@@ -1,0 +1,11 @@
+# Gradle build/cache artifacts
+.gradle/
+build/
+out/
+
+# IDE/editor files
+.idea/
+*.iml
+
+# OS files
+.DS_Store
