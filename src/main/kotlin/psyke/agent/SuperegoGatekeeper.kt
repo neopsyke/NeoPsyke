@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.DeserializationFeature
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
 import mu.KotlinLogging
+import psyke.llm.ChatCallMetadata
 import psyke.llm.ChatMessage
 import psyke.llm.ChatModelClient
 import psyke.llm.ChatRequestOptions
@@ -28,7 +29,12 @@ class SuperegoGatekeeper(
             messages = boundedMessages,
             options = ChatRequestOptions(
                 temperature = 0.0,
-                maxTokens = 120
+                maxTokens = 80,
+                metadata = ChatCallMetadata(
+                    actor = "superego",
+                    callSite = "action_review",
+                    actionType = action.type.name.lowercase()
+                )
             )
         )
         val decision = parseResponse(response.content)
@@ -42,10 +48,11 @@ class SuperegoGatekeeper(
         return try {
             val json = TextSecurity.extractJsonObject(raw)
             val payload = mapper.readValue<SuperegoResponse>(json)
+            val allow = payload.allow == true
             val reason = TextSecurity.clamp(payload.reason?.trim().orEmpty(), 180)
             GateDecision(
-                allow = payload.allow == true,
-                reason = if (reason.isBlank()) "No reason supplied." else reason
+                allow = allow,
+                reason = if (allow) "" else reason.ifBlank { "No reason supplied." }
             )
         } catch (ex: Exception) {
             logger.warn(ex) {
@@ -77,7 +84,9 @@ class SuperegoGatekeeper(
                     $directivesBlock
 
                     JSON schema:
-                    {"allow": true|false, "reason":"<=180 chars"}
+                    - If allowed: {"allow": true}
+                    - If denied: {"allow": false, "reason":"<=180 chars"}
+                    Keep output minimal JSON only.
                 """.trimIndent()
             ),
             ChatMessage(

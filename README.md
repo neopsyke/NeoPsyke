@@ -37,19 +37,20 @@ Enable trace logs:
 Use the local launcher:
 ```bash
 export MISTRAL_API_KEY=your_token
-./run-ego
+./run-psyke.sh
 ```
 
 Set a specific log level via parameter:
 ```bash
-./run-ego --log-level info
+./run-psyke.sh --log-level info
 ```
 
 Notes:
-- `run-ego` bootstraps `installDist` once if needed.
+- `run-psyke.sh` bootstraps `installDist` once if needed.
 - After bootstrap, execution is direct (`build/install/psyke/bin/psyke`) without `gradle run`.
-- Default log level in `run-ego` is `trace`.
+- Default log level in `run-psyke.sh` is `trace`.
 - `PSYKE_LOG_LEVEL` can still provide a default if `--log-level` is omitted.
+- By default the launcher persists metrics to `.psyke/metrics.db` (override with `PSYKE_METRICS_DB`).
 
 Then interact:
 ```text
@@ -67,3 +68,8 @@ you> exit
 
 ## Initial Superego directive
 - `Any actions should not contain words or expressions that could offend the interlocutor.`
+
+## Metrics persistence
+- SQLite storage records per-run and per-call data (`runs`, `llm_calls`).
+- API keys are never stored raw; metrics use a salted key fingerprint.
+- Call metrics include actor/call-site/action-type, latency, status, and token usage when returned by the model API.
