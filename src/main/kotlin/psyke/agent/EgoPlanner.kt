@@ -6,6 +6,7 @@ import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
 import mu.KotlinLogging
 import psyke.llm.ChatMessage
+import psyke.llm.ChatCallMetadata
 import psyke.llm.ChatModelClient
 import psyke.llm.ChatRequestOptions
 import psyke.llm.ChatRole
@@ -31,7 +32,11 @@ class EgoPlanner(
             messages = boundedMessages,
             options = ChatRequestOptions(
                 temperature = 0.2,
-                maxTokens = config.maxCompletionTokens
+                maxTokens = config.maxCompletionTokens,
+                metadata = ChatCallMetadata(
+                    actor = "ego",
+                    callSite = triggerLabel
+                )
             )
         )
 

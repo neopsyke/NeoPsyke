@@ -6,6 +6,10 @@ APP_BIN="$ROOT_DIR/build/install/psyke/bin/psyke"
 LOG_LEVEL="${PSYKE_LOG_LEVEL:-trace}"
 APP_ARGS=()
 
+if [[ -z "${PSYKE_METRICS_DB:-}" ]]; then
+  export PSYKE_METRICS_DB="$ROOT_DIR/.psyke/metrics.db"
+fi
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -l|--log-level)
@@ -22,7 +26,7 @@ while [[ $# -gt 0 ]]; do
       ;;
     -h|--help)
       cat <<'EOF'
-Usage: ./run-ego [--log-level LEVEL] [--] [app-args...]
+Usage: ./run-psyke.sh [--log-level LEVEL] [--] [app-args...]
 
 Options:
   -l, --log-level LEVEL   SLF4J simple logger level (default: trace)
@@ -31,6 +35,7 @@ Options:
 Environment:
   MISTRAL_API_KEY         Required for model access
   PSYKE_LOG_LEVEL         Default log level if --log-level is not provided
+  PSYKE_METRICS_DB        SQLite path for persisted local metrics
 EOF
       exit 0
       ;;

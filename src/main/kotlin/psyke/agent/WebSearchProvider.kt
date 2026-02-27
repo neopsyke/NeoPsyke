@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.DeserializationFeature
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
 import mu.KotlinLogging
+import psyke.llm.ChatCallMetadata
 import psyke.llm.ChatMessage
 import psyke.llm.ChatModelClient
 import psyke.llm.ChatRequestOptions
@@ -54,7 +55,12 @@ class MistralWebSearchProvider(
             messages = boundedMessages,
             options = ChatRequestOptions(
                 temperature = 0.1,
-                maxTokens = config.maxCompletionTokens
+                maxTokens = config.maxCompletionTokens,
+                metadata = ChatCallMetadata(
+                    actor = "ego",
+                    callSite = "web_search",
+                    actionType = "web_search"
+                )
             )
         )
         return parse(response.content, maxResults)

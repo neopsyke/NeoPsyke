@@ -8,6 +8,7 @@ import psyke.agent.MistralWebSearchProvider
 import psyke.agent.MotorCortex
 import psyke.agent.SuperegoGatekeeper
 import psyke.llm.MistralChatClient
+import psyke.metrics.MetricsRuntimeFactory
 
 private val logger = KotlinLogging.logger {}
 
@@ -24,21 +25,36 @@ fun main() {
     val egoModel = System.getenv("MISTRAL_EGO_MODEL") ?: MistralChatClient.DEFAULT_MODEL
     val superegoModel = System.getenv("MISTRAL_SUPEREGO_MODEL") ?: egoModel
 
-    MistralChatClient(apiKey = apiKey, modelName = egoModel).use { egoClient ->
-        MistralChatClient(apiKey = apiKey, modelName = superegoModel).use { superegoClient ->
-            logger.info { "Ego model=$egoModel Superego model=$superegoModel" }
+    MetricsRuntimeFactory.create(
+        apiKey = apiKey,
+        egoModel = egoModel,
+        superegoModel = superegoModel
+    ).use { metrics ->
+        MistralChatClient(
+            apiKey = apiKey,
+            modelName = egoModel,
+            callObserver = metrics.chatCallObserver(provider = "mistral")
+        ).use { egoClient ->
+            MistralChatClient(
+                apiKey = apiKey,
+                modelName = superegoModel,
+                callObserver = metrics.chatCallObserver(provider = "mistral")
+            ).use { superegoClient ->
+                logger.info { "Ego model=$egoModel Superego model=$superegoModel" }
 
-            val planner = EgoPlanner(egoClient, config)
-            val gatekeeper = SuperegoGatekeeper(superegoClient, config)
-            val webSearchProvider = MistralWebSearchProvider(egoClient, config)
-            val motorCortex = MotorCortex(webSearchProvider)
+                val planner = EgoPlanner(egoClient, config)
+                val gatekeeper = SuperegoGatekeeper(superegoClient, config)
+                val webSearchProvider = MistralWebSearchProvider(egoClient, config)
+                val motorCortex = MotorCortex(webSearchProvider)
 
-            EgoAgent(
-                planner = planner,
-                superego = gatekeeper,
-                motorCortex = motorCortex,
-                config = config
-            ).runInteractive()
+                EgoAgent(
+                    planner = planner,
+                    superego = gatekeeper,
+                    motorCortex = motorCortex,
+                    config = config,
+                    onActionDenied = metrics::recordDeniedAction
+                ).runInteractive()
+            }
         }
     }
 }

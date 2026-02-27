@@ -9,6 +9,7 @@ class EgoAgent(
     private val superego: SuperegoGatekeeper,
     private val motorCortex: MotorCortex,
     private val config: AgentConfig,
+    private val onActionDenied: () -> Unit = {},
 ) {
     private val scheduler = AttentionScheduler(config)
     private val dialogue = ArrayDeque<DialogueTurn>()
@@ -88,6 +89,7 @@ class EgoAgent(
         }
         val gateDecision = superego.review(action, scheduler.snapshot(dialogue.toList()))
         if (!gateDecision.allow) {
+            onActionDenied()
             val denialThought = TextSecurity.clamp(
                 "Action denied by superego: ${gateDecision.reason}",
                 config.maxThoughtChars
