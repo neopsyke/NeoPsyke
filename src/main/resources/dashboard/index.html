@@ -180,16 +180,29 @@
       border: 1px solid var(--line);
       border-radius: 6px;
       padding: 4px 8px;
-      display: flex;
+      display: grid;
+      grid-template-columns: max-content minmax(0, auto);
       align-items: center;
-      justify-content: space-between;
       gap: 8px;
-      min-width: 180px;
-      flex: 1 1 190px;
-      max-width: 280px;
+      width: fit-content;
+      min-width: 128px;
+      max-width: min(100%, 460px);
+      flex: 0 1 auto;
+      overflow: hidden;
+    }
+    .metric-chip.with-meter {
+      grid-template-columns: max-content minmax(0, auto) auto;
+    }
+    .metric-label {
+      white-space: nowrap;
+    }
+    .metric-value {
+      min-width: 0;
+      overflow-wrap: anywhere;
+      word-break: break-word;
     }
     .meter {
-      width: 84px;
+      width: clamp(56px, 8vw, 84px);
       height: 6px;
       border: 1px solid var(--line);
       border-radius: 999px;
@@ -217,8 +230,9 @@
       .grid3 { grid-template-columns: 1fr; }
       .cols2 { grid-template-columns: 1fr; }
       .metric-chip {
-        min-width: 160px;
-        flex-basis: 170px;
+        width: 100%;
+        max-width: 100%;
+        min-width: 0;
       }
     }
   </style>
@@ -284,12 +298,18 @@
       loopStep: 0,
       currentTaskType: null,
       currentProcessing: null,
+      inFlight: { active: false, taskType: null, detail: null },
       queues: { inputs: [], thoughts: [], actions: [] },
       recentEvents: [],
       lastSuperegoInput: null,
       lastSuperegoOutput: null,
       limits: {},
-      metrics: null
+      metrics: null,
+      instrumentationHealth: {
+        dropped_events: 0,
+        queue_saturation_events: 0,
+        queue_saturation_by_type: {}
+      }
     };
 
     const fmt = (v) => JSON.stringify(v, null, 2);
@@ -313,6 +333,31 @@
     };
 
     const compactHiddenKeys = new Set(["provider", "model"]);
+
+    function processingDetail(data) {
+      if (!data || typeof data !== "object") return null;
+      const input = data.input;
+      if (input && typeof input === "object") {
+        return "#" + (input.id ?? "?") + " " + short(input.content, 42);
+      }
+      const thought = data.thought;
+      if (thought && typeof thought === "object") {
+        return "#" + (thought.id ?? "?") + " " + short(thought.content, 42);
+      }
+      const action = data.action;
+      if (action && typeof action === "object") {
+        return "#" + (action.id ?? "?") + " " + short(action.summary || action.type || "action", 42);
+      }
+      return null;
+    }
+
+    function inFlightLabel() {
+      const inFlight = state.inFlight || {};
+      if (!inFlight.active) return "idle";
+      const taskType = inFlight.taskType || "task";
+      const detail = inFlight.detail ? ": " + inFlight.detail : "";
+      return taskType + detail;
+    }
 
     function compactEventData(event) {
       const data = event.data || {};
@@ -384,36 +429,54 @@
       const meter = meterPct == null
         ? ""
         : "<div class=\"meter\"><span style=\"width:" + meterPct.toFixed(1) + "%\"></span></div>";
-      return "<div class=\"metric-chip\"><strong>" + escapeHtml(title) + "</strong><span>" + escapeHtml(value) + "</span>" + meter + "</div>";
+      const meterClass = meterPct == null ? "" : " with-meter";
+      return "<div class=\"metric-chip" + meterClass + "\"><strong class=\"metric-label\">" + escapeHtml(title) + "</strong><span class=\"metric-value\">" + escapeHtml(value) + "</span>" + meter + "</div>";
     }
 
     function renderStatusBar() {
       const el = document.getElementById("status-bar");
       const metrics = state.metrics;
       const limits = state.limits || {};
-      if (!metrics) {
-        el.innerHTML = "<span class=\"muted\">Metrics pending...</span>";
-        return;
+      const health = state.instrumentationHealth || {};
+      const satByType = health.queue_saturation_by_type || {};
+      const parts = [];
+
+      if (metrics) {
+        const run = metrics.runTotals || {};
+        const all = metrics.persistentTotals || {};
+        const runSuperegoTokens = Number(metrics.runSuperegoTokens || 0);
+        const allSuperegoTokens = Number(metrics.persistentSuperegoTokens || 0);
+        parts.push(chip("Run", short(metrics.runId, 10), null));
+        parts.push(chip("Key", metrics.keyFingerprint, null));
+        parts.push(chip("Runs", metrics.runCountForKey, null));
+        parts.push(chip("Run Calls", run.calls || 0, null));
+        parts.push(chip("Run Tokens", run.totalTokens || 0, null));
+        parts.push(chip("All Tokens", all.totalTokens || 0, null));
+        parts.push(chip("Superego Run Tok", runSuperegoTokens, null));
+        parts.push(chip("Superego All Tok", allSuperegoTokens, null));
+        parts.push(chip("Denied", run.deniedActions || 0, null));
+        parts.push(chip("Errors", run.errorCount || 0, null));
+        parts.push(chip("Run Q Sat", run.queueSaturationEvents || 0, null));
+        parts.push(chip("All Q Sat", all.queueSaturationEvents || 0, null));
+        parts.push(chip("Run Dropped", run.droppedEvents || 0, null));
+        parts.push(chip("All Dropped", all.droppedEvents || 0, null));
+        parts.push(chip("Prompt/Limit", (run.promptTokens || 0) + " / " + (limits.max_prompt_tokens || "-"), ratio(run.promptTokens, limits.max_prompt_tokens)));
+        parts.push(chip("Completion/Limit", (run.completionTokens || 0) + " / " + (limits.max_completion_tokens || "-"), ratio(run.completionTokens, limits.max_completion_tokens)));
+      } else {
+        parts.push(chip("Metrics", "pending", null));
       }
 
-      const run = metrics.runTotals || {};
-      const all = metrics.persistentTotals || {};
-      const parts = [];
-      parts.push(chip("Run", short(metrics.runId, 10), null));
-      parts.push(chip("Key", metrics.keyFingerprint, null));
-      parts.push(chip("Runs", metrics.runCountForKey, null));
-      parts.push(chip("Run Calls", run.calls || 0, null));
-      parts.push(chip("Run Tokens", run.totalTokens || 0, null));
-      parts.push(chip("All Tokens", all.totalTokens || 0, null));
-      parts.push(chip("Denied", run.deniedActions || 0, null));
-      parts.push(chip("Errors", run.errorCount || 0, null));
-      parts.push(chip("Prompt/Limit", (run.promptTokens || 0) + " / " + (limits.max_prompt_tokens || "-"), ratio(run.promptTokens, limits.max_prompt_tokens)));
-      parts.push(chip("Completion/Limit", (run.completionTokens || 0) + " / " + (limits.max_completion_tokens || "-"), ratio(run.completionTokens, limits.max_completion_tokens)));
       parts.push(chip("LoopStep/Limit", state.loopStep + " / " + (limits.max_loop_steps || "-"), ratio(state.loopStep, limits.max_loop_steps)));
+      parts.push(chip("In-Flight", inFlightLabel(), null));
       parts.push(chip("Q Inputs", state.queues.inputs.length + " / " + (limits.max_pending_inputs || "-"), ratio(state.queues.inputs.length, limits.max_pending_inputs)));
       parts.push(chip("Q Thoughts", state.queues.thoughts.length + " / " + (limits.max_pending_thoughts || "-"), ratio(state.queues.thoughts.length, limits.max_pending_thoughts)));
       parts.push(chip("Q Actions", state.queues.actions.length + " / " + (limits.max_pending_actions || "-"), ratio(state.queues.actions.length, limits.max_pending_actions)));
-      parts.push(chip("Updated", metrics.updatedAtIso || "-", null));
+      parts.push(chip("Live Dropped", health.dropped_events || 0, null));
+      parts.push(chip("Live Q Sat", health.queue_saturation_events || 0, null));
+      parts.push(chip("Sat Input", satByType.input || 0, null));
+      parts.push(chip("Sat Thought", satByType.thought || 0, null));
+      parts.push(chip("Sat Action", satByType.action || 0, null));
+      parts.push(chip("Updated", metrics?.updatedAtIso || "-", null));
       el.innerHTML = parts.join("");
     }
 
@@ -426,7 +489,7 @@
           message: state.loopMessage || null
         }) + "</pre>";
 
-      renderQueue("q-inputs", state.queues.inputs, (i) => "#" + i.id + " " + short(i.content, 100));
+      renderQueue("q-inputs", state.queues.inputs, (i) => "#" + i.id + " [" + (i.priority || "MEDIUM") + "] " + short(i.content, 100));
       renderQueue("q-thoughts", state.queues.thoughts, (i) => "#" + i.id + " [" + i.urgency + "] p" + i.passes + " " + short(i.content, 90));
       renderQueue("q-actions", state.queues.actions, (i) => "#" + i.id + " [" + i.urgency + "] " + i.type + " " + short(i.summary, 70));
 
@@ -435,7 +498,10 @@
       document.getElementById("superego-out").textContent = fmt(state.lastSuperegoOutput || {});
 
       const orderedEvents = state.recentEvents.slice().sort((a, b) => (a.id || 0) - (b.id || 0));
-      document.getElementById("timeline").innerHTML = orderedEvents.slice(-140).map(renderEventItem).join("");
+      const timelineEvents = orderedEvents
+        .filter(e => e.type !== "queue_snapshot")
+        .slice(-140);
+      document.getElementById("timeline").innerHTML = timelineEvents.map(renderEventItem).join("");
 
       const actionEvents = orderedEvents
         .filter(e => e.type.startsWith("action_") || e.type.startsWith("superego_"))
@@ -453,19 +519,43 @@
         case "loop_status":
           state.loopStatus = event.data.status || state.loopStatus;
           state.loopMessage = event.data.message || null;
+          if (state.loopStatus !== "running") {
+            state.inFlight = {
+              active: false,
+              taskType: state.inFlight.taskType,
+              detail: state.inFlight.detail
+            };
+          }
           break;
         case "loop_step":
           state.loopStep = event.data.step || state.loopStep;
           state.currentTaskType = event.data.task_type || null;
+          state.inFlight = {
+            active: true,
+            taskType: event.data.task_type || state.currentTaskType || "task",
+            detail: null
+          };
           break;
         case "queue_snapshot":
           if (event.data.queues) state.queues = event.data.queues;
+          if (event.data.source === "task_processed" || event.data.source === "fallback_explanation_step") {
+            state.inFlight = {
+              active: false,
+              taskType: state.inFlight.taskType,
+              detail: state.inFlight.detail
+            };
+          }
           break;
         case "input_processing":
         case "thought_processing":
         case "action_review_requested":
         case "action_executed":
           state.currentProcessing = event.data;
+          state.inFlight = {
+            active: true,
+            taskType: state.inFlight.taskType || state.currentTaskType || "task",
+            detail: processingDetail(event.data)
+          };
           break;
         case "superego_input":
           state.lastSuperegoInput = event.data;
@@ -479,6 +569,43 @@
         case "metrics_snapshot":
           state.metrics = event.data.metrics || null;
           break;
+        case "queue_saturation": {
+          const next = Object.assign({
+            dropped_events: 0,
+            queue_saturation_events: 0,
+            queue_saturation_by_type: {}
+          }, state.instrumentationHealth || {});
+          next.queue_saturation_events = Number(next.queue_saturation_events || 0) + 1;
+          const queueType = (event.data && event.data.queue_type) ? String(event.data.queue_type) : "unknown";
+          const byType = Object.assign({}, next.queue_saturation_by_type || {});
+          byType[queueType] = Number(byType[queueType] || 0) + 1;
+          next.queue_saturation_by_type = byType;
+          state.instrumentationHealth = next;
+          break;
+        }
+        case "instrumentation_health": {
+          const current = Object.assign({
+            dropped_events: 0,
+            queue_saturation_events: 0,
+            queue_saturation_by_type: {}
+          }, state.instrumentationHealth || {});
+          const incoming = event.data || {};
+          const mergedByType = Object.assign(
+            {},
+            current.queue_saturation_by_type || {},
+            incoming.queue_saturation_by_type || {}
+          );
+          state.instrumentationHealth = {
+            dropped_events: Number(incoming.dropped_events != null ? incoming.dropped_events : current.dropped_events || 0),
+            queue_saturation_events: Number(
+              incoming.queue_saturation_events != null
+                ? incoming.queue_saturation_events
+                : current.queue_saturation_events || 0
+            ),
+            queue_saturation_by_type: mergedByType
+          };
+          break;
+        }
       }
 
       render();
@@ -511,6 +638,11 @@
       try {
         const snapshot = await fetch("/api/snapshot", { cache: "no-store" }).then(r => r.json());
         Object.assign(state, snapshot);
+        state.inFlight = {
+          active: false,
+          taskType: state.currentTaskType || null,
+          detail: processingDetail(state.currentProcessing)
+        };
       } catch (_) {}
 
       enableResize();

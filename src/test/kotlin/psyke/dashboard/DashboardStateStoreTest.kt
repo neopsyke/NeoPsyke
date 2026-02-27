@@ -33,7 +33,9 @@ class DashboardStateStoreTest {
             updatedAtIso = "2026-01-01T00:00:00Z",
             runTotals = MetricsTotals(1, 2, 3, 5, 0, 0),
             persistentTotals = MetricsTotals(2, 4, 6, 10, 1, 0),
-            runCountForKey = 2
+            runCountForKey = 2,
+            runSuperegoTokens = 3,
+            persistentSuperegoTokens = 6
         )
 
         store.onEvent(AgentEvent(id = 2, type = "loop_step", data = mapOf("step" to 2, "task_type" to "thought")))
@@ -43,6 +45,14 @@ class DashboardStateStoreTest {
         store.onEvent(AgentEvent(id = 5, type = "superego_output", data = mapOf("allow" to true)))
         store.onEvent(AgentEvent(id = 6, type = "limits_config", data = mapOf("limits" to mapOf("max_prompt_tokens" to 2400))))
         store.onEvent(AgentEvent(id = 7, type = "metrics_snapshot", data = mapOf("metrics" to metrics)))
+        store.onEvent(
+            AgentEvent(
+                id = 8,
+                type = "queue_saturation",
+                data = mapOf("queue_type" to "thought", "pending" to 32, "capacity" to 32, "reason" to "full")
+            )
+        )
+        store.recordDroppedEvents(3)
 
         val snapshot: DashboardSnapshot = mapper.readValue(store.snapshotJson())
         assertEquals("running", snapshot.loopStatus)
@@ -55,7 +65,12 @@ class DashboardStateStoreTest {
         assertEquals(true, snapshot.lastSuperegoOutput?.get("allow"))
         assertEquals(2400, snapshot.limits["max_prompt_tokens"])
         assertEquals(metrics, snapshot.metrics)
-        assertEquals(listOf(1L, 2L, 3L, 4L, 5L, 6L, 7L), snapshot.recentEvents.map { it.id })
+        assertEquals(3L, (snapshot.instrumentationHealth["dropped_events"] as Number).toLong())
+        assertEquals(1L, (snapshot.instrumentationHealth["queue_saturation_events"] as Number).toLong())
+        @Suppress("UNCHECKED_CAST")
+        val saturationByType = snapshot.instrumentationHealth["queue_saturation_by_type"] as Map<String, Any?>
+        assertEquals(1L, (saturationByType["thought"] as Number).toLong())
+        assertEquals(listOf(1L, 2L, 3L, 4L, 5L, 6L, 7L, 8L, 9L), snapshot.recentEvents.map { it.id })
     }
 
     @Test

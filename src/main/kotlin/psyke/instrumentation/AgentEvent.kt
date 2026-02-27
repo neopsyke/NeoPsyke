@@ -42,6 +42,17 @@ object AgentEvents {
             )
         )
 
+    fun queueSaturation(queueType: String, pending: Int, capacity: Int, reason: String): AgentEvent =
+        AgentEvent(
+            type = "queue_saturation",
+            data = mapOf(
+                "queue_type" to queueType,
+                "pending" to pending,
+                "capacity" to capacity,
+                "reason" to reason
+            )
+        )
+
     fun inputQueued(input: PendingInput): AgentEvent =
         AgentEvent(
             type = "input_queued",
@@ -189,5 +200,21 @@ object AgentEvents {
         AgentEvent(
             type = "warning",
             data = mapOf("message" to message)
+        )
+
+    fun llmRawResponse(
+        actor: String,
+        callSite: String,
+        rawResponse: String,
+        actionType: String? = null,
+    ): AgentEvent =
+        AgentEvent(
+            type = "llm_raw_response",
+            data = mapOf(
+                "actor" to actor,
+                "call_site" to callSite,
+                "action_type" to actionType,
+                "raw_response" to rawResponse
+            )
         )
 }

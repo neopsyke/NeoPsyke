@@ -68,6 +68,11 @@ tasks.named<JavaExec>("run") {
     if (!configuredLogLevel.isNullOrBlank()) {
         systemProperty("org.slf4j.simpleLogger.defaultLogLevel", configuredLogLevel)
     }
+    val configuredLogFile = System.getProperty("org.slf4j.simpleLogger.logFile")
+        ?: System.getenv("PSYKE_LOG_FILE")
+    if (!configuredLogFile.isNullOrBlank()) {
+        systemProperty("org.slf4j.simpleLogger.logFile", configuredLogFile)
+    }
 
     // Keep interactive CLI loops alive by wiring terminal stdin to the app process.
     standardInput = System.`in`

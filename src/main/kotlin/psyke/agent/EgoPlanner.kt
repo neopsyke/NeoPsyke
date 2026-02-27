@@ -22,7 +22,7 @@ class EgoPlanner(
     private val config: AgentConfig,
     private val instrumentation: AgentInstrumentation = NoopAgentInstrumentation,
 ) {
-    fun decide(trigger: EgoTrigger, snapshot: AgentSnapshot): EgoDecision {
+    fun decide(trigger: EgoTrigger, context: PlannerContext): EgoDecision {
         val triggerLabel = when (trigger) {
             is EgoTrigger.IncomingInput -> "input"
             is EgoTrigger.PendingThoughtInput -> "thought"
@@ -32,28 +32,47 @@ class EgoPlanner(
                 type = "planner_start",
                 data = mapOf(
                     "trigger" to triggerLabel,
-                    "pending_inputs" to snapshot.pendingInputCount,
-                    "pending_thoughts" to snapshot.pendingThoughtCount,
-                    "pending_actions" to snapshot.pendingActionCount
+                    "pending_inputs" to context.queue.pendingInputCount,
+                    "pending_thoughts" to context.queue.pendingThoughtCount,
+                    "pending_actions" to context.queue.pendingActionCount
                 )
             )
         )
 
-        val messages = buildMessages(trigger, snapshot)
-        val boundedMessages = TextSecurity.trimMessagesToBudget(messages, config.maxPromptTokens)
-        val response = modelClient.chat(
-            messages = boundedMessages,
-            options = ChatRequestOptions(
-                temperature = 0.2,
-                maxTokens = config.maxCompletionTokens,
-                metadata = ChatCallMetadata(
-                    actor = "ego",
-                    callSite = triggerLabel
+        val messages = buildMessages(trigger, context)
+        var response = null as psyke.llm.ChatCompletion?
+        var lastError: Exception? = null
+        for (attempt in 1..2) {
+            try {
+                response = modelClient.chat(
+                    messages = messages,
+                    options = ChatRequestOptions(
+                        temperature = 0.2,
+                        maxTokens = config.maxCompletionTokens,
+                        metadata = ChatCallMetadata(
+                            actor = "ego",
+                            callSite = triggerLabel
+                        )
+                    )
                 )
-            )
-        )
+                break
+            } catch (ex: Exception) {
+                lastError = ex
+                if (attempt < 2) {
+                    instrumentation.emit(AgentEvents.warning("Planner call failed (attempt 1/2); retrying."))
+                }
+            }
+        }
+        if (response == null) {
+            logger.warn(lastError) { "Planner call failed for trigger=$triggerLabel." }
+            instrumentation.emit(AgentEvents.warning("Planner call failed; falling back to noop."))
+            val fallback = EgoDecision.Noop("Planner unavailable due to model error.")
+            emitDecision(triggerLabel, fallback)
+            return fallback
+        }
+        val resolvedResponse = response
 
-        val decision = parseResponse(response.content)
+        val decision = parseResponse(resolvedResponse.content)
         emitDecision(triggerLabel, decision)
         return decision
     }
@@ -141,69 +160,105 @@ class EgoPlanner(
         }
     }
 
-    private fun buildMessages(trigger: EgoTrigger, snapshot: AgentSnapshot): List<ChatMessage> {
+    private fun buildMessages(trigger: EgoTrigger, context: PlannerContext): List<ChatMessage> {
         val triggerText = when (trigger) {
             is EgoTrigger.IncomingInput -> "INPUT: ${trigger.input.content}"
-            is EgoTrigger.PendingThoughtInput -> "THOUGHT(pass=${trigger.thought.passes}): ${trigger.thought.content}"
-        }
-
-        val dialogue = if (snapshot.recentDialogue.isEmpty()) {
-            "none"
-        } else {
-            snapshot.recentDialogue.joinToString("\n") { turn ->
-                "${turn.role.name.lowercase()}: ${turn.content}"
+            is EgoTrigger.PendingThoughtInput -> {
+                val thought = trigger.thought
+                val denialContext = if (thought.deniedActionType != null && !thought.deniedActionPayload.isNullOrBlank()) {
+                    """
+                    Denied action context:
+                    denied_action_type=${thought.deniedActionType.name.lowercase()}
+                    denied_action_payload=${thought.deniedActionPayload}
+                    denied_reason=${thought.denialReason ?: "none"}
+                    Do not repeat the denied action payload; prefer a materially different next step.
+                    """.trimIndent()
+                } else {
+                    "Denied action context: none"
+                }
+                "THOUGHT(pass=${thought.passes}): ${thought.content}\n$denialContext"
             }
         }
 
-        return listOf(
-            ChatMessage(
-                ChatRole.SYSTEM,
-                """
-                You are Ego, an action planner in a loop.
-                Return STRICT JSON only.
-                Decisions:
-                - thought: create/refine a thought for future processing.
-                - action: propose one action.
-                - noop: when no safe next step exists.
-                Allowed actions:
-                - web_search: payload is a concise search query.
-                - answer: payload is the exact answer text for the interlocutor.
-                """.trimIndent()
-            ),
-            ChatMessage(
-                ChatRole.SYSTEM,
-                """
-                JSON schema:
-                {
-                  "decision":"thought|action|noop",
-                  "urgency":"low|medium|high",
-                  "thought":"... optional when decision=thought",
-                  "action_type":"web_search|answer",
-                  "action_payload":"... optional when decision=action",
-                  "action_summary":"<=180 chars context summary for action review",
-                  "reason":"... optional short reason"
-                }
-                Keep thought concise.
-                Prefer concise answer payloads by default.
-                Only produce a detailed answer payload when the user explicitly asks for detail.
-                Action summary must be at most 180 chars.
-                """.trimIndent()
-            ),
-            ChatMessage(
-                ChatRole.USER,
-                """
-                Queue snapshot:
-                pending_inputs=${snapshot.pendingInputCount}
-                pending_thoughts=${snapshot.pendingThoughtCount}
-                pending_actions=${snapshot.pendingActionCount}
+        val dialogue = if (context.recentDialogue.isEmpty()) {
+            "none"
+        } else {
+            context.recentDialogue.joinToString("\n") { turn ->
+                "${turn.role.name.lowercase()}: ${turn.content}"
+            }
+        }
+        val memorySummary = context.memorySummary.ifBlank { "none" }
 
-                Recent dialogue:
-                $dialogue
-
-                Trigger:
-                $triggerText
-                """.trimIndent()
-            )
+        return PromptBudgetAllocator.allocate(
+            sections = listOf(
+                PromptBudgetAllocator.Section(
+                    role = ChatRole.SYSTEM,
+                    priority = PromptBudgetAllocator.Priority.MANDATORY,
+                    required = true,
+                    minTokens = 48,
+                    content = """
+                    You are Ego, an action planner in a loop.
+                    Return STRICT JSON only.
+                    Decisions:
+                    - thought: create/refine a thought for future processing.
+                    - action: propose one action.
+                    - noop: when no safe next step exists.
+                    Allowed actions:
+                    - web_search: payload is a concise search query.
+                    - answer: payload is the exact answer text for the interlocutor.
+                    """.trimIndent()
+                ),
+                PromptBudgetAllocator.Section(
+                    role = ChatRole.SYSTEM,
+                    priority = PromptBudgetAllocator.Priority.IMPORTANT,
+                    minTokens = 36,
+                    content = """
+                    JSON schema:
+                    {
+                      "decision":"thought|action|noop",
+                      "urgency":"low|medium|high",
+                      "thought":"... optional when decision=thought",
+                      "action_type":"web_search|answer",
+                      "action_payload":"... optional when decision=action",
+                      "action_summary":"<=180 chars context summary for action review",
+                      "reason":"... optional short reason"
+                    }
+                    Keep thought concise.
+                    Prefer concise answer payloads by default.
+                    Only produce a detailed answer payload when the user explicitly asks for detail.
+                    Action summary must be at most 180 chars.
+                    """.trimIndent()
+                ),
+                PromptBudgetAllocator.Section(
+                    role = ChatRole.USER,
+                    priority = PromptBudgetAllocator.Priority.OPTIONAL,
+                    content = """
+                    Queue snapshot:
+                    pending_inputs=${context.queue.pendingInputCount}
+                    pending_thoughts=${context.queue.pendingThoughtCount}
+                    pending_actions=${context.queue.pendingActionCount}
+                    """.trimIndent()
+                ),
+                PromptBudgetAllocator.Section(
+                    role = ChatRole.USER,
+                    priority = PromptBudgetAllocator.Priority.OPTIONAL,
+                    content = "Recent dialogue:\n$dialogue"
+                ),
+                PromptBudgetAllocator.Section(
+                    role = ChatRole.USER,
+                    priority = PromptBudgetAllocator.Priority.IMPORTANT,
+                    minTokens = 24,
+                    content = "Memory summary:\n$memorySummary"
+                ),
+                PromptBudgetAllocator.Section(
+                    role = ChatRole.USER,
+                    priority = PromptBudgetAllocator.Priority.MANDATORY,
+                    required = true,
+                    minTokens = 30,
+                    content = "Trigger:\n$triggerText"
+                )
+            ),
+            maxTokens = config.maxPromptTokens
         )
     }
 

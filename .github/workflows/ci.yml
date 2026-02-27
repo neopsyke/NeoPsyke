@@ -1,0 +1,26 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 23 (Corretto)
+        uses: actions/setup-java@v4
+        with:
+          distribution: corretto
+          java-version: "23"
+          cache: gradle
+
+      - name: Build
+        run: ./gradlew --no-daemon build -x test
+
+      - name: Unit tests
+        run: ./gradlew --no-daemon test

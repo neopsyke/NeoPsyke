@@ -29,13 +29,31 @@ enum class ActionType {
     }
 }
 
+enum class InputPriority(val level: Int) {
+    LOW(1),
+    MEDIUM(2),
+    HIGH(3);
+
+    companion object {
+        fun fromRaw(value: String?): InputPriority =
+            when (value?.trim()?.lowercase()) {
+                "high", "3" -> HIGH
+                "low", "1" -> LOW
+                else -> MEDIUM
+            }
+    }
+}
+
 data class AgentConfig(
     val maxLoopStepsPerInput: Int = 18,
+    val loopDelayMs: Int = 0,
     val maxThoughtPasses: Int = 5,
     val maxPendingThoughts: Int = 64,
     val maxPendingActions: Int = 32,
     val maxPendingInputs: Int = 32,
     val maxInputChars: Int = 2_000,
+    val maxMemoryChars: Int = 12_000,
+    val maxMemoryPromptTokens: Int = 256,
     val maxThoughtChars: Int = 600,
     val maxActionPayloadChars: Int = 4_000,
     val maxActionSummaryChars: Int = 180,
@@ -47,7 +65,10 @@ data class AgentConfig(
         fun fromEnv(): AgentConfig =
             AgentConfig(
                 maxLoopStepsPerInput = readInt("EGO_MAX_LOOP_STEPS", 18),
+                loopDelayMs = readNonNegativeInt("EGO_LOOP_DELAY_MS", 0),
                 maxThoughtPasses = readInt("EGO_MAX_THOUGHT_PASSES", 5),
+                maxMemoryChars = readInt("EGO_MAX_MEMORY_CHARS", 12000),
+                maxMemoryPromptTokens = readInt("EGO_MAX_MEMORY_PROMPT_TOKENS", 256),
                 maxActionPayloadChars = readInt("EGO_MAX_ACTION_PAYLOAD_CHARS", 4000),
                 maxPromptTokens = readInt("EGO_MAX_PROMPT_TOKENS", 2400),
                 maxCompletionTokens = readInt("EGO_MAX_COMPLETION_TOKENS", 900),
@@ -56,12 +77,16 @@ data class AgentConfig(
 
         private fun readInt(name: String, fallback: Int): Int =
             System.getenv(name)?.toIntOrNull()?.takeIf { it > 0 } ?: fallback
+
+        private fun readNonNegativeInt(name: String, fallback: Int): Int =
+            System.getenv(name)?.toIntOrNull()?.takeIf { it >= 0 } ?: fallback
     }
 }
 
 data class PendingInput(
     val id: Long,
     val content: String,
+    val priority: InputPriority = InputPriority.MEDIUM,
 )
 
 data class PendingThought(
@@ -69,6 +94,10 @@ data class PendingThought(
     val urgency: Urgency,
     val content: String,
     val passes: Int = 0,
+    val deniedActionType: ActionType? = null,
+    val deniedActionPayload: String? = null,
+    val denialReason: String? = null,
+    val allowFallbackExplanation: Boolean = false,
 )
 
 data class PendingAction(
@@ -78,6 +107,7 @@ data class PendingAction(
     val payload: String,
     val summary: String,
     val attempts: Int = 0,
+    val isFallbackExplanation: Boolean = false,
 )
 
 data class QueueState(
@@ -96,11 +126,21 @@ data class DialogueTurn(
     val content: String,
 )
 
-data class AgentSnapshot(
-    val recentDialogue: List<DialogueTurn>,
+data class QueueSnapshot(
     val pendingInputCount: Int,
     val pendingThoughtCount: Int,
     val pendingActionCount: Int,
+)
+
+data class PlannerContext(
+    val recentDialogue: List<DialogueTurn>,
+    val queue: QueueSnapshot,
+    val memorySummary: String = "",
+)
+
+data class SuperegoContext(
+    val recentDialogue: List<DialogueTurn>,
+    val memorySummary: String = "",
 )
 
 sealed interface LoopTask {

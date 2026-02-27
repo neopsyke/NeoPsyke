@@ -9,6 +9,8 @@ private val logger = KotlinLogging.logger {}
 interface MetricsRuntime : Closeable {
     fun chatCallObserver(provider: String): ChatCallObserver?
     fun recordDeniedAction()
+    fun recordDroppedEvents(count: Long = 1)
+    fun recordQueueSaturation(queueType: String)
     fun snapshot(): MetricsSnapshot?
 
     override fun close() {}
@@ -17,6 +19,8 @@ interface MetricsRuntime : Closeable {
 class NoopMetricsRuntime : MetricsRuntime {
     override fun chatCallObserver(provider: String): ChatCallObserver? = null
     override fun recordDeniedAction() {}
+    override fun recordDroppedEvents(count: Long) {}
+    override fun recordQueueSaturation(queueType: String) {}
     override fun snapshot(): MetricsSnapshot? = null
 }
 
@@ -46,6 +50,8 @@ data class MetricsTotals(
     val totalTokens: Long,
     val deniedActions: Long,
     val errorCount: Long,
+    val queueSaturationEvents: Long = 0,
+    val droppedEvents: Long = 0,
 )
 
 data class MetricsSnapshot(
@@ -55,4 +61,6 @@ data class MetricsSnapshot(
     val runTotals: MetricsTotals,
     val persistentTotals: MetricsTotals,
     val runCountForKey: Long,
+    val runSuperegoTokens: Long = 0,
+    val persistentSuperegoTokens: Long = 0,
 )

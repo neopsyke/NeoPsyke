@@ -45,6 +45,22 @@ class AttentionSchedulerTest {
     }
 
     @Test
+    fun `inputs are selected by priority then insertion order`() {
+        val scheduler = AttentionScheduler(config)
+        scheduler.enqueueInput("medium-first")
+        scheduler.enqueueInput("high-second", InputPriority.HIGH)
+
+        val first = scheduler.nextTask()
+        val second = scheduler.nextTask()
+
+        assertIs<LoopTask.ProcessInput>(first)
+        assertIs<LoopTask.ProcessInput>(second)
+        assertEquals("high-second", first.item.content)
+        assertEquals(InputPriority.HIGH, first.item.priority)
+        assertEquals("medium-first", second.item.content)
+    }
+
+    @Test
     fun `queue limits are enforced`() {
         val scheduler = AttentionScheduler(config)
 
@@ -62,30 +78,30 @@ class AttentionSchedulerTest {
     }
 
     @Test
-    fun `snapshot keeps last twelve dialogue turns`() {
+    fun `queue snapshot reports current queue counts`() {
         val scheduler = AttentionScheduler(config)
-        val dialogue = (1..14).map {
-            DialogueTurn(
-                role = if (it % 2 == 0) DialogueRole.ASSISTANT else DialogueRole.USER,
-                content = "line-$it"
-            )
-        }
+        scheduler.enqueueInput("line-1")
+        scheduler.enqueueThought("line-2", Urgency.HIGH)
+        scheduler.enqueueAction(ActionType.ANSWER, "line-3", "summary", Urgency.MEDIUM)
 
-        val snapshot = scheduler.snapshot(dialogue)
-        assertEquals(12, snapshot.recentDialogue.size)
-        assertEquals("line-3", snapshot.recentDialogue.first().content)
-        assertEquals("line-14", snapshot.recentDialogue.last().content)
+        val snapshot = scheduler.queueSnapshot()
+        assertEquals(1, snapshot.pendingInputCount)
+        assertEquals(1, snapshot.pendingThoughtCount)
+        assertEquals(1, snapshot.pendingActionCount)
     }
 
     @Test
     fun `queue state returns sorted thoughts and actions`() {
         val scheduler = AttentionScheduler(config)
+        scheduler.enqueueInput("medium-input", InputPriority.MEDIUM)
+        scheduler.enqueueInput("high-input", InputPriority.HIGH)
         scheduler.enqueueThought("low", Urgency.LOW)
         scheduler.enqueueThought("high", Urgency.HIGH)
         scheduler.enqueueAction(ActionType.ANSWER, "low-action", "s1", Urgency.LOW)
         scheduler.enqueueAction(ActionType.ANSWER, "high-action", "s2", Urgency.HIGH)
 
         val state = scheduler.queueState()
+        assertEquals(listOf("high-input", "medium-input"), state.inputs.map { it.content })
         assertEquals(listOf("high", "low"), state.thoughts.map { it.content })
         assertEquals(listOf("high-action", "low-action"), state.actions.map { it.payload })
         assertNotNull(scheduler.nextTask())

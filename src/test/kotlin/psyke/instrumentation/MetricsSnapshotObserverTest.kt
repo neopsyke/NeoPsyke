@@ -19,7 +19,9 @@ class MetricsSnapshotObserverTest {
             updatedAtIso = "2026-01-01T00:00:00Z",
             runTotals = MetricsTotals(1, 2, 3, 5, 0, 0),
             persistentTotals = MetricsTotals(10, 20, 30, 50, 2, 1),
-            runCountForKey = 4
+            runCountForKey = 4,
+            runSuperegoTokens = 7,
+            persistentSuperegoTokens = 70
         )
         val runtime = StubMetricsRuntime(snapshotValue = snapshot)
         val instrumentation = RecordingInstrumentation()
