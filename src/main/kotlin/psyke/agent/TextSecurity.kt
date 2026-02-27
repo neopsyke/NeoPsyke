@@ -8,6 +8,13 @@ object TextSecurity {
     fun clamp(text: String, maxChars: Int): String =
         if (text.length <= maxChars) text else text.take(maxChars)
 
+    fun clampToTokenBudget(text: String, maxTokens: Int): String {
+        if (maxTokens <= 0) return ""
+        if (estimateTokens(text) <= maxTokens) return text
+        val charBudget = maxTokens * 4
+        return clamp(text, charBudget)
+    }
+
     fun preview(text: String, maxChars: Int = 80): String =
         clamp(text.replace(Regex("\\s+"), " ").trim(), maxChars)
 

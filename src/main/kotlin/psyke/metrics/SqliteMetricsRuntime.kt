@@ -48,10 +48,14 @@ class SqliteMetricsRuntime(
                   completion_tokens INTEGER NOT NULL DEFAULT 0,
                   total_tokens INTEGER NOT NULL DEFAULT 0,
                   denied_actions INTEGER NOT NULL DEFAULT 0,
-                  error_count INTEGER NOT NULL DEFAULT 0
+                  error_count INTEGER NOT NULL DEFAULT 0,
+                  queue_saturation_events INTEGER NOT NULL DEFAULT 0,
+                  dropped_events INTEGER NOT NULL DEFAULT 0
                 );
                 """.trimIndent()
             )
+            addRunsColumnIfMissing(statement, "queue_saturation_events", "INTEGER NOT NULL DEFAULT 0")
+            addRunsColumnIfMissing(statement, "dropped_events", "INTEGER NOT NULL DEFAULT 0")
             statement.execute(
                 """
                 CREATE TABLE IF NOT EXISTS llm_calls (
@@ -94,6 +98,32 @@ class SqliteMetricsRuntime(
         }
     }
 
+    override fun recordDroppedEvents(count: Long) {
+        if (count <= 0) {
+            return
+        }
+        synchronized(connection) {
+            connection.prepareStatement(
+                "UPDATE runs SET dropped_events = dropped_events + ? WHERE run_id = ?"
+            ).use { statement ->
+                statement.setLong(1, count)
+                statement.setString(2, runId)
+                statement.executeUpdate()
+            }
+        }
+    }
+
+    override fun recordQueueSaturation(queueType: String) {
+        synchronized(connection) {
+            connection.prepareStatement(
+                "UPDATE runs SET queue_saturation_events = queue_saturation_events + 1 WHERE run_id = ?"
+            ).use { statement ->
+                statement.setString(1, runId)
+                statement.executeUpdate()
+            }
+        }
+    }
+
     override fun close() {
         try {
             synchronized(connection) {
@@ -116,7 +146,14 @@ class SqliteMetricsRuntime(
         synchronized(connection) {
             val runTotals = connection.prepareStatement(
                 """
-                SELECT total_calls, prompt_tokens, completion_tokens, total_tokens, denied_actions, error_count
+                SELECT total_calls,
+                       prompt_tokens,
+                       completion_tokens,
+                       total_tokens,
+                       denied_actions,
+                       error_count,
+                       queue_saturation_events,
+                       dropped_events
                 FROM runs WHERE run_id = ?
                 """.trimIndent()
             ).use { statement ->
@@ -131,7 +168,9 @@ class SqliteMetricsRuntime(
                             completionTokens = rs.getLong("completion_tokens"),
                             totalTokens = rs.getLong("total_tokens"),
                             deniedActions = rs.getLong("denied_actions"),
-                            errorCount = rs.getLong("error_count")
+                            errorCount = rs.getLong("error_count"),
+                            queueSaturationEvents = rs.getLong("queue_saturation_events"),
+                            droppedEvents = rs.getLong("dropped_events")
                         )
                     }
                 }
@@ -145,7 +184,9 @@ class SqliteMetricsRuntime(
                        COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
                        COALESCE(SUM(total_tokens), 0) AS total_tokens,
                        COALESCE(SUM(denied_actions), 0) AS denied_actions,
-                       COALESCE(SUM(error_count), 0) AS error_count
+                       COALESCE(SUM(error_count), 0) AS error_count,
+                       COALESCE(SUM(queue_saturation_events), 0) AS queue_saturation_events,
+                       COALESCE(SUM(dropped_events), 0) AS dropped_events
                 FROM runs
                 WHERE key_fingerprint = ?
                 """.trimIndent()
@@ -159,9 +200,39 @@ class SqliteMetricsRuntime(
                         completionTokens = rs.getLong("completion_tokens"),
                         totalTokens = rs.getLong("total_tokens"),
                         deniedActions = rs.getLong("denied_actions"),
-                        errorCount = rs.getLong("error_count")
+                        errorCount = rs.getLong("error_count"),
+                        queueSaturationEvents = rs.getLong("queue_saturation_events"),
+                        droppedEvents = rs.getLong("dropped_events")
                     )
                     Pair(rs.getLong("run_count"), totals)
+                }
+            }
+
+            val runSuperegoTokens = connection.prepareStatement(
+                """
+                SELECT COALESCE(SUM(COALESCE(total_tokens, COALESCE(prompt_tokens, 0) + COALESCE(completion_tokens, 0))), 0) AS total
+                FROM llm_calls
+                WHERE run_id = ? AND LOWER(COALESCE(actor, '')) = 'superego'
+                """.trimIndent()
+            ).use { statement ->
+                statement.setString(1, runId)
+                statement.executeQuery().use { rs ->
+                    rs.next()
+                    rs.getLong("total")
+                }
+            }
+
+            val persistentSuperegoTokens = connection.prepareStatement(
+                """
+                SELECT COALESCE(SUM(COALESCE(total_tokens, COALESCE(prompt_tokens, 0) + COALESCE(completion_tokens, 0))), 0) AS total
+                FROM llm_calls
+                WHERE key_fingerprint = ? AND LOWER(COALESCE(actor, '')) = 'superego'
+                """.trimIndent()
+            ).use { statement ->
+                statement.setString(1, keyFingerprint)
+                statement.executeQuery().use { rs ->
+                    rs.next()
+                    rs.getLong("total")
                 }
             }
 
@@ -171,7 +242,9 @@ class SqliteMetricsRuntime(
                 updatedAtIso = nowIso(),
                 runTotals = runTotals,
                 persistentTotals = persistent.second,
-                runCountForKey = persistent.first
+                runCountForKey = persistent.first,
+                runSuperegoTokens = runSuperegoTokens,
+                persistentSuperegoTokens = persistentSuperegoTokens
             )
         }
     }
@@ -259,6 +332,14 @@ class SqliteMetricsRuntime(
     }
 
     private companion object {
+        private fun addRunsColumnIfMissing(statement: java.sql.Statement, column: String, definition: String) {
+            try {
+                statement.execute("ALTER TABLE runs ADD COLUMN $column $definition;")
+            } catch (_: Exception) {
+                // compatible with pre-existing DBs where column already exists
+            }
+        }
+
         private fun resolveDbPath(): Path {
             val raw = System.getenv("PSYKE_METRICS_DB") ?: "~/.psyke/metrics.db"
             return expandUserPath(raw)

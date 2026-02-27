@@ -29,4 +29,20 @@ class InstrumentationBusTest {
         }
         assertEquals(55L, sink.events.single().id)
     }
+
+    @Test
+    fun `bus reports dropped events when queue overflows`() {
+        val sink = RecordingSink(expected = 1)
+        var totalDropped = 0L
+        InstrumentationBus(sinks = listOf(sink), queueCapacity = 1).use { bus ->
+            bus.setDroppedEventsObserver { _, total ->
+                totalDropped = total
+            }
+            repeat(2_000) { idx ->
+                bus.emit(AgentEvent(type = "evt-$idx"))
+            }
+            assertTrue(sink.await())
+        }
+        assertTrue(totalDropped > 0)
+    }
 }

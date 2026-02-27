@@ -6,6 +6,12 @@ import kotlin.test.assertNull
 
 class AgentModelsTest {
     @Test
+    fun `agent config defaults to zero loop delay`() {
+        val config = AgentConfig()
+        assertEquals(0, config.loopDelayMs)
+    }
+
+    @Test
     fun `urgency parser maps known values and defaults to medium`() {
         assertEquals(Urgency.HIGH, Urgency.fromRaw("high"))
         assertEquals(Urgency.LOW, Urgency.fromRaw("LOW"))

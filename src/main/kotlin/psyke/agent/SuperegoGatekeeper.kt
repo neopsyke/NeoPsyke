@@ -18,13 +18,11 @@ private val logger = KotlinLogging.logger {}
 class SuperegoGatekeeper(
     private val modelClient: ChatModelClient,
     private val config: AgentConfig,
-    private val directives: List<String> = listOf(
-        "Any actions should not contain words or expressions that could offend the interlocutor.",
-    ),
+    private val directives: List<String> = DEFAULT_DIRECTIVES,
     private val instrumentation: AgentInstrumentation = NoopAgentInstrumentation,
 ) {
-    fun review(action: PendingAction, snapshot: AgentSnapshot): GateDecision {
-        val lastUserTurn = snapshot.recentDialogue.lastOrNull { it.role == DialogueRole.USER }?.content ?: "none"
+    fun review(action: PendingAction, context: SuperegoContext): GateDecision {
+        val lastUserTurn = context.recentDialogue.lastOrNull { it.role == DialogueRole.USER }?.content ?: "none"
         instrumentation.emit(
             AgentEvents.superegoReviewInput(
                 action = action,
@@ -32,21 +30,41 @@ class SuperegoGatekeeper(
                 lastUserMessage = lastUserTurn
             )
         )
-        val messages = buildMessages(action, snapshot)
-        val boundedMessages = TextSecurity.trimMessagesToBudget(messages, config.maxPromptTokens)
-        val response = modelClient.chat(
-            messages = boundedMessages,
-            options = ChatRequestOptions(
-                temperature = 0.0,
-                maxTokens = 80,
-                metadata = ChatCallMetadata(
-                    actor = "superego",
-                    callSite = "action_review",
-                    actionType = action.type.name.lowercase()
+        val messages = buildMessages(action, context)
+        var response = null as psyke.llm.ChatCompletion?
+        var lastError: Exception? = null
+        for (attempt in 1..2) {
+            try {
+                response = modelClient.chat(
+                    messages = messages,
+                    options = ChatRequestOptions(
+                        temperature = 0.0,
+                        maxTokens = 80,
+                        metadata = ChatCallMetadata(
+                            actor = "superego",
+                            callSite = "action_review",
+                            actionType = action.type.name.lowercase()
+                        )
+                    )
                 )
+                break
+            } catch (ex: Exception) {
+                lastError = ex
+                if (attempt < 2) {
+                    instrumentation.emit(AgentEvents.warning("Superego call failed (attempt 1/2); retrying."))
+                }
+            }
+        }
+        if (response == null) {
+            logger.warn(lastError) { "Superego review call failed for action=${action.id} type=${action.type}." }
+            instrumentation.emit(AgentEvents.warning("Superego call failed; denying action by default."))
+            return GateDecision(
+                allow = false,
+                reason = "Superego unavailable due to model error."
             )
-        )
-        val decision = parseResponse(response.content)
+        }
+        val resolvedResponse = response
+        val decision = parseResponse(resolvedResponse.content)
         instrumentation.emit(
             AgentEvents.superegoReviewOutput(
                 actionId = action.id,
@@ -79,43 +97,71 @@ class SuperegoGatekeeper(
         }
     }
 
-    private fun buildMessages(action: PendingAction, snapshot: AgentSnapshot): List<ChatMessage> {
+    private fun buildMessages(action: PendingAction, context: SuperegoContext): List<ChatMessage> {
         val directivesBlock = directives.joinToString(separator = "\n") { "- $it" }
-        val lastUserTurn = snapshot.recentDialogue.lastOrNull { it.role == DialogueRole.USER }?.content ?: "none"
-        return listOf(
-            ChatMessage(
-                role = ChatRole.SYSTEM,
-                content = """
-                    You are Superego, a strict gatekeeper for actions.
-                    Return STRICT JSON only.
-                    If action violates directives or is unsafe, deny it.
-                """.trimIndent()
-            ),
-            ChatMessage(
-                role = ChatRole.SYSTEM,
-                content = """
-                    Directives:
-                    $directivesBlock
+        val lastUserTurn = context.recentDialogue.lastOrNull { it.role == DialogueRole.USER }?.content ?: "none"
+        val memorySummary = context.memorySummary.ifBlank { "none" }
+        return PromptBudgetAllocator.allocate(
+            sections = listOf(
+                PromptBudgetAllocator.Section(
+                    role = ChatRole.SYSTEM,
+                    priority = PromptBudgetAllocator.Priority.MANDATORY,
+                    required = true,
+                    minTokens = 28,
+                    content = """
+                        You are Superego, a strict gatekeeper for actions.
+                        Return STRICT JSON only.
+                        If action violates directives or is unsafe, deny it.
+                    """.trimIndent()
+                ),
+                PromptBudgetAllocator.Section(
+                    role = ChatRole.SYSTEM,
+                    priority = PromptBudgetAllocator.Priority.IMPORTANT,
+                    minTokens = 24,
+                    content = """
+                        Directives:
+                        $directivesBlock
 
-                    JSON schema:
-                    - If allowed: {"allow": true}
-                    - If denied: {"allow": false, "reason":"<=180 chars"}
-                    Keep output minimal JSON only.
-                """.trimIndent()
+                        JSON schema:
+                        - If allowed: {"allow": true}
+                        - If denied: {"allow": false, "reason":"<=180 chars"}
+                        Keep output minimal JSON only.
+                    """.trimIndent()
+                ),
+                PromptBudgetAllocator.Section(
+                    role = ChatRole.USER,
+                    priority = PromptBudgetAllocator.Priority.MANDATORY,
+                    required = true,
+                    minTokens = 24,
+                    content = """
+                        Candidate action:
+                        type=${action.type.name.lowercase()}
+                        urgency=${action.urgency.name.lowercase()}
+                        summary=${action.summary}
+                        payload=${action.payload}
+                    """.trimIndent()
+                ),
+                PromptBudgetAllocator.Section(
+                    role = ChatRole.USER,
+                    priority = PromptBudgetAllocator.Priority.MANDATORY,
+                    required = true,
+                    minTokens = 10,
+                    content = """
+                        Last user message:
+                        $lastUserTurn
+                    """.trimIndent()
+                ),
+                PromptBudgetAllocator.Section(
+                    role = ChatRole.USER,
+                    priority = PromptBudgetAllocator.Priority.IMPORTANT,
+                    minTokens = 12,
+                    content = """
+                        Memory summary:
+                        $memorySummary
+                    """.trimIndent()
+                )
             ),
-            ChatMessage(
-                role = ChatRole.USER,
-                content = """
-                    Candidate action:
-                    type=${action.type.name.lowercase()}
-                    urgency=${action.urgency.name.lowercase()}
-                    summary=${action.summary}
-                    payload=${action.payload}
-
-                    Last user message:
-                    $lastUserTurn
-                """.trimIndent()
-            )
+            maxTokens = config.maxPromptTokens
         )
     }
 
@@ -124,7 +170,11 @@ class SuperegoGatekeeper(
         val reason: String? = null,
     )
 
-    private companion object {
+    companion object {
+        val DEFAULT_DIRECTIVES: List<String> = listOf(
+            "Any actions should not contain words or expressions that could offend the interlocutor.",
+        )
+
         val mapper = jacksonObjectMapper()
             .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
     }

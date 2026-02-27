@@ -1,6 +1,7 @@
 package psyke.agent
 
 import psyke.support.StubChatModelClient
+import psyke.llm.ChatModelClient
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -40,10 +41,30 @@ class MistralWebSearchProviderTest {
     fun `search returns fallback result on parse failures`() {
         val llm = StubChatModelClient()
         llm.enqueueRawResponse("not-json")
-        val provider = MistralWebSearchProvider(modelClient = llm, config = AgentConfig())
+        val provider = MistralWebSearchProvider(
+            modelClient = llm,
+            config = AgentConfig()
+        )
 
         val result = provider.search("bad response", maxResults = 4)
         assertEquals("Search output could not be parsed.", result.summary)
+        assertTrue(result.snippets.isEmpty())
+    }
+
+    @Test
+    fun `search returns fallback result when model call fails`() {
+        val failingClient = object : ChatModelClient {
+            override val modelName: String = "failing"
+
+            override fun chat(
+                messages: List<psyke.llm.ChatMessage>,
+                options: psyke.llm.ChatRequestOptions
+            ) = throw IllegalStateException("search unavailable")
+        }
+        val provider = MistralWebSearchProvider(modelClient = failingClient, config = AgentConfig())
+
+        val result = provider.search("bad response", maxResults = 4)
+        assertEquals("Search unavailable due to model error.", result.summary)
         assertTrue(result.snippets.isEmpty())
     }
 }

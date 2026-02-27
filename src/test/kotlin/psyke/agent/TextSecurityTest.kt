@@ -21,6 +21,13 @@ class TextSecurityTest {
     }
 
     @Test
+    fun `clamp to token budget trims oversized text`() {
+        val text = "a".repeat(100)
+        val clamped = TextSecurity.clampToTokenBudget(text, maxTokens = 10)
+        assertEquals(10, TextSecurity.estimateTokens(clamped))
+    }
+
+    @Test
     fun `trim messages keeps system prefix and most recent tail`() {
         val messages = listOf(
             ChatMessage(ChatRole.SYSTEM, "12345678"),

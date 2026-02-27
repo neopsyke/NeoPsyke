@@ -63,6 +63,10 @@ class StubMetricsRuntime(
         deniedActionCount += 1
     }
 
+    override fun recordDroppedEvents(count: Long) {}
+
+    override fun recordQueueSaturation(queueType: String) {}
+
     override fun snapshot(): MetricsSnapshot? = snapshotValue
 }
 

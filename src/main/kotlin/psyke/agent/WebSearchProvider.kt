@@ -27,43 +27,73 @@ class MistralWebSearchProvider(
 ) : WebSearchProvider {
 
     override fun search(query: String, maxResults: Int): WebSearchResult {
-        val messages = listOf(
-            ChatMessage(
-                ChatRole.SYSTEM,
-                """
-                You are a web research assistant.
-                If your runtime has web access, use it. If not, provide best-effort knowledge and mark uncertainty.
-                Return STRICT JSON only.
-                """.trimIndent()
+        val messages = PromptBudgetAllocator.allocate(
+            sections = listOf(
+                PromptBudgetAllocator.Section(
+                    role = ChatRole.SYSTEM,
+                    priority = PromptBudgetAllocator.Priority.MANDATORY,
+                    required = true,
+                    minTokens = 20,
+                    content = """
+                    You are a web research assistant.
+                    If your runtime has web access, use it. If not, provide best-effort knowledge and mark uncertainty.
+                    Return STRICT JSON only.
+                    """.trimIndent()
+                ),
+                PromptBudgetAllocator.Section(
+                    role = ChatRole.SYSTEM,
+                    priority = PromptBudgetAllocator.Priority.IMPORTANT,
+                    minTokens = 16,
+                    content = """
+                    JSON schema:
+                    {
+                      "summary":"short finding summary",
+                      "snippets":["bullet-sized snippet", "... up to $maxResults items"]
+                    }
+                    Keep snippets short and factual.
+                    """.trimIndent()
+                ),
+                PromptBudgetAllocator.Section(
+                    role = ChatRole.USER,
+                    priority = PromptBudgetAllocator.Priority.MANDATORY,
+                    required = true,
+                    minTokens = 12,
+                    content = "Search query: $query"
+                )
             ),
-            ChatMessage(
-                ChatRole.SYSTEM,
-                """
-                JSON schema:
-                {
-                  "summary":"short finding summary",
-                  "snippets":["bullet-sized snippet", "... up to $maxResults items"]
-                }
-                Keep snippets short and factual.
-                """.trimIndent()
-            ),
-            ChatMessage(ChatRole.USER, "Search query: $query")
+            maxTokens = config.maxPromptTokens
         )
 
-        val boundedMessages = TextSecurity.trimMessagesToBudget(messages, config.maxPromptTokens)
-        val response = modelClient.chat(
-            messages = boundedMessages,
-            options = ChatRequestOptions(
-                temperature = 0.1,
-                maxTokens = config.maxCompletionTokens,
-                metadata = ChatCallMetadata(
-                    actor = "ego",
-                    callSite = "web_search",
-                    actionType = "web_search"
+        var response = null as psyke.llm.ChatCompletion?
+        var lastError: Exception? = null
+        for (attempt in 1..2) {
+            try {
+                response = modelClient.chat(
+                    messages = messages,
+                    options = ChatRequestOptions(
+                        temperature = 0.1,
+                        maxTokens = config.maxCompletionTokens,
+                        metadata = ChatCallMetadata(
+                            actor = "ego",
+                            callSite = "web_search",
+                            actionType = "web_search"
+                        )
+                    )
                 )
+                break
+            } catch (ex: Exception) {
+                lastError = ex
+            }
+        }
+        if (response == null) {
+            logger.warn(lastError) { "Web search call failed for query='${TextSecurity.preview(query, 100)}'." }
+            return WebSearchResult(
+                summary = "Search unavailable due to model error.",
+                snippets = emptyList()
             )
-        )
-        return parse(response.content, maxResults)
+        }
+        val resolvedResponse = response
+        return parse(resolvedResponse.content, maxResults)
     }
 
     private fun parse(raw: String, maxResults: Int): WebSearchResult {

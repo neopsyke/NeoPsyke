@@ -26,6 +26,9 @@ class DashboardStateStore(
     private var lastSuperegoOutput: Map<String, Any?>? = null
     private var limits: Map<String, Any?> = emptyMap()
     private var metrics: MetricsSnapshot? = null
+    private var droppedEvents: Long = 0
+    private var queueSaturationEvents: Long = 0
+    private val queueSaturationByType = mutableMapOf<String, Long>()
     private val subscribers = mutableSetOf<LinkedBlockingDeque<String>>()
 
     override fun onEvent(event: AgentEvent) {
@@ -99,19 +102,24 @@ class DashboardStateStore(
                 "metrics_snapshot" -> {
                     metrics = event.data["metrics"] as? MetricsSnapshot
                 }
-            }
 
-            payloadJson = mapper.writeValueAsString(event)
-            val staleSubscribers = mutableListOf<LinkedBlockingDeque<String>>()
-            subscribers.forEach { queue ->
-                if (!queue.offerLast(payloadJson)) {
-                    queue.pollFirst()
-                    if (!queue.offerLast(payloadJson)) {
-                        staleSubscribers.add(queue)
+                "queue_saturation" -> {
+                    queueSaturationEvents += 1
+                    val queueType = event.data["queue_type"]?.toString()?.ifBlank { "unknown" } ?: "unknown"
+                    val current = queueSaturationByType[queueType] ?: 0L
+                    queueSaturationByType[queueType] = current + 1
+                }
+
+                "instrumentation_health" -> {
+                    val dropped = (event.data["dropped_events"] as? Number)?.toLong()
+                    if (dropped != null) {
+                        droppedEvents = max(droppedEvents, dropped)
                     }
                 }
             }
-            subscribers.removeAll(staleSubscribers.toSet())
+
+            payloadJson = mapper.writeValueAsString(event)
+            broadcastToSubscribers(payloadJson)
         }
     }
 
@@ -129,10 +137,33 @@ class DashboardStateStore(
                 lastSuperegoOutput = lastSuperegoOutput,
                 limits = limits,
                 metrics = metrics,
+                instrumentationHealth = instrumentationHealthMap(),
                 recentEvents = events.toList().sortedBy { it.id }
             )
         }
         return mapper.writeValueAsString(snapshot)
+    }
+
+    fun recordDroppedEvents(totalDroppedEvents: Long) {
+        if (totalDroppedEvents < 0) {
+            return
+        }
+        val payloadJson: String
+        synchronized(lock) {
+            droppedEvents = max(droppedEvents, totalDroppedEvents)
+            val nextId = (events.maxOfOrNull { it.id } ?: 0L) + 1L
+            val healthEvent = AgentEvent(
+                id = nextId,
+                type = "instrumentation_health",
+                data = instrumentationHealthMap()
+            )
+            if (events.size >= max(50, maxEvents)) {
+                events.removeFirst()
+            }
+            events.addLast(healthEvent)
+            payloadJson = mapper.writeValueAsString(healthEvent)
+            broadcastToSubscribers(payloadJson)
+        }
     }
 
     fun subscribe(): DashboardSubscription {
@@ -152,6 +183,26 @@ class DashboardStateStore(
             subscribers.clear()
         }
     }
+
+    private fun instrumentationHealthMap(): Map<String, Any?> =
+        buildMap {
+            put("dropped_events", droppedEvents)
+            put("queue_saturation_events", queueSaturationEvents)
+            put("queue_saturation_by_type", queueSaturationByType.toMap())
+        }
+
+    private fun broadcastToSubscribers(payloadJson: String) {
+        val staleSubscribers = mutableListOf<LinkedBlockingDeque<String>>()
+        subscribers.forEach { queue ->
+            if (!queue.offerLast(payloadJson)) {
+                queue.pollFirst()
+                if (!queue.offerLast(payloadJson)) {
+                    staleSubscribers.add(queue)
+                }
+            }
+        }
+        subscribers.removeAll(staleSubscribers.toSet())
+    }
 }
 
 data class DashboardSnapshot(
@@ -166,6 +217,7 @@ data class DashboardSnapshot(
     val lastSuperegoOutput: Map<String, Any?>?,
     val limits: Map<String, Any?>,
     val metrics: MetricsSnapshot?,
+    val instrumentationHealth: Map<String, Any?> = emptyMap(),
     val recentEvents: List<AgentEvent>,
 )
 

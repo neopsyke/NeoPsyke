@@ -6,19 +6,36 @@ class AttentionScheduler(
     private val config: AgentConfig,
 ) {
     private var idCounter = 0L
-    private val inputs = ArrayDeque<PendingInput>()
+    private val inputs = PriorityQueue<PendingInput>(inputComparator)
     private val thoughts = PriorityQueue<PendingThought>(thoughtComparator)
     private val actions = PriorityQueue<PendingAction>(actionComparator)
+    private var latestQueuedInput: PendingInput? = null
 
-    fun enqueueInput(content: String): Boolean {
+    fun enqueueInput(content: String, priority: InputPriority = InputPriority.MEDIUM): Boolean {
         if (inputs.size >= config.maxPendingInputs) {
             return false
         }
-        inputs.addLast(PendingInput(id = nextId(), content = content))
+        val input = PendingInput(
+            id = nextId(),
+            content = content,
+            priority = priority
+        )
+        inputs.add(input)
+        latestQueuedInput = input
         return true
     }
 
-    fun enqueueThought(content: String, urgency: Urgency, passes: Int = 0): Boolean {
+    fun latestQueuedInput(): PendingInput? = latestQueuedInput
+
+    fun enqueueThought(
+        content: String,
+        urgency: Urgency,
+        passes: Int = 0,
+        deniedActionType: ActionType? = null,
+        deniedActionPayload: String? = null,
+        denialReason: String? = null,
+        allowFallbackExplanation: Boolean = false,
+    ): Boolean {
         if (thoughts.size >= config.maxPendingThoughts) {
             return false
         }
@@ -27,7 +44,11 @@ class AttentionScheduler(
                 id = nextId(),
                 urgency = urgency,
                 content = content,
-                passes = passes
+                passes = passes,
+                deniedActionType = deniedActionType,
+                deniedActionPayload = deniedActionPayload,
+                denialReason = denialReason,
+                allowFallbackExplanation = allowFallbackExplanation
             )
         )
         return true
@@ -39,6 +60,7 @@ class AttentionScheduler(
         summary: String,
         urgency: Urgency,
         attempts: Int = 0,
+        isFallbackExplanation: Boolean = false,
     ): Boolean {
         if (actions.size >= config.maxPendingActions) {
             return false
@@ -50,14 +72,25 @@ class AttentionScheduler(
                 type = type,
                 payload = payload,
                 summary = summary,
-                attempts = attempts
+                attempts = attempts,
+                isFallbackExplanation = isFallbackExplanation
             )
         )
         return true
     }
 
+    fun dequeueFallbackExplanationAction(): PendingAction? {
+        val candidate = actions.toList()
+            .filter { it.isFallbackExplanation }
+            .sortedWith(actionComparator)
+            .firstOrNull()
+            ?: return null
+        actions.remove(candidate)
+        return candidate
+    }
+
     fun nextTask(): LoopTask? {
-        val input = inputs.removeFirstOrNull()
+        val input = inputs.poll()
         if (input != null) {
             return LoopTask.ProcessInput(input)
         }
@@ -83,9 +116,8 @@ class AttentionScheduler(
 
     fun hasPendingWork(): Boolean = inputs.isNotEmpty() || thoughts.isNotEmpty() || actions.isNotEmpty()
 
-    fun snapshot(dialogue: List<DialogueTurn>): AgentSnapshot =
-        AgentSnapshot(
-            recentDialogue = dialogue.takeLast(12),
+    fun queueSnapshot(): QueueSnapshot =
+        QueueSnapshot(
             pendingInputCount = inputs.size,
             pendingThoughtCount = thoughts.size,
             pendingActionCount = actions.size
@@ -93,7 +125,7 @@ class AttentionScheduler(
 
     fun queueState(): QueueState =
         QueueState(
-            inputs = inputs.toList(),
+            inputs = inputs.toList().sortedWith(inputComparator),
             thoughts = thoughts.toList().sortedWith(thoughtComparator),
             actions = actions.toList().sortedWith(actionComparator)
         )
@@ -104,6 +136,9 @@ class AttentionScheduler(
     }
 
     private companion object {
+        val inputComparator = compareByDescending<PendingInput> { it.priority.level }
+            .thenBy { it.id }
+
         val thoughtComparator = compareByDescending<PendingThought> { it.urgency.priority }
             .thenBy { it.id }
 

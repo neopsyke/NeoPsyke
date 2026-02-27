@@ -29,6 +29,8 @@ class InstrumentationBus(
     private val droppedEvents = AtomicLong(0)
     private val activeSinks = sinks.toList()
     @Volatile
+    private var droppedEventsObserver: ((delta: Long, total: Long) -> Unit)? = null
+    @Volatile
     private var running = true
     private val worker = thread(
         name = "psyke-instrumentation-bus",
@@ -43,10 +45,25 @@ class InstrumentationBus(
             return
         }
 
-        queue.poll()
-        if (!queue.offer(stampedEvent)) {
-            droppedEvents.incrementAndGet()
+        var droppedDelta = 0L
+        if (queue.poll() != null) {
+            droppedDelta += 1
         }
+        if (!queue.offer(stampedEvent)) {
+            droppedDelta += 1
+        }
+        if (droppedDelta > 0) {
+            val totalDropped = droppedEvents.addAndGet(droppedDelta)
+            try {
+                droppedEventsObserver?.invoke(droppedDelta, totalDropped)
+            } catch (_: Exception) {
+                // keep instrumentation path robust
+            }
+        }
+    }
+
+    fun setDroppedEventsObserver(observer: ((delta: Long, total: Long) -> Unit)?) {
+        droppedEventsObserver = observer
     }
 
     override fun close() {

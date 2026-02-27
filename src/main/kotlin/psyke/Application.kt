@@ -6,6 +6,7 @@ import psyke.agent.EgoAgent
 import psyke.agent.EgoPlanner
 import psyke.agent.MistralWebSearchProvider
 import psyke.agent.MotorCortex
+import psyke.agent.SuperegoDirectives
 import psyke.agent.SuperegoGatekeeper
 import psyke.dashboard.DashboardServer
 import psyke.dashboard.DashboardStateStore
@@ -13,8 +14,10 @@ import psyke.instrumentation.AgentEvent
 import psyke.instrumentation.AgentEvents
 import psyke.instrumentation.InstrumentationBus
 import psyke.instrumentation.LlmCallEventObserver
+import psyke.instrumentation.LlmRawResponseEventHook
 import psyke.instrumentation.MetricsSnapshotObserver
 import psyke.instrumentation.StructuredLogSink
+import psyke.llm.InstrumentedChatModelClient
 import psyke.llm.combineChatCallObservers
 import psyke.llm.MistralChatClient
 import psyke.metrics.MetricsRuntimeFactory
@@ -33,6 +36,7 @@ fun main() {
     val config = AgentConfig.fromEnv()
     val egoModel = System.getenv("MISTRAL_EGO_MODEL") ?: MistralChatClient.DEFAULT_MODEL
     val superegoModel = System.getenv("MISTRAL_SUPEREGO_MODEL") ?: egoModel
+    val superegoDirectives = SuperegoDirectives.load()
     val dashboardPort = System.getenv("PSYKE_DASHBOARD_PORT")?.toIntOrNull() ?: 8787
     val dashboardEnabled = (System.getenv("PSYKE_DASHBOARD_ENABLED") ?: "true").equals("true", ignoreCase = true)
 
@@ -68,6 +72,7 @@ fun main() {
                     data = mapOf(
                         "limits" to mapOf(
                             "max_loop_steps" to config.maxLoopStepsPerInput,
+                            "loop_delay_ms" to config.loopDelayMs,
                             "max_thought_passes" to config.maxThoughtPasses,
                             "max_prompt_tokens" to config.maxPromptTokens,
                             "max_completion_tokens" to config.maxCompletionTokens,
@@ -75,6 +80,8 @@ fun main() {
                             "max_pending_thoughts" to config.maxPendingThoughts,
                             "max_pending_actions" to config.maxPendingActions,
                             "max_input_chars" to config.maxInputChars,
+                            "max_memory_chars" to config.maxMemoryChars,
+                            "max_memory_prompt_tokens" to config.maxMemoryPromptTokens,
                             "max_thought_chars" to config.maxThoughtChars,
                             "max_action_payload_chars" to config.maxActionPayloadChars,
                             "max_action_summary_chars" to config.maxActionSummaryChars
@@ -88,14 +95,23 @@ fun main() {
                 egoModel = egoModel,
                 superegoModel = superegoModel
             ).use { metrics ->
-                metrics.snapshot()?.let { snapshot ->
-                    instrumentation.emit(
-                        AgentEvent(
-                            type = "metrics_snapshot",
-                            data = mapOf("metrics" to snapshot)
-                        )
-                    )
+                instrumentation.setDroppedEventsObserver { delta, total ->
+                    metrics.recordDroppedEvents(delta)
+                    dashboardStore.recordDroppedEvents(total)
                 }
+
+                fun emitMetricsSnapshot() {
+                    metrics.snapshot()?.let { snapshot ->
+                        instrumentation.emit(
+                            AgentEvent(
+                                type = "metrics_snapshot",
+                                data = mapOf("metrics" to snapshot)
+                            )
+                        )
+                    }
+                }
+
+                emitMetricsSnapshot()
                 val instrumentationObserver = LlmCallEventObserver(
                     provider = "mistral",
                     instrumentation = instrumentation
@@ -104,30 +120,48 @@ fun main() {
                     metricsRuntime = metrics,
                     instrumentation = instrumentation
                 )
+                val rawResponseHook = LlmRawResponseEventHook(
+                    instrumentation = instrumentation,
+                    maxRawResponseChars = config.maxActionPayloadChars
+                )
 
-                MistralChatClient(
-                    apiKey = apiKey,
-                    modelName = egoModel,
-                    callObserver = combineChatCallObservers(
-                        metrics.chatCallObserver(provider = "mistral"),
-                        instrumentationObserver,
-                        metricsSnapshotObserver
-                    )
-                ).use { egoClient ->
-                    MistralChatClient(
+                InstrumentedChatModelClient(
+                    delegate = MistralChatClient(
                         apiKey = apiKey,
-                        modelName = superegoModel,
+                        modelName = egoModel,
                         callObserver = combineChatCallObservers(
                             metrics.chatCallObserver(provider = "mistral"),
                             instrumentationObserver,
                             metricsSnapshotObserver
                         )
+                    ),
+                    hooks = listOf(rawResponseHook)
+                ).use { egoClient ->
+                    InstrumentedChatModelClient(
+                        delegate = MistralChatClient(
+                            apiKey = apiKey,
+                            modelName = superegoModel,
+                            callObserver = combineChatCallObservers(
+                                metrics.chatCallObserver(provider = "mistral"),
+                                instrumentationObserver,
+                                metricsSnapshotObserver
+                            )
+                        ),
+                        hooks = listOf(rawResponseHook)
                     ).use { superegoClient ->
                         logger.info { "Ego model=$egoModel Superego model=$superegoModel" }
 
                         val planner = EgoPlanner(egoClient, config, instrumentation)
-                        val gatekeeper = SuperegoGatekeeper(superegoClient, config, instrumentation = instrumentation)
-                        val webSearchProvider = MistralWebSearchProvider(egoClient, config)
+                        val gatekeeper = SuperegoGatekeeper(
+                            modelClient = superegoClient,
+                            config = config,
+                            directives = superegoDirectives,
+                            instrumentation = instrumentation
+                        )
+                        val webSearchProvider = MistralWebSearchProvider(
+                            modelClient = egoClient,
+                            config = config
+                        )
                         val motorCortex = MotorCortex(webSearchProvider)
 
                         EgoAgent(
@@ -137,14 +171,11 @@ fun main() {
                             config = config,
                             onActionDenied = {
                                 metrics.recordDeniedAction()
-                                metrics.snapshot()?.let { snapshot ->
-                                    instrumentation.emit(
-                                        AgentEvent(
-                                            type = "metrics_snapshot",
-                                            data = mapOf("metrics" to snapshot)
-                                        )
-                                    )
-                                }
+                                emitMetricsSnapshot()
+                            },
+                            onQueueSaturation = { queueType, _, _ ->
+                                metrics.recordQueueSaturation(queueType)
+                                emitMetricsSnapshot()
                             },
                             instrumentation = instrumentation
                         ).runInteractive()
