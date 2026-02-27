@@ -4,6 +4,9 @@ import com.fasterxml.jackson.databind.DeserializationFeature
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
 import mu.KotlinLogging
+import psyke.instrumentation.AgentEvents
+import psyke.instrumentation.AgentInstrumentation
+import psyke.instrumentation.NoopAgentInstrumentation
 import psyke.llm.ChatCallMetadata
 import psyke.llm.ChatMessage
 import psyke.llm.ChatModelClient
@@ -16,13 +19,19 @@ class SuperegoGatekeeper(
     private val modelClient: ChatModelClient,
     private val config: AgentConfig,
     private val directives: List<String> = listOf(
-        "Any actions should not contain words or expressions that could offend the interlocutor."
+        "Any actions should not contain words or expressions that could offend the interlocutor.",
     ),
+    private val instrumentation: AgentInstrumentation = NoopAgentInstrumentation,
 ) {
     fun review(action: PendingAction, snapshot: AgentSnapshot): GateDecision {
-        logger.trace {
-            "superego.review.start action_id=${action.id} type=${action.type.name.lowercase()} urgency=${action.urgency.name.lowercase()} summary='${TextSecurity.preview(action.summary, 80)}'"
-        }
+        val lastUserTurn = snapshot.recentDialogue.lastOrNull { it.role == DialogueRole.USER }?.content ?: "none"
+        instrumentation.emit(
+            AgentEvents.superegoReviewInput(
+                action = action,
+                directives = directives,
+                lastUserMessage = lastUserTurn
+            )
+        )
         val messages = buildMessages(action, snapshot)
         val boundedMessages = TextSecurity.trimMessagesToBudget(messages, config.maxPromptTokens)
         val response = modelClient.chat(
@@ -38,9 +47,13 @@ class SuperegoGatekeeper(
             )
         )
         val decision = parseResponse(response.content)
-        logger.trace {
-            "superego.review.result action_id=${action.id} allow=${decision.allow} reason='${TextSecurity.preview(decision.reason, 80)}'"
-        }
+        instrumentation.emit(
+            AgentEvents.superegoReviewOutput(
+                actionId = action.id,
+                allow = decision.allow,
+                reason = decision.reason
+            )
+        )
         return decision
     }
 
@@ -58,6 +71,7 @@ class SuperegoGatekeeper(
             logger.warn(ex) {
                 "Failed to parse Superego response. response_len=${raw.length} preview='${TextSecurity.preview(raw, 120)}'"
             }
+            instrumentation.emit(AgentEvents.warning("Failed to parse Superego response."))
             GateDecision(
                 allow = false,
                 reason = "Superego response could not be parsed."

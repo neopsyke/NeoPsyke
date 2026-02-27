@@ -16,10 +16,13 @@ Standalone Kotlin JVM app using Gradle with:
 - Optional:
   - `MISTRAL_EGO_MODEL` (default: `mistral-small-latest`)
   - `MISTRAL_SUPEREGO_MODEL` (default: same as Ego model)
+  - `PSYKE_DASHBOARD_ENABLED` (default: `true`)
+  - `PSYKE_DASHBOARD_PORT` (default: `8787`)
   - `EGO_MAX_LOOP_STEPS` (default: `18`)
   - `EGO_MAX_THOUGHT_PASSES` (default: `5`)
   - `EGO_MAX_PROMPT_TOKENS` (default: `2400`)
-  - `EGO_MAX_COMPLETION_TOKENS` (default: `300`)
+  - `EGO_MAX_COMPLETION_TOKENS` (default: `900`)
+  - `EGO_MAX_ACTION_PAYLOAD_CHARS` (default: `4000`)
   - `EGO_SEARCH_RESULT_COUNT` (default: `5`)
 
 ## Run
@@ -48,7 +51,7 @@ Set a specific log level via parameter:
 Notes:
 - `run-psyke.sh` bootstraps `installDist` once if needed.
 - After bootstrap, execution is direct (`build/install/psyke/bin/psyke`) without `gradle run`.
-- Default log level in `run-psyke.sh` is `trace`.
+- Default log level in `run-psyke.sh` is `warning`.
 - `PSYKE_LOG_LEVEL` can still provide a default if `--log-level` is omitted.
 - By default the launcher persists metrics to `.psyke/metrics.db` (override with `PSYKE_METRICS_DB`).
 
@@ -58,6 +61,14 @@ you> hello
 you> search for latest kotlin release notes
 you> exit
 ```
+
+## Realtime dashboard
+- Enabled by default and served locally on `http://127.0.0.1:8787/`.
+- Uses async instrumentation (`InstrumentationBus`) with pluggable sinks:
+  - `StructuredLogSink` (logs)
+  - `DashboardStateStore` + SSE stream (UI)
+- Queue, loop, thought/action flow, Superego in/out, and LLM call events are streamed as typed events.
+- If dashboard bind fails, app continues running without the dashboard server.
 
 ## Loop behavior
 - Priority order: incoming inputs first.

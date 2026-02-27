@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_BIN="$ROOT_DIR/build/install/psyke/bin/psyke"
-LOG_LEVEL="${PSYKE_LOG_LEVEL:-trace}"
+LOG_LEVEL="${PSYKE_LOG_LEVEL:-warning}"
 APP_ARGS=()
 
 if [[ -z "${PSYKE_METRICS_DB:-}" ]]; then
@@ -29,7 +29,7 @@ while [[ $# -gt 0 ]]; do
 Usage: ./run-psyke.sh [--log-level LEVEL] [--] [app-args...]
 
 Options:
-  -l, --log-level LEVEL   SLF4J simple logger level (default: trace)
+  -l, --log-level LEVEL   SLF4J simple logger level (default: warning)
   -h, --help              Show this help message
 
 Environment:
@@ -52,7 +52,7 @@ EOF
 done
 
 if [[ -z "${LOG_LEVEL}" ]]; then
-  LOG_LEVEL="trace"
+  LOG_LEVEL="warning"
 fi
 export JAVA_OPTS="${JAVA_OPTS:-} -Dorg.slf4j.simpleLogger.defaultLogLevel=${LOG_LEVEL}"
 

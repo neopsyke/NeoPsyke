@@ -37,10 +37,10 @@ data class AgentConfig(
     val maxPendingInputs: Int = 32,
     val maxInputChars: Int = 2_000,
     val maxThoughtChars: Int = 600,
-    val maxActionPayloadChars: Int = 1_000,
+    val maxActionPayloadChars: Int = 4_000,
     val maxActionSummaryChars: Int = 180,
     val maxPromptTokens: Int = 2_400,
-    val maxCompletionTokens: Int = 300,
+    val maxCompletionTokens: Int = 900,
     val searchResultCount: Int = 5
 ) {
     companion object {
@@ -48,8 +48,9 @@ data class AgentConfig(
             AgentConfig(
                 maxLoopStepsPerInput = readInt("EGO_MAX_LOOP_STEPS", 18),
                 maxThoughtPasses = readInt("EGO_MAX_THOUGHT_PASSES", 5),
+                maxActionPayloadChars = readInt("EGO_MAX_ACTION_PAYLOAD_CHARS", 4000),
                 maxPromptTokens = readInt("EGO_MAX_PROMPT_TOKENS", 2400),
-                maxCompletionTokens = readInt("EGO_MAX_COMPLETION_TOKENS", 300),
+                maxCompletionTokens = readInt("EGO_MAX_COMPLETION_TOKENS", 900),
                 searchResultCount = readInt("EGO_SEARCH_RESULT_COUNT", 5)
             )
 
@@ -77,6 +78,12 @@ data class PendingAction(
     val payload: String,
     val summary: String,
     val attempts: Int = 0,
+)
+
+data class QueueState(
+    val inputs: List<PendingInput>,
+    val thoughts: List<PendingThought>,
+    val actions: List<PendingAction>,
 )
 
 enum class DialogueRole {

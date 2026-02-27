@@ -9,6 +9,7 @@ private val logger = KotlinLogging.logger {}
 interface MetricsRuntime : Closeable {
     fun chatCallObserver(provider: String): ChatCallObserver?
     fun recordDeniedAction()
+    fun snapshot(): MetricsSnapshot?
 
     override fun close() {}
 }
@@ -16,6 +17,7 @@ interface MetricsRuntime : Closeable {
 class NoopMetricsRuntime : MetricsRuntime {
     override fun chatCallObserver(provider: String): ChatCallObserver? = null
     override fun recordDeniedAction() {}
+    override fun snapshot(): MetricsSnapshot? = null
 }
 
 object MetricsRuntimeFactory {
@@ -36,3 +38,21 @@ object MetricsRuntimeFactory {
         }
     }
 }
+
+data class MetricsTotals(
+    val calls: Long,
+    val promptTokens: Long,
+    val completionTokens: Long,
+    val totalTokens: Long,
+    val deniedActions: Long,
+    val errorCount: Long,
+)
+
+data class MetricsSnapshot(
+    val runId: String,
+    val keyFingerprint: String,
+    val updatedAtIso: String,
+    val runTotals: MetricsTotals,
+    val persistentTotals: MetricsTotals,
+    val runCountForKey: Long,
+)
