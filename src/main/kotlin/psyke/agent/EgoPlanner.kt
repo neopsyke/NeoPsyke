@@ -5,6 +5,10 @@ import com.fasterxml.jackson.databind.DeserializationFeature
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
 import mu.KotlinLogging
+import psyke.instrumentation.AgentEvent
+import psyke.instrumentation.AgentEvents
+import psyke.instrumentation.AgentInstrumentation
+import psyke.instrumentation.NoopAgentInstrumentation
 import psyke.llm.ChatMessage
 import psyke.llm.ChatCallMetadata
 import psyke.llm.ChatModelClient
@@ -16,15 +20,24 @@ private val logger = KotlinLogging.logger {}
 class EgoPlanner(
     private val modelClient: ChatModelClient,
     private val config: AgentConfig,
+    private val instrumentation: AgentInstrumentation = NoopAgentInstrumentation,
 ) {
     fun decide(trigger: EgoTrigger, snapshot: AgentSnapshot): EgoDecision {
         val triggerLabel = when (trigger) {
             is EgoTrigger.IncomingInput -> "input"
             is EgoTrigger.PendingThoughtInput -> "thought"
         }
-        logger.trace {
-            "ego.plan.start trigger=$triggerLabel pending(in=${snapshot.pendingInputCount},th=${snapshot.pendingThoughtCount},ac=${snapshot.pendingActionCount})"
-        }
+        instrumentation.emit(
+            AgentEvent(
+                type = "planner_start",
+                data = mapOf(
+                    "trigger" to triggerLabel,
+                    "pending_inputs" to snapshot.pendingInputCount,
+                    "pending_thoughts" to snapshot.pendingThoughtCount,
+                    "pending_actions" to snapshot.pendingActionCount
+                )
+            )
+        )
 
         val messages = buildMessages(trigger, snapshot)
         val boundedMessages = TextSecurity.trimMessagesToBudget(messages, config.maxPromptTokens)
@@ -41,7 +54,7 @@ class EgoPlanner(
         )
 
         val decision = parseResponse(response.content)
-        logDecision(decision)
+        emitDecision(triggerLabel, decision)
         return decision
     }
 
@@ -85,28 +98,45 @@ class EgoPlanner(
             logger.warn(ex) {
                 "Failed to parse Ego decision. response_len=${raw.length} preview='${TextSecurity.preview(raw, 120)}'"
             }
+            instrumentation.emit(AgentEvents.warning("Failed to parse Ego planner response."))
             EgoDecision.Noop("Planner produced non-parseable output.")
         }
     }
 
-    private fun logDecision(decision: EgoDecision) {
+    private fun emitDecision(triggerLabel: String, decision: EgoDecision) {
         when (decision) {
             is EgoDecision.EnqueueThought -> {
-                logger.trace {
-                    "ego.plan.decision type=thought urgency=${decision.urgency.name.lowercase()} thought_len=${decision.content.length}"
-                }
+                instrumentation.emit(
+                    AgentEvents.plannerDecision(
+                        trigger = triggerLabel,
+                        decisionType = "thought",
+                        urgency = decision.urgency.name.lowercase(),
+                        thought = decision.content
+                    )
+                )
             }
 
             is EgoDecision.ProposeAction -> {
-                logger.trace {
-                    "ego.plan.decision type=action action=${decision.actionType.name.lowercase()} urgency=${decision.urgency.name.lowercase()} payload_len=${decision.payload.length} summary='${TextSecurity.preview(decision.summary, 80)}'"
-                }
+                instrumentation.emit(
+                    AgentEvents.plannerDecision(
+                        trigger = triggerLabel,
+                        decisionType = "action",
+                        urgency = decision.urgency.name.lowercase(),
+                        actionType = decision.actionType.name.lowercase(),
+                        payload = decision.payload,
+                        summary = decision.summary
+                    )
+                )
             }
 
             is EgoDecision.Noop -> {
-                logger.trace {
-                    "ego.plan.decision type=noop reason='${TextSecurity.preview(decision.reason, 80)}'"
-                }
+                instrumentation.emit(
+                    AgentEvents.plannerDecision(
+                        trigger = triggerLabel,
+                        decisionType = "noop",
+                        reason = decision.reason
+                    )
+                )
             }
         }
     }
@@ -154,6 +184,8 @@ class EgoPlanner(
                   "reason":"... optional short reason"
                 }
                 Keep thought concise.
+                Prefer concise answer payloads by default.
+                Only produce a detailed answer payload when the user explicitly asks for detail.
                 Action summary must be at most 180 chars.
                 """.trimIndent()
             ),

@@ -91,6 +91,13 @@ class AttentionScheduler(
             pendingActionCount = actions.size
         )
 
+    fun queueState(): QueueState =
+        QueueState(
+            inputs = inputs.toList(),
+            thoughts = thoughts.toList().sortedWith(thoughtComparator),
+            actions = actions.toList().sortedWith(actionComparator)
+        )
+
     private fun nextId(): Long {
         idCounter += 1
         return idCounter

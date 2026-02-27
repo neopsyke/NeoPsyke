@@ -112,6 +112,70 @@ class SqliteMetricsRuntime(
         }
     }
 
+    override fun snapshot(): MetricsSnapshot {
+        synchronized(connection) {
+            val runTotals = connection.prepareStatement(
+                """
+                SELECT total_calls, prompt_tokens, completion_tokens, total_tokens, denied_actions, error_count
+                FROM runs WHERE run_id = ?
+                """.trimIndent()
+            ).use { statement ->
+                statement.setString(1, runId)
+                statement.executeQuery().use { rs ->
+                    if (!rs.next()) {
+                        MetricsTotals(0, 0, 0, 0, 0, 0)
+                    } else {
+                        MetricsTotals(
+                            calls = rs.getLong("total_calls"),
+                            promptTokens = rs.getLong("prompt_tokens"),
+                            completionTokens = rs.getLong("completion_tokens"),
+                            totalTokens = rs.getLong("total_tokens"),
+                            deniedActions = rs.getLong("denied_actions"),
+                            errorCount = rs.getLong("error_count")
+                        )
+                    }
+                }
+            }
+
+            val persistent = connection.prepareStatement(
+                """
+                SELECT COUNT(*) AS run_count,
+                       COALESCE(SUM(total_calls), 0) AS total_calls,
+                       COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
+                       COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
+                       COALESCE(SUM(total_tokens), 0) AS total_tokens,
+                       COALESCE(SUM(denied_actions), 0) AS denied_actions,
+                       COALESCE(SUM(error_count), 0) AS error_count
+                FROM runs
+                WHERE key_fingerprint = ?
+                """.trimIndent()
+            ).use { statement ->
+                statement.setString(1, keyFingerprint)
+                statement.executeQuery().use { rs ->
+                    rs.next()
+                    val totals = MetricsTotals(
+                        calls = rs.getLong("total_calls"),
+                        promptTokens = rs.getLong("prompt_tokens"),
+                        completionTokens = rs.getLong("completion_tokens"),
+                        totalTokens = rs.getLong("total_tokens"),
+                        deniedActions = rs.getLong("denied_actions"),
+                        errorCount = rs.getLong("error_count")
+                    )
+                    Pair(rs.getLong("run_count"), totals)
+                }
+            }
+
+            return MetricsSnapshot(
+                runId = runId,
+                keyFingerprint = keyFingerprint,
+                updatedAtIso = nowIso(),
+                runTotals = runTotals,
+                persistentTotals = persistent.second,
+                runCountForKey = persistent.first
+            )
+        }
+    }
+
     private fun startRun(egoModel: String, superegoModel: String) {
         synchronized(connection) {
             connection.prepareStatement(
