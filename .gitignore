@@ -3,6 +3,7 @@
 build/
 out/
 .psyke/
+.kotlin/
 
 # IDE/editor files
 .idea/

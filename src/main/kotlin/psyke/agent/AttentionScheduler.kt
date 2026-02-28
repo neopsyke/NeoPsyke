@@ -31,6 +31,8 @@ class AttentionScheduler(
         content: String,
         urgency: Urgency,
         passes: Int = 0,
+        longTermMemoryRecallQuery: String? = null,
+        rootInputEnqueuedAtMs: Long? = null,
         deniedActionType: ActionType? = null,
         deniedActionPayload: String? = null,
         denialReason: String? = null,
@@ -45,6 +47,8 @@ class AttentionScheduler(
                 urgency = urgency,
                 content = content,
                 passes = passes,
+                longTermMemoryRecallQuery = longTermMemoryRecallQuery,
+                rootInputEnqueuedAtMs = rootInputEnqueuedAtMs,
                 deniedActionType = deniedActionType,
                 deniedActionPayload = deniedActionPayload,
                 denialReason = denialReason,
@@ -61,6 +65,7 @@ class AttentionScheduler(
         urgency: Urgency,
         attempts: Int = 0,
         isFallbackExplanation: Boolean = false,
+        rootInputEnqueuedAtMs: Long? = null,
     ): Boolean {
         if (actions.size >= config.maxPendingActions) {
             return false
@@ -73,7 +78,8 @@ class AttentionScheduler(
                 payload = payload,
                 summary = summary,
                 attempts = attempts,
-                isFallbackExplanation = isFallbackExplanation
+                isFallbackExplanation = isFallbackExplanation,
+                rootInputEnqueuedAtMs = rootInputEnqueuedAtMs
             )
         )
         return true

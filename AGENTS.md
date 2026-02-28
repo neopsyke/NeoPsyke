@@ -37,6 +37,9 @@ Instructions for coding agents working in this repository (Codex, Claude, Gemini
   - `./gradlew test`
 - For faster iteration, run targeted tests first, then full tests if core/shared code changed.
 - If you cannot run tests, clearly state that in your final summary.
+- Test execution policy for coding agents:
+  - Fast local unit/integration tests with deterministic stubs are allowed in the default `./gradlew test` suite.
+  - Tests that require real network calls, real provider APIs, or consume paid external tokens must be manual-only and run only when explicitly requested.
 
 ## Code Style
 - Follow existing Kotlin style and package structure.

@@ -22,6 +22,8 @@ class EgoPlanner(
     private val modelClient: ChatModelClient,
     private val config: AgentConfig,
     private val instrumentation: AgentInstrumentation = NoopAgentInstrumentation,
+    private val onPlannerNoop: () -> Unit = {},
+    private val onPlannerOutputRepaired: () -> Unit = {},
 ) {
     fun decide(trigger: EgoTrigger, context: PlannerContext): EgoDecision {
         val triggerLabel = when (trigger) {
@@ -83,8 +85,7 @@ class EgoPlanner(
 
     private fun parseResponse(raw: String, availableActions: Set<ActionType>): EgoDecision {
         return try {
-            val json = TextSecurity.extractJsonObject(raw)
-            val payload = mapper.readValue<EgoDecisionPayload>(json)
+            val payload = parsePayloadWithRepair(raw)
             when (payload.decision?.trim()?.lowercase()) {
                 "thought" -> {
                     val thought = payload.thought?.trim().orEmpty()
@@ -93,7 +94,10 @@ class EgoPlanner(
                     } else {
                         EgoDecision.EnqueueThought(
                             urgency = Urgency.fromRaw(payload.urgency),
-                            content = TextSecurity.clamp(thought, config.maxThoughtChars)
+                            content = TextSecurity.clamp(thought, config.maxThoughtChars),
+                            longTermMemoryRecallQuery = payload.longTermMemoryRecallQuery?.trim()?.ifBlank { null }?.let {
+                                TextSecurity.clamp(it, config.maxThoughtChars)
+                            }
                         )
                     }
                 }
@@ -102,8 +106,15 @@ class EgoPlanner(
                     val actionType = ActionType.fromRaw(payload.actionType)
                     val actionPayload = payload.actionPayload?.trim().orEmpty()
                     val actionSummary = payload.actionSummary?.trim().orEmpty()
+                    val resolvedSummary = if (actionSummary.isBlank() && actionType != null && actionPayload.isNotBlank()) {
+                        onPlannerOutputRepaired()
+                        instrumentation.emit(AgentEvents.plannerOutputRepaired(actionType = actionType.name.lowercase()))
+                        synthesizeActionSummary(actionPayload)
+                    } else {
+                        actionSummary
+                    }
 
-                    if (actionType == null || actionPayload.isBlank() || actionSummary.isBlank()) {
+                    if (actionType == null || actionPayload.isBlank() || resolvedSummary.isBlank()) {
                         EgoDecision.Noop("Planner returned invalid action payload.")
                     } else if (!availableActions.contains(actionType)) {
                         EgoDecision.Noop(
@@ -114,7 +125,7 @@ class EgoPlanner(
                             urgency = Urgency.fromRaw(payload.urgency),
                             actionType = actionType,
                             payload = TextSecurity.clamp(actionPayload, config.maxActionPayloadChars),
-                            summary = TextSecurity.clamp(actionSummary, config.maxActionSummaryChars)
+                            summary = TextSecurity.clamp(resolvedSummary, config.maxActionSummaryChars)
                         )
                     }
                 }
@@ -129,6 +140,34 @@ class EgoPlanner(
             EgoDecision.Noop("Planner produced non-parseable output.")
         }
     }
+
+    private fun parsePayloadWithRepair(raw: String): EgoDecisionPayload {
+        val json = TextSecurity.extractJsonObject(raw)
+        return try {
+            mapper.readValue<EgoDecisionPayload>(json)
+        } catch (initial: Exception) {
+            val repaired = repairInvalidJsonEscapes(json)
+            if (repaired == json) {
+                throw initial
+            }
+            try {
+                val payload = mapper.readValue<EgoDecisionPayload>(repaired)
+                onPlannerOutputRepaired()
+                instrumentation.emit(
+                    AgentEvents.plannerOutputRepaired(
+                        actionType = "planner",
+                        repair = "invalid_json_escape"
+                    )
+                )
+                payload
+            } catch (_: Exception) {
+                throw initial
+            }
+        }
+    }
+
+    private fun repairInvalidJsonEscapes(json: String): String =
+        json.replace(invalidJsonEscapeRegex, "")
 
     private fun emitDecision(triggerLabel: String, decision: EgoDecision) {
         when (decision) {
@@ -157,6 +196,7 @@ class EgoPlanner(
             }
 
             is EgoDecision.Noop -> {
+                onPlannerNoop()
                 instrumentation.emit(
                     AgentEvents.plannerDecision(
                         trigger = triggerLabel,
@@ -195,8 +235,8 @@ class EgoPlanner(
                 "${turn.role.name.lowercase()}: ${turn.content}"
             }
         }
-        val memorySummary = context.memorySummary.ifBlank { "none" }
-        val memoryRecall = context.memoryRecall.ifBlank { "none" }
+        val shortTermContextSummary = context.shortTermContextSummary.ifBlank { "none" }
+        val longTermMemoryRecall = context.longTermMemoryRecall.ifBlank { "none" }
         val metaGuidance = context.metaGuidance.ifBlank { "none" }
         val deliberation = context.deliberation
         val availableActionList = context.availableActions
@@ -230,9 +270,9 @@ class EgoPlanner(
                     - answer: payload is the exact answer text for the interlocutor.
                     - mcp_time: payload is JSON like {"timezone":"Europe/Berlin"} (timezone optional).
                     - mcp_fetch: payload is JSON like {"url":"https://example.com","max_chars":1200}.
-                    You may receive Retrieved memory from Hippocampus search.
-                    Use retrieved memory only when relevant to the current trigger.
-                    If retrieved memory is missing or ambiguous, do not invent details.
+                    You may receive Long-term memory recall from Hippocampus search.
+                    Use long-term memory recall only when relevant to the current trigger.
+                    If long-term memory recall is missing or ambiguous, do not invent details.
                     You may also receive Decision pressure metadata.
                     As pressure rises, reduce exploratory loops and converge on a final answer.
                     """.trimIndent()
@@ -247,11 +287,15 @@ class EgoPlanner(
                       "decision":"thought|action|noop",
                       "urgency":"low|medium|high",
                       "thought":"... optional when decision=thought",
+                      "long_term_memory_recall_query":"optional query string for explicit extra long-term recall",
                       "action_type":"web_search|answer|mcp_time|mcp_fetch",
                       "action_payload":"... optional when decision=action",
-                      "action_summary":"<=180 chars context summary for action review",
+                      "action_summary":"required when decision=action; <=180 chars context summary for action review",
                       "reason":"... optional short reason"
                     }
+                    Valid action example:
+                    {"decision":"action","urgency":"medium","action_type":"answer","action_payload":"...","action_summary":"Deliver concise recommendation"}
+                    Do not return decision=action without both action_payload and action_summary.
                     Keep thought concise.
                     Prefer concise answer payloads by default.
                     Only produce a detailed answer payload when the user explicitly asks for detail.
@@ -288,13 +332,13 @@ class EgoPlanner(
                     role = ChatRole.USER,
                     priority = PromptBudgetAllocator.Priority.IMPORTANT,
                     minTokens = 24,
-                    content = "Memory summary:\n$memorySummary"
+                    content = "Short-term context summary:\n$shortTermContextSummary"
                 ),
                 PromptBudgetAllocator.Section(
                     role = ChatRole.USER,
                     priority = PromptBudgetAllocator.Priority.IMPORTANT,
                     minTokens = 24,
-                    content = "Retrieved memory:\n$memoryRecall"
+                    content = "Long-term memory recall:\n$longTermMemoryRecall"
                 ),
                 PromptBudgetAllocator.Section(
                     role = ChatRole.USER,
@@ -337,6 +381,8 @@ class EgoPlanner(
         val decision: String? = null,
         val urgency: String? = null,
         val thought: String? = null,
+        @JsonProperty("long_term_memory_recall_query")
+        val longTermMemoryRecallQuery: String? = null,
         @JsonProperty("action_type")
         val actionType: String? = null,
         @JsonProperty("action_payload")
@@ -349,5 +395,21 @@ class EgoPlanner(
     private companion object {
         val mapper = jacksonObjectMapper()
             .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
+        val invalidJsonEscapeRegex = Regex("""\\(?!["\\/bfnrtu])""")
+    }
+
+    private fun synthesizeActionSummary(actionPayload: String): String {
+        val firstLine = actionPayload
+            .lineSequence()
+            .map { it.trim() }
+            .firstOrNull { it.isNotBlank() }
+            .orEmpty()
+        val normalized = firstLine
+            .replace(Regex("\\s+"), " ")
+            .trim()
+        if (normalized.isBlank()) {
+            return "Generated action summary."
+        }
+        return TextSecurity.clamp(normalized, config.maxActionSummaryChars)
     }
 }

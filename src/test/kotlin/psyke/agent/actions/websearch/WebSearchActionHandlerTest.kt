@@ -29,10 +29,13 @@ class WebSearchActionHandlerTest {
         val outcome = handler.execute("kotlin release notes", 5)
         assertTrue(outcome.statusSummary.contains("Web search summary: Kotlin 2.3 release notes are available."))
         assertTrue(outcome.statusSummary.contains("JetBrains post | What's new | Migration guidance"))
-        assertTrue(outcome.statusSummary.contains("[1] JetBrains Blog - https://blog.jetbrains.com/kotlin"))
-        assertTrue(outcome.statusSummary.contains("[2] Kotlin Docs - https://kotlinlang.org/docs/whatsnew23.html"))
-        assertTrue(outcome.statusSummary.contains("[3] GitHub - https://github.com/JetBrains/kotlin/releases"))
+        assertTrue(outcome.statusSummary.contains("Kotlin Docs - https://kotlinlang.org/docs/whatsnew23.html"))
+        assertTrue(outcome.statusSummary.contains("JetBrains Blog - https://blog.jetbrains.com/kotlin"))
+        assertTrue(outcome.statusSummary.contains("GitHub - https://github.com/JetBrains/kotlin/releases"))
         assertTrue(!outcome.statusSummary.contains("https://example.com/extra"))
+        assertTrue(outcome.statusSummary.contains("source_confidence: medium"))
+        assertTrue(outcome.plannerSignal.contains("key_sources"))
+        assertEquals(true, outcome.observedEvidence)
     }
 
     @Test
@@ -51,5 +54,7 @@ class WebSearchActionHandlerTest {
         val outcome = handler.execute("status", 3)
         assertTrue(outcome.statusSummary.contains("snippets: no snippets"))
         assertTrue(outcome.statusSummary.contains("sources: none"))
+        assertTrue(outcome.statusSummary.contains("source_confidence: none"))
+        assertEquals(false, outcome.observedEvidence)
     }
 }

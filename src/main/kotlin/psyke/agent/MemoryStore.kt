@@ -105,12 +105,12 @@ class MemoryStore(
         }
         return buildString {
             if (rolledSummary.isNotBlank()) {
-                append("Compressed memory:\n")
+                append("Short-term context summary:\n")
                 append(rolledSummary)
                 append('\n')
             }
             if (recent.isNotBlank()) {
-                append("Recent memory:\n")
+                append("Recent short-term context:\n")
                 append(recent)
             }
         }.trim()

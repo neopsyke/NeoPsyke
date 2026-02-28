@@ -5,7 +5,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
-class MemoryConsolidationAdvisorTest {
+class LongTermMemoryAdvisorTest {
     @Test
     fun `advisor parses save decision and summary`() {
         val llm = StubChatModelClient().apply {
@@ -15,18 +15,18 @@ class MemoryConsolidationAdvisorTest {
                 """.trimIndent()
             )
         }
-        val advisor = LlmMemoryConsolidationAdvisor(
+        val advisor = LlmLongTermMemoryAdvisor(
             modelClient = llm,
-            config = AgentConfig(memoryConsolidationMaxTokens = 111)
+            config = AgentConfig(longTermMemoryMaxTokens = 111)
         )
 
         val decision = advisor.assess(
-            MemoryConsolidationContext(
+            LongTermMemoryAssessmentContext(
                 trigger = "interval",
                 deliberation = DeliberationState(stepIndex = 8, decisionPressure = 0.42),
                 recentDialogue = listOf(DialogueTurn(DialogueRole.USER, "be concise")),
-                memorySummary = "",
-                memoryRecall = "",
+                shortTermContextSummary = "",
+                longTermMemoryRecall = "",
                 metaGuidance = ""
             )
         )
@@ -34,7 +34,7 @@ class MemoryConsolidationAdvisorTest {
         assertTrue(decision.shouldSave)
         assertEquals("User prefers concise answers.", decision.summary)
         assertTrue(decision.confidence > 0.8)
-        assertEquals("memory_consolidation", llm.lastOptions.metadata.callSite)
+        assertEquals("long_term_memory_assessment", llm.lastOptions.metadata.callSite)
         assertEquals(111, llm.lastOptions.maxTokens)
     }
 }

@@ -3,7 +3,7 @@ package psyke.agent
 data class MemoryRecallQuery(
     val cue: String,
     val recentDialogue: List<DialogueTurn> = emptyList(),
-    val memorySummary: String = "",
+    val shortTermContextSummary: String = "",
     val maxItems: Int = 4,
     val maxChars: Int = 1200,
 )
@@ -17,7 +17,7 @@ data class MemoryRecall(
 
 data class MemoryImprint(
     val summary: String,
-    val source: String = "ego_memory_consolidation",
+    val source: String = "ego_long_term_memory_assessment",
     val confidence: Double = 0.5,
     val tags: List<String> = emptyList(),
 )
@@ -30,6 +30,8 @@ interface Hippocampus : AutoCloseable {
     fun recall(query: MemoryRecallQuery): MemoryRecall
 
     fun imprint(imprint: MemoryImprint): Boolean = false
+
+    fun purgeTaggedObservations(tagMarkers: List<String>): Int = 0
 
     fun imprint(turn: DialogueTurn): Boolean {
         val normalized = turn.content.trim()
@@ -55,4 +57,6 @@ object NoopHippocampus : Hippocampus {
         MemoryRecall(provider = providerName, text = "", hitCount = 0, truncated = false)
 
     override fun imprint(imprint: MemoryImprint): Boolean = false
+
+    override fun purgeTaggedObservations(tagMarkers: List<String>): Int = 0
 }

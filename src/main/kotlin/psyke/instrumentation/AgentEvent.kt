@@ -203,6 +203,15 @@ object AgentEvents {
             data = mapOf("message" to message)
         )
 
+    fun plannerOutputRepaired(actionType: String, repair: String = "action_summary_autofill"): AgentEvent =
+        AgentEvent(
+            type = "planner_output_repaired",
+            data = mapOf(
+                "action_type" to actionType,
+                "repair" to repair
+            )
+        )
+
     fun memoryRecallStart(
         trigger: String,
         provider: String,
@@ -250,6 +259,68 @@ object AgentEvents {
                 "provider" to provider,
                 "latency_ms" to latencyMs,
                 "reason" to reason
+            )
+        )
+
+    fun longTermMemoryRecallRequested(
+        trigger: String,
+        source: String,
+        queryPreview: String,
+    ): AgentEvent =
+        AgentEvent(
+            type = "long_term_memory_recall_requested",
+            data = mapOf(
+                "trigger" to trigger,
+                "source" to source,
+                "query_preview" to queryPreview
+            )
+        )
+
+    fun longTermMemoryRecallSkipped(trigger: String, reason: String): AgentEvent =
+        AgentEvent(
+            type = "long_term_memory_recall_skipped",
+            data = mapOf(
+                "trigger" to trigger,
+                "reason" to reason
+            )
+        )
+
+    fun longTermMemoryAssessmentParseFallback(
+        trigger: String,
+        stepIndex: Int,
+        streak: Int,
+    ): AgentEvent =
+        AgentEvent(
+            type = "long_term_memory_assessment_parse_fallback",
+            data = mapOf(
+                "trigger" to trigger,
+                "step_index" to stepIndex,
+                "streak" to streak
+            )
+        )
+
+    fun longTermMemoryAssessmentTemporarilyDisabled(
+        trigger: String,
+        stepIndex: Int,
+        streak: Int,
+        threshold: Int,
+    ): AgentEvent =
+        AgentEvent(
+            type = "long_term_memory_assessment_temporarily_disabled",
+            data = mapOf(
+                "trigger" to trigger,
+                "step_index" to stepIndex,
+                "streak" to streak,
+                "threshold" to threshold
+            )
+        )
+
+    fun responseLatencyRecorded(latencyMs: Long, actionId: Long): AgentEvent =
+        AgentEvent(
+            type = "response_latency_recorded",
+            data = mapOf(
+                "latency_ms" to latencyMs,
+                "action_id" to actionId
             )
         )
 

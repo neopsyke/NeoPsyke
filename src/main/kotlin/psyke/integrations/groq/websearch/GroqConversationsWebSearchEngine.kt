@@ -1,5 +1,6 @@
-package psyke.integrations.mistral.websearch
+package psyke.integrations.groq.websearch
 
+import com.fasterxml.jackson.annotation.JsonProperty
 import com.fasterxml.jackson.databind.DeserializationFeature
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
@@ -24,122 +25,136 @@ import psyke.llm.ChatCallStatus
 import psyke.llm.ChatUsage
 import psyke.llm.bindFailSafeMetricsObserver
 import java.io.IOException
-import java.net.URI
+import java.net.SocketTimeoutException
 import java.time.Duration
 import kotlin.math.max
 
 private val logger = KotlinLogging.logger {}
 private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
 
-class MistralConversationsWebSearchEngine(
+class GroqConversationsWebSearchEngine(
     private val apiKey: String,
-    private val profile: MistralWebSearchProfile,
+    private val model: String,
     private val baseUrl: String = DEFAULT_BASE_URL,
     private val httpClient: OkHttpClient = defaultHttpClient(),
     private val callObserver: ChatCallObserver? = null,
     private val instrumentation: AgentInstrumentation = NoopAgentInstrumentation,
     private val maxRawResponseChars: Int = 4_000,
-    private val failurePolicy: WebSearchFailurePolicy = WebSearchFailurePolicy.FAIL_FAST,
 ) : WebSearchEngine, AutoCloseable {
     private var effectiveCallObserver: ChatCallObserver? = callObserver
 
     init {
-        require(apiKey.isNotBlank()) { "Mistral API key must be provided (set MISTRAL_API_KEY)." }
+        require(apiKey.isNotBlank()) { "Groq API key must be provided (set GROQ_API_KEY)." }
         val binding = bindFailSafeMetricsObserver(
-            provider = "mistral",
+            provider = "groq",
             apiKey = apiKey,
-            modelName = profile.model,
+            modelName = model,
             primaryObserver = callObserver
         )
         effectiveCallObserver = binding.observer
     }
 
-    override fun healthCheck(): WebSearchEngineHealth {
-        if (profile.mode == MistralWebSearchMode.AGENT_ID && profile.agentId.isNullOrBlank()) {
-            return WebSearchEngineHealth(
-                available = false,
-                detail = "Mistral web search is unavailable: MISTRAL_WEBSEARCH_AGENT_ID is required for AGENT_ID mode."
-            )
-        }
-        return WebSearchEngineHealth(
+    override fun healthCheck(): WebSearchEngineHealth =
+        WebSearchEngineHealth(
             available = true,
-            detail = "Mistral web search configured (${profile.mode.name.lowercase()})."
+            detail = "Groq web search configured."
         )
-    }
 
     override fun search(query: String, maxResults: Int): WebSearchResult {
-        val health = healthCheck()
-        if (!health.available) {
-            return failResult(health.detail)
-        }
-
         val startedAt = System.nanoTime()
-        val requestBody = buildRequestBody(query, maxResults)
-        val request = Request.Builder()
-            .url("${baseUrl.trimEnd('/')}/conversations")
-            .header("Authorization", "Bearer $apiKey")
-            .header("Content-Type", "application/json")
-            .post(requestBody.toRequestBody(jsonMediaType))
-            .build()
+        val normalizedQuery = TextSecurity.clamp(query.trim(), MAX_QUERY_CHARS)
+        var attempt = 0
+        var lastError: Exception? = null
+        while (attempt < MAX_RETRY_ATTEMPTS) {
+            attempt += 1
+            val requestBody = buildRequestBody(normalizedQuery, maxResults)
+            val request = Request.Builder()
+                .url("${baseUrl.trimEnd('/')}/chat/completions")
+                .header("Authorization", "Bearer $apiKey")
+                .header("Content-Type", "application/json")
+                .post(requestBody.toRequestBody(jsonMediaType))
+                .build()
 
-        return try {
-            httpClient.newCall(request).execute().use { response ->
-                val rawBody = response.body?.string()
-                if (!response.isSuccessful) {
-                    throw MistralConversationsHttpException(
-                        statusCode = response.code,
-                        responseBody = rawBody
+            try {
+                httpClient.newCall(request).execute().use { response ->
+                    val rawBody = response.body?.string()
+                    if (!response.isSuccessful) {
+                        throw GroqConversationsHttpException(
+                            statusCode = response.code,
+                            responseBody = rawBody
+                        )
+                    }
+                    if (rawBody.isNullOrBlank()) {
+                        throw IOException("Groq web search returned an empty response body.")
+                    }
+
+                    instrumentation.emit(
+                        AgentEvents.llmRawResponse(
+                            actor = "ego",
+                            callSite = "web_search",
+                            actionType = "web_search",
+                            rawResponse = TextSecurity.clamp(rawBody, maxRawResponseChars)
+                        )
                     )
-                }
-                if (rawBody.isNullOrBlank()) {
-                    throw IOException("Mistral conversations returned an empty response body.")
-                }
 
+                    val root = mapper.readTree(rawBody)
+                    val usage = root.extractUsage()
+                    val assistantText = root.extractAssistantText()
+                    val result = resolveResult(
+                        assistantText = assistantText,
+                        root = root,
+                        maxResults = maxResults
+                    )
+                    observeCall(
+                        ChatCallRecord(
+                            model = root.path("model").asText().ifBlank { model },
+                            metadata = WEB_SEARCH_METADATA,
+                            latencyMs = elapsedMillis(startedAt),
+                            promptTokens = usage?.promptTokens,
+                            completionTokens = usage?.completionTokens,
+                            totalTokens = usage?.totalTokens,
+                            status = ChatCallStatus.OK
+                        )
+                    )
+                    return result
+                }
+            } catch (ex: Exception) {
+                lastError = ex
+                val shouldRetry = ex.isRetryableWebSearchFailure() && attempt < MAX_RETRY_ATTEMPTS
+                if (!shouldRetry) {
+                    break
+                }
                 instrumentation.emit(
-                    AgentEvents.llmRawResponse(
-                        actor = "ego",
-                        callSite = "web_search",
-                        actionType = "web_search",
-                        rawResponse = TextSecurity.clamp(rawBody, maxRawResponseChars)
+                    AgentEvents.warning(
+                        "Groq web search attempt $attempt/$MAX_RETRY_ATTEMPTS failed; retrying."
                     )
                 )
-
-                val root = mapper.readTree(rawBody)
-                val model = root.path("model").asText().ifBlank { profile.model }
-                val usage = root.extractUsage()
-                val assistantText = root.extractAssistantText()
-                val result = resolveResult(
-                    assistantText = assistantText,
-                    root = root,
-                    maxResults = maxResults
-                )
-                observeCall(
-                    ChatCallRecord(
-                        model = model,
-                        metadata = WEB_SEARCH_METADATA,
-                        latencyMs = elapsedMillis(startedAt),
-                        promptTokens = usage?.promptTokens,
-                        completionTokens = usage?.completionTokens,
-                        totalTokens = usage?.totalTokens,
-                        status = ChatCallStatus.OK
-                    )
-                )
-                result
+                try {
+                    Thread.sleep(RETRY_BASE_DELAY_MS * attempt.toLong())
+                } catch (_: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                    break
+                }
             }
-        } catch (ex: Exception) {
-            observeCall(
-                ChatCallRecord(
-                    model = profile.model,
-                    metadata = WEB_SEARCH_METADATA,
-                    latencyMs = elapsedMillis(startedAt),
-                    status = ChatCallStatus.ERROR,
-                    errorCode = ex.toErrorCode(),
-                    errorMessage = ex.toErrorMessage()
-                )
-            )
-            logger.warn(ex) { "Mistral web search failed for query='${TextSecurity.preview(query, 100)}'." }
-            failResult("Mistral web search unavailable: ${ex.message ?: "request failed"}")
         }
+
+        val failure = lastError ?: IOException("Groq web search failed with unknown error.")
+        observeCall(
+            ChatCallRecord(
+                model = model,
+                metadata = WEB_SEARCH_METADATA,
+                latencyMs = elapsedMillis(startedAt),
+                status = ChatCallStatus.ERROR,
+                errorCode = failure.toErrorCode(),
+                errorMessage = failure.toErrorMessage()
+            )
+        )
+        logger.warn(failure) { "Groq web search failed for query='${TextSecurity.preview(normalizedQuery, 100)}'." }
+        return WebSearchResult(
+            summary = TextSecurity.clamp("Groq web search unavailable: ${failure.message ?: "request failed"}", 280),
+            snippets = emptyList(),
+            sources = emptyList()
+        )
     }
 
     override fun close() {
@@ -162,19 +177,21 @@ class MistralConversationsWebSearchEngine(
             If only secondary/community sources are available, state that clearly in summary.
         """.trimIndent()
 
-        val payload: Map<String, Any> = when (profile.mode) {
-            MistralWebSearchMode.AGENT_ID -> mapOf(
-                "agent_id" to profile.agentId.orEmpty(),
-                "inputs" to prompt
-            )
-
-            MistralWebSearchMode.PER_REQUEST_TOOLS -> mapOf(
-                "model" to profile.model,
-                "inputs" to prompt,
-                "tools" to listOf(
-                    mapOf("type" to profile.tool.apiValue)
+        val payload = mutableMapOf<String, Any>(
+            "model" to model,
+            "messages" to listOf(
+                mapOf(
+                    "role" to "user",
+                    "content" to prompt
                 )
             )
+        )
+        if (requiresBrowserSearchTool(model)) {
+            payload["tools"] = listOf(
+                mapOf("type" to "browser_search")
+            )
+            payload["tool_choice"] = "required"
+            payload["reasoning_effort"] = "low"
         }
         return mapper.writeValueAsString(payload)
     }
@@ -234,7 +251,7 @@ class MistralConversationsWebSearchEngine(
                         null
                     } else {
                         WebSearchSource(
-                            title = source.title?.trim().orEmpty().ifBlank { hostOrUrl(url) },
+                            title = source.title?.trim().orEmpty().ifBlank { url },
                             url = url,
                             snippet = source.snippet?.trim()?.ifBlank { null }?.let { TextSecurity.clamp(it, 200) }
                         )
@@ -252,15 +269,6 @@ class MistralConversationsWebSearchEngine(
         }
     }
 
-    private fun failResult(reason: String): WebSearchResult =
-        when (failurePolicy) {
-            WebSearchFailurePolicy.FAIL_FAST -> WebSearchResult(
-                summary = TextSecurity.clamp(reason, 280),
-                snippets = emptyList(),
-                sources = emptyList()
-            )
-        }
-
     private fun observeCall(record: ChatCallRecord) {
         try {
             effectiveCallObserver?.onChatCall(record)
@@ -268,6 +276,9 @@ class MistralConversationsWebSearchEngine(
             // keep web-search execution robust when telemetry fan-out fails
         }
     }
+
+    private fun requiresBrowserSearchTool(modelName: String): Boolean =
+        !modelName.trim().lowercase().startsWith("groq/compound")
 
     private data class SearchPayload(
         val summary: String? = null,
@@ -282,7 +293,9 @@ class MistralConversationsWebSearchEngine(
     )
 
     companion object {
-        private const val DEFAULT_BASE_URL = "https://api.mistral.ai/v1"
+        private const val DEFAULT_BASE_URL = "https://api.groq.com/openai/v1"
+        private const val MAX_RETRY_ATTEMPTS = 3
+        private const val RETRY_BASE_DELAY_MS = 150L
         private val WEB_SEARCH_METADATA = ChatCallMetadata(
             actor = "ego",
             callSite = "web_search",
@@ -293,39 +306,43 @@ class MistralConversationsWebSearchEngine(
 
         private fun defaultHttpClient(): OkHttpClient =
             OkHttpClient.Builder()
-                .callTimeout(Duration.ofSeconds(30))
+                .connectTimeout(Duration.ofSeconds(10))
+                .readTimeout(Duration.ofSeconds(45))
+                .writeTimeout(Duration.ofSeconds(45))
+                .callTimeout(Duration.ofSeconds(50))
                 .build()
+
+        private const val MAX_QUERY_CHARS = 320
 
         private fun elapsedMillis(startedAtNanos: Long): Long =
             max(1L, (System.nanoTime() - startedAtNanos) / 1_000_000L)
 
         private fun normalizeUrl(url: String): String = url.trim().removeSuffix("/").lowercase()
-
-        private fun hostOrUrl(rawUrl: String): String {
-            val host = try {
-                URI(rawUrl).host
-            } catch (_: Exception) {
-                null
-            }
-            return host?.ifBlank { rawUrl } ?: rawUrl
-        }
     }
 }
 
-private class MistralConversationsHttpException(
+private class GroqConversationsHttpException(
     val statusCode: Int,
     val responseBody: String?,
-) : IOException("Mistral conversations failed with status $statusCode.${responseBody?.let { " Response: $it" } ?: ""}")
+) : IOException("Groq web search failed with status $statusCode.${responseBody?.let { " Response: $it" } ?: ""}")
 
 private fun Exception.toErrorCode(): String =
     when (this) {
-        is MistralConversationsHttpException -> "HTTP_$statusCode"
+        is GroqConversationsHttpException -> "HTTP_$statusCode"
         else -> this::class.simpleName ?: "error"
+    }
+
+private fun Exception.isRetryableWebSearchFailure(): Boolean =
+    when (this) {
+        is GroqConversationsHttpException -> statusCode == 429 || statusCode >= 500
+        is SocketTimeoutException -> true
+        is IOException -> true
+        else -> false
     }
 
 private fun Exception.toErrorMessage(): String {
     val raw = when (this) {
-        is MistralConversationsHttpException -> responseBody ?: message.orEmpty()
+        is GroqConversationsHttpException -> responseBody ?: message.orEmpty()
         else -> message.orEmpty()
     }
     return raw.replace(Regex("\\s+"), " ").trim().take(180)
@@ -354,19 +371,11 @@ private fun JsonNode.extractAssistantText(): String {
     collectText(path("output_text"), candidates)
     collectText(path("output"), candidates)
 
-    val outputs = path("outputs")
-    if (outputs.isArray) {
-        outputs.forEach { output ->
-            collectText(output.path("text"), candidates)
-            collectText(output.path("content"), candidates)
-            collectText(output.path("message").path("content"), candidates)
-        }
-    }
-
     val choices = path("choices")
     if (choices.isArray) {
         choices.forEach { choice ->
             collectText(choice.path("message").path("content"), candidates)
+            collectText(choice.path("message"), candidates)
         }
     }
 

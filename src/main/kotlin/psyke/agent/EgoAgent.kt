@@ -16,15 +16,18 @@ class EgoAgent(
     private val config: AgentConfig,
     private val hippocampus: Hippocampus = NoopHippocampus,
     private val metaReasoner: MetaReasoner = NoopMetaReasoner,
-    private val memoryConsolidationAdvisor: MemoryConsolidationAdvisor = NoopMemoryConsolidationAdvisor,
+    private val longTermMemoryAdvisor: LongTermMemoryAdvisor = NoopLongTermMemoryAdvisor,
     private val sensoryCortex: SensoryCortex = SensoryCortex.stdin(config),
-    private val memoryStore: MemoryStore = MemoryStore(config.maxMemoryChars),
+    private val memoryStore: MemoryStore = MemoryStore(config.maxShortTermContextChars),
     private val onActionDenied: () -> Unit = {},
     private val onQueueSaturation: (queueType: String, pending: Int, capacity: Int) -> Unit = { _, _, _ -> },
     private val onMemoryRecall: (hitCount: Int, latencyMs: Long, recallChars: Int, truncated: Boolean) -> Unit = { _, _, _, _ -> },
     private val onMemoryRecallFailure: (latencyMs: Long) -> Unit = {},
-    private val onMemoryConsolidationAssessment: (saveRecommended: Boolean) -> Unit = {},
+    private val onLongTermMemoryRecallSkipped: () -> Unit = {},
+    private val onLongTermMemoryAssessment: (saveRecommended: Boolean) -> Unit = {},
+    private val onLongTermMemoryAssessmentParseFailure: () -> Unit = {},
     private val onMemoryImprintResult: (saved: Boolean, summaryChars: Int, latencyMs: Long) -> Unit = { _, _, _ -> },
+    private val onEndToEndResponseLatency: (latencyMs: Long) -> Unit = {},
     private val instrumentation: AgentInstrumentation = NoopAgentInstrumentation,
 ) {
     private val scheduler = AttentionScheduler(config)
@@ -34,9 +37,12 @@ class EgoAgent(
     private var lastMetaAssessmentStep: Int = 0
     private var forcedTerminalAnswerQueued: Boolean = false
     private var lastConsolidationStep: Int = 0
-    private var latestPlannerMemorySummary: String = ""
-    private var latestPlannerMemoryRecall: String = ""
+    private var latestPlannerShortTermContextSummary: String = ""
+    private var latestPlannerLongTermMemoryRecall: String = ""
+    private var longTermMemoryAssessmentParseFallbackStreak: Int = 0
+    private var longTermMemoryAssessmentTemporarilyDisabled: Boolean = false
     private val recentImprintFingerprints = ArrayDeque<String>()
+    private val externalEvidenceByRootInput = mutableMapOf<Long, ExternalEvidenceProgress>()
 
     fun runInteractive() {
         logger.info { "Ego loop started. Type 'exit' to quit." }
@@ -104,7 +110,7 @@ class EgoAgent(
                 )
             }
             maybeForceTerminalAnswer()
-            maybeRunMemoryConsolidation(trigger = "interval")
+            maybeRunLongTermMemoryAssessment(trigger = "interval")
             emitQueueSnapshot("task_processed")
         }
 
@@ -126,6 +132,7 @@ class EgoAgent(
             lastMetaAssessmentStep = 0
             forcedTerminalAnswerQueued = false
             lastConsolidationStep = 0
+            externalEvidenceByRootInput.clear()
             deliberationMonitor.reset()
         }
 
@@ -156,7 +163,12 @@ class EgoAgent(
         )
         val finalDecision = maybeApplyMetaPressureOverride(decision, assessment)
         deliberationMonitor.onPlannerDecision(finalDecision)
-        applyDecision(finalDecision, nextPassCount = 0, originThought = null)
+        applyDecision(
+            finalDecision,
+            nextPassCount = 0,
+            originThought = null,
+            rootInputEnqueuedAtMs = input.enqueuedAtMs
+        )
     }
 
     private fun processThought(thought: PendingThought) {
@@ -186,7 +198,12 @@ class EgoAgent(
         )
         val finalDecision = maybeApplyMetaPressureOverride(decision, assessment)
         deliberationMonitor.onPlannerDecision(finalDecision)
-        applyDecision(finalDecision, nextPassCount = thought.passes + 1, originThought = thought)
+        applyDecision(
+            finalDecision,
+            nextPassCount = thought.passes + 1,
+            originThought = thought,
+            rootInputEnqueuedAtMs = thought.rootInputEnqueuedAtMs
+        )
     }
 
     private fun processAction(action: PendingAction) {
@@ -201,13 +218,31 @@ class EgoAgent(
             )
             val outcome = executeActionSafely(action) ?: return
             instrumentation.emit(AgentEvents.actionExecuted(action, outcome.statusSummary))
+            if (action.type == ActionType.ANSWER) {
+                val enqueuedAtMs = action.rootInputEnqueuedAtMs
+                if (enqueuedAtMs != null) {
+                    val latencyMs = (System.currentTimeMillis() - enqueuedAtMs).coerceAtLeast(0L)
+                    instrumentation.emit(AgentEvents.responseLatencyRecorded(latencyMs = latencyMs, actionId = action.id))
+                    onEndToEndResponseLatency(latencyMs)
+                }
+                clearExternalEvidenceForRootInput(action.rootInputEnqueuedAtMs)
+            }
             if (outcome.assistantOutput != null) {
                 val assistantTurn = DialogueTurn(DialogueRole.ASSISTANT, outcome.assistantOutput)
                 dialogue.addLast(assistantTurn)
                 memoryStore.remember(assistantTurn)
                 trimDialogue()
             }
-            deliberationMonitor.onActionExecuted(action)
+            val observedEvidence = actionObservedEvidence(action, outcome)
+            recordExternalEvidenceProgress(
+                action = action,
+                outcome = outcome,
+                observedEvidence = observedEvidence
+            )
+            deliberationMonitor.onActionExecuted(
+                action = action,
+                observedEvidence = observedEvidence
+            )
             return
         }
         val gateDecision = superego.review(action, superegoContext())
@@ -231,6 +266,7 @@ class EgoAgent(
                 content = denialThought,
                 urgency = action.urgency,
                 passes = action.attempts + 1,
+                rootInputEnqueuedAtMs = action.rootInputEnqueuedAtMs,
                 deniedActionType = action.type,
                 deniedActionPayload = TextSecurity.clamp(action.payload, 240),
                 denialReason = gateDecision.reason,
@@ -251,29 +287,49 @@ class EgoAgent(
 
         val outcome = executeActionSafely(action) ?: return
         instrumentation.emit(AgentEvents.actionExecuted(action, outcome.statusSummary))
-        deliberationMonitor.onActionExecuted(action)
+        val observedEvidence = actionObservedEvidence(action, outcome)
+        recordExternalEvidenceProgress(
+            action = action,
+            outcome = outcome,
+            observedEvidence = observedEvidence
+        )
+        deliberationMonitor.onActionExecuted(
+            action = action,
+            observedEvidence = observedEvidence
+        )
+        if (action.type == ActionType.ANSWER) {
+            val enqueuedAtMs = action.rootInputEnqueuedAtMs
+            if (enqueuedAtMs != null) {
+                val latencyMs = (System.currentTimeMillis() - enqueuedAtMs).coerceAtLeast(0L)
+                instrumentation.emit(AgentEvents.responseLatencyRecorded(latencyMs = latencyMs, actionId = action.id))
+                onEndToEndResponseLatency(latencyMs)
+            }
+            clearExternalEvidenceForRootInput(action.rootInputEnqueuedAtMs)
+        }
         if (outcome.assistantOutput != null) {
             val assistantTurn = DialogueTurn(DialogueRole.ASSISTANT, outcome.assistantOutput)
             dialogue.addLast(assistantTurn)
             memoryStore.remember(assistantTurn)
             trimDialogue()
         }
-        maybeRunMemoryConsolidation(
+        maybeRunLongTermMemoryAssessment(
             trigger = "post_allowed_action",
-            force = true,
+            force = config.longTermMemoryForceAssessOnAllowedAction,
             latestActionType = action.type,
-            latestActionOutcome = outcome.statusSummary
+            latestActionOutcome = outcome.plannerSignal
         )
 
         if (action.type.requiresFollowUpThought()) {
             val followUpThought = TextSecurity.clamp(
-                "${action.type.followUpPrefix()} ${outcome.statusSummary}. Decide if an answer should be sent.",
+                "${action.type.followUpPrefix()} ${outcome.plannerSignal}. Decide if an answer should be sent.",
                 config.maxThoughtChars
             )
             val queued = scheduler.enqueueThought(
                 content = followUpThought,
                 urgency = action.urgency,
-                passes = action.attempts
+                passes = action.attempts,
+                rootInputEnqueuedAtMs = action.rootInputEnqueuedAtMs,
+                allowFallbackExplanation = true
             )
             if (!queued) {
                 instrumentation.emit(AgentEvents.warning("Failed to enqueue follow-up thought after action."))
@@ -287,18 +343,34 @@ class EgoAgent(
         }
     }
 
-    private fun applyDecision(decision: EgoDecision, nextPassCount: Int, originThought: PendingThought?) {
+    private fun applyDecision(
+        decision: EgoDecision,
+        nextPassCount: Int,
+        originThought: PendingThought?,
+        rootInputEnqueuedAtMs: Long?,
+    ) {
         when (decision) {
             is EgoDecision.EnqueueThought -> {
                 val queued = scheduler.enqueueThought(
                     content = decision.content,
                     urgency = decision.urgency,
                     passes = nextPassCount,
+                    longTermMemoryRecallQuery = decision.longTermMemoryRecallQuery,
+                    rootInputEnqueuedAtMs = rootInputEnqueuedAtMs,
                     deniedActionType = originThought?.deniedActionType,
                     deniedActionPayload = originThought?.deniedActionPayload,
                     denialReason = originThought?.denialReason,
                     allowFallbackExplanation = originThought?.allowFallbackExplanation ?: false
                 )
+                if (!decision.longTermMemoryRecallQuery.isNullOrBlank()) {
+                    instrumentation.emit(
+                        AgentEvents.longTermMemoryRecallRequested(
+                            trigger = "thought",
+                            source = "planner",
+                            queryPreview = TextSecurity.preview(decision.longTermMemoryRecallQuery, 180)
+                        )
+                    )
+                }
                 instrumentation.emit(
                     AgentEvent(
                         type = "thought_enqueued",
@@ -335,6 +407,7 @@ class EgoAgent(
                         content = retryThought,
                         urgency = originThought.urgency,
                         passes = nextPassCount,
+                        rootInputEnqueuedAtMs = rootInputEnqueuedAtMs,
                         deniedActionType = originThought.deniedActionType,
                         deniedActionPayload = originThought.deniedActionPayload,
                         denialReason = originThought.denialReason,
@@ -358,7 +431,8 @@ class EgoAgent(
                     payload = decision.payload,
                     summary = decision.summary,
                     urgency = decision.urgency,
-                    attempts = nextPassCount
+                    attempts = nextPassCount,
+                    rootInputEnqueuedAtMs = rootInputEnqueuedAtMs
                 )
                 instrumentation.emit(
                     AgentEvents.actionProposed(
@@ -389,6 +463,7 @@ class EgoAgent(
                     content = noopThought,
                     urgency = Urgency.LOW,
                     passes = nextPassCount,
+                    rootInputEnqueuedAtMs = rootInputEnqueuedAtMs,
                     deniedActionType = originThought?.deniedActionType,
                     deniedActionPayload = originThought?.deniedActionPayload,
                     denialReason = originThought?.denialReason,
@@ -417,20 +492,52 @@ class EgoAgent(
     }
 
     private fun enqueueFallbackExplanation(thought: PendingThought) {
-        val payload = TextSecurity.clamp(
-            "I cannot complete the previous action because it was blocked by policy " +
-                "(${thought.denialReason ?: "no reason provided"}). " +
-                "I could not find a safe alternative.",
-            config.maxActionPayloadChars
-        )
-        val summary = "Explain inability to comply after policy denial."
+        val evidence = thought.rootInputEnqueuedAtMs?.let { externalEvidenceByRootInput[it] }
+        val parseFailureLikely = thought.content.contains("non-parseable", ignoreCase = true)
+        val (payload, summary) = when {
+            !thought.denialReason.isNullOrBlank() -> {
+                val message = "I cannot complete the previous action because it was blocked by policy " +
+                    "(${thought.denialReason ?: "no reason provided"}). " +
+                    "I could not find a safe alternative."
+                message to "Explain inability to comply after policy denial."
+            }
+
+            evidence?.hadSuccessfulEvidence == true -> {
+                val evidenceSignal = evidence.latestPlannerSignal.ifBlank {
+                    "I gathered external evidence, but final synthesis failed."
+                }
+                val message = "I completed external verification, but repeated internal planner formatting/parsing failures " +
+                    "prevented a clean final synthesis. Best-effort result from gathered evidence: $evidenceSignal"
+                message to "Provide best-effort answer using gathered evidence after planner parse failures."
+            }
+
+            evidence?.hadExternalFailures == true -> {
+                val message = "I could not complete external verification after multiple attempts due to transient tool/provider " +
+                    "failures (for example, timeouts). I can still provide a best-effort answer based on currently available " +
+                    "context, but it may be stale."
+                message to "Explain inability to verify externally after repeated tool failures."
+            }
+
+            parseFailureLikely -> {
+                val message = "I encountered repeated internal parsing/formatting failures while preparing the final response. " +
+                    "I can still provide a concise best-effort answer, but confidence is reduced."
+                message to "Explain inability to finalize due to internal parse failures."
+            }
+
+            else -> {
+                val message = "I could not complete this request reliably after multiple attempts. " +
+                    "I can still provide a concise best-effort answer from available context."
+                message to "Explain inability to complete reliably after repeated failures."
+            }
+        }
         val queued = scheduler.enqueueAction(
             type = ActionType.ANSWER,
-            payload = payload,
+            payload = TextSecurity.clamp(payload, config.maxActionPayloadChars),
             summary = summary,
             urgency = thought.urgency,
             attempts = thought.passes,
-            isFallbackExplanation = true
+            isFallbackExplanation = true,
+            rootInputEnqueuedAtMs = thought.rootInputEnqueuedAtMs
         )
         if (!queued) {
             logger.warn { "Fallback explanation enqueue failed; executing immediate fallback action." }
@@ -448,7 +555,8 @@ class EgoAgent(
                     payload = payload,
                     summary = summary,
                     attempts = thought.passes,
-                    isFallbackExplanation = true
+                    isFallbackExplanation = true,
+                    rootInputEnqueuedAtMs = thought.rootInputEnqueuedAtMs
                 )
             )
             emitQueueSnapshot("fallback_explanation_executed_immediate")
@@ -476,15 +584,15 @@ class EgoAgent(
     }
 
     private fun plannerContext(trigger: EgoTrigger): PlannerContext {
-        val memorySummary = currentMemorySummary()
-        val memoryRecall = recallMemory(trigger, memorySummary)
-        latestPlannerMemorySummary = memorySummary
-        latestPlannerMemoryRecall = memoryRecall
+        val shortTermContextSummary = currentShortTermContextSummary()
+        val longTermMemoryRecall = recallMemory(trigger, shortTermContextSummary)
+        latestPlannerShortTermContextSummary = shortTermContextSummary
+        latestPlannerLongTermMemoryRecall = longTermMemoryRecall
         return PlannerContext(
             recentDialogue = dialogue.takeLast(12),
             queue = scheduler.queueSnapshot(),
-            memorySummary = memorySummary,
-            memoryRecall = memoryRecall,
+            shortTermContextSummary = shortTermContextSummary,
+            longTermMemoryRecall = longTermMemoryRecall,
             deliberation = deliberationMonitor.snapshot(),
             metaGuidance = latestMetaGuidance,
             availableActions = motorCortex.availableActionTypes()
@@ -492,28 +600,23 @@ class EgoAgent(
     }
 
     private fun superegoContext(): SuperegoContext {
-        val memorySummary = currentMemorySummary()
+        val shortTermContextSummary = currentShortTermContextSummary()
         return SuperegoContext(
             recentDialogue = dialogue.takeLast(12),
-            memorySummary = memorySummary
+            shortTermContextSummary = shortTermContextSummary
         )
     }
 
-    private fun currentMemorySummary(): String {
+    private fun currentShortTermContextSummary(): String {
         val memoryTokenBudget = minOf(
-            config.maxMemoryPromptTokens,
+            config.maxShortTermContextPromptTokens,
             maxOf(64, config.maxPromptTokens / 3)
         )
         return memoryStore.summaryForPrompt(memoryTokenBudget)
     }
 
-    private fun recallMemory(trigger: EgoTrigger, memorySummary: String): String {
+    private fun recallMemory(trigger: EgoTrigger, shortTermContextSummary: String): String {
         if (!hippocampus.enabled) {
-            return ""
-        }
-
-        val cue = buildRecallCue(trigger).trim()
-        if (cue.isBlank()) {
             return ""
         }
 
@@ -521,6 +624,35 @@ class EgoAgent(
             is EgoTrigger.IncomingInput -> "input"
             is EgoTrigger.PendingThoughtInput -> "thought"
         }
+        val cue = when (trigger) {
+            is EgoTrigger.IncomingInput -> buildRecallCue(trigger).trim()
+            is EgoTrigger.PendingThoughtInput -> {
+                val query = trigger.thought.longTermMemoryRecallQuery?.trim().orEmpty()
+                if (query.isBlank()) {
+                    instrumentation.emit(
+                        AgentEvents.longTermMemoryRecallSkipped(
+                            trigger = triggerLabel,
+                            reason = "missing_explicit_query"
+                        )
+                    )
+                    onLongTermMemoryRecallSkipped()
+                    return ""
+                }
+                val normalized = TextSecurity.clamp(query, config.maxThoughtChars)
+                instrumentation.emit(
+                    AgentEvents.longTermMemoryRecallRequested(
+                        trigger = triggerLabel,
+                        source = "thought",
+                        queryPreview = TextSecurity.preview(normalized, 180)
+                    )
+                )
+                normalized
+            }
+        }
+        if (cue.isBlank()) {
+            return ""
+        }
+
         instrumentation.emit(
             AgentEvents.memoryRecallStart(
                 trigger = triggerLabel,
@@ -535,9 +667,9 @@ class EgoAgent(
                 MemoryRecallQuery(
                     cue = cue,
                     recentDialogue = dialogue.takeLast(12),
-                    memorySummary = memorySummary,
-                    maxItems = config.memoryRecallMaxItems,
-                    maxChars = config.memoryRecallMaxChars
+                    shortTermContextSummary = shortTermContextSummary,
+                    maxItems = config.longTermMemoryRecallMaxItems,
+                    maxChars = config.longTermMemoryRecallMaxChars
                 )
             )
             val latencyMs = (System.nanoTime() - startedAt) / 1_000_000L
@@ -579,18 +711,7 @@ class EgoAgent(
     private fun buildRecallCue(trigger: EgoTrigger): String {
         val triggerCue = when (trigger) {
             is EgoTrigger.IncomingInput -> trigger.input.content.trim()
-            is EgoTrigger.PendingThoughtInput -> {
-                val thought = trigger.thought
-                buildString {
-                    append(thought.content.trim())
-                    if (thought.deniedActionType != null && !thought.deniedActionPayload.isNullOrBlank()) {
-                        append("\ndenied_action_type=")
-                        append(thought.deniedActionType.name.lowercase())
-                        append("\ndenied_action_payload=")
-                        append(thought.deniedActionPayload)
-                    }
-                }.trim()
-            }
+            is EgoTrigger.PendingThoughtInput -> ""
         }
         val recentUserTurn = dialogue
             .asReversed()
@@ -706,7 +827,9 @@ class EgoAgent(
         if (state.stepIndex < config.deliberationPressureAssessmentMinStep) {
             return
         }
-        if (state.decisionPressure < 0.98 || state.staleStreak < 8) {
+        val circularPressureHigh = state.decisionPressure >= 0.98 && state.staleStreak >= 8
+        val repeatedModelErrors = state.modelErrorStreak >= 3 && state.decisionPressure >= 0.72 && state.stepIndex >= 6
+        if (!circularPressureHigh && !repeatedModelErrors) {
             return
         }
         val queued = scheduler.enqueueAction(
@@ -729,25 +852,88 @@ class EgoAgent(
         }
     }
 
-    private fun maybeRunMemoryConsolidation(
+    private fun actionObservedEvidence(action: PendingAction, outcome: ActionOutcome): Boolean {
+        if (!action.type.requiresFollowUpThought()) {
+            return true
+        }
+        outcome.observedEvidence?.let { return it }
+        val summary = outcome.plannerSignal.lowercase(Locale.ROOT)
+        return when (action.type) {
+            ActionType.WEB_SEARCH -> {
+                !summary.contains("unavailable") &&
+                    !summary.contains("timeout") &&
+                    !summary.contains("sources: none") &&
+                    !summary.contains("snippets: no snippets")
+            }
+
+            ActionType.MCP_FETCH, ActionType.MCP_TIME -> {
+                !summary.contains("not configured") &&
+                    !summary.contains("unavailable") &&
+                    !summary.contains("failed") &&
+                    !summary.contains("error") &&
+                    !summary.contains("timeout")
+            }
+
+            ActionType.ANSWER -> true
+        }
+    }
+
+    private fun recordExternalEvidenceProgress(
+        action: PendingAction,
+        outcome: ActionOutcome,
+        observedEvidence: Boolean,
+    ) {
+        if (!action.type.requiresFollowUpThought()) {
+            return
+        }
+        val rootInput = action.rootInputEnqueuedAtMs ?: return
+        val current = externalEvidenceByRootInput[rootInput] ?: ExternalEvidenceProgress()
+        externalEvidenceByRootInput[rootInput] = current.copy(
+            hadSuccessfulEvidence = current.hadSuccessfulEvidence || observedEvidence,
+            hadExternalFailures = current.hadExternalFailures || !observedEvidence,
+            latestPlannerSignal = if (observedEvidence) {
+                TextSecurity.clamp(outcome.plannerSignal, 420)
+            } else {
+                current.latestPlannerSignal
+            }
+        )
+    }
+
+    private fun markExternalEvidenceFailure(action: PendingAction) {
+        if (!action.type.requiresFollowUpThought()) {
+            return
+        }
+        val rootInput = action.rootInputEnqueuedAtMs ?: return
+        val current = externalEvidenceByRootInput[rootInput] ?: ExternalEvidenceProgress()
+        externalEvidenceByRootInput[rootInput] = current.copy(hadExternalFailures = true)
+    }
+
+    private fun clearExternalEvidenceForRootInput(rootInputEnqueuedAtMs: Long?) {
+        if (rootInputEnqueuedAtMs == null) {
+            return
+        }
+        externalEvidenceByRootInput.remove(rootInputEnqueuedAtMs)
+    }
+
+    private fun maybeRunLongTermMemoryAssessment(
         trigger: String,
         force: Boolean = false,
         latestActionType: ActionType? = null,
         latestActionOutcome: String? = null,
     ) {
-        if (!hippocampus.enabled || !memoryConsolidationAdvisor.enabled) {
+        if (!hippocampus.enabled || !longTermMemoryAdvisor.enabled || longTermMemoryAssessmentTemporarilyDisabled) {
             return
         }
         val state = deliberationMonitor.snapshot()
         val shouldByInterval = !force &&
             state.stepIndex > 0 &&
-            state.stepIndex % config.memoryConsolidationEverySteps == 0
+            state.stepIndex % config.longTermMemoryAssessEverySteps == 0
         if (!force && !shouldByInterval) {
             return
         }
         if (!force) {
             val stepsSinceLast = state.stepIndex - lastConsolidationStep
-            if (stepsSinceLast in 0 until config.memoryConsolidationCooldownSteps) {
+            if (stepsSinceLast in 0 until config.longTermMemoryAssessCooldownSteps) {
                 return
             }
         }
@@ -755,23 +941,23 @@ class EgoAgent(
             return
         }
 
-        val context = MemoryConsolidationContext(
+        val context = LongTermMemoryAssessmentContext(
             trigger = trigger,
             deliberation = state,
             recentDialogue = dialogue.takeLast(12),
-            memorySummary = latestPlannerMemorySummary.ifBlank { currentMemorySummary() },
-            memoryRecall = latestPlannerMemoryRecall,
+            shortTermContextSummary = latestPlannerShortTermContextSummary.ifBlank { currentShortTermContextSummary() },
+            longTermMemoryRecall = latestPlannerLongTermMemoryRecall,
             metaGuidance = latestMetaGuidance,
             latestActionType = latestActionType,
             latestActionOutcome = latestActionOutcome
         )
 
         val decision = try {
-            memoryConsolidationAdvisor.assess(context)
+            longTermMemoryAdvisor.assess(context)
         } catch (ex: Exception) {
-            logger.warn(ex) { "Memory consolidation assessment failed." }
+            logger.warn(ex) { "Long-term memory assessment failed." }
             instrumentation.emit(
-                AgentEvents.warning("Memory consolidation advisor failed; skipping this cycle.")
+                AgentEvents.warning("Long-term memory assessment failed; skipping this cycle.")
             )
             return
         } finally {
@@ -780,7 +966,7 @@ class EgoAgent(
 
         instrumentation.emit(
             AgentEvent(
-                type = "memory_consolidation_assessment",
+                type = "long_term_memory_assessment",
                 data = mapOf(
                     "trigger" to trigger,
                     "step_index" to state.stepIndex,
@@ -791,15 +977,46 @@ class EgoAgent(
                 )
             )
         )
-        onMemoryConsolidationAssessment(decision.shouldSave)
+        if (decision.parseFallback) {
+            longTermMemoryAssessmentParseFallbackStreak += 1
+            instrumentation.emit(
+                AgentEvents.longTermMemoryAssessmentParseFallback(
+                    trigger = trigger,
+                    stepIndex = state.stepIndex,
+                    streak = longTermMemoryAssessmentParseFallbackStreak
+                )
+            )
+            onLongTermMemoryAssessmentParseFailure()
+            if (longTermMemoryAssessmentParseFallbackStreak >= config.longTermMemoryParseFallbackDisableAfter) {
+                longTermMemoryAssessmentTemporarilyDisabled = true
+                instrumentation.emit(
+                    AgentEvents.longTermMemoryAssessmentTemporarilyDisabled(
+                        trigger = trigger,
+                        stepIndex = state.stepIndex,
+                        streak = longTermMemoryAssessmentParseFallbackStreak,
+                        threshold = config.longTermMemoryParseFallbackDisableAfter
+                    )
+                )
+                instrumentation.emit(
+                    AgentEvents.warning(
+                        "Long-term memory assessment disabled for this run after repeated parse fallbacks."
+                    )
+                )
+            }
+            return
+        } else {
+            longTermMemoryAssessmentParseFallbackStreak = 0
+        }
+
+        onLongTermMemoryAssessment(decision.shouldSave)
 
         if (!decision.shouldSave) {
             return
         }
-        if (decision.confidence < config.memoryConsolidationMinConfidence) {
+        if (decision.confidence < config.longTermMemoryMinConfidence) {
             instrumentation.emit(
                 AgentEvents.warning(
-                    "Memory consolidation skipped: confidence ${String.format(Locale.ROOT, "%.2f", decision.confidence)} below threshold."
+                    "Long-term memory persistence skipped: confidence ${String.format(Locale.ROOT, "%.2f", decision.confidence)} below threshold."
                 )
             )
             return
@@ -808,7 +1025,7 @@ class EgoAgent(
         val fingerprint = normalizeActionPayload(decision.summary)
         if (recentImprintFingerprints.contains(fingerprint)) {
             instrumentation.emit(
-                AgentEvents.warning("Memory consolidation skipped: duplicate imprint summary.")
+                AgentEvents.warning("Long-term memory persistence skipped: duplicate imprint summary.")
             )
             return
         }
@@ -865,7 +1082,8 @@ class EgoAgent(
                     "denial_count" to state.denialCount,
                     "steps_since_new_evidence" to state.stepsSinceNewEvidence,
                     "repeat_signature_hits" to state.repeatSignatureHits,
-                    "noop_streak" to state.noopStreak
+                    "noop_streak" to state.noopStreak,
+                    "model_error_streak" to state.modelErrorStreak
                 )
             )
         )
@@ -908,6 +1126,7 @@ class EgoAgent(
         return try {
             motorCortex.execute(action, config.searchResultCount)
         } catch (ex: Exception) {
+            markExternalEvidenceFailure(action)
             logger.warn(ex) {
                 "Action execution failed for action_id=${action.id} type=${action.type}."
             }
@@ -935,4 +1154,10 @@ class EgoAgent(
             ActionType.MCP_FETCH -> "MCP fetch completed."
             ActionType.ANSWER -> "Action completed."
         }
+
+    private data class ExternalEvidenceProgress(
+        val hadSuccessfulEvidence: Boolean = false,
+        val hadExternalFailures: Boolean = false,
+        val latestPlannerSignal: String = "",
+    )
 }

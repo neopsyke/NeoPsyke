@@ -63,6 +63,10 @@ class StubMetricsRuntime(
         deniedActionCount += 1
     }
 
+    override fun recordPlannerNoop() {}
+
+    override fun recordPlannerOutputRepaired() {}
+
     override fun recordDroppedEvents(count: Long) {}
 
     override fun recordQueueSaturation(queueType: String) {}
@@ -71,9 +75,15 @@ class StubMetricsRuntime(
 
     override fun recordMemoryRecallFailure(latencyMs: Long) {}
 
-    override fun recordMemoryConsolidationAssessment(saveRecommended: Boolean) {}
+    override fun recordLongTermMemoryRecallSkipped() {}
+
+    override fun recordLongTermMemoryAssessment(saveRecommended: Boolean) {}
+
+    override fun recordLongTermMemoryAssessmentParseFailure() {}
 
     override fun recordMemoryImprint(saved: Boolean, summaryChars: Int, latencyMs: Long) {}
+
+    override fun recordEndToEndResponseLatency(latencyMs: Long) {}
 
     override fun snapshot(): MetricsSnapshot? = snapshotValue
 }

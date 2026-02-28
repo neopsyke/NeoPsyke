@@ -17,6 +17,11 @@ import kotlinx.coroutines.withTimeout
 import kotlinx.io.asSink
 import kotlinx.io.asSource
 import kotlinx.io.buffered
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import mu.KotlinLogging
 import java.io.IOException
 import java.nio.charset.StandardCharsets
@@ -279,10 +284,11 @@ class McpStdioClient private constructor(
     }
 
     fun callTool(toolName: String, arguments: Map<String, Any>, timeoutMs: Long): McpToolCallResult {
+        val encodedArguments = encodeMcpArguments(arguments)
         val result = try {
             runBlocking {
                 withTimeout(timeoutMs) {
-                    client.callTool(toolName, arguments)
+                    client.callTool(toolName, encodedArguments)
                 }
             }
         } catch (ex: TimeoutCancellationException) {
@@ -390,6 +396,27 @@ class McpStdioClient private constructor(
         }
     }
 }
+
+internal fun encodeMcpArguments(arguments: Map<String, Any?>): Map<String, Any> =
+    arguments.mapValues { (_, value) -> toMcpJsonElement(value) }
+
+private fun toMcpJsonElement(value: Any?): JsonElement =
+    when (value) {
+        null -> JsonNull
+        is JsonElement -> value
+        is String -> JsonPrimitive(value)
+        is Number -> JsonPrimitive(value)
+        is Boolean -> JsonPrimitive(value)
+        is Map<*, *> -> JsonObject(
+            value.entries
+                .filter { it.key != null }
+                .associate { (key, nestedValue) -> key.toString() to toMcpJsonElement(nestedValue) }
+        )
+
+        is Iterable<*> -> JsonArray(value.map { nested -> toMcpJsonElement(nested) })
+        is Array<*> -> JsonArray(value.map { nested -> toMcpJsonElement(nested) })
+        else -> JsonPrimitive(value.toString())
+    }
 
 private object NpmCommandIsolation {
     private const val PUBLIC_REGISTRY = "https://registry.npmjs.org/"

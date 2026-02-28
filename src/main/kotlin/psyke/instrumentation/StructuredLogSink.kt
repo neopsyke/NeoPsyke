@@ -70,6 +70,24 @@ class StructuredLogSink : InstrumentationSink {
                 }
             }
 
+            "planner_output_repaired" -> {
+                logger.trace {
+                    "planner.output.repaired action=${event.data["action_type"]} repair=${event.data["repair"]}"
+                }
+            }
+
+            "long_term_memory_recall_requested" -> {
+                logger.trace {
+                    "memory.recall.requested trigger=${event.data["trigger"]} source=${event.data["source"]} query=${event.data["query_preview"]}"
+                }
+            }
+
+            "long_term_memory_recall_skipped" -> {
+                logger.trace {
+                    "memory.recall.skipped trigger=${event.data["trigger"]} reason=${event.data["reason"]}"
+                }
+            }
+
             "deliberation_state" -> {
                 logger.trace {
                     "deliberation.state task=${event.data["task_type"]} step=${event.data["step_index"]} pressure=${event.data["decision_pressure"]} stale=${event.data["stale_streak"]} progress=${event.data["progress_score"]} denials=${event.data["denial_count"]} evidence_gap=${event.data["steps_since_new_evidence"]} repeats=${event.data["repeat_signature_hits"]} noop_streak=${event.data["noop_streak"]}"
@@ -85,6 +103,24 @@ class StructuredLogSink : InstrumentationSink {
             "memory_consolidation_assessment" -> {
                 logger.trace {
                     "memory.consolidation.assessment trigger=${event.data["trigger"]} step=${event.data["step_index"]} save=${event.data["save"]} confidence=${event.data["confidence"]} reason=${event.data["reason"]}"
+                }
+            }
+
+            "long_term_memory_assessment" -> {
+                logger.trace {
+                    "long_term_memory.assessment trigger=${event.data["trigger"]} step=${event.data["step_index"]} save=${event.data["save"]} confidence=${event.data["confidence"]} reason=${event.data["reason"]}"
+                }
+            }
+
+            "long_term_memory_assessment_parse_fallback" -> {
+                logger.warn {
+                    "long_term_memory.assessment.parse_fallback trigger=${event.data["trigger"]} step=${event.data["step_index"]} streak=${event.data["streak"]}"
+                }
+            }
+
+            "long_term_memory_assessment_temporarily_disabled" -> {
+                logger.warn {
+                    "long_term_memory.assessment.disabled trigger=${event.data["trigger"]} step=${event.data["step_index"]} streak=${event.data["streak"]} threshold=${event.data["threshold"]}"
                 }
             }
 
@@ -130,6 +166,30 @@ class StructuredLogSink : InstrumentationSink {
                 }
             }
 
+            "eval_memory_imprint" -> {
+                logger.trace {
+                    "[eval.memory] imprint task=${event.data["task_id"]} saved=${event.data["saved"]} latency_ms=${event.data["latency_ms"]} confidence=${event.data["confidence"]} imprint_error=${event.data["imprint_error"]}"
+                }
+            }
+
+            "eval_memory_recall" -> {
+                logger.trace {
+                    "[eval.memory] recall task=${event.data["task_id"]} provider=${event.data["provider"]} hit_count=${event.data["hit_count"]} chars=${event.data["chars"]} meaningful=${event.data["meaningful"]}"
+                }
+            }
+
+            "eval_memory_judge_parse_error" -> {
+                logger.warn {
+                    "[eval.memory] judge.parse_error task=${event.data["task_id"]} attempt=${event.data["attempt"]} error=${event.data["error"]} raw_preview=${event.data["raw_preview"]}"
+                }
+            }
+
+            "eval_memory_cleanup" -> {
+                logger.info {
+                    "[eval.memory] cleanup phase=${event.data["phase"]} deleted_observations=${event.data["deleted_observations"]}"
+                }
+            }
+
             "eval_task_result" -> {
                 logger.info {
                     "[eval.reasoning] task.result id=${event.data["task_id"]} passed=${event.data["passed"]} attempts=${event.data["attempts_used"]} duration_ms=${event.data["duration_ms"]} model_calls=${event.data["model_calls"]} total_tokens=${event.data["total_tokens"]} errors=${event.data["validation_errors"]} runtime_error=${event.data["runtime_error"]}"
@@ -145,6 +205,12 @@ class StructuredLogSink : InstrumentationSink {
             "action_executed" -> {
                 logger.trace {
                     "action.executed action=${event.data["action"]}"
+                }
+            }
+
+            "response_latency_recorded" -> {
+                logger.trace {
+                    "response.latency.recorded latency_ms=${event.data["latency_ms"]} action_id=${event.data["action_id"]}"
                 }
             }
 

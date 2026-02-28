@@ -149,6 +149,81 @@ class EgoPlannerTest {
     }
 
     @Test
+    fun `planner repairs invalid json escapes in model output`() {
+        val llm = StubChatModelClient().apply {
+            enqueueRawResponse(
+                """
+                {"decision":"action","urgency":"medium","action_type":"answer","action_payload":"Costs are \${'$'}20 per month","action_summary":"deliver answer"}
+                """.trimIndent()
+            )
+        }
+        val instrumentation = RecordingInstrumentation()
+        var repairCount = 0
+        val planner = EgoPlanner(
+            modelClient = llm,
+            config = AgentConfig(),
+            instrumentation = instrumentation,
+            onPlannerOutputRepaired = { repairCount += 1 }
+        )
+
+        val decision = planner.decide(
+            trigger = EgoTrigger.IncomingInput(PendingInput(1, "pricing")),
+            context = PlannerContext(
+                recentDialogue = emptyList(),
+                queue = QueueSnapshot(0, 0, 0)
+            )
+        )
+
+        val action = assertIs<EgoDecision.ProposeAction>(decision)
+        assertEquals(ActionType.ANSWER, action.actionType)
+        assertTrue(action.payload.contains("\$20"))
+        assertEquals(1, repairCount)
+        assertTrue(
+            instrumentation.events.any {
+                it.type == "planner_output_repaired" &&
+                    it.data["repair"] == "invalid_json_escape"
+            }
+        )
+    }
+
+    @Test
+    fun `planner repairs missing action summary from payload and records repair`() {
+        val llm = StubChatModelClient().apply {
+            enqueueRawResponse(
+                """
+                {
+                  "decision":"action",
+                  "urgency":"medium",
+                  "action_type":"answer",
+                  "action_payload":"first useful line\nsecond line"
+                }
+                """.trimIndent()
+            )
+        }
+        val instrumentation = RecordingInstrumentation()
+        var repairCount = 0
+        val planner = EgoPlanner(
+            modelClient = llm,
+            config = AgentConfig(maxActionSummaryChars = 180),
+            instrumentation = instrumentation,
+            onPlannerOutputRepaired = { repairCount += 1 }
+        )
+
+        val decision = planner.decide(
+            trigger = EgoTrigger.IncomingInput(PendingInput(1, "hello")),
+            context = PlannerContext(
+                recentDialogue = emptyList(),
+                queue = QueueSnapshot(0, 0, 0)
+            )
+        )
+
+        val action = assertIs<EgoDecision.ProposeAction>(decision)
+        assertEquals("first useful line", action.summary)
+        assertEquals(1, repairCount)
+        assertTrue(instrumentation.events.any { it.type == "planner_output_repaired" })
+    }
+
+    @Test
     fun `planner trims oversized prompt before sending to model`() {
         val llm = StubChatModelClient()
         llm.enqueueRawResponse("""{"decision":"noop","reason":"done"}""")
@@ -180,7 +255,7 @@ class EgoPlannerTest {
     }
 
     @Test
-    fun `planner includes memory summary in prompt context`() {
+    fun `planner includes short-term context summary in prompt context`() {
         val llm = StubChatModelClient()
         llm.enqueueRawResponse("""{"decision":"noop","reason":"done"}""")
         val planner = EgoPlanner(
@@ -194,18 +269,18 @@ class EgoPlannerTest {
                 pendingThoughtCount = 0,
                 pendingActionCount = 0
             ),
-            memorySummary = "Compressed memory:\n- user likes concise answers"
+            shortTermContextSummary = "Short-term context summary:\n- user likes concise answers"
         )
 
         planner.decide(EgoTrigger.IncomingInput(PendingInput(1, "question")), context)
 
         val prompt = llm.lastMessages.last().content
-        assertTrue(prompt.contains("Memory summary:"))
+        assertTrue(prompt.contains("Short-term context summary:"))
         assertTrue(prompt.contains("user likes concise answers"))
     }
 
     @Test
-    fun `planner includes retrieved memory in prompt context`() {
+    fun `planner includes long-term memory recall in prompt context`() {
         val llm = StubChatModelClient()
         llm.enqueueRawResponse("""{"decision":"noop","reason":"done"}""")
         val planner = EgoPlanner(
@@ -219,14 +294,14 @@ class EgoPlannerTest {
                 pendingThoughtCount = 0,
                 pendingActionCount = 0
             ),
-            memorySummary = "Compressed memory:\n- user likes concise answers",
-            memoryRecall = "- last week user asked for deploy checklist"
+            shortTermContextSummary = "Short-term context summary:\n- user likes concise answers",
+            longTermMemoryRecall = "- last week user asked for deploy checklist"
         )
 
         planner.decide(EgoTrigger.IncomingInput(PendingInput(1, "question")), context)
 
         val prompt = llm.lastMessages.last().content
-        assertTrue(prompt.contains("Retrieved memory:"))
+        assertTrue(prompt.contains("Long-term memory recall:"))
         assertTrue(prompt.contains("deploy checklist"))
     }
 
@@ -261,6 +336,29 @@ class EgoPlannerTest {
         assertTrue(prompt.contains("decision_pressure=0.820"))
         assertTrue(prompt.contains("Meta reasoning guidance:"))
         assertTrue(prompt.contains("Finalize now"))
+    }
+
+    @Test
+    fun `planner prompt hardening enforces action summary contract`() {
+        val llm = StubChatModelClient().apply {
+            enqueueRawResponse("""{"decision":"noop","reason":"done"}""")
+        }
+        val planner = EgoPlanner(
+            modelClient = llm,
+            config = AgentConfig()
+        )
+
+        planner.decide(
+            EgoTrigger.IncomingInput(PendingInput(1, "question")),
+            PlannerContext(
+                recentDialogue = emptyList(),
+                queue = QueueSnapshot(0, 0, 0)
+            )
+        )
+
+        val systemPrompt = llm.lastMessages.first().content
+        assertTrue(systemPrompt.contains("Do not return decision=action without both action_payload and action_summary."))
+        assertTrue(systemPrompt.contains("\"action_summary\":\"required when decision=action"))
     }
 
     @Test

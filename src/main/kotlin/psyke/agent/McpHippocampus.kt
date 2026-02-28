@@ -51,7 +51,7 @@ class McpHippocampus(
             )
         }
 
-        val normalized = normalizeResultText(result.content, maxChars)
+        val normalized = normalizeResultText(result.content, maxChars, cue)
         return MemoryRecall(
             provider = providerName,
             text = normalized.text,
@@ -62,6 +62,75 @@ class McpHippocampus(
 
     override fun close() {
         clientHolder.close()
+    }
+
+    override fun purgeTaggedObservations(tagMarkers: List<String>): Int {
+        val normalizedMarkers = tagMarkers
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+        if (normalizedMarkers.isEmpty()) {
+            return 0
+        }
+
+        val toolNames = try {
+            clientHolder.listTools(callTimeoutMs)
+        } catch (ex: Exception) {
+            logger.warn(ex) { "MCP memory purge failed while listing tools." }
+            return 0
+        }
+
+        if ("read_graph" !in toolNames || "delete_observations" !in toolNames) {
+            logger.warn {
+                "MCP memory purge skipped; required tools missing. has_read_graph=${"read_graph" in toolNames} has_delete_observations=${"delete_observations" in toolNames}"
+            }
+            return 0
+        }
+
+        val readResult = try {
+            callWithFallbackArguments(
+                toolName = "read_graph",
+                argumentCandidates = listOf(emptyMap<String, Any>())
+            )
+        } catch (ex: Exception) {
+            logger.warn(ex) { "MCP memory purge failed while reading graph." }
+            return 0
+        }
+
+        if (readResult.isError) {
+            logger.warn {
+                "MCP memory purge read_graph returned error: ${TextSecurity.preview(readResult.content, 220)}"
+            }
+            return 0
+        }
+
+        val deletions = buildObservationDeletions(readResult.content, normalizedMarkers)
+        if (deletions.isEmpty()) {
+            return 0
+        }
+
+        val deleteResult = try {
+            callWithFallbackArguments(
+                toolName = "delete_observations",
+                argumentCandidates = listOf(
+                    mapOf("deletions" to deletions)
+                )
+            )
+        } catch (ex: Exception) {
+            logger.warn(ex) { "MCP memory purge failed while deleting observations." }
+            return 0
+        }
+
+        if (deleteResult.isError) {
+            logger.warn {
+                "MCP memory purge delete_observations returned error: ${TextSecurity.preview(deleteResult.content, 220)}"
+            }
+            return 0
+        }
+
+        return deletions.sumOf { deletion ->
+            @Suppress("UNCHECKED_CAST")
+            (deletion["observations"] as? List<String>)?.size ?: 0
+        }
     }
 
     override fun imprint(imprint: MemoryImprint): Boolean {
@@ -78,7 +147,13 @@ class McpHippocampus(
         }
 
         if ("add_observations" in toolNames) {
-            return imprintViaGraphObservations(toolNames, summary, imprint)
+            val graphSaved = imprintViaGraphObservations(toolNames, summary, imprint)
+            if (graphSaved) {
+                return true
+            }
+            logger.warn {
+                "MCP graph memory imprint failed via add_observations; falling back to generic write tools."
+            }
         }
 
         val toolName = resolveImprintToolName(toolNames) ?: return false
@@ -87,7 +162,14 @@ class McpHippocampus(
                 toolName = toolName,
                 argumentCandidates = buildImprintArgumentCandidates(toolName, summary, imprint)
             )
-            !result.isError
+            if (result.isError) {
+                logger.warn {
+                    "MCP memory imprint tool=$toolName returned error: ${TextSecurity.preview(result.content, 220)}"
+                }
+                false
+            } else {
+                true
+            }
         } catch (ex: Exception) {
             logger.warn(ex) { "MCP memory imprint call failed for tool=$toolName." }
             false
@@ -217,7 +299,14 @@ class McpHippocampus(
                 toolName = "add_observations",
                 argumentCandidates = candidates
             )
-            !result.isError
+            if (result.isError) {
+                logger.warn {
+                    "MCP graph memory add_observations returned error: ${TextSecurity.preview(result.content, 220)}"
+                }
+                false
+            } else {
+                true
+            }
         } catch (ex: Exception) {
             logger.warn(ex) { "MCP graph memory add_observations imprint failed." }
             false
@@ -264,6 +353,9 @@ class McpHippocampus(
                 if (!result.isError) {
                     return result
                 }
+                logger.debug {
+                    "MCP memory tool=$toolName attempt failed with args=${arguments.keys} error=${TextSecurity.preview(result.content, 180)}"
+                }
                 lastResult = result
             } catch (ex: Exception) {
                 lastError = ex
@@ -288,55 +380,107 @@ class McpHippocampus(
             .joinToString(separator = "\n") { turn ->
                 "${turn.role.name.lowercase()}: ${TextSecurity.preview(turn.content, 120)}"
             }
-        val summary = query.memorySummary
+        val summary = query.shortTermContextSummary
             .lineSequence()
             .take(10)
             .joinToString(separator = "\n")
             .trim()
         return listOfNotNull(
             dialogue.ifBlank { null }?.let { "recent_dialogue:\n$it" },
-            summary.ifBlank { null }?.let { "local_memory_summary:\n$it" }
+            summary.ifBlank { null }?.let { "short_term_context_summary:\n$it" }
         ).joinToString(separator = "\n\n")
     }
 
-    private fun normalizeResultText(raw: String, maxChars: Int): NormalizedRecall {
+    internal fun buildObservationDeletions(rawGraph: String, tagMarkers: List<String>): List<Map<String, Any>> {
+        if (tagMarkers.isEmpty()) {
+            return emptyList()
+        }
+        val root = try {
+            mapper.readTree(rawGraph)
+        } catch (_: Exception) {
+            return emptyList()
+        }
+        val entities = root.get("entities")?.takeIf { it.isArray } ?: return emptyList()
+        val loweredMarkers = tagMarkers.map { it.lowercase() }
+
+        return entities.mapNotNull { entity ->
+            val entityName = entity.get("name")?.asText()?.trim().orEmpty()
+            if (entityName.isBlank()) {
+                return@mapNotNull null
+            }
+            val observations = entity.get("observations")
+                ?.takeIf { it.isArray }
+                ?.mapNotNull { it.asText().trim().ifBlank { null } }
+                .orEmpty()
+            if (observations.isEmpty()) {
+                return@mapNotNull null
+            }
+            val matched = observations.filter { observation ->
+                val lowered = observation.lowercase()
+                loweredMarkers.any { marker -> lowered.contains(marker) }
+            }
+            if (matched.isEmpty()) {
+                return@mapNotNull null
+            }
+            mapOf(
+                "entityName" to entityName,
+                "observations" to matched
+            )
+        }
+    }
+
+    internal fun normalizeResultText(raw: String, maxChars: Int, queryHint: String = ""): NormalizedRecall {
         val trimmedRaw = raw.trim()
         if (trimmedRaw.isEmpty()) {
             return NormalizedRecall(text = "", hitCount = 0, truncated = false)
         }
 
-        val structured = parseStructuredRecall(trimmedRaw, maxChars)
-        if (structured != null) {
-            return structured
+        val root = try {
+            mapper.readTree(trimmedRaw)
+        } catch (_: Exception) {
+            null
+        }
+
+        if (root != null) {
+            val structured = parseStructuredRecall(root, maxChars, queryHint)
+            if (structured != null) {
+                return structured
+            }
+            if (isEmptyStructuredPayload(root)) {
+                logger.debug { "MCP memory recall returned empty structured payload." }
+                return NormalizedRecall(text = "", hitCount = 0, truncated = false)
+            }
         }
 
         val clamped = TextSecurity.clamp(trimmedRaw, maxChars)
         return NormalizedRecall(
             text = clamped,
-            hitCount = clamped.lineSequence().count { it.trimStart().startsWith("-") }.coerceAtLeast(1),
+            hitCount = clamped.lineSequence().count { it.trimStart().startsWith("-") },
             truncated = clamped.length < trimmedRaw.length
         )
     }
 
-    private fun parseStructuredRecall(raw: String, maxChars: Int): NormalizedRecall? {
-        val root = try {
-            mapper.readTree(raw)
-        } catch (_: Exception) {
-            return null
-        }
-
+    private fun parseStructuredRecall(root: JsonNode, maxChars: Int, queryHint: String): NormalizedRecall? {
         val candidates = extractResultNodes(root)
         if (candidates.isEmpty()) {
-            return null
+            return if (isEmptyStructuredPayload(root)) {
+                NormalizedRecall(text = "", hitCount = 0, truncated = false)
+            } else {
+                null
+            }
         }
 
         val lines = candidates
             .mapNotNull { candidate ->
-                renderCandidateLine(candidate)?.let { TextSecurity.preview(it, 220) }
+                renderCandidateLine(candidate, queryHint)?.let { TextSecurity.preview(it, 220) }
             }
             .filter { it.isNotBlank() }
         if (lines.isEmpty()) {
-            return null
+            return if (isEmptyStructuredPayload(root)) {
+                NormalizedRecall(text = "", hitCount = 0, truncated = false)
+            } else {
+                null
+            }
         }
 
         val rendered = lines.joinToString(separator = "\n") { "- $it" }
@@ -354,7 +498,7 @@ class McpHippocampus(
         }
 
         if (root.isObject) {
-            val arrayFields = listOf("results", "items", "memories", "nodes", "observations")
+            val arrayFields = listOf("results", "items", "memories", "nodes", "observations", "entities", "relations")
             val firstArrayField = arrayFields.firstNotNullOfOrNull { field ->
                 root.get(field)?.takeIf { it.isArray }
             }
@@ -367,13 +511,63 @@ class McpHippocampus(
         return emptyList()
     }
 
-    private fun renderCandidateLine(node: JsonNode): String? {
+    private fun isEmptyStructuredPayload(root: JsonNode): Boolean {
+        if (root.isArray) {
+            return root.size() == 0
+        }
+        if (!root.isObject) {
+            return false
+        }
+
+        val fields = root.fields().asSequence().toList()
+        if (fields.isEmpty()) {
+            return true
+        }
+
+        val hasNonEmptySignal = fields.any { (_, value) ->
+            when {
+                value.isTextual -> value.asText().isNotBlank()
+                value.isNumber || value.isBoolean -> true
+                value.isArray -> value.size() > 0
+                value.isObject -> value.fields().asSequence().any()
+                else -> false
+            }
+        }
+        if (hasNonEmptySignal) {
+            return false
+        }
+
+        return fields.all { (_, value) -> value.isArray || value.isObject || value.isNull }
+    }
+
+    private fun renderCandidateLine(node: JsonNode, queryHint: String): String? {
         if (node.isTextual) {
             return node.asText().trim().ifBlank { null }
         }
 
         if (!node.isObject) {
             return node.toString()
+        }
+
+        val observations = node.get("observations")
+        if (observations?.isArray == true) {
+            val observationItems = observations
+                .mapNotNull { it.asText().trim().ifBlank { null } }
+            if (observationItems.isEmpty()) {
+                return null
+            }
+            val loweredHint = queryHint.trim().lowercase()
+            val prioritized = if (loweredHint.isNotBlank()) {
+                observationItems.filter { it.lowercase().contains(loweredHint) }
+            } else {
+                emptyList()
+            }
+            val selected = (if (prioritized.isNotEmpty()) prioritized else observationItems.asReversed())
+                .take(3)
+            val observationText = selected.joinToString(separator = " | ").trim()
+            if (observationText.isNotBlank()) {
+                return observationText
+            }
         }
 
         val keyOrder = listOf(
@@ -406,10 +600,10 @@ class McpHippocampus(
                 .ifBlank { null }
         }
 
-        return node.toString()
+        return null
     }
 
-    private data class NormalizedRecall(
+    internal data class NormalizedRecall(
         val text: String,
         val hitCount: Int,
         val truncated: Boolean,

@@ -1,11 +1,11 @@
 package psyke.llm
 
 import okhttp3.Interceptor
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Protocol
-import okhttp3.Response
 import okhttp3.Request
-import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.Response
 import okhttp3.ResponseBody.Companion.toResponseBody
 import okio.Buffer
 import java.nio.file.Files
@@ -16,7 +16,7 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
-class MistralChatClientTest {
+class GroqChatClientTest {
     @Test
     fun `chat builds request and parses successful response`() {
         var capturedRequest: Request? = null
@@ -25,7 +25,7 @@ class MistralChatClientTest {
             """
             {
               "id": "resp-1",
-              "model": "mistral-small-latest",
+              "model": "openai/gpt-oss-20b",
               "choices": [
                 {"index":0,"message":{"role":"assistant","content":"hello"},"finish_reason":"stop"}
               ],
@@ -34,9 +34,9 @@ class MistralChatClientTest {
             """.trimIndent()
         }
         var observed: ChatCallRecord? = null
-        MistralChatClient(
+        GroqChatClient(
             apiKey = "test-key",
-            baseUrl = "https://mock.test/v1",
+            baseUrl = "https://mock.test/openai/v1",
             httpClient = httpClient,
             callObserver = ChatCallObserver { observed = it }
         ).use { client ->
@@ -45,13 +45,12 @@ class MistralChatClientTest {
                 options = ChatRequestOptions(
                     temperature = 0.3,
                     maxTokens = 77,
-                    safePrompt = true,
                     metadata = ChatCallMetadata(actor = "ego", callSite = "unit")
                 )
             )
 
             assertEquals("hello", completion.content)
-            assertEquals("mistral-small-latest", completion.model)
+            assertEquals("openai/gpt-oss-20b", completion.model)
             assertEquals(16, completion.usage?.totalTokens)
             assertEquals("stop", completion.finishReason)
         }
@@ -60,10 +59,10 @@ class MistralChatClientTest {
         assertEquals("Bearer test-key", request.header("Authorization"))
         assertTrue(request.url.toString().endsWith("/chat/completions"))
         val body = Buffer().also { request.body!!.writeTo(it) }.readUtf8()
-        assertTrue(body.contains("\"safe_prompt\":true"))
         assertTrue(body.contains("\"max_tokens\":77"))
         assertTrue(body.contains("\"temperature\":0.3"))
         assertTrue(body.contains("\"role\":\"user\""))
+        assertTrue(!body.contains("\"safe_prompt\""))
 
         val record = assertNotNull(observed)
         assertEquals(ChatCallStatus.OK, record.status)
@@ -79,9 +78,9 @@ class MistralChatClientTest {
         val httpClient = fakeHttpClient(status = 422) {
             """{"message":"bad request"}"""
         }
-        MistralChatClient(
+        GroqChatClient(
             apiKey = "test-key",
-            baseUrl = "https://mock.test/v1",
+            baseUrl = "https://mock.test/openai/v1",
             httpClient = httpClient,
             callObserver = ChatCallObserver { observed = it }
         ).use { client ->
@@ -100,9 +99,9 @@ class MistralChatClientTest {
     @Test
     fun `chat requires at least one message`() {
         val httpClient = fakeHttpClient(status = 200) { "{}" }
-        MistralChatClient(
+        GroqChatClient(
             apiKey = "test-key",
-            baseUrl = "https://mock.test/v1",
+            baseUrl = "https://mock.test/openai/v1",
             httpClient = httpClient
         ).use { client ->
             assertFailsWith<IllegalArgumentException> {
@@ -113,7 +112,7 @@ class MistralChatClientTest {
 
     @Test
     fun `chat persists metrics without explicit observer`() {
-        val dbPath = Files.createTempFile("mistral-client-metrics", ".db")
+        val dbPath = Files.createTempFile("groq-client-metrics", ".db")
         val previous = System.getProperty("psyke.metrics.db")
         System.setProperty("psyke.metrics.db", dbPath.toString())
         try {
@@ -121,17 +120,17 @@ class MistralChatClientTest {
                 """
                 {
                   "id": "resp-1",
-                  "model": "mistral-small-latest",
+                  "model": "openai/gpt-oss-20b",
                   "choices": [
                     {"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}
                   ],
-                  "usage":{"prompt_tokens":2,"completion_tokens":3,"total_tokens":5}
+                  "usage":{"prompt_tokens":4,"completion_tokens":6,"total_tokens":10}
                 }
                 """.trimIndent()
             }
-            MistralChatClient(
+            GroqChatClient(
                 apiKey = "test-key",
-                baseUrl = "https://mock.test/v1",
+                baseUrl = "https://mock.test/openai/v1",
                 httpClient = httpClient
             ).use { client ->
                 client.chat(messages = listOf(ChatMessage(ChatRole.USER, "persist this")))
@@ -140,10 +139,10 @@ class MistralChatClientTest {
             DriverManager.getConnection("jdbc:sqlite:${dbPath.toAbsolutePath()}").use { connection ->
                 connection.createStatement().use { statement ->
                     statement.executeQuery(
-                        "SELECT COALESCE(SUM(total_tokens), 0) AS tokens FROM llm_calls WHERE provider = 'mistral'"
+                        "SELECT COALESCE(SUM(total_tokens), 0) AS tokens FROM llm_calls WHERE provider = 'groq'"
                     ).use { rs ->
                         rs.next()
-                        assertTrue(rs.getInt("tokens") >= 5)
+                        assertTrue(rs.getInt("tokens") >= 10)
                     }
                 }
             }

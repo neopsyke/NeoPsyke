@@ -1,5 +1,7 @@
 package psyke.llm
 
+interface PersistentMetricsChatCallObserver : ChatCallObserver
+
 class CompositeChatCallObserver(
     private val observers: List<ChatCallObserver>,
 ) : ChatCallObserver {
@@ -12,6 +14,15 @@ class CompositeChatCallObserver(
             }
         }
     }
+
+    fun hasPersistentMetricsObserver(): Boolean =
+        observers.any { observer ->
+            when (observer) {
+                is PersistentMetricsChatCallObserver -> true
+                is CompositeChatCallObserver -> observer.hasPersistentMetricsObserver()
+                else -> false
+            }
+        }
 }
 
 fun combineChatCallObservers(vararg observers: ChatCallObserver?): ChatCallObserver? {
@@ -22,3 +33,11 @@ fun combineChatCallObservers(vararg observers: ChatCallObserver?): ChatCallObser
         else -> CompositeChatCallObserver(resolved)
     }
 }
+
+fun hasPersistentMetricsObserver(observer: ChatCallObserver?): Boolean =
+    when (observer) {
+        null -> false
+        is PersistentMetricsChatCallObserver -> true
+        is CompositeChatCallObserver -> observer.hasPersistentMetricsObserver()
+        else -> false
+    }
