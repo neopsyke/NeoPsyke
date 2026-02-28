@@ -7,25 +7,25 @@ import kotlin.test.assertTrue
 class PromptBudgetAllocatorTest {
     @Test
     fun `allocator keeps required user section under tight budget`() {
-        val messages = PromptBudgetAllocator.allocate(
+        val messages = psyke.agent.support.PromptBudgetAllocator.allocate(
             sections = listOf(
-                PromptBudgetAllocator.Section(
+                psyke.agent.support.PromptBudgetAllocator.Section(
                     role = ChatRole.SYSTEM,
-                    priority = PromptBudgetAllocator.Priority.MANDATORY,
+                    priority = psyke.agent.support.PromptBudgetAllocator.Priority.MANDATORY,
                     required = true,
                     minTokens = 20,
                     content = "system " + "x".repeat(400)
                 ),
-                PromptBudgetAllocator.Section(
+                psyke.agent.support.PromptBudgetAllocator.Section(
                     role = ChatRole.USER,
-                    priority = PromptBudgetAllocator.Priority.MANDATORY,
+                    priority = psyke.agent.support.PromptBudgetAllocator.Priority.MANDATORY,
                     required = true,
                     minTokens = 10,
                     content = "Trigger:\nInput: hello world " + "y".repeat(300)
                 ),
-                PromptBudgetAllocator.Section(
+                psyke.agent.support.PromptBudgetAllocator.Section(
                     role = ChatRole.USER,
-                    priority = PromptBudgetAllocator.Priority.OPTIONAL,
+                    priority = psyke.agent.support.PromptBudgetAllocator.Priority.OPTIONAL,
                     content = "Optional context " + "z".repeat(400)
                 )
             ),
@@ -40,24 +40,24 @@ class PromptBudgetAllocatorTest {
 
     @Test
     fun `allocator favors mandatory and important sections before optional`() {
-        val messages = PromptBudgetAllocator.allocate(
+        val messages = psyke.agent.support.PromptBudgetAllocator.allocate(
             sections = listOf(
-                PromptBudgetAllocator.Section(
+                psyke.agent.support.PromptBudgetAllocator.Section(
                     role = ChatRole.SYSTEM,
-                    priority = PromptBudgetAllocator.Priority.MANDATORY,
+                    priority = psyke.agent.support.PromptBudgetAllocator.Priority.MANDATORY,
                     required = true,
                     minTokens = 12,
                     content = "Core instructions " + "a".repeat(260)
                 ),
-                PromptBudgetAllocator.Section(
+                psyke.agent.support.PromptBudgetAllocator.Section(
                     role = ChatRole.USER,
-                    priority = PromptBudgetAllocator.Priority.IMPORTANT,
+                    priority = psyke.agent.support.PromptBudgetAllocator.Priority.IMPORTANT,
                     minTokens = 8,
                     content = "Memory summary: prefer concise answers. " + "b".repeat(260)
                 ),
-                PromptBudgetAllocator.Section(
+                psyke.agent.support.PromptBudgetAllocator.Section(
                     role = ChatRole.USER,
-                    priority = PromptBudgetAllocator.Priority.OPTIONAL,
+                    priority = psyke.agent.support.PromptBudgetAllocator.Priority.OPTIONAL,
                     content = "Verbose queue dump " + "c".repeat(500)
                 )
             ),

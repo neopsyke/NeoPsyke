@@ -22,7 +22,7 @@ class AttentionSchedulerTest {
         scheduler.enqueueInput("new input")
 
         val task = scheduler.nextTask()
-        assertIs<LoopTask.ProcessInput>(task)
+        assertIs<psyke.agent.core.LoopTask.ProcessInput>(task)
         assertEquals("new input", task.item.content)
     }
 
@@ -37,10 +37,10 @@ class AttentionSchedulerTest {
         val second = scheduler.nextTask()
         val third = scheduler.nextTask()
 
-        assertIs<LoopTask.PerformAction>(first)
-        assertIs<LoopTask.ProcessThought>(second)
+        assertIs<psyke.agent.core.LoopTask.PerformAction>(first)
+        assertIs<psyke.agent.core.LoopTask.ProcessThought>(second)
         assertEquals("high", second.item.content)
-        assertIs<LoopTask.ProcessThought>(third)
+        assertIs<psyke.agent.core.LoopTask.ProcessThought>(third)
         assertEquals("low", third.item.content)
     }
 
@@ -53,8 +53,8 @@ class AttentionSchedulerTest {
         val first = scheduler.nextTask()
         val second = scheduler.nextTask()
 
-        assertIs<LoopTask.ProcessInput>(first)
-        assertIs<LoopTask.ProcessInput>(second)
+        assertIs<psyke.agent.core.LoopTask.ProcessInput>(first)
+        assertIs<psyke.agent.core.LoopTask.ProcessInput>(second)
         assertEquals("high-second", first.item.content)
         assertEquals(InputPriority.HIGH, first.item.priority)
         assertEquals("medium-first", second.item.content)

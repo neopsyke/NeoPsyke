@@ -9,7 +9,7 @@ class DeliberationProgressMonitorTest {
         val monitor = DeliberationProgressMonitor()
         repeat(12) {
             monitor.startStep()
-            monitor.onPlannerDecision(EgoDecision.Noop("no progress"))
+            monitor.onPlannerDecision(psyke.agent.core.EgoDecision.Noop("no progress"))
         }
 
         val state = monitor.snapshot()
@@ -23,13 +23,13 @@ class DeliberationProgressMonitorTest {
         val monitor = DeliberationProgressMonitor()
         repeat(8) {
             monitor.startStep()
-            monitor.onPlannerDecision(EgoDecision.Noop("loop"))
+            monitor.onPlannerDecision(psyke.agent.core.EgoDecision.Noop("loop"))
         }
         val before = monitor.snapshot()
 
         monitor.startStep()
         monitor.onPlannerDecision(
-            EgoDecision.ProposeAction(
+            psyke.agent.core.EgoDecision.ProposeAction(
                 urgency = Urgency.HIGH,
                 actionType = ActionType.WEB_SEARCH,
                 payload = "query",
@@ -57,13 +57,13 @@ class DeliberationProgressMonitorTest {
         val monitor = DeliberationProgressMonitor()
         repeat(4) {
             monitor.startStep()
-            monitor.onPlannerDecision(EgoDecision.Noop("Planner unavailable due to model error."))
+            monitor.onPlannerDecision(psyke.agent.core.EgoDecision.Noop("Planner unavailable due to model error."))
         }
         val before = monitor.snapshot()
 
         monitor.startStep()
         monitor.onPlannerDecision(
-            EgoDecision.ProposeAction(
+            psyke.agent.core.EgoDecision.ProposeAction(
                 urgency = Urgency.MEDIUM,
                 actionType = ActionType.WEB_SEARCH,
                 payload = "query",

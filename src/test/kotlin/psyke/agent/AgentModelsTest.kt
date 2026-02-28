@@ -10,6 +10,10 @@ class AgentModelsTest {
         val config = AgentConfig()
         assertEquals(0, config.loopDelayMs)
         assertEquals(180, config.maxLoopStepsPerInput)
+        assertEquals(2, config.llmRetryAttempts)
+        assertEquals(192, config.superegoMaxCompletionTokens)
+        assertEquals(0.98, config.forcedTerminalPressureThreshold)
+        assertEquals(8, config.forcedTerminalStaleStreakThreshold)
     }
 
     @Test

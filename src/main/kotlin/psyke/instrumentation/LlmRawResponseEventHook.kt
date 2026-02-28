@@ -1,6 +1,6 @@
 package psyke.instrumentation
 
-import psyke.agent.TextSecurity
+import psyke.agent.support.TextSecurity
 import psyke.llm.ChatCompletion
 import psyke.llm.ChatMessage
 import psyke.llm.ChatModelHook

@@ -1,4 +1,8 @@
-package psyke.agent
+package psyke.agent.cortex.sensory
+
+import psyke.agent.core.AgentConfig
+import psyke.agent.core.InputPriority
+import psyke.agent.support.TextSecurity
 
 data class SensoryInput(
     val content: String,

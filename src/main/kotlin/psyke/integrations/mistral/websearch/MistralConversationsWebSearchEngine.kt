@@ -9,7 +9,7 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
-import psyke.agent.TextSecurity
+import psyke.agent.support.TextSecurity
 import psyke.agent.actions.websearch.WebSearchEngine
 import psyke.agent.actions.websearch.WebSearchEngineHealth
 import psyke.agent.actions.websearch.WebSearchResult

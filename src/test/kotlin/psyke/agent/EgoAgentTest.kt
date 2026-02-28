@@ -28,9 +28,9 @@ class EgoAgentTest {
         val instrumentation = RecordingInstrumentation()
         val outputs = mutableListOf<String>()
         val config = AgentConfig(maxLoopStepsPerInput = 4, maxThoughtPasses = 2)
-        val agent = EgoAgent(
-            planner = EgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
-            superego = SuperegoGatekeeper(
+        val agent = Ego(
+            planner = LlmEgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
+            superego = Superego(
                 modelClient = superegoLlm,
                 config = config,
                 instrumentation = instrumentation
@@ -82,9 +82,9 @@ class EgoAgentTest {
         }
         val instrumentation = RecordingInstrumentation()
         val outputs = mutableListOf<String>()
-        val agent = EgoAgent(
-            planner = EgoPlanner(modelClient = plannerLlm, config = AgentConfig(), instrumentation = instrumentation),
-            superego = SuperegoGatekeeper(
+        val agent = Ego(
+            planner = LlmEgoPlanner(modelClient = plannerLlm, config = AgentConfig(), instrumentation = instrumentation),
+            superego = Superego(
                 modelClient = superegoLlm,
                 config = AgentConfig(),
                 instrumentation = instrumentation
@@ -128,9 +128,9 @@ class EgoAgentTest {
             maxLoopStepsPerInput = 4,
             maxThoughtPasses = 2
         )
-        val agent = EgoAgent(
-            planner = EgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
-            superego = SuperegoGatekeeper(
+        val agent = Ego(
+            planner = LlmEgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
+            superego = Superego(
                 modelClient = superegoLlm,
                 config = config,
                 instrumentation = instrumentation
@@ -176,9 +176,9 @@ class EgoAgentTest {
             maxThoughtPasses = 1,
             maxPendingActions = 1
         )
-        val agent = EgoAgent(
-            planner = EgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
-            superego = SuperegoGatekeeper(
+        val agent = Ego(
+            planner = LlmEgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
+            superego = Superego(
                 modelClient = superegoLlm,
                 config = config,
                 instrumentation = instrumentation
@@ -232,9 +232,9 @@ class EgoAgentTest {
             maxLoopStepsPerInput = 7,
             maxThoughtPasses = 1
         )
-        val agent = EgoAgent(
-            planner = EgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
-            superego = SuperegoGatekeeper(
+        val agent = Ego(
+            planner = LlmEgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
+            superego = Superego(
                 modelClient = superegoLlm,
                 config = config,
                 instrumentation = instrumentation
@@ -290,9 +290,9 @@ class EgoAgentTest {
             maxLoopStepsPerInput = 7,
             maxThoughtPasses = 1
         )
-        val agent = EgoAgent(
-            planner = EgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
-            superego = SuperegoGatekeeper(
+        val agent = Ego(
+            planner = LlmEgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
+            superego = Superego(
                 modelClient = superegoLlm,
                 config = config,
                 instrumentation = instrumentation
@@ -331,9 +331,9 @@ class EgoAgentTest {
             enqueueRawResponse("""{"allow":true}""")
         }
         val instrumentation = RecordingInstrumentation()
-        val agent = EgoAgent(
-            planner = EgoPlanner(modelClient = plannerLlm, config = AgentConfig(), instrumentation = instrumentation),
-            superego = SuperegoGatekeeper(
+        val agent = Ego(
+            planner = LlmEgoPlanner(modelClient = plannerLlm, config = AgentConfig(), instrumentation = instrumentation),
+            superego = Superego(
                 modelClient = superegoLlm,
                 config = AgentConfig(),
                 instrumentation = instrumentation
@@ -379,9 +379,9 @@ class EgoAgentTest {
                 hitCount = 1
             )
         )
-        val agent = EgoAgent(
-            planner = EgoPlanner(modelClient = plannerLlm, config = AgentConfig(), instrumentation = instrumentation),
-            superego = SuperegoGatekeeper(
+        val agent = Ego(
+            planner = LlmEgoPlanner(modelClient = plannerLlm, config = AgentConfig(), instrumentation = instrumentation),
+            superego = Superego(
                 modelClient = superegoLlm,
                 config = AgentConfig(),
                 instrumentation = instrumentation
@@ -435,9 +435,9 @@ class EgoAgentTest {
             )
         )
         var recallSkipped = 0
-        val agent = EgoAgent(
-            planner = EgoPlanner(modelClient = plannerLlm, config = AgentConfig(), instrumentation = instrumentation),
-            superego = SuperegoGatekeeper(
+        val agent = Ego(
+            planner = LlmEgoPlanner(modelClient = plannerLlm, config = AgentConfig(), instrumentation = instrumentation),
+            superego = Superego(
                 modelClient = superegoLlm,
                 config = AgentConfig(),
                 instrumentation = instrumentation
@@ -481,9 +481,9 @@ class EgoAgentTest {
                 hitCount = 1
             )
         )
-        val agent = EgoAgent(
-            planner = EgoPlanner(modelClient = plannerLlm, config = AgentConfig(), instrumentation = instrumentation),
-            superego = SuperegoGatekeeper(
+        val agent = Ego(
+            planner = LlmEgoPlanner(modelClient = plannerLlm, config = AgentConfig(), instrumentation = instrumentation),
+            superego = Superego(
                 modelClient = superegoLlm,
                 config = AgentConfig(),
                 instrumentation = instrumentation
@@ -515,9 +515,9 @@ class EgoAgentTest {
         }
         val instrumentation = RecordingInstrumentation()
         val outputs = mutableListOf<String>()
-        val agent = EgoAgent(
-            planner = EgoPlanner(modelClient = plannerLlm, config = AgentConfig(), instrumentation = instrumentation),
-            superego = SuperegoGatekeeper(
+        val agent = Ego(
+            planner = LlmEgoPlanner(modelClient = plannerLlm, config = AgentConfig(), instrumentation = instrumentation),
+            superego = Superego(
                 modelClient = superegoLlm,
                 config = AgentConfig(),
                 instrumentation = instrumentation
@@ -554,8 +554,8 @@ class EgoAgentTest {
         }
         val instrumentation = RecordingInstrumentation()
         val outputs = mutableListOf<String>()
-        val agent = EgoAgent(
-            planner = EgoPlanner(
+        val agent = Ego(
+            planner = LlmEgoPlanner(
                 modelClient = plannerLlm,
                 config = AgentConfig(
                     maxLoopStepsPerInput = 6,
@@ -564,7 +564,7 @@ class EgoAgentTest {
                 ),
                 instrumentation = instrumentation
             ),
-            superego = SuperegoGatekeeper(
+            superego = Superego(
                 modelClient = superegoLlm,
                 config = AgentConfig(),
                 instrumentation = instrumentation
@@ -636,9 +636,9 @@ class EgoAgentTest {
             longTermMemoryMinConfidence = 0.6,
             longTermMemoryForceAssessOnAllowedAction = true
         )
-        val agent = EgoAgent(
-            planner = EgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
-            superego = SuperegoGatekeeper(
+        val agent = Ego(
+            planner = LlmEgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
+            superego = Superego(
                 modelClient = superegoLlm,
                 config = config,
                 instrumentation = instrumentation
@@ -705,9 +705,9 @@ class EgoAgentTest {
             longTermMemoryMinConfidence = 0.5,
             longTermMemoryForceAssessOnAllowedAction = true
         )
-        val agent = EgoAgent(
-            planner = EgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
-            superego = SuperegoGatekeeper(
+        val agent = Ego(
+            planner = LlmEgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
+            superego = Superego(
                 modelClient = superegoLlm,
                 config = config,
                 instrumentation = instrumentation
@@ -774,9 +774,9 @@ class EgoAgentTest {
             maxLoopStepsPerInput = 3,
             longTermMemoryAssessEverySteps = 100
         )
-        val agent = EgoAgent(
-            planner = EgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
-            superego = SuperegoGatekeeper(
+        val agent = Ego(
+            planner = LlmEgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
+            superego = Superego(
                 modelClient = superegoLlm,
                 config = config,
                 instrumentation = instrumentation
@@ -843,9 +843,9 @@ class EgoAgentTest {
             longTermMemoryForceAssessOnAllowedAction = true,
             longTermMemoryParseFallbackDisableAfter = 2
         )
-        val agent = EgoAgent(
-            planner = EgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
-            superego = SuperegoGatekeeper(
+        val agent = Ego(
+            planner = LlmEgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
+            superego = Superego(
                 modelClient = superegoLlm,
                 config = config,
                 instrumentation = instrumentation
@@ -870,7 +870,7 @@ class EgoAgentTest {
         )
     }
 
-    private fun runAgentWithInput(agent: EgoAgent, stdinContent: String) {
+    private fun runAgentWithInput(agent: Ego, stdinContent: String) {
         val previousIn = System.`in`
         try {
             System.setIn(ByteArrayInputStream(stdinContent.toByteArray()))

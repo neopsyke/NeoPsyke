@@ -21,7 +21,7 @@ class MetaReasonerTest {
         )
 
         val assessment = reasoner.assess(
-            trigger = EgoTrigger.PendingThoughtInput(
+            trigger = psyke.agent.core.EgoTrigger.PendingThoughtInput(
                 PendingThought(
                     id = 1,
                     urgency = Urgency.MEDIUM,

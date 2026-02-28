@@ -1,7 +1,7 @@
 package psyke.dashboard
 
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
-import psyke.agent.QueueState
+import psyke.agent.core.QueueState
 import psyke.instrumentation.AgentEvent
 import psyke.instrumentation.InstrumentationSink
 import psyke.metrics.MetricsSnapshot

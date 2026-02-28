@@ -53,9 +53,16 @@ Standalone Kotlin JVM app using Gradle with:
     - `provider` (label/selector for provider intent)
     - `command` (primary command string)
     - `fallback_commands` (list of command strings; first executable in `PATH` is used)
+- Agent/app/eval runtime settings are centralized in `agent-runtime.yaml` (repository root).
+  - Optional override file path: `PSYKE_AGENT_CONFIG_FILE=/path/to/agent-runtime.yaml`.
+  - `agent` section covers loop/token/pressure/runtime knobs.
+  - `app` section covers UI/runtime flags (for example dashboard enablement and port).
+  - `eval` section covers eval defaults (for example stage default and raw-response cap).
+  - Precedence is `CLI > env > YAML > code defaults`.
 - Optional:
   - `PSYKE_LLM_CONFIG_FILE` (optional; path to LLM runtime YAML, default: `./llm-runtime.yaml`)
   - `PSYKE_MCP_CONFIG_FILE` (optional; path to MCP runtime YAML, default: `./mcp-runtime.yaml`)
+  - `PSYKE_AGENT_CONFIG_FILE` (optional; path to agent/app/eval runtime YAML, default: `./agent-runtime.yaml`)
   - LLM model overrides (defaults depend on provider: Groq=`openai/gpt-oss-20b`, Mistral=`mistral-small-latest`):
     - `LLM_EGO_MODEL`
     - `LLM_SUPEREGO_MODEL` (default: Ego model)
@@ -71,6 +78,8 @@ Standalone Kotlin JVM app using Gradle with:
   - `EGO_MAX_THOUGHT_PASSES` (default: `5`)
   - `EGO_MAX_PROMPT_TOKENS` (default: `2400`)
   - `EGO_MAX_COMPLETION_TOKENS` (default: `900`)
+  - `EGO_LLM_RETRY_ATTEMPTS` (default: `2`)
+  - `EGO_SUPEREGO_MAX_COMPLETION_TOKENS` (default: `192`)
   - `EGO_LOOP_DELAY_MS` (default app value: `0`)
   - `EGO_SHORT_TERM_CONTEXT_MAX_CHARS` (default: `20000`)
   - `EGO_SHORT_TERM_CONTEXT_MAX_PROMPT_TOKENS` (default: `384`)
@@ -91,6 +100,8 @@ Standalone Kotlin JVM app using Gradle with:
   - `EGO_PRESSURE_MIN_STEP` (default: `16`)
   - `EGO_PRESSURE_ASSESS_EVERY_STEPS` (default: `8`)
   - `EGO_PRESSURE_ASSESS_THRESHOLD` (default: `0.68`)
+  - `EGO_FORCE_TERMINAL_PRESSURE_THRESHOLD` (default: `0.98`)
+  - `EGO_FORCE_TERMINAL_STALE_STREAK_THRESHOLD` (default: `8`)
   - `EGO_META_REASONER_COOLDOWN_STEPS` (default: `6`)
   - `EGO_META_REASONER_MAX_TOKENS` (default: `120`)
   - `EGO_LONG_TERM_MEMORY_ASSESS_EVERY_STEPS` (default: `16`)
@@ -243,9 +254,11 @@ you> exit
 - If denied, denial reason (<=180 chars) is pushed back as a new thought.
 
 ## Superego directives
-- Loaded at startup from `src/main/resources/superego/directives.txt`.
-- Use one directive per line.
-- Empty lines and lines starting with `#` are ignored.
+- Defined in code at `psyke.agent.superego.SuperegoPolicy`.
+- Structured as:
+  - general directives (always included)
+  - action-specific directives selected by action type (`answer`, `web_search`, `mcp_time`, `mcp_fetch`)
+- Superego prompt includes `general + action-specific(current_action)` to reduce token usage.
 
 ## Metrics persistence
 - SQLite storage records per-run and per-call data (`runs`, `llm_calls`).

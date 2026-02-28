@@ -1,6 +1,12 @@
-package psyke.agent
+package psyke.agent.cortex.motor
 
 import psyke.agent.actions.websearch.WebSearchActionHandler
+import psyke.agent.core.ActionOutcome
+import psyke.agent.core.ActionType
+import psyke.agent.core.PendingAction
+import psyke.agent.tools.mcp.McpFetchTool
+import psyke.agent.tools.mcp.McpTimeTool
+import psyke.agent.tools.mcp.ToolHealthStatus
 
 data class ActionImplementationStatus(
     val actionType: ActionType,

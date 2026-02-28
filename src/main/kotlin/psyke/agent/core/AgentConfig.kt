@@ -1,52 +1,4 @@
-package psyke.agent
-
-enum class Urgency(val priority: Int) {
-    LOW(1),
-    MEDIUM(2),
-    HIGH(3);
-
-    companion object {
-        fun fromRaw(value: String?): Urgency =
-            when (value?.trim()?.lowercase()) {
-                "high" -> HIGH
-                "low" -> LOW
-                else -> MEDIUM
-            }
-    }
-}
-
-enum class ActionType {
-    WEB_SEARCH,
-    ANSWER,
-    MCP_TIME,
-    MCP_FETCH;
-
-    companion object {
-        fun fromRaw(value: String?): ActionType? =
-            when (value?.trim()?.lowercase()) {
-                "web_search" -> WEB_SEARCH
-                "answer" -> ANSWER
-                "mcp_time" -> MCP_TIME
-                "mcp_fetch" -> MCP_FETCH
-                else -> null
-            }
-    }
-}
-
-enum class InputPriority(val level: Int) {
-    LOW(1),
-    MEDIUM(2),
-    HIGH(3);
-
-    companion object {
-        fun fromRaw(value: String?): InputPriority =
-            when (value?.trim()?.lowercase()) {
-                "high", "3" -> HIGH
-                "low", "1" -> LOW
-                else -> MEDIUM
-            }
-    }
-}
+package psyke.agent.core
 
 data class AgentConfig(
     val maxLoopStepsPerInput: Int = 180,
@@ -62,7 +14,9 @@ data class AgentConfig(
     val maxActionPayloadChars: Int = 4_000,
     val maxActionSummaryChars: Int = 180,
     val maxPromptTokens: Int = 2_400,
-    val maxCompletionTokens: Int = 900, 
+    val maxCompletionTokens: Int = 900,
+    val llmRetryAttempts: Int = 2,
+    val superegoMaxCompletionTokens: Int = 192,
     val searchResultCount: Int = 5,
     val mcpCallTimeoutMs: Long = 8_000,
     val mcpFetchMaxChars: Int = 4_000,
@@ -79,6 +33,8 @@ data class AgentConfig(
     val longTermMemoryMinConfidence: Double = 0.65,
     val longTermMemoryMaxTokens: Int = 180,
     val longTermMemoryMaxSummaryChars: Int = 320,
+    val forcedTerminalPressureThreshold: Double = 0.98,
+    val forcedTerminalStaleStreakThreshold: Int = 8,
     val longTermMemoryForceAssessOnAllowedAction: Boolean = false,
     val longTermMemoryParseFallbackDisableAfter: Int = 2
 ) {
@@ -97,6 +53,8 @@ data class AgentConfig(
                 maxActionPayloadChars = readInt("EGO_MAX_ACTION_PAYLOAD_CHARS", 4000),
                 maxPromptTokens = readInt("EGO_MAX_PROMPT_TOKENS", 2400),
                 maxCompletionTokens = readInt("EGO_MAX_COMPLETION_TOKENS", 900),
+                llmRetryAttempts = readInt("EGO_LLM_RETRY_ATTEMPTS", 2),
+                superegoMaxCompletionTokens = readInt("EGO_SUPEREGO_MAX_COMPLETION_TOKENS", 192),
                 searchResultCount = readInt("EGO_SEARCH_RESULT_COUNT", 5),
                 mcpCallTimeoutMs = mcpCallTimeoutMs,
                 mcpFetchMaxChars = readInt("MCP_FETCH_MAX_CHARS", 4000),
@@ -113,6 +71,8 @@ data class AgentConfig(
                 longTermMemoryMinConfidence = readDouble("EGO_LONG_TERM_MEMORY_MIN_CONFIDENCE", 0.65),
                 longTermMemoryMaxTokens = readInt("EGO_LONG_TERM_MEMORY_MAX_TOKENS", 180),
                 longTermMemoryMaxSummaryChars = readInt("EGO_LONG_TERM_MEMORY_MAX_SUMMARY_CHARS", 320),
+                forcedTerminalPressureThreshold = readDouble("EGO_FORCE_TERMINAL_PRESSURE_THRESHOLD", 0.98),
+                forcedTerminalStaleStreakThreshold = readInt("EGO_FORCE_TERMINAL_STALE_STREAK_THRESHOLD", 8),
                 longTermMemoryForceAssessOnAllowedAction = readBoolean("EGO_LONG_TERM_MEMORY_FORCE_ASSESS_ON_ALLOWED_ACTION", false),
                 longTermMemoryParseFallbackDisableAfter = readInt("EGO_LONG_TERM_MEMORY_PARSE_FALLBACK_DISABLE_AFTER", 2)
             )
@@ -134,121 +94,3 @@ data class AgentConfig(
             System.getenv(name)?.trim()?.lowercase()?.let { it == "1" || it == "true" || it == "yes" } ?: fallback
     }
 }
-
-data class PendingInput(
-    val id: Long,
-    val content: String,
-    val priority: InputPriority = InputPriority.MEDIUM,
-    val enqueuedAtMs: Long = System.currentTimeMillis(),
-)
-
-data class PendingThought(
-    val id: Long,
-    val urgency: Urgency,
-    val content: String,
-    val passes: Int = 0,
-    val longTermMemoryRecallQuery: String? = null,
-    val rootInputEnqueuedAtMs: Long? = null,
-    val deniedActionType: ActionType? = null,
-    val deniedActionPayload: String? = null,
-    val denialReason: String? = null,
-    val allowFallbackExplanation: Boolean = false,
-)
-
-data class PendingAction(
-    val id: Long,
-    val urgency: Urgency,
-    val type: ActionType,
-    val payload: String,
-    val summary: String,
-    val attempts: Int = 0,
-    val isFallbackExplanation: Boolean = false,
-    val rootInputEnqueuedAtMs: Long? = null,
-)
-
-data class QueueState(
-    val inputs: List<PendingInput>,
-    val thoughts: List<PendingThought>,
-    val actions: List<PendingAction>,
-)
-
-enum class DialogueRole {
-    USER,
-    ASSISTANT
-}
-
-data class DialogueTurn(
-    val role: DialogueRole,
-    val content: String,
-)
-
-data class QueueSnapshot(
-    val pendingInputCount: Int,
-    val pendingThoughtCount: Int,
-    val pendingActionCount: Int,
-)
-
-data class PlannerContext(
-    val recentDialogue: List<DialogueTurn>,
-    val queue: QueueSnapshot,
-    val shortTermContextSummary: String = "",
-    val longTermMemoryRecall: String = "",
-    val deliberation: DeliberationState = DeliberationState(),
-    val metaGuidance: String = "",
-    val availableActions: Set<ActionType> = ActionType.entries.toSet(),
-)
-
-data class SuperegoContext(
-    val recentDialogue: List<DialogueTurn>,
-    val shortTermContextSummary: String = "",
-)
-
-sealed interface LoopTask {
-    data class ProcessInput(val item: PendingInput) : LoopTask
-    data class ProcessThought(val item: PendingThought) : LoopTask
-    data class PerformAction(val item: PendingAction) : LoopTask
-}
-
-sealed interface EgoTrigger {
-    data class IncomingInput(val input: PendingInput) : EgoTrigger
-    data class PendingThoughtInput(val thought: PendingThought) : EgoTrigger
-}
-
-sealed interface EgoDecision {
-    data class EnqueueThought(
-        val urgency: Urgency,
-        val content: String,
-        val longTermMemoryRecallQuery: String? = null,
-    ) : EgoDecision
-    data class ProposeAction(
-        val urgency: Urgency,
-        val actionType: ActionType,
-        val payload: String,
-        val summary: String,
-    ) : EgoDecision
-    data class Noop(val reason: String) : EgoDecision
-}
-
-data class GateDecision(
-    val allow: Boolean,
-    val reason: String,
-)
-
-data class ActionOutcome(
-    val statusSummary: String,
-    val assistantOutput: String? = null,
-    val plannerSignal: String = statusSummary,
-    val observedEvidence: Boolean? = null,
-)
-
-data class DeliberationState(
-    val stepIndex: Int = 0,
-    val decisionPressure: Double = 0.0,
-    val staleStreak: Int = 0,
-    val progressScore: Double = 0.0,
-    val denialCount: Int = 0,
-    val stepsSinceNewEvidence: Int = 0,
-    val repeatSignatureHits: Int = 0,
-    val noopStreak: Int = 0,
-    val modelErrorStreak: Int = 0,
-)

@@ -1,4 +1,4 @@
-package psyke.agent
+package psyke.agent.support
 
 import psyke.llm.ChatMessage
 import psyke.llm.ChatRole

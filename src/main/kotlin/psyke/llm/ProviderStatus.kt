@@ -3,6 +3,8 @@ package psyke.llm
 import mu.KotlinLogging
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import psyke.ConsoleReporter
+import psyke.StdConsoleReporter
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
@@ -14,6 +16,7 @@ import java.time.Instant
 import java.time.Duration
 
 private val logger = KotlinLogging.logger {}
+private val output: ConsoleReporter = StdConsoleReporter
 
 enum class ProviderHealthState {
     AVAILABLE,
@@ -144,13 +147,13 @@ fun reportProviderStatusAndDecide(
 
         ProviderHealthState.DEGRADED -> {
             logger.warn { message }
-            println("Warning: $message")
+            output.warn("Warning: $message")
             true
         }
 
         ProviderHealthState.UNAVAILABLE -> {
             logger.error { message }
-            System.err.println("Error: $message")
+            output.error("Error: $message")
             false
         }
     }

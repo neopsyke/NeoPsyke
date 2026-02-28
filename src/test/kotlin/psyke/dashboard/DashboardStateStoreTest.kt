@@ -2,12 +2,12 @@ package psyke.dashboard
 
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
-import psyke.agent.ActionType
-import psyke.agent.PendingAction
-import psyke.agent.PendingInput
-import psyke.agent.PendingThought
-import psyke.agent.QueueState
-import psyke.agent.Urgency
+import psyke.agent.core.ActionType
+import psyke.agent.core.PendingAction
+import psyke.agent.core.PendingInput
+import psyke.agent.core.PendingThought
+import psyke.agent.core.QueueState
+import psyke.agent.core.Urgency
 import psyke.instrumentation.AgentEvent
 import psyke.metrics.MetricsSnapshot
 import psyke.metrics.MetricsTotals

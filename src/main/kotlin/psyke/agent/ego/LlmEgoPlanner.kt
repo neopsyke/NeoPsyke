@@ -1,10 +1,13 @@
-package psyke.agent
+package psyke.agent.ego
 
 import com.fasterxml.jackson.annotation.JsonProperty
 import com.fasterxml.jackson.databind.DeserializationFeature
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
 import mu.KotlinLogging
+import psyke.agent.core.*
+import psyke.agent.support.PromptBudgetAllocator
+import psyke.agent.support.TextSecurity
 import psyke.instrumentation.AgentEvent
 import psyke.instrumentation.AgentEvents
 import psyke.instrumentation.AgentInstrumentation
@@ -18,14 +21,14 @@ import java.util.Locale
 
 private val logger = KotlinLogging.logger {}
 
-class EgoPlanner(
+class LlmEgoPlanner(
     private val modelClient: ChatModelClient,
     private val config: AgentConfig,
     private val instrumentation: AgentInstrumentation = NoopAgentInstrumentation,
     private val onPlannerNoop: () -> Unit = {},
     private val onPlannerOutputRepaired: () -> Unit = {},
-) {
-    fun decide(trigger: EgoTrigger, context: PlannerContext): EgoDecision {
+) : Ego.Planner {
+    override fun decide(trigger: EgoTrigger, context: PlannerContext): EgoDecision {
         val triggerLabel = when (trigger) {
             is EgoTrigger.IncomingInput -> "input"
             is EgoTrigger.PendingThoughtInput -> "thought"
@@ -45,7 +48,8 @@ class EgoPlanner(
         val messages = buildMessages(trigger, context)
         var response = null as psyke.llm.ChatCompletion?
         var lastError: Exception? = null
-        for (attempt in 1..2) {
+        val retryAttempts = maxOf(1, config.llmRetryAttempts)
+        for (attempt in 1..retryAttempts) {
             try {
                 response = modelClient.chat(
                     messages = messages,
@@ -61,8 +65,12 @@ class EgoPlanner(
                 break
             } catch (ex: Exception) {
                 lastError = ex
-                if (attempt < 2) {
-                    instrumentation.emit(AgentEvents.warning("Planner call failed (attempt 1/2); retrying."))
+                if (attempt < retryAttempts) {
+                    instrumentation.emit(
+                        AgentEvents.warning(
+                            "Planner call failed (attempt $attempt/$retryAttempts); retrying."
+                        )
+                    )
                 }
             }
         }

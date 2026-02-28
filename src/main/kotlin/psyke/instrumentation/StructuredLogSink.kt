@@ -1,7 +1,7 @@
 package psyke.instrumentation
 
 import mu.KotlinLogging
-import psyke.agent.QueueState
+import psyke.agent.core.QueueState
 
 private val logger = KotlinLogging.logger {}
 

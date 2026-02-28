@@ -1,10 +1,10 @@
 package psyke.instrumentation
 
-import psyke.agent.PendingAction
-import psyke.agent.PendingInput
-import psyke.agent.PendingThought
-import psyke.agent.QueueState
-import psyke.agent.ActionImplementationStatus
+import psyke.agent.core.PendingAction
+import psyke.agent.core.PendingInput
+import psyke.agent.core.PendingThought
+import psyke.agent.core.QueueState
+import psyke.agent.cortex.motor.ActionImplementationStatus
 import java.time.Instant
 
 data class AgentEvent(

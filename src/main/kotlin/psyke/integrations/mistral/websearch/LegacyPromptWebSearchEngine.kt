@@ -4,9 +4,9 @@ import com.fasterxml.jackson.databind.DeserializationFeature
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
 import mu.KotlinLogging
-import psyke.agent.AgentConfig
-import psyke.agent.PromptBudgetAllocator
-import psyke.agent.TextSecurity
+import psyke.agent.core.AgentConfig
+import psyke.agent.support.PromptBudgetAllocator
+import psyke.agent.support.TextSecurity
 import psyke.agent.actions.websearch.WebSearchEngine
 import psyke.agent.actions.websearch.WebSearchResult
 import psyke.llm.ChatCallMetadata
@@ -66,7 +66,8 @@ class LegacyPromptWebSearchEngine(
 
         var response = null as psyke.llm.ChatCompletion?
         var lastError: Exception? = null
-        for (attempt in 1..2) {
+        val retryAttempts = maxOf(1, config.llmRetryAttempts)
+        for (attempt in 1..retryAttempts) {
             try {
                 response = modelClient.chat(
                     messages = messages,

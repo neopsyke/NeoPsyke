@@ -3,7 +3,7 @@ package psyke.eval
 import com.fasterxml.jackson.annotation.JsonInclude
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
-import psyke.agent.TextSecurity
+import psyke.agent.support.TextSecurity
 import psyke.instrumentation.AgentEvent
 import psyke.instrumentation.AgentInstrumentation
 import psyke.instrumentation.NoopAgentInstrumentation
