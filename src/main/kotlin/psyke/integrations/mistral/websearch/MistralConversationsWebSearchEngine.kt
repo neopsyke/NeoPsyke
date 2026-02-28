@@ -157,6 +157,9 @@ class MistralConversationsWebSearchEngine(
               "sources":[{"title":"source title","url":"https://...","snippet":"optional source snippet"}]
             }
             Keep snippets factual and concise.
+            Prioritize primary sources (official vendor docs, official pricing pages, standards, research papers).
+            Avoid forums, social posts, link-aggregators, and SEO summaries unless primary sources are unavailable.
+            If only secondary/community sources are available, state that clearly in summary.
         """.trimIndent()
 
         val payload: Map<String, Any> = when (profile.mode) {

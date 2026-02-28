@@ -32,10 +32,10 @@ class MemoryRoundTripIntegrationTest {
         val instrumentation = RecordingInstrumentation()
         val hippocampus = RoundTripHippocampus()
         var consolidationCalls = 0
-        val advisor = object : MemoryConsolidationAdvisor {
-            override fun assess(context: MemoryConsolidationContext): MemoryConsolidationDecision {
+        val advisor = object : LongTermMemoryAdvisor {
+            override fun assess(context: LongTermMemoryAssessmentContext): LongTermMemoryAssessmentDecision {
                 consolidationCalls += 1
-                return MemoryConsolidationDecision(
+                return LongTermMemoryAssessmentDecision(
                     shouldSave = true,
                     summary = "User preference: favorite color is teal.",
                     confidence = 0.95,
@@ -46,8 +46,9 @@ class MemoryRoundTripIntegrationTest {
         }
         val config = AgentConfig(
             maxLoopStepsPerInput = 8,
-            memoryConsolidationEverySteps = 100,
-            memoryConsolidationMinConfidence = 0.5
+            longTermMemoryAssessEverySteps = 100,
+            longTermMemoryMinConfidence = 0.5,
+            longTermMemoryForceAssessOnAllowedAction = true
         )
         val outputs = mutableListOf<String>()
         val agent = EgoAgent(
@@ -60,7 +61,7 @@ class MemoryRoundTripIntegrationTest {
             motorCortex = buildMotorCortex(output = { outputs.add(it) }),
             config = config,
             hippocampus = hippocampus,
-            memoryConsolidationAdvisor = advisor,
+            longTermMemoryAdvisor = advisor,
             instrumentation = instrumentation
         )
 
@@ -75,7 +76,7 @@ class MemoryRoundTripIntegrationTest {
             assertTrue(hippocampus.imprints.single().summary.contains("favorite color is teal", ignoreCase = true))
             assertTrue(hippocampus.recallQueries.size >= 2)
             val lastPlannerPrompt = plannerLlm.lastMessages.last().content
-            assertTrue(lastPlannerPrompt.contains("Retrieved memory:"))
+            assertTrue(lastPlannerPrompt.contains("Long-term memory recall:"))
             assertTrue(lastPlannerPrompt.contains("favorite color is teal", ignoreCase = true))
             assertEquals(
                 listOf(

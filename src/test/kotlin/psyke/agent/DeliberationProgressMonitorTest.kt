@@ -51,4 +51,41 @@ class DeliberationProgressMonitorTest {
         assertTrue(after.progressScore > before.progressScore)
         assertTrue(after.stepsSinceNewEvidence == 0)
     }
+
+    @Test
+    fun `failed evidence action increases pressure instead of resetting evidence gap`() {
+        val monitor = DeliberationProgressMonitor()
+        repeat(4) {
+            monitor.startStep()
+            monitor.onPlannerDecision(EgoDecision.Noop("Planner unavailable due to model error."))
+        }
+        val before = monitor.snapshot()
+
+        monitor.startStep()
+        monitor.onPlannerDecision(
+            EgoDecision.ProposeAction(
+                urgency = Urgency.MEDIUM,
+                actionType = ActionType.WEB_SEARCH,
+                payload = "query",
+                summary = "search"
+            )
+        )
+        monitor.onActionExecuted(
+            action = PendingAction(
+                id = 2,
+                urgency = Urgency.MEDIUM,
+                type = ActionType.WEB_SEARCH,
+                payload = "query",
+                summary = "search"
+            ),
+            observedEvidence = false
+        )
+
+        val after = monitor.snapshot()
+        assertTrue(after.stepsSinceNewEvidence > 0)
+        assertTrue(after.staleStreak >= before.staleStreak)
+        assertTrue(after.decisionPressure >= before.decisionPressure)
+        assertTrue(after.modelErrorStreak >= 1)
+        assertTrue(after.progressScore <= before.progressScore + 0.05)
+    }
 }

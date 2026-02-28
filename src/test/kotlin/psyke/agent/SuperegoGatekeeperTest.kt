@@ -38,7 +38,7 @@ class SuperegoGatekeeperTest {
         assertEquals("superego", llm.lastOptions.metadata.actor)
         assertEquals("action_review", llm.lastOptions.metadata.callSite)
         assertEquals("answer", llm.lastOptions.metadata.actionType)
-        assertEquals(80, llm.lastOptions.maxTokens)
+        assertEquals(192, llm.lastOptions.maxTokens)
         assertTrue(instrumentation.events.any { it.type == "superego_input" })
         assertTrue(
             instrumentation.events.any {
@@ -79,16 +79,16 @@ class SuperegoGatekeeperTest {
     }
 
     @Test
-    fun `gatekeeper includes memory summary in review prompt`() {
+    fun `gatekeeper includes short-term context summary in review prompt`() {
         val llm = StubChatModelClient()
         llm.enqueueRawResponse("""{"allow":true}""")
         val gatekeeper = SuperegoGatekeeper(modelClient = llm, config = AgentConfig())
-        val memorySnapshot = snapshot.copy(memorySummary = "Compressed memory: prefer neutral tone.")
+        val memorySnapshot = snapshot.copy(shortTermContextSummary = "Short-term context summary: prefer neutral tone.")
 
         gatekeeper.review(action, memorySnapshot)
 
         val prompt = llm.lastMessages.last().content
-        assertTrue(prompt.contains("Memory summary:"))
+        assertTrue(prompt.contains("Short-term context summary:"))
         assertTrue(prompt.contains("prefer neutral tone"))
     }
 

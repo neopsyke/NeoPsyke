@@ -25,6 +25,7 @@ import psyke.llm.ChatCallStatus
 import psyke.llm.ChatUsage
 import psyke.llm.bindFailSafeMetricsObserver
 import java.io.IOException
+import java.net.SocketTimeoutException
 import java.time.Duration
 import kotlin.math.max
 
@@ -61,75 +62,99 @@ class GroqConversationsWebSearchEngine(
 
     override fun search(query: String, maxResults: Int): WebSearchResult {
         val startedAt = System.nanoTime()
-        val requestBody = buildRequestBody(query, maxResults)
-        val request = Request.Builder()
-            .url("${baseUrl.trimEnd('/')}/chat/completions")
-            .header("Authorization", "Bearer $apiKey")
-            .header("Content-Type", "application/json")
-            .post(requestBody.toRequestBody(jsonMediaType))
-            .build()
+        val normalizedQuery = TextSecurity.clamp(query.trim(), MAX_QUERY_CHARS)
+        var attempt = 0
+        var lastError: Exception? = null
+        while (attempt < MAX_RETRY_ATTEMPTS) {
+            attempt += 1
+            val requestBody = buildRequestBody(normalizedQuery, maxResults)
+            val request = Request.Builder()
+                .url("${baseUrl.trimEnd('/')}/chat/completions")
+                .header("Authorization", "Bearer $apiKey")
+                .header("Content-Type", "application/json")
+                .post(requestBody.toRequestBody(jsonMediaType))
+                .build()
 
-        return try {
-            httpClient.newCall(request).execute().use { response ->
-                val rawBody = response.body?.string()
-                if (!response.isSuccessful) {
-                    throw GroqConversationsHttpException(
-                        statusCode = response.code,
-                        responseBody = rawBody
+            try {
+                httpClient.newCall(request).execute().use { response ->
+                    val rawBody = response.body?.string()
+                    if (!response.isSuccessful) {
+                        throw GroqConversationsHttpException(
+                            statusCode = response.code,
+                            responseBody = rawBody
+                        )
+                    }
+                    if (rawBody.isNullOrBlank()) {
+                        throw IOException("Groq web search returned an empty response body.")
+                    }
+
+                    instrumentation.emit(
+                        AgentEvents.llmRawResponse(
+                            actor = "ego",
+                            callSite = "web_search",
+                            actionType = "web_search",
+                            rawResponse = TextSecurity.clamp(rawBody, maxRawResponseChars)
+                        )
                     )
-                }
-                if (rawBody.isNullOrBlank()) {
-                    throw IOException("Groq web search returned an empty response body.")
-                }
 
+                    val root = mapper.readTree(rawBody)
+                    val usage = root.extractUsage()
+                    val assistantText = root.extractAssistantText()
+                    val result = resolveResult(
+                        assistantText = assistantText,
+                        root = root,
+                        maxResults = maxResults
+                    )
+                    observeCall(
+                        ChatCallRecord(
+                            model = root.path("model").asText().ifBlank { model },
+                            metadata = WEB_SEARCH_METADATA,
+                            latencyMs = elapsedMillis(startedAt),
+                            promptTokens = usage?.promptTokens,
+                            completionTokens = usage?.completionTokens,
+                            totalTokens = usage?.totalTokens,
+                            status = ChatCallStatus.OK
+                        )
+                    )
+                    return result
+                }
+            } catch (ex: Exception) {
+                lastError = ex
+                val shouldRetry = ex.isRetryableWebSearchFailure() && attempt < MAX_RETRY_ATTEMPTS
+                if (!shouldRetry) {
+                    break
+                }
                 instrumentation.emit(
-                    AgentEvents.llmRawResponse(
-                        actor = "ego",
-                        callSite = "web_search",
-                        actionType = "web_search",
-                        rawResponse = TextSecurity.clamp(rawBody, maxRawResponseChars)
+                    AgentEvents.warning(
+                        "Groq web search attempt $attempt/$MAX_RETRY_ATTEMPTS failed; retrying."
                     )
                 )
-
-                val root = mapper.readTree(rawBody)
-                val usage = root.extractUsage()
-                val assistantText = root.extractAssistantText()
-                val result = resolveResult(
-                    assistantText = assistantText,
-                    root = root,
-                    maxResults = maxResults
-                )
-                observeCall(
-                    ChatCallRecord(
-                        model = root.path("model").asText().ifBlank { model },
-                        metadata = WEB_SEARCH_METADATA,
-                        latencyMs = elapsedMillis(startedAt),
-                        promptTokens = usage?.promptTokens,
-                        completionTokens = usage?.completionTokens,
-                        totalTokens = usage?.totalTokens,
-                        status = ChatCallStatus.OK
-                    )
-                )
-                result
+                try {
+                    Thread.sleep(RETRY_BASE_DELAY_MS * attempt.toLong())
+                } catch (_: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                    break
+                }
             }
-        } catch (ex: Exception) {
-            observeCall(
-                ChatCallRecord(
-                    model = model,
-                    metadata = WEB_SEARCH_METADATA,
-                    latencyMs = elapsedMillis(startedAt),
-                    status = ChatCallStatus.ERROR,
-                    errorCode = ex.toErrorCode(),
-                    errorMessage = ex.toErrorMessage()
-                )
-            )
-            logger.warn(ex) { "Groq web search failed for query='${TextSecurity.preview(query, 100)}'." }
-            WebSearchResult(
-                summary = TextSecurity.clamp("Groq web search unavailable: ${ex.message ?: "request failed"}", 280),
-                snippets = emptyList(),
-                sources = emptyList()
-            )
         }
+
+        val failure = lastError ?: IOException("Groq web search failed with unknown error.")
+        observeCall(
+            ChatCallRecord(
+                model = model,
+                metadata = WEB_SEARCH_METADATA,
+                latencyMs = elapsedMillis(startedAt),
+                status = ChatCallStatus.ERROR,
+                errorCode = failure.toErrorCode(),
+                errorMessage = failure.toErrorMessage()
+            )
+        )
+        logger.warn(failure) { "Groq web search failed for query='${TextSecurity.preview(normalizedQuery, 100)}'." }
+        return WebSearchResult(
+            summary = TextSecurity.clamp("Groq web search unavailable: ${failure.message ?: "request failed"}", 280),
+            snippets = emptyList(),
+            sources = emptyList()
+        )
     }
 
     override fun close() {
@@ -147,6 +172,9 @@ class GroqConversationsWebSearchEngine(
               "sources":[{"title":"source title","url":"https://...","snippet":"optional source snippet"}]
             }
             Keep snippets factual and concise.
+            Prioritize primary sources (official vendor docs, official pricing pages, standards, research papers).
+            Avoid forums, social posts, link-aggregators, and SEO summaries unless primary sources are unavailable.
+            If only secondary/community sources are available, state that clearly in summary.
         """.trimIndent()
 
         val payload = mutableMapOf<String, Any>(
@@ -163,6 +191,7 @@ class GroqConversationsWebSearchEngine(
                 mapOf("type" to "browser_search")
             )
             payload["tool_choice"] = "required"
+            payload["reasoning_effort"] = "low"
         }
         return mapper.writeValueAsString(payload)
     }
@@ -265,6 +294,8 @@ class GroqConversationsWebSearchEngine(
 
     companion object {
         private const val DEFAULT_BASE_URL = "https://api.groq.com/openai/v1"
+        private const val MAX_RETRY_ATTEMPTS = 3
+        private const val RETRY_BASE_DELAY_MS = 150L
         private val WEB_SEARCH_METADATA = ChatCallMetadata(
             actor = "ego",
             callSite = "web_search",
@@ -275,8 +306,13 @@ class GroqConversationsWebSearchEngine(
 
         private fun defaultHttpClient(): OkHttpClient =
             OkHttpClient.Builder()
-                .callTimeout(Duration.ofSeconds(30))
+                .connectTimeout(Duration.ofSeconds(10))
+                .readTimeout(Duration.ofSeconds(45))
+                .writeTimeout(Duration.ofSeconds(45))
+                .callTimeout(Duration.ofSeconds(50))
                 .build()
+
+        private const val MAX_QUERY_CHARS = 320
 
         private fun elapsedMillis(startedAtNanos: Long): Long =
             max(1L, (System.nanoTime() - startedAtNanos) / 1_000_000L)
@@ -294,6 +330,14 @@ private fun Exception.toErrorCode(): String =
     when (this) {
         is GroqConversationsHttpException -> "HTTP_$statusCode"
         else -> this::class.simpleName ?: "error"
+    }
+
+private fun Exception.isRetryableWebSearchFailure(): Boolean =
+    when (this) {
+        is GroqConversationsHttpException -> statusCode == 429 || statusCode >= 500
+        is SocketTimeoutException -> true
+        is IOException -> true
+        else -> false
     }
 
 private fun Exception.toErrorMessage(): String {

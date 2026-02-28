@@ -3,6 +3,7 @@ package psyke.agent
 import psyke.agent.actions.websearch.WebSearchActionHandler
 import psyke.agent.actions.websearch.WebSearchEngine
 import psyke.agent.actions.websearch.WebSearchResult
+import psyke.agent.actions.websearch.WebSearchSource
 import psyke.support.RecordingInstrumentation
 import psyke.support.StubChatModelClient
 import java.io.ByteArrayInputStream
@@ -200,6 +201,124 @@ class EgoAgentTest {
     }
 
     @Test
+    fun `web search timeouts eventually return fallback answer instead of silent drop`() {
+        val plannerLlm = StubChatModelClient().apply {
+            enqueueRawResponse(
+                """
+                {"decision":"action","urgency":"medium","action_type":"web_search","action_payload":"latest pricing","action_summary":"search 1"}
+                """.trimIndent()
+            )
+            enqueueRawResponse(
+                """
+                {"decision":"action","urgency":"medium","action_type":"web_search","action_payload":"latest pricing retry","action_summary":"search 2"}
+                """.trimIndent()
+            )
+        }
+        val superegoLlm = StubChatModelClient().apply {
+            enqueueRawResponse("""{"allow":true}""")
+            enqueueRawResponse("""{"allow":true}""")
+        }
+        val instrumentation = RecordingInstrumentation()
+        val outputs = mutableListOf<String>()
+        val timingOutSearch = object : WebSearchEngine {
+            override fun search(query: String, maxResults: Int): WebSearchResult =
+                WebSearchResult(
+                    summary = "Groq web search unavailable: timeout",
+                    snippets = emptyList(),
+                    sources = emptyList()
+                )
+        }
+        val config = AgentConfig(
+            maxLoopStepsPerInput = 7,
+            maxThoughtPasses = 1
+        )
+        val agent = EgoAgent(
+            planner = EgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
+            superego = SuperegoGatekeeper(
+                modelClient = superegoLlm,
+                config = config,
+                instrumentation = instrumentation
+            ),
+            motorCortex = buildMotorCortex(
+                output = { outputs.add(it) },
+                webSearchEngine = timingOutSearch
+            ),
+            config = config,
+            instrumentation = instrumentation
+        )
+
+        runAgentWithInput(agent, "hello\nexit\n")
+
+        assertEquals(1, outputs.size)
+        assertTrue(outputs.first().contains("could not complete external verification", ignoreCase = true))
+        assertTrue(
+            instrumentation.events.any {
+                it.type == "queue_snapshot" && it.data["source"] == "fallback_explanation_enqueued"
+            }
+        )
+    }
+
+    @Test
+    fun `fallback answer uses gathered evidence when planner output remains non parseable`() {
+        val plannerLlm = StubChatModelClient().apply {
+            enqueueRawResponse(
+                """
+                {"decision":"action","urgency":"medium","action_type":"web_search","action_payload":"latest groq pricing","action_summary":"search pricing"}
+                """.trimIndent()
+            )
+            enqueueRawResponse("not-json")
+        }
+        val superegoLlm = StubChatModelClient().apply {
+            enqueueRawResponse("""{"allow":true}""")
+        }
+        val instrumentation = RecordingInstrumentation()
+        val outputs = mutableListOf<String>()
+        val successfulSearch = object : WebSearchEngine {
+            override fun search(query: String, maxResults: Int): WebSearchResult =
+                WebSearchResult(
+                    summary = "Groq official pricing page lists current model rates.",
+                    snippets = listOf("Use official pricing pages over community estimates."),
+                    sources = listOf(
+                        WebSearchSource(
+                            title = "Groq Pricing",
+                            url = "https://groq.com/pricing"
+                        )
+                    )
+                )
+        }
+        val config = AgentConfig(
+            maxLoopStepsPerInput = 7,
+            maxThoughtPasses = 1
+        )
+        val agent = EgoAgent(
+            planner = EgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
+            superego = SuperegoGatekeeper(
+                modelClient = superegoLlm,
+                config = config,
+                instrumentation = instrumentation
+            ),
+            motorCortex = buildMotorCortex(
+                output = { outputs.add(it) },
+                webSearchEngine = successfulSearch
+            ),
+            config = config,
+            instrumentation = instrumentation
+        )
+
+        runAgentWithInput(agent, "hello\nexit\n")
+
+        assertEquals(1, outputs.size)
+        assertTrue(outputs.first().contains("completed external verification", ignoreCase = true))
+        assertTrue(outputs.first().contains("web_search result:", ignoreCase = true))
+        assertFalse(outputs.first().contains("could not complete external verification", ignoreCase = true))
+        assertTrue(
+            instrumentation.events.any {
+                it.type == "queue_snapshot" && it.data["source"] == "fallback_explanation_enqueued"
+            }
+        )
+    }
+
+    @Test
     fun `agent keeps loop alive when action execution throws`() {
         val plannerLlm = StubChatModelClient().apply {
             enqueueRawResponse(
@@ -278,7 +397,7 @@ class EgoAgentTest {
         assertEquals(1, hippocampus.queries.size)
         assertTrue(hippocampus.queries.single().cue.contains("hello"))
         val prompt = plannerLlm.lastMessages.last().content
-        assertTrue(prompt.contains("Retrieved memory:"))
+        assertTrue(prompt.contains("Long-term memory recall:"))
         assertTrue(prompt.contains("prior preference: concise responses"))
         assertEquals(listOf("ego> ok"), outputs)
         assertTrue(
@@ -288,6 +407,98 @@ class EgoAgentTest {
                     it.data["hit_count"] == 1
             }
         )
+    }
+
+    @Test
+    fun `thought recall is skipped when planner does not request explicit query`() {
+        val plannerLlm = StubChatModelClient().apply {
+            enqueueRawResponse(
+                """
+                {"decision":"thought","urgency":"medium","thought":"consider options"}
+                """.trimIndent()
+            )
+            enqueueRawResponse(
+                """
+                {"decision":"action","urgency":"medium","action_type":"answer","action_payload":"ok","action_summary":"respond"}
+                """.trimIndent()
+            )
+        }
+        val superegoLlm = StubChatModelClient().apply {
+            enqueueRawResponse("""{"allow":true}""")
+        }
+        val instrumentation = RecordingInstrumentation()
+        val hippocampus = RecordingHippocampus(
+            recall = MemoryRecall(
+                provider = "test_memory",
+                text = "recall baseline",
+                hitCount = 1
+            )
+        )
+        var recallSkipped = 0
+        val agent = EgoAgent(
+            planner = EgoPlanner(modelClient = plannerLlm, config = AgentConfig(), instrumentation = instrumentation),
+            superego = SuperegoGatekeeper(
+                modelClient = superegoLlm,
+                config = AgentConfig(),
+                instrumentation = instrumentation
+            ),
+            motorCortex = buildMotorCortex(output = {}),
+            config = AgentConfig(maxLoopStepsPerInput = 6),
+            hippocampus = hippocampus,
+            onLongTermMemoryRecallSkipped = { recallSkipped += 1 },
+            instrumentation = instrumentation
+        )
+
+        runAgentWithInput(agent, "hello\nexit\n")
+
+        assertEquals(1, hippocampus.queries.size)
+        assertEquals(1, recallSkipped)
+        assertTrue(instrumentation.events.any { it.type == "long_term_memory_recall_skipped" })
+    }
+
+    @Test
+    fun `thought recall runs when planner requests explicit recall query`() {
+        val plannerLlm = StubChatModelClient().apply {
+            enqueueRawResponse(
+                """
+                {"decision":"thought","urgency":"medium","thought":"check memory","long_term_memory_recall_query":"project constraints and deadlines"}
+                """.trimIndent()
+            )
+            enqueueRawResponse(
+                """
+                {"decision":"action","urgency":"medium","action_type":"answer","action_payload":"ok","action_summary":"respond"}
+                """.trimIndent()
+            )
+        }
+        val superegoLlm = StubChatModelClient().apply {
+            enqueueRawResponse("""{"allow":true}""")
+        }
+        val instrumentation = RecordingInstrumentation()
+        val hippocampus = RecordingHippocampus(
+            recall = MemoryRecall(
+                provider = "test_memory",
+                text = "memory result",
+                hitCount = 1
+            )
+        )
+        val agent = EgoAgent(
+            planner = EgoPlanner(modelClient = plannerLlm, config = AgentConfig(), instrumentation = instrumentation),
+            superego = SuperegoGatekeeper(
+                modelClient = superegoLlm,
+                config = AgentConfig(),
+                instrumentation = instrumentation
+            ),
+            motorCortex = buildMotorCortex(output = {}),
+            config = AgentConfig(maxLoopStepsPerInput = 6),
+            hippocampus = hippocampus,
+            instrumentation = instrumentation
+        )
+
+        runAgentWithInput(agent, "hello\nexit\n")
+
+        assertEquals(2, hippocampus.queries.size)
+        assertTrue(hippocampus.queries.last().cue.contains("project constraints and deadlines"))
+        assertTrue(instrumentation.events.any { it.type == "long_term_memory_recall_requested" })
     }
 
     @Test
@@ -409,9 +620,9 @@ class EgoAgentTest {
         val hippocampus = RecordingHippocampus(
             recall = MemoryRecall(provider = "test_memory", text = "")
         )
-        val advisor = object : MemoryConsolidationAdvisor {
-            override fun assess(context: MemoryConsolidationContext): MemoryConsolidationDecision =
-                MemoryConsolidationDecision(
+        val advisor = object : LongTermMemoryAdvisor {
+            override fun assess(context: LongTermMemoryAssessmentContext): LongTermMemoryAssessmentDecision =
+                LongTermMemoryAssessmentDecision(
                     shouldSave = true,
                     summary = "User prefers concise answers for future interactions.",
                     confidence = 0.9,
@@ -421,8 +632,9 @@ class EgoAgentTest {
         }
         val config = AgentConfig(
             maxLoopStepsPerInput = 4,
-            memoryConsolidationEverySteps = 100,
-            memoryConsolidationMinConfidence = 0.6
+            longTermMemoryAssessEverySteps = 100,
+            longTermMemoryMinConfidence = 0.6,
+            longTermMemoryForceAssessOnAllowedAction = true
         )
         val agent = EgoAgent(
             planner = EgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
@@ -434,7 +646,7 @@ class EgoAgentTest {
             motorCortex = buildMotorCortex(output = { outputs.add(it) }),
             config = config,
             hippocampus = hippocampus,
-            memoryConsolidationAdvisor = advisor,
+            longTermMemoryAdvisor = advisor,
             instrumentation = instrumentation
         )
 
@@ -443,7 +655,7 @@ class EgoAgentTest {
         assertEquals(listOf("ego> ok"), outputs)
         assertEquals(1, hippocampus.imprints.size)
         assertTrue(hippocampus.imprints.single().summary.contains("prefers concise"))
-        assertTrue(instrumentation.events.any { it.type == "memory_consolidation_assessment" })
+        assertTrue(instrumentation.events.any { it.type == "long_term_memory_assessment" })
         assertTrue(
             instrumentation.events.any {
                 it.type == "memory_imprint_result" && it.data["saved"] == true
@@ -471,9 +683,9 @@ class EgoAgentTest {
                 hitCount = 2
             )
         )
-        val advisor = object : MemoryConsolidationAdvisor {
-            override fun assess(context: MemoryConsolidationContext): MemoryConsolidationDecision =
-                MemoryConsolidationDecision(
+        val advisor = object : LongTermMemoryAdvisor {
+            override fun assess(context: LongTermMemoryAssessmentContext): LongTermMemoryAssessmentDecision =
+                LongTermMemoryAssessmentDecision(
                     shouldSave = true,
                     summary = "User prefers concise answers.",
                     confidence = 0.95,
@@ -489,8 +701,9 @@ class EgoAgentTest {
         var lastImprintLatencyMs = -1L
         val config = AgentConfig(
             maxLoopStepsPerInput = 4,
-            memoryConsolidationEverySteps = 100,
-            memoryConsolidationMinConfidence = 0.5
+            longTermMemoryAssessEverySteps = 100,
+            longTermMemoryMinConfidence = 0.5,
+            longTermMemoryForceAssessOnAllowedAction = true
         )
         val agent = EgoAgent(
             planner = EgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
@@ -502,7 +715,7 @@ class EgoAgentTest {
             motorCortex = buildMotorCortex(output = {}),
             config = config,
             hippocampus = hippocampus,
-            memoryConsolidationAdvisor = advisor,
+            longTermMemoryAdvisor = advisor,
             onMemoryRecall = { hitCount, _, _, _ ->
                 recallSuccessCount += 1
                 lastRecallHitCount = hitCount
@@ -510,7 +723,7 @@ class EgoAgentTest {
             onMemoryRecallFailure = {
                 recallFailureCount += 1
             },
-            onMemoryConsolidationAssessment = {
+            onLongTermMemoryAssessment = {
                 consolidationCount += 1
             },
             onMemoryImprintResult = { saved, _, latencyMs ->
@@ -548,9 +761,9 @@ class EgoAgentTest {
         val hippocampus = RecordingHippocampus(
             recall = MemoryRecall(provider = "test_memory", text = "")
         )
-        val advisor = object : MemoryConsolidationAdvisor {
-            override fun assess(context: MemoryConsolidationContext): MemoryConsolidationDecision =
-                MemoryConsolidationDecision(
+        val advisor = object : LongTermMemoryAdvisor {
+            override fun assess(context: LongTermMemoryAssessmentContext): LongTermMemoryAssessmentDecision =
+                LongTermMemoryAssessmentDecision(
                     shouldSave = true,
                     summary = "should not save on denied action trigger",
                     confidence = 0.95,
@@ -559,7 +772,7 @@ class EgoAgentTest {
         }
         val config = AgentConfig(
             maxLoopStepsPerInput = 3,
-            memoryConsolidationEverySteps = 100
+            longTermMemoryAssessEverySteps = 100
         )
         val agent = EgoAgent(
             planner = EgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
@@ -571,7 +784,7 @@ class EgoAgentTest {
             motorCortex = buildMotorCortex(output = {}),
             config = config,
             hippocampus = hippocampus,
-            memoryConsolidationAdvisor = advisor,
+            longTermMemoryAdvisor = advisor,
             instrumentation = instrumentation
         )
 
@@ -580,9 +793,80 @@ class EgoAgentTest {
         assertTrue(hippocampus.imprints.isEmpty())
         assertFalse(
             instrumentation.events.any {
-                it.type == "memory_consolidation_assessment" &&
+                it.type == "long_term_memory_assessment" &&
                     it.data["trigger"] == "post_allowed_action"
             }
+        )
+    }
+
+    @Test
+    fun `long-term memory assessment parse fallback disables further assessments in run`() {
+        val plannerLlm = StubChatModelClient().apply {
+            enqueueRawResponse(
+                """
+                {"decision":"action","urgency":"medium","action_type":"answer","action_payload":"a1","action_summary":"s1"}
+                """.trimIndent()
+            )
+            enqueueRawResponse(
+                """
+                {"decision":"action","urgency":"medium","action_type":"answer","action_payload":"a2","action_summary":"s2"}
+                """.trimIndent()
+            )
+            enqueueRawResponse(
+                """
+                {"decision":"action","urgency":"medium","action_type":"answer","action_payload":"a3","action_summary":"s3"}
+                """.trimIndent()
+            )
+        }
+        val superegoLlm = StubChatModelClient().apply {
+            enqueueRawResponse("""{"allow":true}""")
+            enqueueRawResponse("""{"allow":true}""")
+            enqueueRawResponse("""{"allow":true}""")
+        }
+        val instrumentation = RecordingInstrumentation()
+        val advisor = object : LongTermMemoryAdvisor {
+            override fun assess(context: LongTermMemoryAssessmentContext): LongTermMemoryAssessmentDecision =
+                LongTermMemoryAssessmentDecision(
+                    shouldSave = false,
+                    summary = "",
+                    confidence = 0.0,
+                    reason = "parse fallback",
+                    parseFallback = true
+                )
+        }
+        val hippocampus = RecordingHippocampus(
+            recall = MemoryRecall(provider = "test_memory", text = "", hitCount = 0)
+        )
+        var parseFailureCount = 0
+        val config = AgentConfig(
+            maxLoopStepsPerInput = 6,
+            longTermMemoryForceAssessOnAllowedAction = true,
+            longTermMemoryParseFallbackDisableAfter = 2
+        )
+        val agent = EgoAgent(
+            planner = EgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
+            superego = SuperegoGatekeeper(
+                modelClient = superegoLlm,
+                config = config,
+                instrumentation = instrumentation
+            ),
+            motorCortex = buildMotorCortex(output = {}),
+            config = config,
+            hippocampus = hippocampus,
+            longTermMemoryAdvisor = advisor,
+            onLongTermMemoryAssessmentParseFailure = { parseFailureCount += 1 },
+            instrumentation = instrumentation
+        )
+
+        runAgentWithInput(agent, "one\ntwo\nthree\nexit\n")
+
+        assertEquals(2, parseFailureCount)
+        assertTrue(
+            instrumentation.events.count { it.type == "long_term_memory_assessment_parse_fallback" } >= 2
+        )
+        assertEquals(
+            1,
+            instrumentation.events.count { it.type == "long_term_memory_assessment_temporarily_disabled" }
         )
     }
 
@@ -596,12 +880,15 @@ class EgoAgentTest {
         }
     }
 
-    private fun buildMotorCortex(output: (String) -> Unit): MotorCortex {
+    private fun buildMotorCortex(
+        output: (String) -> Unit,
+        webSearchEngine: WebSearchEngine = object : WebSearchEngine {
+            override fun search(query: String, maxResults: Int): WebSearchResult =
+                WebSearchResult(summary = "unused", snippets = emptyList())
+        }
+    ): MotorCortex {
         val webSearchHandler = WebSearchActionHandler(
-            engine = object : WebSearchEngine {
-                override fun search(query: String, maxResults: Int): WebSearchResult =
-                    WebSearchResult(summary = "unused", snippets = emptyList())
-            }
+            engine = webSearchEngine
         )
         return MotorCortex(
             webSearchActionHandler = webSearchHandler,

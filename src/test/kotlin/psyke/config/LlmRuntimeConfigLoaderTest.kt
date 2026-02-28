@@ -20,6 +20,7 @@ class LlmRuntimeConfigLoaderTest {
         assertEquals("GROQ_API_KEY", resolved.apiKeyEnvVar)
         assertEquals("openai/gpt-oss-20b", resolved.egoModel)
         assertEquals("openai/gpt-oss-20b", resolved.superegoModel)
+        assertEquals("groq/compound-mini", resolved.webSearchModel)
     }
 
     @Test

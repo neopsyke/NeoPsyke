@@ -97,7 +97,7 @@ Eval mode (forwarded to app):
   --eval-stage ID                 Label this eval run for history comparison
   --eval-reasoning-max-attempts N Max retries per reasoning task (default: 4)
   --eval-reasoning-tasks id1,id2  Restrict reasoning eval to selected tasks
-  --eval-memory-max-attempts N    Max retries per memory consolidation task (default: 2)
+  --eval-memory-max-attempts N    Max retries per long-term memory assessment task (default: 2)
   --eval-memory-tasks id1,id2     Restrict memory eval to selected tasks
 EOF
       exit 0

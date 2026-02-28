@@ -6,7 +6,7 @@ import psyke.agent.EgoAgent
 import psyke.agent.EgoPlanner
 import psyke.agent.Hippocampus
 import psyke.agent.LlmMetaReasoner
-import psyke.agent.LlmMemoryConsolidationAdvisor
+import psyke.agent.LlmLongTermMemoryAdvisor
 import psyke.agent.McpHippocampus
 import psyke.agent.McpStdioClient
 import psyke.agent.MotorCortex
@@ -164,16 +164,16 @@ private fun runReasoningOnlyEval(
             null
         }
     }
-    val sinks = listOfNotNull(
-        ReasoningEvalFlowLogSink(),
-        sidecarSink
+    val sinks = listOf(
+        ReasoningEvalFlowLogSink()
     )
     val evalRawResponseCharLimit = System.getenv("PSYKE_EVAL_MAX_RAW_RESPONSE_CHARS")
         ?.toIntOrNull()
         ?.takeIf { it > 0 }
         ?: Int.MAX_VALUE
     InstrumentationBus(
-        sinks = sinks
+        sinks = sinks,
+        criticalSinks = listOfNotNull(sidecarSink)
     ).use { instrumentation ->
         val provider = if (cliOptions.evalReasoningMode == ReasoningEvalMode.LOGIC) {
             "logic-harness"
@@ -303,16 +303,16 @@ private fun runMemoryLiveEval(
             null
         }
     }
-    val sinks = listOfNotNull(
-        MemoryEvalFlowLogSink(),
-        sidecarSink
+    val sinks = listOf(
+        MemoryEvalFlowLogSink()
     )
     val evalRawResponseCharLimit = System.getenv("PSYKE_EVAL_MAX_RAW_RESPONSE_CHARS")
         ?.toIntOrNull()
         ?.takeIf { it > 0 }
         ?: Int.MAX_VALUE
     InstrumentationBus(
-        sinks = sinks
+        sinks = sinks,
+        criticalSinks = listOfNotNull(sidecarSink)
     ).use { instrumentation ->
         MetricsRuntimeFactory.create(
             provider = llm.providerLabel,
@@ -352,12 +352,12 @@ private fun runMemoryLiveEval(
                 McpHippocampus(
                     command = memoryCommand,
                     callTimeoutMs = config.mcpMemoryCallTimeoutMs,
-                    defaultMaxItems = config.memoryRecallMaxItems,
-                    defaultMaxChars = config.memoryRecallMaxChars
+                    defaultMaxItems = config.longTermMemoryRecallMaxItems,
+                    defaultMaxChars = config.longTermMemoryRecallMaxChars
                 ).use { hippocampus ->
                     val report = MemoryLiveEvalRunner(
                         client = client,
-                        memoryConsolidationAdvisor = LlmMemoryConsolidationAdvisor(
+                        longTermMemoryAdvisor = LlmLongTermMemoryAdvisor(
                             modelClient = client,
                             config = config
                         ),
@@ -486,11 +486,25 @@ private fun runInteractiveMode(
     val dashboardEnabled = (System.getenv("PSYKE_DASHBOARD_ENABLED") ?: "true").equals("true", ignoreCase = true)
 
     val dashboardStore = DashboardStateStore()
+    val sidecarPath = resolveEvalEventSidecarPath()
+    val sidecarSink = if (sidecarPath == null) {
+        null
+    } else {
+        try {
+            JsonlEventSink(sidecarPath).also {
+                logger.info { "Event sidecar enabled at $sidecarPath" }
+            }
+        } catch (ex: Exception) {
+            logger.warn(ex) { "Failed to initialize event sidecar at $sidecarPath; continuing without sidecar." }
+            null
+        }
+    }
     InstrumentationBus(
-        sinks = listOf(
+        sinks = listOfNotNull(
             StructuredLogSink(),
             dashboardStore
-        )
+        ),
+        criticalSinks = listOfNotNull(sidecarSink)
     ).use { instrumentation ->
         val dashboardServer = if (dashboardEnabled) {
             try {
@@ -525,26 +539,28 @@ private fun runInteractiveMode(
                             "max_pending_thoughts" to config.maxPendingThoughts,
                             "max_pending_actions" to config.maxPendingActions,
                             "max_input_chars" to config.maxInputChars,
-                            "max_memory_chars" to config.maxMemoryChars,
-                            "max_memory_prompt_tokens" to config.maxMemoryPromptTokens,
+                            "short_term_context_max_chars" to config.maxShortTermContextChars,
+                            "short_term_context_max_prompt_tokens" to config.maxShortTermContextPromptTokens,
                             "max_thought_chars" to config.maxThoughtChars,
                             "max_action_payload_chars" to config.maxActionPayloadChars,
                             "max_action_summary_chars" to config.maxActionSummaryChars,
                             "mcp_call_timeout_ms" to config.mcpCallTimeoutMs,
                             "mcp_fetch_max_chars" to config.mcpFetchMaxChars,
                             "mcp_memory_call_timeout_ms" to config.mcpMemoryCallTimeoutMs,
-                            "memory_recall_max_items" to config.memoryRecallMaxItems,
-                            "memory_recall_max_chars" to config.memoryRecallMaxChars,
+                            "long_term_memory_recall_max_items" to config.longTermMemoryRecallMaxItems,
+                            "long_term_memory_recall_max_chars" to config.longTermMemoryRecallMaxChars,
                             "pressure_assessment_min_step" to config.deliberationPressureAssessmentMinStep,
                             "pressure_assess_every_steps" to config.deliberationPressureAssessmentEverySteps,
                             "pressure_assess_threshold" to config.deliberationPressureAssessmentThreshold,
                             "meta_reasoner_cooldown_steps" to config.metaReasonerCooldownSteps,
                             "meta_reasoner_max_tokens" to config.metaReasonerMaxTokens,
-                            "memory_consolidation_every_steps" to config.memoryConsolidationEverySteps,
-                            "memory_consolidation_cooldown_steps" to config.memoryConsolidationCooldownSteps,
-                            "memory_consolidation_min_confidence" to config.memoryConsolidationMinConfidence,
-                            "memory_consolidation_max_tokens" to config.memoryConsolidationMaxTokens,
-                            "memory_consolidation_max_summary_chars" to config.memoryConsolidationMaxSummaryChars
+                            "long_term_memory_assess_every_steps" to config.longTermMemoryAssessEverySteps,
+                            "long_term_memory_assess_cooldown_steps" to config.longTermMemoryAssessCooldownSteps,
+                            "long_term_memory_min_confidence" to config.longTermMemoryMinConfidence,
+                            "long_term_memory_max_tokens" to config.longTermMemoryMaxTokens,
+                            "long_term_memory_max_summary_chars" to config.longTermMemoryMaxSummaryChars,
+                            "long_term_memory_force_assess_on_allowed_action" to config.longTermMemoryForceAssessOnAllowedAction,
+                            "long_term_memory_parse_fallback_disable_after" to config.longTermMemoryParseFallbackDisableAfter
                         )
                     )
                 )
@@ -622,7 +638,7 @@ private fun runInteractiveMode(
                                     callObserver = callObserver
                                 ),
                                 hooks = listOf(rawResponseHook)
-                            ).use { memoryConsolidationClient ->
+                            ).use { longTermMemoryClient ->
                                 logger.info {
                                     "Provider=${llm.providerLabel} Ego model=${llm.egoModel} Superego model=${llm.superegoModel} " +
                                         "Meta model=${llm.metaReasonerModel} Memory model=${llm.memoryConsolidationModel} " +
@@ -663,13 +679,44 @@ private fun runInteractiveMode(
                                                 )
                                             )
                                         }
-                                        val planner = EgoPlanner(egoPlannerClient, config, instrumentation)
+                                        var plannerNoopCount = 0
+                                        var plannerOutputRepairedCount = 0
+                                        var longTermMemoryAssessmentParseFailures = 0
+                                        val planner = EgoPlanner(
+                                            modelClient = egoPlannerClient,
+                                            config = config,
+                                            instrumentation = instrumentation,
+                                            onPlannerNoop = {
+                                                metrics.recordPlannerNoop()
+                                                plannerNoopCount += 1
+                                                if (plannerNoopCount == 3) {
+                                                    instrumentation.emit(
+                                                        AgentEvents.warning(
+                                                            "Anomaly threshold reached: noop_count >= 3."
+                                                        )
+                                                    )
+                                                }
+                                                emitMetricsSnapshot()
+                                            },
+                                            onPlannerOutputRepaired = {
+                                                metrics.recordPlannerOutputRepaired()
+                                                plannerOutputRepairedCount += 1
+                                                if (plannerOutputRepairedCount == 3) {
+                                                    instrumentation.emit(
+                                                        AgentEvents.warning(
+                                                            "Anomaly threshold reached: planner_output_repaired_count >= 3."
+                                                        )
+                                                    )
+                                                }
+                                                emitMetricsSnapshot()
+                                            }
+                                        )
                                         val metaReasoner = LlmMetaReasoner(
                                             modelClient = metaReasonerClient,
                                             config = config
                                         )
-                                        val memoryConsolidationAdvisor = LlmMemoryConsolidationAdvisor(
-                                            modelClient = memoryConsolidationClient,
+                                        val longTermMemoryAdvisor = LlmLongTermMemoryAdvisor(
+                                            modelClient = longTermMemoryClient,
                                             config = config
                                         )
                                         val hippocampus = createHippocampus(config, mcpRuntimeConfig.memory)
@@ -681,7 +728,7 @@ private fun runInteractiveMode(
                                                 config = config,
                                                 hippocampus = hippocampus,
                                                 metaReasoner = metaReasoner,
-                                                memoryConsolidationAdvisor = memoryConsolidationAdvisor,
+                                                longTermMemoryAdvisor = longTermMemoryAdvisor,
                                                 onActionDenied = {
                                                     metrics.recordDeniedAction()
                                                     emitMetricsSnapshot()
@@ -703,8 +750,24 @@ private fun runInteractiveMode(
                                                     metrics.recordMemoryRecallFailure(latencyMs)
                                                     emitMetricsSnapshot()
                                                 },
-                                                onMemoryConsolidationAssessment = { saveRecommended ->
-                                                    metrics.recordMemoryConsolidationAssessment(saveRecommended)
+                                                onLongTermMemoryRecallSkipped = {
+                                                    metrics.recordLongTermMemoryRecallSkipped()
+                                                    emitMetricsSnapshot()
+                                                },
+                                                onLongTermMemoryAssessment = { saveRecommended ->
+                                                    metrics.recordLongTermMemoryAssessment(saveRecommended)
+                                                    emitMetricsSnapshot()
+                                                },
+                                                onLongTermMemoryAssessmentParseFailure = {
+                                                    metrics.recordLongTermMemoryAssessmentParseFailure()
+                                                    longTermMemoryAssessmentParseFailures += 1
+                                                    if (longTermMemoryAssessmentParseFailures == 2) {
+                                                        instrumentation.emit(
+                                                            AgentEvents.warning(
+                                                                "Anomaly threshold reached: memory_consolidation_parse_failures >= 2."
+                                                            )
+                                                        )
+                                                    }
                                                     emitMetricsSnapshot()
                                                 },
                                                 onMemoryImprintResult = { saved, summaryChars, latencyMs ->
@@ -713,6 +776,10 @@ private fun runInteractiveMode(
                                                         summaryChars = summaryChars,
                                                         latencyMs = latencyMs
                                                     )
+                                                    emitMetricsSnapshot()
+                                                },
+                                                onEndToEndResponseLatency = { latencyMs ->
+                                                    metrics.recordEndToEndResponseLatency(latencyMs)
                                                     emitMetricsSnapshot()
                                                 },
                                                 instrumentation = instrumentation
@@ -850,8 +917,8 @@ private fun createHippocampus(config: AgentConfig, capability: McpCapabilityConf
     return McpHippocampus(
         command = command,
         callTimeoutMs = config.mcpMemoryCallTimeoutMs,
-        defaultMaxItems = config.memoryRecallMaxItems,
-        defaultMaxChars = config.memoryRecallMaxChars
+        defaultMaxItems = config.longTermMemoryRecallMaxItems,
+        defaultMaxChars = config.longTermMemoryRecallMaxChars
     )
 }
 
@@ -974,7 +1041,7 @@ private fun printAppHelp() {
           --eval-stage ID                 Label this eval run (default: UTC date, e.g. 2026-02-28)
           --eval-reasoning-max-attempts N Max retries per reasoning task (default: 4)
           --eval-reasoning-tasks id1,id2  Run only selected reasoning task ids
-          --eval-memory-max-attempts N    Max consolidation retries per memory task (default: 2)
+          --eval-memory-max-attempts N    Max long-term memory assessment retries per memory task (default: 2)
           --eval-memory-tasks id1,id2     Run only selected memory eval task ids
           -h, --help                      Show this help message
         """.trimIndent()

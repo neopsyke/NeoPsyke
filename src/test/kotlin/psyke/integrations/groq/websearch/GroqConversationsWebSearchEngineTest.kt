@@ -10,6 +10,7 @@ import psyke.llm.ChatCallObserver
 import psyke.llm.ChatCallRecord
 import psyke.llm.ChatCallStatus
 import psyke.support.RecordingInstrumentation
+import java.net.SocketTimeoutException
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
@@ -64,6 +65,7 @@ class GroqConversationsWebSearchEngineTest {
         assertTrue(capturedBody.contains("\"model\":\"openai/gpt-oss-20b\""))
         assertTrue(capturedBody.contains("\"tool_choice\":\"required\""))
         assertTrue(capturedBody.contains("\"type\":\"browser_search\""))
+        assertTrue(capturedBody.contains("\"reasoning_effort\":\"low\""))
         assertEquals("Found docs", result.summary)
         assertEquals(listOf("snippet one", "snippet two"), result.snippets)
         assertEquals(1, result.sources.size)
@@ -126,6 +128,7 @@ class GroqConversationsWebSearchEngineTest {
         assertTrue(capturedBody.contains("\"model\":\"groq/compound-mini\""))
         assertTrue(!capturedBody.contains("\"tool_choice\""))
         assertTrue(!capturedBody.contains("\"tools\""))
+        assertTrue(!capturedBody.contains("\"reasoning_effort\""))
         assertEquals(2, result.sources.size)
         assertEquals("https://kotlinlang.org/docs/home.html", result.sources[0].url)
         assertEquals("https://blog.jetbrains.com/kotlin/", result.sources[1].url)
@@ -196,5 +199,46 @@ class GroqConversationsWebSearchEngineTest {
         assertEquals(3, call.promptTokens)
         assertEquals(4, call.completionTokens)
         assertEquals(7, call.totalTokens)
+    }
+
+    @Test
+    fun `search retries timeout errors and succeeds on later attempt`() {
+        var attempts = 0
+        val observed = mutableListOf<ChatCallRecord>()
+        val httpClient = OkHttpClient.Builder()
+            .addInterceptor { chain ->
+                attempts += 1
+                if (attempts < 3) {
+                    throw SocketTimeoutException("timeout")
+                }
+                val responseBody = """
+                    {
+                      "model":"openai/gpt-oss-20b",
+                      "usage":{"prompt_tokens":5,"completion_tokens":6,"total_tokens":11},
+                      "choices":[{"message":{"role":"assistant","content":"{\"summary\":\"ok\",\"snippets\":[],\"sources\":[]}"}}]
+                    }
+                """.trimIndent()
+                Response.Builder()
+                    .request(chain.request())
+                    .protocol(Protocol.HTTP_1_1)
+                    .code(200)
+                    .message("OK")
+                    .body(responseBody.toResponseBody("application/json".toMediaType()))
+                    .build()
+            }
+            .build()
+        val engine = GroqConversationsWebSearchEngine(
+            apiKey = "test-key",
+            model = "openai/gpt-oss-20b",
+            httpClient = httpClient,
+            callObserver = ChatCallObserver { observed += it }
+        )
+
+        val result = engine.search("timeout then success", 2)
+
+        assertEquals(3, attempts)
+        assertEquals("ok", result.summary)
+        assertEquals(1, observed.size)
+        assertEquals(ChatCallStatus.OK, observed.single().status)
     }
 }

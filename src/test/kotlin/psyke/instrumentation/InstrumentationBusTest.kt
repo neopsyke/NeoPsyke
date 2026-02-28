@@ -45,4 +45,29 @@ class InstrumentationBusTest {
         }
         assertTrue(totalDropped > 0)
     }
+
+    @Test
+    fun `critical sinks receive all events even when async queue overflows`() {
+        val asyncSink = RecordingSink(expected = 1)
+        val criticalSink = RecordingSink()
+        var totalDropped = 0L
+        val totalEvents = 2_000
+
+        InstrumentationBus(
+            sinks = listOf(asyncSink),
+            criticalSinks = listOf(criticalSink),
+            queueCapacity = 1
+        ).use { bus ->
+            bus.setDroppedEventsObserver { _, total ->
+                totalDropped = total
+            }
+            repeat(totalEvents) { idx ->
+                bus.emit(AgentEvent(type = "evt-$idx"))
+            }
+            assertTrue(asyncSink.await())
+        }
+
+        assertTrue(totalDropped > 0)
+        assertEquals(totalEvents, synchronized(criticalSink.events) { criticalSink.events.size })
+    }
 }

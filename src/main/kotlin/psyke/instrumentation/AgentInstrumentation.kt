@@ -22,12 +22,14 @@ interface InstrumentationSink : Closeable {
 
 class InstrumentationBus(
     sinks: List<InstrumentationSink>,
+    criticalSinks: List<InstrumentationSink> = emptyList(),
     queueCapacity: Int = 2_048,
 ) : AgentInstrumentation, Closeable {
     private val queue = ArrayBlockingQueue<AgentEvent>(queueCapacity)
     private val nextEventId = AtomicLong(1)
     private val droppedEvents = AtomicLong(0)
     private val activeSinks = sinks.toList()
+    private val activeCriticalSinks = criticalSinks.toList()
     @Volatile
     private var droppedEventsObserver: ((delta: Long, total: Long) -> Unit)? = null
     @Volatile
@@ -41,6 +43,13 @@ class InstrumentationBus(
 
     override fun emit(event: AgentEvent) {
         val stampedEvent = if (event.id > 0) event else event.copy(id = nextEventId.getAndIncrement())
+        activeCriticalSinks.forEach { sink ->
+            try {
+                sink.onEvent(stampedEvent)
+            } catch (_: Exception) {
+                // keep instrumentation path robust
+            }
+        }
         if (queue.offer(stampedEvent)) {
             return
         }
@@ -69,7 +78,7 @@ class InstrumentationBus(
     override fun close() {
         running = false
         worker.join(1_500)
-        activeSinks.forEach { sink ->
+        (activeCriticalSinks + activeSinks).distinct().forEach { sink ->
             try {
                 sink.close()
             } catch (_: Exception) {

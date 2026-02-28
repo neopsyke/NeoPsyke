@@ -79,8 +79,8 @@ class LlmMetaReasoner(
                 "${turn.role.name.lowercase()}: ${TextSecurity.preview(turn.content, 140)}"
             }
             .ifBlank { "none" }
-        val memoryRecall = context.memoryRecall.ifBlank { "none" }
-        val memorySummary = context.memorySummary.ifBlank { "none" }
+        val longTermMemoryRecall = context.longTermMemoryRecall.ifBlank { "none" }
+        val shortTermContextSummary = context.shortTermContextSummary.ifBlank { "none" }
         val deliberation = context.deliberation
         return listOf(
             ChatMessage(
@@ -117,11 +117,11 @@ class LlmMetaReasoner(
                 pending_thoughts=${context.queue.pendingThoughtCount}
                 pending_actions=${context.queue.pendingActionCount}
 
-                Memory recall:
-                $memoryRecall
+                Long-term memory recall:
+                $longTermMemoryRecall
 
-                Memory summary:
-                $memorySummary
+                Short-term context summary:
+                $shortTermContextSummary
 
                 Recent dialogue:
                 $dialogue

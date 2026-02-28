@@ -61,7 +61,7 @@ Standalone Kotlin JVM app using Gradle with:
     - `LLM_SUPEREGO_MODEL` (default: Ego model)
     - `LLM_META_REASONER_MODEL` (default: Ego model)
     - `LLM_MEMORY_CONSOLIDATION_MODEL` (default: Ego model)
-    - `LLM_WEBSEARCH_MODEL` (default: Ego model)
+    - `LLM_WEBSEARCH_MODEL` (default: Groq=`groq/compound-mini`, Mistral=`mistral-small-latest`)
   - Provider-specific model override aliases:
     - Groq: `GROQ_EGO_MODEL`, `GROQ_SUPEREGO_MODEL`, `GROQ_META_REASONER_MODEL`, `GROQ_MEMORY_CONSOLIDATION_MODEL`, `GROQ_WEBSEARCH_MODEL`
     - Mistral: `MISTRAL_EGO_MODEL`, `MISTRAL_SUPEREGO_MODEL`, `MISTRAL_META_REASONER_MODEL`, `MISTRAL_MEMORY_CONSOLIDATION_MODEL`, `MISTRAL_WEBSEARCH_MODEL`
@@ -72,8 +72,8 @@ Standalone Kotlin JVM app using Gradle with:
   - `EGO_MAX_PROMPT_TOKENS` (default: `2400`)
   - `EGO_MAX_COMPLETION_TOKENS` (default: `900`)
   - `EGO_LOOP_DELAY_MS` (default app value: `0`)
-  - `EGO_MAX_MEMORY_CHARS` (default: `12000`)
-  - `EGO_MAX_MEMORY_PROMPT_TOKENS` (default: `256`)
+  - `EGO_SHORT_TERM_CONTEXT_MAX_CHARS` (default: `20000`)
+  - `EGO_SHORT_TERM_CONTEXT_MAX_PROMPT_TOKENS` (default: `384`)
   - `EGO_MAX_ACTION_PAYLOAD_CHARS` (default: `4000`)
   - `EGO_SEARCH_RESULT_COUNT` (default: `5`)
   - `MCP_TIME_SERVER_CMD` (optional env override for YAML time command)
@@ -86,18 +86,20 @@ Standalone Kotlin JVM app using Gradle with:
   - `MCP_CALL_TIMEOUT_MS` (default: `8000`)
   - `MCP_MEMORY_CALL_TIMEOUT_MS` (default: same as `MCP_CALL_TIMEOUT_MS`)
   - `MCP_FETCH_MAX_CHARS` (default: `4000`)
-  - `EGO_MEMORY_RECALL_MAX_ITEMS` (default: `4`)
-  - `EGO_MEMORY_RECALL_MAX_CHARS` (default: `1200`)
+  - `EGO_LONG_TERM_MEMORY_RECALL_MAX_ITEMS` (default: `4`)
+  - `EGO_LONG_TERM_MEMORY_RECALL_MAX_CHARS` (default: `1200`)
   - `EGO_PRESSURE_MIN_STEP` (default: `16`)
   - `EGO_PRESSURE_ASSESS_EVERY_STEPS` (default: `8`)
   - `EGO_PRESSURE_ASSESS_THRESHOLD` (default: `0.68`)
   - `EGO_META_REASONER_COOLDOWN_STEPS` (default: `6`)
   - `EGO_META_REASONER_MAX_TOKENS` (default: `120`)
-  - `EGO_MEMORY_CONSOLIDATION_EVERY_STEPS` (default: `8`)
-  - `EGO_MEMORY_CONSOLIDATION_COOLDOWN_STEPS` (default: `4`)
-  - `EGO_MEMORY_CONSOLIDATION_MIN_CONFIDENCE` (default: `0.65`)
-  - `EGO_MEMORY_CONSOLIDATION_MAX_TOKENS` (default: `180`)
-  - `EGO_MEMORY_CONSOLIDATION_MAX_SUMMARY_CHARS` (default: `320`)
+  - `EGO_LONG_TERM_MEMORY_ASSESS_EVERY_STEPS` (default: `16`)
+  - `EGO_LONG_TERM_MEMORY_ASSESS_COOLDOWN_STEPS` (default: `8`)
+  - `EGO_LONG_TERM_MEMORY_MIN_CONFIDENCE` (default: `0.65`)
+  - `EGO_LONG_TERM_MEMORY_MAX_TOKENS` (default: `180`)
+  - `EGO_LONG_TERM_MEMORY_MAX_SUMMARY_CHARS` (default: `320`)
+  - `EGO_LONG_TERM_MEMORY_FORCE_ASSESS_ON_ALLOWED_ACTION` (default: `false`)
+  - `EGO_LONG_TERM_MEMORY_PARSE_FALLBACK_DISABLE_AFTER` (default: `2`)
   - `PSYKE_EVAL_MAX_RAW_RESPONSE_CHARS` (reasoning eval raw-thought capture cap; default: unlimited)
 
 ## Run
@@ -167,7 +169,7 @@ Memory live eval options:
 Memory live eval output:
 - Per-run detailed JSON in `.psyke/evals/memory-live/runs/`.
 - Append-only trend history in `.psyke/evals/memory-live/history.jsonl`.
-- Uses real `LlmMemoryConsolidationAdvisor` + real `McpHippocampus` imprint/recall calls.
+- Uses real `LlmLongTermMemoryAdvisor` + real `McpHippocampus` imprint/recall calls.
 - Tags each saved item with a unique run session marker to reduce cross-run collision.
 - Main run log focuses on memory eval flow (`[eval.memory] ...`).
 

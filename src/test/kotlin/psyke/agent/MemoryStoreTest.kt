@@ -15,7 +15,7 @@ class MemoryStoreTest {
         val stats = store.stats()
         assertTrue(stats.totalChars <= 1_000)
         val summary = store.summaryForPrompt(maxTokens = 400)
-        assertTrue(summary.contains("Compressed memory:", ignoreCase = false))
+        assertTrue(summary.contains("Short-term context summary:", ignoreCase = false))
     }
 
     @Test

@@ -92,4 +92,42 @@ class SqliteMetricsRuntimeTest {
             Files.deleteIfExists(dbPath.resolveSibling("metrics.salt"))
         }
     }
+
+    @Test
+    fun `response latency median is computed for odd and even sample counts`() {
+        val dbPath = Files.createTempFile("psyke-metrics-latency-test", ".db")
+        val previous = System.getProperty("psyke.metrics.db")
+        System.setProperty("psyke.metrics.db", dbPath.toString())
+        try {
+            SqliteMetricsRuntime(
+                provider = "groq",
+                apiKey = "same-key",
+                egoModel = "g-ego",
+                superegoModel = "g-superego"
+            ).use { metrics ->
+                metrics.recordEndToEndResponseLatency(100)
+                metrics.recordEndToEndResponseLatency(300)
+                var snapshot = metrics.snapshot()
+                requireNotNull(snapshot)
+                assertEquals(2, snapshot.runTotals.responseLatencyCount)
+                assertEquals(400, snapshot.runTotals.responseLatencySumMs)
+                assertEquals(200.0, snapshot.runTotals.medianEndToEndResponseLatencyMs)
+
+                metrics.recordEndToEndResponseLatency(200)
+                snapshot = metrics.snapshot()
+                requireNotNull(snapshot)
+                assertEquals(3, snapshot.runTotals.responseLatencyCount)
+                assertEquals(600, snapshot.runTotals.responseLatencySumMs)
+                assertEquals(200.0, snapshot.runTotals.medianEndToEndResponseLatencyMs)
+            }
+        } finally {
+            if (previous == null) {
+                System.clearProperty("psyke.metrics.db")
+            } else {
+                System.setProperty("psyke.metrics.db", previous)
+            }
+            Files.deleteIfExists(dbPath)
+            Files.deleteIfExists(dbPath.resolveSibling("metrics.salt"))
+        }
+    }
 }

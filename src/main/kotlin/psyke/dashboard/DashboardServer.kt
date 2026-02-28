@@ -6,7 +6,9 @@ import mu.KotlinLogging
 import java.io.Closeable
 import java.net.InetSocketAddress
 import java.nio.charset.StandardCharsets
+import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 private val logger = KotlinLogging.logger {}
 
@@ -16,10 +18,11 @@ class DashboardServer(
     host: String = "127.0.0.1",
 ) : Closeable {
     private val server: HttpServer = HttpServer.create(InetSocketAddress(host, port), 0)
+    private val executor: ExecutorService = Executors.newCachedThreadPool()
     val url: String = "http://$host:$port/"
 
     init {
-        server.executor = Executors.newCachedThreadPool()
+        server.executor = executor
         server.createContext("/") { exchange ->
             if (exchange.requestURI.path != "/") {
                 respondText(exchange, 404, "Not found", "text/plain; charset=utf-8")
@@ -52,7 +55,16 @@ class DashboardServer(
     }
 
     override fun close() {
-        server.stop(0)
+        try {
+            server.stop(0)
+        } finally {
+            executor.shutdownNow()
+            try {
+                executor.awaitTermination(1, TimeUnit.SECONDS)
+            } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+            }
+        }
         logger.info { "Dashboard server stopped." }
     }
 

@@ -20,11 +20,11 @@ fun interface SensoryInputSource {
 class StdinSensoryInputSource(
     private val readLineFn: () -> String? = { readLine() },
     private val prompt: () -> Unit = { print("you> ") },
-) : SensoryInputSource {
+    ) : SensoryInputSource {
     override fun nextSignal(): SensorySignal {
         prompt()
         val rawInput = readLineFn() ?: return SensorySignal.SourceClosed(source = "stdin")
-        if (rawInput.equals("exit", ignoreCase = true)) {
+        if (rawInput.trim().equals("exit", ignoreCase = true)) {
             return SensorySignal.ExitRequested(source = "stdin")
         }
         if (rawInput.isBlank()) {

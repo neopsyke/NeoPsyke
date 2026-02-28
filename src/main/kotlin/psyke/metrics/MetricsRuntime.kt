@@ -18,12 +18,17 @@ private val logger = KotlinLogging.logger {}
 interface MetricsRuntime : Closeable {
     fun chatCallObserver(provider: String): ChatCallObserver?
     fun recordDeniedAction()
+    fun recordPlannerNoop()
+    fun recordPlannerOutputRepaired()
     fun recordDroppedEvents(count: Long = 1)
     fun recordQueueSaturation(queueType: String)
     fun recordMemoryRecall(hitCount: Int, latencyMs: Long, recallChars: Int, truncated: Boolean)
     fun recordMemoryRecallFailure(latencyMs: Long)
-    fun recordMemoryConsolidationAssessment(saveRecommended: Boolean)
+    fun recordLongTermMemoryRecallSkipped()
+    fun recordLongTermMemoryAssessment(saveRecommended: Boolean)
+    fun recordLongTermMemoryAssessmentParseFailure()
     fun recordMemoryImprint(saved: Boolean, summaryChars: Int, latencyMs: Long)
+    fun recordEndToEndResponseLatency(latencyMs: Long)
     fun snapshot(): MetricsSnapshot?
 
     override fun close() {}
@@ -32,12 +37,17 @@ interface MetricsRuntime : Closeable {
 class NoopMetricsRuntime : MetricsRuntime {
     override fun chatCallObserver(provider: String): ChatCallObserver? = null
     override fun recordDeniedAction() {}
+    override fun recordPlannerNoop() {}
+    override fun recordPlannerOutputRepaired() {}
     override fun recordDroppedEvents(count: Long) {}
     override fun recordQueueSaturation(queueType: String) {}
     override fun recordMemoryRecall(hitCount: Int, latencyMs: Long, recallChars: Int, truncated: Boolean) {}
     override fun recordMemoryRecallFailure(latencyMs: Long) {}
-    override fun recordMemoryConsolidationAssessment(saveRecommended: Boolean) {}
+    override fun recordLongTermMemoryRecallSkipped() {}
+    override fun recordLongTermMemoryAssessment(saveRecommended: Boolean) {}
+    override fun recordLongTermMemoryAssessmentParseFailure() {}
     override fun recordMemoryImprint(saved: Boolean, summaryChars: Int, latencyMs: Long) {}
+    override fun recordEndToEndResponseLatency(latencyMs: Long) {}
     override fun snapshot(): MetricsSnapshot? = null
 }
 
@@ -126,6 +136,26 @@ private class JsonlFallbackMetricsRuntime(
         )
     }
 
+    override fun recordPlannerNoop() {
+        appendLine(
+            mapOf(
+                "ts" to Instant.now().toString(),
+                "provider" to provider,
+                "event" to "planner_noop"
+            )
+        )
+    }
+
+    override fun recordPlannerOutputRepaired() {
+        appendLine(
+            mapOf(
+                "ts" to Instant.now().toString(),
+                "provider" to provider,
+                "event" to "planner_output_repaired"
+            )
+        )
+    }
+
     override fun recordDroppedEvents(count: Long) {
         appendLine(
             mapOf(
@@ -173,13 +203,33 @@ private class JsonlFallbackMetricsRuntime(
         )
     }
 
-    override fun recordMemoryConsolidationAssessment(saveRecommended: Boolean) {
+    override fun recordLongTermMemoryRecallSkipped() {
         appendLine(
             mapOf(
                 "ts" to Instant.now().toString(),
                 "provider" to provider,
-                "event" to "memory_consolidation_assessment",
+                "event" to "long_term_memory_recall_skipped"
+            )
+        )
+    }
+
+    override fun recordLongTermMemoryAssessment(saveRecommended: Boolean) {
+        appendLine(
+            mapOf(
+                "ts" to Instant.now().toString(),
+                "provider" to provider,
+                "event" to "long_term_memory_assessment",
                 "save_recommended" to saveRecommended
+            )
+        )
+    }
+
+    override fun recordLongTermMemoryAssessmentParseFailure() {
+        appendLine(
+            mapOf(
+                "ts" to Instant.now().toString(),
+                "provider" to provider,
+                "event" to "long_term_memory_assessment_parse_failure"
             )
         )
     }
@@ -192,6 +242,17 @@ private class JsonlFallbackMetricsRuntime(
                 "event" to "memory_imprint",
                 "saved" to saved,
                 "summary_chars" to summaryChars,
+                "latency_ms" to latencyMs
+            )
+        )
+    }
+
+    override fun recordEndToEndResponseLatency(latencyMs: Long) {
+        appendLine(
+            mapOf(
+                "ts" to Instant.now().toString(),
+                "provider" to provider,
+                "event" to "response_latency",
                 "latency_ms" to latencyMs
             )
         )
@@ -224,6 +285,8 @@ data class MetricsTotals(
     val totalTokens: Long,
     val deniedActions: Long,
     val errorCount: Long,
+    val plannerNoopCount: Long = 0,
+    val plannerOutputRepairedCount: Long = 0,
     val queueSaturationEvents: Long = 0,
     val droppedEvents: Long = 0,
     val memoryRecallAttempts: Long = 0,
@@ -234,11 +297,16 @@ data class MetricsTotals(
     val memoryRecallCharsTotal: Long = 0,
     val memoryConsolidationAssessments: Long = 0,
     val memoryConsolidationSaveRecommended: Long = 0,
+    val longTermMemoryRecallSkipped: Long = 0,
+    val memoryConsolidationParseFailures: Long = 0,
     val memoryImprintAttempts: Long = 0,
     val memoryImprintSaved: Long = 0,
     val memoryImprintFailures: Long = 0,
     val memoryImprintLatencyMsTotal: Long = 0,
     val memoryImprintCharsTotal: Long = 0,
+    val responseLatencyCount: Long = 0,
+    val responseLatencySumMs: Long = 0,
+    val medianEndToEndResponseLatencyMs: Double? = null,
 )
 
 data class MetricsSnapshot(

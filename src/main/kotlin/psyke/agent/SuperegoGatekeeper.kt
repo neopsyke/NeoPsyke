@@ -39,7 +39,8 @@ class SuperegoGatekeeper(
                     messages = messages,
                     options = ChatRequestOptions(
                         temperature = 0.0,
-                        maxTokens = 80,
+                        // Keep response budget independent from prompt/directive growth.
+                        maxTokens = MAX_RESPONSE_TOKENS,
                         metadata = ChatCallMetadata(
                             actor = "superego",
                             callSite = "action_review",
@@ -80,7 +81,7 @@ class SuperegoGatekeeper(
             val json = TextSecurity.extractJsonObject(raw)
             val payload = mapper.readValue<SuperegoResponse>(json)
             val allow = payload.allow == true
-            val reason = TextSecurity.clamp(payload.reason?.trim().orEmpty(), 180)
+            val reason = TextSecurity.clamp(payload.reason?.trim().orEmpty(), MAX_DENY_REASON_CHARS)
             GateDecision(
                 allow = allow,
                 reason = if (allow) "" else reason.ifBlank { "No reason supplied." }
@@ -100,7 +101,7 @@ class SuperegoGatekeeper(
     private fun buildMessages(action: PendingAction, context: SuperegoContext): List<ChatMessage> {
         val directivesBlock = directives.joinToString(separator = "\n") { "- $it" }
         val lastUserTurn = context.recentDialogue.lastOrNull { it.role == DialogueRole.USER }?.content ?: "none"
-        val memorySummary = context.memorySummary.ifBlank { "none" }
+        val shortTermContextSummary = context.shortTermContextSummary.ifBlank { "none" }
         return PromptBudgetAllocator.allocate(
             sections = listOf(
                 PromptBudgetAllocator.Section(
@@ -124,7 +125,7 @@ class SuperegoGatekeeper(
 
                         JSON schema:
                         - If allowed: {"allow": true}
-                        - If denied: {"allow": false, "reason":"<=180 chars"}
+                        - If denied: {"allow": false, "reason":"<=${MAX_DENY_REASON_CHARS} chars"}
                         Keep output minimal JSON only.
                     """.trimIndent()
                 ),
@@ -156,8 +157,8 @@ class SuperegoGatekeeper(
                     priority = PromptBudgetAllocator.Priority.IMPORTANT,
                     minTokens = 12,
                     content = """
-                        Memory summary:
-                        $memorySummary
+                        Short-term context summary:
+                        $shortTermContextSummary
                     """.trimIndent()
                 )
             ),
@@ -171,6 +172,9 @@ class SuperegoGatekeeper(
     )
 
     companion object {
+        private const val MAX_DENY_REASON_CHARS: Int = 180
+        private const val MAX_RESPONSE_TOKENS: Int = 192
+
         val DEFAULT_DIRECTIVES: List<String> = listOf(
             "Allow ANSWER by default unless the content would materially facilitate harm, fraud, unauthorized access, or disclosure of sensitive data.",
             "For WEB_SEARCH and MCP_FETCH, deny actions that include or seek credentials, API keys, tokens, cookies, private keys, or other secrets.",

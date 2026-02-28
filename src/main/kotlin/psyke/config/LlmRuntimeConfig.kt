@@ -61,6 +61,7 @@ private data class ProviderDefaults(
     val baseUrl: String,
     val apiKeyEnvVar: String,
     val defaultModel: String,
+    val defaultWebSearchModel: String,
 )
 
 object LlmRuntimeConfigLoader {
@@ -132,8 +133,9 @@ object LlmRuntimeConfigLoader {
             env["LLM_WEBSEARCH_MODEL"],
             env["${providerPrefix}_WEBSEARCH_MODEL"],
             yaml.models.webSearch,
+            defaults.defaultWebSearchModel,
             egoModel
-        ) ?: egoModel
+        ) ?: defaults.defaultWebSearchModel
 
         return LlmRuntimeConfig(
             provider = provider,
@@ -170,13 +172,15 @@ object LlmRuntimeConfigLoader {
             LlmProvider.GROQ -> ProviderDefaults(
                 baseUrl = "https://api.groq.com/openai/v1",
                 apiKeyEnvVar = "GROQ_API_KEY",
-                defaultModel = GroqChatClient.DEFAULT_MODEL
+                defaultModel = GroqChatClient.DEFAULT_MODEL,
+                defaultWebSearchModel = "groq/compound-mini"
             )
 
             LlmProvider.MISTRAL -> ProviderDefaults(
                 baseUrl = "https://api.mistral.ai/v1",
                 apiKeyEnvVar = "MISTRAL_API_KEY",
-                defaultModel = MistralChatClient.DEFAULT_MODEL
+                defaultModel = MistralChatClient.DEFAULT_MODEL,
+                defaultWebSearchModel = MistralChatClient.DEFAULT_MODEL
             )
         }
 

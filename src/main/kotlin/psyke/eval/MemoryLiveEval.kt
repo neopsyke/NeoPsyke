@@ -8,9 +8,9 @@ import psyke.agent.DeliberationState
 import psyke.agent.DialogueRole
 import psyke.agent.DialogueTurn
 import psyke.agent.Hippocampus
-import psyke.agent.MemoryConsolidationAdvisor
-import psyke.agent.MemoryConsolidationContext
-import psyke.agent.MemoryConsolidationDecision
+import psyke.agent.LongTermMemoryAdvisor
+import psyke.agent.LongTermMemoryAssessmentContext
+import psyke.agent.LongTermMemoryAssessmentDecision
 import psyke.agent.MemoryImprint
 import psyke.agent.MemoryRecallQuery
 import psyke.agent.TextSecurity
@@ -37,6 +37,8 @@ data class MemoryLiveEvalOptions(
     val taskFilter: Set<String> = emptySet(),
     val maxConsolidationAttempts: Int = 2,
     val sessionTag: String = defaultMemoryEvalSessionTag(),
+    val purgeEvalMemoriesBeforeRun: Boolean = true,
+    val purgeEvalMemoriesAfterRun: Boolean = true,
 )
 
 data class MemoryLiveEvalTask(
@@ -61,6 +63,9 @@ data class MemoryLiveEvalTaskResult(
     val judgePass: Boolean,
     val judgeScore: Double,
     val judgeReason: String,
+    val failureReason: String? = null,
+    val imprintError: String? = null,
+    val judgeParseError: String? = null,
     val savedSummary: String,
     val recallPreview: String,
     val modelCalls: Int,
@@ -92,17 +97,31 @@ data class MemoryLiveEvalReport(
 
 class MemoryLiveEvalRunner(
     private val client: UsageTrackingChatClient,
-    private val memoryConsolidationAdvisor: MemoryConsolidationAdvisor,
+    private val longTermMemoryAdvisor: LongTermMemoryAdvisor,
     private val hippocampus: Hippocampus,
     private val tasks: List<MemoryLiveEvalTask> = MemoryLiveEvalTasks.defaults(),
     private val instrumentation: AgentInstrumentation = NoopAgentInstrumentation,
 ) {
     fun run(options: MemoryLiveEvalOptions = MemoryLiveEvalOptions()): MemoryLiveEvalReport {
         require(hippocampus.enabled) { "Memory live eval requires an enabled Hippocampus provider." }
-        require(memoryConsolidationAdvisor.enabled) { "Memory live eval requires an enabled MemoryConsolidationAdvisor." }
+        require(longTermMemoryAdvisor.enabled) { "Memory live eval requires an enabled LongTermMemoryAdvisor." }
 
         val selectedTasks = selectTasks(options.taskFilter)
         require(selectedTasks.isNotEmpty()) { "No memory live eval tasks selected." }
+        if (options.purgeEvalMemoriesBeforeRun) {
+            val deleted = purgeEvalMemories("before_run")
+            instrumentation.emit(
+                AgentEvent(
+                    type = "eval_memory_cleanup",
+                    data = mapOf(
+                        "eval_type" to "memory_live",
+                        "mode" to "live",
+                        "phase" to "before_run",
+                        "deleted_observations" to deleted
+                    )
+                )
+            )
+        }
         instrumentation.emit(
             AgentEvent(
                 type = "eval_run_start",
@@ -173,6 +192,20 @@ class MemoryLiveEvalRunner(
                 )
             )
         )
+        if (options.purgeEvalMemoriesAfterRun) {
+            val deleted = purgeEvalMemories("after_run")
+            instrumentation.emit(
+                AgentEvent(
+                    type = "eval_memory_cleanup",
+                    data = mapOf(
+                        "eval_type" to "memory_live",
+                        "mode" to "live",
+                        "phase" to "after_run",
+                        "deleted_observations" to deleted
+                    )
+                )
+            )
+        }
         return report
     }
 
@@ -186,7 +219,8 @@ class MemoryLiveEvalRunner(
         val startedAt = System.nanoTime()
         var attemptsUsed = 0
         var runtimeError: String? = null
-        var decision = MemoryConsolidationDecision(
+        var imprintError: String? = null
+        var decision = LongTermMemoryAssessmentDecision(
             shouldSave = false,
             summary = "",
             confidence = 0.0,
@@ -211,7 +245,7 @@ class MemoryLiveEvalRunner(
             )
             val context = buildConsolidationContext(task, options.sessionTag, attempt)
             decision = try {
-                memoryConsolidationAdvisor.assess(context)
+                longTermMemoryAdvisor.assess(context)
             } catch (ex: Exception) {
                 runtimeError = ex.message ?: ex::class.simpleName ?: "memory_eval_consolidation_error"
                 instrumentation.emit(
@@ -249,7 +283,14 @@ class MemoryLiveEvalRunner(
         }
 
         if (runtimeError != null) {
-            return buildFailureResult(task, usageBefore, startedAt, attemptsUsed, runtimeError)
+            return buildFailureResult(
+                task = task,
+                usageBefore = usageBefore,
+                startedAtNanos = startedAt,
+                attemptsUsed = attemptsUsed,
+                runtimeError = runtimeError,
+                failureReason = "consolidation_runtime_error"
+            )
         }
         if (!decision.shouldSave || decision.summary.isBlank()) {
             return buildFailureResult(
@@ -257,7 +298,8 @@ class MemoryLiveEvalRunner(
                 usageBefore = usageBefore,
                 startedAtNanos = startedAt,
                 attemptsUsed = attemptsUsed,
-                runtimeError = "consolidation_did_not_save"
+                runtimeError = "consolidation_did_not_save",
+                failureReason = "consolidation_did_not_save"
             )
         }
 
@@ -269,14 +311,33 @@ class MemoryLiveEvalRunner(
                     summary = taggedSummary,
                     source = "memory_eval_live",
                     confidence = decision.confidence,
-                    tags = task.tags + listOf("memory_eval_live", task.id, options.sessionTag)
+                    tags = task.tags + listOf("memory_eval_live", "memory_eval_live_ephemeral", task.id, options.sessionTag)
                 )
             )
         } catch (ex: Exception) {
-            runtimeError = ex.message ?: ex::class.simpleName ?: "memory_eval_imprint_error"
+            imprintError = ex.message ?: ex::class.simpleName ?: "memory_eval_imprint_error"
+            runtimeError = runtimeError ?: imprintError
             false
         }
+        if (!saved && imprintError == null) {
+            imprintError = "imprint_returned_false"
+        }
         val imprintLatencyMs = elapsedMillis(imprintStartedAt)
+        instrumentation.emit(
+            AgentEvent(
+                type = "eval_memory_imprint",
+                data = mapOf(
+                    "eval_type" to "memory_live",
+                    "mode" to "live",
+                    "task_id" to task.id,
+                    "saved" to saved,
+                    "latency_ms" to imprintLatencyMs,
+                    "confidence" to decision.confidence,
+                    "summary_preview" to TextSecurity.preview(taggedSummary, 180),
+                    "imprint_error" to imprintError
+                )
+            )
+        )
 
         val recall = try {
             val cue = buildRecallCue(task, options.sessionTag)
@@ -286,7 +347,7 @@ class MemoryLiveEvalRunner(
                     recentDialogue = listOf(
                         DialogueTurn(DialogueRole.USER, task.recallCue)
                     ),
-                    memorySummary = "",
+                    shortTermContextSummary = "",
                     maxItems = 4,
                     maxChars = 1_600
                 )
@@ -295,21 +356,78 @@ class MemoryLiveEvalRunner(
             runtimeError = runtimeError ?: (ex.message ?: ex::class.simpleName ?: "memory_eval_recall_error")
             null
         }
-
-        val judge = if (recall == null) {
-            JudgeResult(
-                pass = false,
-                score = 0.0,
-                reason = "recall_failed"
+        val recallText = recall?.text.orEmpty()
+        val recallHitCount = recall?.hitCount ?: 0
+        val recallMeaningful = recallHitCount > 0 && recallText.isNotBlank()
+        instrumentation.emit(
+            AgentEvent(
+                type = "eval_memory_recall",
+                data = mapOf(
+                    "eval_type" to "memory_live",
+                    "mode" to "live",
+                    "task_id" to task.id,
+                    "provider" to (recall?.provider ?: "unknown"),
+                    "hit_count" to recallHitCount,
+                    "chars" to recallText.length,
+                    "meaningful" to recallMeaningful,
+                    "preview" to TextSecurity.preview(recallText, 180)
+                )
             )
-        } else {
-            judgeRecall(task, sessionTag = options.sessionTag, retrievedText = recall.text)
+        )
+
+        val judge = when {
+            !saved -> {
+                JudgeResult(
+                    pass = false,
+                    score = 0.0,
+                    reason = "not_judged_imprint_failed"
+                )
+            }
+
+            recall == null -> {
+                JudgeResult(
+                    pass = false,
+                    score = 0.0,
+                    reason = "recall_failed"
+                )
+            }
+
+            !recallMeaningful -> {
+                JudgeResult(
+                    pass = false,
+                    score = 0.0,
+                    reason = "recall_empty"
+                )
+            }
+
+            else -> {
+                val lexical = fallbackJudge(task, options.sessionTag, recallText)
+                if (lexical.pass) {
+                    JudgeResult(
+                        pass = true,
+                        score = 0.9,
+                        reason = "lexical_fast_path",
+                        usedFallback = true,
+                        fallbackReason = lexical.reason
+                    )
+                } else {
+                    judgeRecall(task, sessionTag = options.sessionTag, retrievedText = recallText)
+                }
+            }
         }
 
         val durationMs = elapsedMillis(startedAt)
         val usageAfter = client.snapshot()
         val usage = usageAfter - usageBefore
-        val passed = saved && recall != null && judge.pass && recall.hitCount > 0
+        val passed = saved && recallMeaningful && judge.pass && judge.parseError == null
+        val failureReason = when {
+            passed -> null
+            !saved -> "imprint_failed"
+            recall == null -> "recall_failed"
+            !recallMeaningful -> "recall_empty"
+            judge.parseError != null -> "judge_parse_error"
+            else -> "judge_rejected"
+        }
         instrumentation.emit(
             AgentEvent(
                 type = "eval_task_result",
@@ -324,16 +442,23 @@ class MemoryLiveEvalRunner(
                     "saved" to saved,
                     "save_confidence" to decision.confidence,
                     "imprint_latency_ms" to imprintLatencyMs,
-                    "recall_hit_count" to (recall?.hitCount ?: 0),
+                    "recall_hit_count" to recallHitCount,
                     "judge_pass" to judge.pass,
                     "judge_score" to judge.score,
                     "judge_reason" to judge.reason,
+                    "failure_reason" to failureReason,
+                    "imprint_error" to imprintError,
+                    "judge_parse_error" to judge.parseError,
+                    "judge_raw_preview" to judge.rawPreview,
+                    "judge_fallback_reason" to judge.fallbackReason,
                     "model_calls" to usage.calls,
                     "prompt_tokens" to usage.promptTokens,
                     "completion_tokens" to usage.completionTokens,
                     "total_tokens" to usage.totalTokens,
                     "call_errors" to usage.callErrors,
-                    "runtime_error" to runtimeError
+                    "runtime_error" to runtimeError,
+                    "saved_summary_preview" to TextSecurity.preview(taggedSummary, 180),
+                    "recall_preview" to TextSecurity.preview(recallText, 180)
                 )
             )
         )
@@ -345,13 +470,16 @@ class MemoryLiveEvalRunner(
             durationMs = durationMs,
             saved = saved,
             saveConfidence = decision.confidence,
-            recallHitCount = recall?.hitCount ?: 0,
-            recallChars = recall?.text?.length ?: 0,
+            recallHitCount = recallHitCount,
+            recallChars = recallText.length,
             judgePass = judge.pass,
             judgeScore = judge.score,
             judgeReason = judge.reason,
+            failureReason = failureReason,
+            imprintError = imprintError,
+            judgeParseError = judge.parseError,
             savedSummary = TextSecurity.clamp(taggedSummary, 360),
-            recallPreview = TextSecurity.preview(recall?.text ?: "", 360),
+            recallPreview = TextSecurity.preview(recallText, 360),
             modelCalls = usage.calls,
             promptTokens = usage.promptTokens,
             completionTokens = usage.completionTokens,
@@ -367,6 +495,7 @@ class MemoryLiveEvalRunner(
         startedAtNanos: Long,
         attemptsUsed: Int,
         runtimeError: String?,
+        failureReason: String,
     ): MemoryLiveEvalTaskResult {
         val durationMs = elapsedMillis(startedAtNanos)
         val usageAfter = client.snapshot()
@@ -389,6 +518,7 @@ class MemoryLiveEvalRunner(
                     "judge_pass" to false,
                     "judge_score" to 0.0,
                     "judge_reason" to "not_judged",
+                    "failure_reason" to failureReason,
                     "model_calls" to usage.calls,
                     "prompt_tokens" to usage.promptTokens,
                     "completion_tokens" to usage.completionTokens,
@@ -411,6 +541,7 @@ class MemoryLiveEvalRunner(
             judgePass = false,
             judgeScore = 0.0,
             judgeReason = "not_judged",
+            failureReason = failureReason,
             savedSummary = "",
             recallPreview = "",
             modelCalls = usage.calls,
@@ -426,9 +557,9 @@ class MemoryLiveEvalRunner(
         task: MemoryLiveEvalTask,
         sessionTag: String,
         attempt: Int,
-    ): MemoryConsolidationContext {
+    ): LongTermMemoryAssessmentContext {
         val marker = "memory_eval_session=$sessionTag task=${task.id} attempt=$attempt"
-        return MemoryConsolidationContext(
+        return LongTermMemoryAssessmentContext(
             trigger = "memory_eval_live:${task.id}:attempt=$attempt",
             deliberation = DeliberationState(
                 stepIndex = 8,
@@ -450,22 +581,14 @@ class MemoryLiveEvalRunner(
                     content = "Acknowledged. I will retain this for future context."
                 )
             ),
-            memorySummary = "",
-            memoryRecall = "",
+            shortTermContextSummary = "",
+            longTermMemoryRecall = "",
             metaGuidance = "Prefer storing durable user/project memory for future recall."
         )
     }
 
     private fun buildRecallCue(task: MemoryLiveEvalTask, sessionTag: String): String =
-        buildString {
-            append(task.recallCue.trim())
-            append('\n')
-            append("memory_eval_session=")
-            append(sessionTag)
-            append('\n')
-            append("task_id=")
-            append(task.id)
-        }
+        "memory-eval:$sessionTag:${task.id}"
 
     private fun judgeRecall(
         task: MemoryLiveEvalTask,
@@ -495,28 +618,67 @@ class MemoryLiveEvalRunner(
                 """.trimIndent()
             )
         )
-        return try {
-            val raw = client.chat(
-                messages = messages,
-                options = ChatRequestOptions(
-                    temperature = 0.0,
-                    maxTokens = 120,
-                    metadata = ChatCallMetadata(
-                        actor = "memory_eval",
-                        callSite = "${task.id}:judge"
+        var lastParseError: String? = null
+        var lastRawPreview: String? = null
+        for (attempt in 1..2) {
+            var raw = ""
+            try {
+                raw = client.chat(
+                    messages = messages,
+                    options = ChatRequestOptions(
+                        temperature = 0.0,
+                        maxTokens = 220,
+                        metadata = ChatCallMetadata(
+                            actor = "memory_eval",
+                            callSite = "${task.id}:judge:attempt=$attempt"
+                        )
+                    )
+                ).content
+                return parseStrictJudgeResult(raw)
+            } catch (ex: Exception) {
+                lastParseError = ex.message ?: ex::class.simpleName ?: "judge_parse_error"
+                lastRawPreview = TextSecurity.preview(raw, 180).ifBlank { "<empty>" }
+                instrumentation.emit(
+                    AgentEvent(
+                        type = "eval_memory_judge_parse_error",
+                        data = mapOf(
+                            "eval_type" to "memory_live",
+                            "mode" to "live",
+                            "task_id" to task.id,
+                            "attempt" to attempt,
+                            "error" to lastParseError,
+                            "raw_preview" to lastRawPreview
+                        )
                     )
                 )
-            ).content
-            val json = TextSecurity.extractJsonObject(raw)
-            val parsed = memoryEvalMapper.readValue<JudgePayload>(json)
-            JudgeResult(
-                pass = parsed.pass == true,
-                score = parsed.score?.coerceIn(0.0, 1.0) ?: 0.0,
-                reason = TextSecurity.clamp(parsed.reason?.trim().orEmpty().ifBlank { "no_reason" }, 140)
-            )
-        } catch (_: Exception) {
-            fallbackJudge(task, sessionTag, retrievedText)
+            }
         }
+        val fallback = fallbackJudge(task, sessionTag, retrievedText)
+        return JudgeResult(
+            pass = fallback.pass,
+            score = fallback.score,
+            reason = "judge_parse_error",
+            parseError = lastParseError ?: "judge_parse_error",
+            rawPreview = lastRawPreview,
+            usedFallback = true,
+            fallbackReason = fallback.reason
+        )
+    }
+
+    private fun parseStrictJudgeResult(raw: String): JudgeResult {
+        val json = TextSecurity.extractJsonObject(raw)
+        val parsed = memoryEvalMapper.readValue<JudgePayload>(json)
+        val pass = parsed.pass ?: throw IllegalArgumentException("judge payload missing pass")
+        val score = parsed.score ?: throw IllegalArgumentException("judge payload missing score")
+        val reason = parsed.reason?.trim().orEmpty()
+        if (reason.isBlank()) {
+            throw IllegalArgumentException("judge payload missing reason")
+        }
+        return JudgeResult(
+            pass = pass,
+            score = score.coerceIn(0.0, 1.0),
+            reason = TextSecurity.clamp(reason, 140)
+        )
     }
 
     private fun fallbackJudge(
@@ -534,13 +696,17 @@ class MemoryLiveEvalRunner(
             JudgeResult(
                 pass = true,
                 score = 0.8,
-                reason = "fallback lexical match"
+                reason = "fallback lexical match",
+                usedFallback = true,
+                fallbackReason = "fallback lexical match"
             )
         } else {
             JudgeResult(
                 pass = false,
                 score = 0.2,
-                reason = "fallback lexical mismatch"
+                reason = "fallback lexical mismatch",
+                usedFallback = true,
+                fallbackReason = "fallback lexical mismatch"
             )
         }
     }
@@ -554,6 +720,22 @@ class MemoryLiveEvalRunner(
         return selected
     }
 
+    private fun purgeEvalMemories(phase: String): Int {
+        return try {
+            hippocampus.purgeTaggedObservations(EVAL_MEMORY_TAG_MARKERS)
+        } catch (ex: Exception) {
+            instrumentation.emit(
+                AgentEvent(
+                    type = "warning",
+                    data = mapOf(
+                        "message" to "[EVAL:memory_live] cleanup failed in $phase: ${ex.message ?: ex::class.simpleName ?: "unknown"}"
+                    )
+                )
+            )
+            0
+        }
+    }
+
     private data class JudgePayload(
         val pass: Boolean? = null,
         val score: Double? = null,
@@ -564,8 +746,18 @@ class MemoryLiveEvalRunner(
         val pass: Boolean,
         val score: Double,
         val reason: String,
+        val parseError: String? = null,
+        val rawPreview: String? = null,
+        val usedFallback: Boolean = false,
+        val fallbackReason: String? = null,
     )
 }
+
+private val EVAL_MEMORY_TAG_MARKERS = listOf(
+    "[memory-eval:",
+    "memory_eval_live_ephemeral",
+    "source=memory_eval_live"
+)
 
 object MemoryLiveEvalTasks {
     fun defaults(): List<MemoryLiveEvalTask> = listOf(
@@ -609,6 +801,7 @@ object MemoryLiveEvalReporter {
             if (task.runtimeError != null) {
                 lines += "  runtime_error: ${task.runtimeError}"
             } else if (!task.passed) {
+                lines += "  failure_reason: ${task.failureReason}"
                 lines += "  judge_reason: ${task.judgeReason}"
             }
         }

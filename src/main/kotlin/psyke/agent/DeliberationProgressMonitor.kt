@@ -31,6 +31,7 @@ class DeliberationProgressMonitor(
         var progressScore = state.progressScore
         var repeatHits = state.repeatSignatureHits
         var noopStreak = state.noopStreak
+        var modelErrorStreak = state.modelErrorStreak
 
         val signature = decisionSignature(decision)
         if (isRepeatedSignature(signature)) {
@@ -44,18 +45,22 @@ class DeliberationProgressMonitor(
                 staleStreak = max(0, staleStreak - 1)
                 progressScore += 0.07
                 noopStreak = 0
+                modelErrorStreak = max(0, modelErrorStreak - 1)
             }
 
             is EgoDecision.EnqueueThought -> {
                 staleStreak = max(0, staleStreak - 1)
                 progressScore += 0.03
                 noopStreak = 0
+                modelErrorStreak = max(0, modelErrorStreak - 1)
             }
 
             is EgoDecision.Noop -> {
-                staleStreak += 1
-                progressScore = max(0.0, progressScore - 0.03)
-                noopStreak += 1
+                val modelErrorNoop = decision.reason.contains("model error", ignoreCase = true)
+                staleStreak += if (modelErrorNoop) 2 else 1
+                progressScore = max(0.0, progressScore - if (modelErrorNoop) 0.07 else 0.03)
+                noopStreak += if (modelErrorNoop) 2 else 1
+                modelErrorStreak = if (modelErrorNoop) modelErrorStreak + 1 else max(0, modelErrorStreak - 1)
             }
         }
 
@@ -63,7 +68,8 @@ class DeliberationProgressMonitor(
             staleStreak = staleStreak,
             progressScore = progressScore.coerceIn(0.0, 1.5),
             repeatSignatureHits = repeatHits,
-            noopStreak = noopStreak
+            noopStreak = noopStreak,
+            modelErrorStreak = modelErrorStreak
         )
         recomputePressure()
     }
@@ -77,22 +83,31 @@ class DeliberationProgressMonitor(
         recomputePressure()
     }
 
-    fun onActionExecuted(action: PendingAction) {
+    fun onActionExecuted(action: PendingAction, observedEvidence: Boolean = true) {
         val isEvidenceAction = action.type == ActionType.WEB_SEARCH ||
             action.type == ActionType.MCP_TIME ||
             action.type == ActionType.MCP_FETCH
         state = if (isEvidenceAction) {
-            state.copy(
-                staleStreak = max(0, state.staleStreak - 2),
-                stepsSinceNewEvidence = 0,
-                progressScore = (state.progressScore + 0.20).coerceAtMost(1.5),
-                noopStreak = 0
-            )
+            if (observedEvidence) {
+                state.copy(
+                    staleStreak = max(0, state.staleStreak - 2),
+                    stepsSinceNewEvidence = 0,
+                    progressScore = (state.progressScore + 0.20).coerceAtMost(1.5),
+                    noopStreak = 0,
+                    modelErrorStreak = max(0, state.modelErrorStreak - 1)
+                )
+            } else {
+                state.copy(
+                    staleStreak = state.staleStreak + 1,
+                    progressScore = max(0.0, state.progressScore - 0.06)
+                )
+            }
         } else {
             state.copy(
                 staleStreak = max(0, state.staleStreak - 1),
                 progressScore = (state.progressScore + 0.08).coerceAtMost(1.5),
-                noopStreak = 0
+                noopStreak = 0,
+                modelErrorStreak = max(0, state.modelErrorStreak - 1)
             )
         }
         recomputePressure()
@@ -149,6 +164,7 @@ class DeliberationProgressMonitor(
         val denialPressure = state.denialCount * 0.07
         val repeatPressure = state.repeatSignatureHits * 0.08
         val noopPressure = state.noopStreak * 0.06
+        val modelErrorPressure = state.modelErrorStreak * 0.10
         val evidenceGapPressure = min(state.stepsSinceNewEvidence, 18) * 0.02
         val progressRelief = state.progressScore * 0.16
         val raw = 0.10 +
@@ -157,6 +173,7 @@ class DeliberationProgressMonitor(
             denialPressure +
             repeatPressure +
             noopPressure +
+            modelErrorPressure +
             evidenceGapPressure -
             progressRelief
         state = state.copy(decisionPressure = raw.coerceIn(0.0, 1.0))
