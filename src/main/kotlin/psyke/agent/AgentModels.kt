@@ -17,13 +17,17 @@ enum class Urgency(val priority: Int) {
 
 enum class ActionType {
     WEB_SEARCH,
-    ANSWER;
+    ANSWER,
+    MCP_TIME,
+    MCP_FETCH;
 
     companion object {
         fun fromRaw(value: String?): ActionType? =
             when (value?.trim()?.lowercase()) {
                 "web_search" -> WEB_SEARCH
                 "answer" -> ANSWER
+                "mcp_time" -> MCP_TIME
+                "mcp_fetch" -> MCP_FETCH
                 else -> null
             }
     }
@@ -58,8 +62,10 @@ data class AgentConfig(
     val maxActionPayloadChars: Int = 4_000,
     val maxActionSummaryChars: Int = 180,
     val maxPromptTokens: Int = 2_400,
-    val maxCompletionTokens: Int = 900,
-    val searchResultCount: Int = 5
+    val maxCompletionTokens: Int = 900, 
+    val searchResultCount: Int = 5,
+    val mcpCallTimeoutMs: Long = 8_000,
+    val mcpFetchMaxChars: Int = 4_000
 ) {
     companion object {
         fun fromEnv(): AgentConfig =
@@ -72,7 +78,9 @@ data class AgentConfig(
                 maxActionPayloadChars = readInt("EGO_MAX_ACTION_PAYLOAD_CHARS", 4000),
                 maxPromptTokens = readInt("EGO_MAX_PROMPT_TOKENS", 2400),
                 maxCompletionTokens = readInt("EGO_MAX_COMPLETION_TOKENS", 900),
-                searchResultCount = readInt("EGO_SEARCH_RESULT_COUNT", 5)
+                searchResultCount = readInt("EGO_SEARCH_RESULT_COUNT", 5),
+                mcpCallTimeoutMs = readLong("MCP_CALL_TIMEOUT_MS", 8000),
+                mcpFetchMaxChars = readInt("MCP_FETCH_MAX_CHARS", 4000)
             )
 
         private fun readInt(name: String, fallback: Int): Int =
@@ -80,6 +88,9 @@ data class AgentConfig(
 
         private fun readNonNegativeInt(name: String, fallback: Int): Int =
             System.getenv(name)?.toIntOrNull()?.takeIf { it >= 0 } ?: fallback
+
+        private fun readLong(name: String, fallback: Long): Long =
+            System.getenv(name)?.toLongOrNull()?.takeIf { it > 0 } ?: fallback
     }
 }
 
@@ -136,6 +147,7 @@ data class PlannerContext(
     val recentDialogue: List<DialogueTurn>,
     val queue: QueueSnapshot,
     val memorySummary: String = "",
+    val availableActions: Set<ActionType> = ActionType.entries.toSet(),
 )
 
 data class SuperegoContext(

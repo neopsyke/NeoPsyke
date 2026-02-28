@@ -1,5 +1,8 @@
 package psyke.agent
 
+import psyke.agent.actions.websearch.WebSearchActionHandler
+import psyke.agent.actions.websearch.WebSearchEngine
+import psyke.agent.actions.websearch.WebSearchResult
 import psyke.support.RecordingInstrumentation
 import psyke.support.StubChatModelClient
 import java.io.ByteArrayInputStream
@@ -30,13 +33,7 @@ class EgoAgentTest {
                 config = config,
                 instrumentation = instrumentation
             ),
-            motorCortex = MotorCortex(
-                webSearchProvider = object : WebSearchProvider {
-                    override fun search(query: String, maxResults: Int): WebSearchResult =
-                        WebSearchResult(summary = "unused", snippets = emptyList())
-                },
-                output = { outputs.add(it) }
-            ),
+            motorCortex = buildMotorCortex(output = { outputs.add(it) }),
             config = config,
             instrumentation = instrumentation
         )
@@ -90,13 +87,7 @@ class EgoAgentTest {
                 config = AgentConfig(),
                 instrumentation = instrumentation
             ),
-            motorCortex = MotorCortex(
-                webSearchProvider = object : WebSearchProvider {
-                    override fun search(query: String, maxResults: Int): WebSearchResult =
-                        WebSearchResult(summary = "unused", snippets = emptyList())
-                },
-                output = { outputs.add(it) }
-            ),
+            motorCortex = buildMotorCortex(output = { outputs.add(it) }),
             config = AgentConfig(maxLoopStepsPerInput = 8, maxThoughtPasses = 4),
             instrumentation = instrumentation
         )
@@ -142,13 +133,7 @@ class EgoAgentTest {
                 config = config,
                 instrumentation = instrumentation
             ),
-            motorCortex = MotorCortex(
-                webSearchProvider = object : WebSearchProvider {
-                    override fun search(query: String, maxResults: Int): WebSearchResult =
-                        WebSearchResult(summary = "unused", snippets = emptyList())
-                },
-                output = { outputs.add(it) }
-            ),
+            motorCortex = buildMotorCortex(output = { outputs.add(it) }),
             config = config,
             instrumentation = instrumentation
         )
@@ -196,13 +181,7 @@ class EgoAgentTest {
                 config = config,
                 instrumentation = instrumentation
             ),
-            motorCortex = MotorCortex(
-                webSearchProvider = object : WebSearchProvider {
-                    override fun search(query: String, maxResults: Int): WebSearchResult =
-                        WebSearchResult(summary = "unused", snippets = emptyList())
-                },
-                output = { outputs.add(it) }
-            ),
+            motorCortex = buildMotorCortex(output = { outputs.add(it) }),
             config = config,
             instrumentation = instrumentation
         )
@@ -239,13 +218,7 @@ class EgoAgentTest {
                 config = AgentConfig(),
                 instrumentation = instrumentation
             ),
-            motorCortex = MotorCortex(
-                webSearchProvider = object : WebSearchProvider {
-                    override fun search(query: String, maxResults: Int): WebSearchResult =
-                        WebSearchResult(summary = "unused", snippets = emptyList())
-                },
-                output = { throw IllegalStateException("output unavailable") }
-            ),
+            motorCortex = buildMotorCortex(output = { throw IllegalStateException("output unavailable") }),
             config = AgentConfig(maxLoopStepsPerInput = 4, maxThoughtPasses = 2),
             instrumentation = instrumentation
         )
@@ -273,5 +246,18 @@ class EgoAgentTest {
         } finally {
             System.setIn(previousIn)
         }
+    }
+
+    private fun buildMotorCortex(output: (String) -> Unit): MotorCortex {
+        val webSearchHandler = WebSearchActionHandler(
+            engine = object : WebSearchEngine {
+                override fun search(query: String, maxResults: Int): WebSearchResult =
+                    WebSearchResult(summary = "unused", snippets = emptyList())
+            }
+        )
+        return MotorCortex(
+            webSearchActionHandler = webSearchHandler,
+            output = output
+        )
     }
 }

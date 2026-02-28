@@ -211,9 +211,9 @@ class EgoAgent(
             trimDialogue()
         }
 
-        if (action.type == ActionType.WEB_SEARCH) {
+        if (action.type.requiresFollowUpThought()) {
             val followUpThought = TextSecurity.clamp(
-                "Web search completed. ${outcome.statusSummary}. Decide if an answer should be sent.",
+                "${action.type.followUpPrefix()} ${outcome.statusSummary}. Decide if an answer should be sent.",
                 config.maxThoughtChars
             )
             val queued = scheduler.enqueueThought(
@@ -222,14 +222,14 @@ class EgoAgent(
                 passes = action.attempts
             )
             if (!queued) {
-                instrumentation.emit(AgentEvents.warning("Failed to enqueue follow-up thought after web search."))
+                instrumentation.emit(AgentEvents.warning("Failed to enqueue follow-up thought after action."))
                 recordQueueSaturation(
                     queueType = "thought",
                     capacity = config.maxPendingThoughts,
                     reason = "enqueue_followup_thought_failed_full"
                 )
             }
-            emitQueueSnapshot("web_search_followup")
+            emitQueueSnapshot("action_followup")
         }
     }
 
@@ -425,7 +425,8 @@ class EgoAgent(
         return PlannerContext(
             recentDialogue = dialogue.takeLast(12),
             queue = scheduler.queueSnapshot(),
-            memorySummary = memorySummary
+            memorySummary = memorySummary,
+            availableActions = motorCortex.availableActionTypes()
         )
     }
 
@@ -497,5 +498,16 @@ class EgoAgent(
             is LoopTask.ProcessInput -> "input"
             is LoopTask.ProcessThought -> "thought"
             is LoopTask.PerformAction -> "action"
+        }
+
+    private fun ActionType.requiresFollowUpThought(): Boolean =
+        this == ActionType.WEB_SEARCH || this == ActionType.MCP_TIME || this == ActionType.MCP_FETCH
+
+    private fun ActionType.followUpPrefix(): String =
+        when (this) {
+            ActionType.WEB_SEARCH -> "Web search completed."
+            ActionType.MCP_TIME -> "MCP time lookup completed."
+            ActionType.MCP_FETCH -> "MCP fetch completed."
+            ActionType.ANSWER -> "Action completed."
         }
 }

@@ -153,6 +153,54 @@
     .item details[open] > summary::before { content: "- "; }
     .item .summary-text { color: var(--muted); }
 
+    .cap-list {
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: rgba(15, 26, 31, 0.6);
+      overflow: hidden;
+    }
+    .cap-item {
+      border-bottom: 1px solid var(--line);
+      padding: 8px;
+      font-size: 11px;
+      display: grid;
+      gap: 6px;
+    }
+    .cap-item:last-child { border-bottom: none; }
+    .cap-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .cap-type {
+      font-weight: 600;
+      text-transform: lowercase;
+      letter-spacing: 0.02em;
+    }
+    .cap-badge {
+      font-size: 10px;
+      border-radius: 999px;
+      padding: 1px 7px;
+      border: 1px solid var(--line);
+      white-space: nowrap;
+    }
+    .cap-badge.ok {
+      border-color: #2a8f74;
+      color: #7ae3c9;
+      background: rgba(42, 143, 116, 0.2);
+    }
+    .cap-badge.bad {
+      border-color: #8e4d57;
+      color: #f0a6b2;
+      background: rgba(142, 77, 87, 0.22);
+    }
+    .cap-detail {
+      color: var(--muted);
+      overflow-wrap: anywhere;
+      word-break: break-word;
+    }
+
     .muted { color: var(--muted); }
     .cols2 {
       display: grid;
@@ -284,6 +332,10 @@
         </div>
       </div>
       <div class="panel">
+        <h3>Action Capabilities</h3>
+        <div class="cap-list" id="action-capabilities"></div>
+      </div>
+      <div class="panel">
         <h3>Action Flow</h3>
         <div class="list" id="actions"></div>
       </div>
@@ -303,6 +355,7 @@
       recentEvents: [],
       lastSuperegoInput: null,
       lastSuperegoOutput: null,
+      actionCapabilities: [],
       limits: {},
       metrics: null,
       instrumentationHealth: {
@@ -425,6 +478,41 @@
       el.innerHTML = list.map(i => "<div class=\"item\">" + escapeHtml(formatter(i)) + "</div>").join("");
     }
 
+    function renderActionCapabilities(list) {
+      const el = document.getElementById("action-capabilities");
+      if (!Array.isArray(list) || list.length === 0) {
+        el.innerHTML = "<div class=\"cap-item\"><div class=\"cap-detail\">No action capability status published yet.</div></div>";
+        return;
+      }
+
+      const order = ["answer", "web_search", "mcp_time", "mcp_fetch"];
+      const sorted = list
+        .slice()
+        .sort((a, b) => {
+          const ai = order.indexOf(String(a.action_type || ""));
+          const bi = order.indexOf(String(b.action_type || ""));
+          const av = ai === -1 ? 99 : ai;
+          const bv = bi === -1 ? 99 : bi;
+          if (av !== bv) return av - bv;
+          return String(a.action_type || "").localeCompare(String(b.action_type || ""));
+        });
+
+      el.innerHTML = sorted.map((status) => {
+        const type = String(status.action_type || "unknown");
+        const available = status.available === true;
+        const detail = String(status.detail || "");
+        const badgeClass = available ? "ok" : "bad";
+        const badgeText = available ? "available" : "unavailable";
+        return "<div class=\"cap-item\">" +
+          "<div class=\"cap-head\">" +
+          "<span class=\"cap-type\">" + escapeHtml(type) + "</span>" +
+          "<span class=\"cap-badge " + badgeClass + "\">" + escapeHtml(badgeText) + "</span>" +
+          "</div>" +
+          "<div class=\"cap-detail\">" + escapeHtml(detail || "-") + "</div>" +
+          "</div>";
+      }).join("");
+    }
+
     function chip(title, value, meterPct) {
       const meter = meterPct == null
         ? ""
@@ -496,6 +584,7 @@
       document.getElementById("current-processing").textContent = fmt(state.currentProcessing || {});
       document.getElementById("superego-in").textContent = fmt(state.lastSuperegoInput || {});
       document.getElementById("superego-out").textContent = fmt(state.lastSuperegoOutput || {});
+      renderActionCapabilities(state.actionCapabilities || []);
 
       const orderedEvents = state.recentEvents.slice().sort((a, b) => (a.id || 0) - (b.id || 0));
       const timelineEvents = orderedEvents
@@ -562,6 +651,9 @@
           break;
         case "superego_output":
           state.lastSuperegoOutput = event.data;
+          break;
+        case "action_capabilities":
+          state.actionCapabilities = Array.isArray(event.data?.statuses) ? event.data.statuses : [];
           break;
         case "limits_config":
           state.limits = event.data.limits || {};
@@ -638,6 +730,7 @@
       try {
         const snapshot = await fetch("/api/snapshot", { cache: "no-store" }).then(r => r.json());
         Object.assign(state, snapshot);
+        if (!Array.isArray(state.actionCapabilities)) state.actionCapabilities = [];
         state.inFlight = {
           active: false,
           taskType: state.currentTaskType || null,

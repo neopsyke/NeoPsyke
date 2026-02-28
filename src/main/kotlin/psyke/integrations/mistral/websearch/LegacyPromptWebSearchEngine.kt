@@ -1,9 +1,14 @@
-package psyke.agent
+package psyke.integrations.mistral.websearch
 
 import com.fasterxml.jackson.databind.DeserializationFeature
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
 import mu.KotlinLogging
+import psyke.agent.AgentConfig
+import psyke.agent.PromptBudgetAllocator
+import psyke.agent.TextSecurity
+import psyke.agent.actions.websearch.WebSearchEngine
+import psyke.agent.actions.websearch.WebSearchResult
 import psyke.llm.ChatCallMetadata
 import psyke.llm.ChatMessage
 import psyke.llm.ChatModelClient
@@ -12,19 +17,14 @@ import psyke.llm.ChatRole
 
 private val logger = KotlinLogging.logger {}
 
-data class WebSearchResult(
-    val summary: String,
-    val snippets: List<String>,
+@Deprecated(
+    message = "Use MistralConversationsWebSearchEngine for real web-search tool execution.",
+    replaceWith = ReplaceWith("MistralConversationsWebSearchEngine")
 )
-
-interface WebSearchProvider {
-    fun search(query: String, maxResults: Int): WebSearchResult
-}
-
-class MistralWebSearchProvider(
+class LegacyPromptWebSearchEngine(
     private val modelClient: ChatModelClient,
     private val config: AgentConfig,
-) : WebSearchProvider {
+) : WebSearchEngine {
 
     override fun search(query: String, maxResults: Int): WebSearchResult {
         val messages = PromptBudgetAllocator.allocate(
@@ -86,7 +86,7 @@ class MistralWebSearchProvider(
             }
         }
         if (response == null) {
-            logger.warn(lastError) { "Web search call failed for query='${TextSecurity.preview(query, 100)}'." }
+            logger.warn(lastError) { "Legacy web search call failed for query='${TextSecurity.preview(query, 100)}'." }
             return WebSearchResult(
                 summary = "Search unavailable due to model error.",
                 snippets = emptyList()
@@ -107,7 +107,7 @@ class MistralWebSearchProvider(
                 .map { TextSecurity.clamp(it.trim(), 200) }
             WebSearchResult(summary = TextSecurity.clamp(summary, 280), snippets = snippets)
         } catch (ex: Exception) {
-            logger.warn(ex) { "Failed to parse web-search response. Raw response: $raw" }
+            logger.warn(ex) { "Failed to parse legacy web-search response. Raw response: $raw" }
             WebSearchResult(
                 summary = "Search output could not be parsed.",
                 snippets = emptyList()

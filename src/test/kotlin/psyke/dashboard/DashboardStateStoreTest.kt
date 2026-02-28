@@ -43,11 +43,23 @@ class DashboardStateStoreTest {
         store.onEvent(AgentEvent(id = 3, type = "queue_snapshot", data = mapOf("queues" to queues)))
         store.onEvent(AgentEvent(id = 4, type = "superego_input", data = mapOf("allow" to false)))
         store.onEvent(AgentEvent(id = 5, type = "superego_output", data = mapOf("allow" to true)))
-        store.onEvent(AgentEvent(id = 6, type = "limits_config", data = mapOf("limits" to mapOf("max_prompt_tokens" to 2400))))
-        store.onEvent(AgentEvent(id = 7, type = "metrics_snapshot", data = mapOf("metrics" to metrics)))
         store.onEvent(
             AgentEvent(
-                id = 8,
+                id = 6,
+                type = "action_capabilities",
+                data = mapOf(
+                    "statuses" to listOf(
+                        mapOf("action_type" to "answer", "available" to true, "detail" to "ok"),
+                        mapOf("action_type" to "mcp_fetch", "available" to false, "detail" to "offline")
+                    )
+                )
+            )
+        )
+        store.onEvent(AgentEvent(id = 7, type = "limits_config", data = mapOf("limits" to mapOf("max_prompt_tokens" to 2400))))
+        store.onEvent(AgentEvent(id = 8, type = "metrics_snapshot", data = mapOf("metrics" to metrics)))
+        store.onEvent(
+            AgentEvent(
+                id = 9,
                 type = "queue_saturation",
                 data = mapOf("queue_type" to "thought", "pending" to 32, "capacity" to 32, "reason" to "full")
             )
@@ -63,6 +75,9 @@ class DashboardStateStoreTest {
         assertEquals(1, snapshot.queues.thoughts.size)
         assertEquals(1, snapshot.queues.actions.size)
         assertEquals(true, snapshot.lastSuperegoOutput?.get("allow"))
+        assertEquals(2, snapshot.actionCapabilities.size)
+        assertEquals("mcp_fetch", snapshot.actionCapabilities[1]["action_type"])
+        assertEquals(false, snapshot.actionCapabilities[1]["available"])
         assertEquals(2400, snapshot.limits["max_prompt_tokens"])
         assertEquals(metrics, snapshot.metrics)
         assertEquals(3L, (snapshot.instrumentationHealth["dropped_events"] as Number).toLong())
@@ -70,7 +85,7 @@ class DashboardStateStoreTest {
         @Suppress("UNCHECKED_CAST")
         val saturationByType = snapshot.instrumentationHealth["queue_saturation_by_type"] as Map<String, Any?>
         assertEquals(1L, (saturationByType["thought"] as Number).toLong())
-        assertEquals(listOf(1L, 2L, 3L, 4L, 5L, 6L, 7L, 8L, 9L), snapshot.recentEvents.map { it.id })
+        assertEquals(listOf(1L, 2L, 3L, 4L, 5L, 6L, 7L, 8L, 9L, 10L), snapshot.recentEvents.map { it.id })
     }
 
     @Test

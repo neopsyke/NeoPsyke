@@ -90,6 +90,38 @@ class EgoPlannerTest {
     }
 
     @Test
+    fun `planner rejects actions unavailable at runtime`() {
+        val llm = StubChatModelClient()
+        llm.enqueueRawResponse(
+            """
+            {
+              "decision":"action",
+              "urgency":"medium",
+              "action_type":"mcp_fetch",
+              "action_payload":"{\"url\":\"https://example.com\"}",
+              "action_summary":"fetch page"
+            }
+            """.trimIndent()
+        )
+        val planner = EgoPlanner(
+            modelClient = llm,
+            config = AgentConfig()
+        )
+
+        val decision = planner.decide(
+            trigger = EgoTrigger.IncomingInput(PendingInput(1, "fetch this page")),
+            context = PlannerContext(
+                recentDialogue = emptyList(),
+                queue = QueueSnapshot(0, 0, 0),
+                availableActions = setOf(ActionType.ANSWER, ActionType.WEB_SEARCH)
+            )
+        )
+
+        val noop = assertIs<EgoDecision.Noop>(decision)
+        assertTrue(noop.reason.contains("unavailable", ignoreCase = true))
+    }
+
+    @Test
     fun `planner converts invalid payload and parse failures to noop`() {
         val llm = StubChatModelClient()
         llm.enqueueRawResponse("""{"decision":"action","action_type":"answer"}""")

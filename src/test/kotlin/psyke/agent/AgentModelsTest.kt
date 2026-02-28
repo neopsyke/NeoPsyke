@@ -23,6 +23,8 @@ class AgentModelsTest {
     fun `action type parser maps valid values only`() {
         assertEquals(ActionType.WEB_SEARCH, ActionType.fromRaw("web_search"))
         assertEquals(ActionType.ANSWER, ActionType.fromRaw("answer"))
+        assertEquals(ActionType.MCP_TIME, ActionType.fromRaw("mcp_time"))
+        assertEquals(ActionType.MCP_FETCH, ActionType.fromRaw("mcp_fetch"))
         assertNull(ActionType.fromRaw("search"))
         assertNull(ActionType.fromRaw(null))
     }
