@@ -16,7 +16,11 @@ import psyke.agent.SdkMcpTimeTool
 import psyke.agent.SuperegoDirectives
 import psyke.agent.SuperegoGatekeeper
 import psyke.agent.actions.websearch.WebSearchActionHandler
+import psyke.agent.actions.websearch.WebSearchEngine
 import psyke.config.McpCapabilityConfig
+import psyke.config.LlmProvider
+import psyke.config.LlmRuntimeConfig
+import psyke.config.LlmRuntimeConfigLoader
 import psyke.config.McpRuntimeConfig
 import psyke.config.McpRuntimeConfigLoader
 import psyke.dashboard.DashboardServer
@@ -45,12 +49,15 @@ import psyke.instrumentation.ReasoningEvalFlowLogSink
 import psyke.instrumentation.StructuredLogSink
 import psyke.llm.InstrumentedChatModelClient
 import psyke.llm.ChatModelClient
+import psyke.llm.GroqChatClient
+import psyke.llm.GroqProviderStatusChecker
 import psyke.llm.MistralChatClient
 import psyke.llm.MistralProviderStatusChecker
 import psyke.llm.ProviderHealthState
 import psyke.llm.ProviderStatus
 import psyke.llm.combineChatCallObservers
 import psyke.llm.reportProviderStatusAndDecide
+import psyke.integrations.groq.websearch.GroqConversationsWebSearchEngine
 import psyke.integrations.mistral.websearch.MistralConversationsWebSearchEngine
 import psyke.integrations.mistral.websearch.MistralWebSearchMode
 import psyke.integrations.mistral.websearch.MistralWebSearchProfile
@@ -98,21 +105,23 @@ fun main(args: Array<String>) {
 
     val config = AgentConfig.fromEnv()
     val mcpRuntimeConfig = McpRuntimeConfigLoader.load()
-    val egoModel = System.getenv("MISTRAL_EGO_MODEL") ?: MistralChatClient.DEFAULT_MODEL
-    val superegoModel = System.getenv("MISTRAL_SUPEREGO_MODEL") ?: egoModel
+    val llmRuntimeConfig = LlmRuntimeConfigLoader.load()
+    if (llmRuntimeConfig == null) {
+        System.err.println("Unsupported LLM_PROVIDER. Expected one of: groq, mistral.")
+        logger.warn { "Unsupported LLM_PROVIDER. Expected one of: groq, mistral." }
+        return
+    }
 
     if (cliOptions.evalReasoningOnly) {
         runReasoningOnlyEval(
-            apiKey = System.getenv("MISTRAL_API_KEY"),
-            egoModel = egoModel,
+            llm = llmRuntimeConfig,
             cliOptions = cliOptions
         )
         return
     }
     if (cliOptions.evalMemoryLiveOnly) {
         runMemoryLiveEval(
-            apiKey = System.getenv("MISTRAL_API_KEY"),
-            egoModel = egoModel,
+            llm = llmRuntimeConfig,
             config = config,
             mcpRuntimeConfig = mcpRuntimeConfig,
             cliOptions = cliOptions
@@ -120,28 +129,25 @@ fun main(args: Array<String>) {
         return
     }
 
-    val apiKey = System.getenv("MISTRAL_API_KEY")
-    if (apiKey.isNullOrBlank()) {
-        System.err.println("MISTRAL_API_KEY is not set. Export it to talk to Mistral.")
-        logger.warn { "MISTRAL_API_KEY is not set. Export it to talk to Mistral." }
+    if (llmRuntimeConfig.apiKey.isBlank()) {
+        val message = "${llmRuntimeConfig.apiKeyEnvVar} is not set. Export it to talk to ${llmRuntimeConfig.providerLabel}."
+        System.err.println(message)
+        logger.warn { message }
         return
     }
-    if (!checkMistralProviderHealth(apiKey = apiKey, modeLabel = "interactive")) {
+    if (!checkProviderHealth(llm = llmRuntimeConfig, modeLabel = "interactive")) {
         return
     }
 
     runInteractiveMode(
-        apiKey = apiKey,
-        egoModel = egoModel,
-        superegoModel = superegoModel,
+        llm = llmRuntimeConfig,
         config = config,
         mcpRuntimeConfig = mcpRuntimeConfig
     )
 }
 
 private fun runReasoningOnlyEval(
-    apiKey: String?,
-    egoModel: String,
+    llm: LlmRuntimeConfig,
     cliOptions: AppCliOptions,
 ) {
     println("Running reasoning-only self-eval (mode=${cliOptions.evalReasoningMode.id})...")
@@ -172,84 +178,101 @@ private fun runReasoningOnlyEval(
         val provider = if (cliOptions.evalReasoningMode == ReasoningEvalMode.LOGIC) {
             "logic-harness"
         } else {
-            "mistral"
+            llm.providerLabel
         }
-        val llmCallObserver = LlmCallEventObserver(
+        MetricsRuntimeFactory.create(
             provider = provider,
-            instrumentation = instrumentation
-        )
-        val rawResponseHook = LlmRawResponseEventHook(
-            instrumentation = instrumentation,
-            maxRawResponseChars = evalRawResponseCharLimit
-        )
-        val baseClient: ChatModelClient = when (cliOptions.evalReasoningMode) {
-            ReasoningEvalMode.LOGIC -> ReasoningLogicHarnessClient(
-                callObserver = llmCallObserver
-            )
-
-            ReasoningEvalMode.MODEL -> {
-                val resolvedApiKey = apiKey?.trim().orEmpty()
-                if (resolvedApiKey.isBlank()) {
-                    System.err.println("MISTRAL_API_KEY is required for --eval-reasoning-mode model.")
-                    logger.warn { "MISTRAL_API_KEY is required for --eval-reasoning-mode model." }
-                    return
-                }
-                if (!checkMistralProviderHealth(apiKey = resolvedApiKey, modeLabel = "eval_reasoning_model")) {
-                    return
-                }
-                MistralChatClient(
-                    apiKey = resolvedApiKey,
-                    modelName = egoModel,
-                    callObserver = llmCallObserver
-                )
-            }
-        }
-        val evalTasks = when (cliOptions.evalReasoningMode) {
-            ReasoningEvalMode.LOGIC -> ReasoningLogicEvalTasks.defaults()
-            ReasoningEvalMode.MODEL -> ReasoningEvalTasks.defaults()
-        }
-        UsageTrackingChatClient(
-            delegate = InstrumentedChatModelClient(
-                delegate = baseClient,
-                hooks = listOf(rawResponseHook)
-            )
-        ).use { client ->
-            val options = ReasoningEvalOptions(
-                maxAttemptsPerTask = cliOptions.evalReasoningMaxAttempts,
-                taskFilter = cliOptions.evalReasoningTaskFilter,
-                stage = cliOptions.evalStage ?: (System.getenv("PSYKE_EVAL_STAGE") ?: "")
-                    .ifBlank { java.time.LocalDate.now(java.time.ZoneOffset.UTC).toString() },
-                mode = cliOptions.evalReasoningMode.id
-            )
-            val report = ReasoningSelfEvalRunner(
-                client = client,
-                tasks = evalTasks,
+            apiKey = llm.apiKey.ifBlank { provider },
+            egoModel = llm.egoModel,
+            superegoModel = llm.superegoModel
+        ).use { metrics ->
+            val llmCallObserver = LlmCallEventObserver(
+                provider = provider,
                 instrumentation = instrumentation
-            ).run(options)
-            println(ReasoningEvalReporter.render(report))
-            val runPath = ReasoningEvalReporter.writeRunReport(report)
-            ReasoningEvalReporter.appendHistory(report)
-            println("Run report: $runPath")
-            println("History: .psyke/evals/reasoning/history.jsonl")
+            )
+            val metricsSnapshotObserver = MetricsSnapshotObserver(
+                metricsRuntime = metrics,
+                instrumentation = instrumentation
+            )
+            val callObserver = combineChatCallObservers(
+                metrics.chatCallObserver(provider = provider),
+                llmCallObserver,
+                metricsSnapshotObserver
+            )
+            val rawResponseHook = LlmRawResponseEventHook(
+                instrumentation = instrumentation,
+                maxRawResponseChars = evalRawResponseCharLimit
+            )
+            val baseClient: ChatModelClient = when (cliOptions.evalReasoningMode) {
+                ReasoningEvalMode.LOGIC -> ReasoningLogicHarnessClient(
+                    callObserver = callObserver
+                )
+
+                ReasoningEvalMode.MODEL -> {
+                    val resolvedApiKey = llm.apiKey.trim()
+                    if (resolvedApiKey.isBlank()) {
+                        val message = "${llm.apiKeyEnvVar} is required for --eval-reasoning-mode model."
+                        System.err.println(message)
+                        logger.warn { message }
+                        return
+                    }
+                    if (!checkProviderHealth(llm = llm, modeLabel = "eval_reasoning_model")) {
+                        return
+                    }
+                    createChatClient(
+                        llm = llm,
+                        modelName = llm.egoModel,
+                        callObserver = callObserver
+                    )
+                }
+            }
+            val evalTasks = when (cliOptions.evalReasoningMode) {
+                ReasoningEvalMode.LOGIC -> ReasoningLogicEvalTasks.defaults()
+                ReasoningEvalMode.MODEL -> ReasoningEvalTasks.defaults()
+            }
+            UsageTrackingChatClient(
+                delegate = InstrumentedChatModelClient(
+                    delegate = baseClient,
+                    hooks = listOf(rawResponseHook)
+                )
+            ).use { client ->
+                val options = ReasoningEvalOptions(
+                    maxAttemptsPerTask = cliOptions.evalReasoningMaxAttempts,
+                    taskFilter = cliOptions.evalReasoningTaskFilter,
+                    stage = cliOptions.evalStage ?: (System.getenv("PSYKE_EVAL_STAGE") ?: "")
+                        .ifBlank { java.time.LocalDate.now(java.time.ZoneOffset.UTC).toString() },
+                    mode = cliOptions.evalReasoningMode.id
+                )
+                val report = ReasoningSelfEvalRunner(
+                    client = client,
+                    tasks = evalTasks,
+                    instrumentation = instrumentation
+                ).run(options)
+                println(ReasoningEvalReporter.render(report))
+                val runPath = ReasoningEvalReporter.writeRunReport(report)
+                ReasoningEvalReporter.appendHistory(report)
+                println("Run report: $runPath")
+                println("History: .psyke/evals/reasoning/history.jsonl")
+            }
         }
     }
 }
 
 private fun runMemoryLiveEval(
-    apiKey: String?,
-    egoModel: String,
+    llm: LlmRuntimeConfig,
     config: AgentConfig,
     mcpRuntimeConfig: McpRuntimeConfig,
     cliOptions: AppCliOptions,
 ) {
     println("Running memory live eval (real LLM + real MCP memory)...")
-    val resolvedApiKey = apiKey?.trim().orEmpty()
+    val resolvedApiKey = llm.apiKey.trim()
     if (resolvedApiKey.isBlank()) {
-        System.err.println("MISTRAL_API_KEY is required for --eval-memory-live.")
-        logger.warn { "MISTRAL_API_KEY is required for --eval-memory-live." }
+        val message = "${llm.apiKeyEnvVar} is required for --eval-memory-live."
+        System.err.println(message)
+        logger.warn { message }
         return
     }
-    if (!checkMistralProviderHealth(apiKey = resolvedApiKey, modeLabel = "eval_memory_live")) {
+    if (!checkProviderHealth(llm = llm, modeLabel = "eval_memory_live")) {
         return
     }
     val memoryCommand = resolveMcpCommand(mcpRuntimeConfig.memory)
@@ -291,53 +314,69 @@ private fun runMemoryLiveEval(
     InstrumentationBus(
         sinks = sinks
     ).use { instrumentation ->
-        val llmCallObserver = LlmCallEventObserver(
-            provider = "mistral",
-            instrumentation = instrumentation
-        )
-        val rawResponseHook = LlmRawResponseEventHook(
-            instrumentation = instrumentation,
-            maxRawResponseChars = evalRawResponseCharLimit
-        )
-        UsageTrackingChatClient(
-            delegate = InstrumentedChatModelClient(
-                delegate = MistralChatClient(
-                    apiKey = resolvedApiKey,
-                    modelName = egoModel,
-                    callObserver = llmCallObserver
-                ),
-                hooks = listOf(rawResponseHook)
+        MetricsRuntimeFactory.create(
+            provider = llm.providerLabel,
+            apiKey = llm.apiKey,
+            egoModel = llm.egoModel,
+            superegoModel = llm.superegoModel
+        ).use { metrics ->
+            val llmCallObserver = LlmCallEventObserver(
+                provider = llm.providerLabel,
+                instrumentation = instrumentation
             )
-        ).use { client ->
-            val stage = cliOptions.evalStage ?: (System.getenv("PSYKE_EVAL_STAGE") ?: "")
-                .ifBlank { java.time.LocalDate.now(java.time.ZoneOffset.UTC).toString() }
-            McpHippocampus(
-                command = memoryCommand,
-                callTimeoutMs = config.mcpMemoryCallTimeoutMs,
-                defaultMaxItems = config.memoryRecallMaxItems,
-                defaultMaxChars = config.memoryRecallMaxChars
-            ).use { hippocampus ->
-                val report = MemoryLiveEvalRunner(
-                    client = client,
-                    memoryConsolidationAdvisor = LlmMemoryConsolidationAdvisor(
-                        modelClient = client,
-                        config = config
+            val metricsSnapshotObserver = MetricsSnapshotObserver(
+                metricsRuntime = metrics,
+                instrumentation = instrumentation
+            )
+            val callObserver = combineChatCallObservers(
+                metrics.chatCallObserver(provider = llm.providerLabel),
+                llmCallObserver,
+                metricsSnapshotObserver
+            )
+            val rawResponseHook = LlmRawResponseEventHook(
+                instrumentation = instrumentation,
+                maxRawResponseChars = evalRawResponseCharLimit
+            )
+            UsageTrackingChatClient(
+                delegate = InstrumentedChatModelClient(
+                    delegate = createChatClient(
+                        llm = llm,
+                        modelName = llm.egoModel,
+                        callObserver = callObserver
                     ),
-                    hippocampus = hippocampus,
-                    tasks = MemoryLiveEvalTasks.defaults(),
-                    instrumentation = instrumentation
-                ).run(
-                    MemoryLiveEvalOptions(
-                        stage = stage,
-                        taskFilter = cliOptions.evalMemoryTaskFilter,
-                        maxConsolidationAttempts = cliOptions.evalMemoryMaxAttempts
-                    )
+                    hooks = listOf(rawResponseHook)
                 )
-                println(MemoryLiveEvalReporter.render(report))
-                val runPath = MemoryLiveEvalReporter.writeRunReport(report)
-                MemoryLiveEvalReporter.appendHistory(report)
-                println("Run report: $runPath")
-                println("History: .psyke/evals/memory-live/history.jsonl")
+            ).use { client ->
+                val stage = cliOptions.evalStage ?: (System.getenv("PSYKE_EVAL_STAGE") ?: "")
+                    .ifBlank { java.time.LocalDate.now(java.time.ZoneOffset.UTC).toString() }
+                McpHippocampus(
+                    command = memoryCommand,
+                    callTimeoutMs = config.mcpMemoryCallTimeoutMs,
+                    defaultMaxItems = config.memoryRecallMaxItems,
+                    defaultMaxChars = config.memoryRecallMaxChars
+                ).use { hippocampus ->
+                    val report = MemoryLiveEvalRunner(
+                        client = client,
+                        memoryConsolidationAdvisor = LlmMemoryConsolidationAdvisor(
+                            modelClient = client,
+                            config = config
+                        ),
+                        hippocampus = hippocampus,
+                        tasks = MemoryLiveEvalTasks.defaults(),
+                        instrumentation = instrumentation
+                    ).run(
+                        MemoryLiveEvalOptions(
+                            stage = stage,
+                            taskFilter = cliOptions.evalMemoryTaskFilter,
+                            maxConsolidationAttempts = cliOptions.evalMemoryMaxAttempts
+                        )
+                    )
+                    println(MemoryLiveEvalReporter.render(report))
+                    val runPath = MemoryLiveEvalReporter.writeRunReport(report)
+                    MemoryLiveEvalReporter.appendHistory(report)
+                    println("Run report: $runPath")
+                    println("History: .psyke/evals/memory-live/history.jsonl")
+                }
             }
         }
     }
@@ -365,8 +404,18 @@ private fun resolveEvalEventSidecarPath(): Path? {
     return logPath.resolveSibling(sidecarName)
 }
 
-private fun checkMistralProviderHealth(apiKey: String, modeLabel: String): Boolean {
-    val checker = MistralProviderStatusChecker(apiKey = apiKey)
+private fun checkProviderHealth(llm: LlmRuntimeConfig, modeLabel: String): Boolean {
+    val checker = when (llm.provider) {
+        LlmProvider.GROQ -> GroqProviderStatusChecker(
+            apiKey = llm.apiKey,
+            baseUrl = llm.baseUrl
+        )
+
+        LlmProvider.MISTRAL -> MistralProviderStatusChecker(
+            apiKey = llm.apiKey,
+            baseUrl = llm.baseUrl
+        )
+    }
     val status = checker.check()
     return reportProviderStatusAndDecide(
         modeLabel = modeLabel,
@@ -428,9 +477,7 @@ private fun checkMcpMemoryProviderHealth(
 }
 
 private fun runInteractiveMode(
-    apiKey: String,
-    egoModel: String,
-    superegoModel: String,
+    llm: LlmRuntimeConfig,
     config: AgentConfig,
     mcpRuntimeConfig: McpRuntimeConfig,
 ) {
@@ -504,9 +551,10 @@ private fun runInteractiveMode(
             )
 
             MetricsRuntimeFactory.create(
-                apiKey = apiKey,
-                egoModel = egoModel,
-                superegoModel = superegoModel
+                provider = llm.providerLabel,
+                apiKey = llm.apiKey,
+                egoModel = llm.egoModel,
+                superegoModel = llm.superegoModel
             ).use { metrics ->
                 instrumentation.setDroppedEventsObserver { delta, total ->
                     metrics.recordDroppedEvents(delta)
@@ -526,12 +574,17 @@ private fun runInteractiveMode(
 
                 emitMetricsSnapshot()
                 val instrumentationObserver = LlmCallEventObserver(
-                    provider = "mistral",
+                    provider = llm.providerLabel,
                     instrumentation = instrumentation
                 )
                 val metricsSnapshotObserver = MetricsSnapshotObserver(
                     metricsRuntime = metrics,
                     instrumentation = instrumentation
+                )
+                val callObserver = combineChatCallObservers(
+                    metrics.chatCallObserver(provider = llm.providerLabel),
+                    instrumentationObserver,
+                    metricsSnapshotObserver
                 )
                 val rawResponseHook = LlmRawResponseEventHook(
                     instrumentation = instrumentation,
@@ -539,142 +592,138 @@ private fun runInteractiveMode(
                 )
 
                 InstrumentedChatModelClient(
-                    delegate = MistralChatClient(
-                        apiKey = apiKey,
-                        modelName = egoModel,
-                        callObserver = combineChatCallObservers(
-                            metrics.chatCallObserver(provider = "mistral"),
-                            instrumentationObserver,
-                            metricsSnapshotObserver
-                        )
+                    delegate = createChatClient(
+                        llm = llm,
+                        modelName = llm.egoModel,
+                        callObserver = callObserver
                     ),
                     hooks = listOf(rawResponseHook)
-                ).use { egoClient ->
+                ).use { egoPlannerClient ->
                     InstrumentedChatModelClient(
-                        delegate = MistralChatClient(
-                            apiKey = apiKey,
-                            modelName = superegoModel,
-                            callObserver = combineChatCallObservers(
-                                metrics.chatCallObserver(provider = "mistral"),
-                                instrumentationObserver,
-                                metricsSnapshotObserver
-                            )
+                        delegate = createChatClient(
+                            llm = llm,
+                            modelName = llm.superegoModel,
+                            callObserver = callObserver
                         ),
                         hooks = listOf(rawResponseHook)
                     ).use { superegoClient ->
-                        logger.info { "Ego model=$egoModel Superego model=$superegoModel" }
-
-                        val gatekeeper = SuperegoGatekeeper(
-                            modelClient = superegoClient,
-                            config = config,
-                            directives = superegoDirectives,
-                            instrumentation = instrumentation
-                        )
-                        val webSearchAgentSession = MistralWebSearchAgentSession.start(
-                            apiKey = apiKey,
-                            model = egoModel,
-                            providedAgentId = System.getenv("MISTRAL_WEBSEARCH_AGENT_ID")
-                        )
-                        val mcpTimeTool = createMcpTimeTool(config, mcpRuntimeConfig.time)
-                        val mcpFetchTool = createMcpFetchTool(config, mcpRuntimeConfig.fetch)
-
-                        webSearchAgentSession.use { agentSession ->
-                            val webSearchProfile = MistralWebSearchProfile(
-                                mode = MistralWebSearchMode.AGENT_ID,
-                                model = egoModel,
-                                agentId = agentSession.agentId
-                            )
-                            val webSearchEngine = MistralConversationsWebSearchEngine(
-                                apiKey = apiKey,
-                                profile = webSearchProfile,
-                                callObserver = combineChatCallObservers(
-                                    metrics.chatCallObserver(provider = "mistral"),
-                                    instrumentationObserver,
-                                    metricsSnapshotObserver
+                        InstrumentedChatModelClient(
+                            delegate = createChatClient(
+                                llm = llm,
+                                modelName = llm.metaReasonerModel,
+                                callObserver = callObserver
+                            ),
+                            hooks = listOf(rawResponseHook)
+                        ).use { metaReasonerClient ->
+                            InstrumentedChatModelClient(
+                                delegate = createChatClient(
+                                    llm = llm,
+                                    modelName = llm.memoryConsolidationModel,
+                                    callObserver = callObserver
                                 ),
-                                instrumentation = instrumentation,
-                                maxRawResponseChars = config.maxActionPayloadChars
-                            )
+                                hooks = listOf(rawResponseHook)
+                            ).use { memoryConsolidationClient ->
+                                logger.info {
+                                    "Provider=${llm.providerLabel} Ego model=${llm.egoModel} Superego model=${llm.superegoModel} " +
+                                        "Meta model=${llm.metaReasonerModel} Memory model=${llm.memoryConsolidationModel} " +
+                                        "WebSearch model=${llm.webSearchModel}"
+                                }
 
-                            webSearchEngine.use { searchEngine ->
-                                val timeTool = mcpTimeTool
-                                val fetchTool = mcpFetchTool
-                                try {
-                                    val webSearchActionHandler = WebSearchActionHandler(searchEngine)
-                                    val motorCortex = MotorCortex(
-                                        webSearchActionHandler = webSearchActionHandler,
-                                        mcpTimeTool = timeTool,
-                                        mcpFetchTool = fetchTool
-                                    )
-                                    val actionStatuses = motorCortex.startupSmokeTest()
-                                    instrumentation.emit(AgentEvents.actionCapabilities(actionStatuses))
-                                    actionStatuses.filterNot { it.available }.forEach { status ->
-                                        instrumentation.emit(
-                                            AgentEvents.warning(
-                                                "Action ${status.actionType.name.lowercase()} unavailable at startup: ${status.detail}"
-                                            )
-                                        )
-                                    }
-                                    val planner = EgoPlanner(egoClient, config, instrumentation)
-                                    val metaReasoner = LlmMetaReasoner(
-                                        modelClient = egoClient,
-                                        config = config
-                                    )
-                                    val memoryConsolidationAdvisor = LlmMemoryConsolidationAdvisor(
-                                        modelClient = egoClient,
-                                        config = config
-                                    )
-                                    val hippocampus = createHippocampus(config, mcpRuntimeConfig.memory)
+                                val gatekeeper = SuperegoGatekeeper(
+                                    modelClient = superegoClient,
+                                    config = config,
+                                    directives = superegoDirectives,
+                                    instrumentation = instrumentation
+                                )
+                                val mcpTimeTool = createMcpTimeTool(config, mcpRuntimeConfig.time)
+                                val mcpFetchTool = createMcpFetchTool(config, mcpRuntimeConfig.fetch)
+                                val webSearchRuntime = createWebSearchRuntime(
+                                    llm = llm,
+                                    callObserver = callObserver,
+                                    instrumentation = instrumentation,
+                                    maxRawResponseChars = config.maxActionPayloadChars
+                                )
+
+                                webSearchRuntime.use { runtime ->
+                                    val timeTool = mcpTimeTool
+                                    val fetchTool = mcpFetchTool
                                     try {
-                                        EgoAgent(
-                                            planner = planner,
-                                            superego = gatekeeper,
-                                            motorCortex = motorCortex,
-                                            config = config,
-                                            hippocampus = hippocampus,
-                                            metaReasoner = metaReasoner,
-                                            memoryConsolidationAdvisor = memoryConsolidationAdvisor,
-                                            onActionDenied = {
-                                                metrics.recordDeniedAction()
-                                                emitMetricsSnapshot()
-                                            },
-                                            onQueueSaturation = { queueType, _, _ ->
-                                                metrics.recordQueueSaturation(queueType)
-                                                emitMetricsSnapshot()
-                                            },
-                                            onMemoryRecall = { hitCount, latencyMs, recallChars, truncated ->
-                                                metrics.recordMemoryRecall(
-                                                    hitCount = hitCount,
-                                                    latencyMs = latencyMs,
-                                                    recallChars = recallChars,
-                                                    truncated = truncated
+                                        val webSearchActionHandler = WebSearchActionHandler(runtime.engine)
+                                        val motorCortex = MotorCortex(
+                                            webSearchActionHandler = webSearchActionHandler,
+                                            mcpTimeTool = timeTool,
+                                            mcpFetchTool = fetchTool
+                                        )
+                                        val actionStatuses = motorCortex.startupSmokeTest()
+                                        instrumentation.emit(AgentEvents.actionCapabilities(actionStatuses))
+                                        actionStatuses.filterNot { it.available }.forEach { status ->
+                                            instrumentation.emit(
+                                                AgentEvents.warning(
+                                                    "Action ${status.actionType.name.lowercase()} unavailable at startup: ${status.detail}"
                                                 )
-                                                emitMetricsSnapshot()
-                                            },
-                                            onMemoryRecallFailure = { latencyMs ->
-                                                metrics.recordMemoryRecallFailure(latencyMs)
-                                                emitMetricsSnapshot()
-                                            },
-                                            onMemoryConsolidationAssessment = { saveRecommended ->
-                                                metrics.recordMemoryConsolidationAssessment(saveRecommended)
-                                                emitMetricsSnapshot()
-                                            },
-                                            onMemoryImprintResult = { saved, summaryChars, latencyMs ->
-                                                metrics.recordMemoryImprint(
-                                                    saved = saved,
-                                                    summaryChars = summaryChars,
-                                                    latencyMs = latencyMs
-                                                )
-                                                emitMetricsSnapshot()
-                                            },
-                                            instrumentation = instrumentation
-                                        ).runInteractive()
+                                            )
+                                        }
+                                        val planner = EgoPlanner(egoPlannerClient, config, instrumentation)
+                                        val metaReasoner = LlmMetaReasoner(
+                                            modelClient = metaReasonerClient,
+                                            config = config
+                                        )
+                                        val memoryConsolidationAdvisor = LlmMemoryConsolidationAdvisor(
+                                            modelClient = memoryConsolidationClient,
+                                            config = config
+                                        )
+                                        val hippocampus = createHippocampus(config, mcpRuntimeConfig.memory)
+                                        try {
+                                            EgoAgent(
+                                                planner = planner,
+                                                superego = gatekeeper,
+                                                motorCortex = motorCortex,
+                                                config = config,
+                                                hippocampus = hippocampus,
+                                                metaReasoner = metaReasoner,
+                                                memoryConsolidationAdvisor = memoryConsolidationAdvisor,
+                                                onActionDenied = {
+                                                    metrics.recordDeniedAction()
+                                                    emitMetricsSnapshot()
+                                                },
+                                                onQueueSaturation = { queueType, _, _ ->
+                                                    metrics.recordQueueSaturation(queueType)
+                                                    emitMetricsSnapshot()
+                                                },
+                                                onMemoryRecall = { hitCount, latencyMs, recallChars, truncated ->
+                                                    metrics.recordMemoryRecall(
+                                                        hitCount = hitCount,
+                                                        latencyMs = latencyMs,
+                                                        recallChars = recallChars,
+                                                        truncated = truncated
+                                                    )
+                                                    emitMetricsSnapshot()
+                                                },
+                                                onMemoryRecallFailure = { latencyMs ->
+                                                    metrics.recordMemoryRecallFailure(latencyMs)
+                                                    emitMetricsSnapshot()
+                                                },
+                                                onMemoryConsolidationAssessment = { saveRecommended ->
+                                                    metrics.recordMemoryConsolidationAssessment(saveRecommended)
+                                                    emitMetricsSnapshot()
+                                                },
+                                                onMemoryImprintResult = { saved, summaryChars, latencyMs ->
+                                                    metrics.recordMemoryImprint(
+                                                        saved = saved,
+                                                        summaryChars = summaryChars,
+                                                        latencyMs = latencyMs
+                                                    )
+                                                    emitMetricsSnapshot()
+                                                },
+                                                instrumentation = instrumentation
+                                            ).runInteractive()
+                                        } finally {
+                                            hippocampus.close()
+                                        }
                                     } finally {
-                                        hippocampus.close()
+                                        closeQuietly(fetchTool)
+                                        closeQuietly(timeTool)
                                     }
-                                } finally {
-                                    closeQuietly(fetchTool)
-                                    closeQuietly(timeTool)
                                 }
                             }
                         }
@@ -682,6 +731,86 @@ private fun runInteractiveMode(
                 }
             }
         }
+    }
+}
+
+private data class WebSearchRuntime(
+    val engine: WebSearchEngine,
+    private val closeAction: () -> Unit = {},
+) : AutoCloseable {
+    override fun close() {
+        closeAction()
+    }
+}
+
+private fun createWebSearchRuntime(
+    llm: LlmRuntimeConfig,
+    callObserver: psyke.llm.ChatCallObserver?,
+    instrumentation: psyke.instrumentation.AgentInstrumentation,
+    maxRawResponseChars: Int,
+): WebSearchRuntime {
+    return when (llm.provider) {
+        LlmProvider.MISTRAL -> {
+            val session = MistralWebSearchAgentSession.start(
+                apiKey = llm.apiKey,
+                model = llm.webSearchModel,
+                providedAgentId = System.getenv("MISTRAL_WEBSEARCH_AGENT_ID"),
+                baseUrl = llm.baseUrl
+            )
+            val profile = MistralWebSearchProfile(
+                mode = MistralWebSearchMode.AGENT_ID,
+                model = llm.webSearchModel,
+                agentId = session.agentId
+            )
+            val engine = MistralConversationsWebSearchEngine(
+                apiKey = llm.apiKey,
+                profile = profile,
+                baseUrl = llm.baseUrl,
+                callObserver = callObserver,
+                instrumentation = instrumentation,
+                maxRawResponseChars = maxRawResponseChars
+            )
+            WebSearchRuntime(
+                engine = engine,
+                closeAction = {
+                    closeQuietly(engine)
+                    closeQuietly(session)
+                }
+            )
+        }
+
+        LlmProvider.GROQ -> WebSearchRuntime(
+            engine = GroqConversationsWebSearchEngine(
+                apiKey = llm.apiKey,
+                model = llm.webSearchModel,
+                baseUrl = llm.baseUrl,
+                callObserver = callObserver,
+                instrumentation = instrumentation,
+                maxRawResponseChars = maxRawResponseChars
+            )
+        )
+    }
+}
+
+private fun createChatClient(
+    llm: LlmRuntimeConfig,
+    modelName: String,
+    callObserver: psyke.llm.ChatCallObserver? = null,
+): ChatModelClient {
+    return when (llm.provider) {
+        LlmProvider.GROQ -> GroqChatClient(
+            apiKey = llm.apiKey,
+            baseUrl = llm.baseUrl,
+            modelName = modelName,
+            callObserver = callObserver
+        )
+
+        LlmProvider.MISTRAL -> MistralChatClient(
+            apiKey = llm.apiKey,
+            baseUrl = llm.baseUrl,
+            modelName = modelName,
+            callObserver = callObserver
+        )
     }
 }
 

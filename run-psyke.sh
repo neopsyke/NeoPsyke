@@ -73,7 +73,11 @@ Options:
   -h, --help              Show this help message
 
 Environment:
-  MISTRAL_API_KEY         Required for interactive mode and eval mode=model
+  PSYKE_LLM_CONFIG_FILE   Optional path to LLM runtime YAML (default: ./llm-runtime.yaml)
+  LLM_PROVIDER            Optional env override for YAML provider: groq or mistral
+  GROQ_API_KEY            Required when provider=groq
+  MISTRAL_API_KEY         Required when provider=mistral
+  LLM_API_KEY             Optional generic API key fallback for the selected provider
   PSYKE_MCP_CONFIG_FILE   Optional path to MCP runtime YAML (default: ./mcp-runtime.yaml)
   MCP_MEMORY_SERVER_CMD   Optional override for memory command (required only if YAML memory command is not set)
   PSYKE_LOG_LEVEL         Default log level if --log-level is not provided
@@ -82,7 +86,7 @@ Environment:
   PSYKE_EVENT_LOG_FILE    Optional path override for instrumentation sidecar JSONL
   PSYKE_METRICS_DB        SQLite path for persisted local metrics
   EGO_LOOP_DELAY_MS       Delay between loop cycles in ms (default via launcher: 1000)
-  PSYKE_EVAL_TRANSPORT_DEBUG  Set to true to keep low-level Mistral transport debug lines in eval mode
+  PSYKE_EVAL_TRANSPORT_DEBUG  Set to true to keep low-level LLM transport debug lines in eval mode
   PSYKE_EVAL_MAX_RAW_RESPONSE_CHARS  Max chars stored per raw eval thought (default: unlimited)
 
 Eval mode (forwarded to app):
@@ -161,7 +165,7 @@ export PSYKE_EVENT_LOG_FILE="$RUN_EVENT_FILE"
 
 JAVA_OPTS_APPEND=" -Dorg.slf4j.simpleLogger.defaultLogLevel=${LOG_LEVEL} -Dorg.slf4j.simpleLogger.logFile=${RUN_LOG_FILE} -Dorg.slf4j.simpleLogger.showDateTime=true -Dorg.slf4j.simpleLogger.dateTimeFormat=yyyy-MM-dd_HH:mm:ss.SSSZ"
 if [[ "$EVAL_MODE" -eq 1 ]] && [[ "${PSYKE_EVAL_TRANSPORT_DEBUG:-false}" != "true" ]]; then
-  JAVA_OPTS_APPEND="${JAVA_OPTS_APPEND} -Dorg.slf4j.simpleLogger.log.psyke.llm.MistralChatClient=warn"
+  JAVA_OPTS_APPEND="${JAVA_OPTS_APPEND} -Dorg.slf4j.simpleLogger.log.psyke.llm.MistralChatClient=warn -Dorg.slf4j.simpleLogger.log.psyke.llm.GroqChatClient=warn"
 fi
 export JAVA_OPTS="${JAVA_OPTS:-}${JAVA_OPTS_APPEND}"
 

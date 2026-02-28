@@ -20,8 +20,8 @@ private val mapper = jacksonObjectMapper()
     .setSerializationInclusion(JsonInclude.Include.NON_NULL)
 private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
 
-class MistralChatClient(
-    private val apiKey: String = System.getenv("MISTRAL_API_KEY") ?: "",
+class GroqChatClient(
+    private val apiKey: String = System.getenv("GROQ_API_KEY") ?: "",
     private val baseUrl: String = DEFAULT_BASE_URL,
     override val modelName: String = DEFAULT_MODEL,
     private val httpClient: OkHttpClient = defaultHttpClient(),
@@ -30,9 +30,9 @@ class MistralChatClient(
     private var effectiveCallObserver: ChatCallObserver? = callObserver
 
     init {
-        require(apiKey.isNotBlank()) { "Mistral API key must be provided (set MISTRAL_API_KEY)." }
+        require(apiKey.isNotBlank()) { "Groq API key must be provided (set GROQ_API_KEY)." }
         val binding = bindFailSafeMetricsObserver(
-            provider = "mistral",
+            provider = "groq",
             apiKey = apiKey,
             modelName = modelName,
             primaryObserver = callObserver
@@ -44,17 +44,16 @@ class MistralChatClient(
         require(messages.isNotEmpty()) { "At least one chat message is required." }
         val startedAt = System.nanoTime()
 
-        val payload = MistralChatCompletionRequest(
+        val payload = GroqChatCompletionRequest(
             model = modelName,
-            messages = messages.map { MistralChatMessage(role = it.role.apiValue, content = it.content) },
+            messages = messages.map { GroqChatMessage(role = it.role.apiValue, content = it.content) },
             temperature = options.temperature,
-            maxTokens = options.maxTokens,
-            safePrompt = options.safePrompt
+            maxTokens = options.maxTokens
         )
 
         val requestBody = mapper.writeValueAsString(payload).toRequestBody(jsonMediaType)
         val request = Request.Builder()
-            .url("$baseUrl/chat/completions")
+            .url("${baseUrl.trimEnd('/')}/chat/completions")
             .header("Authorization", "Bearer $apiKey")
             .header("Content-Type", "application/json")
             .post(requestBody)
@@ -66,19 +65,19 @@ class MistralChatClient(
             httpClient.newCall(request).execute().use { response ->
                 val responseBody = response.body?.string()
                 if (!response.isSuccessful) {
-                    throw MistralHttpException(
+                    throw GroqHttpException(
                         statusCode = response.code,
                         responseBody = responseBody
                     )
                 }
 
                 if (responseBody.isNullOrBlank()) {
-                    throw IOException("Mistral chat returned an empty response body.")
+                    throw IOException("Groq chat returned an empty response body.")
                 }
 
-                val parsed = mapper.readValue<MistralChatCompletionResponse>(responseBody)
+                val parsed = mapper.readValue<GroqChatCompletionResponse>(responseBody)
                 val choice = parsed.choices.firstOrNull()
-                    ?: throw IOException("Mistral chat returned no choices.")
+                    ?: throw IOException("Groq chat returned no choices.")
 
                 val usage = parsed.usage?.toChatUsage()
                 val resolvedModel = parsed.model ?: modelName
@@ -125,8 +124,8 @@ class MistralChatClient(
     }
 
     companion object {
-        const val DEFAULT_MODEL = "mistral-small-latest"
-        private const val DEFAULT_BASE_URL = "https://api.mistral.ai/v1"
+        const val DEFAULT_MODEL = "openai/gpt-oss-20b"
+        private const val DEFAULT_BASE_URL = "https://api.groq.com/openai/v1"
 
         private fun defaultHttpClient(): OkHttpClient =
             OkHttpClient.Builder()
@@ -146,62 +145,60 @@ class MistralChatClient(
     }
 }
 
-private class MistralHttpException(
+private class GroqHttpException(
     val statusCode: Int,
     val responseBody: String?,
-) : IOException("Mistral chat failed with status $statusCode.${responseBody?.let { " Response: $it" } ?: ""}")
+) : IOException("Groq chat failed with status $statusCode.${responseBody?.let { " Response: $it" } ?: ""}")
 
 private fun Exception.toErrorCode(): String =
     when (this) {
-        is MistralHttpException -> "HTTP_$statusCode"
+        is GroqHttpException -> "HTTP_$statusCode"
         else -> this::class.simpleName ?: "error"
     }
 
 private fun Exception.toErrorMessage(): String {
     val raw = when (this) {
-        is MistralHttpException -> responseBody ?: message.orEmpty()
+        is GroqHttpException -> responseBody ?: message.orEmpty()
         else -> message.orEmpty()
     }
     return raw.replace(Regex("\\s+"), " ").trim().take(180)
 }
 
-private data class MistralChatCompletionRequest(
+private data class GroqChatCompletionRequest(
     val model: String,
-    val messages: List<MistralChatMessage>,
+    val messages: List<GroqChatMessage>,
     val temperature: Double? = null,
     @JsonProperty("max_tokens")
     val maxTokens: Int? = null,
-    @JsonProperty("safe_prompt")
-    val safePrompt: Boolean? = null,
 )
 
-private data class MistralChatMessage(
+private data class GroqChatMessage(
     val role: String,
     val content: String,
 )
 
-private data class MistralChatCompletionResponse(
+private data class GroqChatCompletionResponse(
     val id: String?,
     @JsonProperty("object")
     val objectType: String? = null,
     val model: String?,
-    val choices: List<MistralChoice> = emptyList(),
-    val usage: MistralUsage? = null,
+    val choices: List<GroqChoice> = emptyList(),
+    val usage: GroqUsage? = null,
 )
 
-private data class MistralChoice(
+private data class GroqChoice(
     val index: Int? = null,
-    val message: MistralResponseMessage,
+    val message: GroqResponseMessage,
     @JsonProperty("finish_reason")
     val finishReason: String? = null,
 )
 
-private data class MistralResponseMessage(
+private data class GroqResponseMessage(
     val role: String,
     val content: String,
 )
 
-private data class MistralUsage(
+private data class GroqUsage(
     @JsonProperty("prompt_tokens")
     val promptTokens: Int? = null,
     @JsonProperty("completion_tokens")

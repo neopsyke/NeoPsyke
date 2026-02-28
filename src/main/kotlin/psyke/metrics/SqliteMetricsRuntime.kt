@@ -1,9 +1,11 @@
 package psyke.metrics
 
 import mu.KotlinLogging
+import psyke.config.RuntimeDefaultsConfigLoader
 import psyke.llm.ChatCallObserver
 import psyke.llm.ChatCallRecord
 import psyke.llm.ChatCallStatus
+import psyke.llm.PersistentMetricsChatCallObserver
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
@@ -18,6 +20,7 @@ import java.util.UUID
 private val logger = KotlinLogging.logger {}
 
 class SqliteMetricsRuntime(
+    private val provider: String,
     apiKey: String,
     egoModel: String,
     superegoModel: String,
@@ -38,6 +41,7 @@ class SqliteMetricsRuntime(
                 """
                 CREATE TABLE IF NOT EXISTS runs (
                   run_id TEXT PRIMARY KEY,
+                  provider TEXT NOT NULL,
                   key_fingerprint TEXT NOT NULL,
                   started_at TEXT NOT NULL,
                   ended_at TEXT,
@@ -67,6 +71,7 @@ class SqliteMetricsRuntime(
                 );
                 """.trimIndent()
             )
+            addRunsColumnIfMissing(statement, "provider", "TEXT NOT NULL DEFAULT 'unknown'")
             addRunsColumnIfMissing(statement, "queue_saturation_events", "INTEGER NOT NULL DEFAULT 0")
             addRunsColumnIfMissing(statement, "dropped_events", "INTEGER NOT NULL DEFAULT 0")
             addRunsColumnIfMissing(statement, "memory_recall_attempts", "INTEGER NOT NULL DEFAULT 0")
@@ -106,12 +111,14 @@ class SqliteMetricsRuntime(
             )
             statement.execute("CREATE INDEX IF NOT EXISTS idx_llm_calls_run_id ON llm_calls(run_id);")
             statement.execute("CREATE INDEX IF NOT EXISTS idx_llm_calls_key_ts ON llm_calls(key_fingerprint, ts);")
+            statement.execute("CREATE INDEX IF NOT EXISTS idx_runs_scope ON runs(provider, key_fingerprint, started_at);")
+            statement.execute("CREATE INDEX IF NOT EXISTS idx_llm_calls_scope ON llm_calls(provider, key_fingerprint, ts);")
         }
         startRun(egoModel, superegoModel)
     }
 
     override fun chatCallObserver(provider: String): ChatCallObserver =
-        ChatCallObserver { record -> recordCall(provider, record) }
+        SqlitePersistingChatCallObserver { record -> recordCall(provider, record) }
 
     override fun recordDeniedAction() {
         synchronized(connection) {
@@ -334,10 +341,11 @@ class SqliteMetricsRuntime(
                        COALESCE(SUM(memory_imprint_latency_ms_total), 0) AS memory_imprint_latency_ms_total,
                        COALESCE(SUM(memory_imprint_chars_total), 0) AS memory_imprint_chars_total
                 FROM runs
-                WHERE key_fingerprint = ?
+                WHERE key_fingerprint = ? AND provider = ?
                 """.trimIndent()
             ).use { statement ->
                 statement.setString(1, keyFingerprint)
+                statement.setString(2, provider)
                 statement.executeQuery().use { rs ->
                     rs.next()
                     val totals = MetricsTotals(
@@ -385,10 +393,11 @@ class SqliteMetricsRuntime(
                 """
                 SELECT COALESCE(SUM(COALESCE(total_tokens, COALESCE(prompt_tokens, 0) + COALESCE(completion_tokens, 0))), 0) AS total
                 FROM llm_calls
-                WHERE key_fingerprint = ? AND LOWER(COALESCE(actor, '')) = 'superego'
+                WHERE key_fingerprint = ? AND LOWER(COALESCE(actor, '')) = 'superego' AND provider = ?
                 """.trimIndent()
             ).use { statement ->
                 statement.setString(1, keyFingerprint)
+                statement.setString(2, provider)
                 statement.executeQuery().use { rs ->
                     rs.next()
                     rs.getLong("total")
@@ -397,11 +406,12 @@ class SqliteMetricsRuntime(
 
             return MetricsSnapshot(
                 runId = runId,
+                provider = provider,
                 keyFingerprint = keyFingerprint,
                 updatedAtIso = nowIso(),
                 runTotals = runTotals,
                 persistentTotals = persistent.second,
-                runCountForKey = persistent.first,
+                runCountForScope = persistent.first,
                 runSuperegoTokens = runSuperegoTokens,
                 persistentSuperegoTokens = persistentSuperegoTokens
             )
@@ -412,15 +422,16 @@ class SqliteMetricsRuntime(
         synchronized(connection) {
             connection.prepareStatement(
                 """
-                INSERT INTO runs(run_id, key_fingerprint, started_at, ego_model, superego_model)
-                VALUES(?, ?, ?, ?, ?)
+                INSERT INTO runs(run_id, provider, key_fingerprint, started_at, ego_model, superego_model)
+                VALUES(?, ?, ?, ?, ?, ?)
                 """.trimIndent()
             ).use { statement ->
                 statement.setString(1, runId)
-                statement.setString(2, keyFingerprint)
-                statement.setString(3, nowIso())
-                statement.setString(4, egoModel)
-                statement.setString(5, superegoModel)
+                statement.setString(2, provider)
+                statement.setString(3, keyFingerprint)
+                statement.setString(4, nowIso())
+                statement.setString(5, egoModel)
+                statement.setString(6, superegoModel)
                 statement.executeUpdate()
             }
         }
@@ -491,6 +502,14 @@ class SqliteMetricsRuntime(
     }
 
     private companion object {
+        private class SqlitePersistingChatCallObserver(
+            private val sink: (ChatCallRecord) -> Unit,
+        ) : PersistentMetricsChatCallObserver {
+            override fun onChatCall(record: ChatCallRecord) {
+                sink(record)
+            }
+        }
+
         private fun addRunsColumnIfMissing(statement: java.sql.Statement, column: String, definition: String) {
             try {
                 statement.execute("ALTER TABLE runs ADD COLUMN $column $definition;")
@@ -500,8 +519,11 @@ class SqliteMetricsRuntime(
         }
 
         private fun resolveDbPath(): Path {
-            val raw = System.getenv("PSYKE_METRICS_DB") ?: "~/.psyke/metrics.db"
-            return expandUserPath(raw)
+            val raw = System.getProperty("psyke.metrics.db")
+            if (!raw.isNullOrBlank()) {
+                return expandUserPath(raw)
+            }
+            return RuntimeDefaultsConfigLoader.resolveMetricsDbPath()
         }
 
         private fun expandUserPath(raw: String): Path {

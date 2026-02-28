@@ -537,6 +537,7 @@
       if (metrics) {
         const run = metrics.runTotals || {};
         const all = metrics.persistentTotals || {};
+        const scopeRunCount = metrics.runCountForScope != null ? metrics.runCountForScope : metrics.runCountForKey;
         const runSuperegoTokens = Number(metrics.runSuperegoTokens || 0);
         const allSuperegoTokens = Number(metrics.persistentSuperegoTokens || 0);
         const runRecallAttempts = asNum(run.memoryRecallAttempts);
@@ -561,8 +562,9 @@
         const allImprintFailures = asNum(all.memoryImprintFailures);
         const allImprintAvgLatencyMs = avg(all.memoryImprintLatencyMsTotal, allImprintAttempts);
         parts.push(chip("Run", short(metrics.runId, 10), null));
+        parts.push(chip("Provider", metrics.provider || "-", null));
         parts.push(chip("Key", metrics.keyFingerprint, null));
-        parts.push(chip("Runs", metrics.runCountForKey, null));
+        parts.push(chip("Runs(scope)", scopeRunCount || 0, null));
         parts.push(chip("Run Calls", run.calls || 0, null));
         parts.push(chip("Run Tokens", run.totalTokens || 0, null));
         parts.push(chip("All Tokens", all.totalTokens || 0, null));

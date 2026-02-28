@@ -29,11 +29,12 @@ class DashboardStateStoreTest {
         )
         val metrics = MetricsSnapshot(
             runId = "run-1",
+            provider = "mistral",
             keyFingerprint = "fp",
             updatedAtIso = "2026-01-01T00:00:00Z",
             runTotals = MetricsTotals(1, 2, 3, 5, 0, 0),
             persistentTotals = MetricsTotals(2, 4, 6, 10, 1, 0),
-            runCountForKey = 2,
+            runCountForScope = 2,
             runSuperegoTokens = 3,
             persistentSuperegoTokens = 6
         )

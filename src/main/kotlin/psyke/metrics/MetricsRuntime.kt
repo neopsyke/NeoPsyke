@@ -1,8 +1,17 @@
 package psyke.metrics
 
+import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import mu.KotlinLogging
 import psyke.llm.ChatCallObserver
+import psyke.llm.ChatCallRecord
+import psyke.llm.PersistentMetricsChatCallObserver
+import psyke.config.RuntimeDefaultsConfigLoader
 import java.io.Closeable
+import java.nio.charset.StandardCharsets
+import java.nio.file.Files
+import java.nio.file.Path
+import java.nio.file.StandardOpenOption
+import java.time.Instant
 
 private val logger = KotlinLogging.logger {}
 
@@ -34,19 +43,176 @@ class NoopMetricsRuntime : MetricsRuntime {
 
 object MetricsRuntimeFactory {
     fun create(
+        provider: String,
         apiKey: String,
         egoModel: String,
         superegoModel: String,
     ): MetricsRuntime {
+        ensureMetricsDbSystemProperty()
         return try {
             SqliteMetricsRuntime(
+                provider = provider,
                 apiKey = apiKey,
                 egoModel = egoModel,
                 superegoModel = superegoModel
             )
         } catch (ex: Exception) {
-            logger.warn(ex) { "Metrics disabled because initialization failed." }
+            logger.warn(ex) { "Primary SQLite metrics initialization failed; falling back to JSONL metrics sink." }
+            createFallbackRuntime(provider = provider)
+        }
+    }
+
+    private fun ensureMetricsDbSystemProperty() {
+        if (!System.getProperty("psyke.metrics.db").isNullOrBlank()) {
+            return
+        }
+        val resolved = RuntimeDefaultsConfigLoader.resolveMetricsDbPath()
+        System.setProperty("psyke.metrics.db", resolved.toString())
+    }
+
+    private fun createFallbackRuntime(provider: String): MetricsRuntime {
+        val targetPath = try {
+            RuntimeDefaultsConfigLoader.resolveMetricsDbPath().resolveSibling("metrics-fallback.jsonl")
+        } catch (_: Exception) {
+            Path.of(System.getProperty("user.dir"), ".psyke", "metrics-fallback.jsonl")
+        }
+        return try {
+            JsonlFallbackMetricsRuntime(
+                provider = provider,
+                filePath = targetPath
+            )
+        } catch (fallbackEx: Exception) {
+            logger.warn(fallbackEx) { "Fallback JSONL metrics initialization failed. Metrics are disabled." }
             NoopMetricsRuntime()
+        }
+    }
+}
+
+private class JsonlFallbackMetricsRuntime(
+    private val provider: String,
+    private val filePath: Path,
+) : MetricsRuntime {
+    private val mapper = jacksonObjectMapper()
+
+    override fun chatCallObserver(provider: String): ChatCallObserver =
+        object : PersistentMetricsChatCallObserver {
+            override fun onChatCall(record: ChatCallRecord) {
+                val payload = mapOf(
+                    "ts" to Instant.now().toString(),
+                    "provider" to provider,
+                    "model" to record.model,
+                    "actor" to record.metadata.actor,
+                    "call_site" to record.metadata.callSite,
+                    "action_type" to record.metadata.actionType,
+                    "prompt_tokens" to record.promptTokens,
+                    "completion_tokens" to record.completionTokens,
+                    "total_tokens" to record.totalTokens,
+                    "latency_ms" to record.latencyMs,
+                    "status" to record.status.name.lowercase(),
+                    "error_code" to record.errorCode,
+                    "error_message" to record.errorMessage
+                )
+                appendLine(payload)
+            }
+        }
+
+    override fun recordDeniedAction() {
+        appendLine(
+            mapOf(
+                "ts" to Instant.now().toString(),
+                "provider" to provider,
+                "event" to "denied_action"
+            )
+        )
+    }
+
+    override fun recordDroppedEvents(count: Long) {
+        appendLine(
+            mapOf(
+                "ts" to Instant.now().toString(),
+                "provider" to provider,
+                "event" to "dropped_events",
+                "count" to count
+            )
+        )
+    }
+
+    override fun recordQueueSaturation(queueType: String) {
+        appendLine(
+            mapOf(
+                "ts" to Instant.now().toString(),
+                "provider" to provider,
+                "event" to "queue_saturation",
+                "queue_type" to queueType
+            )
+        )
+    }
+
+    override fun recordMemoryRecall(hitCount: Int, latencyMs: Long, recallChars: Int, truncated: Boolean) {
+        appendLine(
+            mapOf(
+                "ts" to Instant.now().toString(),
+                "provider" to provider,
+                "event" to "memory_recall",
+                "hit_count" to hitCount,
+                "latency_ms" to latencyMs,
+                "recall_chars" to recallChars,
+                "truncated" to truncated
+            )
+        )
+    }
+
+    override fun recordMemoryRecallFailure(latencyMs: Long) {
+        appendLine(
+            mapOf(
+                "ts" to Instant.now().toString(),
+                "provider" to provider,
+                "event" to "memory_recall_failure",
+                "latency_ms" to latencyMs
+            )
+        )
+    }
+
+    override fun recordMemoryConsolidationAssessment(saveRecommended: Boolean) {
+        appendLine(
+            mapOf(
+                "ts" to Instant.now().toString(),
+                "provider" to provider,
+                "event" to "memory_consolidation_assessment",
+                "save_recommended" to saveRecommended
+            )
+        )
+    }
+
+    override fun recordMemoryImprint(saved: Boolean, summaryChars: Int, latencyMs: Long) {
+        appendLine(
+            mapOf(
+                "ts" to Instant.now().toString(),
+                "provider" to provider,
+                "event" to "memory_imprint",
+                "saved" to saved,
+                "summary_chars" to summaryChars,
+                "latency_ms" to latencyMs
+            )
+        )
+    }
+
+    override fun snapshot(): MetricsSnapshot? = null
+
+    private fun appendLine(payload: Map<String, Any?>) {
+        try {
+            Files.createDirectories(filePath.parent)
+            val line = mapper.writeValueAsString(payload) + "\n"
+            Files.writeString(
+                filePath,
+                line,
+                StandardCharsets.UTF_8,
+                StandardOpenOption.CREATE,
+                StandardOpenOption.WRITE,
+                StandardOpenOption.APPEND
+            )
+        } catch (ex: Exception) {
+            logger.debug(ex) { "Fallback metrics write failed for path=$filePath." }
         }
     }
 }
@@ -77,11 +243,12 @@ data class MetricsTotals(
 
 data class MetricsSnapshot(
     val runId: String,
+    val provider: String,
     val keyFingerprint: String,
     val updatedAtIso: String,
     val runTotals: MetricsTotals,
     val persistentTotals: MetricsTotals,
-    val runCountForKey: Long,
+    val runCountForScope: Long,
     val runSuperegoTokens: Long = 0,
     val persistentSuperegoTokens: Long = 0,
 )

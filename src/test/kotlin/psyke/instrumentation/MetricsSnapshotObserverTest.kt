@@ -15,11 +15,12 @@ class MetricsSnapshotObserverTest {
     fun `observer emits snapshot event when metrics are available`() {
         val snapshot = MetricsSnapshot(
             runId = "r1",
+            provider = "mistral",
             keyFingerprint = "fp",
             updatedAtIso = "2026-01-01T00:00:00Z",
             runTotals = MetricsTotals(1, 2, 3, 5, 0, 0),
             persistentTotals = MetricsTotals(10, 20, 30, 50, 2, 1),
-            runCountForKey = 4,
+            runCountForScope = 4,
             runSuperegoTokens = 7,
             persistentSuperegoTokens = 70
         )

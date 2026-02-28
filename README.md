@@ -16,10 +16,33 @@ Standalone Kotlin JVM app using Gradle with:
 - JDK 21+
 - Use the included Gradle wrapper (`./gradlew`)
 - Gradle can run on JDK 21+; Kotlin and Java compilation emit Java 21-compatible bytecode.
-- `MISTRAL_API_KEY` is required for interactive mode and for `--eval-reasoning-mode model`.
+- LLM API key is required for interactive mode and for `--eval-reasoning-mode model`:
+  - Default provider from `llm-runtime.yaml` is `groq`, so `GROQ_API_KEY`
+  - If provider is switched to `mistral`, use `MISTRAL_API_KEY`
 
 ## Configuration
-- Set `MISTRAL_API_KEY` to your API token.
+- LLM settings are centralized in `llm-runtime.yaml` (repository root).
+  - Default config selects provider `groq`; if models are omitted, Psyke uses provider defaults (`openai/gpt-oss-20b` for Groq, `mistral-small-latest` for Mistral).
+  - Optional override file path: `PSYKE_LLM_CONFIG_FILE=/path/to/llm-runtime.yaml`.
+  - Environment variables override YAML when present.
+  - Example:
+    ```yaml
+    provider: groq
+    models:
+      ego: openai/gpt-oss-20b
+      superego: openai/gpt-oss-20b
+      meta_reasoner: openai/gpt-oss-20b
+      memory_consolidation: openai/gpt-oss-20b
+      web_search: openai/gpt-oss-20b
+    ```
+- LLM auth and provider overrides:
+  - `GROQ_API_KEY` (required when provider is `groq`)
+  - `MISTRAL_API_KEY` (required when provider is `mistral`)
+  - `LLM_API_KEY` (optional generic fallback for selected provider key)
+  - `LLM_PROVIDER` (optional env override for YAML provider; `groq|mistral`)
+- Optional LLM endpoint overrides:
+  - `LLM_BASE_URL` (provider-agnostic override)
+  - `GROQ_BASE_URL` / `MISTRAL_BASE_URL` (provider-specific override)
 - MCP/time/fetch/memory provider settings are now centralized in `mcp-runtime.yaml` (repository root).
   - Default config enables `time`, `fetch`, and `memory` in `stdio` mode with command/fallback lists.
   - Optional override file path: `PSYKE_MCP_CONFIG_FILE=/path/to/mcp-runtime.yaml`.
@@ -31,9 +54,17 @@ Standalone Kotlin JVM app using Gradle with:
     - `command` (primary command string)
     - `fallback_commands` (list of command strings; first executable in `PATH` is used)
 - Optional:
+  - `PSYKE_LLM_CONFIG_FILE` (optional; path to LLM runtime YAML, default: `./llm-runtime.yaml`)
   - `PSYKE_MCP_CONFIG_FILE` (optional; path to MCP runtime YAML, default: `./mcp-runtime.yaml`)
-  - `MISTRAL_EGO_MODEL` (default: `mistral-small-latest`)
-  - `MISTRAL_SUPEREGO_MODEL` (default: same as Ego model)
+  - LLM model overrides (defaults depend on provider: Groq=`openai/gpt-oss-20b`, Mistral=`mistral-small-latest`):
+    - `LLM_EGO_MODEL`
+    - `LLM_SUPEREGO_MODEL` (default: Ego model)
+    - `LLM_META_REASONER_MODEL` (default: Ego model)
+    - `LLM_MEMORY_CONSOLIDATION_MODEL` (default: Ego model)
+    - `LLM_WEBSEARCH_MODEL` (default: Ego model)
+  - Provider-specific model override aliases:
+    - Groq: `GROQ_EGO_MODEL`, `GROQ_SUPEREGO_MODEL`, `GROQ_META_REASONER_MODEL`, `GROQ_MEMORY_CONSOLIDATION_MODEL`, `GROQ_WEBSEARCH_MODEL`
+    - Mistral: `MISTRAL_EGO_MODEL`, `MISTRAL_SUPEREGO_MODEL`, `MISTRAL_META_REASONER_MODEL`, `MISTRAL_MEMORY_CONSOLIDATION_MODEL`, `MISTRAL_WEBSEARCH_MODEL`
   - `PSYKE_DASHBOARD_ENABLED` (default: `true`)
   - `PSYKE_DASHBOARD_PORT` (default: `8787`)
   - `EGO_MAX_LOOP_STEPS` (default: `180`)
@@ -51,7 +82,7 @@ Standalone Kotlin JVM app using Gradle with:
   - `MCP_TIME_MODE` / `MCP_FETCH_MODE` / `MCP_MEMORY_MODE` (optional env override for YAML mode)
   - `MCP_TIME_PROVIDER` / `MCP_FETCH_PROVIDER` / `MCP_MEMORY_PROVIDER` (optional env override for YAML provider)
   - `MCP_TIME_ENABLED` / `MCP_FETCH_ENABLED` / `MCP_MEMORY_ENABLED` (optional env override for YAML enabled flag)
-  - `MISTRAL_WEBSEARCH_AGENT_ID` (optional; if omitted, Psyke creates an ephemeral Mistral web-search agent per run)
+  - `MISTRAL_WEBSEARCH_AGENT_ID` (optional, provider=`mistral` only; if omitted, Psyke creates an ephemeral Mistral web-search agent per run)
   - `MCP_CALL_TIMEOUT_MS` (default: `8000`)
   - `MCP_MEMORY_CALL_TIMEOUT_MS` (default: same as `MCP_CALL_TIMEOUT_MS`)
   - `MCP_FETCH_MAX_CHARS` (default: `4000`)
@@ -71,7 +102,7 @@ Standalone Kotlin JVM app using Gradle with:
 
 ## Run
 ```bash
-export MISTRAL_API_KEY=your_token
+export GROQ_API_KEY=your_token
 ./gradlew run
 ```
 
@@ -90,7 +121,7 @@ export PSYKE_LOG_FILE="$PWD/.psyke/logs/gradle-run.log"
 ## Simpler Entrypoint (No `gradle run`)
 Use the local launcher:
 ```bash
-export MISTRAL_API_KEY=your_token
+export GROQ_API_KEY=your_token
 ./run-psyke.sh
 ```
 
@@ -102,7 +133,7 @@ Run deterministic reasoning self-eval (no MotorCortex actions, no baseline compa
 Reasoning eval options:
 ```bash
 ./run-psyke.sh --eval-reasoning-only --eval-reasoning-mode logic  # default; no external LLM calls
-./run-psyke.sh --eval-reasoning-only --eval-reasoning-mode model  # uses MISTRAL_API_KEY
+./run-psyke.sh --eval-reasoning-only --eval-reasoning-mode model  # uses provider API key (GROQ_API_KEY by default)
 ./run-psyke.sh --eval-reasoning-only --eval-stage 2026-02-28
 ./run-psyke.sh --eval-reasoning-only --eval-reasoning-max-attempts 5
 ./run-psyke.sh --eval-reasoning-only --eval-reasoning-tasks shape-lock,multi-fix  # logic mode tasks
@@ -120,7 +151,7 @@ Reasoning eval output:
 
 Memory live eval (real-world, no mocks):
 ```bash
-export MISTRAL_API_KEY=your_token
+export GROQ_API_KEY=your_token
 # either set in mcp-runtime.yaml (preferred) or override here:
 export MCP_MEMORY_SERVER_CMD='your-memory-mcp-server-command'
 ./run-psyke.sh --eval-memory-live
@@ -165,6 +196,10 @@ Notes:
 - `PSYKE_LOG_DIR` overrides the log directory (default: `.psyke/logs`).
 - `PSYKE_EVENT_LOG_FILE` overrides the event sidecar path (used by eval modes).
 - By default the launcher persists metrics to `.psyke/metrics.db` (override with `PSYKE_METRICS_DB`).
+  - A runtime defaults file is auto-created on first metrics use at `.psyke/runtime-defaults.yaml` (override path with `PSYKE_RUNTIME_DEFAULTS_FILE`).
+  - If `PSYKE_METRICS_DB` is not set, the app uses `metrics_db` from that defaults file.
+  - Metrics are now fail-safe at client level (LLM/web-search clients emit usage through persistent metrics observer even outside the normal app runner path).
+  - If SQLite metrics init fails, Psyke falls back to `.psyke/metrics-fallback.jsonl` so usage events are still persisted.
 
 Then interact:
 ```text
@@ -199,6 +234,9 @@ you> exit
 - Every proposed action includes a context summary capped at 180 chars.
 - MotorCortex runs a startup capability smoke test and emits `action_capabilities` instrumentation.
 - Ego planner receives runtime `available_action_types` and avoids proposing unavailable actions.
+- `web_search` is supported for both providers:
+  - `mistral`: Conversations web-search integration (agent-backed)
+  - `groq`: Groq web search via Chat Completions (`browser_search` tool for standard models, or built-in search behavior for `groq/compound*` models)
 - Superego validates every action against directives before execution.
 - If denied, denial reason (<=180 chars) is pushed back as a new thought.
 
@@ -216,8 +254,8 @@ you> exit
 - Memory metrics are persisted per run and as persistent totals: recall attempts/hits/failures/truncation/latency/chars, consolidation assessments/save recommendations, and imprint attempts/success/failures/latency/chars.
 
 ## Provider status checks
-- Before interactive mode and live/model eval modes, Psyke runs a provider health check for Mistral.
-- Checks include DNS resolution for `api.mistral.ai` and a short authenticated HTTP probe (`GET /v1/models`).
+- Before interactive mode and live/model eval modes, Psyke runs a provider health check for the selected LLM provider.
+- Checks include DNS resolution for the provider host and a short authenticated HTTP probe (`GET /models`).
 - If provider is unavailable, Psyke prints a clear error to both stderr/stdout-facing output and logs, then exits early.
 - If provider is degraded (for example, rate limiting), Psyke logs and prints a warning but continues.
 - For `--eval-memory-live`, Psyke also preflights the memory MCP provider (connect + tool listing) and fails early if required recall/write-like tools are missing or startup fails.
