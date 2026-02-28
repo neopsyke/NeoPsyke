@@ -8,6 +8,7 @@ import psyke.support.StubChatModelClient
 import java.io.ByteArrayInputStream
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class EgoAgentTest {
@@ -238,6 +239,353 @@ class EgoAgentTest {
         )
     }
 
+    @Test
+    fun `agent injects hippocampus recall into planner context`() {
+        val plannerLlm = StubChatModelClient().apply {
+            enqueueRawResponse(
+                """
+                {"decision":"action","urgency":"medium","action_type":"answer","action_payload":"ok","action_summary":"respond"}
+                """.trimIndent()
+            )
+        }
+        val superegoLlm = StubChatModelClient().apply {
+            enqueueRawResponse("""{"allow":true}""")
+        }
+        val instrumentation = RecordingInstrumentation()
+        val outputs = mutableListOf<String>()
+        val hippocampus = RecordingHippocampus(
+            recall = MemoryRecall(
+                provider = "test_memory",
+                text = "- prior preference: concise responses",
+                hitCount = 1
+            )
+        )
+        val agent = EgoAgent(
+            planner = EgoPlanner(modelClient = plannerLlm, config = AgentConfig(), instrumentation = instrumentation),
+            superego = SuperegoGatekeeper(
+                modelClient = superegoLlm,
+                config = AgentConfig(),
+                instrumentation = instrumentation
+            ),
+            motorCortex = buildMotorCortex(output = { outputs.add(it) }),
+            config = AgentConfig(maxLoopStepsPerInput = 4),
+            hippocampus = hippocampus,
+            instrumentation = instrumentation
+        )
+
+        runAgentWithInput(agent, "hello\nexit\n")
+
+        assertEquals(1, hippocampus.queries.size)
+        assertTrue(hippocampus.queries.single().cue.contains("hello"))
+        val prompt = plannerLlm.lastMessages.last().content
+        assertTrue(prompt.contains("Retrieved memory:"))
+        assertTrue(prompt.contains("prior preference: concise responses"))
+        assertEquals(listOf("ego> ok"), outputs)
+        assertTrue(
+            instrumentation.events.any {
+                it.type == "memory_recall_result" &&
+                    it.data["provider"] == "test_memory" &&
+                    it.data["hit_count"] == 1
+            }
+        )
+    }
+
+    @Test
+    fun `agent continues when hippocampus recall fails`() {
+        val plannerLlm = StubChatModelClient().apply {
+            enqueueRawResponse(
+                """
+                {"decision":"action","urgency":"medium","action_type":"answer","action_payload":"ok","action_summary":"respond"}
+                """.trimIndent()
+            )
+        }
+        val superegoLlm = StubChatModelClient().apply {
+            enqueueRawResponse("""{"allow":true}""")
+        }
+        val instrumentation = RecordingInstrumentation()
+        val outputs = mutableListOf<String>()
+        val agent = EgoAgent(
+            planner = EgoPlanner(modelClient = plannerLlm, config = AgentConfig(), instrumentation = instrumentation),
+            superego = SuperegoGatekeeper(
+                modelClient = superegoLlm,
+                config = AgentConfig(),
+                instrumentation = instrumentation
+            ),
+            motorCortex = buildMotorCortex(output = { outputs.add(it) }),
+            config = AgentConfig(maxLoopStepsPerInput = 4),
+            hippocampus = ThrowingHippocampus(),
+            instrumentation = instrumentation
+        )
+
+        runAgentWithInput(agent, "hello\nexit\n")
+
+        assertEquals(listOf("ego> ok"), outputs)
+        assertTrue(
+            instrumentation.events.any {
+                it.type == "memory_recall_failure" &&
+                    (it.data["reason"] as? String)?.contains("offline", ignoreCase = true) == true
+            }
+        )
+    }
+
+    @Test
+    fun `meta reasoner can push convergence when chain is stale`() {
+        val plannerLlm = StubChatModelClient().apply {
+            enqueueRawResponse("""{"decision":"noop","reason":"still thinking"}""")
+            enqueueRawResponse(
+                """
+                {"decision":"action","urgency":"high","action_type":"answer","action_payload":"final answer","action_summary":"deliver final"}
+                """.trimIndent()
+            )
+        }
+        val superegoLlm = StubChatModelClient().apply {
+            enqueueRawResponse("""{"allow":true}""")
+        }
+        val instrumentation = RecordingInstrumentation()
+        val outputs = mutableListOf<String>()
+        val agent = EgoAgent(
+            planner = EgoPlanner(
+                modelClient = plannerLlm,
+                config = AgentConfig(
+                    maxLoopStepsPerInput = 6,
+                    deliberationPressureAssessmentMinStep = 1,
+                    deliberationPressureAssessmentEverySteps = 1
+                ),
+                instrumentation = instrumentation
+            ),
+            superego = SuperegoGatekeeper(
+                modelClient = superegoLlm,
+                config = AgentConfig(),
+                instrumentation = instrumentation
+            ),
+            motorCortex = buildMotorCortex(output = { outputs.add(it) }),
+            config = AgentConfig(
+                maxLoopStepsPerInput = 6,
+                deliberationPressureAssessmentMinStep = 1,
+                deliberationPressureAssessmentEverySteps = 1
+            ),
+            metaReasoner = object : MetaReasoner {
+                override fun assess(trigger: EgoTrigger, context: PlannerContext): MetaReasonerAssessment =
+                    MetaReasonerAssessment(
+                        verdict = MetaReasonerVerdict.FINALIZE_NOW,
+                        confidence = 0.9,
+                        reason = "stale loop"
+                    )
+            },
+            instrumentation = instrumentation
+        )
+
+        runAgentWithInput(agent, "hello\nexit\n")
+
+        assertEquals(listOf("ego> final answer"), outputs)
+        assertTrue(
+            instrumentation.events.any {
+                it.type == "meta_reasoner_assessment" &&
+                    it.data["verdict"] == "finalize_now"
+            }
+        )
+        assertTrue(
+            instrumentation.events.any {
+                it.type == "warning" &&
+                    (it.data["message"] as? String)?.contains("MetaReasoner requested faster convergence", ignoreCase = true) == true
+            }
+        )
+    }
+
+    @Test
+    fun `memory consolidation runs after allowed action and writes imprint`() {
+        val plannerLlm = StubChatModelClient().apply {
+            enqueueRawResponse(
+                """
+                {"decision":"action","urgency":"medium","action_type":"answer","action_payload":"ok","action_summary":"respond"}
+                """.trimIndent()
+            )
+        }
+        val superegoLlm = StubChatModelClient().apply {
+            enqueueRawResponse("""{"allow":true}""")
+        }
+        val instrumentation = RecordingInstrumentation()
+        val outputs = mutableListOf<String>()
+        val hippocampus = RecordingHippocampus(
+            recall = MemoryRecall(provider = "test_memory", text = "")
+        )
+        val advisor = object : MemoryConsolidationAdvisor {
+            override fun assess(context: MemoryConsolidationContext): MemoryConsolidationDecision =
+                MemoryConsolidationDecision(
+                    shouldSave = true,
+                    summary = "User prefers concise answers for future interactions.",
+                    confidence = 0.9,
+                    reason = "stable preference",
+                    tags = listOf("preference")
+                )
+        }
+        val config = AgentConfig(
+            maxLoopStepsPerInput = 4,
+            memoryConsolidationEverySteps = 100,
+            memoryConsolidationMinConfidence = 0.6
+        )
+        val agent = EgoAgent(
+            planner = EgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
+            superego = SuperegoGatekeeper(
+                modelClient = superegoLlm,
+                config = config,
+                instrumentation = instrumentation
+            ),
+            motorCortex = buildMotorCortex(output = { outputs.add(it) }),
+            config = config,
+            hippocampus = hippocampus,
+            memoryConsolidationAdvisor = advisor,
+            instrumentation = instrumentation
+        )
+
+        runAgentWithInput(agent, "hello\nexit\n")
+
+        assertEquals(listOf("ego> ok"), outputs)
+        assertEquals(1, hippocampus.imprints.size)
+        assertTrue(hippocampus.imprints.single().summary.contains("prefers concise"))
+        assertTrue(instrumentation.events.any { it.type == "memory_consolidation_assessment" })
+        assertTrue(
+            instrumentation.events.any {
+                it.type == "memory_imprint_result" && it.data["saved"] == true
+            }
+        )
+    }
+
+    @Test
+    fun `memory metric callbacks receive recall consolidation and imprint signals`() {
+        val plannerLlm = StubChatModelClient().apply {
+            enqueueRawResponse(
+                """
+                {"decision":"action","urgency":"medium","action_type":"answer","action_payload":"ok","action_summary":"respond"}
+                """.trimIndent()
+            )
+        }
+        val superegoLlm = StubChatModelClient().apply {
+            enqueueRawResponse("""{"allow":true}""")
+        }
+        val instrumentation = RecordingInstrumentation()
+        val hippocampus = RecordingHippocampus(
+            recall = MemoryRecall(
+                provider = "test_memory",
+                text = "preference: concise",
+                hitCount = 2
+            )
+        )
+        val advisor = object : MemoryConsolidationAdvisor {
+            override fun assess(context: MemoryConsolidationContext): MemoryConsolidationDecision =
+                MemoryConsolidationDecision(
+                    shouldSave = true,
+                    summary = "User prefers concise answers.",
+                    confidence = 0.95,
+                    reason = "stable preference"
+                )
+        }
+        var recallSuccessCount = 0
+        var recallFailureCount = 0
+        var consolidationCount = 0
+        var imprintCount = 0
+        var lastRecallHitCount = -1
+        var lastImprintSaved = false
+        var lastImprintLatencyMs = -1L
+        val config = AgentConfig(
+            maxLoopStepsPerInput = 4,
+            memoryConsolidationEverySteps = 100,
+            memoryConsolidationMinConfidence = 0.5
+        )
+        val agent = EgoAgent(
+            planner = EgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
+            superego = SuperegoGatekeeper(
+                modelClient = superegoLlm,
+                config = config,
+                instrumentation = instrumentation
+            ),
+            motorCortex = buildMotorCortex(output = {}),
+            config = config,
+            hippocampus = hippocampus,
+            memoryConsolidationAdvisor = advisor,
+            onMemoryRecall = { hitCount, _, _, _ ->
+                recallSuccessCount += 1
+                lastRecallHitCount = hitCount
+            },
+            onMemoryRecallFailure = {
+                recallFailureCount += 1
+            },
+            onMemoryConsolidationAssessment = {
+                consolidationCount += 1
+            },
+            onMemoryImprintResult = { saved, _, latencyMs ->
+                imprintCount += 1
+                lastImprintSaved = saved
+                lastImprintLatencyMs = latencyMs
+            },
+            instrumentation = instrumentation
+        )
+
+        runAgentWithInput(agent, "hello\nexit\n")
+
+        assertEquals(1, recallSuccessCount)
+        assertEquals(0, recallFailureCount)
+        assertEquals(2, lastRecallHitCount)
+        assertEquals(1, consolidationCount)
+        assertEquals(1, imprintCount)
+        assertTrue(lastImprintSaved)
+        assertTrue(lastImprintLatencyMs >= 0)
+    }
+
+    @Test
+    fun `memory consolidation action-trigger does not run when superego denies`() {
+        val plannerLlm = StubChatModelClient().apply {
+            enqueueRawResponse(
+                """
+                {"decision":"action","urgency":"medium","action_type":"answer","action_payload":"blocked","action_summary":"respond"}
+                """.trimIndent()
+            )
+        }
+        val superegoLlm = StubChatModelClient().apply {
+            enqueueRawResponse("""{"allow":false,"reason":"policy"}""")
+        }
+        val instrumentation = RecordingInstrumentation()
+        val hippocampus = RecordingHippocampus(
+            recall = MemoryRecall(provider = "test_memory", text = "")
+        )
+        val advisor = object : MemoryConsolidationAdvisor {
+            override fun assess(context: MemoryConsolidationContext): MemoryConsolidationDecision =
+                MemoryConsolidationDecision(
+                    shouldSave = true,
+                    summary = "should not save on denied action trigger",
+                    confidence = 0.95,
+                    reason = "test"
+                )
+        }
+        val config = AgentConfig(
+            maxLoopStepsPerInput = 3,
+            memoryConsolidationEverySteps = 100
+        )
+        val agent = EgoAgent(
+            planner = EgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
+            superego = SuperegoGatekeeper(
+                modelClient = superegoLlm,
+                config = config,
+                instrumentation = instrumentation
+            ),
+            motorCortex = buildMotorCortex(output = {}),
+            config = config,
+            hippocampus = hippocampus,
+            memoryConsolidationAdvisor = advisor,
+            instrumentation = instrumentation
+        )
+
+        runAgentWithInput(agent, "hello\nexit\n")
+
+        assertTrue(hippocampus.imprints.isEmpty())
+        assertFalse(
+            instrumentation.events.any {
+                it.type == "memory_consolidation_assessment" &&
+                    it.data["trigger"] == "post_allowed_action"
+            }
+        )
+    }
+
     private fun runAgentWithInput(agent: EgoAgent, stdinContent: String) {
         val previousIn = System.`in`
         try {
@@ -259,5 +607,31 @@ class EgoAgentTest {
             webSearchActionHandler = webSearchHandler,
             output = output
         )
+    }
+
+    private class RecordingHippocampus(
+        private val recall: MemoryRecall,
+    ) : Hippocampus {
+        override val providerName: String = recall.provider
+        val queries = mutableListOf<MemoryRecallQuery>()
+        val imprints = mutableListOf<MemoryImprint>()
+
+        override fun recall(query: MemoryRecallQuery): MemoryRecall {
+            queries += query
+            return recall
+        }
+
+        override fun imprint(imprint: MemoryImprint): Boolean {
+            imprints += imprint
+            return true
+        }
+    }
+
+    private class ThrowingHippocampus : Hippocampus {
+        override val providerName: String = "throwing_memory"
+
+        override fun recall(query: MemoryRecallQuery): MemoryRecall {
+            throw IllegalStateException("memory offline")
+        }
     }
 }

@@ -5,6 +5,7 @@ import psyke.instrumentation.AgentEvent
 import psyke.instrumentation.AgentEvents
 import psyke.instrumentation.AgentInstrumentation
 import psyke.instrumentation.NoopAgentInstrumentation
+import java.util.Locale
 
 private val logger = KotlinLogging.logger {}
 
@@ -13,14 +14,29 @@ class EgoAgent(
     private val superego: SuperegoGatekeeper,
     private val motorCortex: MotorCortex,
     private val config: AgentConfig,
+    private val hippocampus: Hippocampus = NoopHippocampus,
+    private val metaReasoner: MetaReasoner = NoopMetaReasoner,
+    private val memoryConsolidationAdvisor: MemoryConsolidationAdvisor = NoopMemoryConsolidationAdvisor,
     private val sensoryCortex: SensoryCortex = SensoryCortex.stdin(config),
     private val memoryStore: MemoryStore = MemoryStore(config.maxMemoryChars),
     private val onActionDenied: () -> Unit = {},
     private val onQueueSaturation: (queueType: String, pending: Int, capacity: Int) -> Unit = { _, _, _ -> },
+    private val onMemoryRecall: (hitCount: Int, latencyMs: Long, recallChars: Int, truncated: Boolean) -> Unit = { _, _, _, _ -> },
+    private val onMemoryRecallFailure: (latencyMs: Long) -> Unit = {},
+    private val onMemoryConsolidationAssessment: (saveRecommended: Boolean) -> Unit = {},
+    private val onMemoryImprintResult: (saved: Boolean, summaryChars: Int, latencyMs: Long) -> Unit = { _, _, _ -> },
     private val instrumentation: AgentInstrumentation = NoopAgentInstrumentation,
 ) {
     private val scheduler = AttentionScheduler(config)
     private val dialogue = ArrayDeque<DialogueTurn>()
+    private val deliberationMonitor = DeliberationProgressMonitor()
+    private var latestMetaGuidance: String = ""
+    private var lastMetaAssessmentStep: Int = 0
+    private var forcedTerminalAnswerQueued: Boolean = false
+    private var lastConsolidationStep: Int = 0
+    private var latestPlannerMemorySummary: String = ""
+    private var latestPlannerMemoryRecall: String = ""
+    private val recentImprintFingerprints = ArrayDeque<String>()
 
     fun runInteractive() {
         logger.info { "Ego loop started. Type 'exit' to quit." }
@@ -70,6 +86,8 @@ class EgoAgent(
             val task = scheduler.nextTask() ?: break
             steps += 1
             instrumentation.emit(AgentEvents.loopStep(step = steps, taskType = taskType(task)))
+            val state = deliberationMonitor.startStep()
+            emitDeliberationState(taskType(task), state)
             try {
                 when (task) {
                     is LoopTask.ProcessInput -> processInput(task.item)
@@ -78,12 +96,15 @@ class EgoAgent(
                 }
             } catch (ex: Exception) {
                 logger.warn(ex) { "Task processing failed for task_type=${taskType(task)}." }
+                deliberationMonitor.onTaskFailure()
                 instrumentation.emit(
                     AgentEvents.warning(
                         "Task processing failed for ${taskType(task)}; continuing loop."
                     )
                 )
             }
+            maybeForceTerminalAnswer()
+            maybeRunMemoryConsolidation(trigger = "interval")
             emitQueueSnapshot("task_processed")
         }
 
@@ -98,6 +119,14 @@ class EgoAgent(
                 processAction(fallbackAction)
                 emitQueueSnapshot("fallback_explanation_step")
             }
+        }
+
+        if (!scheduler.hasPendingWork()) {
+            latestMetaGuidance = ""
+            lastMetaAssessmentStep = 0
+            forcedTerminalAnswerQueued = false
+            lastConsolidationStep = 0
+            deliberationMonitor.reset()
         }
 
         if (config.loopDelayMs > 0) {
@@ -115,11 +144,19 @@ class EgoAgent(
         dialogue.addLast(userTurn)
         memoryStore.remember(userTurn)
         trimDialogue()
+        val trigger = EgoTrigger.IncomingInput(input)
+        val context = plannerContext(trigger)
+        val assessment = maybeAssessDeliberation(trigger, context)
+        if (assessment != null) {
+            latestMetaGuidance = buildMetaGuidance(assessment)
+        }
         val decision = planner.decide(
-            trigger = EgoTrigger.IncomingInput(input),
-            context = plannerContext()
+            trigger = trigger,
+            context = context.copy(metaGuidance = latestMetaGuidance)
         )
-        applyDecision(decision, nextPassCount = 0, originThought = null)
+        val finalDecision = maybeApplyMetaPressureOverride(decision, assessment)
+        deliberationMonitor.onPlannerDecision(finalDecision)
+        applyDecision(finalDecision, nextPassCount = 0, originThought = null)
     }
 
     private fun processThought(thought: PendingThought) {
@@ -137,11 +174,19 @@ class EgoAgent(
             return
         }
         instrumentation.emit(AgentEvents.thoughtProcessing(thought))
+        val trigger = EgoTrigger.PendingThoughtInput(thought)
+        val context = plannerContext(trigger)
+        val assessment = maybeAssessDeliberation(trigger, context)
+        if (assessment != null) {
+            latestMetaGuidance = buildMetaGuidance(assessment)
+        }
         val decision = planner.decide(
-            trigger = EgoTrigger.PendingThoughtInput(thought),
-            context = plannerContext()
+            trigger = trigger,
+            context = context.copy(metaGuidance = latestMetaGuidance)
         )
-        applyDecision(decision, nextPassCount = thought.passes + 1, originThought = thought)
+        val finalDecision = maybeApplyMetaPressureOverride(decision, assessment)
+        deliberationMonitor.onPlannerDecision(finalDecision)
+        applyDecision(finalDecision, nextPassCount = thought.passes + 1, originThought = thought)
     }
 
     private fun processAction(action: PendingAction) {
@@ -162,6 +207,7 @@ class EgoAgent(
                 memoryStore.remember(assistantTurn)
                 trimDialogue()
             }
+            deliberationMonitor.onActionExecuted(action)
             return
         }
         val gateDecision = superego.review(action, superegoContext())
@@ -174,6 +220,7 @@ class EgoAgent(
         )
         if (!gateDecision.allow) {
             onActionDenied()
+            deliberationMonitor.onActionDenied()
             val denialThought = TextSecurity.clamp(
                 "Action denied by superego (${gateDecision.reason}). " +
                     "Try a different safe action than the denied one. " +
@@ -204,12 +251,19 @@ class EgoAgent(
 
         val outcome = executeActionSafely(action) ?: return
         instrumentation.emit(AgentEvents.actionExecuted(action, outcome.statusSummary))
+        deliberationMonitor.onActionExecuted(action)
         if (outcome.assistantOutput != null) {
             val assistantTurn = DialogueTurn(DialogueRole.ASSISTANT, outcome.assistantOutput)
             dialogue.addLast(assistantTurn)
             memoryStore.remember(assistantTurn)
             trimDialogue()
         }
+        maybeRunMemoryConsolidation(
+            trigger = "post_allowed_action",
+            force = true,
+            latestActionType = action.type,
+            latestActionOutcome = outcome.statusSummary
+        )
 
         if (action.type.requiresFollowUpThought()) {
             val followUpThought = TextSecurity.clamp(
@@ -271,6 +325,7 @@ class EgoAgent(
                     instrumentation.emit(
                         AgentEvents.warning("Planner repeated a denied action; requesting an alternative.")
                     )
+                    deliberationMonitor.onRepeatedDeniedAction()
                     val retryThought = TextSecurity.clamp(
                         "Previous proposed action repeats a denied action. " +
                             "Pick a materially different safe action.",
@@ -420,12 +475,18 @@ class EgoAgent(
         }
     }
 
-    private fun plannerContext(): PlannerContext {
+    private fun plannerContext(trigger: EgoTrigger): PlannerContext {
         val memorySummary = currentMemorySummary()
+        val memoryRecall = recallMemory(trigger, memorySummary)
+        latestPlannerMemorySummary = memorySummary
+        latestPlannerMemoryRecall = memoryRecall
         return PlannerContext(
             recentDialogue = dialogue.takeLast(12),
             queue = scheduler.queueSnapshot(),
             memorySummary = memorySummary,
+            memoryRecall = memoryRecall,
+            deliberation = deliberationMonitor.snapshot(),
+            metaGuidance = latestMetaGuidance,
             availableActions = motorCortex.availableActionTypes()
         )
     }
@@ -444,6 +505,370 @@ class EgoAgent(
             maxOf(64, config.maxPromptTokens / 3)
         )
         return memoryStore.summaryForPrompt(memoryTokenBudget)
+    }
+
+    private fun recallMemory(trigger: EgoTrigger, memorySummary: String): String {
+        if (!hippocampus.enabled) {
+            return ""
+        }
+
+        val cue = buildRecallCue(trigger).trim()
+        if (cue.isBlank()) {
+            return ""
+        }
+
+        val triggerLabel = when (trigger) {
+            is EgoTrigger.IncomingInput -> "input"
+            is EgoTrigger.PendingThoughtInput -> "thought"
+        }
+        instrumentation.emit(
+            AgentEvents.memoryRecallStart(
+                trigger = triggerLabel,
+                provider = hippocampus.providerName,
+                cuePreview = TextSecurity.preview(cue, 180)
+            )
+        )
+
+        val startedAt = System.nanoTime()
+        return try {
+            val recall = hippocampus.recall(
+                MemoryRecallQuery(
+                    cue = cue,
+                    recentDialogue = dialogue.takeLast(12),
+                    memorySummary = memorySummary,
+                    maxItems = config.memoryRecallMaxItems,
+                    maxChars = config.memoryRecallMaxChars
+                )
+            )
+            val latencyMs = (System.nanoTime() - startedAt) / 1_000_000L
+            instrumentation.emit(
+                AgentEvents.memoryRecallResult(
+                    trigger = triggerLabel,
+                    provider = recall.provider.ifBlank { hippocampus.providerName },
+                    hitCount = recall.hitCount,
+                    latencyMs = latencyMs,
+                    recallChars = recall.text.length,
+                    truncated = recall.truncated
+                )
+            )
+            onMemoryRecall(
+                recall.hitCount,
+                latencyMs,
+                recall.text.length,
+                recall.truncated
+            )
+            recall.text
+        } catch (ex: Exception) {
+            val latencyMs = (System.nanoTime() - startedAt) / 1_000_000L
+            logger.warn(ex) {
+                "Memory recall failed for trigger=$triggerLabel cue='${TextSecurity.preview(cue, 120)}'."
+            }
+            instrumentation.emit(
+                AgentEvents.memoryRecallFailure(
+                    trigger = triggerLabel,
+                    provider = hippocampus.providerName,
+                    latencyMs = latencyMs,
+                    reason = ex.message ?: "memory recall failed"
+                )
+            )
+            onMemoryRecallFailure(latencyMs)
+            ""
+        }
+    }
+
+    private fun buildRecallCue(trigger: EgoTrigger): String {
+        val triggerCue = when (trigger) {
+            is EgoTrigger.IncomingInput -> trigger.input.content.trim()
+            is EgoTrigger.PendingThoughtInput -> {
+                val thought = trigger.thought
+                buildString {
+                    append(thought.content.trim())
+                    if (thought.deniedActionType != null && !thought.deniedActionPayload.isNullOrBlank()) {
+                        append("\ndenied_action_type=")
+                        append(thought.deniedActionType.name.lowercase())
+                        append("\ndenied_action_payload=")
+                        append(thought.deniedActionPayload)
+                    }
+                }.trim()
+            }
+        }
+        val recentUserTurn = dialogue
+            .asReversed()
+            .firstOrNull { it.role == DialogueRole.USER }
+            ?.content
+            ?.trim()
+            .orEmpty()
+        return listOfNotNull(
+            triggerCue.ifBlank { null },
+            recentUserTurn.takeIf { it.isNotBlank() && it != triggerCue }?.let { "latest_user_message: $it" }
+        ).joinToString(separator = "\n")
+    }
+
+    private fun maybeAssessDeliberation(
+        trigger: EgoTrigger,
+        context: PlannerContext,
+    ): MetaReasonerAssessment? {
+        if (!metaReasoner.enabled) {
+            return null
+        }
+        val state = deliberationMonitor.snapshot()
+        val minStepReached = state.stepIndex >= config.deliberationPressureAssessmentMinStep
+        if (!minStepReached) {
+            return null
+        }
+        val stepsSinceLast = state.stepIndex - lastMetaAssessmentStep
+        val dueByInterval = stepsSinceLast >= config.deliberationPressureAssessmentEverySteps
+        val dueByPressure = state.decisionPressure >= config.deliberationPressureAssessmentThreshold &&
+            stepsSinceLast >= config.metaReasonerCooldownSteps
+        if (!dueByInterval && !dueByPressure) {
+            return null
+        }
+
+        val assessment = try {
+            metaReasoner.assess(trigger, context)
+        } catch (ex: Exception) {
+            logger.warn(ex) { "MetaReasoner assessment failed; continuing without override." }
+            instrumentation.emit(
+                AgentEvents.warning("MetaReasoner call failed; continuing default deliberation.")
+            )
+            return null
+        }
+
+        lastMetaAssessmentStep = state.stepIndex
+        instrumentation.emit(
+            AgentEvent(
+                type = "meta_reasoner_assessment",
+                data = mapOf(
+                    "step_index" to state.stepIndex,
+                    "decision_pressure" to state.decisionPressure,
+                    "verdict" to assessment.verdict.name.lowercase(),
+                    "confidence" to assessment.confidence,
+                    "reason" to assessment.reason
+                )
+            )
+        )
+        return assessment
+    }
+
+    private fun buildMetaGuidance(assessment: MetaReasonerAssessment): String =
+        when (assessment.verdict) {
+            MetaReasonerVerdict.CONTINUE -> {
+                "Continue current reasoning. Reason: ${assessment.reason}"
+            }
+
+            MetaReasonerVerdict.CONTINUE_WITH_CONSTRAINTS -> {
+                "Reasoning is degrading. Avoid repeated thoughts/actions. Converge to one concrete next step in <=2 iterations. Reason: ${assessment.reason}"
+            }
+
+            MetaReasonerVerdict.FINALIZE_NOW -> {
+                "Finalize now. Prefer action=answer with a concise best-effort response and explicit uncertainty if needed. Reason: ${assessment.reason}"
+            }
+
+            MetaReasonerVerdict.REQUEST_TOOL_THEN_FINALIZE -> {
+                "At most one decisive external action is allowed, then finalize with action=answer immediately. Reason: ${assessment.reason}"
+            }
+        }
+
+    private fun maybeApplyMetaPressureOverride(
+        decision: EgoDecision,
+        assessment: MetaReasonerAssessment?,
+    ): EgoDecision {
+        if (assessment == null) {
+            return decision
+        }
+        val needsFinalizationPressure = assessment.verdict == MetaReasonerVerdict.FINALIZE_NOW ||
+            assessment.verdict == MetaReasonerVerdict.REQUEST_TOOL_THEN_FINALIZE
+        if (!needsFinalizationPressure) {
+            return decision
+        }
+        if (decision is EgoDecision.ProposeAction) {
+            return decision
+        }
+        val pressuredThought = TextSecurity.clamp(
+            "Decision pressure is high. Stop looping and provide a concise best-effort final answer now. " +
+                "If one decisive tool action is strictly necessary, do only one then answer.",
+            config.maxThoughtChars
+        )
+        instrumentation.emit(
+            AgentEvents.warning("MetaReasoner requested faster convergence; overriding non-action decision.")
+        )
+        return EgoDecision.EnqueueThought(
+            urgency = Urgency.HIGH,
+            content = pressuredThought
+        )
+    }
+
+    private fun maybeForceTerminalAnswer() {
+        if (forcedTerminalAnswerQueued) {
+            return
+        }
+        val state = deliberationMonitor.snapshot()
+        if (state.stepIndex < config.deliberationPressureAssessmentMinStep) {
+            return
+        }
+        if (state.decisionPressure < 0.98 || state.staleStreak < 8) {
+            return
+        }
+        val queued = scheduler.enqueueAction(
+            type = ActionType.ANSWER,
+            payload = TextSecurity.clamp(
+                "I have reached diminishing returns in internal reasoning. " +
+                    "Here is the best concise answer I can provide now with current evidence.",
+                config.maxActionPayloadChars
+            ),
+            summary = "Forced terminal answer due to high decision pressure.",
+            urgency = Urgency.HIGH
+        )
+        if (queued) {
+            forcedTerminalAnswerQueued = true
+            instrumentation.emit(
+                AgentEvents.warning("Forced terminal answer queued due to persistent circular deliberation pressure.")
+            )
+            emitQueueSnapshot("forced_terminal_answer")
+            latestMetaGuidance = "Finalize immediately due to persistent circular reasoning pressure."
+        }
+    }
+
+    private fun maybeRunMemoryConsolidation(
+        trigger: String,
+        force: Boolean = false,
+        latestActionType: ActionType? = null,
+        latestActionOutcome: String? = null,
+    ) {
+        if (!hippocampus.enabled || !memoryConsolidationAdvisor.enabled) {
+            return
+        }
+        val state = deliberationMonitor.snapshot()
+        val shouldByInterval = !force &&
+            state.stepIndex > 0 &&
+            state.stepIndex % config.memoryConsolidationEverySteps == 0
+        if (!force && !shouldByInterval) {
+            return
+        }
+        if (!force) {
+            val stepsSinceLast = state.stepIndex - lastConsolidationStep
+            if (stepsSinceLast in 0 until config.memoryConsolidationCooldownSteps) {
+                return
+            }
+        }
+        if (state.stepIndex == lastConsolidationStep && lastConsolidationStep > 0) {
+            return
+        }
+
+        val context = MemoryConsolidationContext(
+            trigger = trigger,
+            deliberation = state,
+            recentDialogue = dialogue.takeLast(12),
+            memorySummary = latestPlannerMemorySummary.ifBlank { currentMemorySummary() },
+            memoryRecall = latestPlannerMemoryRecall,
+            metaGuidance = latestMetaGuidance,
+            latestActionType = latestActionType,
+            latestActionOutcome = latestActionOutcome
+        )
+
+        val decision = try {
+            memoryConsolidationAdvisor.assess(context)
+        } catch (ex: Exception) {
+            logger.warn(ex) { "Memory consolidation assessment failed." }
+            instrumentation.emit(
+                AgentEvents.warning("Memory consolidation advisor failed; skipping this cycle.")
+            )
+            return
+        } finally {
+            lastConsolidationStep = state.stepIndex
+        }
+
+        instrumentation.emit(
+            AgentEvent(
+                type = "memory_consolidation_assessment",
+                data = mapOf(
+                    "trigger" to trigger,
+                    "step_index" to state.stepIndex,
+                    "save" to decision.shouldSave,
+                    "confidence" to decision.confidence,
+                    "reason" to decision.reason,
+                    "summary_preview" to TextSecurity.preview(decision.summary, 180)
+                )
+            )
+        )
+        onMemoryConsolidationAssessment(decision.shouldSave)
+
+        if (!decision.shouldSave) {
+            return
+        }
+        if (decision.confidence < config.memoryConsolidationMinConfidence) {
+            instrumentation.emit(
+                AgentEvents.warning(
+                    "Memory consolidation skipped: confidence ${String.format(Locale.ROOT, "%.2f", decision.confidence)} below threshold."
+                )
+            )
+            return
+        }
+
+        val fingerprint = normalizeActionPayload(decision.summary)
+        if (recentImprintFingerprints.contains(fingerprint)) {
+            instrumentation.emit(
+                AgentEvents.warning("Memory consolidation skipped: duplicate imprint summary.")
+            )
+            return
+        }
+
+        val imprintStartedAt = System.nanoTime()
+        val saved = try {
+            hippocampus.imprint(
+                MemoryImprint(
+                    summary = decision.summary,
+                    source = trigger,
+                    confidence = decision.confidence,
+                    tags = decision.tags
+                )
+            )
+        } catch (ex: Exception) {
+            logger.warn(ex) { "Hippocampus imprint failed." }
+            false
+        }
+        val imprintLatencyMs = (System.nanoTime() - imprintStartedAt) / 1_000_000L
+
+        instrumentation.emit(
+            AgentEvent(
+                type = "memory_imprint_result",
+                data = mapOf(
+                    "trigger" to trigger,
+                    "saved" to saved,
+                    "provider" to hippocampus.providerName,
+                    "summary_chars" to decision.summary.length,
+                    "latency_ms" to imprintLatencyMs,
+                    "confidence" to decision.confidence,
+                    "tags" to decision.tags
+                )
+            )
+        )
+        onMemoryImprintResult(saved, decision.summary.length, imprintLatencyMs)
+        if (saved) {
+            recentImprintFingerprints.addLast(fingerprint)
+            while (recentImprintFingerprints.size > 24) {
+                recentImprintFingerprints.removeFirst()
+            }
+        }
+    }
+
+    private fun emitDeliberationState(taskType: String, state: DeliberationState) {
+        instrumentation.emit(
+            AgentEvent(
+                type = "deliberation_state",
+                data = mapOf(
+                    "task_type" to taskType,
+                    "step_index" to state.stepIndex,
+                    "decision_pressure" to state.decisionPressure,
+                    "stale_streak" to state.staleStreak,
+                    "progress_score" to state.progressScore,
+                    "denial_count" to state.denialCount,
+                    "steps_since_new_evidence" to state.stepsSinceNewEvidence,
+                    "repeat_signature_hits" to state.repeatSignatureHits,
+                    "noop_streak" to state.noopStreak
+                )
+            )
+        )
     }
 
     private fun emitQueueSnapshot(source: String) {

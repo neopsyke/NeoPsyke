@@ -205,6 +205,65 @@ class EgoPlannerTest {
     }
 
     @Test
+    fun `planner includes retrieved memory in prompt context`() {
+        val llm = StubChatModelClient()
+        llm.enqueueRawResponse("""{"decision":"noop","reason":"done"}""")
+        val planner = EgoPlanner(
+            modelClient = llm,
+            config = AgentConfig()
+        )
+        val context = PlannerContext(
+            recentDialogue = listOf(DialogueTurn(DialogueRole.USER, "hello")),
+            queue = QueueSnapshot(
+                pendingInputCount = 1,
+                pendingThoughtCount = 0,
+                pendingActionCount = 0
+            ),
+            memorySummary = "Compressed memory:\n- user likes concise answers",
+            memoryRecall = "- last week user asked for deploy checklist"
+        )
+
+        planner.decide(EgoTrigger.IncomingInput(PendingInput(1, "question")), context)
+
+        val prompt = llm.lastMessages.last().content
+        assertTrue(prompt.contains("Retrieved memory:"))
+        assertTrue(prompt.contains("deploy checklist"))
+    }
+
+    @Test
+    fun `planner includes deliberation pressure and meta guidance`() {
+        val llm = StubChatModelClient()
+        llm.enqueueRawResponse("""{"decision":"noop","reason":"done"}""")
+        val planner = EgoPlanner(
+            modelClient = llm,
+            config = AgentConfig()
+        )
+        val context = PlannerContext(
+            recentDialogue = listOf(DialogueTurn(DialogueRole.USER, "hello")),
+            queue = QueueSnapshot(0, 1, 0),
+            deliberation = DeliberationState(
+                stepIndex = 22,
+                decisionPressure = 0.82,
+                staleStreak = 5,
+                progressScore = 0.24,
+                denialCount = 1,
+                stepsSinceNewEvidence = 6,
+                repeatSignatureHits = 2,
+                noopStreak = 3
+            ),
+            metaGuidance = "Finalize now with concise answer."
+        )
+
+        planner.decide(EgoTrigger.PendingThoughtInput(PendingThought(1, Urgency.MEDIUM, "think")), context)
+
+        val prompt = llm.lastMessages.last().content
+        assertTrue(prompt.contains("Deliberation pressure:"))
+        assertTrue(prompt.contains("decision_pressure=0.820"))
+        assertTrue(prompt.contains("Meta reasoning guidance:"))
+        assertTrue(prompt.contains("Finalize now"))
+    }
+
+    @Test
     fun `planner falls back to noop when model call fails`() {
         val failingClient = object : ChatModelClient {
             override val modelName: String = "failing"

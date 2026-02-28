@@ -6,7 +6,7 @@ APP_BIN="$ROOT_DIR/build/install/psyke/bin/psyke"
 LOG_LEVEL="${PSYKE_LOG_LEVEL:-warning}"
 LOG_LEVEL_EXPLICIT=0
 LOG_LEVEL_FROM_ENV=0
-REASONING_EVAL_MODE=0
+EVAL_MODE=0
 LOOP_DELAY_MS="${EGO_LOOP_DELAY_MS:-1000}"
 LOG_DIR="${PSYKE_LOG_DIR:-$ROOT_DIR/.psyke/logs}"
 LOG_RETENTION="${PSYKE_LOG_RETENTION:-30}"
@@ -53,7 +53,12 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --eval-reasoning-only)
-      REASONING_EVAL_MODE=1
+      EVAL_MODE=1
+      APP_ARGS+=("$1")
+      shift
+      ;;
+    --eval-memory-live)
+      EVAL_MODE=1
       APP_ARGS+=("$1")
       shift
       ;;
@@ -69,6 +74,8 @@ Options:
 
 Environment:
   MISTRAL_API_KEY         Required for interactive mode and eval mode=model
+  PSYKE_MCP_CONFIG_FILE   Optional path to MCP runtime YAML (default: ./mcp-runtime.yaml)
+  MCP_MEMORY_SERVER_CMD   Optional override for memory command (required only if YAML memory command is not set)
   PSYKE_LOG_LEVEL         Default log level if --log-level is not provided
   PSYKE_LOG_DIR           Directory for run logs (default: .psyke/logs)
   PSYKE_LOG_RETENTION     Number of run log files to keep (default: 30)
@@ -82,9 +89,12 @@ Eval mode (forwarded to app):
   --eval-reasoning-only           Run deterministic reasoning self-eval (no tools/actions)
                                  (defaults launcher log level to trace unless overridden)
   --eval-reasoning-mode MODE      Eval mode: logic (default) or model
+  --eval-memory-live              Run live memory eval (real LLM + real MCP memory)
   --eval-stage ID                 Label this eval run for history comparison
   --eval-reasoning-max-attempts N Max retries per reasoning task (default: 4)
   --eval-reasoning-tasks id1,id2  Restrict reasoning eval to selected tasks
+  --eval-memory-max-attempts N    Max retries per memory consolidation task (default: 2)
+  --eval-memory-tasks id1,id2     Restrict memory eval to selected tasks
 EOF
       exit 0
       ;;
@@ -104,7 +114,7 @@ if [[ -z "${LOG_LEVEL}" ]]; then
   LOG_LEVEL="warning"
 fi
 
-if [[ "$REASONING_EVAL_MODE" -eq 1 && "$LOG_LEVEL_EXPLICIT" -eq 0 && "$LOG_LEVEL_FROM_ENV" -eq 0 ]]; then
+if [[ "$EVAL_MODE" -eq 1 && "$LOG_LEVEL_EXPLICIT" -eq 0 && "$LOG_LEVEL_FROM_ENV" -eq 0 ]]; then
   LOG_LEVEL="trace"
 fi
 
@@ -150,7 +160,7 @@ export PSYKE_LOG_FILE="$RUN_LOG_FILE"
 export PSYKE_EVENT_LOG_FILE="$RUN_EVENT_FILE"
 
 JAVA_OPTS_APPEND=" -Dorg.slf4j.simpleLogger.defaultLogLevel=${LOG_LEVEL} -Dorg.slf4j.simpleLogger.logFile=${RUN_LOG_FILE} -Dorg.slf4j.simpleLogger.showDateTime=true -Dorg.slf4j.simpleLogger.dateTimeFormat=yyyy-MM-dd_HH:mm:ss.SSSZ"
-if [[ "$REASONING_EVAL_MODE" -eq 1 ]] && [[ "${PSYKE_EVAL_TRANSPORT_DEBUG:-false}" != "true" ]]; then
+if [[ "$EVAL_MODE" -eq 1 ]] && [[ "${PSYKE_EVAL_TRANSPORT_DEBUG:-false}" != "true" ]]; then
   JAVA_OPTS_APPEND="${JAVA_OPTS_APPEND} -Dorg.slf4j.simpleLogger.log.psyke.llm.MistralChatClient=warn"
 fi
 export JAVA_OPTS="${JAVA_OPTS:-}${JAVA_OPTS_APPEND}"

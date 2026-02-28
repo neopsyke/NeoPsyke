@@ -20,7 +20,7 @@ Instructions for coding agents working in this repository (Codex, Claude, Gemini
   - `./run-psyke.sh`
 
 ## Environment
-- Requires JDK 23+.
+- Requires JDK 21+.
 - Runtime needs `MISTRAL_API_KEY`.
 - Optional runtime flags and env vars are documented in `README.md`.
 

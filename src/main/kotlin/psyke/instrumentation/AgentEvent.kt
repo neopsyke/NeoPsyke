@@ -203,6 +203,56 @@ object AgentEvents {
             data = mapOf("message" to message)
         )
 
+    fun memoryRecallStart(
+        trigger: String,
+        provider: String,
+        cuePreview: String,
+    ): AgentEvent =
+        AgentEvent(
+            type = "memory_recall_start",
+            data = mapOf(
+                "trigger" to trigger,
+                "provider" to provider,
+                "cue_preview" to cuePreview
+            )
+        )
+
+    fun memoryRecallResult(
+        trigger: String,
+        provider: String,
+        hitCount: Int,
+        latencyMs: Long,
+        recallChars: Int,
+        truncated: Boolean,
+    ): AgentEvent =
+        AgentEvent(
+            type = "memory_recall_result",
+            data = mapOf(
+                "trigger" to trigger,
+                "provider" to provider,
+                "hit_count" to hitCount,
+                "latency_ms" to latencyMs,
+                "recall_chars" to recallChars,
+                "truncated" to truncated
+            )
+        )
+
+    fun memoryRecallFailure(
+        trigger: String,
+        provider: String,
+        latencyMs: Long,
+        reason: String,
+    ): AgentEvent =
+        AgentEvent(
+            type = "memory_recall_failure",
+            data = mapOf(
+                "trigger" to trigger,
+                "provider" to provider,
+                "latency_ms" to latencyMs,
+                "reason" to reason
+            )
+        )
+
     fun actionCapabilities(statuses: List<ActionImplementationStatus>): AgentEvent =
         AgentEvent(
             type = "action_capabilities",

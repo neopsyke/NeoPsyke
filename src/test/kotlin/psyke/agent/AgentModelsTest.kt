@@ -9,6 +9,7 @@ class AgentModelsTest {
     fun `agent config defaults to zero loop delay`() {
         val config = AgentConfig()
         assertEquals(0, config.loopDelayMs)
+        assertEquals(180, config.maxLoopStepsPerInput)
     }
 
     @Test
