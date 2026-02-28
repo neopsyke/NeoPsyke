@@ -4,6 +4,7 @@ import psyke.agent.PendingAction
 import psyke.agent.PendingInput
 import psyke.agent.PendingThought
 import psyke.agent.QueueState
+import psyke.agent.ActionImplementationStatus
 import java.time.Instant
 
 data class AgentEvent(
@@ -200,6 +201,20 @@ object AgentEvents {
         AgentEvent(
             type = "warning",
             data = mapOf("message" to message)
+        )
+
+    fun actionCapabilities(statuses: List<ActionImplementationStatus>): AgentEvent =
+        AgentEvent(
+            type = "action_capabilities",
+            data = mapOf(
+                "statuses" to statuses.map { status ->
+                    mapOf(
+                        "action_type" to status.actionType.name.lowercase(),
+                        "available" to status.available,
+                        "detail" to status.detail
+                    )
+                }
+            )
         )
 
     fun llmRawResponse(

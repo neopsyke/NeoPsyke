@@ -5,12 +5,18 @@ Standalone Kotlin JVM app using Gradle with:
 - Interactive Ego agent loop (inputs, thoughts, actions)
 - Extensible input abstraction (`SensoryCortex`)
 - Superego action gatekeeper (policy/safety review)
-- Action executor (`MotorCortex`) for `web_search` and `answer`
+- Action executor (`MotorCortex`) for `web_search`, `answer`, `mcp_time`, and `mcp_fetch`
+
+## For Coding Agents
+- Repository-wide coding-agent instructions live in `AGENTS.md`.
+- Keep `README.md` as the human-facing guide for setup, runtime, and architecture.
+- If you add tool-specific files (for example `CLAUDE.md`), keep them short and aligned with `AGENTS.md`.
 
 ## Requirements
 - JDK 23+
 - Use the included Gradle wrapper (`./gradlew`)
 - Kotlin currently emits bytecode up to Java 21; the build uses a JDK 23 toolchain while targeting 21-compatible bytecode for both Kotlin and Java.
+- `MISTRAL_API_KEY` is required for interactive mode and for `--eval-reasoning-mode model`.
 
 ## Configuration
 - Set `MISTRAL_API_KEY` to your API token.
@@ -28,6 +34,12 @@ Standalone Kotlin JVM app using Gradle with:
   - `EGO_MAX_MEMORY_PROMPT_TOKENS` (default: `256`)
   - `EGO_MAX_ACTION_PAYLOAD_CHARS` (default: `4000`)
   - `EGO_SEARCH_RESULT_COUNT` (default: `5`)
+  - `MCP_TIME_SERVER_CMD` (default: `uvx mcp-server-time`)
+  - `MCP_FETCH_SERVER_CMD` (default: `uvx mcp-server-fetch`)
+  - `MISTRAL_WEBSEARCH_AGENT_ID` (optional; if omitted, Psyke creates an ephemeral Mistral web-search agent per run)
+  - `MCP_CALL_TIMEOUT_MS` (default: `8000`)
+  - `MCP_FETCH_MAX_CHARS` (default: `4000`)
+  - `PSYKE_EVAL_MAX_RAW_RESPONSE_CHARS` (reasoning eval raw-thought capture cap; default: unlimited)
 
 ## Run
 ```bash
@@ -54,6 +66,30 @@ export MISTRAL_API_KEY=your_token
 ./run-psyke.sh
 ```
 
+Run deterministic reasoning self-eval (no MotorCortex actions, no baseline comparison):
+```bash
+./run-psyke.sh --eval-reasoning-only
+```
+
+Reasoning eval options:
+```bash
+./run-psyke.sh --eval-reasoning-only --eval-reasoning-mode logic  # default; no external LLM calls
+./run-psyke.sh --eval-reasoning-only --eval-reasoning-mode model  # uses MISTRAL_API_KEY
+./run-psyke.sh --eval-reasoning-only --eval-stage 2026-02-28
+./run-psyke.sh --eval-reasoning-only --eval-reasoning-max-attempts 5
+./run-psyke.sh --eval-reasoning-only --eval-reasoning-tasks shape-lock,multi-fix  # logic mode tasks
+./run-psyke.sh --eval-reasoning-only --log-level trace  # explicit override (already default for this mode)
+```
+
+Reasoning eval output:
+- Per-run detailed JSON in `.psyke/evals/reasoning/runs/`.
+- Append-only trend history in `.psyke/evals/reasoning/history.jsonl`.
+- Default eval mode is `logic`, which uses a deterministic local harness to score retry/feedback loop behavior.
+- `model` mode keeps the prior real-LLM task set for optional model-inclusive checks.
+- If `--eval-stage` is omitted, stage defaults to current UTC date.
+- Main run log focuses on eval flow (`[eval.reasoning] ...`) and full model thought text blocks (`thought.begin`/`thought.end`).
+- Metadata-rich instrumentation events (including `llm.call`) are written to a per-run sidecar JSONL file.
+
 Set a specific log level via parameter:
 ```bash
 ./run-psyke.sh --log-level info
@@ -70,11 +106,13 @@ Notes:
 - Default log level in `run-psyke.sh` is `warning`.
 - Launcher logs are written to per-run files in `.psyke/logs/runs/`.
 - `.psyke/logs/latest.log` always points to the newest run log.
-- `.psyke/logs/latest-run.env` stores `PSYKE_LOG_RUN_ID`, `PSYKE_LOG_FILE`, and start time for the current run.
+- `.psyke/logs/latest-events.jsonl` always points to the newest event sidecar.
+- `.psyke/logs/latest-run.env` stores `PSYKE_LOG_RUN_ID`, `PSYKE_LOG_FILE`, `PSYKE_EVENT_LOG_FILE`, and start time for the current run.
 - Old run logs are auto-pruned; retention defaults to 30 files (`PSYKE_LOG_RETENTION`).
 - Default loop delay in `run-psyke.sh` is `1000ms` (`--no-delay` or `--loop-delay-ms 0` disables it).
 - `PSYKE_LOG_LEVEL` can still provide a default if `--log-level` is omitted.
 - `PSYKE_LOG_DIR` overrides the log directory (default: `.psyke/logs`).
+- `PSYKE_EVENT_LOG_FILE` overrides the event sidecar path (used by reasoning eval mode).
 - By default the launcher persists metrics to `.psyke/metrics.db` (override with `PSYKE_METRICS_DB`).
 
 Then interact:
@@ -103,6 +141,8 @@ you> exit
 - Memory summary included in Ego/Superego prompts is token-capped to stay within LLM context budgets.
 - If no inputs are pending, thoughts and actions are scheduled by urgency (`high`, `medium`, `low`).
 - Every proposed action includes a context summary capped at 180 chars.
+- MotorCortex runs a startup capability smoke test and emits `action_capabilities` instrumentation.
+- Ego planner receives runtime `available_action_types` and avoids proposing unavailable actions.
 - Superego validates every action against directives before execution.
 - If denied, denial reason (<=180 chars) is pushed back as a new thought.
 

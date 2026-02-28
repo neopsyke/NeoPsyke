@@ -72,12 +72,15 @@ class EgoPlanner(
         }
         val resolvedResponse = response
 
-        val decision = parseResponse(resolvedResponse.content)
+        val decision = parseResponse(
+            raw = resolvedResponse.content,
+            availableActions = context.availableActions
+        )
         emitDecision(triggerLabel, decision)
         return decision
     }
 
-    private fun parseResponse(raw: String): EgoDecision {
+    private fun parseResponse(raw: String, availableActions: Set<ActionType>): EgoDecision {
         return try {
             val json = TextSecurity.extractJsonObject(raw)
             val payload = mapper.readValue<EgoDecisionPayload>(json)
@@ -101,6 +104,10 @@ class EgoPlanner(
 
                     if (actionType == null || actionPayload.isBlank() || actionSummary.isBlank()) {
                         EgoDecision.Noop("Planner returned invalid action payload.")
+                    } else if (!availableActions.contains(actionType)) {
+                        EgoDecision.Noop(
+                            "Planner proposed unavailable action type: ${actionType.name.lowercase()}."
+                        )
                     } else {
                         EgoDecision.ProposeAction(
                             urgency = Urgency.fromRaw(payload.urgency),
@@ -188,6 +195,17 @@ class EgoPlanner(
             }
         }
         val memorySummary = context.memorySummary.ifBlank { "none" }
+        val availableActionList = context.availableActions
+            .map { it.name.lowercase() }
+            .sorted()
+            .joinToString(", ")
+            .ifBlank { "none" }
+        val unavailableActionList = ActionType.entries
+            .filterNot { context.availableActions.contains(it) }
+            .map { it.name.lowercase() }
+            .sorted()
+            .joinToString(", ")
+            .ifBlank { "none" }
 
         return PromptBudgetAllocator.allocate(
             sections = listOf(
@@ -206,6 +224,8 @@ class EgoPlanner(
                     Allowed actions:
                     - web_search: payload is a concise search query.
                     - answer: payload is the exact answer text for the interlocutor.
+                    - mcp_time: payload is JSON like {"timezone":"Europe/Berlin"} (timezone optional).
+                    - mcp_fetch: payload is JSON like {"url":"https://example.com","max_chars":1200}.
                     """.trimIndent()
                 ),
                 PromptBudgetAllocator.Section(
@@ -218,7 +238,7 @@ class EgoPlanner(
                       "decision":"thought|action|noop",
                       "urgency":"low|medium|high",
                       "thought":"... optional when decision=thought",
-                      "action_type":"web_search|answer",
+                      "action_type":"web_search|answer|mcp_time|mcp_fetch",
                       "action_payload":"... optional when decision=action",
                       "action_summary":"<=180 chars context summary for action review",
                       "reason":"... optional short reason"
@@ -237,6 +257,17 @@ class EgoPlanner(
                     pending_inputs=${context.queue.pendingInputCount}
                     pending_thoughts=${context.queue.pendingThoughtCount}
                     pending_actions=${context.queue.pendingActionCount}
+                    """.trimIndent()
+                ),
+                PromptBudgetAllocator.Section(
+                    role = ChatRole.USER,
+                    priority = PromptBudgetAllocator.Priority.IMPORTANT,
+                    minTokens = 20,
+                    content = """
+                    Runtime action availability:
+                    available_action_types=$availableActionList
+                    unavailable_action_types=$unavailableActionList
+                    Never propose unavailable_action_types.
                     """.trimIndent()
                 ),
                 PromptBudgetAllocator.Section(

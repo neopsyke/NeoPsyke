@@ -24,6 +24,7 @@ class DashboardStateStore(
     private var queues: QueueState = QueueState(emptyList(), emptyList(), emptyList())
     private var lastSuperegoInput: Map<String, Any?>? = null
     private var lastSuperegoOutput: Map<String, Any?>? = null
+    private var actionCapabilities: List<Map<String, Any?>> = emptyList()
     private var limits: Map<String, Any?> = emptyMap()
     private var metrics: MetricsSnapshot? = null
     private var droppedEvents: Long = 0
@@ -94,6 +95,11 @@ class DashboardStateStore(
                     lastSuperegoOutput = event.data
                 }
 
+                "action_capabilities" -> {
+                    @Suppress("UNCHECKED_CAST")
+                    actionCapabilities = (event.data["statuses"] as? List<Map<String, Any?>>).orEmpty()
+                }
+
                 "limits_config" -> {
                     @Suppress("UNCHECKED_CAST")
                     limits = (event.data["limits"] as? Map<String, Any?>).orEmpty()
@@ -135,6 +141,7 @@ class DashboardStateStore(
                 queues = queues,
                 lastSuperegoInput = lastSuperegoInput,
                 lastSuperegoOutput = lastSuperegoOutput,
+                actionCapabilities = actionCapabilities,
                 limits = limits,
                 metrics = metrics,
                 instrumentationHealth = instrumentationHealthMap(),
@@ -215,6 +222,7 @@ data class DashboardSnapshot(
     val queues: QueueState,
     val lastSuperegoInput: Map<String, Any?>?,
     val lastSuperegoOutput: Map<String, Any?>?,
+    val actionCapabilities: List<Map<String, Any?>> = emptyList(),
     val limits: Map<String, Any?>,
     val metrics: MetricsSnapshot?,
     val instrumentationHealth: Map<String, Any?> = emptyMap(),

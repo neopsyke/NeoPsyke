@@ -5,7 +5,7 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 
 plugins {
-    kotlin("jvm") version "1.9.23"
+    kotlin("jvm") version "2.2.0"
     application
 }
 
@@ -21,8 +21,10 @@ dependencies {
 
     implementation("io.github.microutils:kotlin-logging-jvm:3.0.5")
     implementation("org.slf4j:slf4j-simple:2.0.12")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.1")
 
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("io.modelcontextprotocol:kotlin-sdk:0.6.0")
 
     implementation("com.fasterxml.jackson.module:jackson-module-kotlin:2.17.0")
     implementation("com.fasterxml.jackson.core:jackson-databind:2.17.0")
@@ -47,7 +49,7 @@ java {
 
 tasks.withType<KotlinCompile>().configureEach {
     compilerOptions {
-        // Kotlin 1.9.x supports bytecode targets up to 21; use JDK 23 toolchain but emit 21-compatible bytecode.
+        // Keep bytecode compatible with Java 21 while building with JDK 23 toolchain.
         jvmTarget.set(JvmTarget.JVM_21)
     }
 }
