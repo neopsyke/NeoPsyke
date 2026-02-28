@@ -19,6 +19,11 @@ import kotlinx.io.asSource
 import kotlinx.io.buffered
 import mu.KotlinLogging
 import java.io.IOException
+import java.nio.charset.StandardCharsets
+import java.nio.file.Files
+import java.nio.file.Path
+import java.nio.file.Paths
+import java.nio.file.StandardOpenOption
 import java.net.URI
 import java.util.Locale
 import kotlin.concurrent.thread
@@ -312,7 +317,9 @@ class McpStdioClient private constructor(
     companion object {
         fun start(command: List<String>, serverLabel: String): McpStdioClient {
             require(command.isNotEmpty()) { "MCP command cannot be empty." }
-            val process = ProcessBuilder(command).start()
+            val processBuilder = ProcessBuilder(command)
+            NpmCommandIsolation.apply(processBuilder, command, serverLabel)
+            val process = processBuilder.start()
 
             // Drain stderr continuously to avoid deadlocks if the server logs.
             thread(name = "mcp-$serverLabel-stderr", isDaemon = true) {
@@ -381,6 +388,103 @@ class McpStdioClient private constructor(
 
             return ""
         }
+    }
+}
+
+private object NpmCommandIsolation {
+    private const val PUBLIC_REGISTRY = "https://registry.npmjs.org/"
+
+    fun apply(processBuilder: ProcessBuilder, command: List<String>, serverLabel: String) {
+        val executable = normalizeExecutableName(command.firstOrNull().orEmpty())
+        if (executable != "npm" && executable != "npx") {
+            return
+        }
+
+        val workspaceRoot = Paths.get(System.getProperty("user.dir"))
+        val npmDir = workspaceRoot.resolve(".psyke").resolve("npm")
+        val userConfig = npmDir.resolve("mcp-user.npmrc")
+        val globalConfig = npmDir.resolve("mcp-global.npmrc")
+        val cacheDir = npmDir.resolve("cache")
+        val npxCacheDir = npmDir.resolve("npx-cache")
+
+        try {
+            Files.createDirectories(npmDir)
+            Files.createDirectories(cacheDir)
+            Files.createDirectories(npxCacheDir)
+            writeUserConfig(userConfig)
+            writeGlobalConfig(globalConfig)
+        } catch (ex: Exception) {
+            logger.warn(ex) { "Failed to prepare isolated npm config for MCP $serverLabel." }
+            return
+        }
+
+        val env = processBuilder.environment()
+        val removed = env.keys
+            .filter { key ->
+                val normalized = key.lowercase(Locale.ROOT)
+                normalized.startsWith("npm_config_") ||
+                    normalized == "npm_token" ||
+                    normalized == "node_auth_token"
+            }
+            .toList()
+        removed.forEach { key -> env.remove(key) }
+
+        setEnv(env, "NPM_CONFIG_USERCONFIG", userConfig.toString())
+        setEnv(env, "NPM_CONFIG_GLOBALCONFIG", globalConfig.toString())
+        setEnv(env, "NPM_CONFIG_REGISTRY", PUBLIC_REGISTRY)
+        setEnv(env, "NPM_CONFIG_ALWAYS_AUTH", "false")
+        setEnv(env, "NPM_CONFIG_CACHE", cacheDir.toString())
+        setEnv(env, "NPX_CACHE", npxCacheDir.toString())
+
+        logger.info {
+            "mcp-$serverLabel using isolated npm configuration at $userConfig (registry=$PUBLIC_REGISTRY, removed_env=${removed.size})"
+        }
+    }
+
+    private fun writeUserConfig(path: Path) {
+        val content = buildString {
+            appendLine("registry=$PUBLIC_REGISTRY")
+            appendLine("always-auth=false")
+            appendLine("fund=false")
+            appendLine("update-notifier=false")
+            appendLine("audit=false")
+        }
+        Files.writeString(
+            path,
+            content,
+            StandardCharsets.UTF_8,
+            StandardOpenOption.CREATE,
+            StandardOpenOption.TRUNCATE_EXISTING,
+            StandardOpenOption.WRITE
+        )
+    }
+
+    private fun writeGlobalConfig(path: Path) {
+        Files.writeString(
+            path,
+            "",
+            StandardCharsets.UTF_8,
+            StandardOpenOption.CREATE,
+            StandardOpenOption.TRUNCATE_EXISTING,
+            StandardOpenOption.WRITE
+        )
+    }
+
+    private fun setEnv(env: MutableMap<String, String>, key: String, value: String) {
+        env[key] = value
+        env[key.lowercase(Locale.ROOT)] = value
+    }
+
+    private fun normalizeExecutableName(executable: String): String {
+        val trimmed = executable.trim()
+        if (trimmed.isBlank()) {
+            return ""
+        }
+        val base = trimmed
+            .substringAfterLast('/')
+            .substringAfterLast('\\')
+            .lowercase(Locale.ROOT)
+        return base.removeSuffix(".cmd").removeSuffix(".exe").removeSuffix(".bat")
     }
 }
 

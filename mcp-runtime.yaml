@@ -1,0 +1,23 @@
+time:
+  enabled: true
+  mode: stdio
+  provider: mcp-server-time
+  command: "uvx mcp-server-time"
+  fallback_commands:
+    - "python -m mcp_server_time"
+
+fetch:
+  enabled: true
+  mode: stdio
+  provider: mcp-server-fetch
+  command: "uvx mcp-server-fetch"
+  fallback_commands:
+    - "python -m mcp_server_fetch"
+
+memory:
+  enabled: true
+  mode: stdio
+  provider: auto
+  command: "npx -y @modelcontextprotocol/server-memory"
+  fallback_commands:
+    - "uvx mcp-server-memory"

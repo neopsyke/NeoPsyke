@@ -1,6 +1,5 @@
 import org.gradle.api.tasks.compile.JavaCompile
 import org.gradle.api.tasks.JavaExec
-import org.gradle.jvm.toolchain.JavaLanguageVersion
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 
@@ -28,6 +27,7 @@ dependencies {
 
     implementation("com.fasterxml.jackson.module:jackson-module-kotlin:2.17.0")
     implementation("com.fasterxml.jackson.core:jackson-databind:2.17.0")
+    implementation("com.fasterxml.jackson.dataformat:jackson-dataformat-yaml:2.17.0")
     implementation("org.xerial:sqlite-jdbc:3.46.1.3")
 
     testImplementation(kotlin("test"))
@@ -37,20 +37,11 @@ tasks.test {
     useJUnitPlatform()
 }
 
-kotlin {
-    jvmToolchain(23)
-}
-
-java {
-    toolchain {
-        languageVersion.set(JavaLanguageVersion.of(23))
-    }
-}
-
 tasks.withType<KotlinCompile>().configureEach {
     compilerOptions {
-        // Keep bytecode compatible with Java 21 while building with JDK 23 toolchain.
+        // Emit Java 21-compatible bytecode, even when Gradle runs on a newer JDK.
         jvmTarget.set(JvmTarget.JVM_21)
+        freeCompilerArgs.add("-Xjdk-release=21")
     }
 }
 

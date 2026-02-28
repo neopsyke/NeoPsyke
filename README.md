@@ -13,14 +13,25 @@ Standalone Kotlin JVM app using Gradle with:
 - If you add tool-specific files (for example `CLAUDE.md`), keep them short and aligned with `AGENTS.md`.
 
 ## Requirements
-- JDK 23+
+- JDK 21+
 - Use the included Gradle wrapper (`./gradlew`)
-- Kotlin currently emits bytecode up to Java 21; the build uses a JDK 23 toolchain while targeting 21-compatible bytecode for both Kotlin and Java.
+- Gradle can run on JDK 21+; Kotlin and Java compilation emit Java 21-compatible bytecode.
 - `MISTRAL_API_KEY` is required for interactive mode and for `--eval-reasoning-mode model`.
 
 ## Configuration
 - Set `MISTRAL_API_KEY` to your API token.
+- MCP/time/fetch/memory provider settings are now centralized in `mcp-runtime.yaml` (repository root).
+  - Default config enables `time`, `fetch`, and `memory` in `stdio` mode with command/fallback lists.
+  - Optional override file path: `PSYKE_MCP_CONFIG_FILE=/path/to/mcp-runtime.yaml`.
+  - Environment variables still override YAML when present (`MCP_TIME_*`, `MCP_FETCH_*`, `MCP_MEMORY_*`, plus legacy `MCP_*_SERVER_CMD`).
+  - YAML schema per capability:
+    - `enabled` (`true|false`)
+    - `mode` (`stdio` currently supported)
+    - `provider` (label/selector for provider intent)
+    - `command` (primary command string)
+    - `fallback_commands` (list of command strings; first executable in `PATH` is used)
 - Optional:
+  - `PSYKE_MCP_CONFIG_FILE` (optional; path to MCP runtime YAML, default: `./mcp-runtime.yaml`)
   - `MISTRAL_EGO_MODEL` (default: `mistral-small-latest`)
   - `MISTRAL_SUPEREGO_MODEL` (default: same as Ego model)
   - `PSYKE_DASHBOARD_ENABLED` (default: `true`)
@@ -34,9 +45,12 @@ Standalone Kotlin JVM app using Gradle with:
   - `EGO_MAX_MEMORY_PROMPT_TOKENS` (default: `256`)
   - `EGO_MAX_ACTION_PAYLOAD_CHARS` (default: `4000`)
   - `EGO_SEARCH_RESULT_COUNT` (default: `5`)
-  - `MCP_TIME_SERVER_CMD` (default: `uvx mcp-server-time`)
-  - `MCP_FETCH_SERVER_CMD` (default: `uvx mcp-server-fetch`)
-  - `MCP_MEMORY_SERVER_CMD` (optional; when set, enables Ego internal memory recall/imprint via MCP; Psyke starts it as a child process)
+  - `MCP_TIME_SERVER_CMD` (optional env override for YAML time command)
+  - `MCP_FETCH_SERVER_CMD` (optional env override for YAML fetch command)
+  - `MCP_MEMORY_SERVER_CMD` (optional env override for YAML memory command)
+  - `MCP_TIME_MODE` / `MCP_FETCH_MODE` / `MCP_MEMORY_MODE` (optional env override for YAML mode)
+  - `MCP_TIME_PROVIDER` / `MCP_FETCH_PROVIDER` / `MCP_MEMORY_PROVIDER` (optional env override for YAML provider)
+  - `MCP_TIME_ENABLED` / `MCP_FETCH_ENABLED` / `MCP_MEMORY_ENABLED` (optional env override for YAML enabled flag)
   - `MISTRAL_WEBSEARCH_AGENT_ID` (optional; if omitted, Psyke creates an ephemeral Mistral web-search agent per run)
   - `MCP_CALL_TIMEOUT_MS` (default: `8000`)
   - `MCP_MEMORY_CALL_TIMEOUT_MS` (default: same as `MCP_CALL_TIMEOUT_MS`)
@@ -104,6 +118,28 @@ Reasoning eval output:
 - Main run log focuses on eval flow (`[eval.reasoning] ...`) and full model thought text blocks (`thought.begin`/`thought.end`).
 - Metadata-rich instrumentation events (including `llm.call`) are written to a per-run sidecar JSONL file.
 
+Memory live eval (real-world, no mocks):
+```bash
+export MISTRAL_API_KEY=your_token
+# either set in mcp-runtime.yaml (preferred) or override here:
+export MCP_MEMORY_SERVER_CMD='your-memory-mcp-server-command'
+./run-psyke.sh --eval-memory-live
+```
+
+Memory live eval options:
+```bash
+./run-psyke.sh --eval-memory-live --eval-stage 2026-02-28
+./run-psyke.sh --eval-memory-live --eval-memory-max-attempts 3
+./run-psyke.sh --eval-memory-live --eval-memory-tasks user-preference-color,project-constraint-timezone
+```
+
+Memory live eval output:
+- Per-run detailed JSON in `.psyke/evals/memory-live/runs/`.
+- Append-only trend history in `.psyke/evals/memory-live/history.jsonl`.
+- Uses real `LlmMemoryConsolidationAdvisor` + real `McpHippocampus` imprint/recall calls.
+- Tags each saved item with a unique run session marker to reduce cross-run collision.
+- Main run log focuses on memory eval flow (`[eval.memory] ...`).
+
 Set a specific log level via parameter:
 ```bash
 ./run-psyke.sh --log-level info
@@ -117,7 +153,7 @@ Disable the default interactive delay for faster local/manual loops:
 Notes:
 - `run-psyke.sh` bootstraps `installDist` once if needed.
 - After bootstrap, execution is direct (`build/install/psyke/bin/psyke`) without `gradle run`.
-- You do not run memory MCP separately if `MCP_MEMORY_SERVER_CMD` is set correctly; Psyke launches it on demand. `uv/uvx` is only needed when your command uses it.
+- You do not run memory MCP separately if memory command config is set correctly (from `mcp-runtime.yaml` or `MCP_MEMORY_SERVER_CMD` override); Psyke launches it on demand.
 - Default log level in `run-psyke.sh` is `warning`.
 - Launcher logs are written to per-run files in `.psyke/logs/runs/`.
 - `.psyke/logs/latest.log` always points to the newest run log.
@@ -127,7 +163,7 @@ Notes:
 - Default loop delay in `run-psyke.sh` is `1000ms` (`--no-delay` or `--loop-delay-ms 0` disables it).
 - `PSYKE_LOG_LEVEL` can still provide a default if `--log-level` is omitted.
 - `PSYKE_LOG_DIR` overrides the log directory (default: `.psyke/logs`).
-- `PSYKE_EVENT_LOG_FILE` overrides the event sidecar path (used by reasoning eval mode).
+- `PSYKE_EVENT_LOG_FILE` overrides the event sidecar path (used by eval modes).
 - By default the launcher persists metrics to `.psyke/metrics.db` (override with `PSYKE_METRICS_DB`).
 
 Then interact:
@@ -154,7 +190,7 @@ you> exit
 - The built-in stdin source always submits with `high` priority.
 - `MemoryStore` keeps bounded rolling memory and compacts older turns into a summary as it nears capacity.
 - Memory summary included in Ego/Superego prompts is token-capped to stay within LLM context budgets.
-- When `MCP_MEMORY_SERVER_CMD` is configured, Ego also runs internal `Hippocampus` memory recall per thought/input planning step (not a MotorCortex action).
+- When memory capability is enabled/configured (via `mcp-runtime.yaml` or env override), Ego also runs internal `Hippocampus` memory recall per thought/input planning step (not a MotorCortex action).
 - Ego tracks a `decision_pressure` signal to detect circular thought chains and increase convergence pressure.
 - A separate MetaReasoner LLM call runs periodically under pressure to classify chain health (`continue`, `continue_with_constraints`, `finalize_now`, `request_tool_then_finalize`).
 - A separate `MemoryConsolidationAdvisor` LLM call can run every N steps (default 8) and after allowed actions to decide if durable memory should be persisted.
@@ -178,3 +214,10 @@ you> exit
 - Instrumentation health is persisted per run, including dropped instrumentation events and queue-saturation hits.
 - Superego token usage is tracked separately for both current run and persistent totals (still included in overall totals).
 - Memory metrics are persisted per run and as persistent totals: recall attempts/hits/failures/truncation/latency/chars, consolidation assessments/save recommendations, and imprint attempts/success/failures/latency/chars.
+
+## Provider status checks
+- Before interactive mode and live/model eval modes, Psyke runs a provider health check for Mistral.
+- Checks include DNS resolution for `api.mistral.ai` and a short authenticated HTTP probe (`GET /v1/models`).
+- If provider is unavailable, Psyke prints a clear error to both stderr/stdout-facing output and logs, then exits early.
+- If provider is degraded (for example, rate limiting), Psyke logs and prints a warning but continues.
+- For `--eval-memory-live`, Psyke also preflights the memory MCP provider (connect + tool listing) and fails early if required recall/write-like tools are missing or startup fails.

@@ -16,8 +16,15 @@ import psyke.agent.SdkMcpTimeTool
 import psyke.agent.SuperegoDirectives
 import psyke.agent.SuperegoGatekeeper
 import psyke.agent.actions.websearch.WebSearchActionHandler
+import psyke.config.McpCapabilityConfig
+import psyke.config.McpRuntimeConfig
+import psyke.config.McpRuntimeConfigLoader
 import psyke.dashboard.DashboardServer
 import psyke.dashboard.DashboardStateStore
+import psyke.eval.MemoryLiveEvalOptions
+import psyke.eval.MemoryLiveEvalReporter
+import psyke.eval.MemoryLiveEvalRunner
+import psyke.eval.MemoryLiveEvalTasks
 import psyke.eval.ReasoningEvalOptions
 import psyke.eval.ReasoningEvalReporter
 import psyke.eval.ReasoningEvalMode
@@ -32,29 +39,42 @@ import psyke.instrumentation.InstrumentationBus
 import psyke.instrumentation.JsonlEventSink
 import psyke.instrumentation.LlmCallEventObserver
 import psyke.instrumentation.LlmRawResponseEventHook
+import psyke.instrumentation.MemoryEvalFlowLogSink
 import psyke.instrumentation.MetricsSnapshotObserver
 import psyke.instrumentation.ReasoningEvalFlowLogSink
 import psyke.instrumentation.StructuredLogSink
 import psyke.llm.InstrumentedChatModelClient
 import psyke.llm.ChatModelClient
 import psyke.llm.MistralChatClient
+import psyke.llm.MistralProviderStatusChecker
+import psyke.llm.ProviderHealthState
+import psyke.llm.ProviderStatus
 import psyke.llm.combineChatCallObservers
+import psyke.llm.reportProviderStatusAndDecide
 import psyke.integrations.mistral.websearch.MistralConversationsWebSearchEngine
 import psyke.integrations.mistral.websearch.MistralWebSearchMode
 import psyke.integrations.mistral.websearch.MistralWebSearchProfile
 import psyke.integrations.mistral.websearch.MistralWebSearchAgentSession
 import psyke.metrics.MetricsRuntimeFactory
+import psyke.agent.McpFetchTool
+import psyke.agent.McpTimeTool
+import psyke.agent.ToolHealthStatus
+import java.nio.file.Files
 import java.nio.file.Path
+import java.nio.file.Paths
 
 private val logger = KotlinLogging.logger {}
 
 private data class AppCliOptions(
     val showHelp: Boolean,
     val evalReasoningOnly: Boolean,
+    val evalMemoryLiveOnly: Boolean,
     val evalReasoningMode: ReasoningEvalMode,
     val evalStage: String?,
     val evalReasoningMaxAttempts: Int,
     val evalReasoningTaskFilter: Set<String>,
+    val evalMemoryMaxAttempts: Int,
+    val evalMemoryTaskFilter: Set<String>,
     val unknownArgs: List<String>,
     val parseErrors: List<String>,
 )
@@ -77,6 +97,7 @@ fun main(args: Array<String>) {
     }
 
     val config = AgentConfig.fromEnv()
+    val mcpRuntimeConfig = McpRuntimeConfigLoader.load()
     val egoModel = System.getenv("MISTRAL_EGO_MODEL") ?: MistralChatClient.DEFAULT_MODEL
     val superegoModel = System.getenv("MISTRAL_SUPEREGO_MODEL") ?: egoModel
 
@@ -88,6 +109,16 @@ fun main(args: Array<String>) {
         )
         return
     }
+    if (cliOptions.evalMemoryLiveOnly) {
+        runMemoryLiveEval(
+            apiKey = System.getenv("MISTRAL_API_KEY"),
+            egoModel = egoModel,
+            config = config,
+            mcpRuntimeConfig = mcpRuntimeConfig,
+            cliOptions = cliOptions
+        )
+        return
+    }
 
     val apiKey = System.getenv("MISTRAL_API_KEY")
     if (apiKey.isNullOrBlank()) {
@@ -95,12 +126,16 @@ fun main(args: Array<String>) {
         logger.warn { "MISTRAL_API_KEY is not set. Export it to talk to Mistral." }
         return
     }
+    if (!checkMistralProviderHealth(apiKey = apiKey, modeLabel = "interactive")) {
+        return
+    }
 
     runInteractiveMode(
         apiKey = apiKey,
         egoModel = egoModel,
         superegoModel = superegoModel,
-        config = config
+        config = config,
+        mcpRuntimeConfig = mcpRuntimeConfig
     )
 }
 
@@ -110,7 +145,7 @@ private fun runReasoningOnlyEval(
     cliOptions: AppCliOptions,
 ) {
     println("Running reasoning-only self-eval (mode=${cliOptions.evalReasoningMode.id})...")
-    val sidecarPath = resolveReasoningEventSidecarPath()
+    val sidecarPath = resolveEvalEventSidecarPath()
     val sidecarSink = if (sidecarPath == null) {
         null
     } else {
@@ -159,6 +194,9 @@ private fun runReasoningOnlyEval(
                     logger.warn { "MISTRAL_API_KEY is required for --eval-reasoning-mode model." }
                     return
                 }
+                if (!checkMistralProviderHealth(apiKey = resolvedApiKey, modeLabel = "eval_reasoning_model")) {
+                    return
+                }
                 MistralChatClient(
                     apiKey = resolvedApiKey,
                     modelName = egoModel,
@@ -197,7 +235,115 @@ private fun runReasoningOnlyEval(
     }
 }
 
-private fun resolveReasoningEventSidecarPath(): Path? {
+private fun runMemoryLiveEval(
+    apiKey: String?,
+    egoModel: String,
+    config: AgentConfig,
+    mcpRuntimeConfig: McpRuntimeConfig,
+    cliOptions: AppCliOptions,
+) {
+    println("Running memory live eval (real LLM + real MCP memory)...")
+    val resolvedApiKey = apiKey?.trim().orEmpty()
+    if (resolvedApiKey.isBlank()) {
+        System.err.println("MISTRAL_API_KEY is required for --eval-memory-live.")
+        logger.warn { "MISTRAL_API_KEY is required for --eval-memory-live." }
+        return
+    }
+    if (!checkMistralProviderHealth(apiKey = resolvedApiKey, modeLabel = "eval_memory_live")) {
+        return
+    }
+    val memoryCommand = resolveMcpCommand(mcpRuntimeConfig.memory)
+    if (memoryCommand == null) {
+        val reason = disabledReason("memory", mcpRuntimeConfig.memory)
+        System.err.println(
+            "Memory MCP command is unavailable for --eval-memory-live. $reason Configure mcp-runtime.yaml or override with MCP_MEMORY_SERVER_CMD."
+        )
+        logger.warn {
+            "Memory MCP command is unavailable for --eval-memory-live. $reason"
+        }
+        return
+    }
+    if (!checkMcpMemoryProviderHealth(command = memoryCommand, timeoutMs = config.mcpMemoryCallTimeoutMs, modeLabel = "eval_memory_live")) {
+        return
+    }
+
+    val sidecarPath = resolveEvalEventSidecarPath()
+    val sidecarSink = if (sidecarPath == null) {
+        null
+    } else {
+        try {
+            JsonlEventSink(sidecarPath).also {
+                println("Event sidecar: $sidecarPath")
+            }
+        } catch (ex: Exception) {
+            logger.warn(ex) { "Failed to initialize event sidecar at $sidecarPath; continuing without sidecar." }
+            null
+        }
+    }
+    val sinks = listOfNotNull(
+        MemoryEvalFlowLogSink(),
+        sidecarSink
+    )
+    val evalRawResponseCharLimit = System.getenv("PSYKE_EVAL_MAX_RAW_RESPONSE_CHARS")
+        ?.toIntOrNull()
+        ?.takeIf { it > 0 }
+        ?: Int.MAX_VALUE
+    InstrumentationBus(
+        sinks = sinks
+    ).use { instrumentation ->
+        val llmCallObserver = LlmCallEventObserver(
+            provider = "mistral",
+            instrumentation = instrumentation
+        )
+        val rawResponseHook = LlmRawResponseEventHook(
+            instrumentation = instrumentation,
+            maxRawResponseChars = evalRawResponseCharLimit
+        )
+        UsageTrackingChatClient(
+            delegate = InstrumentedChatModelClient(
+                delegate = MistralChatClient(
+                    apiKey = resolvedApiKey,
+                    modelName = egoModel,
+                    callObserver = llmCallObserver
+                ),
+                hooks = listOf(rawResponseHook)
+            )
+        ).use { client ->
+            val stage = cliOptions.evalStage ?: (System.getenv("PSYKE_EVAL_STAGE") ?: "")
+                .ifBlank { java.time.LocalDate.now(java.time.ZoneOffset.UTC).toString() }
+            McpHippocampus(
+                command = memoryCommand,
+                callTimeoutMs = config.mcpMemoryCallTimeoutMs,
+                defaultMaxItems = config.memoryRecallMaxItems,
+                defaultMaxChars = config.memoryRecallMaxChars
+            ).use { hippocampus ->
+                val report = MemoryLiveEvalRunner(
+                    client = client,
+                    memoryConsolidationAdvisor = LlmMemoryConsolidationAdvisor(
+                        modelClient = client,
+                        config = config
+                    ),
+                    hippocampus = hippocampus,
+                    tasks = MemoryLiveEvalTasks.defaults(),
+                    instrumentation = instrumentation
+                ).run(
+                    MemoryLiveEvalOptions(
+                        stage = stage,
+                        taskFilter = cliOptions.evalMemoryTaskFilter,
+                        maxConsolidationAttempts = cliOptions.evalMemoryMaxAttempts
+                    )
+                )
+                println(MemoryLiveEvalReporter.render(report))
+                val runPath = MemoryLiveEvalReporter.writeRunReport(report)
+                MemoryLiveEvalReporter.appendHistory(report)
+                println("Run report: $runPath")
+                println("History: .psyke/evals/memory-live/history.jsonl")
+            }
+        }
+    }
+}
+
+private fun resolveEvalEventSidecarPath(): Path? {
     val explicit = System.getenv("PSYKE_EVENT_LOG_FILE")?.trim().orEmpty()
     if (explicit.isNotBlank()) {
         return Path.of(explicit)
@@ -219,11 +365,74 @@ private fun resolveReasoningEventSidecarPath(): Path? {
     return logPath.resolveSibling(sidecarName)
 }
 
+private fun checkMistralProviderHealth(apiKey: String, modeLabel: String): Boolean {
+    val checker = MistralProviderStatusChecker(apiKey = apiKey)
+    val status = checker.check()
+    return reportProviderStatusAndDecide(
+        modeLabel = modeLabel,
+        status = status
+    )
+}
+
+private fun checkMcpMemoryProviderHealth(
+    command: List<String>,
+    timeoutMs: Long,
+    modeLabel: String,
+): Boolean {
+    val status = try {
+        McpStdioClient.start(command = command, serverLabel = "memory-health").use { client ->
+            val tools = client.listTools(timeoutMs)
+            val hasSearchLike = tools.any { tool ->
+                val lower = tool.lowercase()
+                lower.contains("search") || lower.contains("recall") || lower.contains("query")
+            }
+            val hasWriteLike = tools.any { tool ->
+                val lower = tool.lowercase()
+                lower.contains("add_observations") ||
+                    lower.contains("remember") ||
+                    lower.contains("imprint") ||
+                    lower.contains("create_memory") ||
+                    lower.contains("add_memory") ||
+                    lower.contains("write_memory")
+            }
+            when {
+                !hasSearchLike || !hasWriteLike -> {
+                    ProviderStatus(
+                        provider = "mcp_memory",
+                        state = ProviderHealthState.UNAVAILABLE,
+                        detail = "MCP memory server reachable but required tools are missing. search_like=$hasSearchLike write_like=$hasWriteLike tools=${tools.sorted().joinToString(",")}"
+                    )
+                }
+
+                else -> {
+                    ProviderStatus(
+                        provider = "mcp_memory",
+                        state = ProviderHealthState.AVAILABLE,
+                        detail = "MCP memory server reachable; required tools detected."
+                    )
+                }
+            }
+        }
+    } catch (ex: Exception) {
+        ProviderStatus(
+            provider = "mcp_memory",
+            state = ProviderHealthState.UNAVAILABLE,
+            detail = "MCP memory provider check failed: ${ex.message ?: ex::class.simpleName ?: "unknown error"}"
+        )
+    }
+
+    return reportProviderStatusAndDecide(
+        modeLabel = modeLabel,
+        status = status
+    )
+}
+
 private fun runInteractiveMode(
     apiKey: String,
     egoModel: String,
     superegoModel: String,
     config: AgentConfig,
+    mcpRuntimeConfig: McpRuntimeConfig,
 ) {
     val superegoDirectives = SuperegoDirectives.load()
     val dashboardPort = System.getenv("PSYKE_DASHBOARD_PORT")?.toIntOrNull() ?: 8787
@@ -366,21 +575,8 @@ private fun runInteractiveMode(
                             model = egoModel,
                             providedAgentId = System.getenv("MISTRAL_WEBSEARCH_AGENT_ID")
                         )
-                        val mcpTimeTool = SdkMcpTimeTool(
-                            command = resolveMcpCommand(
-                                envName = "MCP_TIME_SERVER_CMD",
-                                fallback = listOf("uvx", "mcp-server-time")
-                            ),
-                            callTimeoutMs = config.mcpCallTimeoutMs
-                        )
-                        val mcpFetchTool = SdkMcpFetchTool(
-                            command = resolveMcpCommand(
-                                envName = "MCP_FETCH_SERVER_CMD",
-                                fallback = listOf("uvx", "mcp-server-fetch")
-                            ),
-                            callTimeoutMs = config.mcpCallTimeoutMs,
-                            maxChars = config.mcpFetchMaxChars
-                        )
+                        val mcpTimeTool = createMcpTimeTool(config, mcpRuntimeConfig.time)
+                        val mcpFetchTool = createMcpFetchTool(config, mcpRuntimeConfig.fetch)
 
                         webSearchAgentSession.use { agentSession ->
                             val webSearchProfile = MistralWebSearchProfile(
@@ -401,81 +597,84 @@ private fun runInteractiveMode(
                             )
 
                             webSearchEngine.use { searchEngine ->
-                                mcpTimeTool.use { timeTool ->
-                                    mcpFetchTool.use { fetchTool ->
-                                        val webSearchActionHandler = WebSearchActionHandler(searchEngine)
-                                        val motorCortex = MotorCortex(
-                                            webSearchActionHandler = webSearchActionHandler,
-                                            mcpTimeTool = timeTool,
-                                            mcpFetchTool = fetchTool
-                                        )
-                                        val actionStatuses = motorCortex.startupSmokeTest()
-                                        instrumentation.emit(AgentEvents.actionCapabilities(actionStatuses))
-                                        actionStatuses.filterNot { it.available }.forEach { status ->
-                                            instrumentation.emit(
-                                                AgentEvents.warning(
-                                                    "Action ${status.actionType.name.lowercase()} unavailable at startup: ${status.detail}"
-                                                )
+                                val timeTool = mcpTimeTool
+                                val fetchTool = mcpFetchTool
+                                try {
+                                    val webSearchActionHandler = WebSearchActionHandler(searchEngine)
+                                    val motorCortex = MotorCortex(
+                                        webSearchActionHandler = webSearchActionHandler,
+                                        mcpTimeTool = timeTool,
+                                        mcpFetchTool = fetchTool
+                                    )
+                                    val actionStatuses = motorCortex.startupSmokeTest()
+                                    instrumentation.emit(AgentEvents.actionCapabilities(actionStatuses))
+                                    actionStatuses.filterNot { it.available }.forEach { status ->
+                                        instrumentation.emit(
+                                            AgentEvents.warning(
+                                                "Action ${status.actionType.name.lowercase()} unavailable at startup: ${status.detail}"
                                             )
-                                        }
-                                        val planner = EgoPlanner(egoClient, config, instrumentation)
-                                        val metaReasoner = LlmMetaReasoner(
-                                            modelClient = egoClient,
-                                            config = config
                                         )
-                                        val memoryConsolidationAdvisor = LlmMemoryConsolidationAdvisor(
-                                            modelClient = egoClient,
-                                            config = config
-                                        )
-                                        val hippocampus = createHippocampus(config)
-                                        try {
-                                            EgoAgent(
-                                                planner = planner,
-                                                superego = gatekeeper,
-                                                motorCortex = motorCortex,
-                                                config = config,
-                                                hippocampus = hippocampus,
-                                                metaReasoner = metaReasoner,
-                                                memoryConsolidationAdvisor = memoryConsolidationAdvisor,
-                                                onActionDenied = {
-                                                    metrics.recordDeniedAction()
-                                                    emitMetricsSnapshot()
-                                                },
-                                                onQueueSaturation = { queueType, _, _ ->
-                                                    metrics.recordQueueSaturation(queueType)
-                                                    emitMetricsSnapshot()
-                                                },
-                                                onMemoryRecall = { hitCount, latencyMs, recallChars, truncated ->
-                                                    metrics.recordMemoryRecall(
-                                                        hitCount = hitCount,
-                                                        latencyMs = latencyMs,
-                                                        recallChars = recallChars,
-                                                        truncated = truncated
-                                                    )
-                                                    emitMetricsSnapshot()
-                                                },
-                                                onMemoryRecallFailure = { latencyMs ->
-                                                    metrics.recordMemoryRecallFailure(latencyMs)
-                                                    emitMetricsSnapshot()
-                                                },
-                                                onMemoryConsolidationAssessment = { saveRecommended ->
-                                                    metrics.recordMemoryConsolidationAssessment(saveRecommended)
-                                                    emitMetricsSnapshot()
-                                                },
-                                                onMemoryImprintResult = { saved, summaryChars, latencyMs ->
-                                                    metrics.recordMemoryImprint(
-                                                        saved = saved,
-                                                        summaryChars = summaryChars,
-                                                        latencyMs = latencyMs
-                                                    )
-                                                    emitMetricsSnapshot()
-                                                },
-                                                instrumentation = instrumentation
-                                            ).runInteractive()
-                                        } finally {
-                                            hippocampus.close()
-                                        }
                                     }
+                                    val planner = EgoPlanner(egoClient, config, instrumentation)
+                                    val metaReasoner = LlmMetaReasoner(
+                                        modelClient = egoClient,
+                                        config = config
+                                    )
+                                    val memoryConsolidationAdvisor = LlmMemoryConsolidationAdvisor(
+                                        modelClient = egoClient,
+                                        config = config
+                                    )
+                                    val hippocampus = createHippocampus(config, mcpRuntimeConfig.memory)
+                                    try {
+                                        EgoAgent(
+                                            planner = planner,
+                                            superego = gatekeeper,
+                                            motorCortex = motorCortex,
+                                            config = config,
+                                            hippocampus = hippocampus,
+                                            metaReasoner = metaReasoner,
+                                            memoryConsolidationAdvisor = memoryConsolidationAdvisor,
+                                            onActionDenied = {
+                                                metrics.recordDeniedAction()
+                                                emitMetricsSnapshot()
+                                            },
+                                            onQueueSaturation = { queueType, _, _ ->
+                                                metrics.recordQueueSaturation(queueType)
+                                                emitMetricsSnapshot()
+                                            },
+                                            onMemoryRecall = { hitCount, latencyMs, recallChars, truncated ->
+                                                metrics.recordMemoryRecall(
+                                                    hitCount = hitCount,
+                                                    latencyMs = latencyMs,
+                                                    recallChars = recallChars,
+                                                    truncated = truncated
+                                                )
+                                                emitMetricsSnapshot()
+                                            },
+                                            onMemoryRecallFailure = { latencyMs ->
+                                                metrics.recordMemoryRecallFailure(latencyMs)
+                                                emitMetricsSnapshot()
+                                            },
+                                            onMemoryConsolidationAssessment = { saveRecommended ->
+                                                metrics.recordMemoryConsolidationAssessment(saveRecommended)
+                                                emitMetricsSnapshot()
+                                            },
+                                            onMemoryImprintResult = { saved, summaryChars, latencyMs ->
+                                                metrics.recordMemoryImprint(
+                                                    saved = saved,
+                                                    summaryChars = summaryChars,
+                                                    latencyMs = latencyMs
+                                                )
+                                                emitMetricsSnapshot()
+                                            },
+                                            instrumentation = instrumentation
+                                        ).runInteractive()
+                                    } finally {
+                                        hippocampus.close()
+                                    }
+                                } finally {
+                                    closeQuietly(fetchTool)
+                                    closeQuietly(timeTool)
                                 }
                             }
                         }
@@ -486,17 +685,37 @@ private fun runInteractiveMode(
     }
 }
 
-private fun resolveMcpCommand(envName: String, fallback: List<String>): List<String> {
-    val raw = System.getenv(envName)?.trim().orEmpty()
-    if (raw.isBlank()) {
-        return fallback
+private fun createMcpTimeTool(config: AgentConfig, capability: McpCapabilityConfig): McpTimeTool {
+    val command = resolveMcpCommand(capability)
+    if (command == null) {
+        val reason = disabledReason("time", capability)
+        logger.info { reason }
+        return DisabledMcpTimeTool(reason)
     }
-    return McpStdioClient.parseCommand(raw).ifEmpty { fallback }
+    return SdkMcpTimeTool(
+        command = command,
+        callTimeoutMs = config.mcpCallTimeoutMs
+    )
 }
 
-private fun createHippocampus(config: AgentConfig): Hippocampus {
-    val command = resolveOptionalMcpCommand("MCP_MEMORY_SERVER_CMD")
+private fun createMcpFetchTool(config: AgentConfig, capability: McpCapabilityConfig): McpFetchTool {
+    val command = resolveMcpCommand(capability)
     if (command == null) {
+        val reason = disabledReason("fetch", capability)
+        logger.info { reason }
+        return DisabledMcpFetchTool(reason)
+    }
+    return SdkMcpFetchTool(
+        command = command,
+        callTimeoutMs = config.mcpCallTimeoutMs,
+        maxChars = config.mcpFetchMaxChars
+    )
+}
+
+private fun createHippocampus(config: AgentConfig, capability: McpCapabilityConfig): Hippocampus {
+    val command = resolveMcpCommand(capability)
+    if (command == null) {
+        logger.info { disabledReason("memory", capability) }
         return NoopHippocampus
     }
     return McpHippocampus(
@@ -507,12 +726,113 @@ private fun createHippocampus(config: AgentConfig): Hippocampus {
     )
 }
 
-private fun resolveOptionalMcpCommand(envName: String): List<String>? {
-    val raw = System.getenv(envName)?.trim().orEmpty()
-    if (raw.isBlank()) {
+private fun resolveMcpCommand(capability: McpCapabilityConfig): List<String>? {
+    if (!capability.enabled) {
         return null
     }
-    return McpStdioClient.parseCommand(raw).ifEmpty { null }
+    if (!capability.mode.equals("stdio", ignoreCase = true)) {
+        return null
+    }
+
+    val candidateCommands = buildList {
+        val primary = capability.command.trim()
+        if (primary.isNotBlank()) {
+            add(primary)
+        }
+        capability.fallbackCommands.map { it.trim() }.filter { it.isNotBlank() }.forEach { add(it) }
+    }
+    if (candidateCommands.isEmpty()) {
+        return null
+    }
+
+    val parsedCandidates = candidateCommands
+        .map { McpStdioClient.parseCommand(it) }
+        .filter { it.isNotEmpty() }
+    if (parsedCandidates.isEmpty()) {
+        return null
+    }
+
+    val available = parsedCandidates.firstOrNull { command -> isExecutableAvailable(command.first()) }
+    if (available != null) {
+        return available
+    }
+    return null
+}
+
+private fun isExecutableAvailable(binary: String): Boolean {
+    val candidate = binary.trim()
+    if (candidate.isBlank()) {
+        return false
+    }
+    val explicitPath = Paths.get(candidate)
+    if (explicitPath.isAbsolute || candidate.contains("/") || candidate.contains("\\")) {
+        return Files.isExecutable(explicitPath)
+    }
+    val pathVar = System.getenv("PATH").orEmpty()
+    if (pathVar.isBlank()) {
+        return false
+    }
+    return pathVar.split(java.io.File.pathSeparatorChar).any { segment ->
+        val base = segment.trim()
+        if (base.isBlank()) {
+            return@any false
+        }
+        Files.isExecutable(Paths.get(base, candidate))
+    }
+}
+
+private fun disabledReason(capabilityName: String, capability: McpCapabilityConfig): String {
+    if (!capability.enabled) {
+        return "MCP $capabilityName capability disabled by configuration."
+    }
+    if (!capability.mode.equals("stdio", ignoreCase = true)) {
+        return "MCP $capabilityName mode '${capability.mode}' is not supported in this runtime (only stdio)."
+    }
+    val configured = listOf(capability.command) + capability.fallbackCommands
+    val nonBlank = configured.map { it.trim() }.filter { it.isNotBlank() }
+    if (nonBlank.isEmpty()) {
+        return "MCP $capabilityName command is not configured."
+    }
+    return "MCP $capabilityName command is configured but not executable in PATH: ${nonBlank.joinToString(" | ")}"
+}
+
+private fun closeQuietly(value: Any?) {
+    val closeable = value as? AutoCloseable ?: return
+    try {
+        closeable.close()
+    } catch (_: Exception) {
+        // ignore best-effort shutdown
+    }
+}
+
+private class DisabledMcpTimeTool(
+    private val reason: String,
+) : McpTimeTool, AutoCloseable {
+    override fun getCurrentTime(payload: String): String =
+        "MCP time unavailable: $reason"
+
+    override fun healthCheck(): ToolHealthStatus =
+        ToolHealthStatus(
+            available = false,
+            detail = reason
+        )
+
+    override fun close() {}
+}
+
+private class DisabledMcpFetchTool(
+    private val reason: String,
+) : McpFetchTool, AutoCloseable {
+    override fun fetch(payload: String): String =
+        "MCP fetch unavailable: $reason"
+
+    override fun healthCheck(): ToolHealthStatus =
+        ToolHealthStatus(
+            available = false,
+            detail = reason
+        )
+
+    override fun close() {}
 }
 
 private fun printAppHelp() {
@@ -521,9 +841,12 @@ private fun printAppHelp() {
         psyke app options:
           --eval-reasoning-only           Run deterministic reasoning self-eval (no tools/actions)
           --eval-reasoning-mode MODE      Eval mode: logic (default) or model
+          --eval-memory-live              Run live memory eval (real LLM + real MCP memory)
           --eval-stage ID                 Label this eval run (default: UTC date, e.g. 2026-02-28)
           --eval-reasoning-max-attempts N Max retries per reasoning task (default: 4)
           --eval-reasoning-tasks id1,id2  Run only selected reasoning task ids
+          --eval-memory-max-attempts N    Max consolidation retries per memory task (default: 2)
+          --eval-memory-tasks id1,id2     Run only selected memory eval task ids
           -h, --help                      Show this help message
         """.trimIndent()
     )
@@ -532,10 +855,13 @@ private fun printAppHelp() {
 private fun parseCliOptions(args: Array<String>): AppCliOptions {
     var showHelp = false
     var evalReasoningOnly = false
+    var evalMemoryLiveOnly = false
     var evalReasoningMode = ReasoningEvalMode.LOGIC
     var evalStage: String? = null
     var evalReasoningMaxAttempts = 4
     var evalReasoningTaskFilter: Set<String> = emptySet()
+    var evalMemoryMaxAttempts = 2
+    var evalMemoryTaskFilter: Set<String> = emptySet()
     val unknownArgs = mutableListOf<String>()
     val parseErrors = mutableListOf<String>()
 
@@ -550,6 +876,10 @@ private fun parseCliOptions(args: Array<String>): AppCliOptions {
 
             arg == "--eval-reasoning-only" -> {
                 evalReasoningOnly = true
+                index += 1
+            }
+            arg == "--eval-memory-live" -> {
+                evalMemoryLiveOnly = true
                 index += 1
             }
             arg == "--eval-reasoning-mode" -> {
@@ -627,6 +957,42 @@ private fun parseCliOptions(args: Array<String>): AppCliOptions {
                 index += 1
             }
 
+            arg == "--eval-memory-max-attempts" -> {
+                val next = args.getOrNull(index + 1)
+                val parsed = next?.toIntOrNull()
+                if (parsed == null || parsed < 1) {
+                    parseErrors += "Invalid value for --eval-memory-max-attempts: '${next ?: "<missing>"}'. Expected positive integer."
+                } else {
+                    evalMemoryMaxAttempts = parsed
+                }
+                index += 2
+            }
+            arg.startsWith("--eval-memory-max-attempts=") -> {
+                val raw = arg.substringAfter('=')
+                val parsed = raw.toIntOrNull()
+                if (parsed == null || parsed < 1) {
+                    parseErrors += "Invalid value for --eval-memory-max-attempts: '$raw'. Expected positive integer."
+                } else {
+                    evalMemoryMaxAttempts = parsed
+                }
+                index += 1
+            }
+
+            arg == "--eval-memory-tasks" -> {
+                val next = args.getOrNull(index + 1)
+                if (next.isNullOrBlank()) {
+                    parseErrors += "Missing value for --eval-memory-tasks."
+                } else {
+                    evalMemoryTaskFilter = next.split(',').map { it.trim() }.filter { it.isNotBlank() }.toSet()
+                }
+                index += 2
+            }
+            arg.startsWith("--eval-memory-tasks=") -> {
+                val raw = arg.substringAfter('=')
+                evalMemoryTaskFilter = raw.split(',').map { it.trim() }.filter { it.isNotBlank() }.toSet()
+                index += 1
+            }
+
             else -> {
                 unknownArgs += arg
                 index += 1
@@ -634,13 +1000,20 @@ private fun parseCliOptions(args: Array<String>): AppCliOptions {
         }
     }
 
+    if (evalReasoningOnly && evalMemoryLiveOnly) {
+        parseErrors += "Choose only one eval mode: --eval-reasoning-only or --eval-memory-live."
+    }
+
     return AppCliOptions(
         showHelp = showHelp,
         evalReasoningOnly = evalReasoningOnly,
+        evalMemoryLiveOnly = evalMemoryLiveOnly,
         evalReasoningMode = evalReasoningMode,
         evalStage = evalStage,
         evalReasoningMaxAttempts = evalReasoningMaxAttempts,
         evalReasoningTaskFilter = evalReasoningTaskFilter,
+        evalMemoryMaxAttempts = evalMemoryMaxAttempts,
+        evalMemoryTaskFilter = evalMemoryTaskFilter,
         unknownArgs = unknownArgs,
         parseErrors = parseErrors
     )
