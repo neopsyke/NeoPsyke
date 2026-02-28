@@ -379,6 +379,11 @@
         .replace(/'/g, "&#39;");
 
     const asNum = (v) => Number(v || 0);
+    const avg = (total, count) => {
+      const c = asNum(count);
+      if (c <= 0) return 0;
+      return Math.round(asNum(total) / c);
+    };
     const ratio = (current, limit) => {
       const l = asNum(limit);
       if (!l || l <= 0) return 0;
@@ -534,6 +539,27 @@
         const all = metrics.persistentTotals || {};
         const runSuperegoTokens = Number(metrics.runSuperegoTokens || 0);
         const allSuperegoTokens = Number(metrics.persistentSuperegoTokens || 0);
+        const runRecallAttempts = asNum(run.memoryRecallAttempts);
+        const runRecallHits = asNum(run.memoryRecallHits);
+        const runRecallFailures = asNum(run.memoryRecallFailures);
+        const runRecallTruncated = asNum(run.memoryRecallTruncated);
+        const runRecallAvgLatencyMs = avg(run.memoryRecallLatencyMsTotal, runRecallAttempts);
+        const allRecallAttempts = asNum(all.memoryRecallAttempts);
+        const allRecallHits = asNum(all.memoryRecallHits);
+        const allRecallFailures = asNum(all.memoryRecallFailures);
+        const allRecallAvgLatencyMs = avg(all.memoryRecallLatencyMsTotal, allRecallAttempts);
+        const runConsolidationAssessments = asNum(run.memoryConsolidationAssessments);
+        const runConsolidationSaveRecommended = asNum(run.memoryConsolidationSaveRecommended);
+        const allConsolidationAssessments = asNum(all.memoryConsolidationAssessments);
+        const allConsolidationSaveRecommended = asNum(all.memoryConsolidationSaveRecommended);
+        const runImprintAttempts = asNum(run.memoryImprintAttempts);
+        const runImprintSaved = asNum(run.memoryImprintSaved);
+        const runImprintFailures = asNum(run.memoryImprintFailures);
+        const runImprintAvgLatencyMs = avg(run.memoryImprintLatencyMsTotal, runImprintAttempts);
+        const allImprintAttempts = asNum(all.memoryImprintAttempts);
+        const allImprintSaved = asNum(all.memoryImprintSaved);
+        const allImprintFailures = asNum(all.memoryImprintFailures);
+        const allImprintAvgLatencyMs = avg(all.memoryImprintLatencyMsTotal, allImprintAttempts);
         parts.push(chip("Run", short(metrics.runId, 10), null));
         parts.push(chip("Key", metrics.keyFingerprint, null));
         parts.push(chip("Runs", metrics.runCountForKey, null));
@@ -548,6 +574,15 @@
         parts.push(chip("All Q Sat", all.queueSaturationEvents || 0, null));
         parts.push(chip("Run Dropped", run.droppedEvents || 0, null));
         parts.push(chip("All Dropped", all.droppedEvents || 0, null));
+        parts.push(chip("Mem Recall Run", runRecallAttempts + "a/" + runRecallHits + "h/" + runRecallFailures + "f", null));
+        parts.push(chip("Mem Recall All", allRecallAttempts + "a/" + allRecallHits + "h/" + allRecallFailures + "f", null));
+        parts.push(chip("Mem Recall Lat", runRecallAvgLatencyMs + "ms run / " + allRecallAvgLatencyMs + "ms all", null));
+        parts.push(chip("Mem Recall Trunc", runRecallTruncated, null));
+        parts.push(chip("Mem Consolidation", runConsolidationAssessments + "a/" + runConsolidationSaveRecommended + "save run", null));
+        parts.push(chip("Mem Consolidation All", allConsolidationAssessments + "a/" + allConsolidationSaveRecommended + "save", null));
+        parts.push(chip("Mem Imprint Run", runImprintAttempts + "a/" + runImprintSaved + "ok/" + runImprintFailures + "f", null));
+        parts.push(chip("Mem Imprint All", allImprintAttempts + "a/" + allImprintSaved + "ok/" + allImprintFailures + "f", null));
+        parts.push(chip("Mem Imprint Lat", runImprintAvgLatencyMs + "ms run / " + allImprintAvgLatencyMs + "ms all", null));
         parts.push(chip("Prompt/Limit", (run.promptTokens || 0) + " / " + (limits.max_prompt_tokens || "-"), ratio(run.promptTokens, limits.max_prompt_tokens)));
         parts.push(chip("Completion/Limit", (run.completionTokens || 0) + " / " + (limits.max_completion_tokens || "-"), ratio(run.completionTokens, limits.max_completion_tokens)));
       } else {

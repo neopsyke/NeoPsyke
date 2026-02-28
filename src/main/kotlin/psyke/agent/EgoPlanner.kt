@@ -14,6 +14,7 @@ import psyke.llm.ChatCallMetadata
 import psyke.llm.ChatModelClient
 import psyke.llm.ChatRequestOptions
 import psyke.llm.ChatRole
+import java.util.Locale
 
 private val logger = KotlinLogging.logger {}
 
@@ -195,6 +196,9 @@ class EgoPlanner(
             }
         }
         val memorySummary = context.memorySummary.ifBlank { "none" }
+        val memoryRecall = context.memoryRecall.ifBlank { "none" }
+        val metaGuidance = context.metaGuidance.ifBlank { "none" }
+        val deliberation = context.deliberation
         val availableActionList = context.availableActions
             .map { it.name.lowercase() }
             .sorted()
@@ -226,6 +230,11 @@ class EgoPlanner(
                     - answer: payload is the exact answer text for the interlocutor.
                     - mcp_time: payload is JSON like {"timezone":"Europe/Berlin"} (timezone optional).
                     - mcp_fetch: payload is JSON like {"url":"https://example.com","max_chars":1200}.
+                    You may receive Retrieved memory from Hippocampus search.
+                    Use retrieved memory only when relevant to the current trigger.
+                    If retrieved memory is missing or ambiguous, do not invent details.
+                    You may also receive Decision pressure metadata.
+                    As pressure rises, reduce exploratory loops and converge on a final answer.
                     """.trimIndent()
                 ),
                 PromptBudgetAllocator.Section(
@@ -280,6 +289,37 @@ class EgoPlanner(
                     priority = PromptBudgetAllocator.Priority.IMPORTANT,
                     minTokens = 24,
                     content = "Memory summary:\n$memorySummary"
+                ),
+                PromptBudgetAllocator.Section(
+                    role = ChatRole.USER,
+                    priority = PromptBudgetAllocator.Priority.IMPORTANT,
+                    minTokens = 24,
+                    content = "Retrieved memory:\n$memoryRecall"
+                ),
+                PromptBudgetAllocator.Section(
+                    role = ChatRole.USER,
+                    priority = PromptBudgetAllocator.Priority.IMPORTANT,
+                    minTokens = 24,
+                    content = """
+                    Deliberation pressure:
+                    step_index=${deliberation.stepIndex}
+                    decision_pressure=${String.format(Locale.ROOT, "%.3f", deliberation.decisionPressure)}
+                    stale_streak=${deliberation.staleStreak}
+                    progress_score=${String.format(Locale.ROOT, "%.3f", deliberation.progressScore)}
+                    denial_count=${deliberation.denialCount}
+                    steps_since_new_evidence=${deliberation.stepsSinceNewEvidence}
+                    repeat_signature_hits=${deliberation.repeatSignatureHits}
+                    noop_streak=${deliberation.noopStreak}
+                    Guidance:
+                    - if decision_pressure >= 0.75, prefer a concrete action or final answer.
+                    - if decision_pressure >= 0.90, avoid new thought loops unless strictly necessary.
+                    """.trimIndent()
+                ),
+                PromptBudgetAllocator.Section(
+                    role = ChatRole.USER,
+                    priority = PromptBudgetAllocator.Priority.IMPORTANT,
+                    minTokens = 16,
+                    content = "Meta reasoning guidance:\n$metaGuidance"
                 ),
                 PromptBudgetAllocator.Section(
                     role = ChatRole.USER,

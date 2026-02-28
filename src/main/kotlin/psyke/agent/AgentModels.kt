@@ -49,7 +49,7 @@ enum class InputPriority(val level: Int) {
 }
 
 data class AgentConfig(
-    val maxLoopStepsPerInput: Int = 18,
+    val maxLoopStepsPerInput: Int = 180,
     val loopDelayMs: Int = 0,
     val maxThoughtPasses: Int = 5,
     val maxPendingThoughts: Int = 64,
@@ -65,12 +65,29 @@ data class AgentConfig(
     val maxCompletionTokens: Int = 900, 
     val searchResultCount: Int = 5,
     val mcpCallTimeoutMs: Long = 8_000,
-    val mcpFetchMaxChars: Int = 4_000
+    val mcpFetchMaxChars: Int = 4_000,
+    val mcpMemoryCallTimeoutMs: Long = 8_000,
+    val memoryRecallMaxItems: Int = 4,
+    val memoryRecallMaxChars: Int = 1_200,
+    val deliberationPressureAssessmentMinStep: Int = 16,
+    val deliberationPressureAssessmentEverySteps: Int = 8,
+    val deliberationPressureAssessmentThreshold: Double = 0.68,
+    val metaReasonerCooldownSteps: Int = 6,
+    val metaReasonerMaxTokens: Int = 120,
+    val memoryConsolidationEverySteps: Int = 8,
+    val memoryConsolidationCooldownSteps: Int = 4,
+    val memoryConsolidationMinConfidence: Double = 0.65,
+    val memoryConsolidationMaxTokens: Int = 180,
+    val memoryConsolidationMaxSummaryChars: Int = 320
 ) {
     companion object {
         fun fromEnv(): AgentConfig =
-            AgentConfig(
-                maxLoopStepsPerInput = readInt("EGO_MAX_LOOP_STEPS", 18),
+            AgentConfig.fromResolvedEnv()
+
+        private fun fromResolvedEnv(): AgentConfig {
+            val mcpCallTimeoutMs = readLong("MCP_CALL_TIMEOUT_MS", 8000)
+            return AgentConfig(
+                maxLoopStepsPerInput = readInt("EGO_MAX_LOOP_STEPS", 180),
                 loopDelayMs = readNonNegativeInt("EGO_LOOP_DELAY_MS", 0),
                 maxThoughtPasses = readInt("EGO_MAX_THOUGHT_PASSES", 5),
                 maxMemoryChars = readInt("EGO_MAX_MEMORY_CHARS", 12000),
@@ -79,9 +96,23 @@ data class AgentConfig(
                 maxPromptTokens = readInt("EGO_MAX_PROMPT_TOKENS", 2400),
                 maxCompletionTokens = readInt("EGO_MAX_COMPLETION_TOKENS", 900),
                 searchResultCount = readInt("EGO_SEARCH_RESULT_COUNT", 5),
-                mcpCallTimeoutMs = readLong("MCP_CALL_TIMEOUT_MS", 8000),
-                mcpFetchMaxChars = readInt("MCP_FETCH_MAX_CHARS", 4000)
+                mcpCallTimeoutMs = mcpCallTimeoutMs,
+                mcpFetchMaxChars = readInt("MCP_FETCH_MAX_CHARS", 4000),
+                mcpMemoryCallTimeoutMs = readLong("MCP_MEMORY_CALL_TIMEOUT_MS", mcpCallTimeoutMs),
+                memoryRecallMaxItems = readInt("EGO_MEMORY_RECALL_MAX_ITEMS", 4),
+                memoryRecallMaxChars = readInt("EGO_MEMORY_RECALL_MAX_CHARS", 1200),
+                deliberationPressureAssessmentMinStep = readInt("EGO_PRESSURE_MIN_STEP", 16),
+                deliberationPressureAssessmentEverySteps = readInt("EGO_PRESSURE_ASSESS_EVERY_STEPS", 8),
+                deliberationPressureAssessmentThreshold = readDouble("EGO_PRESSURE_ASSESS_THRESHOLD", 0.68),
+                metaReasonerCooldownSteps = readInt("EGO_META_REASONER_COOLDOWN_STEPS", 6),
+                metaReasonerMaxTokens = readInt("EGO_META_REASONER_MAX_TOKENS", 120),
+                memoryConsolidationEverySteps = readInt("EGO_MEMORY_CONSOLIDATION_EVERY_STEPS", 8),
+                memoryConsolidationCooldownSteps = readInt("EGO_MEMORY_CONSOLIDATION_COOLDOWN_STEPS", 4),
+                memoryConsolidationMinConfidence = readDouble("EGO_MEMORY_CONSOLIDATION_MIN_CONFIDENCE", 0.65),
+                memoryConsolidationMaxTokens = readInt("EGO_MEMORY_CONSOLIDATION_MAX_TOKENS", 180),
+                memoryConsolidationMaxSummaryChars = readInt("EGO_MEMORY_CONSOLIDATION_MAX_SUMMARY_CHARS", 320)
             )
+        }
 
         private fun readInt(name: String, fallback: Int): Int =
             System.getenv(name)?.toIntOrNull()?.takeIf { it > 0 } ?: fallback
@@ -91,6 +122,9 @@ data class AgentConfig(
 
         private fun readLong(name: String, fallback: Long): Long =
             System.getenv(name)?.toLongOrNull()?.takeIf { it > 0 } ?: fallback
+
+        private fun readDouble(name: String, fallback: Double): Double =
+            System.getenv(name)?.toDoubleOrNull()?.takeIf { it in 0.0..1.0 } ?: fallback
     }
 }
 
@@ -147,6 +181,9 @@ data class PlannerContext(
     val recentDialogue: List<DialogueTurn>,
     val queue: QueueSnapshot,
     val memorySummary: String = "",
+    val memoryRecall: String = "",
+    val deliberation: DeliberationState = DeliberationState(),
+    val metaGuidance: String = "",
     val availableActions: Set<ActionType> = ActionType.entries.toSet(),
 )
 
@@ -185,4 +222,15 @@ data class GateDecision(
 data class ActionOutcome(
     val statusSummary: String,
     val assistantOutput: String? = null,
+)
+
+data class DeliberationState(
+    val stepIndex: Int = 0,
+    val decisionPressure: Double = 0.0,
+    val staleStreak: Int = 0,
+    val progressScore: Double = 0.0,
+    val denialCount: Int = 0,
+    val stepsSinceNewEvidence: Int = 0,
+    val repeatSignatureHits: Int = 0,
+    val noopStreak: Int = 0,
 )

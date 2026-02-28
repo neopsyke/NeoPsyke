@@ -50,12 +50,38 @@ class SqliteMetricsRuntime(
                   denied_actions INTEGER NOT NULL DEFAULT 0,
                   error_count INTEGER NOT NULL DEFAULT 0,
                   queue_saturation_events INTEGER NOT NULL DEFAULT 0,
-                  dropped_events INTEGER NOT NULL DEFAULT 0
+                  dropped_events INTEGER NOT NULL DEFAULT 0,
+                  memory_recall_attempts INTEGER NOT NULL DEFAULT 0,
+                  memory_recall_hits INTEGER NOT NULL DEFAULT 0,
+                  memory_recall_failures INTEGER NOT NULL DEFAULT 0,
+                  memory_recall_truncated INTEGER NOT NULL DEFAULT 0,
+                  memory_recall_latency_ms_total INTEGER NOT NULL DEFAULT 0,
+                  memory_recall_chars_total INTEGER NOT NULL DEFAULT 0,
+                  memory_consolidation_assessments INTEGER NOT NULL DEFAULT 0,
+                  memory_consolidation_save_recommended INTEGER NOT NULL DEFAULT 0,
+                  memory_imprint_attempts INTEGER NOT NULL DEFAULT 0,
+                  memory_imprint_saved INTEGER NOT NULL DEFAULT 0,
+                  memory_imprint_failures INTEGER NOT NULL DEFAULT 0,
+                  memory_imprint_latency_ms_total INTEGER NOT NULL DEFAULT 0,
+                  memory_imprint_chars_total INTEGER NOT NULL DEFAULT 0
                 );
                 """.trimIndent()
             )
             addRunsColumnIfMissing(statement, "queue_saturation_events", "INTEGER NOT NULL DEFAULT 0")
             addRunsColumnIfMissing(statement, "dropped_events", "INTEGER NOT NULL DEFAULT 0")
+            addRunsColumnIfMissing(statement, "memory_recall_attempts", "INTEGER NOT NULL DEFAULT 0")
+            addRunsColumnIfMissing(statement, "memory_recall_hits", "INTEGER NOT NULL DEFAULT 0")
+            addRunsColumnIfMissing(statement, "memory_recall_failures", "INTEGER NOT NULL DEFAULT 0")
+            addRunsColumnIfMissing(statement, "memory_recall_truncated", "INTEGER NOT NULL DEFAULT 0")
+            addRunsColumnIfMissing(statement, "memory_recall_latency_ms_total", "INTEGER NOT NULL DEFAULT 0")
+            addRunsColumnIfMissing(statement, "memory_recall_chars_total", "INTEGER NOT NULL DEFAULT 0")
+            addRunsColumnIfMissing(statement, "memory_consolidation_assessments", "INTEGER NOT NULL DEFAULT 0")
+            addRunsColumnIfMissing(statement, "memory_consolidation_save_recommended", "INTEGER NOT NULL DEFAULT 0")
+            addRunsColumnIfMissing(statement, "memory_imprint_attempts", "INTEGER NOT NULL DEFAULT 0")
+            addRunsColumnIfMissing(statement, "memory_imprint_saved", "INTEGER NOT NULL DEFAULT 0")
+            addRunsColumnIfMissing(statement, "memory_imprint_failures", "INTEGER NOT NULL DEFAULT 0")
+            addRunsColumnIfMissing(statement, "memory_imprint_latency_ms_total", "INTEGER NOT NULL DEFAULT 0")
+            addRunsColumnIfMissing(statement, "memory_imprint_chars_total", "INTEGER NOT NULL DEFAULT 0")
             statement.execute(
                 """
                 CREATE TABLE IF NOT EXISTS llm_calls (
@@ -124,6 +150,87 @@ class SqliteMetricsRuntime(
         }
     }
 
+    override fun recordMemoryRecall(hitCount: Int, latencyMs: Long, recallChars: Int, truncated: Boolean) {
+        synchronized(connection) {
+            connection.prepareStatement(
+                """
+                UPDATE runs
+                SET memory_recall_attempts = memory_recall_attempts + 1,
+                    memory_recall_hits = memory_recall_hits + ?,
+                    memory_recall_truncated = memory_recall_truncated + ?,
+                    memory_recall_latency_ms_total = memory_recall_latency_ms_total + ?,
+                    memory_recall_chars_total = memory_recall_chars_total + ?
+                WHERE run_id = ?
+                """.trimIndent()
+            ).use { statement ->
+                statement.setLong(1, hitCount.coerceAtLeast(0).toLong())
+                statement.setLong(2, if (truncated) 1 else 0)
+                statement.setLong(3, latencyMs.coerceAtLeast(0))
+                statement.setLong(4, recallChars.coerceAtLeast(0).toLong())
+                statement.setString(5, runId)
+                statement.executeUpdate()
+            }
+        }
+    }
+
+    override fun recordMemoryRecallFailure(latencyMs: Long) {
+        synchronized(connection) {
+            connection.prepareStatement(
+                """
+                UPDATE runs
+                SET memory_recall_attempts = memory_recall_attempts + 1,
+                    memory_recall_failures = memory_recall_failures + 1,
+                    memory_recall_latency_ms_total = memory_recall_latency_ms_total + ?
+                WHERE run_id = ?
+                """.trimIndent()
+            ).use { statement ->
+                statement.setLong(1, latencyMs.coerceAtLeast(0))
+                statement.setString(2, runId)
+                statement.executeUpdate()
+            }
+        }
+    }
+
+    override fun recordMemoryConsolidationAssessment(saveRecommended: Boolean) {
+        synchronized(connection) {
+            connection.prepareStatement(
+                """
+                UPDATE runs
+                SET memory_consolidation_assessments = memory_consolidation_assessments + 1,
+                    memory_consolidation_save_recommended = memory_consolidation_save_recommended + ?
+                WHERE run_id = ?
+                """.trimIndent()
+            ).use { statement ->
+                statement.setLong(1, if (saveRecommended) 1 else 0)
+                statement.setString(2, runId)
+                statement.executeUpdate()
+            }
+        }
+    }
+
+    override fun recordMemoryImprint(saved: Boolean, summaryChars: Int, latencyMs: Long) {
+        synchronized(connection) {
+            connection.prepareStatement(
+                """
+                UPDATE runs
+                SET memory_imprint_attempts = memory_imprint_attempts + 1,
+                    memory_imprint_saved = memory_imprint_saved + ?,
+                    memory_imprint_failures = memory_imprint_failures + ?,
+                    memory_imprint_latency_ms_total = memory_imprint_latency_ms_total + ?,
+                    memory_imprint_chars_total = memory_imprint_chars_total + ?
+                WHERE run_id = ?
+                """.trimIndent()
+            ).use { statement ->
+                statement.setLong(1, if (saved) 1 else 0)
+                statement.setLong(2, if (saved) 0 else 1)
+                statement.setLong(3, latencyMs.coerceAtLeast(0))
+                statement.setLong(4, summaryChars.coerceAtLeast(0).toLong())
+                statement.setString(5, runId)
+                statement.executeUpdate()
+            }
+        }
+    }
+
     override fun close() {
         try {
             synchronized(connection) {
@@ -153,7 +260,20 @@ class SqliteMetricsRuntime(
                        denied_actions,
                        error_count,
                        queue_saturation_events,
-                       dropped_events
+                       dropped_events,
+                       memory_recall_attempts,
+                       memory_recall_hits,
+                       memory_recall_failures,
+                       memory_recall_truncated,
+                       memory_recall_latency_ms_total,
+                       memory_recall_chars_total,
+                       memory_consolidation_assessments,
+                       memory_consolidation_save_recommended,
+                       memory_imprint_attempts,
+                       memory_imprint_saved,
+                       memory_imprint_failures,
+                       memory_imprint_latency_ms_total,
+                       memory_imprint_chars_total
                 FROM runs WHERE run_id = ?
                 """.trimIndent()
             ).use { statement ->
@@ -170,7 +290,20 @@ class SqliteMetricsRuntime(
                             deniedActions = rs.getLong("denied_actions"),
                             errorCount = rs.getLong("error_count"),
                             queueSaturationEvents = rs.getLong("queue_saturation_events"),
-                            droppedEvents = rs.getLong("dropped_events")
+                            droppedEvents = rs.getLong("dropped_events"),
+                            memoryRecallAttempts = rs.getLong("memory_recall_attempts"),
+                            memoryRecallHits = rs.getLong("memory_recall_hits"),
+                            memoryRecallFailures = rs.getLong("memory_recall_failures"),
+                            memoryRecallTruncated = rs.getLong("memory_recall_truncated"),
+                            memoryRecallLatencyMsTotal = rs.getLong("memory_recall_latency_ms_total"),
+                            memoryRecallCharsTotal = rs.getLong("memory_recall_chars_total"),
+                            memoryConsolidationAssessments = rs.getLong("memory_consolidation_assessments"),
+                            memoryConsolidationSaveRecommended = rs.getLong("memory_consolidation_save_recommended"),
+                            memoryImprintAttempts = rs.getLong("memory_imprint_attempts"),
+                            memoryImprintSaved = rs.getLong("memory_imprint_saved"),
+                            memoryImprintFailures = rs.getLong("memory_imprint_failures"),
+                            memoryImprintLatencyMsTotal = rs.getLong("memory_imprint_latency_ms_total"),
+                            memoryImprintCharsTotal = rs.getLong("memory_imprint_chars_total")
                         )
                     }
                 }
@@ -186,7 +319,20 @@ class SqliteMetricsRuntime(
                        COALESCE(SUM(denied_actions), 0) AS denied_actions,
                        COALESCE(SUM(error_count), 0) AS error_count,
                        COALESCE(SUM(queue_saturation_events), 0) AS queue_saturation_events,
-                       COALESCE(SUM(dropped_events), 0) AS dropped_events
+                       COALESCE(SUM(dropped_events), 0) AS dropped_events,
+                       COALESCE(SUM(memory_recall_attempts), 0) AS memory_recall_attempts,
+                       COALESCE(SUM(memory_recall_hits), 0) AS memory_recall_hits,
+                       COALESCE(SUM(memory_recall_failures), 0) AS memory_recall_failures,
+                       COALESCE(SUM(memory_recall_truncated), 0) AS memory_recall_truncated,
+                       COALESCE(SUM(memory_recall_latency_ms_total), 0) AS memory_recall_latency_ms_total,
+                       COALESCE(SUM(memory_recall_chars_total), 0) AS memory_recall_chars_total,
+                       COALESCE(SUM(memory_consolidation_assessments), 0) AS memory_consolidation_assessments,
+                       COALESCE(SUM(memory_consolidation_save_recommended), 0) AS memory_consolidation_save_recommended,
+                       COALESCE(SUM(memory_imprint_attempts), 0) AS memory_imprint_attempts,
+                       COALESCE(SUM(memory_imprint_saved), 0) AS memory_imprint_saved,
+                       COALESCE(SUM(memory_imprint_failures), 0) AS memory_imprint_failures,
+                       COALESCE(SUM(memory_imprint_latency_ms_total), 0) AS memory_imprint_latency_ms_total,
+                       COALESCE(SUM(memory_imprint_chars_total), 0) AS memory_imprint_chars_total
                 FROM runs
                 WHERE key_fingerprint = ?
                 """.trimIndent()
@@ -202,7 +348,20 @@ class SqliteMetricsRuntime(
                         deniedActions = rs.getLong("denied_actions"),
                         errorCount = rs.getLong("error_count"),
                         queueSaturationEvents = rs.getLong("queue_saturation_events"),
-                        droppedEvents = rs.getLong("dropped_events")
+                        droppedEvents = rs.getLong("dropped_events"),
+                        memoryRecallAttempts = rs.getLong("memory_recall_attempts"),
+                        memoryRecallHits = rs.getLong("memory_recall_hits"),
+                        memoryRecallFailures = rs.getLong("memory_recall_failures"),
+                        memoryRecallTruncated = rs.getLong("memory_recall_truncated"),
+                        memoryRecallLatencyMsTotal = rs.getLong("memory_recall_latency_ms_total"),
+                        memoryRecallCharsTotal = rs.getLong("memory_recall_chars_total"),
+                        memoryConsolidationAssessments = rs.getLong("memory_consolidation_assessments"),
+                        memoryConsolidationSaveRecommended = rs.getLong("memory_consolidation_save_recommended"),
+                        memoryImprintAttempts = rs.getLong("memory_imprint_attempts"),
+                        memoryImprintSaved = rs.getLong("memory_imprint_saved"),
+                        memoryImprintFailures = rs.getLong("memory_imprint_failures"),
+                        memoryImprintLatencyMsTotal = rs.getLong("memory_imprint_latency_ms_total"),
+                        memoryImprintCharsTotal = rs.getLong("memory_imprint_chars_total")
                     )
                     Pair(rs.getLong("run_count"), totals)
                 }

@@ -52,6 +52,48 @@ class StructuredLogSink : InstrumentationSink {
                 }
             }
 
+            "memory_recall_start" -> {
+                logger.trace {
+                    "memory.recall.start provider=${event.data["provider"]} trigger=${event.data["trigger"]} cue=${event.data["cue_preview"]}"
+                }
+            }
+
+            "memory_recall_result" -> {
+                logger.trace {
+                    "memory.recall.result provider=${event.data["provider"]} trigger=${event.data["trigger"]} hits=${event.data["hit_count"]} latency_ms=${event.data["latency_ms"]} chars=${event.data["recall_chars"]} truncated=${event.data["truncated"]}"
+                }
+            }
+
+            "memory_recall_failure" -> {
+                logger.warn {
+                    "memory.recall.failure provider=${event.data["provider"]} trigger=${event.data["trigger"]} latency_ms=${event.data["latency_ms"]} reason=${event.data["reason"]}"
+                }
+            }
+
+            "deliberation_state" -> {
+                logger.trace {
+                    "deliberation.state task=${event.data["task_type"]} step=${event.data["step_index"]} pressure=${event.data["decision_pressure"]} stale=${event.data["stale_streak"]} progress=${event.data["progress_score"]} denials=${event.data["denial_count"]} evidence_gap=${event.data["steps_since_new_evidence"]} repeats=${event.data["repeat_signature_hits"]} noop_streak=${event.data["noop_streak"]}"
+                }
+            }
+
+            "meta_reasoner_assessment" -> {
+                logger.trace {
+                    "meta.reasoner step=${event.data["step_index"]} pressure=${event.data["decision_pressure"]} verdict=${event.data["verdict"]} confidence=${event.data["confidence"]} reason=${event.data["reason"]}"
+                }
+            }
+
+            "memory_consolidation_assessment" -> {
+                logger.trace {
+                    "memory.consolidation.assessment trigger=${event.data["trigger"]} step=${event.data["step_index"]} save=${event.data["save"]} confidence=${event.data["confidence"]} reason=${event.data["reason"]}"
+                }
+            }
+
+            "memory_imprint_result" -> {
+                logger.trace {
+                    "memory.imprint.result trigger=${event.data["trigger"]} provider=${event.data["provider"]} saved=${event.data["saved"]} summary_chars=${event.data["summary_chars"]} latency_ms=${event.data["latency_ms"]} confidence=${event.data["confidence"]}"
+                }
+            }
+
             "llm_call" -> {
                 logger.trace {
                     "llm.call provider=${event.data["provider"]} model=${event.data["model"]} actor=${event.data["actor"]} call_site=${event.data["call_site"]} status=${event.data["status"]} latency_ms=${event.data["latency_ms"]} total_tokens=${event.data["total_tokens"]}"

@@ -67,6 +67,14 @@ class StubMetricsRuntime(
 
     override fun recordQueueSaturation(queueType: String) {}
 
+    override fun recordMemoryRecall(hitCount: Int, latencyMs: Long, recallChars: Int, truncated: Boolean) {}
+
+    override fun recordMemoryRecallFailure(latencyMs: Long) {}
+
+    override fun recordMemoryConsolidationAssessment(saveRecommended: Boolean) {}
+
+    override fun recordMemoryImprint(saved: Boolean, summaryChars: Int, latencyMs: Long) {}
+
     override fun snapshot(): MetricsSnapshot? = snapshotValue
 }
 

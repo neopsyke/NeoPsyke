@@ -4,8 +4,13 @@ import mu.KotlinLogging
 import psyke.agent.AgentConfig
 import psyke.agent.EgoAgent
 import psyke.agent.EgoPlanner
+import psyke.agent.Hippocampus
+import psyke.agent.LlmMetaReasoner
+import psyke.agent.LlmMemoryConsolidationAdvisor
+import psyke.agent.McpHippocampus
 import psyke.agent.McpStdioClient
 import psyke.agent.MotorCortex
+import psyke.agent.NoopHippocampus
 import psyke.agent.SdkMcpFetchTool
 import psyke.agent.SdkMcpTimeTool
 import psyke.agent.SuperegoDirectives
@@ -270,7 +275,20 @@ private fun runInteractiveMode(
                             "max_action_payload_chars" to config.maxActionPayloadChars,
                             "max_action_summary_chars" to config.maxActionSummaryChars,
                             "mcp_call_timeout_ms" to config.mcpCallTimeoutMs,
-                            "mcp_fetch_max_chars" to config.mcpFetchMaxChars
+                            "mcp_fetch_max_chars" to config.mcpFetchMaxChars,
+                            "mcp_memory_call_timeout_ms" to config.mcpMemoryCallTimeoutMs,
+                            "memory_recall_max_items" to config.memoryRecallMaxItems,
+                            "memory_recall_max_chars" to config.memoryRecallMaxChars,
+                            "pressure_assessment_min_step" to config.deliberationPressureAssessmentMinStep,
+                            "pressure_assess_every_steps" to config.deliberationPressureAssessmentEverySteps,
+                            "pressure_assess_threshold" to config.deliberationPressureAssessmentThreshold,
+                            "meta_reasoner_cooldown_steps" to config.metaReasonerCooldownSteps,
+                            "meta_reasoner_max_tokens" to config.metaReasonerMaxTokens,
+                            "memory_consolidation_every_steps" to config.memoryConsolidationEverySteps,
+                            "memory_consolidation_cooldown_steps" to config.memoryConsolidationCooldownSteps,
+                            "memory_consolidation_min_confidence" to config.memoryConsolidationMinConfidence,
+                            "memory_consolidation_max_tokens" to config.memoryConsolidationMaxTokens,
+                            "memory_consolidation_max_summary_chars" to config.memoryConsolidationMaxSummaryChars
                         )
                     )
                 )
@@ -401,22 +419,62 @@ private fun runInteractiveMode(
                                             )
                                         }
                                         val planner = EgoPlanner(egoClient, config, instrumentation)
-
-                                        EgoAgent(
-                                            planner = planner,
-                                            superego = gatekeeper,
-                                            motorCortex = motorCortex,
-                                            config = config,
-                                            onActionDenied = {
-                                                metrics.recordDeniedAction()
-                                                emitMetricsSnapshot()
-                                            },
-                                            onQueueSaturation = { queueType, _, _ ->
-                                                metrics.recordQueueSaturation(queueType)
-                                                emitMetricsSnapshot()
-                                            },
-                                            instrumentation = instrumentation
-                                        ).runInteractive()
+                                        val metaReasoner = LlmMetaReasoner(
+                                            modelClient = egoClient,
+                                            config = config
+                                        )
+                                        val memoryConsolidationAdvisor = LlmMemoryConsolidationAdvisor(
+                                            modelClient = egoClient,
+                                            config = config
+                                        )
+                                        val hippocampus = createHippocampus(config)
+                                        try {
+                                            EgoAgent(
+                                                planner = planner,
+                                                superego = gatekeeper,
+                                                motorCortex = motorCortex,
+                                                config = config,
+                                                hippocampus = hippocampus,
+                                                metaReasoner = metaReasoner,
+                                                memoryConsolidationAdvisor = memoryConsolidationAdvisor,
+                                                onActionDenied = {
+                                                    metrics.recordDeniedAction()
+                                                    emitMetricsSnapshot()
+                                                },
+                                                onQueueSaturation = { queueType, _, _ ->
+                                                    metrics.recordQueueSaturation(queueType)
+                                                    emitMetricsSnapshot()
+                                                },
+                                                onMemoryRecall = { hitCount, latencyMs, recallChars, truncated ->
+                                                    metrics.recordMemoryRecall(
+                                                        hitCount = hitCount,
+                                                        latencyMs = latencyMs,
+                                                        recallChars = recallChars,
+                                                        truncated = truncated
+                                                    )
+                                                    emitMetricsSnapshot()
+                                                },
+                                                onMemoryRecallFailure = { latencyMs ->
+                                                    metrics.recordMemoryRecallFailure(latencyMs)
+                                                    emitMetricsSnapshot()
+                                                },
+                                                onMemoryConsolidationAssessment = { saveRecommended ->
+                                                    metrics.recordMemoryConsolidationAssessment(saveRecommended)
+                                                    emitMetricsSnapshot()
+                                                },
+                                                onMemoryImprintResult = { saved, summaryChars, latencyMs ->
+                                                    metrics.recordMemoryImprint(
+                                                        saved = saved,
+                                                        summaryChars = summaryChars,
+                                                        latencyMs = latencyMs
+                                                    )
+                                                    emitMetricsSnapshot()
+                                                },
+                                                instrumentation = instrumentation
+                                            ).runInteractive()
+                                        } finally {
+                                            hippocampus.close()
+                                        }
                                     }
                                 }
                             }
@@ -434,6 +492,27 @@ private fun resolveMcpCommand(envName: String, fallback: List<String>): List<Str
         return fallback
     }
     return McpStdioClient.parseCommand(raw).ifEmpty { fallback }
+}
+
+private fun createHippocampus(config: AgentConfig): Hippocampus {
+    val command = resolveOptionalMcpCommand("MCP_MEMORY_SERVER_CMD")
+    if (command == null) {
+        return NoopHippocampus
+    }
+    return McpHippocampus(
+        command = command,
+        callTimeoutMs = config.mcpMemoryCallTimeoutMs,
+        defaultMaxItems = config.memoryRecallMaxItems,
+        defaultMaxChars = config.memoryRecallMaxChars
+    )
+}
+
+private fun resolveOptionalMcpCommand(envName: String): List<String>? {
+    val raw = System.getenv(envName)?.trim().orEmpty()
+    if (raw.isBlank()) {
+        return null
+    }
+    return McpStdioClient.parseCommand(raw).ifEmpty { null }
 }
 
 private fun printAppHelp() {

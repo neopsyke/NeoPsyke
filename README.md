@@ -25,7 +25,7 @@ Standalone Kotlin JVM app using Gradle with:
   - `MISTRAL_SUPEREGO_MODEL` (default: same as Ego model)
   - `PSYKE_DASHBOARD_ENABLED` (default: `true`)
   - `PSYKE_DASHBOARD_PORT` (default: `8787`)
-  - `EGO_MAX_LOOP_STEPS` (default: `18`)
+  - `EGO_MAX_LOOP_STEPS` (default: `180`)
   - `EGO_MAX_THOUGHT_PASSES` (default: `5`)
   - `EGO_MAX_PROMPT_TOKENS` (default: `2400`)
   - `EGO_MAX_COMPLETION_TOKENS` (default: `900`)
@@ -36,9 +36,23 @@ Standalone Kotlin JVM app using Gradle with:
   - `EGO_SEARCH_RESULT_COUNT` (default: `5`)
   - `MCP_TIME_SERVER_CMD` (default: `uvx mcp-server-time`)
   - `MCP_FETCH_SERVER_CMD` (default: `uvx mcp-server-fetch`)
+  - `MCP_MEMORY_SERVER_CMD` (optional; when set, enables Ego internal memory recall/imprint via MCP; Psyke starts it as a child process)
   - `MISTRAL_WEBSEARCH_AGENT_ID` (optional; if omitted, Psyke creates an ephemeral Mistral web-search agent per run)
   - `MCP_CALL_TIMEOUT_MS` (default: `8000`)
+  - `MCP_MEMORY_CALL_TIMEOUT_MS` (default: same as `MCP_CALL_TIMEOUT_MS`)
   - `MCP_FETCH_MAX_CHARS` (default: `4000`)
+  - `EGO_MEMORY_RECALL_MAX_ITEMS` (default: `4`)
+  - `EGO_MEMORY_RECALL_MAX_CHARS` (default: `1200`)
+  - `EGO_PRESSURE_MIN_STEP` (default: `16`)
+  - `EGO_PRESSURE_ASSESS_EVERY_STEPS` (default: `8`)
+  - `EGO_PRESSURE_ASSESS_THRESHOLD` (default: `0.68`)
+  - `EGO_META_REASONER_COOLDOWN_STEPS` (default: `6`)
+  - `EGO_META_REASONER_MAX_TOKENS` (default: `120`)
+  - `EGO_MEMORY_CONSOLIDATION_EVERY_STEPS` (default: `8`)
+  - `EGO_MEMORY_CONSOLIDATION_COOLDOWN_STEPS` (default: `4`)
+  - `EGO_MEMORY_CONSOLIDATION_MIN_CONFIDENCE` (default: `0.65`)
+  - `EGO_MEMORY_CONSOLIDATION_MAX_TOKENS` (default: `180`)
+  - `EGO_MEMORY_CONSOLIDATION_MAX_SUMMARY_CHARS` (default: `320`)
   - `PSYKE_EVAL_MAX_RAW_RESPONSE_CHARS` (reasoning eval raw-thought capture cap; default: unlimited)
 
 ## Run
@@ -103,6 +117,7 @@ Disable the default interactive delay for faster local/manual loops:
 Notes:
 - `run-psyke.sh` bootstraps `installDist` once if needed.
 - After bootstrap, execution is direct (`build/install/psyke/bin/psyke`) without `gradle run`.
+- You do not run memory MCP separately if `MCP_MEMORY_SERVER_CMD` is set correctly; Psyke launches it on demand. `uv/uvx` is only needed when your command uses it.
 - Default log level in `run-psyke.sh` is `warning`.
 - Launcher logs are written to per-run files in `.psyke/logs/runs/`.
 - `.psyke/logs/latest.log` always points to the newest run log.
@@ -139,6 +154,11 @@ you> exit
 - The built-in stdin source always submits with `high` priority.
 - `MemoryStore` keeps bounded rolling memory and compacts older turns into a summary as it nears capacity.
 - Memory summary included in Ego/Superego prompts is token-capped to stay within LLM context budgets.
+- When `MCP_MEMORY_SERVER_CMD` is configured, Ego also runs internal `Hippocampus` memory recall per thought/input planning step (not a MotorCortex action).
+- Ego tracks a `decision_pressure` signal to detect circular thought chains and increase convergence pressure.
+- A separate MetaReasoner LLM call runs periodically under pressure to classify chain health (`continue`, `continue_with_constraints`, `finalize_now`, `request_tool_then_finalize`).
+- A separate `MemoryConsolidationAdvisor` LLM call can run every N steps (default 8) and after allowed actions to decide if durable memory should be persisted.
+- If consolidation says yes with enough confidence, Psyke generates a concise summary and writes it through `Hippocampus` imprint (MCP memory if configured).
 - If no inputs are pending, thoughts and actions are scheduled by urgency (`high`, `medium`, `low`).
 - Every proposed action includes a context summary capped at 180 chars.
 - MotorCortex runs a startup capability smoke test and emits `action_capabilities` instrumentation.
@@ -157,3 +177,4 @@ you> exit
 - Call metrics include actor/call-site/action-type, latency, status, and token usage when returned by the model API.
 - Instrumentation health is persisted per run, including dropped instrumentation events and queue-saturation hits.
 - Superego token usage is tracked separately for both current run and persistent totals (still included in overall totals).
+- Memory metrics are persisted per run and as persistent totals: recall attempts/hits/failures/truncation/latency/chars, consolidation assessments/save recommendations, and imprint attempts/success/failures/latency/chars.
