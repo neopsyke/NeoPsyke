@@ -1,7 +1,7 @@
 package psyke.agent.actions.websearch
 
-import psyke.agent.ActionOutcome
-import psyke.agent.TextSecurity
+import psyke.agent.core.ActionOutcome
+import psyke.agent.support.TextSecurity
 import java.net.URI
 
 class WebSearchActionHandler(

@@ -5,6 +5,7 @@ import psyke.llm.ChatRole
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertTrue
 
 class TextSecurityTest {
     @Test
@@ -48,6 +49,42 @@ class TextSecurityTest {
         val wrapped = "response:\n{\n  \"ok\": true\n}\nthanks"
         assertEquals("{\"a\":1,\"b\":2}", TextSecurity.extractJsonObject(fenced))
         assertEquals("{\n  \"ok\": true\n}", TextSecurity.extractJsonObject(wrapped))
+    }
+
+    @Test
+    fun `extract json object skips malformed fenced block and finds next valid object`() {
+        val raw = """
+            ```json
+            {"broken":
+            ```
+            explanation text
+            ```json
+            {"allow": false, "reason": "insufficient context"}
+            ```
+        """.trimIndent()
+
+        assertEquals(
+            "{\"allow\": false, \"reason\": \"insufficient context\"}",
+            TextSecurity.extractJsonObject(raw)
+        )
+    }
+
+    @Test
+    fun `extract json object handles braces inside string values`() {
+        val raw = """
+            Here is your payload:
+            {"message":"keep literal braces like {this} intact","ok":true}
+            trailing note
+        """.trimIndent()
+
+        val extracted = TextSecurity.extractJsonObject(raw)
+        assertTrue(extracted.contains("\"keep literal braces like {this} intact\""))
+    }
+
+    @Test
+    fun `extract json object returns first valid object from mixed text`() {
+        val raw = "prefix {oops} middle {\"first\":1} then {\"second\":2}"
+        assertEquals("{\"first\":1}", TextSecurity.extractJsonObject(raw))
     }
 
     @Test

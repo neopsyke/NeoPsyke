@@ -1,5 +1,6 @@
-package psyke.agent
+package psyke.agent.ego
 
+import psyke.agent.core.*
 import java.util.PriorityQueue
 
 class AttentionScheduler(

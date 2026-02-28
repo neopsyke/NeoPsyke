@@ -1,5 +1,7 @@
-package psyke.agent
+package psyke.agent.memory.shortterm
 
+import psyke.agent.core.DialogueTurn
+import psyke.agent.support.TextSecurity
 import kotlin.math.max
 
 data class MemoryStats(

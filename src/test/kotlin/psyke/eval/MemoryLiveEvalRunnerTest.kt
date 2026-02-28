@@ -1,12 +1,12 @@
 package psyke.eval
 
-import psyke.agent.Hippocampus
-import psyke.agent.LongTermMemoryAdvisor
-import psyke.agent.LongTermMemoryAssessmentContext
-import psyke.agent.LongTermMemoryAssessmentDecision
-import psyke.agent.MemoryImprint
-import psyke.agent.MemoryRecall
-import psyke.agent.MemoryRecallQuery
+import psyke.agent.memory.longterm.Hippocampus
+import psyke.agent.memory.longterm.LongTermMemoryAdvisor
+import psyke.agent.memory.longterm.LongTermMemoryAssessmentContext
+import psyke.agent.memory.longterm.LongTermMemoryAssessmentDecision
+import psyke.agent.memory.longterm.MemoryImprint
+import psyke.agent.memory.longterm.MemoryRecall
+import psyke.agent.memory.longterm.MemoryRecallQuery
 import psyke.support.RecordingInstrumentation
 import psyke.support.StubChatModelClient
 import kotlin.test.Test

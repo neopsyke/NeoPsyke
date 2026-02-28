@@ -26,7 +26,7 @@ class SuperegoGatekeeperTest {
         val llm = StubChatModelClient()
         llm.enqueueRawResponse("""{"allow":true,"reason":"unused"}""")
         val instrumentation = RecordingInstrumentation()
-        val gatekeeper = SuperegoGatekeeper(
+        val gatekeeper = Superego(
             modelClient = llm,
             config = AgentConfig(maxPromptTokens = 100),
             instrumentation = instrumentation
@@ -54,7 +54,7 @@ class SuperegoGatekeeperTest {
     fun `gatekeeper denies and clamps reason`() {
         val llm = StubChatModelClient()
         llm.enqueueRawResponse("""{"allow":false,"reason":"${"n".repeat(220)}"}""")
-        val gatekeeper = SuperegoGatekeeper(modelClient = llm, config = AgentConfig())
+        val gatekeeper = Superego(modelClient = llm, config = AgentConfig())
 
         val decision = gatekeeper.review(action, snapshot)
         assertFalse(decision.allow)
@@ -66,7 +66,7 @@ class SuperegoGatekeeperTest {
         val llm = StubChatModelClient()
         llm.enqueueRawResponse("n/a")
         val instrumentation = RecordingInstrumentation()
-        val gatekeeper = SuperegoGatekeeper(
+        val gatekeeper = Superego(
             modelClient = llm,
             config = AgentConfig(),
             instrumentation = instrumentation
@@ -82,7 +82,7 @@ class SuperegoGatekeeperTest {
     fun `gatekeeper includes short-term context summary in review prompt`() {
         val llm = StubChatModelClient()
         llm.enqueueRawResponse("""{"allow":true}""")
-        val gatekeeper = SuperegoGatekeeper(modelClient = llm, config = AgentConfig())
+        val gatekeeper = Superego(modelClient = llm, config = AgentConfig())
         val memorySnapshot = snapshot.copy(shortTermContextSummary = "Short-term context summary: prefer neutral tone.")
 
         gatekeeper.review(action, memorySnapshot)
@@ -90,6 +90,20 @@ class SuperegoGatekeeperTest {
         val prompt = llm.lastMessages.last().content
         assertTrue(prompt.contains("Short-term context summary:"))
         assertTrue(prompt.contains("prefer neutral tone"))
+    }
+
+    @Test
+    fun `gatekeeper honors configured completion token budget`() {
+        val llm = StubChatModelClient()
+        llm.enqueueRawResponse("""{"allow":true}""")
+        val gatekeeper = Superego(
+            modelClient = llm,
+            config = AgentConfig(superegoMaxCompletionTokens = 77)
+        )
+
+        gatekeeper.review(action, snapshot)
+
+        assertEquals(77, llm.lastOptions.maxTokens)
     }
 
     @Test
@@ -103,7 +117,7 @@ class SuperegoGatekeeperTest {
             ) = throw IllegalStateException("superego unavailable")
         }
         val instrumentation = RecordingInstrumentation()
-        val gatekeeper = SuperegoGatekeeper(
+        val gatekeeper = Superego(
             modelClient = failingClient,
             config = AgentConfig(),
             instrumentation = instrumentation

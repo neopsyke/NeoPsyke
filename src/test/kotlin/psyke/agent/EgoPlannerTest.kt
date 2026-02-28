@@ -16,14 +16,14 @@ class EgoPlannerTest {
         val llm = StubChatModelClient()
         llm.enqueueRawResponse("""{"decision":"thought","urgency":"high","thought":"abcdefghi"}""")
         val instrumentation = RecordingInstrumentation()
-        val planner = EgoPlanner(
+        val planner = LlmEgoPlanner(
             modelClient = llm,
             config = AgentConfig(maxThoughtChars = 5, maxCompletionTokens = 88),
             instrumentation = instrumentation
         )
 
         val decision = planner.decide(
-            trigger = EgoTrigger.IncomingInput(PendingInput(1, "hi")),
+            trigger = psyke.agent.core.EgoTrigger.IncomingInput(PendingInput(1, "hi")),
             context = PlannerContext(
                 recentDialogue = emptyList(),
                 queue = QueueSnapshot(
@@ -34,7 +34,7 @@ class EgoPlannerTest {
             )
         )
 
-        val thought = assertIs<EgoDecision.EnqueueThought>(decision)
+        val thought = assertIs<psyke.agent.core.EgoDecision.EnqueueThought>(decision)
         assertEquals(Urgency.HIGH, thought.urgency)
         assertEquals("abcde", thought.content)
         assertEquals("ego", llm.lastOptions.metadata.actor)
@@ -62,13 +62,13 @@ class EgoPlannerTest {
             }
             """.trimIndent()
         )
-        val planner = EgoPlanner(
+        val planner = LlmEgoPlanner(
             modelClient = llm,
             config = AgentConfig(maxActionPayloadChars = 7, maxActionSummaryChars = 8)
         )
 
         val decision = planner.decide(
-            trigger = EgoTrigger.PendingThoughtInput(PendingThought(7, Urgency.LOW, "think", 1)),
+            trigger = psyke.agent.core.EgoTrigger.PendingThoughtInput(PendingThought(7, Urgency.LOW, "think", 1)),
             context = PlannerContext(
                 recentDialogue = listOf(
                     DialogueTurn(DialogueRole.USER, "u"),
@@ -82,7 +82,7 @@ class EgoPlannerTest {
             )
         )
 
-        val action = assertIs<EgoDecision.ProposeAction>(decision)
+        val action = assertIs<psyke.agent.core.EgoDecision.ProposeAction>(decision)
         assertEquals(ActionType.ANSWER, action.actionType)
         assertEquals("payload", action.payload)
         assertEquals("summary-", action.summary)
@@ -103,13 +103,13 @@ class EgoPlannerTest {
             }
             """.trimIndent()
         )
-        val planner = EgoPlanner(
+        val planner = LlmEgoPlanner(
             modelClient = llm,
             config = AgentConfig()
         )
 
         val decision = planner.decide(
-            trigger = EgoTrigger.IncomingInput(PendingInput(1, "fetch this page")),
+            trigger = psyke.agent.core.EgoTrigger.IncomingInput(PendingInput(1, "fetch this page")),
             context = PlannerContext(
                 recentDialogue = emptyList(),
                 queue = QueueSnapshot(0, 0, 0),
@@ -117,7 +117,7 @@ class EgoPlannerTest {
             )
         )
 
-        val noop = assertIs<EgoDecision.Noop>(decision)
+        val noop = assertIs<psyke.agent.core.EgoDecision.Noop>(decision)
         assertTrue(noop.reason.contains("unavailable", ignoreCase = true))
     }
 
@@ -127,23 +127,23 @@ class EgoPlannerTest {
         llm.enqueueRawResponse("""{"decision":"action","action_type":"answer"}""")
         llm.enqueueRawResponse("not-json")
         val instrumentation = RecordingInstrumentation()
-        val planner = EgoPlanner(
+        val planner = LlmEgoPlanner(
             modelClient = llm,
             config = AgentConfig(),
             instrumentation = instrumentation
         )
-        val trigger = EgoTrigger.IncomingInput(PendingInput(2, "hello"))
+        val trigger = psyke.agent.core.EgoTrigger.IncomingInput(PendingInput(2, "hello"))
         val context = PlannerContext(
             recentDialogue = emptyList(),
             queue = QueueSnapshot(0, 0, 0)
         )
 
         val invalidAction = planner.decide(trigger, context)
-        assertIs<EgoDecision.Noop>(invalidAction)
+        assertIs<psyke.agent.core.EgoDecision.Noop>(invalidAction)
         assertTrue(invalidAction.reason.contains("invalid action", ignoreCase = true))
 
         val invalidJson = planner.decide(trigger, context)
-        assertIs<EgoDecision.Noop>(invalidJson)
+        assertIs<psyke.agent.core.EgoDecision.Noop>(invalidJson)
         assertTrue(invalidJson.reason.contains("non-parseable", ignoreCase = true))
         assertTrue(instrumentation.events.any { it.type == "warning" })
     }
@@ -159,7 +159,7 @@ class EgoPlannerTest {
         }
         val instrumentation = RecordingInstrumentation()
         var repairCount = 0
-        val planner = EgoPlanner(
+        val planner = LlmEgoPlanner(
             modelClient = llm,
             config = AgentConfig(),
             instrumentation = instrumentation,
@@ -167,14 +167,14 @@ class EgoPlannerTest {
         )
 
         val decision = planner.decide(
-            trigger = EgoTrigger.IncomingInput(PendingInput(1, "pricing")),
+            trigger = psyke.agent.core.EgoTrigger.IncomingInput(PendingInput(1, "pricing")),
             context = PlannerContext(
                 recentDialogue = emptyList(),
                 queue = QueueSnapshot(0, 0, 0)
             )
         )
 
-        val action = assertIs<EgoDecision.ProposeAction>(decision)
+        val action = assertIs<psyke.agent.core.EgoDecision.ProposeAction>(decision)
         assertEquals(ActionType.ANSWER, action.actionType)
         assertTrue(action.payload.contains("\$20"))
         assertEquals(1, repairCount)
@@ -202,7 +202,7 @@ class EgoPlannerTest {
         }
         val instrumentation = RecordingInstrumentation()
         var repairCount = 0
-        val planner = EgoPlanner(
+        val planner = LlmEgoPlanner(
             modelClient = llm,
             config = AgentConfig(maxActionSummaryChars = 180),
             instrumentation = instrumentation,
@@ -210,14 +210,14 @@ class EgoPlannerTest {
         )
 
         val decision = planner.decide(
-            trigger = EgoTrigger.IncomingInput(PendingInput(1, "hello")),
+            trigger = psyke.agent.core.EgoTrigger.IncomingInput(PendingInput(1, "hello")),
             context = PlannerContext(
                 recentDialogue = emptyList(),
                 queue = QueueSnapshot(0, 0, 0)
             )
         )
 
-        val action = assertIs<EgoDecision.ProposeAction>(decision)
+        val action = assertIs<psyke.agent.core.EgoDecision.ProposeAction>(decision)
         assertEquals("first useful line", action.summary)
         assertEquals(1, repairCount)
         assertTrue(instrumentation.events.any { it.type == "planner_output_repaired" })
@@ -227,7 +227,7 @@ class EgoPlannerTest {
     fun `planner trims oversized prompt before sending to model`() {
         val llm = StubChatModelClient()
         llm.enqueueRawResponse("""{"decision":"noop","reason":"done"}""")
-        val planner = EgoPlanner(
+        val planner = LlmEgoPlanner(
             modelClient = llm,
             config = AgentConfig(maxPromptTokens = 120)
         )
@@ -245,7 +245,7 @@ class EgoPlannerTest {
                 pendingActionCount = 3
             )
         )
-        planner.decide(EgoTrigger.IncomingInput(PendingInput(1, "ask")), context)
+        planner.decide(psyke.agent.core.EgoTrigger.IncomingInput(PendingInput(1, "ask")), context)
 
         assertTrue(llm.lastMessages.isNotEmpty())
         assertTrue(llm.lastMessages.any { it.role == ChatRole.USER && it.content.contains("Trigger:") })
@@ -258,7 +258,7 @@ class EgoPlannerTest {
     fun `planner includes short-term context summary in prompt context`() {
         val llm = StubChatModelClient()
         llm.enqueueRawResponse("""{"decision":"noop","reason":"done"}""")
-        val planner = EgoPlanner(
+        val planner = LlmEgoPlanner(
             modelClient = llm,
             config = AgentConfig()
         )
@@ -272,7 +272,7 @@ class EgoPlannerTest {
             shortTermContextSummary = "Short-term context summary:\n- user likes concise answers"
         )
 
-        planner.decide(EgoTrigger.IncomingInput(PendingInput(1, "question")), context)
+        planner.decide(psyke.agent.core.EgoTrigger.IncomingInput(PendingInput(1, "question")), context)
 
         val prompt = llm.lastMessages.last().content
         assertTrue(prompt.contains("Short-term context summary:"))
@@ -283,7 +283,7 @@ class EgoPlannerTest {
     fun `planner includes long-term memory recall in prompt context`() {
         val llm = StubChatModelClient()
         llm.enqueueRawResponse("""{"decision":"noop","reason":"done"}""")
-        val planner = EgoPlanner(
+        val planner = LlmEgoPlanner(
             modelClient = llm,
             config = AgentConfig()
         )
@@ -298,7 +298,7 @@ class EgoPlannerTest {
             longTermMemoryRecall = "- last week user asked for deploy checklist"
         )
 
-        planner.decide(EgoTrigger.IncomingInput(PendingInput(1, "question")), context)
+        planner.decide(psyke.agent.core.EgoTrigger.IncomingInput(PendingInput(1, "question")), context)
 
         val prompt = llm.lastMessages.last().content
         assertTrue(prompt.contains("Long-term memory recall:"))
@@ -309,7 +309,7 @@ class EgoPlannerTest {
     fun `planner includes deliberation pressure and meta guidance`() {
         val llm = StubChatModelClient()
         llm.enqueueRawResponse("""{"decision":"noop","reason":"done"}""")
-        val planner = EgoPlanner(
+        val planner = LlmEgoPlanner(
             modelClient = llm,
             config = AgentConfig()
         )
@@ -329,7 +329,7 @@ class EgoPlannerTest {
             metaGuidance = "Finalize now with concise answer."
         )
 
-        planner.decide(EgoTrigger.PendingThoughtInput(PendingThought(1, Urgency.MEDIUM, "think")), context)
+        planner.decide(psyke.agent.core.EgoTrigger.PendingThoughtInput(PendingThought(1, Urgency.MEDIUM, "think")), context)
 
         val prompt = llm.lastMessages.last().content
         assertTrue(prompt.contains("Deliberation pressure:"))
@@ -343,13 +343,13 @@ class EgoPlannerTest {
         val llm = StubChatModelClient().apply {
             enqueueRawResponse("""{"decision":"noop","reason":"done"}""")
         }
-        val planner = EgoPlanner(
+        val planner = LlmEgoPlanner(
             modelClient = llm,
             config = AgentConfig()
         )
 
         planner.decide(
-            EgoTrigger.IncomingInput(PendingInput(1, "question")),
+            psyke.agent.core.EgoTrigger.IncomingInput(PendingInput(1, "question")),
             PlannerContext(
                 recentDialogue = emptyList(),
                 queue = QueueSnapshot(0, 0, 0)
@@ -372,21 +372,21 @@ class EgoPlannerTest {
             ) = throw IllegalStateException("planner unavailable")
         }
         val instrumentation = RecordingInstrumentation()
-        val planner = EgoPlanner(
+        val planner = LlmEgoPlanner(
             modelClient = failingClient,
             config = AgentConfig(),
             instrumentation = instrumentation
         )
 
         val decision = planner.decide(
-            trigger = EgoTrigger.IncomingInput(PendingInput(1, "hello")),
+            trigger = psyke.agent.core.EgoTrigger.IncomingInput(PendingInput(1, "hello")),
             context = PlannerContext(
                 recentDialogue = emptyList(),
                 queue = QueueSnapshot(0, 0, 0)
             )
         )
 
-        val noop = assertIs<EgoDecision.Noop>(decision)
+        val noop = assertIs<psyke.agent.core.EgoDecision.Noop>(decision)
         assertTrue(noop.reason.contains("unavailable", ignoreCase = true))
         assertTrue(
             instrumentation.events.any {
@@ -394,5 +394,42 @@ class EgoPlannerTest {
                     (it.data["message"] as? String)?.contains("Planner call failed", ignoreCase = true) == true
             }
         )
+    }
+
+    @Test
+    fun `planner honors configured retry attempts`() {
+        var calls = 0
+        val flakyClient = object : ChatModelClient {
+            override val modelName: String = "flaky"
+
+            override fun chat(
+                messages: List<ChatMessage>,
+                options: psyke.llm.ChatRequestOptions
+            ): psyke.llm.ChatCompletion {
+                calls += 1
+                if (calls < 3) {
+                    throw IllegalStateException("temporary failure")
+                }
+                return psyke.llm.ChatCompletion(
+                    content = """{"decision":"noop","reason":"ok"}""",
+                    model = modelName
+                )
+            }
+        }
+        val planner = LlmEgoPlanner(
+            modelClient = flakyClient,
+            config = AgentConfig(llmRetryAttempts = 3)
+        )
+
+        val decision = planner.decide(
+            trigger = psyke.agent.core.EgoTrigger.IncomingInput(PendingInput(1, "hello")),
+            context = PlannerContext(
+                recentDialogue = emptyList(),
+                queue = QueueSnapshot(0, 0, 0)
+            )
+        )
+
+        assertIs<psyke.agent.core.EgoDecision.Noop>(decision)
+        assertEquals(3, calls)
     }
 }

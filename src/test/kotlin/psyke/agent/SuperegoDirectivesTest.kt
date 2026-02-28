@@ -1,33 +1,58 @@
 package psyke.agent
 
 import kotlin.test.Test
-import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 class SuperegoDirectivesTest {
     @Test
-    fun `load parses one directive per line and ignores comments and blanks`() {
-        val directives = SuperegoDirectives.load("/superego/test-directives.txt")
+    fun `for action includes general and action specific directives`() {
+        val directives = SuperegoPolicy.forAction(ActionType.MCP_FETCH)
 
-        assertEquals(
-            listOf(
-                "No slurs or hate speech.",
-                "No threats or harassment."
-            ),
-            directives
+        assertTrue(directives.general.isNotEmpty())
+        assertTrue(directives.actionSpecific.isNotEmpty())
+        assertTrue(directives.all.size >= directives.general.size)
+    }
+
+    @Test
+    fun `action specific directives differ by action type`() {
+        val answer = SuperegoPolicy.forAction(ActionType.ANSWER).actionSpecific
+        val fetch = SuperegoPolicy.forAction(ActionType.MCP_FETCH).actionSpecific
+
+        assertTrue(answer != fetch)
+        assertTrue(answer.any { it.contains("ANSWER", ignoreCase = true) })
+        assertTrue(fetch.any { it.contains("MCP_FETCH", ignoreCase = true) })
+    }
+
+    @Test
+    fun `all directives contains deduplicated union`() {
+        val all = SuperegoPolicy.allDirectives()
+        val expected = ActionType.entries
+            .flatMap { SuperegoPolicy.forAction(it).all }
+            .distinct()
+
+        assertTrue(all == expected)
+        assertTrue(all.isNotEmpty())
+    }
+
+    @Test
+    fun `general directives are always included`() {
+        val general = SuperegoPolicy.GENERAL_DIRECTIVES
+        ActionType.entries.forEach { actionType ->
+            val all = SuperegoPolicy.forAction(actionType).all
+            general.forEach { directive ->
+                assertTrue(
+                    all.contains(directive),
+                    "Expected general directive missing for action=$actionType"
+                )
+            }
+        }
+    }
+
+    @Test
+    fun `mcp fetch includes url safety directive`() {
+        val fetch = SuperegoPolicy.forAction(ActionType.MCP_FETCH).actionSpecific
+        assertTrue(
+            fetch.any { it.contains("HTTPS", ignoreCase = true) }
         )
-    }
-
-    @Test
-    fun `load falls back to defaults when resource is empty`() {
-        val directives = SuperegoDirectives.load("/superego/empty-directives.txt")
-
-        assertEquals(SuperegoGatekeeper.DEFAULT_DIRECTIVES, directives)
-    }
-
-    @Test
-    fun `load falls back to defaults when resource is missing`() {
-        val directives = SuperegoDirectives.load("/superego/missing-directives.txt")
-
-        assertEquals(SuperegoGatekeeper.DEFAULT_DIRECTIVES, directives)
     }
 }

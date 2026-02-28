@@ -51,9 +51,9 @@ class MemoryRoundTripIntegrationTest {
             longTermMemoryForceAssessOnAllowedAction = true
         )
         val outputs = mutableListOf<String>()
-        val agent = EgoAgent(
-            planner = EgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
-            superego = SuperegoGatekeeper(
+        val agent = Ego(
+            planner = LlmEgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
+            superego = Superego(
                 modelClient = superegoLlm,
                 config = config,
                 instrumentation = instrumentation
@@ -90,7 +90,7 @@ class MemoryRoundTripIntegrationTest {
         }
     }
 
-    private fun runAgentWithInput(agent: EgoAgent, stdinContent: String) {
+    private fun runAgentWithInput(agent: Ego, stdinContent: String) {
         val previousIn = System.`in`
         try {
             System.setIn(ByteArrayInputStream(stdinContent.toByteArray()))

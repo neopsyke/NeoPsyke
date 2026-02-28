@@ -1,4 +1,4 @@
-package psyke.agent
+package psyke.agent.tools.mcp
 
 import com.fasterxml.jackson.annotation.JsonProperty
 import com.fasterxml.jackson.databind.DeserializationFeature
@@ -23,6 +23,7 @@ import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import mu.KotlinLogging
+import psyke.agent.support.TextSecurity
 import java.io.IOException
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files

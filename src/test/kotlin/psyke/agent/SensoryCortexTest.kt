@@ -20,7 +20,7 @@ class SensoryCortexTest {
         )
 
         val signal = source.nextSignal()
-        val input = assertIs<SensorySignal.InputReceived>(signal).input
+        val input = assertIs<psyke.agent.cortex.sensory.SensorySignal.InputReceived>(signal).input
         assertEquals(InputPriority.HIGH, input.priority)
         assertEquals("stdin", input.source)
     }
@@ -28,7 +28,7 @@ class SensoryCortexTest {
     @Test
     fun `sensory cortex sanitizes input content and keeps explicit priority`() {
         val source = SensoryInputSource {
-            SensorySignal.InputReceived(
+            psyke.agent.cortex.sensory.SensorySignal.InputReceived(
                 SensoryInput(
                     content = "  ${"x".repeat(50)}  ",
                     priority = InputPriority.LOW,
@@ -42,7 +42,7 @@ class SensoryCortexTest {
         )
 
         val signal = cortex.nextSignal()
-        val input = assertIs<SensorySignal.InputReceived>(signal).input
+        val input = assertIs<psyke.agent.cortex.sensory.SensorySignal.InputReceived>(signal).input
         assertEquals("x".repeat(12), input.content)
         assertEquals(InputPriority.LOW, input.priority)
         assertEquals("webhook", input.source)

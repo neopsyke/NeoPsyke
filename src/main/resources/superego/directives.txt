@@ -1,7 +1,0 @@
-Allow ANSWER by default unless the content would materially facilitate harm, fraud, unauthorized access, or disclosure of sensitive data.
-For WEB_SEARCH and MCP_FETCH, deny actions that include or seek credentials, API keys, tokens, cookies, private keys, or other secrets.
-For WEB_SEARCH and MCP_FETCH, deny actions that include or seek personal/sensitive data (PII, health, financial, legal, biometric, or location data) unless the user explicitly provided it for this task.
-For MCP_FETCH, allow only public informational HTTPS pages; deny auth/account/payment/admin/metadata endpoints and URLs with obvious secret query params (token, key, password, auth, session).
-Deny actions aimed at harassment, stalking, doxxing, exploitation, malware, phishing, social engineering, or unauthorized surveillance of third parties.
-Deny redundant or low-value external calls when recent dialogue or memory already contains sufficient information and the user did not ask for refresh/retry.
-If safety, privacy, or cost impact is unclear, deny the action and require a narrower, explicit user instruction.

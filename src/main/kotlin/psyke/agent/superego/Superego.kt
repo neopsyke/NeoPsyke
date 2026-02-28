@@ -1,9 +1,16 @@
-package psyke.agent
+package psyke.agent.superego
 
 import com.fasterxml.jackson.databind.DeserializationFeature
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
 import mu.KotlinLogging
+import psyke.agent.core.AgentConfig
+import psyke.agent.core.DialogueRole
+import psyke.agent.core.GateDecision
+import psyke.agent.core.PendingAction
+import psyke.agent.core.SuperegoContext
+import psyke.agent.support.PromptBudgetAllocator
+import psyke.agent.support.TextSecurity
 import psyke.instrumentation.AgentEvents
 import psyke.instrumentation.AgentInstrumentation
 import psyke.instrumentation.NoopAgentInstrumentation
@@ -15,32 +22,34 @@ import psyke.llm.ChatRole
 
 private val logger = KotlinLogging.logger {}
 
-class SuperegoGatekeeper(
+class Superego(
     private val modelClient: ChatModelClient,
     private val config: AgentConfig,
-    private val directives: List<String> = DEFAULT_DIRECTIVES,
+    private val policy: SuperegoPolicy = SuperegoPolicy,
     private val instrumentation: AgentInstrumentation = NoopAgentInstrumentation,
 ) {
     fun review(action: PendingAction, context: SuperegoContext): GateDecision {
+        val resolvedDirectives = policy.forAction(action.type).all
         val lastUserTurn = context.recentDialogue.lastOrNull { it.role == DialogueRole.USER }?.content ?: "none"
         instrumentation.emit(
             AgentEvents.superegoReviewInput(
                 action = action,
-                directives = directives,
+                directives = resolvedDirectives,
                 lastUserMessage = lastUserTurn
             )
         )
-        val messages = buildMessages(action, context)
+        val messages = buildMessages(action, context, resolvedDirectives)
         var response = null as psyke.llm.ChatCompletion?
         var lastError: Exception? = null
-        for (attempt in 1..2) {
+        val retryAttempts = maxOf(1, config.llmRetryAttempts)
+        for (attempt in 1..retryAttempts) {
             try {
                 response = modelClient.chat(
                     messages = messages,
                     options = ChatRequestOptions(
                         temperature = 0.0,
                         // Keep response budget independent from prompt/directive growth.
-                        maxTokens = MAX_RESPONSE_TOKENS,
+                        maxTokens = config.superegoMaxCompletionTokens,
                         metadata = ChatCallMetadata(
                             actor = "superego",
                             callSite = "action_review",
@@ -51,8 +60,12 @@ class SuperegoGatekeeper(
                 break
             } catch (ex: Exception) {
                 lastError = ex
-                if (attempt < 2) {
-                    instrumentation.emit(AgentEvents.warning("Superego call failed (attempt 1/2); retrying."))
+                if (attempt < retryAttempts) {
+                    instrumentation.emit(
+                        AgentEvents.warning(
+                            "Superego call failed (attempt $attempt/$retryAttempts); retrying."
+                        )
+                    )
                 }
             }
         }
@@ -98,7 +111,11 @@ class SuperegoGatekeeper(
         }
     }
 
-    private fun buildMessages(action: PendingAction, context: SuperegoContext): List<ChatMessage> {
+    private fun buildMessages(
+        action: PendingAction,
+        context: SuperegoContext,
+        directives: List<String>,
+    ): List<ChatMessage> {
         val directivesBlock = directives.joinToString(separator = "\n") { "- $it" }
         val lastUserTurn = context.recentDialogue.lastOrNull { it.role == DialogueRole.USER }?.content ?: "none"
         val shortTermContextSummary = context.shortTermContextSummary.ifBlank { "none" }
@@ -173,17 +190,6 @@ class SuperegoGatekeeper(
 
     companion object {
         private const val MAX_DENY_REASON_CHARS: Int = 180
-        private const val MAX_RESPONSE_TOKENS: Int = 192
-
-        val DEFAULT_DIRECTIVES: List<String> = listOf(
-            "Allow ANSWER by default unless the content would materially facilitate harm, fraud, unauthorized access, or disclosure of sensitive data.",
-            "For WEB_SEARCH and MCP_FETCH, deny actions that include or seek credentials, API keys, tokens, cookies, private keys, or other secrets.",
-            "For WEB_SEARCH and MCP_FETCH, deny actions that include or seek personal/sensitive data (PII, health, financial, legal, biometric, or location data) unless the user explicitly provided it for this task.",
-            "For MCP_FETCH, allow only public informational HTTPS pages; deny auth/account/payment/admin/metadata endpoints and URLs with obvious secret query params (token, key, password, auth, session).",
-            "Deny actions aimed at harassment, stalking, doxxing, exploitation, malware, phishing, social engineering, or unauthorized surveillance of third parties.",
-            "Deny redundant or low-value external calls when recent dialogue or memory already contains sufficient information and the user did not ask for refresh/retry.",
-            "If safety, privacy, or cost impact is unclear, deny the action and require a narrower, explicit user instruction.",
-        )
 
         val mapper = jacksonObjectMapper()
             .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)

@@ -12,6 +12,14 @@ LOG_DIR="${PSYKE_LOG_DIR:-$ROOT_DIR/.psyke/logs}"
 LOG_RETENTION="${PSYKE_LOG_RETENTION:-30}"
 APP_ARGS=()
 
+log_info() {
+  printf '%s\n' "$*"
+}
+
+log_error() {
+  printf '%s\n' "$*" >&2
+}
+
 if [[ -n "${PSYKE_LOG_LEVEL:-}" ]]; then
   LOG_LEVEL_FROM_ENV=1
 fi
@@ -24,7 +32,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     -l|--log-level)
       if [[ $# -lt 2 ]]; then
-        echo "Missing value for $1" >&2
+        log_error "Missing value for $1"
         exit 1
       fi
       LOG_LEVEL="$2"
@@ -38,7 +46,7 @@ while [[ $# -gt 0 ]]; do
       ;;
     --loop-delay-ms)
       if [[ $# -lt 2 ]]; then
-        echo "Missing value for $1" >&2
+        log_error "Missing value for $1"
         exit 1
       fi
       LOOP_DELAY_MS="$2"
@@ -74,6 +82,7 @@ Options:
 
 Environment:
   PSYKE_LLM_CONFIG_FILE   Optional path to LLM runtime YAML (default: ./llm-runtime.yaml)
+  PSYKE_AGENT_CONFIG_FILE Optional path to agent/app/eval runtime YAML (default: ./agent-runtime.yaml)
   LLM_PROVIDER            Optional env override for YAML provider: groq or mistral
   GROQ_API_KEY            Required when provider=groq
   MISTRAL_API_KEY         Required when provider=mistral
@@ -183,13 +192,13 @@ elif [[ -n "$(find \
 fi
 
 if [[ "$NEEDS_BUILD" -eq 1 ]]; then
-  echo "Building local app distribution..."
+  log_info "Building local app distribution..."
   "$ROOT_DIR/gradlew" --no-problems-report installDist
 fi
 
-echo "Psyke logs for this run: $RUN_LOG_FILE"
-echo "Psyke event sidecar for this run: $RUN_EVENT_FILE"
-echo "Latest run log pointer: $LOG_DIR/latest.log"
+log_info "Psyke logs for this run: $RUN_LOG_FILE"
+log_info "Psyke event sidecar for this run: $RUN_EVENT_FILE"
+log_info "Latest run log pointer: $LOG_DIR/latest.log"
 
 if [[ ${#APP_ARGS[@]} -gt 0 ]]; then
   exec "$APP_BIN" "${APP_ARGS[@]}"

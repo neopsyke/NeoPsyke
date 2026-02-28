@@ -1,6 +1,20 @@
-package psyke.agent
+package psyke.agent.ego
 
 import mu.KotlinLogging
+import psyke.agent.core.*
+import psyke.agent.cortex.motor.MotorCortex
+import psyke.agent.cortex.sensory.SensoryCortex
+import psyke.agent.cortex.sensory.SensorySignal
+import psyke.agent.memory.longterm.Hippocampus
+import psyke.agent.memory.longterm.LongTermMemoryAdvisor
+import psyke.agent.memory.longterm.LongTermMemoryAssessmentContext
+import psyke.agent.memory.longterm.MemoryImprint
+import psyke.agent.memory.longterm.MemoryRecallQuery
+import psyke.agent.memory.longterm.NoopHippocampus
+import psyke.agent.memory.longterm.NoopLongTermMemoryAdvisor
+import psyke.agent.memory.shortterm.MemoryStore
+import psyke.agent.support.TextSecurity
+import psyke.agent.superego.Superego
 import psyke.instrumentation.AgentEvent
 import psyke.instrumentation.AgentEvents
 import psyke.instrumentation.AgentInstrumentation
@@ -9,9 +23,9 @@ import java.util.Locale
 
 private val logger = KotlinLogging.logger {}
 
-class EgoAgent(
-    private val planner: EgoPlanner,
-    private val superego: SuperegoGatekeeper,
+class Ego(
+    private val planner: Planner,
+    private val superego: Superego,
     private val motorCortex: MotorCortex,
     private val config: AgentConfig,
     private val hippocampus: Hippocampus = NoopHippocampus,
@@ -30,6 +44,10 @@ class EgoAgent(
     private val onEndToEndResponseLatency: (latencyMs: Long) -> Unit = {},
     private val instrumentation: AgentInstrumentation = NoopAgentInstrumentation,
 ) {
+    interface Planner {
+        fun decide(trigger: EgoTrigger, context: PlannerContext): EgoDecision
+    }
+
     private val scheduler = AttentionScheduler(config)
     private val dialogue = ArrayDeque<DialogueTurn>()
     private val deliberationMonitor = DeliberationProgressMonitor()
@@ -827,8 +845,11 @@ class EgoAgent(
         if (state.stepIndex < config.deliberationPressureAssessmentMinStep) {
             return
         }
-        val circularPressureHigh = state.decisionPressure >= 0.98 && state.staleStreak >= 8
-        val repeatedModelErrors = state.modelErrorStreak >= 3 && state.decisionPressure >= 0.72 && state.stepIndex >= 6
+        val circularPressureHigh = state.decisionPressure >= config.forcedTerminalPressureThreshold &&
+            state.staleStreak >= config.forcedTerminalStaleStreakThreshold
+        val repeatedModelErrors = state.modelErrorStreak >= MODEL_ERROR_STREAK_THRESHOLD &&
+            state.decisionPressure >= MODEL_ERROR_PRESSURE_THRESHOLD &&
+            state.stepIndex >= MODEL_ERROR_MIN_STEP_INDEX
         if (!circularPressureHigh && !repeatedModelErrors) {
             return
         }
@@ -1160,4 +1181,10 @@ class EgoAgent(
         val hadExternalFailures: Boolean = false,
         val latestPlannerSignal: String = "",
     )
+
+    private companion object {
+        private const val MODEL_ERROR_STREAK_THRESHOLD: Int = 3
+        private const val MODEL_ERROR_PRESSURE_THRESHOLD: Double = 0.72
+        private const val MODEL_ERROR_MIN_STEP_INDEX: Int = 6
+    }
 }
