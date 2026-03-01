@@ -48,14 +48,14 @@ class LlmEgoPlanner(
         val messages = buildMessages(trigger, context)
         var response = null as psyke.llm.ChatCompletion?
         var lastError: Exception? = null
-        val retryAttempts = maxOf(1, config.llmRetryAttempts)
+        val retryAttempts = maxOf(1, config.planner.llmRetryAttempts)
         for (attempt in 1..retryAttempts) {
             try {
                 response = modelClient.chat(
                     messages = messages,
                     options = ChatRequestOptions(
                         temperature = 0.2,
-                        maxTokens = config.maxCompletionTokens,
+                        maxTokens = config.planner.maxCompletionTokens,
                         metadata = ChatCallMetadata(
                             actor = "ego",
                             callSite = triggerLabel
@@ -107,9 +107,9 @@ class LlmEgoPlanner(
                     } else {
                         EgoDecision.EnqueueThought(
                             urgency = Urgency.fromRaw(payload.urgency),
-                            content = TextSecurity.clamp(thought, config.maxThoughtChars),
+                            content = TextSecurity.clamp(thought, config.planner.maxThoughtChars),
                             longTermMemoryRecallQuery = payload.longTermMemoryRecallQuery?.trim()?.ifBlank { null }?.let {
-                                TextSecurity.clamp(it, config.maxThoughtChars)
+                                TextSecurity.clamp(it, config.planner.maxThoughtChars)
                             }
                         )
                     }
@@ -137,8 +137,8 @@ class LlmEgoPlanner(
                         EgoDecision.ProposeAction(
                             urgency = Urgency.fromRaw(payload.urgency),
                             actionType = actionType,
-                            payload = TextSecurity.clamp(actionPayload, config.maxActionPayloadChars),
-                            summary = TextSecurity.clamp(resolvedSummary, config.maxActionSummaryChars)
+                            payload = TextSecurity.clamp(actionPayload, config.planner.maxActionPayloadChars),
+                            summary = TextSecurity.clamp(resolvedSummary, config.planner.maxActionSummaryChars)
                         )
                     }
                 }
@@ -212,14 +212,14 @@ class LlmEgoPlanner(
     ): ActionVerifierPayload? {
         var response = null as psyke.llm.ChatCompletion?
         var lastError: Exception? = null
-        val retryAttempts = maxOf(1, config.llmRetryAttempts)
+        val retryAttempts = maxOf(1, config.planner.llmRetryAttempts)
         for (attempt in 1..retryAttempts) {
             try {
                 response = modelClient.chat(
                     messages = messages,
                     options = ChatRequestOptions(
                         temperature = 0.1,
-                        maxTokens = minOf(config.maxCompletionTokens, 220),
+                        maxTokens = minOf(config.planner.maxCompletionTokens, 220),
                         metadata = ChatCallMetadata(
                             actor = "ego",
                             callSite = "action_verifier",
@@ -365,8 +365,8 @@ class LlmEgoPlanner(
                 EgoDecision.ProposeAction(
                     urgency = original.urgency,
                     actionType = repairedActionType,
-                    payload = TextSecurity.clamp(repairedPayload, config.maxActionPayloadChars),
-                    summary = TextSecurity.clamp(resolvedSummary, config.maxActionSummaryChars)
+                    payload = TextSecurity.clamp(repairedPayload, config.planner.maxActionPayloadChars),
+                    summary = TextSecurity.clamp(resolvedSummary, config.planner.maxActionSummaryChars)
                 )
             }
 
@@ -587,7 +587,7 @@ class LlmEgoPlanner(
                     content = "Trigger:\n$triggerText"
                 )
             ),
-            maxTokens = config.maxPromptTokens
+            maxTokens = config.planner.maxPromptTokens
         )
     }
 
@@ -677,7 +677,7 @@ class LlmEgoPlanner(
                     """.trimIndent()
                 )
             ),
-            maxTokens = minOf(config.maxPromptTokens, 1_200)
+            maxTokens = minOf(config.planner.maxPromptTokens, 1_200)
         )
     }
 
@@ -745,6 +745,6 @@ class LlmEgoPlanner(
         if (normalized.isBlank()) {
             return "Generated action summary."
         }
-        return TextSecurity.clamp(normalized, config.maxActionSummaryChars)
+        return TextSecurity.clamp(normalized, config.planner.maxActionSummaryChars)
     }
 }

@@ -14,10 +14,10 @@ class AgentRuntimeSettingsLoaderTest {
             defaultPath = tempDir.resolve("missing.yaml")
         )
 
-        assertEquals(180, settings.agentConfig.maxLoopStepsPerInput)
+        assertEquals(180, settings.agentConfig.planner.maxLoopStepsPerInput)
         assertEquals(0, settings.agentConfig.loopDelayMs)
-        assertEquals(2, settings.agentConfig.llmRetryAttempts)
-        assertEquals(192, settings.agentConfig.superegoMaxCompletionTokens)
+        assertEquals(2, settings.agentConfig.planner.llmRetryAttempts)
+        assertEquals(192, settings.agentConfig.superego.maxCompletionTokens)
         assertTrue(settings.dashboardEnabled)
         assertEquals(8787, settings.dashboardPort)
         assertEquals(Int.MAX_VALUE, settings.evalMaxRawResponseChars)
@@ -53,9 +53,9 @@ class AgentRuntimeSettingsLoaderTest {
         assertEquals(9200, settings.dashboardPort)
         assertEquals(4444, settings.evalMaxRawResponseChars)
         assertEquals("local", settings.evalDefaultStage)
-        assertEquals(21, settings.agentConfig.maxLoopStepsPerInput)
-        assertEquals(999, settings.agentConfig.maxPromptTokens)
-        assertEquals(4, settings.agentConfig.llmRetryAttempts)
+        assertEquals(21, settings.agentConfig.planner.maxLoopStepsPerInput)
+        assertEquals(999, settings.agentConfig.planner.maxPromptTokens)
+        assertEquals(4, settings.agentConfig.planner.llmRetryAttempts)
     }
 
     @Test
@@ -89,8 +89,8 @@ class AgentRuntimeSettingsLoaderTest {
             defaultPath = yamlPath
         )
 
-        assertEquals(77, settings.agentConfig.maxLoopStepsPerInput)
-        assertEquals(3, settings.agentConfig.llmRetryAttempts)
+        assertEquals(77, settings.agentConfig.planner.maxLoopStepsPerInput)
+        assertEquals(3, settings.agentConfig.planner.llmRetryAttempts)
         assertEquals(true, settings.dashboardEnabled)
         assertEquals(9900, settings.dashboardPort)
         assertEquals(5555, settings.evalMaxRawResponseChars)
@@ -120,7 +120,7 @@ class AgentRuntimeSettingsLoaderTest {
         )
 
         assertEquals(true, settings.dashboardEnabled)
-        assertEquals(42, settings.agentConfig.maxLoopStepsPerInput)
+        assertEquals(42, settings.agentConfig.planner.maxLoopStepsPerInput)
         assertEquals(Int.MAX_VALUE, settings.evalMaxRawResponseChars)
         assertEquals(null, settings.evalDefaultStage)
     }

@@ -15,8 +15,8 @@ class LlmRawResponseEventHook(
         options: ChatRequestOptions,
         completion: ChatCompletion,
     ) {
-        val actor = options.metadata.actor?.trim().orEmpty()
-        val callSite = options.metadata.callSite?.trim().orEmpty()
+        val actor = options.metadata.actor.trim()
+        val callSite = options.metadata.callSite.trim()
         if (actor.isBlank() || callSite.isBlank()) {
             return
         }

@@ -61,19 +61,19 @@ class LegacyPromptWebSearchEngine(
                     content = "Search query: $query"
                 )
             ),
-            maxTokens = config.maxPromptTokens
+            maxTokens = config.planner.maxPromptTokens
         )
 
         var response = null as psyke.llm.ChatCompletion?
         var lastError: Exception? = null
-        val retryAttempts = maxOf(1, config.llmRetryAttempts)
+        val retryAttempts = maxOf(1, config.planner.llmRetryAttempts)
         for (attempt in 1..retryAttempts) {
             try {
                 response = modelClient.chat(
                     messages = messages,
                     options = ChatRequestOptions(
                         temperature = 0.1,
-                        maxTokens = config.maxCompletionTokens,
+                        maxTokens = config.planner.maxCompletionTokens,
                         metadata = ChatCallMetadata(
                             actor = "ego",
                             callSite = "web_search",
