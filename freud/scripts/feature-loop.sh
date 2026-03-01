@@ -89,6 +89,7 @@ scenario_pack_cmd="${FREUD_SCENARIO_PACK_CMD:-}"
 reasoning_logic_cmd="${FREUD_REASONING_EVAL_LOGIC_CMD:-}"
 reasoning_model_cmd="${FREUD_REASONING_EVAL_MODEL_CMD:-}"
 memory_smoke_cmd="${FREUD_MEMORY_SMOKE_CMD:-}"
+ai_triage_cmd="${FREUD_AI_TRIAGE_CMD:-freud/scripts/ai-triage-failure.sh --if-configured}"
 summarizer_cmd="${FREUD_SUMMARIZER_CMD:-}"
 run_root_cfg="${FREUD_RUN_ROOT:-.psyke/runs/freud}"
 gradle_user_home_cfg="${FREUD_GRADLE_USER_HOME:-}"
@@ -235,6 +236,7 @@ write_run_config() {
     echo "    \"reasoning_eval_logic\": \"$(json_escape "$reasoning_logic_cmd")\","
     echo "    \"reasoning_eval_model\": \"$(json_escape "$reasoning_model_cmd")\","
     echo "    \"memory_live_smoke\": \"$(json_escape "$memory_smoke_cmd")\","
+    echo "    \"ai_triage\": \"$(json_escape "$ai_triage_cmd")\","
     echo "    \"summarizer\": \"$(json_escape "$summarizer_cmd")\""
     echo "  }"
     echo "}"
@@ -604,6 +606,22 @@ fi
 
 "$repo_root/freud/scripts/triage-run.sh" "$run_dir" >/dev/null
 emit_trail "triage_complete" "" "ok" "triage artifacts generated" "" "$artifact_dir/anomalies.json" ""
+
+if [[ "$should_stop" == "true" && -n "$ai_triage_cmd" && "$dry_run" != "true" ]]; then
+  emit_trail "ai_triage_start" "" "running" "AI failure triage started" "$ai_triage_cmd" "" ""
+  set +e
+  (
+    cd "$repo_root"
+    FREUD_RUN_DIR="$run_dir" FREUD_ARTIFACT_DIR="$artifact_dir" eval "$ai_triage_cmd"
+  ) >"$log_dir/08-ai-triage.log" 2>&1
+  ai_triage_exit=$?
+  set -e
+  if [[ $ai_triage_exit -eq 0 ]]; then
+    emit_trail "ai_triage_end" "" "pass" "AI triage complete" "$ai_triage_cmd" "$log_dir/08-ai-triage.log" "$artifact_dir/ai-triage.json"
+  else
+    emit_trail "ai_triage_end" "" "fail" "AI triage failed (non-fatal)" "$ai_triage_cmd" "$log_dir/08-ai-triage.log" ""
+  fi
+fi
 
 if [[ -n "$summarizer_cmd" && "$dry_run" != "true" ]]; then
   emit_trail "summarizer_start" "" "running" "external summarizer start" "$summarizer_cmd" "" ""
