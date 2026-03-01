@@ -705,24 +705,24 @@ class LlmEgoPlanner(
         val decision: String? = null,
         val urgency: String? = null,
         val thought: String? = null,
-        @JsonProperty("long_term_memory_recall_query")
+        @field:JsonProperty("long_term_memory_recall_query")
         val longTermMemoryRecallQuery: String? = null,
-        @JsonProperty("action_type")
+        @field:JsonProperty("action_type")
         val actionType: String? = null,
-        @JsonProperty("action_payload")
+        @field:JsonProperty("action_payload")
         val actionPayload: String? = null,
-        @JsonProperty("action_summary")
+        @field:JsonProperty("action_summary")
         val actionSummary: String? = null,
         val reason: String? = null,
     )
 
     private data class ActionVerifierPayload(
         val verdict: String? = null,
-        @JsonProperty("action_type")
+        @field:JsonProperty("action_type")
         val actionType: String? = null,
-        @JsonProperty("action_payload")
+        @field:JsonProperty("action_payload")
         val actionPayload: String? = null,
-        @JsonProperty("action_summary")
+        @field:JsonProperty("action_summary")
         val actionSummary: String? = null,
         val reason: String? = null,
     )
