@@ -37,7 +37,7 @@ class SensoryCortexTest {
             )
         }
         val cortex = SensoryCortex(
-            config = AgentConfig(maxInputChars = 12),
+            config = AgentConfig(planner = PlannerConfig(maxInputChars = 12)),
             source = source
         )
 

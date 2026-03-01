@@ -5,6 +5,9 @@ import psyke.agent.actions.websearch.WebSearchEngine
 import psyke.agent.actions.websearch.WebSearchResult
 import psyke.agent.actions.websearch.WebSearchSource
 import psyke.agent.core.AgentConfig
+import psyke.agent.core.MemoryConfig
+import psyke.agent.core.MetaReasonerConfig
+import psyke.agent.core.PlannerConfig
 import psyke.agent.cortex.motor.MotorCortex
 import psyke.agent.ego.Ego
 import psyke.agent.ego.LlmEgoPlanner
@@ -50,7 +53,7 @@ class AgentScenarioPackTest {
         }
         val instrumentation = RecordingInstrumentation()
         val outputs = mutableListOf<String>()
-        val config = AgentConfig(maxLoopStepsPerInput = 8, maxThoughtPasses = 4)
+        val config = AgentConfig(planner = PlannerConfig(maxLoopStepsPerInput = 8, maxThoughtPasses = 4))
         val agent = Ego(
             planner = LlmEgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
             superego = Superego(modelClient = superegoLlm, config = config, instrumentation = instrumentation),
@@ -98,7 +101,7 @@ class AgentScenarioPackTest {
                     sources = emptyList()
                 )
         }
-        val config = AgentConfig(maxLoopStepsPerInput = 7, maxThoughtPasses = 1)
+        val config = AgentConfig(planner = PlannerConfig(maxLoopStepsPerInput = 7, maxThoughtPasses = 1))
         val agent = Ego(
             planner = LlmEgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
             superego = Superego(modelClient = superegoLlm, config = config, instrumentation = instrumentation),
@@ -134,7 +137,7 @@ class AgentScenarioPackTest {
                 hitCount = 1
             )
         )
-        val config = AgentConfig(maxLoopStepsPerInput = 4)
+        val config = AgentConfig(planner = PlannerConfig(maxLoopStepsPerInput = 4))
         val agent = Ego(
             planner = LlmEgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
             superego = Superego(modelClient = superegoLlm, config = config, instrumentation = instrumentation),
@@ -169,12 +172,16 @@ class AgentScenarioPackTest {
         val instrumentation = RecordingInstrumentation()
         val outputs = mutableListOf<String>()
         val config = AgentConfig(
-            maxLoopStepsPerInput = 24,
-            maxThoughtPasses = 20,
-            llmRetryAttempts = 1,
-            deliberationPressureAssessmentMinStep = 1,
-            forcedTerminalPressureThreshold = 0.55,
-            forcedTerminalStaleStreakThreshold = 2
+            planner = PlannerConfig(
+                maxLoopStepsPerInput = 24,
+                maxThoughtPasses = 20,
+                llmRetryAttempts = 1
+            ),
+            metaReasoner = MetaReasonerConfig(
+                deliberationPressureAssessmentMinStep = 1,
+                forcedTerminalPressureThreshold = 0.55,
+                forcedTerminalStaleStreakThreshold = 2
+            )
         )
         val agent = Ego(
             planner = LlmEgoPlanner(modelClient = failingClient, config = config, instrumentation = instrumentation),
@@ -215,7 +222,7 @@ class AgentScenarioPackTest {
         }
         val instrumentation = RecordingInstrumentation()
         val outputs = mutableListOf<String>()
-        val config = AgentConfig(maxLoopStepsPerInput = 6, maxThoughtPasses = 2)
+        val config = AgentConfig(planner = PlannerConfig(maxLoopStepsPerInput = 6, maxThoughtPasses = 2))
         val agent = Ego(
             planner = LlmEgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
             superego = Superego(modelClient = superegoLlm, config = config, instrumentation = instrumentation),

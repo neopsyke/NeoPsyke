@@ -15,8 +15,21 @@ class MemoryStore(
     private val compactThresholdRatio: Double = 0.85,
     private val targetRatio: Double = 0.65,
 ) {
+    companion object {
+        /** Maximum chars stored per turn when adding to short-term memory. */
+        const val TURN_CONTENT_MAX_CHARS: Int = 700
+        /** Max chars per turn when folding old turns into the rolled summary. */
+        const val FOLDED_TURN_PREVIEW_CHARS: Int = 90
+        /** Minimum chars the rolled summary is allowed to occupy. */
+        const val SUMMARY_MIN_CHARS: Int = 240
+        /** Max chars per turn when building the recent-turns section of the prompt. */
+        const val RECENT_TURN_PREVIEW_CHARS: Int = 140
+        /** Fraction of maxChars used as the rolled-summary capacity cap. */
+        const val SUMMARY_CAP_RATIO: Double = 0.60
+    }
     private val recentTurns = ArrayDeque<DialogueTurn>()
     private var rolledSummary: String = ""
+    private var recentTurnsCharCount: Int = 0
 
     init {
         require(maxChars >= 512) { "maxChars must be at least 512." }
@@ -24,17 +37,14 @@ class MemoryStore(
 
     @Synchronized
     fun remember(turn: DialogueTurn) {
-        val normalized = TextSecurity.preview(turn.content, 700)
+        val normalized = TextSecurity.preview(turn.content, TURN_CONTENT_MAX_CHARS)
         if (normalized.isBlank()) {
             return
         }
 
-        recentTurns.addLast(
-            DialogueTurn(
-                role = turn.role,
-                content = normalized
-            )
-        )
+        val newTurn = DialogueTurn(role = turn.role, content = normalized)
+        recentTurns.addLast(newTurn)
+        recentTurnsCharCount += normalized.length + 12
         compactIfNeeded()
     }
 
@@ -66,7 +76,8 @@ class MemoryStore(
         }
 
         while (totalChars() > maxChars && recentTurns.size > 4) {
-            recentTurns.removeFirst()
+            val removed = recentTurns.removeFirst()
+            recentTurnsCharCount -= removed.content.length + 12
         }
 
         val remainingForSummary = max(0, maxChars - recentTurnsChars())
@@ -81,7 +92,9 @@ class MemoryStore(
         val chunk = mutableListOf<DialogueTurn>()
         repeat(chunkSize) {
             if (recentTurns.isNotEmpty()) {
-                chunk.add(recentTurns.removeFirst())
+                val removed = recentTurns.removeFirst()
+                recentTurnsCharCount -= removed.content.length + 12
+                chunk.add(removed)
             }
         }
         if (chunk.isEmpty()) {
@@ -89,11 +102,11 @@ class MemoryStore(
         }
 
         val compacted = chunk.joinToString(separator = " | ") {
-            "${it.role.name.lowercase()}: ${TextSecurity.preview(it.content, 90)}"
+            "${it.role.name.lowercase()}: ${TextSecurity.preview(it.content, FOLDED_TURN_PREVIEW_CHARS)}"
         }
         val entry = "- $compacted"
         rolledSummary = if (rolledSummary.isBlank()) entry else "$rolledSummary\n$entry"
-        val summaryCap = max(240, (maxChars * 0.60).toInt())
+        val summaryCap = max(SUMMARY_MIN_CHARS, (maxChars * SUMMARY_CAP_RATIO).toInt())
         rolledSummary = trimFromStart(rolledSummary, summaryCap)
     }
 
@@ -103,7 +116,7 @@ class MemoryStore(
         }
 
         val recent = recentTurns.takeLast(8).joinToString(separator = "\n") {
-            "- ${it.role.name.lowercase()}: ${TextSecurity.preview(it.content, 140)}"
+            "- ${it.role.name.lowercase()}: ${TextSecurity.preview(it.content, RECENT_TURN_PREVIEW_CHARS)}"
         }
         return buildString {
             if (rolledSummary.isNotBlank()) {
@@ -120,7 +133,7 @@ class MemoryStore(
 
     private fun totalChars(): Int = rolledSummary.length + recentTurnsChars()
 
-    private fun recentTurnsChars(): Int = recentTurns.sumOf { it.content.length + 12 }
+    private fun recentTurnsChars(): Int = recentTurnsCharCount
 
     private fun trimFromStart(text: String, maxChars: Int): String {
         if (maxChars <= 0) {

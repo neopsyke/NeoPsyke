@@ -28,7 +28,7 @@ class SuperegoGatekeeperTest {
         val instrumentation = RecordingInstrumentation()
         val gatekeeper = Superego(
             modelClient = llm,
-            config = AgentConfig(maxPromptTokens = 100),
+            config = AgentConfig(planner = PlannerConfig(maxPromptTokens = 100)),
             instrumentation = instrumentation
         )
 
@@ -98,7 +98,7 @@ class SuperegoGatekeeperTest {
         llm.enqueueRawResponse("""{"allow":true}""")
         val gatekeeper = Superego(
             modelClient = llm,
-            config = AgentConfig(superegoMaxCompletionTokens = 77)
+            config = AgentConfig(superego = SuperegoConfig(maxCompletionTokens = 77))
         )
 
         gatekeeper.review(action, snapshot)

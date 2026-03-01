@@ -41,7 +41,7 @@ class Superego(
         val messages = buildMessages(action, context, resolvedDirectives)
         var response = null as psyke.llm.ChatCompletion?
         var lastError: Exception? = null
-        val retryAttempts = maxOf(1, config.llmRetryAttempts)
+        val retryAttempts = maxOf(1, config.planner.llmRetryAttempts)
         for (attempt in 1..retryAttempts) {
             try {
                 response = modelClient.chat(
@@ -49,7 +49,7 @@ class Superego(
                     options = ChatRequestOptions(
                         temperature = 0.0,
                         // Keep response budget independent from prompt/directive growth.
-                        maxTokens = config.superegoMaxCompletionTokens,
+                        maxTokens = config.superego.maxCompletionTokens,
                         metadata = ChatCallMetadata(
                             actor = "superego",
                             callSite = "action_review",
@@ -93,6 +93,12 @@ class Superego(
         return try {
             val json = TextSecurity.extractJsonObject(raw)
             val payload = mapper.readValue<SuperegoResponse>(json)
+            if (payload.allow == null) {
+                logger.warn {
+                    "Superego response missing required 'allow' field. response_len=${raw.length} preview='${TextSecurity.preview(raw, 120)}'"
+                }
+                return GateDecision(allow = false, reason = "Superego response missing required field.")
+            }
             val allow = payload.allow == true
             val reason = TextSecurity.clamp(payload.reason?.trim().orEmpty(), MAX_DENY_REASON_CHARS)
             GateDecision(
@@ -179,7 +185,7 @@ class Superego(
                     """.trimIndent()
                 )
             ),
-            maxTokens = config.maxPromptTokens
+            maxTokens = config.planner.maxPromptTokens
         )
     }
 

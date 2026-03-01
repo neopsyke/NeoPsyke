@@ -54,7 +54,7 @@ class SensoryCortex(
             return signal
         }
 
-        val sanitized = TextSecurity.clamp(signal.input.content.trim(), config.maxInputChars)
+        val sanitized = TextSecurity.clamp(signal.input.content.trim(), config.planner.maxInputChars)
         if (sanitized.isBlank()) {
             return SensorySignal.NoInput
         }

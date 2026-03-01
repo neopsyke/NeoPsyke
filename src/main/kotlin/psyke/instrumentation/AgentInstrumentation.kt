@@ -28,7 +28,7 @@ class InstrumentationBus(
     private val queue = ArrayBlockingQueue<AgentEvent>(queueCapacity)
     private val nextEventId = AtomicLong(1)
     private val droppedEvents = AtomicLong(0)
-    private val activeSinks = sinks.toList()
+    private val activeSinks = java.util.concurrent.CopyOnWriteArrayList<InstrumentationSink>(sinks)
     private val activeCriticalSinks = criticalSinks.toList()
     @Volatile
     private var droppedEventsObserver: ((delta: Long, total: Long) -> Unit)? = null
@@ -69,6 +69,10 @@ class InstrumentationBus(
                 // keep instrumentation path robust
             }
         }
+    }
+
+    fun addSink(sink: InstrumentationSink) {
+        activeSinks.add(sink)
     }
 
     fun setDroppedEventsObserver(observer: ((delta: Long, total: Long) -> Unit)?) {

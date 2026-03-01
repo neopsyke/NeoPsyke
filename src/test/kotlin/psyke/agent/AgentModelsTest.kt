@@ -9,11 +9,11 @@ class AgentModelsTest {
     fun `agent config defaults to zero loop delay`() {
         val config = AgentConfig()
         assertEquals(0, config.loopDelayMs)
-        assertEquals(180, config.maxLoopStepsPerInput)
-        assertEquals(2, config.llmRetryAttempts)
-        assertEquals(192, config.superegoMaxCompletionTokens)
-        assertEquals(0.98, config.forcedTerminalPressureThreshold)
-        assertEquals(8, config.forcedTerminalStaleStreakThreshold)
+        assertEquals(180, config.planner.maxLoopStepsPerInput)
+        assertEquals(2, config.planner.llmRetryAttempts)
+        assertEquals(192, config.superego.maxCompletionTokens)
+        assertEquals(0.98, config.metaReasoner.forcedTerminalPressureThreshold)
+        assertEquals(8, config.metaReasoner.forcedTerminalStaleStreakThreshold)
     }
 
     @Test
