@@ -44,6 +44,9 @@ Instructions for coding agents working in this repository (Codex, Claude, Gemini
   - `freud/scripts/feature-loop.sh <feature-id>`
 - Live-inclusive run (only when explicitly required):
   - `freud/scripts/feature-loop.sh <feature-id> --live`
+- Resume from a specific step (skips earlier steps, preserves artifact record):
+  - `freud/scripts/feature-loop.sh <feature-id> --from-step <step>`
+  - Valid step names: `preflight_compile targeted_tests full_tests scenario_pack reasoning_eval_logic reasoning_eval_model memory_live_smoke`
 - Scenario-only run:
   - `freud/scripts/run-scenarios.sh --file freud/scenarios/v1/psyke-agent-scenarios.json`
 - Dry-run inspection:
@@ -63,6 +66,8 @@ Instructions for coding agents working in this repository (Codex, Claude, Gemini
 - Fast-entry artifacts (read these first):
   - `artifacts/summary-compact.md`
   - `artifacts/summary.json` (includes triage + summarizer counters)
+  - `artifacts/ai-triage.md` (AI root-cause + fix suggestion; present only on failure)
+  - `artifacts/ai-triage.json` (structured: `root_cause`, `fix_suggestion`, `confidence`, `relevant_lines`)
   - `artifacts/model-summary.json` (Tier-2 optional)
   - `artifacts/model-summary.md` (Tier-2 optional)
   - `artifacts/model-summary-attempts.tsv` (Tier-2 provider health/fallback trace)
@@ -101,6 +106,12 @@ Instructions for coding agents working in this repository (Codex, Claude, Gemini
   - `freud/config/default.env`
 - Optional override:
   - `FREUD_CONFIG=/path/to/adapter.env`
+- AI failure triage knobs (optional, runs automatically on step failure):
+  - `FREUD_AI_TRIAGE_CMD` — override or disable (`=''`) the triage command.
+  - `FREUD_TRIAGE_PROVIDER` — same provider values as summarizer (default `auto`).
+  - `FREUD_TRIAGE_MODEL`, `FREUD_TRIAGE_BASE_URL`, `FREUD_TRIAGE_MAX_OUTPUT_TOKENS` (default `500`).
+  - `FREUD_TRIAGE_LOG_TAIL_LINES` (default `60`), `FREUD_TRIAGE_TIMEOUT_SEC` (default `30`).
+  - Reuses `OPENAI_API_KEY` / `MISTRAL_API_KEY` / `GROQ_API_KEY`; silently skips if none available.
 - Tier-2 summarizer knobs (optional):
   - `FREUD_SUMMARIZER_PROVIDER`, `FREUD_SUMMARIZER_MODEL`, `FREUD_SUMMARIZER_BASE_URL`
   - Default is `FREUD_SUMMARIZER_PROVIDER=auto` (uses first available key/provider).
@@ -131,6 +142,96 @@ Instructions for coding agents working in this repository (Codex, Claude, Gemini
 - Test execution policy for coding agents:
   - Fast local unit/integration tests with deterministic stubs are allowed in the default `./gradlew test` suite.
   - Tests that require real network calls, real provider APIs, or consume paid external tokens must be manual-only and run only when explicitly requested.
+
+## Architecture Patterns (Required)
+
+These patterns encode lessons from post-implementation reviews.
+Violating them will cause the same class of bugs to recur.
+
+### Per-Input State Reset
+Any component that holds **per-input-loop state** (counters, step indices,
+flags that track progress within one user turn) must expose a
+`resetForNewInput()` method. `Ego` calls it on every component at the end
+of the input loop.
+
+- Correct: `MemoryCoordinator.resetForNewInput()` resets `lastConsolidationStep`.
+- Wrong: relying on the orchestrator to remember to zero-out individual fields.
+- When adding a new counter/index to a class, ask: "Does this need to reset each turn?"
+  If yes, add it to that class's `resetForNewInput()` and verify the call site in `Ego`.
+
+### Thread Safety for Shared Mutable State
+- Sink registries and callback lists that are read/written from multiple threads
+  must use `CopyOnWriteArrayList`, not `ArrayList` or `mutableListOf()`.
+- Fields that can be set from one thread and read from another must be `@Volatile`.
+- Never use a plain `var` or `MutableList` for anything touched by both the agent
+  loop thread and a registration/configuration thread.
+- Canonical example: `InstrumentationBus` uses `CopyOnWriteArrayList` for sinks;
+  `MetricsEventSink.instrumentation` is `@Volatile`.
+
+### Late-Binding / Setter Injection
+Components that receive a dependency after construction (e.g. metrics hooks wired
+by the runtime, not the constructor) must follow the setter-injection pattern:
+
+```kotlin
+@Volatile private var myDep: MyDep? = null
+fun setMyDep(dep: MyDep) { myDep = dep }
+```
+
+Do not capture such dependencies in the primary constructor — the wiring happens
+after instantiation, so constructor capture will silently hold `null`.
+
+### LLM Caller Standard Pattern
+Every class that calls an LLM (`Superego`, `MetaReasoner`, `LongTermMemoryAdvisor`,
+and any future caller) must follow all three sub-rules:
+
+1. **Retry loop**
+   ```kotlin
+   val attempts = maxOf(1, config.planner.llmRetryAttempts)
+   for (attempt in 1..attempts) {
+       try { response = modelClient.chat(...); break }
+       catch (ex: Exception) {
+           if (attempt < attempts) logger.warn(ex) { "... retrying (attempt $attempt/$attempts)" }
+           else logger.warn(ex) { "... failed after $attempts attempts" }
+       }
+   }
+   ```
+2. **Required-field validation** — after JSON deserialization, check every required
+   field for `null`/blank before using it. Log a warning and return the safe
+   fallback if any required field is missing.
+3. **Safe fallback** — on exhaustion or parse failure, return a well-defined
+   fallback value (never throw or return `null` from a non-nullable return type).
+
+Do not add a new LLM caller without all three sub-rules in place.
+
+### Named Constants for Numeric Thresholds
+Magic numbers (character limits, ratios, step counts, token caps) must be
+extracted to `const val` entries in the `companion object` of the class that
+owns the logic. Never scatter bare literals across multiple methods.
+
+```kotlin
+companion object {
+    const val TURN_CONTENT_MAX_CHARS: Int = 700
+    const val SUMMARY_CAP_RATIO: Double = 0.60
+}
+```
+
+Reference only the named constant inside the class body. This makes threshold
+changes a one-line edit with a clear name at the call site.
+
+### Domain-Grouped Configuration
+`AgentConfig` is a **container** of domain sub-configs + infrastructure fields.
+Do not add new fields directly to `AgentConfig`.
+
+| Sub-config | Owns |
+|---|---|
+| `PlannerConfig` | loop limits, token caps, retry attempts |
+| `SuperegoConfig` | superego-specific completion limits |
+| `MemoryConfig` | short/long-term memory knobs, MCP timeouts |
+| `MetaReasonerConfig` | deliberation pressure thresholds, cooldown, max tokens |
+
+When adding a new knob, put it in the matching sub-config. If none fits, create
+a new sub-config and add it as a field on `AgentConfig`. Access paths follow the
+pattern `config.<domain>.<field>` (e.g. `config.planner.llmRetryAttempts`).
 
 ## Code Style
 - Follow existing Kotlin style and package structure.
