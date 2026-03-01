@@ -4,11 +4,17 @@ set -euo pipefail
 usage() {
   cat <<'EOF'
 Usage:
-  freud/scripts/feature-loop.sh <feature_id> [--live] [--dry-run] [--continue-on-fail] [--config <path>]
+  freud/scripts/feature-loop.sh <feature_id> [--live] [--dry-run] [--continue-on-fail]
+                                [--config <path>] [--from-step <step>]
+
+Step names for --from-step:
+  preflight_compile  targeted_tests  full_tests  scenario_pack
+  reasoning_eval_logic  reasoning_eval_model  memory_live_smoke
 
 Description:
   Runs a deterministic-first feature workflow and writes compact artifacts under:
   .psyke/runs/freud/<timestamp>-<feature_id>/
+  Use --from-step to resume from a specific step, skipping earlier ones.
 EOF
 }
 
@@ -37,6 +43,7 @@ mode="stub"
 dry_run="false"
 continue_on_fail=""
 config_path=""
+from_step=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -56,6 +63,14 @@ while [[ $# -gt 0 ]]; do
       config_path="${2:-}"
       if [[ -z "$config_path" ]]; then
         echo "--config requires a value."
+        exit 1
+      fi
+      shift 2
+      ;;
+    --from-step)
+      from_step="${2:-}"
+      if [[ -z "$from_step" ]]; then
+        echo "--from-step requires a step name."
         exit 1
       fi
       shift 2
@@ -103,12 +118,14 @@ for summarizer_env_var in \
 done
 
 project_name="${FREUD_PROJECT_NAME:-unknown-project}"
+preflight_compile_cmd="${FREUD_PREFLIGHT_COMPILE_CMD:-}"
 targeted_cmd="${FREUD_TARGETED_TEST_CMD:-}"
 full_cmd="${FREUD_FULL_TEST_CMD:-}"
 scenario_pack_cmd="${FREUD_SCENARIO_PACK_CMD:-}"
 reasoning_logic_cmd="${FREUD_REASONING_EVAL_LOGIC_CMD:-}"
 reasoning_model_cmd="${FREUD_REASONING_EVAL_MODEL_CMD:-}"
 memory_smoke_cmd="${FREUD_MEMORY_SMOKE_CMD:-}"
+ai_triage_cmd="${FREUD_AI_TRIAGE_CMD:-freud/scripts/ai-triage-failure.sh --if-configured}"
 summarizer_cmd="${FREUD_SUMMARIZER_CMD:-}"
 run_root_cfg="${FREUD_RUN_ROOT:-.psyke/runs/freud}"
 gradle_user_home_cfg="${FREUD_GRADLE_USER_HOME:-}"
@@ -130,6 +147,54 @@ fi
 
 if [[ -z "$continue_on_fail" ]]; then
   continue_on_fail="${FREUD_CONTINUE_ON_FAIL:-false}"
+fi
+
+# Ordered list of all step names for --from-step resolution.
+all_steps_ordered=(
+  preflight_compile
+  targeted_tests
+  full_tests
+  scenario_pack
+  reasoning_eval_logic
+  reasoning_eval_model
+  memory_live_smoke
+)
+
+# step_is_active <step_name>: returns 0 (active) or 1 (skip) based on --from-step.
+step_is_active() {
+  local step="$1"
+  if [[ -z "$from_step" ]]; then
+    return 0
+  fi
+  local seen_from="false"
+  local s
+  for s in "${all_steps_ordered[@]}"; do
+    if [[ "$s" == "$from_step" ]]; then
+      seen_from="true"
+    fi
+    if [[ "$s" == "$step" ]]; then
+      if [[ "$seen_from" == "true" || "$s" == "$from_step" ]]; then
+        return 0
+      else
+        return 1
+      fi
+    fi
+  done
+  # Unknown step name: treat as active (don't silently skip unknown steps).
+  return 0
+}
+
+if [[ -n "$from_step" ]]; then
+  valid_from="false"
+  for s in "${all_steps_ordered[@]}"; do
+    if [[ "$s" == "$from_step" ]]; then valid_from="true"; break; fi
+  done
+  if [[ "$valid_from" != "true" ]]; then
+    echo "Unknown step name for --from-step: '$from_step'"
+    echo "Valid step names: ${all_steps_ordered[*]}"
+    exit 1
+  fi
+  echo "Resuming from step: $from_step (earlier steps will be skipped)"
 fi
 
 run_id="$(date -u +"%Y%m%dT%H%M%SZ")"
@@ -257,6 +322,7 @@ write_run_config() {
     echo "  \"mode\": \"$(json_escape "$mode")\","
     echo "  \"dry_run\": \"$(json_escape "$dry_run")\","
     echo "  \"continue_on_fail\": \"$(json_escape "$continue_on_fail")\","
+    echo "  \"from_step\": \"$(json_escape "${from_step:-}")\","
     echo "  \"commands\": {"
     echo "    \"targeted_tests\": \"$(json_escape "$targeted_cmd")\","
     echo "    \"full_tests\": \"$(json_escape "$full_cmd")\","
@@ -264,6 +330,7 @@ write_run_config() {
     echo "    \"reasoning_eval_logic\": \"$(json_escape "$reasoning_logic_cmd")\","
     echo "    \"reasoning_eval_model\": \"$(json_escape "$reasoning_model_cmd")\","
     echo "    \"memory_live_smoke\": \"$(json_escape "$memory_smoke_cmd")\","
+    echo "    \"ai_triage\": \"$(json_escape "$ai_triage_cmd")\","
     echo "    \"summarizer\": \"$(json_escape "$summarizer_cmd")\""
     echo "  }"
     echo "}"
@@ -611,25 +678,52 @@ emit_trail "run_start" "" "running" "feature loop started" "" "" "$run_config_js
 
 should_stop="false"
 
-run_step "targeted_tests" "$targeted_cmd" "$log_dir/01-targeted-tests.log" || should_stop="true"
+# Helper: resolve the effective command for a step, respecting --from-step.
+# If the step is before --from-step, returns "" so run_step records it as skipped.
+step_cmd_for() {
+  local step_name="$1" cmd="$2"
+  if step_is_active "$step_name"; then printf '%s' "$cmd"
+  else printf ''; fi
+}
+
+run_step "preflight_compile" "$(step_cmd_for preflight_compile "$preflight_compile_cmd")" "$log_dir/00-preflight-compile.log" || should_stop="true"
 if [[ "$should_stop" != "true" ]]; then
-  run_step "full_tests" "$full_cmd" "$log_dir/02-full-tests.log" || should_stop="true"
+  run_step "targeted_tests" "$(step_cmd_for targeted_tests "$targeted_cmd")" "$log_dir/01-targeted-tests.log" || should_stop="true"
 fi
 if [[ "$should_stop" != "true" ]]; then
-  run_step "scenario_pack" "$scenario_pack_cmd" "$log_dir/03-scenario-pack.log" || should_stop="true"
+  run_step "full_tests" "$(step_cmd_for full_tests "$full_cmd")" "$log_dir/02-full-tests.log" || should_stop="true"
 fi
 if [[ "$should_stop" != "true" ]]; then
-  run_step "reasoning_eval_logic" "$reasoning_logic_cmd" "$log_dir/04-reasoning-eval-logic.log" || should_stop="true"
+  run_step "scenario_pack" "$(step_cmd_for scenario_pack "$scenario_pack_cmd")" "$log_dir/03-scenario-pack.log" || should_stop="true"
+fi
+if [[ "$should_stop" != "true" ]]; then
+  run_step "reasoning_eval_logic" "$(step_cmd_for reasoning_eval_logic "$reasoning_logic_cmd")" "$log_dir/04-reasoning-eval-logic.log" || should_stop="true"
 fi
 if [[ "$should_stop" != "true" && "$mode" == "live" ]]; then
-  run_step "reasoning_eval_model" "$reasoning_model_cmd" "$log_dir/05-reasoning-eval-model.log" || should_stop="true"
+  run_step "reasoning_eval_model" "$(step_cmd_for reasoning_eval_model "$reasoning_model_cmd")" "$log_dir/05-reasoning-eval-model.log" || should_stop="true"
 fi
 if [[ "$should_stop" != "true" && "$mode" == "live" ]]; then
-  run_step "memory_live_smoke" "$memory_smoke_cmd" "$log_dir/06-memory-live-smoke.log" || should_stop="true"
+  run_step "memory_live_smoke" "$(step_cmd_for memory_live_smoke "$memory_smoke_cmd")" "$log_dir/06-memory-live-smoke.log" || should_stop="true"
 fi
 
 "$repo_root/freud/scripts/triage-run.sh" "$run_dir" >/dev/null
 emit_trail "triage_complete" "" "ok" "triage artifacts generated" "" "$artifact_dir/anomalies.json" ""
+
+if [[ "$should_stop" == "true" && -n "$ai_triage_cmd" && "$dry_run" != "true" ]]; then
+  emit_trail "ai_triage_start" "" "running" "AI failure triage started" "$ai_triage_cmd" "" ""
+  set +e
+  (
+    cd "$repo_root"
+    FREUD_RUN_DIR="$run_dir" FREUD_ARTIFACT_DIR="$artifact_dir" eval "$ai_triage_cmd"
+  ) >"$log_dir/08-ai-triage.log" 2>&1
+  ai_triage_exit=$?
+  set -e
+  if [[ $ai_triage_exit -eq 0 ]]; then
+    emit_trail "ai_triage_end" "" "pass" "AI triage complete" "$ai_triage_cmd" "$log_dir/08-ai-triage.log" "$artifact_dir/ai-triage.json"
+  else
+    emit_trail "ai_triage_end" "" "fail" "AI triage failed (non-fatal)" "$ai_triage_cmd" "$log_dir/08-ai-triage.log" ""
+  fi
+fi
 
 if [[ -n "$summarizer_cmd" && "$dry_run" != "true" ]]; then
   emit_trail "summarizer_start" "" "running" "external summarizer start" "$summarizer_cmd" "" ""
