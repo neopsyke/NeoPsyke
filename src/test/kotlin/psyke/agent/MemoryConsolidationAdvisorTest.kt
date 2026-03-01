@@ -17,7 +17,7 @@ class LongTermMemoryAdvisorTest {
         }
         val advisor = LlmLongTermMemoryAdvisor(
             modelClient = llm,
-            config = AgentConfig(longTermMemoryMaxTokens = 111)
+            config = AgentConfig(memory = MemoryConfig(longTermMemoryMaxTokens = 111))
         )
 
         val decision = advisor.assess(

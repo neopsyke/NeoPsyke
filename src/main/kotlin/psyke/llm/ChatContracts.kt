@@ -18,14 +18,17 @@ data class ChatRequestOptions(
 )
 
 data class ChatCallMetadata(
-    val actor: String? = null,
-    val callSite: String? = null,
+    val actor: String = "",
+    val callSite: String = "",
     val actionType: String? = null,
 )
 
 enum class ChatCallStatus {
     OK,
-    ERROR
+    ERROR,
+    TIMEOUT,
+    RATE_LIMITED,
+    INVALID_RESPONSE
 }
 
 data class ChatCallRecord(

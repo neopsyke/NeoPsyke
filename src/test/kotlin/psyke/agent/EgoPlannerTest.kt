@@ -18,7 +18,7 @@ class EgoPlannerTest {
         val instrumentation = RecordingInstrumentation()
         val planner = LlmEgoPlanner(
             modelClient = llm,
-            config = AgentConfig(maxThoughtChars = 5, maxCompletionTokens = 88),
+            config = AgentConfig(planner = PlannerConfig(maxThoughtChars = 5, maxCompletionTokens = 88)),
             instrumentation = instrumentation
         )
 
@@ -64,7 +64,7 @@ class EgoPlannerTest {
         )
         val planner = LlmEgoPlanner(
             modelClient = llm,
-            config = AgentConfig(maxActionPayloadChars = 7, maxActionSummaryChars = 8)
+            config = AgentConfig(planner = PlannerConfig(maxActionPayloadChars = 7, maxActionSummaryChars = 8))
         )
 
         val decision = planner.decide(
@@ -204,7 +204,7 @@ class EgoPlannerTest {
         var repairCount = 0
         val planner = LlmEgoPlanner(
             modelClient = llm,
-            config = AgentConfig(maxActionSummaryChars = 180),
+            config = AgentConfig(planner = PlannerConfig(maxActionSummaryChars = 180)),
             instrumentation = instrumentation,
             onPlannerOutputRepaired = { repairCount += 1 }
         )
@@ -320,7 +320,7 @@ class EgoPlannerTest {
         llm.enqueueRawResponse("""{"decision":"noop","reason":"done"}""")
         val planner = LlmEgoPlanner(
             modelClient = llm,
-            config = AgentConfig(maxPromptTokens = 120)
+            config = AgentConfig(planner = PlannerConfig(maxPromptTokens = 120))
         )
 
         val context = PlannerContext(
@@ -509,7 +509,7 @@ class EgoPlannerTest {
         }
         val planner = LlmEgoPlanner(
             modelClient = flakyClient,
-            config = AgentConfig(llmRetryAttempts = 3)
+            config = AgentConfig(planner = PlannerConfig(llmRetryAttempts = 3))
         )
 
         val decision = planner.decide(

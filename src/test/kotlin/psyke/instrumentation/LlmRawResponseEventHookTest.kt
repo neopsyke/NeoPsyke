@@ -47,7 +47,7 @@ class LlmRawResponseEventHookTest {
 
         hook.onSuccess(
             messages = emptyList(),
-            options = ChatRequestOptions(metadata = ChatCallMetadata(actor = "ego", callSite = null)),
+            options = ChatRequestOptions(metadata = ChatCallMetadata(actor = "ego", callSite = "")),
             completion = ChatCompletion(content = "ok", model = "stub")
         )
 

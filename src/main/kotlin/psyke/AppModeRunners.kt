@@ -42,6 +42,7 @@ import psyke.instrumentation.JsonlEventSink
 import psyke.instrumentation.LlmCallEventObserver
 import psyke.instrumentation.LlmRawResponseEventHook
 import psyke.instrumentation.MemoryEvalFlowLogSink
+import psyke.instrumentation.MetricsEventSink
 import psyke.instrumentation.MetricsSnapshotObserver
 import psyke.instrumentation.ReasoningEvalFlowLogSink
 import psyke.instrumentation.StructuredLogSink
@@ -212,7 +213,7 @@ internal object AppModeRunners {
             }
             return
         }
-        if (!checkMcpMemoryProviderHealth(command = memoryCommand, timeoutMs = config.mcpMemoryCallTimeoutMs, modeLabel = "eval_memory_live")) {
+        if (!checkMcpMemoryProviderHealth(command = memoryCommand, timeoutMs = config.memory.mcpMemoryCallTimeoutMs, modeLabel = "eval_memory_live")) {
             return
         }
     
@@ -275,9 +276,9 @@ internal object AppModeRunners {
                         ?: java.time.LocalDate.now(java.time.ZoneOffset.UTC).toString()
                     McpHippocampus(
                         command = memoryCommand,
-                        callTimeoutMs = config.mcpMemoryCallTimeoutMs,
-                        defaultMaxItems = config.longTermMemoryRecallMaxItems,
-                        defaultMaxChars = config.longTermMemoryRecallMaxChars
+                        callTimeoutMs = config.memory.mcpMemoryCallTimeoutMs,
+                        defaultMaxItems = config.memory.longTermMemoryRecallMaxItems,
+                        defaultMaxChars = config.memory.longTermMemoryRecallMaxChars
                     ).use { hippocampus ->
                         val report = MemoryLiveEvalRunner(
                             client = client,
@@ -457,37 +458,37 @@ internal object AppModeRunners {
                         type = "limits_config",
                         data = mapOf(
                             "limits" to mapOf(
-                                "max_loop_steps" to config.maxLoopStepsPerInput,
+                                "max_loop_steps" to config.planner.maxLoopStepsPerInput,
                                 "loop_delay_ms" to config.loopDelayMs,
-                                "max_thought_passes" to config.maxThoughtPasses,
-                                "max_prompt_tokens" to config.maxPromptTokens,
-                                "max_completion_tokens" to config.maxCompletionTokens,
+                                "max_thought_passes" to config.planner.maxThoughtPasses,
+                                "max_prompt_tokens" to config.planner.maxPromptTokens,
+                                "max_completion_tokens" to config.planner.maxCompletionTokens,
                                 "max_pending_inputs" to config.maxPendingInputs,
                                 "max_pending_thoughts" to config.maxPendingThoughts,
                                 "max_pending_actions" to config.maxPendingActions,
-                                "max_input_chars" to config.maxInputChars,
-                                "short_term_context_max_chars" to config.maxShortTermContextChars,
-                                "short_term_context_max_prompt_tokens" to config.maxShortTermContextPromptTokens,
-                                "max_thought_chars" to config.maxThoughtChars,
-                                "max_action_payload_chars" to config.maxActionPayloadChars,
-                                "max_action_summary_chars" to config.maxActionSummaryChars,
+                                "max_input_chars" to config.planner.maxInputChars,
+                                "short_term_context_max_chars" to config.memory.maxShortTermContextChars,
+                                "short_term_context_max_prompt_tokens" to config.memory.maxShortTermContextPromptTokens,
+                                "max_thought_chars" to config.planner.maxThoughtChars,
+                                "max_action_payload_chars" to config.planner.maxActionPayloadChars,
+                                "max_action_summary_chars" to config.planner.maxActionSummaryChars,
                                 "mcp_call_timeout_ms" to config.mcpCallTimeoutMs,
                                 "mcp_fetch_max_chars" to config.mcpFetchMaxChars,
-                                "mcp_memory_call_timeout_ms" to config.mcpMemoryCallTimeoutMs,
-                                "long_term_memory_recall_max_items" to config.longTermMemoryRecallMaxItems,
-                                "long_term_memory_recall_max_chars" to config.longTermMemoryRecallMaxChars,
-                                "pressure_assessment_min_step" to config.deliberationPressureAssessmentMinStep,
-                                "pressure_assess_every_steps" to config.deliberationPressureAssessmentEverySteps,
-                                "pressure_assess_threshold" to config.deliberationPressureAssessmentThreshold,
-                                "meta_reasoner_cooldown_steps" to config.metaReasonerCooldownSteps,
-                                "meta_reasoner_max_tokens" to config.metaReasonerMaxTokens,
-                                "long_term_memory_assess_every_steps" to config.longTermMemoryAssessEverySteps,
-                                "long_term_memory_assess_cooldown_steps" to config.longTermMemoryAssessCooldownSteps,
-                                "long_term_memory_min_confidence" to config.longTermMemoryMinConfidence,
-                                "long_term_memory_max_tokens" to config.longTermMemoryMaxTokens,
-                                "long_term_memory_max_summary_chars" to config.longTermMemoryMaxSummaryChars,
-                                "long_term_memory_force_assess_on_allowed_action" to config.longTermMemoryForceAssessOnAllowedAction,
-                                "long_term_memory_parse_fallback_disable_after" to config.longTermMemoryParseFallbackDisableAfter
+                                "mcp_memory_call_timeout_ms" to config.memory.mcpMemoryCallTimeoutMs,
+                                "long_term_memory_recall_max_items" to config.memory.longTermMemoryRecallMaxItems,
+                                "long_term_memory_recall_max_chars" to config.memory.longTermMemoryRecallMaxChars,
+                                "pressure_assessment_min_step" to config.metaReasoner.deliberationPressureAssessmentMinStep,
+                                "pressure_assess_every_steps" to config.metaReasoner.deliberationPressureAssessmentEverySteps,
+                                "pressure_assess_threshold" to config.metaReasoner.deliberationPressureAssessmentThreshold,
+                                "meta_reasoner_cooldown_steps" to config.metaReasoner.cooldownSteps,
+                                "meta_reasoner_max_tokens" to config.metaReasoner.maxTokens,
+                                "long_term_memory_assess_every_steps" to config.memory.longTermMemoryAssessEverySteps,
+                                "long_term_memory_assess_cooldown_steps" to config.memory.longTermMemoryAssessCooldownSteps,
+                                "long_term_memory_min_confidence" to config.memory.longTermMemoryMinConfidence,
+                                "long_term_memory_max_tokens" to config.memory.longTermMemoryMaxTokens,
+                                "long_term_memory_max_summary_chars" to config.memory.longTermMemoryMaxSummaryChars,
+                                "long_term_memory_force_assess_on_allowed_action" to config.memory.longTermMemoryForceAssessOnAllowedAction,
+                                "long_term_memory_parse_fallback_disable_after" to config.memory.longTermMemoryParseFallbackDisableAfter
                             )
                         )
                     )
@@ -499,23 +500,16 @@ internal object AppModeRunners {
                     egoModel = llm.egoModel,
                     superegoModel = llm.superegoModel
                 ).use { metrics ->
+                    val metricsEventSink = MetricsEventSink(
+                        metrics = metrics,
+                        longTermMemoryParseFailureAnomalyThreshold = config.memory.longTermMemoryParseFallbackDisableAfter
+                    )
+                    instrumentation.addSink(metricsEventSink)
+                    metricsEventSink.setInstrumentation(instrumentation)
                     instrumentation.setDroppedEventsObserver { delta, total ->
                         metrics.recordDroppedEvents(delta)
                         dashboardStore.recordDroppedEvents(total)
                     }
-    
-                    fun emitMetricsSnapshot() {
-                        metrics.snapshot()?.let { snapshot ->
-                            instrumentation.emit(
-                                AgentEvent(
-                                    type = "metrics_snapshot",
-                                    data = mapOf("metrics" to snapshot)
-                                )
-                            )
-                        }
-                    }
-    
-                    emitMetricsSnapshot()
                     val instrumentationObserver = LlmCallEventObserver(
                         provider = llm.providerLabel,
                         instrumentation = instrumentation
@@ -531,7 +525,7 @@ internal object AppModeRunners {
                     )
                     val rawResponseHook = LlmRawResponseEventHook(
                         instrumentation = instrumentation,
-                        maxRawResponseChars = config.maxActionPayloadChars
+                        maxRawResponseChars = config.planner.maxActionPayloadChars
                     )
     
                     InstrumentedChatModelClient(
@@ -583,7 +577,7 @@ internal object AppModeRunners {
                                         llm = llm,
                                         callObserver = callObserver,
                                         instrumentation = instrumentation,
-                                        maxRawResponseChars = config.maxActionPayloadChars
+                                        maxRawResponseChars = config.planner.maxActionPayloadChars
                                     )
     
                                     webSearchRuntime.use { runtime ->
@@ -607,7 +601,6 @@ internal object AppModeRunners {
                                             }
                                             var plannerNoopCount = 0
                                             var plannerOutputRepairedCount = 0
-                                            var longTermMemoryAssessmentParseFailures = 0
                                             val planner = LlmEgoPlanner(
                                                 modelClient = egoPlannerClient,
                                                 config = config,
@@ -622,7 +615,6 @@ internal object AppModeRunners {
                                                             )
                                                         )
                                                     }
-                                                    emitMetricsSnapshot()
                                                 },
                                                 onPlannerOutputRepaired = {
                                                     metrics.recordPlannerOutputRepaired()
@@ -634,7 +626,6 @@ internal object AppModeRunners {
                                                             )
                                                         )
                                                     }
-                                                    emitMetricsSnapshot()
                                                 }
                                             )
                                             val metaReasoner = LlmMetaReasoner(
@@ -655,63 +646,6 @@ internal object AppModeRunners {
                                                     hippocampus = hippocampus,
                                                     metaReasoner = metaReasoner,
                                                     longTermMemoryAdvisor = longTermMemoryAdvisor,
-                                                    onActionExecuted = { actionType ->
-                                                        metrics.recordActionCall(actionType.name.lowercase())
-                                                        emitMetricsSnapshot()
-                                                    },
-                                                    onActionDenied = {
-                                                        metrics.recordDeniedAction()
-                                                        emitMetricsSnapshot()
-                                                    },
-                                                    onQueueSaturation = { queueType, _, _ ->
-                                                        metrics.recordQueueSaturation(queueType)
-                                                        emitMetricsSnapshot()
-                                                    },
-                                                    onMemoryRecall = { hitCount, latencyMs, recallChars, truncated ->
-                                                        metrics.recordMemoryRecall(
-                                                            hitCount = hitCount,
-                                                            latencyMs = latencyMs,
-                                                            recallChars = recallChars,
-                                                            truncated = truncated
-                                                        )
-                                                        emitMetricsSnapshot()
-                                                    },
-                                                    onMemoryRecallFailure = { latencyMs ->
-                                                        metrics.recordMemoryRecallFailure(latencyMs)
-                                                        emitMetricsSnapshot()
-                                                    },
-                                                    onLongTermMemoryRecallSkipped = {
-                                                        metrics.recordLongTermMemoryRecallSkipped()
-                                                        emitMetricsSnapshot()
-                                                    },
-                                                    onLongTermMemoryAssessment = { saveRecommended ->
-                                                        metrics.recordLongTermMemoryAssessment(saveRecommended)
-                                                        emitMetricsSnapshot()
-                                                    },
-                                                    onLongTermMemoryAssessmentParseFailure = {
-                                                        metrics.recordLongTermMemoryAssessmentParseFailure()
-                                                        longTermMemoryAssessmentParseFailures += 1
-                                                        if (longTermMemoryAssessmentParseFailures == 2) {
-                                                            instrumentation.emit(
-                                                                AgentEvents.warning(
-                                                                    "Anomaly threshold reached: memory_consolidation_parse_failures >= 2."
-                                                                )
-                                                            )
-                                                        }
-                                                        emitMetricsSnapshot()
-                                                    },
-                                                    onMemoryImprintResult = { saved, summaryChars, latencyMs ->
-                                                        metrics.recordMemoryImprint(
-                                                            saved = saved,
-                                                            summaryChars = summaryChars,
-                                                            latencyMs = latencyMs
-                                                        )
-                                                        emitMetricsSnapshot()
-                                                    },
-                                                    onEndToEndResponseLatency = { latencyMs ->
-                                                        metrics.recordEndToEndResponseLatency(latencyMs)
-                                                        emitMetricsSnapshot()
-                                                    },
                                                     instrumentation = instrumentation
                                                 ).runInteractive()
                                             } finally {
@@ -846,9 +780,9 @@ internal object AppModeRunners {
         }
         return McpHippocampus(
             command = command,
-            callTimeoutMs = config.mcpMemoryCallTimeoutMs,
-            defaultMaxItems = config.longTermMemoryRecallMaxItems,
-            defaultMaxChars = config.longTermMemoryRecallMaxChars
+            callTimeoutMs = config.memory.mcpMemoryCallTimeoutMs,
+            defaultMaxItems = config.memory.longTermMemoryRecallMaxItems,
+            defaultMaxChars = config.memory.longTermMemoryRecallMaxChars
         )
     }
     

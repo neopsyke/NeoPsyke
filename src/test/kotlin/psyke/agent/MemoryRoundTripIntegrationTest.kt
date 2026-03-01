@@ -45,10 +45,12 @@ class MemoryRoundTripIntegrationTest {
             }
         }
         val config = AgentConfig(
-            maxLoopStepsPerInput = 8,
-            longTermMemoryAssessEverySteps = 100,
-            longTermMemoryMinConfidence = 0.5,
-            longTermMemoryForceAssessOnAllowedAction = true
+            planner = PlannerConfig(maxLoopStepsPerInput = 8),
+            memory = MemoryConfig(
+                longTermMemoryAssessEverySteps = 100,
+                longTermMemoryMinConfidence = 0.5,
+                longTermMemoryForceAssessOnAllowedAction = true
+            )
         )
         val outputs = mutableListOf<String>()
         val agent = Ego(

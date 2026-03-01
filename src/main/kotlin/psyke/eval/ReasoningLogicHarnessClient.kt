@@ -21,7 +21,7 @@ class ReasoningLogicHarnessClient(
         val startedAt = System.nanoTime()
         val metadata = options.metadata
         return try {
-            val callSite = metadata.callSite.orEmpty()
+            val callSite = metadata.callSite
             val taskId = callSite.substringBefore(":attempt=").ifBlank { "unknown" }
             val attempt = callSite.substringAfter(":attempt=", "1").toIntOrNull() ?: 1
             val latestUser = messages.lastOrNull { it.role == ChatRole.USER }?.content.orEmpty()

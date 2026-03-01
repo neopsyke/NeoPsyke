@@ -54,17 +54,38 @@ class LlmMetaReasoner(
 ) : MetaReasoner {
     override fun assess(trigger: EgoTrigger, context: PlannerContext): MetaReasonerAssessment {
         val messages = buildMessages(trigger, context)
-        val response = modelClient.chat(
-            messages = messages,
-            options = ChatRequestOptions(
-                temperature = 0.0,
-                maxTokens = config.metaReasonerMaxTokens,
-                metadata = ChatCallMetadata(
-                    actor = "ego",
-                    callSite = "meta_reasoner"
+        var response: psyke.llm.ChatCompletion? = null
+        var lastError: Exception? = null
+        val retryAttempts = maxOf(1, config.planner.llmRetryAttempts)
+        for (attempt in 1..retryAttempts) {
+            try {
+                response = modelClient.chat(
+                    messages = messages,
+                    options = ChatRequestOptions(
+                        temperature = 0.0,
+                        maxTokens = config.metaReasoner.maxTokens,
+                        metadata = ChatCallMetadata(
+                            actor = "ego",
+                            callSite = "meta_reasoner"
+                        )
+                    )
                 )
+                break
+            } catch (ex: Exception) {
+                lastError = ex
+                if (attempt < retryAttempts) {
+                    logger.warn(ex) { "MetaReasoner call failed (attempt $attempt/$retryAttempts); retrying." }
+                }
+            }
+        }
+        if (response == null) {
+            logger.warn(lastError) { "MetaReasoner call failed after $retryAttempts attempts." }
+            return MetaReasonerAssessment(
+                verdict = MetaReasonerVerdict.CONTINUE,
+                confidence = 0.2,
+                reason = "Meta reasoner unavailable."
             )
-        )
+        }
         return parseResponse(response.content)
     }
 
@@ -138,6 +159,16 @@ class LlmMetaReasoner(
         return try {
             val json = TextSecurity.extractJsonObject(raw)
             val payload = mapper.readValue<MetaReasonerPayload>(json)
+            if (payload.verdict.isNullOrBlank()) {
+                logger.warn {
+                    "MetaReasoner response missing required 'verdict' field. response_len=${raw.length} preview='${TextSecurity.preview(raw, 120)}'"
+                }
+                return MetaReasonerAssessment(
+                    verdict = MetaReasonerVerdict.CONTINUE,
+                    confidence = 0.2,
+                    reason = "Meta reasoner: missing verdict field."
+                )
+            }
             MetaReasonerAssessment(
                 verdict = MetaReasonerVerdict.entries.firstOrNull {
                     it.name.equals(payload.verdict?.trim(), ignoreCase = true)

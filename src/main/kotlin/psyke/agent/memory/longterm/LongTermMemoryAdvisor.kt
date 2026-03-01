@@ -63,17 +63,40 @@ class LlmLongTermMemoryAdvisor(
 ) : LongTermMemoryAdvisor {
     override fun assess(context: LongTermMemoryAssessmentContext): LongTermMemoryAssessmentDecision {
         val messages = buildMessages(context)
-        val response = modelClient.chat(
-            messages = messages,
-            options = ChatRequestOptions(
-                temperature = 0.0,
-                maxTokens = config.longTermMemoryMaxTokens,
-                metadata = ChatCallMetadata(
-                    actor = "ego",
-                    callSite = "long_term_memory_assessment"
+        var response: psyke.llm.ChatCompletion? = null
+        var lastError: Exception? = null
+        val retryAttempts = maxOf(1, config.planner.llmRetryAttempts)
+        for (attempt in 1..retryAttempts) {
+            try {
+                response = modelClient.chat(
+                    messages = messages,
+                    options = ChatRequestOptions(
+                        temperature = 0.0,
+                        maxTokens = config.memory.longTermMemoryMaxTokens,
+                        metadata = ChatCallMetadata(
+                            actor = "ego",
+                            callSite = "long_term_memory_assessment"
+                        )
+                    )
                 )
+                break
+            } catch (ex: Exception) {
+                lastError = ex
+                if (attempt < retryAttempts) {
+                    logger.warn(ex) { "LongTermMemoryAdvisor call failed (attempt $attempt/$retryAttempts); retrying." }
+                }
+            }
+        }
+        if (response == null) {
+            logger.warn(lastError) { "LongTermMemoryAdvisor call failed after $retryAttempts attempts." }
+            return LongTermMemoryAssessmentDecision(
+                shouldSave = false,
+                summary = "",
+                confidence = 0.0,
+                reason = "long-term memory advisor unavailable",
+                parseFallback = true
             )
-        )
+        }
         return parseResponse(response.content)
     }
 
@@ -146,9 +169,21 @@ class LlmLongTermMemoryAdvisor(
         return try {
             val json = TextSecurity.extractJsonObject(raw)
             val payload = mapper.readValue<LongTermMemoryAssessmentPayload>(json)
+            if (payload.save == null) {
+                logger.warn {
+                    "Long-term memory assessment response missing required 'save' field. response_len=${raw.length} preview='${TextSecurity.preview(raw, 120)}'"
+                }
+                return LongTermMemoryAssessmentDecision(
+                    shouldSave = false,
+                    summary = "",
+                    confidence = 0.0,
+                    reason = "parse fallback: missing save field",
+                    parseFallback = true
+                )
+            }
             val shouldSave = payload.save == true
             val summary = if (shouldSave) {
-                TextSecurity.clamp(payload.summary?.trim().orEmpty(), config.longTermMemoryMaxSummaryChars)
+                TextSecurity.clamp(payload.summary?.trim().orEmpty(), config.memory.longTermMemoryMaxSummaryChars)
             } else {
                 ""
             }

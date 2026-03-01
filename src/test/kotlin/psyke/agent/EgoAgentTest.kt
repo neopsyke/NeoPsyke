@@ -27,7 +27,7 @@ class EgoAgentTest {
         }
         val instrumentation = RecordingInstrumentation()
         val outputs = mutableListOf<String>()
-        val config = AgentConfig(maxLoopStepsPerInput = 4, maxThoughtPasses = 2)
+        val config = AgentConfig(planner = PlannerConfig(maxLoopStepsPerInput = 4, maxThoughtPasses = 2))
         val agent = Ego(
             planner = LlmEgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
             superego = Superego(
@@ -90,7 +90,7 @@ class EgoAgentTest {
                 instrumentation = instrumentation
             ),
             motorCortex = buildMotorCortex(output = { outputs.add(it) }),
-            config = AgentConfig(maxLoopStepsPerInput = 8, maxThoughtPasses = 4),
+            config = AgentConfig(planner = PlannerConfig(maxLoopStepsPerInput = 8, maxThoughtPasses = 4)),
             instrumentation = instrumentation
         )
 
@@ -124,10 +124,7 @@ class EgoAgentTest {
         }
         val instrumentation = RecordingInstrumentation()
         val outputs = mutableListOf<String>()
-        val config = AgentConfig(
-            maxLoopStepsPerInput = 4,
-            maxThoughtPasses = 2
-        )
+        val config = AgentConfig(planner = PlannerConfig(maxLoopStepsPerInput = 4, maxThoughtPasses = 2))
         val agent = Ego(
             planner = LlmEgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
             superego = Superego(
@@ -172,8 +169,7 @@ class EgoAgentTest {
         val instrumentation = RecordingInstrumentation()
         val outputs = mutableListOf<String>()
         val config = AgentConfig(
-            maxLoopStepsPerInput = 2,
-            maxThoughtPasses = 1,
+            planner = PlannerConfig(maxLoopStepsPerInput = 2, maxThoughtPasses = 1),
             maxPendingActions = 1
         )
         val agent = Ego(
@@ -228,10 +224,7 @@ class EgoAgentTest {
                     sources = emptyList()
                 )
         }
-        val config = AgentConfig(
-            maxLoopStepsPerInput = 7,
-            maxThoughtPasses = 1
-        )
+        val config = AgentConfig(planner = PlannerConfig(maxLoopStepsPerInput = 7, maxThoughtPasses = 1))
         val agent = Ego(
             planner = LlmEgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
             superego = Superego(
@@ -286,10 +279,7 @@ class EgoAgentTest {
                     )
                 )
         }
-        val config = AgentConfig(
-            maxLoopStepsPerInput = 7,
-            maxThoughtPasses = 1
-        )
+        val config = AgentConfig(planner = PlannerConfig(maxLoopStepsPerInput = 7, maxThoughtPasses = 1))
         val agent = Ego(
             planner = LlmEgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
             superego = Superego(
@@ -339,7 +329,7 @@ class EgoAgentTest {
                 instrumentation = instrumentation
             ),
             motorCortex = buildMotorCortex(output = { throw IllegalStateException("output unavailable") }),
-            config = AgentConfig(maxLoopStepsPerInput = 4, maxThoughtPasses = 2),
+            config = AgentConfig(planner = PlannerConfig(maxLoopStepsPerInput = 4, maxThoughtPasses = 2)),
             instrumentation = instrumentation
         )
 
@@ -387,7 +377,7 @@ class EgoAgentTest {
                 instrumentation = instrumentation
             ),
             motorCortex = buildMotorCortex(output = { outputs.add(it) }),
-            config = AgentConfig(maxLoopStepsPerInput = 4),
+            config = AgentConfig(planner = PlannerConfig(maxLoopStepsPerInput = 4)),
             hippocampus = hippocampus,
             instrumentation = instrumentation
         )
@@ -434,7 +424,6 @@ class EgoAgentTest {
                 hitCount = 1
             )
         )
-        var recallSkipped = 0
         val agent = Ego(
             planner = LlmEgoPlanner(modelClient = plannerLlm, config = AgentConfig(), instrumentation = instrumentation),
             superego = Superego(
@@ -443,17 +432,15 @@ class EgoAgentTest {
                 instrumentation = instrumentation
             ),
             motorCortex = buildMotorCortex(output = {}),
-            config = AgentConfig(maxLoopStepsPerInput = 6),
+            config = AgentConfig(planner = PlannerConfig(maxLoopStepsPerInput = 6)),
             hippocampus = hippocampus,
-            onLongTermMemoryRecallSkipped = { recallSkipped += 1 },
             instrumentation = instrumentation
         )
 
         runAgentWithInput(agent, "hello\nexit\n")
 
         assertEquals(1, hippocampus.queries.size)
-        assertEquals(1, recallSkipped)
-        assertTrue(instrumentation.events.any { it.type == "long_term_memory_recall_skipped" })
+        assertEquals(1, instrumentation.events.count { it.type == "long_term_memory_recall_skipped" })
     }
 
     @Test
@@ -489,7 +476,7 @@ class EgoAgentTest {
                 instrumentation = instrumentation
             ),
             motorCortex = buildMotorCortex(output = {}),
-            config = AgentConfig(maxLoopStepsPerInput = 6),
+            config = AgentConfig(planner = PlannerConfig(maxLoopStepsPerInput = 6)),
             hippocampus = hippocampus,
             instrumentation = instrumentation
         )
@@ -523,7 +510,7 @@ class EgoAgentTest {
                 instrumentation = instrumentation
             ),
             motorCortex = buildMotorCortex(output = { outputs.add(it) }),
-            config = AgentConfig(maxLoopStepsPerInput = 4),
+            config = AgentConfig(planner = PlannerConfig(maxLoopStepsPerInput = 4)),
             hippocampus = ThrowingHippocampus(),
             instrumentation = instrumentation
         )
@@ -558,9 +545,11 @@ class EgoAgentTest {
             planner = LlmEgoPlanner(
                 modelClient = plannerLlm,
                 config = AgentConfig(
-                    maxLoopStepsPerInput = 6,
-                    deliberationPressureAssessmentMinStep = 1,
-                    deliberationPressureAssessmentEverySteps = 1
+                    planner = PlannerConfig(maxLoopStepsPerInput = 6),
+                    metaReasoner = MetaReasonerConfig(
+                        deliberationPressureAssessmentMinStep = 1,
+                        deliberationPressureAssessmentEverySteps = 1
+                    )
                 ),
                 instrumentation = instrumentation
             ),
@@ -571,9 +560,11 @@ class EgoAgentTest {
             ),
             motorCortex = buildMotorCortex(output = { outputs.add(it) }),
             config = AgentConfig(
-                maxLoopStepsPerInput = 6,
-                deliberationPressureAssessmentMinStep = 1,
-                deliberationPressureAssessmentEverySteps = 1
+                planner = PlannerConfig(maxLoopStepsPerInput = 6),
+                metaReasoner = MetaReasonerConfig(
+                    deliberationPressureAssessmentMinStep = 1,
+                    deliberationPressureAssessmentEverySteps = 1
+                )
             ),
             metaReasoner = object : MetaReasoner {
                 override fun assess(trigger: EgoTrigger, context: PlannerContext): MetaReasonerAssessment =
@@ -631,10 +622,12 @@ class EgoAgentTest {
                 )
         }
         val config = AgentConfig(
-            maxLoopStepsPerInput = 4,
-            longTermMemoryAssessEverySteps = 100,
-            longTermMemoryMinConfidence = 0.6,
-            longTermMemoryForceAssessOnAllowedAction = true
+            planner = PlannerConfig(maxLoopStepsPerInput = 4),
+            memory = MemoryConfig(
+                longTermMemoryAssessEverySteps = 100,
+                longTermMemoryMinConfidence = 0.6,
+                longTermMemoryForceAssessOnAllowedAction = true
+            )
         )
         val agent = Ego(
             planner = LlmEgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
@@ -692,18 +685,13 @@ class EgoAgentTest {
                     reason = "stable preference"
                 )
         }
-        var recallSuccessCount = 0
-        var recallFailureCount = 0
-        var consolidationCount = 0
-        var imprintCount = 0
-        var lastRecallHitCount = -1
-        var lastImprintSaved = false
-        var lastImprintLatencyMs = -1L
         val config = AgentConfig(
-            maxLoopStepsPerInput = 4,
-            longTermMemoryAssessEverySteps = 100,
-            longTermMemoryMinConfidence = 0.5,
-            longTermMemoryForceAssessOnAllowedAction = true
+            planner = PlannerConfig(maxLoopStepsPerInput = 4),
+            memory = MemoryConfig(
+                longTermMemoryAssessEverySteps = 100,
+                longTermMemoryMinConfidence = 0.5,
+                longTermMemoryForceAssessOnAllowedAction = true
+            )
         )
         val agent = Ego(
             planner = LlmEgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
@@ -716,33 +704,20 @@ class EgoAgentTest {
             config = config,
             hippocampus = hippocampus,
             longTermMemoryAdvisor = advisor,
-            onMemoryRecall = { hitCount, _, _, _ ->
-                recallSuccessCount += 1
-                lastRecallHitCount = hitCount
-            },
-            onMemoryRecallFailure = {
-                recallFailureCount += 1
-            },
-            onLongTermMemoryAssessment = {
-                consolidationCount += 1
-            },
-            onMemoryImprintResult = { saved, _, latencyMs ->
-                imprintCount += 1
-                lastImprintSaved = saved
-                lastImprintLatencyMs = latencyMs
-            },
             instrumentation = instrumentation
         )
 
         runAgentWithInput(agent, "hello\nexit\n")
 
-        assertEquals(1, recallSuccessCount)
-        assertEquals(0, recallFailureCount)
-        assertEquals(2, lastRecallHitCount)
-        assertEquals(1, consolidationCount)
-        assertEquals(1, imprintCount)
-        assertTrue(lastImprintSaved)
-        assertTrue(lastImprintLatencyMs >= 0)
+        assertEquals(1, instrumentation.events.count { it.type == "memory_recall_result" })
+        assertEquals(0, instrumentation.events.count { it.type == "memory_recall_failure" })
+        val recallEvent = instrumentation.events.first { it.type == "memory_recall_result" }
+        assertEquals(2, recallEvent.data["hit_count"] as Int)
+        assertEquals(1, instrumentation.events.count { it.type == "long_term_memory_assessment" })
+        val imprintEvent = instrumentation.events.first { it.type == "memory_imprint_result" }
+        assertEquals(1, instrumentation.events.count { it.type == "memory_imprint_result" })
+        assertTrue(imprintEvent.data["saved"] as Boolean)
+        assertTrue((imprintEvent.data["latency_ms"] as Long) >= 0)
     }
 
     @Test
@@ -771,8 +746,8 @@ class EgoAgentTest {
                 )
         }
         val config = AgentConfig(
-            maxLoopStepsPerInput = 3,
-            longTermMemoryAssessEverySteps = 100
+            planner = PlannerConfig(maxLoopStepsPerInput = 3),
+            memory = MemoryConfig(longTermMemoryAssessEverySteps = 100)
         )
         val agent = Ego(
             planner = LlmEgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
@@ -837,11 +812,12 @@ class EgoAgentTest {
         val hippocampus = RecordingHippocampus(
             recall = MemoryRecall(provider = "test_memory", text = "", hitCount = 0)
         )
-        var parseFailureCount = 0
         val config = AgentConfig(
-            maxLoopStepsPerInput = 6,
-            longTermMemoryForceAssessOnAllowedAction = true,
-            longTermMemoryParseFallbackDisableAfter = 2
+            planner = PlannerConfig(maxLoopStepsPerInput = 6),
+            memory = MemoryConfig(
+                longTermMemoryForceAssessOnAllowedAction = true,
+                longTermMemoryParseFallbackDisableAfter = 2
+            )
         )
         val agent = Ego(
             planner = LlmEgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
@@ -854,13 +830,11 @@ class EgoAgentTest {
             config = config,
             hippocampus = hippocampus,
             longTermMemoryAdvisor = advisor,
-            onLongTermMemoryAssessmentParseFailure = { parseFailureCount += 1 },
             instrumentation = instrumentation
         )
 
         runAgentWithInput(agent, "one\ntwo\nthree\nexit\n")
 
-        assertEquals(2, parseFailureCount)
         assertTrue(
             instrumentation.events.count { it.type == "long_term_memory_assessment_parse_fallback" } >= 2
         )
