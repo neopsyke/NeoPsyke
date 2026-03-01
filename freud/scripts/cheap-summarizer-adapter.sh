@@ -104,9 +104,51 @@ fallback_order="${FREUD_SUMMARIZER_FALLBACK_ORDER:-openai,mistral,groq}"
 token_limit="${FREUD_SUMMARIZER_TOKEN_LIMIT:-1000000}"
 runtime_root="${FREUD_RUNTIME_ROOT:-$repo_root/.freud}"
 metrics_dir="$runtime_root/metrics"
-usage_ledger_json="$metrics_dir/summarizer-usage.json"
+usage_ledger_snapshot_json="$metrics_dir/summarizer-usage.json"
+usage_ledger_json="$usage_ledger_snapshot_json"
+summarizer_run_id="$(basename "$run_dir")"
+
+expand_path() {
+  local raw="$1"
+  if [[ "$raw" == "~" ]]; then
+    printf '%s' "$HOME"
+    return
+  fi
+  if [[ "$raw" == ~/* ]]; then
+    printf '%s/%s' "$HOME" "${raw#~/}"
+    return
+  fi
+  if [[ "$raw" = /* ]]; then
+    printf '%s' "$raw"
+    return
+  fi
+  printf '%s/%s' "$repo_root" "$raw"
+}
+
+resolve_usage_ledger_db() {
+  local configured="${PSYKE_METRICS_DB:-}"
+  if [[ -z "$configured" ]]; then
+    local defaults_file="${PSYKE_RUNTIME_DEFAULTS_FILE:-$repo_root/.psyke/runtime-defaults.yaml}"
+    if [[ -f "$defaults_file" ]]; then
+      configured="$(awk -F':' '/^[[:space:]]*metrics_db[[:space:]]*:/ {sub(/^[[:space:]]*/, "", $2); print $2; exit}' "$defaults_file" \
+        | sed -E 's/^[[:space:]]+|[[:space:]]+$//g' \
+        | sed -E "s/^[\"']|[\"']$//g")"
+    fi
+  fi
+  if [[ -z "$configured" ]]; then
+    configured=".psyke/metrics.db"
+  fi
+  expand_path "$configured"
+}
+
+usage_ledger_db="$(resolve_usage_ledger_db)"
+usage_store_backend="json"
+if command -v sqlite3 >/dev/null 2>&1; then
+  usage_store_backend="sqlite"
+fi
 
 mkdir -p "$metrics_dir"
+mkdir -p "$(dirname "$usage_ledger_db")"
 
 summary_json="$artifact_dir/summary.json"
 step_index_tsv="$artifact_dir/step-index.tsv"
@@ -121,8 +163,10 @@ model_summary_prompt="$artifact_dir/model-summary-prompt.txt"
 model_response_json="$artifact_dir/model-summary-response.json"
 model_parsed_json="$artifact_dir/model-summary-parsed.json"
 model_attempts_tsv="$artifact_dir/model-summary-attempts.tsv"
+model_summary_debug_log="$artifact_dir/model-summary-debug.log"
 
 printf "attempt\tprovider\tmodel\tphase\tstatus\tdetail\n" >"$model_attempts_tsv"
+: >"$model_summary_debug_log"
 
 ledger_prompt_before=0
 ledger_completion_before=0
@@ -131,6 +175,31 @@ usage_cumulative_before=0
 usage_cumulative_after=0
 usage_limit_reached="false"
 usage_warning=""
+ledger_token_limit_reached_at=""
+ledger_last_updated_at=""
+ledger_last_run_dir=""
+ledger_last_provider=""
+ledger_last_model=""
+ledger_last_api_key_source=""
+usage_scope_id="bootstrap:none:none"
+usage_scope_provider="bootstrap"
+usage_scope_api_key_source=""
+usage_scope_api_key_fingerprint="none"
+usage_scope_safe="bootstrap-none-none"
+usage_ledger_store_json="$metrics_dir/summarizer-usage-${usage_scope_safe}.json"
+api_key_source=""
+healthcheck_last_http_code=""
+healthcheck_last_curl_exit=0
+healthcheck_last_models_url=""
+sqlite_field_sep=$'\x1f'
+
+debug_log() {
+  local msg="$1"
+  local ts
+  ts="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+  printf '[%s] %s\n' "$ts" "$msg" >>"$model_summary_debug_log"
+  printf '[%s] %s\n' "$ts" "$msg" >&2
+}
 
 trim_chars() {
   local value="$1"
@@ -167,17 +236,193 @@ read_compact_tsv() {
   trim_chars "$snippet" "$max_chars"
 }
 
-ensure_usage_ledger() {
-  if [[ -f "$usage_ledger_json" ]]; then
+sql_quote() {
+  local value="${1:-}"
+  value="${value//\'/''}"
+  printf "'%s'" "$value"
+}
+
+hash_string() {
+  local value="$1"
+  if command -v sha256sum >/dev/null 2>&1; then
+    printf '%s' "$value" | sha256sum | awk '{print $1}'
+    return
+  fi
+  if command -v shasum >/dev/null 2>&1; then
+    printf '%s' "$value" | shasum -a 256 | awk '{print $1}'
+    return
+  fi
+  if command -v openssl >/dev/null 2>&1; then
+    printf '%s' "$value" | openssl dgst -sha256 | awk '{print $NF}'
+    return
+  fi
+  printf '%s' "$value" | cksum | awk '{print $1}'
+}
+
+scope_safe_component() {
+  local value="$1"
+  if [[ -z "$value" ]]; then
+    printf 'none'
+    return
+  fi
+  printf '%s' "$value" | sed -E 's/[^a-zA-Z0-9._-]+/-/g; s/^-+//; s/-+$//'
+}
+
+set_usage_scope() {
+  local scope_provider="$1"
+  local scope_key_source="$2"
+  local scope_key_value="${3:-}"
+  local scope_key_fingerprint="none"
+  if [[ -n "$scope_key_value" ]]; then
+    scope_key_fingerprint="$(hash_string "$scope_key_value" | cut -c1-16)"
+  fi
+
+  usage_scope_provider="${scope_provider:-unknown}"
+  usage_scope_api_key_source="${scope_key_source:-}"
+  usage_scope_api_key_fingerprint="$scope_key_fingerprint"
+  usage_scope_id="${usage_scope_provider}:${usage_scope_api_key_source:-none}:${usage_scope_api_key_fingerprint}"
+  usage_scope_safe="$(scope_safe_component "${usage_scope_provider}")-$(scope_safe_component "${usage_scope_api_key_source:-none}")-$(scope_safe_component "$usage_scope_api_key_fingerprint")"
+  usage_ledger_store_json="$metrics_dir/summarizer-usage-${usage_scope_safe}.json"
+}
+
+sqlite_fallback_to_json() {
+  local phase="$1"
+  local detail="${2:-}"
+  detail="$(printf '%s' "$detail" | tr '\n' ' ' | tr '\t' ' ' | sed -E 's/[[:space:]]+/ /g; s/^ //; s/ $//')"
+  if [[ "$usage_store_backend" == "sqlite" ]]; then
+    usage_store_backend="json"
+    if [[ -n "$detail" ]]; then
+      debug_log "usage_ledger_backend_fallback phase=$phase detail=$detail"
+    else
+      debug_log "usage_ledger_backend_fallback phase=$phase"
+    fi
+  fi
+}
+
+sqlite_exec_stmt() {
+  local phase="$1"
+  local sql="$2"
+  local output rc
+  set +e
+  output="$(sqlite3 "$usage_ledger_db" "$sql" 2>&1)"
+  rc=$?
+  set -e
+  if (( rc != 0 )); then
+    sqlite_fallback_to_json "$phase" "sqlite3_exit=$rc sql_error=$output"
+    return 1
+  fi
+  return 0
+}
+
+sqlite_exec_script() {
+  local phase="$1"
+  local sql_script="$2"
+  local output rc
+  set +e
+  output="$(printf '%s\n' "$sql_script" | sqlite3 "$usage_ledger_db" 2>&1)"
+  rc=$?
+  set -e
+  if (( rc != 0 )); then
+    sqlite_fallback_to_json "$phase" "sqlite3_exit=$rc sql_error=$output"
+    return 1
+  fi
+  return 0
+}
+
+sqlite_query_stmt() {
+  local phase="$1"
+  local sql="$2"
+  local output rc
+  set +e
+  output="$(sqlite3 -noheader -separator "$sqlite_field_sep" "$usage_ledger_db" "$sql" 2>&1)"
+  rc=$?
+  set -e
+  if (( rc != 0 )); then
+    sqlite_fallback_to_json "$phase" "sqlite3_exit=$rc sql_error=$output"
+    return 1
+  fi
+  printf '%s' "$output"
+  return 0
+}
+
+write_usage_ledger_snapshot_json() {
+  local tmp
+  tmp="$(mktemp)"
+  jq -n \
+    --arg backend "$usage_store_backend" \
+    --arg scope_id "$usage_scope_id" \
+    --arg scope_provider "$usage_scope_provider" \
+    --arg scope_key_source "${usage_scope_api_key_source:-}" \
+    --arg scope_key_fingerprint "$usage_scope_api_key_fingerprint" \
+    --arg updated_at "$ledger_last_updated_at" \
+    --arg run_dir "$ledger_last_run_dir" \
+    --arg provider "$ledger_last_provider" \
+    --arg model "$ledger_last_model" \
+    --arg api_key_source "$ledger_last_api_key_source" \
+    --arg reached_at "$ledger_token_limit_reached_at" \
+    --arg ledger_path "$usage_ledger_store_json" \
+    --arg snapshot_path "$usage_ledger_snapshot_json" \
+    --arg db_path "$usage_ledger_db" \
+    --argjson token_limit "$token_limit" \
+    --argjson total_prompt_tokens "$ledger_prompt_before" \
+    --argjson total_completion_tokens "$ledger_completion_before" \
+    --argjson total_tokens "$usage_cumulative_before" \
+    --argjson run_count "$ledger_runs_before" \
+    --argjson limit_reached "$([[ "$usage_limit_reached" == "true" ]] && echo true || echo false)" \
+    '{
+      workflow: "freud",
+      ledger: "summarizer_usage",
+      backend: $backend,
+      scope: {
+        id: $scope_id,
+        provider: $scope_provider,
+        api_key_source: $scope_key_source,
+        api_key_fingerprint: $scope_key_fingerprint
+      },
+      token_limit: $token_limit,
+      total_prompt_tokens: $total_prompt_tokens,
+      total_completion_tokens: $total_completion_tokens,
+      total_tokens: $total_tokens,
+      run_count: $run_count,
+      token_limit_reached: $limit_reached,
+      token_limit_reached_at: $reached_at,
+      last_updated_at: $updated_at,
+      last_run_dir: $run_dir,
+      last_provider: $provider,
+      last_model: $model,
+      last_api_key_source: $api_key_source,
+      ledger_path: $ledger_path,
+      snapshot_path: $snapshot_path,
+      sqlite_db_path: $db_path
+    }' >"$tmp"
+  mv "$tmp" "$usage_ledger_store_json"
+  cp "$usage_ledger_store_json" "$usage_ledger_snapshot_json" 2>/dev/null || cat "$usage_ledger_store_json" >"$usage_ledger_snapshot_json"
+}
+
+init_json_usage_ledger() {
+  if [[ -f "$usage_ledger_store_json" ]]; then
     return 0
   fi
   jq -n \
     --arg updated_at "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
-    --arg ledger_path "$usage_ledger_json" \
+    --arg scope_id "$usage_scope_id" \
+    --arg scope_provider "$usage_scope_provider" \
+    --arg scope_key_source "${usage_scope_api_key_source:-}" \
+    --arg scope_key_fingerprint "$usage_scope_api_key_fingerprint" \
+    --arg ledger_path "$usage_ledger_store_json" \
+    --arg snapshot_path "$usage_ledger_snapshot_json" \
+    --arg db_path "$usage_ledger_db" \
     --argjson token_limit "$token_limit" \
     '{
       workflow: "freud",
       ledger: "summarizer_usage",
+      backend: "json",
+      scope: {
+        id: $scope_id,
+        provider: $scope_provider,
+        api_key_source: $scope_key_source,
+        api_key_fingerprint: $scope_key_fingerprint
+      },
       token_limit: $token_limit,
       total_prompt_tokens: 0,
       total_completion_tokens: 0,
@@ -189,16 +434,151 @@ ensure_usage_ledger() {
       last_run_dir: "",
       last_provider: "",
       last_model: "",
-      ledger_path: $ledger_path
-    }' >"$usage_ledger_json"
+      last_api_key_source: "",
+      ledger_path: $ledger_path,
+      snapshot_path: $snapshot_path,
+      sqlite_db_path: $db_path
+    }' >"$usage_ledger_store_json"
+  cp "$usage_ledger_store_json" "$usage_ledger_snapshot_json" 2>/dev/null || cat "$usage_ledger_store_json" >"$usage_ledger_snapshot_json"
+}
+
+ensure_usage_ledger() {
+  if [[ "$usage_store_backend" != "sqlite" ]]; then
+    init_json_usage_ledger
+    return 0
+  fi
+
+  local schema_sql
+  schema_sql="$(cat <<'SQL'
+PRAGMA journal_mode=WAL;
+CREATE TABLE IF NOT EXISTS freud_summarizer_budget_scopes (
+  scope_id TEXT PRIMARY KEY,
+  provider TEXT NOT NULL,
+  api_key_source TEXT NOT NULL,
+  api_key_fingerprint TEXT NOT NULL,
+  token_limit INTEGER NOT NULL,
+  total_prompt_tokens INTEGER NOT NULL DEFAULT 0,
+  total_completion_tokens INTEGER NOT NULL DEFAULT 0,
+  total_tokens INTEGER NOT NULL DEFAULT 0,
+  run_count INTEGER NOT NULL DEFAULT 0,
+  token_limit_reached INTEGER NOT NULL DEFAULT 0,
+  token_limit_reached_at TEXT NOT NULL DEFAULT '',
+  last_updated_at TEXT NOT NULL DEFAULT '',
+  last_run_dir TEXT NOT NULL DEFAULT '',
+  last_provider TEXT NOT NULL DEFAULT '',
+  last_model TEXT NOT NULL DEFAULT '',
+  last_api_key_source TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_freud_summarizer_budget_scope_provider
+  ON freud_summarizer_budget_scopes(provider, api_key_source, api_key_fingerprint);
+CREATE TABLE IF NOT EXISTS freud_summarizer_runs (
+  run_id TEXT PRIMARY KEY,
+  run_dir TEXT NOT NULL,
+  status TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  provider TEXT NOT NULL,
+  model TEXT NOT NULL,
+  api_key_source TEXT NOT NULL,
+  prompt_tokens INTEGER NOT NULL DEFAULT 0,
+  completion_tokens INTEGER NOT NULL DEFAULT 0,
+  total_tokens INTEGER NOT NULL DEFAULT 0,
+  token_limit INTEGER NOT NULL,
+  cumulative_before INTEGER NOT NULL DEFAULT 0,
+  cumulative_after INTEGER NOT NULL DEFAULT 0,
+  recorded_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS freud_summarizer_attempts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  run_id TEXT NOT NULL,
+  attempt_seq INTEGER NOT NULL,
+  provider TEXT NOT NULL,
+  model TEXT NOT NULL,
+  phase TEXT NOT NULL,
+  status TEXT NOT NULL,
+  detail TEXT NOT NULL,
+  ts TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_freud_summarizer_attempts_run ON freud_summarizer_attempts(run_id, attempt_seq);
+SQL
+)"
+  if ! sqlite_exec_script "ensure_schema" "$schema_sql"; then
+    init_json_usage_ledger
+    return 0
+  fi
+
+  local existing
+  existing="$(sqlite_query_stmt "load_budget_row_count" "SELECT COUNT(*) FROM freud_summarizer_budget_scopes WHERE scope_id = $(sql_quote "$usage_scope_id");")" || existing=""
+  if [[ "$usage_store_backend" != "sqlite" ]]; then
+    init_json_usage_ledger
+    return 0
+  fi
+  existing="${existing:-0}"
+  if [[ "$existing" == "0" ]]; then
+    local seed_prompt=0 seed_completion=0 seed_total=0 seed_runs=0 seed_reached=0 seed_reached_at="" seed_last_updated="" seed_last_run="" seed_last_provider="" seed_last_model="" seed_last_key=""
+    if [[ -f "$usage_ledger_store_json" ]]; then
+      seed_prompt="$(jq -r '.total_prompt_tokens // 0' "$usage_ledger_store_json" 2>/dev/null || echo "0")"
+      seed_completion="$(jq -r '.total_completion_tokens // 0' "$usage_ledger_store_json" 2>/dev/null || echo "0")"
+      seed_total="$(jq -r '.total_tokens // 0' "$usage_ledger_store_json" 2>/dev/null || echo "0")"
+      seed_runs="$(jq -r '.run_count // 0' "$usage_ledger_store_json" 2>/dev/null || echo "0")"
+      if [[ "$(jq -r '.token_limit_reached // false' "$usage_ledger_store_json" 2>/dev/null || echo false)" == "true" ]]; then
+        seed_reached=1
+      fi
+      seed_reached_at="$(jq -r '.token_limit_reached_at // ""' "$usage_ledger_store_json" 2>/dev/null || echo "")"
+      seed_last_updated="$(jq -r '.last_updated_at // ""' "$usage_ledger_store_json" 2>/dev/null || echo "")"
+      seed_last_run="$(jq -r '.last_run_dir // ""' "$usage_ledger_store_json" 2>/dev/null || echo "")"
+      seed_last_provider="$(jq -r '.last_provider // ""' "$usage_ledger_store_json" 2>/dev/null || echo "")"
+      seed_last_model="$(jq -r '.last_model // ""' "$usage_ledger_store_json" 2>/dev/null || echo "")"
+      seed_last_key="$(jq -r '.last_api_key_source // ""' "$usage_ledger_store_json" 2>/dev/null || echo "")"
+    fi
+    if ! sqlite_exec_stmt "seed_budget" "INSERT INTO freud_summarizer_budget_scopes(scope_id, provider, api_key_source, api_key_fingerprint, token_limit, total_prompt_tokens, total_completion_tokens, total_tokens, run_count, token_limit_reached, token_limit_reached_at, last_updated_at, last_run_dir, last_provider, last_model, last_api_key_source) VALUES ($(sql_quote "$usage_scope_id"), $(sql_quote "$usage_scope_provider"), $(sql_quote "${usage_scope_api_key_source:-}"), $(sql_quote "$usage_scope_api_key_fingerprint"), $token_limit, ${seed_prompt:-0}, ${seed_completion:-0}, ${seed_total:-0}, ${seed_runs:-0}, ${seed_reached:-0}, $(sql_quote "$seed_reached_at"), $(sql_quote "$seed_last_updated"), $(sql_quote "$seed_last_run"), $(sql_quote "$seed_last_provider"), $(sql_quote "$seed_last_model"), $(sql_quote "$seed_last_key"));"; then
+      init_json_usage_ledger
+      return 0
+    fi
+  else
+    if ! sqlite_exec_stmt "sync_token_limit" "UPDATE freud_summarizer_budget_scopes SET token_limit = $token_limit WHERE scope_id = $(sql_quote "$usage_scope_id");"; then
+      init_json_usage_ledger
+      return 0
+    fi
+  fi
 }
 
 load_usage_ledger() {
   ensure_usage_ledger
-  ledger_prompt_before="$(jq -r '.total_prompt_tokens // 0' "$usage_ledger_json" 2>/dev/null || echo "0")"
-  ledger_completion_before="$(jq -r '.total_completion_tokens // 0' "$usage_ledger_json" 2>/dev/null || echo "0")"
-  ledger_runs_before="$(jq -r '.run_count // 0' "$usage_ledger_json" 2>/dev/null || echo "0")"
-  usage_cumulative_before="$(jq -r '.total_tokens // 0' "$usage_ledger_json" 2>/dev/null || echo "0")"
+  if [[ "$usage_store_backend" == "sqlite" ]]; then
+    local row
+    row="$(sqlite_query_stmt "load_budget_row" "SELECT total_prompt_tokens, total_completion_tokens, run_count, total_tokens, token_limit_reached, COALESCE(token_limit_reached_at, ''), COALESCE(last_updated_at, ''), COALESCE(last_run_dir, ''), COALESCE(last_provider, ''), COALESCE(last_model, ''), COALESCE(last_api_key_source, '') FROM freud_summarizer_budget_scopes WHERE scope_id = $(sql_quote "$usage_scope_id");")" || row=""
+    if [[ -z "$row" ]]; then
+      usage_store_backend="json"
+      init_json_usage_ledger
+    else
+      IFS="$sqlite_field_sep" read -r ledger_prompt_before ledger_completion_before ledger_runs_before usage_cumulative_before reached_int ledger_token_limit_reached_at ledger_last_updated_at ledger_last_run_dir ledger_last_provider ledger_last_model ledger_last_api_key_source <<<"$row"
+      if [[ "${reached_int:-0}" == "1" ]]; then
+        usage_limit_reached="true"
+      else
+        usage_limit_reached="false"
+      fi
+      usage_cumulative_after="$usage_cumulative_before"
+      write_usage_ledger_snapshot_json
+      return
+    fi
+  fi
+
+  init_json_usage_ledger
+  ledger_prompt_before="$(jq -r '.total_prompt_tokens // 0' "$usage_ledger_store_json" 2>/dev/null || echo "0")"
+  ledger_completion_before="$(jq -r '.total_completion_tokens // 0' "$usage_ledger_store_json" 2>/dev/null || echo "0")"
+  ledger_runs_before="$(jq -r '.run_count // 0' "$usage_ledger_store_json" 2>/dev/null || echo "0")"
+  usage_cumulative_before="$(jq -r '.total_tokens // 0' "$usage_ledger_store_json" 2>/dev/null || echo "0")"
+  if [[ "$(jq -r '.token_limit_reached // false' "$usage_ledger_store_json" 2>/dev/null || echo false)" == "true" ]]; then
+    usage_limit_reached="true"
+  else
+    usage_limit_reached="false"
+  fi
+  ledger_token_limit_reached_at="$(jq -r '.token_limit_reached_at // ""' "$usage_ledger_store_json" 2>/dev/null || echo "")"
+  ledger_last_updated_at="$(jq -r '.last_updated_at // ""' "$usage_ledger_store_json" 2>/dev/null || echo "")"
+  ledger_last_run_dir="$(jq -r '.last_run_dir // ""' "$usage_ledger_store_json" 2>/dev/null || echo "")"
+  ledger_last_provider="$(jq -r '.last_provider // ""' "$usage_ledger_store_json" 2>/dev/null || echo "")"
+  ledger_last_model="$(jq -r '.last_model // ""' "$usage_ledger_store_json" 2>/dev/null || echo "")"
+  ledger_last_api_key_source="$(jq -r '.last_api_key_source // ""' "$usage_ledger_store_json" 2>/dev/null || echo "")"
   usage_cumulative_after="$usage_cumulative_before"
 }
 
@@ -217,21 +597,70 @@ persist_usage_ledger() {
     usage_limit_reached="true"
   fi
 
-  local reached_at
-  reached_at="$(jq -r '.token_limit_reached_at // ""' "$usage_ledger_json" 2>/dev/null || true)"
+  local reached_at updated_at
+  reached_at="$ledger_token_limit_reached_at"
   if [[ "$usage_limit_reached" == "true" && -z "$reached_at" ]]; then
     reached_at="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+  fi
+  updated_at="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+
+  if [[ "$usage_store_backend" == "sqlite" ]]; then
+    local update_sql
+    update_sql="$(cat <<SQL
+BEGIN IMMEDIATE;
+UPDATE freud_summarizer_budget_scopes
+SET token_limit = $token_limit,
+    provider = $(sql_quote "$usage_scope_provider"),
+    api_key_source = $(sql_quote "${usage_scope_api_key_source:-}"),
+    api_key_fingerprint = $(sql_quote "$usage_scope_api_key_fingerprint"),
+    total_prompt_tokens = $prompt_after,
+    total_completion_tokens = $completion_after,
+    total_tokens = $total_after,
+    run_count = $runs_after,
+    token_limit_reached = $([[ "$usage_limit_reached" == "true" ]] && echo 1 || echo 0),
+    token_limit_reached_at = $(sql_quote "$reached_at"),
+    last_updated_at = $(sql_quote "$updated_at"),
+    last_run_dir = $(sql_quote "$run_dir"),
+    last_provider = $(sql_quote "$provider"),
+    last_model = $(sql_quote "$model"),
+    last_api_key_source = $(sql_quote "$api_key_source")
+WHERE scope_id = $(sql_quote "$usage_scope_id");
+COMMIT;
+SQL
+)"
+    if sqlite_exec_script "update_budget" "$update_sql"; then
+      ledger_prompt_before="$prompt_after"
+      ledger_completion_before="$completion_after"
+      ledger_runs_before="$runs_after"
+      usage_cumulative_before="$total_after"
+      ledger_token_limit_reached_at="$reached_at"
+      ledger_last_updated_at="$updated_at"
+      ledger_last_run_dir="$run_dir"
+      ledger_last_provider="$provider"
+      ledger_last_model="$model"
+      ledger_last_api_key_source="$api_key_source"
+      write_usage_ledger_snapshot_json
+      return
+    fi
+    init_json_usage_ledger
   fi
 
   local tmp
   tmp="$(mktemp)"
   jq -n \
-    --arg updated_at "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
+    --arg scope_id "$usage_scope_id" \
+    --arg scope_provider "$usage_scope_provider" \
+    --arg scope_key_source "${usage_scope_api_key_source:-}" \
+    --arg scope_key_fingerprint "$usage_scope_api_key_fingerprint" \
+    --arg updated_at "$updated_at" \
     --arg run_dir "$run_dir" \
     --arg provider "$provider" \
     --arg model "$model" \
-    --arg ledger_path "$usage_ledger_json" \
+    --arg api_key_source "$api_key_source" \
     --arg reached_at "$reached_at" \
+    --arg ledger_path "$usage_ledger_store_json" \
+    --arg snapshot_path "$usage_ledger_snapshot_json" \
+    --arg db_path "$usage_ledger_db" \
     --argjson token_limit "$token_limit" \
     --argjson total_prompt_tokens "$prompt_after" \
     --argjson total_completion_tokens "$completion_after" \
@@ -241,6 +670,13 @@ persist_usage_ledger() {
     '{
       workflow: "freud",
       ledger: "summarizer_usage",
+      backend: "json",
+      scope: {
+        id: $scope_id,
+        provider: $scope_provider,
+        api_key_source: $scope_key_source,
+        api_key_fingerprint: $scope_key_fingerprint
+      },
       token_limit: $token_limit,
       total_prompt_tokens: $total_prompt_tokens,
       total_completion_tokens: $total_completion_tokens,
@@ -252,9 +688,38 @@ persist_usage_ledger() {
       last_run_dir: $run_dir,
       last_provider: $provider,
       last_model: $model,
-      ledger_path: $ledger_path
+      last_api_key_source: $api_key_source,
+      ledger_path: $ledger_path,
+      snapshot_path: $snapshot_path,
+      sqlite_db_path: $db_path
     }' >"$tmp"
-  mv "$tmp" "$usage_ledger_json"
+  mv "$tmp" "$usage_ledger_store_json"
+  cp "$usage_ledger_store_json" "$usage_ledger_snapshot_json" 2>/dev/null || cat "$usage_ledger_store_json" >"$usage_ledger_snapshot_json"
+  ledger_prompt_before="$prompt_after"
+  ledger_completion_before="$completion_after"
+  ledger_runs_before="$runs_after"
+  usage_cumulative_before="$total_after"
+  ledger_token_limit_reached_at="$reached_at"
+  ledger_last_updated_at="$updated_at"
+  ledger_last_run_dir="$run_dir"
+  ledger_last_provider="$provider"
+  ledger_last_model="$model"
+  ledger_last_api_key_source="$api_key_source"
+}
+
+persist_usage_run_snapshot() {
+  local status="$1"
+  local reason="$2"
+  local prompt_tokens="${3:-0}"
+  local completion_tokens="${4:-0}"
+  local total_tokens="${5:-0}"
+  if [[ "$usage_store_backend" != "sqlite" ]]; then
+    return
+  fi
+  local now_iso
+  now_iso="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+  sqlite_exec_stmt "persist_run_snapshot" \
+    "INSERT INTO freud_summarizer_runs(run_id, run_dir, status, reason, provider, model, api_key_source, prompt_tokens, completion_tokens, total_tokens, token_limit, cumulative_before, cumulative_after, recorded_at) VALUES ($(sql_quote "$summarizer_run_id"), $(sql_quote "$run_dir"), $(sql_quote "$status"), $(sql_quote "$reason"), $(sql_quote "$provider"), $(sql_quote "$model"), $(sql_quote "$api_key_source"), ${prompt_tokens:-0}, ${completion_tokens:-0}, ${total_tokens:-0}, $token_limit, ${usage_cumulative_before:-0}, ${usage_cumulative_after:-0}, $(sql_quote "$now_iso")) ON CONFLICT(run_id) DO UPDATE SET run_dir=excluded.run_dir, status=excluded.status, reason=excluded.reason, provider=excluded.provider, model=excluded.model, api_key_source=excluded.api_key_source, prompt_tokens=excluded.prompt_tokens, completion_tokens=excluded.completion_tokens, total_tokens=excluded.total_tokens, token_limit=excluded.token_limit, cumulative_before=excluded.cumulative_before, cumulative_after=excluded.cumulative_after, recorded_at=excluded.recorded_at;" >/dev/null || true
 }
 
 write_summary_artifacts() {
@@ -270,6 +735,7 @@ write_summary_artifacts() {
       --slurpfile parsed "$model_parsed_json" \
       --arg workflow "freud" \
       --arg tier "tier2_model_summary" \
+      --arg backend "$usage_store_backend" \
       --arg status "$status" \
       --arg reason "$reason" \
       --arg provider "$provider" \
@@ -283,6 +749,14 @@ write_summary_artifacts() {
       --arg anomalies_json "$anomalies_json" \
       --arg attempts_tsv "$model_attempts_tsv" \
       --arg usage_ledger "$usage_ledger_json" \
+      --arg usage_scope_ledger "$usage_ledger_store_json" \
+      --arg usage_db "$usage_ledger_db" \
+      --arg debug_log "$model_summary_debug_log" \
+      --arg api_key_source "$api_key_source" \
+      --arg scope_id "$usage_scope_id" \
+      --arg scope_provider "$usage_scope_provider" \
+      --arg scope_key_source "${usage_scope_api_key_source:-}" \
+      --arg scope_key_fingerprint "$usage_scope_api_key_fingerprint" \
       --arg summary_text "$summary_text" \
       --argjson prompt_tokens "${prompt_tokens:-0}" \
       --argjson completion_tokens "${completion_tokens:-0}" \
@@ -295,6 +769,7 @@ write_summary_artifacts() {
       '{
         workflow: $workflow,
         tier: $tier,
+        storage_backend: $backend,
         status: $status,
         reason: $reason,
         provider: $provider,
@@ -308,7 +783,19 @@ write_summary_artifacts() {
           trail_index_tsv: $trail_index,
           anomalies_json: $anomalies_json,
           attempts_tsv: $attempts_tsv,
-          usage_ledger_json: $usage_ledger
+          usage_ledger_json: $usage_ledger,
+          usage_scope_ledger_json: $usage_scope_ledger,
+          usage_ledger_db: $usage_db,
+          debug_log: $debug_log
+        },
+        auth: {
+          api_key_source: $api_key_source
+        },
+        usage_scope: {
+          id: $scope_id,
+          provider: $scope_provider,
+          api_key_source: $scope_key_source,
+          api_key_fingerprint: $scope_key_fingerprint
         },
         usage: {
           prompt_tokens: $prompt_tokens,
@@ -329,6 +816,7 @@ write_summary_artifacts() {
     jq -n \
       --arg workflow "freud" \
       --arg tier "tier2_model_summary" \
+      --arg backend "$usage_store_backend" \
       --arg status "$status" \
       --arg reason "$reason" \
       --arg provider "$provider" \
@@ -342,6 +830,14 @@ write_summary_artifacts() {
       --arg anomalies_json "$anomalies_json" \
       --arg attempts_tsv "$model_attempts_tsv" \
       --arg usage_ledger "$usage_ledger_json" \
+      --arg usage_scope_ledger "$usage_ledger_store_json" \
+      --arg usage_db "$usage_ledger_db" \
+      --arg debug_log "$model_summary_debug_log" \
+      --arg api_key_source "$api_key_source" \
+      --arg scope_id "$usage_scope_id" \
+      --arg scope_provider "$usage_scope_provider" \
+      --arg scope_key_source "${usage_scope_api_key_source:-}" \
+      --arg scope_key_fingerprint "$usage_scope_api_key_fingerprint" \
       --arg summary_text "$summary_text" \
       --argjson prompt_tokens "${prompt_tokens:-0}" \
       --argjson completion_tokens "${completion_tokens:-0}" \
@@ -354,6 +850,7 @@ write_summary_artifacts() {
       '{
         workflow: $workflow,
         tier: $tier,
+        storage_backend: $backend,
         status: $status,
         reason: $reason,
         provider: $provider,
@@ -367,7 +864,19 @@ write_summary_artifacts() {
           trail_index_tsv: $trail_index,
           anomalies_json: $anomalies_json,
           attempts_tsv: $attempts_tsv,
-          usage_ledger_json: $usage_ledger
+          usage_ledger_json: $usage_ledger,
+          usage_scope_ledger_json: $usage_scope_ledger,
+          usage_ledger_db: $usage_db,
+          debug_log: $debug_log
+        },
+        auth: {
+          api_key_source: $api_key_source
+        },
+        usage_scope: {
+          id: $scope_id,
+          provider: $scope_provider,
+          api_key_source: $scope_key_source,
+          api_key_fingerprint: $scope_key_fingerprint
         },
         usage: {
           prompt_tokens: $prompt_tokens,
@@ -408,6 +917,14 @@ write_summary_artifacts() {
     echo "- \`$anomalies_json\`"
     echo "- \`$model_attempts_tsv\`"
     echo "- \`$usage_ledger_json\`"
+    echo "- \`$usage_ledger_store_json\`"
+    echo "- \`$usage_ledger_db\`"
+    echo "- \`$model_summary_debug_log\`"
+    echo
+    echo "## Auth Context"
+    echo "- api_key_source: \`${api_key_source:-unknown}\` (redacted)"
+    echo "- usage_scope_id: \`${usage_scope_id}\`"
+    echo "- usage_scope_fingerprint: \`${usage_scope_api_key_fingerprint}\` (redacted)"
     echo
     echo "## Token Usage"
     echo "- prompt_tokens: \`${prompt_tokens:-0}\`"
@@ -484,7 +1001,16 @@ write_summary_artifacts() {
     --arg generated_at "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
     --arg run_dir "$run_dir" \
     --arg usage_ledger "$usage_ledger_json" \
+    --arg usage_scope_ledger "$usage_ledger_store_json" \
+    --arg usage_db "$usage_ledger_db" \
+    --arg backend "$usage_store_backend" \
     --arg attempts_tsv "$model_attempts_tsv" \
+    --arg debug_log "$model_summary_debug_log" \
+    --arg api_key_source "$api_key_source" \
+    --arg scope_id "$usage_scope_id" \
+    --arg scope_provider "$usage_scope_provider" \
+    --arg scope_key_source "${usage_scope_api_key_source:-}" \
+    --arg scope_key_fingerprint "$usage_scope_api_key_fingerprint" \
     --argjson prompt_tokens "${prompt_tokens:-0}" \
     --argjson completion_tokens "${completion_tokens:-0}" \
     --argjson total_tokens "$total_tokens" \
@@ -500,6 +1026,7 @@ write_summary_artifacts() {
     '{
       workflow: "freud",
       metric_set: "tier2_summarizer",
+      storage_backend: $backend,
       status: $status,
       reason: $reason,
       provider: $provider,
@@ -507,7 +1034,19 @@ write_summary_artifacts() {
       generated_at: $generated_at,
       run_dir: $run_dir,
       usage_ledger_json: $usage_ledger,
+      usage_scope_ledger_json: $usage_scope_ledger,
+      usage_ledger_db: $usage_db,
       attempts_tsv: $attempts_tsv,
+      debug_log: $debug_log,
+      auth: {
+        api_key_source: $api_key_source
+      },
+      usage_scope: {
+        id: $scope_id,
+        provider: $scope_provider,
+        api_key_source: $scope_key_source,
+        api_key_fingerprint: $scope_key_fingerprint
+      },
       tokens: {
         prompt_tokens: $prompt_tokens,
         completion_tokens: $completion_tokens,
@@ -527,6 +1066,8 @@ write_summary_artifacts() {
         fallback_used: $fallback_used
       }
     }' >"$model_summary_metrics_json"
+
+  persist_usage_run_snapshot "$status" "$reason" "${prompt_tokens:-0}" "${completion_tokens:-0}" "$total_tokens"
 }
 
 write_skipped() {
@@ -595,6 +1136,22 @@ append_attempt() {
   attempt_seq=$((attempt_seq + 1))
   detail="$(printf '%s' "$detail" | tr '\n' ' ' | tr '\t' ' ' | sed -E 's/[[:space:]]+/ /g; s/^ //; s/ $//')"
   printf "%s\t%s\t%s\t%s\t%s\t%s\n" "$attempt_seq" "$p" "$m" "$phase" "$status" "$detail" >>"$model_attempts_tsv"
+  if [[ "$usage_store_backend" == "sqlite" ]]; then
+    local now_iso
+    now_iso="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+    sqlite_exec_stmt "persist_attempt" \
+      "INSERT INTO freud_summarizer_attempts(run_id, attempt_seq, provider, model, phase, status, detail, ts) VALUES ($(sql_quote "$summarizer_run_id"), $attempt_seq, $(sql_quote "$p"), $(sql_quote "$m"), $(sql_quote "$phase"), $(sql_quote "$status"), $(sql_quote "$detail"), $(sql_quote "$now_iso"));" >/dev/null || true
+  fi
+}
+
+api_key_env_name_for_provider() {
+  local p="$1"
+  case "$p" in
+    openai) printf 'OPENAI_API_KEY' ;;
+    mistral) printf 'MISTRAL_API_KEY' ;;
+    groq) printf 'GROQ_API_KEY' ;;
+    *) printf '' ;;
+  esac
 }
 
 provider_has_key() {
@@ -690,6 +1247,10 @@ healthcheck_provider() {
   local url="$2"
   local key="$3"
 
+  healthcheck_last_http_code=""
+  healthcheck_last_curl_exit=0
+  healthcheck_last_models_url=""
+
   [[ "$p" == "mock" ]] && return 0
   [[ -z "$key" ]] && return 1
 
@@ -699,6 +1260,7 @@ healthcheck_provider() {
   else
     models_url="${url%/}/models"
   fi
+  healthcheck_last_models_url="$models_url"
 
   curl_exit=0
   http_code="$(
@@ -710,6 +1272,8 @@ healthcheck_provider() {
       -H "Authorization: Bearer $key" \
       "$models_url"
   )" || curl_exit=$?
+  healthcheck_last_http_code="$http_code"
+  healthcheck_last_curl_exit="$curl_exit"
 
   if [[ $curl_exit -ne 0 ]]; then
     return 1
@@ -717,9 +1281,13 @@ healthcheck_provider() {
   [[ "$http_code" =~ ^2 ]]
 }
 
-load_usage_ledger
+debug_log "summarizer_start run_dir=$run_dir artifact_dir=$artifact_dir"
+debug_log "config provider=$provider model_override=${model:-none} base_url_override=${base_url:-none} fallback_order=$fallback_order token_limit=$token_limit if_configured=$if_configured dry_run=$dry_run"
+debug_log "api_key_presence OPENAI_API_KEY=$([[ -n "${OPENAI_API_KEY:-}" ]] && echo true || echo false) MISTRAL_API_KEY=$([[ -n "${MISTRAL_API_KEY:-}" ]] && echo true || echo false) GROQ_API_KEY=$([[ -n "${GROQ_API_KEY:-}" ]] && echo true || echo false)"
+debug_log "usage_ledger backend=$usage_store_backend snapshot_json=$usage_ledger_snapshot_json db_path=$usage_ledger_db"
 
 if [[ "$dry_run" == "true" ]]; then
+  debug_log "dry_run=true; no provider call"
   write_summary_artifacts "dry_run" "adapter dry-run; no model call" "" "0" "0" "false"
   echo "$model_summary_json"
   exit 0
@@ -730,6 +1298,7 @@ requested_model="$model"
 requested_base_url="$base_url"
 
 if [[ "$requested_provider" == "none" || -z "$requested_provider" ]]; then
+  debug_log "provider_not_configured requested_provider=$requested_provider"
   if [[ "$if_configured" == "true" ]]; then
     write_skipped "summarizer provider not configured"
     exit 0
@@ -738,18 +1307,8 @@ if [[ "$requested_provider" == "none" || -z "$requested_provider" ]]; then
   exit 1
 fi
 
-if (( usage_cumulative_before >= token_limit )); then
-  usage_limit_reached="true"
-  usage_cumulative_after="$usage_cumulative_before"
-  usage_warning="summarizer token limit reached (${usage_cumulative_before}/${token_limit}); Tier-2 skipped"
-  append_attempt "-" "-" "budget" "skip" "$usage_warning"
-  echo "WARNING: $usage_warning" >&2
-  write_summary_artifacts "skipped" "$usage_warning" "" "0" "0" "false"
-  echo "$model_summary_json"
-  exit 0
-fi
-
 provider_sequence_csv="$(resolve_provider_sequence "$requested_provider")"
+debug_log "provider_sequence requested=$requested_provider resolved=${provider_sequence_csv:-none} fallback_enabled=$enable_fallback"
 if [[ -z "$provider_sequence_csv" ]]; then
   if [[ "$if_configured" == "true" ]]; then
     write_skipped "no provider candidates in fallback chain"
@@ -764,16 +1323,26 @@ last_failure_reason=""
 has_configured_provider="false"
 used_requested_model_override="false"
 used_requested_base_override="false"
+budget_skip_count=0
+non_budget_failure_count=0
+last_budget_skip_reason=""
 
 for candidate_provider in "${provider_candidates[@]}"; do
   candidate_provider="$(printf '%s' "$candidate_provider" | xargs)"
   [[ -z "$candidate_provider" ]] && continue
+  debug_log "candidate_start provider=$candidate_provider"
 
   if [[ "$candidate_provider" == "mock" ]]; then
+    set_usage_scope "$candidate_provider" "" ""
+    load_usage_ledger
+    debug_log "candidate_budget scope=$usage_scope_id cumulative_before=$usage_cumulative_before token_limit=$token_limit runs_before=$ledger_runs_before"
     provider="mock"
     model="${requested_model:-$(default_model_for_provider "$candidate_provider")}"
+    api_key_source=""
+    debug_log "candidate_mock_selected provider=$provider model=$model"
     append_attempt "$provider" "$model" "selection" "pass" "mock provider selected"
     persist_usage_ledger 0 0 1
+    debug_log "usage_ledger_persisted provider=$provider model=$model api_key_source=${api_key_source:-none} cumulative_after=$usage_cumulative_after"
     cat >"$model_parsed_json" <<EOF
 {"overview":"Mock Tier-2 summary generated without network call.","root_cause":"Mock mode enabled.","recommended_actions":["Set FREUD_SUMMARIZER_PROVIDER to openai, groq, or mistral for live model summaries."],"evidence_refs":["$summary_json"],"confidence":0.2,"risk_level":"low"}
 EOF
@@ -783,6 +1352,7 @@ EOF
   fi
 
   if ! provider_has_key "$candidate_provider"; then
+    debug_log "candidate_skip_missing_key provider=$candidate_provider"
     append_attempt "$candidate_provider" "-" "selection" "skip" "missing API key"
     continue
   fi
@@ -812,15 +1382,35 @@ EOF
 
   candidate_api_key="$(api_key_for_provider "$candidate_provider")"
   if [[ -z "$candidate_api_key" ]]; then
+    debug_log "candidate_skip_empty_key provider=$candidate_provider"
     append_attempt "$candidate_provider" "$candidate_model" "selection" "skip" "resolved empty API key"
     continue
   fi
-
-  if ! healthcheck_provider "$candidate_provider" "$candidate_base_url" "$candidate_api_key"; then
-    append_attempt "$candidate_provider" "$candidate_model" "healthcheck" "fail" "provider unavailable or timeout"
-    last_failure_reason="healthcheck failed for provider=$candidate_provider"
+  candidate_key_source="$(api_key_env_name_for_provider "$candidate_provider")"
+  set_usage_scope "$candidate_provider" "$candidate_key_source" "$candidate_api_key"
+  load_usage_ledger
+  api_key_source="$candidate_key_source"
+  debug_log "candidate_budget scope=$usage_scope_id cumulative_before=$usage_cumulative_before token_limit=$token_limit runs_before=$ledger_runs_before"
+  if (( usage_cumulative_before >= token_limit )); then
+    usage_limit_reached="true"
+    usage_cumulative_after="$usage_cumulative_before"
+    usage_warning="summarizer token limit reached for scope=${usage_scope_id} (${usage_cumulative_before}/${token_limit}); skipping provider"
+    debug_log "candidate_budget_skip provider=$candidate_provider scope=$usage_scope_id reason=$usage_warning"
+    append_attempt "$candidate_provider" "$candidate_model" "budget" "skip" "$usage_warning"
+    last_budget_skip_reason="$usage_warning"
+    budget_skip_count=$((budget_skip_count + 1))
     continue
   fi
+  debug_log "candidate_ready provider=$candidate_provider model=$candidate_model base_url=$candidate_base_url key_source=$(api_key_env_name_for_provider "$candidate_provider")"
+
+  if ! healthcheck_provider "$candidate_provider" "$candidate_base_url" "$candidate_api_key"; then
+    debug_log "healthcheck_fail provider=$candidate_provider url=$healthcheck_last_models_url curl_exit=$healthcheck_last_curl_exit http_code=${healthcheck_last_http_code:-none}"
+    append_attempt "$candidate_provider" "$candidate_model" "healthcheck" "fail" "provider unavailable or timeout"
+    last_failure_reason="healthcheck failed for provider=$candidate_provider"
+    non_budget_failure_count=$((non_budget_failure_count + 1))
+    continue
+  fi
+  debug_log "healthcheck_pass provider=$candidate_provider url=$healthcheck_last_models_url http_code=${healthcheck_last_http_code:-unknown}"
   append_attempt "$candidate_provider" "$candidate_model" "healthcheck" "pass" "provider reachable"
 
   payload="$(
@@ -854,10 +1444,12 @@ EOF
       -d "$payload" \
       "$candidate_base_url"
   )" || curl_exit=$?
+  debug_log "completion_http provider=$candidate_provider model=$candidate_model url=$candidate_base_url response_file=$candidate_response_json curl_exit=$curl_exit http_code=${http_code:-none}"
 
   if [[ $curl_exit -ne 0 ]]; then
     append_attempt "$candidate_provider" "$candidate_model" "completion" "fail" "curl request failed"
     last_failure_reason="curl request failed for provider=$candidate_provider"
+    non_budget_failure_count=$((non_budget_failure_count + 1))
     continue
   fi
 
@@ -865,15 +1457,18 @@ EOF
     err_text="$(jq -r '.error.message // .error // "request failed"' "$candidate_response_json" 2>/dev/null || echo "request failed")"
     append_attempt "$candidate_provider" "$candidate_model" "completion" "fail" "HTTP $http_code: $err_text"
     last_failure_reason="HTTP $http_code from provider=$candidate_provider"
+    non_budget_failure_count=$((non_budget_failure_count + 1))
     continue
   fi
 
   provider="$candidate_provider"
   model="$candidate_model"
   base_url="$candidate_base_url"
+  api_key_source="$(api_key_env_name_for_provider "$candidate_provider")"
   prompt_tokens="$(jq -r '.usage.prompt_tokens // 0' "$candidate_response_json" 2>/dev/null || echo "0")"
   completion_tokens="$(jq -r '.usage.completion_tokens // 0' "$candidate_response_json" 2>/dev/null || echo "0")"
   persist_usage_ledger "$prompt_tokens" "$completion_tokens" 1
+  debug_log "usage_ledger_persisted provider=$provider model=$model api_key_source=${api_key_source:-none} prompt_tokens=$prompt_tokens completion_tokens=$completion_tokens cumulative_after=$usage_cumulative_after"
   if [[ "$usage_limit_reached" == "true" ]]; then
     usage_warning="summarizer token limit reached (${usage_cumulative_after}/${token_limit})"
     append_attempt "$candidate_provider" "$candidate_model" "budget" "warn" "$usage_warning"
@@ -893,6 +1488,7 @@ EOF
   if [[ -z "$model_text" ]]; then
     append_attempt "$candidate_provider" "$candidate_model" "completion" "fail" "missing text content"
     last_failure_reason="model response missing text for provider=$candidate_provider"
+    non_budget_failure_count=$((non_budget_failure_count + 1))
     continue
   fi
 
@@ -916,6 +1512,7 @@ EOF
   fi
 
   append_attempt "$provider" "$model" "completion" "pass" "summary generated"
+  debug_log "completion_pass provider=$provider model=$model parsed_ok=$parsed_ok"
   if [[ "$parsed_ok" == "true" ]]; then
     write_summary_artifacts "ok" "model summary generated" "$model_text" "$prompt_tokens" "$completion_tokens" "true"
   else
@@ -926,12 +1523,23 @@ EOF
 done
 
 if [[ "$has_configured_provider" != "true" && "$if_configured" == "true" ]]; then
+  debug_log "no_configured_provider_in_fallback_chain"
   write_skipped "no configured provider key available in fallback chain"
   exit 0
+fi
+
+if (( budget_skip_count > 0 )) && (( non_budget_failure_count == 0 )); then
+  usage_warning="${last_budget_skip_reason:-summarizer token limit reached for all configured providers; Tier-2 skipped}"
+  debug_log "all_candidates_budget_skipped count=$budget_skip_count reason=$usage_warning"
+  if [[ "$if_configured" == "true" ]]; then
+    write_skipped "$usage_warning"
+    exit 0
+  fi
 fi
 
 if [[ -z "$last_failure_reason" ]]; then
   last_failure_reason="all provider attempts failed"
 fi
+debug_log "summarizer_error reason=$last_failure_reason"
 write_error "$last_failure_reason" "see $model_attempts_tsv"
 exit 1

@@ -81,6 +81,27 @@ if [[ -f "$config_path" ]]; then
   source "$config_path"
 fi
 
+# Ensure summarizer adapter receives config values from sourced env files.
+for summarizer_env_var in \
+  FREUD_SUMMARIZER_PROVIDER \
+  FREUD_SUMMARIZER_MODEL \
+  FREUD_SUMMARIZER_BASE_URL \
+  FREUD_SUMMARIZER_MAX_OUTPUT_TOKENS \
+  FREUD_SUMMARIZER_TEMPERATURE \
+  FREUD_SUMMARIZER_TIMEOUT_SEC \
+  FREUD_SUMMARIZER_HEALTHCHECK_TIMEOUT_SEC \
+  FREUD_SUMMARIZER_MAX_SECTION_CHARS \
+  FREUD_SUMMARIZER_ENABLE_FALLBACK \
+  FREUD_SUMMARIZER_FALLBACK_ORDER \
+  FREUD_SUMMARIZER_TOKEN_LIMIT \
+  FREUD_RUNTIME_ROOT \
+  PSYKE_METRICS_DB \
+  PSYKE_RUNTIME_DEFAULTS_FILE; do
+  if [[ "${!summarizer_env_var-__unset__}" != "__unset__" ]]; then
+    export "$summarizer_env_var"
+  fi
+done
+
 project_name="${FREUD_PROJECT_NAME:-unknown-project}"
 targeted_cmd="${FREUD_TARGETED_TEST_CMD:-}"
 full_cmd="${FREUD_FULL_TEST_CMD:-}"
@@ -137,6 +158,15 @@ mkdir -p "$log_dir" "$artifact_dir" "$log_index_dir" "$step_meta_dir"
 if [[ -n "$gradle_user_home" ]]; then
   mkdir -p "$gradle_user_home"
 fi
+
+write_local_freud_pointers() {
+  local local_root="$repo_root/freud"
+  mkdir -p "$local_root/logs"
+  ln -sfn "$run_dir" "$local_root/latest"
+  ln -sfn "$run_dir/logs" "$local_root/logs/latest"
+  ln -sfn "$run_dir/artifacts" "$local_root/artifacts-latest"
+  printf '%s\n' "$run_dir" >"$local_root/latest-run.txt"
+}
 
 prime_gradle_wrapper_cache() {
   [[ -z "$gradle_user_home" ]] && return 0
@@ -846,6 +876,7 @@ build_run_index "$overall_status" "${first_failed_step:-}" "$steps_total" "$fail
 
 ln -sfn "$run_dir" "$run_root/latest"
 printf '%s\n' "$run_dir" >"$run_root/latest-run.txt"
+write_local_freud_pointers
 
 echo "run_dir=$run_dir"
 echo "summary=$summary_json"
@@ -859,6 +890,7 @@ echo "model_summary_json=$model_summary_json"
 echo "model_summary_md=$model_summary_md"
 echo "model_summary_attempts_tsv=$model_summary_attempts_tsv"
 echo "model_summary_metrics_json=$model_summary_metrics_json"
+echo "model_summary_debug_log=$artifact_dir/model-summary-debug.log"
 echo "freud_metrics_json=$freud_metrics_json"
 echo "run_index=$run_index_json"
 echo "codex_context=$artifact_dir/codex-context.md"

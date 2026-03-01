@@ -5,6 +5,7 @@ import psyke.agent.actions.websearch.WebSearchEngine
 import psyke.agent.actions.websearch.WebSearchResult
 import psyke.agent.actions.websearch.WebSearchSource
 import psyke.agent.core.AgentConfig
+import psyke.agent.core.PendingAction
 import psyke.agent.cortex.motor.MotorCortex
 import psyke.agent.ego.Ego
 import psyke.agent.ego.LlmEgoPlanner
@@ -232,6 +233,66 @@ class AgentScenarioPackTest {
                 it.type == "planner_decision" &&
                     it.data["decision_type"] == "noop" &&
                     (it.data["reason"] as? String)?.contains("unavailable action type", ignoreCase = true) == true
+            }
+        )
+    }
+
+    @Test
+    fun scenario_action_verifier_repairs_web_search_before_superego_review() {
+        val plannerLlm = StubChatModelClient().apply {
+            enqueueRawResponse(
+                """
+                {"decision":"action","urgency":"medium","action_type":"web_search","action_payload":"stale query","action_summary":"search old pricing"}
+                """.trimIndent()
+            )
+            enqueueRawResponseForCallSite(
+                callSite = "action_verifier",
+                content = """
+                {"verdict":"repair","action_type":"web_search","action_payload":"official groq pricing","action_summary":"search official pricing page","reason":"refined query"}
+                """.trimIndent()
+            )
+        }
+        val superegoLlm = StubChatModelClient().apply {
+            enqueueRawResponse("""{"allow":true}""")
+        }
+        val instrumentation = RecordingInstrumentation()
+        val observedQueries = mutableListOf<String>()
+        val recordingSearchEngine = object : WebSearchEngine {
+            override fun search(query: String, maxResults: Int): WebSearchResult {
+                observedQueries += query
+                return WebSearchResult(
+                    summary = "ok",
+                    snippets = listOf("official result"),
+                    sources = listOf(
+                        WebSearchSource(
+                            title = "Groq Pricing",
+                            url = "https://groq.com/pricing"
+                        )
+                    )
+                )
+            }
+        }
+        val config = AgentConfig(maxLoopStepsPerInput = 2, maxThoughtPasses = 2)
+        val agent = Ego(
+            planner = LlmEgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
+            superego = Superego(modelClient = superegoLlm, config = config, instrumentation = instrumentation),
+            motorCortex = buildMotorCortex(webSearchEngine = recordingSearchEngine, output = {}),
+            config = config,
+            instrumentation = instrumentation
+        )
+
+        runAgentWithInput(agent, "check pricing\nexit\n")
+
+        assertEquals(listOf("official groq pricing"), observedQueries)
+        assertTrue(
+            instrumentation.events.any {
+                it.type == "action_verifier_result" && it.data["verdict"] == "repair"
+            }
+        )
+        assertTrue(
+            instrumentation.events.any {
+                it.type == "action_review_requested" &&
+                    (it.data["action"] as? PendingAction)?.payload == "official groq pricing"
             }
         )
     }

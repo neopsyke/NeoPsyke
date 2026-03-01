@@ -19,23 +19,15 @@ Feature:
 - goal: <one-sentence outcome>
 
 Acceptance Checks:
-1. <deterministic behavior check>
-2. <test or scenario check>
-3. <no regressions / no critical anomalies check>
+     1. Propose a deterministic behavior check
+     2. Propose a live test or scenario check (can use real llm calls, can be added to existing evals)
+     3. Make a "no regressions / no critical anomalies check"
 
 Constraints:
 - Keep changes scoped to this feature.
-- Preserve existing behavior unless required by acceptance checks.
-- Do not add unrelated refactors.
-
-File Scope:
-- Expected files to change:
-  - <path-1>
-  - <path-2>
-- Allowed to inspect:
-  - src/main/kotlin/psyke/**
-  - src/test/kotlin/psyke/**
-  - freud/**
+- Try to keep main ego logic easy to understand/read in code. Simple is always better, as long as desired functionality is achieved.
+- Do not add unrelated refactors. If truly needed ask for permission first.
+- Preserve existing behavior unless required by new feature and acceptance checks.
 
 Execution Plan:
 1. Implement the smallest useful slice for this feature.
@@ -79,4 +71,11 @@ Token Efficiency Rules:
 - Read compact artifacts first; avoid full logs unless required.
 - Share file paths and line references, not large raw dumps.
 - Use targeted tests/scenarios before full-suite reruns when possible.
+
+If anything is unclear or appears incorrect, ask for clarification.
+
+At the end of the feature implementation, perform an evaluation on Freud, 
+and if it's feature have been useful to reduce both time, effort and token usage 
+while implementing the new feature. If not, propose upgrades/changes. 
+
 ```
