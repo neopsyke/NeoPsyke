@@ -82,6 +82,7 @@ if [[ -f "$config_path" ]]; then
 fi
 
 project_name="${FREUD_PROJECT_NAME:-unknown-project}"
+preflight_compile_cmd="${FREUD_PREFLIGHT_COMPILE_CMD:-}"
 targeted_cmd="${FREUD_TARGETED_TEST_CMD:-}"
 full_cmd="${FREUD_FULL_TEST_CMD:-}"
 scenario_pack_cmd="${FREUD_SCENARIO_PACK_CMD:-}"
@@ -581,7 +582,10 @@ emit_trail "run_start" "" "running" "feature loop started" "" "" "$run_config_js
 
 should_stop="false"
 
-run_step "targeted_tests" "$targeted_cmd" "$log_dir/01-targeted-tests.log" || should_stop="true"
+run_step "preflight_compile" "$preflight_compile_cmd" "$log_dir/00-preflight-compile.log" || should_stop="true"
+if [[ "$should_stop" != "true" ]]; then
+  run_step "targeted_tests" "$targeted_cmd" "$log_dir/01-targeted-tests.log" || should_stop="true"
+fi
 if [[ "$should_stop" != "true" ]]; then
   run_step "full_tests" "$full_cmd" "$log_dir/02-full-tests.log" || should_stop="true"
 fi
