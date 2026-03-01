@@ -357,6 +357,7 @@
       lastSuperegoOutput: null,
       actionCapabilities: [],
       limits: {},
+      lastLlmCall: null,
       metrics: null,
       instrumentationHealth: {
         dropped_events: 0,
@@ -378,16 +379,57 @@
         .replace(/\"/g, "&quot;")
         .replace(/'/g, "&#39;");
 
-    const asNum = (v) => Number(v || 0);
+    const asNum = (v, fallback = 0) => {
+      const n = Number(v);
+      return Number.isFinite(n) ? n : fallback;
+    };
     const avg = (total, count) => {
       const c = asNum(count);
       if (c <= 0) return 0;
       return Math.round(asNum(total) / c);
     };
     const ratio = (current, limit) => {
-      const l = asNum(limit);
+      const l = asNum(limit, NaN);
       if (!l || l <= 0) return 0;
-      return Math.max(0, Math.min(100, (asNum(current) / l) * 100));
+      const pct = (asNum(current, 0) / l) * 100;
+      if (!Number.isFinite(pct)) return 0;
+      return Math.max(0, Math.min(100, pct));
+    };
+    const percentageLabel = (part, total) => {
+      const p = asNum(part, 0);
+      const t = asNum(total, NaN);
+      if (!Number.isFinite(t) || t <= 0) {
+        return "- (" + p + " / 0 tok)";
+      }
+      const pct = ((p / t) * 100).toFixed(1);
+      return pct + "% (" + p + " / " + t + " tok)";
+    };
+    const readLimit = (limits, ...keys) => {
+      for (const key of keys) {
+        if (Object.prototype.hasOwnProperty.call(limits, key)) {
+          return limits[key];
+        }
+      }
+      return null;
+    };
+    const formatLimit = (v) => {
+      const n = asNum(v, NaN);
+      return Number.isFinite(n) && n > 0 ? String(n) : "-";
+    };
+    const latestLlmCallFromEvents = (events) => {
+      if (!Array.isArray(events)) return null;
+      for (let i = events.length - 1; i >= 0; i -= 1) {
+        const event = events[i];
+        if (event?.type !== "llm_call") continue;
+        const data = event.data || {};
+        return {
+          promptTokens: asNum(data.prompt_tokens),
+          completionTokens: asNum(data.completion_tokens),
+          totalTokens: asNum(data.total_tokens),
+          status: String(data.status || "unknown")
+        };
+      }
+      return null;
     };
 
     const compactHiddenKeys = new Set(["provider", "model"]);
@@ -483,12 +525,14 @@
       el.innerHTML = list.map(i => "<div class=\"item\">" + escapeHtml(formatter(i)) + "</div>").join("");
     }
 
-    function renderActionCapabilities(list) {
+    function renderActionCapabilities(list, metrics) {
       const el = document.getElementById("action-capabilities");
       if (!Array.isArray(list) || list.length === 0) {
         el.innerHTML = "<div class=\"cap-item\"><div class=\"cap-detail\">No action capability status published yet.</div></div>";
         return;
       }
+      const runActionCalls = metrics?.runActionCallsByType || {};
+      const allActionCalls = metrics?.persistentActionCallsByType || {};
 
       const order = ["answer", "web_search", "mcp_time", "mcp_fetch"];
       const sorted = list
@@ -506,6 +550,8 @@
         const type = String(status.action_type || "unknown");
         const available = status.available === true;
         const detail = String(status.detail || "");
+        const runCalls = asNum(runActionCalls[type]);
+        const allCalls = asNum(allActionCalls[type]);
         const badgeClass = available ? "ok" : "bad";
         const badgeText = available ? "available" : "unavailable";
         return "<div class=\"cap-item\">" +
@@ -513,6 +559,7 @@
           "<span class=\"cap-type\">" + escapeHtml(type) + "</span>" +
           "<span class=\"cap-badge " + badgeClass + "\">" + escapeHtml(badgeText) + "</span>" +
           "</div>" +
+          "<div class=\"cap-detail\">Calls: " + escapeHtml(runCalls + " run / " + allCalls + " all") + "</div>" +
           "<div class=\"cap-detail\">" + escapeHtml(detail || "-") + "</div>" +
           "</div>";
       }).join("");
@@ -530,6 +577,12 @@
       const el = document.getElementById("status-bar");
       const metrics = state.metrics;
       const limits = state.limits || {};
+      const loopLimit = readLimit(limits, "max_loop_steps", "max_loop_steps_per_input");
+      const promptLimit = readLimit(limits, "max_prompt_tokens");
+      const completionLimit = readLimit(limits, "max_completion_tokens");
+      const pendingInputsLimit = readLimit(limits, "max_pending_inputs");
+      const pendingThoughtsLimit = readLimit(limits, "max_pending_thoughts");
+      const pendingActionsLimit = readLimit(limits, "max_pending_actions");
       const health = state.instrumentationHealth || {};
       const satByType = health.queue_saturation_by_type || {};
       const parts = [];
@@ -582,6 +635,8 @@
         parts.push(chip("All Tokens", all.totalTokens || 0, null));
         parts.push(chip("Superego Run Tok", runSuperegoTokens, null));
         parts.push(chip("Superego All Tok", allSuperegoTokens, null));
+        parts.push(chip("Superego Run %", percentageLabel(runSuperegoTokens, run.totalTokens), ratio(runSuperegoTokens, run.totalTokens)));
+        parts.push(chip("Superego All %", percentageLabel(allSuperegoTokens, all.totalTokens), ratio(allSuperegoTokens, all.totalTokens)));
         parts.push(chip("Denied", run.deniedActions || 0, null));
         parts.push(chip("Errors", run.errorCount || 0, null));
         parts.push(chip("Noops", runNoops + " run / " + allNoops + " all", null));
@@ -603,17 +658,24 @@
         parts.push(chip("Mem Imprint Lat", runImprintAvgLatencyMs + "ms run / " + allImprintAvgLatencyMs + "ms all", null));
         parts.push(chip("Resp Lat p50", runResponseLatencyP50 + " (" + runResponseLatencyCount + ")", null));
         parts.push(chip("Resp Lat Avg All", allResponseLatencyAvg + "ms (" + allResponseLatencyCount + ")", null));
-        parts.push(chip("Prompt/Limit", (run.promptTokens || 0) + " / " + (limits.max_prompt_tokens || "-"), ratio(run.promptTokens, limits.max_prompt_tokens)));
-        parts.push(chip("Completion/Limit", (run.completionTokens || 0) + " / " + (limits.max_completion_tokens || "-"), ratio(run.completionTokens, limits.max_completion_tokens)));
+        const lastLlm = state.lastLlmCall;
+        if (lastLlm) {
+          parts.push(chip("Last Prompt/Limit", lastLlm.promptTokens + " / " + formatLimit(promptLimit), ratio(lastLlm.promptTokens, promptLimit)));
+          parts.push(chip("Last Completion/Limit", lastLlm.completionTokens + " / " + formatLimit(completionLimit), ratio(lastLlm.completionTokens, completionLimit)));
+          parts.push(chip("Last LLM Status", lastLlm.status, null));
+        } else {
+          parts.push(chip("Last Prompt/Limit", "- / " + formatLimit(promptLimit), null));
+          parts.push(chip("Last Completion/Limit", "- / " + formatLimit(completionLimit), null));
+        }
       } else {
         parts.push(chip("Metrics", "pending", null));
       }
 
-      parts.push(chip("LoopStep/Limit", state.loopStep + " / " + (limits.max_loop_steps || "-"), ratio(state.loopStep, limits.max_loop_steps)));
+      parts.push(chip("LoopStep/Limit", state.loopStep + " / " + formatLimit(loopLimit), ratio(state.loopStep, loopLimit)));
       parts.push(chip("In-Flight", inFlightLabel(), null));
-      parts.push(chip("Q Inputs", state.queues.inputs.length + " / " + (limits.max_pending_inputs || "-"), ratio(state.queues.inputs.length, limits.max_pending_inputs)));
-      parts.push(chip("Q Thoughts", state.queues.thoughts.length + " / " + (limits.max_pending_thoughts || "-"), ratio(state.queues.thoughts.length, limits.max_pending_thoughts)));
-      parts.push(chip("Q Actions", state.queues.actions.length + " / " + (limits.max_pending_actions || "-"), ratio(state.queues.actions.length, limits.max_pending_actions)));
+      parts.push(chip("Q Inputs", state.queues.inputs.length + " / " + formatLimit(pendingInputsLimit), ratio(state.queues.inputs.length, pendingInputsLimit)));
+      parts.push(chip("Q Thoughts", state.queues.thoughts.length + " / " + formatLimit(pendingThoughtsLimit), ratio(state.queues.thoughts.length, pendingThoughtsLimit)));
+      parts.push(chip("Q Actions", state.queues.actions.length + " / " + formatLimit(pendingActionsLimit), ratio(state.queues.actions.length, pendingActionsLimit)));
       parts.push(chip("Live Dropped", health.dropped_events || 0, null));
       parts.push(chip("Live Q Sat", health.queue_saturation_events || 0, null));
       parts.push(chip("Sat Input", satByType.input || 0, null));
@@ -639,11 +701,11 @@
       document.getElementById("current-processing").textContent = fmt(state.currentProcessing || {});
       document.getElementById("superego-in").textContent = fmt(state.lastSuperegoInput || {});
       document.getElementById("superego-out").textContent = fmt(state.lastSuperegoOutput || {});
-      renderActionCapabilities(state.actionCapabilities || []);
+      renderActionCapabilities(state.actionCapabilities || [], state.metrics);
 
       const orderedEvents = state.recentEvents.slice().sort((a, b) => (a.id || 0) - (b.id || 0));
       const timelineEvents = orderedEvents
-        .filter(e => e.type !== "queue_snapshot")
+        .filter(e => e.type !== "queue_snapshot" && e.type !== "metrics_snapshot")
         .slice(-140);
       document.getElementById("timeline").innerHTML = timelineEvents.map(renderEventItem).join("");
 
@@ -716,6 +778,14 @@
         case "metrics_snapshot":
           state.metrics = event.data.metrics || null;
           break;
+        case "llm_call":
+          state.lastLlmCall = {
+            promptTokens: asNum(event.data?.prompt_tokens),
+            completionTokens: asNum(event.data?.completion_tokens),
+            totalTokens: asNum(event.data?.total_tokens),
+            status: String(event.data?.status || "unknown")
+          };
+          break;
         case "queue_saturation": {
           const next = Object.assign({
             dropped_events: 0,
@@ -786,6 +856,7 @@
         const snapshot = await fetch("/api/snapshot", { cache: "no-store" }).then(r => r.json());
         Object.assign(state, snapshot);
         if (!Array.isArray(state.actionCapabilities)) state.actionCapabilities = [];
+        state.lastLlmCall = latestLlmCallFromEvents(state.recentEvents);
         state.inFlight = {
           active: false,
           taskType: state.currentTaskType || null,

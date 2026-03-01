@@ -20,9 +20,9 @@ data class AgentRuntimeSettings(
 )
 
 private data class AgentRuntimeYamlConfig(
-    val app: AgentRuntimeYamlApp = AgentRuntimeYamlApp(),
-    val eval: AgentRuntimeYamlEval = AgentRuntimeYamlEval(),
-    val agent: AgentRuntimeYamlAgent = AgentRuntimeYamlAgent(),
+    val app: AgentRuntimeYamlApp? = AgentRuntimeYamlApp(),
+    val eval: AgentRuntimeYamlEval? = AgentRuntimeYamlEval(),
+    val agent: AgentRuntimeYamlAgent? = AgentRuntimeYamlAgent(),
 )
 
 private data class AgentRuntimeYamlApp(
@@ -87,136 +87,139 @@ object AgentRuntimeSettingsLoader {
     ): AgentRuntimeSettings {
         val defaults = AgentConfig()
         val yaml = readYaml(resolveConfigPath(env, defaultPath)) ?: AgentRuntimeYamlConfig()
+        val appYaml = yaml.app ?: AgentRuntimeYamlApp()
+        val evalYaml = yaml.eval ?: AgentRuntimeYamlEval()
+        val agentYaml = yaml.agent ?: AgentRuntimeYamlAgent()
 
         val mcpCallTimeoutMs = readPositiveLong(
             env = env["MCP_CALL_TIMEOUT_MS"],
-            yaml = yaml.agent.mcpCallTimeoutMs,
+            yaml = agentYaml.mcpCallTimeoutMs,
             fallback = defaults.mcpCallTimeoutMs
         )
 
         val agentConfig = AgentConfig(
-            maxLoopStepsPerInput = readPositiveInt(env["EGO_MAX_LOOP_STEPS"], yaml.agent.maxLoopStepsPerInput, defaults.maxLoopStepsPerInput),
-            loopDelayMs = readNonNegativeInt(env["EGO_LOOP_DELAY_MS"], yaml.agent.loopDelayMs, defaults.loopDelayMs),
-            maxThoughtPasses = readPositiveInt(env["EGO_MAX_THOUGHT_PASSES"], yaml.agent.maxThoughtPasses, defaults.maxThoughtPasses),
-            maxPendingThoughts = readPositiveInt(null, yaml.agent.maxPendingThoughts, defaults.maxPendingThoughts),
-            maxPendingActions = readPositiveInt(null, yaml.agent.maxPendingActions, defaults.maxPendingActions),
-            maxPendingInputs = readPositiveInt(null, yaml.agent.maxPendingInputs, defaults.maxPendingInputs),
-            maxInputChars = readPositiveInt(null, yaml.agent.maxInputChars, defaults.maxInputChars),
+            maxLoopStepsPerInput = readPositiveInt(env["EGO_MAX_LOOP_STEPS"], agentYaml.maxLoopStepsPerInput, defaults.maxLoopStepsPerInput),
+            loopDelayMs = readNonNegativeInt(env["EGO_LOOP_DELAY_MS"], agentYaml.loopDelayMs, defaults.loopDelayMs),
+            maxThoughtPasses = readPositiveInt(env["EGO_MAX_THOUGHT_PASSES"], agentYaml.maxThoughtPasses, defaults.maxThoughtPasses),
+            maxPendingThoughts = readPositiveInt(null, agentYaml.maxPendingThoughts, defaults.maxPendingThoughts),
+            maxPendingActions = readPositiveInt(null, agentYaml.maxPendingActions, defaults.maxPendingActions),
+            maxPendingInputs = readPositiveInt(null, agentYaml.maxPendingInputs, defaults.maxPendingInputs),
+            maxInputChars = readPositiveInt(null, agentYaml.maxInputChars, defaults.maxInputChars),
             maxShortTermContextChars = readPositiveInt(
                 env["EGO_SHORT_TERM_CONTEXT_MAX_CHARS"],
-                yaml.agent.maxShortTermContextChars,
+                agentYaml.maxShortTermContextChars,
                 defaults.maxShortTermContextChars
             ),
             maxShortTermContextPromptTokens = readPositiveInt(
                 env["EGO_SHORT_TERM_CONTEXT_MAX_PROMPT_TOKENS"],
-                yaml.agent.maxShortTermContextPromptTokens,
+                agentYaml.maxShortTermContextPromptTokens,
                 defaults.maxShortTermContextPromptTokens
             ),
-            maxThoughtChars = readPositiveInt(null, yaml.agent.maxThoughtChars, defaults.maxThoughtChars),
+            maxThoughtChars = readPositiveInt(null, agentYaml.maxThoughtChars, defaults.maxThoughtChars),
             maxActionPayloadChars = readPositiveInt(
                 env["EGO_MAX_ACTION_PAYLOAD_CHARS"],
-                yaml.agent.maxActionPayloadChars,
+                agentYaml.maxActionPayloadChars,
                 defaults.maxActionPayloadChars
             ),
-            maxActionSummaryChars = readPositiveInt(null, yaml.agent.maxActionSummaryChars, defaults.maxActionSummaryChars),
-            maxPromptTokens = readPositiveInt(env["EGO_MAX_PROMPT_TOKENS"], yaml.agent.maxPromptTokens, defaults.maxPromptTokens),
+            maxActionSummaryChars = readPositiveInt(null, agentYaml.maxActionSummaryChars, defaults.maxActionSummaryChars),
+            maxPromptTokens = readPositiveInt(env["EGO_MAX_PROMPT_TOKENS"], agentYaml.maxPromptTokens, defaults.maxPromptTokens),
             maxCompletionTokens = readPositiveInt(
                 env["EGO_MAX_COMPLETION_TOKENS"],
-                yaml.agent.maxCompletionTokens,
+                agentYaml.maxCompletionTokens,
                 defaults.maxCompletionTokens
             ),
-            llmRetryAttempts = readPositiveInt(env["EGO_LLM_RETRY_ATTEMPTS"], yaml.agent.llmRetryAttempts, defaults.llmRetryAttempts),
+            llmRetryAttempts = readPositiveInt(env["EGO_LLM_RETRY_ATTEMPTS"], agentYaml.llmRetryAttempts, defaults.llmRetryAttempts),
             superegoMaxCompletionTokens = readPositiveInt(
                 env["EGO_SUPEREGO_MAX_COMPLETION_TOKENS"],
-                yaml.agent.superegoMaxCompletionTokens,
+                agentYaml.superegoMaxCompletionTokens,
                 defaults.superegoMaxCompletionTokens
             ),
-            searchResultCount = readPositiveInt(env["EGO_SEARCH_RESULT_COUNT"], yaml.agent.searchResultCount, defaults.searchResultCount),
+            searchResultCount = readPositiveInt(env["EGO_SEARCH_RESULT_COUNT"], agentYaml.searchResultCount, defaults.searchResultCount),
             mcpCallTimeoutMs = mcpCallTimeoutMs,
-            mcpFetchMaxChars = readPositiveInt(env["MCP_FETCH_MAX_CHARS"], yaml.agent.mcpFetchMaxChars, defaults.mcpFetchMaxChars),
+            mcpFetchMaxChars = readPositiveInt(env["MCP_FETCH_MAX_CHARS"], agentYaml.mcpFetchMaxChars, defaults.mcpFetchMaxChars),
             mcpMemoryCallTimeoutMs = readPositiveLong(
                 env = env["MCP_MEMORY_CALL_TIMEOUT_MS"],
-                yaml = yaml.agent.mcpMemoryCallTimeoutMs,
+                yaml = agentYaml.mcpMemoryCallTimeoutMs,
                 fallback = mcpCallTimeoutMs
             ),
             longTermMemoryRecallMaxItems = readPositiveInt(
                 env["EGO_LONG_TERM_MEMORY_RECALL_MAX_ITEMS"],
-                yaml.agent.longTermMemoryRecallMaxItems,
+                agentYaml.longTermMemoryRecallMaxItems,
                 defaults.longTermMemoryRecallMaxItems
             ),
             longTermMemoryRecallMaxChars = readPositiveInt(
                 env["EGO_LONG_TERM_MEMORY_RECALL_MAX_CHARS"],
-                yaml.agent.longTermMemoryRecallMaxChars,
+                agentYaml.longTermMemoryRecallMaxChars,
                 defaults.longTermMemoryRecallMaxChars
             ),
             deliberationPressureAssessmentMinStep = readPositiveInt(
                 env["EGO_PRESSURE_MIN_STEP"],
-                yaml.agent.deliberationPressureAssessmentMinStep,
+                agentYaml.deliberationPressureAssessmentMinStep,
                 defaults.deliberationPressureAssessmentMinStep
             ),
             deliberationPressureAssessmentEverySteps = readPositiveInt(
                 env["EGO_PRESSURE_ASSESS_EVERY_STEPS"],
-                yaml.agent.deliberationPressureAssessmentEverySteps,
+                agentYaml.deliberationPressureAssessmentEverySteps,
                 defaults.deliberationPressureAssessmentEverySteps
             ),
             deliberationPressureAssessmentThreshold = readProbability(
                 env["EGO_PRESSURE_ASSESS_THRESHOLD"],
-                yaml.agent.deliberationPressureAssessmentThreshold,
+                agentYaml.deliberationPressureAssessmentThreshold,
                 defaults.deliberationPressureAssessmentThreshold
             ),
             metaReasonerCooldownSteps = readPositiveInt(
                 env["EGO_META_REASONER_COOLDOWN_STEPS"],
-                yaml.agent.metaReasonerCooldownSteps,
+                agentYaml.metaReasonerCooldownSteps,
                 defaults.metaReasonerCooldownSteps
             ),
             metaReasonerMaxTokens = readPositiveInt(
                 env["EGO_META_REASONER_MAX_TOKENS"],
-                yaml.agent.metaReasonerMaxTokens,
+                agentYaml.metaReasonerMaxTokens,
                 defaults.metaReasonerMaxTokens
             ),
             longTermMemoryAssessEverySteps = readPositiveInt(
                 env["EGO_LONG_TERM_MEMORY_ASSESS_EVERY_STEPS"],
-                yaml.agent.longTermMemoryAssessEverySteps,
+                agentYaml.longTermMemoryAssessEverySteps,
                 defaults.longTermMemoryAssessEverySteps
             ),
             longTermMemoryAssessCooldownSteps = readPositiveInt(
                 env["EGO_LONG_TERM_MEMORY_ASSESS_COOLDOWN_STEPS"],
-                yaml.agent.longTermMemoryAssessCooldownSteps,
+                agentYaml.longTermMemoryAssessCooldownSteps,
                 defaults.longTermMemoryAssessCooldownSteps
             ),
             longTermMemoryMinConfidence = readProbability(
                 env["EGO_LONG_TERM_MEMORY_MIN_CONFIDENCE"],
-                yaml.agent.longTermMemoryMinConfidence,
+                agentYaml.longTermMemoryMinConfidence,
                 defaults.longTermMemoryMinConfidence
             ),
             longTermMemoryMaxTokens = readPositiveInt(
                 env["EGO_LONG_TERM_MEMORY_MAX_TOKENS"],
-                yaml.agent.longTermMemoryMaxTokens,
+                agentYaml.longTermMemoryMaxTokens,
                 defaults.longTermMemoryMaxTokens
             ),
             longTermMemoryMaxSummaryChars = readPositiveInt(
                 env["EGO_LONG_TERM_MEMORY_MAX_SUMMARY_CHARS"],
-                yaml.agent.longTermMemoryMaxSummaryChars,
+                agentYaml.longTermMemoryMaxSummaryChars,
                 defaults.longTermMemoryMaxSummaryChars
             ),
             forcedTerminalPressureThreshold = readProbability(
                 env["EGO_FORCE_TERMINAL_PRESSURE_THRESHOLD"],
-                yaml.agent.forcedTerminalPressureThreshold,
+                agentYaml.forcedTerminalPressureThreshold,
                 defaults.forcedTerminalPressureThreshold
             ),
             forcedTerminalStaleStreakThreshold = readPositiveInt(
                 env["EGO_FORCE_TERMINAL_STALE_STREAK_THRESHOLD"],
-                yaml.agent.forcedTerminalStaleStreakThreshold,
+                agentYaml.forcedTerminalStaleStreakThreshold,
                 defaults.forcedTerminalStaleStreakThreshold
             ),
             longTermMemoryForceAssessOnAllowedAction = readBoolean(
                 env["EGO_LONG_TERM_MEMORY_FORCE_ASSESS_ON_ALLOWED_ACTION"],
-                yaml.agent.longTermMemoryForceAssessOnAllowedAction,
+                agentYaml.longTermMemoryForceAssessOnAllowedAction,
                 defaults.longTermMemoryForceAssessOnAllowedAction
             ),
             longTermMemoryParseFallbackDisableAfter = readPositiveInt(
                 env["EGO_LONG_TERM_MEMORY_PARSE_FALLBACK_DISABLE_AFTER"],
-                yaml.agent.longTermMemoryParseFallbackDisableAfter,
+                agentYaml.longTermMemoryParseFallbackDisableAfter,
                 defaults.longTermMemoryParseFallbackDisableAfter
             )
         )
@@ -225,20 +228,20 @@ object AgentRuntimeSettingsLoader {
             agentConfig = agentConfig,
             dashboardEnabled = readBoolean(
                 env = env["PSYKE_DASHBOARD_ENABLED"],
-                yaml = yaml.app.dashboardEnabled,
+                yaml = appYaml.dashboardEnabled,
                 fallback = true
             ),
             dashboardPort = readPositiveInt(
                 env = env["PSYKE_DASHBOARD_PORT"],
-                yaml = yaml.app.dashboardPort,
+                yaml = appYaml.dashboardPort,
                 fallback = DEFAULT_DASHBOARD_PORT
             ),
             evalMaxRawResponseChars = readPositiveInt(
                 env = env["PSYKE_EVAL_MAX_RAW_RESPONSE_CHARS"],
-                yaml = yaml.eval.maxRawResponseChars,
+                yaml = evalYaml.maxRawResponseChars,
                 fallback = Int.MAX_VALUE
             ),
-            evalDefaultStage = firstNonBlank(env["PSYKE_EVAL_STAGE"], yaml.eval.defaultStage)
+            evalDefaultStage = firstNonBlank(env["PSYKE_EVAL_STAGE"], evalYaml.defaultStage)
         )
     }
 
@@ -284,4 +287,3 @@ object AgentRuntimeSettingsLoader {
     private fun firstNonBlank(vararg values: String?): String? =
         values.firstOrNull { !it.isNullOrBlank() }?.trim()
 }
-

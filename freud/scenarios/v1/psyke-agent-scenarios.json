@@ -1,0 +1,30 @@
+{
+  "version": "v1",
+  "scenarios": [
+    {
+      "id": "denial_alternative",
+      "selector": "psyke.eval.AgentScenarioPackTest.scenario_denial_alternative_action",
+      "description": "Denied action is replaced with a materially different safe action."
+    },
+    {
+      "id": "fallback_external_failures",
+      "selector": "psyke.eval.AgentScenarioPackTest.scenario_fallback_after_external_failures",
+      "description": "External failures converge to a fallback explanation instead of a silent drop."
+    },
+    {
+      "id": "memory_recall_context",
+      "selector": "psyke.eval.AgentScenarioPackTest.scenario_memory_recall_injected_into_prompt",
+      "description": "Memory recall is injected into planner prompt context."
+    },
+    {
+      "id": "forced_terminal_model_errors",
+      "selector": "psyke.eval.AgentScenarioPackTest.scenario_forced_terminal_after_repeated_model_errors",
+      "description": "Repeated planner model errors trigger forced terminal answer path."
+    },
+    {
+      "id": "unavailable_action_recovery",
+      "selector": "psyke.eval.AgentScenarioPackTest.scenario_unavailable_action_then_recover_with_answer",
+      "description": "Unavailable actions are rejected and flow recovers to an answer."
+    }
+  ]
+}

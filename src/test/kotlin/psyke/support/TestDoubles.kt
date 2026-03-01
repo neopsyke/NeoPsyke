@@ -63,6 +63,8 @@ class StubMetricsRuntime(
         deniedActionCount += 1
     }
 
+    override fun recordActionCall(actionType: String) {}
+
     override fun recordPlannerNoop() {}
 
     override fun recordPlannerOutputRepaired() {}

@@ -130,4 +130,64 @@ class SqliteMetricsRuntimeTest {
             Files.deleteIfExists(dbPath.resolveSibling("metrics.salt"))
         }
     }
+
+    @Test
+    fun `action call counters are tracked per run and aggregated for provider scope`() {
+        val dbPath = Files.createTempFile("psyke-metrics-action-counts-test", ".db")
+        val previous = System.getProperty("psyke.metrics.db")
+        System.setProperty("psyke.metrics.db", dbPath.toString())
+        try {
+            SqliteMetricsRuntime(
+                provider = "groq",
+                apiKey = "same-key",
+                egoModel = "g-ego",
+                superegoModel = "g-superego"
+            ).use { metrics ->
+                metrics.recordActionCall("answer")
+                metrics.recordActionCall("web_search")
+                metrics.recordActionCall("web_search")
+                val snapshot = metrics.snapshot()
+                requireNotNull(snapshot)
+                assertEquals(1L, snapshot.runActionCallsByType["answer"])
+                assertEquals(2L, snapshot.runActionCallsByType["web_search"])
+                assertEquals(1L, snapshot.persistentActionCallsByType["answer"])
+                assertEquals(2L, snapshot.persistentActionCallsByType["web_search"])
+            }
+
+            SqliteMetricsRuntime(
+                provider = "mistral",
+                apiKey = "same-key",
+                egoModel = "m-ego",
+                superegoModel = "m-superego"
+            ).use { metrics ->
+                metrics.recordActionCall("answer")
+                val snapshot = metrics.snapshot()
+                requireNotNull(snapshot)
+                assertEquals(1L, snapshot.runActionCallsByType["answer"])
+                assertEquals(1L, snapshot.persistentActionCallsByType["answer"])
+            }
+
+            SqliteMetricsRuntime(
+                provider = "groq",
+                apiKey = "same-key",
+                egoModel = "g-ego-2",
+                superegoModel = "g-superego-2"
+            ).use { metrics ->
+                metrics.recordActionCall("answer")
+                val snapshot = metrics.snapshot()
+                requireNotNull(snapshot)
+                assertEquals(1L, snapshot.runActionCallsByType["answer"])
+                assertEquals(2L, snapshot.persistentActionCallsByType["answer"])
+                assertEquals(2L, snapshot.persistentActionCallsByType["web_search"])
+            }
+        } finally {
+            if (previous == null) {
+                System.clearProperty("psyke.metrics.db")
+            } else {
+                System.setProperty("psyke.metrics.db", previous)
+            }
+            Files.deleteIfExists(dbPath)
+            Files.deleteIfExists(dbPath.resolveSibling("metrics.salt"))
+        }
+    }
 }

@@ -96,5 +96,32 @@ class AgentRuntimeSettingsLoaderTest {
         assertEquals(5555, settings.evalMaxRawResponseChars)
         assertEquals("env-stage", settings.evalDefaultStage)
     }
-}
 
+    @Test
+    fun `load tolerates comments-only eval section`() {
+        val tempDir = Files.createTempDirectory("psyke-agent-runtime-empty-eval")
+        val yamlPath = tempDir.resolve("agent-runtime.yaml")
+        Files.writeString(
+            yamlPath,
+            """
+            app:
+              dashboard_enabled: true
+            eval:
+              # default_stage: local
+              # max_raw_response_chars: 2048
+            agent:
+              max_loop_steps_per_input: 42
+            """.trimIndent()
+        )
+
+        val settings = AgentRuntimeSettingsLoader.load(
+            env = emptyMap(),
+            defaultPath = yamlPath
+        )
+
+        assertEquals(true, settings.dashboardEnabled)
+        assertEquals(42, settings.agentConfig.maxLoopStepsPerInput)
+        assertEquals(Int.MAX_VALUE, settings.evalMaxRawResponseChars)
+        assertEquals(null, settings.evalDefaultStage)
+    }
+}

@@ -124,16 +124,49 @@ class SqliteMetricsRuntime(
                 );
                 """.trimIndent()
             )
+            statement.execute(
+                """
+                CREATE TABLE IF NOT EXISTS action_calls (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  run_id TEXT NOT NULL,
+                  key_fingerprint TEXT NOT NULL,
+                  provider TEXT NOT NULL,
+                  action_type TEXT NOT NULL,
+                  count INTEGER NOT NULL DEFAULT 0
+                );
+                """.trimIndent()
+            )
             statement.execute("CREATE INDEX IF NOT EXISTS idx_llm_calls_run_id ON llm_calls(run_id);")
             statement.execute("CREATE INDEX IF NOT EXISTS idx_llm_calls_key_ts ON llm_calls(key_fingerprint, ts);")
             statement.execute("CREATE INDEX IF NOT EXISTS idx_runs_scope ON runs(provider, key_fingerprint, started_at);")
             statement.execute("CREATE INDEX IF NOT EXISTS idx_llm_calls_scope ON llm_calls(provider, key_fingerprint, ts);")
+            statement.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_action_calls_run_type ON action_calls(run_id, action_type);")
+            statement.execute("CREATE INDEX IF NOT EXISTS idx_action_calls_scope_type ON action_calls(key_fingerprint, provider, action_type);")
         }
         startRun(egoModel, superegoModel)
     }
 
     override fun chatCallObserver(provider: String): ChatCallObserver =
         SqlitePersistingChatCallObserver { record -> recordCall(provider, record) }
+
+    override fun recordActionCall(actionType: String) {
+        val normalizedActionType = actionType.trim().lowercase().ifBlank { "unknown" }
+        synchronized(connection) {
+            connection.prepareStatement(
+                """
+                INSERT INTO action_calls(run_id, key_fingerprint, provider, action_type, count)
+                VALUES(?, ?, ?, ?, 1)
+                ON CONFLICT(run_id, action_type) DO UPDATE SET count = count + 1
+                """.trimIndent()
+            ).use { statement ->
+                statement.setString(1, runId)
+                statement.setString(2, keyFingerprint)
+                statement.setString(3, provider)
+                statement.setString(4, normalizedActionType)
+                statement.executeUpdate()
+            }
+        }
+    }
 
     override fun recordDeniedAction() {
         synchronized(connection) {
@@ -518,6 +551,44 @@ class SqliteMetricsRuntime(
                 }
             }
 
+            val runActionCallsByType = connection.prepareStatement(
+                """
+                SELECT action_type, count
+                FROM action_calls
+                WHERE run_id = ?
+                ORDER BY action_type ASC
+                """.trimIndent()
+            ).use { statement ->
+                statement.setString(1, runId)
+                statement.executeQuery().use { rs ->
+                    buildMap {
+                        while (rs.next()) {
+                            put(rs.getString("action_type"), rs.getLong("count"))
+                        }
+                    }
+                }
+            }
+
+            val persistentActionCallsByType = connection.prepareStatement(
+                """
+                SELECT action_type, COALESCE(SUM(count), 0) AS total
+                FROM action_calls
+                WHERE key_fingerprint = ? AND provider = ?
+                GROUP BY action_type
+                ORDER BY action_type ASC
+                """.trimIndent()
+            ).use { statement ->
+                statement.setString(1, keyFingerprint)
+                statement.setString(2, provider)
+                statement.executeQuery().use { rs ->
+                    buildMap {
+                        while (rs.next()) {
+                            put(rs.getString("action_type"), rs.getLong("total"))
+                        }
+                    }
+                }
+            }
+
             return MetricsSnapshot(
                 runId = runId,
                 provider = provider,
@@ -527,7 +598,9 @@ class SqliteMetricsRuntime(
                 persistentTotals = persistent.second,
                 runCountForScope = persistent.first,
                 runSuperegoTokens = runSuperegoTokens,
-                persistentSuperegoTokens = persistentSuperegoTokens
+                persistentSuperegoTokens = persistentSuperegoTokens,
+                runActionCallsByType = runActionCallsByType,
+                persistentActionCallsByType = persistentActionCallsByType
             )
         }
     }
