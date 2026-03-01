@@ -30,6 +30,11 @@
       "id": "action_verifier_repair",
       "selector": "psyke.eval.AgentScenarioPackTest.scenario_action_verifier_repairs_web_search_before_superego_review",
       "description": "Action verifier repairs a generic action before Superego policy review."
+    },
+    {
+      "id": "plan_decomposition",
+      "selector": "psyke.eval.AgentScenarioPackTest.scenario_plan_decomposition_then_execute",
+      "description": "Plan decision decomposes into step-thoughts that execute through normal Ego loop."
     }
   ]
 }

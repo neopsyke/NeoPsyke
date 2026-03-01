@@ -35,6 +35,12 @@ sealed interface EgoDecision {
     ) : EgoDecision
 
     data class Noop(val reason: String) : EgoDecision
+
+    data class EnqueuePlan(
+        val urgency: Urgency,
+        val goal: String,
+        val steps: List<String>,
+    ) : EgoDecision
 }
 
 data class GateDecision(

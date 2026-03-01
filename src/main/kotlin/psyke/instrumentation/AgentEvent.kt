@@ -338,6 +338,27 @@ object AgentEvents {
             )
         )
 
+    fun planCreated(planId: String, goal: String, stepCount: Int, urgency: String): AgentEvent =
+        AgentEvent(
+            type = "plan_created",
+            data = mapOf(
+                "plan_id" to planId,
+                "goal" to goal,
+                "step_count" to stepCount,
+                "urgency" to urgency
+            )
+        )
+
+    fun planStepsEnqueued(planId: String, totalSteps: Int, allQueued: Boolean): AgentEvent =
+        AgentEvent(
+            type = "plan_steps_enqueued",
+            data = mapOf(
+                "plan_id" to planId,
+                "total_steps" to totalSteps,
+                "all_queued" to allQueued
+            )
+        )
+
     fun llmRawResponse(
         actor: String,
         callSite: String,

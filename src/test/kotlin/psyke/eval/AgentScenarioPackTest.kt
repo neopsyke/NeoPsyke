@@ -303,6 +303,60 @@ class AgentScenarioPackTest {
         )
     }
 
+    @Test
+    fun scenario_plan_decomposition_then_execute() {
+        val plannerLlm = StubChatModelClient().apply {
+            // Input: planner decides to create a plan
+            enqueueRawResponse(
+                """
+                {"decision":"plan","urgency":"medium","plan_goal":"Search and answer pricing question","plan_steps":["Search for official pricing","Synthesize answer from search results"]}
+                """.trimIndent()
+            )
+            // Step-thought 1: planner decides to web_search
+            enqueueRawResponse(
+                """
+                {"decision":"action","urgency":"medium","action_type":"web_search","action_payload":"official pricing 2025","action_summary":"search pricing"}
+                """.trimIndent()
+            )
+            // Follow-up thought from search: planner decides to answer
+            enqueueRawResponse(
+                """
+                {"decision":"action","urgency":"medium","action_type":"answer","action_payload":"Pricing is $20/month based on verified sources.","action_summary":"deliver verified answer"}
+                """.trimIndent()
+            )
+        }
+        val superegoLlm = StubChatModelClient().apply {
+            enqueueRawResponse("""{"allow":true}""")
+            enqueueRawResponse("""{"allow":true}""")
+        }
+        val instrumentation = RecordingInstrumentation()
+        val outputs = mutableListOf<String>()
+        val config = AgentConfig(planner = PlannerConfig(maxLoopStepsPerInput = 12, maxThoughtPasses = 4))
+        val agent = Ego(
+            planner = LlmEgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
+            superego = Superego(modelClient = superegoLlm, config = config, instrumentation = instrumentation),
+            motorCortex = buildMotorCortex(output = { outputs.add(it) }),
+            config = config,
+            instrumentation = instrumentation
+        )
+
+        runAgentWithInput(agent, "what is the pricing?\nexit\n")
+
+        assertTrue(outputs.isNotEmpty())
+        assertTrue(outputs.first().contains("Pricing is", ignoreCase = true))
+        assertTrue(
+            instrumentation.events.any { it.type == "plan_created" }
+        )
+        assertTrue(
+            instrumentation.events.any { it.type == "plan_steps_enqueued" }
+        )
+        assertTrue(
+            instrumentation.events.any {
+                it.type == "planner_decision" && it.data["decision_type"] == "plan"
+            }
+        )
+    }
+
     private fun runAgentWithInput(agent: Ego, stdinContent: String) {
         val previousIn = System.`in`
         try {

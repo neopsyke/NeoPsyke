@@ -30,6 +30,8 @@ data class AgentConfig(
                     maxPromptTokens = readInt("EGO_MAX_PROMPT_TOKENS", 2400),
                     maxCompletionTokens = readInt("EGO_MAX_COMPLETION_TOKENS", 900),
                     llmRetryAttempts = readInt("EGO_LLM_RETRY_ATTEMPTS", 2),
+                    maxPlanSteps = readInt("EGO_MAX_PLAN_STEPS", 6),
+                    maxPlanStepDescriptionChars = readInt("EGO_MAX_PLAN_STEP_DESC_CHARS", 120),
                 ),
                 superego = SuperegoConfig(
                     maxCompletionTokens = readInt("EGO_SUPEREGO_MAX_COMPLETION_TOKENS", 192),

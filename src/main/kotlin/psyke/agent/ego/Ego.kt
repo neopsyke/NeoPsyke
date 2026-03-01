@@ -401,6 +401,57 @@ class Ego(
                 emitQueueSnapshot("decision_action")
             }
 
+            is EgoDecision.EnqueuePlan -> {
+                val planId = java.util.UUID.randomUUID().toString().take(PLAN_ID_LENGTH)
+                instrumentation.emit(
+                    AgentEvents.planCreated(
+                        planId = planId,
+                        goal = decision.goal,
+                        stepCount = decision.steps.size,
+                        urgency = decision.urgency.name.lowercase()
+                    )
+                )
+                var allQueued = true
+                decision.steps.forEachIndexed { index, stepDescription ->
+                    val stepContent = TextSecurity.clamp(
+                        "Plan step ${index + 1}/${decision.steps.size}: $stepDescription",
+                        config.planner.maxThoughtChars
+                    )
+                    val queued = scheduler.enqueueThought(
+                        content = stepContent,
+                        urgency = decision.urgency,
+                        passes = nextPassCount,
+                        rootInputEnqueuedAtMs = rootInputEnqueuedAtMs,
+                        planContext = PlanContext(
+                            planId = planId,
+                            planGoal = decision.goal,
+                            stepIndex = index,
+                            totalSteps = decision.steps.size,
+                            stepDescription = stepDescription,
+                        ),
+                    )
+                    if (!queued) {
+                        allQueued = false
+                        instrumentation.emit(
+                            AgentEvents.warning("Failed to enqueue plan step ${index + 1}/${decision.steps.size}.")
+                        )
+                        recordQueueSaturation(
+                            queueType = "thought",
+                            capacity = config.maxPendingThoughts,
+                            reason = "enqueue_plan_step_failed_full"
+                        )
+                    }
+                }
+                instrumentation.emit(
+                    AgentEvents.planStepsEnqueued(
+                        planId = planId,
+                        totalSteps = decision.steps.size,
+                        allQueued = allQueued
+                    )
+                )
+                emitQueueSnapshot("decision_plan")
+            }
+
             is EgoDecision.Noop -> {
                 val noopThought = TextSecurity.clamp("Noop decision: ${decision.reason}", config.planner.maxThoughtChars)
                 val queued = scheduler.enqueueThought(
@@ -629,4 +680,8 @@ class Ego(
             ActionType.MCP_FETCH -> "MCP fetch completed."
             ActionType.ANSWER -> "Action completed."
         }
+
+    private companion object {
+        const val PLAN_ID_LENGTH: Int = 8
+    }
 }

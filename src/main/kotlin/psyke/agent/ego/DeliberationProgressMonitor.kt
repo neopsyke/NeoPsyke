@@ -59,6 +59,13 @@ class DeliberationProgressMonitor(
                 modelErrorStreak = max(0, modelErrorStreak - 1)
             }
 
+            is EgoDecision.EnqueuePlan -> {
+                staleStreak = max(0, staleStreak - 1)
+                progressScore += 0.05
+                noopStreak = 0
+                modelErrorStreak = max(0, modelErrorStreak - 1)
+            }
+
             is EgoDecision.Noop -> {
                 val modelErrorNoop = decision.reason.contains("model error", ignoreCase = true)
                 staleStreak += if (modelErrorNoop) 2 else 1
@@ -142,6 +149,10 @@ class DeliberationProgressMonitor(
 
             is EgoDecision.ProposeAction -> {
                 "action:${decision.actionType.name.lowercase()}:${normalize(decision.payload)}"
+            }
+
+            is EgoDecision.EnqueuePlan -> {
+                "plan:${normalize(decision.goal)}:steps=${decision.steps.size}"
             }
 
             is EgoDecision.Noop -> {
