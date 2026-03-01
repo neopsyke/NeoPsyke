@@ -224,6 +224,97 @@ class EgoPlannerTest {
     }
 
     @Test
+    fun `planner runs action verifier and applies one-pass action repair`() {
+        val llm = StubChatModelClient().apply {
+            enqueueRawResponse(
+                """
+                {"decision":"action","urgency":"medium","action_type":"answer","action_payload":"2+2 is 5","action_summary":"respond"}
+                """.trimIndent()
+            )
+            enqueueRawResponseForCallSite(
+                callSite = "action_verifier",
+                content = """
+                {"verdict":"repair","action_type":"answer","action_payload":"2+2 is 4","action_summary":"correct arithmetic answer","reason":"fixed contradiction"}
+                """.trimIndent()
+            )
+        }
+        val instrumentation = RecordingInstrumentation()
+        var repairCount = 0
+        val planner = LlmEgoPlanner(
+            modelClient = llm,
+            config = AgentConfig(),
+            instrumentation = instrumentation,
+            onPlannerOutputRepaired = { repairCount += 1 }
+        )
+
+        val decision = planner.decide(
+            trigger = psyke.agent.core.EgoTrigger.IncomingInput(PendingInput(1, "what is 2+2?")),
+            context = PlannerContext(
+                recentDialogue = emptyList(),
+                queue = QueueSnapshot(0, 0, 0)
+            )
+        )
+
+        val action = assertIs<psyke.agent.core.EgoDecision.ProposeAction>(decision)
+        assertEquals(ActionType.ANSWER, action.actionType)
+        assertEquals("2+2 is 4", action.payload)
+        assertEquals("correct arithmetic answer", action.summary)
+        assertEquals(1, repairCount)
+        assertTrue(llm.calls.any { it.options.metadata.callSite == "action_verifier" })
+        assertTrue(
+            instrumentation.events.any {
+                it.type == "planner_output_repaired" &&
+                    it.data["repair"] == "action_verifier_repair"
+            }
+        )
+        assertTrue(
+            instrumentation.events.any {
+                it.type == "action_verifier_result" &&
+                    it.data["verdict"] == "repair" &&
+                    it.data["repaired"] == true
+            }
+        )
+    }
+
+    @Test
+    fun `planner converts verifier reject into noop`() {
+        val llm = StubChatModelClient().apply {
+            enqueueRawResponse(
+                """
+                {"decision":"action","urgency":"medium","action_type":"answer","action_payload":"unsafe","action_summary":"respond"}
+                """.trimIndent()
+            )
+            enqueueRawResponseForCallSite(
+                callSite = "action_verifier",
+                content = """{"verdict":"reject","reason":"internally inconsistent with trigger"}"""
+            )
+        }
+        val instrumentation = RecordingInstrumentation()
+        val planner = LlmEgoPlanner(
+            modelClient = llm,
+            config = AgentConfig(),
+            instrumentation = instrumentation
+        )
+
+        val decision = planner.decide(
+            trigger = psyke.agent.core.EgoTrigger.IncomingInput(PendingInput(1, "safe response only")),
+            context = PlannerContext(
+                recentDialogue = emptyList(),
+                queue = QueueSnapshot(0, 0, 0)
+            )
+        )
+
+        val noop = assertIs<psyke.agent.core.EgoDecision.Noop>(decision)
+        assertTrue(noop.reason.contains("inconsistent", ignoreCase = true))
+        assertTrue(
+            instrumentation.events.any {
+                it.type == "action_verifier_result" &&
+                    it.data["verdict"] == "reject"
+            }
+        )
+    }
+
+    @Test
     fun `planner trims oversized prompt before sending to model`() {
         val llm = StubChatModelClient()
         llm.enqueueRawResponse("""{"decision":"noop","reason":"done"}""")

@@ -1,0 +1,20 @@
+# Psyke Scenario Pack v1
+
+This pack is a deterministic, end-to-end regression layer for agent-loop behavior.
+
+## Why this exists
+Existing Psyke evals already cover:
+- Reasoning retry/feedback contract behavior (logic harness)
+- Model reasoning tasks (ledger/assignment/state-machine)
+- Live long-term memory persistence/recall checks
+
+The scenario pack adds deterministic agent-loop coverage that is hard to infer from reasoning-only evals:
+- policy denial and alternative-action recovery
+- fallback behavior after repeated external failures
+- memory recall injection into planner context
+- forced terminal convergence under repeated planner model errors
+- unavailable-action rejection and recovery with available actions
+
+## Source of truth
+- Manifest: `freud/scenarios/v1/psyke-agent-scenarios.json`
+- Tests: `src/test/kotlin/psyke/eval/AgentScenarioPackTest.kt`

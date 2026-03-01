@@ -16,7 +16,14 @@ import java.util.concurrent.TimeUnit
 class StubChatModelClient(
     override val modelName: String = "stub-model",
 ) : ChatModelClient {
+    data class ObservedCall(
+        val messages: List<ChatMessage>,
+        val options: ChatRequestOptions,
+    )
+
     private val queuedResponses = ArrayDeque<ChatCompletion>()
+    private val queuedResponsesByCallSite = mutableMapOf<String, ArrayDeque<ChatCompletion>>()
+    val calls = mutableListOf<ObservedCall>()
     var lastMessages: List<ChatMessage> = emptyList()
         private set
     var lastOptions: ChatRequestOptions = ChatRequestOptions()
@@ -26,9 +33,23 @@ class StubChatModelClient(
         queuedResponses.addLast(ChatCompletion(content = content, model = modelName))
     }
 
+    fun enqueueRawResponseForCallSite(callSite: String, content: String) {
+        val queue = queuedResponsesByCallSite.getOrPut(callSite) { ArrayDeque() }
+        queue.addLast(ChatCompletion(content = content, model = modelName))
+    }
+
     override fun chat(messages: List<ChatMessage>, options: ChatRequestOptions): ChatCompletion {
-        lastMessages = messages
-        lastOptions = options
+        val callSite = options.metadata.callSite.orEmpty()
+        calls += ObservedCall(messages = messages, options = options)
+        if (callSite != "action_verifier") {
+            lastMessages = messages
+            lastOptions = options
+        }
+
+        queuedResponsesByCallSite[callSite]?.removeFirstOrNull()?.let { return it }
+        if (callSite == "action_verifier") {
+            return ChatCompletion(content = """{"verdict":"approve"}""", model = modelName)
+        }
         return queuedResponses.removeFirstOrNull()
             ?: ChatCompletion(content = """{"decision":"noop","reason":"empty queue"}""", model = modelName)
     }
@@ -62,6 +83,8 @@ class StubMetricsRuntime(
     override fun recordDeniedAction() {
         deniedActionCount += 1
     }
+
+    override fun recordActionCall(actionType: String) {}
 
     override fun recordPlannerNoop() {}
 

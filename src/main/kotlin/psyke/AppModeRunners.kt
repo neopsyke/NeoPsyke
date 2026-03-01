@@ -655,6 +655,10 @@ internal object AppModeRunners {
                                                     hippocampus = hippocampus,
                                                     metaReasoner = metaReasoner,
                                                     longTermMemoryAdvisor = longTermMemoryAdvisor,
+                                                    onActionExecuted = { actionType ->
+                                                        metrics.recordActionCall(actionType.name.lowercase())
+                                                        emitMetricsSnapshot()
+                                                    },
                                                     onActionDenied = {
                                                         metrics.recordDeniedAction()
                                                         emitMetricsSnapshot()

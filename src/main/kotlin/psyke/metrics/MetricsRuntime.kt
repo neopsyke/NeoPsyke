@@ -17,6 +17,7 @@ private val logger = KotlinLogging.logger {}
 
 interface MetricsRuntime : Closeable {
     fun chatCallObserver(provider: String): ChatCallObserver?
+    fun recordActionCall(actionType: String)
     fun recordDeniedAction()
     fun recordPlannerNoop()
     fun recordPlannerOutputRepaired()
@@ -36,6 +37,7 @@ interface MetricsRuntime : Closeable {
 
 class NoopMetricsRuntime : MetricsRuntime {
     override fun chatCallObserver(provider: String): ChatCallObserver? = null
+    override fun recordActionCall(actionType: String) {}
     override fun recordDeniedAction() {}
     override fun recordPlannerNoop() {}
     override fun recordPlannerOutputRepaired() {}
@@ -132,6 +134,17 @@ private class JsonlFallbackMetricsRuntime(
                 "ts" to Instant.now().toString(),
                 "provider" to provider,
                 "event" to "denied_action"
+            )
+        )
+    }
+
+    override fun recordActionCall(actionType: String) {
+        appendLine(
+            mapOf(
+                "ts" to Instant.now().toString(),
+                "provider" to provider,
+                "event" to "action_call",
+                "action_type" to actionType
             )
         )
     }
@@ -319,4 +332,6 @@ data class MetricsSnapshot(
     val runCountForScope: Long,
     val runSuperegoTokens: Long = 0,
     val persistentSuperegoTokens: Long = 0,
+    val runActionCallsByType: Map<String, Long> = emptyMap(),
+    val persistentActionCallsByType: Map<String, Long> = emptyMap(),
 )

@@ -33,6 +33,7 @@ class Ego(
     private val longTermMemoryAdvisor: LongTermMemoryAdvisor = NoopLongTermMemoryAdvisor,
     private val sensoryCortex: SensoryCortex = SensoryCortex.stdin(config),
     private val memoryStore: MemoryStore = MemoryStore(config.maxShortTermContextChars),
+    private val onActionExecuted: (actionType: ActionType) -> Unit = {},
     private val onActionDenied: () -> Unit = {},
     private val onQueueSaturation: (queueType: String, pending: Int, capacity: Int) -> Unit = { _, _, _ -> },
     private val onMemoryRecall: (hitCount: Int, latencyMs: Long, recallChars: Int, truncated: Boolean) -> Unit = { _, _, _, _ -> },
@@ -236,6 +237,7 @@ class Ego(
             )
             val outcome = executeActionSafely(action) ?: return
             instrumentation.emit(AgentEvents.actionExecuted(action, outcome.statusSummary))
+            onActionExecuted(action.type)
             if (action.type == ActionType.ANSWER) {
                 val enqueuedAtMs = action.rootInputEnqueuedAtMs
                 if (enqueuedAtMs != null) {
@@ -305,6 +307,7 @@ class Ego(
 
         val outcome = executeActionSafely(action) ?: return
         instrumentation.emit(AgentEvents.actionExecuted(action, outcome.statusSummary))
+        onActionExecuted(action.type)
         val observedEvidence = actionObservedEvidence(action, outcome)
         recordExternalEvidenceProgress(
             action = action,

@@ -87,8 +87,13 @@ class LlmEgoPlanner(
             raw = resolvedResponse.content,
             availableActions = context.availableActions
         )
-        emitDecision(triggerLabel, decision)
-        return decision
+        val verifiedDecision = verifyActionDecision(
+            trigger = trigger,
+            context = context,
+            decision = decision
+        )
+        emitDecision(triggerLabel, verifiedDecision)
+        return verifiedDecision
     }
 
     private fun parseResponse(raw: String, availableActions: Set<ActionType>): EgoDecision {
@@ -177,6 +182,224 @@ class LlmEgoPlanner(
     private fun repairInvalidJsonEscapes(json: String): String =
         json.replace(invalidJsonEscapeRegex, "")
 
+    private fun verifyActionDecision(
+        trigger: EgoTrigger,
+        context: PlannerContext,
+        decision: EgoDecision,
+    ): EgoDecision {
+        if (decision !is EgoDecision.ProposeAction) {
+            return decision
+        }
+        val messages = buildActionVerifierMessages(
+            trigger = trigger,
+            context = context,
+            decision = decision
+        )
+        val verifierPayload = callActionVerifier(
+            messages = messages,
+            actionType = decision.actionType.name.lowercase()
+        ) ?: return decision
+        return resolveVerifierDecision(
+            original = decision,
+            payload = verifierPayload,
+            availableActions = context.availableActions
+        )
+    }
+
+    private fun callActionVerifier(
+        messages: List<ChatMessage>,
+        actionType: String,
+    ): ActionVerifierPayload? {
+        var response = null as psyke.llm.ChatCompletion?
+        var lastError: Exception? = null
+        val retryAttempts = maxOf(1, config.llmRetryAttempts)
+        for (attempt in 1..retryAttempts) {
+            try {
+                response = modelClient.chat(
+                    messages = messages,
+                    options = ChatRequestOptions(
+                        temperature = 0.1,
+                        maxTokens = minOf(config.maxCompletionTokens, 220),
+                        metadata = ChatCallMetadata(
+                            actor = "ego",
+                            callSite = "action_verifier",
+                            actionType = actionType
+                        )
+                    )
+                )
+                break
+            } catch (ex: Exception) {
+                lastError = ex
+                if (attempt < retryAttempts) {
+                    instrumentation.emit(
+                        AgentEvents.warning(
+                            "Action verifier call failed (attempt $attempt/$retryAttempts); retrying."
+                        )
+                    )
+                }
+            }
+        }
+        if (response == null) {
+            logger.warn(lastError) { "Action verifier call failed for action_type=$actionType." }
+            instrumentation.emit(AgentEvents.warning("Action verifier unavailable; keeping original action proposal."))
+            return null
+        }
+        return try {
+            parseActionVerifierPayloadWithRepair(response.content)
+        } catch (ex: Exception) {
+            logger.warn(ex) {
+                "Failed to parse action verifier response. action_type=$actionType preview='${TextSecurity.preview(response.content, 120)}'"
+            }
+            instrumentation.emit(AgentEvents.warning("Action verifier response was non-parseable; keeping original action."))
+            null
+        }
+    }
+
+    private fun parseActionVerifierPayloadWithRepair(raw: String): ActionVerifierPayload {
+        val json = TextSecurity.extractJsonObject(raw)
+        return try {
+            mapper.readValue<ActionVerifierPayload>(json)
+        } catch (initial: Exception) {
+            val repaired = repairInvalidJsonEscapes(json)
+            if (repaired == json) {
+                throw initial
+            }
+            try {
+                val payload = mapper.readValue<ActionVerifierPayload>(repaired)
+                onPlannerOutputRepaired()
+                instrumentation.emit(
+                    AgentEvents.plannerOutputRepaired(
+                        actionType = "action_verifier",
+                        repair = "invalid_json_escape"
+                    )
+                )
+                payload
+            } catch (_: Exception) {
+                throw initial
+            }
+        }
+    }
+
+    private fun resolveVerifierDecision(
+        original: EgoDecision.ProposeAction,
+        payload: ActionVerifierPayload,
+        availableActions: Set<ActionType>,
+    ): EgoDecision {
+        return when (payload.verdict?.trim()?.lowercase()) {
+            "approve" -> {
+                emitVerifierResult(
+                    verdict = "approve",
+                    originalActionType = original.actionType.name.lowercase(),
+                    resultingActionType = original.actionType.name.lowercase(),
+                    repaired = false,
+                    reason = payload.reason
+                )
+                original
+            }
+
+            "reject" -> {
+                val reason = payload.reason?.trim().orEmpty().ifBlank {
+                    "Action verifier rejected candidate action."
+                }
+                emitVerifierResult(
+                    verdict = "reject",
+                    originalActionType = original.actionType.name.lowercase(),
+                    resultingActionType = null,
+                    repaired = false,
+                    reason = reason
+                )
+                EgoDecision.Noop(TextSecurity.clamp(reason, 160))
+            }
+
+            "repair" -> {
+                val repairedActionType = ActionType.fromRaw(payload.actionType) ?: original.actionType
+                if (!availableActions.contains(repairedActionType)) {
+                    val reason = "Action verifier proposed unavailable action type: ${repairedActionType.name.lowercase()}."
+                    emitVerifierResult(
+                        verdict = "reject",
+                        originalActionType = original.actionType.name.lowercase(),
+                        resultingActionType = repairedActionType.name.lowercase(),
+                        repaired = false,
+                        reason = reason
+                    )
+                    return EgoDecision.Noop(reason)
+                }
+
+                val repairedPayload = payload.actionPayload?.trim().orEmpty()
+                if (repairedPayload.isBlank()) {
+                    instrumentation.emit(
+                        AgentEvents.warning(
+                            "Action verifier repair missing payload; keeping original action."
+                        )
+                    )
+                    return original
+                }
+                val repairedSummary = payload.actionSummary?.trim().orEmpty()
+                val resolvedSummary = if (repairedSummary.isBlank()) {
+                    synthesizeActionSummary(repairedPayload)
+                } else {
+                    repairedSummary
+                }
+                if (resolvedSummary.isBlank()) {
+                    instrumentation.emit(
+                        AgentEvents.warning(
+                            "Action verifier repair missing summary; keeping original action."
+                        )
+                    )
+                    return original
+                }
+                onPlannerOutputRepaired()
+                instrumentation.emit(
+                    AgentEvents.plannerOutputRepaired(
+                        actionType = repairedActionType.name.lowercase(),
+                        repair = "action_verifier_repair"
+                    )
+                )
+                emitVerifierResult(
+                    verdict = "repair",
+                    originalActionType = original.actionType.name.lowercase(),
+                    resultingActionType = repairedActionType.name.lowercase(),
+                    repaired = true,
+                    reason = payload.reason
+                )
+                EgoDecision.ProposeAction(
+                    urgency = original.urgency,
+                    actionType = repairedActionType,
+                    payload = TextSecurity.clamp(repairedPayload, config.maxActionPayloadChars),
+                    summary = TextSecurity.clamp(resolvedSummary, config.maxActionSummaryChars)
+                )
+            }
+
+            else -> {
+                instrumentation.emit(
+                    AgentEvents.warning("Action verifier returned unknown verdict; keeping original action.")
+                )
+                original
+            }
+        }
+    }
+
+    private fun emitVerifierResult(
+        verdict: String,
+        originalActionType: String,
+        resultingActionType: String?,
+        repaired: Boolean,
+        reason: String?,
+    ) {
+        instrumentation.emit(
+            AgentEvent(
+                type = "action_verifier_result",
+                data = mapOf(
+                    "verdict" to verdict,
+                    "original_action_type" to originalActionType,
+                    "resulting_action_type" to resultingActionType,
+                    "repaired" to repaired,
+                    "reason" to reason
+                )
+            )
+        )
+    }
+
     private fun emitDecision(triggerLabel: String, decision: EgoDecision) {
         when (decision) {
             is EgoDecision.EnqueueThought -> {
@@ -217,24 +440,7 @@ class LlmEgoPlanner(
     }
 
     private fun buildMessages(trigger: EgoTrigger, context: PlannerContext): List<ChatMessage> {
-        val triggerText = when (trigger) {
-            is EgoTrigger.IncomingInput -> "INPUT: ${trigger.input.content}"
-            is EgoTrigger.PendingThoughtInput -> {
-                val thought = trigger.thought
-                val denialContext = if (thought.deniedActionType != null && !thought.deniedActionPayload.isNullOrBlank()) {
-                    """
-                    Denied action context:
-                    denied_action_type=${thought.deniedActionType.name.lowercase()}
-                    denied_action_payload=${thought.deniedActionPayload}
-                    denied_reason=${thought.denialReason ?: "none"}
-                    Do not repeat the denied action payload; prefer a materially different next step.
-                    """.trimIndent()
-                } else {
-                    "Denied action context: none"
-                }
-                "THOUGHT(pass=${thought.passes}): ${thought.content}\n$denialContext"
-            }
-        }
+        val triggerText = formatTriggerText(trigger)
 
         val dialogue = if (context.recentDialogue.isEmpty()) {
             "none"
@@ -385,12 +591,133 @@ class LlmEgoPlanner(
         )
     }
 
+    private fun buildActionVerifierMessages(
+        trigger: EgoTrigger,
+        context: PlannerContext,
+        decision: EgoDecision.ProposeAction,
+    ): List<ChatMessage> {
+        val triggerText = formatTriggerText(trigger)
+        val dialogue = if (context.recentDialogue.isEmpty()) {
+            "none"
+        } else {
+            context.recentDialogue.joinToString("\n") { turn ->
+                "${turn.role.name.lowercase()}: ${turn.content}"
+            }
+        }
+        val availableActionList = context.availableActions
+            .map { it.name.lowercase() }
+            .sorted()
+            .joinToString(", ")
+            .ifBlank { "none" }
+        val shortTermContextSummary = context.shortTermContextSummary.ifBlank { "none" }
+        val longTermMemoryRecall = context.longTermMemoryRecall.ifBlank { "none" }
+
+        return PromptBudgetAllocator.allocate(
+            sections = listOf(
+                PromptBudgetAllocator.Section(
+                    role = ChatRole.SYSTEM,
+                    priority = PromptBudgetAllocator.Priority.MANDATORY,
+                    required = true,
+                    minTokens = 36,
+                    content = """
+                    You are an action verifier.
+                    Return STRICT JSON only.
+                    Evaluate whether the candidate action is logically consistent with trigger and context.
+                    Output schema:
+                    {
+                      "verdict":"approve|repair|reject",
+                      "action_type":"required when verdict=repair",
+                      "action_payload":"required when verdict=repair",
+                      "action_summary":"required when verdict=repair",
+                      "reason":"optional short reason"
+                    }
+                    Rules:
+                    - approve: action is coherent and ready for policy review.
+                    - repair: one-shot correction to make action coherent.
+                    - reject: action cannot be repaired safely/coherently.
+                    - Never use action types outside available_action_types.
+                    """.trimIndent()
+                ),
+                PromptBudgetAllocator.Section(
+                    role = ChatRole.USER,
+                    priority = PromptBudgetAllocator.Priority.IMPORTANT,
+                    minTokens = 18,
+                    content = "available_action_types=$availableActionList"
+                ),
+                PromptBudgetAllocator.Section(
+                    role = ChatRole.USER,
+                    priority = PromptBudgetAllocator.Priority.OPTIONAL,
+                    content = "Recent dialogue:\n$dialogue"
+                ),
+                PromptBudgetAllocator.Section(
+                    role = ChatRole.USER,
+                    priority = PromptBudgetAllocator.Priority.IMPORTANT,
+                    minTokens = 24,
+                    content = "Short-term context summary:\n$shortTermContextSummary"
+                ),
+                PromptBudgetAllocator.Section(
+                    role = ChatRole.USER,
+                    priority = PromptBudgetAllocator.Priority.OPTIONAL,
+                    content = "Long-term memory recall:\n$longTermMemoryRecall"
+                ),
+                PromptBudgetAllocator.Section(
+                    role = ChatRole.USER,
+                    priority = PromptBudgetAllocator.Priority.MANDATORY,
+                    required = true,
+                    minTokens = 30,
+                    content = """
+                    Trigger:
+                    $triggerText
+                    
+                    Candidate action:
+                    urgency=${decision.urgency.name.lowercase()}
+                    action_type=${decision.actionType.name.lowercase()}
+                    action_payload=${decision.payload}
+                    action_summary=${decision.summary}
+                    """.trimIndent()
+                )
+            ),
+            maxTokens = minOf(config.maxPromptTokens, 1_200)
+        )
+    }
+
+    private fun formatTriggerText(trigger: EgoTrigger): String =
+        when (trigger) {
+            is EgoTrigger.IncomingInput -> "INPUT: ${trigger.input.content}"
+            is EgoTrigger.PendingThoughtInput -> {
+                val thought = trigger.thought
+                val denialContext = if (thought.deniedActionType != null && !thought.deniedActionPayload.isNullOrBlank()) {
+                    """
+                    Denied action context:
+                    denied_action_type=${thought.deniedActionType.name.lowercase()}
+                    denied_action_payload=${thought.deniedActionPayload}
+                    denied_reason=${thought.denialReason ?: "none"}
+                    Do not repeat the denied action payload; prefer a materially different next step.
+                    """.trimIndent()
+                } else {
+                    "Denied action context: none"
+                }
+                "THOUGHT(pass=${thought.passes}): ${thought.content}\n$denialContext"
+            }
+        }
+
     private data class EgoDecisionPayload(
         val decision: String? = null,
         val urgency: String? = null,
         val thought: String? = null,
         @JsonProperty("long_term_memory_recall_query")
         val longTermMemoryRecallQuery: String? = null,
+        @JsonProperty("action_type")
+        val actionType: String? = null,
+        @JsonProperty("action_payload")
+        val actionPayload: String? = null,
+        @JsonProperty("action_summary")
+        val actionSummary: String? = null,
+        val reason: String? = null,
+    )
+
+    private data class ActionVerifierPayload(
+        val verdict: String? = null,
         @JsonProperty("action_type")
         val actionType: String? = null,
         @JsonProperty("action_payload")
