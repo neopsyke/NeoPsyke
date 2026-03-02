@@ -32,6 +32,18 @@ Instructions for coding agents working in this repository (Codex, Claude, Gemini
 - Prefer ASCII in docs/code unless the file already uses Unicode.
 - Preserve existing behavior unless the user asked for behavior changes.
 
+## Agent Logic Docs Maintenance (Required)
+- Keep both `AGENT_LOGIC_SUMMARY.md` and `AGENT_LOGIC_DIAGRAM.md` accurate as living runtime logic docs.
+- Whenever a change affects control flow or core behavior in any of these areas, update the relevant sections in both files in the same PR/patch:
+  - Ego loop orchestration, scheduler ordering, or fallback behavior.
+  - Planner decision schema/flow, action verifier behavior, or parsing fallback semantics.
+  - Superego review behavior and default deny/allow semantics.
+  - Deliberation pressure/meta-reasoner thresholds, overrides, or forced terminal answer rules.
+  - Short-term/long-term memory recall, consolidation, or confidence/disable thresholds.
+  - Available action types and their execution/runtime availability behavior.
+- Keep docs readable for humans (architecture and decision flow first, implementation detail second).
+- Keep diagrams simple and editable (Mermaid text blocks, small focused views instead of one large graph).
+
 ## Freud Workflow (Meta-Project)
 - Preferred feature-delivery path: use `freud/` for coding, validation, and triage of non-trivial changes.
 - Separation rule:

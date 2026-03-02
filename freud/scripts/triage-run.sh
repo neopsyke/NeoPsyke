@@ -97,9 +97,11 @@ record_pattern "provider_failures" "timeout|unavailable|provider check failed"
 
 if [[ -d "$logs_dir" ]]; then
   set +e
-  top_signals="$(rg -i -n -H -e "error|exception|failed|warning" "$logs_dir" 2>/dev/null)"
+  # Filter out Gradle task-header lines (e.g. "> Task :checkKotlinGradlePluginConfigurationErrors SKIPPED")
+  # to avoid false-positive signals from Gradle's built-in task names on every passing build.
+  top_signals="$(rg -i -n -H -e "error|exception|failed|warning" "$logs_dir" 2>/dev/null | rg -v ':> Task :')"
   pressure_signals="$(rg -n -H -e "decision_pressure=[0-9]+\\.[0-9]+" "$logs_dir" 2>/dev/null)"
-  first_fail_line="$(rg -i -n -H -m 1 -e "error|exception|failed|traceback|assert" "$logs_dir" 2>/dev/null | head -n 1)"
+  first_fail_line="$(rg -i -n -H -e "error|exception|failed|traceback|assert" "$logs_dir" 2>/dev/null | rg -v ':> Task :' | head -n 1)"
   set -e
   printf '%s\n' "$top_signals" | sed '/^$/d' | head -n "$top_n" >"$top_signals_file"
   printf '%s\n' "$pressure_signals" | sed '/^$/d' >"$pressure_file"

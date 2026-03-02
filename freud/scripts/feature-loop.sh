@@ -407,7 +407,7 @@ index_step_log() {
   local cat regex matches
   while IFS='|' read -r cat regex; do
     set +e
-    matches="$(rg -n -i -e "$regex" "$step_log" 2>/dev/null)"
+    matches="$(rg -n -i -e "$regex" "$step_log" 2>/dev/null | rg -v '^[0-9]+:> Task :')"
     set -e
     if [[ -z "$matches" ]]; then
       continue
@@ -438,10 +438,12 @@ summarize_step_log_counts() {
   log_lines="$(wc -l <"$step_log" | tr -d ' ')"
 
   set +e
-  warning_count="$(rg -n -i -e "warning" "$step_log" 2>/dev/null | wc -l | tr -d ' ')"
-  error_count="$(rg -n -i -e "error|exception|failed|assert" "$step_log" 2>/dev/null | wc -l | tr -d ' ')"
-  first_warning="$(rg -n -i -m 1 -e "warning" "$step_log" 2>/dev/null | head -n 1)"
-  first_error="$(rg -n -i -m 1 -e "error|exception|failed|assert" "$step_log" 2>/dev/null | head -n 1)"
+  # Filter out Gradle task-header lines (e.g. "> Task :checkKotlinGradlePluginConfigurationErrors SKIPPED")
+  # to avoid false-positive error/warning counts on every passing Gradle build.
+  warning_count="$(rg -n -i -e "warning" "$step_log" 2>/dev/null | rg -v '^[0-9]+:> Task :' | wc -l | tr -d ' ')"
+  error_count="$(rg -n -i -e "error|exception|failed|assert" "$step_log" 2>/dev/null | rg -v '^[0-9]+:> Task :' | wc -l | tr -d ' ')"
+  first_warning="$(rg -n -i -e "warning" "$step_log" 2>/dev/null | rg -v '^[0-9]+:> Task :' | head -n 1)"
+  first_error="$(rg -n -i -e "error|exception|failed|assert" "$step_log" 2>/dev/null | rg -v '^[0-9]+:> Task :' | head -n 1)"
   first_pressure="$(rg -n -m 1 -e "decision_pressure=[0-9]+\\.[0-9]+" "$step_log" 2>/dev/null | head -n 1)"
   set -e
 
@@ -737,7 +739,12 @@ if [[ -n "$summarizer_cmd" && "$dry_run" != "true" ]]; then
   if [[ $summarizer_exit -eq 0 ]]; then
     emit_trail "summarizer_end" "" "pass" "external summarizer finished" "$summarizer_cmd" "$log_dir/07-summarizer.log" ""
     if [[ -f "$model_summary_json" ]]; then
-      emit_trail "summarizer_artifact" "" "ok" "tier-2 model summary written" "" "$model_summary_json" "$model_summary_md"
+      _ms_actual_status="$(sed -nE 's/^[[:space:]]*"status"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p' "$model_summary_json" 2>/dev/null | head -n 1)"
+      if [[ "${_ms_actual_status:-}" == "done" ]]; then
+        emit_trail "summarizer_artifact" "" "ok" "tier-2 model summary written" "" "$model_summary_json" "$model_summary_md"
+      else
+        emit_trail "summarizer_skipped" "" "skipped" "tier-2 summarizer skipped (${_ms_actual_status:-no-status})" "" "$model_summary_json" ""
+      fi
     fi
   else
     emit_trail "summarizer_end" "" "fail" "external summarizer failed" "$summarizer_cmd" "$log_dir/07-summarizer.log" ""
@@ -962,10 +969,9 @@ failures_json="$artifact_dir/failures.json"
   echo "}"
 } >"$failures_json"
 
+emit_trail "run_end" "" "$overall_status" "feature loop completed" "" "$summary_json" "${first_failed_step:-}"
 "$repo_root/freud/scripts/summarize-run.sh" "$run_dir" >/dev/null
 "$repo_root/freud/scripts/codex-context-pack.sh" "$run_dir" >/dev/null
-
-emit_trail "run_end" "" "$overall_status" "feature loop completed" "" "$summary_json" "${first_failed_step:-}"
 build_run_index "$overall_status" "${first_failed_step:-}" "$steps_total" "$failed_test_count" "$eval_total_calls" "$eval_total_tokens"
 
 ln -sfn "$run_dir" "$run_root/latest"
