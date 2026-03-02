@@ -10,4 +10,6 @@ data class PlannerConfig(
     val maxPromptTokens: Int = 2_400,
     val maxCompletionTokens: Int = 900,
     val llmRetryAttempts: Int = 2,
+    val maxPlanSteps: Int = 6,
+    val maxPlanStepDescriptionChars: Int = 120,
 )

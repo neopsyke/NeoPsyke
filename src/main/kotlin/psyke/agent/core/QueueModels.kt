@@ -7,6 +7,14 @@ data class PendingInput(
     val enqueuedAtMs: Long = System.currentTimeMillis(),
 )
 
+data class PlanContext(
+    val planId: String,
+    val planGoal: String,
+    val stepIndex: Int,
+    val totalSteps: Int,
+    val stepDescription: String,
+)
+
 data class PendingThought(
     val id: Long,
     val urgency: Urgency,
@@ -18,6 +26,7 @@ data class PendingThought(
     val deniedActionPayload: String? = null,
     val denialReason: String? = null,
     val allowFallbackExplanation: Boolean = false,
+    val planContext: PlanContext? = null,
 )
 
 data class PendingAction(

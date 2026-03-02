@@ -143,6 +143,25 @@ class LlmEgoPlanner(
                     }
                 }
 
+                "plan" -> {
+                    val goal = payload.planGoal?.trim().orEmpty()
+                    val steps = payload.planSteps
+                        ?.map { it.trim() }
+                        ?.filter { it.isNotBlank() }
+                        ?.take(config.planner.maxPlanSteps)
+                        ?.map { TextSecurity.clamp(it, config.planner.maxPlanStepDescriptionChars) }
+                        .orEmpty()
+                    if (goal.isBlank() || steps.isEmpty()) {
+                        EgoDecision.Noop("Planner returned plan with missing goal or empty steps.")
+                    } else {
+                        EgoDecision.EnqueuePlan(
+                            urgency = Urgency.fromRaw(payload.urgency),
+                            goal = TextSecurity.clamp(goal, config.planner.maxThoughtChars),
+                            steps = steps,
+                        )
+                    }
+                }
+
                 else -> EgoDecision.Noop(payload.reason?.take(120) ?: "Planner returned noop.")
             }
         } catch (ex: Exception) {
@@ -426,6 +445,18 @@ class LlmEgoPlanner(
                 )
             }
 
+            is EgoDecision.EnqueuePlan -> {
+                instrumentation.emit(
+                    AgentEvents.plannerDecision(
+                        trigger = triggerLabel,
+                        decisionType = "plan",
+                        urgency = decision.urgency.name.lowercase(),
+                        thought = decision.goal,
+                        reason = "steps=${decision.steps.size}"
+                    )
+                )
+            }
+
             is EgoDecision.Noop -> {
                 onPlannerNoop()
                 instrumentation.emit(
@@ -478,7 +509,11 @@ class LlmEgoPlanner(
                     Decisions:
                     - thought: create/refine a thought for future processing.
                     - action: propose one action.
+                    - plan: decompose into ordered steps when the task needs multiple stages.
                     - noop: when no safe next step exists.
+                    Use plan when the task requires multiple sequential stages (e.g. search, then verify, then answer).
+                    Each plan_step is a concise directive (<=120 chars). The planner re-evaluates each step.
+                    Do not use plan for simple tasks solvable in one or two steps.
                     Allowed actions:
                     - web_search: payload is a concise search query.
                     - answer: payload is the exact answer text for the interlocutor.
@@ -498,18 +533,23 @@ class LlmEgoPlanner(
                     content = """
                     JSON schema:
                     {
-                      "decision":"thought|action|noop",
+                      "decision":"thought|action|plan|noop",
                       "urgency":"low|medium|high",
                       "thought":"... optional when decision=thought",
                       "long_term_memory_recall_query":"optional query string for explicit extra long-term recall",
                       "action_type":"web_search|answer|mcp_time|mcp_fetch",
                       "action_payload":"... optional when decision=action",
                       "action_summary":"required when decision=action; <=180 chars context summary for action review",
+                      "plan_goal":"required when decision=plan; overall objective",
+                      "plan_steps":["step 1 directive","step 2 directive","..."],
                       "reason":"... optional short reason"
                     }
                     Valid action example:
                     {"decision":"action","urgency":"medium","action_type":"answer","action_payload":"...","action_summary":"Deliver concise recommendation"}
+                    Valid plan example:
+                    {"decision":"plan","urgency":"medium","plan_goal":"Find and verify current pricing","plan_steps":["Search for official pricing page","Fetch the pricing page content","Synthesize and answer with verified pricing"]}
                     Do not return decision=action without both action_payload and action_summary.
+                    Do not return decision=plan without both plan_goal and plan_steps.
                     Keep thought concise.
                     Prefer concise answer payloads by default.
                     Only produce a detailed answer payload when the user explicitly asks for detail.
@@ -686,6 +726,15 @@ class LlmEgoPlanner(
             is EgoTrigger.IncomingInput -> "INPUT: ${trigger.input.content}"
             is EgoTrigger.PendingThoughtInput -> {
                 val thought = trigger.thought
+                val planInfo = thought.planContext?.let { ctx ->
+                    """
+                    Active plan context:
+                    plan_goal=${ctx.planGoal}
+                    step=${ctx.stepIndex + 1}/${ctx.totalSteps}
+                    step_description=${ctx.stepDescription}
+                    Re-evaluate this step in light of current context. You may refine, skip, or act.
+                    """.trimIndent()
+                } ?: ""
                 val denialContext = if (thought.deniedActionType != null && !thought.deniedActionPayload.isNullOrBlank()) {
                     """
                     Denied action context:
@@ -697,7 +746,9 @@ class LlmEgoPlanner(
                 } else {
                     "Denied action context: none"
                 }
-                "THOUGHT(pass=${thought.passes}): ${thought.content}\n$denialContext"
+                val parts = listOf("THOUGHT(pass=${thought.passes}): ${thought.content}", planInfo, denialContext)
+                    .filter { it.isNotBlank() }
+                parts.joinToString("\n")
             }
         }
 
@@ -714,6 +765,10 @@ class LlmEgoPlanner(
         @field:JsonProperty("action_summary")
         val actionSummary: String? = null,
         val reason: String? = null,
+        @field:JsonProperty("plan_goal")
+        val planGoal: String? = null,
+        @field:JsonProperty("plan_steps")
+        val planSteps: List<String>? = null,
     )
 
     private data class ActionVerifierPayload(

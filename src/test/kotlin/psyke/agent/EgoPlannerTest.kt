@@ -523,4 +523,103 @@ class EgoPlannerTest {
         assertIs<psyke.agent.core.EgoDecision.Noop>(decision)
         assertEquals(3, calls)
     }
+
+    @Test
+    fun `planner returns plan decision with clamped steps`() {
+        val llm = StubChatModelClient()
+        llm.enqueueRawResponse(
+            """
+            {
+              "decision":"plan",
+              "urgency":"medium",
+              "plan_goal":"Find verified current pricing",
+              "plan_steps":["Search for pricing page","Fetch pricing content","Synthesize answer"]
+            }
+            """.trimIndent()
+        )
+        val instrumentation = RecordingInstrumentation()
+        val planner = LlmEgoPlanner(
+            modelClient = llm,
+            config = AgentConfig(planner = PlannerConfig(maxPlanSteps = 2, maxPlanStepDescriptionChars = 10)),
+            instrumentation = instrumentation
+        )
+
+        val decision = planner.decide(
+            trigger = psyke.agent.core.EgoTrigger.IncomingInput(PendingInput(1, "pricing?")),
+            context = PlannerContext(
+                recentDialogue = emptyList(),
+                queue = QueueSnapshot(0, 0, 0)
+            )
+        )
+
+        val plan = assertIs<psyke.agent.core.EgoDecision.EnqueuePlan>(decision)
+        assertEquals(Urgency.MEDIUM, plan.urgency)
+        assertEquals(2, plan.steps.size)
+        assertTrue(plan.steps[0].length <= 10)
+        assertTrue(
+            instrumentation.events.any {
+                it.type == "planner_decision" && it.data["decision_type"] == "plan"
+            }
+        )
+    }
+
+    @Test
+    fun `planner returns noop for plan with empty steps`() {
+        val llm = StubChatModelClient()
+        llm.enqueueRawResponse(
+            """{"decision":"plan","urgency":"medium","plan_goal":"do stuff","plan_steps":[]}"""
+        )
+        val planner = LlmEgoPlanner(modelClient = llm, config = AgentConfig())
+
+        val decision = planner.decide(
+            trigger = psyke.agent.core.EgoTrigger.IncomingInput(PendingInput(1, "test")),
+            context = PlannerContext(
+                recentDialogue = emptyList(),
+                queue = QueueSnapshot(0, 0, 0)
+            )
+        )
+
+        val noop = assertIs<psyke.agent.core.EgoDecision.Noop>(decision)
+        assertTrue(noop.reason.contains("empty steps", ignoreCase = true))
+    }
+
+    @Test
+    fun `planner returns noop for plan with blank goal`() {
+        val llm = StubChatModelClient()
+        llm.enqueueRawResponse(
+            """{"decision":"plan","plan_goal":"","plan_steps":["step 1"]}"""
+        )
+        val planner = LlmEgoPlanner(modelClient = llm, config = AgentConfig())
+
+        val decision = planner.decide(
+            trigger = psyke.agent.core.EgoTrigger.IncomingInput(PendingInput(1, "test")),
+            context = PlannerContext(
+                recentDialogue = emptyList(),
+                queue = QueueSnapshot(0, 0, 0)
+            )
+        )
+
+        assertIs<psyke.agent.core.EgoDecision.Noop>(decision)
+    }
+
+    @Test
+    fun `planner prompt includes plan decision type in schema`() {
+        val llm = StubChatModelClient().apply {
+            enqueueRawResponse("""{"decision":"noop","reason":"done"}""")
+        }
+        val planner = LlmEgoPlanner(modelClient = llm, config = AgentConfig())
+
+        planner.decide(
+            psyke.agent.core.EgoTrigger.IncomingInput(PendingInput(1, "test")),
+            PlannerContext(
+                recentDialogue = emptyList(),
+                queue = QueueSnapshot(0, 0, 0)
+            )
+        )
+
+        val allPromptText = llm.lastMessages.joinToString("\n") { it.content }
+        assertTrue(allPromptText.contains("plan:"))
+        assertTrue(allPromptText.contains("plan_goal"))
+        assertTrue(allPromptText.contains("plan_steps"))
+    }
 }
