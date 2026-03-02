@@ -61,7 +61,7 @@ sequenceDiagram
             Planner-->>Ego: thought/action/plan/noop
             Ego->>Delib: maybeApplyPressureOverride
             Ego->>Sched: enqueue thought/action/plan steps
-            Note over Ego,Sched: Duplicate plan fan-out for same input can be suppressed
+            Note over Ego,Sched: Plans gated by budget → pressure → hash dedup → pending-plan check
         else Task = action
             alt Fallback explanation action
                 Ego->>Motor: execute (bypass Superego)
@@ -95,7 +95,7 @@ stateDiagram-v2
     Processing --> Planning: input/thought task
     Planning --> ActionQueued: decision=action
     Planning --> ThoughtQueued: decision=thought/plan/noop-thought
-    Planning --> ThoughtQueued: duplicate plan suppressed -> convergence thought
+    Planning --> ThoughtQueued: plan suppressed (budget/pressure/hash/pending) -> convergence thought
 
     ActionQueued --> PolicyReview: non-fallback action
     ActionQueued --> Executing: fallback explanation action
@@ -108,6 +108,8 @@ stateDiagram-v2
     Executing --> EvidenceMissing: tool/provider failure
     EvidenceObserved --> ThoughtQueued: follow-up thought
     EvidenceMissing --> ThoughtQueued: retry/adjust path
+    EvidenceMissing --> ActionDisabled: circuit breaker trips (non-retryable fetch failures)
+    ActionDisabled --> ThoughtQueued: planner uses remaining available actions
 
     Processing --> HighPressure: pressure threshold reached
     HighPressure --> ForcedTerminal: force answer enqueue

@@ -154,6 +154,8 @@ It is intentionally high-level and should stay aligned with the code.
   - `mcp_time`
   - `mcp_fetch`
 - Action availability is runtime health-dependent and fed back into planner context.
+- `mcp_fetch` errors are classified as retryable vs non-retryable; non-retryable failures
+  feed into the per-input circuit breaker in `DeliberationEngine`.
 
 ## Queueing Model
 - File: `src/main/kotlin/psyke/agent/ego/AttentionScheduler.kt`
@@ -176,8 +178,17 @@ It is intentionally high-level and should stay aligned with the code.
   - meta-reasoner -> continue fallback
   - long-term advisor -> parse-fallback/skip save
 - Repeated denied-action loops are detected and blocked by payload/type comparison.
-- Repeated plan fan-out for the same root input is suppressed when plan steps are already pending,
-  and converted into a single convergence thought.
+- Multi-layer duplicate plan suppression (evaluated cheapest-first):
+  1. **Plan budget**: hard cap (`maxPlansPerInput`, default 2) on plans emitted per root input.
+  2. **Pressure gate**: suppress new plans when `decisionPressure >= planEmissionPressureThreshold` (default 0.55).
+  3. **Exact hash dedup**: normalized goal+steps hash prevents identical plans from being re-emitted.
+  4. **Pending plan detection**: if plan-context thoughts are already queued, suppress and enqueue a convergence thought instead.
+  5. **Convergence thought dedupe**: at most one convergence thought per root input to prevent churn.
+- `mcp_fetch` circuit breaker: after `FETCH_CIRCUIT_BREAKER_THRESHOLD` (default 3) non-retryable failures
+  (403, 404, 401, install errors, etc.) for a root input, `MCP_FETCH` is removed from available actions,
+  forcing the planner to use alternatives like `web_search`.
+- Fallback answer synthesis aggregates up to 6 successful evidence signals from the deliberation session
+  instead of relying only on the latest planner signal.
 
 ## Key Complexity Drivers
 - Multiple LLM actors with distinct prompts and fallback semantics.
