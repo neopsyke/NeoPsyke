@@ -66,6 +66,7 @@ typealias ToolHealthStatus = psyke.agent.tools.mcp.ToolHealthStatus
 typealias McpStdioClient = psyke.agent.tools.mcp.McpStdioClient
 typealias SdkMcpTimeTool = psyke.agent.tools.mcp.SdkMcpTimeTool
 typealias SdkMcpFetchTool = psyke.agent.tools.mcp.SdkMcpFetchTool
+typealias NativeFetchTool = psyke.agent.tools.mcp.NativeFetchTool
 
 typealias PromptBudgetAllocator = psyke.agent.support.PromptBudgetAllocator
 typealias TextSecurity = psyke.agent.support.TextSecurity

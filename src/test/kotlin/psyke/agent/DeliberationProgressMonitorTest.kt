@@ -53,6 +53,29 @@ class DeliberationProgressMonitorTest {
     }
 
     @Test
+    fun `step pressure reaches planner guidance threshold within 50 steps`() {
+        val monitor = DeliberationProgressMonitor()
+        // Simulate 50 steps of moderate activity (no noops, no failures, just steps)
+        repeat(50) {
+            monitor.startStep()
+            monitor.onPlannerDecision(
+                psyke.agent.core.EgoDecision.EnqueueThought(
+                    urgency = Urgency.MEDIUM,
+                    content = "thinking step $it"
+                )
+            )
+        }
+
+        val state = monitor.snapshot()
+        // By step 50, pressure should be high enough that the planner's built-in
+        // guidance ("if pressure >= 0.75, prefer answer") kicks in.
+        assertTrue(
+            state.decisionPressure >= 0.60,
+            "Expected pressure >= 0.60 at step 50, got ${state.decisionPressure}"
+        )
+    }
+
+    @Test
     fun `failed evidence action increases pressure instead of resetting evidence gap`() {
         val monitor = DeliberationProgressMonitor()
         repeat(4) {

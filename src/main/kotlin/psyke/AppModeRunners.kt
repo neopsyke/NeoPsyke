@@ -11,6 +11,7 @@ import psyke.agent.memory.longterm.McpHippocampus
 import psyke.agent.tools.mcp.McpStdioClient
 import psyke.agent.cortex.motor.MotorCortex
 import psyke.agent.memory.longterm.NoopHippocampus
+import psyke.agent.tools.mcp.NativeFetchTool
 import psyke.agent.tools.mcp.SdkMcpFetchTool
 import psyke.agent.tools.mcp.SdkMcpTimeTool
 import psyke.agent.superego.Superego
@@ -759,6 +760,24 @@ internal object AppModeRunners {
     }
     
     private fun createMcpFetchTool(config: AgentConfig, capability: McpCapabilityConfig): McpFetchTool {
+        if (!capability.enabled) {
+            val reason = disabledReason("fetch", capability)
+            logger.info { reason }
+            return DisabledMcpFetchTool(reason)
+        }
+
+        // Use native JVM fetch (OkHttp + Jsoup) unless an explicit external
+        // server command is forced via MCP_FETCH_SERVER_CMD.
+        val explicitCmd = System.getenv("MCP_FETCH_SERVER_CMD")?.trim().orEmpty()
+        if (explicitCmd.isBlank()) {
+            logger.info { "Using native JVM fetch tool (OkHttp + Jsoup). No external process." }
+            return NativeFetchTool(
+                callTimeoutMs = config.mcpCallTimeoutMs,
+                maxChars = config.mcpFetchMaxChars
+            )
+        }
+
+        // Fall back to external MCP server if explicitly configured.
         val command = resolveMcpCommand(capability)
         if (command == null) {
             val reason = disabledReason("fetch", capability)
