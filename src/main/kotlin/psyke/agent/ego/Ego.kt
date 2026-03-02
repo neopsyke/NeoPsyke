@@ -40,6 +40,8 @@ class Ego(
     private val dialogue = ArrayDeque<DialogueTurn>()
     private val deliberation = DeliberationEngine(config, instrumentation, metaReasoner)
     private val memory = MemoryCoordinator(hippocampus, longTermMemoryAdvisor, config, instrumentation, memoryStore)
+    private val planCountByInput = mutableMapOf<Long?, Int>()
+    private val emittedPlanHashes = mutableMapOf<Long?, MutableSet<String>>()
 
     fun runInteractive() {
         logger.info { "Ego loop started. Type 'exit' to quit." }
@@ -126,6 +128,8 @@ class Ego(
         if (!scheduler.hasPendingWork()) {
             deliberation.reset()
             memory.resetForNewInput()
+            planCountByInput.clear()
+            emittedPlanHashes.clear()
         }
 
         if (config.loopDelayMs > 0) {
@@ -414,6 +418,46 @@ class Ego(
             }
 
             is EgoDecision.EnqueuePlan -> {
+                // ── Gate 1: plan budget per input ──
+                val currentPlanCount = planCountByInput.getOrDefault(rootInputEnqueuedAtMs, 0)
+                if (currentPlanCount >= config.planner.maxPlansPerInput) {
+                    instrumentation.emit(
+                        AgentEvents.warning(
+                            "Duplicate plan suppressed; plan budget exhausted " +
+                                "($currentPlanCount/${config.planner.maxPlansPerInput}) for this input."
+                        )
+                    )
+                    emitQueueSnapshot("decision_plan_suppressed_budget")
+                    return
+                }
+
+                // ── Gate 2: pressure-gated plan emission ──
+                val pressure = deliberation.snapshot().decisionPressure
+                if (pressure >= config.planner.planEmissionPressureThreshold) {
+                    instrumentation.emit(
+                        AgentEvents.warning(
+                            "Duplicate plan suppressed; decision pressure ${"%.2f".format(pressure)} " +
+                                ">= threshold ${config.planner.planEmissionPressureThreshold}."
+                        )
+                    )
+                    emitQueueSnapshot("decision_plan_suppressed_pressure")
+                    return
+                }
+
+                // ── Gate 3: exact plan hash dedup ──
+                val planHash = normalizePlanHash(decision.goal, decision.steps)
+                val inputHashes = emittedPlanHashes.getOrPut(rootInputEnqueuedAtMs) { mutableSetOf() }
+                if (!inputHashes.add(planHash)) {
+                    instrumentation.emit(
+                        AgentEvents.warning(
+                            "Duplicate plan suppressed; identical plan hash already emitted for this input."
+                        )
+                    )
+                    emitQueueSnapshot("decision_plan_suppressed_hash")
+                    return
+                }
+
+                // ── Gate 4: pending plan thoughts / convergence (existing) ──
                 if (scheduler.hasPendingPlanThoughtsForInput(rootInputEnqueuedAtMs)) {
                     if (scheduler.hasPendingConvergenceThoughtForInput(rootInputEnqueuedAtMs)) {
                         instrumentation.emit(
@@ -456,6 +500,10 @@ class Ego(
                     emitQueueSnapshot("decision_plan_skipped_duplicate")
                     return
                 }
+
+                // ── All gates passed: emit plan ──
+                planCountByInput[rootInputEnqueuedAtMs] = currentPlanCount + 1
+
                 val planId = java.util.UUID.randomUUID().toString().take(PLAN_ID_LENGTH)
                 instrumentation.emit(
                     AgentEvents.planCreated(
@@ -627,6 +675,12 @@ class Ego(
 
     private fun normalizeActionPayload(payload: String): String =
         payload.lowercase().replace(Regex("\\s+"), " ").trim()
+
+    private fun normalizePlanHash(goal: String, steps: List<String>): String {
+        val normalized = (listOf(goal) + steps)
+            .joinToString("|") { it.lowercase().replace(Regex("\\s+"), " ").trim() }
+        return normalized.hashCode().toString(16)
+    }
 
     private fun trimDialogue() {
         while (dialogue.size > 20) {

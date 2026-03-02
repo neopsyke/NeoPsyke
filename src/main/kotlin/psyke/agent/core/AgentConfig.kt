@@ -32,6 +32,8 @@ data class AgentConfig(
                     llmRetryAttempts = readInt("EGO_LLM_RETRY_ATTEMPTS", 2),
                     maxPlanSteps = readInt("EGO_MAX_PLAN_STEPS", 6),
                     maxPlanStepDescriptionChars = readInt("EGO_MAX_PLAN_STEP_DESC_CHARS", 120),
+                    maxPlansPerInput = readInt("EGO_MAX_PLANS_PER_INPUT", 2),
+                    planEmissionPressureThreshold = readDouble("EGO_PLAN_EMISSION_PRESSURE_THRESHOLD", 0.55),
                 ),
                 superego = SuperegoConfig(
                     maxCompletionTokens = readInt("EGO_SUPEREGO_MAX_COMPLETION_TOKENS", 192),
