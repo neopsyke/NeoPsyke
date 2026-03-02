@@ -338,6 +338,33 @@ object AgentEvents {
             )
         )
 
+    fun duplicatePlanSuppressed(reason: String, rootInputEnqueuedAtMs: Long? = null): AgentEvent =
+        AgentEvent(
+            type = "duplicate_plan_suppressed",
+            data = mapOf(
+                "reason" to reason,
+                "root_input_enqueued_at_ms" to rootInputEnqueuedAtMs
+            )
+        )
+
+    fun convergenceThoughtEnqueued(rootInputEnqueuedAtMs: Long? = null): AgentEvent =
+        AgentEvent(
+            type = "convergence_thought_enqueued",
+            data = mapOf(
+                "root_input_enqueued_at_ms" to rootInputEnqueuedAtMs
+            )
+        )
+
+    fun actionTypeTemporarilyDisabled(actionType: String, reason: String, rootInputEnqueuedAtMs: Long? = null): AgentEvent =
+        AgentEvent(
+            type = "action_type_temporarily_disabled",
+            data = mapOf(
+                "action_type" to actionType,
+                "reason" to reason,
+                "root_input_enqueued_at_ms" to rootInputEnqueuedAtMs
+            )
+        )
+
     fun planCreated(planId: String, goal: String, stepCount: Int, urgency: String): AgentEvent =
         AgentEvent(
             type = "plan_created",

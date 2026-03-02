@@ -207,6 +207,13 @@ internal class DeliberationEngine(
                         )
                     )
                 )
+                instrumentation.emit(
+                    AgentEvents.actionTypeTemporarilyDisabled(
+                        actionType = "mcp_fetch",
+                        reason = "circuit_breaker_non_retryable_failures",
+                        rootInputEnqueuedAtMs = rootInputEnqueuedAtMs
+                    )
+                )
             }
         }
     }

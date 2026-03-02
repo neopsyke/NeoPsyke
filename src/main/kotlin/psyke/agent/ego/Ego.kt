@@ -427,6 +427,9 @@ class Ego(
                                 "($currentPlanCount/${config.planner.maxPlansPerInput}) for this input."
                         )
                     )
+                    instrumentation.emit(
+                        AgentEvents.duplicatePlanSuppressed(reason = "budget_exhausted", rootInputEnqueuedAtMs = rootInputEnqueuedAtMs)
+                    )
                     emitQueueSnapshot("decision_plan_suppressed_budget")
                     return
                 }
@@ -439,6 +442,9 @@ class Ego(
                             "Duplicate plan suppressed; decision pressure ${"%.2f".format(pressure)} " +
                                 ">= threshold ${config.planner.planEmissionPressureThreshold}."
                         )
+                    )
+                    instrumentation.emit(
+                        AgentEvents.duplicatePlanSuppressed(reason = "pressure_gate", rootInputEnqueuedAtMs = rootInputEnqueuedAtMs)
                     )
                     emitQueueSnapshot("decision_plan_suppressed_pressure")
                     return
@@ -453,6 +459,9 @@ class Ego(
                             "Duplicate plan suppressed; identical plan hash already emitted for this input."
                         )
                     )
+                    instrumentation.emit(
+                        AgentEvents.duplicatePlanSuppressed(reason = "hash_dedup", rootInputEnqueuedAtMs = rootInputEnqueuedAtMs)
+                    )
                     emitQueueSnapshot("decision_plan_suppressed_hash")
                     return
                 }
@@ -465,6 +474,9 @@ class Ego(
                                 "Duplicate plan suppressed; convergence thought already pending for this input."
                             )
                         )
+                        instrumentation.emit(
+                            AgentEvents.duplicatePlanSuppressed(reason = "convergence_pending", rootInputEnqueuedAtMs = rootInputEnqueuedAtMs)
+                        )
                         emitQueueSnapshot("decision_plan_skipped_duplicate")
                         return
                     }
@@ -473,6 +485,9 @@ class Ego(
                             "Planner emitted duplicate plan while plan steps are still pending; " +
                                 "enqueueing convergence thought instead."
                         )
+                    )
+                    instrumentation.emit(
+                        AgentEvents.duplicatePlanSuppressed(reason = "pending_plan_thoughts", rootInputEnqueuedAtMs = rootInputEnqueuedAtMs)
                     )
                     val convergenceThought = TextSecurity.clamp(
                         "${AttentionScheduler.CONVERGENCE_THOUGHT_PREFIX}Plan steps are already queued. " +
@@ -487,7 +502,11 @@ class Ego(
                         rootInputEnqueuedAtMs = rootInputEnqueuedAtMs,
                         allowFallbackExplanation = originThought?.allowFallbackExplanation ?: false
                     )
-                    if (!queued) {
+                    if (queued) {
+                        instrumentation.emit(
+                            AgentEvents.convergenceThoughtEnqueued(rootInputEnqueuedAtMs = rootInputEnqueuedAtMs)
+                        )
+                    } else {
                         instrumentation.emit(
                             AgentEvents.warning("Failed to enqueue convergence thought after duplicate plan suppression.")
                         )
