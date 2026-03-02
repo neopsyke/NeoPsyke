@@ -106,9 +106,15 @@ class MotorCortex(
             }
 
             ActionType.MCP_FETCH -> {
-                val status = mcpFetchTool?.fetch(action.payload)
-                    ?: "MCP fetch tool is not configured."
-                ActionOutcome(statusSummary = status)
+                if (mcpFetchTool == null) {
+                    ActionOutcome(statusSummary = "MCP fetch tool is not configured.")
+                } else {
+                    val outcome = mcpFetchTool.fetchWithOutcome(action.payload)
+                    ActionOutcome(
+                        statusSummary = outcome.message,
+                        fetchErrorCategory = outcome.errorCategory.name.lowercase()
+                    )
+                }
             }
         }
     }

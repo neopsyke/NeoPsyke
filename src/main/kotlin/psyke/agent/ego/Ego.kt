@@ -12,6 +12,7 @@ import psyke.agent.memory.longterm.NoopLongTermMemoryAdvisor
 import psyke.agent.memory.shortterm.MemoryStore
 import psyke.agent.support.TextSecurity
 import psyke.agent.superego.Superego
+import psyke.agent.tools.mcp.FetchErrorCategory
 import psyke.instrumentation.AgentEvent
 import psyke.instrumentation.AgentEvents
 import psyke.instrumentation.AgentInstrumentation
@@ -143,7 +144,7 @@ class Ego(
         memory.remember(userTurn)
         trimDialogue()
         val trigger = EgoTrigger.IncomingInput(input)
-        val context = plannerContext(trigger)
+        val context = plannerContext(trigger, rootInputEnqueuedAtMs = input.enqueuedAtMs)
         val assessment = deliberation.maybeAssessAndUpdateGuidance(trigger, context)
         val decision = planner.decide(
             trigger = trigger,
@@ -170,7 +171,7 @@ class Ego(
         }
         instrumentation.emit(AgentEvents.thoughtProcessing(thought))
         val trigger = EgoTrigger.PendingThoughtInput(thought)
-        val context = plannerContext(trigger)
+        val context = plannerContext(trigger, rootInputEnqueuedAtMs = thought.rootInputEnqueuedAtMs)
         val assessment = deliberation.maybeAssessAndUpdateGuidance(trigger, context)
         val decision = planner.decide(
             trigger = trigger,
@@ -254,6 +255,12 @@ class Ego(
         val observed = deliberation.observedEvidence(action, outcome)
         deliberation.recordEvidenceProgress(action, outcome, observed)
         deliberation.onActionExecuted(action, observed)
+        if (action.type == ActionType.MCP_FETCH && !observed) {
+            val category = FetchErrorCategory.entries.firstOrNull {
+                it.name.equals(outcome.fetchErrorCategory, ignoreCase = true)
+            } ?: FetchErrorCategory.RETRYABLE
+            deliberation.recordFetchFailure(action.rootInputEnqueuedAtMs, category)
+        }
         if (action.type == ActionType.ANSWER) {
             val enqueuedAtMs = action.rootInputEnqueuedAtMs
             if (enqueuedAtMs != null) {
@@ -622,9 +629,10 @@ class Ego(
         }
     }
 
-    private fun plannerContext(trigger: EgoTrigger): PlannerContext {
+    private fun plannerContext(trigger: EgoTrigger, rootInputEnqueuedAtMs: Long? = null): PlannerContext {
         val shortTermSummary = memory.currentShortTermSummary()
         val longTermRecall = memory.recall(trigger, shortTermSummary, dialogue.takeLast(12))
+        val disabled = deliberation.disabledActionTypes(rootInputEnqueuedAtMs)
         return PlannerContext(
             recentDialogue = dialogue.takeLast(12),
             queue = scheduler.queueSnapshot(),
@@ -632,7 +640,7 @@ class Ego(
             longTermMemoryRecall = longTermRecall,
             deliberation = deliberation.snapshot(),
             metaGuidance = deliberation.guidance(),
-            availableActions = motorCortex.availableActionTypes()
+            availableActions = motorCortex.availableActionTypes() - disabled
         )
     }
 

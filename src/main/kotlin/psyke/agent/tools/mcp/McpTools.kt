@@ -48,6 +48,9 @@ interface McpTimeTool {
 interface McpFetchTool {
     fun fetch(payload: String): String
 
+    fun fetchWithOutcome(payload: String): FetchOutcome =
+        FetchOutcome(message = fetch(payload))
+
     fun healthCheck(): ToolHealthStatus = ToolHealthStatus(
         available = true,
         detail = "health check not implemented"
@@ -127,19 +130,30 @@ class SdkMcpFetchTool(
 ) : McpFetchTool, AutoCloseable {
     private val clientHolder = LazyMcpClientHolder(command, serverLabel = "fetch")
 
-    override fun fetch(payload: String): String {
+    override fun fetch(payload: String): String = fetchWithOutcome(payload).message
+
+    override fun fetchWithOutcome(payload: String): FetchOutcome {
         val parsed = try {
             mapper.readValue<FetchPayload>(payload)
         } catch (_: Exception) {
-            return "MCP fetch payload is invalid. Expected JSON like {\"url\":\"https://example.com\",\"max_chars\":1200}."
+            return FetchOutcome(
+                message = "MCP fetch payload is invalid. Expected JSON like {\"url\":\"https://example.com\",\"max_chars\":1200}.",
+                errorCategory = FetchErrorCategory.NON_RETRYABLE
+            )
         }
 
         val url = parsed.url?.trim().orEmpty()
         if (url.isEmpty()) {
-            return "MCP fetch payload is missing url."
+            return FetchOutcome(
+                message = "MCP fetch payload is missing url.",
+                errorCategory = FetchErrorCategory.NON_RETRYABLE
+            )
         }
         if (!isFetchUrlAllowed(url)) {
-            return "MCP fetch blocked URL by safety policy. Only public HTTPS URLs are allowed."
+            return FetchOutcome(
+                message = "MCP fetch blocked URL by safety policy. Only public HTTPS URLs are allowed.",
+                errorCategory = FetchErrorCategory.NON_RETRYABLE
+            )
         }
 
         val requestedMaxChars = parsed.maxChars ?: maxChars
@@ -153,16 +167,45 @@ class SdkMcpFetchTool(
             )
         } catch (ex: Exception) {
             logger.warn(ex) { "MCP fetch tool call failed for url=${TextSecurity.preview(url, 120)}." }
-            return "MCP fetch unavailable: ${ex.message ?: "tool call failed"}"
+            val errorMsg = ex.message?.lowercase(java.util.Locale.ROOT).orEmpty()
+            val category = classifyFetchError(errorMsg)
+            return FetchOutcome(
+                message = "MCP fetch unavailable: ${ex.message ?: "tool call failed"}",
+                errorCategory = category
+            )
         }
 
         val content = TextSecurity.clamp(result.content, safeMaxChars)
         val preview = TextSecurity.preview(content, 240)
         return if (result.isError) {
-            "MCP fetch tool returned an error for $url: ${TextSecurity.clamp(content.ifBlank { "empty error" }, 240)}"
+            val errorContent = TextSecurity.clamp(content.ifBlank { "empty error" }, 240)
+            val category = classifyFetchError(errorContent.lowercase(java.util.Locale.ROOT))
+            FetchOutcome(
+                message = "MCP fetch tool returned an error for $url: $errorContent",
+                errorCategory = category
+            )
         } else {
-            "MCP fetch completed for $url. Extracted ${content.length} chars. Preview: $preview"
+            FetchOutcome(
+                message = "MCP fetch completed for $url. Extracted ${content.length} chars. Preview: $preview",
+                errorCategory = FetchErrorCategory.NONE
+            )
         }
+    }
+
+    private fun classifyFetchError(errorText: String): FetchErrorCategory {
+        if (NON_RETRYABLE_PATTERNS.any { errorText.contains(it) }) {
+            return FetchErrorCategory.NON_RETRYABLE
+        }
+        return FetchErrorCategory.RETRYABLE
+    }
+
+    private companion object {
+        val NON_RETRYABLE_PATTERNS = listOf(
+            "403", "404", "401", "410", "451",
+            "forbidden", "not found", "unauthorized", "gone",
+            "non-zero exit status", "install", "enoent",
+            "blocked", "safety policy",
+        )
     }
 
     override fun close() {
@@ -524,6 +567,17 @@ data class McpToolCallResult(
 data class ToolHealthStatus(
     val available: Boolean,
     val detail: String,
+)
+
+enum class FetchErrorCategory {
+    NONE,
+    NON_RETRYABLE,
+    RETRYABLE,
+}
+
+data class FetchOutcome(
+    val message: String,
+    val errorCategory: FetchErrorCategory = FetchErrorCategory.NONE,
 )
 
 private data class TimePayload(

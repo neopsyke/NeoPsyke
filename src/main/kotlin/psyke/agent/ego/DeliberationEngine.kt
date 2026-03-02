@@ -11,6 +11,7 @@ import psyke.agent.core.PendingAction
 import psyke.agent.core.PlannerContext
 import psyke.agent.core.Urgency
 import psyke.agent.support.TextSecurity
+import psyke.agent.tools.mcp.FetchErrorCategory
 import psyke.instrumentation.AgentEvent
 import psyke.instrumentation.AgentEvents
 import psyke.instrumentation.AgentInstrumentation
@@ -33,6 +34,11 @@ internal class DeliberationEngine(
     private val externalEvidence: MutableMap<Long, ExternalEvidenceProgress> =
         object : LinkedHashMap<Long, ExternalEvidenceProgress>(16, 0.75f, false) {
             override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Long, ExternalEvidenceProgress>): Boolean =
+                size > MAX_EVIDENCE_ENTRIES
+        }
+    private val fetchCircuitBreaker: MutableMap<Long, Int> =
+        object : LinkedHashMap<Long, Int>(16, 0.75f, false) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Long, Int>): Boolean =
                 size > MAX_EVIDENCE_ENTRIES
         }
 
@@ -171,6 +177,39 @@ internal class DeliberationEngine(
     fun evidenceFor(rootInputEnqueuedAtMs: Long?): ExternalEvidenceProgress? =
         rootInputEnqueuedAtMs?.let { externalEvidence[it] }
 
+    // --- Fetch circuit breaker ---
+
+    fun recordFetchFailure(rootInputEnqueuedAtMs: Long?, errorCategory: FetchErrorCategory) {
+        if (rootInputEnqueuedAtMs == null) return
+        if (errorCategory == FetchErrorCategory.NON_RETRYABLE) {
+            val count = (fetchCircuitBreaker[rootInputEnqueuedAtMs] ?: 0) + 1
+            fetchCircuitBreaker[rootInputEnqueuedAtMs] = count
+            if (count >= FETCH_CIRCUIT_BREAKER_THRESHOLD) {
+                instrumentation.emit(
+                    AgentEvent(
+                        type = "action_type_circuit_breaker_tripped",
+                        data = mapOf(
+                            "action_type" to "mcp_fetch",
+                            "root_input_enqueued_at_ms" to rootInputEnqueuedAtMs,
+                            "non_retryable_failure_count" to count,
+                            "threshold" to FETCH_CIRCUIT_BREAKER_THRESHOLD
+                        )
+                    )
+                )
+            }
+        }
+    }
+
+    fun disabledActionTypes(rootInputEnqueuedAtMs: Long?): Set<ActionType> {
+        if (rootInputEnqueuedAtMs == null) return emptySet()
+        val fetchFailures = fetchCircuitBreaker[rootInputEnqueuedAtMs] ?: 0
+        return if (fetchFailures >= FETCH_CIRCUIT_BREAKER_THRESHOLD) {
+            setOf(ActionType.MCP_FETCH)
+        } else {
+            emptySet()
+        }
+    }
+
     // --- Reset ---
 
     fun reset() {
@@ -178,6 +217,7 @@ internal class DeliberationEngine(
         lastAssessmentStep = 0
         forcedTerminalAnswerQueued = false
         externalEvidence.clear()
+        fetchCircuitBreaker.clear()
         monitor.reset()
     }
 
@@ -242,5 +282,6 @@ internal class DeliberationEngine(
         private const val MODEL_ERROR_PRESSURE_THRESHOLD: Double = 0.72
         private const val MODEL_ERROR_MIN_STEP_INDEX: Int = 6
         private const val MAX_EVIDENCE_ENTRIES: Int = 64
+        private const val FETCH_CIRCUIT_BREAKER_THRESHOLD: Int = 3
     }
 }
