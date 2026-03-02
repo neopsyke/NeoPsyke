@@ -554,11 +554,16 @@ class Ego(
                 message to "Explain inability to comply after policy denial."
             }
             evidence?.hadSuccessfulEvidence == true -> {
-                val evidenceSignal = evidence.latestPlannerSignal.ifBlank {
-                    "I gathered external evidence, but final synthesis failed."
+                val signals = evidence.successfulEvidenceSignals
+                val aggregatedEvidence = if (signals.isNotEmpty()) {
+                    signals.joinToString(" | ")
+                } else {
+                    evidence.latestPlannerSignal.ifBlank {
+                        "I gathered external evidence, but final synthesis failed."
+                    }
                 }
                 val message = "I completed external verification, but repeated internal planner formatting/parsing failures " +
-                    "prevented a clean final synthesis. Best-effort result from gathered evidence: $evidenceSignal"
+                    "prevented a clean final synthesis. Best-effort result from gathered evidence: $aggregatedEvidence"
                 message to "Provide best-effort answer using gathered evidence after planner parse failures."
             }
             evidence?.hadExternalFailures == true -> {

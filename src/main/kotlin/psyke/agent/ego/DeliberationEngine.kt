@@ -155,10 +155,21 @@ internal class DeliberationEngine(
         if (!action.type.requiresFollowUpThought()) return
         val rootInput = action.rootInputEnqueuedAtMs ?: return
         val current = externalEvidence[rootInput] ?: ExternalEvidenceProgress()
+        val updatedSignals = if (observed) {
+            val signal = TextSecurity.clamp(outcome.plannerSignal, 280)
+            val newList = current.successfulEvidenceSignals.toMutableList()
+            if (newList.size < MAX_EVIDENCE_SIGNALS_PER_INPUT) {
+                newList.add(signal)
+            }
+            newList
+        } else {
+            current.successfulEvidenceSignals
+        }
         externalEvidence[rootInput] = current.copy(
             hadSuccessfulEvidence = current.hadSuccessfulEvidence || observed,
             hadExternalFailures = current.hadExternalFailures || !observed,
-            latestPlannerSignal = if (observed) TextSecurity.clamp(outcome.plannerSignal, 420) else current.latestPlannerSignal
+            latestPlannerSignal = if (observed) TextSecurity.clamp(outcome.plannerSignal, 420) else current.latestPlannerSignal,
+            successfulEvidenceSignals = updatedSignals
         )
     }
 
@@ -275,6 +286,7 @@ internal class DeliberationEngine(
         val hadSuccessfulEvidence: Boolean = false,
         val hadExternalFailures: Boolean = false,
         val latestPlannerSignal: String = "",
+        val successfulEvidenceSignals: List<String> = emptyList(),
     )
 
     private companion object {
@@ -283,5 +295,6 @@ internal class DeliberationEngine(
         private const val MODEL_ERROR_MIN_STEP_INDEX: Int = 6
         private const val MAX_EVIDENCE_ENTRIES: Int = 64
         private const val FETCH_CIRCUIT_BREAKER_THRESHOLD: Int = 3
+        private const val MAX_EVIDENCE_SIGNALS_PER_INPUT: Int = 6
     }
 }
