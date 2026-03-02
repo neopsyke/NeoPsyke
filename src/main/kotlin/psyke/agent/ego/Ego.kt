@@ -101,7 +101,10 @@ class Ego(
                 deliberation.onTaskFailure()
                 instrumentation.emit(AgentEvents.warning("Task processing failed for ${taskType(task)}; continuing loop."))
             }
-            deliberation.maybeForceTerminalAnswer(scheduler)
+            deliberation.maybeForceTerminalAnswer(
+                scheduler = scheduler,
+                rootInputEnqueuedAtMs = taskRootInputEnqueuedAtMs(task)
+            )
             maybeRunLongTermMemoryAssessment(trigger = "interval")
             emitQueueSnapshot("task_processed")
         }
@@ -198,6 +201,7 @@ class Ego(
                     instrumentation.emit(AgentEvents.responseLatencyRecorded(latencyMs = latencyMs, actionId = action.id))
                 }
                 deliberation.clearEvidenceForInput(action.rootInputEnqueuedAtMs)
+                cleanupResolvedInputAfterAnswer(action)
             }
             if (outcome.assistantOutput != null) {
                 val assistantTurn = DialogueTurn(DialogueRole.ASSISTANT, outcome.assistantOutput)
@@ -257,6 +261,7 @@ class Ego(
                 instrumentation.emit(AgentEvents.responseLatencyRecorded(latencyMs = latencyMs, actionId = action.id))
             }
             deliberation.clearEvidenceForInput(action.rootInputEnqueuedAtMs)
+            cleanupResolvedInputAfterAnswer(action)
         }
         if (outcome.assistantOutput != null) {
             val assistantTurn = DialogueTurn(DialogueRole.ASSISTANT, outcome.assistantOutput)
@@ -402,6 +407,38 @@ class Ego(
             }
 
             is EgoDecision.EnqueuePlan -> {
+                if (scheduler.hasPendingPlanThoughtsForInput(rootInputEnqueuedAtMs)) {
+                    instrumentation.emit(
+                        AgentEvents.warning(
+                            "Planner emitted duplicate plan while plan steps are still pending; " +
+                                "enqueueing convergence thought instead."
+                        )
+                    )
+                    val convergenceThought = TextSecurity.clamp(
+                        "Plan steps are already queued. Continue with current steps and converge to a final answer " +
+                            "instead of starting another plan.",
+                        config.planner.maxThoughtChars
+                    )
+                    val queued = scheduler.enqueueThought(
+                        content = convergenceThought,
+                        urgency = decision.urgency,
+                        passes = nextPassCount,
+                        rootInputEnqueuedAtMs = rootInputEnqueuedAtMs,
+                        allowFallbackExplanation = originThought?.allowFallbackExplanation ?: false
+                    )
+                    if (!queued) {
+                        instrumentation.emit(
+                            AgentEvents.warning("Failed to enqueue convergence thought after duplicate plan suppression.")
+                        )
+                        recordQueueSaturation(
+                            queueType = "thought",
+                            capacity = config.maxPendingThoughts,
+                            reason = "enqueue_duplicate_plan_convergence_thought_failed_full"
+                        )
+                    }
+                    emitQueueSnapshot("decision_plan_skipped_duplicate")
+                    return
+                }
                 val planId = java.util.UUID.randomUUID().toString().take(PLAN_ID_LENGTH)
                 instrumentation.emit(
                     AgentEvents.planCreated(
@@ -484,6 +521,12 @@ class Ego(
     }
 
     private fun enqueueFallbackExplanation(thought: PendingThought) {
+        if (scheduler.hasPendingFallbackExplanationAction(thought.rootInputEnqueuedAtMs)) {
+            instrumentation.emit(
+                AgentEvents.warning("Fallback explanation already queued for this input; skipping duplicate enqueue.")
+            )
+            return
+        }
         val evidence = deliberation.evidenceFor(thought.rootInputEnqueuedAtMs)
         val parseFailureLikely = thought.content.contains("non-parseable", ignoreCase = true)
         val (payload, summary) = when {
@@ -633,6 +676,27 @@ class Ego(
         )
     }
 
+    private fun cleanupResolvedInputAfterAnswer(action: PendingAction) {
+        val rootInputEnqueuedAtMs = action.rootInputEnqueuedAtMs ?: return
+        val cleared = scheduler.clearPendingWorkForInput(rootInputEnqueuedAtMs)
+        if (cleared.thoughtsRemoved == 0 && cleared.actionsRemoved == 0) {
+            return
+        }
+        instrumentation.emit(
+            AgentEvent(
+                type = "input_resolution_cleanup",
+                data = mapOf(
+                    "answer_action_id" to action.id,
+                    "is_fallback_explanation" to action.isFallbackExplanation,
+                    "root_input_enqueued_at_ms" to rootInputEnqueuedAtMs,
+                    "removed_thoughts" to cleared.thoughtsRemoved,
+                    "removed_actions" to cleared.actionsRemoved
+                )
+            )
+        )
+        emitQueueSnapshot("input_resolution_cleanup")
+    }
+
     private fun recordQueueSaturation(queueType: String, capacity: Int, reason: String) {
         val pending = scheduler.queueSnapshot().let { snapshot ->
             when (queueType) {
@@ -668,6 +732,13 @@ class Ego(
             is LoopTask.ProcessInput -> "input"
             is LoopTask.ProcessThought -> "thought"
             is LoopTask.PerformAction -> "action"
+        }
+
+    private fun taskRootInputEnqueuedAtMs(task: LoopTask): Long? =
+        when (task) {
+            is LoopTask.ProcessInput -> task.item.enqueuedAtMs
+            is LoopTask.ProcessThought -> task.item.rootInputEnqueuedAtMs
+            is LoopTask.PerformAction -> task.item.rootInputEnqueuedAtMs
         }
 
     private fun ActionType.requiresFollowUpThought(): Boolean =

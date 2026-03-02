@@ -309,6 +309,130 @@ class EgoAgentTest {
     }
 
     @Test
+    fun `fallback answer resolves pending work for same input and prevents continued cycling`() {
+        val plannerLlm = StubChatModelClient().apply {
+            enqueueRawResponse(
+                """
+                {
+                  "decision":"plan",
+                  "urgency":"medium",
+                  "plan_goal":"Fetch official pricing and answer",
+                  "plan_steps":["Search pricing page","Finalize response"]
+                }
+                """.trimIndent()
+            )
+            enqueueRawResponse(
+                """
+                {"decision":"action","urgency":"high","action_type":"web_search","action_payload":"official pricing page","action_summary":"search pricing"}
+                """.trimIndent()
+            )
+        }
+        val superegoLlm = StubChatModelClient().apply {
+            enqueueRawResponse("""{"allow":true}""")
+        }
+        val instrumentation = RecordingInstrumentation()
+        val outputs = mutableListOf<String>()
+        val successfulSearch = object : WebSearchEngine {
+            override fun search(query: String, maxResults: Int): WebSearchResult =
+                WebSearchResult(
+                    summary = "Official pricing page with current rates.",
+                    snippets = listOf("Use official pricing pages."),
+                    sources = listOf(
+                        WebSearchSource(
+                            title = "Pricing",
+                            url = "https://example.com/pricing"
+                        )
+                    )
+                )
+        }
+        val config = AgentConfig(planner = PlannerConfig(maxLoopStepsPerInput = 10, maxThoughtPasses = 1))
+        val agent = Ego(
+            planner = LlmEgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
+            superego = Superego(
+                modelClient = superegoLlm,
+                config = config,
+                instrumentation = instrumentation
+            ),
+            motorCortex = buildMotorCortex(
+                output = { outputs.add(it) },
+                webSearchEngine = successfulSearch
+            ),
+            config = config,
+            instrumentation = instrumentation
+        )
+
+        runAgentWithInput(agent, "hello\nexit\n")
+
+        assertEquals(1, outputs.size)
+        val answerEvents = instrumentation.events.filter {
+            it.type == "action_executed" &&
+                ((it.data["action"] as? PendingAction)?.type == ActionType.ANSWER)
+        }
+        assertEquals(1, answerEvents.size)
+        val cleanup = instrumentation.events.firstOrNull { it.type == "input_resolution_cleanup" }
+        assertTrue(cleanup != null)
+        assertTrue((cleanup?.data?.get("removed_thoughts") as? Int ?: 0) >= 1)
+        val answerEventId = answerEvents.first().id
+        assertFalse(
+            instrumentation.events.any {
+                it.id > answerEventId &&
+                    (it.type == "thought_processing" || it.type == "action_review_requested")
+            }
+        )
+    }
+
+    @Test
+    fun `duplicate plan emission is suppressed while plan steps are still pending`() {
+        val plannerLlm = StubChatModelClient().apply {
+            enqueueRawResponse(
+                """
+                {
+                  "decision":"plan",
+                  "urgency":"medium",
+                  "plan_goal":"Get pricing",
+                  "plan_steps":["step one","step two"]
+                }
+                """.trimIndent()
+            )
+            enqueueRawResponse(
+                """
+                {
+                  "decision":"plan",
+                  "urgency":"medium",
+                  "plan_goal":"Get pricing again",
+                  "plan_steps":["repeat one","repeat two"]
+                }
+                """.trimIndent()
+            )
+        }
+        val instrumentation = RecordingInstrumentation()
+        val agent = Ego(
+            planner = LlmEgoPlanner(
+                modelClient = plannerLlm,
+                config = AgentConfig(planner = PlannerConfig(maxLoopStepsPerInput = 2, maxThoughtPasses = 3)),
+                instrumentation = instrumentation
+            ),
+            superego = Superego(
+                modelClient = StubChatModelClient(),
+                config = AgentConfig(),
+                instrumentation = instrumentation
+            ),
+            motorCortex = buildMotorCortex(output = {}),
+            config = AgentConfig(planner = PlannerConfig(maxLoopStepsPerInput = 2, maxThoughtPasses = 3)),
+            instrumentation = instrumentation
+        )
+
+        runAgentWithInput(agent, "hello\nexit\n")
+
+        assertEquals(1, instrumentation.events.count { it.type == "plan_created" })
+        assertTrue(
+            instrumentation.events.any {
+                it.type == "queue_snapshot" && it.data["source"] == "decision_plan_skipped_duplicate"
+            }
+        )
+    }
+
+    @Test
     fun `agent keeps loop alive when action execution throws`() {
         val plannerLlm = StubChatModelClient().apply {
             enqueueRawResponse(

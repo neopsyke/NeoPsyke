@@ -46,6 +46,11 @@ data class QueueSnapshot(
     val pendingActionCount: Int,
 )
 
+data class ClearedPendingWork(
+    val thoughtsRemoved: Int = 0,
+    val actionsRemoved: Int = 0,
+)
+
 data class QueueState(
     val inputs: List<PendingInput>,
     val thoughts: List<PendingThought>,

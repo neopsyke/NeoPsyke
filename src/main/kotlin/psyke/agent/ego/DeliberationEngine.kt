@@ -90,7 +90,10 @@ internal class DeliberationEngine(
     /**
      * If pressure thresholds are exceeded and no forced answer is queued, enqueues one via [scheduler].
      */
-    fun maybeForceTerminalAnswer(scheduler: AttentionScheduler) {
+    fun maybeForceTerminalAnswer(
+        scheduler: AttentionScheduler,
+        rootInputEnqueuedAtMs: Long?,
+    ) {
         if (forcedTerminalAnswerQueued) return
         val state = monitor.snapshot()
         if (state.stepIndex < config.metaReasoner.deliberationPressureAssessmentMinStep) return
@@ -108,7 +111,8 @@ internal class DeliberationEngine(
                 config.planner.maxActionPayloadChars
             ),
             summary = "Forced terminal answer due to high decision pressure.",
-            urgency = Urgency.HIGH
+            urgency = Urgency.HIGH,
+            rootInputEnqueuedAtMs = rootInputEnqueuedAtMs
         )
         if (queued) {
             forcedTerminalAnswerQueued = true

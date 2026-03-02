@@ -61,6 +61,7 @@ sequenceDiagram
             Planner-->>Ego: thought/action/plan/noop
             Ego->>Delib: maybeApplyPressureOverride
             Ego->>Sched: enqueue thought/action/plan steps
+            Note over Ego,Sched: Duplicate plan fan-out for same input can be suppressed
         else Task = action
             alt Fallback explanation action
                 Ego->>Motor: execute (bypass Superego)
@@ -69,6 +70,9 @@ sequenceDiagram
                 Sup-->>Ego: allow/deny
                 alt allow
                     Ego->>Motor: execute(action)
+                    alt action = answer
+                        Ego->>Sched: clear pending thought/action work for same root input
+                    end
                     Ego->>Sched: enqueue follow-up thought (for evidence actions)
                     Ego->>Mem: maybeAssessLongTermMemory(post_action)
                 else deny
@@ -91,6 +95,7 @@ stateDiagram-v2
     Processing --> Planning: input/thought task
     Planning --> ActionQueued: decision=action
     Planning --> ThoughtQueued: decision=thought/plan/noop-thought
+    Planning --> ThoughtQueued: duplicate plan suppressed -> convergence thought
 
     ActionQueued --> PolicyReview: non-fallback action
     ActionQueued --> Executing: fallback explanation action
@@ -112,6 +117,8 @@ stateDiagram-v2
     StepLimit --> FallbackAttempt: dequeue fallback explanation action
     FallbackAttempt --> Executing
 
+    Executing --> CleanupResolvedInput: action=answer clears same-input queued work
+    CleanupResolvedInput --> Complete
     Processing --> Complete: queues drained
     Complete --> [*]
 ```

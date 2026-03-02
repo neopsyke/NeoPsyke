@@ -98,6 +98,40 @@ class AttentionScheduler(
         return candidate
     }
 
+    fun hasPendingFallbackExplanationAction(rootInputEnqueuedAtMs: Long?): Boolean {
+        if (rootInputEnqueuedAtMs == null) {
+            return false
+        }
+        return actions.any { action ->
+            action.isFallbackExplanation &&
+                action.rootInputEnqueuedAtMs == rootInputEnqueuedAtMs
+        }
+    }
+
+    fun hasPendingPlanThoughtsForInput(rootInputEnqueuedAtMs: Long?): Boolean {
+        if (rootInputEnqueuedAtMs == null) {
+            return false
+        }
+        return thoughts.any { thought ->
+            thought.rootInputEnqueuedAtMs == rootInputEnqueuedAtMs &&
+                thought.planContext != null
+        }
+    }
+
+    fun clearPendingWorkForInput(rootInputEnqueuedAtMs: Long?): ClearedPendingWork {
+        if (rootInputEnqueuedAtMs == null) {
+            return ClearedPendingWork()
+        }
+        val thoughtBefore = thoughts.size
+        val actionBefore = actions.size
+        thoughts.removeIf { it.rootInputEnqueuedAtMs == rootInputEnqueuedAtMs }
+        actions.removeIf { it.rootInputEnqueuedAtMs == rootInputEnqueuedAtMs }
+        return ClearedPendingWork(
+            thoughtsRemoved = thoughtBefore - thoughts.size,
+            actionsRemoved = actionBefore - actions.size
+        )
+    }
+
     fun nextTask(): LoopTask? {
         val input = inputs.poll()
         if (input != null) {
