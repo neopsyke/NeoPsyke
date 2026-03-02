@@ -408,6 +408,15 @@ class Ego(
 
             is EgoDecision.EnqueuePlan -> {
                 if (scheduler.hasPendingPlanThoughtsForInput(rootInputEnqueuedAtMs)) {
+                    if (scheduler.hasPendingConvergenceThoughtForInput(rootInputEnqueuedAtMs)) {
+                        instrumentation.emit(
+                            AgentEvents.warning(
+                                "Duplicate plan suppressed; convergence thought already pending for this input."
+                            )
+                        )
+                        emitQueueSnapshot("decision_plan_skipped_duplicate")
+                        return
+                    }
                     instrumentation.emit(
                         AgentEvents.warning(
                             "Planner emitted duplicate plan while plan steps are still pending; " +
@@ -415,7 +424,8 @@ class Ego(
                         )
                     )
                     val convergenceThought = TextSecurity.clamp(
-                        "Plan steps are already queued. Continue with current steps and converge to a final answer " +
+                        "${AttentionScheduler.CONVERGENCE_THOUGHT_PREFIX}Plan steps are already queued. " +
+                            "Continue with current steps and converge to a final answer " +
                             "instead of starting another plan.",
                         config.planner.maxThoughtChars
                     )
