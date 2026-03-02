@@ -968,6 +968,120 @@ class EgoAgentTest {
         )
     }
 
+    @Test
+    fun `mcp fetch circuit breaker disables action after repeated non retryable failures`() {
+        val plannerLlm = StubChatModelClient().apply {
+            enqueueRawResponse(
+                """{"decision":"action","urgency":"medium","action_type":"mcp_fetch","action_payload":"{\"url\":\"https://blocked.example.com\"}","action_summary":"fetch page"}"""
+            )
+            enqueueRawResponse(
+                """{"decision":"action","urgency":"medium","action_type":"mcp_fetch","action_payload":"{\"url\":\"https://blocked.example.com\"}","action_summary":"retry fetch"}"""
+            )
+            enqueueRawResponse(
+                """{"decision":"action","urgency":"medium","action_type":"mcp_fetch","action_payload":"{\"url\":\"https://blocked.example.com\"}","action_summary":"retry fetch 2"}"""
+            )
+            enqueueRawResponse(
+                """{"decision":"action","urgency":"medium","action_type":"answer","action_payload":"Could not fetch the page.","action_summary":"fallback answer"}"""
+            )
+        }
+        val superegoLlm = StubChatModelClient().apply {
+            enqueueRawResponse("""{"allow":true}""")
+            enqueueRawResponse("""{"allow":true}""")
+            enqueueRawResponse("""{"allow":true}""")
+            enqueueRawResponse("""{"allow":true}""")
+        }
+        val instrumentation = RecordingInstrumentation()
+        val outputs = mutableListOf<String>()
+        val failingFetchTool = object : McpFetchTool {
+            override fun fetch(payload: String): String = "unused"
+            override fun fetchWithOutcome(payload: String): FetchOutcome =
+                FetchOutcome(
+                    message = "MCP fetch tool returned an error: 403 Forbidden",
+                    errorCategory = FetchErrorCategory.NON_RETRYABLE
+                )
+        }
+        val config = AgentConfig(planner = PlannerConfig(maxLoopStepsPerInput = 16, maxThoughtPasses = 5))
+        val agent = Ego(
+            planner = LlmEgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
+            superego = Superego(modelClient = superegoLlm, config = config, instrumentation = instrumentation),
+            motorCortex = buildMotorCortex(output = { outputs.add(it) }, mcpFetchTool = failingFetchTool),
+            config = config,
+            instrumentation = instrumentation
+        )
+
+        runAgentWithInput(agent, "fetch this page\nexit\n")
+
+        assertEquals(1, outputs.size)
+        assertTrue(outputs.first().contains("Could not fetch"))
+        assertTrue(
+            instrumentation.events.any {
+                it.type == "action_type_temporarily_disabled" &&
+                    it.data["action_type"] == "mcp_fetch"
+            },
+            "Expected action_type_temporarily_disabled event for mcp_fetch"
+        )
+        assertTrue(
+            instrumentation.events.any {
+                it.type == "action_type_circuit_breaker_tripped"
+            },
+            "Expected action_type_circuit_breaker_tripped event"
+        )
+    }
+
+    @Test
+    fun `mcp fetch malformed request does not trip circuit breaker`() {
+        val plannerLlm = StubChatModelClient().apply {
+            enqueueRawResponse(
+                """{"decision":"action","urgency":"medium","action_type":"mcp_fetch","action_payload":"bad json","action_summary":"fetch 1"}"""
+            )
+            enqueueRawResponse(
+                """{"decision":"action","urgency":"medium","action_type":"mcp_fetch","action_payload":"still bad","action_summary":"fetch 2"}"""
+            )
+            enqueueRawResponse(
+                """{"decision":"action","urgency":"medium","action_type":"mcp_fetch","action_payload":"nope","action_summary":"fetch 3"}"""
+            )
+            enqueueRawResponse(
+                """{"decision":"action","urgency":"medium","action_type":"answer","action_payload":"answering from context","action_summary":"fallback"}"""
+            )
+        }
+        val superegoLlm = StubChatModelClient().apply {
+            enqueueRawResponse("""{"allow":true}""")
+            enqueueRawResponse("""{"allow":true}""")
+            enqueueRawResponse("""{"allow":true}""")
+            enqueueRawResponse("""{"allow":true}""")
+        }
+        val instrumentation = RecordingInstrumentation()
+        val outputs = mutableListOf<String>()
+        val malformedTool = object : McpFetchTool {
+            override fun fetch(payload: String): String = "unused"
+            override fun fetchWithOutcome(payload: String): FetchOutcome =
+                FetchOutcome(
+                    message = "MCP fetch payload is invalid.",
+                    errorCategory = FetchErrorCategory.MALFORMED_REQUEST
+                )
+        }
+        val config = AgentConfig(planner = PlannerConfig(maxLoopStepsPerInput = 16, maxThoughtPasses = 5))
+        val agent = Ego(
+            planner = LlmEgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
+            superego = Superego(modelClient = superegoLlm, config = config, instrumentation = instrumentation),
+            motorCortex = buildMotorCortex(output = { outputs.add(it) }, mcpFetchTool = malformedTool),
+            config = config,
+            instrumentation = instrumentation
+        )
+
+        runAgentWithInput(agent, "fetch this\nexit\n")
+
+        assertEquals(1, outputs.size)
+        assertFalse(
+            instrumentation.events.any { it.type == "action_type_temporarily_disabled" },
+            "MALFORMED_REQUEST should NOT trigger action_type_temporarily_disabled"
+        )
+        assertFalse(
+            instrumentation.events.any { it.type == "action_type_circuit_breaker_tripped" },
+            "MALFORMED_REQUEST should NOT trigger circuit breaker"
+        )
+    }
+
     private fun runAgentWithInput(agent: Ego, stdinContent: String) {
         val previousIn = System.`in`
         try {
@@ -983,14 +1097,16 @@ class EgoAgentTest {
         webSearchEngine: WebSearchEngine = object : WebSearchEngine {
             override fun search(query: String, maxResults: Int): WebSearchResult =
                 WebSearchResult(summary = "unused", snippets = emptyList())
-        }
+        },
+        mcpFetchTool: McpFetchTool? = null,
     ): MotorCortex {
         val webSearchHandler = WebSearchActionHandler(
             engine = webSearchEngine
         )
         return MotorCortex(
             webSearchActionHandler = webSearchHandler,
-            output = output
+            output = output,
+            mcpFetchTool = mcpFetchTool
         )
     }
 

@@ -138,7 +138,7 @@ class SdkMcpFetchTool(
         } catch (_: Exception) {
             return FetchOutcome(
                 message = "MCP fetch payload is invalid. Expected JSON like {\"url\":\"https://example.com\",\"max_chars\":1200}.",
-                errorCategory = FetchErrorCategory.NON_RETRYABLE
+                errorCategory = FetchErrorCategory.MALFORMED_REQUEST
             )
         }
 
@@ -146,13 +146,13 @@ class SdkMcpFetchTool(
         if (url.isEmpty()) {
             return FetchOutcome(
                 message = "MCP fetch payload is missing url.",
-                errorCategory = FetchErrorCategory.NON_RETRYABLE
+                errorCategory = FetchErrorCategory.MALFORMED_REQUEST
             )
         }
         if (!isFetchUrlAllowed(url)) {
             return FetchOutcome(
                 message = "MCP fetch blocked URL by safety policy. Only public HTTPS URLs are allowed.",
-                errorCategory = FetchErrorCategory.NON_RETRYABLE
+                errorCategory = FetchErrorCategory.MALFORMED_REQUEST
             )
         }
 
@@ -192,15 +192,15 @@ class SdkMcpFetchTool(
         }
     }
 
-    private fun classifyFetchError(errorText: String): FetchErrorCategory {
-        if (NON_RETRYABLE_PATTERNS.any { errorText.contains(it) }) {
-            return FetchErrorCategory.NON_RETRYABLE
+    companion object {
+        internal fun classifyFetchError(errorText: String): FetchErrorCategory {
+            if (NON_RETRYABLE_PATTERNS.any { errorText.contains(it) }) {
+                return FetchErrorCategory.NON_RETRYABLE
+            }
+            return FetchErrorCategory.RETRYABLE
         }
-        return FetchErrorCategory.RETRYABLE
-    }
 
-    private companion object {
-        val NON_RETRYABLE_PATTERNS = listOf(
+        internal val NON_RETRYABLE_PATTERNS = listOf(
             "403", "404", "401", "410", "451",
             "forbidden", "not found", "unauthorized", "gone",
             "non-zero exit status", "install", "enoent",
@@ -571,6 +571,7 @@ data class ToolHealthStatus(
 
 enum class FetchErrorCategory {
     NONE,
+    MALFORMED_REQUEST,
     NON_RETRYABLE,
     RETRYABLE,
 }
