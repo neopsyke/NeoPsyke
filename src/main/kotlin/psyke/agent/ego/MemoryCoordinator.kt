@@ -13,6 +13,7 @@ import psyke.agent.memory.longterm.LongTermMemoryAssessmentContext
 import psyke.agent.memory.longterm.MemoryImprint
 import psyke.agent.memory.longterm.MemoryRecallQuery
 import psyke.agent.memory.shortterm.MemoryStore
+import psyke.agent.support.PromptInjectionDefense
 import psyke.agent.support.TextSecurity
 import psyke.instrumentation.AgentEvent
 import psyke.instrumentation.AgentEvents
@@ -256,6 +257,11 @@ internal class MemoryCoordinator(
                     maxChars = config.memory.longTermMemoryRecallMaxChars
                 )
             )
+            val recallText = PromptInjectionDefense.asUntrustedDataBlock(
+                text = recall.text,
+                maxChars = config.memory.longTermMemoryRecallMaxChars
+            )
+            val recallScan = PromptInjectionDefense.scan(recall.text)
             val latencyMs = (System.nanoTime() - startedAt) / 1_000_000L
             instrumentation.emit(
                 AgentEvents.memoryRecallResult(
@@ -263,11 +269,18 @@ internal class MemoryCoordinator(
                     provider = recall.provider.ifBlank { hippocampus.providerName },
                     hitCount = recall.hitCount,
                     latencyMs = latencyMs,
-                    recallChars = recall.text.length,
+                    recallChars = recallText.length,
                     truncated = recall.truncated
                 )
             )
-            recall.text
+            if (recallScan.suspicious) {
+                instrumentation.emit(
+                    AgentEvents.warning(
+                        "Prompt-injection signals detected in long-term memory recall: ${recallScan.signalIds.sorted().joinToString(",")}."
+                    )
+                )
+            }
+            recallText
         } catch (ex: Exception) {
             val latencyMs = (System.nanoTime() - startedAt) / 1_000_000L
             logger.warn(ex) { "Memory recall failed for trigger=$triggerLabel cue='${TextSecurity.preview(cue, 120)}'." }

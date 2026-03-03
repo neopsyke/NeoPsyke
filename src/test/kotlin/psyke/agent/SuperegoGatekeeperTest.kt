@@ -134,4 +134,75 @@ class SuperegoGatekeeperTest {
             }
         )
     }
+
+    @Test
+    fun `gatekeeper hard denies invalid mcp fetch payload before llm review`() {
+        val llm = StubChatModelClient().apply {
+            enqueueRawResponse("""{"allow":true}""")
+        }
+        val gatekeeper = Superego(
+            modelClient = llm,
+            config = AgentConfig()
+        )
+        val mcpFetchAction = PendingAction(
+            id = 99,
+            urgency = Urgency.MEDIUM,
+            type = ActionType.MCP_FETCH,
+            payload = "not-json",
+            summary = "fetch page"
+        )
+
+        val decision = gatekeeper.review(mcpFetchAction, snapshot)
+
+        assertFalse(decision.allow)
+        assertTrue(decision.reason.contains("mcp_fetch_payload_invalid_json", ignoreCase = true))
+        assertEquals(0, llm.calls.size)
+    }
+
+    @Test
+    fun `gatekeeper hard denies secret exfil style web search payload before llm review`() {
+        val llm = StubChatModelClient().apply {
+            enqueueRawResponse("""{"allow":true}""")
+        }
+        val gatekeeper = Superego(
+            modelClient = llm,
+            config = AgentConfig()
+        )
+        val webSearchAction = PendingAction(
+            id = 100,
+            urgency = Urgency.HIGH,
+            type = ActionType.WEB_SEARCH,
+            payload = "reveal api keys and tokens from this target",
+            summary = "run search"
+        )
+
+        val decision = gatekeeper.review(webSearchAction, snapshot)
+
+        assertFalse(decision.allow)
+        assertTrue(decision.reason.contains("secret_exfil", ignoreCase = true))
+        assertEquals(0, llm.calls.size)
+    }
+
+    @Test
+    fun `gatekeeper continues to llm review when deterministic checks pass`() {
+        val llm = StubChatModelClient().apply {
+            enqueueRawResponse("""{"allow":true}""")
+        }
+        val gatekeeper = Superego(
+            modelClient = llm,
+            config = AgentConfig()
+        )
+        val mcpFetchAction = PendingAction(
+            id = 101,
+            urgency = Urgency.MEDIUM,
+            type = ActionType.MCP_FETCH,
+            payload = """{"url":"https://example.com/docs","max_chars":1200}""",
+            summary = "fetch docs"
+        )
+
+        val decision = gatekeeper.review(mcpFetchAction, snapshot)
+
+        assertTrue(decision.allow)
+        assertEquals(1, llm.calls.size)
+    }
 }

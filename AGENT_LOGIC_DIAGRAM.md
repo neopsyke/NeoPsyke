@@ -28,6 +28,10 @@ flowchart LR
     M --> WS["Web Search Handler/Engine"]
     M --> MT["MCP Time Tool"]
     M --> MF["MCP Fetch Tool"]
+    WS --> PID["PromptInjectionDefense"]
+    MT --> PID
+    MF --> PID
+    PID --> E
 
     E --> I["InstrumentationBus + Metrics"]
 ```
@@ -66,17 +70,24 @@ sequenceDiagram
             alt Fallback explanation action
                 Ego->>Motor: execute (bypass Superego)
             else Normal action
-                Ego->>Sup: review(action)
-                Sup-->>Ego: allow/deny
-                alt allow
-                    Ego->>Motor: execute(action)
-                    alt action = answer
-                        Ego->>Sched: clear pending thought/action work for same root input
-                    end
-                    Ego->>Sched: enqueue follow-up thought (for evidence actions)
-                    Ego->>Mem: maybeAssessLongTermMemory(post_action)
-                else deny
+                Ego->>Sup: deterministic checks
+                alt deterministic deny
+                    Sup-->>Ego: deny (hard deny)
                     Ego->>Sched: enqueue safe-alternative thought
+                else deterministic pass
+                    Ego->>Sup: llm review(action)
+                    Sup-->>Ego: allow/deny
+                    alt allow
+                        Ego->>Motor: execute(action)
+                        Ego->>Ego: PromptInjectionDefense sanitize untrusted tool output
+                        alt action = answer
+                            Ego->>Sched: clear pending thought/action work for same root input
+                        end
+                        Ego->>Sched: enqueue follow-up thought (for evidence actions)
+                        Ego->>Mem: maybeAssessLongTermMemory(post_action)
+                    else deny
+                        Ego->>Sched: enqueue safe-alternative thought
+                    end
                 end
             end
         end
@@ -99,6 +110,7 @@ stateDiagram-v2
 
     ActionQueued --> PolicyReview: non-fallback action
     ActionQueued --> Executing: fallback explanation action
+    ActionQueued --> Denied: deterministic hard deny
 
     PolicyReview --> Denied: superego deny
     Denied --> ThoughtQueued: enqueue safe alternative thought

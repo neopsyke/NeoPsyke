@@ -29,6 +29,7 @@ import org.jsoup.Jsoup
 import org.jsoup.nodes.Element
 import org.jsoup.nodes.Node
 import org.jsoup.nodes.TextNode
+import psyke.agent.support.PromptInjectionDefense
 import psyke.agent.support.TextSecurity
 import java.io.IOException
 import java.net.SocketTimeoutException
@@ -98,7 +99,10 @@ class SdkMcpTimeTool(
             return "MCP time unavailable: ${ex.message ?: "tool call failed"}"
         }
 
-        val content = TextSecurity.clamp(result.content.ifBlank { "No time data returned." }, 500)
+        val content = PromptInjectionDefense.sanitizeExternalText(
+            result.content.ifBlank { "No time data returned." },
+            500
+        )
         return if (result.isError) {
             "MCP time tool returned an error: $content"
         } else {
@@ -521,10 +525,13 @@ class NativeFetchTool(
                 body
             }
 
-            val clamped = TextSecurity.clamp(text, safeMaxChars)
+            val clamped = PromptInjectionDefense.sanitizeExternalText(text, safeMaxChars)
+            val injectionScan = PromptInjectionDefense.scan(text)
             val preview = TextSecurity.preview(clamped, 240)
+            val promptInjectionSignals =
+                if (injectionScan.suspicious) injectionScan.signalIds.sorted().joinToString(",") else "none"
             return FetchOutcome(
-                message = "Fetch completed for $url. Extracted ${clamped.length} chars. Preview: $preview",
+                message = "Fetch completed for $url. Extracted ${clamped.length} chars. Preview: $preview. prompt_injection_signals=$promptInjectionSignals",
                 errorCategory = FetchErrorCategory.NONE
             )
         }

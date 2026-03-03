@@ -1,6 +1,7 @@
 package psyke.agent.actions.websearch
 
 import psyke.agent.core.ActionOutcome
+import psyke.agent.support.PromptInjectionDefense
 import psyke.agent.support.TextSecurity
 import java.net.URI
 
@@ -8,16 +9,20 @@ class WebSearchActionHandler(
     private val engine: WebSearchEngine,
 ) {
     fun execute(query: String, maxResults: Int): ActionOutcome {
+        val queryScan = PromptInjectionDefense.scan(query)
         val result = engine.search(query, maxResults)
         val summary = TextSecurity.clamp(
-            result.summary.trim().ifBlank { "No summary returned." },
+            PromptInjectionDefense.sanitizeExternalText(
+                result.summary.trim().ifBlank { "No summary returned." },
+                280
+            ),
             280
         )
         val snippets = if (result.snippets.isEmpty()) {
             "no snippets"
         } else {
             result.snippets
-                .map { TextSecurity.clamp(it.trim(), 200) }
+                .map { PromptInjectionDefense.sanitizeExternalText(it.trim(), 200) }
                 .joinToString(" | ")
                 .ifBlank { "no snippets" }
         }
@@ -26,7 +31,8 @@ class WebSearchActionHandler(
             .filter { it.url.isNotBlank() }
             .take(3)
             .mapIndexed { index, source ->
-                "[${index + 1}] ${TextSecurity.clamp(source.title.ifBlank { source.url }, 120)} - ${source.url}"
+                val safeTitle = PromptInjectionDefense.sanitizeExternalText(source.title.ifBlank { source.url }, 120)
+                "[${index + 1}] $safeTitle - ${source.url}"
             }
             .joinToString(" | ")
             .ifBlank { "none" }
@@ -34,19 +40,25 @@ class WebSearchActionHandler(
         val keySources = prioritizedSources
             .take(2)
             .joinToString(" | ") { source ->
-                "${TextSecurity.clamp(source.title.ifBlank { source.url }, 90)} (${source.url})"
+                val safeTitle = PromptInjectionDefense.sanitizeExternalText(source.title.ifBlank { source.url }, 90)
+                "$safeTitle (${source.url})"
             }
             .ifBlank { "none" }
+        val promptInjectionSignals = if (queryScan.suspicious) {
+            queryScan.signalIds.sorted().joinToString(",")
+        } else {
+            "none"
+        }
         val observedEvidence = !summary.contains("unavailable", ignoreCase = true) &&
             !summary.contains("timeout", ignoreCase = true) &&
             (prioritizedSources.isNotEmpty() || result.snippets.any { it.isNotBlank() })
         val plannerSignal = TextSecurity.clamp(
-            "web_search result: $summary; key_sources: $keySources; source_confidence: $confidence",
+            "web_search result: $summary; key_sources: $keySources; source_confidence: $confidence; query_injection_signals: $promptInjectionSignals",
             420
         )
 
         return ActionOutcome(
-            statusSummary = "Web search summary: $summary; snippets: $snippets; sources: $sources; source_confidence: $confidence",
+            statusSummary = "Web search summary: $summary; snippets: $snippets; sources: $sources; source_confidence: $confidence; query_injection_signals: $promptInjectionSignals",
             plannerSignal = plannerSignal,
             observedEvidence = observedEvidence
         )

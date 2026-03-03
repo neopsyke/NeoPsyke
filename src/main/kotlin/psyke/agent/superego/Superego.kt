@@ -11,6 +11,7 @@ import psyke.agent.core.PendingAction
 import psyke.agent.core.SuperegoContext
 import psyke.agent.support.PromptBudgetAllocator
 import psyke.agent.support.TextSecurity
+import psyke.instrumentation.AgentEvent
 import psyke.instrumentation.AgentEvents
 import psyke.instrumentation.AgentInstrumentation
 import psyke.instrumentation.NoopAgentInstrumentation
@@ -28,6 +29,8 @@ class Superego(
     private val policy: SuperegoPolicy = SuperegoPolicy,
     private val instrumentation: AgentInstrumentation = NoopAgentInstrumentation,
 ) {
+    private val deterministicConscience = SuperegoDeterministicConscience(config)
+
     fun review(action: PendingAction, context: SuperegoContext): GateDecision {
         val resolvedDirectives = policy.forAction(action.type).all
         val lastUserTurn = context.recentDialogue.lastOrNull { it.role == DialogueRole.USER }?.content ?: "none"
@@ -36,6 +39,35 @@ class Superego(
                 action = action,
                 directives = resolvedDirectives,
                 lastUserMessage = lastUserTurn
+            )
+        )
+        val deterministicDecision = deterministicConscience.review(action, context)
+        if (!deterministicDecision.allow) {
+            val reason = TextSecurity.clamp(
+                deterministicDecision.reason.ifBlank { "Deterministic policy denied action." },
+                MAX_DENY_REASON_CHARS
+            )
+            instrumentation.emit(
+                AgentEvent(
+                    type = "superego_deterministic_review",
+                    data = mapOf(
+                        "action_id" to action.id,
+                        "allow" to false,
+                        "rule_id" to deterministicDecision.ruleId,
+                        "reason" to reason
+                    )
+                )
+            )
+            instrumentation.emit(AgentEvents.superegoReviewOutput(actionId = action.id, allow = false, reason = reason))
+            return GateDecision(allow = false, reason = reason)
+        }
+        instrumentation.emit(
+            AgentEvent(
+                type = "superego_deterministic_review",
+                data = mapOf(
+                    "action_id" to action.id,
+                    "allow" to true
+                )
             )
         )
         val messages = buildMessages(action, context, resolvedDirectives)
