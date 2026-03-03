@@ -160,6 +160,7 @@ It is intentionally high-level and should stay aligned with the code.
       - thresholds are configurable via `MemoryConfig` / `EGO_LONG_TERM_MEMORY_RECALL_ECHO_*`
     - duplicate fingerprint suppression
     - temporary disable after repeated parse-fallback streaks
+    - every blocked persistence emits `long_term_memory_persistence_skipped` with exact `reason_code` + `reason_detail`
   - `McpHippocampus` requests `write_mode=dedupe_if_similar` when calling memory write tools.
 
 ## Action Execution Surface

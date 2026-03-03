@@ -87,7 +87,7 @@ sequenceDiagram
                         end
                         Ego->>Sched: enqueue follow-up thought (for evidence actions)
                         Ego->>Mem: maybeAssessLongTermMemory(post_allowed_action, optional force)
-                        Note over Ego,Mem: Imprint is skipped when advisor summary is an echo of current recall content (configurable thresholds)
+                        Note over Ego,Mem: Blocked imprints emit long_term_memory_persistence_skipped (reason_code + reason_detail) for timeline visibility
                     else deny
                         Ego->>Sched: enqueue safe-alternative thought
                     end

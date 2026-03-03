@@ -10,6 +10,8 @@ Instructions for coding agents working in this repository (Codex, Claude, Gemini
 - Follow system/developer/user instructions first.
 - Then follow this file.
 - If instructions conflict, use the highest-priority source.
+- Before adding a new feature or fixing a problem with a new heuristic make sure that tuning or adjusting 
+  an existing one does not achieve the same purpose. Tuning/adjusting is prefered.
 
 ## Project Snapshot
 - Language: Kotlin (JVM), Gradle Kotlin DSL.

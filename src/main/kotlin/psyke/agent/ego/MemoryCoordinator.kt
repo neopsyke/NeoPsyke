@@ -125,6 +125,13 @@ internal class MemoryCoordinator(
             longTermMemoryAdvisor.assess(context)
         } catch (ex: Exception) {
             logger.warn(ex) { "Long-term memory assessment failed." }
+            emitMemoryPersistenceSkipped(
+                trigger = effectiveTrigger,
+                stepIndex = stepIndex,
+                reasonCode = REASON_CODE_ASSESSMENT_EXCEPTION,
+                reasonDetail = "Advisor assessment failed: ${ex.message ?: ex::class.simpleName ?: "unknown error"}.",
+                decision = null
+            )
             instrumentation.emit(AgentEvents.warning("Long-term memory assessment failed; skipping this cycle."))
             return
         } finally {
@@ -147,6 +154,17 @@ internal class MemoryCoordinator(
 
         if (decision.parseFallback) {
             parseFallbackStreak += 1
+            emitMemoryPersistenceSkipped(
+                trigger = effectiveTrigger,
+                stepIndex = stepIndex,
+                reasonCode = REASON_CODE_PARSE_FALLBACK,
+                reasonDetail = "Advisor response parse fallback blocked persistence for this cycle (streak=$parseFallbackStreak, disable_after=${config.memory.longTermMemoryParseFallbackDisableAfter}).",
+                decision = decision,
+                extra = mapOf(
+                    "parse_fallback_streak" to parseFallbackStreak,
+                    "parse_fallback_disable_after" to config.memory.longTermMemoryParseFallbackDisableAfter
+                )
+            )
             instrumentation.emit(
                 AgentEvents.longTermMemoryAssessmentParseFallback(
                     trigger = effectiveTrigger,
@@ -171,23 +189,66 @@ internal class MemoryCoordinator(
             parseFallbackStreak = 0
         }
 
-        if (!decision.shouldSave) return
+        if (!decision.shouldSave) {
+            emitMemoryPersistenceSkipped(
+                trigger = effectiveTrigger,
+                stepIndex = stepIndex,
+                reasonCode = REASON_CODE_ADVISOR_DECLINED,
+                reasonDetail = "Advisor declined persistence: ${decision.reason}.",
+                decision = decision
+            )
+            return
+        }
         if (decision.confidence < config.memory.longTermMemoryMinConfidence) {
-            instrumentation.emit(
-                AgentEvents.warning(
-                    "Long-term memory persistence skipped: confidence ${String.format(Locale.ROOT, "%.2f", decision.confidence)} below threshold."
+            val confidence = String.format(Locale.ROOT, "%.3f", decision.confidence)
+            val threshold = String.format(Locale.ROOT, "%.3f", config.memory.longTermMemoryMinConfidence)
+            emitMemoryPersistenceSkipped(
+                trigger = effectiveTrigger,
+                stepIndex = stepIndex,
+                reasonCode = REASON_CODE_CONFIDENCE_BELOW_THRESHOLD,
+                reasonDetail = "Decision confidence $confidence is below configured minimum $threshold.",
+                decision = decision,
+                extra = mapOf(
+                    "confidence" to decision.confidence,
+                    "min_confidence" to config.memory.longTermMemoryMinConfidence
                 )
             )
             return
         }
-        if (isRecallEcho(decision.summary)) {
-            instrumentation.emit(AgentEvents.warning("Long-term memory persistence skipped: summary echoes recalled memory."))
+        val recallEchoEvaluation = evaluateRecallEcho(decision.summary)
+        if (recallEchoEvaluation.isEcho) {
+            val overlapLabel = recallEchoEvaluation.overlapRatio?.let { String.format(Locale.ROOT, "%.3f", it) } ?: "n/a"
+            val thresholdLabel = String.format(Locale.ROOT, "%.3f", config.memory.longTermMemoryRecallEchoTokenOverlapThreshold)
+            emitMemoryPersistenceSkipped(
+                trigger = effectiveTrigger,
+                stepIndex = stepIndex,
+                reasonCode = REASON_CODE_RECALL_ECHO,
+                reasonDetail =
+                    "Summary matched recalled memory (mode=${recallEchoEvaluation.mode ?: "unknown"}, overlap=$overlapLabel, min_summary_chars=${config.memory.longTermMemoryRecallEchoMinSummaryChars}, min_token_length=${config.memory.longTermMemoryRecallEchoMinTokenLength}, min_token_count=${config.memory.longTermMemoryRecallEchoMinTokenCount}, overlap_threshold=$thresholdLabel).",
+                decision = decision,
+                extra = mapOf(
+                    "echo_mode" to recallEchoEvaluation.mode,
+                    "echo_overlap_ratio" to recallEchoEvaluation.overlapRatio,
+                    "echo_summary_token_count" to recallEchoEvaluation.summaryTokenCount,
+                    "echo_recall_token_count" to recallEchoEvaluation.recallTokenCount,
+                    "echo_min_summary_chars" to config.memory.longTermMemoryRecallEchoMinSummaryChars,
+                    "echo_min_token_length" to config.memory.longTermMemoryRecallEchoMinTokenLength,
+                    "echo_min_token_count" to config.memory.longTermMemoryRecallEchoMinTokenCount,
+                    "echo_overlap_threshold" to config.memory.longTermMemoryRecallEchoTokenOverlapThreshold
+                )
+            )
             return
         }
 
         val fingerprint = normalizePayload(decision.summary)
         if (recentImprintFingerprints.contains(fingerprint)) {
-            instrumentation.emit(AgentEvents.warning("Long-term memory persistence skipped: duplicate imprint summary."))
+            emitMemoryPersistenceSkipped(
+                trigger = effectiveTrigger,
+                stepIndex = stepIndex,
+                reasonCode = REASON_CODE_DUPLICATE_FINGERPRINT,
+                reasonDetail = "Duplicate imprint summary fingerprint matched a recent saved entry.",
+                decision = decision
+            )
             return
         }
 
@@ -347,12 +408,19 @@ internal class MemoryCoordinator(
     private fun normalizePayload(payload: String): String =
         payload.lowercase().replace(Regex("\\s+"), " ").trim()
 
-    private fun isRecallEcho(summary: String): Boolean {
+    private fun evaluateRecallEcho(summary: String): RecallEchoEvaluation {
         val canonicalSummary = canonicalizeForComparison(summary)
-        if (canonicalSummary.length < config.memory.longTermMemoryRecallEchoMinSummaryChars) return false
+        if (canonicalSummary.length < config.memory.longTermMemoryRecallEchoMinSummaryChars) {
+            return RecallEchoEvaluation(isEcho = false)
+        }
         val canonicalRecall = canonicalizeForComparison(latestLongTermRecall)
-        if (canonicalRecall.isBlank()) return false
-        if (canonicalRecall.contains(canonicalSummary)) return true
+        if (canonicalRecall.isBlank()) return RecallEchoEvaluation(isEcho = false)
+        if (canonicalRecall.contains(canonicalSummary)) {
+            return RecallEchoEvaluation(
+                isEcho = true,
+                mode = "containment"
+            )
+        }
 
         val summaryTokens = canonicalSummary
             .split(' ')
@@ -360,7 +428,12 @@ internal class MemoryCoordinator(
             .map { it.trim() }
             .filter { it.length >= config.memory.longTermMemoryRecallEchoMinTokenLength }
             .toSet()
-        if (summaryTokens.size < config.memory.longTermMemoryRecallEchoMinTokenCount) return false
+        if (summaryTokens.size < config.memory.longTermMemoryRecallEchoMinTokenCount) {
+            return RecallEchoEvaluation(
+                isEcho = false,
+                summaryTokenCount = summaryTokens.size
+            )
+        }
 
         val recallTokens = canonicalRecall
             .split(' ')
@@ -368,10 +441,22 @@ internal class MemoryCoordinator(
             .map { it.trim() }
             .filter { it.length >= config.memory.longTermMemoryRecallEchoMinTokenLength }
             .toSet()
-        if (recallTokens.isEmpty()) return false
+        if (recallTokens.isEmpty()) {
+            return RecallEchoEvaluation(
+                isEcho = false,
+                summaryTokenCount = summaryTokens.size,
+                recallTokenCount = 0
+            )
+        }
 
         val overlap = summaryTokens.count { it in recallTokens }.toDouble() / summaryTokens.size.toDouble()
-        return overlap >= config.memory.longTermMemoryRecallEchoTokenOverlapThreshold
+        return RecallEchoEvaluation(
+            isEcho = overlap >= config.memory.longTermMemoryRecallEchoTokenOverlapThreshold,
+            mode = "token_overlap",
+            overlapRatio = overlap,
+            summaryTokenCount = summaryTokens.size,
+            recallTokenCount = recallTokens.size
+        )
     }
 
     private fun canonicalizeForComparison(text: String): String =
@@ -395,6 +480,38 @@ internal class MemoryCoordinator(
         return ExplicitRememberIntent(
             patternLabel = matchedPattern.label,
             latestUserMessagePreview = TextSecurity.preview(latestUserTurn, EXPLICIT_INTENT_PREVIEW_MAX_CHARS)
+        )
+    }
+
+    private fun emitMemoryPersistenceSkipped(
+        trigger: String,
+        stepIndex: Int,
+        reasonCode: String,
+        reasonDetail: String,
+        decision: psyke.agent.memory.longterm.LongTermMemoryAssessmentDecision?,
+        extra: Map<String, Any?> = emptyMap(),
+    ) {
+        val confidenceLabel = decision?.let { String.format(Locale.ROOT, "%.3f", it.confidence) } ?: "n/a"
+        logger.info {
+            "long_term_memory.persistence.skipped trigger=$trigger step=$stepIndex reason_code=$reasonCode detail='${TextSecurity.preview(reasonDetail, 220)}' confidence=$confidenceLabel"
+        }
+        val payload = linkedMapOf<String, Any?>(
+            "trigger" to trigger,
+            "step_index" to stepIndex,
+            "reason_code" to reasonCode,
+            "reason_detail" to reasonDetail
+        )
+        if (decision != null) {
+            payload["decision_confidence"] = decision.confidence
+            payload["decision_reason"] = decision.reason
+            payload["summary_preview"] = TextSecurity.preview(decision.summary, 180)
+        }
+        payload.putAll(extra)
+        instrumentation.emit(
+            AgentEvent(
+                type = "long_term_memory_persistence_skipped",
+                data = payload
+            )
         )
     }
 
@@ -422,6 +539,14 @@ internal class MemoryCoordinator(
         val latestUserMessagePreview: String,
     )
 
+    private data class RecallEchoEvaluation(
+        val isEcho: Boolean,
+        val mode: String? = null,
+        val overlapRatio: Double? = null,
+        val summaryTokenCount: Int = 0,
+        val recallTokenCount: Int = 0,
+    )
+
     private data class IntentPattern(
         val label: String,
         val regex: Regex,
@@ -430,6 +555,12 @@ internal class MemoryCoordinator(
     private companion object {
         const val EXPLICIT_REMEMBER_INTENT_TRIGGER: String = "explicit_remember_intent"
         const val EXPLICIT_INTENT_PREVIEW_MAX_CHARS: Int = 180
+        const val REASON_CODE_ADVISOR_DECLINED: String = "advisor_declined_save"
+        const val REASON_CODE_ASSESSMENT_EXCEPTION: String = "assessment_exception"
+        const val REASON_CODE_PARSE_FALLBACK: String = "assessment_parse_fallback"
+        const val REASON_CODE_CONFIDENCE_BELOW_THRESHOLD: String = "confidence_below_threshold"
+        const val REASON_CODE_RECALL_ECHO: String = "recall_echo_suppression"
+        const val REASON_CODE_DUPLICATE_FINGERPRINT: String = "duplicate_recent_fingerprint"
 
         val RECALL_ECHO_NON_ALPHANUMERIC_REGEX: Regex = Regex("[^a-z0-9]+")
         val RECALL_ECHO_WHITESPACE_REGEX: Regex = Regex("\\s+")

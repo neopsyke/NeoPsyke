@@ -124,6 +124,12 @@ class StructuredLogSink : InstrumentationSink {
                 }
             }
 
+            "long_term_memory_persistence_skipped" -> {
+                logger.info {
+                    "long_term_memory.persistence.skipped trigger=${event.data["trigger"]} step=${event.data["step_index"]} reason_code=${event.data["reason_code"]} detail=${event.data["reason_detail"]}"
+                }
+            }
+
             "memory_imprint_result" -> {
                 logger.trace {
                     "memory.imprint.result trigger=${event.data["trigger"]} provider=${event.data["provider"]} saved=${event.data["saved"]} summary_chars=${event.data["summary_chars"]} latency_ms=${event.data["latency_ms"]} confidence=${event.data["confidence"]}"
