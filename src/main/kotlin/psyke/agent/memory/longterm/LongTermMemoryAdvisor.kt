@@ -124,6 +124,8 @@ class LlmLongTermMemoryAdvisor(
                 - durable project constraints or decisions
                 - important factual outcomes
                 Avoid saving transient chatter or redundant details.
+                Never save a fact that is already present in the "Long-term memory recall" block
+                unless the recent dialogue contains a correction or materially new detail.
                 JSON schema:
                 {"save":true|false,"summary":"<=320 chars","confidence":0.0-1.0,"reason":"<=140 chars","tags":["..."]}
                 If save=false, keep summary empty.

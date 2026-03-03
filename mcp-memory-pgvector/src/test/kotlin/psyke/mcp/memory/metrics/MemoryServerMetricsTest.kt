@@ -69,6 +69,9 @@ class MemoryServerMetricsTest {
         metrics.dbUpsertConflicts.set(2)
         metrics.dbDeletes.set(1)
         metrics.dbErrors.set(3)
+        metrics.dbSemanticDedupeHits.set(4)
+        metrics.dbFactUpserts.set(6)
+        metrics.dbFactSupersedes.set(2)
 
         @Suppress("UNCHECKED_CAST")
         val db = metrics.snapshot()["database"] as Map<String, Any>
@@ -77,6 +80,9 @@ class MemoryServerMetricsTest {
         assertEquals(2L, db["upsert_conflicts"])
         assertEquals(1L, db["deletes"])
         assertEquals(3L, db["errors"])
+        assertEquals(4L, db["semantic_dedupe_hits"])
+        assertEquals(6L, db["fact_upserts"])
+        assertEquals(2L, db["fact_supersedes"])
     }
 
     @Test

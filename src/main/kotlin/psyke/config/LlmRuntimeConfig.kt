@@ -31,10 +31,17 @@ data class LlmRuntimeConfig(
     val superegoModel: String,
     val metaReasonerModel: String,
     val memoryConsolidationModel: String,
+    val webSearchProvider: LlmProvider,
+    val webSearchApiKey: String,
+    val webSearchApiKeyEnvVar: String,
+    val webSearchBaseUrl: String,
     val webSearchModel: String,
 ) {
     val providerLabel: String
         get() = provider.id
+
+    val webSearchProviderLabel: String
+        get() = webSearchProvider.id
 }
 
 private data class LlmRuntimeYamlModels(
@@ -54,7 +61,18 @@ private data class LlmRuntimeYamlConfig(
     val baseUrl: String? = null,
     @JsonProperty("api_key_env")
     val apiKeyEnvVar: String? = null,
+    @JsonProperty("web_search")
+    val webSearch: LlmRuntimeYamlWebSearch? = null,
     val models: LlmRuntimeYamlModels = LlmRuntimeYamlModels(),
+)
+
+private data class LlmRuntimeYamlWebSearch(
+    val provider: String? = null,
+    @JsonProperty("base_url")
+    val baseUrl: String? = null,
+    @JsonProperty("api_key_env")
+    val apiKeyEnvVar: String? = null,
+    val model: String? = null,
 )
 
 private data class ProviderDefaults(
@@ -129,13 +147,47 @@ object LlmRuntimeConfigLoader {
             egoModel
         ) ?: egoModel
 
-        val webSearchModel = firstNonBlank(
+        val webSearchProvider = LlmProvider.parse(
+            firstNonBlank(
+                env["LLM_WEBSEARCH_PROVIDER"],
+                yaml.webSearch?.provider,
+                provider.id
+            )
+        ) ?: return null
+        val webSearchDefaults = webSearchProvider.defaults()
+        val webSearchPrefix = webSearchProvider.id.uppercase()
+
+        val webSearchBaseUrl = firstNonBlank(
+            env["LLM_WEBSEARCH_BASE_URL"],
+            env["${webSearchPrefix}_WEBSEARCH_BASE_URL"],
+            yaml.webSearch?.baseUrl,
+            if (webSearchProvider == provider) baseUrl else null,
+            env["${webSearchPrefix}_BASE_URL"],
+            webSearchDefaults.baseUrl
+        ) ?: webSearchDefaults.baseUrl
+
+        val webSearchApiKeyEnvVar = firstNonBlank(
+            env["LLM_WEBSEARCH_API_KEY_ENV"],
+            yaml.webSearch?.apiKeyEnvVar,
+            if (webSearchProvider == provider) apiKeyEnvVar else null,
+            webSearchDefaults.apiKeyEnvVar
+        ) ?: webSearchDefaults.apiKeyEnvVar
+
+        val webSearchApiKey = firstNonBlank(
+            env["LLM_WEBSEARCH_API_KEY"],
+            env[webSearchApiKeyEnvVar],
+            if (webSearchProvider == provider) apiKey else null,
+            env[webSearchDefaults.apiKeyEnvVar]
+        ).orEmpty()
+
+        val resolvedWebSearchModel = firstNonBlank(
             env["LLM_WEBSEARCH_MODEL"],
-            env["${providerPrefix}_WEBSEARCH_MODEL"],
+            env["${webSearchPrefix}_WEBSEARCH_MODEL"],
+            yaml.webSearch?.model,
             yaml.models.webSearch,
-            defaults.defaultWebSearchModel,
-            egoModel
-        ) ?: defaults.defaultWebSearchModel
+            webSearchDefaults.defaultWebSearchModel,
+            if (webSearchProvider == provider) egoModel else null
+        ) ?: webSearchDefaults.defaultWebSearchModel
 
         return LlmRuntimeConfig(
             provider = provider,
@@ -146,7 +198,11 @@ object LlmRuntimeConfigLoader {
             superegoModel = superegoModel,
             metaReasonerModel = metaReasonerModel,
             memoryConsolidationModel = memoryConsolidationModel,
-            webSearchModel = webSearchModel
+            webSearchProvider = webSearchProvider,
+            webSearchApiKey = webSearchApiKey,
+            webSearchApiKeyEnvVar = webSearchApiKeyEnvVar,
+            webSearchBaseUrl = webSearchBaseUrl,
+            webSearchModel = resolvedWebSearchModel
         )
     }
 

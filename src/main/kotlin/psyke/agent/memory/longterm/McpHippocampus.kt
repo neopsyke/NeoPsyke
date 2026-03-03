@@ -264,21 +264,30 @@ class McpHippocampus(
         val enriched = "$summary$tagsText"
         return when (toolName) {
             "remember" -> listOf(
-                mapOf("text" to enriched),
-                mapOf("memory" to enriched),
-                mapOf("content" to enriched)
+                mapOf("text" to enriched, "write_mode" to "dedupe_if_similar"),
+                mapOf("memory" to enriched, "write_mode" to "dedupe_if_similar"),
+                mapOf("content" to enriched, "write_mode" to "dedupe_if_similar")
             )
 
             "create_memory", "add_memory", "write_memory", "imprint_memory" -> listOf(
-                mapOf("content" to enriched, "source" to imprint.source, "confidence" to imprint.confidence),
-                mapOf("text" to enriched, "metadata" to mapOf("source" to imprint.source, "confidence" to imprint.confidence)),
-                mapOf("memory" to enriched)
+                mapOf(
+                    "content" to enriched,
+                    "source" to imprint.source,
+                    "confidence" to imprint.confidence,
+                    "write_mode" to "dedupe_if_similar"
+                ),
+                mapOf(
+                    "text" to enriched,
+                    "metadata" to mapOf("source" to imprint.source, "confidence" to imprint.confidence),
+                    "write_mode" to "dedupe_if_similar"
+                ),
+                mapOf("memory" to enriched, "write_mode" to "dedupe_if_similar")
             )
 
             else -> listOf(
-                mapOf("content" to enriched),
-                mapOf("text" to enriched),
-                mapOf("memory" to enriched)
+                mapOf("content" to enriched, "write_mode" to "dedupe_if_similar"),
+                mapOf("text" to enriched, "write_mode" to "dedupe_if_similar"),
+                mapOf("memory" to enriched, "write_mode" to "dedupe_if_similar")
             )
         }
     }

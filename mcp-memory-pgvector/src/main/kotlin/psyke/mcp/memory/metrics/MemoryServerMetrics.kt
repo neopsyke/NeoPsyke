@@ -44,6 +44,9 @@ class MemoryServerMetrics {
     val dbReads = AtomicLong(0)
     val dbReadLatencyNs = AtomicLong(0)
     val dbErrors = AtomicLong(0)
+    val dbSemanticDedupeHits = AtomicLong(0)
+    val dbFactUpserts = AtomicLong(0)
+    val dbFactSupersedes = AtomicLong(0)
 
     // ---- Tool invocation metrics ----
     private val toolInvocations = ConcurrentHashMap<String, AtomicLong>()
@@ -106,6 +109,9 @@ class MemoryServerMetrics {
                 "reads" to dbReads.get(),
                 "read_latency_ms" to nsToMs(dbReadLatencyNs.get()),
                 "errors" to dbErrors.get(),
+                "semantic_dedupe_hits" to dbSemanticDedupeHits.get(),
+                "fact_upserts" to dbFactUpserts.get(),
+                "fact_supersedes" to dbFactSupersedes.get(),
             ),
             "tools" to buildToolSnapshot(),
         )
@@ -122,7 +128,9 @@ class MemoryServerMetrics {
                 "cache_hit_rate=$hitRate " +
                 "db_inserts=${dbInserts.get()} " +
                 "db_searches=${dbSearches.get()} " +
-                "db_errors=${dbErrors.get()}"
+                "db_errors=${dbErrors.get()} " +
+                "semantic_dedupe_hits=${dbSemanticDedupeHits.get()} " +
+                "fact_upserts=${dbFactUpserts.get()}"
         }
     }
 

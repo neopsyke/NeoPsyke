@@ -49,7 +49,13 @@ data class AgentConfig(
                     longTermMemoryMaxTokens = readInt("EGO_LONG_TERM_MEMORY_MAX_TOKENS", 180),
                     longTermMemoryMaxSummaryChars = readInt("EGO_LONG_TERM_MEMORY_MAX_SUMMARY_CHARS", 320),
                     longTermMemoryForceAssessOnAllowedAction = readBoolean("EGO_LONG_TERM_MEMORY_FORCE_ASSESS_ON_ALLOWED_ACTION", false),
+                    longTermMemoryForceAssessOnTerminalAnswer = readBoolean("EGO_LONG_TERM_MEMORY_FORCE_ASSESS_ON_TERMINAL_ANSWER", true),
                     longTermMemoryParseFallbackDisableAfter = readInt("EGO_LONG_TERM_MEMORY_PARSE_FALLBACK_DISABLE_AFTER", 2),
+                    longTermMemoryRecallEchoMinSummaryChars = readInt("EGO_LONG_TERM_MEMORY_RECALL_ECHO_MIN_SUMMARY_CHARS", 16),
+                    longTermMemoryRecallEchoMinTokenLength = readInt("EGO_LONG_TERM_MEMORY_RECALL_ECHO_MIN_TOKEN_LENGTH", 3),
+                    longTermMemoryRecallEchoMinTokenCount = readInt("EGO_LONG_TERM_MEMORY_RECALL_ECHO_MIN_TOKEN_COUNT", 4),
+                    longTermMemoryRecallEchoTokenOverlapThreshold =
+                        readDouble("EGO_LONG_TERM_MEMORY_RECALL_ECHO_TOKEN_OVERLAP_THRESHOLD", 0.85),
                     mcpMemoryCallTimeoutMs = readLong("MCP_MEMORY_CALL_TIMEOUT_MS", mcpCallTimeoutMs),
                 ),
                 metaReasoner = MetaReasonerConfig(

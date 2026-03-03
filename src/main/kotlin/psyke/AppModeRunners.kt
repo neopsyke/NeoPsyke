@@ -18,6 +18,8 @@ import psyke.agent.tools.mcp.SdkMcpTimeTool
 import psyke.agent.superego.Superego
 import psyke.agent.actions.websearch.WebSearchActionHandler
 import psyke.agent.actions.websearch.WebSearchEngine
+import psyke.agent.actions.websearch.WebSearchEngineHealth
+import psyke.agent.actions.websearch.WebSearchResult
 import psyke.config.AgentRuntimeSettings
 import psyke.config.McpCapabilityConfig
 import psyke.config.LlmProvider
@@ -67,6 +69,8 @@ import psyke.metrics.MetricsRuntimeFactory
 import psyke.agent.tools.mcp.FetchTool
 import psyke.agent.tools.mcp.McpTimeTool
 import psyke.agent.tools.mcp.ToolHealthStatus
+import java.net.InetSocketAddress
+import java.net.Socket
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
@@ -390,10 +394,11 @@ internal object AppModeRunners {
                 }
             }
         } catch (ex: Exception) {
+            val postgresStatus = localPostgresStatus()
             ProviderStatus(
                 provider = "mcp_memory",
                 state = ProviderHealthState.UNAVAILABLE,
-                detail = "MCP memory provider check failed: ${ex.message ?: ex::class.simpleName ?: "unknown error"}"
+                detail = "MCP memory provider check failed. PostgreSQL status: $postgresStatus"
             )
         }
     
@@ -490,7 +495,13 @@ internal object AppModeRunners {
                                 "long_term_memory_max_tokens" to config.memory.longTermMemoryMaxTokens,
                                 "long_term_memory_max_summary_chars" to config.memory.longTermMemoryMaxSummaryChars,
                                 "long_term_memory_force_assess_on_allowed_action" to config.memory.longTermMemoryForceAssessOnAllowedAction,
-                                "long_term_memory_parse_fallback_disable_after" to config.memory.longTermMemoryParseFallbackDisableAfter
+                                "long_term_memory_force_assess_on_terminal_answer" to config.memory.longTermMemoryForceAssessOnTerminalAnswer,
+                                "long_term_memory_parse_fallback_disable_after" to config.memory.longTermMemoryParseFallbackDisableAfter,
+                                "long_term_memory_recall_echo_min_summary_chars" to config.memory.longTermMemoryRecallEchoMinSummaryChars,
+                                "long_term_memory_recall_echo_min_token_length" to config.memory.longTermMemoryRecallEchoMinTokenLength,
+                                "long_term_memory_recall_echo_min_token_count" to config.memory.longTermMemoryRecallEchoMinTokenCount,
+                                "long_term_memory_recall_echo_token_overlap_threshold" to
+                                    config.memory.longTermMemoryRecallEchoTokenOverlapThreshold
                             )
                         )
                     )
@@ -525,6 +536,19 @@ internal object AppModeRunners {
                         instrumentationObserver,
                         metricsSnapshotObserver
                     )
+                    val webSearchCallObserver = if (llm.webSearchProvider == llm.provider) {
+                        callObserver
+                    } else {
+                        val webSearchInstrumentationObserver = LlmCallEventObserver(
+                            provider = llm.webSearchProviderLabel,
+                            instrumentation = instrumentation
+                        )
+                        combineChatCallObservers(
+                            metrics.chatCallObserver(provider = llm.webSearchProviderLabel),
+                            webSearchInstrumentationObserver,
+                            metricsSnapshotObserver
+                        )
+                    }
                     val rawResponseHook = LlmRawResponseEventHook(
                         instrumentation = instrumentation,
                         maxRawResponseChars = config.planner.maxActionPayloadChars
@@ -565,7 +589,7 @@ internal object AppModeRunners {
                                     logger.info {
                                         "Provider=${llm.providerLabel} Ego model=${llm.egoModel} Superego model=${llm.superegoModel} " +
                                             "Meta model=${llm.metaReasonerModel} Memory model=${llm.memoryConsolidationModel} " +
-                                            "WebSearch model=${llm.webSearchModel}"
+                                            "WebSearch provider=${llm.webSearchProviderLabel} model=${llm.webSearchModel}"
                                     }
     
                                     val gatekeeper = Superego(
@@ -577,7 +601,7 @@ internal object AppModeRunners {
                                     val fetchTool = createFetchTool(config, mcpRuntimeConfig.fetch)
                                     val webSearchRuntime = createWebSearchRuntime(
                                         llm = llm,
-                                        callObserver = callObserver,
+                                        callObserver = webSearchCallObserver,
                                         instrumentation = instrumentation,
                                         maxRawResponseChars = config.planner.maxActionPayloadChars
                                     )
@@ -638,11 +662,10 @@ internal object AppModeRunners {
                                                 modelClient = longTermMemoryClient,
                                                 config = config
                                             )
-                                            val hippocampus = createHippocampus(config, mcpRuntimeConfig.memory)
-                                            val memoryProviderDetail = if (hippocampus.enabled)
-                                                "Provider: ${hippocampus.providerName} (${mcpRuntimeConfig.memory.provider})"
-                                            else
-                                                "Long-term memory is disabled."
+                                            val interactiveMemoryStartup =
+                                                resolveInteractiveMemoryStartup(config, mcpRuntimeConfig.memory)
+                                            val hippocampus = interactiveMemoryStartup.hippocampus
+                                            val memoryProviderDetail = interactiveMemoryStartup.detail
                                             val allStatuses = actionStatuses + ActionImplementationStatus(
                                                 actionType = ActionType.MEMORY,
                                                 available = hippocampus.enabled,
@@ -697,47 +720,71 @@ internal object AppModeRunners {
         instrumentation: psyke.instrumentation.AgentInstrumentation,
         maxRawResponseChars: Int,
     ): WebSearchRuntime {
-        return when (llm.provider) {
-            LlmProvider.MISTRAL -> {
-                val session = MistralWebSearchAgentSession.start(
-                    apiKey = llm.apiKey,
-                    model = llm.webSearchModel,
-                    providedAgentId = System.getenv("MISTRAL_WEBSEARCH_AGENT_ID"),
-                    baseUrl = llm.baseUrl
-                )
-                val profile = MistralWebSearchProfile(
-                    mode = MistralWebSearchMode.AGENT_ID,
-                    model = llm.webSearchModel,
-                    agentId = session.agentId
-                )
-                val engine = MistralConversationsWebSearchEngine(
-                    apiKey = llm.apiKey,
-                    profile = profile,
-                    baseUrl = llm.baseUrl,
-                    callObserver = callObserver,
-                    instrumentation = instrumentation,
-                    maxRawResponseChars = maxRawResponseChars
-                )
-                WebSearchRuntime(
-                    engine = engine,
-                    closeAction = {
-                        closeQuietly(engine)
-                        closeQuietly(session)
-                    }
+        return try {
+            when (llm.webSearchProvider) {
+                LlmProvider.MISTRAL -> {
+                    val session = MistralWebSearchAgentSession.start(
+                        apiKey = llm.webSearchApiKey,
+                        model = llm.webSearchModel,
+                        providedAgentId = System.getenv("MISTRAL_WEBSEARCH_AGENT_ID"),
+                        baseUrl = llm.webSearchBaseUrl
+                    )
+                    val profile = MistralWebSearchProfile(
+                        mode = MistralWebSearchMode.AGENT_ID,
+                        model = llm.webSearchModel,
+                        agentId = session.agentId
+                    )
+                    val engine = MistralConversationsWebSearchEngine(
+                        apiKey = llm.webSearchApiKey,
+                        profile = profile,
+                        baseUrl = llm.webSearchBaseUrl,
+                        callObserver = callObserver,
+                        instrumentation = instrumentation,
+                        maxRawResponseChars = maxRawResponseChars
+                    )
+                    WebSearchRuntime(
+                        engine = engine,
+                        closeAction = {
+                            closeQuietly(engine)
+                            closeQuietly(session)
+                        }
+                    )
+                }
+
+                LlmProvider.GROQ -> WebSearchRuntime(
+                    engine = GroqConversationsWebSearchEngine(
+                        apiKey = llm.webSearchApiKey,
+                        model = llm.webSearchModel,
+                        baseUrl = llm.webSearchBaseUrl,
+                        callObserver = callObserver,
+                        instrumentation = instrumentation,
+                        maxRawResponseChars = maxRawResponseChars
+                    )
                 )
             }
-    
-            LlmProvider.GROQ -> WebSearchRuntime(
-                engine = GroqConversationsWebSearchEngine(
-                    apiKey = llm.apiKey,
-                    model = llm.webSearchModel,
-                    baseUrl = llm.baseUrl,
-                    callObserver = callObserver,
-                    instrumentation = instrumentation,
-                    maxRawResponseChars = maxRawResponseChars
-                )
-            )
+        } catch (ex: Exception) {
+            val detail = "Web search unavailable: ${ex.message ?: ex::class.simpleName ?: "initialization failed"}"
+            logger.warn(ex) { detail }
+            instrumentation.emit(AgentEvents.warning(detail))
+            WebSearchRuntime(engine = UnavailableWebSearchEngine(detail))
         }
+    }
+
+    private class UnavailableWebSearchEngine(
+        private val detail: String,
+    ) : WebSearchEngine {
+        override fun search(query: String, maxResults: Int): WebSearchResult =
+            WebSearchResult(
+                summary = detail,
+                snippets = emptyList(),
+                sources = emptyList()
+            )
+
+        override fun healthCheck(): WebSearchEngineHealth =
+            WebSearchEngineHealth(
+                available = false,
+                detail = detail
+            )
     }
     
     private fun createChatClient(
@@ -789,7 +836,15 @@ internal object AppModeRunners {
     }
     
     private fun createHippocampus(config: AgentConfig, capability: McpCapabilityConfig): Hippocampus {
-        val command = resolveMcpCommand(capability)
+        return createHippocampus(config = config, capability = capability, resolvedCommand = null)
+    }
+
+    private fun createHippocampus(
+        config: AgentConfig,
+        capability: McpCapabilityConfig,
+        resolvedCommand: List<String>?,
+    ): Hippocampus {
+        val command = resolvedCommand ?: resolveMcpCommand(capability)
         if (command == null) {
             logger.info { disabledReason("memory", capability) }
             return NoopHippocampus
@@ -799,6 +854,41 @@ internal object AppModeRunners {
             callTimeoutMs = config.memory.mcpMemoryCallTimeoutMs,
             defaultMaxItems = config.memory.longTermMemoryRecallMaxItems,
             defaultMaxChars = config.memory.longTermMemoryRecallMaxChars
+        )
+    }
+
+    private fun resolveInteractiveMemoryStartup(
+        config: AgentConfig,
+        capability: McpCapabilityConfig,
+    ): InteractiveMemoryStartup {
+        val command = resolveMcpCommand(capability)
+        if (command == null) {
+            return InteractiveMemoryStartup(
+                hippocampus = NoopHippocampus,
+                detail = disabledReason("memory", capability)
+            )
+        }
+
+        val memoryHealthy = checkMcpMemoryProviderHealth(
+            command = command,
+            timeoutMs = config.memory.mcpMemoryCallTimeoutMs,
+            modeLabel = "interactive_memory"
+        )
+        if (!memoryHealthy) {
+            return InteractiveMemoryStartup(
+                hippocampus = NoopHippocampus,
+                detail = "MCP memory startup health check failed; long-term memory disabled for this run."
+            )
+        }
+
+        val hippocampus = createHippocampus(
+            config = config,
+            capability = capability,
+            resolvedCommand = command
+        )
+        return InteractiveMemoryStartup(
+            hippocampus = hippocampus,
+            detail = "Provider: ${hippocampus.providerName} (${capability.provider})"
         )
     }
     
@@ -880,6 +970,25 @@ internal object AppModeRunners {
             // ignore best-effort shutdown
         }
     }
+
+    private fun localPostgresStatus(): String {
+        val host = "127.0.0.1"
+        val port = 5432
+        val timeoutMs = 500
+        return try {
+            Socket().use { socket ->
+                socket.connect(InetSocketAddress(host, port), timeoutMs)
+            }
+            "available at localhost:5432"
+        } catch (_: Exception) {
+            "unavailable at localhost:5432"
+        }
+    }
+
+    private data class InteractiveMemoryStartup(
+        val hippocampus: Hippocampus,
+        val detail: String,
+    )
     
     private class DisabledMcpTimeTool(
         private val reason: String,

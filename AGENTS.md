@@ -229,6 +229,8 @@ companion object {
 
 Reference only the named constant inside the class body. This makes threshold
 changes a one-line edit with a clear name at the call site.
+If a threshold should be runtime-tunable, expose it as a domain config knob
+(`PlannerConfig` / `MemoryConfig` / etc.) with a named default.
 
 ### Domain-Grouped Configuration
 `AgentConfig` is a **container** of domain sub-configs + infrastructure fields.
@@ -250,6 +252,24 @@ pattern `config.<domain>.<field>` (e.g. `config.planner.llmRetryAttempts`).
 - Prefer small, explicit functions and descriptive names.
 - Use existing abstractions (`SensoryCortex`, `MotorCortex`, `SuperegoGatekeeper`, instrumentation hooks) instead of duplicating logic.
 - Keep logging and metrics instrumentation consistent with existing patterns.
+
+## Logging Practices (Required)
+- Log for diagnosis, not verbosity: every warning/error must include enough context to locate the failing path quickly.
+- Include stable keys in log messages for machine filtering:
+  - operation/tool name
+  - namespace/tenant or caller scope (when applicable)
+  - attempt number for retries
+  - bounded input metadata (length/count), never raw sensitive payloads by default
+- Use consistent outcome logs for external calls:
+  - start (optional at debug)
+  - success (debug/info with latency + status)
+  - failure (warn/error with exception + key context)
+- For retries, log both:
+  - intermediate retryable failures (`warn` with `attempt x/y`)
+  - terminal failure after max attempts (`warn`/`error` with total attempts)
+- Never log secrets or tokens (API keys, Authorization headers, credentials).
+- Prefer structured metrics for high-volume signals; reserve high-cardinality details for debug logs.
+- If a component has health checks, ensure the health-check failure message distinguishes dependency class (network, auth, storage, transport) and includes actionable next step text.
 
 ## Change Summary Format
 - When done, report:

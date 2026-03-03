@@ -11,11 +11,21 @@ class MemoryServerConfigTest {
         assertEquals(MemoryServerConfig.DEFAULT_DB_URL, config.dbUrl)
         assertEquals(MemoryServerConfig.DEFAULT_DB_USER, config.dbUser)
         assertEquals(MemoryServerConfig.DEFAULT_DB_PASSWORD, config.dbPassword)
+        assertEquals(MemoryServerConfig.DEFAULT_NAMESPACE, config.defaultNamespace)
         assertEquals("", config.embeddingApiKey)
         assertEquals(MemoryServerConfig.DEFAULT_EMBEDDING_BASE_URL, config.embeddingBaseUrl)
         assertEquals(MemoryServerConfig.DEFAULT_EMBEDDING_MODEL, config.embeddingModel)
         assertEquals(MemoryServerConfig.DEFAULT_EMBEDDING_DIMENSIONS, config.embeddingDimensions)
         assertEquals(MemoryServerConfig.DEFAULT_SEARCH_LIMIT, config.searchDefaultLimit)
+        assertEquals(
+            MemoryServerConfig.DEFAULT_SEMANTIC_DEDUPE_SIMILARITY_THRESHOLD,
+            config.semanticDedupeSimilarityThreshold
+        )
+        assertEquals(
+            MemoryServerConfig.DEFAULT_SEMANTIC_DEDUPE_MIN_CONFIDENCE,
+            config.semanticDedupeMinConfidence
+        )
+        assertEquals(MemoryServerConfig.DEFAULT_FACT_SUBJECT, config.factDefaultSubject)
     }
 
     @Test
@@ -23,16 +33,24 @@ class MemoryServerConfigTest {
         val env = mapOf(
             "PGVECTOR_DB_URL" to "jdbc:postgresql://custom:5432/mydb",
             "PGVECTOR_DB_USER" to "admin",
+            "MEMORY_DEFAULT_NAMESPACE" to "codex_project_x",
             "EMBEDDING_API_KEY" to "sk-test-key",
             "EMBEDDING_MODEL" to "custom-embed",
             "EMBEDDING_DIMENSIONS" to "768",
+            "MEMORY_SEMANTIC_DEDUPE_SIMILARITY_THRESHOLD" to "0.91",
+            "MEMORY_SEMANTIC_DEDUPE_MIN_CONFIDENCE" to "0.72",
+            "MEMORY_FACT_DEFAULT_SUBJECT" to "profile",
         )
         val config = MemoryServerConfig.fromEnv(env)
         assertEquals("jdbc:postgresql://custom:5432/mydb", config.dbUrl)
         assertEquals("admin", config.dbUser)
+        assertEquals("codex_project_x", config.defaultNamespace)
         assertEquals("sk-test-key", config.embeddingApiKey)
         assertEquals("custom-embed", config.embeddingModel)
         assertEquals(768, config.embeddingDimensions)
+        assertEquals(0.91, config.semanticDedupeSimilarityThreshold)
+        assertEquals(0.72, config.semanticDedupeMinConfidence)
+        assertEquals("profile", config.factDefaultSubject)
     }
 
     @Test

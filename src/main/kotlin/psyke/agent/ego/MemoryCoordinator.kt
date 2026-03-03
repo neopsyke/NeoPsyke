@@ -38,6 +38,7 @@ internal class MemoryCoordinator(
     private var latestLongTermRecall: String = ""
     private var parseFallbackStreak: Int = 0
     private var assessmentTemporarilyDisabled: Boolean = false
+    private var explicitIntentAssessmentTriggeredForInput: Boolean = false
     private val recentImprintFingerprints = ArrayDeque<String>()
 
     // --- Short-term memory delegation ---
@@ -77,18 +78,40 @@ internal class MemoryCoordinator(
     ) {
         if (!hippocampus.enabled || !longTermMemoryAdvisor.enabled || assessmentTemporarilyDisabled) return
         val stepIndex = deliberation.stepIndex
+        val explicitIntent = detectExplicitRememberIntent(recentDialogue)
+        val forcedByExplicitIntent = !force &&
+            !explicitIntentAssessmentTriggeredForInput &&
+            explicitIntent != null
         val shouldByInterval = !force &&
+            !forcedByExplicitIntent &&
             stepIndex > 0 &&
             stepIndex % config.memory.longTermMemoryAssessEverySteps == 0
-        if (!force && !shouldByInterval) return
-        if (!force) {
+        if (!force && !forcedByExplicitIntent && !shouldByInterval) return
+        val effectiveForce = force || forcedByExplicitIntent
+        if (!effectiveForce) {
             val stepsSinceLast = stepIndex - lastConsolidationStep
             if (stepsSinceLast in 0 until config.memory.longTermMemoryAssessCooldownSteps) return
         }
         if (stepIndex == lastConsolidationStep && lastConsolidationStep > 0) return
 
+        val effectiveTrigger = if (forcedByExplicitIntent) EXPLICIT_REMEMBER_INTENT_TRIGGER else trigger
+        if (forcedByExplicitIntent) {
+            explicitIntentAssessmentTriggeredForInput = true
+            instrumentation.emit(
+                AgentEvent(
+                    type = "long_term_memory_explicit_intent_detected",
+                    data = mapOf(
+                        "trigger" to trigger,
+                        "step_index" to stepIndex,
+                        "intent_pattern" to explicitIntent?.patternLabel,
+                        "latest_user_message_preview" to explicitIntent?.latestUserMessagePreview
+                    )
+                )
+            )
+        }
+
         val context = LongTermMemoryAssessmentContext(
-            trigger = trigger,
+            trigger = effectiveTrigger,
             deliberation = deliberation,
             recentDialogue = recentDialogue,
             shortTermContextSummary = latestShortTermSummary.ifBlank { currentShortTermSummary() },
@@ -112,7 +135,7 @@ internal class MemoryCoordinator(
             AgentEvent(
                 type = "long_term_memory_assessment",
                 data = mapOf(
-                    "trigger" to trigger,
+                    "trigger" to effectiveTrigger,
                     "step_index" to stepIndex,
                     "save" to decision.shouldSave,
                     "confidence" to decision.confidence,
@@ -126,7 +149,7 @@ internal class MemoryCoordinator(
             parseFallbackStreak += 1
             instrumentation.emit(
                 AgentEvents.longTermMemoryAssessmentParseFallback(
-                    trigger = trigger,
+                    trigger = effectiveTrigger,
                     stepIndex = stepIndex,
                     streak = parseFallbackStreak
                 )
@@ -135,7 +158,7 @@ internal class MemoryCoordinator(
                 assessmentTemporarilyDisabled = true
                 instrumentation.emit(
                     AgentEvents.longTermMemoryAssessmentTemporarilyDisabled(
-                        trigger = trigger,
+                        trigger = effectiveTrigger,
                         stepIndex = stepIndex,
                         streak = parseFallbackStreak,
                         threshold = config.memory.longTermMemoryParseFallbackDisableAfter
@@ -157,6 +180,10 @@ internal class MemoryCoordinator(
             )
             return
         }
+        if (isRecallEcho(decision.summary)) {
+            instrumentation.emit(AgentEvents.warning("Long-term memory persistence skipped: summary echoes recalled memory."))
+            return
+        }
 
         val fingerprint = normalizePayload(decision.summary)
         if (recentImprintFingerprints.contains(fingerprint)) {
@@ -169,7 +196,7 @@ internal class MemoryCoordinator(
             hippocampus.imprint(
                 MemoryImprint(
                     summary = decision.summary,
-                    source = trigger,
+                    source = effectiveTrigger,
                     confidence = decision.confidence,
                     tags = decision.tags
                 )
@@ -183,7 +210,7 @@ internal class MemoryCoordinator(
             AgentEvent(
                 type = "memory_imprint_result",
                 data = mapOf(
-                    "trigger" to trigger,
+                    "trigger" to effectiveTrigger,
                     "saved" to saved,
                     "provider" to hippocampus.providerName,
                     "summary_chars" to decision.summary.length,
@@ -204,6 +231,7 @@ internal class MemoryCoordinator(
 
     fun resetForNewInput() {
         lastConsolidationStep = 0
+        explicitIntentAssessmentTriggeredForInput = false
     }
 
     // --- Private helpers ---
@@ -319,6 +347,57 @@ internal class MemoryCoordinator(
     private fun normalizePayload(payload: String): String =
         payload.lowercase().replace(Regex("\\s+"), " ").trim()
 
+    private fun isRecallEcho(summary: String): Boolean {
+        val canonicalSummary = canonicalizeForComparison(summary)
+        if (canonicalSummary.length < config.memory.longTermMemoryRecallEchoMinSummaryChars) return false
+        val canonicalRecall = canonicalizeForComparison(latestLongTermRecall)
+        if (canonicalRecall.isBlank()) return false
+        if (canonicalRecall.contains(canonicalSummary)) return true
+
+        val summaryTokens = canonicalSummary
+            .split(' ')
+            .asSequence()
+            .map { it.trim() }
+            .filter { it.length >= config.memory.longTermMemoryRecallEchoMinTokenLength }
+            .toSet()
+        if (summaryTokens.size < config.memory.longTermMemoryRecallEchoMinTokenCount) return false
+
+        val recallTokens = canonicalRecall
+            .split(' ')
+            .asSequence()
+            .map { it.trim() }
+            .filter { it.length >= config.memory.longTermMemoryRecallEchoMinTokenLength }
+            .toSet()
+        if (recallTokens.isEmpty()) return false
+
+        val overlap = summaryTokens.count { it in recallTokens }.toDouble() / summaryTokens.size.toDouble()
+        return overlap >= config.memory.longTermMemoryRecallEchoTokenOverlapThreshold
+    }
+
+    private fun canonicalizeForComparison(text: String): String =
+        text
+            .lowercase(Locale.ROOT)
+            .replace(RECALL_ECHO_NON_ALPHANUMERIC_REGEX, " ")
+            .replace(RECALL_ECHO_WHITESPACE_REGEX, " ")
+            .trim()
+
+    private fun detectExplicitRememberIntent(recentDialogue: List<DialogueTurn>): ExplicitRememberIntent? {
+        val latestUserTurn = recentDialogue
+            .asReversed()
+            .firstOrNull { it.role == DialogueRole.USER }
+            ?.content
+            ?.trim()
+            .orEmpty()
+        if (latestUserTurn.isBlank()) return null
+        val normalized = normalizePayload(latestUserTurn)
+        val matchedPattern = EXPLICIT_REMEMBER_INTENT_PATTERNS.firstOrNull { it.regex.containsMatchIn(normalized) }
+            ?: return null
+        return ExplicitRememberIntent(
+            patternLabel = matchedPattern.label,
+            latestUserMessagePreview = TextSecurity.preview(latestUserTurn, EXPLICIT_INTENT_PREVIEW_MAX_CHARS)
+        )
+    }
+
     /**
      * Fetches server-side metrics from the memory backend and emits them as an
      * instrumentation event. Called after every recall and imprint operation so
@@ -336,5 +415,38 @@ internal class MemoryCoordinator(
         } catch (ex: Exception) {
             logger.debug(ex) { "Failed to emit server-side memory metrics." }
         }
+    }
+
+    private data class ExplicitRememberIntent(
+        val patternLabel: String,
+        val latestUserMessagePreview: String,
+    )
+
+    private data class IntentPattern(
+        val label: String,
+        val regex: Regex,
+    )
+
+    private companion object {
+        const val EXPLICIT_REMEMBER_INTENT_TRIGGER: String = "explicit_remember_intent"
+        const val EXPLICIT_INTENT_PREVIEW_MAX_CHARS: Int = 180
+
+        val RECALL_ECHO_NON_ALPHANUMERIC_REGEX: Regex = Regex("[^a-z0-9]+")
+        val RECALL_ECHO_WHITESPACE_REGEX: Regex = Regex("\\s+")
+
+        val EXPLICIT_REMEMBER_INTENT_PATTERNS: List<IntentPattern> = listOf(
+            IntentPattern(
+                label = "remember_directive",
+                regex = Regex("""^(?:please\s+)?remember\b""")
+            ),
+            IntentPattern(
+                label = "name_declaration",
+                regex = Regex("""\b(my name is|call me)\b""")
+            ),
+            IntentPattern(
+                label = "retention_directive",
+                regex = Regex("""\b(don't forget|do not forget)\b""")
+            )
+        )
     }
 }

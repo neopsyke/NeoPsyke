@@ -49,6 +49,10 @@ fun registerSearchMemoryTool(
                     put("items", buildJsonObject { put("type", JsonPrimitive("string")) })
                     put("description", JsonPrimitive("Optional tag filter: only return memories with at least one matching tag"))
                 })
+                put("namespace", buildJsonObject {
+                    put("type", JsonPrimitive("string"))
+                    put("description", JsonPrimitive("Optional memory namespace/tenant. Defaults to server namespace."))
+                })
             },
             required = listOf("query")
         )
@@ -68,6 +72,7 @@ private fun handleSearchMemory(
     config: MemoryServerConfig,
 ): CallToolResult {
     val args = request.arguments
+    val namespace = resolveNamespace(args, config.defaultNamespace)
     val query = args["query"]?.jsonPrimitive?.contentOrNull
         ?: args["q"]?.jsonPrimitive?.contentOrNull
         ?: args["text"]?.jsonPrimitive?.contentOrNull
@@ -88,6 +93,7 @@ private fun handleSearchMemory(
     return try {
         val embedding = embedder.embed(query)
         val results = repository.searchByVector(
+            namespace = namespace,
             queryEmbedding = embedding,
             limit = limit.coerceIn(1, 50),
             tagFilter = tagFilter,
@@ -98,9 +104,16 @@ private fun handleSearchMemory(
                 mapOf(
                     "content" to row.content,
                     "source" to row.source,
+                    "namespace" to row.namespace,
                     "confidence" to row.confidence,
                     "similarity" to String.format(java.util.Locale.US, "%.4f", row.similarity),
                     "score" to String.format(java.util.Locale.US, "%.4f", row.score),
+                    "is_active" to row.isActive,
+                    "supersedes_memory_id" to row.supersedesMemoryId,
+                    "fact_subject" to row.factSubject,
+                    "fact_key" to row.factKey,
+                    "fact_value" to row.factValue,
+                    "versioned_at" to row.versionedAt?.toString(),
                     "tags" to row.tags,
                     "created_at" to row.createdAt.toString(),
                 )
@@ -108,7 +121,7 @@ private fun handleSearchMemory(
         )
         CallToolResult(content = listOf(TextContent(text = jackson.writeValueAsString(response))))
     } catch (ex: Exception) {
-        logger.warn(ex) { "search_memory failed" }
+        logger.warn(ex) { "search_memory failed namespace=$namespace query_len=${query.length}" }
         errorResult("Search failed: ${ex.message}")
     }
 }

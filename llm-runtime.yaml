@@ -1,1 +1,9 @@
 provider: groq
+models:
+  ego: openai/gpt-oss-20b
+  superego: openai/gpt-oss-20b
+  meta_reasoner: openai/gpt-oss-20b
+  memory_consolidation: openai/gpt-oss-20b
+web_search:
+  provider: mistral
+  model: mistral-small-latest

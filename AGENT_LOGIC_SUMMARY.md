@@ -13,6 +13,8 @@ It is intentionally high-level and should stay aligned with the code.
   - `src/main/kotlin/psyke/AppModeRunners.kt#runInteractiveMode`
 - `runInteractiveMode` composes:
   - LLM clients (planner, superego, meta-reasoner, long-term-memory advisor)
+    - Primary reasoning provider is shared across those clients.
+    - `web_search` runtime can be configured with an independent provider/api key/base URL/model.
   - `Superego`
   - `MotorCortex` (answer + web search + MCP tools)
   - `LlmEgoPlanner`
@@ -20,6 +22,10 @@ It is intentionally high-level and should stay aligned with the code.
   - `LlmLongTermMemoryAdvisor`
   - `Hippocampus` (MCP memory adapter or noop)
   - `Ego` orchestrator
+- Interactive startup now performs an MCP memory health probe before enabling memory:
+  - if probe passes, memory is exposed as available and `McpHippocampus` is wired
+  - if probe fails, memory is downgraded to noop for the run and reported unavailable
+  - MCP memory server process now stays alive after `connect` until transport close so startup health checks can complete instead of racing a premature process exit
 - Instrumentation and metrics are wired before loop start and receive lifecycle events throughout.
 
 ## Main Loop (Ego)
@@ -40,7 +46,7 @@ It is intentionally high-level and should stay aligned with the code.
       - `processAction`
     - Catch task errors, emit warning, continue loop.
     - Optionally queue forced terminal answer under high pressure (scoped to current root input when available).
-    - Optionally run long-term memory assessment.
+    - Optionally run long-term memory assessment (interval trigger, plus explicit remember-intent fast path).
   - If step limit is reached with pending work:
     - Try to execute one fallback explanation action.
   - If queues drain:
@@ -84,8 +90,9 @@ It is intentionally high-level and should stay aligned with the code.
     - Execute via `MotorCortex.execute`.
     - Record outcome + deliberation evidence.
     - Store assistant output in dialogue and short-term memory when applicable.
+    - For `answer`, optionally force a post-terminal-answer long-term memory assessment.
     - For evidence actions (`web_search`, `mcp_time`, `mcp_fetch`), enqueue follow-up thought.
-    - Optionally run immediate long-term memory assessment.
+    - Optionally run immediate post-allowed-action long-term memory assessment.
   - For `answer`, response latency is emitted and per-input evidence cache is cleared.
   - After `answer`, pending thoughts/actions for the same root input are pruned from queues
     (`input_resolution_cleanup`) so stale plan/follow-up work cannot continue cycling.
@@ -141,13 +148,19 @@ It is intentionally high-level and should stay aligned with the code.
 - Long-term recall:
   - Through `MemoryCoordinator` + `Hippocampus.recall`.
   - Input-trigger recalls are cue-based; thought-trigger recalls require explicit planner query.
+  - MCP stdio connect uses bounded startup retry (2 attempts) to absorb transient transport-close failures.
 - Long-term consolidation:
   - `LlmLongTermMemoryAdvisor` decides `save|skip` with confidence/tags/summary.
   - `MemoryCoordinator` enforces:
     - interval/cooldown gates
+    - explicit remember-intent fast path (one forced assessment per input when user asks to remember)
+    - optional forced assessments (post-allowed-action and post-terminal-answer)
     - confidence threshold
+    - recall-echo suppression (skip imprints whose summary substantially matches current recall payload)
+      - thresholds are configurable via `MemoryConfig` / `EGO_LONG_TERM_MEMORY_RECALL_ECHO_*`
     - duplicate fingerprint suppression
     - temporary disable after repeated parse-fallback streaks
+  - `McpHippocampus` requests `write_mode=dedupe_if_similar` when calling memory write tools.
 
 ## Action Execution Surface
 - File: `src/main/kotlin/psyke/agent/cortex/motor/MotorCortex.kt`
@@ -156,6 +169,9 @@ It is intentionally high-level and should stay aligned with the code.
   - `web_search`
   - `mcp_time`
   - `mcp_fetch`
+- `web_search` provider routing is independent from primary reasoning provider:
+  - default follows primary provider unless `web_search.provider`/`LLM_WEBSEARCH_PROVIDER` overrides it.
+  - startup initialization failures (missing key, bad base URL, provider/session errors) degrade web search to an unavailable engine instead of crashing the app.
 - Action availability is runtime health-dependent and fed back into planner context.
 - `mcp_fetch` errors are classified as retryable vs non-retryable; non-retryable failures
   feed into the per-input circuit breaker in `DeliberationEngine`.

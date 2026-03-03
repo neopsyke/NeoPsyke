@@ -5,6 +5,7 @@ import io.modelcontextprotocol.kotlin.sdk.ServerCapabilities
 import io.modelcontextprotocol.kotlin.sdk.server.Server
 import io.modelcontextprotocol.kotlin.sdk.server.ServerOptions
 import io.modelcontextprotocol.kotlin.sdk.server.StdioServerTransport
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.runBlocking
 import kotlinx.io.asSink
 import kotlinx.io.asSource
@@ -40,7 +41,7 @@ fun main() {
     try {
         repository.initSchema()
     } catch (ex: Exception) {
-        logger.error(ex) { "Failed to initialize database schema. Is PostgreSQL running?" }
+        logger.error(ex) { "Failed to initialize memory schema/settings. Check PostgreSQL connectivity and embedding dimensions." }
         System.exit(1)
     }
 
@@ -62,9 +63,9 @@ fun main() {
 
     // Register tools (all receive metrics for per-tool invocation tracking)
     registerSearchMemoryTool(server, repository, embedder, config, metrics)
-    registerRememberTool(server, repository, embedder, metrics)
-    registerCreateMemoryTool(server, repository, embedder, metrics)
-    registerGraphCompatTools(server, repository, embedder, metrics)
+    registerRememberTool(server, repository, embedder, config.defaultNamespace, config.factDefaultSubject, metrics)
+    registerCreateMemoryTool(server, repository, embedder, config.defaultNamespace, config.factDefaultSubject, metrics)
+    registerGraphCompatTools(server, repository, embedder, config.defaultNamespace, metrics)
     registerMetricsTool(server, metrics)
 
     // Periodic metrics logging (every 5 minutes)
@@ -79,11 +80,21 @@ fun main() {
         System.out.asSink().buffered(),
     )
 
-    logger.info { "Starting ${config.serverName} v${config.serverVersion} on stdio (metrics enabled)" }
+    logger.info {
+        "Starting ${config.serverName} v${config.serverVersion} on stdio " +
+            "(metrics enabled, namespace=${config.defaultNamespace}, embedding_dimensions=${config.embeddingDimensions})"
+    }
 
     runBlocking {
+        val closed = CompletableDeferred<Unit>()
+        server.onClose {
+            closed.complete(Unit)
+        }
         server.connect(transport)
+        // Keep the process alive while stdio transport is connected.
+        closed.await()
     }
+    metricsTimer.cancel()
 }
 
 private const val METRICS_LOG_INTERVAL_MS = 5L * 60 * 1000 // 5 minutes

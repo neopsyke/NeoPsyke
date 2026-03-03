@@ -218,6 +218,7 @@ class Ego(
             val observed = deliberation.observedEvidence(action, outcome)
             deliberation.recordEvidenceProgress(action, outcome, observed)
             deliberation.onActionExecuted(action, observed)
+            maybeRunTerminalAnswerMemoryAssessment(action, outcome)
             return
         }
         val gateDecision = superego.review(action, superegoContext())
@@ -281,6 +282,7 @@ class Ego(
             memory.remember(assistantTurn)
             trimDialogue()
         }
+        maybeRunTerminalAnswerMemoryAssessment(action, outcome)
         maybeRunLongTermMemoryAssessment(
             trigger = "post_allowed_action",
             force = config.memory.longTermMemoryForceAssessOnAllowedAction,
@@ -748,6 +750,16 @@ class Ego(
             latestActionOutcome = latestActionOutcome,
             deliberation = deliberation.snapshot(),
             recentDialogue = dialogue.takeLast(12)
+        )
+    }
+
+    private fun maybeRunTerminalAnswerMemoryAssessment(action: PendingAction, outcome: ActionOutcome) {
+        if (action.type != ActionType.ANSWER) return
+        maybeRunLongTermMemoryAssessment(
+            trigger = "post_terminal_answer",
+            force = config.memory.longTermMemoryForceAssessOnTerminalAnswer,
+            latestActionType = action.type,
+            latestActionOutcome = outcome.plannerSignal
         )
     }
 

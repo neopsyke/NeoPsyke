@@ -19,10 +19,13 @@ Standalone Kotlin JVM app using Gradle with:
 - LLM API key is required for interactive mode and for `--eval-reasoning-mode model`:
   - Default provider from `llm-runtime.yaml` is `groq`, so `GROQ_API_KEY`
   - If provider is switched to `mistral`, use `MISTRAL_API_KEY`
+  - If `web_search.provider` differs from the primary provider, set that provider key too (for example `MISTRAL_API_KEY`)
 
 ## Configuration
 - LLM settings are centralized in `llm-runtime.yaml` (repository root).
-  - Default config selects provider `groq`; if models are omitted, Psyke uses provider defaults (`openai/gpt-oss-20b` for Groq, `mistral-small-latest` for Mistral).
+  - Primary reasoning provider is set by `provider`.
+  - `web_search` can use an independent provider/key/base URL/model.
+  - If models are omitted, Psyke uses provider defaults (`openai/gpt-oss-20b` for Groq, `mistral-small-latest` for Mistral; web search defaults to `groq/compound-mini` on Groq and `mistral-small-latest` on Mistral).
   - Optional override file path: `PSYKE_LLM_CONFIG_FILE=/path/to/llm-runtime.yaml`.
   - Environment variables override YAML when present.
   - Example:
@@ -33,16 +36,23 @@ Standalone Kotlin JVM app using Gradle with:
       superego: openai/gpt-oss-20b
       meta_reasoner: openai/gpt-oss-20b
       memory_consolidation: openai/gpt-oss-20b
-      web_search: openai/gpt-oss-20b
+    web_search:
+      provider: mistral
+      model: mistral-small-latest
     ```
 - LLM auth and provider overrides:
   - `GROQ_API_KEY` (required when provider is `groq`)
   - `MISTRAL_API_KEY` (required when provider is `mistral`)
   - `LLM_API_KEY` (optional generic fallback for selected provider key)
   - `LLM_PROVIDER` (optional env override for YAML provider; `groq|mistral`)
+  - `LLM_WEBSEARCH_PROVIDER` (optional env override for `web_search.provider`; `groq|mistral`)
+  - `LLM_WEBSEARCH_API_KEY` (optional explicit API key for web-search provider)
+  - `LLM_WEBSEARCH_API_KEY_ENV` (optional env-var name that stores the web-search API key)
 - Optional LLM endpoint overrides:
   - `LLM_BASE_URL` (provider-agnostic override)
   - `GROQ_BASE_URL` / `MISTRAL_BASE_URL` (provider-specific override)
+  - `LLM_WEBSEARCH_BASE_URL` (provider-agnostic override for web search only)
+  - `GROQ_WEBSEARCH_BASE_URL` / `MISTRAL_WEBSEARCH_BASE_URL` (provider-specific web-search base URL overrides)
 - MCP/time/fetch/memory provider settings are now centralized in `mcp-runtime.yaml` (repository root).
   - Default config enables `time`, `fetch`, and `memory` in `stdio` mode with command/fallback lists.
   - Optional override file path: `PSYKE_MCP_CONFIG_FILE=/path/to/mcp-runtime.yaml`.
@@ -68,7 +78,7 @@ Standalone Kotlin JVM app using Gradle with:
     - `LLM_SUPEREGO_MODEL` (default: Ego model)
     - `LLM_META_REASONER_MODEL` (default: Ego model)
     - `LLM_MEMORY_CONSOLIDATION_MODEL` (default: Ego model)
-    - `LLM_WEBSEARCH_MODEL` (default: Groq=`groq/compound-mini`, Mistral=`mistral-small-latest`)
+    - `LLM_WEBSEARCH_MODEL` (default depends on web-search provider: Groq=`groq/compound-mini`, Mistral=`mistral-small-latest`)
   - Provider-specific model override aliases:
     - Groq: `GROQ_EGO_MODEL`, `GROQ_SUPEREGO_MODEL`, `GROQ_META_REASONER_MODEL`, `GROQ_MEMORY_CONSOLIDATION_MODEL`, `GROQ_WEBSEARCH_MODEL`
     - Mistral: `MISTRAL_EGO_MODEL`, `MISTRAL_SUPEREGO_MODEL`, `MISTRAL_META_REASONER_MODEL`, `MISTRAL_MEMORY_CONSOLIDATION_MODEL`, `MISTRAL_WEBSEARCH_MODEL`
@@ -91,7 +101,7 @@ Standalone Kotlin JVM app using Gradle with:
   - `MCP_TIME_MODE` / `MCP_FETCH_MODE` / `MCP_MEMORY_MODE` (optional env override for YAML mode)
   - `MCP_TIME_PROVIDER` / `MCP_FETCH_PROVIDER` / `MCP_MEMORY_PROVIDER` (optional env override for YAML provider)
   - `MCP_TIME_ENABLED` / `MCP_FETCH_ENABLED` / `MCP_MEMORY_ENABLED` (optional env override for YAML enabled flag)
-  - `MISTRAL_WEBSEARCH_AGENT_ID` (optional, provider=`mistral` only; if omitted, Psyke creates an ephemeral Mistral web-search agent per run)
+  - `MISTRAL_WEBSEARCH_AGENT_ID` (optional when `web_search.provider=mistral`; if omitted, Psyke creates an ephemeral Mistral web-search agent per run)
   - `MCP_CALL_TIMEOUT_MS` (default: `8000`)
   - `MCP_MEMORY_CALL_TIMEOUT_MS` (default: same as `MCP_CALL_TIMEOUT_MS`)
   - `MCP_FETCH_MAX_CHARS` (default: `4000`)
@@ -110,12 +120,23 @@ Standalone Kotlin JVM app using Gradle with:
   - `EGO_LONG_TERM_MEMORY_MAX_TOKENS` (default: `180`)
   - `EGO_LONG_TERM_MEMORY_MAX_SUMMARY_CHARS` (default: `320`)
   - `EGO_LONG_TERM_MEMORY_FORCE_ASSESS_ON_ALLOWED_ACTION` (default: `false`)
+  - `EGO_LONG_TERM_MEMORY_FORCE_ASSESS_ON_TERMINAL_ANSWER` (default: `true`)
   - `EGO_LONG_TERM_MEMORY_PARSE_FALLBACK_DISABLE_AFTER` (default: `2`)
+  - `EGO_LONG_TERM_MEMORY_RECALL_ECHO_MIN_SUMMARY_CHARS` (default: `16`)
+  - `EGO_LONG_TERM_MEMORY_RECALL_ECHO_MIN_TOKEN_LENGTH` (default: `3`)
+  - `EGO_LONG_TERM_MEMORY_RECALL_ECHO_MIN_TOKEN_COUNT` (default: `4`)
+  - `EGO_LONG_TERM_MEMORY_RECALL_ECHO_TOKEN_OVERLAP_THRESHOLD` (default: `0.85`)
+  - `PSYKE_AUTO_START_PGVECTOR` (optional; when `true`, launcher runs `docker compose up -d pgvector` if needed)
+  - `MEMORY_DEFAULT_NAMESPACE` (optional; memory MCP namespace/tenant default, launcher defaults to `psyke`)
+  - `MEMORY_SEMANTIC_DEDUPE_SIMILARITY_THRESHOLD` (memory server; default: `0.93`)
+  - `MEMORY_SEMANTIC_DEDUPE_MIN_CONFIDENCE` (memory server; default: `0.65`)
+  - `MEMORY_FACT_DEFAULT_SUBJECT` (memory server; default: `user`)
   - `PSYKE_EVAL_MAX_RAW_RESPONSE_CHARS` (reasoning eval raw-thought capture cap; default: unlimited)
 
 ## Run
 ```bash
 export GROQ_API_KEY=your_token
+export MISTRAL_API_KEY=your_token  # required when web_search.provider=mistral
 ./gradlew run
 ```
 
@@ -135,6 +156,7 @@ export PSYKE_LOG_FILE="$PWD/.psyke/logs/gradle-run.log"
 Use the local launcher:
 ```bash
 export GROQ_API_KEY=your_token
+export MISTRAL_API_KEY=your_token  # required when web_search.provider=mistral
 ./run-psyke.sh
 ```
 
@@ -184,6 +206,16 @@ Memory live eval output:
 - Tags each saved item with a unique run session marker to reduce cross-run collision.
 - Main run log focuses on memory eval flow (`[eval.memory] ...`).
 
+Manual DB-backed memory server eval (not part of default `test`):
+```bash
+# uses live PostgreSQL/pgvector configured via PGVECTOR_DB_* env vars
+./gradlew :mcp-memory-pgvector:memoryDbEval
+```
+This eval verifies:
+- semantic dedupe (`write_mode=dedupe_if_similar`)
+- fact upsert supersession (`write_mode=upsert_fact`)
+- namespace isolation (no cross-tenant mixing)
+
 Set a specific log level via parameter:
 ```bash
 ./run-psyke.sh --log-level info
@@ -196,6 +228,7 @@ Disable the default interactive delay for faster local/manual loops:
 
 Notes:
 - `run-psyke.sh` bootstraps `installDist` once if needed.
+- `run-psyke.sh` also bootstraps `:mcp-memory-pgvector:fatJar` when the memory MCP jar is missing or stale.
 - After bootstrap, execution is direct (`build/install/psyke/bin/psyke`) without `gradle run`.
 - You do not run memory MCP separately if memory command config is set correctly (from `mcp-runtime.yaml` or `MCP_MEMORY_SERVER_CMD` override); Psyke launches it on demand.
 - Default log level in `run-psyke.sh` is `warning`.
@@ -204,6 +237,12 @@ Notes:
 - `.psyke/logs/latest-events.jsonl` always points to the newest event sidecar.
 - `.psyke/logs/latest-run.env` stores `PSYKE_LOG_RUN_ID`, `PSYKE_LOG_FILE`, `PSYKE_EVENT_LOG_FILE`, and start time for the current run.
 - Old run logs are auto-pruned; retention defaults to 30 files (`PSYKE_LOG_RETENTION`).
+- If pgvector is not running, launcher prints a startup tip: `docker compose up -d pgvector`.
+- Set `PSYKE_AUTO_START_PGVECTOR=true` to auto-start pgvector from the launcher when required.
+- Launcher sets `MEMORY_DEFAULT_NAMESPACE=psyke` unless already set, so Psyke memory stays isolated by default.
+- Memory MCP write tools support `write_mode`: `append`, `dedupe_if_similar`, `upsert_fact`.
+- `upsert_fact` supports `fact_subject`, `fact_key`, `fact_value`, `fact_versioned_at` and keeps only one active value per `(namespace, subject, key)`.
+- Memory MCP tools accept optional `namespace` (or `tenant`/`workspace`) argument for explicit multi-client isolation.
 - Default loop delay in `run-psyke.sh` is `1000ms` (`--no-delay` or `--loop-delay-ms 0` disables it).
 - `PSYKE_LOG_LEVEL` can still provide a default if `--log-level` is omitted.
 - `PSYKE_LOG_DIR` overrides the log directory (default: `.psyke/logs`).

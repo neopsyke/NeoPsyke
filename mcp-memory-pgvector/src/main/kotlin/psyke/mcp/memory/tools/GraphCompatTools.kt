@@ -14,6 +14,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import mu.KotlinLogging
 import psyke.mcp.memory.db.MemoryRepository
+import psyke.mcp.memory.db.MemoryWriteMode
 import psyke.mcp.memory.embedding.Embedder
 import psyke.mcp.memory.metrics.MemoryServerMetrics
 
@@ -34,18 +35,20 @@ fun registerGraphCompatTools(
     server: Server,
     repository: MemoryRepository,
     embedder: Embedder,
+    defaultNamespace: String,
     metrics: MemoryServerMetrics? = null,
 ) {
-    registerAddObservationsTool(server, repository, embedder, metrics)
-    registerReadGraphTool(server, repository, metrics)
-    registerDeleteObservationsTool(server, repository, metrics)
-    registerCreateEntitiesTool(server, metrics)
+    registerAddObservationsTool(server, repository, embedder, defaultNamespace, metrics)
+    registerReadGraphTool(server, repository, defaultNamespace, metrics)
+    registerDeleteObservationsTool(server, repository, defaultNamespace, metrics)
+    registerCreateEntitiesTool(server, defaultNamespace, metrics)
 }
 
 private fun registerAddObservationsTool(
     server: Server,
     repository: MemoryRepository,
     embedder: Embedder,
+    defaultNamespace: String,
     metrics: MemoryServerMetrics?,
 ) {
     server.addTool(
@@ -57,12 +60,16 @@ private fun registerAddObservationsTool(
                     put("type", JsonPrimitive("array"))
                     put("description", JsonPrimitive("List of observation groups"))
                 })
+                put("namespace", buildJsonObject {
+                    put("type", JsonPrimitive("string"))
+                    put("description", JsonPrimitive("Optional memory namespace/tenant. Defaults to server namespace."))
+                })
             },
             required = listOf("observations")
         )
     ) { request ->
         val startNs = metrics?.startTimer() ?: 0L
-        val result = handleAddObservations(request, repository, embedder)
+        val result = handleAddObservations(request, repository, embedder, defaultNamespace)
         metrics?.recordToolInvocation(ADD_OBSERVATIONS_TOOL, startNs)
         if (result.isError == true) metrics?.recordToolError(ADD_OBSERVATIONS_TOOL)
         result
@@ -72,17 +79,23 @@ private fun registerAddObservationsTool(
 private fun registerReadGraphTool(
     server: Server,
     repository: MemoryRepository,
+    defaultNamespace: String,
     metrics: MemoryServerMetrics?,
 ) {
     server.addTool(
         name = READ_GRAPH_TOOL,
         description = "Read all stored memories as a graph structure.",
         inputSchema = Tool.Input(
-            properties = buildJsonObject {},
+            properties = buildJsonObject {
+                put("namespace", buildJsonObject {
+                    put("type", JsonPrimitive("string"))
+                    put("description", JsonPrimitive("Optional memory namespace/tenant. Defaults to server namespace."))
+                })
+            },
         )
-    ) { _ ->
+    ) { request ->
         val startNs = metrics?.startTimer() ?: 0L
-        val result = handleReadGraph(repository)
+        val result = handleReadGraph(request, repository, defaultNamespace)
         metrics?.recordToolInvocation(READ_GRAPH_TOOL, startNs)
         if (result.isError == true) metrics?.recordToolError(READ_GRAPH_TOOL)
         result
@@ -92,6 +105,7 @@ private fun registerReadGraphTool(
 private fun registerDeleteObservationsTool(
     server: Server,
     repository: MemoryRepository,
+    defaultNamespace: String,
     metrics: MemoryServerMetrics?,
 ) {
     server.addTool(
@@ -103,12 +117,16 @@ private fun registerDeleteObservationsTool(
                     put("type", JsonPrimitive("array"))
                     put("description", JsonPrimitive("List of deletion groups"))
                 })
+                put("namespace", buildJsonObject {
+                    put("type", JsonPrimitive("string"))
+                    put("description", JsonPrimitive("Optional memory namespace/tenant. Defaults to server namespace."))
+                })
             },
             required = listOf("deletions")
         )
     ) { request ->
         val startNs = metrics?.startTimer() ?: 0L
-        val result = handleDeleteObservations(request, repository)
+        val result = handleDeleteObservations(request, repository, defaultNamespace)
         metrics?.recordToolInvocation(DELETE_OBSERVATIONS_TOOL, startNs)
         if (result.isError == true) metrics?.recordToolError(DELETE_OBSERVATIONS_TOOL)
         result
@@ -117,6 +135,7 @@ private fun registerDeleteObservationsTool(
 
 private fun registerCreateEntitiesTool(
     server: Server,
+    defaultNamespace: String,
     metrics: MemoryServerMetrics?,
 ) {
     server.addTool(
@@ -128,14 +147,19 @@ private fun registerCreateEntitiesTool(
                     put("type", JsonPrimitive("array"))
                     put("description", JsonPrimitive("List of entities to create"))
                 })
+                put("namespace", buildJsonObject {
+                    put("type", JsonPrimitive("string"))
+                    put("description", JsonPrimitive("Optional memory namespace/tenant. Defaults to server namespace."))
+                })
             },
             required = listOf("entities")
         )
-    ) { _ ->
+    ) { request ->
         val startNs = metrics?.startTimer() ?: 0L
+        val namespace = resolveNamespace(request.arguments, defaultNamespace)
         // No-op: entities are implicit via the source field on memories.
         val result = CallToolResult(
-            content = listOf(TextContent(text = jackson.writeValueAsString(mapOf("status" to "ok"))))
+            content = listOf(TextContent(text = jackson.writeValueAsString(mapOf("status" to "ok", "namespace" to namespace))))
         )
         metrics?.recordToolInvocation(CREATE_ENTITIES_TOOL, startNs)
         result
@@ -153,8 +177,10 @@ private fun handleAddObservations(
     request: CallToolRequest,
     repository: MemoryRepository,
     embedder: Embedder,
+    defaultNamespace: String,
 ): CallToolResult {
     val args = request.arguments
+    val namespace = resolveNamespace(args, defaultNamespace)
     var stored = 0
 
     try {
@@ -176,13 +202,15 @@ private fun handleAddObservations(
                     val tagsFromText = extractInlineTags(content)
                     val cleanedContent = removeInlineTags(content)
                     val embedding = embedder.embed(cleanedContent)
-                    repository.insertMemory(
+                    repository.writeMemory(
+                        namespace = namespace,
                         content = content, // keep original (with metadata) for purge matching
                         embedding = embedding,
                         source = entityName,
                         confidence = extractConfidence(content),
                         tags = tagsFromText,
                         fingerprint = normalizeFingerprint(cleanedContent),
+                        writeMode = MemoryWriteMode.DEDUPE_IF_SIMILAR
                     )
                     stored++
                 }
@@ -207,29 +235,36 @@ private fun handleAddObservations(
                 val tagsFromText = extractInlineTags(content)
                 val cleanedContent = removeInlineTags(content)
                 val embedding = embedder.embed(cleanedContent)
-                repository.insertMemory(
+                repository.writeMemory(
+                    namespace = namespace,
                     content = content,
                     embedding = embedding,
                     source = entityName,
                     confidence = extractConfidence(content),
                     tags = tagsFromText,
                     fingerprint = normalizeFingerprint(cleanedContent),
+                    writeMode = MemoryWriteMode.DEDUPE_IF_SIMILAR
                 )
                 stored++
             }
         }
     } catch (ex: Exception) {
-        logger.warn(ex) { "add_observations failed" }
+        logger.warn(ex) { "add_observations failed namespace=$namespace" }
         return errorResult("add_observations failed: ${ex.message}")
     }
 
-    val response = mapOf("status" to "ok", "stored" to stored)
+    val response = mapOf("status" to "ok", "stored" to stored, "namespace" to namespace)
     return CallToolResult(content = listOf(TextContent(text = jackson.writeValueAsString(response))))
 }
 
-private fun handleReadGraph(repository: MemoryRepository): CallToolResult {
+private fun handleReadGraph(
+    request: CallToolRequest,
+    repository: MemoryRepository,
+    defaultNamespace: String,
+): CallToolResult {
+    val namespace = resolveNamespace(request.arguments, defaultNamespace)
     return try {
-        val grouped = repository.readAllGroupedBySource()
+        val grouped = repository.readAllGroupedBySource(namespace)
         val entities = grouped.map { (source, contents) ->
             mapOf(
                 "name" to source,
@@ -238,12 +273,13 @@ private fun handleReadGraph(repository: MemoryRepository): CallToolResult {
             )
         }
         val response = mapOf(
+            "namespace" to namespace,
             "entities" to entities,
             "relations" to emptyList<Any>(),
         )
         CallToolResult(content = listOf(TextContent(text = jackson.writeValueAsString(response))))
     } catch (ex: Exception) {
-        logger.warn(ex) { "read_graph failed" }
+        logger.warn(ex) { "read_graph failed namespace=$namespace" }
         errorResult("read_graph failed: ${ex.message}")
     }
 }
@@ -255,8 +291,10 @@ private fun handleReadGraph(repository: MemoryRepository): CallToolResult {
 private fun handleDeleteObservations(
     request: CallToolRequest,
     repository: MemoryRepository,
+    defaultNamespace: String,
 ): CallToolResult {
     val args = request.arguments
+    val namespace = resolveNamespace(args, defaultNamespace)
     var deleted = 0
 
     try {
@@ -269,15 +307,15 @@ private fun handleDeleteObservations(
                     ?: continue
                 val observations = obj["observations"]?.jsonArray?.map { it.jsonPrimitive.content }
                     ?: continue
-                deleted += repository.deleteByEntityAndContents(entityName, observations)
+                deleted += repository.deleteByEntityAndContents(namespace, entityName, observations)
             }
         }
     } catch (ex: Exception) {
-        logger.warn(ex) { "delete_observations failed" }
+        logger.warn(ex) { "delete_observations failed namespace=$namespace" }
         return errorResult("delete_observations failed: ${ex.message}")
     }
 
-    val response = mapOf("status" to "ok", "deleted" to deleted)
+    val response = mapOf("status" to "ok", "deleted" to deleted, "namespace" to namespace)
     return CallToolResult(content = listOf(TextContent(text = jackson.writeValueAsString(response))))
 }
 
