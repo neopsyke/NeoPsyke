@@ -8,12 +8,16 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import psyke.mcp.memory.MemoryServerConfig
+import psyke.mcp.memory.metrics.MemoryServerMetrics
 import java.io.IOException
 import java.time.Duration
 
 private val logger = KotlinLogging.logger {}
 
-class MistralEmbedder(private val config: MemoryServerConfig) : Embedder {
+class MistralEmbedder(
+    private val config: MemoryServerConfig,
+    private val metrics: MemoryServerMetrics? = null,
+) : Embedder {
 
     companion object {
         const val MAX_RETRY_ATTEMPTS = 2
@@ -34,13 +38,22 @@ class MistralEmbedder(private val config: MemoryServerConfig) : Embedder {
 
     override fun embed(text: String): FloatArray {
         val clamped = text.take(MAX_INPUT_CHARS)
+        metrics?.embeddingInputChars?.addAndGet(clamped.length.toLong())
+        val startNs = metrics?.startTimer() ?: 0L
         for (attempt in 1..MAX_RETRY_ATTEMPTS) {
             try {
-                return callEmbeddingApi(clamped)
+                val result = callEmbeddingApi(clamped)
+                metrics?.embeddingRequests?.incrementAndGet()
+                metrics?.recordEmbeddingLatency(startNs)
+                return result
             } catch (ex: Exception) {
                 if (attempt < MAX_RETRY_ATTEMPTS) {
+                    metrics?.embeddingRetries?.incrementAndGet()
                     logger.warn(ex) { "Embedding call failed, retrying (attempt $attempt/$MAX_RETRY_ATTEMPTS)" }
                 } else {
+                    metrics?.embeddingRequests?.incrementAndGet()
+                    metrics?.embeddingRequestErrors?.incrementAndGet()
+                    metrics?.recordEmbeddingLatency(startNs)
                     logger.warn(ex) { "Embedding call failed after $MAX_RETRY_ATTEMPTS attempts" }
                     throw ex
                 }
@@ -68,7 +81,15 @@ class MistralEmbedder(private val config: MemoryServerConfig) : Embedder {
                 val body = response.body?.string()?.take(500) ?: ""
                 throw IOException("Embedding API returned ${response.code}: $body")
             }
-            val tree = mapper.readTree(response.body?.string() ?: "")
+            val bodyStr = response.body?.string() ?: ""
+            val tree = mapper.readTree(bodyStr)
+
+            // Parse token usage from Mistral response
+            tree["usage"]?.let { usage ->
+                usage["prompt_tokens"]?.asLong()?.let { metrics?.embeddingPromptTokens?.addAndGet(it) }
+                usage["total_tokens"]?.asLong()?.let { metrics?.embeddingTotalTokens?.addAndGet(it) }
+            }
+
             val data = tree["data"]?.firstOrNull()
                 ?: throw IOException("No embedding data in response")
             val embeddingNode = data["embedding"]

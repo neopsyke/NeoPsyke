@@ -17,18 +17,22 @@ import mu.KotlinLogging
 import psyke.mcp.memory.MemoryServerConfig
 import psyke.mcp.memory.db.MemoryRepository
 import psyke.mcp.memory.embedding.Embedder
+import psyke.mcp.memory.metrics.MemoryServerMetrics
 
 private val logger = KotlinLogging.logger {}
 private val jackson = jacksonObjectMapper()
+
+private const val TOOL_NAME = "search_memory"
 
 fun registerSearchMemoryTool(
     server: Server,
     repository: MemoryRepository,
     embedder: Embedder,
     config: MemoryServerConfig,
+    metrics: MemoryServerMetrics? = null,
 ) {
     server.addTool(
-        name = "search_memory",
+        name = TOOL_NAME,
         description = "Search stored memories using semantic similarity. Returns the most relevant memories matching the query.",
         inputSchema = Tool.Input(
             properties = buildJsonObject {
@@ -49,7 +53,11 @@ fun registerSearchMemoryTool(
             required = listOf("query")
         )
     ) { request ->
-        handleSearchMemory(request, repository, embedder, config)
+        val startNs = metrics?.startTimer() ?: 0L
+        val result = handleSearchMemory(request, repository, embedder, config)
+        metrics?.recordToolInvocation(TOOL_NAME, startNs)
+        if (result.isError == true) metrics?.recordToolError(TOOL_NAME)
+        result
     }
 }
 
@@ -91,8 +99,8 @@ private fun handleSearchMemory(
                     "content" to row.content,
                     "source" to row.source,
                     "confidence" to row.confidence,
-                    "similarity" to String.format("%.4f", row.similarity),
-                    "score" to String.format("%.4f", row.score),
+                    "similarity" to String.format(java.util.Locale.US, "%.4f", row.similarity),
+                    "score" to String.format(java.util.Locale.US, "%.4f", row.score),
                     "tags" to row.tags,
                     "created_at" to row.createdAt.toString(),
                 )

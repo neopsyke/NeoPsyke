@@ -14,17 +14,22 @@ import kotlinx.serialization.json.jsonPrimitive
 import mu.KotlinLogging
 import psyke.mcp.memory.db.MemoryRepository
 import psyke.mcp.memory.embedding.Embedder
+import psyke.mcp.memory.metrics.MemoryServerMetrics
 
 private val logger = KotlinLogging.logger {}
 private val jackson = jacksonObjectMapper()
+
+private const val REMEMBER_TOOL = "remember"
+private const val CREATE_MEMORY_TOOL = "create_memory"
 
 fun registerRememberTool(
     server: Server,
     repository: MemoryRepository,
     embedder: Embedder,
+    metrics: MemoryServerMetrics? = null,
 ) {
     server.addTool(
-        name = "remember",
+        name = REMEMBER_TOOL,
         description = "Store a memory for later recall. The text will be embedded and stored for semantic search.",
         inputSchema = Tool.Input(
             properties = buildJsonObject {
@@ -36,7 +41,11 @@ fun registerRememberTool(
             required = listOf("text")
         )
     ) { request ->
-        handleRemember(request, repository, embedder)
+        val startNs = metrics?.startTimer() ?: 0L
+        val result = handleRemember(request, repository, embedder)
+        metrics?.recordToolInvocation(REMEMBER_TOOL, startNs)
+        if (result.isError == true) metrics?.recordToolError(REMEMBER_TOOL)
+        result
     }
 }
 
@@ -44,9 +53,10 @@ fun registerCreateMemoryTool(
     server: Server,
     repository: MemoryRepository,
     embedder: Embedder,
+    metrics: MemoryServerMetrics? = null,
 ) {
     server.addTool(
-        name = "create_memory",
+        name = CREATE_MEMORY_TOOL,
         description = "Store a memory with metadata (source, confidence, tags).",
         inputSchema = Tool.Input(
             properties = buildJsonObject {
@@ -66,7 +76,11 @@ fun registerCreateMemoryTool(
             required = listOf("content")
         )
     ) { request ->
-        handleCreateMemory(request, repository, embedder)
+        val startNs = metrics?.startTimer() ?: 0L
+        val result = handleCreateMemory(request, repository, embedder)
+        metrics?.recordToolInvocation(CREATE_MEMORY_TOOL, startNs)
+        if (result.isError == true) metrics?.recordToolError(CREATE_MEMORY_TOOL)
+        result
     }
 }
 

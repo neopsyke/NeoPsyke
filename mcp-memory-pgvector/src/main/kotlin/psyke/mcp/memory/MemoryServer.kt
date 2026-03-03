@@ -13,10 +13,14 @@ import mu.KotlinLogging
 import psyke.mcp.memory.db.MemoryRepository
 import psyke.mcp.memory.embedding.EmbeddingCache
 import psyke.mcp.memory.embedding.MistralEmbedder
+import psyke.mcp.memory.metrics.MemoryServerMetrics
 import psyke.mcp.memory.tools.registerCreateMemoryTool
 import psyke.mcp.memory.tools.registerGraphCompatTools
+import psyke.mcp.memory.tools.registerMetricsTool
 import psyke.mcp.memory.tools.registerRememberTool
 import psyke.mcp.memory.tools.registerSearchMemoryTool
+import java.util.Timer
+import kotlin.concurrent.scheduleAtFixedRate
 
 private val logger = KotlinLogging.logger {}
 
@@ -28,8 +32,11 @@ fun main() {
         System.exit(1)
     }
 
+    // Central metrics registry
+    val metrics = MemoryServerMetrics()
+
     // Initialize database
-    val repository = MemoryRepository(config)
+    val repository = MemoryRepository(config, metrics)
     try {
         repository.initSchema()
     } catch (ex: Exception) {
@@ -38,7 +45,7 @@ fun main() {
     }
 
     // Initialize embedding client (with LRU cache)
-    val embedder = EmbeddingCache(MistralEmbedder(config))
+    val embedder = EmbeddingCache(MistralEmbedder(config, metrics), metrics = metrics)
 
     // Create MCP server
     val server = Server(
@@ -53,11 +60,18 @@ fun main() {
         )
     )
 
-    // Register tools
-    registerSearchMemoryTool(server, repository, embedder, config)
-    registerRememberTool(server, repository, embedder)
-    registerCreateMemoryTool(server, repository, embedder)
-    registerGraphCompatTools(server, repository, embedder)
+    // Register tools (all receive metrics for per-tool invocation tracking)
+    registerSearchMemoryTool(server, repository, embedder, config, metrics)
+    registerRememberTool(server, repository, embedder, metrics)
+    registerCreateMemoryTool(server, repository, embedder, metrics)
+    registerGraphCompatTools(server, repository, embedder, metrics)
+    registerMetricsTool(server, metrics)
+
+    // Periodic metrics logging (every 5 minutes)
+    val metricsTimer = Timer("metrics-logger", true)
+    metricsTimer.scheduleAtFixedRate(METRICS_LOG_INTERVAL_MS, METRICS_LOG_INTERVAL_MS) {
+        metrics.logSummary()
+    }
 
     // Start stdio transport
     val transport = StdioServerTransport(
@@ -65,9 +79,11 @@ fun main() {
         System.out.asSink().buffered(),
     )
 
-    logger.info { "Starting ${config.serverName} v${config.serverVersion} on stdio" }
+    logger.info { "Starting ${config.serverName} v${config.serverVersion} on stdio (metrics enabled)" }
 
     runBlocking {
         server.connect(transport)
     }
 }
+
+private const val METRICS_LOG_INTERVAL_MS = 5L * 60 * 1000 // 5 minutes

@@ -15,9 +15,15 @@ import kotlinx.serialization.json.jsonPrimitive
 import mu.KotlinLogging
 import psyke.mcp.memory.db.MemoryRepository
 import psyke.mcp.memory.embedding.Embedder
+import psyke.mcp.memory.metrics.MemoryServerMetrics
 
 private val logger = KotlinLogging.logger {}
 private val jackson = jacksonObjectMapper()
+
+private const val ADD_OBSERVATIONS_TOOL = "add_observations"
+private const val READ_GRAPH_TOOL = "read_graph"
+private const val DELETE_OBSERVATIONS_TOOL = "delete_observations"
+private const val CREATE_ENTITIES_TOOL = "create_entities"
 
 /**
  * Graph-compatible tools mapped to the flat memories table.
@@ -28,20 +34,22 @@ fun registerGraphCompatTools(
     server: Server,
     repository: MemoryRepository,
     embedder: Embedder,
+    metrics: MemoryServerMetrics? = null,
 ) {
-    registerAddObservationsTool(server, repository, embedder)
-    registerReadGraphTool(server, repository)
-    registerDeleteObservationsTool(server, repository)
-    registerCreateEntitiesTool(server)
+    registerAddObservationsTool(server, repository, embedder, metrics)
+    registerReadGraphTool(server, repository, metrics)
+    registerDeleteObservationsTool(server, repository, metrics)
+    registerCreateEntitiesTool(server, metrics)
 }
 
 private fun registerAddObservationsTool(
     server: Server,
     repository: MemoryRepository,
     embedder: Embedder,
+    metrics: MemoryServerMetrics?,
 ) {
     server.addTool(
-        name = "add_observations",
+        name = ADD_OBSERVATIONS_TOOL,
         description = "Add observations to an entity (stored as tagged memories).",
         inputSchema = Tool.Input(
             properties = buildJsonObject {
@@ -53,31 +61,41 @@ private fun registerAddObservationsTool(
             required = listOf("observations")
         )
     ) { request ->
-        handleAddObservations(request, repository, embedder)
+        val startNs = metrics?.startTimer() ?: 0L
+        val result = handleAddObservations(request, repository, embedder)
+        metrics?.recordToolInvocation(ADD_OBSERVATIONS_TOOL, startNs)
+        if (result.isError == true) metrics?.recordToolError(ADD_OBSERVATIONS_TOOL)
+        result
     }
 }
 
 private fun registerReadGraphTool(
     server: Server,
     repository: MemoryRepository,
+    metrics: MemoryServerMetrics?,
 ) {
     server.addTool(
-        name = "read_graph",
+        name = READ_GRAPH_TOOL,
         description = "Read all stored memories as a graph structure.",
         inputSchema = Tool.Input(
             properties = buildJsonObject {},
         )
     ) { _ ->
-        handleReadGraph(repository)
+        val startNs = metrics?.startTimer() ?: 0L
+        val result = handleReadGraph(repository)
+        metrics?.recordToolInvocation(READ_GRAPH_TOOL, startNs)
+        if (result.isError == true) metrics?.recordToolError(READ_GRAPH_TOOL)
+        result
     }
 }
 
 private fun registerDeleteObservationsTool(
     server: Server,
     repository: MemoryRepository,
+    metrics: MemoryServerMetrics?,
 ) {
     server.addTool(
-        name = "delete_observations",
+        name = DELETE_OBSERVATIONS_TOOL,
         description = "Delete observations (memories) matching entity name and content.",
         inputSchema = Tool.Input(
             properties = buildJsonObject {
@@ -89,13 +107,20 @@ private fun registerDeleteObservationsTool(
             required = listOf("deletions")
         )
     ) { request ->
-        handleDeleteObservations(request, repository)
+        val startNs = metrics?.startTimer() ?: 0L
+        val result = handleDeleteObservations(request, repository)
+        metrics?.recordToolInvocation(DELETE_OBSERVATIONS_TOOL, startNs)
+        if (result.isError == true) metrics?.recordToolError(DELETE_OBSERVATIONS_TOOL)
+        result
     }
 }
 
-private fun registerCreateEntitiesTool(server: Server) {
+private fun registerCreateEntitiesTool(
+    server: Server,
+    metrics: MemoryServerMetrics?,
+) {
     server.addTool(
-        name = "create_entities",
+        name = CREATE_ENTITIES_TOOL,
         description = "Create named entities (no-op: entity concept is mapped to source field).",
         inputSchema = Tool.Input(
             properties = buildJsonObject {
@@ -107,10 +132,13 @@ private fun registerCreateEntitiesTool(server: Server) {
             required = listOf("entities")
         )
     ) { _ ->
+        val startNs = metrics?.startTimer() ?: 0L
         // No-op: entities are implicit via the source field on memories.
-        CallToolResult(
+        val result = CallToolResult(
             content = listOf(TextContent(text = jackson.writeValueAsString(mapOf("status" to "ok"))))
         )
+        metrics?.recordToolInvocation(CREATE_ENTITIES_TOOL, startNs)
+        result
     }
 }
 

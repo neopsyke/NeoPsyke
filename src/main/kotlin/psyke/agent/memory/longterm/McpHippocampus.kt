@@ -67,6 +67,24 @@ class McpHippocampus(
         clientHolder.close()
     }
 
+    @Suppress("UNCHECKED_CAST")
+    override fun fetchServerMetrics(): Map<String, Any>? {
+        return try {
+            val tools = clientHolder.listTools(callTimeoutMs)
+            if (METRICS_TOOL_NAME !in tools) return null
+            val result = clientHolder.callTool(
+                toolName = METRICS_TOOL_NAME,
+                arguments = emptyMap(),
+                timeoutMs = callTimeoutMs
+            )
+            if (result.isError) return null
+            mapper.readValue(result.content, Map::class.java) as? Map<String, Any>
+        } catch (ex: Exception) {
+            logger.debug(ex) { "Failed to fetch server-side memory metrics." }
+            null
+        }
+    }
+
     override fun purgeTaggedObservations(tagMarkers: List<String>): Int {
         val normalizedMarkers = tagMarkers
             .map { it.trim() }
@@ -634,5 +652,7 @@ class McpHippocampus(
             "write_memory",
             "imprint_memory"
         )
+
+        const val METRICS_TOOL_NAME = "get_memory_metrics"
     }
 }

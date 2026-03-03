@@ -43,6 +43,10 @@ object SuperegoPolicy {
             ActionType.MCP_TIME -> listOf(
                 "Allow MCP_TIME for benign time/date lookup payloads.",
             )
+
+            ActionType.MEMORY -> listOf(
+                "Allow MEMORY operations by default; memory is an internal subsystem capability.",
+            )
         }
 
     fun allDirectives(): List<String> =

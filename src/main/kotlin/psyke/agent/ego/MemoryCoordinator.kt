@@ -199,6 +199,7 @@ internal class MemoryCoordinator(
                 recentImprintFingerprints.removeFirst()
             }
         }
+        emitServerMetrics()
     }
 
     fun resetForNewInput() {
@@ -280,6 +281,7 @@ internal class MemoryCoordinator(
                     )
                 )
             }
+            emitServerMetrics()
             recallText
         } catch (ex: Exception) {
             val latencyMs = (System.nanoTime() - startedAt) / 1_000_000L
@@ -292,6 +294,7 @@ internal class MemoryCoordinator(
                     reason = ex.message ?: "memory recall failed"
                 )
             )
+            emitServerMetrics()
             ""
         }
     }
@@ -315,4 +318,23 @@ internal class MemoryCoordinator(
 
     private fun normalizePayload(payload: String): String =
         payload.lowercase().replace(Regex("\\s+"), " ").trim()
+
+    /**
+     * Fetches server-side metrics from the memory backend and emits them as an
+     * instrumentation event. Called after every recall and imprint operation so
+     * the dashboard receives an up-to-date snapshot without polling.
+     */
+    private fun emitServerMetrics() {
+        try {
+            val serverMetrics = hippocampus.fetchServerMetrics() ?: return
+            instrumentation.emit(
+                AgentEvent(
+                    type = "memory_server_metrics",
+                    data = serverMetrics
+                )
+            )
+        } catch (ex: Exception) {
+            logger.debug(ex) { "Failed to emit server-side memory metrics." }
+        }
+    }
 }

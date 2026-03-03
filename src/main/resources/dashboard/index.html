@@ -658,6 +658,21 @@
         parts.push(chip("Mem Imprint Run", runImprintAttempts + "a/" + runImprintSaved + "ok/" + runImprintFailures + "f", null));
         parts.push(chip("Mem Imprint All", allImprintAttempts + "a/" + allImprintSaved + "ok/" + allImprintFailures + "f", null));
         parts.push(chip("Mem Imprint Lat", runImprintAvgLatencyMs + "ms run / " + allImprintAvgLatencyMs + "ms all", null));
+        const msm = metrics.memoryServerMetrics || null;
+        if (msm) {
+          const embed = msm.embedding || {};
+          const cache = msm.cache || {};
+          const db = msm.database || {};
+          const embedLatency = embed.latency_ms || {};
+          const embedReqs = asNum(embed.requests);
+          const embedAvgLat = embedReqs > 0 ? (asNum(embedLatency.total) / embedReqs).toFixed(0) : "-";
+          const cacheHitRate = cache.hit_rate != null ? cache.hit_rate : "-";
+          const cacheHitPct = cache.hit_rate != null ? parseFloat(cache.hit_rate) * 100 : 0;
+          parts.push(chip("Embed Tokens", asNum(embed.total_tokens) + " (" + embedReqs + " req)", null));
+          parts.push(chip("Cache Hit%", (cacheHitRate !== "-" ? (cacheHitPct).toFixed(0) + "%" : "-") + " (" + asNum(cache.hits) + "h/" + asNum(cache.misses) + "m)", cacheHitPct));
+          parts.push(chip("DB Dedup Hits", asNum(db.upsert_conflicts), null));
+          parts.push(chip("Embed Avg Lat", embedAvgLat + "ms", null));
+        }
         parts.push(chip("Resp Lat p50", runResponseLatencyP50 + " (" + runResponseLatencyCount + ")", null));
         parts.push(chip("Resp Lat Avg All", allResponseLatencyAvg + "ms (" + allResponseLatencyCount + ")", null));
         const lastLlm = state.lastLlmCall;

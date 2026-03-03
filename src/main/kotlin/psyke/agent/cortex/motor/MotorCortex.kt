@@ -116,6 +116,11 @@ class MotorCortex(
                     )
                 }
             }
+
+            ActionType.MEMORY -> {
+                // Memory operations are handled internally by McpHippocampus, not dispatched here.
+                ActionOutcome(statusSummary = "Memory action is not executable via MotorCortex.")
+            }
         }
     }
 
