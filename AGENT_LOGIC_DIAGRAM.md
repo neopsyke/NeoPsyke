@@ -26,6 +26,7 @@ flowchart LR
     MC --> LTM["LlmLongTermMemoryAdvisor"]
 
     M --> WS["Web Search Handler/Engine"]
+    CfgWS["WebSearch Provider Config (provider/key/base/model)"] --> WS
     M --> MT["MCP Time Tool"]
     M --> MF["MCP Fetch Tool"]
     WS --> PID["PromptInjectionDefense"]
@@ -82,9 +83,11 @@ sequenceDiagram
                         Ego->>Ego: PromptInjectionDefense sanitize untrusted tool output
                         alt action = answer
                             Ego->>Sched: clear pending thought/action work for same root input
+                            Ego->>Mem: maybeAssessLongTermMemory(post_terminal_answer, forced)
                         end
                         Ego->>Sched: enqueue follow-up thought (for evidence actions)
-                        Ego->>Mem: maybeAssessLongTermMemory(post_action)
+                        Ego->>Mem: maybeAssessLongTermMemory(post_allowed_action, optional force)
+                        Note over Ego,Mem: Blocked imprints emit long_term_memory_persistence_skipped (reason_code + reason_detail) for timeline visibility
                     else deny
                         Ego->>Sched: enqueue safe-alternative thought
                     end
@@ -93,8 +96,21 @@ sequenceDiagram
         end
 
         Ego->>Delib: maybeForceTerminalAnswer
-        Ego->>Mem: maybeAssessLongTermMemory(interval)
+        Ego->>Mem: maybeAssessLongTermMemory(interval or explicit remember-intent)
     end
+```
+
+## 2.5) Interactive Startup Memory Gate
+
+```mermaid
+flowchart LR
+    A["runInteractiveMode"] --> B["Resolve MCP memory command"]
+    B -->|missing/disabled| C["NoopHippocampus (memory unavailable)"]
+    B -->|present| D["MCP memory health probe (long-lived stdio connect + listTools)"]
+    D -->|pass| E["McpHippocampus enabled"]
+    D -->|fail| C
+    E --> F["Emit action_capabilities(memory=available)"]
+    C --> G["Emit action_capabilities(memory=unavailable + warning)"]
 ```
 
 ## 3) Convergence and Fallback States
@@ -118,6 +134,8 @@ stateDiagram-v2
     PolicyReview --> Executing: superego allow
     Executing --> EvidenceObserved: external action succeeded
     Executing --> EvidenceMissing: tool/provider failure
+    Executing --> WebSearchUnavailable: web search init/config failure
+    WebSearchUnavailable --> ThoughtQueued: planner uses remaining available actions
     EvidenceObserved --> ThoughtQueued: follow-up thought
     EvidenceMissing --> ThoughtQueued: retry/adjust path
     EvidenceMissing --> ActionDisabled: circuit breaker trips (non-retryable fetch failures)

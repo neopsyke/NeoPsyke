@@ -781,6 +781,379 @@ class EgoAgentTest {
     }
 
     @Test
+    fun `terminal answer force hook runs consolidation when allowed-action force is disabled`() {
+        val plannerLlm = StubChatModelClient().apply {
+            enqueueRawResponse(
+                """
+                {"decision":"action","urgency":"medium","action_type":"answer","action_payload":"ok","action_summary":"respond"}
+                """.trimIndent()
+            )
+        }
+        val superegoLlm = StubChatModelClient().apply {
+            enqueueRawResponse("""{"allow":true}""")
+        }
+        val instrumentation = RecordingInstrumentation()
+        val outputs = mutableListOf<String>()
+        val hippocampus = RecordingHippocampus(
+            recall = MemoryRecall(provider = "test_memory", text = "")
+        )
+        val advisor = object : LongTermMemoryAdvisor {
+            override fun assess(context: LongTermMemoryAssessmentContext): LongTermMemoryAssessmentDecision =
+                LongTermMemoryAssessmentDecision(
+                    shouldSave = true,
+                    summary = "User name is Victor.",
+                    confidence = 0.95,
+                    reason = "identity fact"
+                )
+        }
+        val config = AgentConfig(
+            planner = PlannerConfig(maxLoopStepsPerInput = 4),
+            memory = MemoryConfig(
+                longTermMemoryAssessEverySteps = 100,
+                longTermMemoryForceAssessOnAllowedAction = false,
+                longTermMemoryForceAssessOnTerminalAnswer = true
+            )
+        )
+        val agent = Ego(
+            planner = LlmEgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
+            superego = Superego(
+                modelClient = superegoLlm,
+                config = config,
+                instrumentation = instrumentation
+            ),
+            motorCortex = buildMotorCortex(output = { outputs.add(it) }),
+            config = config,
+            hippocampus = hippocampus,
+            longTermMemoryAdvisor = advisor,
+            instrumentation = instrumentation
+        )
+
+        runAgentWithInput(agent, "remember my name is Victor\nexit\n")
+
+        assertEquals(listOf("ego> ok"), outputs)
+        assertEquals(1, hippocampus.imprints.size)
+        assertTrue(
+            instrumentation.events.any {
+                it.type == "long_term_memory_assessment" &&
+                    it.data["trigger"] == "post_terminal_answer"
+            }
+        )
+        assertFalse(
+            instrumentation.events.any {
+                it.type == "long_term_memory_assessment" &&
+                    it.data["trigger"] == "post_allowed_action"
+            }
+        )
+    }
+
+    @Test
+    fun `explicit remember intent forces consolidation even when force hooks are disabled`() {
+        val plannerLlm = StubChatModelClient().apply {
+            enqueueRawResponse(
+                """
+                {"decision":"action","urgency":"medium","action_type":"answer","action_payload":"noted","action_summary":"respond"}
+                """.trimIndent()
+            )
+        }
+        val superegoLlm = StubChatModelClient().apply {
+            enqueueRawResponse("""{"allow":true}""")
+        }
+        val instrumentation = RecordingInstrumentation()
+        val outputs = mutableListOf<String>()
+        val hippocampus = RecordingHippocampus(
+            recall = MemoryRecall(provider = "test_memory", text = "")
+        )
+        val advisor = object : LongTermMemoryAdvisor {
+            override fun assess(context: LongTermMemoryAssessmentContext): LongTermMemoryAssessmentDecision =
+                LongTermMemoryAssessmentDecision(
+                    shouldSave = true,
+                    summary = "User name is Victor.",
+                    confidence = 0.95,
+                    reason = "explicit remember request"
+                )
+        }
+        val config = AgentConfig(
+            planner = PlannerConfig(maxLoopStepsPerInput = 4),
+            memory = MemoryConfig(
+                longTermMemoryAssessEverySteps = 100,
+                longTermMemoryForceAssessOnAllowedAction = false,
+                longTermMemoryForceAssessOnTerminalAnswer = false
+            )
+        )
+        val agent = Ego(
+            planner = LlmEgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
+            superego = Superego(
+                modelClient = superegoLlm,
+                config = config,
+                instrumentation = instrumentation
+            ),
+            motorCortex = buildMotorCortex(output = { outputs.add(it) }),
+            config = config,
+            hippocampus = hippocampus,
+            longTermMemoryAdvisor = advisor,
+            instrumentation = instrumentation
+        )
+
+        runAgentWithInput(agent, "Please remember my name is Victor\nexit\n")
+
+        assertEquals(listOf("ego> noted"), outputs)
+        assertEquals(1, hippocampus.imprints.size)
+        assertTrue(
+            instrumentation.events.any {
+                it.type == "long_term_memory_explicit_intent_detected"
+            }
+        )
+        assertTrue(
+            instrumentation.events.any {
+                it.type == "long_term_memory_assessment" &&
+                    it.data["trigger"] == "explicit_remember_intent"
+            }
+        )
+        assertFalse(
+            instrumentation.events.any {
+                it.type == "long_term_memory_assessment" &&
+                    it.data["trigger"] == "post_terminal_answer"
+            }
+        )
+        assertFalse(
+            instrumentation.events.any {
+                it.type == "long_term_memory_assessment" &&
+                    it.data["trigger"] == "post_allowed_action"
+            }
+        )
+    }
+
+    @Test
+    fun `memory consolidation skips imprint when summary echoes recalled memory`() {
+        val plannerLlm = StubChatModelClient().apply {
+            enqueueRawResponse(
+                """
+                {"decision":"action","urgency":"medium","action_type":"answer","action_payload":"Your name is Victor.","action_summary":"respond"}
+                """.trimIndent()
+            )
+        }
+        val superegoLlm = StubChatModelClient().apply {
+            enqueueRawResponse("""{"allow":true}""")
+        }
+        val instrumentation = RecordingInstrumentation()
+        val outputs = mutableListOf<String>()
+        val hippocampus = RecordingHippocampus(
+            recall = MemoryRecall(
+                provider = "test_memory",
+                text = "Known fact: user name is Victor."
+            )
+        )
+        val advisor = object : LongTermMemoryAdvisor {
+            override fun assess(context: LongTermMemoryAssessmentContext): LongTermMemoryAssessmentDecision =
+                LongTermMemoryAssessmentDecision(
+                    shouldSave = true,
+                    summary = "User name is Victor.",
+                    confidence = 0.95,
+                    reason = "identity fact"
+                )
+        }
+        val config = AgentConfig(
+            planner = PlannerConfig(maxLoopStepsPerInput = 4),
+            memory = MemoryConfig(
+                longTermMemoryAssessEverySteps = 100,
+                longTermMemoryForceAssessOnAllowedAction = false,
+                longTermMemoryForceAssessOnTerminalAnswer = true
+            )
+        )
+        val agent = Ego(
+            planner = LlmEgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
+            superego = Superego(
+                modelClient = superegoLlm,
+                config = config,
+                instrumentation = instrumentation
+            ),
+            motorCortex = buildMotorCortex(output = { outputs.add(it) }),
+            config = config,
+            hippocampus = hippocampus,
+            longTermMemoryAdvisor = advisor,
+            instrumentation = instrumentation
+        )
+
+        runAgentWithInput(agent, "what is my name?\nexit\n")
+
+        assertEquals(listOf("ego> Your name is Victor."), outputs)
+        assertTrue(hippocampus.imprints.isEmpty())
+        val skipEvent = instrumentation.events.firstOrNull { it.type == "long_term_memory_persistence_skipped" }
+        assertTrue(skipEvent != null)
+        assertEquals("recall_echo_suppression", skipEvent?.data?.get("reason_code"))
+        assertTrue((skipEvent?.data?.get("reason_detail") as? String)?.contains("min_summary_chars=") == true)
+    }
+
+    @Test
+    fun `memory consolidation recall-echo suppression can be relaxed via config knobs`() {
+        val plannerLlm = StubChatModelClient().apply {
+            enqueueRawResponse(
+                """
+                {"decision":"action","urgency":"medium","action_type":"answer","action_payload":"Your name is Victor.","action_summary":"respond"}
+                """.trimIndent()
+            )
+        }
+        val superegoLlm = StubChatModelClient().apply {
+            enqueueRawResponse("""{"allow":true}""")
+        }
+        val instrumentation = RecordingInstrumentation()
+        val outputs = mutableListOf<String>()
+        val hippocampus = RecordingHippocampus(
+            recall = MemoryRecall(
+                provider = "test_memory",
+                text = "Known fact: user name is Victor."
+            )
+        )
+        val advisor = object : LongTermMemoryAdvisor {
+            override fun assess(context: LongTermMemoryAssessmentContext): LongTermMemoryAssessmentDecision =
+                LongTermMemoryAssessmentDecision(
+                    shouldSave = true,
+                    summary = "User name is Victor.",
+                    confidence = 0.95,
+                    reason = "identity fact"
+                )
+        }
+        val config = AgentConfig(
+            planner = PlannerConfig(maxLoopStepsPerInput = 4),
+            memory = MemoryConfig(
+                longTermMemoryAssessEverySteps = 100,
+                longTermMemoryForceAssessOnAllowedAction = false,
+                longTermMemoryForceAssessOnTerminalAnswer = true,
+                longTermMemoryRecallEchoMinSummaryChars = 100
+            )
+        )
+        val agent = Ego(
+            planner = LlmEgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
+            superego = Superego(
+                modelClient = superegoLlm,
+                config = config,
+                instrumentation = instrumentation
+            ),
+            motorCortex = buildMotorCortex(output = { outputs.add(it) }),
+            config = config,
+            hippocampus = hippocampus,
+            longTermMemoryAdvisor = advisor,
+            instrumentation = instrumentation
+        )
+
+        runAgentWithInput(agent, "what is my name?\nexit\n")
+
+        assertEquals(listOf("ego> Your name is Victor."), outputs)
+        assertEquals(1, hippocampus.imprints.size)
+    }
+
+    @Test
+    fun `memory consolidation emits exact skip reason when confidence is below threshold`() {
+        val plannerLlm = StubChatModelClient().apply {
+            enqueueRawResponse(
+                """
+                {"decision":"action","urgency":"medium","action_type":"answer","action_payload":"ok","action_summary":"respond"}
+                """.trimIndent()
+            )
+        }
+        val superegoLlm = StubChatModelClient().apply {
+            enqueueRawResponse("""{"allow":true}""")
+        }
+        val instrumentation = RecordingInstrumentation()
+        val hippocampus = RecordingHippocampus(
+            recall = MemoryRecall(provider = "test_memory", text = "")
+        )
+        val advisor = object : LongTermMemoryAdvisor {
+            override fun assess(context: LongTermMemoryAssessmentContext): LongTermMemoryAssessmentDecision =
+                LongTermMemoryAssessmentDecision(
+                    shouldSave = true,
+                    summary = "User likes short responses.",
+                    confidence = 0.40,
+                    reason = "stable preference"
+                )
+        }
+        val config = AgentConfig(
+            planner = PlannerConfig(maxLoopStepsPerInput = 4),
+            memory = MemoryConfig(
+                longTermMemoryAssessEverySteps = 100,
+                longTermMemoryMinConfidence = 0.80,
+                longTermMemoryForceAssessOnAllowedAction = true
+            )
+        )
+        val agent = Ego(
+            planner = LlmEgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
+            superego = Superego(
+                modelClient = superegoLlm,
+                config = config,
+                instrumentation = instrumentation
+            ),
+            motorCortex = buildMotorCortex(output = {}),
+            config = config,
+            hippocampus = hippocampus,
+            longTermMemoryAdvisor = advisor,
+            instrumentation = instrumentation
+        )
+
+        runAgentWithInput(agent, "hello\nexit\n")
+
+        assertTrue(hippocampus.imprints.isEmpty())
+        val skipEvent = instrumentation.events.firstOrNull { it.type == "long_term_memory_persistence_skipped" }
+        assertTrue(skipEvent != null)
+        assertEquals("confidence_below_threshold", skipEvent?.data?.get("reason_code"))
+        assertTrue((skipEvent?.data?.get("reason_detail") as? String)?.contains("below configured minimum") == true)
+    }
+
+    @Test
+    fun `memory consolidation emits exact skip reason when advisor declines save`() {
+        val plannerLlm = StubChatModelClient().apply {
+            enqueueRawResponse(
+                """
+                {"decision":"action","urgency":"medium","action_type":"answer","action_payload":"ok","action_summary":"respond"}
+                """.trimIndent()
+            )
+        }
+        val superegoLlm = StubChatModelClient().apply {
+            enqueueRawResponse("""{"allow":true}""")
+        }
+        val instrumentation = RecordingInstrumentation()
+        val hippocampus = RecordingHippocampus(
+            recall = MemoryRecall(provider = "test_memory", text = "")
+        )
+        val advisor = object : LongTermMemoryAdvisor {
+            override fun assess(context: LongTermMemoryAssessmentContext): LongTermMemoryAssessmentDecision =
+                LongTermMemoryAssessmentDecision(
+                    shouldSave = false,
+                    summary = "",
+                    confidence = 0.95,
+                    reason = "not durable"
+                )
+        }
+        val config = AgentConfig(
+            planner = PlannerConfig(maxLoopStepsPerInput = 4),
+            memory = MemoryConfig(
+                longTermMemoryAssessEverySteps = 100,
+                longTermMemoryForceAssessOnAllowedAction = true
+            )
+        )
+        val agent = Ego(
+            planner = LlmEgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
+            superego = Superego(
+                modelClient = superegoLlm,
+                config = config,
+                instrumentation = instrumentation
+            ),
+            motorCortex = buildMotorCortex(output = {}),
+            config = config,
+            hippocampus = hippocampus,
+            longTermMemoryAdvisor = advisor,
+            instrumentation = instrumentation
+        )
+
+        runAgentWithInput(agent, "hello\nexit\n")
+
+        assertTrue(hippocampus.imprints.isEmpty())
+        val skipEvent = instrumentation.events.firstOrNull { it.type == "long_term_memory_persistence_skipped" }
+        assertTrue(skipEvent != null)
+        assertEquals("advisor_declined_save", skipEvent?.data?.get("reason_code"))
+        assertTrue((skipEvent?.data?.get("reason_detail") as? String)?.contains("not durable") == true)
+    }
+
+    @Test
     fun `memory metric callbacks receive recall consolidation and imprint signals`() {
         val plannerLlm = StubChatModelClient().apply {
             enqueueRawResponse(

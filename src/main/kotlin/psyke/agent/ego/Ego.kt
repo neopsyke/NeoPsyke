@@ -218,6 +218,7 @@ class Ego(
             val observed = deliberation.observedEvidence(action, outcome)
             deliberation.recordEvidenceProgress(action, outcome, observed)
             deliberation.onActionExecuted(action, observed)
+            maybeRunTerminalAnswerMemoryAssessment(action, outcome)
             return
         }
         val gateDecision = superego.review(action, superegoContext())
@@ -281,6 +282,7 @@ class Ego(
             memory.remember(assistantTurn)
             trimDialogue()
         }
+        maybeRunTerminalAnswerMemoryAssessment(action, outcome)
         maybeRunLongTermMemoryAssessment(
             trigger = "post_allowed_action",
             force = config.memory.longTermMemoryForceAssessOnAllowedAction,
@@ -751,6 +753,16 @@ class Ego(
         )
     }
 
+    private fun maybeRunTerminalAnswerMemoryAssessment(action: PendingAction, outcome: ActionOutcome) {
+        if (action.type != ActionType.ANSWER) return
+        maybeRunLongTermMemoryAssessment(
+            trigger = "post_terminal_answer",
+            force = config.memory.longTermMemoryForceAssessOnTerminalAnswer,
+            latestActionType = action.type,
+            latestActionOutcome = outcome.plannerSignal
+        )
+    }
+
     private fun emitDeliberationState(taskType: String, state: DeliberationState) {
         instrumentation.emit(
             AgentEvent(
@@ -851,6 +863,7 @@ class Ego(
             ActionType.MCP_TIME -> "MCP time lookup completed."
             ActionType.MCP_FETCH -> "Fetch completed."
             ActionType.ANSWER -> "Action completed."
+            ActionType.MEMORY -> "Memory operation completed."
         }
 
     private companion object {

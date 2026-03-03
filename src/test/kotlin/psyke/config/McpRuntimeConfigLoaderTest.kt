@@ -19,7 +19,7 @@ class McpRuntimeConfigLoaderTest {
         assertEquals("uvx mcp-server-time", config.time.command)
         assertTrue(config.fetch.enabled)
         assertTrue(config.memory.enabled)
-        assertEquals("npx -y @modelcontextprotocol/server-memory", config.memory.command)
+        assertEquals("java -jar mcp-memory-pgvector/build/libs/mcp-memory-pgvector-0.1.0-all.jar", config.memory.command)
     }
 
     @Test

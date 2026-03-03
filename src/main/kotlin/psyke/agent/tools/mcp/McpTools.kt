@@ -215,7 +215,7 @@ class McpStdioClient private constructor(
         } finally {
             if (process.isAlive) {
                 process.destroy()
-                process.waitFor(250, java.util.concurrent.TimeUnit.MILLISECONDS)
+                process.waitFor(PROCESS_SHUTDOWN_GRACE_MS, java.util.concurrent.TimeUnit.MILLISECONDS)
             }
             if (process.isAlive) {
                 process.destroyForcibly()
@@ -225,6 +225,33 @@ class McpStdioClient private constructor(
 
     companion object {
         fun start(command: List<String>, serverLabel: String): McpStdioClient {
+            require(command.isNotEmpty()) { "MCP command cannot be empty." }
+            var lastError: Exception? = null
+            for (attempt in 1..START_MAX_ATTEMPTS) {
+                try {
+                    return startOnce(command = command, serverLabel = serverLabel)
+                } catch (ex: Exception) {
+                    lastError = ex
+                    if (attempt < START_MAX_ATTEMPTS) {
+                        logger.warn(ex) {
+                            "MCP $serverLabel connect failed; retrying (attempt $attempt/$START_MAX_ATTEMPTS)."
+                        }
+                        Thread.sleep(START_RETRY_DELAY_MS)
+                    } else {
+                        logger.warn(ex) {
+                            "MCP $serverLabel connect failed after $START_MAX_ATTEMPTS attempts."
+                        }
+                    }
+                }
+            }
+
+            throw IOException(
+                "MCP $serverLabel connect failed after $START_MAX_ATTEMPTS attempts.",
+                lastError
+            )
+        }
+
+        private fun startOnce(command: List<String>, serverLabel: String): McpStdioClient {
             require(command.isNotEmpty()) { "MCP command cannot be empty." }
             val processBuilder = ProcessBuilder(command)
             NpmCommandIsolation.apply(processBuilder, command, serverLabel)
@@ -247,8 +274,19 @@ class McpStdioClient private constructor(
                 clientInfo = Implementation(name = "psyke", version = "0.1.0"),
                 options = ClientOptions()
             )
-            runBlocking {
-                client.connect(transport)
+            try {
+                runBlocking {
+                    client.connect(transport)
+                }
+            } catch (ex: Exception) {
+                if (process.isAlive) {
+                    process.destroy()
+                    process.waitFor(PROCESS_SHUTDOWN_GRACE_MS, TimeUnit.MILLISECONDS)
+                }
+                if (process.isAlive) {
+                    process.destroyForcibly()
+                }
+                throw ex
             }
             return McpStdioClient(
                 process = process,
@@ -297,6 +335,10 @@ class McpStdioClient private constructor(
 
             return ""
         }
+
+        private const val START_MAX_ATTEMPTS: Int = 2
+        private const val START_RETRY_DELAY_MS: Long = 200
+        private const val PROCESS_SHUTDOWN_GRACE_MS: Long = 250
     }
 }
 

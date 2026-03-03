@@ -490,7 +490,7 @@ class LlmEgoPlanner(
             .sorted()
             .joinToString(", ")
             .ifBlank { "none" }
-        val unavailableActionList = ActionType.entries
+        val unavailableActionList = ActionType.DISPATCHABLE
             .filterNot { context.availableActions.contains(it) }
             .map { it.name.lowercase() }
             .sorted()

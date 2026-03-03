@@ -11,6 +11,11 @@ data class MemoryConfig(
     val longTermMemoryMaxTokens: Int = 180,
     val longTermMemoryMaxSummaryChars: Int = 320,
     val longTermMemoryForceAssessOnAllowedAction: Boolean = false,
+    val longTermMemoryForceAssessOnTerminalAnswer: Boolean = true,
     val longTermMemoryParseFallbackDisableAfter: Int = 2,
+    val longTermMemoryRecallEchoMinSummaryChars: Int = 16,
+    val longTermMemoryRecallEchoMinTokenLength: Int = 3,
+    val longTermMemoryRecallEchoMinTokenCount: Int = 4,
+    val longTermMemoryRecallEchoTokenOverlapThreshold: Double = 0.85,
     val mcpMemoryCallTimeoutMs: Long = 8_000,
 )

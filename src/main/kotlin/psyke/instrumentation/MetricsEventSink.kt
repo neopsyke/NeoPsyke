@@ -21,6 +21,9 @@ class MetricsEventSink(
     @Volatile
     private var instrumentation: AgentInstrumentation = NoopAgentInstrumentation
 
+    @Volatile
+    private var latestMemoryServerMetrics: Map<String, Any>? = null
+
     private var longTermMemoryAssessmentParseFailures = 0
 
     fun setInstrumentation(instrumentation: AgentInstrumentation) {
@@ -111,15 +114,24 @@ class MetricsEventSink(
                 metrics.recordEndToEndResponseLatency(latencyMs)
                 emitSnapshot()
             }
+
+            "memory_server_metrics" -> {
+                @Suppress("UNCHECKED_CAST")
+                latestMemoryServerMetrics = event.data as? Map<String, Any>
+                emitSnapshot()
+            }
         }
     }
 
     private fun emitSnapshot() {
         metrics.snapshot()?.let { snapshot ->
+            val enriched = latestMemoryServerMetrics?.let {
+                snapshot.copy(memoryServerMetrics = it)
+            } ?: snapshot
             instrumentation.emit(
                 AgentEvent(
                     type = "metrics_snapshot",
-                    data = mapOf("metrics" to snapshot)
+                    data = mapOf("metrics" to enriched)
                 )
             )
         }

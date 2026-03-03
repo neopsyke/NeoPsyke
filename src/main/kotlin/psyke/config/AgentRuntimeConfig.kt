@@ -75,7 +75,12 @@ private data class AgentRuntimeYamlAgent(
     val forcedTerminalPressureThreshold: Double? = null,
     val forcedTerminalStaleStreakThreshold: Int? = null,
     val longTermMemoryForceAssessOnAllowedAction: Boolean? = null,
+    val longTermMemoryForceAssessOnTerminalAnswer: Boolean? = null,
     val longTermMemoryParseFallbackDisableAfter: Int? = null,
+    val longTermMemoryRecallEchoMinSummaryChars: Int? = null,
+    val longTermMemoryRecallEchoMinTokenLength: Int? = null,
+    val longTermMemoryRecallEchoMinTokenCount: Int? = null,
+    val longTermMemoryRecallEchoTokenOverlapThreshold: Double? = null,
 )
 
 object AgentRuntimeSettingsLoader {
@@ -179,10 +184,35 @@ object AgentRuntimeSettingsLoader {
                     agentYaml.longTermMemoryForceAssessOnAllowedAction,
                     defaults.memory.longTermMemoryForceAssessOnAllowedAction
                 ),
+                longTermMemoryForceAssessOnTerminalAnswer = readBoolean(
+                    env["EGO_LONG_TERM_MEMORY_FORCE_ASSESS_ON_TERMINAL_ANSWER"],
+                    agentYaml.longTermMemoryForceAssessOnTerminalAnswer,
+                    defaults.memory.longTermMemoryForceAssessOnTerminalAnswer
+                ),
                 longTermMemoryParseFallbackDisableAfter = readPositiveInt(
                     env["EGO_LONG_TERM_MEMORY_PARSE_FALLBACK_DISABLE_AFTER"],
                     agentYaml.longTermMemoryParseFallbackDisableAfter,
                     defaults.memory.longTermMemoryParseFallbackDisableAfter
+                ),
+                longTermMemoryRecallEchoMinSummaryChars = readPositiveInt(
+                    env["EGO_LONG_TERM_MEMORY_RECALL_ECHO_MIN_SUMMARY_CHARS"],
+                    agentYaml.longTermMemoryRecallEchoMinSummaryChars,
+                    defaults.memory.longTermMemoryRecallEchoMinSummaryChars
+                ),
+                longTermMemoryRecallEchoMinTokenLength = readPositiveInt(
+                    env["EGO_LONG_TERM_MEMORY_RECALL_ECHO_MIN_TOKEN_LENGTH"],
+                    agentYaml.longTermMemoryRecallEchoMinTokenLength,
+                    defaults.memory.longTermMemoryRecallEchoMinTokenLength
+                ),
+                longTermMemoryRecallEchoMinTokenCount = readPositiveInt(
+                    env["EGO_LONG_TERM_MEMORY_RECALL_ECHO_MIN_TOKEN_COUNT"],
+                    agentYaml.longTermMemoryRecallEchoMinTokenCount,
+                    defaults.memory.longTermMemoryRecallEchoMinTokenCount
+                ),
+                longTermMemoryRecallEchoTokenOverlapThreshold = readProbability(
+                    env["EGO_LONG_TERM_MEMORY_RECALL_ECHO_TOKEN_OVERLAP_THRESHOLD"],
+                    agentYaml.longTermMemoryRecallEchoTokenOverlapThreshold,
+                    defaults.memory.longTermMemoryRecallEchoTokenOverlapThreshold
                 ),
                 mcpMemoryCallTimeoutMs = readPositiveLong(
                     env = env["MCP_MEMORY_CALL_TIMEOUT_MS"],

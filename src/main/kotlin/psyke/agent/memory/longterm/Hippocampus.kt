@@ -35,6 +35,12 @@ interface Hippocampus : AutoCloseable {
 
     fun purgeTaggedObservations(tagMarkers: List<String>): Int = 0
 
+    /**
+     * Returns server-side metrics from the memory backend, or null if unsupported.
+     * Keys follow the structure emitted by [psyke.mcp.memory.metrics.MemoryServerMetrics.snapshot].
+     */
+    fun fetchServerMetrics(): Map<String, Any>? = null
+
     fun imprint(turn: DialogueTurn): Boolean {
         val normalized = turn.content.trim()
         if (normalized.isBlank()) {

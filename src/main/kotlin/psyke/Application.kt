@@ -45,8 +45,8 @@ fun main(args: Array<String>) {
     val mcpRuntimeConfig = McpRuntimeConfigLoader.load()
     val llmRuntimeConfig = LlmRuntimeConfigLoader.load()
     if (llmRuntimeConfig == null) {
-        output.error("Unsupported LLM_PROVIDER. Expected one of: groq, mistral.")
-        logger.warn { "Unsupported LLM_PROVIDER. Expected one of: groq, mistral." }
+        output.error("Unsupported LLM provider setting. Expected one of: groq, mistral (for LLM_PROVIDER and optional LLM_WEBSEARCH_PROVIDER).")
+        logger.warn { "Unsupported LLM provider setting. Expected one of: groq, mistral (for LLM_PROVIDER and optional LLM_WEBSEARCH_PROVIDER)." }
         return
     }
 

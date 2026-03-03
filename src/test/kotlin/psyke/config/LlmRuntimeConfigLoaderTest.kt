@@ -20,6 +20,9 @@ class LlmRuntimeConfigLoaderTest {
         assertEquals("GROQ_API_KEY", resolved.apiKeyEnvVar)
         assertEquals("openai/gpt-oss-20b", resolved.egoModel)
         assertEquals("openai/gpt-oss-20b", resolved.superegoModel)
+        assertEquals(LlmProvider.GROQ, resolved.webSearchProvider)
+        assertEquals("https://api.groq.com/openai/v1", resolved.webSearchBaseUrl)
+        assertEquals("GROQ_API_KEY", resolved.webSearchApiKeyEnvVar)
         assertEquals("groq/compound-mini", resolved.webSearchModel)
     }
 
@@ -55,6 +58,9 @@ class LlmRuntimeConfigLoaderTest {
         assertEquals("mistral-medium-latest", resolved.superegoModel)
         assertEquals("mistral-large-latest", resolved.metaReasonerModel)
         assertEquals("mistral-medium-latest", resolved.memoryConsolidationModel)
+        assertEquals(LlmProvider.MISTRAL, resolved.webSearchProvider)
+        assertEquals("https://custom.mistral.test/v1", resolved.webSearchBaseUrl)
+        assertEquals("CUSTOM_MISTRAL_KEY", resolved.webSearchApiKeyEnvVar)
         assertEquals("mistral-small-latest", resolved.webSearchModel)
     }
 
@@ -88,5 +94,46 @@ class LlmRuntimeConfigLoaderTest {
         assertEquals("mistral-small-latest", resolved.egoModel)
         assertEquals("mistral-medium-latest", resolved.superegoModel)
         assertEquals("https://api.mistral.ai/v1", resolved.baseUrl)
+        assertEquals(LlmProvider.MISTRAL, resolved.webSearchProvider)
+        assertEquals("https://api.mistral.ai/v1", resolved.webSearchBaseUrl)
+        assertEquals("MISTRAL_API_KEY", resolved.webSearchApiKeyEnvVar)
+    }
+
+    @Test
+    fun `web search provider can be configured independently from primary provider`() {
+        val tempDir = Files.createTempDirectory("psyke-llm-config-web-search-provider")
+        val yamlPath = tempDir.resolve("llm-runtime.yaml")
+        Files.writeString(
+            yamlPath,
+            """
+            provider: groq
+            models:
+              ego: openai/gpt-oss-20b
+              superego: openai/gpt-oss-20b
+              meta_reasoner: openai/gpt-oss-20b
+              memory_consolidation: openai/gpt-oss-20b
+            web_search:
+              provider: mistral
+              model: mistral-small-latest
+            """.trimIndent()
+        )
+
+        val config = LlmRuntimeConfigLoader.load(
+            env = mapOf(
+                "GROQ_API_KEY" to "groq-key",
+                "MISTRAL_API_KEY" to "mistral-key"
+            ),
+            defaultPath = yamlPath
+        )
+
+        val resolved = assertNotNull(config)
+        assertEquals(LlmProvider.GROQ, resolved.provider)
+        assertEquals("groq-key", resolved.apiKey)
+        assertEquals("openai/gpt-oss-20b", resolved.egoModel)
+        assertEquals(LlmProvider.MISTRAL, resolved.webSearchProvider)
+        assertEquals("mistral-key", resolved.webSearchApiKey)
+        assertEquals("MISTRAL_API_KEY", resolved.webSearchApiKeyEnvVar)
+        assertEquals("https://api.mistral.ai/v1", resolved.webSearchBaseUrl)
+        assertEquals("mistral-small-latest", resolved.webSearchModel)
     }
 }

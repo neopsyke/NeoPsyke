@@ -1,0 +1,21 @@
+services:
+  pgvector:
+    image: pgvector/pgvector:pg17
+    container_name: psyke-pgvector
+    environment:
+      POSTGRES_DB: psyke_memory
+      POSTGRES_USER: psyke
+      POSTGRES_PASSWORD: psyke_dev
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgvector-data:/var/lib/postgresql/data
+      - ./mcp-memory-pgvector/docker/init.sql:/docker-entrypoint-initdb.d/01-init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U psyke -d psyke_memory"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  pgvector-data:

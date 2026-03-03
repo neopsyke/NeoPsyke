@@ -67,6 +67,24 @@ class McpHippocampus(
         clientHolder.close()
     }
 
+    @Suppress("UNCHECKED_CAST")
+    override fun fetchServerMetrics(): Map<String, Any>? {
+        return try {
+            val tools = clientHolder.listTools(callTimeoutMs)
+            if (METRICS_TOOL_NAME !in tools) return null
+            val result = clientHolder.callTool(
+                toolName = METRICS_TOOL_NAME,
+                arguments = emptyMap(),
+                timeoutMs = callTimeoutMs
+            )
+            if (result.isError) return null
+            mapper.readValue(result.content, Map::class.java) as? Map<String, Any>
+        } catch (ex: Exception) {
+            logger.debug(ex) { "Failed to fetch server-side memory metrics." }
+            null
+        }
+    }
+
     override fun purgeTaggedObservations(tagMarkers: List<String>): Int {
         val normalizedMarkers = tagMarkers
             .map { it.trim() }
@@ -246,21 +264,30 @@ class McpHippocampus(
         val enriched = "$summary$tagsText"
         return when (toolName) {
             "remember" -> listOf(
-                mapOf("text" to enriched),
-                mapOf("memory" to enriched),
-                mapOf("content" to enriched)
+                mapOf("text" to enriched, "write_mode" to "dedupe_if_similar"),
+                mapOf("memory" to enriched, "write_mode" to "dedupe_if_similar"),
+                mapOf("content" to enriched, "write_mode" to "dedupe_if_similar")
             )
 
             "create_memory", "add_memory", "write_memory", "imprint_memory" -> listOf(
-                mapOf("content" to enriched, "source" to imprint.source, "confidence" to imprint.confidence),
-                mapOf("text" to enriched, "metadata" to mapOf("source" to imprint.source, "confidence" to imprint.confidence)),
-                mapOf("memory" to enriched)
+                mapOf(
+                    "content" to enriched,
+                    "source" to imprint.source,
+                    "confidence" to imprint.confidence,
+                    "write_mode" to "dedupe_if_similar"
+                ),
+                mapOf(
+                    "text" to enriched,
+                    "metadata" to mapOf("source" to imprint.source, "confidence" to imprint.confidence),
+                    "write_mode" to "dedupe_if_similar"
+                ),
+                mapOf("memory" to enriched, "write_mode" to "dedupe_if_similar")
             )
 
             else -> listOf(
-                mapOf("content" to enriched),
-                mapOf("text" to enriched),
-                mapOf("memory" to enriched)
+                mapOf("content" to enriched, "write_mode" to "dedupe_if_similar"),
+                mapOf("text" to enriched, "write_mode" to "dedupe_if_similar"),
+                mapOf("memory" to enriched, "write_mode" to "dedupe_if_similar")
             )
         }
     }
@@ -634,5 +661,7 @@ class McpHippocampus(
             "write_memory",
             "imprint_memory"
         )
+
+        const val METRICS_TOOL_NAME = "get_memory_metrics"
     }
 }

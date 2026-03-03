@@ -148,6 +148,7 @@ internal class DeliberationEngine(
                     !summary.contains("timeout")
             }
             ActionType.ANSWER -> true
+            ActionType.MEMORY -> true // Memory ops are internal; treat as observed.
         }
     }
 

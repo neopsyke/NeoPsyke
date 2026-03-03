@@ -34,6 +34,7 @@ internal class SuperegoDeterministicConscience(
                 ActionType.WEB_SEARCH -> validateWebSearch(action, context)
                 ActionType.MCP_TIME -> validateMcpTime(action)
                 ActionType.MCP_FETCH -> validateMcpFetch(action, context)
+                ActionType.MEMORY -> allow() // Memory ops are internal subsystem calls, always allowed.
             }
         } catch (_: Exception) {
             deny(
