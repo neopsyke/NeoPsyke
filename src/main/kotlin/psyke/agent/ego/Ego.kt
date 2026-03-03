@@ -10,6 +10,7 @@ import psyke.agent.memory.longterm.LongTermMemoryAdvisor
 import psyke.agent.memory.longterm.NoopHippocampus
 import psyke.agent.memory.longterm.NoopLongTermMemoryAdvisor
 import psyke.agent.memory.shortterm.MemoryStore
+import psyke.agent.support.PromptInjectionDefense
 import psyke.agent.support.TextSecurity
 import psyke.agent.superego.Superego
 import psyke.agent.tools.mcp.FetchErrorCategory
@@ -288,8 +289,12 @@ class Ego(
         )
 
         if (action.type.requiresFollowUpThought()) {
+            val safePlannerSignal = PromptInjectionDefense.asUntrustedDataBlock(
+                text = outcome.plannerSignal,
+                maxChars = FOLLOW_UP_SIGNAL_MAX_CHARS
+            )
             val followUpThought = TextSecurity.clamp(
-                "${action.type.followUpPrefix()} ${outcome.plannerSignal}. Decide if an answer should be sent.",
+                "${action.type.followUpPrefix()}\n$safePlannerSignal\nDecide if an answer should be sent.",
                 config.planner.maxThoughtChars
             )
             val queued = scheduler.enqueueThought(
@@ -850,5 +855,6 @@ class Ego(
 
     private companion object {
         const val PLAN_ID_LENGTH: Int = 8
+        const val FOLLOW_UP_SIGNAL_MAX_CHARS: Int = 420
     }
 }

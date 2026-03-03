@@ -107,9 +107,12 @@ It is intentionally high-level and should stay aligned with the code.
 
 ## Policy Gate (Superego)
 - File: `src/main/kotlin/psyke/agent/superego/Superego.kt`
-- Reviews each non-fallback action against directives.
+- Reviews each non-fallback action with layered checks:
+  - deterministic hard-deny checks first (`SuperegoDeterministicConscience`)
+  - LLM semantic review second (only if deterministic checks pass)
 - Returns `GateDecision(allow, reason)` from strict JSON.
 - Default behavior on model/parse failure is deny (safe fallback).
+- Deterministic deny is authoritative (LLM cannot override a hard deny).
 
 ## Deliberation and Convergence
 - Files:
@@ -172,6 +175,10 @@ It is intentionally high-level and should stay aligned with the code.
 ## Safety and Fallback Patterns
 - LLM callers use retry loops with bounded attempts.
 - Required JSON fields are validated after deserialization.
+- Prompt-injection mitigation is implemented as deterministic, model-agnostic guards outside Superego:
+  - untrusted external content sanitization (`PromptInjectionDefense`)
+  - untrusted-data framing before follow-up planner thoughts
+  - long-term recall wrapped as untrusted data block before planner context
 - On failures:
   - planner -> noop fallback
   - superego -> deny fallback
@@ -202,7 +209,9 @@ Update this file whenever any of these change:
 - Loop task ordering, step-limit behavior, or fallback execution policy.
 - Planner decision schema or verifier verdict handling.
 - Superego directives contract or default deny/allow fallback behavior.
+- Superego deterministic rules/validators or deterministic-vs-LLM precedence.
 - Deliberation pressure formula, thresholds, or forced-terminal criteria.
 - Memory recall/consolidation triggers, thresholds, or disable semantics.
+- Prompt-injection defense patterns or untrusted-content handling paths.
 - Supported action types or runtime availability logic.
 - Critical instrumentation events that materially change control flow visibility.

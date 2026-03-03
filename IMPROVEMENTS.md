@@ -33,8 +33,8 @@ As of **March 1, 2026**, your agent is a solid **single-trajectory deliberation 
    With `maxLoopStepsPerInput=180` ([AgentConfig.kt:4](/Users/victor.toral/atomitl/ai/psyke/src/main/kotlin/psyke/agent/core/AgentConfig.kt:4)) and serial planner/meta/superego/memory calls, worst-case deliberation is expensive and slow.
 
 ## How it compares to main SOTA reasoning concepts
-1. **CoT-style intermediate reasoning:** Partial support (thought queue).
-2. **Plan-first decomposition (PS):** Weak/implicit only.
+1. DONE **CoT-style intermediate reasoning:** Partial support (thought queue).
+2. DONE **Plan-first decomposition (PS):** Weak/implicit only.
 3. **Self-consistency / majority over multiple traces:** Missing.
 4. **Tree/graph search (ToT/LATS/GoT):** Missing.
 5. **Verifier/process-supervised checking:** Missing.
