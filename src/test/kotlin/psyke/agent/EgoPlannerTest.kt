@@ -90,6 +90,39 @@ class EgoPlannerTest {
     }
 
     @Test
+    fun `planner accepts structured action payload object by normalizing to json string`() {
+        val llm = StubChatModelClient()
+        llm.enqueueRawResponse(
+            """
+            {
+              "decision":"action",
+              "urgency":"medium",
+              "action_type":"mcp_fetch",
+              "action_payload":{"url":"https://openai.com/pricing","max_chars":1200},
+              "action_summary":"Fetch OpenAI pricing page content"
+            }
+            """.trimIndent()
+        )
+        val planner = LlmEgoPlanner(
+            modelClient = llm,
+            config = AgentConfig()
+        )
+
+        val decision = planner.decide(
+            trigger = psyke.agent.core.EgoTrigger.PendingThoughtInput(PendingThought(7, Urgency.LOW, "think", 1)),
+            context = PlannerContext(
+                recentDialogue = emptyList(),
+                queue = QueueSnapshot(0, 0, 0)
+            )
+        )
+
+        val action = assertIs<psyke.agent.core.EgoDecision.ProposeAction>(decision)
+        assertEquals(ActionType.MCP_FETCH, action.actionType)
+        assertTrue(action.payload.contains("\"url\":\"https://openai.com/pricing\""))
+        assertTrue(action.payload.contains("\"max_chars\":1200"))
+    }
+
+    @Test
     fun `planner rejects actions unavailable at runtime`() {
         val llm = StubChatModelClient()
         llm.enqueueRawResponse(
@@ -274,6 +307,37 @@ class EgoPlannerTest {
                     it.data["repaired"] == true
             }
         )
+    }
+
+    @Test
+    fun `planner accepts structured action payload from action verifier repair`() {
+        val llm = StubChatModelClient().apply {
+            enqueueRawResponse(
+                """
+                {"decision":"action","urgency":"medium","action_type":"mcp_fetch","action_payload":"{\"url\":\"https://example.com\"}","action_summary":"fetch"}
+                """.trimIndent()
+            )
+            enqueueRawResponseForCallSite(
+                callSite = "action_verifier",
+                content = """
+                {"verdict":"repair","action_type":"mcp_fetch","action_payload":{"url":"https://openai.com/pricing","max_chars":900},"action_summary":"fetch pricing"}
+                """.trimIndent()
+            )
+        }
+        val planner = LlmEgoPlanner(modelClient = llm, config = AgentConfig())
+
+        val decision = planner.decide(
+            trigger = psyke.agent.core.EgoTrigger.IncomingInput(PendingInput(1, "pricing")),
+            context = PlannerContext(
+                recentDialogue = emptyList(),
+                queue = QueueSnapshot(0, 0, 0)
+            )
+        )
+
+        val action = assertIs<psyke.agent.core.EgoDecision.ProposeAction>(decision)
+        assertEquals(ActionType.MCP_FETCH, action.actionType)
+        assertTrue(action.payload.contains("\"url\":\"https://openai.com/pricing\""))
+        assertTrue(action.payload.contains("\"max_chars\":900"))
     }
 
     @Test

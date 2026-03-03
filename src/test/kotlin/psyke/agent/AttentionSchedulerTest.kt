@@ -106,4 +106,66 @@ class AttentionSchedulerTest {
         assertEquals(listOf("high-action", "low-action"), state.actions.map { it.payload })
         assertNotNull(scheduler.nextTask())
     }
+
+    @Test
+    fun `scheduler can clear pending thoughts and actions for a resolved input`() {
+        val scheduler = AttentionScheduler(config.copy(maxPendingThoughts = 8, maxPendingActions = 8))
+        val rootA = 100L
+        val rootB = 200L
+        scheduler.enqueueThought("a-thought", Urgency.HIGH, rootInputEnqueuedAtMs = rootA)
+        scheduler.enqueueThought("b-thought", Urgency.HIGH, rootInputEnqueuedAtMs = rootB)
+        scheduler.enqueueAction(
+            ActionType.WEB_SEARCH,
+            "a-action",
+            "a-summary",
+            Urgency.HIGH,
+            rootInputEnqueuedAtMs = rootA
+        )
+        scheduler.enqueueAction(
+            ActionType.WEB_SEARCH,
+            "b-action",
+            "b-summary",
+            Urgency.HIGH,
+            rootInputEnqueuedAtMs = rootB
+        )
+
+        val cleared = scheduler.clearPendingWorkForInput(rootA)
+
+        assertEquals(1, cleared.thoughtsRemoved)
+        assertEquals(1, cleared.actionsRemoved)
+        val state = scheduler.queueState()
+        assertEquals(listOf("b-thought"), state.thoughts.map { it.content })
+        assertEquals(listOf("b-action"), state.actions.map { it.payload })
+    }
+
+    @Test
+    fun `scheduler can detect pending fallback and plan thoughts for an input`() {
+        val scheduler = AttentionScheduler(config.copy(maxPendingThoughts = 8, maxPendingActions = 8))
+        val root = 300L
+        scheduler.enqueueThought(
+            content = "step 1",
+            urgency = Urgency.MEDIUM,
+            rootInputEnqueuedAtMs = root,
+            planContext = psyke.agent.core.PlanContext(
+                planId = "p1",
+                planGoal = "goal",
+                stepIndex = 0,
+                totalSteps = 2,
+                stepDescription = "step"
+            )
+        )
+        scheduler.enqueueAction(
+            type = ActionType.ANSWER,
+            payload = "fallback",
+            summary = "fallback",
+            urgency = Urgency.HIGH,
+            isFallbackExplanation = true,
+            rootInputEnqueuedAtMs = root
+        )
+
+        assertTrue(scheduler.hasPendingPlanThoughtsForInput(root))
+        assertTrue(scheduler.hasPendingFallbackExplanationAction(root))
+        assertFalse(scheduler.hasPendingPlanThoughtsForInput(999L))
+        assertFalse(scheduler.hasPendingFallbackExplanationAction(999L))
+    }
 }

@@ -58,7 +58,7 @@ private data class AgentRuntimeYamlAgent(
     val superegoMaxCompletionTokens: Int? = null,
     val searchResultCount: Int? = null,
     val mcpCallTimeoutMs: Long? = null,
-    val mcpFetchMaxChars: Int? = null,
+    val fetchMaxChars: Int? = null,
     val mcpMemoryCallTimeoutMs: Long? = null,
     val longTermMemoryRecallMaxItems: Int? = null,
     val longTermMemoryRecallMaxChars: Int? = null,
@@ -233,7 +233,7 @@ object AgentRuntimeSettingsLoader {
             maxPendingInputs = readPositiveInt(null, agentYaml.maxPendingInputs, defaults.maxPendingInputs),
             searchResultCount = readPositiveInt(env["EGO_SEARCH_RESULT_COUNT"], agentYaml.searchResultCount, defaults.searchResultCount),
             mcpCallTimeoutMs = mcpCallTimeoutMs,
-            mcpFetchMaxChars = readPositiveInt(env["MCP_FETCH_MAX_CHARS"], agentYaml.mcpFetchMaxChars, defaults.mcpFetchMaxChars),
+            fetchMaxChars = readPositiveInt(env["MCP_FETCH_MAX_CHARS"], agentYaml.fetchMaxChars, defaults.fetchMaxChars),
         )
 
         return AgentRuntimeSettings(

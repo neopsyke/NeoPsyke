@@ -36,10 +36,8 @@ data class McpRuntimeConfig(
                 ),
                 fetch = McpCapabilityConfig(
                     enabled = true,
-                    mode = "stdio",
-                    provider = "mcp-server-fetch",
-                    command = "uvx mcp-server-fetch",
-                    fallbackCommands = listOf("python -m mcp_server_fetch")
+                    mode = "native",
+                    provider = "native-jvm",
                 ),
                 memory = McpCapabilityConfig(
                     enabled = true,

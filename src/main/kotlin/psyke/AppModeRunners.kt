@@ -11,7 +11,7 @@ import psyke.agent.memory.longterm.McpHippocampus
 import psyke.agent.tools.mcp.McpStdioClient
 import psyke.agent.cortex.motor.MotorCortex
 import psyke.agent.memory.longterm.NoopHippocampus
-import psyke.agent.tools.mcp.SdkMcpFetchTool
+import psyke.agent.tools.mcp.NativeFetchTool
 import psyke.agent.tools.mcp.SdkMcpTimeTool
 import psyke.agent.superego.Superego
 import psyke.agent.actions.websearch.WebSearchActionHandler
@@ -62,7 +62,7 @@ import psyke.integrations.mistral.websearch.MistralWebSearchMode
 import psyke.integrations.mistral.websearch.MistralWebSearchProfile
 import psyke.integrations.mistral.websearch.MistralWebSearchAgentSession
 import psyke.metrics.MetricsRuntimeFactory
-import psyke.agent.tools.mcp.McpFetchTool
+import psyke.agent.tools.mcp.FetchTool
 import psyke.agent.tools.mcp.McpTimeTool
 import psyke.agent.tools.mcp.ToolHealthStatus
 import java.nio.file.Files
@@ -473,7 +473,7 @@ internal object AppModeRunners {
                                 "max_action_payload_chars" to config.planner.maxActionPayloadChars,
                                 "max_action_summary_chars" to config.planner.maxActionSummaryChars,
                                 "mcp_call_timeout_ms" to config.mcpCallTimeoutMs,
-                                "mcp_fetch_max_chars" to config.mcpFetchMaxChars,
+                                "fetch_max_chars" to config.fetchMaxChars,
                                 "mcp_memory_call_timeout_ms" to config.memory.mcpMemoryCallTimeoutMs,
                                 "long_term_memory_recall_max_items" to config.memory.longTermMemoryRecallMaxItems,
                                 "long_term_memory_recall_max_chars" to config.memory.longTermMemoryRecallMaxChars,
@@ -572,7 +572,7 @@ internal object AppModeRunners {
                                         instrumentation = instrumentation
                                     )
                                     val mcpTimeTool = createMcpTimeTool(config, mcpRuntimeConfig.time)
-                                    val mcpFetchTool = createMcpFetchTool(config, mcpRuntimeConfig.fetch)
+                                    val fetchTool = createFetchTool(config, mcpRuntimeConfig.fetch)
                                     val webSearchRuntime = createWebSearchRuntime(
                                         llm = llm,
                                         callObserver = callObserver,
@@ -582,13 +582,13 @@ internal object AppModeRunners {
     
                                     webSearchRuntime.use { runtime ->
                                         val timeTool = mcpTimeTool
-                                        val fetchTool = mcpFetchTool
+                                        val activeFetchTool = fetchTool
                                         try {
                                             val webSearchActionHandler = WebSearchActionHandler(runtime.engine)
                                             val motorCortex = MotorCortex(
                                                 webSearchActionHandler = webSearchActionHandler,
                                                 mcpTimeTool = timeTool,
-                                                mcpFetchTool = fetchTool
+                                                fetchTool = activeFetchTool
                                             )
                                             val actionStatuses = motorCortex.startupSmokeTest()
                                             instrumentation.emit(AgentEvents.actionCapabilities(actionStatuses))
@@ -652,7 +652,7 @@ internal object AppModeRunners {
                                                 hippocampus.close()
                                             }
                                         } finally {
-                                            closeQuietly(fetchTool)
+                                            closeQuietly(activeFetchTool)
                                             closeQuietly(timeTool)
                                         }
                                     }
@@ -758,17 +758,16 @@ internal object AppModeRunners {
         )
     }
     
-    private fun createMcpFetchTool(config: AgentConfig, capability: McpCapabilityConfig): McpFetchTool {
-        val command = resolveMcpCommand(capability)
-        if (command == null) {
-            val reason = disabledReason("fetch", capability)
+    private fun createFetchTool(config: AgentConfig, capability: McpCapabilityConfig): FetchTool {
+        if (!capability.enabled) {
+            val reason = "Fetch capability disabled by configuration."
             logger.info { reason }
-            return DisabledMcpFetchTool(reason)
+            return DisabledFetchTool(reason)
         }
-        return SdkMcpFetchTool(
-            command = command,
+        logger.info { "Using native JVM fetch tool (OkHttp + Jsoup). No external process." }
+        return NativeFetchTool(
             callTimeoutMs = config.mcpCallTimeoutMs,
-            maxChars = config.mcpFetchMaxChars
+            maxChars = config.fetchMaxChars
         )
     }
     
@@ -880,18 +879,18 @@ internal object AppModeRunners {
         override fun close() {}
     }
     
-    private class DisabledMcpFetchTool(
+    private class DisabledFetchTool(
         private val reason: String,
-    ) : McpFetchTool, AutoCloseable {
+    ) : FetchTool, AutoCloseable {
         override fun fetch(payload: String): String =
-            "MCP fetch unavailable: $reason"
-    
+            "Fetch unavailable: $reason"
+
         override fun healthCheck(): ToolHealthStatus =
             ToolHealthStatus(
                 available = false,
                 detail = reason
             )
-    
+
         override fun close() {}
     }
 }

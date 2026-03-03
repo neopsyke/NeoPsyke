@@ -39,7 +39,7 @@ It is intentionally high-level and should stay aligned with the code.
       - `processThought`
       - `processAction`
     - Catch task errors, emit warning, continue loop.
-    - Optionally queue forced terminal answer under high pressure.
+    - Optionally queue forced terminal answer under high pressure (scoped to current root input when available).
     - Optionally run long-term memory assessment.
   - If step limit is reached with pending work:
     - Try to execute one fallback explanation action.
@@ -66,6 +66,7 @@ It is intentionally high-level and should stay aligned with the code.
 - `processThought`:
   - Drops thought if `passes >= maxThoughtPasses`.
   - If dropped and fallback explanation is allowed, enqueue fallback answer action.
+  - Duplicate fallback answer enqueues for the same root input are suppressed if one is already pending.
   - Otherwise mirrors input path:
     - build context
     - optional meta assessment/guidance
@@ -86,12 +87,15 @@ It is intentionally high-level and should stay aligned with the code.
     - For evidence actions (`web_search`, `mcp_time`, `mcp_fetch`), enqueue follow-up thought.
     - Optionally run immediate long-term memory assessment.
   - For `answer`, response latency is emitted and per-input evidence cache is cleared.
+  - After `answer`, pending thoughts/actions for the same root input are pruned from queues
+    (`input_resolution_cleanup`) so stale plan/follow-up work cannot continue cycling.
 
 ## Planner Logic
 - File: `src/main/kotlin/psyke/agent/ego/LlmEgoPlanner.kt`
 - Responsibilities:
   - Prompt assembly with budget allocation.
   - Strict JSON parse + minimal repair for invalid escapes.
+  - Normalizes `action_payload` from either JSON string or structured JSON (object/array) into a string payload.
   - Decision types:
     - `thought`
     - `action`
@@ -150,6 +154,8 @@ It is intentionally high-level and should stay aligned with the code.
   - `mcp_time`
   - `mcp_fetch`
 - Action availability is runtime health-dependent and fed back into planner context.
+- `mcp_fetch` errors are classified as retryable vs non-retryable; non-retryable failures
+  feed into the per-input circuit breaker in `DeliberationEngine`.
 
 ## Queueing Model
 - File: `src/main/kotlin/psyke/agent/ego/AttentionScheduler.kt`
@@ -157,6 +163,10 @@ It is intentionally high-level and should stay aligned with the code.
   - inputs (`InputPriority`)
   - thoughts (`Urgency`)
   - actions (`Urgency`)
+- Supports root-input scoped queue operations used by convergence logic:
+  - detect pending fallback explanation actions per input
+  - detect pending plan-context thoughts per input
+  - clear pending thoughts/actions for a resolved input after terminal answer
 - Saturation leads to drop + instrumentation warning/event.
 
 ## Safety and Fallback Patterns
@@ -168,6 +178,17 @@ It is intentionally high-level and should stay aligned with the code.
   - meta-reasoner -> continue fallback
   - long-term advisor -> parse-fallback/skip save
 - Repeated denied-action loops are detected and blocked by payload/type comparison.
+- Multi-layer duplicate plan suppression (evaluated cheapest-first):
+  1. **Plan budget**: hard cap (`maxPlansPerInput`, default 2) on plans emitted per root input.
+  2. **Pressure gate**: suppress new plans when `decisionPressure >= planEmissionPressureThreshold` (default 0.55).
+  3. **Exact hash dedup**: normalized goal+steps hash prevents identical plans from being re-emitted.
+  4. **Pending plan detection**: if plan-context thoughts are already queued, suppress and enqueue a convergence thought instead.
+  5. **Convergence thought dedupe**: at most one convergence thought per root input to prevent churn.
+- `mcp_fetch` circuit breaker: after `FETCH_CIRCUIT_BREAKER_THRESHOLD` (default 3) non-retryable failures
+  (403, 404, 401, install errors, etc.) for a root input, `MCP_FETCH` is removed from available actions,
+  forcing the planner to use alternatives like `web_search`.
+- Fallback answer synthesis aggregates up to 6 successful evidence signals from the deliberation session
+  instead of relying only on the latest planner signal.
 
 ## Key Complexity Drivers
 - Multiple LLM actors with distinct prompts and fallback semantics.

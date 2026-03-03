@@ -98,6 +98,50 @@ class AttentionScheduler(
         return candidate
     }
 
+    fun hasPendingFallbackExplanationAction(rootInputEnqueuedAtMs: Long?): Boolean {
+        if (rootInputEnqueuedAtMs == null) {
+            return false
+        }
+        return actions.any { action ->
+            action.isFallbackExplanation &&
+                action.rootInputEnqueuedAtMs == rootInputEnqueuedAtMs
+        }
+    }
+
+    fun hasPendingPlanThoughtsForInput(rootInputEnqueuedAtMs: Long?): Boolean {
+        if (rootInputEnqueuedAtMs == null) {
+            return false
+        }
+        return thoughts.any { thought ->
+            thought.rootInputEnqueuedAtMs == rootInputEnqueuedAtMs &&
+                thought.planContext != null
+        }
+    }
+
+    fun hasPendingConvergenceThoughtForInput(rootInputEnqueuedAtMs: Long?): Boolean {
+        if (rootInputEnqueuedAtMs == null) {
+            return false
+        }
+        return thoughts.any { thought ->
+            thought.rootInputEnqueuedAtMs == rootInputEnqueuedAtMs &&
+                thought.content.startsWith(CONVERGENCE_THOUGHT_PREFIX)
+        }
+    }
+
+    fun clearPendingWorkForInput(rootInputEnqueuedAtMs: Long?): ClearedPendingWork {
+        if (rootInputEnqueuedAtMs == null) {
+            return ClearedPendingWork()
+        }
+        val thoughtBefore = thoughts.size
+        val actionBefore = actions.size
+        thoughts.removeIf { it.rootInputEnqueuedAtMs == rootInputEnqueuedAtMs }
+        actions.removeIf { it.rootInputEnqueuedAtMs == rootInputEnqueuedAtMs }
+        return ClearedPendingWork(
+            thoughtsRemoved = thoughtBefore - thoughts.size,
+            actionsRemoved = actionBefore - actions.size
+        )
+    }
+
     fun nextTask(): LoopTask? {
         val input = inputs.poll()
         if (input != null) {
@@ -144,14 +188,16 @@ class AttentionScheduler(
         return idCounter
     }
 
-    private companion object {
-        val inputComparator = compareByDescending<PendingInput> { it.priority.level }
+    companion object {
+        const val CONVERGENCE_THOUGHT_PREFIX: String = "[convergence] "
+
+        internal val inputComparator = compareByDescending<PendingInput> { it.priority.level }
             .thenBy { it.id }
 
-        val thoughtComparator = compareByDescending<PendingThought> { it.urgency.priority }
+        internal val thoughtComparator = compareByDescending<PendingThought> { it.urgency.priority }
             .thenBy { it.id }
 
-        val actionComparator = compareByDescending<PendingAction> { it.urgency.priority }
+        internal val actionComparator = compareByDescending<PendingAction> { it.urgency.priority }
             .thenBy { it.id }
     }
 }

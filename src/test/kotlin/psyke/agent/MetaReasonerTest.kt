@@ -151,4 +151,52 @@ class MetaReasonerTest {
 
         assertEquals("ego", llm.lastOptions.metadata.actor)
     }
+
+    // ── Truncation-tolerant parsing tests ──
+
+    @Test
+    fun `meta reasoner salvages finalize_now from truncated JSON`() {
+        val truncated = """{"verdict":"finalize_now","confidence":0.97,"reason":"Sufficient info to"""
+        val (reasoner, _) = buildReasoner(truncated)
+
+        val assessment = reasoner.assess(trigger = thoughtTrigger(), context = defaultContext())
+
+        assertEquals(MetaReasonerVerdict.FINALIZE_NOW, assessment.verdict)
+        assertTrue(assessment.confidence >= 0.9, "Should extract confidence from truncated JSON, got ${assessment.confidence}")
+    }
+
+    @Test
+    fun `meta reasoner salvages request_tool_then_finalize from truncated JSON`() {
+        val truncated = """{"verdict":"request_tool_then_finalize","confidence":0.85,"rea"""
+        val (reasoner, _) = buildReasoner(truncated)
+
+        val assessment = reasoner.assess(trigger = thoughtTrigger(), context = defaultContext())
+
+        assertEquals(MetaReasonerVerdict.REQUEST_TOOL_THEN_FINALIZE, assessment.verdict)
+        assertTrue(assessment.confidence >= 0.8)
+    }
+
+    @Test
+    fun `meta reasoner does not salvage truncated continue verdict`() {
+        // A truncated "continue" is worthless — fallback to standard parse fallback
+        val truncated = """{"verdict":"continue","confidence":0.8,"reason":"still produc"""
+        val (reasoner, _) = buildReasoner(truncated)
+
+        val assessment = reasoner.assess(trigger = thoughtTrigger(), context = defaultContext())
+
+        assertEquals(MetaReasonerVerdict.CONTINUE, assessment.verdict)
+        // Should still be low confidence because it's a fallback, not a salvage
+        assertTrue(assessment.confidence <= 0.3, "Should be fallback confidence, got ${assessment.confidence}")
+    }
+
+    @Test
+    fun `meta reasoner salvages verdict even without confidence field`() {
+        val truncated = """{"verdict":"finalize_now","rea"""
+        val (reasoner, _) = buildReasoner(truncated)
+
+        val assessment = reasoner.assess(trigger = thoughtTrigger(), context = defaultContext())
+
+        assertEquals(MetaReasonerVerdict.FINALIZE_NOW, assessment.verdict)
+        assertEquals(0.6, assessment.confidence, 0.01) // default when confidence not extractable
+    }
 }

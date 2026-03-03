@@ -12,4 +12,6 @@ data class PlannerConfig(
     val llmRetryAttempts: Int = 2,
     val maxPlanSteps: Int = 6,
     val maxPlanStepDescriptionChars: Int = 120,
+    val maxPlansPerInput: Int = 2,
+    val planEmissionPressureThreshold: Double = 0.55,
 )

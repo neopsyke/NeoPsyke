@@ -110,7 +110,7 @@ class MotorCortexTest {
     }
 
     @Test
-    fun `mcp fetch action delegates to configured tool`() {
+    fun `mcp fetch action delegates to configured tool and propagates success category`() {
         val cortex = MotorCortex(
             webSearchActionHandler = WebSearchActionHandler(
                 engine = object : WebSearchEngine {
@@ -118,10 +118,14 @@ class MotorCortexTest {
                         WebSearchResult("unused", emptyList())
                 }
             ),
-            mcpFetchTool = object : McpFetchTool {
-                override fun fetch(payload: String): String {
+            fetchTool = object : FetchTool {
+                override fun fetch(payload: String): String = "unused"
+                override fun fetchWithOutcome(payload: String): FetchOutcome {
                     assertEquals("""{"url":"https://example.com","max_chars":500}""", payload)
-                    return "MCP fetch completed for https://example.com."
+                    return FetchOutcome(
+                        message = "MCP fetch completed for https://example.com.",
+                        errorCategory = FetchErrorCategory.NONE
+                    )
                 }
             }
         )
@@ -138,7 +142,74 @@ class MotorCortexTest {
         )
 
         assertEquals("MCP fetch completed for https://example.com.", outcome.statusSummary)
+        assertEquals("none", outcome.fetchErrorCategory)
         assertNull(outcome.assistantOutput)
+    }
+
+    @Test
+    fun `mcp fetch propagates non retryable error category through action outcome`() {
+        val cortex = MotorCortex(
+            webSearchActionHandler = WebSearchActionHandler(
+                engine = object : WebSearchEngine {
+                    override fun search(query: String, maxResults: Int): WebSearchResult =
+                        WebSearchResult("unused", emptyList())
+                }
+            ),
+            fetchTool = object : FetchTool {
+                override fun fetch(payload: String): String = "unused"
+                override fun fetchWithOutcome(payload: String): FetchOutcome =
+                    FetchOutcome(
+                        message = "MCP fetch tool returned an error: 403 Forbidden",
+                        errorCategory = FetchErrorCategory.NON_RETRYABLE
+                    )
+            }
+        )
+
+        val outcome = cortex.execute(
+            PendingAction(
+                id = 5,
+                urgency = Urgency.HIGH,
+                type = ActionType.MCP_FETCH,
+                payload = """{"url":"https://example.com"}""",
+                summary = "fetch page"
+            ),
+            searchResultCount = 1
+        )
+
+        assertEquals("non_retryable", outcome.fetchErrorCategory)
+    }
+
+    @Test
+    fun `mcp fetch propagates malformed request category through action outcome`() {
+        val cortex = MotorCortex(
+            webSearchActionHandler = WebSearchActionHandler(
+                engine = object : WebSearchEngine {
+                    override fun search(query: String, maxResults: Int): WebSearchResult =
+                        WebSearchResult("unused", emptyList())
+                }
+            ),
+            fetchTool = object : FetchTool {
+                override fun fetch(payload: String): String = "unused"
+                override fun fetchWithOutcome(payload: String): FetchOutcome =
+                    FetchOutcome(
+                        message = "MCP fetch payload is invalid.",
+                        errorCategory = FetchErrorCategory.MALFORMED_REQUEST
+                    )
+            }
+        )
+
+        val outcome = cortex.execute(
+            PendingAction(
+                id = 6,
+                urgency = Urgency.MEDIUM,
+                type = ActionType.MCP_FETCH,
+                payload = "bad payload",
+                summary = "fetch page"
+            ),
+            searchResultCount = 1
+        )
+
+        assertEquals("malformed_request", outcome.fetchErrorCategory)
     }
 
     @Test
@@ -162,7 +233,7 @@ class MotorCortexTest {
                 override fun healthCheck(): ToolHealthStatus =
                     ToolHealthStatus(available = false, detail = "time server offline")
             },
-            mcpFetchTool = object : McpFetchTool {
+            fetchTool = object : FetchTool {
                 override fun fetch(payload: String): String = "unused"
 
                 override fun healthCheck(): ToolHealthStatus =

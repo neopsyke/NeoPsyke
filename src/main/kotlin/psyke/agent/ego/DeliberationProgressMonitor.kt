@@ -174,7 +174,7 @@ class DeliberationProgressMonitor(
     }
 
     private fun recomputePressure() {
-        val stepPressure = if (state.stepIndex <= 20) 0.0 else (state.stepIndex - 20) * 0.012
+        val stepPressure = if (state.stepIndex <= 14) 0.0 else (state.stepIndex - 14) * 0.018
         val stalePressure = state.staleStreak * 0.09
         val denialPressure = state.denialCount * 0.07
         val repeatPressure = state.repeatSignatureHits * 0.08

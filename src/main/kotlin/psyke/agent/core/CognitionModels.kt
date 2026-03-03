@@ -53,6 +53,7 @@ data class ActionOutcome(
     val assistantOutput: String? = null,
     val plannerSignal: String = statusSummary,
     val observedEvidence: Boolean? = null,
+    val fetchErrorCategory: String? = null,
 )
 
 data class DeliberationState(

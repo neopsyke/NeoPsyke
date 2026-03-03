@@ -170,18 +170,19 @@ class LlmMetaReasoner(
                 )
             }
             MetaReasonerAssessment(
-                verdict = MetaReasonerVerdict.entries.firstOrNull {
-                    it.name.equals(payload.verdict?.trim(), ignoreCase = true)
-                } ?: when (payload.verdict?.trim()?.lowercase()) {
-                    "continue_with_constraints" -> MetaReasonerVerdict.CONTINUE_WITH_CONSTRAINTS
-                    "finalize_now" -> MetaReasonerVerdict.FINALIZE_NOW
-                    "request_tool_then_finalize" -> MetaReasonerVerdict.REQUEST_TOOL_THEN_FINALIZE
-                    else -> MetaReasonerVerdict.CONTINUE
-                },
+                verdict = resolveVerdict(payload.verdict),
                 confidence = payload.confidence?.coerceIn(0.0, 1.0) ?: 0.5,
                 reason = TextSecurity.clamp(payload.reason?.trim().orEmpty().ifBlank { "No reason provided." }, 140)
             )
         } catch (ex: Exception) {
+            // Attempt truncation-tolerant extraction before falling back.
+            val salvaged = salvageVerdictFromTruncated(raw)
+            if (salvaged != null) {
+                logger.info {
+                    "MetaReasoner response was truncated but verdict salvaged: ${salvaged.verdict}. response_len=${raw.length}"
+                }
+                return salvaged
+            }
             logger.warn(ex) {
                 "Failed to parse MetaReasoner response. response_len=${raw.length} preview='${TextSecurity.preview(raw, 120)}'"
             }
@@ -193,14 +194,54 @@ class LlmMetaReasoner(
         }
     }
 
+    /**
+     * Extracts a verdict from a truncated JSON response where the closing brace
+     * is missing. For example: `{"verdict":"finalize_now","confidence":0.97,"reason":"Sufficient info to`
+     */
+    private fun salvageVerdictFromTruncated(raw: String): MetaReasonerAssessment? {
+        if (raw.isBlank()) return null
+        val verdictMatch = TRUNCATED_VERDICT_REGEX.find(raw) ?: return null
+        val verdictStr = verdictMatch.groupValues[1].trim()
+        val verdict = resolveVerdict(verdictStr)
+        // Only salvage non-continue verdicts — a truncated "continue" adds no value.
+        if (verdict == MetaReasonerVerdict.CONTINUE) return null
+        val confidence = TRUNCATED_CONFIDENCE_REGEX.find(raw)
+            ?.groupValues?.get(1)?.toDoubleOrNull()?.coerceIn(0.0, 1.0) ?: 0.6
+        return MetaReasonerAssessment(
+            verdict = verdict,
+            confidence = confidence,
+            reason = "Verdict salvaged from truncated response."
+        )
+    }
+
+    private fun resolveVerdict(raw: String?): MetaReasonerVerdict {
+        val normalized = raw?.trim()?.lowercase() ?: return MetaReasonerVerdict.CONTINUE
+        return MetaReasonerVerdict.entries.firstOrNull {
+            it.name.equals(normalized, ignoreCase = true)
+        } ?: when (normalized) {
+            "continue_with_constraints" -> MetaReasonerVerdict.CONTINUE_WITH_CONSTRAINTS
+            "finalize_now" -> MetaReasonerVerdict.FINALIZE_NOW
+            "request_tool_then_finalize" -> MetaReasonerVerdict.REQUEST_TOOL_THEN_FINALIZE
+            else -> MetaReasonerVerdict.CONTINUE
+        }
+    }
+
     private data class MetaReasonerPayload(
         val verdict: String? = null,
         val confidence: Double? = null,
         val reason: String? = null,
     )
 
-    private companion object {
+    internal companion object {
         val mapper = jacksonObjectMapper()
             .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
+
+        /** Matches `"verdict":"<value>"` even if the surrounding JSON is truncated. */
+        internal val TRUNCATED_VERDICT_REGEX =
+            Regex(""""verdict"\s*:\s*"([^"]+)"""")
+
+        /** Matches `"confidence":<number>` from a truncated JSON fragment. */
+        internal val TRUNCATED_CONFIDENCE_REGEX =
+            Regex(""""confidence"\s*:\s*([0-9]+(?:\.[0-9]+)?)""")
     }
 }

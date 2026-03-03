@@ -11,7 +11,7 @@ data class AgentConfig(
     val maxPendingInputs: Int = 32,
     val searchResultCount: Int = 5,
     val mcpCallTimeoutMs: Long = 8_000,
-    val mcpFetchMaxChars: Int = 4_000,
+    val fetchMaxChars: Int = 4_000,
 ) {
     companion object {
         fun fromEnv(): AgentConfig =
@@ -32,6 +32,8 @@ data class AgentConfig(
                     llmRetryAttempts = readInt("EGO_LLM_RETRY_ATTEMPTS", 2),
                     maxPlanSteps = readInt("EGO_MAX_PLAN_STEPS", 6),
                     maxPlanStepDescriptionChars = readInt("EGO_MAX_PLAN_STEP_DESC_CHARS", 120),
+                    maxPlansPerInput = readInt("EGO_MAX_PLANS_PER_INPUT", 2),
+                    planEmissionPressureThreshold = readDouble("EGO_PLAN_EMISSION_PRESSURE_THRESHOLD", 0.55),
                 ),
                 superego = SuperegoConfig(
                     maxCompletionTokens = readInt("EGO_SUPEREGO_MAX_COMPLETION_TOKENS", 192),
@@ -65,7 +67,7 @@ data class AgentConfig(
                 maxPendingInputs = readInt("EGO_MAX_PENDING_INPUTS", 32),
                 searchResultCount = readInt("EGO_SEARCH_RESULT_COUNT", 5),
                 mcpCallTimeoutMs = mcpCallTimeoutMs,
-                mcpFetchMaxChars = readInt("MCP_FETCH_MAX_CHARS", 4000),
+                fetchMaxChars = readInt("MCP_FETCH_MAX_CHARS", 4000),
             )
         }
 

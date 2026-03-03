@@ -2,6 +2,7 @@ package psyke.agent.ego
 
 import com.fasterxml.jackson.annotation.JsonProperty
 import com.fasterxml.jackson.databind.DeserializationFeature
+import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
 import mu.KotlinLogging
@@ -117,7 +118,7 @@ class LlmEgoPlanner(
 
                 "action" -> {
                     val actionType = ActionType.fromRaw(payload.actionType)
-                    val actionPayload = payload.actionPayload?.trim().orEmpty()
+                    val actionPayload = normalizeActionPayload(payload.actionPayload)?.trim().orEmpty()
                     val actionSummary = payload.actionSummary?.trim().orEmpty()
                     val resolvedSummary = if (actionSummary.isBlank() && actionType != null && actionPayload.isNotBlank()) {
                         onPlannerOutputRepaired()
@@ -344,7 +345,7 @@ class LlmEgoPlanner(
                     return EgoDecision.Noop(reason)
                 }
 
-                val repairedPayload = payload.actionPayload?.trim().orEmpty()
+                val repairedPayload = normalizeActionPayload(payload.actionPayload)?.trim().orEmpty()
                 if (repairedPayload.isBlank()) {
                     instrumentation.emit(
                         AgentEvents.warning(
@@ -549,6 +550,7 @@ class LlmEgoPlanner(
                     Valid plan example:
                     {"decision":"plan","urgency":"medium","plan_goal":"Find and verify current pricing","plan_steps":["Search for official pricing page","Fetch the pricing page content","Synthesize and answer with verified pricing"]}
                     Do not return decision=action without both action_payload and action_summary.
+                    action_payload must always be a JSON string value; never return object/array directly.
                     Do not return decision=plan without both plan_goal and plan_steps.
                     Keep thought concise.
                     Prefer concise answer payloads by default.
@@ -761,7 +763,7 @@ class LlmEgoPlanner(
         @field:JsonProperty("action_type")
         val actionType: String? = null,
         @field:JsonProperty("action_payload")
-        val actionPayload: String? = null,
+        val actionPayload: JsonNode? = null,
         @field:JsonProperty("action_summary")
         val actionSummary: String? = null,
         val reason: String? = null,
@@ -776,7 +778,7 @@ class LlmEgoPlanner(
         @field:JsonProperty("action_type")
         val actionType: String? = null,
         @field:JsonProperty("action_payload")
-        val actionPayload: String? = null,
+        val actionPayload: JsonNode? = null,
         @field:JsonProperty("action_summary")
         val actionSummary: String? = null,
         val reason: String? = null,
@@ -786,6 +788,17 @@ class LlmEgoPlanner(
         val mapper = jacksonObjectMapper()
             .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
         val invalidJsonEscapeRegex = Regex("""\\(?!["\\/bfnrtu])""")
+    }
+
+    private fun normalizeActionPayload(node: JsonNode?): String? {
+        if (node == null || node.isNull) {
+            return null
+        }
+        return when {
+            node.isTextual -> node.asText()
+            node.isObject || node.isArray -> mapper.writeValueAsString(node)
+            else -> node.asText()
+        }
     }
 
     private fun synthesizeActionSummary(actionPayload: String): String {

@@ -218,6 +218,45 @@ api_key_for_provider() {
   esac
 }
 
+build_completion_payload() {
+  local provider_name="$1"
+  local model_name="$2"
+  local user_prompt="$3"
+  if [[ "$provider_name" == "openai" ]]; then
+    jq -n \
+      --arg model "$model_name" \
+      --arg system "You are a CI triage assistant. Output strict JSON only, with no markdown fences." \
+      --arg user "$user_prompt" \
+      --argjson temperature 0.1 \
+      --argjson max_completion_tokens "$max_output_tokens" \
+      '{
+        model: $model,
+        temperature: $temperature,
+        max_completion_tokens: $max_completion_tokens,
+        messages: [
+          {role: "system", content: $system},
+          {role: "user", content: $user}
+        ]
+      }'
+  else
+    jq -n \
+      --arg model "$model_name" \
+      --arg system "You are a CI triage assistant. Output strict JSON only, with no markdown fences." \
+      --arg user "$user_prompt" \
+      --argjson temperature 0.1 \
+      --argjson max_tokens "$max_output_tokens" \
+      '{
+        model: $model,
+        temperature: $temperature,
+        max_tokens: $max_tokens,
+        messages: [
+          {role: "system", content: $system},
+          {role: "user", content: $user}
+        ]
+      }'
+  fi
+}
+
 healthcheck_provider() {
   local p="$1" url="$2" key="$3"
   [[ "$p" == "mock" ]] && return 0
@@ -454,21 +493,7 @@ for cand_p in "${provider_candidates[@]}"; do
   fi
   append_attempt "$cand_p" "$cand_model" "healthcheck" "pass" "provider reachable"
 
-  payload="$(jq -n \
-    --arg model "$cand_model" \
-    --arg system "You are a CI triage assistant. Output strict JSON only, with no markdown fences." \
-    --arg user "$(cat "$ai_triage_prompt")" \
-    --argjson temperature 0.1 \
-    --argjson max_tokens "$max_output_tokens" \
-    '{
-      model: $model,
-      temperature: $temperature,
-      max_tokens: $max_tokens,
-      messages: [
-        {role: "system", content: $system},
-        {role: "user", content: $user}
-      ]
-    }')"
+  payload="$(build_completion_payload "$cand_p" "$cand_model" "$(cat "$ai_triage_prompt")")"
 
   curl_exit=0
   http_code="$(

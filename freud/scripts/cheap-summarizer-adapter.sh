@@ -173,6 +173,8 @@ ledger_completion_before=0
 ledger_runs_before=0
 usage_cumulative_before=0
 usage_cumulative_after=0
+report_cumulative_before=0
+report_cumulative_after=0
 usage_limit_reached="false"
 usage_warning=""
 ledger_token_limit_reached_at=""
@@ -719,7 +721,7 @@ persist_usage_run_snapshot() {
   local now_iso
   now_iso="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
   sqlite_exec_stmt "persist_run_snapshot" \
-    "INSERT INTO freud_summarizer_runs(run_id, run_dir, status, reason, provider, model, api_key_source, prompt_tokens, completion_tokens, total_tokens, token_limit, cumulative_before, cumulative_after, recorded_at) VALUES ($(sql_quote "$summarizer_run_id"), $(sql_quote "$run_dir"), $(sql_quote "$status"), $(sql_quote "$reason"), $(sql_quote "$provider"), $(sql_quote "$model"), $(sql_quote "$api_key_source"), ${prompt_tokens:-0}, ${completion_tokens:-0}, ${total_tokens:-0}, $token_limit, ${usage_cumulative_before:-0}, ${usage_cumulative_after:-0}, $(sql_quote "$now_iso")) ON CONFLICT(run_id) DO UPDATE SET run_dir=excluded.run_dir, status=excluded.status, reason=excluded.reason, provider=excluded.provider, model=excluded.model, api_key_source=excluded.api_key_source, prompt_tokens=excluded.prompt_tokens, completion_tokens=excluded.completion_tokens, total_tokens=excluded.total_tokens, token_limit=excluded.token_limit, cumulative_before=excluded.cumulative_before, cumulative_after=excluded.cumulative_after, recorded_at=excluded.recorded_at;" >/dev/null || true
+    "INSERT INTO freud_summarizer_runs(run_id, run_dir, status, reason, provider, model, api_key_source, prompt_tokens, completion_tokens, total_tokens, token_limit, cumulative_before, cumulative_after, recorded_at) VALUES ($(sql_quote "$summarizer_run_id"), $(sql_quote "$run_dir"), $(sql_quote "$status"), $(sql_quote "$reason"), $(sql_quote "$provider"), $(sql_quote "$model"), $(sql_quote "$api_key_source"), ${prompt_tokens:-0}, ${completion_tokens:-0}, ${total_tokens:-0}, $token_limit, ${report_cumulative_before:-0}, ${report_cumulative_after:-0}, $(sql_quote "$now_iso")) ON CONFLICT(run_id) DO UPDATE SET run_dir=excluded.run_dir, status=excluded.status, reason=excluded.reason, provider=excluded.provider, model=excluded.model, api_key_source=excluded.api_key_source, prompt_tokens=excluded.prompt_tokens, completion_tokens=excluded.completion_tokens, total_tokens=excluded.total_tokens, token_limit=excluded.token_limit, cumulative_before=excluded.cumulative_before, cumulative_after=excluded.cumulative_after, recorded_at=excluded.recorded_at;" >/dev/null || true
 }
 
 write_summary_artifacts() {
@@ -762,8 +764,8 @@ write_summary_artifacts() {
       --argjson completion_tokens "${completion_tokens:-0}" \
       --argjson total_tokens "$(( ${prompt_tokens:-0} + ${completion_tokens:-0} ))" \
       --argjson token_limit "$token_limit" \
-      --argjson cumulative_before "${usage_cumulative_before:-0}" \
-      --argjson cumulative_after "${usage_cumulative_after:-0}" \
+      --argjson cumulative_before "${report_cumulative_before:-0}" \
+      --argjson cumulative_after "${report_cumulative_after:-0}" \
       --argjson limit_reached "$([[ "$usage_limit_reached" == "true" ]] && echo true || echo false)" \
       --arg token_warning "$usage_warning" \
       '{
@@ -843,8 +845,8 @@ write_summary_artifacts() {
       --argjson completion_tokens "${completion_tokens:-0}" \
       --argjson total_tokens "$(( ${prompt_tokens:-0} + ${completion_tokens:-0} ))" \
       --argjson token_limit "$token_limit" \
-      --argjson cumulative_before "${usage_cumulative_before:-0}" \
-      --argjson cumulative_after "${usage_cumulative_after:-0}" \
+      --argjson cumulative_before "${report_cumulative_before:-0}" \
+      --argjson cumulative_after "${report_cumulative_after:-0}" \
       --argjson limit_reached "$([[ "$usage_limit_reached" == "true" ]] && echo true || echo false)" \
       --arg token_warning "$usage_warning" \
       '{
@@ -930,8 +932,8 @@ write_summary_artifacts() {
     echo "- prompt_tokens: \`${prompt_tokens:-0}\`"
     echo "- completion_tokens: \`${completion_tokens:-0}\`"
     echo "- total_tokens: \`$(( ${prompt_tokens:-0} + ${completion_tokens:-0} ))\`"
-    echo "- cumulative_before: \`${usage_cumulative_before:-0}\`"
-    echo "- cumulative_after: \`${usage_cumulative_after:-0}\`"
+    echo "- cumulative_before: \`${report_cumulative_before:-0}\`"
+    echo "- cumulative_after: \`${report_cumulative_after:-0}\`"
     echo "- token_limit: \`${token_limit}\`"
     echo "- limit_reached: \`${usage_limit_reached}\`"
     if [[ -n "$usage_warning" ]]; then
@@ -1014,8 +1016,8 @@ write_summary_artifacts() {
     --argjson prompt_tokens "${prompt_tokens:-0}" \
     --argjson completion_tokens "${completion_tokens:-0}" \
     --argjson total_tokens "$total_tokens" \
-    --argjson cumulative_before "${usage_cumulative_before:-0}" \
-    --argjson cumulative_after "${usage_cumulative_after:-0}" \
+    --argjson cumulative_before "${report_cumulative_before:-0}" \
+    --argjson cumulative_after "${report_cumulative_after:-0}" \
     --argjson token_limit "$token_limit" \
     --argjson limit_reached "$([[ "$usage_limit_reached" == "true" ]] && echo true || echo false)" \
     --arg token_warning "$usage_warning" \
@@ -1196,6 +1198,45 @@ api_key_for_provider() {
   esac
 }
 
+build_chat_payload() {
+  local provider_name="$1"
+  local model_name="$2"
+  local user_prompt="$3"
+  if [[ "$provider_name" == "openai" ]]; then
+    jq -n \
+      --arg model "$model_name" \
+      --arg system "You are a concise triage summarizer. Output strict JSON only." \
+      --arg user "$user_prompt" \
+      --argjson temperature "$temperature" \
+      --argjson max_completion_tokens "$max_output_tokens" \
+      '{
+        model: $model,
+        temperature: $temperature,
+        max_completion_tokens: $max_completion_tokens,
+        messages: [
+          {role: "system", content: $system},
+          {role: "user", content: $user}
+        ]
+      }'
+  else
+    jq -n \
+      --arg model "$model_name" \
+      --arg system "You are a concise triage summarizer. Output strict JSON only." \
+      --arg user "$user_prompt" \
+      --argjson temperature "$temperature" \
+      --argjson max_tokens "$max_output_tokens" \
+      '{
+        model: $model,
+        temperature: $temperature,
+        max_tokens: $max_tokens,
+        messages: [
+          {role: "system", content: $system},
+          {role: "user", content: $user}
+        ]
+      }'
+  fi
+}
+
 unique_provider_append() {
   local candidate="$1"
   local current="$2"
@@ -1335,6 +1376,8 @@ for candidate_provider in "${provider_candidates[@]}"; do
   if [[ "$candidate_provider" == "mock" ]]; then
     set_usage_scope "$candidate_provider" "" ""
     load_usage_ledger
+    report_cumulative_before="$usage_cumulative_before"
+    report_cumulative_after="$usage_cumulative_after"
     debug_log "candidate_budget scope=$usage_scope_id cumulative_before=$usage_cumulative_before token_limit=$token_limit runs_before=$ledger_runs_before"
     provider="mock"
     model="${requested_model:-$(default_model_for_provider "$candidate_provider")}"
@@ -1342,6 +1385,7 @@ for candidate_provider in "${provider_candidates[@]}"; do
     debug_log "candidate_mock_selected provider=$provider model=$model"
     append_attempt "$provider" "$model" "selection" "pass" "mock provider selected"
     persist_usage_ledger 0 0 1
+    report_cumulative_after="$usage_cumulative_after"
     debug_log "usage_ledger_persisted provider=$provider model=$model api_key_source=${api_key_source:-none} cumulative_after=$usage_cumulative_after"
     cat >"$model_parsed_json" <<EOF
 {"overview":"Mock Tier-2 summary generated without network call.","root_cause":"Mock mode enabled.","recommended_actions":["Set FREUD_SUMMARIZER_PROVIDER to openai, groq, or mistral for live model summaries."],"evidence_refs":["$summary_json"],"confidence":0.2,"risk_level":"low"}
@@ -1389,6 +1433,8 @@ EOF
   candidate_key_source="$(api_key_env_name_for_provider "$candidate_provider")"
   set_usage_scope "$candidate_provider" "$candidate_key_source" "$candidate_api_key"
   load_usage_ledger
+  report_cumulative_before="$usage_cumulative_before"
+  report_cumulative_after="$usage_cumulative_after"
   api_key_source="$candidate_key_source"
   debug_log "candidate_budget scope=$usage_scope_id cumulative_before=$usage_cumulative_before token_limit=$token_limit runs_before=$ledger_runs_before"
   if (( usage_cumulative_before >= token_limit )); then
@@ -1413,23 +1459,7 @@ EOF
   debug_log "healthcheck_pass provider=$candidate_provider url=$healthcheck_last_models_url http_code=${healthcheck_last_http_code:-unknown}"
   append_attempt "$candidate_provider" "$candidate_model" "healthcheck" "pass" "provider reachable"
 
-  payload="$(
-    jq -n \
-      --arg model "$candidate_model" \
-      --arg system "You are a concise triage summarizer. Output strict JSON only." \
-      --arg user "$(cat "$model_summary_prompt")" \
-      --argjson temperature "$temperature" \
-      --argjson max_tokens "$max_output_tokens" \
-      '{
-        model: $model,
-        temperature: $temperature,
-        max_tokens: $max_tokens,
-        messages: [
-          {role: "system", content: $system},
-          {role: "user", content: $user}
-        ]
-      }'
-  )"
+  payload="$(build_chat_payload "$candidate_provider" "$candidate_model" "$(cat "$model_summary_prompt")")"
 
   candidate_response_json="$artifact_dir/model-summary-response-${candidate_provider}.json"
   curl_exit=0
@@ -1468,6 +1498,7 @@ EOF
   prompt_tokens="$(jq -r '.usage.prompt_tokens // 0' "$candidate_response_json" 2>/dev/null || echo "0")"
   completion_tokens="$(jq -r '.usage.completion_tokens // 0' "$candidate_response_json" 2>/dev/null || echo "0")"
   persist_usage_ledger "$prompt_tokens" "$completion_tokens" 1
+  report_cumulative_after="$usage_cumulative_after"
   debug_log "usage_ledger_persisted provider=$provider model=$model api_key_source=${api_key_source:-none} prompt_tokens=$prompt_tokens completion_tokens=$completion_tokens cumulative_after=$usage_cumulative_after"
   if [[ "$usage_limit_reached" == "true" ]]; then
     usage_warning="summarizer token limit reached (${usage_cumulative_after}/${token_limit})"

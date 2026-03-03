@@ -59,11 +59,13 @@ typealias LongTermMemoryAssessmentDecision = psyke.agent.memory.longterm.LongTer
 typealias LlmLongTermMemoryAdvisor = psyke.agent.memory.longterm.LlmLongTermMemoryAdvisor
 
 typealias McpTimeTool = psyke.agent.tools.mcp.McpTimeTool
-typealias McpFetchTool = psyke.agent.tools.mcp.McpFetchTool
+typealias FetchTool = psyke.agent.tools.mcp.FetchTool
+typealias FetchOutcome = psyke.agent.tools.mcp.FetchOutcome
+typealias FetchErrorCategory = psyke.agent.tools.mcp.FetchErrorCategory
 typealias ToolHealthStatus = psyke.agent.tools.mcp.ToolHealthStatus
 typealias McpStdioClient = psyke.agent.tools.mcp.McpStdioClient
 typealias SdkMcpTimeTool = psyke.agent.tools.mcp.SdkMcpTimeTool
-typealias SdkMcpFetchTool = psyke.agent.tools.mcp.SdkMcpFetchTool
+typealias NativeFetchTool = psyke.agent.tools.mcp.NativeFetchTool
 
 typealias PromptBudgetAllocator = psyke.agent.support.PromptBudgetAllocator
 typealias TextSecurity = psyke.agent.support.TextSecurity
