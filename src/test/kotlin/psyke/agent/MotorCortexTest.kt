@@ -118,7 +118,7 @@ class MotorCortexTest {
                         WebSearchResult("unused", emptyList())
                 }
             ),
-            mcpFetchTool = object : McpFetchTool {
+            fetchTool = object : FetchTool {
                 override fun fetch(payload: String): String = "unused"
                 override fun fetchWithOutcome(payload: String): FetchOutcome {
                     assertEquals("""{"url":"https://example.com","max_chars":500}""", payload)
@@ -155,7 +155,7 @@ class MotorCortexTest {
                         WebSearchResult("unused", emptyList())
                 }
             ),
-            mcpFetchTool = object : McpFetchTool {
+            fetchTool = object : FetchTool {
                 override fun fetch(payload: String): String = "unused"
                 override fun fetchWithOutcome(payload: String): FetchOutcome =
                     FetchOutcome(
@@ -188,7 +188,7 @@ class MotorCortexTest {
                         WebSearchResult("unused", emptyList())
                 }
             ),
-            mcpFetchTool = object : McpFetchTool {
+            fetchTool = object : FetchTool {
                 override fun fetch(payload: String): String = "unused"
                 override fun fetchWithOutcome(payload: String): FetchOutcome =
                     FetchOutcome(
@@ -233,7 +233,7 @@ class MotorCortexTest {
                 override fun healthCheck(): ToolHealthStatus =
                     ToolHealthStatus(available = false, detail = "time server offline")
             },
-            mcpFetchTool = object : McpFetchTool {
+            fetchTool = object : FetchTool {
                 override fun fetch(payload: String): String = "unused"
 
                 override fun healthCheck(): ToolHealthStatus =

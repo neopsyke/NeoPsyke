@@ -11,7 +11,7 @@ data class AgentConfig(
     val maxPendingInputs: Int = 32,
     val searchResultCount: Int = 5,
     val mcpCallTimeoutMs: Long = 8_000,
-    val mcpFetchMaxChars: Int = 4_000,
+    val fetchMaxChars: Int = 4_000,
 ) {
     companion object {
         fun fromEnv(): AgentConfig =
@@ -67,7 +67,7 @@ data class AgentConfig(
                 maxPendingInputs = readInt("EGO_MAX_PENDING_INPUTS", 32),
                 searchResultCount = readInt("EGO_SEARCH_RESULT_COUNT", 5),
                 mcpCallTimeoutMs = mcpCallTimeoutMs,
-                mcpFetchMaxChars = readInt("MCP_FETCH_MAX_CHARS", 4000),
+                fetchMaxChars = readInt("MCP_FETCH_MAX_CHARS", 4000),
             )
         }
 

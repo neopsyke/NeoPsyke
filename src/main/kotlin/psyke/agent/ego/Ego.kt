@@ -844,7 +844,7 @@ class Ego(
         when (this) {
             ActionType.WEB_SEARCH -> "Web search completed."
             ActionType.MCP_TIME -> "MCP time lookup completed."
-            ActionType.MCP_FETCH -> "MCP fetch completed."
+            ActionType.MCP_FETCH -> "Fetch completed."
             ActionType.ANSWER -> "Action completed."
         }
 

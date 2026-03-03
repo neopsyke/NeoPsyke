@@ -992,7 +992,7 @@ class EgoAgentTest {
         }
         val instrumentation = RecordingInstrumentation()
         val outputs = mutableListOf<String>()
-        val failingFetchTool = object : McpFetchTool {
+        val failingFetchTool = object : FetchTool {
             override fun fetch(payload: String): String = "unused"
             override fun fetchWithOutcome(payload: String): FetchOutcome =
                 FetchOutcome(
@@ -1004,7 +1004,7 @@ class EgoAgentTest {
         val agent = Ego(
             planner = LlmEgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
             superego = Superego(modelClient = superegoLlm, config = config, instrumentation = instrumentation),
-            motorCortex = buildMotorCortex(output = { outputs.add(it) }, mcpFetchTool = failingFetchTool),
+            motorCortex = buildMotorCortex(output = { outputs.add(it) }, fetchTool = failingFetchTool),
             config = config,
             instrumentation = instrumentation
         )
@@ -1052,7 +1052,7 @@ class EgoAgentTest {
         }
         val instrumentation = RecordingInstrumentation()
         val outputs = mutableListOf<String>()
-        val malformedTool = object : McpFetchTool {
+        val malformedTool = object : FetchTool {
             override fun fetch(payload: String): String = "unused"
             override fun fetchWithOutcome(payload: String): FetchOutcome =
                 FetchOutcome(
@@ -1064,7 +1064,7 @@ class EgoAgentTest {
         val agent = Ego(
             planner = LlmEgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
             superego = Superego(modelClient = superegoLlm, config = config, instrumentation = instrumentation),
-            motorCortex = buildMotorCortex(output = { outputs.add(it) }, mcpFetchTool = malformedTool),
+            motorCortex = buildMotorCortex(output = { outputs.add(it) }, fetchTool = malformedTool),
             config = config,
             instrumentation = instrumentation
         )
@@ -1098,7 +1098,7 @@ class EgoAgentTest {
             override fun search(query: String, maxResults: Int): WebSearchResult =
                 WebSearchResult(summary = "unused", snippets = emptyList())
         },
-        mcpFetchTool: McpFetchTool? = null,
+        fetchTool: FetchTool? = null,
     ): MotorCortex {
         val webSearchHandler = WebSearchActionHandler(
             engine = webSearchEngine
@@ -1106,7 +1106,7 @@ class EgoAgentTest {
         return MotorCortex(
             webSearchActionHandler = webSearchHandler,
             output = output,
-            mcpFetchTool = mcpFetchTool
+            fetchTool = fetchTool
         )
     }
 

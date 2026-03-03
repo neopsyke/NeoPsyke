@@ -55,7 +55,7 @@ interface McpTimeTool {
     )
 }
 
-interface McpFetchTool {
+interface FetchTool {
     fun fetch(payload: String): String
 
     fun fetchWithOutcome(payload: String): FetchOutcome =
@@ -131,119 +131,6 @@ class SdkMcpTimeTool(
             )
         }
     }
-}
-
-class SdkMcpFetchTool(
-    command: List<String>,
-    private val callTimeoutMs: Long,
-    private val maxChars: Int,
-) : McpFetchTool, AutoCloseable {
-    private val clientHolder = LazyMcpClientHolder(command, serverLabel = "fetch")
-
-    override fun fetch(payload: String): String = fetchWithOutcome(payload).message
-
-    override fun fetchWithOutcome(payload: String): FetchOutcome {
-        val parsed = try {
-            mapper.readValue<FetchPayload>(payload)
-        } catch (_: Exception) {
-            return FetchOutcome(
-                message = "MCP fetch payload is invalid. Expected JSON like {\"url\":\"https://example.com\",\"max_chars\":1200}.",
-                errorCategory = FetchErrorCategory.MALFORMED_REQUEST
-            )
-        }
-
-        val url = parsed.url?.trim().orEmpty()
-        if (url.isEmpty()) {
-            return FetchOutcome(
-                message = "MCP fetch payload is missing url.",
-                errorCategory = FetchErrorCategory.MALFORMED_REQUEST
-            )
-        }
-        if (!isFetchUrlAllowed(url)) {
-            return FetchOutcome(
-                message = "MCP fetch blocked URL by safety policy. Only public HTTPS URLs are allowed.",
-                errorCategory = FetchErrorCategory.MALFORMED_REQUEST
-            )
-        }
-
-        val requestedMaxChars = parsed.maxChars ?: maxChars
-        val safeMaxChars = requestedMaxChars.coerceIn(256, maxChars)
-
-        val result = try {
-            clientHolder.callTool(
-                toolName = "fetch",
-                arguments = mapOf("url" to url),
-                timeoutMs = callTimeoutMs
-            )
-        } catch (ex: Exception) {
-            logger.warn(ex) { "MCP fetch tool call failed for url=${TextSecurity.preview(url, 120)}." }
-            val errorMsg = ex.message?.lowercase(java.util.Locale.ROOT).orEmpty()
-            val category = classifyFetchError(errorMsg)
-            return FetchOutcome(
-                message = "MCP fetch unavailable: ${ex.message ?: "tool call failed"}",
-                errorCategory = category
-            )
-        }
-
-        val content = TextSecurity.clamp(result.content, safeMaxChars)
-        val preview = TextSecurity.preview(content, 240)
-        return if (result.isError) {
-            val errorContent = TextSecurity.clamp(content.ifBlank { "empty error" }, 240)
-            val category = classifyFetchError(errorContent.lowercase(java.util.Locale.ROOT))
-            FetchOutcome(
-                message = "MCP fetch tool returned an error for $url: $errorContent",
-                errorCategory = category
-            )
-        } else {
-            FetchOutcome(
-                message = "MCP fetch completed for $url. Extracted ${content.length} chars. Preview: $preview",
-                errorCategory = FetchErrorCategory.NONE
-            )
-        }
-    }
-
-    companion object {
-        internal fun classifyFetchError(errorText: String): FetchErrorCategory {
-            if (NON_RETRYABLE_PATTERNS.any { errorText.contains(it) }) {
-                return FetchErrorCategory.NON_RETRYABLE
-            }
-            return FetchErrorCategory.RETRYABLE
-        }
-
-        internal val NON_RETRYABLE_PATTERNS = listOf(
-            "403", "404", "401", "410", "451",
-            "forbidden", "not found", "unauthorized", "gone",
-            "non-zero exit status", "install", "enoent",
-            "blocked", "safety policy",
-        )
-    }
-
-    override fun close() {
-        clientHolder.close()
-    }
-
-    override fun healthCheck(): ToolHealthStatus {
-        return try {
-            val toolNames = clientHolder.listTools(callTimeoutMs)
-            if ("fetch" in toolNames) {
-                ToolHealthStatus(
-                    available = true,
-                    detail = "MCP fetch server reachable and tool fetch is registered."
-                )
-            } else {
-                ToolHealthStatus(
-                    available = false,
-                    detail = "MCP fetch server reachable but fetch tool is missing."
-                )
-            }
-        } catch (ex: Exception) {
-            ToolHealthStatus(
-                available = false,
-                detail = "MCP fetch server health check failed: ${ex.message ?: "unknown error"}"
-            )
-        }
-    }
-
 }
 
 class LazyMcpClientHolder(
@@ -534,7 +421,7 @@ private object NpmCommandIsolation {
 class NativeFetchTool(
     private val callTimeoutMs: Long,
     private val maxChars: Int,
-) : McpFetchTool {
+) : FetchTool {
     private val httpClient = OkHttpClient.Builder()
         .followRedirects(true)
         .followSslRedirects(true)
