@@ -42,11 +42,8 @@ data class McpRuntimeConfig(
                 memory = McpCapabilityConfig(
                     enabled = true,
                     mode = "stdio",
-                    provider = "auto",
-                    command = "npx -y @modelcontextprotocol/server-memory",
-                    fallbackCommands = listOf(
-                        "uvx mcp-server-memory"
-                    )
+                    provider = "pgvector",
+                    command = "java -jar mcp-memory-pgvector/build/libs/mcp-memory-pgvector-0.1.0-all.jar",
                 )
             )
     }

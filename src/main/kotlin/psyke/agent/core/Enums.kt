@@ -19,7 +19,8 @@ enum class ActionType {
     WEB_SEARCH,
     ANSWER,
     MCP_TIME,
-    MCP_FETCH;
+    MCP_FETCH,
+    MEMORY;
 
     companion object {
         fun fromRaw(value: String?): ActionType? =
@@ -28,6 +29,7 @@ enum class ActionType {
                 "answer" -> ANSWER
                 "mcp_time" -> MCP_TIME
                 "mcp_fetch" -> MCP_FETCH
+                "memory" -> MEMORY
                 else -> null
             }
     }

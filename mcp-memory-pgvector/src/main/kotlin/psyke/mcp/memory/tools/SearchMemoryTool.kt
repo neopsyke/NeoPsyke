@@ -1,0 +1,106 @@
+package psyke.mcp.memory.tools
+
+import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+import io.modelcontextprotocol.kotlin.sdk.CallToolRequest
+import io.modelcontextprotocol.kotlin.sdk.CallToolResult
+import io.modelcontextprotocol.kotlin.sdk.TextContent
+import io.modelcontextprotocol.kotlin.sdk.Tool
+import io.modelcontextprotocol.kotlin.sdk.server.Server
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonPrimitive
+import mu.KotlinLogging
+import psyke.mcp.memory.MemoryServerConfig
+import psyke.mcp.memory.db.MemoryRepository
+import psyke.mcp.memory.embedding.Embedder
+
+private val logger = KotlinLogging.logger {}
+private val jackson = jacksonObjectMapper()
+
+fun registerSearchMemoryTool(
+    server: Server,
+    repository: MemoryRepository,
+    embedder: Embedder,
+    config: MemoryServerConfig,
+) {
+    server.addTool(
+        name = "search_memory",
+        description = "Search stored memories using semantic similarity. Returns the most relevant memories matching the query.",
+        inputSchema = Tool.Input(
+            properties = buildJsonObject {
+                put("query", buildJsonObject {
+                    put("type", JsonPrimitive("string"))
+                    put("description", JsonPrimitive("The search query text"))
+                })
+                put("limit", buildJsonObject {
+                    put("type", JsonPrimitive("integer"))
+                    put("description", JsonPrimitive("Maximum number of results to return"))
+                })
+                put("tags", buildJsonObject {
+                    put("type", JsonPrimitive("array"))
+                    put("items", buildJsonObject { put("type", JsonPrimitive("string")) })
+                    put("description", JsonPrimitive("Optional tag filter: only return memories with at least one matching tag"))
+                })
+            },
+            required = listOf("query")
+        )
+    ) { request ->
+        handleSearchMemory(request, repository, embedder, config)
+    }
+}
+
+private fun handleSearchMemory(
+    request: CallToolRequest,
+    repository: MemoryRepository,
+    embedder: Embedder,
+    config: MemoryServerConfig,
+): CallToolResult {
+    val args = request.arguments
+    val query = args["query"]?.jsonPrimitive?.contentOrNull
+        ?: args["q"]?.jsonPrimitive?.contentOrNull
+        ?: args["text"]?.jsonPrimitive?.contentOrNull
+    if (query.isNullOrBlank()) {
+        return errorResult("Missing required argument: query")
+    }
+
+    val limit = args["limit"]?.jsonPrimitive?.intOrNull
+        ?: args["top_k"]?.jsonPrimitive?.intOrNull
+        ?: config.searchDefaultLimit
+
+    val tagFilter = try {
+        args["tags"]?.jsonArray?.map { it.jsonPrimitive.content }
+    } catch (_: Exception) {
+        null
+    }
+
+    return try {
+        val embedding = embedder.embed(query)
+        val results = repository.searchByVector(
+            queryEmbedding = embedding,
+            limit = limit.coerceIn(1, 50),
+            tagFilter = tagFilter,
+        )
+
+        val response = mapOf(
+            "results" to results.map { row ->
+                mapOf(
+                    "content" to row.content,
+                    "source" to row.source,
+                    "confidence" to row.confidence,
+                    "similarity" to String.format("%.4f", row.similarity),
+                    "score" to String.format("%.4f", row.score),
+                    "tags" to row.tags,
+                    "created_at" to row.createdAt.toString(),
+                )
+            }
+        )
+        CallToolResult(content = listOf(TextContent(text = jackson.writeValueAsString(response))))
+    } catch (ex: Exception) {
+        logger.warn(ex) { "search_memory failed" }
+        errorResult("Search failed: ${ex.message}")
+    }
+}

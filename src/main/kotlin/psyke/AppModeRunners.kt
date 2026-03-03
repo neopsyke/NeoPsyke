@@ -9,6 +9,8 @@ import psyke.agent.ego.LlmMetaReasoner
 import psyke.agent.memory.longterm.LlmLongTermMemoryAdvisor
 import psyke.agent.memory.longterm.McpHippocampus
 import psyke.agent.tools.mcp.McpStdioClient
+import psyke.agent.core.ActionType
+import psyke.agent.cortex.motor.ActionImplementationStatus
 import psyke.agent.cortex.motor.MotorCortex
 import psyke.agent.memory.longterm.NoopHippocampus
 import psyke.agent.tools.mcp.NativeFetchTool
@@ -637,6 +639,21 @@ internal object AppModeRunners {
                                                 config = config
                                             )
                                             val hippocampus = createHippocampus(config, mcpRuntimeConfig.memory)
+                                            val memoryProviderDetail = if (hippocampus.enabled)
+                                                "Provider: ${hippocampus.providerName} (${mcpRuntimeConfig.memory.provider})"
+                                            else
+                                                "Long-term memory is disabled."
+                                            val allStatuses = actionStatuses + ActionImplementationStatus(
+                                                actionType = ActionType.MEMORY,
+                                                available = hippocampus.enabled,
+                                                detail = memoryProviderDetail,
+                                            )
+                                            instrumentation.emit(AgentEvents.actionCapabilities(allStatuses))
+                                            if (!hippocampus.enabled) {
+                                                instrumentation.emit(
+                                                    AgentEvents.warning("Long-term memory is unavailable: $memoryProviderDetail")
+                                                )
+                                            }
                                             try {
                                                 Ego(
                                                     planner = planner,

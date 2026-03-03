@@ -534,7 +534,7 @@
       const runActionCalls = metrics?.runActionCallsByType || {};
       const allActionCalls = metrics?.persistentActionCallsByType || {};
 
-      const order = ["answer", "web_search", "mcp_time", "mcp_fetch"];
+      const order = ["answer", "web_search", "mcp_time", "mcp_fetch", "memory"];
       const sorted = list
         .slice()
         .sort((a, b) => {
@@ -645,6 +645,8 @@
         parts.push(chip("All Q Sat", all.queueSaturationEvents || 0, null));
         parts.push(chip("Run Dropped", run.droppedEvents || 0, null));
         parts.push(chip("All Dropped", all.droppedEvents || 0, null));
+        const memCap = (state.actionCapabilities || []).find(c => c.action_type === "memory");
+        parts.push(chip("Mem Provider", memCap ? (memCap.available ? memCap.detail : "unavailable") : "-", null));
         parts.push(chip("Mem Recall Run", runRecallAttempts + "a/" + runRecallHits + "h/" + runRecallFailures + "f", null));
         parts.push(chip("Mem Recall All", allRecallAttempts + "a/" + allRecallHits + "h/" + allRecallFailures + "f", null));
         parts.push(chip("Mem Recall Skipped", runRecallSkipped + " run / " + allRecallSkipped + " all", null));
