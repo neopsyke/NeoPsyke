@@ -14,7 +14,8 @@ import java.nio.file.Paths
 
 enum class LlmProvider(val id: String) {
     GROQ("groq"),
-    MISTRAL("mistral");
+    MISTRAL("mistral"),
+    GOOGLE("google");
 
     companion object {
         fun parse(raw: String?): LlmProvider? =
@@ -237,6 +238,13 @@ object LlmRuntimeConfigLoader {
                 apiKeyEnvVar = "MISTRAL_API_KEY",
                 defaultModel = MistralChatClient.DEFAULT_MODEL,
                 defaultWebSearchModel = MistralChatClient.DEFAULT_MODEL
+            )
+
+            LlmProvider.GOOGLE -> ProviderDefaults(
+                baseUrl = "https://generativelanguage.googleapis.com/v1beta/openai/",
+                apiKeyEnvVar = "GOOGLE_API_KEY",
+                defaultModel = "gemini-3.1-pro-preview",
+                defaultWebSearchModel = "gemini-3.1-flash-lite-preview"
             )
         }
 
