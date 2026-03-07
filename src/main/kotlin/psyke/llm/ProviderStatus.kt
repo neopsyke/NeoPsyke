@@ -118,6 +118,21 @@ class MistralProviderStatusChecker(
         ).check()
 }
 
+class GeminiProviderStatusChecker(
+    private val apiKey: String,
+    private val baseUrl: String = "https://generativelanguage.googleapis.com/v1beta/openai/",
+    private val timeoutMs: Long = 4_000,
+) : LlmProviderStatusChecker {
+    override fun check(): ProviderStatus =
+        HttpModelsProviderStatusChecker(
+            providerLabel = "google",
+            missingApiKeyEnvVar = "GOOGLE_API_KEY",
+            apiKey = apiKey,
+            baseUrl = baseUrl,
+            timeoutMs = timeoutMs
+        ).check()
+}
+
 class GroqProviderStatusChecker(
     private val apiKey: String,
     private val baseUrl: String = "https://api.groq.com/openai/v1",

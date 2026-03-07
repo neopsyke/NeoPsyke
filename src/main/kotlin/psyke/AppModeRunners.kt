@@ -52,6 +52,9 @@ import psyke.instrumentation.ReasoningEvalFlowLogSink
 import psyke.instrumentation.StructuredLogSink
 import psyke.llm.InstrumentedChatModelClient
 import psyke.llm.ChatModelClient
+import psyke.integrations.google.websearch.GeminiWebSearchEngine
+import psyke.llm.GeminiChatClient
+import psyke.llm.GeminiProviderStatusChecker
 import psyke.llm.GroqChatClient
 import psyke.llm.GroqProviderStatusChecker
 import psyke.llm.MistralChatClient
@@ -343,6 +346,11 @@ internal object AppModeRunners {
             )
     
             LlmProvider.MISTRAL -> MistralProviderStatusChecker(
+                apiKey = llm.apiKey,
+                baseUrl = llm.baseUrl
+            )
+
+            LlmProvider.GOOGLE -> GeminiProviderStatusChecker(
                 apiKey = llm.apiKey,
                 baseUrl = llm.baseUrl
             )
@@ -761,6 +769,17 @@ internal object AppModeRunners {
                         maxRawResponseChars = maxRawResponseChars
                     )
                 )
+
+                LlmProvider.GOOGLE -> WebSearchRuntime(
+                    engine = GeminiWebSearchEngine(
+                        apiKey = llm.webSearchApiKey,
+                        model = llm.webSearchModel,
+                        baseUrl = llm.webSearchBaseUrl,
+                        callObserver = callObserver,
+                        instrumentation = instrumentation,
+                        maxRawResponseChars = maxRawResponseChars
+                    )
+                )
             }
         } catch (ex: Exception) {
             val detail = "Web search unavailable: ${ex.message ?: ex::class.simpleName ?: "initialization failed"}"
@@ -801,6 +820,13 @@ internal object AppModeRunners {
             )
     
             LlmProvider.MISTRAL -> MistralChatClient(
+                apiKey = llm.apiKey,
+                baseUrl = llm.baseUrl,
+                modelName = modelName,
+                callObserver = callObserver
+            )
+
+            LlmProvider.GOOGLE -> GeminiChatClient(
                 apiKey = llm.apiKey,
                 baseUrl = llm.baseUrl,
                 modelName = modelName,
