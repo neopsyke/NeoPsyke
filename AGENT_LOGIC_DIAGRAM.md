@@ -68,6 +68,7 @@ sequenceDiagram
     participant Delib as DeliberationEngine
     participant Mem as MemoryCoordinator
     participant TWS as TaskWorkspaceStore
+    participant Dash as DashboardStateStore/API
 
     User->>SC: Input text
     SC->>Ego: InputReceived
@@ -81,6 +82,7 @@ sequenceDiagram
         alt Task = input or thought
             Ego->>Mem: recall + short-term summary
             Ego->>TWS: create/update request workspace + index summary
+            Ego->>Dash: emit task_workspace_head (+ optional debug snapshot)
             Ego->>Planner: decide(context)
             Note over Ego,Planner: On non-parseable planner JSON, planner issues one strict-JSON retry before noop fallback
             Planner-->>Ego: thought/action/plan/noop
@@ -114,6 +116,7 @@ sequenceDiagram
                         alt action = answer
                             Ego->>Sched: clear pending thought/action work for same root input
                             Ego->>TWS: destroy workspace for resolved input
+                            Ego->>Dash: drawer reads full snapshots via /api/workspace/{rootId}
                             Ego->>Mem: maybeAssessLongTermMemory(post_terminal_answer, forced)
                         end
                         Ego->>TWS: record non-answer action outcomes/evidence

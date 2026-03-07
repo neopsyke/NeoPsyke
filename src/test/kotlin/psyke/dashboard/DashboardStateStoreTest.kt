@@ -14,10 +14,12 @@ import psyke.metrics.MetricsTotals
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class DashboardStateStoreTest {
     private val mapper = jacksonObjectMapper()
+    private val nowMs = System.currentTimeMillis()
 
     @Test
     fun `snapshot aggregates state and keeps events ordered by id`() {
@@ -99,6 +101,61 @@ class DashboardStateStoreTest {
         assertNotNull(payload)
         assertTrue(payload.contains("\"type\":\"warning\""))
         assertTrue(payload.contains("\"id\":9"))
+        subscription.close()
+        store.close()
+    }
+
+    @Test
+    fun `workspace debug snapshot is captured for api but not broadcast over sse`() {
+        val store = DashboardStateStore(maxEvents = 20)
+        val subscription = store.subscribe()
+        store.onEvent(
+            AgentEvent(
+                id = 1,
+                type = "task_workspace_debug_snapshot",
+                data = mapOf(
+                    "root_input_enqueued_at_ms" to 99L,
+                    "update_type" to "plan_recorded",
+                    "version" to 4L,
+                    "updated_at_ms" to nowMs,
+                    "goal" to "Verify pricing and summarize",
+                    "section_count" to 2,
+                    "evidence_count" to 1,
+                    "workspace_confidence" to 0.72,
+                    "bytes_estimate" to 222,
+                    "sections" to listOf(
+                        mapOf(
+                            "title" to "Request",
+                            "summary" to "find pricing",
+                            "content" to "find official pricing page",
+                            "source" to "input"
+                        )
+                    ),
+                    "evidence" to listOf("official pricing page found")
+                )
+            )
+        )
+
+        val ssePayload = subscription.poll(timeoutMs = 120)
+        assertNull(ssePayload)
+
+        val index: Map<String, Any?> = mapper.readValue(store.workspaceIndexJson())
+        val items = index["items"] as List<*>
+        assertEquals(1, items.size)
+        @Suppress("UNCHECKED_CAST")
+        val first = items.first() as Map<String, Any?>
+        assertEquals(99L, (first["root_input_enqueued_at_ms"] as Number).toLong())
+        assertEquals(4L, (first["version"] as Number).toLong())
+
+        val detailJson = store.workspaceSnapshotJson(rootInputEnqueuedAtMs = 99L)
+        assertNotNull(detailJson)
+        val detail: Map<String, Any?> = mapper.readValue(detailJson)
+        assertEquals("Verify pricing and summarize", detail["goal"])
+        @Suppress("UNCHECKED_CAST")
+        val sections = detail["sections"] as List<Map<String, Any?>>
+        assertEquals(1, sections.size)
+        assertEquals("Request", sections.first()["title"])
+
         subscription.close()
         store.close()
     }

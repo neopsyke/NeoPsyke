@@ -90,6 +90,29 @@
       letter-spacing: .03em;
       text-transform: uppercase;
     }
+    .panel-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+    .panel-head h3 {
+      margin: 0;
+    }
+    .ghost-btn {
+      border: 1px solid var(--line);
+      background: rgba(15, 26, 31, 0.55);
+      color: var(--text);
+      font-size: 11px;
+      padding: 4px 9px;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+    .ghost-btn:hover {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
 
     .grid3 {
       display: grid;
@@ -350,6 +373,168 @@
       background: var(--accent);
     }
 
+    .workspace-drawer {
+      position: fixed;
+      inset: 0;
+      display: none;
+      z-index: 40;
+    }
+    .workspace-drawer.open {
+      display: block;
+    }
+    .workspace-backdrop {
+      position: absolute;
+      inset: 0;
+      background: rgba(5, 10, 12, 0.56);
+    }
+    .workspace-sheet {
+      position: absolute;
+      top: 0;
+      right: 0;
+      height: 100%;
+      width: min(960px, 92vw);
+      background: linear-gradient(180deg, rgba(16, 28, 33, 0.98), rgba(12, 21, 25, 0.98));
+      border-left: 1px solid var(--line);
+      display: grid;
+      grid-template-rows: auto auto 1fr;
+      min-width: 0;
+    }
+    .workspace-head {
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--line);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+    .workspace-toolbar {
+      padding: 8px 12px;
+      border-bottom: 1px solid var(--line);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 11px;
+    }
+    .workspace-body {
+      min-height: 0;
+      display: grid;
+      grid-template-columns: 280px 1fr;
+      gap: 10px;
+      padding: 10px;
+    }
+    .workspace-list {
+      min-height: 0;
+      overflow: auto;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: rgba(15, 26, 31, 0.58);
+    }
+    .workspace-item {
+      width: 100%;
+      border: 0;
+      border-bottom: 1px solid var(--line);
+      background: transparent;
+      color: var(--text);
+      text-align: left;
+      cursor: pointer;
+      padding: 8px;
+      font-size: 11px;
+    }
+    .workspace-item:last-child {
+      border-bottom: none;
+    }
+    .workspace-item.active {
+      background: rgba(54, 195, 167, 0.13);
+      outline: 1px solid rgba(54, 195, 167, 0.35);
+      outline-offset: -1px;
+    }
+    .workspace-item .line {
+      display: block;
+      color: var(--muted);
+      margin-top: 2px;
+    }
+    .workspace-detail {
+      min-height: 0;
+      display: grid;
+      grid-template-rows: auto 1fr;
+      gap: 8px;
+    }
+    .workspace-tabs {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .workspace-tab {
+      border: 1px solid var(--line);
+      background: rgba(15, 26, 31, 0.55);
+      color: var(--text);
+      border-radius: 6px;
+      padding: 4px 8px;
+      font-size: 11px;
+      cursor: pointer;
+    }
+    .workspace-tab.active {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+    .workspace-content {
+      min-height: 0;
+      overflow: auto;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: rgba(15, 26, 31, 0.58);
+      padding: 8px;
+    }
+    .workspace-summary-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+      margin-bottom: 8px;
+      font-size: 11px;
+    }
+    .workspace-summary-grid > div {
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 6px;
+      background: rgba(12, 21, 25, 0.65);
+    }
+    .workspace-versions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-bottom: 8px;
+    }
+    .workspace-version-btn {
+      border: 1px solid var(--line);
+      background: rgba(15, 26, 31, 0.55);
+      color: var(--muted);
+      border-radius: 999px;
+      padding: 2px 8px;
+      font-size: 10px;
+      cursor: pointer;
+    }
+    .workspace-version-btn.active {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+    .workspace-section {
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 7px;
+      margin-bottom: 7px;
+      background: rgba(12, 21, 25, 0.63);
+    }
+    .workspace-section-title {
+      color: var(--accent);
+      font-size: 11px;
+      margin-bottom: 4px;
+    }
+    .workspace-muted {
+      color: var(--muted);
+      font-size: 11px;
+    }
+
     @media (max-width: 1020px) {
       .layout {
         flex-direction: column;
@@ -367,6 +552,12 @@
         width: 100%;
         max-width: 100%;
         min-width: 0;
+      }
+      .workspace-body {
+        grid-template-columns: 1fr;
+      }
+      .workspace-sheet {
+        width: 100vw;
       }
     }
   </style>
@@ -422,10 +613,37 @@
         <div class="cap-list" id="action-capabilities"></div>
       </div>
       <div class="panel">
-        <h3>Action Flow</h3>
+        <div class="panel-head">
+          <h3>Action Flow</h3>
+          <button class="ghost-btn" id="workspace-open-btn" type="button">Workspace</button>
+        </div>
         <div class="list" id="actions"></div>
       </div>
     </section>
+  </div>
+
+  <div class="workspace-drawer" id="workspace-drawer">
+    <div class="workspace-backdrop" id="workspace-backdrop"></div>
+    <aside class="workspace-sheet" role="dialog" aria-label="Task Workspace">
+      <div class="workspace-head">
+        <strong>Task Workspace (Debug)</strong>
+        <button class="ghost-btn" id="workspace-close-btn" type="button">Close</button>
+      </div>
+      <div class="workspace-toolbar">
+        <button class="ghost-btn" id="workspace-refresh-btn" type="button">Refresh</button>
+        <span id="workspace-status">idle</span>
+      </div>
+      <div class="workspace-body">
+        <div class="workspace-list" id="workspace-index"></div>
+        <div class="workspace-detail">
+          <div class="workspace-tabs">
+            <button class="workspace-tab active" id="workspace-tab-summary" type="button">Summary</button>
+            <button class="workspace-tab" id="workspace-tab-raw" type="button">Raw JSON</button>
+          </div>
+          <div class="workspace-content" id="workspace-content"></div>
+        </div>
+      </div>
+    </aside>
   </div>
 
   <div class="status-bar" id="status-bar"></div>
@@ -449,6 +667,16 @@
         dropped_events: 0,
         queue_saturation_events: 0,
         queue_saturation_by_type: {}
+      },
+      workspace: {
+        open: false,
+        index: [],
+        selectedRoot: null,
+        selectedVersion: null,
+        snapshot: null,
+        activeTab: "summary",
+        status: "idle",
+        refreshTimer: null
       }
     };
 
@@ -471,6 +699,7 @@
       "response_latency_recorded", "llm_raw_response", "llm_call",
       "action_capabilities", "limits_config", "instrumentation_health",
       "queue_saturation", "noop_recorded",
+      "task_workspace_head", "task_workspace_debug_snapshot",
       "long_term_memory_assessment_parse_fallback",
       "long_term_memory_assessment_temporarily_disabled",
       "long_term_memory_persistence_skipped"
@@ -789,6 +1018,181 @@
         "</details></div>";
     }
 
+    function formatLocalTs(ms) {
+      const n = Number(ms);
+      if (!Number.isFinite(n) || n <= 0) return "-";
+      return new Date(n).toLocaleTimeString();
+    }
+
+    async function fetchJsonNoStore(url) {
+      const response = await fetch(url, { cache: "no-store" });
+      if (!response.ok) {
+        throw new Error("HTTP " + response.status);
+      }
+      return response.json();
+    }
+
+    function setWorkspaceStatus(text) {
+      state.workspace.status = text;
+      const el = document.getElementById("workspace-status");
+      if (el) el.textContent = text;
+    }
+
+    function openWorkspaceDrawer() {
+      state.workspace.open = true;
+      const drawer = document.getElementById("workspace-drawer");
+      if (drawer) drawer.classList.add("open");
+      refreshWorkspaceIndex();
+      renderWorkspaceDrawer();
+    }
+
+    function closeWorkspaceDrawer() {
+      state.workspace.open = false;
+      const drawer = document.getElementById("workspace-drawer");
+      if (drawer) drawer.classList.remove("open");
+    }
+
+    async function refreshWorkspaceIndex() {
+      if (!state.workspace.open) return;
+      setWorkspaceStatus("loading...");
+      try {
+        const payload = await fetchJsonNoStore("/api/workspace");
+        state.workspace.index = Array.isArray(payload.items) ? payload.items : [];
+        if (state.workspace.index.length === 0) {
+          state.workspace.selectedRoot = null;
+          state.workspace.selectedVersion = null;
+          state.workspace.snapshot = null;
+          setWorkspaceStatus("empty");
+          renderWorkspaceDrawer();
+          return;
+        }
+        const selectedStillExists = state.workspace.index.some(
+          (item) => Number(item.root_input_enqueued_at_ms) === Number(state.workspace.selectedRoot)
+        );
+        if (!selectedStillExists) {
+          state.workspace.selectedRoot = Number(state.workspace.index[0].root_input_enqueued_at_ms);
+          state.workspace.selectedVersion = null;
+        }
+        await refreshWorkspaceSnapshot(state.workspace.selectedRoot, state.workspace.selectedVersion);
+        setWorkspaceStatus("updated " + new Date().toLocaleTimeString());
+      } catch (err) {
+        setWorkspaceStatus("error: " + (err && err.message ? err.message : "unknown"));
+      }
+      renderWorkspaceDrawer();
+    }
+
+    async function refreshWorkspaceSnapshot(rootId, version = null) {
+      if (!rootId) {
+        state.workspace.snapshot = null;
+        return;
+      }
+      const versionQuery = version != null ? ("?version=" + encodeURIComponent(String(version))) : "";
+      const payload = await fetchJsonNoStore("/api/workspace/" + encodeURIComponent(String(rootId)) + versionQuery);
+      state.workspace.snapshot = payload;
+      state.workspace.selectedRoot = Number(payload.root_input_enqueued_at_ms);
+      state.workspace.selectedVersion = payload.version == null ? null : Number(payload.version);
+    }
+
+    function scheduleWorkspaceRefresh() {
+      if (!state.workspace.open) return;
+      if (state.workspace.refreshTimer != null) {
+        clearTimeout(state.workspace.refreshTimer);
+      }
+      state.workspace.refreshTimer = setTimeout(() => {
+        refreshWorkspaceIndex();
+      }, 200);
+    }
+
+    function renderWorkspaceDrawer() {
+      const drawer = document.getElementById("workspace-drawer");
+      if (!drawer) return;
+      drawer.classList.toggle("open", !!state.workspace.open);
+      if (!state.workspace.open) return;
+
+      const indexEl = document.getElementById("workspace-index");
+      const items = state.workspace.index || [];
+      if (!items.length) {
+        indexEl.innerHTML = "<div class=\"workspace-muted\" style=\"padding:8px;\">No snapshots captured yet.</div>";
+      } else {
+        indexEl.innerHTML = items.map((item) => {
+          const root = Number(item.root_input_enqueued_at_ms);
+          const active = root === Number(state.workspace.selectedRoot) ? " active" : "";
+          return "<button class=\"workspace-item" + active + "\" data-root=\"" + escapeHtml(root) + "\">" +
+            "<strong>root " + escapeHtml(root) + "</strong>" +
+            "<span class=\"line\">v" + escapeHtml(item.version) + " · " + escapeHtml(item.section_count) + " sections · " + escapeHtml(item.evidence_count) + " evidence</span>" +
+            "<span class=\"line\">" + escapeHtml(short(item.goal_preview || "-", 96)) + "</span>" +
+            "</button>";
+        }).join("");
+        indexEl.querySelectorAll("button[data-root]").forEach((btn) => {
+          btn.addEventListener("click", async () => {
+            state.workspace.selectedRoot = Number(btn.getAttribute("data-root"));
+            state.workspace.selectedVersion = null;
+            await refreshWorkspaceSnapshot(state.workspace.selectedRoot, null);
+            renderWorkspaceDrawer();
+          });
+        });
+      }
+
+      const contentEl = document.getElementById("workspace-content");
+      const snapshot = state.workspace.snapshot;
+      if (!snapshot) {
+        contentEl.innerHTML = "<div class=\"workspace-muted\">Select a workspace to inspect.</div>";
+      } else if (state.workspace.activeTab === "raw") {
+        contentEl.innerHTML = "<pre>" + escapeHtml(fmt(snapshot)) + "</pre>";
+      } else {
+        const versions = Array.isArray(snapshot.versions) ? snapshot.versions : [];
+        const sections = Array.isArray(snapshot.sections) ? snapshot.sections : [];
+        const evidence = Array.isArray(snapshot.evidence) ? snapshot.evidence : [];
+        const versionsHtml = versions.map((item) => {
+          const v = Number(item.version);
+          const active = v === Number(state.workspace.selectedVersion) ? " active" : "";
+          return "<button class=\"workspace-version-btn" + active + "\" data-version=\"" + escapeHtml(v) + "\">" +
+            "v" + escapeHtml(v) + " · " + escapeHtml(formatLocalTs(item.updated_at_ms)) +
+            "</button>";
+        }).join("");
+        const sectionsHtml = sections.length
+          ? sections.map((section, idx) =>
+              "<div class=\"workspace-section\">" +
+                "<div class=\"workspace-section-title\">[" + escapeHtml(idx + 1) + "] " + escapeHtml(section.title || "-") + " · " + escapeHtml(section.source || "-") + "</div>" +
+                "<div class=\"workspace-muted\">" + escapeHtml(section.summary || "") + "</div>" +
+                "<pre>" + escapeHtml(section.content || "") + "</pre>" +
+              "</div>"
+            ).join("")
+          : "<div class=\"workspace-muted\">No sections.</div>";
+        const evidenceHtml = evidence.length
+          ? "<pre>" + escapeHtml(evidence.map((item) => "- " + item).join("\n")) + "</pre>"
+          : "<div class=\"workspace-muted\">No evidence.</div>";
+
+        contentEl.innerHTML =
+          "<div class=\"workspace-summary-grid\">" +
+            "<div><strong>Root</strong><br/>" + escapeHtml(snapshot.root_input_enqueued_at_ms) + "</div>" +
+            "<div><strong>Version</strong><br/>" + escapeHtml(snapshot.version) + "</div>" +
+            "<div><strong>Updated</strong><br/>" + escapeHtml(formatLocalTs(snapshot.updated_at_ms)) + "</div>" +
+            "<div><strong>Confidence</strong><br/>" + escapeHtml((Number(snapshot.workspace_confidence || 0)).toFixed(3)) + "</div>" +
+            "<div><strong>Sections</strong><br/>" + escapeHtml(snapshot.section_count) + "</div>" +
+            "<div><strong>Evidence</strong><br/>" + escapeHtml(snapshot.evidence_count) + "</div>" +
+          "</div>" +
+          "<div class=\"workspace-section\"><div class=\"workspace-section-title\">Goal</div><pre>" + escapeHtml(snapshot.goal || "") + "</pre></div>" +
+          "<div class=\"workspace-versions\">" + versionsHtml + "</div>" +
+          "<div class=\"workspace-section\"><div class=\"workspace-section-title\">Sections</div>" + sectionsHtml + "</div>" +
+          "<div class=\"workspace-section\"><div class=\"workspace-section-title\">Evidence</div>" + evidenceHtml + "</div>";
+
+        contentEl.querySelectorAll("button[data-version]").forEach((btn) => {
+          btn.addEventListener("click", async () => {
+            const version = Number(btn.getAttribute("data-version"));
+            state.workspace.selectedVersion = version;
+            await refreshWorkspaceSnapshot(state.workspace.selectedRoot, version);
+            renderWorkspaceDrawer();
+          });
+        });
+      }
+
+      const summaryTab = document.getElementById("workspace-tab-summary");
+      const rawTab = document.getElementById("workspace-tab-raw");
+      summaryTab.classList.toggle("active", state.workspace.activeTab === "summary");
+      rawTab.classList.toggle("active", state.workspace.activeTab === "raw");
+    }
+
     function renderQueue(elId, list, formatter) {
       const el = document.getElementById(elId);
       if (!list || list.length === 0) {
@@ -1005,6 +1409,9 @@
       document.getElementById("actions").innerHTML = actionEvents.map(renderEventItem).join("");
 
       renderStatusBar();
+      if (state.workspace.open) {
+        renderWorkspaceDrawer();
+      }
     }
 
     function applyEvent(event) {
@@ -1115,6 +1522,10 @@
         }
       }
 
+      if (String(event.type || "").startsWith("task_workspace_")) {
+        scheduleWorkspaceRefresh();
+      }
+
       render();
     }
 
@@ -1155,6 +1566,18 @@
       } catch (_) {}
 
       enableResize();
+      document.getElementById("workspace-open-btn").addEventListener("click", () => openWorkspaceDrawer());
+      document.getElementById("workspace-close-btn").addEventListener("click", () => closeWorkspaceDrawer());
+      document.getElementById("workspace-backdrop").addEventListener("click", () => closeWorkspaceDrawer());
+      document.getElementById("workspace-refresh-btn").addEventListener("click", () => refreshWorkspaceIndex());
+      document.getElementById("workspace-tab-summary").addEventListener("click", () => {
+        state.workspace.activeTab = "summary";
+        renderWorkspaceDrawer();
+      });
+      document.getElementById("workspace-tab-raw").addEventListener("click", () => {
+        state.workspace.activeTab = "raw";
+        renderWorkspaceDrawer();
+      });
       render();
 
       const es = new EventSource("/api/events");

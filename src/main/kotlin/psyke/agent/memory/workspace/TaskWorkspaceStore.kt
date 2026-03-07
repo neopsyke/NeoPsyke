@@ -21,6 +21,30 @@ data class TaskWorkspaceFinalPassInput(
     val evidenceCount: Int,
 )
 
+data class TaskWorkspaceDebugHead(
+    val rootInputEnqueuedAtMs: Long,
+    val version: Long,
+    val updatedAtMs: Long,
+    val goal: String,
+    val sectionCount: Int,
+    val evidenceCount: Int,
+    val workspaceConfidence: Double,
+    val bytesEstimate: Int,
+)
+
+data class TaskWorkspaceDebugSection(
+    val title: String,
+    val summary: String,
+    val content: String,
+    val source: String,
+)
+
+data class TaskWorkspaceDebugSnapshot(
+    val head: TaskWorkspaceDebugHead,
+    val sections: List<TaskWorkspaceDebugSection>,
+    val evidence: List<String>,
+)
+
 class TaskWorkspaceStore(
     private val config: TaskWorkspaceConfig,
 ) {
@@ -49,7 +73,7 @@ class TaskWorkspaceStore(
         val workspace = lookup(rootInputEnqueuedAtMs) ?: return
         val normalizedGoal = TextSecurity.preview(goal, MAX_GOAL_CHARS)
         if (normalizedGoal.isNotBlank()) {
-            workspace.goal = normalizedGoal
+            workspace.updateGoal(normalizedGoal)
         }
         val stepLines = steps.mapIndexed { index, step ->
             "${index + 1}. ${TextSecurity.preview(step, MAX_PLAN_STEP_CHARS)}"
@@ -189,6 +213,14 @@ class TaskWorkspaceStore(
     }
 
     @Synchronized
+    fun debugHead(rootInputEnqueuedAtMs: Long?): TaskWorkspaceDebugHead? =
+        lookup(rootInputEnqueuedAtMs)?.debugHead()
+
+    @Synchronized
+    fun debugSnapshot(rootInputEnqueuedAtMs: Long?): TaskWorkspaceDebugSnapshot? =
+        lookup(rootInputEnqueuedAtMs)?.debugSnapshot()
+
+    @Synchronized
     fun destroy(rootInputEnqueuedAtMs: Long?): TaskWorkspaceDestroyed? {
         if (!config.enabled || rootInputEnqueuedAtMs == null) return null
         val removed = workspaces.remove(rootInputEnqueuedAtMs) ?: return null
@@ -235,6 +267,17 @@ class TaskWorkspaceStore(
         val sections: ArrayDeque<TaskWorkspaceSection> = ArrayDeque(),
         val evidence: ArrayDeque<String> = ArrayDeque(),
     ) {
+        var version: Long = 0L
+            private set
+        var updatedAtMs: Long = System.currentTimeMillis()
+            private set
+
+        fun updateGoal(newGoal: String) {
+            if (newGoal == goal) return
+            goal = newGoal
+            touch()
+        }
+
         fun addSection(title: String, summary: String, content: String, source: String) {
             if (summary.isBlank() && content.isBlank()) return
             sections.addLast(
@@ -248,6 +291,7 @@ class TaskWorkspaceStore(
             while (sections.size > sectionCap()) {
                 sections.removeFirst()
             }
+            touch()
         }
 
         fun addEvidence(value: String) {
@@ -257,6 +301,7 @@ class TaskWorkspaceStore(
             while (evidence.size > evidenceCap()) {
                 evidence.removeFirst()
             }
+            touch()
         }
 
         fun buildPromptSummary(): String {
@@ -304,6 +349,46 @@ class TaskWorkspaceStore(
             return (sectionSignal * SECTION_SIGNAL_WEIGHT) +
                 (evidenceSignal * EVIDENCE_SIGNAL_WEIGHT) +
                 (goalSignal * GOAL_SIGNAL_WEIGHT)
+        }
+
+        fun debugHead(): TaskWorkspaceDebugHead =
+            TaskWorkspaceDebugHead(
+                rootInputEnqueuedAtMs = rootInputEnqueuedAtMs,
+                version = version,
+                updatedAtMs = updatedAtMs,
+                goal = goal,
+                sectionCount = sections.size,
+                evidenceCount = evidence.size,
+                workspaceConfidence = estimateConfidence(),
+                bytesEstimate = estimateBytes()
+            )
+
+        fun debugSnapshot(): TaskWorkspaceDebugSnapshot =
+            TaskWorkspaceDebugSnapshot(
+                head = debugHead(),
+                sections = sections.map { section ->
+                    TaskWorkspaceDebugSection(
+                        title = section.title,
+                        summary = section.summary,
+                        content = section.content,
+                        source = section.source
+                    )
+                },
+                evidence = evidence.toList()
+            )
+
+        private fun touch() {
+            version += 1L
+            updatedAtMs = System.currentTimeMillis()
+        }
+
+        private fun estimateBytes(): Int {
+            var total = goal.length
+            sections.forEach { section ->
+                total += section.title.length + section.summary.length + section.content.length + section.source.length
+            }
+            evidence.forEach { item -> total += item.length }
+            return total
         }
     }
 

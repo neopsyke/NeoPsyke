@@ -44,6 +44,13 @@ class DashboardServer(
             }
             handleSse(exchange)
         }
+        server.createContext("/api/workspace") { exchange ->
+            if (exchange.requestMethod != "GET") {
+                respondText(exchange, 405, "Method not allowed", "text/plain; charset=utf-8")
+                return@createContext
+            }
+            handleWorkspaceApi(exchange)
+        }
         server.createContext("/health") { exchange ->
             respondText(exchange, 200, "ok", "text/plain; charset=utf-8")
         }
@@ -97,6 +104,48 @@ class DashboardServer(
             subscription.close()
             output.close()
         }
+    }
+
+    private fun handleWorkspaceApi(exchange: HttpExchange) {
+        val path = exchange.requestURI.path
+        if (path == "/api/workspace") {
+            respondText(exchange, 200, store.workspaceIndexJson(), "application/json; charset=utf-8")
+            return
+        }
+        val rootIdRaw = path.removePrefix("/api/workspace/").trim()
+        if (rootIdRaw.isBlank() || rootIdRaw == path) {
+            respondText(exchange, 404, "Not found", "text/plain; charset=utf-8")
+            return
+        }
+        val rootId = rootIdRaw.toLongOrNull()
+        if (rootId == null) {
+            respondText(exchange, 400, "Invalid workspace id", "text/plain; charset=utf-8")
+            return
+        }
+        val version = parseQueryParam(exchange.requestURI.query, "version")?.toLongOrNull()
+        val snapshot = store.workspaceSnapshotJson(rootInputEnqueuedAtMs = rootId, version = version)
+        if (snapshot == null) {
+            respondText(exchange, 404, "Workspace snapshot not found", "text/plain; charset=utf-8")
+            return
+        }
+        respondText(exchange, 200, snapshot, "application/json; charset=utf-8")
+    }
+
+    private fun parseQueryParam(query: String?, key: String): String? {
+        if (query.isNullOrBlank()) return null
+        return query
+            .split("&")
+            .mapNotNull { part ->
+                val (k, v) = part.split("=", limit = 2).let { tokens ->
+                    when (tokens.size) {
+                        2 -> tokens[0] to tokens[1]
+                        1 -> tokens[0] to ""
+                        else -> return@mapNotNull null
+                    }
+                }
+                if (k == key) v else null
+            }
+            .firstOrNull()
     }
 
     private fun respondText(

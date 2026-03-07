@@ -620,6 +620,10 @@ class Ego(
                         )
                     )
                 )
+                emitTaskWorkspaceTelemetry(
+                    rootInputEnqueuedAtMs = rootInputEnqueuedAtMs,
+                    updateType = "plan_recorded"
+                )
 
                 val planId = java.util.UUID.randomUUID().toString().take(PLAN_ID_LENGTH)
                 instrumentation.emit(
@@ -820,6 +824,7 @@ class Ego(
                 )
             )
         )
+        emitTaskWorkspaceTelemetry(rootInputEnqueuedAtMs = input.enqueuedAtMs, updateType = "workspace_created")
     }
 
     private fun maybeRecordTaskWorkspaceOutcome(action: PendingAction, outcome: ActionOutcome, observedEvidence: Boolean) {
@@ -843,6 +848,10 @@ class Ego(
                 )
             )
         )
+        emitTaskWorkspaceTelemetry(
+            rootInputEnqueuedAtMs = action.rootInputEnqueuedAtMs,
+            updateType = "action_outcome_recorded"
+        )
     }
 
     private fun applyTaskWorkspaceFinalPass(action: PendingAction): PendingAction {
@@ -855,6 +864,10 @@ class Ego(
         taskWorkspaceStore.recordAnswerDraft(
             rootInputEnqueuedAtMs = action.rootInputEnqueuedAtMs,
             payload = action.payload
+        )
+        emitTaskWorkspaceTelemetry(
+            rootInputEnqueuedAtMs = action.rootInputEnqueuedAtMs,
+            updateType = "answer_draft_recorded"
         )
         val finalPassInput = taskWorkspaceStore.buildFinalPassInput(
             rootInputEnqueuedAtMs = action.rootInputEnqueuedAtMs,
@@ -1066,6 +1079,10 @@ class Ego(
 
     private fun cleanupResolvedInputAfterAnswer(action: PendingAction) {
         val rootInputEnqueuedAtMs = action.rootInputEnqueuedAtMs ?: return
+        emitTaskWorkspaceTelemetry(
+            rootInputEnqueuedAtMs = rootInputEnqueuedAtMs,
+            updateType = "before_destroy_input_resolved"
+        )
         val cleared = scheduler.clearPendingWorkForInput(rootInputEnqueuedAtMs)
         val destroyedWorkspace = taskWorkspaceStore.destroy(rootInputEnqueuedAtMs)
         if (destroyedWorkspace != null) {
@@ -1097,6 +1114,53 @@ class Ego(
             )
         )
         emitQueueSnapshot("input_resolution_cleanup")
+    }
+
+    private fun emitTaskWorkspaceTelemetry(rootInputEnqueuedAtMs: Long?, updateType: String) {
+        val head = taskWorkspaceStore.debugHead(rootInputEnqueuedAtMs) ?: return
+        instrumentation.emit(
+            AgentEvent(
+                type = "task_workspace_head",
+                data = mapOf(
+                    "root_input_enqueued_at_ms" to head.rootInputEnqueuedAtMs,
+                    "update_type" to updateType,
+                    "version" to head.version,
+                    "updated_at_ms" to head.updatedAtMs,
+                    "goal_preview" to TextSecurity.preview(head.goal, 140),
+                    "section_count" to head.sectionCount,
+                    "evidence_count" to head.evidenceCount,
+                    "workspace_confidence" to head.workspaceConfidence,
+                    "bytes_estimate" to head.bytesEstimate
+                )
+            )
+        )
+        if (!config.memory.taskWorkspace.debugCaptureEnabled) return
+        val snapshot = taskWorkspaceStore.debugSnapshot(rootInputEnqueuedAtMs) ?: return
+        instrumentation.emit(
+            AgentEvent(
+                type = "task_workspace_debug_snapshot",
+                data = mapOf(
+                    "root_input_enqueued_at_ms" to snapshot.head.rootInputEnqueuedAtMs,
+                    "update_type" to updateType,
+                    "version" to snapshot.head.version,
+                    "updated_at_ms" to snapshot.head.updatedAtMs,
+                    "goal" to snapshot.head.goal,
+                    "section_count" to snapshot.head.sectionCount,
+                    "evidence_count" to snapshot.head.evidenceCount,
+                    "workspace_confidence" to snapshot.head.workspaceConfidence,
+                    "bytes_estimate" to snapshot.head.bytesEstimate,
+                    "sections" to snapshot.sections.map { section ->
+                        mapOf(
+                            "title" to section.title,
+                            "summary" to section.summary,
+                            "content" to section.content,
+                            "source" to section.source
+                        )
+                    },
+                    "evidence" to snapshot.evidence
+                )
+            )
+        )
     }
 
     private fun recordQueueSaturation(queueType: String, capacity: Int, reason: String) {

@@ -35,6 +35,7 @@ class AgentRuntimeSettingsLoaderTest {
         assertEquals(260, settings.agentConfig.memory.taskWorkspace.finalPassMaxTokens)
         assertEquals(0.35, settings.agentConfig.memory.taskWorkspace.finalPassMinWorkspaceConfidence)
         assertEquals(0.55, settings.agentConfig.memory.taskWorkspace.finalPassMinModelConfidence)
+        assertEquals(true, settings.agentConfig.memory.taskWorkspace.debugCaptureEnabled)
         assertEquals(true, settings.agentConfig.memory.longTermMemoryPromptCompressionEnabled)
         assertEquals(1100, settings.agentConfig.memory.longTermMemoryPromptDialogueMaxChars)
         assertEquals(900, settings.agentConfig.memory.longTermMemoryPromptRecallMaxChars)
@@ -75,6 +76,7 @@ class AgentRuntimeSettingsLoaderTest {
               task_workspace_final_pass_max_tokens: 190
               task_workspace_final_pass_min_workspace_confidence: 0.42
               task_workspace_final_pass_min_model_confidence: 0.61
+              task_workspace_debug_capture_enabled: false
               superego_dynamic_completion_enabled: false
               superego_dynamic_completion_hard_max_tokens: 700
               superego_dynamic_prompt_to_completion_ratio: 0.21
@@ -113,6 +115,7 @@ class AgentRuntimeSettingsLoaderTest {
         assertEquals(190, settings.agentConfig.memory.taskWorkspace.finalPassMaxTokens)
         assertEquals(0.42, settings.agentConfig.memory.taskWorkspace.finalPassMinWorkspaceConfidence)
         assertEquals(0.61, settings.agentConfig.memory.taskWorkspace.finalPassMinModelConfidence)
+        assertEquals(false, settings.agentConfig.memory.taskWorkspace.debugCaptureEnabled)
         assertEquals(false, settings.agentConfig.superego.dynamicCompletionEnabled)
         assertEquals(700, settings.agentConfig.superego.dynamicCompletionHardMaxTokens)
         assertEquals(0.21, settings.agentConfig.superego.dynamicPromptToCompletionRatio)
@@ -156,6 +159,7 @@ class AgentRuntimeSettingsLoaderTest {
                 "EGO_MAX_RUN_TOTAL_TOKENS" to "7000",
                 "EGO_TASK_WORKSPACE_ENABLED" to "true",
                 "EGO_TASK_WORKSPACE_FINAL_PASS_REWRITE_ENABLED" to "false",
+                "EGO_TASK_WORKSPACE_DEBUG_CAPTURE_ENABLED" to "true",
                 "PSYKE_DASHBOARD_ENABLED" to "true",
                 "PSYKE_DASHBOARD_PORT" to "9900",
                 "PSYKE_EVAL_MAX_RAW_RESPONSE_CHARS" to "5555",
@@ -169,6 +173,7 @@ class AgentRuntimeSettingsLoaderTest {
         assertEquals(7000, settings.agentConfig.planner.maxRunTotalTokens)
         assertEquals(true, settings.agentConfig.memory.taskWorkspace.enabled)
         assertEquals(false, settings.agentConfig.memory.taskWorkspace.finalPassRewriteEnabled)
+        assertEquals(true, settings.agentConfig.memory.taskWorkspace.debugCaptureEnabled)
         assertEquals(true, settings.dashboardEnabled)
         assertEquals(9900, settings.dashboardPort)
         assertEquals(5555, settings.evalMaxRawResponseChars)

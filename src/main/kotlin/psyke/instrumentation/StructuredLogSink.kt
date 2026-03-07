@@ -175,6 +175,18 @@ class StructuredLogSink : InstrumentationSink {
                 }
             }
 
+            "task_workspace_head" -> {
+                logger.trace {
+                    "task_workspace.head root=${event.data["root_input_enqueued_at_ms"]} type=${event.data["update_type"]} version=${event.data["version"]} sections=${event.data["section_count"]} evidence=${event.data["evidence_count"]}"
+                }
+            }
+
+            "task_workspace_debug_snapshot" -> {
+                logger.trace {
+                    "task_workspace.debug_snapshot root=${event.data["root_input_enqueued_at_ms"]} type=${event.data["update_type"]} version=${event.data["version"]} bytes=${event.data["bytes_estimate"]}"
+                }
+            }
+
             "task_workspace_final_pass" -> {
                 logger.trace {
                     "task_workspace.final_pass root=${event.data["root_input_enqueued_at_ms"]} action_id=${event.data["action_id"]} workspace_confidence=${event.data["workspace_confidence"]}"

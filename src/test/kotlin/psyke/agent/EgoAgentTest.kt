@@ -632,6 +632,8 @@ class EgoAgentTest {
         assertEquals(listOf("ego> Final answer from planner"), outputs)
         assertTrue(instrumentation.events.any { it.type == "task_workspace_created" })
         assertTrue(instrumentation.events.any { it.type == "task_workspace_updated" })
+        assertTrue(instrumentation.events.any { it.type == "task_workspace_head" })
+        assertTrue(instrumentation.events.any { it.type == "task_workspace_debug_snapshot" })
         assertTrue(instrumentation.events.any { it.type == "task_workspace_final_pass" })
         assertTrue(instrumentation.events.any { it.type == "task_workspace_destroyed" })
     }

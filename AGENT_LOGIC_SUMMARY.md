@@ -105,6 +105,8 @@ It is intentionally high-level and should stay aligned with the code.
     - runs `TaskWorkspaceFinalizer` rewrite when enabled
     - applies model-confidence gate (`finalPassMinModelConfidence`)
     - keeps original payload on any gate/finalizer failure path
+  - Emits lightweight workspace-head telemetry (`task_workspace_head`) on workspace mutations.
+  - When `TaskWorkspaceConfig.debugCaptureEnabled` is on, emits full debug snapshots (`task_workspace_debug_snapshot`) for dashboard-only inspection.
   - Fallback explanation actions bypass policy gate.
   - Normal actions go through `Superego.review`.
   - If denied:
@@ -217,8 +219,14 @@ It is intentionally high-level and should stay aligned with the code.
   - Stores compact sections/evidence for the active request only.
   - Planner receives only prompt-capped workspace index/summaries, not full workspace content.
   - Provides final-pass compilation input with workspace confidence estimate (sections/evidence/goal weighted signal).
+  - Exposes debug head/snapshot views (versioned) for development-time observability.
   - Workspace final-pass rewrite is handled by `TaskWorkspaceFinalizer` (`src/main/kotlin/psyke/agent/ego/TaskWorkspaceFinalizer.kt`) with strict JSON parsing, required-field validation, retry loop, and safe fallback.
   - Workspace is destroyed on input resolution or queue drain cleanup.
+
+- Dashboard workspace observability:
+  - Files: `src/main/kotlin/psyke/dashboard/DashboardStateStore.kt`, `src/main/kotlin/psyke/dashboard/DashboardServer.kt`, `src/main/resources/dashboard/index.html`
+  - SSE lane streams lightweight events only; heavy workspace debug snapshots are captured in a bounded TTL ring and served on-demand via `/api/workspace` and `/api/workspace/{rootId}`.
+  - The dashboard drawer fetches snapshot detail on demand to avoid continuous large-payload updates in timeline/event streams.
 
 ## Action Execution Surface
 - File: `src/main/kotlin/psyke/agent/cortex/motor/MotorCortex.kt`

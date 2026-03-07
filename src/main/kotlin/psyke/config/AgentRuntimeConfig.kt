@@ -61,6 +61,7 @@ private data class AgentRuntimeYamlAgent(
     val taskWorkspaceFinalPassMaxTokens: Int? = null,
     val taskWorkspaceFinalPassMinWorkspaceConfidence: Double? = null,
     val taskWorkspaceFinalPassMinModelConfidence: Double? = null,
+    val taskWorkspaceDebugCaptureEnabled: Boolean? = null,
     val taskWorkspaceMaxActiveTasks: Int? = null,
     val maxThoughtChars: Int? = null,
     val maxActionPayloadChars: Int? = null,
@@ -284,6 +285,11 @@ object AgentRuntimeSettingsLoader {
                         env["EGO_TASK_WORKSPACE_FINAL_PASS_MIN_MODEL_CONFIDENCE"],
                         agentYaml.taskWorkspaceFinalPassMinModelConfidence,
                         defaults.memory.taskWorkspace.finalPassMinModelConfidence
+                    ),
+                    debugCaptureEnabled = readBoolean(
+                        env["EGO_TASK_WORKSPACE_DEBUG_CAPTURE_ENABLED"],
+                        agentYaml.taskWorkspaceDebugCaptureEnabled,
+                        defaults.memory.taskWorkspace.debugCaptureEnabled
                     ),
                     maxActiveTasks = readPositiveInt(
                         env["EGO_TASK_WORKSPACE_MAX_ACTIVE_TASKS"],

@@ -99,4 +99,19 @@ class TaskWorkspaceStoreTest {
         assertEquals("", store.promptSummary(1L, maxTokens = 200))
         assertTrue(store.promptSummary(2L, maxTokens = 200).isNotBlank())
     }
+
+    @Test
+    fun `debug snapshot exposes full sections evidence and monotonic version`() {
+        val store = TaskWorkspaceStore(TaskWorkspaceConfig(enabled = true))
+        val root = 12L
+        store.ensureForInput(PendingInput(id = 1, content = "collect references", enqueuedAtMs = root))
+        val v1 = store.debugHead(root)?.version ?: -1L
+        store.recordPlan(root, "Collect references", listOf("Find docs"))
+        val snapshot = store.debugSnapshot(root)
+
+        assertTrue(snapshot != null)
+        assertTrue((snapshot?.sections?.size ?: 0) >= 2)
+        assertTrue((snapshot?.head?.workspaceConfidence ?: 0.0) > 0.0)
+        assertTrue((snapshot?.head?.version ?: -1L) > v1)
+    }
 }

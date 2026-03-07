@@ -68,6 +68,7 @@ data class AgentConfig(
                             readDouble("EGO_TASK_WORKSPACE_FINAL_PASS_MIN_WORKSPACE_CONFIDENCE", 0.35),
                         finalPassMinModelConfidence =
                             readDouble("EGO_TASK_WORKSPACE_FINAL_PASS_MIN_MODEL_CONFIDENCE", 0.55),
+                        debugCaptureEnabled = readBoolean("EGO_TASK_WORKSPACE_DEBUG_CAPTURE_ENABLED", true),
                         maxActiveTasks = readInt("EGO_TASK_WORKSPACE_MAX_ACTIVE_TASKS", 32),
                     ),
                     longTermMemoryRecallMaxItems = readInt("EGO_LONG_TERM_MEMORY_RECALL_MAX_ITEMS", 4),

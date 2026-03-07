@@ -12,6 +12,8 @@ import kotlin.math.max
 
 class DashboardStateStore(
     private val maxEvents: Int = 500,
+    private val maxWorkspaceSnapshots: Int = 120,
+    private val workspaceSnapshotTtlMs: Long = 15 * 60 * 1000L,
 ) : InstrumentationSink {
     private val mapper = jacksonObjectMapper()
     private val lock = Any()
@@ -30,15 +32,25 @@ class DashboardStateStore(
     private var droppedEvents: Long = 0
     private var queueSaturationEvents: Long = 0
     private val queueSaturationByType = mutableMapOf<String, Long>()
+    private val workspaceSnapshots = ArrayDeque<WorkspaceSnapshotRecord>()
+    private val latestWorkspaceSnapshotByRoot = mutableMapOf<Long, WorkspaceSnapshotRecord>()
     private val subscribers = mutableSetOf<LinkedBlockingDeque<String>>()
 
     override fun onEvent(event: AgentEvent) {
-        val payloadJson: String
+        var payloadJson: String? = null
         synchronized(lock) {
-            if (events.size >= max(50, maxEvents)) {
-                events.removeFirst()
+            val isDebugWorkspaceSnapshot = event.type == "task_workspace_debug_snapshot"
+            if (isDebugWorkspaceSnapshot) {
+                captureWorkspaceSnapshot(event.data)
+            } else {
+                if (event.type == "task_workspace_head") {
+                    captureWorkspaceHead(event.data)
+                }
+                if (events.size >= max(50, maxEvents)) {
+                    events.removeFirst()
+                }
+                events.addLast(event)
             }
-            events.addLast(event)
 
             when (event.type) {
                 "loop_status" -> {
@@ -124,13 +136,16 @@ class DashboardStateStore(
                 }
             }
 
-            payloadJson = mapper.writeValueAsString(event)
-            broadcastToSubscribers(payloadJson)
+            if (!isDebugWorkspaceSnapshot) {
+                payloadJson = mapper.writeValueAsString(event)
+            }
+            payloadJson?.let { broadcastToSubscribers(it) }
         }
     }
 
     fun snapshotJson(): String {
         val snapshot = synchronized(lock) {
+            pruneWorkspaceSnapshotsLocked()
             DashboardSnapshot(
                 generatedAt = System.currentTimeMillis(),
                 loopStatus = loopStatus,
@@ -149,6 +164,74 @@ class DashboardStateStore(
             )
         }
         return mapper.writeValueAsString(snapshot)
+    }
+
+    fun workspaceIndexJson(): String {
+        val payload = synchronized(lock) {
+            pruneWorkspaceSnapshotsLocked()
+            val items = latestWorkspaceSnapshotByRoot.values
+                .sortedByDescending { it.updatedAtMs }
+                .map { snapshot ->
+                    mapOf(
+                        "root_input_enqueued_at_ms" to snapshot.rootInputEnqueuedAtMs,
+                        "version" to snapshot.version,
+                        "updated_at_ms" to snapshot.updatedAtMs,
+                        "update_type" to snapshot.updateType,
+                        "goal_preview" to snapshot.goal.take(WORKSPACE_GOAL_PREVIEW_CHARS),
+                        "section_count" to snapshot.sectionCount,
+                        "evidence_count" to snapshot.evidenceCount,
+                        "workspace_confidence" to snapshot.workspaceConfidence,
+                        "bytes_estimate" to snapshot.bytesEstimate
+                    )
+                }
+            mapOf(
+                "generated_at" to System.currentTimeMillis(),
+                "count" to items.size,
+                "items" to items
+            )
+        }
+        return mapper.writeValueAsString(payload)
+    }
+
+    fun workspaceSnapshotJson(rootInputEnqueuedAtMs: Long, version: Long? = null): String? {
+        val payload = synchronized(lock) {
+            pruneWorkspaceSnapshotsLocked()
+            val record = if (version == null) {
+                latestWorkspaceSnapshotByRoot[rootInputEnqueuedAtMs]
+            } else {
+                workspaceSnapshots.lastOrNull {
+                    it.rootInputEnqueuedAtMs == rootInputEnqueuedAtMs && it.version == version
+                }
+            } ?: return null
+            val versions = workspaceSnapshots
+                .asSequence()
+                .filter { it.rootInputEnqueuedAtMs == rootInputEnqueuedAtMs }
+                .sortedByDescending { it.version }
+                .take(WORKSPACE_VERSION_LIST_LIMIT)
+                .map {
+                    mapOf(
+                        "version" to it.version,
+                        "updated_at_ms" to it.updatedAtMs,
+                        "update_type" to it.updateType
+                    )
+                }
+                .toList()
+            mapOf(
+                "root_input_enqueued_at_ms" to record.rootInputEnqueuedAtMs,
+                "version" to record.version,
+                "updated_at_ms" to record.updatedAtMs,
+                "update_type" to record.updateType,
+                "goal" to record.goal,
+                "section_count" to record.sectionCount,
+                "evidence_count" to record.evidenceCount,
+                "workspace_confidence" to record.workspaceConfidence,
+                "bytes_estimate" to record.bytesEstimate,
+                "sections" to record.sections,
+                "evidence" to record.evidence,
+                "versions" to versions
+            )
+        }
+        return mapper.writeValueAsString(payload)
     }
 
     fun recordDroppedEvents(totalDroppedEvents: Long) {
@@ -209,6 +292,132 @@ class DashboardStateStore(
             }
         }
         subscribers.removeAll(staleSubscribers.toSet())
+    }
+
+    private fun captureWorkspaceSnapshot(data: Map<String, Any?>) {
+        val rootInputEnqueuedAtMs = data["root_input_enqueued_at_ms"].asLong() ?: return
+        val version = data["version"].asLong() ?: return
+        val updatedAtMs = data["updated_at_ms"].asLong() ?: System.currentTimeMillis()
+        val record = WorkspaceSnapshotRecord(
+            rootInputEnqueuedAtMs = rootInputEnqueuedAtMs,
+            version = version,
+            updatedAtMs = updatedAtMs,
+            updateType = data["update_type"]?.toString().orEmpty(),
+            goal = data["goal"]?.toString().orEmpty(),
+            sectionCount = data["section_count"].asInt(),
+            evidenceCount = data["evidence_count"].asInt(),
+            workspaceConfidence = data["workspace_confidence"].asDouble(),
+            bytesEstimate = data["bytes_estimate"].asInt(),
+            sections = (data["sections"] as? List<*>)
+                ?.mapNotNull { item ->
+                    val section = item as? Map<*, *> ?: return@mapNotNull null
+                    section.entries.associate { (k, v) -> k.toString() to v }
+                }
+                .orEmpty(),
+            evidence = (data["evidence"] as? List<*>)
+                ?.mapNotNull { item -> item?.toString() }
+                .orEmpty()
+        )
+        val sameVersionIndex = workspaceSnapshots.indexOfFirst {
+            it.rootInputEnqueuedAtMs == rootInputEnqueuedAtMs && it.version == version
+        }
+        if (sameVersionIndex >= 0) {
+            workspaceSnapshots.removeAt(sameVersionIndex)
+        }
+        workspaceSnapshots.addLast(record)
+        pruneWorkspaceSnapshotsLocked()
+    }
+
+    private fun captureWorkspaceHead(data: Map<String, Any?>) {
+        val rootInputEnqueuedAtMs = data["root_input_enqueued_at_ms"].asLong() ?: return
+        val version = data["version"].asLong() ?: return
+        val updatedAtMs = data["updated_at_ms"].asLong() ?: System.currentTimeMillis()
+        val sameVersionIndex = workspaceSnapshots.indexOfFirst {
+            it.rootInputEnqueuedAtMs == rootInputEnqueuedAtMs && it.version == version
+        }
+        if (sameVersionIndex >= 0) {
+            return
+        }
+        workspaceSnapshots.addLast(
+            WorkspaceSnapshotRecord(
+                rootInputEnqueuedAtMs = rootInputEnqueuedAtMs,
+                version = version,
+                updatedAtMs = updatedAtMs,
+                updateType = data["update_type"]?.toString().orEmpty(),
+                goal = data["goal_preview"]?.toString().orEmpty(),
+                sectionCount = data["section_count"].asInt(),
+                evidenceCount = data["evidence_count"].asInt(),
+                workspaceConfidence = data["workspace_confidence"].asDouble(),
+                bytesEstimate = data["bytes_estimate"].asInt(),
+                sections = emptyList(),
+                evidence = emptyList()
+            )
+        )
+        pruneWorkspaceSnapshotsLocked()
+    }
+
+    private fun pruneWorkspaceSnapshotsLocked() {
+        val ttlMs = workspaceSnapshotTtlMs.coerceAtLeast(0L)
+        val now = System.currentTimeMillis()
+        if (ttlMs > 0L) {
+            while (workspaceSnapshots.isNotEmpty() && (now - workspaceSnapshots.first().updatedAtMs) > ttlMs) {
+                workspaceSnapshots.removeFirst()
+            }
+        }
+        while (workspaceSnapshots.size > max(10, maxWorkspaceSnapshots)) {
+            workspaceSnapshots.removeFirst()
+        }
+        latestWorkspaceSnapshotByRoot.clear()
+        workspaceSnapshots.forEach { record ->
+            val current = latestWorkspaceSnapshotByRoot[record.rootInputEnqueuedAtMs]
+            if (
+                current == null ||
+                record.version > current.version ||
+                (record.version == current.version && record.updatedAtMs >= current.updatedAtMs)
+            ) {
+                latestWorkspaceSnapshotByRoot[record.rootInputEnqueuedAtMs] = record
+            }
+        }
+    }
+
+    private fun Any?.asLong(): Long? =
+        when (this) {
+            is Number -> this.toLong()
+            is String -> this.toLongOrNull()
+            else -> null
+        }
+
+    private fun Any?.asInt(): Int =
+        when (this) {
+            is Number -> this.toInt()
+            is String -> this.toIntOrNull() ?: 0
+            else -> 0
+        }
+
+    private fun Any?.asDouble(): Double =
+        when (this) {
+            is Number -> this.toDouble()
+            is String -> this.toDoubleOrNull() ?: 0.0
+            else -> 0.0
+        }
+
+    private data class WorkspaceSnapshotRecord(
+        val rootInputEnqueuedAtMs: Long,
+        val version: Long,
+        val updatedAtMs: Long,
+        val updateType: String,
+        val goal: String,
+        val sectionCount: Int,
+        val evidenceCount: Int,
+        val workspaceConfidence: Double,
+        val bytesEstimate: Int,
+        val sections: List<Map<String, Any?>>,
+        val evidence: List<String>,
+    )
+
+    private companion object {
+        const val WORKSPACE_GOAL_PREVIEW_CHARS: Int = 140
+        const val WORKSPACE_VERSION_LIST_LIMIT: Int = 25
     }
 }
 

@@ -121,6 +121,7 @@ Standalone Kotlin JVM app using Gradle with:
   - `EGO_TASK_WORKSPACE_FINAL_PASS_MAX_TOKENS` (default: `260`)
   - `EGO_TASK_WORKSPACE_FINAL_PASS_MIN_WORKSPACE_CONFIDENCE` (default: `0.35`)
   - `EGO_TASK_WORKSPACE_FINAL_PASS_MIN_MODEL_CONFIDENCE` (default: `0.55`)
+  - `EGO_TASK_WORKSPACE_DEBUG_CAPTURE_ENABLED` (default: `true`, temporary development default)
   - `EGO_TASK_WORKSPACE_MAX_ACTIVE_TASKS` (default: `32`)
   - `EGO_MAX_ACTION_PAYLOAD_CHARS` (default: `4000`)
   - `EGO_SEARCH_RESULT_COUNT` (default: `5`)
@@ -304,6 +305,8 @@ you> exit
 - Queue, loop, thought/action flow, Superego in/out, and LLM events are streamed as typed events.
 - Thought Chain / Timeline includes non-snapshot events, including `llm_raw_response` payloads.
 - Queue snapshots are used for queue panels/counts, not shown as timeline items.
+- Task Workspace drawer (Action Flow -> `Workspace`) fetches full debug snapshots on demand from `/api/workspace` and `/api/workspace/{rootId}`.
+- Full workspace snapshots use two-lane instrumentation: lightweight `task_workspace_head` is streamed live; heavy `task_workspace_debug_snapshot` is captured server-side and excluded from SSE broadcasting.
 - If dashboard bind fails, app continues running without the dashboard server.
 
 ## Loop behavior

@@ -13,5 +13,6 @@ data class TaskWorkspaceConfig(
     val finalPassMaxTokens: Int = 260,
     val finalPassMinWorkspaceConfidence: Double = 0.35,
     val finalPassMinModelConfidence: Double = 0.55,
+    val debugCaptureEnabled: Boolean = true,
     val maxActiveTasks: Int = 32,
 )
