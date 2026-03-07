@@ -45,8 +45,8 @@ fun main(args: Array<String>) {
     val mcpRuntimeConfig = McpRuntimeConfigLoader.load()
     val llmRuntimeConfig = LlmRuntimeConfigLoader.load()
     if (llmRuntimeConfig == null) {
-        output.error("Unsupported LLM provider setting. Expected one of: groq, mistral (for LLM_PROVIDER and optional LLM_WEBSEARCH_PROVIDER).")
-        logger.warn { "Unsupported LLM provider setting. Expected one of: groq, mistral (for LLM_PROVIDER and optional LLM_WEBSEARCH_PROVIDER)." }
+        output.error("Invalid llm-runtime.yaml configuration. Supported providers are: groq, mistral, google.")
+        logger.warn { "Invalid llm-runtime.yaml configuration. Supported providers are: groq, mistral, google." }
         return
     }
 
@@ -66,13 +66,6 @@ fun main(args: Array<String>) {
             cliOptions = cliOptions,
             runtimeSettings = runtimeSettings
         )
-        return
-    }
-
-    if (llmRuntimeConfig.apiKey.isBlank()) {
-        val message = "${llmRuntimeConfig.apiKeyEnvVar} is not set. Export it to talk to ${llmRuntimeConfig.providerLabel}."
-        output.error(message)
-        logger.warn { message }
         return
     }
 

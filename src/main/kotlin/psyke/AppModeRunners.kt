@@ -22,6 +22,7 @@ import psyke.agent.actions.websearch.WebSearchEngineHealth
 import psyke.agent.actions.websearch.WebSearchResult
 import psyke.config.AgentRuntimeSettings
 import psyke.config.McpCapabilityConfig
+import psyke.config.LlmEndpointConfig
 import psyke.config.LlmProvider
 import psyke.config.LlmRuntimeConfig
 import psyke.config.McpRuntimeConfig
@@ -112,13 +113,13 @@ internal object AppModeRunners {
             val provider = if (cliOptions.evalReasoningMode == ReasoningEvalMode.LOGIC) {
                 "logic-harness"
             } else {
-                llm.providerLabel
+                llm.planner.providerLabel
             }
             MetricsRuntimeFactory.create(
                 provider = provider,
-                apiKey = llm.apiKey.ifBlank { provider },
-                egoModel = llm.egoModel,
-                superegoModel = llm.superegoModel
+                apiKey = llm.planner.apiKey.ifBlank { provider },
+                egoModel = llm.planner.model,
+                superegoModel = llm.superego.model
             ).use { metrics ->
                 val llmCallObserver = LlmCallEventObserver(
                     provider = provider,
@@ -143,19 +144,18 @@ internal object AppModeRunners {
                     )
     
                     ReasoningEvalMode.MODEL -> {
-                        val resolvedApiKey = llm.apiKey.trim()
+                        val resolvedApiKey = llm.planner.apiKey.trim()
                         if (resolvedApiKey.isBlank()) {
-                            val message = "${llm.apiKeyEnvVar} is required for --eval-reasoning-mode model."
+                            val message = "${llm.planner.apiKeyEnvVar} is required for --eval-reasoning-mode model."
                             output.error(message)
                             logger.warn { message }
                             return
                         }
-                        if (!checkProviderHealth(llm = llm, modeLabel = "eval_reasoning_model")) {
+                        if (!checkProviderHealth(endpoint = llm.planner, modeLabel = "eval_reasoning_model", roleLabel = "planner")) {
                             return
                         }
                         createChatClient(
-                            llm = llm,
-                            modelName = llm.egoModel,
+                            endpoint = llm.planner,
                             callObserver = callObserver
                         )
                     }
@@ -201,14 +201,14 @@ internal object AppModeRunners {
         runtimeSettings: AgentRuntimeSettings,
     ) {
         output.info("Running memory live eval (real LLM + real MCP memory)...")
-        val resolvedApiKey = llm.apiKey.trim()
+        val resolvedApiKey = llm.planner.apiKey.trim()
         if (resolvedApiKey.isBlank()) {
-            val message = "${llm.apiKeyEnvVar} is required for --eval-memory-live."
+            val message = "${llm.planner.apiKeyEnvVar} is required for --eval-memory-live."
             output.error(message)
             logger.warn { message }
             return
         }
-        if (!checkProviderHealth(llm = llm, modeLabel = "eval_memory_live")) {
+        if (!checkProviderHealth(endpoint = llm.planner, modeLabel = "eval_memory_live", roleLabel = "planner")) {
             return
         }
         val memoryCommand = resolveMcpCommand(mcpRuntimeConfig.memory)
@@ -248,13 +248,13 @@ internal object AppModeRunners {
             criticalSinks = listOfNotNull(sidecarSink)
         ).use { instrumentation ->
             MetricsRuntimeFactory.create(
-                provider = llm.providerLabel,
-                apiKey = llm.apiKey,
-                egoModel = llm.egoModel,
-                superegoModel = llm.superegoModel
+                provider = llm.planner.providerLabel,
+                apiKey = llm.planner.apiKey,
+                egoModel = llm.planner.model,
+                superegoModel = llm.superego.model
             ).use { metrics ->
                 val llmCallObserver = LlmCallEventObserver(
-                    provider = llm.providerLabel,
+                    provider = llm.planner.providerLabel,
                     instrumentation = instrumentation
                 )
                 val metricsSnapshotObserver = MetricsSnapshotObserver(
@@ -262,7 +262,7 @@ internal object AppModeRunners {
                     instrumentation = instrumentation
                 )
                 val callObserver = combineChatCallObservers(
-                    metrics.chatCallObserver(provider = llm.providerLabel),
+                    metrics.chatCallObserver(provider = llm.planner.providerLabel),
                     llmCallObserver,
                     metricsSnapshotObserver
                 )
@@ -273,8 +273,7 @@ internal object AppModeRunners {
                 UsageTrackingChatClient(
                     delegate = InstrumentedChatModelClient(
                         delegate = createChatClient(
-                            llm = llm,
-                            modelName = llm.egoModel,
+                            endpoint = llm.planner,
                             callObserver = callObserver
                         ),
                         hooks = listOf(rawResponseHook)
@@ -338,28 +337,76 @@ internal object AppModeRunners {
         return logPath.resolveSibling(sidecarName)
     }
     
-    private fun checkProviderHealth(llm: LlmRuntimeConfig, modeLabel: String): Boolean {
-        val checker = when (llm.provider) {
-            LlmProvider.GROQ -> GroqProviderStatusChecker(
-                apiKey = llm.apiKey,
-                baseUrl = llm.baseUrl
+    private fun checkProviderHealth(
+        endpoint: LlmEndpointConfig,
+        modeLabel: String,
+        roleLabel: String,
+    ): Boolean {
+        if (endpoint.apiKey.isBlank()) {
+            return reportProviderStatusAndDecide(
+                modeLabel = "$modeLabel:$roleLabel",
+                status = ProviderStatus(
+                    provider = endpoint.providerLabel,
+                    state = ProviderHealthState.UNAVAILABLE,
+                    detail = "${endpoint.apiKeyEnvVar} is missing."
+                )
             )
-    
+        }
+        val checker = when (endpoint.provider) {
+            LlmProvider.GROQ -> GroqProviderStatusChecker(
+                apiKey = endpoint.apiKey,
+                baseUrl = endpoint.baseUrl
+            )
+
             LlmProvider.MISTRAL -> MistralProviderStatusChecker(
-                apiKey = llm.apiKey,
-                baseUrl = llm.baseUrl
+                apiKey = endpoint.apiKey,
+                baseUrl = endpoint.baseUrl
             )
 
             LlmProvider.GOOGLE -> GeminiProviderStatusChecker(
-                apiKey = llm.apiKey,
-                baseUrl = llm.baseUrl
+                apiKey = endpoint.apiKey,
+                baseUrl = endpoint.baseUrl
             )
         }
         val status = checker.check()
         return reportProviderStatusAndDecide(
-            modeLabel = modeLabel,
+            modeLabel = "$modeLabel:$roleLabel",
             status = status
         )
+    }
+
+    private fun checkInteractiveLlmHealth(
+        llm: LlmRuntimeConfig,
+        modeLabel: String,
+    ): Boolean {
+        val endpoints = listOf(
+            "planner" to llm.planner,
+            "action_verifier" to llm.actionVerifier,
+            "superego" to llm.superego,
+            "meta_reasoner" to llm.metaReasoner,
+            "memory_advisor" to llm.memoryAdvisor
+        )
+        for ((roleLabel, endpoint) in endpoints) {
+            if (!checkProviderHealth(endpoint = endpoint, modeLabel = modeLabel, roleLabel = roleLabel)) {
+                return false
+            }
+        }
+        return true
+    }
+
+    private fun resolveMetricsProviderLabel(llm: LlmRuntimeConfig): String {
+        val providers = linkedSetOf(
+            llm.planner.providerLabel,
+            llm.actionVerifier.providerLabel,
+            llm.superego.providerLabel,
+            llm.metaReasoner.providerLabel,
+            llm.memoryAdvisor.providerLabel
+        )
+        return if (providers.size == 1) {
+            providers.first()
+        } else {
+            "multi"
+        }
     }
     
     private fun checkMcpMemoryProviderHealth(
@@ -422,7 +469,7 @@ internal object AppModeRunners {
         mcpRuntimeConfig: McpRuntimeConfig,
         runtimeSettings: AgentRuntimeSettings,
     ) {
-        if (!checkProviderHealth(llm = llm, modeLabel = "interactive")) {
+        if (!checkInteractiveLlmHealth(llm = llm, modeLabel = "interactive")) {
             return
         }
         val dashboardPort = runtimeSettings.dashboardPort
@@ -515,11 +562,12 @@ internal object AppModeRunners {
                     )
                 )
     
+                val metricsProvider = resolveMetricsProviderLabel(llm)
                 MetricsRuntimeFactory.create(
-                    provider = llm.providerLabel,
-                    apiKey = llm.apiKey,
-                    egoModel = llm.egoModel,
-                    superegoModel = llm.superegoModel
+                    provider = metricsProvider,
+                    apiKey = llm.planner.apiKey.ifBlank { metricsProvider },
+                    egoModel = llm.planner.model,
+                    superegoModel = llm.superego.model
                 ).use { metrics ->
                     val metricsEventSink = MetricsEventSink(
                         metrics = metrics,
@@ -531,32 +579,25 @@ internal object AppModeRunners {
                         metrics.recordDroppedEvents(delta)
                         dashboardStore.recordDroppedEvents(total)
                     }
-                    val instrumentationObserver = LlmCallEventObserver(
-                        provider = llm.providerLabel,
-                        instrumentation = instrumentation
-                    )
                     val metricsSnapshotObserver = MetricsSnapshotObserver(
                         metricsRuntime = metrics,
                         instrumentation = instrumentation
                     )
-                    val callObserver = combineChatCallObservers(
-                        metrics.chatCallObserver(provider = llm.providerLabel),
-                        instrumentationObserver,
-                        metricsSnapshotObserver
-                    )
-                    val webSearchCallObserver = if (llm.webSearchProvider == llm.provider) {
-                        callObserver
-                    } else {
-                        val webSearchInstrumentationObserver = LlmCallEventObserver(
-                            provider = llm.webSearchProviderLabel,
-                            instrumentation = instrumentation
-                        )
-                        combineChatCallObservers(
-                            metrics.chatCallObserver(provider = llm.webSearchProviderLabel),
-                            webSearchInstrumentationObserver,
-                            metricsSnapshotObserver
-                        )
+                    val callObserversByProvider = mutableMapOf<String, psyke.llm.ChatCallObserver?>()
+                    fun callObserverForProvider(provider: String): psyke.llm.ChatCallObserver? {
+                        return callObserversByProvider.getOrPut(provider) {
+                            val instrumentationObserver = LlmCallEventObserver(
+                                provider = provider,
+                                instrumentation = instrumentation
+                            )
+                            combineChatCallObservers(
+                                metrics.chatCallObserver(provider = provider),
+                                instrumentationObserver,
+                                metricsSnapshotObserver
+                            )
+                        }
                     }
+                    val webSearchCallObserver = callObserverForProvider(llm.webSearch.providerLabel)
                     val rawResponseHook = LlmRawResponseEventHook(
                         instrumentation = instrumentation,
                         maxRawResponseChars = config.planner.maxActionPayloadChars
@@ -564,155 +605,165 @@ internal object AppModeRunners {
     
                     InstrumentedChatModelClient(
                         delegate = createChatClient(
-                            llm = llm,
-                            modelName = llm.egoModel,
-                            callObserver = callObserver
+                            endpoint = llm.planner,
+                            callObserver = callObserverForProvider(llm.planner.providerLabel)
                         ),
                         hooks = listOf(rawResponseHook)
-                    ).use { egoPlannerClient ->
+                    ).use { plannerClient ->
                         InstrumentedChatModelClient(
                             delegate = createChatClient(
-                                llm = llm,
-                                modelName = llm.superegoModel,
-                                callObserver = callObserver
+                                endpoint = llm.actionVerifier,
+                                callObserver = callObserverForProvider(llm.actionVerifier.providerLabel)
                             ),
                             hooks = listOf(rawResponseHook)
-                        ).use { superegoClient ->
+                        ).use { actionVerifierClient ->
                             InstrumentedChatModelClient(
                                 delegate = createChatClient(
-                                    llm = llm,
-                                    modelName = llm.metaReasonerModel,
-                                    callObserver = callObserver
+                                    endpoint = llm.superego,
+                                    callObserver = callObserverForProvider(llm.superego.providerLabel)
                                 ),
                                 hooks = listOf(rawResponseHook)
-                            ).use { metaReasonerClient ->
+                            ).use { superegoClient ->
                                 InstrumentedChatModelClient(
                                     delegate = createChatClient(
-                                        llm = llm,
-                                        modelName = llm.memoryConsolidationModel,
-                                        callObserver = callObserver
+                                        endpoint = llm.metaReasoner,
+                                        callObserver = callObserverForProvider(llm.metaReasoner.providerLabel)
                                     ),
                                     hooks = listOf(rawResponseHook)
-                                ).use { longTermMemoryClient ->
-                                    logger.info {
-                                        "Provider=${llm.providerLabel} Ego model=${llm.egoModel} Superego model=${llm.superegoModel} " +
-                                            "Meta model=${llm.metaReasonerModel} Memory model=${llm.memoryConsolidationModel} " +
-                                            "WebSearch provider=${llm.webSearchProviderLabel} model=${llm.webSearchModel}"
-                                    }
+                                ).use { metaReasonerClient ->
+                                    InstrumentedChatModelClient(
+                                        delegate = createChatClient(
+                                            endpoint = llm.memoryAdvisor,
+                                            callObserver = callObserverForProvider(llm.memoryAdvisor.providerLabel)
+                                        ),
+                                        hooks = listOf(rawResponseHook)
+                                    ).use { longTermMemoryClient ->
+                                        logger.info {
+                                            "Cognitive role routing: " +
+                                                "planner=${llm.planner.providerLabel}/${llm.planner.model}, " +
+                                                "action_verifier=${llm.actionVerifier.providerLabel}/${llm.actionVerifier.model}, " +
+                                                "superego=${llm.superego.providerLabel}/${llm.superego.model}, " +
+                                                "meta_reasoner=${llm.metaReasoner.providerLabel}/${llm.metaReasoner.model}, " +
+                                                "memory_advisor=${llm.memoryAdvisor.providerLabel}/${llm.memoryAdvisor.model}, " +
+                                                "web_search=${llm.webSearch.providerLabel}/${llm.webSearch.model}"
+                                        }
     
-                                    val gatekeeper = Superego(
-                                        modelClient = superegoClient,
-                                        config = config,
-                                        instrumentation = instrumentation
-                                    )
-                                    val mcpTimeTool = createMcpTimeTool(config, mcpRuntimeConfig.time)
-                                    val fetchTool = createFetchTool(config, mcpRuntimeConfig.fetch)
-                                    val webSearchRuntime = createWebSearchRuntime(
-                                        llm = llm,
-                                        callObserver = webSearchCallObserver,
-                                        instrumentation = instrumentation,
-                                        maxRawResponseChars = config.planner.maxActionPayloadChars
-                                    )
+                                        val gatekeeper = Superego(
+                                            modelClient = superegoClient,
+                                            config = config,
+                                            instrumentation = instrumentation
+                                        )
+                                        val mcpTimeTool = createMcpTimeTool(config, mcpRuntimeConfig.time)
+                                        val fetchTool = createFetchTool(config, mcpRuntimeConfig.fetch)
+                                        val webSearchRuntime = createWebSearchRuntime(
+                                            llm = llm,
+                                            callObserver = webSearchCallObserver,
+                                            instrumentation = instrumentation,
+                                            maxRawResponseChars = config.planner.maxActionPayloadChars
+                                        )
     
-                                    webSearchRuntime.use { runtime ->
-                                        val timeTool = mcpTimeTool
-                                        val activeFetchTool = fetchTool
-                                        try {
-                                            val webSearchActionHandler = WebSearchActionHandler(runtime.engine)
-                                            val motorCortex = MotorCortex(
-                                                webSearchActionHandler = webSearchActionHandler,
-                                                mcpTimeTool = timeTool,
-                                                fetchTool = activeFetchTool
-                                            )
-                                            val actionStatuses = motorCortex.startupSmokeTest()
-                                            instrumentation.emit(AgentEvents.actionCapabilities(actionStatuses))
-                                            actionStatuses.filterNot { it.available }.forEach { status ->
-                                                instrumentation.emit(
-                                                    AgentEvents.warning(
-                                                        "Action ${status.actionType.name.lowercase()} unavailable at startup: ${status.detail}"
-                                                    )
-                                                )
-                                            }
-                                            var plannerNoopCount = 0
-                                            var plannerOutputRepairedCount = 0
-                                            val planner = LlmEgoPlanner(
-                                                modelClient = egoPlannerClient,
-                                                config = config,
-                                                instrumentation = instrumentation,
-                                                onPlannerNoop = {
-                                                    metrics.recordPlannerNoop()
-                                                    plannerNoopCount += 1
-                                                    if (plannerNoopCount == 3) {
-                                                        instrumentation.emit(
-                                                            AgentEvents.warning(
-                                                                "Anomaly threshold reached: noop_count >= 3."
-                                                            )
-                                                        )
-                                                    }
-                                                },
-                                                onPlannerOutputRepaired = {
-                                                    metrics.recordPlannerOutputRepaired()
-                                                    plannerOutputRepairedCount += 1
-                                                    if (plannerOutputRepairedCount == 3) {
-                                                        instrumentation.emit(
-                                                            AgentEvents.warning(
-                                                                "Anomaly threshold reached: planner_output_repaired_count >= 3."
-                                                            )
-                                                        )
-                                                    }
-                                                }
-                                            )
-                                            val metaReasoner = LlmMetaReasoner(
-                                                modelClient = metaReasonerClient,
-                                                config = config
-                                            )
-                                            val longTermMemoryAdvisor = LlmLongTermMemoryAdvisor(
-                                                modelClient = longTermMemoryClient,
-                                                config = config
-                                            )
-                                            val interactiveMemoryStartup =
-                                                resolveInteractiveMemoryStartup(config, mcpRuntimeConfig.memory)
-                                            val hippocampus = interactiveMemoryStartup.hippocampus
-                                            val memoryProviderDetail = interactiveMemoryStartup.detail
-                                            val allStatuses = actionStatuses + ActionImplementationStatus(
-                                                actionType = ActionType.MEMORY,
-                                                available = hippocampus.enabled,
-                                                detail = memoryProviderDetail,
-                                            )
-                                            instrumentation.emit(AgentEvents.actionCapabilities(allStatuses))
-                                            if (!hippocampus.enabled) {
-                                                instrumentation.emit(
-                                                    AgentEvents.warning("Long-term memory is unavailable: $memoryProviderDetail")
-                                                )
-                                            }
+                                        webSearchRuntime.use { runtime ->
+                                            val timeTool = mcpTimeTool
+                                            val activeFetchTool = fetchTool
                                             try {
-                                                Ego(
-                                                    planner = planner,
-                                                    superego = gatekeeper,
-                                                    motorCortex = motorCortex,
+                                                val webSearchActionHandler = WebSearchActionHandler(runtime.engine)
+                                                val motorCortex = MotorCortex(
+                                                    webSearchActionHandler = webSearchActionHandler,
+                                                    mcpTimeTool = timeTool,
+                                                    fetchTool = activeFetchTool
+                                                )
+                                                val actionStatuses = motorCortex.startupSmokeTest()
+                                                instrumentation.emit(AgentEvents.actionCapabilities(actionStatuses))
+                                                actionStatuses.filterNot { it.available }.forEach { status ->
+                                                    instrumentation.emit(
+                                                        AgentEvents.warning(
+                                                            "Action ${status.actionType.name.lowercase()} unavailable at startup: ${status.detail}"
+                                                        )
+                                                    )
+                                                }
+                                                var plannerNoopCount = 0
+                                                var plannerOutputRepairedCount = 0
+                                                val planner = LlmEgoPlanner(
+                                                    modelClient = plannerClient,
+                                                    actionVerifierModelClient = actionVerifierClient,
                                                     config = config,
-                                                    hippocampus = hippocampus,
-                                                    metaReasoner = metaReasoner,
-                                                    longTermMemoryAdvisor = longTermMemoryAdvisor,
-                                                    instrumentation = instrumentation
-                                                ).runInteractive()
+                                                    instrumentation = instrumentation,
+                                                    onPlannerNoop = {
+                                                        metrics.recordPlannerNoop()
+                                                        plannerNoopCount += 1
+                                                        if (plannerNoopCount == 3) {
+                                                            instrumentation.emit(
+                                                                AgentEvents.warning(
+                                                                    "Anomaly threshold reached: noop_count >= 3."
+                                                                )
+                                                            )
+                                                        }
+                                                    },
+                                                    onPlannerOutputRepaired = {
+                                                        metrics.recordPlannerOutputRepaired()
+                                                        plannerOutputRepairedCount += 1
+                                                        if (plannerOutputRepairedCount == 3) {
+                                                            instrumentation.emit(
+                                                                AgentEvents.warning(
+                                                                    "Anomaly threshold reached: planner_output_repaired_count >= 3."
+                                                                )
+                                                            )
+                                                        }
+                                                    }
+                                                )
+                                                val metaReasoner = LlmMetaReasoner(
+                                                    modelClient = metaReasonerClient,
+                                                    config = config
+                                                )
+                                                val longTermMemoryAdvisor = LlmLongTermMemoryAdvisor(
+                                                    modelClient = longTermMemoryClient,
+                                                    config = config
+                                                )
+                                                val interactiveMemoryStartup =
+                                                    resolveInteractiveMemoryStartup(config, mcpRuntimeConfig.memory)
+                                                val hippocampus = interactiveMemoryStartup.hippocampus
+                                                val memoryProviderDetail = interactiveMemoryStartup.detail
+                                                val allStatuses = actionStatuses + ActionImplementationStatus(
+                                                    actionType = ActionType.MEMORY,
+                                                    available = hippocampus.enabled,
+                                                    detail = memoryProviderDetail,
+                                                )
+                                                instrumentation.emit(AgentEvents.actionCapabilities(allStatuses))
+                                                if (!hippocampus.enabled) {
+                                                    instrumentation.emit(
+                                                        AgentEvents.warning("Long-term memory is unavailable: $memoryProviderDetail")
+                                                    )
+                                                }
+                                                try {
+                                                    Ego(
+                                                        planner = planner,
+                                                        superego = gatekeeper,
+                                                        motorCortex = motorCortex,
+                                                        config = config,
+                                                        hippocampus = hippocampus,
+                                                        metaReasoner = metaReasoner,
+                                                        longTermMemoryAdvisor = longTermMemoryAdvisor,
+                                                        instrumentation = instrumentation
+                                                    ).runInteractive()
+                                                } finally {
+                                                    hippocampus.close()
+                                                }
                                             } finally {
-                                                hippocampus.close()
+                                                closeQuietly(activeFetchTool)
+                                                closeQuietly(timeTool)
                                             }
-                                        } finally {
-                                            closeQuietly(activeFetchTool)
-                                            closeQuietly(timeTool)
                                         }
                                     }
                                 }
                             }
                         }
-                    }
                 }
             }
         }
     }
     
+    }
+
     private data class WebSearchRuntime(
         val engine: WebSearchEngine,
         private val closeAction: () -> Unit = {},
@@ -728,24 +779,25 @@ internal object AppModeRunners {
         instrumentation: psyke.instrumentation.AgentInstrumentation,
         maxRawResponseChars: Int,
     ): WebSearchRuntime {
+        val webSearch = llm.webSearch
         return try {
-            when (llm.webSearchProvider) {
+            when (webSearch.provider) {
                 LlmProvider.MISTRAL -> {
                     val session = MistralWebSearchAgentSession.start(
-                        apiKey = llm.webSearchApiKey,
-                        model = llm.webSearchModel,
+                        apiKey = webSearch.apiKey,
+                        model = webSearch.model,
                         providedAgentId = System.getenv("MISTRAL_WEBSEARCH_AGENT_ID"),
-                        baseUrl = llm.webSearchBaseUrl
+                        baseUrl = webSearch.baseUrl
                     )
                     val profile = MistralWebSearchProfile(
                         mode = MistralWebSearchMode.AGENT_ID,
-                        model = llm.webSearchModel,
+                        model = webSearch.model,
                         agentId = session.agentId
                     )
                     val engine = MistralConversationsWebSearchEngine(
-                        apiKey = llm.webSearchApiKey,
+                        apiKey = webSearch.apiKey,
                         profile = profile,
-                        baseUrl = llm.webSearchBaseUrl,
+                        baseUrl = webSearch.baseUrl,
                         callObserver = callObserver,
                         instrumentation = instrumentation,
                         maxRawResponseChars = maxRawResponseChars
@@ -761,9 +813,9 @@ internal object AppModeRunners {
 
                 LlmProvider.GROQ -> WebSearchRuntime(
                     engine = GroqConversationsWebSearchEngine(
-                        apiKey = llm.webSearchApiKey,
-                        model = llm.webSearchModel,
-                        baseUrl = llm.webSearchBaseUrl,
+                        apiKey = webSearch.apiKey,
+                        model = webSearch.model,
+                        baseUrl = webSearch.baseUrl,
                         callObserver = callObserver,
                         instrumentation = instrumentation,
                         maxRawResponseChars = maxRawResponseChars
@@ -772,9 +824,9 @@ internal object AppModeRunners {
 
                 LlmProvider.GOOGLE -> WebSearchRuntime(
                     engine = GeminiWebSearchEngine(
-                        apiKey = llm.webSearchApiKey,
-                        model = llm.webSearchModel,
-                        baseUrl = llm.webSearchBaseUrl,
+                        apiKey = webSearch.apiKey,
+                        model = webSearch.model,
+                        baseUrl = webSearch.baseUrl,
                         callObserver = callObserver,
                         instrumentation = instrumentation,
                         maxRawResponseChars = maxRawResponseChars
@@ -807,29 +859,28 @@ internal object AppModeRunners {
     }
     
     private fun createChatClient(
-        llm: LlmRuntimeConfig,
-        modelName: String,
+        endpoint: LlmEndpointConfig,
         callObserver: psyke.llm.ChatCallObserver? = null,
     ): ChatModelClient {
-        return when (llm.provider) {
+        return when (endpoint.provider) {
             LlmProvider.GROQ -> GroqChatClient(
-                apiKey = llm.apiKey,
-                baseUrl = llm.baseUrl,
-                modelName = modelName,
+                apiKey = endpoint.apiKey,
+                baseUrl = endpoint.baseUrl,
+                modelName = endpoint.model,
                 callObserver = callObserver
             )
     
             LlmProvider.MISTRAL -> MistralChatClient(
-                apiKey = llm.apiKey,
-                baseUrl = llm.baseUrl,
-                modelName = modelName,
+                apiKey = endpoint.apiKey,
+                baseUrl = endpoint.baseUrl,
+                modelName = endpoint.model,
                 callObserver = callObserver
             )
 
             LlmProvider.GOOGLE -> GeminiChatClient(
-                apiKey = llm.apiKey,
-                baseUrl = llm.baseUrl,
-                modelName = modelName,
+                apiKey = endpoint.apiKey,
+                baseUrl = endpoint.baseUrl,
+                modelName = endpoint.model,
                 callObserver = callObserver
             )
         }

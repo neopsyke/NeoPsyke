@@ -80,6 +80,10 @@ class GeminiChatClient(
                 val parsed = mapper.readValue<GeminiChatCompletionResponse>(responseBody)
                 val choice = parsed.choices.firstOrNull()
                     ?: throw IOException("Gemini chat returned no choices.")
+                val content = choice.message.content.trim()
+                if (content.isBlank()) {
+                    throw IOException("Gemini chat returned empty message content.")
+                }
 
                 val usage = parsed.usage?.toChatUsage()
                 val resolvedModel = parsed.model ?: modelName
@@ -97,7 +101,7 @@ class GeminiChatClient(
                 )
 
                 return ChatCompletion(
-                    content = choice.message.content,
+                    content = content,
                     model = resolvedModel,
                     finishReason = choice.finishReason,
                     id = parsed.id,

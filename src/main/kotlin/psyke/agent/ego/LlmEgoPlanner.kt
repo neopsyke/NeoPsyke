@@ -26,6 +26,7 @@ private val logger = KotlinLogging.logger {}
 
 class LlmEgoPlanner(
     private val modelClient: ChatModelClient,
+    private val actionVerifierModelClient: ChatModelClient = modelClient,
     private val config: AgentConfig,
     private val instrumentation: AgentInstrumentation = NoopAgentInstrumentation,
     private val onPlannerNoop: () -> Unit = {},
@@ -289,7 +290,7 @@ class LlmEgoPlanner(
         val retryAttempts = RetryPolicy.boundedLlmRetryAttempts(config.planner.llmRetryAttempts)
         for (attempt in 1..retryAttempts) {
             try {
-                response = modelClient.chat(
+                response = actionVerifierModelClient.chat(
                     messages = messages,
                     options = ChatRequestOptions(
                         temperature = 0.1,
@@ -476,7 +477,7 @@ class LlmEgoPlanner(
             """.trimIndent()
         )
         return try {
-            modelClient.chat(
+            actionVerifierModelClient.chat(
                 messages = retryMessages,
                 options = ChatRequestOptions(
                     temperature = 0.0,

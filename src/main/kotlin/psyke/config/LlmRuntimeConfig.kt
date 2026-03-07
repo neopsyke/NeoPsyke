@@ -23,21 +23,84 @@ enum class LlmProvider(val id: String) {
     }
 }
 
-data class LlmRuntimeConfig(
+data class LlmEndpointConfig(
     val provider: LlmProvider,
     val apiKey: String,
     val apiKeyEnvVar: String,
     val baseUrl: String,
-    val egoModel: String,
-    val superegoModel: String,
-    val metaReasonerModel: String,
-    val memoryConsolidationModel: String,
-    val webSearchProvider: LlmProvider,
-    val webSearchApiKey: String,
-    val webSearchApiKeyEnvVar: String,
-    val webSearchBaseUrl: String,
-    val webSearchModel: String,
+    val model: String,
 ) {
+    val providerLabel: String
+        get() = provider.id
+}
+
+data class LlmCognitiveRolesConfig(
+    val planner: LlmEndpointConfig,
+    val actionVerifier: LlmEndpointConfig,
+    val superego: LlmEndpointConfig,
+    val metaReasoner: LlmEndpointConfig,
+    val memoryAdvisor: LlmEndpointConfig,
+)
+
+data class LlmRuntimeConfig(
+    val cognitiveRoles: LlmCognitiveRolesConfig,
+    val webSearch: LlmEndpointConfig,
+) {
+    val planner: LlmEndpointConfig
+        get() = cognitiveRoles.planner
+
+    val actionVerifier: LlmEndpointConfig
+        get() = cognitiveRoles.actionVerifier
+
+    val superego: LlmEndpointConfig
+        get() = cognitiveRoles.superego
+
+    val metaReasoner: LlmEndpointConfig
+        get() = cognitiveRoles.metaReasoner
+
+    val memoryAdvisor: LlmEndpointConfig
+        get() = cognitiveRoles.memoryAdvisor
+
+    // Legacy aliases retained for existing call sites.
+    val provider: LlmProvider
+        get() = planner.provider
+
+    val apiKey: String
+        get() = planner.apiKey
+
+    val apiKeyEnvVar: String
+        get() = planner.apiKeyEnvVar
+
+    val baseUrl: String
+        get() = planner.baseUrl
+
+    val egoModel: String
+        get() = planner.model
+
+    val superegoModel: String
+        get() = superego.model
+
+    val metaReasonerModel: String
+        get() = metaReasoner.model
+
+    val memoryConsolidationModel: String
+        get() = memoryAdvisor.model
+
+    val webSearchProvider: LlmProvider
+        get() = webSearch.provider
+
+    val webSearchApiKey: String
+        get() = webSearch.apiKey
+
+    val webSearchApiKeyEnvVar: String
+        get() = webSearch.apiKeyEnvVar
+
+    val webSearchBaseUrl: String
+        get() = webSearch.baseUrl
+
+    val webSearchModel: String
+        get() = webSearch.model
+
     val providerLabel: String
         get() = provider.id
 
@@ -56,6 +119,35 @@ private data class LlmRuntimeYamlModels(
     val webSearch: String? = null,
 )
 
+private data class LlmRuntimeYamlRole(
+    val provider: String? = null,
+    val model: String? = null,
+)
+
+private data class LlmRuntimeYamlCognitiveRoles(
+    val planner: LlmRuntimeYamlRole? = null,
+    @JsonProperty("action_verifier")
+    val actionVerifier: LlmRuntimeYamlRole? = null,
+    val superego: LlmRuntimeYamlRole? = null,
+    @JsonProperty("meta_reasoner")
+    val metaReasoner: LlmRuntimeYamlRole? = null,
+    @JsonProperty("memory_advisor")
+    val memoryAdvisor: LlmRuntimeYamlRole? = null,
+)
+
+private data class LlmRuntimeYamlProvider(
+    @JsonProperty("base_url")
+    val baseUrl: String? = null,
+    @JsonProperty("api_key_env")
+    val apiKeyEnvVar: String? = null,
+)
+
+private data class LlmRuntimeYamlProviders(
+    val groq: LlmRuntimeYamlProvider? = null,
+    val mistral: LlmRuntimeYamlProvider? = null,
+    val google: LlmRuntimeYamlProvider? = null,
+)
+
 private data class LlmRuntimeYamlConfig(
     val provider: String? = null,
     @JsonProperty("base_url")
@@ -64,6 +156,9 @@ private data class LlmRuntimeYamlConfig(
     val apiKeyEnvVar: String? = null,
     @JsonProperty("web_search")
     val webSearch: LlmRuntimeYamlWebSearch? = null,
+    @JsonProperty("cognitive_roles")
+    val cognitiveRoles: LlmRuntimeYamlCognitiveRoles? = null,
+    val providers: LlmRuntimeYamlProviders? = null,
     val models: LlmRuntimeYamlModels = LlmRuntimeYamlModels(),
 )
 
@@ -83,6 +178,12 @@ private data class ProviderDefaults(
     val defaultWebSearchModel: String,
 )
 
+private data class ProviderRuntimeSettings(
+    val baseUrl: String,
+    val apiKeyEnvVar: String,
+    val apiKey: String,
+)
+
 object LlmRuntimeConfigLoader {
     private val mapper = ObjectMapper(YAMLFactory())
         .registerKotlinModule()
@@ -93,119 +194,143 @@ object LlmRuntimeConfigLoader {
         defaultPath: Path = Paths.get("llm-runtime.yaml"),
     ): LlmRuntimeConfig? {
         val filePath = resolveConfigPath(env, defaultPath)
-        val yaml = readYaml(filePath) ?: LlmRuntimeYamlConfig(provider = LlmProvider.GROQ.id)
+        val yaml = readYaml(filePath) ?: LlmRuntimeYamlConfig()
 
-        val provider = LlmProvider.parse(
-            firstNonBlank(env["LLM_PROVIDER"], yaml.provider, LlmProvider.GROQ.id)
+        val fallbackProvider = LlmProvider.parse(yaml.provider) ?: LlmProvider.GROQ
+
+        val planner = resolveRoleEndpoint(
+            env = env,
+            yaml = yaml,
+            fallbackProvider = fallbackProvider,
+            role = yaml.cognitiveRoles?.planner,
+            legacyModel = yaml.models.ego
         ) ?: return null
+
+        val actionVerifier = resolveRoleEndpoint(
+            env = env,
+            yaml = yaml,
+            fallbackProvider = fallbackProvider,
+            role = yaml.cognitiveRoles?.actionVerifier,
+            legacyModel = planner.model
+        ) ?: return null
+
+        val superego = resolveRoleEndpoint(
+            env = env,
+            yaml = yaml,
+            fallbackProvider = fallbackProvider,
+            role = yaml.cognitiveRoles?.superego,
+            legacyModel = yaml.models.superego ?: planner.model
+        ) ?: return null
+
+        val metaReasoner = resolveRoleEndpoint(
+            env = env,
+            yaml = yaml,
+            fallbackProvider = fallbackProvider,
+            role = yaml.cognitiveRoles?.metaReasoner,
+            legacyModel = yaml.models.metaReasoner ?: planner.model
+        ) ?: return null
+
+        val memoryAdvisor = resolveRoleEndpoint(
+            env = env,
+            yaml = yaml,
+            fallbackProvider = fallbackProvider,
+            role = yaml.cognitiveRoles?.memoryAdvisor,
+            legacyModel = yaml.models.memoryConsolidation ?: planner.model
+        ) ?: return null
+
+        val webSearchProvider = LlmProvider.parse(yaml.webSearch?.provider) ?: fallbackProvider
+        val webSearchProviderSettings = resolveProviderSettings(
+            env = env,
+            yaml = yaml,
+            fallbackProvider = fallbackProvider,
+            provider = webSearchProvider
+        )
+        val webSearchModel = firstNonBlank(
+            yaml.webSearch?.model,
+            yaml.models.webSearch,
+            if (webSearchProvider == planner.provider) planner.model else null,
+            webSearchProvider.defaults().defaultWebSearchModel
+        ) ?: webSearchProvider.defaults().defaultWebSearchModel
+
+        val webSearch = LlmEndpointConfig(
+            provider = webSearchProvider,
+            apiKey = env[resolveWebSearchApiKeyEnvVar(yaml, webSearchProviderSettings.apiKeyEnvVar)]?.trim().orEmpty(),
+            apiKeyEnvVar = resolveWebSearchApiKeyEnvVar(yaml, webSearchProviderSettings.apiKeyEnvVar),
+            baseUrl = firstNonBlank(yaml.webSearch?.baseUrl, webSearchProviderSettings.baseUrl) ?: webSearchProviderSettings.baseUrl,
+            model = webSearchModel
+        )
+
+        return LlmRuntimeConfig(
+            cognitiveRoles = LlmCognitiveRolesConfig(
+                planner = planner,
+                actionVerifier = actionVerifier,
+                superego = superego,
+                metaReasoner = metaReasoner,
+                memoryAdvisor = memoryAdvisor
+            ),
+            webSearch = webSearch
+        )
+    }
+
+    private fun resolveRoleEndpoint(
+        env: Map<String, String>,
+        yaml: LlmRuntimeYamlConfig,
+        fallbackProvider: LlmProvider,
+        role: LlmRuntimeYamlRole?,
+        legacyModel: String?,
+    ): LlmEndpointConfig? {
+        val provider = LlmProvider.parse(role?.provider) ?: fallbackProvider
+        val providerSettings = resolveProviderSettings(
+            env = env,
+            yaml = yaml,
+            fallbackProvider = fallbackProvider,
+            provider = provider
+        )
+        val model = firstNonBlank(role?.model, legacyModel, provider.defaults().defaultModel)
+            ?: provider.defaults().defaultModel
+        return LlmEndpointConfig(
+            provider = provider,
+            apiKey = providerSettings.apiKey,
+            apiKeyEnvVar = providerSettings.apiKeyEnvVar,
+            baseUrl = providerSettings.baseUrl,
+            model = model
+        )
+    }
+
+    private fun resolveProviderSettings(
+        env: Map<String, String>,
+        yaml: LlmRuntimeYamlConfig,
+        fallbackProvider: LlmProvider,
+        provider: LlmProvider,
+    ): ProviderRuntimeSettings {
         val defaults = provider.defaults()
-        val providerPrefix = provider.id.uppercase()
+        val providerYaml = yaml.providers.forProvider(provider)
+        val usesLegacyTopLevel = provider == fallbackProvider
 
         val baseUrl = firstNonBlank(
-            env["LLM_BASE_URL"],
-            env["${providerPrefix}_BASE_URL"],
-            yaml.baseUrl,
+            providerYaml?.baseUrl,
+            if (usesLegacyTopLevel) yaml.baseUrl else null,
             defaults.baseUrl
         ) ?: defaults.baseUrl
 
         val apiKeyEnvVar = firstNonBlank(
-            env["LLM_API_KEY_ENV"],
-            yaml.apiKeyEnvVar,
+            providerYaml?.apiKeyEnvVar,
+            if (usesLegacyTopLevel) yaml.apiKeyEnvVar else null,
             defaults.apiKeyEnvVar
         ) ?: defaults.apiKeyEnvVar
 
-        val apiKey = firstNonBlank(
-            env["LLM_API_KEY"],
-            env[apiKeyEnvVar],
-            env[defaults.apiKeyEnvVar]
-        ).orEmpty()
-
-        val egoModel = firstNonBlank(
-            env["LLM_EGO_MODEL"],
-            env["${providerPrefix}_EGO_MODEL"],
-            yaml.models.ego,
-            defaults.defaultModel
-        ) ?: defaults.defaultModel
-
-        val superegoModel = firstNonBlank(
-            env["LLM_SUPEREGO_MODEL"],
-            env["${providerPrefix}_SUPEREGO_MODEL"],
-            yaml.models.superego,
-            egoModel
-        ) ?: egoModel
-
-        val metaReasonerModel = firstNonBlank(
-            env["LLM_META_REASONER_MODEL"],
-            env["${providerPrefix}_META_REASONER_MODEL"],
-            yaml.models.metaReasoner,
-            egoModel
-        ) ?: egoModel
-
-        val memoryConsolidationModel = firstNonBlank(
-            env["LLM_MEMORY_CONSOLIDATION_MODEL"],
-            env["${providerPrefix}_MEMORY_CONSOLIDATION_MODEL"],
-            yaml.models.memoryConsolidation,
-            egoModel
-        ) ?: egoModel
-
-        val webSearchProvider = LlmProvider.parse(
-            firstNonBlank(
-                env["LLM_WEBSEARCH_PROVIDER"],
-                yaml.webSearch?.provider,
-                provider.id
-            )
-        ) ?: return null
-        val webSearchDefaults = webSearchProvider.defaults()
-        val webSearchPrefix = webSearchProvider.id.uppercase()
-
-        val webSearchBaseUrl = firstNonBlank(
-            env["LLM_WEBSEARCH_BASE_URL"],
-            env["${webSearchPrefix}_WEBSEARCH_BASE_URL"],
-            yaml.webSearch?.baseUrl,
-            if (webSearchProvider == provider) baseUrl else null,
-            env["${webSearchPrefix}_BASE_URL"],
-            webSearchDefaults.baseUrl
-        ) ?: webSearchDefaults.baseUrl
-
-        val webSearchApiKeyEnvVar = firstNonBlank(
-            env["LLM_WEBSEARCH_API_KEY_ENV"],
-            yaml.webSearch?.apiKeyEnvVar,
-            if (webSearchProvider == provider) apiKeyEnvVar else null,
-            webSearchDefaults.apiKeyEnvVar
-        ) ?: webSearchDefaults.apiKeyEnvVar
-
-        val webSearchApiKey = firstNonBlank(
-            env["LLM_WEBSEARCH_API_KEY"],
-            env[webSearchApiKeyEnvVar],
-            if (webSearchProvider == provider) apiKey else null,
-            env[webSearchDefaults.apiKeyEnvVar]
-        ).orEmpty()
-
-        val resolvedWebSearchModel = firstNonBlank(
-            env["LLM_WEBSEARCH_MODEL"],
-            env["${webSearchPrefix}_WEBSEARCH_MODEL"],
-            yaml.webSearch?.model,
-            yaml.models.webSearch,
-            webSearchDefaults.defaultWebSearchModel,
-            if (webSearchProvider == provider) egoModel else null
-        ) ?: webSearchDefaults.defaultWebSearchModel
-
-        return LlmRuntimeConfig(
-            provider = provider,
-            apiKey = apiKey,
-            apiKeyEnvVar = apiKeyEnvVar,
+        return ProviderRuntimeSettings(
             baseUrl = baseUrl,
-            egoModel = egoModel,
-            superegoModel = superegoModel,
-            metaReasonerModel = metaReasonerModel,
-            memoryConsolidationModel = memoryConsolidationModel,
-            webSearchProvider = webSearchProvider,
-            webSearchApiKey = webSearchApiKey,
-            webSearchApiKeyEnvVar = webSearchApiKeyEnvVar,
-            webSearchBaseUrl = webSearchBaseUrl,
-            webSearchModel = resolvedWebSearchModel
+            apiKeyEnvVar = apiKeyEnvVar,
+            apiKey = env[apiKeyEnvVar]?.trim().orEmpty()
         )
     }
+
+    private fun resolveWebSearchApiKeyEnvVar(
+        yaml: LlmRuntimeYamlConfig,
+        providerApiKeyEnvVar: String,
+    ): String =
+        firstNonBlank(yaml.webSearch?.apiKeyEnvVar, providerApiKeyEnvVar) ?: providerApiKeyEnvVar
 
     private fun resolveConfigPath(env: Map<String, String>, defaultPath: Path): Path {
         val configured = env["PSYKE_LLM_CONFIG_FILE"]?.trim().orEmpty()
@@ -223,6 +348,13 @@ object LlmRuntimeConfigLoader {
             return mapper.readValue<LlmRuntimeYamlConfig>(reader)
         }
     }
+
+    private fun LlmRuntimeYamlProviders?.forProvider(provider: LlmProvider): LlmRuntimeYamlProvider? =
+        when (provider) {
+            LlmProvider.GROQ -> this?.groq
+            LlmProvider.MISTRAL -> this?.mistral
+            LlmProvider.GOOGLE -> this?.google
+        }
 
     private fun LlmProvider.defaults(): ProviderDefaults =
         when (this) {

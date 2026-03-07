@@ -12,9 +12,9 @@ It is intentionally high-level and should stay aligned with the code.
   - `src/main/kotlin/psyke/Application.kt`
   - `src/main/kotlin/psyke/AppModeRunners.kt#runInteractiveMode`
 - `runInteractiveMode` composes:
-  - LLM clients (planner, superego, meta-reasoner, long-term-memory advisor)
-    - Primary reasoning provider is shared across those clients.
-    - `web_search` runtime can be configured with an independent provider/api key/base URL/model.
+  - LLM clients (planner, action-verifier, superego, meta-reasoner, long-term-memory advisor)
+    - Each cognitive role can use an independent provider/api key/base URL/model from `llm-runtime.yaml`.
+    - `web_search` runtime remains independently configurable.
   - `Superego`
   - `MotorCortex` (answer + web search + MCP tools)
   - `LlmEgoPlanner`
@@ -176,8 +176,8 @@ It is intentionally high-level and should stay aligned with the code.
   - `web_search`
   - `mcp_time`
   - `mcp_fetch`
-- `web_search` provider routing is independent from primary reasoning provider:
-  - default follows primary provider unless `web_search.provider`/`LLM_WEBSEARCH_PROVIDER` overrides it.
+- `web_search` provider routing is independent from cognitive-role routing:
+  - configured directly via `web_search.provider` in `llm-runtime.yaml`.
   - startup initialization failures (missing key, bad base URL, provider/session errors) degrade web search to an unavailable engine instead of crashing the app.
 - Action availability is runtime health-dependent and fed back into planner context.
 - `mcp_fetch` errors are classified as retryable vs non-retryable; non-retryable failures

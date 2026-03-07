@@ -1,9 +1,31 @@
-provider: groq
-models:
-  ego: openai/gpt-oss-20b
-  superego: openai/gpt-oss-20b
-  meta_reasoner: openai/gpt-oss-20b
-  memory_consolidation: openai/gpt-oss-20b
+providers:
+  groq:
+    api_key_env: GROQ_API_KEY
+    base_url: https://api.groq.com/openai/v1
+  google:
+    api_key_env: GOOGLE_API_KEY
+    base_url: https://generativelanguage.googleapis.com/v1beta/openai/
+  mistral:
+    api_key_env: MISTRAL_API_KEY
+    base_url: https://api.mistral.ai/v1
+
+cognitive_roles:
+  planner:
+    provider: google
+    model: gemini-3.1-flash-lite-preview
+  action_verifier:
+    provider: groq
+    model: openai/gpt-oss-20b
+  superego:
+    provider: groq
+    model: openai/gpt-oss-safeguard-20b
+  meta_reasoner:
+    provider: google
+    model: gemini-3.1-flash-lite-preview
+  memory_advisor:
+    provider: groq
+    model: openai/gpt-oss-20b
+
 web_search:
-  provider: mistral
-  model: mistral-small-latest
+  provider: groq
+  model: openai/gpt-oss-20b
