@@ -14,6 +14,7 @@ flowchart LR
     AS --> E
 
     E --> P["LlmEgoPlanner"]
+    P --> AV["Action Verifier LLM Call"]
     E --> S["Superego"]
     E --> M["MotorCortex"]
 

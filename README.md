@@ -17,42 +17,52 @@ Standalone Kotlin JVM app using Gradle with:
 - Use the included Gradle wrapper (`./gradlew`)
 - Gradle can run on JDK 21+; Kotlin and Java compilation emit Java 21-compatible bytecode.
 - LLM API key is required for interactive mode and for `--eval-reasoning-mode model`:
-  - Default provider from `llm-runtime.yaml` is `groq`, so `GROQ_API_KEY`
-  - If provider is switched to `mistral`, use `MISTRAL_API_KEY`
-  - If `web_search.provider` differs from the primary provider, set that provider key too (for example `MISTRAL_API_KEY`)
+  - Set keys for every provider used by configured cognitive roles in `llm-runtime.yaml`.
+  - Example mixed setup: `GOOGLE_API_KEY` for planner/meta-reasoner and `GROQ_API_KEY` for superego/verifier/memory-advisor.
+  - If `web_search.provider` is different, set that provider key too.
 
 ## Configuration
 - LLM settings are centralized in `llm-runtime.yaml` (repository root).
-  - Primary reasoning provider is set by `provider`.
-  - `web_search` can use an independent provider/key/base URL/model.
-  - If models are omitted, Psyke uses provider defaults (`openai/gpt-oss-20b` for Groq, `mistral-small-latest` for Mistral; web search defaults to `groq/compound-mini` on Groq and `mistral-small-latest` on Mistral).
+  - Cognitive role routing is set in `cognitive_roles`:
+    - `planner`, `action_verifier`, `superego`, `meta_reasoner`, `memory_advisor`
+  - Each cognitive role can set independent `provider` and `model`.
+  - Provider credentials/endpoints are set under `providers` (`api_key_env`, `base_url`).
+  - `web_search` remains independently configurable (`provider`, `model`, optional `api_key_env`, `base_url`).
+  - If a role/model is omitted, Psyke falls back to provider defaults.
   - Optional override file path: `PSYKE_LLM_CONFIG_FILE=/path/to/llm-runtime.yaml`.
-  - Environment variables override YAML when present.
   - Example:
     ```yaml
-    provider: groq
-    models:
-      ego: openai/gpt-oss-20b
-      superego: openai/gpt-oss-20b
-      meta_reasoner: openai/gpt-oss-20b
-      memory_consolidation: openai/gpt-oss-20b
+    providers:
+      groq:
+        api_key_env: GROQ_API_KEY
+      google:
+        api_key_env: GOOGLE_API_KEY
+
+    cognitive_roles:
+      planner:
+        provider: google
+        model: gemini-3.1-flash-lite-preview
+      action_verifier:
+        provider: groq
+        model: openai/gpt-oss-20b
+      superego:
+        provider: groq
+        model: openai/gpt-oss-safeguard-20b
+      meta_reasoner:
+        provider: google
+        model: gemini-3.1-flash-lite-preview
+      memory_advisor:
+        provider: groq
+        model: openai/gpt-oss-20b
+
     web_search:
       provider: mistral
       model: mistral-small-latest
     ```
-- LLM auth and provider overrides:
-  - `GROQ_API_KEY` (required when provider is `groq`)
-  - `MISTRAL_API_KEY` (required when provider is `mistral`)
-  - `LLM_API_KEY` (optional generic fallback for selected provider key)
-  - `LLM_PROVIDER` (optional env override for YAML provider; `groq|mistral`)
-  - `LLM_WEBSEARCH_PROVIDER` (optional env override for `web_search.provider`; `groq|mistral`)
-  - `LLM_WEBSEARCH_API_KEY` (optional explicit API key for web-search provider)
-  - `LLM_WEBSEARCH_API_KEY_ENV` (optional env-var name that stores the web-search API key)
-- Optional LLM endpoint overrides:
-  - `LLM_BASE_URL` (provider-agnostic override)
-  - `GROQ_BASE_URL` / `MISTRAL_BASE_URL` (provider-specific override)
-  - `LLM_WEBSEARCH_BASE_URL` (provider-agnostic override for web search only)
-  - `GROQ_WEBSEARCH_BASE_URL` / `MISTRAL_WEBSEARCH_BASE_URL` (provider-specific web-search base URL overrides)
+- LLM auth env vars (configured by `providers.<name>.api_key_env` and optional `web_search.api_key_env`):
+  - `GROQ_API_KEY`
+  - `MISTRAL_API_KEY`
+  - `GOOGLE_API_KEY`
 - MCP/time/fetch/memory provider settings are now centralized in `mcp-runtime.yaml` (repository root).
   - Default config enables `time`, `fetch`, and `memory` in `stdio` mode with command/fallback lists.
   - Optional override file path: `PSYKE_MCP_CONFIG_FILE=/path/to/mcp-runtime.yaml`.
@@ -73,15 +83,6 @@ Standalone Kotlin JVM app using Gradle with:
   - `PSYKE_LLM_CONFIG_FILE` (optional; path to LLM runtime YAML, default: `./llm-runtime.yaml`)
   - `PSYKE_MCP_CONFIG_FILE` (optional; path to MCP runtime YAML, default: `./mcp-runtime.yaml`)
   - `PSYKE_AGENT_CONFIG_FILE` (optional; path to agent/app/eval runtime YAML, default: `./agent-runtime.yaml`)
-  - LLM model overrides (defaults depend on provider: Groq=`openai/gpt-oss-20b`, Mistral=`mistral-small-latest`):
-    - `LLM_EGO_MODEL`
-    - `LLM_SUPEREGO_MODEL` (default: Ego model)
-    - `LLM_META_REASONER_MODEL` (default: Ego model)
-    - `LLM_MEMORY_CONSOLIDATION_MODEL` (default: Ego model)
-    - `LLM_WEBSEARCH_MODEL` (default depends on web-search provider: Groq=`groq/compound-mini`, Mistral=`mistral-small-latest`)
-  - Provider-specific model override aliases:
-    - Groq: `GROQ_EGO_MODEL`, `GROQ_SUPEREGO_MODEL`, `GROQ_META_REASONER_MODEL`, `GROQ_MEMORY_CONSOLIDATION_MODEL`, `GROQ_WEBSEARCH_MODEL`
-    - Mistral: `MISTRAL_EGO_MODEL`, `MISTRAL_SUPEREGO_MODEL`, `MISTRAL_META_REASONER_MODEL`, `MISTRAL_MEMORY_CONSOLIDATION_MODEL`, `MISTRAL_WEBSEARCH_MODEL`
   - `PSYKE_DASHBOARD_ENABLED` (default: `true`)
   - `PSYKE_DASHBOARD_PORT` (default: `8787`)
   - `EGO_MAX_LOOP_STEPS` (default: `180`)
@@ -308,7 +309,8 @@ you> exit
 - Memory metrics are persisted per run and as persistent totals: recall attempts/hits/failures/truncation/latency/chars, consolidation assessments/save recommendations, and imprint attempts/success/failures/latency/chars.
 
 ## Provider status checks
-- Before interactive mode and live/model eval modes, Psyke runs a provider health check for the selected LLM provider.
+- Before interactive mode, Psyke runs provider health checks for each configured cognitive role endpoint.
+- Before live/model eval modes, Psyke runs a provider health check for the planner endpoint.
 - Checks include DNS resolution for the provider host and a short authenticated HTTP probe (`GET /models`).
 - If provider is unavailable, Psyke prints a clear error to both stderr/stdout-facing output and logs, then exits early.
 - If provider is degraded (for example, rate limiting), Psyke logs and prints a warning but continues.
