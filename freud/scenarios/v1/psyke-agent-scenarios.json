@@ -17,6 +17,11 @@
       "description": "Memory recall is injected into planner prompt context."
     },
     {
+      "id": "task_workspace_lifecycle",
+      "selector": "psyke.eval.AgentScenarioPackTest.scenario_task_workspace_prompt_and_cleanup",
+      "description": "Per-request task workspace is injected into prompt context and destroyed after terminal answer."
+    },
+    {
       "id": "forced_terminal_model_errors",
       "selector": "psyke.eval.AgentScenarioPackTest.scenario_forced_terminal_after_repeated_model_errors",
       "description": "Repeated planner model errors trigger forced terminal answer path."

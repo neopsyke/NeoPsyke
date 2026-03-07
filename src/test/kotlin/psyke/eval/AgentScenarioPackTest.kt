@@ -5,9 +5,11 @@ import psyke.agent.actions.websearch.WebSearchEngine
 import psyke.agent.actions.websearch.WebSearchResult
 import psyke.agent.actions.websearch.WebSearchSource
 import psyke.agent.core.AgentConfig
+import psyke.agent.core.MemoryConfig
 import psyke.agent.core.PendingAction
 import psyke.agent.core.MetaReasonerConfig
 import psyke.agent.core.PlannerConfig
+import psyke.agent.core.TaskWorkspaceConfig
 import psyke.agent.cortex.motor.MotorCortex
 import psyke.agent.ego.Ego
 import psyke.agent.ego.LlmEgoPlanner
@@ -155,6 +157,65 @@ class AgentScenarioPackTest {
         assertTrue(prompt.contains("Long-term memory recall:"))
         assertTrue(prompt.contains("prior preference: concise responses"))
         assertEquals(listOf("ego> ok"), outputs)
+    }
+
+    @Test
+    fun scenario_task_workspace_prompt_and_cleanup() {
+        val plannerLlm = StubChatModelClient().apply {
+            enqueueRawResponse(
+                """
+                {"decision":"action","urgency":"medium","action_type":"web_search","action_payload":"official pricing","action_summary":"search pricing"}
+                """.trimIndent()
+            )
+            enqueueRawResponse(
+                """
+                {"decision":"action","urgency":"medium","action_type":"answer","action_payload":"done","action_summary":"respond"}
+                """.trimIndent()
+            )
+        }
+        val superegoLlm = StubChatModelClient().apply {
+            enqueueRawResponse("""{"allow":true}""")
+            enqueueRawResponse("""{"allow":true}""")
+        }
+        val instrumentation = RecordingInstrumentation()
+        val outputs = mutableListOf<String>()
+        val search = object : WebSearchEngine {
+            override fun search(query: String, maxResults: Int): WebSearchResult =
+                WebSearchResult(
+                    summary = "Official pricing fetched.",
+                    snippets = listOf("Pro plan listed."),
+                    sources = listOf(
+                        WebSearchSource(
+                            title = "Pricing",
+                            url = "https://example.com/pricing"
+                        )
+                    )
+                )
+        }
+        val config = AgentConfig(
+            planner = PlannerConfig(maxLoopStepsPerInput = 8, maxThoughtPasses = 3),
+            memory = MemoryConfig(
+                taskWorkspace = TaskWorkspaceConfig(enabled = true, maxPromptTokens = 260)
+            )
+        )
+        val agent = Ego(
+            planner = LlmEgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
+            superego = Superego(modelClient = superegoLlm, config = config, instrumentation = instrumentation),
+            motorCortex = buildMotorCortex(output = { outputs.add(it) }, webSearchEngine = search),
+            config = config,
+            instrumentation = instrumentation
+        )
+
+        runAgentWithInput(agent, "find pricing\nexit\n")
+
+        val plannerCalls = plannerLlm.calls.filter { it.options.metadata.callSite != "action_verifier" }
+        assertTrue(plannerCalls.size >= 2)
+        val followUpPrompt = plannerCalls[1].messages.last().content
+        assertTrue(followUpPrompt.contains("Task workspace summary:"))
+        assertTrue(followUpPrompt.contains("web_search_result"))
+        assertEquals(listOf("ego> done"), outputs)
+        assertTrue(instrumentation.events.any { it.type == "task_workspace_created" })
+        assertTrue(instrumentation.events.any { it.type == "task_workspace_destroyed" })
     }
 
     @Test

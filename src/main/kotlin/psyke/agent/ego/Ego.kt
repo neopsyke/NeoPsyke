@@ -13,6 +13,7 @@ import psyke.agent.memory.longterm.LongTermMemoryAdvisor
 import psyke.agent.memory.longterm.NoopHippocampus
 import psyke.agent.memory.longterm.NoopLongTermMemoryAdvisor
 import psyke.agent.memory.shortterm.MemoryStore
+import psyke.agent.memory.workspace.TaskWorkspaceStore
 import psyke.agent.support.DenialReasonClassifier
 import psyke.agent.support.PromptInjectionDefense
 import psyke.agent.support.TextSecurity
@@ -35,6 +36,8 @@ class Ego(
     private val longTermMemoryAdvisor: LongTermMemoryAdvisor = NoopLongTermMemoryAdvisor,
     private val sensoryCortex: SensoryCortex = SensoryCortex.stdin(config),
     private val memoryStore: MemoryStore = MemoryStore(config.memory.maxShortTermContextChars),
+    private val taskWorkspaceStore: TaskWorkspaceStore = TaskWorkspaceStore(config.memory.taskWorkspace),
+    private val taskWorkspaceFinalizer: TaskWorkspaceFinalizer = NoopTaskWorkspaceFinalizer,
     private val instrumentation: AgentInstrumentation = NoopAgentInstrumentation,
     private val logbook: Logbook? = null,
     private val logbookSummarizer: LogbookSummarizer? = null,
@@ -143,6 +146,18 @@ class Ego(
             memory.resetForNewInput()
             planCountByInput.clear()
             emittedPlanHashes.clear()
+            val clearedWorkspaces = taskWorkspaceStore.clearAll()
+            if (clearedWorkspaces > 0) {
+                instrumentation.emit(
+                    AgentEvent(
+                        type = "task_workspace_cleared",
+                        data = mapOf(
+                            "cleared_count" to clearedWorkspaces,
+                            "reason" to "queues_drained"
+                        )
+                    )
+                )
+            }
         }
 
         if (config.loopDelayMs > 0) {
@@ -159,6 +174,7 @@ class Ego(
         val userTurn = DialogueTurn(DialogueRole.USER, input.content)
         dialogue.addLast(userTurn)
         memory.remember(userTurn)
+        maybeCreateTaskWorkspace(input)
         trimDialogue()
         val trigger = EgoTrigger.IncomingInput(input)
         val context = plannerContext(trigger, rootInputEnqueuedAtMs = input.enqueuedAtMs)
@@ -207,31 +223,32 @@ class Ego(
     }
 
     private fun processAction(action: PendingAction) {
-        instrumentation.emit(AgentEvents.actionReviewRequested(action))
-        if (action.isFallbackExplanation) {
+        val resolvedAction = applyTaskWorkspaceFinalPass(action)
+        instrumentation.emit(AgentEvents.actionReviewRequested(resolvedAction))
+        if (resolvedAction.isFallbackExplanation) {
             instrumentation.emit(
                 AgentEvents.actionReviewResult(
-                    actionId = action.id,
+                    actionId = resolvedAction.id,
                     allow = true,
                     reason = "fallback_explanation_bypass",
                     reasonCode = "SYSTEM_FALLBACK_BYPASS"
                 )
             )
-            val outcome = executeActionSafely(action) ?: return
-            instrumentation.emit(AgentEvents.actionExecuted(action, outcome.statusSummary))
-            if (action.type == ActionType.ANSWER) {
+            val outcome = executeActionSafely(resolvedAction) ?: return
+            instrumentation.emit(AgentEvents.actionExecuted(resolvedAction, outcome.statusSummary))
+            if (resolvedAction.type == ActionType.ANSWER) {
                 memory.journal(
                     EpisodicEventType.ANSWER_DELIVERED,
-                    "Answered (fallback): ${TextSecurity.preview(action.summary, JOURNAL_SUMMARY_PREVIEW_CHARS)}",
+                    "Answered (fallback): ${TextSecurity.preview(resolvedAction.summary, JOURNAL_SUMMARY_PREVIEW_CHARS)}",
                     actionType = "answer",
                 )
-                val enqueuedAtMs = action.rootInputEnqueuedAtMs
+                val enqueuedAtMs = resolvedAction.rootInputEnqueuedAtMs
                 if (enqueuedAtMs != null) {
                     val latencyMs = (System.currentTimeMillis() - enqueuedAtMs).coerceAtLeast(0L)
-                    instrumentation.emit(AgentEvents.responseLatencyRecorded(latencyMs = latencyMs, actionId = action.id))
+                    instrumentation.emit(AgentEvents.responseLatencyRecorded(latencyMs = latencyMs, actionId = resolvedAction.id))
                 }
-                deliberation.clearEvidenceForInput(action.rootInputEnqueuedAtMs)
-                cleanupResolvedInputAfterAnswer(action)
+                deliberation.clearEvidenceForInput(resolvedAction.rootInputEnqueuedAtMs)
+                cleanupResolvedInputAfterAnswer(resolvedAction)
             }
             if (outcome.assistantOutput != null) {
                 val assistantTurn = DialogueTurn(DialogueRole.ASSISTANT, outcome.assistantOutput)
@@ -239,16 +256,17 @@ class Ego(
                 memory.remember(assistantTurn)
                 trimDialogue()
             }
-            val observed = deliberation.observedEvidence(action, outcome)
-            deliberation.recordEvidenceProgress(action, outcome, observed)
-            deliberation.onActionExecuted(action, observed)
-            maybeRunTerminalAnswerMemoryAssessment(action, outcome)
+            val observed = deliberation.observedEvidence(resolvedAction, outcome)
+            deliberation.recordEvidenceProgress(resolvedAction, outcome, observed)
+            deliberation.onActionExecuted(resolvedAction, observed)
+            maybeRecordTaskWorkspaceOutcome(resolvedAction, outcome, observed)
+            maybeRunTerminalAnswerMemoryAssessment(resolvedAction, outcome)
             return
         }
-        val gateDecision = superego.review(action, superegoContext())
+        val gateDecision = superego.review(resolvedAction, superegoContext())
         instrumentation.emit(
             AgentEvents.actionReviewResult(
-                actionId = action.id,
+                actionId = resolvedAction.id,
                 allow = gateDecision.allow,
                 reason = gateDecision.reason,
                 reasonCode = gateDecision.reasonCode
@@ -264,20 +282,20 @@ class Ego(
             )
             val queued = scheduler.enqueueThought(
                 content = denialThought,
-                urgency = action.urgency,
-                passes = action.attempts + 1,
-                rootInputEnqueuedAtMs = action.rootInputEnqueuedAtMs,
-                deniedActionType = action.type,
-                deniedActionPayload = TextSecurity.clamp(action.payload, 240),
+                urgency = resolvedAction.urgency,
+                passes = resolvedAction.attempts + 1,
+                rootInputEnqueuedAtMs = resolvedAction.rootInputEnqueuedAtMs,
+                deniedActionType = resolvedAction.type,
+                deniedActionPayload = TextSecurity.clamp(resolvedAction.payload, 240),
                 denialReason = gateDecision.reason,
                 denialReasonCode = gateDecision.reasonCode,
                 allowFallbackExplanation = true
             )
-            instrumentation.emit(AgentEvents.actionDenied(action, gateDecision.reason, gateDecision.reasonCode))
+            instrumentation.emit(AgentEvents.actionDenied(resolvedAction, gateDecision.reason, gateDecision.reasonCode))
             memory.journal(
                 EpisodicEventType.ACTION_DENIED,
-                "Denied ${action.type.name.lowercase()}: ${gateDecision.reason}",
-                actionType = action.type.name.lowercase(),
+                "Denied ${resolvedAction.type.name.lowercase()}: ${gateDecision.reason}",
+                actionType = resolvedAction.type.name.lowercase(),
             )
             if (!queued) {
                 instrumentation.emit(AgentEvents.warning("Failed to enqueue denial thought."))
@@ -291,38 +309,39 @@ class Ego(
             return
         }
 
-        val outcome = executeActionSafely(action) ?: return
-        instrumentation.emit(AgentEvents.actionExecuted(action, outcome.statusSummary))
-        if (action.type == ActionType.ANSWER) {
+        val outcome = executeActionSafely(resolvedAction) ?: return
+        instrumentation.emit(AgentEvents.actionExecuted(resolvedAction, outcome.statusSummary))
+        if (resolvedAction.type == ActionType.ANSWER) {
             memory.journal(
                 EpisodicEventType.ANSWER_DELIVERED,
-                "Answered: ${TextSecurity.preview(action.summary, JOURNAL_SUMMARY_PREVIEW_CHARS)}",
+                "Answered: ${TextSecurity.preview(resolvedAction.summary, JOURNAL_SUMMARY_PREVIEW_CHARS)}",
                 actionType = "answer",
             )
         } else {
             memory.journal(
                 EpisodicEventType.ACTION_EXECUTED,
-                "Executed ${action.type.name.lowercase()}: ${TextSecurity.preview(outcome.statusSummary, JOURNAL_SUMMARY_PREVIEW_CHARS)}",
-                actionType = action.type.name.lowercase(),
+                "Executed ${resolvedAction.type.name.lowercase()}: ${TextSecurity.preview(outcome.statusSummary, JOURNAL_SUMMARY_PREVIEW_CHARS)}",
+                actionType = resolvedAction.type.name.lowercase(),
             )
         }
-        val observed = deliberation.observedEvidence(action, outcome)
-        deliberation.recordEvidenceProgress(action, outcome, observed)
-        deliberation.onActionExecuted(action, observed)
-        if (action.type == ActionType.MCP_FETCH && !observed) {
+        val observed = deliberation.observedEvidence(resolvedAction, outcome)
+        deliberation.recordEvidenceProgress(resolvedAction, outcome, observed)
+        deliberation.onActionExecuted(resolvedAction, observed)
+        maybeRecordTaskWorkspaceOutcome(resolvedAction, outcome, observed)
+        if (resolvedAction.type == ActionType.MCP_FETCH && !observed) {
             val category = FetchErrorCategory.entries.firstOrNull {
                 it.name.equals(outcome.fetchErrorCategory, ignoreCase = true)
             } ?: FetchErrorCategory.RETRYABLE
-            deliberation.recordFetchFailure(action.rootInputEnqueuedAtMs, category)
+            deliberation.recordFetchFailure(resolvedAction.rootInputEnqueuedAtMs, category)
         }
-        if (action.type == ActionType.ANSWER) {
-            val enqueuedAtMs = action.rootInputEnqueuedAtMs
+        if (resolvedAction.type == ActionType.ANSWER) {
+            val enqueuedAtMs = resolvedAction.rootInputEnqueuedAtMs
             if (enqueuedAtMs != null) {
                 val latencyMs = (System.currentTimeMillis() - enqueuedAtMs).coerceAtLeast(0L)
-                instrumentation.emit(AgentEvents.responseLatencyRecorded(latencyMs = latencyMs, actionId = action.id))
+                instrumentation.emit(AgentEvents.responseLatencyRecorded(latencyMs = latencyMs, actionId = resolvedAction.id))
             }
-            deliberation.clearEvidenceForInput(action.rootInputEnqueuedAtMs)
-            cleanupResolvedInputAfterAnswer(action)
+            deliberation.clearEvidenceForInput(resolvedAction.rootInputEnqueuedAtMs)
+            cleanupResolvedInputAfterAnswer(resolvedAction)
         }
         if (outcome.assistantOutput != null) {
             val assistantTurn = DialogueTurn(DialogueRole.ASSISTANT, outcome.assistantOutput)
@@ -330,28 +349,28 @@ class Ego(
             memory.remember(assistantTurn)
             trimDialogue()
         }
-        maybeRunTerminalAnswerMemoryAssessment(action, outcome)
+        maybeRunTerminalAnswerMemoryAssessment(resolvedAction, outcome)
         maybeRunLongTermMemoryAssessment(
             trigger = "post_allowed_action",
             force = config.memory.longTermMemoryForceAssessOnAllowedAction,
-            latestActionType = action.type,
+            latestActionType = resolvedAction.type,
             latestActionOutcome = outcome.plannerSignal
         )
 
-        if (action.type.requiresFollowUpThought()) {
+        if (resolvedAction.type.requiresFollowUpThought()) {
             val safePlannerSignal = PromptInjectionDefense.asUntrustedDataBlock(
                 text = outcome.plannerSignal,
                 maxChars = FOLLOW_UP_SIGNAL_MAX_CHARS
             )
             val followUpThought = TextSecurity.clamp(
-                "${action.type.followUpPrefix()}\n$safePlannerSignal\nDecide if an answer should be sent.",
+                "${resolvedAction.type.followUpPrefix()}\n$safePlannerSignal\nDecide if an answer should be sent.",
                 config.planner.maxThoughtChars
             )
             val queued = scheduler.enqueueThought(
                 content = followUpThought,
-                urgency = action.urgency,
-                passes = action.attempts,
-                rootInputEnqueuedAtMs = action.rootInputEnqueuedAtMs,
+                urgency = resolvedAction.urgency,
+                passes = resolvedAction.attempts,
+                rootInputEnqueuedAtMs = resolvedAction.rootInputEnqueuedAtMs,
                 allowFallbackExplanation = true
             )
             if (!queued) {
@@ -584,6 +603,23 @@ class Ego(
 
                 // ── All gates passed: emit plan ──
                 planCountByInput[rootInputEnqueuedAtMs] = currentPlanCount + 1
+                taskWorkspaceStore.recordPlan(
+                    rootInputEnqueuedAtMs = rootInputEnqueuedAtMs,
+                    goal = decision.goal,
+                    steps = decision.steps
+                )
+                instrumentation.emit(
+                    AgentEvent(
+                        type = "task_workspace_updated",
+                        data = mapOf(
+                            "root_input_enqueued_at_ms" to rootInputEnqueuedAtMs,
+                            "update_type" to "plan_recorded",
+                            "goal_preview" to TextSecurity.preview(decision.goal, 140),
+                            "step_count" to decision.steps.size,
+                            "active_tasks" to taskWorkspaceStore.activeTaskCount()
+                        )
+                    )
+                )
 
                 val planId = java.util.UUID.randomUUID().toString().take(PLAN_ID_LENGTH)
                 instrumentation.emit(
@@ -770,12 +806,165 @@ class Ego(
         }
     }
 
+    private fun maybeCreateTaskWorkspace(input: PendingInput) {
+        val created = taskWorkspaceStore.ensureForInput(input)
+        if (!created) return
+        instrumentation.emit(
+            AgentEvent(
+                type = "task_workspace_created",
+                data = mapOf(
+                    "root_input_enqueued_at_ms" to input.enqueuedAtMs,
+                    "input_id" to input.id,
+                    "goal_preview" to TextSecurity.preview(input.content, 140),
+                    "active_tasks" to taskWorkspaceStore.activeTaskCount()
+                )
+            )
+        )
+    }
+
+    private fun maybeRecordTaskWorkspaceOutcome(action: PendingAction, outcome: ActionOutcome, observedEvidence: Boolean) {
+        taskWorkspaceStore.recordActionOutcome(
+            rootInputEnqueuedAtMs = action.rootInputEnqueuedAtMs,
+            action = action,
+            outcome = outcome,
+            observedEvidence = observedEvidence
+        )
+        if (action.type == ActionType.ANSWER) return
+        instrumentation.emit(
+            AgentEvent(
+                type = "task_workspace_updated",
+                data = mapOf(
+                    "root_input_enqueued_at_ms" to action.rootInputEnqueuedAtMs,
+                    "update_type" to "action_outcome_recorded",
+                    "action_type" to action.type.name.lowercase(),
+                    "observed_evidence" to observedEvidence,
+                    "status_preview" to TextSecurity.preview(outcome.statusSummary, 140),
+                    "active_tasks" to taskWorkspaceStore.activeTaskCount()
+                )
+            )
+        )
+    }
+
+    private fun applyTaskWorkspaceFinalPass(action: PendingAction): PendingAction {
+        if (action.type != ActionType.ANSWER) {
+            return action
+        }
+        if (!config.memory.taskWorkspace.enabled || !config.memory.taskWorkspace.finalPassRewriteEnabled) {
+            return action
+        }
+        taskWorkspaceStore.recordAnswerDraft(
+            rootInputEnqueuedAtMs = action.rootInputEnqueuedAtMs,
+            payload = action.payload
+        )
+        val finalPassInput = taskWorkspaceStore.buildFinalPassInput(
+            rootInputEnqueuedAtMs = action.rootInputEnqueuedAtMs,
+            candidateAnswer = action.payload,
+            maxChars = config.memory.taskWorkspace.finalCompilationMaxChars
+        ) ?: return action
+        instrumentation.emit(
+            AgentEvent(
+                type = "task_workspace_final_pass",
+                data = mapOf(
+                    "root_input_enqueued_at_ms" to action.rootInputEnqueuedAtMs,
+                    "action_id" to action.id,
+                    "workspace_confidence" to finalPassInput.workspaceConfidence,
+                    "section_count" to finalPassInput.sectionCount,
+                    "evidence_count" to finalPassInput.evidenceCount,
+                    "compilation_preview" to TextSecurity.preview(finalPassInput.compilation, 220)
+                )
+            )
+        )
+        if (finalPassInput.workspaceConfidence < config.memory.taskWorkspace.finalPassMinWorkspaceConfidence) {
+            instrumentation.emit(
+                AgentEvent(
+                    type = "task_workspace_final_pass_skipped",
+                    data = mapOf(
+                        "root_input_enqueued_at_ms" to action.rootInputEnqueuedAtMs,
+                        "action_id" to action.id,
+                        "reason" to "workspace_confidence_gate",
+                        "workspace_confidence" to finalPassInput.workspaceConfidence,
+                        "min_workspace_confidence" to config.memory.taskWorkspace.finalPassMinWorkspaceConfidence
+                    )
+                )
+            )
+            return action
+        }
+        val finalizerResult = taskWorkspaceFinalizer.finalize(
+            TaskWorkspaceFinalizerRequest(
+                action = action,
+                workspaceCompilation = finalPassInput.compilation,
+                workspaceConfidence = finalPassInput.workspaceConfidence,
+                recentDialogue = dialogue.takeLast(12)
+            )
+        ) ?: run {
+            instrumentation.emit(
+                AgentEvent(
+                    type = "task_workspace_final_pass_skipped",
+                    data = mapOf(
+                        "root_input_enqueued_at_ms" to action.rootInputEnqueuedAtMs,
+                        "action_id" to action.id,
+                        "reason" to "finalizer_unavailable_or_parse"
+                    )
+                )
+            )
+            return action
+        }
+        if (finalizerResult.confidence < config.memory.taskWorkspace.finalPassMinModelConfidence) {
+            instrumentation.emit(
+                AgentEvent(
+                    type = "task_workspace_final_pass_skipped",
+                    data = mapOf(
+                        "root_input_enqueued_at_ms" to action.rootInputEnqueuedAtMs,
+                        "action_id" to action.id,
+                        "reason" to "model_confidence_gate",
+                        "model_confidence" to finalizerResult.confidence,
+                        "min_model_confidence" to config.memory.taskWorkspace.finalPassMinModelConfidence
+                    )
+                )
+            )
+            return action
+        }
+        val rewrittenPayload = TextSecurity.clamp(finalizerResult.rewrittenPayload, config.planner.maxActionPayloadChars)
+        if (rewrittenPayload.isBlank() || rewrittenPayload == action.payload) {
+            instrumentation.emit(
+                AgentEvent(
+                    type = "task_workspace_final_pass_skipped",
+                    data = mapOf(
+                        "root_input_enqueued_at_ms" to action.rootInputEnqueuedAtMs,
+                        "action_id" to action.id,
+                        "reason" to "rewrite_empty_or_unchanged"
+                    )
+                )
+            )
+            return action
+        }
+        instrumentation.emit(
+            AgentEvent(
+                type = "task_workspace_final_pass_applied",
+                data = mapOf(
+                    "root_input_enqueued_at_ms" to action.rootInputEnqueuedAtMs,
+                    "action_id" to action.id,
+                    "workspace_confidence" to finalPassInput.workspaceConfidence,
+                    "model_confidence" to finalizerResult.confidence,
+                    "rewrite_reason" to finalizerResult.reason,
+                    "payload_before_preview" to TextSecurity.preview(action.payload, 180),
+                    "payload_after_preview" to TextSecurity.preview(rewrittenPayload, 180)
+                )
+            )
+        )
+        return action.copy(payload = rewrittenPayload)
+    }
+
     private fun plannerContext(trigger: EgoTrigger, rootInputEnqueuedAtMs: Long? = null): PlannerContext {
         val recentDialogue = dialogue.takeLast(12)
         val shortTermSummary = memory.currentShortTermSummary()
         val episodicCues = memory.recallEpisodicAsVectorCues(recentDialogue)
         val longTermRecall = memory.recall(trigger, shortTermSummary, recentDialogue, episodicCues)
         val episodicRecall = memory.recallEpisodic(trigger, recentDialogue)
+        val taskWorkspaceSummary = taskWorkspaceStore.promptSummary(
+            rootInputEnqueuedAtMs = rootInputEnqueuedAtMs,
+            maxTokens = config.memory.taskWorkspace.maxPromptTokens
+        )
         val disabled = deliberation.disabledActionTypes(rootInputEnqueuedAtMs)
         val evidenceHints = buildEvidenceHints(rootInputEnqueuedAtMs)
         return PlannerContext(
@@ -784,6 +973,7 @@ class Ego(
             shortTermContextSummary = shortTermSummary,
             longTermMemoryRecall = longTermRecall,
             episodicRecall = episodicRecall,
+            taskWorkspaceSummary = taskWorkspaceSummary,
             evidenceHints = evidenceHints,
             deliberation = deliberation.snapshot(),
             metaGuidance = deliberation.guidance(),
@@ -877,6 +1067,20 @@ class Ego(
     private fun cleanupResolvedInputAfterAnswer(action: PendingAction) {
         val rootInputEnqueuedAtMs = action.rootInputEnqueuedAtMs ?: return
         val cleared = scheduler.clearPendingWorkForInput(rootInputEnqueuedAtMs)
+        val destroyedWorkspace = taskWorkspaceStore.destroy(rootInputEnqueuedAtMs)
+        if (destroyedWorkspace != null) {
+            instrumentation.emit(
+                AgentEvent(
+                    type = "task_workspace_destroyed",
+                    data = mapOf(
+                        "root_input_enqueued_at_ms" to destroyedWorkspace.rootInputEnqueuedAtMs,
+                        "section_count" to destroyedWorkspace.sectionCount,
+                        "evidence_count" to destroyedWorkspace.evidenceCount,
+                        "reason" to "input_resolved"
+                    )
+                )
+            )
+        }
         if (cleared.thoughtsRemoved == 0 && cleared.actionsRemoved == 0) {
             return
         }

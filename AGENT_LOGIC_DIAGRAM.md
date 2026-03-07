@@ -31,6 +31,8 @@ flowchart LR
     MC --> LTM["LlmLongTermMemoryAdvisor"]
     MC --> LB["Logbook (Episodic, SQLite+FTS5)"]
     MC -.->|"temporal intent → episodic recall + vector cues"| LB
+    E --> TWS["TaskWorkspaceStore (Ephemeral Per Request)"]
+    E --> TWF["TaskWorkspaceFinalizer (Noop or LLM)"]
 
     M --> WS["Web Search Handler/Engine"]
     CfgWS["WebSearch Provider Config (provider/key/base/model)"] --> WS
@@ -65,6 +67,7 @@ sequenceDiagram
     participant Motor as MotorCortex
     participant Delib as DeliberationEngine
     participant Mem as MemoryCoordinator
+    participant TWS as TaskWorkspaceStore
 
     User->>SC: Input text
     SC->>Ego: InputReceived
@@ -77,6 +80,7 @@ sequenceDiagram
 
         alt Task = input or thought
             Ego->>Mem: recall + short-term summary
+            Ego->>TWS: create/update request workspace + index summary
             Ego->>Planner: decide(context)
             Note over Ego,Planner: On non-parseable planner JSON, planner issues one strict-JSON retry before noop fallback
             Planner-->>Ego: thought/action/plan/noop
@@ -100,12 +104,19 @@ sequenceDiagram
                     Note over Ego,Sup: Stage parse failures trigger one strict-JSON retry before default deny
                     Sup-->>Ego: allow/deny (+ reason_code on deny)
                     alt allow
+                        alt action = answer
+                            Ego->>TWS: final-pass compilation from workspace index/evidence
+                            Ego->>TWF: rewrite candidate payload (if enabled)
+                            Note over Ego,TWF: Apply workspace-confidence gate first, then model-confidence gate
+                        end
                         Ego->>Motor: execute(action)
                         Ego->>Ego: PromptInjectionDefense sanitize untrusted tool output
                         alt action = answer
                             Ego->>Sched: clear pending thought/action work for same root input
+                            Ego->>TWS: destroy workspace for resolved input
                             Ego->>Mem: maybeAssessLongTermMemory(post_terminal_answer, forced)
                         end
+                        Ego->>TWS: record non-answer action outcomes/evidence
                         Ego->>Sched: enqueue follow-up thought (for evidence actions)
                         Ego->>Mem: maybeAssessLongTermMemory(post_allowed_action, optional force)
                         Note over Ego,Mem: Blocked imprints emit long_term_memory_persistence_skipped (reason_code + reason_detail) for timeline visibility
@@ -185,7 +196,7 @@ stateDiagram-v2
     StepLimit --> FallbackAttempt: dequeue fallback explanation action
     FallbackAttempt --> Executing
 
-    Executing --> CleanupResolvedInput: action=answer clears same-input queued work
+    Executing --> CleanupResolvedInput: action=answer clears same-input queued work + destroys task workspace
     CleanupResolvedInput --> Complete
     Processing --> Complete: queues drained
     Complete --> [*]

@@ -29,6 +29,12 @@ class AgentRuntimeSettingsLoaderTest {
         assertEquals(0.70, settings.agentConfig.superego.twoStageLowConfidenceThreshold)
         assertEquals(true, settings.agentConfig.superego.twoStageEscalateOnMediumPolicyRisk)
         assertEquals(320, settings.agentConfig.memory.longTermMemoryMaxTokens)
+        assertEquals(false, settings.agentConfig.memory.taskWorkspace.enabled)
+        assertEquals(220, settings.agentConfig.memory.taskWorkspace.maxPromptTokens)
+        assertEquals(true, settings.agentConfig.memory.taskWorkspace.finalPassRewriteEnabled)
+        assertEquals(260, settings.agentConfig.memory.taskWorkspace.finalPassMaxTokens)
+        assertEquals(0.35, settings.agentConfig.memory.taskWorkspace.finalPassMinWorkspaceConfidence)
+        assertEquals(0.55, settings.agentConfig.memory.taskWorkspace.finalPassMinModelConfidence)
         assertEquals(true, settings.agentConfig.memory.longTermMemoryPromptCompressionEnabled)
         assertEquals(1100, settings.agentConfig.memory.longTermMemoryPromptDialogueMaxChars)
         assertEquals(900, settings.agentConfig.memory.longTermMemoryPromptRecallMaxChars)
@@ -63,6 +69,12 @@ class AgentRuntimeSettingsLoaderTest {
               max_run_tokens_per_provider: 3200
               max_run_tokens_per_role: 1800
               llm_retry_attempts: 4
+              task_workspace_enabled: true
+              task_workspace_max_prompt_tokens: 300
+              task_workspace_final_pass_rewrite_enabled: false
+              task_workspace_final_pass_max_tokens: 190
+              task_workspace_final_pass_min_workspace_confidence: 0.42
+              task_workspace_final_pass_min_model_confidence: 0.61
               superego_dynamic_completion_enabled: false
               superego_dynamic_completion_hard_max_tokens: 700
               superego_dynamic_prompt_to_completion_ratio: 0.21
@@ -95,6 +107,12 @@ class AgentRuntimeSettingsLoaderTest {
         assertEquals(3200, settings.agentConfig.planner.maxRunTokensPerProvider)
         assertEquals(1800, settings.agentConfig.planner.maxRunTokensPerRole)
         assertEquals(4, settings.agentConfig.planner.llmRetryAttempts)
+        assertEquals(true, settings.agentConfig.memory.taskWorkspace.enabled)
+        assertEquals(300, settings.agentConfig.memory.taskWorkspace.maxPromptTokens)
+        assertEquals(false, settings.agentConfig.memory.taskWorkspace.finalPassRewriteEnabled)
+        assertEquals(190, settings.agentConfig.memory.taskWorkspace.finalPassMaxTokens)
+        assertEquals(0.42, settings.agentConfig.memory.taskWorkspace.finalPassMinWorkspaceConfidence)
+        assertEquals(0.61, settings.agentConfig.memory.taskWorkspace.finalPassMinModelConfidence)
         assertEquals(false, settings.agentConfig.superego.dynamicCompletionEnabled)
         assertEquals(700, settings.agentConfig.superego.dynamicCompletionHardMaxTokens)
         assertEquals(0.21, settings.agentConfig.superego.dynamicPromptToCompletionRatio)
@@ -136,6 +154,8 @@ class AgentRuntimeSettingsLoaderTest {
                 "EGO_MAX_LOOP_STEPS" to "77",
                 "EGO_LLM_RETRY_ATTEMPTS" to "3",
                 "EGO_MAX_RUN_TOTAL_TOKENS" to "7000",
+                "EGO_TASK_WORKSPACE_ENABLED" to "true",
+                "EGO_TASK_WORKSPACE_FINAL_PASS_REWRITE_ENABLED" to "false",
                 "PSYKE_DASHBOARD_ENABLED" to "true",
                 "PSYKE_DASHBOARD_PORT" to "9900",
                 "PSYKE_EVAL_MAX_RAW_RESPONSE_CHARS" to "5555",
@@ -147,6 +167,8 @@ class AgentRuntimeSettingsLoaderTest {
         assertEquals(77, settings.agentConfig.planner.maxLoopStepsPerInput)
         assertEquals(3, settings.agentConfig.planner.llmRetryAttempts)
         assertEquals(7000, settings.agentConfig.planner.maxRunTotalTokens)
+        assertEquals(true, settings.agentConfig.memory.taskWorkspace.enabled)
+        assertEquals(false, settings.agentConfig.memory.taskWorkspace.finalPassRewriteEnabled)
         assertEquals(true, settings.dashboardEnabled)
         assertEquals(9900, settings.dashboardPort)
         assertEquals(5555, settings.evalMaxRawResponseChars)

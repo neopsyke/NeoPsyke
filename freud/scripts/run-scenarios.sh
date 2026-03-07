@@ -88,12 +88,12 @@ run_scenario() {
   if [[ -n "$gradle_user_home" ]]; then
     (
       cd "$repo_root"
-      GRADLE_USER_HOME="$gradle_user_home" ./gradlew test --tests "$selector" --console=plain
+      GRADLE_USER_HOME="$gradle_user_home" ./gradlew :test --tests "$selector" --console=plain
     )
   else
     (
       cd "$repo_root"
-      ./gradlew test --tests "$selector" --console=plain
+      ./gradlew :test --tests "$selector" --console=plain
     )
   fi
   exit_code=$?
