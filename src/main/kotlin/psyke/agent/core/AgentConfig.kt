@@ -41,16 +41,37 @@ data class AgentConfig(
                 ),
                 superego = SuperegoConfig(
                     maxCompletionTokens = readInt("EGO_SUPEREGO_MAX_COMPLETION_TOKENS", 192),
+                    dynamicCompletionEnabled = readBoolean("EGO_SUPEREGO_DYNAMIC_COMPLETION_ENABLED", true),
+                    dynamicCompletionHardMaxTokens = readInt("EGO_SUPEREGO_DYNAMIC_COMPLETION_HARD_MAX_TOKENS", 640),
+                    dynamicPromptToCompletionRatio = readRatio("EGO_SUPEREGO_DYNAMIC_PROMPT_TO_COMPLETION_RATIO", 0.10),
+                    dynamicCompletionMinPromptTokens = readInt("EGO_SUPEREGO_DYNAMIC_COMPLETION_MIN_PROMPT_TOKENS", 160),
+                    twoStageReviewEnabled = readBoolean("EGO_SUPEREGO_TWO_STAGE_REVIEW_ENABLED", false),
+                    twoStageLowConfidenceThreshold = readDouble("EGO_SUPEREGO_TWO_STAGE_LOW_CONFIDENCE_THRESHOLD", 0.70),
+                    twoStageEscalateOnMediumPolicyRisk =
+                        readBoolean("EGO_SUPEREGO_TWO_STAGE_ESCALATE_ON_MEDIUM_POLICY_RISK", true),
                 ),
                 memory = MemoryConfig(
                     maxShortTermContextChars = readInt("EGO_SHORT_TERM_CONTEXT_MAX_CHARS", 20000),
                     maxShortTermContextPromptTokens = readInt("EGO_SHORT_TERM_CONTEXT_MAX_PROMPT_TOKENS", 384),
                     longTermMemoryRecallMaxItems = readInt("EGO_LONG_TERM_MEMORY_RECALL_MAX_ITEMS", 4),
                     longTermMemoryRecallMaxChars = readInt("EGO_LONG_TERM_MEMORY_RECALL_MAX_CHARS", 1200),
+                    longTermMemoryPromptCompressionEnabled =
+                        readBoolean("EGO_LONG_TERM_MEMORY_PROMPT_COMPRESSION_ENABLED", true),
+                    longTermMemoryPromptDialogueMaxChars =
+                        readInt("EGO_LONG_TERM_MEMORY_PROMPT_DIALOGUE_MAX_CHARS", 1100),
+                    longTermMemoryPromptRecallMaxChars =
+                        readInt("EGO_LONG_TERM_MEMORY_PROMPT_RECALL_MAX_CHARS", 900),
                     longTermMemoryAssessEverySteps = readInt("EGO_LONG_TERM_MEMORY_ASSESS_EVERY_STEPS", 16),
                     longTermMemoryAssessCooldownSteps = readInt("EGO_LONG_TERM_MEMORY_ASSESS_COOLDOWN_STEPS", 8),
                     longTermMemoryMinConfidence = readDouble("EGO_LONG_TERM_MEMORY_MIN_CONFIDENCE", 0.65),
-                    longTermMemoryMaxTokens = readInt("EGO_LONG_TERM_MEMORY_MAX_TOKENS", 180),
+                    longTermMemoryMaxTokens = readInt("EGO_LONG_TERM_MEMORY_MAX_TOKENS", 320),
+                    longTermMemoryDynamicCompletionEnabled = readBoolean("EGO_LONG_TERM_MEMORY_DYNAMIC_COMPLETION_ENABLED", true),
+                    longTermMemoryDynamicCompletionHardMaxTokens =
+                        readInt("EGO_LONG_TERM_MEMORY_DYNAMIC_COMPLETION_HARD_MAX_TOKENS", 512),
+                    longTermMemoryDynamicPromptToCompletionRatio =
+                        readRatio("EGO_LONG_TERM_MEMORY_DYNAMIC_PROMPT_TO_COMPLETION_RATIO", 0.08),
+                    longTermMemoryDynamicCompletionMinPromptTokens =
+                        readInt("EGO_LONG_TERM_MEMORY_DYNAMIC_COMPLETION_MIN_PROMPT_TOKENS", 160),
                     longTermMemoryMaxSummaryChars = readInt("EGO_LONG_TERM_MEMORY_MAX_SUMMARY_CHARS", 320),
                     longTermMemoryForceAssessOnAllowedAction = readBoolean("EGO_LONG_TERM_MEMORY_FORCE_ASSESS_ON_ALLOWED_ACTION", false),
                     longTermMemoryForceAssessOnTerminalAnswer = readBoolean("EGO_LONG_TERM_MEMORY_FORCE_ASSESS_ON_TERMINAL_ANSWER", true),
@@ -105,5 +126,8 @@ data class AgentConfig(
 
         private fun readBoolean(name: String, fallback: Boolean): Boolean =
             System.getenv(name)?.trim()?.lowercase()?.let { it == "1" || it == "true" || it == "yes" } ?: fallback
+
+        private fun readRatio(name: String, fallback: Double): Double =
+            System.getenv(name)?.toDoubleOrNull()?.takeIf { it >= 0.0 } ?: fallback
     }
 }

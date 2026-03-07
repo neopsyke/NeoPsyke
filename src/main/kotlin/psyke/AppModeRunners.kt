@@ -65,6 +65,8 @@ import psyke.llm.LlmTokenBudgetConfig
 import psyke.llm.LlmTokenBudgetGate
 import psyke.llm.MistralChatClient
 import psyke.llm.MistralProviderStatusChecker
+import psyke.llm.OpenAiChatClient
+import psyke.llm.OpenAiProviderStatusChecker
 import psyke.llm.ProviderHealthState
 import psyke.llm.ProviderStatus
 import psyke.llm.TokenBudgetGuardedChatClient
@@ -298,7 +300,9 @@ internal object AppModeRunners {
                             client = client,
                             longTermMemoryAdvisor = LlmLongTermMemoryAdvisor(
                                 modelClient = client,
-                                config = config
+                                config = config,
+                                modelTokenWeight = llm.modelCatalog.tokenWeightFor(llm.planner),
+                                instrumentation = instrumentation
                             ),
                             hippocampus = hippocampus,
                             tasks = MemoryLiveEvalTasks.defaults(),
@@ -370,6 +374,11 @@ internal object AppModeRunners {
             )
 
             LlmProvider.GOOGLE -> GeminiProviderStatusChecker(
+                apiKey = endpoint.apiKey,
+                baseUrl = endpoint.baseUrl
+            )
+
+            LlmProvider.OPENAI -> OpenAiProviderStatusChecker(
                 apiKey = endpoint.apiKey,
                 baseUrl = endpoint.baseUrl
             )
@@ -548,6 +557,12 @@ internal object AppModeRunners {
                                 "mcp_memory_call_timeout_ms" to config.memory.mcpMemoryCallTimeoutMs,
                                 "long_term_memory_recall_max_items" to config.memory.longTermMemoryRecallMaxItems,
                                 "long_term_memory_recall_max_chars" to config.memory.longTermMemoryRecallMaxChars,
+                                "long_term_memory_prompt_compression_enabled" to
+                                    config.memory.longTermMemoryPromptCompressionEnabled,
+                                "long_term_memory_prompt_dialogue_max_chars" to
+                                    config.memory.longTermMemoryPromptDialogueMaxChars,
+                                "long_term_memory_prompt_recall_max_chars" to
+                                    config.memory.longTermMemoryPromptRecallMaxChars,
                                 "pressure_assessment_min_step" to config.metaReasoner.deliberationPressureAssessmentMinStep,
                                 "pressure_assess_every_steps" to config.metaReasoner.deliberationPressureAssessmentEverySteps,
                                 "pressure_assess_threshold" to config.metaReasoner.deliberationPressureAssessmentThreshold,
@@ -565,7 +580,25 @@ internal object AppModeRunners {
                                 "long_term_memory_recall_echo_min_token_length" to config.memory.longTermMemoryRecallEchoMinTokenLength,
                                 "long_term_memory_recall_echo_min_token_count" to config.memory.longTermMemoryRecallEchoMinTokenCount,
                                 "long_term_memory_recall_echo_token_overlap_threshold" to
-                                    config.memory.longTermMemoryRecallEchoTokenOverlapThreshold
+                                    config.memory.longTermMemoryRecallEchoTokenOverlapThreshold,
+                                "superego_dynamic_completion_enabled" to config.superego.dynamicCompletionEnabled,
+                                "superego_dynamic_completion_hard_max_tokens" to config.superego.dynamicCompletionHardMaxTokens,
+                                "superego_dynamic_prompt_to_completion_ratio" to config.superego.dynamicPromptToCompletionRatio,
+                                "superego_dynamic_completion_min_prompt_tokens" to config.superego.dynamicCompletionMinPromptTokens,
+                                "superego_two_stage_review_enabled" to config.superego.twoStageReviewEnabled,
+                                "superego_two_stage_low_confidence_threshold" to
+                                    config.superego.twoStageLowConfidenceThreshold,
+                                "superego_two_stage_escalate_on_medium_policy_risk" to
+                                    config.superego.twoStageEscalateOnMediumPolicyRisk,
+                                "long_term_memory_dynamic_completion_enabled" to config.memory.longTermMemoryDynamicCompletionEnabled,
+                                "long_term_memory_dynamic_completion_hard_max_tokens" to
+                                    config.memory.longTermMemoryDynamicCompletionHardMaxTokens,
+                                "long_term_memory_dynamic_prompt_to_completion_ratio" to
+                                    config.memory.longTermMemoryDynamicPromptToCompletionRatio,
+                                "long_term_memory_dynamic_completion_min_prompt_tokens" to
+                                    config.memory.longTermMemoryDynamicCompletionMinPromptTokens,
+                                "superego_model_token_weight" to llm.modelCatalog.tokenWeightFor(llm.superego),
+                                "memory_advisor_model_token_weight" to llm.modelCatalog.tokenWeightFor(llm.memoryAdvisor)
                             )
                         )
                     )
@@ -644,18 +677,37 @@ internal object AppModeRunners {
                             ),
                             hooks = listOf(rawResponseHook)
                         ).use { actionVerifierClient ->
+                            val superegoReviewRouting = resolveSuperegoReviewRouting(
+                                llm = llm,
+                                config = config,
+                                instrumentation = instrumentation
+                            )
                             InstrumentedChatModelClient(
                                 delegate = TokenBudgetGuardedChatClient(
                                     delegate = createChatClient(
-                                        endpoint = llm.superego,
-                                        callObserver = callObserverForProvider(llm.superego.providerLabel)
+                                        endpoint = superegoReviewRouting.primaryEndpoint,
+                                        callObserver = callObserverForProvider(superegoReviewRouting.primaryEndpoint.providerLabel)
                                     ),
                                     budgetGate = tokenBudgetGate,
-                                    provider = llm.superego.providerLabel,
+                                    provider = superegoReviewRouting.primaryEndpoint.providerLabel,
                                     role = LlmRoleLabels.SUPEREGO
                                 ),
                                 hooks = listOf(rawResponseHook)
                             ).use { superegoClient ->
+                                val superegoEscalationClient = superegoReviewRouting.escalationEndpoint?.let { escalationEndpoint ->
+                                    InstrumentedChatModelClient(
+                                        delegate = TokenBudgetGuardedChatClient(
+                                            delegate = createChatClient(
+                                                endpoint = escalationEndpoint,
+                                                callObserver = callObserverForProvider(escalationEndpoint.providerLabel)
+                                            ),
+                                            budgetGate = tokenBudgetGate,
+                                            provider = escalationEndpoint.providerLabel,
+                                            role = LlmRoleLabels.SUPEREGO
+                                        ),
+                                        hooks = listOf(rawResponseHook)
+                                    )
+                                }
                                 InstrumentedChatModelClient(
                                     delegate = TokenBudgetGuardedChatClient(
                                         delegate = createChatClient(
@@ -684,122 +736,132 @@ internal object AppModeRunners {
                                             "Cognitive role routing: " +
                                                 "planner=${llm.planner.providerLabel}/${llm.planner.model}, " +
                                                 "action_verifier=${llm.actionVerifier.providerLabel}/${llm.actionVerifier.model}, " +
-                                                "superego=${llm.superego.providerLabel}/${llm.superego.model}, " +
+                                                "superego_primary=${superegoReviewRouting.primaryEndpoint.providerLabel}/${superegoReviewRouting.primaryEndpoint.model}, " +
+                                                "superego_escalation=${superegoReviewRouting.escalationEndpoint?.let { "${it.providerLabel}/${it.model}" } ?: "disabled"}, " +
                                                 "meta_reasoner=${llm.metaReasoner.providerLabel}/${llm.metaReasoner.model}, " +
                                                 "memory_advisor=${llm.memoryAdvisor.providerLabel}/${llm.memoryAdvisor.model}, " +
                                                 "web_search=${llm.webSearch.providerLabel}/${llm.webSearch.model}"
                                         }
-    
-                                        val gatekeeper = Superego(
-                                            modelClient = superegoClient,
-                                            config = config,
-                                            instrumentation = instrumentation
-                                        )
-                                        val mcpTimeTool = createMcpTimeTool(config, mcpRuntimeConfig.time)
-                                        val fetchTool = createFetchTool(config, mcpRuntimeConfig.fetch)
-                                        val webSearchRuntime = createWebSearchRuntime(
-                                            llm = llm,
-                                            callObserver = webSearchCallObserver,
-                                            instrumentation = instrumentation,
-                                            maxRawResponseChars = config.planner.maxActionPayloadChars,
-                                            tokenBudgetGate = tokenBudgetGate
-                                        )
-    
-                                        webSearchRuntime.use { runtime ->
-                                            val timeTool = mcpTimeTool
-                                            val activeFetchTool = fetchTool
-                                            try {
-                                                val webSearchActionHandler = WebSearchActionHandler(runtime.engine)
-                                                val motorCortex = MotorCortex(
-                                                    webSearchActionHandler = webSearchActionHandler,
-                                                    mcpTimeTool = timeTool,
-                                                    fetchTool = activeFetchTool
-                                                )
-                                                val actionStatuses = motorCortex.startupSmokeTest()
-                                                instrumentation.emit(AgentEvents.actionCapabilities(actionStatuses))
-                                                actionStatuses.filterNot { it.available }.forEach { status ->
-                                                    instrumentation.emit(
-                                                        AgentEvents.warning(
-                                                            "Action ${status.actionType.name.lowercase()} unavailable at startup: ${status.detail}"
-                                                        )
-                                                    )
-                                                }
-                                                var plannerNoopCount = 0
-                                                var plannerOutputRepairedCount = 0
-                                                val planner = LlmEgoPlanner(
-                                                    modelClient = plannerClient,
-                                                    actionVerifierModelClient = actionVerifierClient,
-                                                    config = config,
-                                                    instrumentation = instrumentation,
-                                                    onPlannerNoop = {
-                                                        metrics.recordPlannerNoop()
-                                                        plannerNoopCount += 1
-                                                        if (plannerNoopCount == 3) {
-                                                            instrumentation.emit(
-                                                                AgentEvents.warning(
-                                                                    "Anomaly threshold reached: noop_count >= 3."
-                                                                )
-                                                            )
-                                                        }
-                                                    },
-                                                    onPlannerOutputRepaired = {
-                                                        metrics.recordPlannerOutputRepaired()
-                                                        plannerOutputRepairedCount += 1
-                                                        if (plannerOutputRepairedCount == 3) {
-                                                            instrumentation.emit(
-                                                                AgentEvents.warning(
-                                                                    "Anomaly threshold reached: planner_output_repaired_count >= 3."
-                                                                )
-                                                            )
-                                                        }
-                                                    }
-                                                )
-                                                val metaReasoner = LlmMetaReasoner(
-                                                    modelClient = metaReasonerClient,
-                                                    config = config
-                                                )
-                                                val longTermMemoryAdvisor = LlmLongTermMemoryAdvisor(
-                                                    modelClient = longTermMemoryClient,
-                                                    config = config
-                                                )
-                                                val interactiveMemoryStartup =
-                                                    resolveInteractiveMemoryStartup(config, mcpRuntimeConfig.memory)
-                                                val hippocampus = interactiveMemoryStartup.hippocampus
-                                                val memoryProviderDetail = interactiveMemoryStartup.detail
-                                                val allStatuses = actionStatuses + ActionImplementationStatus(
-                                                    actionType = ActionType.MEMORY,
-                                                    available = hippocampus.enabled,
-                                                    detail = memoryProviderDetail,
-                                                )
-                                                instrumentation.emit(AgentEvents.actionCapabilities(allStatuses))
-                                                if (!hippocampus.enabled) {
-                                                    instrumentation.emit(
-                                                        AgentEvents.warning("Long-term memory is unavailable: $memoryProviderDetail")
-                                                    )
-                                                }
-                                                val logbook = createLogbookIfEnabled(config)
-                                                val logbookSummarizer = createLogbookSummarizer(config, longTermMemoryClient)
+                                        try {
+                                            val gatekeeper = Superego(
+                                                modelClient = superegoClient,
+                                                config = config,
+                                                modelTokenWeight = superegoReviewRouting.primaryTokenWeight,
+                                                escalationModelClient = superegoEscalationClient,
+                                                escalationModelTokenWeight = superegoReviewRouting.escalationTokenWeight
+                                                    ?: superegoReviewRouting.primaryTokenWeight,
+                                                instrumentation = instrumentation
+                                            )
+                                            val mcpTimeTool = createMcpTimeTool(config, mcpRuntimeConfig.time)
+                                            val fetchTool = createFetchTool(config, mcpRuntimeConfig.fetch)
+                                            val webSearchRuntime = createWebSearchRuntime(
+                                                llm = llm,
+                                                callObserver = webSearchCallObserver,
+                                                instrumentation = instrumentation,
+                                                maxRawResponseChars = config.planner.maxActionPayloadChars,
+                                                tokenBudgetGate = tokenBudgetGate
+                                            )
+
+                                            webSearchRuntime.use { runtime ->
+                                                val timeTool = mcpTimeTool
+                                                val activeFetchTool = fetchTool
                                                 try {
-                                                    Ego(
-                                                        planner = planner,
-                                                        superego = gatekeeper,
-                                                        motorCortex = motorCortex,
+                                                    val webSearchActionHandler = WebSearchActionHandler(runtime.engine)
+                                                    val motorCortex = MotorCortex(
+                                                        webSearchActionHandler = webSearchActionHandler,
+                                                        mcpTimeTool = timeTool,
+                                                        fetchTool = activeFetchTool
+                                                    )
+                                                    val actionStatuses = motorCortex.startupSmokeTest()
+                                                    instrumentation.emit(AgentEvents.actionCapabilities(actionStatuses))
+                                                    actionStatuses.filterNot { it.available }.forEach { status ->
+                                                        instrumentation.emit(
+                                                            AgentEvents.warning(
+                                                                "Action ${status.actionType.name.lowercase()} unavailable at startup: ${status.detail}"
+                                                            )
+                                                        )
+                                                    }
+                                                    var plannerNoopCount = 0
+                                                    var plannerOutputRepairedCount = 0
+                                                    val planner = LlmEgoPlanner(
+                                                        modelClient = plannerClient,
+                                                        actionVerifierModelClient = actionVerifierClient,
                                                         config = config,
-                                                        hippocampus = hippocampus,
-                                                        metaReasoner = metaReasoner,
-                                                        longTermMemoryAdvisor = longTermMemoryAdvisor,
                                                         instrumentation = instrumentation,
-                                                        logbook = logbook,
-                                                        logbookSummarizer = logbookSummarizer,
-                                                    ).runInteractive()
+                                                        onPlannerNoop = {
+                                                            metrics.recordPlannerNoop()
+                                                            plannerNoopCount += 1
+                                                            if (plannerNoopCount == 3) {
+                                                                instrumentation.emit(
+                                                                    AgentEvents.warning(
+                                                                        "Anomaly threshold reached: noop_count >= 3."
+                                                                    )
+                                                                )
+                                                            }
+                                                        },
+                                                        onPlannerOutputRepaired = {
+                                                            metrics.recordPlannerOutputRepaired()
+                                                            plannerOutputRepairedCount += 1
+                                                            if (plannerOutputRepairedCount == 3) {
+                                                                instrumentation.emit(
+                                                                    AgentEvents.warning(
+                                                                        "Anomaly threshold reached: planner_output_repaired_count >= 3."
+                                                                    )
+                                                                )
+                                                            }
+                                                        }
+                                                    )
+                                                    val metaReasoner = LlmMetaReasoner(
+                                                        modelClient = metaReasonerClient,
+                                                        config = config
+                                                    )
+                                                    val longTermMemoryAdvisor = LlmLongTermMemoryAdvisor(
+                                                        modelClient = longTermMemoryClient,
+                                                        config = config,
+                                                        modelTokenWeight = llm.modelCatalog.tokenWeightFor(llm.memoryAdvisor),
+                                                        instrumentation = instrumentation
+                                                    )
+                                                    val interactiveMemoryStartup =
+                                                        resolveInteractiveMemoryStartup(config, mcpRuntimeConfig.memory)
+                                                    val hippocampus = interactiveMemoryStartup.hippocampus
+                                                    val memoryProviderDetail = interactiveMemoryStartup.detail
+                                                    val allStatuses = actionStatuses + ActionImplementationStatus(
+                                                        actionType = ActionType.MEMORY,
+                                                        available = hippocampus.enabled,
+                                                        detail = memoryProviderDetail,
+                                                    )
+                                                    instrumentation.emit(AgentEvents.actionCapabilities(allStatuses))
+                                                    if (!hippocampus.enabled) {
+                                                        instrumentation.emit(
+                                                            AgentEvents.warning("Long-term memory is unavailable: $memoryProviderDetail")
+                                                        )
+                                                    }
+                                                    val logbook = createLogbookIfEnabled(config)
+                                                    val logbookSummarizer = createLogbookSummarizer(config, longTermMemoryClient)
+                                                    try {
+                                                        Ego(
+                                                            planner = planner,
+                                                            superego = gatekeeper,
+                                                            motorCortex = motorCortex,
+                                                            config = config,
+                                                            hippocampus = hippocampus,
+                                                            metaReasoner = metaReasoner,
+                                                            longTermMemoryAdvisor = longTermMemoryAdvisor,
+                                                            instrumentation = instrumentation,
+                                                            logbook = logbook,
+                                                            logbookSummarizer = logbookSummarizer,
+                                                        ).runInteractive()
+                                                    } finally {
+                                                        hippocampus.close()
+                                                        closeQuietly(logbook)
+                                                    }
                                                 } finally {
-                                                    hippocampus.close()
-                                                    closeQuietly(logbook)
+                                                    closeQuietly(activeFetchTool)
+                                                    closeQuietly(timeTool)
                                                 }
-                                            } finally {
-                                                closeQuietly(activeFetchTool)
-                                                closeQuietly(timeTool)
                                             }
+                                        } finally {
+                                            superegoEscalationClient?.close()
                                         }
                                     }
                                 }
@@ -893,6 +955,12 @@ internal object AppModeRunners {
                         provider = webSearch.providerLabel
                     )
                 )
+
+                LlmProvider.OPENAI -> WebSearchRuntime(
+                    engine = UnavailableWebSearchEngine(
+                        "Web search provider 'openai' is not implemented. Use groq, mistral, or google for web_search."
+                    )
+                )
             }
         } catch (ex: Exception) {
             val detail = "Web search unavailable: ${ex.message ?: ex::class.simpleName ?: "initialization failed"}"
@@ -945,6 +1013,63 @@ internal object AppModeRunners {
             private const val WEB_SEARCH_COMPLETION_ESTIMATE_TOKENS: Int = 384
         }
     }
+
+    private data class SuperegoReviewRouting(
+        val primaryEndpoint: LlmEndpointConfig,
+        val primaryTokenWeight: Double,
+        val escalationEndpoint: LlmEndpointConfig? = null,
+        val escalationTokenWeight: Double? = null,
+    )
+
+    private fun resolveSuperegoReviewRouting(
+        llm: LlmRuntimeConfig,
+        config: AgentConfig,
+        instrumentation: psyke.instrumentation.AgentInstrumentation,
+    ): SuperegoReviewRouting {
+        val escalationEndpoint = llm.superego
+        val escalationWeight = llm.modelCatalog.tokenWeightFor(escalationEndpoint)
+        if (!config.superego.twoStageReviewEnabled) {
+            return SuperegoReviewRouting(
+                primaryEndpoint = escalationEndpoint,
+                primaryTokenWeight = escalationWeight
+            )
+        }
+        val cheapPrimary = llm.modelCatalog.cheapestProfileForProvider(
+            provider = escalationEndpoint.provider,
+            excludingModel = escalationEndpoint.model
+        )
+        if (cheapPrimary == null) {
+            instrumentation.emit(
+                AgentEvents.warning(
+                    "Superego two-stage review enabled but no cheaper model found in catalog for provider=${escalationEndpoint.providerLabel}; using single-stage."
+                )
+            )
+            return SuperegoReviewRouting(
+                primaryEndpoint = escalationEndpoint,
+                primaryTokenWeight = escalationWeight
+            )
+        }
+        val primaryEndpoint = escalationEndpoint.copy(model = cheapPrimary.model)
+        instrumentation.emit(
+            AgentEvent(
+                type = "superego_two_stage_routing",
+                data = mapOf(
+                    "enabled" to true,
+                    "primary_model" to primaryEndpoint.model,
+                    "escalation_model" to escalationEndpoint.model,
+                    "provider" to escalationEndpoint.providerLabel,
+                    "low_confidence_threshold" to config.superego.twoStageLowConfidenceThreshold,
+                    "escalate_on_medium_policy_risk" to config.superego.twoStageEscalateOnMediumPolicyRisk
+                )
+            )
+        )
+        return SuperegoReviewRouting(
+            primaryEndpoint = primaryEndpoint,
+            primaryTokenWeight = cheapPrimary.tokenWeight,
+            escalationEndpoint = escalationEndpoint,
+            escalationTokenWeight = escalationWeight
+        )
+    }
     
     private fun createChatClient(
         endpoint: LlmEndpointConfig,
@@ -966,6 +1091,13 @@ internal object AppModeRunners {
             )
 
             LlmProvider.GOOGLE -> GeminiChatClient(
+                apiKey = endpoint.apiKey,
+                baseUrl = endpoint.baseUrl,
+                modelName = endpoint.model,
+                callObserver = callObserver
+            )
+
+            LlmProvider.OPENAI -> OpenAiChatClient(
                 apiKey = endpoint.apiKey,
                 baseUrl = endpoint.baseUrl,
                 modelName = endpoint.model,

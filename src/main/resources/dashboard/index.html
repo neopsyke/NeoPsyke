@@ -233,6 +233,11 @@
     .tl-cat-meta.tl-primary { border-left-color: #b37feb; }
     .tl-cat-memory .tl-type { color: #67c23a; }
     .tl-cat-memory.tl-primary { border-left-color: #67c23a; }
+    .tl-critical {
+      border-left-color: #f56c6c !important;
+      background: rgba(245, 108, 108, 0.08);
+    }
+    .tl-critical .tl-type { color: #f56c6c; }
 
     .cap-list {
       border: 1px solid var(--line);
@@ -474,6 +479,7 @@
     const timelinePrimary = new Set([
       "planner_decision", "planner_start",
       "superego_output", "action_review_result",
+      "superego_two_stage_review",
       "action_proposed", "action_executed", "action_denied",
       "input_processing", "thought_processing", "thought_enqueued",
       "meta_reasoner_assessment", "deliberation_state",
@@ -482,13 +488,61 @@
       "long_term_memory_explicit_intent_detected"
     ]);
 
-    function eventCategory(type) {
+    const reasoningImpactingLlmCallSites = new Set([
+      "input",
+      "thought",
+      "input_json_retry",
+      "thought_json_retry",
+      "action_verifier",
+      "action_verifier_json_retry",
+      "action_review",
+      "action_review_json_retry",
+      "action_review_escalated",
+      "action_review_escalated_json_retry",
+      "meta_reasoner",
+      "long_term_memory_assessment"
+    ]);
+
+    function isLlmErrorEvent(event) {
+      if (!event || event.type !== "llm_call") return false;
+      const status = String(event.data?.status || "").toLowerCase();
+      return status === "error";
+    }
+
+    function isReasoningImpactingLlmError(event) {
+      if (!isLlmErrorEvent(event)) return false;
+      const callSite = String(event.data?.call_site || "").trim();
+      return callSite === "" || reasoningImpactingLlmCallSites.has(callSite);
+    }
+
+    function shouldShowInTimeline(event) {
+      if (!event || !event.type) return false;
+      if (!timelineExcluded.has(event.type)) return true;
+      return isReasoningImpactingLlmError(event);
+    }
+
+    function isTimelinePriorityEvent(event) {
+      if (!event || !event.type) return false;
+      return timelinePrimary.has(event.type) || isReasoningImpactingLlmError(event);
+    }
+
+    function eventCategory(event) {
+      const type = String(event?.type || "");
       if (type.startsWith("planner") || type === "plan_created" || type === "plan_steps_enqueued" || type === "duplicate_plan_suppressed") return "planner";
       if (type.startsWith("superego") || type === "action_review_result" || type === "action_denied") return "superego";
       if (type.startsWith("action_")) return "action";
       if (type.includes("thought") || type === "input_processing" || type === "input_queued") return "thought";
       if (type.startsWith("meta_") || type === "deliberation_state") return "meta";
       if (type.includes("memory") || type.startsWith("long_term_memory")) return "memory";
+      if (type === "llm_call") {
+        const actor = String(event?.data?.actor || "").toLowerCase();
+        const callSite = String(event?.data?.call_site || "").toLowerCase();
+        if (actor === "superego" || callSite.startsWith("action_review")) return "superego";
+        if (callSite.startsWith("action_verifier")) return "action";
+        if (callSite === "meta_reasoner") return "meta";
+        if (callSite.includes("memory")) return "memory";
+        if (callSite === "input" || callSite === "thought") return "planner";
+      }
       return "";
     }
 
@@ -502,6 +556,11 @@
         case "superego_output":
         case "action_review_result":
           return (d.verdict || d.decision || "") + (d.reason ? ": " + d.reason : "");
+        case "superego_two_stage_review":
+          return "stage=" + (d.stage || "unknown") +
+            ", allow=" + String(d.allow) +
+            ", confidence=" + (d.confidence ?? "n/a") +
+            ", policy_risk=" + (d.policy_risk || "n/a");
         case "action_proposed":
           return (d.action?.type || d.type || "") + (d.action?.summary || d.summary ? " — " + (d.action?.summary || d.summary) : "");
         case "action_executed":
@@ -526,10 +585,24 @@
           return (d.recommendation || d.verdict || "") + (d.reason ? ": " + d.reason : "");
         case "long_term_memory_explicit_intent_detected":
           return d.intent || d.content || null;
+        case "memory_advisor_prompt_compressed":
+          return "dialogue " + (d.dialogue_original_chars || 0) + "→" + (d.dialogue_final_chars || 0) +
+            ", recall " + (d.recall_original_chars || 0) + "→" + (d.recall_final_chars || 0);
+        case "superego_two_stage_routing":
+          return "primary=" + (d.primary_model || "n/a") + ", escalation=" + (d.escalation_model || "n/a");
         case "warning":
           return d.message || d.warning || null;
         case "convergence_thought_enqueued":
           return d.reason || d.content || null;
+        case "llm_call": {
+          const status = String(d.status || "").toLowerCase();
+          if (status !== "error") return null;
+          const actor = String(d.actor || "unknown");
+          const callSite = String(d.call_site || "unknown");
+          const errorCode = d.error_code ? String(d.error_code) : "";
+          const errorMessage = d.error_message ? String(d.error_message) : "";
+          return actor + "/" + callSite + (errorCode ? " [" + errorCode + "]" : "") + (errorMessage ? " — " + errorMessage : "");
+        }
         default:
           return null;
       }
@@ -542,9 +615,11 @@
     }
 
     function renderTimelineItem(event) {
-      const isPrimary = timelinePrimary.has(event.type);
-      const cat = eventCategory(event.type);
+      const isPrimary = isTimelinePriorityEvent(event);
+      const isCritical = isReasoningImpactingLlmError(event);
+      const cat = eventCategory(event);
       const catClass = cat ? " tl-cat-" + cat : "";
+      const criticalClass = isCritical ? " tl-critical" : "";
       const content = extractTimelineContent(event);
       const time = formatTimeOnly(event);
       const typeLabel = event.type.replace(/_/g, " ");
@@ -553,7 +628,7 @@
         const contentHtml = content
           ? "<div class=\"tl-content\">" + escapeHtml(short(content, 300)) + "</div>"
           : "";
-        return "<div class=\"tl-row tl-primary" + catClass + "\">" +
+        return "<div class=\"tl-row tl-primary" + catClass + criticalClass + "\">" +
           "<div class=\"tl-header\">" +
             "<span class=\"tl-type\">" + escapeHtml(typeLabel) + "</span>" +
             "<span class=\"tl-ts\">" + escapeHtml(time) + "</span>" +
@@ -565,7 +640,7 @@
         "</div>";
       }
 
-      return "<div class=\"tl-row tl-secondary" + catClass + "\">" +
+      return "<div class=\"tl-row tl-secondary" + catClass + criticalClass + "\">" +
         "<details>" +
           "<summary>" +
             "<span class=\"tl-type\">" + escapeHtml(typeLabel) + "</span> " +
@@ -920,7 +995,7 @@
 
       const orderedEvents = state.recentEvents.slice().sort((a, b) => (a.id || 0) - (b.id || 0));
       const timelineEvents = orderedEvents
-        .filter(e => !timelineExcluded.has(e.type))
+        .filter(shouldShowInTimeline)
         .slice(-140);
       document.getElementById("timeline").innerHTML = timelineEvents.map(renderTimelineItem).join("");
 

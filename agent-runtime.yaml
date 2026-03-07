@@ -19,7 +19,22 @@ agent:
   max_run_tokens_per_provider: 0
   max_run_tokens_per_role: 0
   llm_retry_attempts: 2
-  superego_max_completion_tokens: 192
+  superego_max_completion_tokens: 384
+  superego_dynamic_completion_enabled: true
+  superego_dynamic_completion_hard_max_tokens: 640
+  superego_dynamic_prompt_to_completion_ratio: 0.10
+  superego_dynamic_completion_min_prompt_tokens: 160
+  superego_two_stage_review_enabled: true
+  superego_two_stage_low_confidence_threshold: 0.72
+  superego_two_stage_escalate_on_medium_policy_risk: true
+  long_term_memory_max_tokens: 320
+  long_term_memory_prompt_compression_enabled: true
+  long_term_memory_prompt_dialogue_max_chars: 900
+  long_term_memory_prompt_recall_max_chars: 760
+  long_term_memory_dynamic_completion_enabled: true
+  long_term_memory_dynamic_completion_hard_max_tokens: 512
+  long_term_memory_dynamic_prompt_to_completion_ratio: 0.08
+  long_term_memory_dynamic_completion_min_prompt_tokens: 160
   deliberation_pressure_assessment_min_step: 16
   deliberation_pressure_assessment_every_steps: 8
   deliberation_pressure_assessment_threshold: 0.68
