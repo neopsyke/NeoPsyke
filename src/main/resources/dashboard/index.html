@@ -153,6 +153,87 @@
     .item details[open] > summary::before { content: "- "; }
     .item .summary-text { color: var(--muted); }
 
+    /* Timeline – clean thought chain */
+    #timeline { max-height: none; overflow: visible; overscroll-behavior: auto; }
+    .tl-row {
+      border-bottom: 1px solid var(--line);
+      padding: 8px 10px;
+      font-size: 11px;
+      min-width: 0;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+    }
+    .tl-row:last-child { border-bottom: none; }
+    .tl-primary {
+      border-left: 3px solid var(--accent);
+      padding-left: 10px;
+    }
+    .tl-secondary {
+      opacity: 0.4;
+      padding-left: 13px;
+      font-size: 10px;
+    }
+    .tl-secondary:hover { opacity: 0.75; }
+    .tl-header {
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+    }
+    .tl-type {
+      font-weight: 600;
+      text-transform: uppercase;
+      font-size: 10px;
+      letter-spacing: 0.04em;
+      flex-shrink: 0;
+    }
+    .tl-ts {
+      color: var(--muted);
+      font-size: 10px;
+      margin-left: auto;
+      flex-shrink: 0;
+    }
+    .tl-content {
+      color: var(--text);
+      margin-top: 3px;
+      line-height: 1.45;
+      font-size: 12px;
+    }
+    .tl-raw {
+      margin-top: 6px;
+    }
+    .tl-raw summary {
+      cursor: pointer;
+      list-style: none;
+      color: var(--muted);
+      font-size: 10px;
+    }
+    .tl-raw summary::-webkit-details-marker { display: none; }
+    .tl-raw summary::before { content: "▸ "; }
+    .tl-raw[open] summary::before { content: "▾ "; }
+    .tl-secondary details summary {
+      cursor: pointer;
+      list-style: none;
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+    }
+    .tl-secondary details summary::-webkit-details-marker { display: none; }
+    .tl-secondary details summary::before { content: "+ "; color: var(--muted); }
+    .tl-secondary details[open] > summary::before { content: "- "; }
+    /* Category colors */
+    .tl-cat-planner .tl-type { color: #e6a23c; }
+    .tl-cat-planner.tl-primary { border-left-color: #e6a23c; }
+    .tl-cat-superego .tl-type { color: #f56c6c; }
+    .tl-cat-superego.tl-primary { border-left-color: #f56c6c; }
+    .tl-cat-action .tl-type { color: var(--accent); }
+    .tl-cat-action.tl-primary { border-left-color: var(--accent); }
+    .tl-cat-thought .tl-type { color: #409eff; }
+    .tl-cat-thought.tl-primary { border-left-color: #409eff; }
+    .tl-cat-meta .tl-type { color: #b37feb; }
+    .tl-cat-meta.tl-primary { border-left-color: #b37feb; }
+    .tl-cat-memory .tl-type { color: #67c23a; }
+    .tl-cat-memory.tl-primary { border-left-color: #67c23a; }
+
     .cap-list {
       border: 1px solid var(--line);
       border-radius: 6px;
@@ -378,6 +459,123 @@
         .replace(/>/g, "&gt;")
         .replace(/\"/g, "&quot;")
         .replace(/'/g, "&#39;");
+
+    /* ── Timeline configuration ── */
+    const timelineExcluded = new Set([
+      "queue_snapshot", "metrics_snapshot", "memory_server_metrics",
+      "response_latency_recorded", "llm_raw_response", "llm_call",
+      "action_capabilities", "limits_config", "instrumentation_health",
+      "queue_saturation", "noop_recorded",
+      "long_term_memory_assessment_parse_fallback",
+      "long_term_memory_assessment_temporarily_disabled",
+      "long_term_memory_persistence_skipped"
+    ]);
+
+    const timelinePrimary = new Set([
+      "planner_decision", "planner_start",
+      "superego_output", "action_review_result",
+      "action_proposed", "action_executed", "action_denied",
+      "input_processing", "thought_processing", "thought_enqueued",
+      "meta_reasoner_assessment", "deliberation_state",
+      "memory_consolidation_assessment", "long_term_memory_assessment",
+      "convergence_thought_enqueued", "warning",
+      "long_term_memory_explicit_intent_detected"
+    ]);
+
+    function eventCategory(type) {
+      if (type.startsWith("planner") || type === "plan_created" || type === "plan_steps_enqueued" || type === "duplicate_plan_suppressed") return "planner";
+      if (type.startsWith("superego") || type === "action_review_result" || type === "action_denied") return "superego";
+      if (type.startsWith("action_")) return "action";
+      if (type.includes("thought") || type === "input_processing" || type === "input_queued") return "thought";
+      if (type.startsWith("meta_") || type === "deliberation_state") return "meta";
+      if (type.includes("memory") || type.startsWith("long_term_memory")) return "memory";
+      return "";
+    }
+
+    function extractTimelineContent(event) {
+      const d = event.data || {};
+      switch (event.type) {
+        case "planner_decision":
+          return d.decision || d.summary || d.action_type || null;
+        case "planner_start":
+          return d.trigger || d.reason || null;
+        case "superego_output":
+        case "action_review_result":
+          return (d.verdict || d.decision || "") + (d.reason ? ": " + d.reason : "");
+        case "action_proposed":
+          return (d.action?.type || d.type || "") + (d.action?.summary || d.summary ? " — " + (d.action?.summary || d.summary) : "");
+        case "action_executed":
+          return d.outcome_summary || ((d.action?.type || d.type || "") + " completed");
+        case "action_denied":
+          return (d.action?.type || d.type || "") + (d.reason ? " — " + d.reason : " denied");
+        case "input_processing":
+          return d.input?.content || d.content || null;
+        case "thought_processing":
+          return d.thought?.content || d.content || null;
+        case "thought_enqueued":
+          return d.thought?.content || d.content || null;
+        case "input_queued":
+          return d.input?.content || d.content || null;
+        case "meta_reasoner_assessment":
+          return d.assessment || d.verdict || d.summary || null;
+        case "deliberation_state":
+          return d.state || d.summary || null;
+        case "memory_consolidation_assessment":
+          return (d.recommendation || d.verdict || "") + (d.reason ? ": " + d.reason : "");
+        case "long_term_memory_assessment":
+          return (d.recommendation || d.verdict || "") + (d.reason ? ": " + d.reason : "");
+        case "long_term_memory_explicit_intent_detected":
+          return d.intent || d.content || null;
+        case "warning":
+          return d.message || d.warning || null;
+        case "convergence_thought_enqueued":
+          return d.reason || d.content || null;
+        default:
+          return null;
+      }
+    }
+
+    function formatTimeOnly(event) {
+      const iso = event.tsIso || (event.ts ? new Date(event.ts).toISOString() : "");
+      const match = iso.match(/T(\d{2}:\d{2}:\d{2})/);
+      return match ? match[1] : iso;
+    }
+
+    function renderTimelineItem(event) {
+      const isPrimary = timelinePrimary.has(event.type);
+      const cat = eventCategory(event.type);
+      const catClass = cat ? " tl-cat-" + cat : "";
+      const content = extractTimelineContent(event);
+      const time = formatTimeOnly(event);
+      const typeLabel = event.type.replace(/_/g, " ");
+
+      if (isPrimary) {
+        const contentHtml = content
+          ? "<div class=\"tl-content\">" + escapeHtml(short(content, 300)) + "</div>"
+          : "";
+        return "<div class=\"tl-row tl-primary" + catClass + "\">" +
+          "<div class=\"tl-header\">" +
+            "<span class=\"tl-type\">" + escapeHtml(typeLabel) + "</span>" +
+            "<span class=\"tl-ts\">" + escapeHtml(time) + "</span>" +
+          "</div>" +
+          contentHtml +
+          "<details class=\"tl-raw\"><summary>raw</summary>" +
+            "<pre>" + escapeHtml(fmt(event.data || {})) + "</pre>" +
+          "</details>" +
+        "</div>";
+      }
+
+      return "<div class=\"tl-row tl-secondary" + catClass + "\">" +
+        "<details>" +
+          "<summary>" +
+            "<span class=\"tl-type\">" + escapeHtml(typeLabel) + "</span> " +
+            "<span class=\"tl-ts\">" + escapeHtml(time) + "</span>" +
+          "</summary>" +
+          (content ? "<div class=\"tl-content\">" + escapeHtml(short(content, 200)) + "</div>" : "") +
+          "<pre>" + escapeHtml(fmt(event.data || {})) + "</pre>" +
+        "</details>" +
+      "</div>";
+    }
 
     const asNum = (v, fallback = 0) => {
       const n = Number(v);
@@ -722,9 +920,9 @@
 
       const orderedEvents = state.recentEvents.slice().sort((a, b) => (a.id || 0) - (b.id || 0));
       const timelineEvents = orderedEvents
-        .filter(e => e.type !== "queue_snapshot" && e.type !== "metrics_snapshot")
+        .filter(e => !timelineExcluded.has(e.type))
         .slice(-140);
-      document.getElementById("timeline").innerHTML = timelineEvents.map(renderEventItem).join("");
+      document.getElementById("timeline").innerHTML = timelineEvents.map(renderTimelineItem).join("");
 
       const actionEvents = orderedEvents
         .filter(e => e.type.startsWith("action_") || e.type.startsWith("superego_"))
