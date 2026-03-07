@@ -703,6 +703,7 @@ class LlmEgoPlanner(
         }
         val shortTermContextSummary = context.shortTermContextSummary.ifBlank { "none" }
         val longTermMemoryRecall = context.longTermMemoryRecall.ifBlank { "none" }
+        val episodicRecall = context.episodicRecall.ifBlank { "none" }
         val taskWorkspaceSummary = context.taskWorkspaceSummary.ifBlank { "none" }
         val evidenceHints = context.evidenceHints.ifBlank { "none" }
         val metaGuidance = context.metaGuidance.ifBlank { "none" }
@@ -745,6 +746,9 @@ class LlmEgoPlanner(
                     You may receive Long-term memory recall from Hippocampus search.
                     Use long-term memory recall only when relevant to the current trigger.
                     If long-term memory recall is missing or ambiguous, do not invent details.
+                    You may receive Episodic memory timeline from the session logbook.
+                    Use episodic memory to answer questions about past actions, events, or conversations.
+                    If the user asks about past events, prefer episodic memory over other sources.
                     You may receive a Task workspace summary scoped to the current request.
                     Treat Task workspace as ephemeral working notes, not durable long-term memory.
                     You may also receive Decision pressure metadata.
@@ -819,6 +823,12 @@ class LlmEgoPlanner(
                     priority = PromptBudgetAllocator.Priority.IMPORTANT,
                     minTokens = 24,
                     content = "Long-term memory recall:\n$longTermMemoryRecall"
+                ),
+                PromptBudgetAllocator.Section(
+                    role = ChatRole.USER,
+                    priority = PromptBudgetAllocator.Priority.IMPORTANT,
+                    minTokens = 24,
+                    content = "Episodic memory timeline:\n$episodicRecall"
                 ),
                 PromptBudgetAllocator.Section(
                     role = ChatRole.USER,

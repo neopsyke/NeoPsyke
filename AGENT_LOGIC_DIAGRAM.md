@@ -29,6 +29,8 @@ flowchart LR
     MC --> MS["MemoryStore (Short-term)"]
     MC --> H["Hippocampus (Long-term Recall/Imprint)"]
     MC --> LTM["LlmLongTermMemoryAdvisor"]
+    MC --> LB["Logbook (Episodic, SQLite+FTS5)"]
+    MC -.->|"temporal intent → episodic recall + vector cues"| LB
     E --> TWS["TaskWorkspaceStore (Ephemeral Per Request)"]
     E --> TWF["TaskWorkspaceFinalizer (Noop or LLM)"]
 

@@ -244,6 +244,7 @@ Do not add new fields directly to `AgentConfig`.
 | `SuperegoConfig` | superego-specific completion limits |
 | `MemoryConfig` | short/long-term memory knobs, MCP timeouts |
 | `MetaReasonerConfig` | deliberation pressure thresholds, cooldown, max tokens |
+| `LogbookConfig` | episodic memory: enabled, summary/keyword limits, retention days, DB path, episodic recall limits, LLM summarizer toggle |
 
 When adding a new knob, put it in the matching sub-config. If none fits, create
 a new sub-config and add it as a field on `AgentConfig`. Access paths follow the
