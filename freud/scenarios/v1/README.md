@@ -12,6 +12,7 @@ The scenario pack adds deterministic agent-loop coverage that is hard to infer f
 - policy denial and alternative-action recovery
 - fallback behavior after repeated external failures
 - memory recall injection into planner context
+- per-request task-workspace prompt injection + cleanup
 - forced terminal convergence under repeated planner model errors
 - unavailable-action rejection and recovery with available actions
 

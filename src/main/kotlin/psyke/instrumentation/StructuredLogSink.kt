@@ -163,6 +163,48 @@ class StructuredLogSink : InstrumentationSink {
                 }
             }
 
+            "task_workspace_created" -> {
+                logger.trace {
+                    "task_workspace.created root=${event.data["root_input_enqueued_at_ms"]} active=${event.data["active_tasks"]} goal=${event.data["goal_preview"]}"
+                }
+            }
+
+            "task_workspace_updated" -> {
+                logger.trace {
+                    "task_workspace.updated root=${event.data["root_input_enqueued_at_ms"]} type=${event.data["update_type"]} active=${event.data["active_tasks"]}"
+                }
+            }
+
+            "task_workspace_final_pass" -> {
+                logger.trace {
+                    "task_workspace.final_pass root=${event.data["root_input_enqueued_at_ms"]} action_id=${event.data["action_id"]} workspace_confidence=${event.data["workspace_confidence"]}"
+                }
+            }
+
+            "task_workspace_final_pass_skipped" -> {
+                logger.trace {
+                    "task_workspace.final_pass.skipped root=${event.data["root_input_enqueued_at_ms"]} action_id=${event.data["action_id"]} reason=${event.data["reason"]}"
+                }
+            }
+
+            "task_workspace_final_pass_applied" -> {
+                logger.trace {
+                    "task_workspace.final_pass.applied root=${event.data["root_input_enqueued_at_ms"]} action_id=${event.data["action_id"]} workspace_confidence=${event.data["workspace_confidence"]} model_confidence=${event.data["model_confidence"]}"
+                }
+            }
+
+            "task_workspace_destroyed" -> {
+                logger.trace {
+                    "task_workspace.destroyed root=${event.data["root_input_enqueued_at_ms"]} sections=${event.data["section_count"]} evidence=${event.data["evidence_count"]} reason=${event.data["reason"]}"
+                }
+            }
+
+            "task_workspace_cleared" -> {
+                logger.trace {
+                    "task_workspace.cleared count=${event.data["cleared_count"]} reason=${event.data["reason"]}"
+                }
+            }
+
             "llm_call" -> {
                 val status = event.data["status"]?.toString().orEmpty()
                 if (status.equals("error", ignoreCase = true)) {

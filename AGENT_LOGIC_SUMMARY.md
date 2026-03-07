@@ -26,6 +26,8 @@ It is intentionally high-level and should stay aligned with the code.
   - `LlmMetaReasoner`
   - `LlmLongTermMemoryAdvisor`
   - `Hippocampus` (MCP memory adapter or noop)
+  - `TaskWorkspaceStore` (ephemeral per-request notebook/workspace)
+  - `TaskWorkspaceFinalizer` (noop or `LlmTaskWorkspaceFinalizer`)
   - `Ego` orchestrator
 - Interactive startup now performs an MCP memory health probe before enabling memory:
   - if probe passes, memory is exposed as available and `McpHippocampus` is wired
@@ -70,11 +72,13 @@ It is intentionally high-level and should stay aligned with the code.
 - `processInput`:
   - Appends user turn to dialogue deque.
   - Stores turn in short-term `MemoryStore`.
+  - Creates/refreshes a task-scoped ephemeral workspace keyed by root input timestamp.
   - Builds `PlannerContext`:
     - recent dialogue
     - queue snapshot
     - short-term memory summary
     - long-term memory recall (if available)
+    - task workspace summary (index + compact section summaries, if enabled)
     - external evidence hints derived from prior successful/failed evidence actions for the same root input
     - deliberation state and meta-guidance
     - currently available action types from `MotorCortex`
@@ -94,6 +98,13 @@ It is intentionally high-level and should stay aligned with the code.
 
 ## Action Path
 - `processAction`:
+  - For terminal `answer` actions, runs task-workspace final-pass processing before action execution:
+    - records candidate answer draft into workspace
+    - builds final compilation from workspace sections/evidence
+    - applies workspace-confidence gate (`finalPassMinWorkspaceConfidence`)
+    - runs `TaskWorkspaceFinalizer` rewrite when enabled
+    - applies model-confidence gate (`finalPassMinModelConfidence`)
+    - keeps original payload on any gate/finalizer failure path
   - Fallback explanation actions bypass policy gate.
   - Normal actions go through `Superego.review`.
   - If denied:
@@ -102,6 +113,7 @@ It is intentionally high-level and should stay aligned with the code.
   - If allowed:
     - Execute via `MotorCortex.execute`.
     - Record outcome + deliberation evidence.
+    - Record non-answer action outcomes into the task workspace (when enabled).
     - Store assistant output in dialogue and short-term memory when applicable.
     - For `answer`, optionally force a post-terminal-answer long-term memory assessment.
     - For evidence actions (`web_search`, `mcp_time`, `mcp_fetch`), enqueue follow-up thought.
@@ -109,6 +121,7 @@ It is intentionally high-level and should stay aligned with the code.
   - For `answer`, response latency is emitted and per-input evidence cache is cleared.
   - After `answer`, pending thoughts/actions for the same root input are pruned from queues
     (`input_resolution_cleanup`) so stale plan/follow-up work cannot continue cycling.
+  - After `answer`, the task workspace for that root input is destroyed (`task_workspace_destroyed`).
 
 ## Planner Logic
 - File: `src/main/kotlin/psyke/agent/ego/LlmEgoPlanner.kt`
@@ -197,6 +210,15 @@ It is intentionally high-level and should stay aligned with the code.
     - temporary disable after repeated parse-fallback streaks
     - every blocked persistence emits `long_term_memory_persistence_skipped` with exact `reason_code` + `reason_detail`
   - `McpHippocampus` requests `write_mode=dedupe_if_similar` when calling memory write tools.
+- Task workspace (ephemeral, per request):
+  - File: `src/main/kotlin/psyke/agent/memory/workspace/TaskWorkspaceStore.kt`
+  - Optional (disabled by default) via `MemoryConfig.taskWorkspace.enabled`.
+  - Scoped to root input; independent from short-term and long-term memory pipelines.
+  - Stores compact sections/evidence for the active request only.
+  - Planner receives only prompt-capped workspace index/summaries, not full workspace content.
+  - Provides final-pass compilation input with workspace confidence estimate (sections/evidence/goal weighted signal).
+  - Workspace final-pass rewrite is handled by `TaskWorkspaceFinalizer` (`src/main/kotlin/psyke/agent/ego/TaskWorkspaceFinalizer.kt`) with strict JSON parsing, required-field validation, retry loop, and safe fallback.
+  - Workspace is destroyed on input resolution or queue drain cleanup.
 
 ## Action Execution Surface
 - File: `src/main/kotlin/psyke/agent/cortex/motor/MotorCortex.kt`
@@ -267,6 +289,7 @@ Update this file whenever any of these change:
 - Superego deterministic rules/validators or deterministic-vs-LLM precedence.
 - Deliberation pressure formula, thresholds, or forced-terminal criteria.
 - Memory recall/consolidation triggers, thresholds, or disable semantics.
+- Task workspace lifecycle, scoping, prompt injection, or final-pass compilation behavior.
 - Prompt-injection defense patterns or untrusted-content handling paths.
 - Supported action types or runtime availability logic.
 - Critical instrumentation events that materially change control flow visibility.

@@ -703,6 +703,7 @@ class LlmEgoPlanner(
         }
         val shortTermContextSummary = context.shortTermContextSummary.ifBlank { "none" }
         val longTermMemoryRecall = context.longTermMemoryRecall.ifBlank { "none" }
+        val taskWorkspaceSummary = context.taskWorkspaceSummary.ifBlank { "none" }
         val evidenceHints = context.evidenceHints.ifBlank { "none" }
         val metaGuidance = context.metaGuidance.ifBlank { "none" }
         val deliberation = context.deliberation
@@ -744,6 +745,8 @@ class LlmEgoPlanner(
                     You may receive Long-term memory recall from Hippocampus search.
                     Use long-term memory recall only when relevant to the current trigger.
                     If long-term memory recall is missing or ambiguous, do not invent details.
+                    You may receive a Task workspace summary scoped to the current request.
+                    Treat Task workspace as ephemeral working notes, not durable long-term memory.
                     You may also receive Decision pressure metadata.
                     As pressure rises, reduce exploratory loops and converge on a final answer.
                     """.trimIndent()
@@ -820,6 +823,12 @@ class LlmEgoPlanner(
                 PromptBudgetAllocator.Section(
                     role = ChatRole.USER,
                     priority = PromptBudgetAllocator.Priority.IMPORTANT,
+                    minTokens = 20,
+                    content = "Task workspace summary:\n$taskWorkspaceSummary"
+                ),
+                PromptBudgetAllocator.Section(
+                    role = ChatRole.USER,
+                    priority = PromptBudgetAllocator.Priority.IMPORTANT,
                     minTokens = 18,
                     content = "External evidence hints:\n$evidenceHints"
                 ),
@@ -880,6 +889,7 @@ class LlmEgoPlanner(
             .ifBlank { "none" }
         val shortTermContextSummary = context.shortTermContextSummary.ifBlank { "none" }
         val longTermMemoryRecall = context.longTermMemoryRecall.ifBlank { "none" }
+        val taskWorkspaceSummary = context.taskWorkspaceSummary.ifBlank { "none" }
 
         return PromptBudgetAllocator.allocate(
             sections = listOf(
@@ -928,6 +938,11 @@ class LlmEgoPlanner(
                     role = ChatRole.USER,
                     priority = PromptBudgetAllocator.Priority.OPTIONAL,
                     content = "Long-term memory recall:\n$longTermMemoryRecall"
+                ),
+                PromptBudgetAllocator.Section(
+                    role = ChatRole.USER,
+                    priority = PromptBudgetAllocator.Priority.OPTIONAL,
+                    content = "Task workspace summary:\n$taskWorkspaceSummary"
                 ),
                 PromptBudgetAllocator.Section(
                     role = ChatRole.USER,
