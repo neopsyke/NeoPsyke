@@ -6,6 +6,7 @@ import com.fasterxml.jackson.module.kotlin.readValue
 import mu.KotlinLogging
 import psyke.agent.core.AgentConfig
 import psyke.agent.support.PromptBudgetAllocator
+import psyke.agent.support.RetryPolicy
 import psyke.agent.support.TextSecurity
 import psyke.agent.actions.websearch.WebSearchEngine
 import psyke.agent.actions.websearch.WebSearchResult
@@ -66,7 +67,7 @@ class LegacyPromptWebSearchEngine(
 
         var response = null as psyke.llm.ChatCompletion?
         var lastError: Exception? = null
-        val retryAttempts = maxOf(1, config.planner.llmRetryAttempts)
+        val retryAttempts = RetryPolicy.boundedLlmRetryAttempts(config.planner.llmRetryAttempts)
         for (attempt in 1..retryAttempts) {
             try {
                 response = modelClient.chat(

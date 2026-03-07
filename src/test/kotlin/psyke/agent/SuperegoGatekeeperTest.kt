@@ -65,6 +65,7 @@ class SuperegoGatekeeperTest {
     fun `gatekeeper denies when response cannot be parsed`() {
         val llm = StubChatModelClient()
         llm.enqueueRawResponse("n/a")
+        llm.enqueueRawResponseForCallSite("action_review_json_retry", "still-not-json")
         val instrumentation = RecordingInstrumentation()
         val gatekeeper = Superego(
             modelClient = llm,
@@ -75,7 +76,39 @@ class SuperegoGatekeeperTest {
         val decision = gatekeeper.review(action, snapshot)
         assertFalse(decision.allow)
         assertTrue(decision.reason.contains("could not be parsed", ignoreCase = true))
+        assertEquals("TECH_PARSE_ERROR", decision.reasonCode)
         assertTrue(instrumentation.events.any { it.type == "warning" })
+    }
+
+    @Test
+    fun `gatekeeper retries with strict json prompt and recovers parse failures`() {
+        val llm = StubChatModelClient().apply {
+            enqueueRawResponse("n/a")
+            enqueueRawResponseForCallSite(
+                callSite = "action_review_json_retry",
+                content = """{"allow":false,"reason":"policy violation"}"""
+            )
+        }
+        val gatekeeper = Superego(modelClient = llm, config = AgentConfig())
+
+        val decision = gatekeeper.review(action, snapshot)
+
+        assertFalse(decision.allow)
+        assertTrue(decision.reason.contains("policy violation", ignoreCase = true))
+        assertTrue(llm.calls.any { it.options.metadata.callSite == "action_review_json_retry" })
+    }
+
+    @Test
+    fun `gatekeeper parses and normalizes reason_code from llm deny`() {
+        val llm = StubChatModelClient().apply {
+            enqueueRawResponse("""{"allow":false,"reason":"blocked","reason_code":"policy_custom"}""")
+        }
+        val gatekeeper = Superego(modelClient = llm, config = AgentConfig())
+
+        val decision = gatekeeper.review(action, snapshot)
+
+        assertFalse(decision.allow)
+        assertEquals("POLICY_CUSTOM", decision.reasonCode)
     }
 
     @Test

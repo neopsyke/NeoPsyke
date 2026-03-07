@@ -141,13 +141,15 @@ object AgentEvents {
         actionId: Long,
         allow: Boolean,
         reason: String? = null,
+        reasonCode: String? = null,
     ): AgentEvent =
         AgentEvent(
             type = "action_review_result",
             data = mapOf(
                 "action_id" to actionId,
                 "allow" to allow,
-                "reason" to reason
+                "reason" to reason,
+                "reason_code" to reasonCode
             )
         )
 
@@ -160,12 +162,13 @@ object AgentEvents {
             )
         )
 
-    fun actionDenied(action: PendingAction, reason: String): AgentEvent =
+    fun actionDenied(action: PendingAction, reason: String, reasonCode: String? = null): AgentEvent =
         AgentEvent(
             type = "action_denied",
             data = mapOf(
                 "action" to action,
-                "reason" to reason
+                "reason" to reason,
+                "reason_code" to reasonCode
             )
         )
 
@@ -187,13 +190,15 @@ object AgentEvents {
         actionId: Long,
         allow: Boolean,
         reason: String?,
+        reasonCode: String? = null,
     ): AgentEvent =
         AgentEvent(
             type = "superego_output",
             data = mapOf(
                 "action_id" to actionId,
                 "allow" to allow,
-                "reason" to reason
+                "reason" to reason,
+                "reason_code" to reasonCode
             )
         )
 

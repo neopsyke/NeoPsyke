@@ -63,6 +63,7 @@ It is intentionally high-level and should stay aligned with the code.
     - queue snapshot
     - short-term memory summary
     - long-term memory recall (if available)
+    - external evidence hints derived from prior successful/failed evidence actions for the same root input
     - deliberation state and meta-guidance
     - currently available action types from `MotorCortex`
   - Runs planner (`LlmEgoPlanner`) and applies deliberation pressure override if needed.
@@ -85,7 +86,7 @@ It is intentionally high-level and should stay aligned with the code.
   - Normal actions go through `Superego.review`.
   - If denied:
     - Record denial metrics/evidence.
-    - Enqueue a new "find safe alternative" thought with denied-action context.
+    - Enqueue a new "find safe alternative" thought with denied-action context, including structured `reason_code`.
   - If allowed:
     - Execute via `MotorCortex.execute`.
     - Record outcome + deliberation evidence.
@@ -102,6 +103,7 @@ It is intentionally high-level and should stay aligned with the code.
 - Responsibilities:
   - Prompt assembly with budget allocation.
   - Strict JSON parse + minimal repair for invalid escapes.
+  - One strict-JSON retry when initial planner output is non-parseable.
   - Normalizes `action_payload` from either JSON string or structured JSON (object/array) into a string payload.
   - Decision types:
     - `thought`
@@ -109,7 +111,9 @@ It is intentionally high-level and should stay aligned with the code.
     - `plan` (decomposed into multiple thought steps)
     - `noop`
   - Action proposal validation against runtime available actions.
-  - Secondary action verifier pass (`approve|repair|reject`).
+  - Secondary action verifier pass (`approve|repair|reject`) with:
+    - one strict-JSON retry on parse failure
+    - parse-failure circuit breaker (scoped by `root_input + action_type`) that bypasses verifier for one decision after repeated malformed verifier outputs
   - Retry policy and safe fallback to `Noop` on model/parse failures.
 
 ## Policy Gate (Superego)
@@ -117,7 +121,9 @@ It is intentionally high-level and should stay aligned with the code.
 - Reviews each non-fallback action with layered checks:
   - deterministic hard-deny checks first (`SuperegoDeterministicConscience`)
   - LLM semantic review second (only if deterministic checks pass)
-- Returns `GateDecision(allow, reason)` from strict JSON.
+- Returns `GateDecision(allow, reason, reasonCode)` from strict JSON.
+- LLM deny responses can include optional `reason_code`; deterministic denials emit policy-prefixed `reason_code`s.
+- If initial LLM output is non-parseable, Superego performs one strict-JSON retry before default deny fallback.
 - Default behavior on model/parse failure is deny (safe fallback).
 - Deterministic deny is authoritative (LLM cannot override a hard deny).
 
@@ -190,8 +196,9 @@ It is intentionally high-level and should stay aligned with the code.
 - Saturation leads to drop + instrumentation warning/event.
 
 ## Safety and Fallback Patterns
-- LLM callers use retry loops with bounded attempts.
+- LLM callers use retry loops with bounded attempts (max 3).
 - Required JSON fields are validated after deserialization.
+- Chat clients treat blank assistant message content as transport/protocol failure so retries/fallbacks trigger upstream.
 - Prompt-injection mitigation is implemented as deterministic, model-agnostic guards outside Superego:
   - untrusted external content sanitization (`PromptInjectionDefense`)
   - untrusted-data framing before follow-up planner thoughts
@@ -201,7 +208,7 @@ It is intentionally high-level and should stay aligned with the code.
   - superego -> deny fallback
   - meta-reasoner -> continue fallback
   - long-term advisor -> parse-fallback/skip save
-- Repeated denied-action loops are detected and blocked by payload/type comparison.
+- Repeated denied-action loops are blocked by payload/type comparison, except when denial is classified as technical/transient. Classification prefers structured `reason_code` (for example `TECH_*`) and falls back to text heuristics only if code is missing.
 - Multi-layer duplicate plan suppression (evaluated cheapest-first):
   1. **Plan budget**: hard cap (`maxPlansPerInput`, default 2) on plans emitted per root input.
   2. **Pressure gate**: suppress new plans when `decisionPressure >= planEmissionPressureThreshold` (default 0.55).

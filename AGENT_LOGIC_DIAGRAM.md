@@ -63,10 +63,12 @@ sequenceDiagram
         alt Task = input or thought
             Ego->>Mem: recall + short-term summary
             Ego->>Planner: decide(context)
+            Note over Ego,Planner: On non-parseable planner JSON, planner issues one strict-JSON retry before noop fallback
             Planner-->>Ego: thought/action/plan/noop
             Ego->>Delib: maybeApplyPressureOverride
             Ego->>Sched: enqueue thought/action/plan steps
             Note over Ego,Sched: Plans gated by budget → pressure → hash dedup → pending-plan check
+            Note over Ego,Planner: Action verifier runs after action decisions; parse failures trigger one strict retry and may trip temporary verifier bypass (scoped per root_input + action_type)
         else Task = action
             alt Fallback explanation action
                 Ego->>Motor: execute (bypass Superego)
@@ -77,7 +79,8 @@ sequenceDiagram
                     Ego->>Sched: enqueue safe-alternative thought
                 else deterministic pass
                     Ego->>Sup: llm review(action)
-                    Sup-->>Ego: allow/deny
+                    Note over Ego,Sup: Superego parse failures trigger one strict-JSON retry before default deny
+                    Sup-->>Ego: allow/deny (+ reason_code on deny)
                     alt allow
                         Ego->>Motor: execute(action)
                         Ego->>Ego: PromptInjectionDefense sanitize untrusted tool output
@@ -130,6 +133,7 @@ stateDiagram-v2
 
     PolicyReview --> Denied: superego deny
     Denied --> ThoughtQueued: enqueue safe alternative thought
+    Note right of ThoughtQueued: Repeat-denied payload block is skipped for technical/transient denial reasons (prefer reason_code classification)
 
     PolicyReview --> Executing: superego allow
     Executing --> EvidenceObserved: external action succeeded

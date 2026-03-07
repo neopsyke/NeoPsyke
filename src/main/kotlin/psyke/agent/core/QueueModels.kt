@@ -27,6 +27,7 @@ data class PendingThought(
     val denialReason: String? = null,
     val allowFallbackExplanation: Boolean = false,
     val planContext: PlanContext? = null,
+    val denialReasonCode: String? = null,
 )
 
 data class PendingAction(

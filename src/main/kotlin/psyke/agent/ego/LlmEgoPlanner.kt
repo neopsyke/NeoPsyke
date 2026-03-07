@@ -7,7 +7,9 @@ import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
 import mu.KotlinLogging
 import psyke.agent.core.*
+import psyke.agent.support.DenialReasonClassifier
 import psyke.agent.support.PromptBudgetAllocator
+import psyke.agent.support.RetryPolicy
 import psyke.agent.support.TextSecurity
 import psyke.instrumentation.AgentEvent
 import psyke.instrumentation.AgentEvents
@@ -29,6 +31,9 @@ class LlmEgoPlanner(
     private val onPlannerNoop: () -> Unit = {},
     private val onPlannerOutputRepaired: () -> Unit = {},
 ) : Ego.Planner {
+    private val actionVerifierParseFailureStreakByKey = mutableMapOf<ActionVerifierCircuitKey, Int>()
+    private val actionVerifierBypassRemainingByKey = mutableMapOf<ActionVerifierCircuitKey, Int>()
+
     override fun decide(trigger: EgoTrigger, context: PlannerContext): EgoDecision {
         val triggerLabel = when (trigger) {
             is EgoTrigger.IncomingInput -> "input"
@@ -49,7 +54,7 @@ class LlmEgoPlanner(
         val messages = buildMessages(trigger, context)
         var response = null as psyke.llm.ChatCompletion?
         var lastError: Exception? = null
-        val retryAttempts = maxOf(1, config.planner.llmRetryAttempts)
+        val retryAttempts = RetryPolicy.boundedLlmRetryAttempts(config.planner.llmRetryAttempts)
         for (attempt in 1..retryAttempts) {
             try {
                 response = modelClient.chat(
@@ -86,8 +91,26 @@ class LlmEgoPlanner(
 
         val decision = parseResponse(
             raw = resolvedResponse.content,
-            availableActions = context.availableActions
-        )
+            availableActions = context.availableActions,
+            emitParseWarning = false
+        ) ?: run {
+            instrumentation.emit(AgentEvents.warning("Planner response was non-parseable; requesting strict JSON retry."))
+            val recovered = requestStrictJsonRetry(
+                baseMessages = messages,
+                callSite = triggerLabel
+            )
+            val repairedDecision = recovered?.let {
+                parseResponse(
+                    raw = it.content,
+                    availableActions = context.availableActions,
+                    emitParseWarning = true
+                )
+            }
+            repairedDecision ?: run {
+                instrumentation.emit(AgentEvents.warning("Planner response remained non-parseable after strict JSON retry."))
+                EgoDecision.Noop("Planner produced non-parseable output.")
+            }
+        }
         val verifiedDecision = verifyActionDecision(
             trigger = trigger,
             context = context,
@@ -97,7 +120,11 @@ class LlmEgoPlanner(
         return verifiedDecision
     }
 
-    private fun parseResponse(raw: String, availableActions: Set<ActionType>): EgoDecision {
+    private fun parseResponse(
+        raw: String,
+        availableActions: Set<ActionType>,
+        emitParseWarning: Boolean,
+    ): EgoDecision? {
         return try {
             val payload = parsePayloadWithRepair(raw)
             when (payload.decision?.trim()?.lowercase()) {
@@ -169,8 +196,10 @@ class LlmEgoPlanner(
             logger.warn(ex) {
                 "Failed to parse Ego decision. response_len=${raw.length} preview='${TextSecurity.preview(raw, 120)}'"
             }
-            instrumentation.emit(AgentEvents.warning("Failed to parse Ego planner response."))
-            EgoDecision.Noop("Planner produced non-parseable output.")
+            if (emitParseWarning) {
+                instrumentation.emit(AgentEvents.warning("Failed to parse Ego planner response."))
+            }
+            null
         }
     }
 
@@ -210,15 +239,39 @@ class LlmEgoPlanner(
         if (decision !is EgoDecision.ProposeAction) {
             return decision
         }
+        val circuitKey = resolveActionVerifierCircuitKey(trigger, decision)
+        val bypassRemaining = actionVerifierBypassRemainingByKey[circuitKey] ?: 0
+        if (bypassRemaining > 0) {
+            val next = bypassRemaining - 1
+            if (next > 0) {
+                actionVerifierBypassRemainingByKey[circuitKey] = next
+            } else {
+                actionVerifierBypassRemainingByKey.remove(circuitKey)
+            }
+            instrumentation.emit(
+                AgentEvents.warning(
+                    "Action verifier temporarily bypassed after repeated parse failures; keeping original action proposal."
+                )
+            )
+            emitActionVerifierCircuitBreakerEvent(
+                phase = "bypassed",
+                circuitKey = circuitKey,
+                parseFailureStreak = actionVerifierParseFailureStreakByKey[circuitKey] ?: 0,
+                bypassRemaining = next
+            )
+            return decision
+        }
         val messages = buildActionVerifierMessages(
             trigger = trigger,
             context = context,
             decision = decision
         )
-        val verifierPayload = callActionVerifier(
+        val verifierOutcome = callActionVerifier(
             messages = messages,
-            actionType = decision.actionType.name.lowercase()
-        ) ?: return decision
+            actionType = decision.actionType.name.lowercase(),
+            circuitKey = circuitKey
+        )
+        val verifierPayload = verifierOutcome.payload ?: return decision
         return resolveVerifierDecision(
             original = decision,
             payload = verifierPayload,
@@ -229,17 +282,18 @@ class LlmEgoPlanner(
     private fun callActionVerifier(
         messages: List<ChatMessage>,
         actionType: String,
-    ): ActionVerifierPayload? {
+        circuitKey: ActionVerifierCircuitKey,
+    ): ActionVerifierOutcome {
         var response = null as psyke.llm.ChatCompletion?
         var lastError: Exception? = null
-        val retryAttempts = maxOf(1, config.planner.llmRetryAttempts)
+        val retryAttempts = RetryPolicy.boundedLlmRetryAttempts(config.planner.llmRetryAttempts)
         for (attempt in 1..retryAttempts) {
             try {
                 response = modelClient.chat(
                     messages = messages,
                     options = ChatRequestOptions(
                         temperature = 0.1,
-                        maxTokens = minOf(config.planner.maxCompletionTokens, 220),
+                        maxTokens = minOf(config.planner.maxCompletionTokens, ACTION_VERIFIER_MAX_TOKENS),
                         metadata = ChatCallMetadata(
                             actor = "ego",
                             callSite = "action_verifier",
@@ -262,15 +316,180 @@ class LlmEgoPlanner(
         if (response == null) {
             logger.warn(lastError) { "Action verifier call failed for action_type=$actionType." }
             instrumentation.emit(AgentEvents.warning("Action verifier unavailable; keeping original action proposal."))
-            return null
+            return ActionVerifierOutcome(payload = null, parseFailed = false)
         }
+        val initialParse = tryParseActionVerifierPayload(response.content, actionType, emitParseWarning = false)
+        if (!initialParse.parseFailed) {
+            actionVerifierParseFailureStreakByKey.remove(circuitKey)
+            return initialParse
+        }
+        instrumentation.emit(
+            AgentEvents.warning("Action verifier response was non-parseable; requesting strict JSON retry.")
+        )
+        val retryResponse = requestActionVerifierStrictJsonRetry(messages = messages, actionType = actionType)
+        val parseResult = if (retryResponse == null) {
+            ActionVerifierOutcome(payload = null, parseFailed = true)
+        } else {
+            tryParseActionVerifierPayload(retryResponse.content, actionType, emitParseWarning = true)
+        }
+        if (parseResult.parseFailed) {
+            val parseFailureStreak = (actionVerifierParseFailureStreakByKey[circuitKey] ?: 0) + 1
+            actionVerifierParseFailureStreakByKey[circuitKey] = parseFailureStreak
+            instrumentation.emit(
+                AgentEvents.warning("Action verifier response remained non-parseable after strict JSON retry.")
+            )
+            if (parseFailureStreak >= ACTION_VERIFIER_PARSE_FAILURE_TRIP_THRESHOLD) {
+                actionVerifierBypassRemainingByKey[circuitKey] = ACTION_VERIFIER_BYPASS_TURNS
+                actionVerifierParseFailureStreakByKey.remove(circuitKey)
+                instrumentation.emit(
+                    AgentEvents.warning(
+                        "Action verifier parse-failure circuit breaker tripped for action_type=${circuitKey.actionType.name.lowercase()} root_input=${circuitKey.rootInputEnqueuedAtMs}; bypassing verifier for $ACTION_VERIFIER_BYPASS_TURNS decision."
+                    )
+                )
+                emitActionVerifierCircuitBreakerEvent(
+                    phase = "tripped",
+                    circuitKey = circuitKey,
+                    parseFailureStreak = parseFailureStreak,
+                    bypassRemaining = ACTION_VERIFIER_BYPASS_TURNS
+                )
+            }
+        } else {
+            actionVerifierParseFailureStreakByKey.remove(circuitKey)
+        }
+        return parseResult
+    }
+
+    private fun resolveActionVerifierCircuitKey(
+        trigger: EgoTrigger,
+        decision: EgoDecision.ProposeAction,
+    ): ActionVerifierCircuitKey {
+        val rootInputEnqueuedAtMs = when (trigger) {
+            is EgoTrigger.IncomingInput -> trigger.input.enqueuedAtMs
+            is EgoTrigger.PendingThoughtInput -> trigger.thought.rootInputEnqueuedAtMs
+        }
+        return ActionVerifierCircuitKey(
+            rootInputEnqueuedAtMs = rootInputEnqueuedAtMs,
+            actionType = decision.actionType
+        )
+    }
+
+    private fun emitActionVerifierCircuitBreakerEvent(
+        phase: String,
+        circuitKey: ActionVerifierCircuitKey,
+        parseFailureStreak: Int,
+        bypassRemaining: Int,
+    ) {
+        instrumentation.emit(
+            AgentEvent(
+                type = "action_verifier_circuit_breaker",
+                data = mapOf(
+                    "phase" to phase,
+                    "action_type" to circuitKey.actionType.name.lowercase(),
+                    "root_input_enqueued_at_ms" to circuitKey.rootInputEnqueuedAtMs,
+                    "parse_failure_streak" to parseFailureStreak,
+                    "bypass_remaining" to bypassRemaining
+                )
+            )
+        )
+    }
+
+    private fun tryParseActionVerifierPayload(
+        raw: String,
+        actionType: String,
+        emitParseWarning: Boolean,
+    ): ActionVerifierOutcome {
         return try {
-            parseActionVerifierPayloadWithRepair(response.content)
+            ActionVerifierOutcome(
+                payload = parseActionVerifierPayloadWithRepair(raw),
+                parseFailed = false
+            )
         } catch (ex: Exception) {
             logger.warn(ex) {
-                "Failed to parse action verifier response. action_type=$actionType preview='${TextSecurity.preview(response.content, 120)}'"
+                "Failed to parse action verifier response. action_type=$actionType preview='${TextSecurity.preview(raw, 120)}'"
             }
-            instrumentation.emit(AgentEvents.warning("Action verifier response was non-parseable; keeping original action."))
+            if (emitParseWarning) {
+                instrumentation.emit(AgentEvents.warning("Failed to parse action verifier response."))
+            }
+            ActionVerifierOutcome(payload = null, parseFailed = true)
+        }
+    }
+
+    private fun requestStrictJsonRetry(
+        baseMessages: List<ChatMessage>,
+        callSite: String,
+    ): psyke.llm.ChatCompletion? {
+        val retryMessages = baseMessages + ChatMessage(
+            role = ChatRole.USER,
+            content = """
+                Your previous output was not valid JSON.
+                Reply with STRICT JSON only and no markdown/code fences.
+                Use this exact schema:
+                {
+                  "decision":"thought|action|plan|noop",
+                  "urgency":"low|medium|high",
+                  "thought":"optional when decision=thought",
+                  "long_term_memory_recall_query":"optional query string",
+                  "action_type":"web_search|answer|mcp_time|mcp_fetch",
+                  "action_payload":"optional when decision=action",
+                  "action_summary":"required when decision=action",
+                  "plan_goal":"required when decision=plan",
+                  "plan_steps":["step 1","step 2"],
+                  "reason":"optional short reason"
+                }
+            """.trimIndent()
+        )
+        return try {
+            modelClient.chat(
+                messages = retryMessages,
+                options = ChatRequestOptions(
+                    temperature = 0.0,
+                    maxTokens = config.planner.maxCompletionTokens,
+                    metadata = ChatCallMetadata(
+                        actor = "ego",
+                        callSite = "${callSite}_json_retry"
+                    )
+                )
+            )
+        } catch (ex: Exception) {
+            logger.warn(ex) { "Planner strict JSON retry call failed for call_site=$callSite." }
+            null
+        }
+    }
+
+    private fun requestActionVerifierStrictJsonRetry(
+        messages: List<ChatMessage>,
+        actionType: String,
+    ): psyke.llm.ChatCompletion? {
+        val retryMessages = messages + ChatMessage(
+            role = ChatRole.USER,
+            content = """
+                Your previous output was not valid JSON.
+                Reply with STRICT JSON only and no markdown/code fences.
+                Use exactly this schema:
+                {
+                  "verdict":"approve|repair|reject",
+                  "action_type":"required when verdict=repair",
+                  "action_payload":"required when verdict=repair",
+                  "action_summary":"required when verdict=repair",
+                  "reason":"optional short reason"
+                }
+            """.trimIndent()
+        )
+        return try {
+            modelClient.chat(
+                messages = retryMessages,
+                options = ChatRequestOptions(
+                    temperature = 0.0,
+                    maxTokens = minOf(config.planner.maxCompletionTokens, ACTION_VERIFIER_MAX_TOKENS),
+                    metadata = ChatCallMetadata(
+                        actor = "ego",
+                        callSite = "action_verifier_json_retry",
+                        actionType = actionType
+                    )
+                )
+            )
+        } catch (ex: Exception) {
+            logger.warn(ex) { "Action verifier strict JSON retry call failed for action_type=$actionType." }
             null
         }
     }
@@ -483,6 +702,7 @@ class LlmEgoPlanner(
         }
         val shortTermContextSummary = context.shortTermContextSummary.ifBlank { "none" }
         val longTermMemoryRecall = context.longTermMemoryRecall.ifBlank { "none" }
+        val evidenceHints = context.evidenceHints.ifBlank { "none" }
         val metaGuidance = context.metaGuidance.ifBlank { "none" }
         val deliberation = context.deliberation
         val availableActionList = context.availableActions
@@ -595,6 +815,12 @@ class LlmEgoPlanner(
                     priority = PromptBudgetAllocator.Priority.IMPORTANT,
                     minTokens = 24,
                     content = "Long-term memory recall:\n$longTermMemoryRecall"
+                ),
+                PromptBudgetAllocator.Section(
+                    role = ChatRole.USER,
+                    priority = PromptBudgetAllocator.Priority.IMPORTANT,
+                    minTokens = 18,
+                    content = "External evidence hints:\n$evidenceHints"
                 ),
                 PromptBudgetAllocator.Section(
                     role = ChatRole.USER,
@@ -738,12 +964,22 @@ class LlmEgoPlanner(
                     """.trimIndent()
                 } ?: ""
                 val denialContext = if (thought.deniedActionType != null && !thought.deniedActionPayload.isNullOrBlank()) {
+                    val technicalDenial = DenialReasonClassifier.isLikelyTechnical(
+                        reasonCode = thought.denialReasonCode,
+                        reason = thought.denialReason
+                    )
+                    val retryGuidance = if (technicalDenial) {
+                        "Denied reason appears technical/transient; retrying the same payload once is allowed if still best."
+                    } else {
+                        "Do not repeat the denied action payload; prefer a materially different next step."
+                    }
                     """
                     Denied action context:
                     denied_action_type=${thought.deniedActionType.name.lowercase()}
                     denied_action_payload=${thought.deniedActionPayload}
                     denied_reason=${thought.denialReason ?: "none"}
-                    Do not repeat the denied action payload; prefer a materially different next step.
+                    denied_reason_code=${thought.denialReasonCode ?: "none"}
+                    $retryGuidance
                     """.trimIndent()
                 } else {
                     "Denied action context: none"
@@ -784,7 +1020,20 @@ class LlmEgoPlanner(
         val reason: String? = null,
     )
 
+    private data class ActionVerifierOutcome(
+        val payload: ActionVerifierPayload?,
+        val parseFailed: Boolean,
+    )
+
+    private data class ActionVerifierCircuitKey(
+        val rootInputEnqueuedAtMs: Long?,
+        val actionType: ActionType,
+    )
+
     private companion object {
+        const val ACTION_VERIFIER_MAX_TOKENS: Int = 220
+        const val ACTION_VERIFIER_PARSE_FAILURE_TRIP_THRESHOLD: Int = 2
+        const val ACTION_VERIFIER_BYPASS_TURNS: Int = 1
         val mapper = jacksonObjectMapper()
             .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
         val invalidJsonEscapeRegex = Regex("""\\(?!["\\/bfnrtu])""")

@@ -159,6 +159,7 @@ class EgoPlannerTest {
         val llm = StubChatModelClient()
         llm.enqueueRawResponse("""{"decision":"action","action_type":"answer"}""")
         llm.enqueueRawResponse("not-json")
+        llm.enqueueRawResponseForCallSite("input_json_retry", "still-not-json")
         val instrumentation = RecordingInstrumentation()
         val planner = LlmEgoPlanner(
             modelClient = llm,
@@ -179,6 +180,30 @@ class EgoPlannerTest {
         assertIs<psyke.agent.core.EgoDecision.Noop>(invalidJson)
         assertTrue(invalidJson.reason.contains("non-parseable", ignoreCase = true))
         assertTrue(instrumentation.events.any { it.type == "warning" })
+    }
+
+    @Test
+    fun `planner retries with strict json prompt and recovers parse failures`() {
+        val llm = StubChatModelClient().apply {
+            enqueueRawResponse("not-json")
+            enqueueRawResponseForCallSite(
+                callSite = "input_json_retry",
+                content = """{"decision":"noop","reason":"recovered"}"""
+            )
+        }
+        val planner = LlmEgoPlanner(modelClient = llm, config = AgentConfig())
+
+        val decision = planner.decide(
+            trigger = psyke.agent.core.EgoTrigger.IncomingInput(PendingInput(1, "hello")),
+            context = PlannerContext(
+                recentDialogue = emptyList(),
+                queue = QueueSnapshot(0, 0, 0)
+            )
+        )
+
+        val noop = assertIs<psyke.agent.core.EgoDecision.Noop>(decision)
+        assertEquals("recovered", noop.reason)
+        assertTrue(llm.calls.any { it.options.metadata.callSite == "input_json_retry" })
     }
 
     @Test
@@ -379,6 +404,104 @@ class EgoPlannerTest {
     }
 
     @Test
+    fun `planner retries action verifier with strict json and applies retry verdict`() {
+        val llm = StubChatModelClient().apply {
+            enqueueRawResponse(
+                """
+                {"decision":"action","urgency":"medium","action_type":"answer","action_payload":"unsafe","action_summary":"respond"}
+                """.trimIndent()
+            )
+            enqueueRawResponseForCallSite(callSite = "action_verifier", content = "not-json")
+            enqueueRawResponseForCallSite(
+                callSite = "action_verifier_json_retry",
+                content = """{"verdict":"reject","reason":"retry parsed and rejected"}"""
+            )
+        }
+        val planner = LlmEgoPlanner(modelClient = llm, config = AgentConfig())
+
+        val decision = planner.decide(
+            trigger = psyke.agent.core.EgoTrigger.IncomingInput(PendingInput(1, "safe response only")),
+            context = PlannerContext(
+                recentDialogue = emptyList(),
+                queue = QueueSnapshot(0, 0, 0)
+            )
+        )
+
+        val noop = assertIs<psyke.agent.core.EgoDecision.Noop>(decision)
+        assertTrue(noop.reason.contains("rejected", ignoreCase = true))
+        assertTrue(llm.calls.any { it.options.metadata.callSite == "action_verifier_json_retry" })
+    }
+
+    @Test
+    fun `planner trips action verifier parse-failure circuit breaker and bypasses one decision`() {
+        val llm = StubChatModelClient().apply {
+            enqueueRawResponse("""{"decision":"action","urgency":"medium","action_type":"answer","action_payload":"a1","action_summary":"s1"}""")
+            enqueueRawResponse("""{"decision":"action","urgency":"medium","action_type":"answer","action_payload":"a2","action_summary":"s2"}""")
+            enqueueRawResponse("""{"decision":"action","urgency":"medium","action_type":"answer","action_payload":"a3","action_summary":"s3"}""")
+            enqueueRawResponseForCallSite(callSite = "action_verifier", content = "bad-1")
+            enqueueRawResponseForCallSite(callSite = "action_verifier_json_retry", content = "bad-1-retry")
+            enqueueRawResponseForCallSite(callSite = "action_verifier", content = "bad-2")
+            enqueueRawResponseForCallSite(callSite = "action_verifier_json_retry", content = "bad-2-retry")
+        }
+        val instrumentation = RecordingInstrumentation()
+        val planner = LlmEgoPlanner(
+            modelClient = llm,
+            config = AgentConfig(),
+            instrumentation = instrumentation
+        )
+        val trigger = psyke.agent.core.EgoTrigger.IncomingInput(PendingInput(1, "test"))
+        val context = PlannerContext(recentDialogue = emptyList(), queue = QueueSnapshot(0, 0, 0))
+
+        assertIs<psyke.agent.core.EgoDecision.ProposeAction>(planner.decide(trigger, context))
+        assertIs<psyke.agent.core.EgoDecision.ProposeAction>(planner.decide(trigger, context))
+        assertIs<psyke.agent.core.EgoDecision.ProposeAction>(planner.decide(trigger, context))
+
+        val verifierCalls = llm.calls.count { it.options.metadata.callSite == "action_verifier" }
+        val verifierRetryCalls = llm.calls.count { it.options.metadata.callSite == "action_verifier_json_retry" }
+        assertEquals(2, verifierCalls)
+        assertEquals(2, verifierRetryCalls)
+        assertTrue(
+            instrumentation.events.any {
+                it.type == "warning" &&
+                    (it.data["message"] as? String)?.contains("circuit breaker tripped", ignoreCase = true) == true
+            }
+        )
+        assertTrue(instrumentation.events.any { it.type == "action_verifier_circuit_breaker" })
+    }
+
+    @Test
+    fun `planner action verifier bypass is scoped per input and action type`() {
+        val llm = StubChatModelClient().apply {
+            enqueueRawResponse("""{"decision":"action","urgency":"medium","action_type":"answer","action_payload":"a1","action_summary":"s1"}""")
+            enqueueRawResponse("""{"decision":"action","urgency":"medium","action_type":"answer","action_payload":"a2","action_summary":"s2"}""")
+            enqueueRawResponse("""{"decision":"action","urgency":"medium","action_type":"answer","action_payload":"a3","action_summary":"s3"}""")
+            enqueueRawResponse("""{"decision":"action","urgency":"medium","action_type":"answer","action_payload":"b1","action_summary":"s4"}""")
+            enqueueRawResponseForCallSite(callSite = "action_verifier", content = "bad-1")
+            enqueueRawResponseForCallSite(callSite = "action_verifier_json_retry", content = "bad-1-retry")
+            enqueueRawResponseForCallSite(callSite = "action_verifier", content = "bad-2")
+            enqueueRawResponseForCallSite(callSite = "action_verifier_json_retry", content = "bad-2-retry")
+        }
+        val planner = LlmEgoPlanner(modelClient = llm, config = AgentConfig())
+        val context = PlannerContext(recentDialogue = emptyList(), queue = QueueSnapshot(0, 0, 0))
+        val triggerA = psyke.agent.core.EgoTrigger.IncomingInput(
+            PendingInput(id = 1, content = "test-a", enqueuedAtMs = 1L)
+        )
+        val triggerB = psyke.agent.core.EgoTrigger.IncomingInput(
+            PendingInput(id = 2, content = "test-b", enqueuedAtMs = 2L)
+        )
+
+        assertIs<psyke.agent.core.EgoDecision.ProposeAction>(planner.decide(triggerA, context))
+        assertIs<psyke.agent.core.EgoDecision.ProposeAction>(planner.decide(triggerA, context))
+        assertIs<psyke.agent.core.EgoDecision.ProposeAction>(planner.decide(triggerA, context)) // bypassed
+        assertIs<psyke.agent.core.EgoDecision.ProposeAction>(planner.decide(triggerB, context)) // verifier active again
+
+        val verifierCalls = llm.calls.count { it.options.metadata.callSite == "action_verifier" }
+        val verifierRetryCalls = llm.calls.count { it.options.metadata.callSite == "action_verifier_json_retry" }
+        assertEquals(3, verifierCalls)
+        assertEquals(2, verifierRetryCalls)
+    }
+
+    @Test
     fun `planner trims oversized prompt before sending to model`() {
         val llm = StubChatModelClient()
         llm.enqueueRawResponse("""{"decision":"noop","reason":"done"}""")
@@ -494,6 +617,27 @@ class EgoPlannerTest {
     }
 
     @Test
+    fun `planner includes external evidence hints in prompt context`() {
+        val llm = StubChatModelClient().apply {
+            enqueueRawResponse("""{"decision":"noop","reason":"done"}""")
+        }
+        val planner = LlmEgoPlanner(modelClient = llm, config = AgentConfig())
+
+        planner.decide(
+            psyke.agent.core.EgoTrigger.IncomingInput(PendingInput(1, "question")),
+            PlannerContext(
+                recentDialogue = emptyList(),
+                queue = QueueSnapshot(0, 0, 0),
+                evidenceHints = "successful_evidence_signals=official pricing page fetched"
+            )
+        )
+
+        val prompt = llm.lastMessages.last().content
+        assertTrue(prompt.contains("External evidence hints:"))
+        assertTrue(prompt.contains("official pricing page fetched"))
+    }
+
+    @Test
     fun `planner prompt hardening enforces action summary contract`() {
         val llm = StubChatModelClient().apply {
             enqueueRawResponse("""{"decision":"noop","reason":"done"}""")
@@ -574,6 +718,37 @@ class EgoPlannerTest {
         val planner = LlmEgoPlanner(
             modelClient = flakyClient,
             config = AgentConfig(planner = PlannerConfig(llmRetryAttempts = 3))
+        )
+
+        val decision = planner.decide(
+            trigger = psyke.agent.core.EgoTrigger.IncomingInput(PendingInput(1, "hello")),
+            context = PlannerContext(
+                recentDialogue = emptyList(),
+                queue = QueueSnapshot(0, 0, 0)
+            )
+        )
+
+        assertIs<psyke.agent.core.EgoDecision.Noop>(decision)
+        assertEquals(3, calls)
+    }
+
+    @Test
+    fun `planner caps configured retry attempts to three`() {
+        var calls = 0
+        val failingClient = object : ChatModelClient {
+            override val modelName: String = "failing"
+
+            override fun chat(
+                messages: List<ChatMessage>,
+                options: psyke.llm.ChatRequestOptions
+            ): psyke.llm.ChatCompletion {
+                calls += 1
+                throw IllegalStateException("still failing")
+            }
+        }
+        val planner = LlmEgoPlanner(
+            modelClient = failingClient,
+            config = AgentConfig(planner = PlannerConfig(llmRetryAttempts = 10))
         )
 
         val decision = planner.decide(

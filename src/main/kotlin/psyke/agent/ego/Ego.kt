@@ -10,6 +10,7 @@ import psyke.agent.memory.longterm.LongTermMemoryAdvisor
 import psyke.agent.memory.longterm.NoopHippocampus
 import psyke.agent.memory.longterm.NoopLongTermMemoryAdvisor
 import psyke.agent.memory.shortterm.MemoryStore
+import psyke.agent.support.DenialReasonClassifier
 import psyke.agent.support.PromptInjectionDefense
 import psyke.agent.support.TextSecurity
 import psyke.agent.superego.Superego
@@ -196,7 +197,12 @@ class Ego(
         instrumentation.emit(AgentEvents.actionReviewRequested(action))
         if (action.isFallbackExplanation) {
             instrumentation.emit(
-                AgentEvents.actionReviewResult(actionId = action.id, allow = true, reason = "fallback_explanation_bypass")
+                AgentEvents.actionReviewResult(
+                    actionId = action.id,
+                    allow = true,
+                    reason = "fallback_explanation_bypass",
+                    reasonCode = "SYSTEM_FALLBACK_BYPASS"
+                )
             )
             val outcome = executeActionSafely(action) ?: return
             instrumentation.emit(AgentEvents.actionExecuted(action, outcome.statusSummary))
@@ -223,7 +229,12 @@ class Ego(
         }
         val gateDecision = superego.review(action, superegoContext())
         instrumentation.emit(
-            AgentEvents.actionReviewResult(actionId = action.id, allow = gateDecision.allow, reason = gateDecision.reason)
+            AgentEvents.actionReviewResult(
+                actionId = action.id,
+                allow = gateDecision.allow,
+                reason = gateDecision.reason,
+                reasonCode = gateDecision.reasonCode
+            )
         )
         if (!gateDecision.allow) {
             deliberation.onActionDenied()
@@ -241,9 +252,10 @@ class Ego(
                 deniedActionType = action.type,
                 deniedActionPayload = TextSecurity.clamp(action.payload, 240),
                 denialReason = gateDecision.reason,
+                denialReasonCode = gateDecision.reasonCode,
                 allowFallbackExplanation = true
             )
-            instrumentation.emit(AgentEvents.actionDenied(action, gateDecision.reason))
+            instrumentation.emit(AgentEvents.actionDenied(action, gateDecision.reason, gateDecision.reasonCode))
             if (!queued) {
                 instrumentation.emit(AgentEvents.warning("Failed to enqueue denial thought."))
                 recordQueueSaturation(
@@ -335,6 +347,7 @@ class Ego(
                     deniedActionType = originThought?.deniedActionType,
                     deniedActionPayload = originThought?.deniedActionPayload,
                     denialReason = originThought?.denialReason,
+                    denialReasonCode = originThought?.denialReasonCode,
                     allowFallbackExplanation = originThought?.allowFallbackExplanation ?: false
                 )
                 if (!decision.longTermMemoryRecallQuery.isNullOrBlank()) {
@@ -368,7 +381,12 @@ class Ego(
             }
 
             is EgoDecision.ProposeAction -> {
-                if (originThought != null && isRepeatOfDeniedAction(originThought, decision)) {
+                val repeatedDeniedAction = originThought != null && isRepeatOfDeniedAction(originThought, decision)
+                val technicalDenial = DenialReasonClassifier.isLikelyTechnical(
+                    reasonCode = originThought?.denialReasonCode,
+                    reason = originThought?.denialReason
+                )
+                if (repeatedDeniedAction && !technicalDenial) {
                     instrumentation.emit(AgentEvents.warning("Planner repeated a denied action; requesting an alternative."))
                     deliberation.onRepeatedDeniedAction()
                     val retryThought = TextSecurity.clamp(
@@ -383,6 +401,7 @@ class Ego(
                         deniedActionType = originThought.deniedActionType,
                         deniedActionPayload = originThought.deniedActionPayload,
                         denialReason = originThought.denialReason,
+                        denialReasonCode = originThought.denialReasonCode,
                         allowFallbackExplanation = originThought.allowFallbackExplanation
                     )
                     if (!queuedRetry) {
@@ -590,6 +609,7 @@ class Ego(
                     deniedActionType = originThought?.deniedActionType,
                     deniedActionPayload = originThought?.deniedActionPayload,
                     denialReason = originThought?.denialReason,
+                    denialReasonCode = originThought?.denialReasonCode,
                     allowFallbackExplanation = originThought?.allowFallbackExplanation ?: false
                 )
                 instrumentation.emit(
@@ -718,15 +738,40 @@ class Ego(
         val shortTermSummary = memory.currentShortTermSummary()
         val longTermRecall = memory.recall(trigger, shortTermSummary, dialogue.takeLast(12))
         val disabled = deliberation.disabledActionTypes(rootInputEnqueuedAtMs)
+        val evidenceHints = buildEvidenceHints(rootInputEnqueuedAtMs)
         return PlannerContext(
             recentDialogue = dialogue.takeLast(12),
             queue = scheduler.queueSnapshot(),
             shortTermContextSummary = shortTermSummary,
             longTermMemoryRecall = longTermRecall,
+            evidenceHints = evidenceHints,
             deliberation = deliberation.snapshot(),
             metaGuidance = deliberation.guidance(),
             availableActions = motorCortex.availableActionTypes() - disabled
         )
+    }
+
+    private fun buildEvidenceHints(rootInputEnqueuedAtMs: Long?): String {
+        val evidence = deliberation.evidenceFor(rootInputEnqueuedAtMs) ?: return ""
+        val hints = mutableListOf<String>()
+        if (evidence.hadSuccessfulEvidence) {
+            val topSignals = evidence.successfulEvidenceSignals
+                .map { it.trim() }
+                .filter { it.isNotBlank() }
+                .take(MAX_EVIDENCE_HINT_SIGNALS)
+            if (topSignals.isNotEmpty()) {
+                hints += "successful_evidence_signals=${topSignals.joinToString(" | ")}"
+            } else if (evidence.latestPlannerSignal.isNotBlank()) {
+                hints += "latest_successful_signal=${evidence.latestPlannerSignal.trim()}"
+            }
+        }
+        if (evidence.hadExternalFailures) {
+            hints += "external_failures_observed=true"
+        }
+        if (hints.isEmpty()) {
+            return ""
+        }
+        return TextSecurity.clamp(hints.joinToString("\n"), MAX_EVIDENCE_HINT_CHARS)
     }
 
     private fun superegoContext(): SuperegoContext {
@@ -869,5 +914,7 @@ class Ego(
     private companion object {
         const val PLAN_ID_LENGTH: Int = 8
         const val FOLLOW_UP_SIGNAL_MAX_CHARS: Int = 420
+        const val MAX_EVIDENCE_HINT_SIGNALS: Int = 3
+        const val MAX_EVIDENCE_HINT_CHARS: Int = 420
     }
 }

@@ -111,6 +111,31 @@ class GroqChatClientTest {
     }
 
     @Test
+    fun `chat fails when choice message content is blank`() {
+        val httpClient = fakeHttpClient(status = 200) {
+            """
+            {
+              "id": "resp-blank",
+              "model": "openai/gpt-oss-20b",
+              "choices": [
+                {"index":0,"message":{"role":"assistant","content":"   "},"finish_reason":"stop"}
+              ]
+            }
+            """.trimIndent()
+        }
+        GroqChatClient(
+            apiKey = "test-key",
+            baseUrl = "https://mock.test/openai/v1",
+            httpClient = httpClient
+        ).use { client ->
+            val ex = assertFailsWith<Exception> {
+                client.chat(messages = listOf(ChatMessage(ChatRole.USER, "hi")))
+            }
+            assertTrue(ex.message.orEmpty().contains("empty message content", ignoreCase = true))
+        }
+    }
+
+    @Test
     fun `chat persists metrics without explicit observer`() {
         val dbPath = Files.createTempFile("groq-client-metrics", ".db")
         val previous = System.getProperty("psyke.metrics.db")

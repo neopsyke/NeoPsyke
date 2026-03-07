@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-@AGENTS.md
+ç
 
 ## Claude Code Specifics
 - Use `./gradlew test` for full verification.

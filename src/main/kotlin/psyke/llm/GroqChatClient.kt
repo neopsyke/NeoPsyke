@@ -78,6 +78,10 @@ class GroqChatClient(
                 val parsed = mapper.readValue<GroqChatCompletionResponse>(responseBody)
                 val choice = parsed.choices.firstOrNull()
                     ?: throw IOException("Groq chat returned no choices.")
+                val content = choice.message.content.trim()
+                if (content.isBlank()) {
+                    throw IOException("Groq chat returned empty message content.")
+                }
 
                 val usage = parsed.usage?.toChatUsage()
                 val resolvedModel = parsed.model ?: modelName
@@ -95,7 +99,7 @@ class GroqChatClient(
                 )
 
                 return ChatCompletion(
-                    content = choice.message.content,
+                    content = content,
                     model = resolvedModel,
                     finishReason = choice.finishReason,
                     id = parsed.id,

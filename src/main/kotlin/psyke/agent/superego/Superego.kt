@@ -1,6 +1,7 @@
 package psyke.agent.superego
 
 import com.fasterxml.jackson.databind.DeserializationFeature
+import com.fasterxml.jackson.annotation.JsonProperty
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
 import mu.KotlinLogging
@@ -10,6 +11,7 @@ import psyke.agent.core.GateDecision
 import psyke.agent.core.PendingAction
 import psyke.agent.core.SuperegoContext
 import psyke.agent.support.PromptBudgetAllocator
+import psyke.agent.support.RetryPolicy
 import psyke.agent.support.TextSecurity
 import psyke.instrumentation.AgentEvent
 import psyke.instrumentation.AgentEvents
@@ -54,12 +56,24 @@ class Superego(
                         "action_id" to action.id,
                         "allow" to false,
                         "rule_id" to deterministicDecision.ruleId,
+                        "reason_code" to deterministicDecision.reasonCode,
                         "reason" to reason
                     )
                 )
             )
-            instrumentation.emit(AgentEvents.superegoReviewOutput(actionId = action.id, allow = false, reason = reason))
-            return GateDecision(allow = false, reason = reason)
+            instrumentation.emit(
+                AgentEvents.superegoReviewOutput(
+                    actionId = action.id,
+                    allow = false,
+                    reason = reason,
+                    reasonCode = deterministicDecision.reasonCode
+                )
+            )
+            return GateDecision(
+                allow = false,
+                reason = reason,
+                reasonCode = deterministicDecision.reasonCode
+            )
         }
         instrumentation.emit(
             AgentEvent(
@@ -73,7 +87,7 @@ class Superego(
         val messages = buildMessages(action, context, resolvedDirectives)
         var response = null as psyke.llm.ChatCompletion?
         var lastError: Exception? = null
-        val retryAttempts = maxOf(1, config.planner.llmRetryAttempts)
+        val retryAttempts = RetryPolicy.boundedLlmRetryAttempts(config.planner.llmRetryAttempts)
         for (attempt in 1..retryAttempts) {
             try {
                 response = modelClient.chat(
@@ -106,22 +120,43 @@ class Superego(
             instrumentation.emit(AgentEvents.warning("Superego call failed; denying action by default."))
             return GateDecision(
                 allow = false,
-                reason = "Superego unavailable due to model error."
+                reason = "Superego unavailable due to model error.",
+                reasonCode = REASON_CODE_TECH_MODEL_UNAVAILABLE
             )
         }
         val resolvedResponse = response
-        val decision = parseResponse(resolvedResponse.content)
+        var parseResult = parseResponse(resolvedResponse.content, emitWarning = false)
+        if (parseResult.parseFailed) {
+            instrumentation.emit(
+                AgentEvents.warning("Superego response was non-parseable; requesting strict JSON retry.")
+            )
+            val retryResponse = requestStrictJsonRetry(messages = messages, action = action)
+            if (retryResponse == null) {
+                instrumentation.emit(
+                    AgentEvents.warning("Superego strict JSON retry call failed; denying action by default.")
+                )
+            } else {
+                parseResult = parseResponse(retryResponse.content, emitWarning = true)
+            }
+            if (parseResult.parseFailed) {
+                instrumentation.emit(
+                    AgentEvents.warning("Superego response remained non-parseable after strict JSON retry.")
+                )
+            }
+        }
+        val decision = parseResult.decision
         instrumentation.emit(
             AgentEvents.superegoReviewOutput(
                 actionId = action.id,
                 allow = decision.allow,
-                reason = decision.reason
+                reason = decision.reason,
+                reasonCode = decision.reasonCode
             )
         )
         return decision
     }
 
-    private fun parseResponse(raw: String): GateDecision {
+    private fun parseResponse(raw: String, emitWarning: Boolean): ParsedSuperegoDecision {
         return try {
             val json = TextSecurity.extractJsonObject(raw)
             val payload = mapper.readValue<SuperegoResponse>(json)
@@ -129,23 +164,75 @@ class Superego(
                 logger.warn {
                     "Superego response missing required 'allow' field. response_len=${raw.length} preview='${TextSecurity.preview(raw, 120)}'"
                 }
-                return GateDecision(allow = false, reason = "Superego response missing required field.")
+                return ParsedSuperegoDecision(
+                    decision = GateDecision(
+                        allow = false,
+                        reason = "Superego response missing required field.",
+                        reasonCode = REASON_CODE_TECH_MISSING_REQUIRED_FIELD
+                    ),
+                    parseFailed = false
+                )
             }
             val allow = payload.allow == true
             val reason = TextSecurity.clamp(payload.reason?.trim().orEmpty(), MAX_DENY_REASON_CHARS)
-            GateDecision(
-                allow = allow,
-                reason = if (allow) "" else reason.ifBlank { "No reason supplied." }
+            val normalizedReasonCode = normalizeReasonCode(payload.reasonCode)
+            ParsedSuperegoDecision(
+                decision = GateDecision(
+                    allow = allow,
+                    reason = if (allow) "" else reason.ifBlank { "No reason supplied." },
+                    reasonCode = if (allow) null else normalizedReasonCode ?: REASON_CODE_POLICY_LLM_DENY
+                ),
+                parseFailed = false
             )
         } catch (ex: Exception) {
             logger.warn(ex) {
                 "Failed to parse Superego response. response_len=${raw.length} preview='${TextSecurity.preview(raw, 120)}'"
             }
-            instrumentation.emit(AgentEvents.warning("Failed to parse Superego response."))
-            GateDecision(
-                allow = false,
-                reason = "Superego response could not be parsed."
+            if (emitWarning) {
+                instrumentation.emit(AgentEvents.warning("Failed to parse Superego response."))
+            }
+            ParsedSuperegoDecision(
+                decision = GateDecision(
+                    allow = false,
+                    reason = "Superego response could not be parsed.",
+                    reasonCode = REASON_CODE_TECH_PARSE_ERROR
+                ),
+                parseFailed = true
             )
+        }
+    }
+
+    private fun requestStrictJsonRetry(
+        messages: List<ChatMessage>,
+        action: PendingAction,
+    ): psyke.llm.ChatCompletion? {
+        val retryMessages = messages + ChatMessage(
+            role = ChatRole.USER,
+            content = """
+                Your previous output was not valid JSON.
+                Reply with STRICT JSON only using exactly one schema:
+                {"allow":true}
+                or
+                {"allow":false,"reason":"<=${MAX_DENY_REASON_CHARS} chars","reason_code":"TECH_*|POLICY_* optional"}
+                Do not include markdown, prose, code fences, or extra keys.
+            """.trimIndent()
+        )
+        return try {
+            modelClient.chat(
+                messages = retryMessages,
+                options = ChatRequestOptions(
+                    temperature = 0.0,
+                    maxTokens = config.superego.maxCompletionTokens,
+                    metadata = ChatCallMetadata(
+                        actor = "superego",
+                        callSite = "action_review_json_retry",
+                        actionType = action.type.name.lowercase()
+                    )
+                )
+            )
+        } catch (ex: Exception) {
+            logger.warn(ex) { "Superego strict JSON retry call failed for action=${action.id} type=${action.type}." }
+            null
         }
     }
 
@@ -180,7 +267,7 @@ class Superego(
 
                         JSON schema:
                         - If allowed: {"allow": true}
-                        - If denied: {"allow": false, "reason":"<=${MAX_DENY_REASON_CHARS} chars"}
+                        - If denied: {"allow": false, "reason":"<=${MAX_DENY_REASON_CHARS} chars", "reason_code":"TECH_*|POLICY_* optional"}
                         Keep output minimal JSON only.
                     """.trimIndent()
                 ),
@@ -224,12 +311,30 @@ class Superego(
     private data class SuperegoResponse(
         val allow: Boolean? = null,
         val reason: String? = null,
+        @field:JsonProperty("reason_code")
+        val reasonCode: String? = null,
+    )
+
+    private data class ParsedSuperegoDecision(
+        val decision: GateDecision,
+        val parseFailed: Boolean,
     )
 
     companion object {
         private const val MAX_DENY_REASON_CHARS: Int = 180
+        private const val REASON_CODE_TECH_MODEL_UNAVAILABLE: String = "TECH_MODEL_UNAVAILABLE"
+        private const val REASON_CODE_TECH_PARSE_ERROR: String = "TECH_PARSE_ERROR"
+        private const val REASON_CODE_TECH_MISSING_REQUIRED_FIELD: String = "TECH_MISSING_REQUIRED_FIELD"
+        private const val REASON_CODE_POLICY_LLM_DENY: String = "POLICY_LLM_DENY"
 
         val mapper = jacksonObjectMapper()
             .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
     }
+
+    private fun normalizeReasonCode(raw: String?): String? =
+        raw?.trim()
+            ?.uppercase()
+            ?.replace(Regex("[^A-Z0-9_]+"), "_")
+            ?.trim('_')
+            ?.ifBlank { null }
 }

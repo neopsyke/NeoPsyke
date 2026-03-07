@@ -79,6 +79,10 @@ class MistralChatClient(
                 val parsed = mapper.readValue<MistralChatCompletionResponse>(responseBody)
                 val choice = parsed.choices.firstOrNull()
                     ?: throw IOException("Mistral chat returned no choices.")
+                val content = choice.message.content.trim()
+                if (content.isBlank()) {
+                    throw IOException("Mistral chat returned empty message content.")
+                }
 
                 val usage = parsed.usage?.toChatUsage()
                 val resolvedModel = parsed.model ?: modelName
@@ -96,7 +100,7 @@ class MistralChatClient(
                 )
 
                 return ChatCompletion(
-                    content = choice.message.content,
+                    content = content,
                     model = resolvedModel,
                     finishReason = choice.finishReason,
                     id = parsed.id,

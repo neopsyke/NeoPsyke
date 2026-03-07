@@ -39,6 +39,7 @@ class AttentionScheduler(
         denialReason: String? = null,
         allowFallbackExplanation: Boolean = false,
         planContext: PlanContext? = null,
+        denialReasonCode: String? = null,
     ): Boolean {
         if (thoughts.size >= config.maxPendingThoughts) {
             return false
@@ -56,6 +57,7 @@ class AttentionScheduler(
                 denialReason = denialReason,
                 allowFallbackExplanation = allowFallbackExplanation,
                 planContext = planContext,
+                denialReasonCode = denialReasonCode,
             )
         )
         return true

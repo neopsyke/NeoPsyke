@@ -5,6 +5,7 @@ data class PlannerContext(
     val queue: QueueSnapshot,
     val shortTermContextSummary: String = "",
     val longTermMemoryRecall: String = "",
+    val evidenceHints: String = "",
     val deliberation: DeliberationState = DeliberationState(),
     val metaGuidance: String = "",
     val availableActions: Set<ActionType> = ActionType.entries.toSet(),
@@ -46,6 +47,7 @@ sealed interface EgoDecision {
 data class GateDecision(
     val allow: Boolean,
     val reason: String,
+    val reasonCode: String? = null,
 )
 
 data class ActionOutcome(

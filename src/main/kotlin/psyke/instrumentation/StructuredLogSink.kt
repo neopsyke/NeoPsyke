@@ -48,7 +48,7 @@ class StructuredLogSink : InstrumentationSink {
 
             "action_review_result" -> {
                 logger.trace {
-                    "superego.review action_id=${event.data["action_id"]} allow=${event.data["allow"]} reason=${event.data["reason"]}"
+                    "superego.review action_id=${event.data["action_id"]} allow=${event.data["allow"]} reason_code=${event.data["reason_code"]} reason=${event.data["reason"]}"
                 }
             }
 

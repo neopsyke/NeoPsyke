@@ -17,6 +17,7 @@ internal data class SuperegoDeterministicDecision(
     val allow: Boolean,
     val reason: String = "",
     val ruleId: String? = null,
+    val reasonCode: String? = null,
 )
 
 /**
@@ -232,8 +233,15 @@ internal class SuperegoDeterministicConscience(
         SuperegoDeterministicDecision(
             allow = false,
             reason = "$reason [rule:$ruleId]",
-            ruleId = ruleId
+            ruleId = ruleId,
+            reasonCode = "POLICY_${normalizeRuleId(ruleId)}"
         )
+
+    private fun normalizeRuleId(ruleId: String): String =
+        ruleId.uppercase(Locale.ROOT)
+            .replace(Regex("[^A-Z0-9]+"), "_")
+            .trim('_')
+            .ifBlank { "DETERMINISTIC_DENY" }
 
     private data class McpTimePayload(
         val timezone: String? = null,
