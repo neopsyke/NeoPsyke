@@ -61,6 +61,12 @@ data class AgentConfig(
                         maxEvidenceItems = readInt("EGO_TASK_WORKSPACE_MAX_EVIDENCE_ITEMS", 8),
                         maxEvidenceChars = readInt("EGO_TASK_WORKSPACE_MAX_EVIDENCE_CHARS", 220),
                         finalCompilationMaxChars = readInt("EGO_TASK_WORKSPACE_FINAL_COMPILATION_MAX_CHARS", 2800),
+                        finalPassRewriteEnabled = readBoolean("EGO_TASK_WORKSPACE_FINAL_PASS_REWRITE_ENABLED", true),
+                        finalPassMaxTokens = readInt("EGO_TASK_WORKSPACE_FINAL_PASS_MAX_TOKENS", 260),
+                        finalPassMinWorkspaceConfidence =
+                            readDouble("EGO_TASK_WORKSPACE_FINAL_PASS_MIN_WORKSPACE_CONFIDENCE", 0.35),
+                        finalPassMinModelConfidence =
+                            readDouble("EGO_TASK_WORKSPACE_FINAL_PASS_MIN_MODEL_CONFIDENCE", 0.55),
                         maxActiveTasks = readInt("EGO_TASK_WORKSPACE_MAX_ACTIVE_TASKS", 32),
                     ),
                     longTermMemoryRecallMaxItems = readInt("EGO_LONG_TERM_MEMORY_RECALL_MAX_ITEMS", 4),

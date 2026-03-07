@@ -14,6 +14,13 @@ data class TaskWorkspaceDestroyed(
     val evidenceCount: Int,
 )
 
+data class TaskWorkspaceFinalPassInput(
+    val compilation: String,
+    val workspaceConfidence: Double,
+    val sectionCount: Int,
+    val evidenceCount: Int,
+)
+
 class TaskWorkspaceStore(
     private val config: TaskWorkspaceConfig,
 ) {
@@ -164,6 +171,24 @@ class TaskWorkspaceStore(
     }
 
     @Synchronized
+    fun buildFinalPassInput(
+        rootInputEnqueuedAtMs: Long?,
+        candidateAnswer: String,
+        maxChars: Int,
+    ): TaskWorkspaceFinalPassInput? {
+        val workspace = lookup(rootInputEnqueuedAtMs) ?: return null
+        val compilation = buildFinalCompilation(rootInputEnqueuedAtMs, candidateAnswer, maxChars)
+        if (compilation.isBlank()) return null
+        val confidence = workspace.estimateConfidence()
+        return TaskWorkspaceFinalPassInput(
+            compilation = compilation,
+            workspaceConfidence = confidence,
+            sectionCount = workspace.sections.size,
+            evidenceCount = workspace.evidence.size
+        )
+    }
+
+    @Synchronized
     fun destroy(rootInputEnqueuedAtMs: Long?): TaskWorkspaceDestroyed? {
         if (!config.enabled || rootInputEnqueuedAtMs == null) return null
         val removed = workspaces.remove(rootInputEnqueuedAtMs) ?: return null
@@ -271,6 +296,15 @@ class TaskWorkspaceStore(
         private fun sectionSummaryCap(): Int = max(48, config.maxSectionSummaryChars)
         private fun evidenceCap(): Int = max(1, config.maxEvidenceItems)
         private fun evidenceItemCap(): Int = max(48, config.maxEvidenceChars)
+
+        fun estimateConfidence(): Double {
+            val sectionSignal = (sections.size.coerceAtMost(4).toDouble() / 4.0)
+            val evidenceSignal = (evidence.size.coerceAtMost(4).toDouble() / 4.0)
+            val goalSignal = if (goal.isBlank()) 0.0 else 1.0
+            return (sectionSignal * SECTION_SIGNAL_WEIGHT) +
+                (evidenceSignal * EVIDENCE_SIGNAL_WEIGHT) +
+                (goalSignal * GOAL_SIGNAL_WEIGHT)
+        }
     }
 
     private companion object {
@@ -283,6 +317,9 @@ class TaskWorkspaceStore(
         const val SOURCE_PLAN: String = "plan"
         const val SOURCE_ACTION: String = "action_outcome"
         const val SOURCE_ANSWER_DRAFT: String = "answer_draft"
+        const val SECTION_SIGNAL_WEIGHT: Double = 0.45
+        const val EVIDENCE_SIGNAL_WEIGHT: Double = 0.45
+        const val GOAL_SIGNAL_WEIGHT: Double = 0.10
     }
 
     private val workspaces = LinkedHashMap<Long, TaskWorkspace>()

@@ -27,6 +27,7 @@ It is intentionally high-level and should stay aligned with the code.
   - `LlmLongTermMemoryAdvisor`
   - `Hippocampus` (MCP memory adapter or noop)
   - `TaskWorkspaceStore` (ephemeral per-request notebook/workspace)
+  - `TaskWorkspaceFinalizer` (noop or `LlmTaskWorkspaceFinalizer`)
   - `Ego` orchestrator
 - Interactive startup now performs an MCP memory health probe before enabling memory:
   - if probe passes, memory is exposed as available and `McpHippocampus` is wired
@@ -97,7 +98,13 @@ It is intentionally high-level and should stay aligned with the code.
 
 ## Action Path
 - `processAction`:
-  - For terminal `answer` actions, runs a task-workspace final-pass compilation step (ephemeral notes synthesis) before action execution.
+  - For terminal `answer` actions, runs task-workspace final-pass processing before action execution:
+    - records candidate answer draft into workspace
+    - builds final compilation from workspace sections/evidence
+    - applies workspace-confidence gate (`finalPassMinWorkspaceConfidence`)
+    - runs `TaskWorkspaceFinalizer` rewrite when enabled
+    - applies model-confidence gate (`finalPassMinModelConfidence`)
+    - keeps original payload on any gate/finalizer failure path
   - Fallback explanation actions bypass policy gate.
   - Normal actions go through `Superego.review`.
   - If denied:
@@ -209,7 +216,9 @@ It is intentionally high-level and should stay aligned with the code.
   - Scoped to root input; independent from short-term and long-term memory pipelines.
   - Stores compact sections/evidence for the active request only.
   - Planner receives only prompt-capped workspace index/summaries, not full workspace content.
-  - Performs final-pass compilation on terminal answer path; workspace is destroyed on input resolution or queue drain cleanup.
+  - Provides final-pass compilation input with workspace confidence estimate (sections/evidence/goal weighted signal).
+  - Workspace final-pass rewrite is handled by `TaskWorkspaceFinalizer` (`src/main/kotlin/psyke/agent/ego/TaskWorkspaceFinalizer.kt`) with strict JSON parsing, required-field validation, retry loop, and safe fallback.
+  - Workspace is destroyed on input resolution or queue drain cleanup.
 
 ## Action Execution Surface
 - File: `src/main/kotlin/psyke/agent/cortex/motor/MotorCortex.kt`

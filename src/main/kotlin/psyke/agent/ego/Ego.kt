@@ -34,6 +34,7 @@ class Ego(
     private val sensoryCortex: SensoryCortex = SensoryCortex.stdin(config),
     private val memoryStore: MemoryStore = MemoryStore(config.memory.maxShortTermContextChars),
     private val taskWorkspaceStore: TaskWorkspaceStore = TaskWorkspaceStore(config.memory.taskWorkspace),
+    private val taskWorkspaceFinalizer: TaskWorkspaceFinalizer = NoopTaskWorkspaceFinalizer,
     private val instrumentation: AgentInstrumentation = NoopAgentInstrumentation,
 ) {
     interface Planner {
@@ -812,29 +813,110 @@ class Ego(
         if (action.type != ActionType.ANSWER) {
             return action
         }
+        if (!config.memory.taskWorkspace.enabled || !config.memory.taskWorkspace.finalPassRewriteEnabled) {
+            return action
+        }
         taskWorkspaceStore.recordAnswerDraft(
             rootInputEnqueuedAtMs = action.rootInputEnqueuedAtMs,
             payload = action.payload
         )
-        val compilation = taskWorkspaceStore.buildFinalCompilation(
+        val finalPassInput = taskWorkspaceStore.buildFinalPassInput(
             rootInputEnqueuedAtMs = action.rootInputEnqueuedAtMs,
             candidateAnswer = action.payload,
             maxChars = config.memory.taskWorkspace.finalCompilationMaxChars
-        )
-        if (compilation.isBlank()) {
-            return action
-        }
+        ) ?: return action
         instrumentation.emit(
             AgentEvent(
                 type = "task_workspace_final_pass",
                 data = mapOf(
                     "root_input_enqueued_at_ms" to action.rootInputEnqueuedAtMs,
                     "action_id" to action.id,
-                    "compilation_preview" to TextSecurity.preview(compilation, 220)
+                    "workspace_confidence" to finalPassInput.workspaceConfidence,
+                    "section_count" to finalPassInput.sectionCount,
+                    "evidence_count" to finalPassInput.evidenceCount,
+                    "compilation_preview" to TextSecurity.preview(finalPassInput.compilation, 220)
                 )
             )
         )
-        return action
+        if (finalPassInput.workspaceConfidence < config.memory.taskWorkspace.finalPassMinWorkspaceConfidence) {
+            instrumentation.emit(
+                AgentEvent(
+                    type = "task_workspace_final_pass_skipped",
+                    data = mapOf(
+                        "root_input_enqueued_at_ms" to action.rootInputEnqueuedAtMs,
+                        "action_id" to action.id,
+                        "reason" to "workspace_confidence_gate",
+                        "workspace_confidence" to finalPassInput.workspaceConfidence,
+                        "min_workspace_confidence" to config.memory.taskWorkspace.finalPassMinWorkspaceConfidence
+                    )
+                )
+            )
+            return action
+        }
+        val finalizerResult = taskWorkspaceFinalizer.finalize(
+            TaskWorkspaceFinalizerRequest(
+                action = action,
+                workspaceCompilation = finalPassInput.compilation,
+                workspaceConfidence = finalPassInput.workspaceConfidence,
+                recentDialogue = dialogue.takeLast(12)
+            )
+        ) ?: run {
+            instrumentation.emit(
+                AgentEvent(
+                    type = "task_workspace_final_pass_skipped",
+                    data = mapOf(
+                        "root_input_enqueued_at_ms" to action.rootInputEnqueuedAtMs,
+                        "action_id" to action.id,
+                        "reason" to "finalizer_unavailable_or_parse"
+                    )
+                )
+            )
+            return action
+        }
+        if (finalizerResult.confidence < config.memory.taskWorkspace.finalPassMinModelConfidence) {
+            instrumentation.emit(
+                AgentEvent(
+                    type = "task_workspace_final_pass_skipped",
+                    data = mapOf(
+                        "root_input_enqueued_at_ms" to action.rootInputEnqueuedAtMs,
+                        "action_id" to action.id,
+                        "reason" to "model_confidence_gate",
+                        "model_confidence" to finalizerResult.confidence,
+                        "min_model_confidence" to config.memory.taskWorkspace.finalPassMinModelConfidence
+                    )
+                )
+            )
+            return action
+        }
+        val rewrittenPayload = TextSecurity.clamp(finalizerResult.rewrittenPayload, config.planner.maxActionPayloadChars)
+        if (rewrittenPayload.isBlank() || rewrittenPayload == action.payload) {
+            instrumentation.emit(
+                AgentEvent(
+                    type = "task_workspace_final_pass_skipped",
+                    data = mapOf(
+                        "root_input_enqueued_at_ms" to action.rootInputEnqueuedAtMs,
+                        "action_id" to action.id,
+                        "reason" to "rewrite_empty_or_unchanged"
+                    )
+                )
+            )
+            return action
+        }
+        instrumentation.emit(
+            AgentEvent(
+                type = "task_workspace_final_pass_applied",
+                data = mapOf(
+                    "root_input_enqueued_at_ms" to action.rootInputEnqueuedAtMs,
+                    "action_id" to action.id,
+                    "workspace_confidence" to finalPassInput.workspaceConfidence,
+                    "model_confidence" to finalizerResult.confidence,
+                    "rewrite_reason" to finalizerResult.reason,
+                    "payload_before_preview" to TextSecurity.preview(action.payload, 180),
+                    "payload_after_preview" to TextSecurity.preview(rewrittenPayload, 180)
+                )
+            )
+        )
+        return action.copy(payload = rewrittenPayload)
     }
 
     private fun plannerContext(trigger: EgoTrigger, rootInputEnqueuedAtMs: Long? = null): PlannerContext {

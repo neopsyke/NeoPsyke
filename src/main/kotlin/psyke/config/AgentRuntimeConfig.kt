@@ -57,6 +57,10 @@ private data class AgentRuntimeYamlAgent(
     val taskWorkspaceMaxEvidenceItems: Int? = null,
     val taskWorkspaceMaxEvidenceChars: Int? = null,
     val taskWorkspaceFinalCompilationMaxChars: Int? = null,
+    val taskWorkspaceFinalPassRewriteEnabled: Boolean? = null,
+    val taskWorkspaceFinalPassMaxTokens: Int? = null,
+    val taskWorkspaceFinalPassMinWorkspaceConfidence: Double? = null,
+    val taskWorkspaceFinalPassMinModelConfidence: Double? = null,
     val taskWorkspaceMaxActiveTasks: Int? = null,
     val maxThoughtChars: Int? = null,
     val maxActionPayloadChars: Int? = null,
@@ -260,6 +264,26 @@ object AgentRuntimeSettingsLoader {
                         env["EGO_TASK_WORKSPACE_FINAL_COMPILATION_MAX_CHARS"],
                         agentYaml.taskWorkspaceFinalCompilationMaxChars,
                         defaults.memory.taskWorkspace.finalCompilationMaxChars
+                    ),
+                    finalPassRewriteEnabled = readBoolean(
+                        env["EGO_TASK_WORKSPACE_FINAL_PASS_REWRITE_ENABLED"],
+                        agentYaml.taskWorkspaceFinalPassRewriteEnabled,
+                        defaults.memory.taskWorkspace.finalPassRewriteEnabled
+                    ),
+                    finalPassMaxTokens = readPositiveInt(
+                        env["EGO_TASK_WORKSPACE_FINAL_PASS_MAX_TOKENS"],
+                        agentYaml.taskWorkspaceFinalPassMaxTokens,
+                        defaults.memory.taskWorkspace.finalPassMaxTokens
+                    ),
+                    finalPassMinWorkspaceConfidence = readProbability(
+                        env["EGO_TASK_WORKSPACE_FINAL_PASS_MIN_WORKSPACE_CONFIDENCE"],
+                        agentYaml.taskWorkspaceFinalPassMinWorkspaceConfidence,
+                        defaults.memory.taskWorkspace.finalPassMinWorkspaceConfidence
+                    ),
+                    finalPassMinModelConfidence = readProbability(
+                        env["EGO_TASK_WORKSPACE_FINAL_PASS_MIN_MODEL_CONFIDENCE"],
+                        agentYaml.taskWorkspaceFinalPassMinModelConfidence,
+                        defaults.memory.taskWorkspace.finalPassMinModelConfidence
                     ),
                     maxActiveTasks = readPositiveInt(
                         env["EGO_TASK_WORKSPACE_MAX_ACTIVE_TASKS"],

@@ -69,6 +69,24 @@ class TaskWorkspaceStoreTest {
     }
 
     @Test
+    fun `final pass input reports workspace confidence`() {
+        val store = TaskWorkspaceStore(TaskWorkspaceConfig(enabled = true))
+        val root = 777L
+        store.ensureForInput(PendingInput(id = 1, content = "find release date", enqueuedAtMs = root))
+        store.recordPlan(root, "Find release date", listOf("Search official release notes"))
+
+        val input = store.buildFinalPassInput(
+            rootInputEnqueuedAtMs = root,
+            candidateAnswer = "Release date is pending confirmation.",
+            maxChars = 1200
+        )
+
+        assertTrue(input != null)
+        assertTrue((input?.workspaceConfidence ?: 0.0) > 0.30)
+        assertTrue((input?.sectionCount ?: 0) >= 2)
+    }
+
+    @Test
     fun `destroy removes only targeted workspace`() {
         val store = TaskWorkspaceStore(TaskWorkspaceConfig(enabled = true))
         store.ensureForInput(PendingInput(id = 1, content = "task A", enqueuedAtMs = 1L))

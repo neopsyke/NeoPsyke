@@ -32,6 +32,10 @@ typealias MetaReasoner = psyke.agent.ego.MetaReasoner
 typealias MetaReasonerVerdict = psyke.agent.ego.MetaReasonerVerdict
 typealias MetaReasonerAssessment = psyke.agent.ego.MetaReasonerAssessment
 typealias LlmMetaReasoner = psyke.agent.ego.LlmMetaReasoner
+typealias TaskWorkspaceFinalizer = psyke.agent.ego.TaskWorkspaceFinalizer
+typealias TaskWorkspaceFinalizerRequest = psyke.agent.ego.TaskWorkspaceFinalizerRequest
+typealias TaskWorkspaceFinalizerResult = psyke.agent.ego.TaskWorkspaceFinalizerResult
+typealias LlmTaskWorkspaceFinalizer = psyke.agent.ego.LlmTaskWorkspaceFinalizer
 
 typealias Superego = psyke.agent.superego.Superego
 typealias SuperegoPolicy = psyke.agent.superego.SuperegoPolicy

@@ -177,7 +177,19 @@ class StructuredLogSink : InstrumentationSink {
 
             "task_workspace_final_pass" -> {
                 logger.trace {
-                    "task_workspace.final_pass root=${event.data["root_input_enqueued_at_ms"]} action_id=${event.data["action_id"]}"
+                    "task_workspace.final_pass root=${event.data["root_input_enqueued_at_ms"]} action_id=${event.data["action_id"]} workspace_confidence=${event.data["workspace_confidence"]}"
+                }
+            }
+
+            "task_workspace_final_pass_skipped" -> {
+                logger.trace {
+                    "task_workspace.final_pass.skipped root=${event.data["root_input_enqueued_at_ms"]} action_id=${event.data["action_id"]} reason=${event.data["reason"]}"
+                }
+            }
+
+            "task_workspace_final_pass_applied" -> {
+                logger.trace {
+                    "task_workspace.final_pass.applied root=${event.data["root_input_enqueued_at_ms"]} action_id=${event.data["action_id"]} workspace_confidence=${event.data["workspace_confidence"]} model_confidence=${event.data["model_confidence"]}"
                 }
             }
 

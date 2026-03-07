@@ -4,8 +4,10 @@ import mu.KotlinLogging
 import psyke.agent.core.AgentConfig
 import psyke.agent.ego.Ego
 import psyke.agent.ego.LlmEgoPlanner
+import psyke.agent.ego.LlmTaskWorkspaceFinalizer
 import psyke.agent.memory.longterm.Hippocampus
 import psyke.agent.ego.LlmMetaReasoner
+import psyke.agent.ego.NoopTaskWorkspaceFinalizer
 import psyke.agent.memory.longterm.LlmLongTermMemoryAdvisor
 import psyke.agent.memory.longterm.McpHippocampus
 import psyke.agent.tools.mcp.McpStdioClient
@@ -819,6 +821,18 @@ internal object AppModeRunners {
                                                         modelTokenWeight = llm.modelCatalog.tokenWeightFor(llm.memoryAdvisor),
                                                         instrumentation = instrumentation
                                                     )
+                                                    val taskWorkspaceFinalizer =
+                                                        if (config.memory.taskWorkspace.enabled &&
+                                                            config.memory.taskWorkspace.finalPassRewriteEnabled
+                                                        ) {
+                                                            LlmTaskWorkspaceFinalizer(
+                                                                modelClient = plannerClient,
+                                                                config = config,
+                                                                instrumentation = instrumentation
+                                                            )
+                                                        } else {
+                                                            NoopTaskWorkspaceFinalizer
+                                                        }
                                                     val interactiveMemoryStartup =
                                                         resolveInteractiveMemoryStartup(config, mcpRuntimeConfig.memory)
                                                     val hippocampus = interactiveMemoryStartup.hippocampus
@@ -843,6 +857,7 @@ internal object AppModeRunners {
                                                             hippocampus = hippocampus,
                                                             metaReasoner = metaReasoner,
                                                             longTermMemoryAdvisor = longTermMemoryAdvisor,
+                                                            taskWorkspaceFinalizer = taskWorkspaceFinalizer,
                                                             instrumentation = instrumentation
                                                         ).runInteractive()
                                                     } finally {

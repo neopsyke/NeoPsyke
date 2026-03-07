@@ -30,6 +30,7 @@ flowchart LR
     MC --> H["Hippocampus (Long-term Recall/Imprint)"]
     MC --> LTM["LlmLongTermMemoryAdvisor"]
     E --> TWS["TaskWorkspaceStore (Ephemeral Per Request)"]
+    E --> TWF["TaskWorkspaceFinalizer (Noop or LLM)"]
 
     M --> WS["Web Search Handler/Engine"]
     CfgWS["WebSearch Provider Config (provider/key/base/model)"] --> WS
@@ -103,6 +104,8 @@ sequenceDiagram
                     alt allow
                         alt action = answer
                             Ego->>TWS: final-pass compilation from workspace index/evidence
+                            Ego->>TWF: rewrite candidate payload (if enabled)
+                            Note over Ego,TWF: Apply workspace-confidence gate first, then model-confidence gate
                         end
                         Ego->>Motor: execute(action)
                         Ego->>Ego: PromptInjectionDefense sanitize untrusted tool output

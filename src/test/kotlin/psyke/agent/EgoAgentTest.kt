@@ -637,6 +637,128 @@ class EgoAgentTest {
     }
 
     @Test
+    fun `task workspace final pass applies rewritten answer when confidence gates pass`() {
+        val plannerLlm = StubChatModelClient().apply {
+            enqueueRawResponse(
+                """
+                {"decision":"action","urgency":"medium","action_type":"web_search","action_payload":"official pricing","action_summary":"search pricing"}
+                """.trimIndent()
+            )
+            enqueueRawResponse(
+                """
+                {"decision":"action","urgency":"medium","action_type":"answer","action_payload":"Draft answer from planner","action_summary":"respond"}
+                """.trimIndent()
+            )
+        }
+        val superegoLlm = StubChatModelClient().apply {
+            enqueueRawResponse("""{"allow":true}""")
+            enqueueRawResponse("""{"allow":true}""")
+        }
+        val instrumentation = RecordingInstrumentation()
+        val outputs = mutableListOf<String>()
+        var finalizerCalls = 0
+        val finalizer = object : TaskWorkspaceFinalizer {
+            override fun finalize(request: TaskWorkspaceFinalizerRequest): TaskWorkspaceFinalizerResult {
+                finalizerCalls += 1
+                return TaskWorkspaceFinalizerResult(
+                    rewrittenPayload = "Rewritten grounded final answer",
+                    confidence = 0.92,
+                    reason = "direct_answer"
+                )
+            }
+        }
+        val config = AgentConfig(
+            planner = PlannerConfig(maxLoopStepsPerInput = 8, maxThoughtPasses = 3),
+            memory = MemoryConfig(
+                taskWorkspace = TaskWorkspaceConfig(
+                    enabled = true,
+                    finalPassMinWorkspaceConfidence = 0.30,
+                    finalPassMinModelConfidence = 0.60
+                )
+            )
+        )
+        val agent = Ego(
+            planner = LlmEgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
+            superego = Superego(modelClient = superegoLlm, config = config, instrumentation = instrumentation),
+            motorCortex = buildMotorCortex(
+                output = { outputs.add(it) },
+                webSearchEngine = object : WebSearchEngine {
+                    override fun search(query: String, maxResults: Int): WebSearchResult =
+                        WebSearchResult(
+                            summary = "Official pricing confirms the rate.",
+                            snippets = listOf("Verified from official pricing page.")
+                        )
+                }
+            ),
+            config = config,
+            taskWorkspaceFinalizer = finalizer,
+            instrumentation = instrumentation
+        )
+
+        runAgentWithInput(agent, "find current pricing\nexit\n")
+
+        assertEquals(listOf("ego> Rewritten grounded final answer"), outputs)
+        assertEquals(1, finalizerCalls)
+        assertTrue(instrumentation.events.any { it.type == "task_workspace_final_pass_applied" })
+    }
+
+    @Test
+    fun `task workspace final pass skips rewrite when workspace confidence gate fails`() {
+        val plannerLlm = StubChatModelClient().apply {
+            enqueueRawResponse(
+                """
+                {"decision":"action","urgency":"medium","action_type":"answer","action_payload":"Planner answer","action_summary":"respond"}
+                """.trimIndent()
+            )
+        }
+        val superegoLlm = StubChatModelClient().apply {
+            enqueueRawResponse("""{"allow":true}""")
+        }
+        val instrumentation = RecordingInstrumentation()
+        val outputs = mutableListOf<String>()
+        var finalizerCalls = 0
+        val finalizer = object : TaskWorkspaceFinalizer {
+            override fun finalize(request: TaskWorkspaceFinalizerRequest): TaskWorkspaceFinalizerResult {
+                finalizerCalls += 1
+                return TaskWorkspaceFinalizerResult(
+                    rewrittenPayload = "Should never apply",
+                    confidence = 0.95,
+                    reason = "direct_answer"
+                )
+            }
+        }
+        val config = AgentConfig(
+            planner = PlannerConfig(maxLoopStepsPerInput = 4, maxThoughtPasses = 2),
+            memory = MemoryConfig(
+                taskWorkspace = TaskWorkspaceConfig(
+                    enabled = true,
+                    finalPassMinWorkspaceConfidence = 0.90,
+                    finalPassMinModelConfidence = 0.50
+                )
+            )
+        )
+        val agent = Ego(
+            planner = LlmEgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
+            superego = Superego(modelClient = superegoLlm, config = config, instrumentation = instrumentation),
+            motorCortex = buildMotorCortex(output = { outputs.add(it) }),
+            config = config,
+            taskWorkspaceFinalizer = finalizer,
+            instrumentation = instrumentation
+        )
+
+        runAgentWithInput(agent, "answer directly\nexit\n")
+
+        assertEquals(listOf("ego> Planner answer"), outputs)
+        assertEquals(0, finalizerCalls)
+        assertTrue(
+            instrumentation.events.any {
+                it.type == "task_workspace_final_pass_skipped" &&
+                    it.data["reason"] == "workspace_confidence_gate"
+            }
+        )
+    }
+
+    @Test
     fun `thought recall is skipped when planner does not request explicit query`() {
         val plannerLlm = StubChatModelClient().apply {
             enqueueRawResponse(
