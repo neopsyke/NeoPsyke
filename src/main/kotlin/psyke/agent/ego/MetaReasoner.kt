@@ -7,6 +7,7 @@ import mu.KotlinLogging
 import psyke.agent.core.AgentConfig
 import psyke.agent.core.EgoTrigger
 import psyke.agent.core.PlannerContext
+import psyke.agent.support.RetryPolicy
 import psyke.agent.support.TextSecurity
 import psyke.llm.ChatCallMetadata
 import psyke.llm.ChatMessage
@@ -56,7 +57,7 @@ class LlmMetaReasoner(
         val messages = buildMessages(trigger, context)
         var response: psyke.llm.ChatCompletion? = null
         var lastError: Exception? = null
-        val retryAttempts = maxOf(1, config.planner.llmRetryAttempts)
+        val retryAttempts = RetryPolicy.boundedLlmRetryAttempts(config.planner.llmRetryAttempts)
         for (attempt in 1..retryAttempts) {
             try {
                 response = modelClient.chat(

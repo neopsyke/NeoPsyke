@@ -106,6 +106,50 @@ class EgoAgentTest {
     }
 
     @Test
+    fun `technical denial allows one repeated action without repeat blocking`() {
+        val plannerLlm = StubChatModelClient().apply {
+            enqueueRawResponse(
+                """
+                {"decision":"action","urgency":"high","action_type":"answer","action_payload":"retryable answer","action_summary":"first answer attempt"}
+                """.trimIndent()
+            )
+            enqueueRawResponse(
+                """
+                {"decision":"action","urgency":"high","action_type":"answer","action_payload":"retryable  answer","action_summary":"retrying same action"}
+                """.trimIndent()
+            )
+        }
+        val superegoLlm = StubChatModelClient().apply {
+            enqueueRawResponse("""{"allow":false,"reason":"blocked by temporary issue","reason_code":"TECH_TIMEOUT"}""")
+            enqueueRawResponse("""{"allow":true}""")
+        }
+        val instrumentation = RecordingInstrumentation()
+        val outputs = mutableListOf<String>()
+        val agent = Ego(
+            planner = LlmEgoPlanner(modelClient = plannerLlm, config = AgentConfig(), instrumentation = instrumentation),
+            superego = Superego(
+                modelClient = superegoLlm,
+                config = AgentConfig(),
+                instrumentation = instrumentation
+            ),
+            motorCortex = buildMotorCortex(output = { outputs.add(it) }),
+            config = AgentConfig(planner = PlannerConfig(maxLoopStepsPerInput = 8, maxThoughtPasses = 4)),
+            instrumentation = instrumentation
+        )
+
+        runAgentWithInput(agent, "hello\nexit\n")
+
+        assertEquals(1, outputs.size)
+        assertTrue(outputs.first().contains("retryable"))
+        assertTrue(
+            instrumentation.events.none {
+                it.type == "warning" &&
+                    (it.data["message"] as? String)?.contains("repeated a denied action", ignoreCase = true) == true
+            }
+        )
+    }
+
+    @Test
     fun `fallback explanation executes with one grace step when thought limit is reached`() {
         val plannerLlm = StubChatModelClient().apply {
             enqueueRawResponse(
