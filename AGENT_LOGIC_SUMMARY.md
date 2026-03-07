@@ -229,6 +229,22 @@ It is intentionally high-level and should stay aligned with the code.
 - Fallback answer synthesis aggregates up to 6 successful evidence signals from the deliberation session
   instead of relying only on the latest planner signal.
 
+## Episodic Memory (Logbook)
+- File: `src/main/kotlin/psyke/agent/memory/episodic/SqliteLogbook.kt`
+- SQLite + FTS5 append-only log of timestamped interaction summaries and keywords.
+- Storage: separate DB file (default `.psyke/logbook.db`), WAL mode, synchronized access.
+- Schema: `entries` table (id, ts, ts_epoch_ms, event_type, summary, keywords, action_type, run_id, metadata) with FTS5 virtual table `entries_fts` auto-synced via triggers.
+- Event types recorded: `INPUT_RECEIVED`, `PLANNER_DECISION`, `ACTION_EXECUTED`, `ACTION_DENIED`, `ANSWER_DELIVERED`, `MEMORY_IMPRINT`.
+- Integration through `MemoryCoordinator`:
+  - `remember()` auto-journals `INPUT_RECEIVED` for user turns.
+  - `maybeAssessLongTermMemory()` auto-journals `MEMORY_IMPRINT` on successful saves.
+  - `journal()` public method called from Ego for planner decisions, action outcomes, denials, and answers.
+- Summarization: deterministic keyword extraction (tokenize, remove stopwords, deduplicate, cap at `maxKeywordsPerEntry`). Optional LLM-based summarizer (`LlmLogbookSummarizer`, opt-in via `PSYKE_LOGBOOK_USE_LLM_SUMMARIZER=true`) with automatic fallback to deterministic on failure.
+- Episodic recall: triggered by temporal intent detection (regex patterns on the latest user turn). Detected intent maps to a time window and optional FTS keyword, producing a compact timeline injected into `PlannerContext.episodicRecall`.
+- Temporal-to-vector bridge: episodic summaries from temporal queries also serve as cues for `Hippocampus.recall()`, enriching long-term memory retrieval with temporal context.
+- Graceful degradation: logbook is optional (`null`-safe); creation failure logs warning and runs without episodic memory.
+- Configuration: `LogbookConfig` (enabled, maxSummaryChars, maxKeywordsPerEntry, retentionDays, dbPath, episodicRecallMaxChars, episodicRecallMaxResults, useLlmSummarizer) with env var overrides (`PSYKE_LOGBOOK_*`).
+
 ## Key Complexity Drivers
 - Multiple LLM actors with distinct prompts and fallback semantics.
 - Multi-queue scheduling with bounded loop budget.
@@ -244,6 +260,7 @@ Update this file whenever any of these change:
 - Superego deterministic rules/validators or deterministic-vs-LLM precedence.
 - Deliberation pressure formula, thresholds, or forced-terminal criteria.
 - Memory recall/consolidation triggers, thresholds, or disable semantics.
+- Episodic memory (logbook) event types, journal call sites, or storage schema.
 - Prompt-injection defense patterns or untrusted-content handling paths.
 - Supported action types or runtime availability logic.
 - Critical instrumentation events that materially change control flow visibility.

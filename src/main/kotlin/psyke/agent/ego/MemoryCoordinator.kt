@@ -7,6 +7,13 @@ import psyke.agent.core.DeliberationState
 import psyke.agent.core.DialogueTurn
 import psyke.agent.core.EgoTrigger
 import psyke.agent.core.DialogueRole
+import psyke.agent.memory.episodic.DeterministicLogbookSummarizer
+import psyke.agent.memory.episodic.EpisodicEventType
+import psyke.agent.memory.episodic.Logbook
+import psyke.agent.memory.episodic.LogbookEntry
+import psyke.agent.memory.episodic.LogbookQuery
+import psyke.agent.memory.episodic.LogbookRecall
+import psyke.agent.memory.episodic.LogbookSummarizer
 import psyke.agent.memory.longterm.Hippocampus
 import psyke.agent.memory.longterm.LongTermMemoryAdvisor
 import psyke.agent.memory.longterm.LongTermMemoryAssessmentContext
@@ -18,6 +25,8 @@ import psyke.agent.support.TextSecurity
 import psyke.instrumentation.AgentEvent
 import psyke.instrumentation.AgentEvents
 import psyke.instrumentation.AgentInstrumentation
+import java.time.Duration
+import java.time.Instant
 import java.util.Locale
 
 private val logger = KotlinLogging.logger {}
@@ -32,6 +41,9 @@ internal class MemoryCoordinator(
     private val config: AgentConfig,
     private val instrumentation: AgentInstrumentation,
     private val memoryStore: MemoryStore,
+    private val logbook: Logbook? = null,
+    private val logbookSummarizer: LogbookSummarizer = DeterministicLogbookSummarizer(config.logbook),
+    private val runId: String? = null,
 ) {
     private var lastConsolidationStep: Int = 0
     private var latestShortTermSummary: String = ""
@@ -43,7 +55,16 @@ internal class MemoryCoordinator(
 
     // --- Short-term memory delegation ---
 
-    fun remember(turn: DialogueTurn) = memoryStore.remember(turn)
+    fun remember(turn: DialogueTurn) {
+        memoryStore.remember(turn)
+        if (turn.role == DialogueRole.USER) {
+            journalSafe(
+                eventType = EpisodicEventType.INPUT_RECEIVED,
+                summary = logbookSummarizer.summarizeInput(turn.content, config.logbook.maxSummaryChars),
+                keywords = logbookSummarizer.extractKeywords(turn.content),
+            )
+        }
+    }
 
     fun currentShortTermSummary(): String {
         val memoryTokenBudget = minOf(
@@ -59,8 +80,13 @@ internal class MemoryCoordinator(
      * Recalls long-term memory for the given trigger. Stores results internally for later
      * use by [maybeAssessLongTermMemory].
      */
-    fun recall(trigger: EgoTrigger, shortTermSummary: String, recentDialogue: List<DialogueTurn>): String {
-        val text = recallMemory(trigger, shortTermSummary, recentDialogue)
+    fun recall(
+        trigger: EgoTrigger,
+        shortTermSummary: String,
+        recentDialogue: List<DialogueTurn>,
+        episodicCues: List<String> = emptyList(),
+    ): String {
+        val text = recallMemory(trigger, shortTermSummary, recentDialogue, episodicCues)
         latestShortTermSummary = shortTermSummary
         latestLongTermRecall = text
         return text
@@ -286,8 +312,144 @@ internal class MemoryCoordinator(
             while (recentImprintFingerprints.size > 24) {
                 recentImprintFingerprints.removeFirst()
             }
+            journalSafe(
+                eventType = EpisodicEventType.MEMORY_IMPRINT,
+                summary = "Remembered: ${TextSecurity.preview(decision.summary, LOGBOOK_IMPRINT_PREVIEW_CHARS)}",
+                keywords = decision.tags,
+            )
         }
         emitServerMetrics()
+    }
+
+    // --- Episodic logbook ---
+
+    /**
+     * Records an episodic logbook entry. Called from Ego for events outside the
+     * normal memory flow (planner decisions, action outcomes, answers, denials).
+     */
+    fun journal(
+        eventType: EpisodicEventType,
+        summary: String,
+        actionType: String? = null,
+        metadata: Map<String, Any?>? = null,
+    ) {
+        journalSafe(
+            eventType = eventType,
+            summary = TextSecurity.preview(summary, config.logbook.maxSummaryChars),
+            keywords = logbookSummarizer.extractKeywords(summary),
+            actionType = actionType,
+            metadata = metadata,
+        )
+    }
+
+    /**
+     * Queries the episodic logbook when temporal recall intent is detected in the latest user turn.
+     * Returns a compact formatted timeline, or empty string if no intent or no results.
+     */
+    fun recallEpisodic(trigger: EgoTrigger, recentDialogue: List<DialogueTurn>): String {
+        val lb = logbook ?: return ""
+        val intent = detectTemporalRecallIntent(recentDialogue) ?: return ""
+
+        instrumentation.emit(
+            AgentEvent(
+                type = "episodic_recall_intent_detected",
+                data = mapOf(
+                    "pattern_label" to intent.patternLabel,
+                    "start_time" to intent.startTime?.toString(),
+                    "end_time" to intent.endTime?.toString(),
+                    "keyword_search" to intent.keywordSearch,
+                    "user_message_preview" to intent.latestUserMessagePreview,
+                )
+            )
+        )
+
+        val query = LogbookQuery(
+            startTime = intent.startTime,
+            endTime = intent.endTime,
+            keywordSearch = intent.keywordSearch,
+            maxResults = config.logbook.episodicRecallMaxResults,
+        )
+
+        val recall = try {
+            lb.query(query)
+        } catch (ex: Exception) {
+            logger.debug(ex) { "Episodic logbook query failed for pattern=${intent.patternLabel}." }
+            return ""
+        }
+
+        if (recall.entries.isEmpty()) return ""
+
+        val formatted = formatEpisodicRecall(recall)
+
+        instrumentation.emit(
+            AgentEvent(
+                type = "episodic_recall_result",
+                data = mapOf(
+                    "pattern_label" to intent.patternLabel,
+                    "entries_returned" to recall.entries.size,
+                    "total_matched" to recall.totalMatched,
+                    "truncated" to recall.truncated,
+                    "formatted_chars" to formatted.length,
+                )
+            )
+        )
+
+        return formatted
+    }
+
+    /**
+     * Extracts episodic summaries as vector recall cues when temporal intent is detected.
+     * Returns summaries from INPUT_RECEIVED and ANSWER_DELIVERED entries, suitable as
+     * cues for [Hippocampus.recall].
+     */
+    fun recallEpisodicAsVectorCues(recentDialogue: List<DialogueTurn>): List<String> {
+        val lb = logbook ?: return emptyList()
+        val intent = detectTemporalRecallIntent(recentDialogue) ?: return emptyList()
+
+        val query = LogbookQuery(
+            startTime = intent.startTime,
+            endTime = intent.endTime,
+            keywordSearch = intent.keywordSearch,
+            eventTypes = VECTOR_CUE_EVENT_TYPES,
+            maxResults = config.logbook.episodicRecallMaxResults,
+        )
+
+        val recall = try {
+            lb.query(query)
+        } catch (ex: Exception) {
+            logger.debug(ex) { "Episodic vector cue query failed for pattern=${intent.patternLabel}." }
+            return emptyList()
+        }
+
+        return recall.entries
+            .map { it.summary }
+            .filter { it.isNotBlank() }
+            .take(MAX_EPISODIC_VECTOR_CUES)
+    }
+
+    private fun journalSafe(
+        eventType: EpisodicEventType,
+        summary: String,
+        keywords: List<String> = emptyList(),
+        actionType: String? = null,
+        metadata: Map<String, Any?>? = null,
+    ) {
+        val lb = logbook ?: return
+        try {
+            lb.record(
+                LogbookEntry(
+                    ts = Instant.now(),
+                    eventType = eventType,
+                    summary = summary,
+                    keywords = keywords,
+                    actionType = actionType,
+                    runId = runId,
+                    metadata = metadata,
+                )
+            )
+        } catch (ex: Exception) {
+            logger.debug(ex) { "Logbook record failed for event_type=${eventType.dbValue()}." }
+        }
     }
 
     fun resetForNewInput() {
@@ -301,6 +463,7 @@ internal class MemoryCoordinator(
         trigger: EgoTrigger,
         shortTermSummary: String,
         recentDialogue: List<DialogueTurn>,
+        episodicCues: List<String> = emptyList(),
     ): String {
         if (!hippocampus.enabled) return ""
         val triggerLabel = when (trigger) {
@@ -308,7 +471,7 @@ internal class MemoryCoordinator(
             is EgoTrigger.PendingThoughtInput -> "thought"
         }
         val cue = when (trigger) {
-            is EgoTrigger.IncomingInput -> buildRecallCue(trigger, recentDialogue).trim()
+            is EgoTrigger.IncomingInput -> buildRecallCue(trigger, recentDialogue, episodicCues).trim()
             is EgoTrigger.PendingThoughtInput -> {
                 val query = trigger.thought.longTermMemoryRecallQuery?.trim().orEmpty()
                 if (query.isBlank()) {
@@ -388,7 +551,11 @@ internal class MemoryCoordinator(
         }
     }
 
-    private fun buildRecallCue(trigger: EgoTrigger, recentDialogue: List<DialogueTurn>): String {
+    private fun buildRecallCue(
+        trigger: EgoTrigger,
+        recentDialogue: List<DialogueTurn>,
+        episodicCues: List<String> = emptyList(),
+    ): String {
         val triggerCue = when (trigger) {
             is EgoTrigger.IncomingInput -> trigger.input.content.trim()
             is EgoTrigger.PendingThoughtInput -> ""
@@ -401,7 +568,8 @@ internal class MemoryCoordinator(
             .orEmpty()
         return listOfNotNull(
             triggerCue.ifBlank { null },
-            recentUserTurn.takeIf { it.isNotBlank() && it != triggerCue }?.let { "latest_user_message: $it" }
+            recentUserTurn.takeIf { it.isNotBlank() && it != triggerCue }?.let { "latest_user_message: $it" },
+            episodicCues.takeIf { it.isNotEmpty() }?.let { "temporal_context: ${it.joinToString(" | ")}" },
         ).joinToString(separator = "\n")
     }
 
@@ -483,6 +651,91 @@ internal class MemoryCoordinator(
         )
     }
 
+    private fun detectTemporalRecallIntent(recentDialogue: List<DialogueTurn>): TemporalRecallIntent? {
+        val latestUserTurn = recentDialogue
+            .asReversed()
+            .firstOrNull { it.role == DialogueRole.USER }
+            ?.content
+            ?.trim()
+            .orEmpty()
+        if (latestUserTurn.isBlank()) return null
+        val normalized = normalizePayload(latestUserTurn)
+        val matchedPattern = TEMPORAL_RECALL_INTENT_PATTERNS.firstOrNull { it.regex.containsMatchIn(normalized) }
+            ?: return null
+
+        val now = Instant.now()
+        val (startTime, endTime) = resolveTemporalWindow(matchedPattern.label, normalized, now)
+        val keywordSearch = extractTopicKeyword(normalized)
+
+        return TemporalRecallIntent(
+            patternLabel = matchedPattern.label,
+            startTime = startTime,
+            endTime = endTime,
+            keywordSearch = keywordSearch,
+            latestUserMessagePreview = TextSecurity.preview(latestUserTurn, TEMPORAL_INTENT_PREVIEW_MAX_CHARS),
+        )
+    }
+
+    private fun resolveTemporalWindow(
+        patternLabel: String,
+        normalizedText: String,
+        now: Instant,
+    ): Pair<Instant?, Instant?> {
+        return when (patternLabel) {
+            "relative_time_earlier" -> {
+                val minutes = when {
+                    normalizedText.contains("minutes") -> WINDOW_MINUTES_SHORT
+                    normalizedText.contains("hours") -> WINDOW_MINUTES_MEDIUM
+                    else -> WINDOW_MINUTES_MEDIUM
+                }
+                Pair(now.minus(Duration.ofMinutes(minutes)), now)
+            }
+            "relative_time_period" -> when {
+                normalizedText.contains("yesterday") ->
+                    Pair(now.minus(Duration.ofHours(WINDOW_HOURS_YESTERDAY_START)), now.minus(Duration.ofHours(WINDOW_HOURS_YESTERDAY_END)))
+                normalizedText.contains("last week") ->
+                    Pair(now.minus(Duration.ofDays(WINDOW_DAYS_WEEK)), now)
+                normalizedText.contains("last hour") ->
+                    Pair(now.minus(Duration.ofHours(1)), now)
+                normalizedText.contains("last month") ->
+                    Pair(now.minus(Duration.ofDays(WINDOW_DAYS_MONTH)), now)
+                normalizedText.contains("last night") ->
+                    Pair(now.minus(Duration.ofHours(WINDOW_HOURS_LAST_NIGHT_START)), now.minus(Duration.ofHours(WINDOW_HOURS_LAST_NIGHT_END)))
+                normalizedText.contains("last session") || normalizedText.contains("last time") ->
+                    Pair(now.minus(Duration.ofHours(WINDOW_HOURS_DEFAULT)), now)
+                else ->
+                    Pair(now.minus(Duration.ofHours(WINDOW_HOURS_DEFAULT)), now)
+            }
+            "absolute_time_reference" ->
+                Pair(now.minus(Duration.ofHours(WINDOW_HOURS_DEFAULT)), now)
+            "what_did_i_ask", "what_did_you_do", "what_happened",
+            "summarize_session", "topic_recall", "working_on_recall" ->
+                Pair(now.minus(Duration.ofHours(WINDOW_HOURS_DEFAULT)), now)
+            else -> Pair(null, null)
+        }
+    }
+
+    private fun extractTopicKeyword(normalizedText: String): String? {
+        val aboutMatch = TOPIC_KEYWORD_REGEX.find(normalizedText) ?: return null
+        val topic = aboutMatch.groupValues.getOrNull(1)?.trim() ?: return null
+        return topic.takeIf { it.length in TOPIC_KEYWORD_MIN_LENGTH..TOPIC_KEYWORD_MAX_LENGTH }
+    }
+
+    private fun formatEpisodicRecall(recall: LogbookRecall): String {
+        val lines = recall.entries.map { entry ->
+            val ts = entry.ts.toString().substringBefore('.')
+            val event = entry.eventType.dbValue()
+            val summary = TextSecurity.preview(entry.summary, EPISODIC_RECALL_ENTRY_MAX_CHARS)
+            val action = entry.actionType?.let { " [$it]" } ?: ""
+            "$ts $event$action: $summary"
+        }
+        val truncationNote = if (recall.truncated) ", truncated" else ""
+        val header = "Episodic timeline (${recall.entries.size} of ${recall.totalMatched} events$truncationNote):"
+        val body = lines.joinToString("\n")
+        val full = "$header\n$body"
+        return TextSecurity.clamp(full, config.logbook.episodicRecallMaxChars)
+    }
+
     private fun emitMemoryPersistenceSkipped(
         trigger: String,
         stepIndex: Int,
@@ -539,6 +792,14 @@ internal class MemoryCoordinator(
         val latestUserMessagePreview: String,
     )
 
+    private data class TemporalRecallIntent(
+        val patternLabel: String,
+        val startTime: Instant?,
+        val endTime: Instant?,
+        val keywordSearch: String?,
+        val latestUserMessagePreview: String,
+    )
+
     private data class RecallEchoEvaluation(
         val isEcho: Boolean,
         val mode: String? = null,
@@ -561,9 +822,32 @@ internal class MemoryCoordinator(
         const val REASON_CODE_CONFIDENCE_BELOW_THRESHOLD: String = "confidence_below_threshold"
         const val REASON_CODE_RECALL_ECHO: String = "recall_echo_suppression"
         const val REASON_CODE_DUPLICATE_FINGERPRINT: String = "duplicate_recent_fingerprint"
+        const val LOGBOOK_IMPRINT_PREVIEW_CHARS: Int = 160
+
+        // --- Temporal recall intent constants ---
+        const val TEMPORAL_INTENT_PREVIEW_MAX_CHARS: Int = 180
+        const val EPISODIC_RECALL_ENTRY_MAX_CHARS: Int = 120
+        const val TOPIC_KEYWORD_MIN_LENGTH: Int = 2
+        const val TOPIC_KEYWORD_MAX_LENGTH: Int = 80
+        const val MAX_EPISODIC_VECTOR_CUES: Int = 5
+        const val WINDOW_MINUTES_SHORT: Long = 30
+        const val WINDOW_MINUTES_MEDIUM: Long = 120
+        const val WINDOW_HOURS_DEFAULT: Long = 24
+        const val WINDOW_HOURS_YESTERDAY_START: Long = 48
+        const val WINDOW_HOURS_YESTERDAY_END: Long = 24
+        const val WINDOW_HOURS_LAST_NIGHT_START: Long = 18
+        const val WINDOW_HOURS_LAST_NIGHT_END: Long = 6
+        const val WINDOW_DAYS_WEEK: Long = 7
+        const val WINDOW_DAYS_MONTH: Long = 30
 
         val RECALL_ECHO_NON_ALPHANUMERIC_REGEX: Regex = Regex("[^a-z0-9]+")
         val RECALL_ECHO_WHITESPACE_REGEX: Regex = Regex("\\s+")
+        val TOPIC_KEYWORD_REGEX: Regex = Regex("""\babout\s+(.+?)(?:\?|$)""")
+
+        val VECTOR_CUE_EVENT_TYPES: Set<EpisodicEventType> = setOf(
+            EpisodicEventType.INPUT_RECEIVED,
+            EpisodicEventType.ANSWER_DELIVERED,
+        )
 
         val EXPLICIT_REMEMBER_INTENT_PATTERNS: List<IntentPattern> = listOf(
             IntentPattern(
@@ -578,6 +862,27 @@ internal class MemoryCoordinator(
                 label = "retention_directive",
                 regex = Regex("""\b(don't forget|do not forget)\b""")
             )
+        )
+
+        val TEMPORAL_RECALL_INTENT_PATTERNS: List<IntentPattern> = listOf(
+            IntentPattern("what_did_i_ask",
+                Regex("""\bwhat did (i|we) (ask|say|discuss|talk about|mention|request)\b""")),
+            IntentPattern("what_did_you_do",
+                Regex("""\bwhat did you (do|say|answer|respond|suggest|recommend)\b""")),
+            IntentPattern("what_happened",
+                Regex("""\bwhat (happened|was (happening|going on|discussed))\b""")),
+            IntentPattern("summarize_session",
+                Regex("""\b(summarize|summary of|recap|review)\b.*(session|conversation|work|discussion|chat|history)\b""")),
+            IntentPattern("relative_time_earlier",
+                Regex("""\b(earlier|previously|before this|a while ago|recently|a (few|couple) (minutes?|hours?|moments?) ago)\b""")),
+            IntentPattern("relative_time_period",
+                Regex("""\b(yesterday|last (week|hour|night|month|session|time)|today|this (morning|afternoon|evening|week))\b""")),
+            IntentPattern("absolute_time_reference",
+                Regex("""\b(at \d{1,2}(:\d{2})?\s*(am|pm)?|on (monday|tuesday|wednesday|thursday|friday|saturday|sunday))\b""")),
+            IntentPattern("topic_recall",
+                Regex("""\b(when did (i|we) (ask|talk|discuss)|what did (i|we) (discuss|say) about)\b""")),
+            IntentPattern("working_on_recall",
+                Regex("""\bwhat was (i|we) (working on|doing)\b""")),
         )
     }
 }

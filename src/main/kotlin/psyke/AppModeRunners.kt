@@ -4,6 +4,8 @@ import mu.KotlinLogging
 import psyke.agent.core.AgentConfig
 import psyke.agent.ego.Ego
 import psyke.agent.ego.LlmEgoPlanner
+import psyke.agent.memory.episodic.Logbook
+import psyke.agent.memory.episodic.SqliteLogbook
 import psyke.agent.memory.longterm.Hippocampus
 import psyke.agent.ego.LlmMetaReasoner
 import psyke.agent.memory.longterm.LlmLongTermMemoryAdvisor
@@ -775,6 +777,8 @@ internal object AppModeRunners {
                                                         AgentEvents.warning("Long-term memory is unavailable: $memoryProviderDetail")
                                                     )
                                                 }
+                                                val logbook = createLogbookIfEnabled(config)
+                                                val logbookSummarizer = createLogbookSummarizer(config, longTermMemoryClient)
                                                 try {
                                                     Ego(
                                                         planner = planner,
@@ -784,10 +788,13 @@ internal object AppModeRunners {
                                                         hippocampus = hippocampus,
                                                         metaReasoner = metaReasoner,
                                                         longTermMemoryAdvisor = longTermMemoryAdvisor,
-                                                        instrumentation = instrumentation
+                                                        instrumentation = instrumentation,
+                                                        logbook = logbook,
+                                                        logbookSummarizer = logbookSummarizer,
                                                     ).runInteractive()
                                                 } finally {
                                                     hippocampus.close()
+                                                    closeQuietly(logbook)
                                                 }
                                             } finally {
                                                 closeQuietly(activeFetchTool)
@@ -1120,6 +1127,29 @@ internal object AppModeRunners {
         return "MCP $capabilityName command is configured but not executable in PATH: ${nonBlank.joinToString(" | ")}"
     }
     
+    private fun createLogbookIfEnabled(config: AgentConfig): Logbook? {
+        if (!config.logbook.enabled) return null
+        return try {
+            SqliteLogbook(config.logbook)
+        } catch (ex: Exception) {
+            logger.warn(ex) { "Episodic logbook initialization failed; continuing without." }
+            null
+        }
+    }
+
+    private fun createLogbookSummarizer(
+        config: AgentConfig,
+        memoryClient: psyke.llm.ChatModelClient,
+    ): psyke.agent.memory.episodic.LogbookSummarizer {
+        if (!config.logbook.useLlmSummarizer) {
+            return psyke.agent.memory.episodic.DeterministicLogbookSummarizer(config.logbook)
+        }
+        return psyke.agent.memory.episodic.LlmLogbookSummarizer(
+            modelClient = memoryClient,
+            config = config,
+        )
+    }
+
     private fun closeQuietly(value: Any?) {
         val closeable = value as? AutoCloseable ?: return
         try {

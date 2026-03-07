@@ -26,6 +26,8 @@ flowchart LR
     MC --> MS["MemoryStore (Short-term)"]
     MC --> H["Hippocampus (Long-term Recall/Imprint)"]
     MC --> LTM["LlmLongTermMemoryAdvisor"]
+    MC --> LB["Logbook (Episodic, SQLite+FTS5)"]
+    MC -.->|"temporal intent → episodic recall + vector cues"| LB
 
     M --> WS["Web Search Handler/Engine"]
     CfgWS["WebSearch Provider Config (provider/key/base/model)"] --> WS

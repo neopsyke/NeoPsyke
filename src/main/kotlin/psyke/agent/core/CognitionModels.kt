@@ -5,6 +5,7 @@ data class PlannerContext(
     val queue: QueueSnapshot,
     val shortTermContextSummary: String = "",
     val longTermMemoryRecall: String = "",
+    val episodicRecall: String = "",
     val evidenceHints: String = "",
     val deliberation: DeliberationState = DeliberationState(),
     val metaGuidance: String = "",

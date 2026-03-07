@@ -5,6 +5,9 @@ import psyke.agent.core.*
 import psyke.agent.cortex.motor.MotorCortex
 import psyke.agent.cortex.sensory.SensoryCortex
 import psyke.agent.cortex.sensory.SensorySignal
+import psyke.agent.memory.episodic.EpisodicEventType
+import psyke.agent.memory.episodic.Logbook
+import psyke.agent.memory.episodic.LogbookSummarizer
 import psyke.agent.memory.longterm.Hippocampus
 import psyke.agent.memory.longterm.LongTermMemoryAdvisor
 import psyke.agent.memory.longterm.NoopHippocampus
@@ -33,6 +36,9 @@ class Ego(
     private val sensoryCortex: SensoryCortex = SensoryCortex.stdin(config),
     private val memoryStore: MemoryStore = MemoryStore(config.memory.maxShortTermContextChars),
     private val instrumentation: AgentInstrumentation = NoopAgentInstrumentation,
+    private val logbook: Logbook? = null,
+    private val logbookSummarizer: LogbookSummarizer? = null,
+    private val runId: String? = null,
 ) {
     interface Planner {
         fun decide(trigger: EgoTrigger, context: PlannerContext): EgoDecision
@@ -41,7 +47,12 @@ class Ego(
     private val scheduler = AttentionScheduler(config)
     private val dialogue = ArrayDeque<DialogueTurn>()
     private val deliberation = DeliberationEngine(config, instrumentation, metaReasoner)
-    private val memory = MemoryCoordinator(hippocampus, longTermMemoryAdvisor, config, instrumentation, memoryStore)
+    private val memory = MemoryCoordinator(
+        hippocampus, longTermMemoryAdvisor, config, instrumentation, memoryStore,
+        logbook = logbook,
+        logbookSummarizer = logbookSummarizer ?: psyke.agent.memory.episodic.DeterministicLogbookSummarizer(config.logbook),
+        runId = runId,
+    )
     private val planCountByInput = mutableMapOf<Long?, Int>()
     private val emittedPlanHashes = mutableMapOf<Long?, MutableSet<String>>()
 
@@ -158,6 +169,7 @@ class Ego(
         )
         val finalDecision = deliberation.maybeApplyPressureOverride(decision, assessment)
         deliberation.onPlannerDecision(finalDecision)
+        journalPlannerDecision(finalDecision)
         applyDecision(
             finalDecision,
             nextPassCount = 0,
@@ -185,6 +197,7 @@ class Ego(
         )
         val finalDecision = deliberation.maybeApplyPressureOverride(decision, assessment)
         deliberation.onPlannerDecision(finalDecision)
+        journalPlannerDecision(finalDecision)
         applyDecision(
             finalDecision,
             nextPassCount = thought.passes + 1,
@@ -207,6 +220,11 @@ class Ego(
             val outcome = executeActionSafely(action) ?: return
             instrumentation.emit(AgentEvents.actionExecuted(action, outcome.statusSummary))
             if (action.type == ActionType.ANSWER) {
+                memory.journal(
+                    EpisodicEventType.ANSWER_DELIVERED,
+                    "Answered (fallback): ${TextSecurity.preview(action.summary, JOURNAL_SUMMARY_PREVIEW_CHARS)}",
+                    actionType = "answer",
+                )
                 val enqueuedAtMs = action.rootInputEnqueuedAtMs
                 if (enqueuedAtMs != null) {
                     val latencyMs = (System.currentTimeMillis() - enqueuedAtMs).coerceAtLeast(0L)
@@ -256,6 +274,11 @@ class Ego(
                 allowFallbackExplanation = true
             )
             instrumentation.emit(AgentEvents.actionDenied(action, gateDecision.reason, gateDecision.reasonCode))
+            memory.journal(
+                EpisodicEventType.ACTION_DENIED,
+                "Denied ${action.type.name.lowercase()}: ${gateDecision.reason}",
+                actionType = action.type.name.lowercase(),
+            )
             if (!queued) {
                 instrumentation.emit(AgentEvents.warning("Failed to enqueue denial thought."))
                 recordQueueSaturation(
@@ -270,6 +293,19 @@ class Ego(
 
         val outcome = executeActionSafely(action) ?: return
         instrumentation.emit(AgentEvents.actionExecuted(action, outcome.statusSummary))
+        if (action.type == ActionType.ANSWER) {
+            memory.journal(
+                EpisodicEventType.ANSWER_DELIVERED,
+                "Answered: ${TextSecurity.preview(action.summary, JOURNAL_SUMMARY_PREVIEW_CHARS)}",
+                actionType = "answer",
+            )
+        } else {
+            memory.journal(
+                EpisodicEventType.ACTION_EXECUTED,
+                "Executed ${action.type.name.lowercase()}: ${TextSecurity.preview(outcome.statusSummary, JOURNAL_SUMMARY_PREVIEW_CHARS)}",
+                actionType = action.type.name.lowercase(),
+            )
+        }
         val observed = deliberation.observedEvidence(action, outcome)
         deliberation.recordEvidenceProgress(action, outcome, observed)
         deliberation.onActionExecuted(action, observed)
@@ -735,15 +771,19 @@ class Ego(
     }
 
     private fun plannerContext(trigger: EgoTrigger, rootInputEnqueuedAtMs: Long? = null): PlannerContext {
+        val recentDialogue = dialogue.takeLast(12)
         val shortTermSummary = memory.currentShortTermSummary()
-        val longTermRecall = memory.recall(trigger, shortTermSummary, dialogue.takeLast(12))
+        val episodicCues = memory.recallEpisodicAsVectorCues(recentDialogue)
+        val longTermRecall = memory.recall(trigger, shortTermSummary, recentDialogue, episodicCues)
+        val episodicRecall = memory.recallEpisodic(trigger, recentDialogue)
         val disabled = deliberation.disabledActionTypes(rootInputEnqueuedAtMs)
         val evidenceHints = buildEvidenceHints(rootInputEnqueuedAtMs)
         return PlannerContext(
-            recentDialogue = dialogue.takeLast(12),
+            recentDialogue = recentDialogue,
             queue = scheduler.queueSnapshot(),
             shortTermContextSummary = shortTermSummary,
             longTermMemoryRecall = longTermRecall,
+            episodicRecall = episodicRecall,
             evidenceHints = evidenceHints,
             deliberation = deliberation.snapshot(),
             metaGuidance = deliberation.guidance(),
@@ -911,10 +951,31 @@ class Ego(
             ActionType.MEMORY -> "Memory operation completed."
         }
 
+    private fun journalPlannerDecision(decision: EgoDecision) {
+        val (label, actionType) = when (decision) {
+            is EgoDecision.EnqueueThought -> "thought" to null
+            is EgoDecision.ProposeAction -> "action: ${decision.actionType.name.lowercase()}" to decision.actionType.name.lowercase()
+            is EgoDecision.EnqueuePlan -> "plan" to null
+            is EgoDecision.Noop -> "noop" to null
+        }
+        val summary = when (decision) {
+            is EgoDecision.ProposeAction ->
+                "Decision: $label — ${TextSecurity.preview(decision.summary, JOURNAL_SUMMARY_PREVIEW_CHARS)}"
+            is EgoDecision.EnqueueThought ->
+                "Decision: $label — ${TextSecurity.preview(decision.content, JOURNAL_SUMMARY_PREVIEW_CHARS)}"
+            is EgoDecision.EnqueuePlan ->
+                "Decision: plan — ${TextSecurity.preview(decision.goal, JOURNAL_SUMMARY_PREVIEW_CHARS)}"
+            is EgoDecision.Noop ->
+                "Decision: noop — ${decision.reason}"
+        }
+        memory.journal(EpisodicEventType.PLANNER_DECISION, summary, actionType = actionType)
+    }
+
     private companion object {
         const val PLAN_ID_LENGTH: Int = 8
         const val FOLLOW_UP_SIGNAL_MAX_CHARS: Int = 420
         const val MAX_EVIDENCE_HINT_SIGNALS: Int = 3
         const val MAX_EVIDENCE_HINT_CHARS: Int = 420
+        const val JOURNAL_SUMMARY_PREVIEW_CHARS: Int = 160
     }
 }
