@@ -5,6 +5,7 @@ import psyke.config.RuntimeDefaultsConfigLoader
 import psyke.llm.ChatCallObserver
 import psyke.llm.ChatCallRecord
 import psyke.llm.ChatCallStatus
+import psyke.llm.LlmRoleLabels
 import psyke.llm.PersistentMetricsChatCallObserver
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
@@ -589,6 +590,42 @@ class SqliteMetricsRuntime(
                 }
             }
 
+            val runTokenRows = queryTokenRows(
+                query = """
+                SELECT provider, actor, call_site, action_type,
+                       prompt_tokens, completion_tokens, total_tokens
+                FROM llm_calls
+                WHERE run_id = ?
+                """.trimIndent()
+            ) { statement ->
+                statement.setString(1, runId)
+            }
+
+            val persistentTokenRows = if (provider == "multi") {
+                queryTokenRows(
+                    query = """
+                    SELECT provider, actor, call_site, action_type,
+                           prompt_tokens, completion_tokens, total_tokens
+                    FROM llm_calls
+                    WHERE key_fingerprint = ?
+                    """.trimIndent()
+                ) { statement ->
+                    statement.setString(1, keyFingerprint)
+                }
+            } else {
+                queryTokenRows(
+                    query = """
+                    SELECT provider, actor, call_site, action_type,
+                           prompt_tokens, completion_tokens, total_tokens
+                    FROM llm_calls
+                    WHERE key_fingerprint = ? AND provider = ?
+                    """.trimIndent()
+                ) { statement ->
+                    statement.setString(1, keyFingerprint)
+                    statement.setString(2, provider)
+                }
+            }
+
             return MetricsSnapshot(
                 runId = runId,
                 provider = provider,
@@ -600,10 +637,62 @@ class SqliteMetricsRuntime(
                 runSuperegoTokens = runSuperegoTokens,
                 persistentSuperegoTokens = persistentSuperegoTokens,
                 runActionCallsByType = runActionCallsByType,
-                persistentActionCallsByType = persistentActionCallsByType
+                persistentActionCallsByType = persistentActionCallsByType,
+                runTokensByProvider = aggregateTokensByProvider(runTokenRows),
+                persistentTokensByProvider = aggregateTokensByProvider(persistentTokenRows),
+                runTokensByRole = aggregateTokensByRole(runTokenRows),
+                persistentTokensByRole = aggregateTokensByRole(persistentTokenRows)
             )
         }
     }
+
+    private fun queryTokenRows(
+        query: String,
+        bind: (java.sql.PreparedStatement) -> Unit,
+    ): List<CallTokenRow> =
+        connection.prepareStatement(query).use { statement ->
+            bind(statement)
+            statement.executeQuery().use { rs ->
+                buildList {
+                    while (rs.next()) {
+                        add(
+                            CallTokenRow(
+                                provider = rs.getString("provider").orEmpty().ifBlank { "unknown" },
+                                actor = rs.getString("actor"),
+                                callSite = rs.getString("call_site"),
+                                actionType = rs.getString("action_type"),
+                                totalTokens = resolveTotalTokens(rs)
+                            )
+                        )
+                    }
+                }
+            }
+        }
+
+    private fun resolveTotalTokens(rs: java.sql.ResultSet): Long {
+        val totalTokens = rs.getLong("total_tokens")
+        if (!rs.wasNull()) {
+            return totalTokens
+        }
+        val promptTokens = rs.getLong("prompt_tokens").let { if (rs.wasNull()) 0L else it }
+        val completionTokens = rs.getLong("completion_tokens").let { if (rs.wasNull()) 0L else it }
+        return promptTokens + completionTokens
+    }
+
+    private fun aggregateTokensByProvider(rows: List<CallTokenRow>): Map<String, Long> =
+        rows.groupingBy { it.provider }
+            .fold(0L) { acc, row -> acc + row.totalTokens }
+            .toSortedMap()
+
+    private fun aggregateTokensByRole(rows: List<CallTokenRow>): Map<String, Long> =
+        rows.groupingBy { row ->
+            LlmRoleLabels.classify(
+                actor = row.actor,
+                callSite = row.callSite,
+                actionType = row.actionType
+            )
+        }.fold(0L) { acc, row -> acc + row.totalTokens }
+            .toSortedMap()
 
     private fun startRun(egoModel: String, superegoModel: String) {
         synchronized(connection) {
@@ -687,6 +776,14 @@ class SqliteMetricsRuntime(
             }
         }
     }
+
+    private data class CallTokenRow(
+        val provider: String,
+        val actor: String?,
+        val callSite: String?,
+        val actionType: String?,
+        val totalTokens: Long,
+    )
 
     private companion object {
         private class SqlitePersistingChatCallObserver(

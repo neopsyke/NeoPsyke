@@ -40,10 +40,15 @@ private class HttpModelsProviderStatusChecker(
     private val apiKey: String,
     private val baseUrl: String,
     private val timeoutMs: Long,
+    private val modelsPath: String = "models",
+    private val apiKeyHeaderName: String = "Authorization",
+    private val apiKeyHeaderValuePrefix: String = "Bearer ",
+    private val extraHeaders: Map<String, String> = emptyMap(),
 ) : LlmProviderStatusChecker {
     override fun check(): ProviderStatus {
+        val normalizedBaseUrl = baseUrl.trimEnd('/')
         val host = try {
-            URI(baseUrl).host?.ifBlank { null } ?: return unavailable("Invalid $providerLabel base URL: $baseUrl")
+            URI(normalizedBaseUrl).host?.ifBlank { null } ?: return unavailable("Invalid $providerLabel base URL: $baseUrl")
         } catch (_: Exception) {
             return unavailable("Invalid $providerLabel base URL: $baseUrl")
         }
@@ -56,9 +61,12 @@ private class HttpModelsProviderStatusChecker(
             .callTimeout(Duration.ofMillis(timeoutMs))
             .build()
         val request = Request.Builder()
-            .url("$baseUrl/models")
-            .header("Authorization", "Bearer $apiKey")
+            .url(buildHealthModelsUrl(baseUrl = normalizedBaseUrl, modelsPath = modelsPath))
+            .header(apiKeyHeaderName, "$apiKeyHeaderValuePrefix$apiKey")
             .header("Accept", "application/json")
+            .apply {
+                extraHeaders.forEach { (name, value) -> header(name, value) }
+            }
             .get()
             .build()
 
@@ -123,14 +131,33 @@ class GeminiProviderStatusChecker(
     private val baseUrl: String = "https://generativelanguage.googleapis.com/v1beta/openai/",
     private val timeoutMs: Long = 4_000,
 ) : LlmProviderStatusChecker {
-    override fun check(): ProviderStatus =
-        HttpModelsProviderStatusChecker(
+    override fun check(): ProviderStatus {
+        val primary = HttpModelsProviderStatusChecker(
             providerLabel = "google",
             missingApiKeyEnvVar = "GOOGLE_API_KEY",
             apiKey = apiKey,
             baseUrl = baseUrl,
             timeoutMs = timeoutMs
         ).check()
+
+        if (!primary.isDegradedHttp404()) {
+            return primary
+        }
+        val nativeBaseUrl = deriveGoogleNativeModelsBaseUrl(baseUrl) ?: return primary
+
+        // Google OpenAI-compat can return 404 for /openai/models while native /models is healthy.
+        return HttpModelsProviderStatusChecker(
+            providerLabel = "google",
+            missingApiKeyEnvVar = "GOOGLE_API_KEY",
+            apiKey = apiKey,
+            baseUrl = nativeBaseUrl,
+            timeoutMs = timeoutMs,
+            modelsPath = "models",
+            apiKeyHeaderName = "x-goog-api-key",
+            apiKeyHeaderValuePrefix = "",
+            extraHeaders = mapOf("Authorization" to "Bearer $apiKey")
+        ).check()
+    }
 }
 
 class GroqProviderStatusChecker(
@@ -206,3 +233,20 @@ private fun resolveProviderStatusLogPath(): Path {
     }
     return Paths.get(System.getProperty("user.dir")).resolve(".psyke").resolve("logs").resolve("provider-status.log")
 }
+
+internal fun buildHealthModelsUrl(baseUrl: String, modelsPath: String = "models"): String {
+    val normalizedBaseUrl = baseUrl.trim().trimEnd('/')
+    val normalizedModelsPath = modelsPath.trim().trimStart('/')
+    return "$normalizedBaseUrl/$normalizedModelsPath"
+}
+
+internal fun deriveGoogleNativeModelsBaseUrl(baseUrl: String): String? {
+    val normalizedBaseUrl = baseUrl.trim().trimEnd('/')
+    if (normalizedBaseUrl.endsWith("/openai")) {
+        return normalizedBaseUrl.removeSuffix("/openai")
+    }
+    return null
+}
+
+private fun ProviderStatus.isDegradedHttp404(): Boolean =
+    state == ProviderHealthState.DEGRADED && detail.contains("HTTP 404")

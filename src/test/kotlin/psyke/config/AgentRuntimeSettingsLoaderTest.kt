@@ -17,6 +17,9 @@ class AgentRuntimeSettingsLoaderTest {
         assertEquals(180, settings.agentConfig.planner.maxLoopStepsPerInput)
         assertEquals(0, settings.agentConfig.loopDelayMs)
         assertEquals(2, settings.agentConfig.planner.llmRetryAttempts)
+        assertEquals(0, settings.agentConfig.planner.maxRunTotalTokens)
+        assertEquals(0, settings.agentConfig.planner.maxRunTokensPerProvider)
+        assertEquals(0, settings.agentConfig.planner.maxRunTokensPerRole)
         assertEquals(192, settings.agentConfig.superego.maxCompletionTokens)
         assertEquals(true, settings.agentConfig.memory.longTermMemoryForceAssessOnTerminalAnswer)
         assertTrue(settings.dashboardEnabled)
@@ -41,6 +44,9 @@ class AgentRuntimeSettingsLoaderTest {
             agent:
               max_loop_steps_per_input: 21
               max_prompt_tokens: 999
+              max_run_total_tokens: 5000
+              max_run_tokens_per_provider: 3200
+              max_run_tokens_per_role: 1800
               llm_retry_attempts: 4
             """.trimIndent()
         )
@@ -56,6 +62,9 @@ class AgentRuntimeSettingsLoaderTest {
         assertEquals("local", settings.evalDefaultStage)
         assertEquals(21, settings.agentConfig.planner.maxLoopStepsPerInput)
         assertEquals(999, settings.agentConfig.planner.maxPromptTokens)
+        assertEquals(5000, settings.agentConfig.planner.maxRunTotalTokens)
+        assertEquals(3200, settings.agentConfig.planner.maxRunTokensPerProvider)
+        assertEquals(1800, settings.agentConfig.planner.maxRunTokensPerRole)
         assertEquals(4, settings.agentConfig.planner.llmRetryAttempts)
     }
 
@@ -74,6 +83,7 @@ class AgentRuntimeSettingsLoaderTest {
               default_stage: yaml-stage
             agent:
               max_loop_steps_per_input: 21
+              max_run_total_tokens: 5000
               llm_retry_attempts: 4
             """.trimIndent()
         )
@@ -82,6 +92,7 @@ class AgentRuntimeSettingsLoaderTest {
             env = mapOf(
                 "EGO_MAX_LOOP_STEPS" to "77",
                 "EGO_LLM_RETRY_ATTEMPTS" to "3",
+                "EGO_MAX_RUN_TOTAL_TOKENS" to "7000",
                 "PSYKE_DASHBOARD_ENABLED" to "true",
                 "PSYKE_DASHBOARD_PORT" to "9900",
                 "PSYKE_EVAL_MAX_RAW_RESPONSE_CHARS" to "5555",
@@ -92,6 +103,7 @@ class AgentRuntimeSettingsLoaderTest {
 
         assertEquals(77, settings.agentConfig.planner.maxLoopStepsPerInput)
         assertEquals(3, settings.agentConfig.planner.llmRetryAttempts)
+        assertEquals(7000, settings.agentConfig.planner.maxRunTotalTokens)
         assertEquals(true, settings.dashboardEnabled)
         assertEquals(9900, settings.dashboardPort)
         assertEquals(5555, settings.evalMaxRawResponseChars)

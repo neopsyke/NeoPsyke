@@ -17,6 +17,7 @@ flowchart LR
     P --> AV["Action Verifier LLM Call"]
     E --> S["Superego"]
     E --> M["MotorCortex"]
+    E --> BG["LLM Token Budget Gate"]
 
     E --> DE["DeliberationEngine"]
     DE --> MR["LlmMetaReasoner"]
@@ -34,6 +35,12 @@ flowchart LR
     MT --> PID
     MF --> PID
     PID --> E
+
+    BG --> P
+    BG --> S
+    BG --> MR
+    BG --> LTM
+    BG --> WS
 
     E --> I["InstrumentationBus + Metrics"]
 ```
@@ -115,6 +122,18 @@ flowchart LR
     D -->|fail| C
     E --> F["Emit action_capabilities(memory=available)"]
     C --> G["Emit action_capabilities(memory=unavailable + warning)"]
+```
+
+## 2.6) Interactive Startup LLM Provider Health Gate
+
+```mermaid
+flowchart LR
+    A["runInteractiveMode"] --> B["Per-role provider health probe: GET base_url/models"]
+    B --> C["Normalize URL join (trim trailing slash)"]
+    C --> D{"Provider is Google and probe is HTTP 404?"}
+    D -->|yes| E["Fallback probe: GET /v1beta/models (native Gemini endpoint)"]
+    D -->|no| F["Report initial probe status"]
+    E --> G["Report fallback status"]
 ```
 
 ## 3) Convergence and Fallback States

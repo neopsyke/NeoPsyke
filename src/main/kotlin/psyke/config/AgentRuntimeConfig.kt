@@ -55,6 +55,9 @@ private data class AgentRuntimeYamlAgent(
     val maxPromptTokens: Int? = null,
     val maxCompletionTokens: Int? = null,
     val llmRetryAttempts: Int? = null,
+    val maxRunTotalTokens: Int? = null,
+    val maxRunTokensPerProvider: Int? = null,
+    val maxRunTokensPerRole: Int? = null,
     val superegoMaxCompletionTokens: Int? = null,
     val searchResultCount: Int? = null,
     val mcpCallTimeoutMs: Long? = null,
@@ -125,6 +128,21 @@ object AgentRuntimeSettingsLoader {
                     defaults.planner.maxCompletionTokens
                 ),
                 llmRetryAttempts = readPositiveInt(env["EGO_LLM_RETRY_ATTEMPTS"], agentYaml.llmRetryAttempts, defaults.planner.llmRetryAttempts),
+                maxRunTotalTokens = readNonNegativeInt(
+                    env["EGO_MAX_RUN_TOTAL_TOKENS"],
+                    agentYaml.maxRunTotalTokens,
+                    defaults.planner.maxRunTotalTokens
+                ),
+                maxRunTokensPerProvider = readNonNegativeInt(
+                    env["EGO_MAX_RUN_TOKENS_PER_PROVIDER"],
+                    agentYaml.maxRunTokensPerProvider,
+                    defaults.planner.maxRunTokensPerProvider
+                ),
+                maxRunTokensPerRole = readNonNegativeInt(
+                    env["EGO_MAX_RUN_TOKENS_PER_ROLE"],
+                    agentYaml.maxRunTokensPerRole,
+                    defaults.planner.maxRunTokensPerRole
+                ),
             ),
             superego = SuperegoConfig(
                 maxCompletionTokens = readPositiveInt(

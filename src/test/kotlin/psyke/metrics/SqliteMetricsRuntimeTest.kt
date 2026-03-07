@@ -190,4 +190,68 @@ class SqliteMetricsRuntimeTest {
             Files.deleteIfExists(dbPath.resolveSibling("metrics.salt"))
         }
     }
+
+    @Test
+    fun `snapshot includes token breakdowns by provider and role`() {
+        val dbPath = Files.createTempFile("psyke-metrics-role-provider-breakdown-test", ".db")
+        val previous = System.getProperty("psyke.metrics.db")
+        System.setProperty("psyke.metrics.db", dbPath.toString())
+        try {
+            SqliteMetricsRuntime(
+                provider = "multi",
+                apiKey = "same-key",
+                egoModel = "planner-model",
+                superegoModel = "superego-model"
+            ).use { metrics ->
+                metrics.chatCallObserver("groq").onChatCall(
+                    ChatCallRecord(
+                        model = "planner-model",
+                        metadata = ChatCallMetadata(actor = "ego", callSite = "input"),
+                        latencyMs = 10,
+                        totalTokens = 40,
+                        status = ChatCallStatus.OK
+                    )
+                )
+                metrics.chatCallObserver("mistral").onChatCall(
+                    ChatCallRecord(
+                        model = "superego-model",
+                        metadata = ChatCallMetadata(actor = "superego", callSite = "action_review"),
+                        latencyMs = 11,
+                        totalTokens = 20,
+                        status = ChatCallStatus.OK
+                    )
+                )
+                metrics.chatCallObserver("mistral").onChatCall(
+                    ChatCallRecord(
+                        model = "meta-model",
+                        metadata = ChatCallMetadata(actor = "ego", callSite = "meta_reasoner"),
+                        latencyMs = 12,
+                        totalTokens = 10,
+                        status = ChatCallStatus.OK
+                    )
+                )
+
+                val snapshot = metrics.snapshot()
+                requireNotNull(snapshot)
+                assertEquals(40L, snapshot.runTokensByProvider["groq"])
+                assertEquals(30L, snapshot.runTokensByProvider["mistral"])
+                assertEquals(40L, snapshot.runTokensByRole["planner"])
+                assertEquals(20L, snapshot.runTokensByRole["superego"])
+                assertEquals(10L, snapshot.runTokensByRole["meta_reasoner"])
+                assertEquals(40L, snapshot.persistentTokensByProvider["groq"])
+                assertEquals(30L, snapshot.persistentTokensByProvider["mistral"])
+                assertEquals(40L, snapshot.persistentTokensByRole["planner"])
+                assertEquals(20L, snapshot.persistentTokensByRole["superego"])
+                assertEquals(10L, snapshot.persistentTokensByRole["meta_reasoner"])
+            }
+        } finally {
+            if (previous == null) {
+                System.clearProperty("psyke.metrics.db")
+            } else {
+                System.setProperty("psyke.metrics.db", previous)
+            }
+            Files.deleteIfExists(dbPath)
+            Files.deleteIfExists(dbPath.resolveSibling("metrics.salt"))
+        }
+    }
 }

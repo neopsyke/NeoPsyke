@@ -26,7 +26,14 @@ It is intentionally high-level and should stay aligned with the code.
   - if probe passes, memory is exposed as available and `McpHippocampus` is wired
   - if probe fails, memory is downgraded to noop for the run and reported unavailable
   - MCP memory server process now stays alive after `connect` until transport close so startup health checks can complete instead of racing a premature process exit
+- Interactive startup runs LLM provider health probes per configured cognitive role endpoint:
+  - probes use normalized URL joining (`base_url` + `/models`) so trailing slashes do not produce `//models`
+  - for Google `v1beta/openai` routes, an `HTTP 404` probe on `/openai/models` falls back to native `/v1beta/models` before reporting status
 - Instrumentation and metrics are wired before loop start and receive lifecycle events throughout.
+- Interactive startup wires a pre-call LLM token budget gate (`LlmTokenBudgetGate`) across all cognitive-role clients and web search:
+  - optional hard caps are configurable via `PlannerConfig` / `agent-runtime.yaml` (`max_run_total_tokens`, `max_run_tokens_per_provider`, `max_run_tokens_per_role`)
+  - limits are enforced before outbound model calls using conservative prompt/completion estimates
+  - default `0` keeps each cap disabled
 
 ## Main Loop (Ego)
 - File: `src/main/kotlin/psyke/agent/ego/Ego.kt`
@@ -197,6 +204,7 @@ It is intentionally high-level and should stay aligned with the code.
 
 ## Safety and Fallback Patterns
 - LLM callers use retry loops with bounded attempts (max 3).
+- A shared pre-call token budget gate can short-circuit outbound LLM calls when projected usage would exceed configured run caps (global, per-provider, or per-role).
 - Required JSON fields are validated after deserialization.
 - Chat clients treat blank assistant message content as transport/protocol failure so retries/fallbacks trigger upstream.
 - Prompt-injection mitigation is implemented as deterministic, model-agnostic guards outside Superego:

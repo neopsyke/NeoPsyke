@@ -58,10 +58,14 @@ import psyke.llm.GeminiChatClient
 import psyke.llm.GeminiProviderStatusChecker
 import psyke.llm.GroqChatClient
 import psyke.llm.GroqProviderStatusChecker
+import psyke.llm.LlmRoleLabels
+import psyke.llm.LlmTokenBudgetConfig
+import psyke.llm.LlmTokenBudgetGate
 import psyke.llm.MistralChatClient
 import psyke.llm.MistralProviderStatusChecker
 import psyke.llm.ProviderHealthState
 import psyke.llm.ProviderStatus
+import psyke.llm.TokenBudgetGuardedChatClient
 import psyke.llm.combineChatCallObservers
 import psyke.llm.reportProviderStatusAndDecide
 import psyke.integrations.groq.websearch.GroqConversationsWebSearchEngine
@@ -525,6 +529,9 @@ internal object AppModeRunners {
                                 "max_thought_passes" to config.planner.maxThoughtPasses,
                                 "max_prompt_tokens" to config.planner.maxPromptTokens,
                                 "max_completion_tokens" to config.planner.maxCompletionTokens,
+                                "max_run_total_tokens" to config.planner.maxRunTotalTokens,
+                                "max_run_tokens_per_provider" to config.planner.maxRunTokensPerProvider,
+                                "max_run_tokens_per_role" to config.planner.maxRunTokensPerRole,
                                 "max_pending_inputs" to config.maxPendingInputs,
                                 "max_pending_thoughts" to config.maxPendingThoughts,
                                 "max_pending_actions" to config.maxPendingActions,
@@ -583,6 +590,14 @@ internal object AppModeRunners {
                         metricsRuntime = metrics,
                         instrumentation = instrumentation
                     )
+                    val tokenBudgetGate = LlmTokenBudgetGate(
+                        metricsRuntime = metrics,
+                        config = LlmTokenBudgetConfig(
+                            maxRunTotalTokens = config.planner.maxRunTotalTokens,
+                            maxRunTokensPerProvider = config.planner.maxRunTokensPerProvider,
+                            maxRunTokensPerRole = config.planner.maxRunTokensPerRole
+                        )
+                    )
                     val callObserversByProvider = mutableMapOf<String, psyke.llm.ChatCallObserver?>()
                     fun callObserverForProvider(provider: String): psyke.llm.ChatCallObserver? {
                         return callObserversByProvider.getOrPut(provider) {
@@ -604,37 +619,62 @@ internal object AppModeRunners {
                     )
     
                     InstrumentedChatModelClient(
-                        delegate = createChatClient(
-                            endpoint = llm.planner,
-                            callObserver = callObserverForProvider(llm.planner.providerLabel)
+                        delegate = TokenBudgetGuardedChatClient(
+                            delegate = createChatClient(
+                                endpoint = llm.planner,
+                                callObserver = callObserverForProvider(llm.planner.providerLabel)
+                            ),
+                            budgetGate = tokenBudgetGate,
+                            provider = llm.planner.providerLabel,
+                            role = LlmRoleLabels.PLANNER
                         ),
                         hooks = listOf(rawResponseHook)
                     ).use { plannerClient ->
                         InstrumentedChatModelClient(
-                            delegate = createChatClient(
-                                endpoint = llm.actionVerifier,
-                                callObserver = callObserverForProvider(llm.actionVerifier.providerLabel)
+                            delegate = TokenBudgetGuardedChatClient(
+                                delegate = createChatClient(
+                                    endpoint = llm.actionVerifier,
+                                    callObserver = callObserverForProvider(llm.actionVerifier.providerLabel)
+                                ),
+                                budgetGate = tokenBudgetGate,
+                                provider = llm.actionVerifier.providerLabel,
+                                role = LlmRoleLabels.ACTION_VERIFIER
                             ),
                             hooks = listOf(rawResponseHook)
                         ).use { actionVerifierClient ->
                             InstrumentedChatModelClient(
-                                delegate = createChatClient(
-                                    endpoint = llm.superego,
-                                    callObserver = callObserverForProvider(llm.superego.providerLabel)
+                                delegate = TokenBudgetGuardedChatClient(
+                                    delegate = createChatClient(
+                                        endpoint = llm.superego,
+                                        callObserver = callObserverForProvider(llm.superego.providerLabel)
+                                    ),
+                                    budgetGate = tokenBudgetGate,
+                                    provider = llm.superego.providerLabel,
+                                    role = LlmRoleLabels.SUPEREGO
                                 ),
                                 hooks = listOf(rawResponseHook)
                             ).use { superegoClient ->
                                 InstrumentedChatModelClient(
-                                    delegate = createChatClient(
-                                        endpoint = llm.metaReasoner,
-                                        callObserver = callObserverForProvider(llm.metaReasoner.providerLabel)
+                                    delegate = TokenBudgetGuardedChatClient(
+                                        delegate = createChatClient(
+                                            endpoint = llm.metaReasoner,
+                                            callObserver = callObserverForProvider(llm.metaReasoner.providerLabel)
+                                        ),
+                                        budgetGate = tokenBudgetGate,
+                                        provider = llm.metaReasoner.providerLabel,
+                                        role = LlmRoleLabels.META_REASONER
                                     ),
                                     hooks = listOf(rawResponseHook)
                                 ).use { metaReasonerClient ->
                                     InstrumentedChatModelClient(
-                                        delegate = createChatClient(
-                                            endpoint = llm.memoryAdvisor,
-                                            callObserver = callObserverForProvider(llm.memoryAdvisor.providerLabel)
+                                        delegate = TokenBudgetGuardedChatClient(
+                                            delegate = createChatClient(
+                                                endpoint = llm.memoryAdvisor,
+                                                callObserver = callObserverForProvider(llm.memoryAdvisor.providerLabel)
+                                            ),
+                                            budgetGate = tokenBudgetGate,
+                                            provider = llm.memoryAdvisor.providerLabel,
+                                            role = LlmRoleLabels.MEMORY_ADVISOR
                                         ),
                                         hooks = listOf(rawResponseHook)
                                     ).use { longTermMemoryClient ->
@@ -659,7 +699,8 @@ internal object AppModeRunners {
                                             llm = llm,
                                             callObserver = webSearchCallObserver,
                                             instrumentation = instrumentation,
-                                            maxRawResponseChars = config.planner.maxActionPayloadChars
+                                            maxRawResponseChars = config.planner.maxActionPayloadChars,
+                                            tokenBudgetGate = tokenBudgetGate
                                         )
     
                                         webSearchRuntime.use { runtime ->
@@ -778,6 +819,7 @@ internal object AppModeRunners {
         callObserver: psyke.llm.ChatCallObserver?,
         instrumentation: psyke.instrumentation.AgentInstrumentation,
         maxRawResponseChars: Int,
+        tokenBudgetGate: LlmTokenBudgetGate? = null,
     ): WebSearchRuntime {
         val webSearch = llm.webSearch
         return try {
@@ -803,7 +845,11 @@ internal object AppModeRunners {
                         maxRawResponseChars = maxRawResponseChars
                     )
                     WebSearchRuntime(
-                        engine = engine,
+                        engine = TokenBudgetGuardedWebSearchEngine(
+                            delegate = engine,
+                            budgetGate = tokenBudgetGate,
+                            provider = webSearch.providerLabel
+                        ),
                         closeAction = {
                             closeQuietly(engine)
                             closeQuietly(session)
@@ -812,24 +858,32 @@ internal object AppModeRunners {
                 }
 
                 LlmProvider.GROQ -> WebSearchRuntime(
-                    engine = GroqConversationsWebSearchEngine(
-                        apiKey = webSearch.apiKey,
-                        model = webSearch.model,
-                        baseUrl = webSearch.baseUrl,
-                        callObserver = callObserver,
-                        instrumentation = instrumentation,
-                        maxRawResponseChars = maxRawResponseChars
+                    engine = TokenBudgetGuardedWebSearchEngine(
+                        delegate = GroqConversationsWebSearchEngine(
+                            apiKey = webSearch.apiKey,
+                            model = webSearch.model,
+                            baseUrl = webSearch.baseUrl,
+                            callObserver = callObserver,
+                            instrumentation = instrumentation,
+                            maxRawResponseChars = maxRawResponseChars
+                        ),
+                        budgetGate = tokenBudgetGate,
+                        provider = webSearch.providerLabel
                     )
                 )
 
                 LlmProvider.GOOGLE -> WebSearchRuntime(
-                    engine = GeminiWebSearchEngine(
-                        apiKey = webSearch.apiKey,
-                        model = webSearch.model,
-                        baseUrl = webSearch.baseUrl,
-                        callObserver = callObserver,
-                        instrumentation = instrumentation,
-                        maxRawResponseChars = maxRawResponseChars
+                    engine = TokenBudgetGuardedWebSearchEngine(
+                        delegate = GeminiWebSearchEngine(
+                            apiKey = webSearch.apiKey,
+                            model = webSearch.model,
+                            baseUrl = webSearch.baseUrl,
+                            callObserver = callObserver,
+                            instrumentation = instrumentation,
+                            maxRawResponseChars = maxRawResponseChars
+                        ),
+                        budgetGate = tokenBudgetGate,
+                        provider = webSearch.providerLabel
                     )
                 )
             }
@@ -856,6 +910,33 @@ internal object AppModeRunners {
                 available = false,
                 detail = detail
             )
+    }
+
+    private class TokenBudgetGuardedWebSearchEngine(
+        private val delegate: WebSearchEngine,
+        private val budgetGate: LlmTokenBudgetGate?,
+        private val provider: String,
+    ) : WebSearchEngine {
+        override fun search(query: String, maxResults: Int): WebSearchResult {
+            budgetGate?.enforceEstimatedCall(
+                provider = provider,
+                role = LlmRoleLabels.WEB_SEARCH,
+                estimatedPromptTokens = maxOf(
+                    WEB_SEARCH_MIN_PROMPT_ESTIMATE_TOKENS,
+                    query.length / WEB_SEARCH_PROMPT_DIVISOR
+                ),
+                requestedMaxCompletionTokens = WEB_SEARCH_COMPLETION_ESTIMATE_TOKENS
+            )
+            return delegate.search(query, maxResults)
+        }
+
+        override fun healthCheck(): WebSearchEngineHealth = delegate.healthCheck()
+
+        companion object {
+            private const val WEB_SEARCH_PROMPT_DIVISOR: Int = 3
+            private const val WEB_SEARCH_MIN_PROMPT_ESTIMATE_TOKENS: Int = 64
+            private const val WEB_SEARCH_COMPLETION_ESTIMATE_TOKENS: Int = 384
+        }
     }
     
     private fun createChatClient(

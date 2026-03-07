@@ -334,5 +334,9 @@ data class MetricsSnapshot(
     val persistentSuperegoTokens: Long = 0,
     val runActionCallsByType: Map<String, Long> = emptyMap(),
     val persistentActionCallsByType: Map<String, Long> = emptyMap(),
+    val runTokensByProvider: Map<String, Long> = emptyMap(),
+    val persistentTokensByProvider: Map<String, Long> = emptyMap(),
+    val runTokensByRole: Map<String, Long> = emptyMap(),
+    val persistentTokensByRole: Map<String, Long> = emptyMap(),
     val memoryServerMetrics: Map<String, Any>? = null,
 )

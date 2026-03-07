@@ -14,6 +14,10 @@ agent:
   max_thought_passes: 5
   max_prompt_tokens: 2400
   max_completion_tokens: 900
+  # Optional hard run caps (0 disables each cap).
+  max_run_total_tokens: 0
+  max_run_tokens_per_provider: 0
+  max_run_tokens_per_role: 0
   llm_retry_attempts: 2
   superego_max_completion_tokens: 192
   deliberation_pressure_assessment_min_step: 16
@@ -21,4 +25,3 @@ agent:
   deliberation_pressure_assessment_threshold: 0.68
   forced_terminal_pressure_threshold: 0.98
   forced_terminal_stale_streak_threshold: 8
-
