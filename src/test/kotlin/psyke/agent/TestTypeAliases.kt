@@ -4,6 +4,7 @@ typealias AgentConfig = psyke.agent.core.AgentConfig
 typealias PlannerConfig = psyke.agent.core.PlannerConfig
 typealias SuperegoConfig = psyke.agent.core.SuperegoConfig
 typealias MemoryConfig = psyke.agent.core.MemoryConfig
+typealias TaskWorkspaceConfig = psyke.agent.core.TaskWorkspaceConfig
 typealias MetaReasonerConfig = psyke.agent.core.MetaReasonerConfig
 typealias Urgency = psyke.agent.core.Urgency
 typealias ActionType = psyke.agent.core.ActionType

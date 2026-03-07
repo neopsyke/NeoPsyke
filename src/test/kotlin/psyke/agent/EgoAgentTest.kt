@@ -568,6 +568,75 @@ class EgoAgentTest {
     }
 
     @Test
+    fun `task workspace summary is injected and lifecycle is scoped to resolved input`() {
+        val plannerLlm = StubChatModelClient().apply {
+            enqueueRawResponse(
+                """
+                {"decision":"action","urgency":"medium","action_type":"web_search","action_payload":"official pricing","action_summary":"search pricing"}
+                """.trimIndent()
+            )
+            enqueueRawResponse(
+                """
+                {"decision":"action","urgency":"medium","action_type":"answer","action_payload":"Final answer from planner","action_summary":"respond"}
+                """.trimIndent()
+            )
+        }
+        val superegoLlm = StubChatModelClient().apply {
+            enqueueRawResponse("""{"allow":true}""")
+            enqueueRawResponse("""{"allow":true}""")
+        }
+        val instrumentation = RecordingInstrumentation()
+        val outputs = mutableListOf<String>()
+        val searchEngine = object : WebSearchEngine {
+            override fun search(query: String, maxResults: Int): WebSearchResult =
+                WebSearchResult(
+                    summary = "Official pricing page confirms current Pro plan rate.",
+                    snippets = listOf("Use official pricing pages for current rates."),
+                    sources = listOf(
+                        WebSearchSource(
+                            title = "Pricing",
+                            url = "https://example.com/pricing"
+                        )
+                    )
+                )
+        }
+        val config = AgentConfig(
+            planner = PlannerConfig(maxLoopStepsPerInput = 8, maxThoughtPasses = 3),
+            memory = MemoryConfig(
+                taskWorkspace = TaskWorkspaceConfig(
+                    enabled = true,
+                    maxPromptTokens = 280
+                )
+            )
+        )
+        val agent = Ego(
+            planner = LlmEgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
+            superego = Superego(
+                modelClient = superegoLlm,
+                config = config,
+                instrumentation = instrumentation
+            ),
+            motorCortex = buildMotorCortex(output = { outputs.add(it) }, webSearchEngine = searchEngine),
+            config = config,
+            instrumentation = instrumentation
+        )
+
+        runAgentWithInput(agent, "find current pricing\nexit\n")
+
+        val plannerCalls = plannerLlm.calls.filter { it.options.metadata.callSite != "action_verifier" }
+        assertTrue(plannerCalls.size >= 2)
+        val followUpPrompt = plannerCalls[1].messages.last().content
+        assertTrue(followUpPrompt.contains("Task workspace summary:"))
+        assertTrue(followUpPrompt.contains("Request"))
+        assertTrue(followUpPrompt.contains("web_search_result"))
+        assertEquals(listOf("ego> Final answer from planner"), outputs)
+        assertTrue(instrumentation.events.any { it.type == "task_workspace_created" })
+        assertTrue(instrumentation.events.any { it.type == "task_workspace_updated" })
+        assertTrue(instrumentation.events.any { it.type == "task_workspace_final_pass" })
+        assertTrue(instrumentation.events.any { it.type == "task_workspace_destroyed" })
+    }
+
+    @Test
     fun `thought recall is skipped when planner does not request explicit query`() {
         val plannerLlm = StubChatModelClient().apply {
             enqueueRawResponse(

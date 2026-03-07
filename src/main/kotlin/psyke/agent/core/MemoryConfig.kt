@@ -3,6 +3,7 @@ package psyke.agent.core
 data class MemoryConfig(
     val maxShortTermContextChars: Int = 20_000,
     val maxShortTermContextPromptTokens: Int = 384,
+    val taskWorkspace: TaskWorkspaceConfig = TaskWorkspaceConfig(),
     val longTermMemoryRecallMaxItems: Int = 4,
     val longTermMemoryRecallMaxChars: Int = 1_200,
     val longTermMemoryPromptCompressionEnabled: Boolean = true,

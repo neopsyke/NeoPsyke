@@ -52,6 +52,17 @@ data class AgentConfig(
                 memory = MemoryConfig(
                     maxShortTermContextChars = readInt("EGO_SHORT_TERM_CONTEXT_MAX_CHARS", 20000),
                     maxShortTermContextPromptTokens = readInt("EGO_SHORT_TERM_CONTEXT_MAX_PROMPT_TOKENS", 384),
+                    taskWorkspace = TaskWorkspaceConfig(
+                        enabled = readBoolean("EGO_TASK_WORKSPACE_ENABLED", false),
+                        maxPromptTokens = readInt("EGO_TASK_WORKSPACE_MAX_PROMPT_TOKENS", 220),
+                        maxSections = readInt("EGO_TASK_WORKSPACE_MAX_SECTIONS", 10),
+                        maxSectionChars = readInt("EGO_TASK_WORKSPACE_MAX_SECTION_CHARS", 1200),
+                        maxSectionSummaryChars = readInt("EGO_TASK_WORKSPACE_MAX_SECTION_SUMMARY_CHARS", 180),
+                        maxEvidenceItems = readInt("EGO_TASK_WORKSPACE_MAX_EVIDENCE_ITEMS", 8),
+                        maxEvidenceChars = readInt("EGO_TASK_WORKSPACE_MAX_EVIDENCE_CHARS", 220),
+                        finalCompilationMaxChars = readInt("EGO_TASK_WORKSPACE_FINAL_COMPILATION_MAX_CHARS", 2800),
+                        maxActiveTasks = readInt("EGO_TASK_WORKSPACE_MAX_ACTIVE_TASKS", 32),
+                    ),
                     longTermMemoryRecallMaxItems = readInt("EGO_LONG_TERM_MEMORY_RECALL_MAX_ITEMS", 4),
                     longTermMemoryRecallMaxChars = readInt("EGO_LONG_TERM_MEMORY_RECALL_MAX_CHARS", 1200),
                     longTermMemoryPromptCompressionEnabled =

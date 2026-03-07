@@ -49,6 +49,15 @@ private data class AgentRuntimeYamlAgent(
     val maxInputChars: Int? = null,
     val maxShortTermContextChars: Int? = null,
     val maxShortTermContextPromptTokens: Int? = null,
+    val taskWorkspaceEnabled: Boolean? = null,
+    val taskWorkspaceMaxPromptTokens: Int? = null,
+    val taskWorkspaceMaxSections: Int? = null,
+    val taskWorkspaceMaxSectionChars: Int? = null,
+    val taskWorkspaceMaxSectionSummaryChars: Int? = null,
+    val taskWorkspaceMaxEvidenceItems: Int? = null,
+    val taskWorkspaceMaxEvidenceChars: Int? = null,
+    val taskWorkspaceFinalCompilationMaxChars: Int? = null,
+    val taskWorkspaceMaxActiveTasks: Int? = null,
     val maxThoughtChars: Int? = null,
     val maxActionPayloadChars: Int? = null,
     val maxActionSummaryChars: Int? = null,
@@ -210,6 +219,53 @@ object AgentRuntimeSettingsLoader {
                     env["EGO_SHORT_TERM_CONTEXT_MAX_PROMPT_TOKENS"],
                     agentYaml.maxShortTermContextPromptTokens,
                     defaults.memory.maxShortTermContextPromptTokens
+                ),
+                taskWorkspace = psyke.agent.core.TaskWorkspaceConfig(
+                    enabled = readBoolean(
+                        env["EGO_TASK_WORKSPACE_ENABLED"],
+                        agentYaml.taskWorkspaceEnabled,
+                        defaults.memory.taskWorkspace.enabled
+                    ),
+                    maxPromptTokens = readPositiveInt(
+                        env["EGO_TASK_WORKSPACE_MAX_PROMPT_TOKENS"],
+                        agentYaml.taskWorkspaceMaxPromptTokens,
+                        defaults.memory.taskWorkspace.maxPromptTokens
+                    ),
+                    maxSections = readPositiveInt(
+                        env["EGO_TASK_WORKSPACE_MAX_SECTIONS"],
+                        agentYaml.taskWorkspaceMaxSections,
+                        defaults.memory.taskWorkspace.maxSections
+                    ),
+                    maxSectionChars = readPositiveInt(
+                        env["EGO_TASK_WORKSPACE_MAX_SECTION_CHARS"],
+                        agentYaml.taskWorkspaceMaxSectionChars,
+                        defaults.memory.taskWorkspace.maxSectionChars
+                    ),
+                    maxSectionSummaryChars = readPositiveInt(
+                        env["EGO_TASK_WORKSPACE_MAX_SECTION_SUMMARY_CHARS"],
+                        agentYaml.taskWorkspaceMaxSectionSummaryChars,
+                        defaults.memory.taskWorkspace.maxSectionSummaryChars
+                    ),
+                    maxEvidenceItems = readPositiveInt(
+                        env["EGO_TASK_WORKSPACE_MAX_EVIDENCE_ITEMS"],
+                        agentYaml.taskWorkspaceMaxEvidenceItems,
+                        defaults.memory.taskWorkspace.maxEvidenceItems
+                    ),
+                    maxEvidenceChars = readPositiveInt(
+                        env["EGO_TASK_WORKSPACE_MAX_EVIDENCE_CHARS"],
+                        agentYaml.taskWorkspaceMaxEvidenceChars,
+                        defaults.memory.taskWorkspace.maxEvidenceChars
+                    ),
+                    finalCompilationMaxChars = readPositiveInt(
+                        env["EGO_TASK_WORKSPACE_FINAL_COMPILATION_MAX_CHARS"],
+                        agentYaml.taskWorkspaceFinalCompilationMaxChars,
+                        defaults.memory.taskWorkspace.finalCompilationMaxChars
+                    ),
+                    maxActiveTasks = readPositiveInt(
+                        env["EGO_TASK_WORKSPACE_MAX_ACTIVE_TASKS"],
+                        agentYaml.taskWorkspaceMaxActiveTasks,
+                        defaults.memory.taskWorkspace.maxActiveTasks
+                    ),
                 ),
                 longTermMemoryRecallMaxItems = readPositiveInt(
                     env["EGO_LONG_TERM_MEMORY_RECALL_MAX_ITEMS"],
