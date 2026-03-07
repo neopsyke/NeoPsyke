@@ -4,6 +4,7 @@ import java.nio.file.Files
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
+import kotlin.test.assertTrue
 
 class LlmRuntimeConfigLoaderTest {
     @Test
@@ -27,6 +28,7 @@ class LlmRuntimeConfigLoaderTest {
         assertEquals("https://api.groq.com/openai/v1", resolved.webSearch.baseUrl)
         assertEquals("GROQ_API_KEY", resolved.webSearch.apiKeyEnvVar)
         assertEquals("openai/gpt-oss-20b", resolved.webSearch.model)
+        assertTrue(resolved.modelCatalog.profiles(LlmProvider.MISTRAL).any { it.model == "mistral-large-2512" })
     }
 
     @Test
@@ -104,7 +106,7 @@ class LlmRuntimeConfigLoaderTest {
             cognitive_roles:
               planner:
                 provider: mistral
-                model: mistral-small-latest
+                model: mistral-small-2506
             """.trimIndent()
         )
 
@@ -120,7 +122,7 @@ class LlmRuntimeConfigLoaderTest {
 
         val resolved = assertNotNull(config)
         assertEquals(LlmProvider.MISTRAL, resolved.planner.provider)
-        assertEquals("mistral-small-latest", resolved.planner.model)
+        assertEquals("mistral-small-2506", resolved.planner.model)
         assertEquals("right-key", resolved.planner.apiKey)
         assertEquals("CUSTOM_MISTRAL_KEY", resolved.planner.apiKeyEnvVar)
     }
@@ -157,5 +159,95 @@ class LlmRuntimeConfigLoaderTest {
         assertEquals("openai/gpt-oss-20b", resolved.memoryAdvisor.model)
         assertEquals("openai/gpt-oss-20b", resolved.actionVerifier.model)
         assertEquals("groq/compound-mini", resolved.webSearch.model)
+    }
+
+    @Test
+    fun `load supports openai provider for all cognitive roles`() {
+        val tempDir = Files.createTempDirectory("psyke-llm-config-openai")
+        val yamlPath = tempDir.resolve("llm-runtime.yaml")
+        Files.writeString(
+            yamlPath,
+            """
+            providers:
+              openai:
+                api_key_env: CUSTOM_OPENAI_KEY
+                base_url: https://openai-proxy.test/v1
+            cognitive_roles:
+              planner:
+                provider: openai
+                model: gpt-4o-mini
+              action_verifier:
+                provider: openai
+                model: gpt-4o-mini
+              superego:
+                provider: openai
+                model: gpt-4.1-mini
+              meta_reasoner:
+                provider: openai
+                model: gpt-4o-mini
+              memory_advisor:
+                provider: openai
+                model: gpt-4o-mini
+            web_search:
+              provider: groq
+              model: groq/compound-mini
+            """.trimIndent()
+        )
+
+        val config = LlmRuntimeConfigLoader.load(
+            env = mapOf(
+                "CUSTOM_OPENAI_KEY" to "openai-key",
+                "GROQ_API_KEY" to "groq-key"
+            ),
+            defaultPath = yamlPath
+        )
+
+        val resolved = assertNotNull(config)
+        assertEquals(LlmProvider.OPENAI, resolved.planner.provider)
+        assertEquals(LlmProvider.OPENAI, resolved.actionVerifier.provider)
+        assertEquals(LlmProvider.OPENAI, resolved.superego.provider)
+        assertEquals(LlmProvider.OPENAI, resolved.metaReasoner.provider)
+        assertEquals(LlmProvider.OPENAI, resolved.memoryAdvisor.provider)
+        assertEquals("openai-key", resolved.planner.apiKey)
+        assertEquals("https://openai-proxy.test/v1", resolved.planner.baseUrl)
+        assertEquals("gpt-4.1-mini", resolved.superego.model)
+        assertEquals(LlmProvider.GROQ, resolved.webSearch.provider)
+    }
+
+    @Test
+    fun `load applies model catalog overrides for token weights`() {
+        val tempDir = Files.createTempDirectory("psyke-llm-config-catalog")
+        val yamlPath = tempDir.resolve("llm-runtime.yaml")
+        Files.writeString(
+            yamlPath,
+            """
+            cognitive_roles:
+              superego:
+                provider: openai
+                model: gpt-5-mini
+              memory_advisor:
+                provider: openai
+                model: gpt-5-nano
+            model_catalog:
+              openai:
+                - model: gpt-5-mini
+                  tier: medium
+                  token_weight: 1.55
+                - model: gpt-5-nano
+                  tier: light
+                  token_weight: 0.95
+            """.trimIndent()
+        )
+
+        val config = LlmRuntimeConfigLoader.load(
+            env = mapOf("OPENAI_API_KEY" to "openai-key"),
+            defaultPath = yamlPath
+        )
+
+        val resolved = assertNotNull(config)
+        assertEquals(1.55, resolved.modelCatalog.tokenWeightFor(resolved.superego))
+        assertEquals(0.95, resolved.modelCatalog.tokenWeightFor(resolved.memoryAdvisor))
+        // Unconfigured providers keep default catalog entries.
+        assertTrue(resolved.modelCatalog.profiles(LlmProvider.MISTRAL).isNotEmpty())
     }
 }

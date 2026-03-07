@@ -8,8 +8,13 @@ import psyke.agent.core.ActionType
 import psyke.agent.core.AgentConfig
 import psyke.agent.core.DeliberationState
 import psyke.agent.core.DialogueTurn
+import psyke.agent.support.AdaptiveCompletionBudget
+import psyke.agent.support.ContextBlockCompressor
 import psyke.agent.support.RetryPolicy
 import psyke.agent.support.TextSecurity
+import psyke.instrumentation.AgentEvent
+import psyke.instrumentation.AgentInstrumentation
+import psyke.instrumentation.NoopAgentInstrumentation
 import psyke.llm.ChatCallMetadata
 import psyke.llm.ChatMessage
 import psyke.llm.ChatModelClient
@@ -61,9 +66,14 @@ object NoopLongTermMemoryAdvisor : LongTermMemoryAdvisor {
 class LlmLongTermMemoryAdvisor(
     private val modelClient: ChatModelClient,
     private val config: AgentConfig,
+    private val modelTokenWeight: Double = DEFAULT_MODEL_TOKEN_WEIGHT,
+    private val instrumentation: AgentInstrumentation = NoopAgentInstrumentation,
 ) : LongTermMemoryAdvisor {
     override fun assess(context: LongTermMemoryAssessmentContext): LongTermMemoryAssessmentDecision {
-        val messages = buildMessages(context)
+        val promptPayload = buildPromptPayload(context)
+        val messages = buildMessages(context, promptPayload)
+        emitCompressionDiagnosticsIfNeeded(promptPayload)
+        val completionTokenBudget = resolveCompletionTokenBudget(messages)
         var response: psyke.llm.ChatCompletion? = null
         var lastError: Exception? = null
         val retryAttempts = RetryPolicy.boundedLlmRetryAttempts(config.planner.llmRetryAttempts)
@@ -73,7 +83,7 @@ class LlmLongTermMemoryAdvisor(
                     messages = messages,
                     options = ChatRequestOptions(
                         temperature = 0.0,
-                        maxTokens = config.memory.longTermMemoryMaxTokens,
+                        maxTokens = completionTokenBudget,
                         metadata = ChatCallMetadata(
                             actor = "ego",
                             callSite = "long_term_memory_assessment"
@@ -101,18 +111,100 @@ class LlmLongTermMemoryAdvisor(
         return parseResponse(response.content)
     }
 
-    private fun buildMessages(context: LongTermMemoryAssessmentContext): List<ChatMessage> {
-        val dialogue = context.recentDialogue
+    private fun resolveCompletionTokenBudget(messages: List<ChatMessage>): Int {
+        val baseBudget = config.memory.longTermMemoryMaxTokens
+        if (!config.memory.longTermMemoryDynamicCompletionEnabled) {
+            return baseBudget
+        }
+        return AdaptiveCompletionBudget.resolve(
+            request = AdaptiveCompletionBudget.Request(
+                messages = messages,
+                baseMaxTokens = baseBudget,
+                hardMaxTokens = config.memory.longTermMemoryDynamicCompletionHardMaxTokens,
+                promptToCompletionRatio = config.memory.longTermMemoryDynamicPromptToCompletionRatio,
+                minPromptTokensForScaling = config.memory.longTermMemoryDynamicCompletionMinPromptTokens,
+                modelTokenWeight = modelTokenWeight
+            )
+        )
+    }
+
+    private fun buildPromptPayload(context: LongTermMemoryAssessmentContext): MemoryAdvisorPromptPayload {
+        val dialogueBlock = context.recentDialogue
             .takeLast(12)
             .joinToString(separator = "\n") { turn ->
                 "${turn.role.name.lowercase()}: ${TextSecurity.preview(turn.content, 160)}"
             }
             .ifBlank { "none" }
+        val shortTermContextSummaryBlock = context.shortTermContextSummary.ifBlank { "none" }
+        val longTermRecallBlock = context.longTermMemoryRecall.ifBlank { "none" }
+        val guidanceBlock = context.metaGuidance.ifBlank { "none" }
+        if (!config.memory.longTermMemoryPromptCompressionEnabled) {
+            return MemoryAdvisorPromptPayload(
+                dialogue = dialogueBlock,
+                longTermRecall = longTermRecallBlock,
+                shortTermContextSummary = shortTermContextSummaryBlock,
+                guidance = guidanceBlock
+            )
+        }
+        val dialogueCompression = ContextBlockCompressor.compress(
+            text = dialogueBlock,
+            maxChars = config.memory.longTermMemoryPromptDialogueMaxChars
+        )
+        val recallCompression = ContextBlockCompressor.compress(
+            text = longTermRecallBlock,
+            maxChars = config.memory.longTermMemoryPromptRecallMaxChars
+        )
+        return MemoryAdvisorPromptPayload(
+            dialogue = dialogueCompression.text.ifBlank { "none" },
+            longTermRecall = recallCompression.text.ifBlank { "none" },
+            shortTermContextSummary = shortTermContextSummaryBlock,
+            guidance = guidanceBlock,
+            dialogueCompression = dialogueCompression,
+            recallCompression = recallCompression
+        )
+    }
+
+    private fun emitCompressionDiagnosticsIfNeeded(payload: MemoryAdvisorPromptPayload) {
+        val dialogue = payload.dialogueCompression
+        val recall = payload.recallCompression
+        val dialogueCompressed = dialogue?.compressed == true
+        val recallCompressed = recall?.compressed == true
+        if (!dialogueCompressed && !recallCompressed) {
+            return
+        }
+        instrumentation.emit(
+            AgentEvent(
+                type = "memory_advisor_prompt_compressed",
+                data = mapOf(
+                    "dialogue_compressed" to dialogueCompressed,
+                    "dialogue_original_chars" to (dialogue?.originalChars ?: payload.dialogue.length),
+                    "dialogue_final_chars" to (dialogue?.compressedChars ?: payload.dialogue.length),
+                    "recall_compressed" to recallCompressed,
+                    "recall_original_chars" to (recall?.originalChars ?: payload.longTermRecall.length),
+                    "recall_final_chars" to (recall?.compressedChars ?: payload.longTermRecall.length),
+                )
+            )
+        )
+        instrumentation.emit(
+            AgentEvent(
+                type = "warning",
+                data = mapOf(
+                    "message" to "Memory advisor prompt compressed long dialogue/recall blocks."
+                )
+            )
+        )
+    }
+
+    private fun buildMessages(
+        context: LongTermMemoryAssessmentContext,
+        promptPayload: MemoryAdvisorPromptPayload,
+    ): List<ChatMessage> {
         val actionType = context.latestActionType?.name?.lowercase() ?: "none"
         val actionOutcome = context.latestActionOutcome?.let { TextSecurity.preview(it, 220) } ?: "none"
-        val shortTermContextSummary = context.shortTermContextSummary.ifBlank { "none" }
-        val longTermRecall = context.longTermMemoryRecall.ifBlank { "none" }
-        val guidance = context.metaGuidance.ifBlank { "none" }
+        val shortTermContextSummary = promptPayload.shortTermContextSummary
+        val longTermRecall = promptPayload.longTermRecall
+        val guidance = promptPayload.guidance
+        val dialogue = promptPayload.dialogue
         val d = context.deliberation
         return listOf(
             ChatMessage(
@@ -220,7 +312,17 @@ class LlmLongTermMemoryAdvisor(
         val tags: List<String>? = null,
     )
 
+    private data class MemoryAdvisorPromptPayload(
+        val dialogue: String,
+        val longTermRecall: String,
+        val shortTermContextSummary: String,
+        val guidance: String,
+        val dialogueCompression: ContextBlockCompressor.Result? = null,
+        val recallCompression: ContextBlockCompressor.Result? = null,
+    )
+
     private companion object {
+        private const val DEFAULT_MODEL_TOKEN_WEIGHT: Double = 1.0
         val mapper = jacksonObjectMapper()
             .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
     }

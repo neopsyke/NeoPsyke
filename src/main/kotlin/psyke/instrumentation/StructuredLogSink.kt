@@ -112,6 +112,33 @@ class StructuredLogSink : InstrumentationSink {
                 }
             }
 
+            "memory_advisor_prompt_compressed" -> {
+                logger.info {
+                    "long_term_memory.assessment.prompt_compressed " +
+                        "dialogue=${event.data["dialogue_original_chars"]}->${event.data["dialogue_final_chars"]} " +
+                        "recall=${event.data["recall_original_chars"]}->${event.data["recall_final_chars"]}"
+                }
+            }
+
+            "superego_two_stage_routing" -> {
+                logger.info {
+                    "superego.two_stage.routing enabled=${event.data["enabled"]} " +
+                        "provider=${event.data["provider"]} primary_model=${event.data["primary_model"]} " +
+                        "escalation_model=${event.data["escalation_model"]} " +
+                        "low_conf_threshold=${event.data["low_confidence_threshold"]} " +
+                        "escalate_medium_risk=${event.data["escalate_on_medium_policy_risk"]}"
+                }
+            }
+
+            "superego_two_stage_review" -> {
+                logger.info {
+                    "superego.two_stage.review stage=${event.data["stage"]} escalated=${event.data["escalated"]} " +
+                        "allow=${event.data["allow"]} reason_code=${event.data["reason_code"]} " +
+                        "confidence=${event.data["confidence"]} policy_risk=${event.data["policy_risk"]} " +
+                        "parse_failed=${event.data["parse_failed"]} technical_fallback=${event.data["technical_fallback"]}"
+                }
+            }
+
             "long_term_memory_assessment_parse_fallback" -> {
                 logger.warn {
                     "long_term_memory.assessment.parse_fallback trigger=${event.data["trigger"]} step=${event.data["step_index"]} streak=${event.data["streak"]}"
@@ -137,8 +164,17 @@ class StructuredLogSink : InstrumentationSink {
             }
 
             "llm_call" -> {
-                logger.trace {
-                    "llm.call provider=${event.data["provider"]} model=${event.data["model"]} actor=${event.data["actor"]} call_site=${event.data["call_site"]} status=${event.data["status"]} latency_ms=${event.data["latency_ms"]} total_tokens=${event.data["total_tokens"]}"
+                val status = event.data["status"]?.toString().orEmpty()
+                if (status.equals("error", ignoreCase = true)) {
+                    logger.warn {
+                        "llm.call provider=${event.data["provider"]} model=${event.data["model"]} actor=${event.data["actor"]} " +
+                            "call_site=${event.data["call_site"]} status=${event.data["status"]} latency_ms=${event.data["latency_ms"]} " +
+                            "error_code=${event.data["error_code"]} error_message=${event.data["error_message"]}"
+                    }
+                } else {
+                    logger.trace {
+                        "llm.call provider=${event.data["provider"]} model=${event.data["model"]} actor=${event.data["actor"]} call_site=${event.data["call_site"]} status=${event.data["status"]} latency_ms=${event.data["latency_ms"]} total_tokens=${event.data["total_tokens"]}"
+                    }
                 }
             }
 

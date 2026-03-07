@@ -59,12 +59,22 @@ private data class AgentRuntimeYamlAgent(
     val maxRunTokensPerProvider: Int? = null,
     val maxRunTokensPerRole: Int? = null,
     val superegoMaxCompletionTokens: Int? = null,
+    val superegoDynamicCompletionEnabled: Boolean? = null,
+    val superegoDynamicCompletionHardMaxTokens: Int? = null,
+    val superegoDynamicPromptToCompletionRatio: Double? = null,
+    val superegoDynamicCompletionMinPromptTokens: Int? = null,
+    val superegoTwoStageReviewEnabled: Boolean? = null,
+    val superegoTwoStageLowConfidenceThreshold: Double? = null,
+    val superegoTwoStageEscalateOnMediumPolicyRisk: Boolean? = null,
     val searchResultCount: Int? = null,
     val mcpCallTimeoutMs: Long? = null,
     val fetchMaxChars: Int? = null,
     val mcpMemoryCallTimeoutMs: Long? = null,
     val longTermMemoryRecallMaxItems: Int? = null,
     val longTermMemoryRecallMaxChars: Int? = null,
+    val longTermMemoryPromptCompressionEnabled: Boolean? = null,
+    val longTermMemoryPromptDialogueMaxChars: Int? = null,
+    val longTermMemoryPromptRecallMaxChars: Int? = null,
     val deliberationPressureAssessmentMinStep: Int? = null,
     val deliberationPressureAssessmentEverySteps: Int? = null,
     val deliberationPressureAssessmentThreshold: Double? = null,
@@ -74,6 +84,10 @@ private data class AgentRuntimeYamlAgent(
     val longTermMemoryAssessCooldownSteps: Int? = null,
     val longTermMemoryMinConfidence: Double? = null,
     val longTermMemoryMaxTokens: Int? = null,
+    val longTermMemoryDynamicCompletionEnabled: Boolean? = null,
+    val longTermMemoryDynamicCompletionHardMaxTokens: Int? = null,
+    val longTermMemoryDynamicPromptToCompletionRatio: Double? = null,
+    val longTermMemoryDynamicCompletionMinPromptTokens: Int? = null,
     val longTermMemoryMaxSummaryChars: Int? = null,
     val forcedTerminalPressureThreshold: Double? = null,
     val forcedTerminalStaleStreakThreshold: Int? = null,
@@ -150,6 +164,41 @@ object AgentRuntimeSettingsLoader {
                     agentYaml.superegoMaxCompletionTokens,
                     defaults.superego.maxCompletionTokens
                 ),
+                dynamicCompletionEnabled = readBoolean(
+                    env["EGO_SUPEREGO_DYNAMIC_COMPLETION_ENABLED"],
+                    agentYaml.superegoDynamicCompletionEnabled,
+                    defaults.superego.dynamicCompletionEnabled
+                ),
+                dynamicCompletionHardMaxTokens = readPositiveInt(
+                    env["EGO_SUPEREGO_DYNAMIC_COMPLETION_HARD_MAX_TOKENS"],
+                    agentYaml.superegoDynamicCompletionHardMaxTokens,
+                    defaults.superego.dynamicCompletionHardMaxTokens
+                ),
+                dynamicPromptToCompletionRatio = readProbability(
+                    env["EGO_SUPEREGO_DYNAMIC_PROMPT_TO_COMPLETION_RATIO"],
+                    agentYaml.superegoDynamicPromptToCompletionRatio,
+                    defaults.superego.dynamicPromptToCompletionRatio
+                ),
+                dynamicCompletionMinPromptTokens = readPositiveInt(
+                    env["EGO_SUPEREGO_DYNAMIC_COMPLETION_MIN_PROMPT_TOKENS"],
+                    agentYaml.superegoDynamicCompletionMinPromptTokens,
+                    defaults.superego.dynamicCompletionMinPromptTokens
+                ),
+                twoStageReviewEnabled = readBoolean(
+                    env["EGO_SUPEREGO_TWO_STAGE_REVIEW_ENABLED"],
+                    agentYaml.superegoTwoStageReviewEnabled,
+                    defaults.superego.twoStageReviewEnabled
+                ),
+                twoStageLowConfidenceThreshold = readProbability(
+                    env["EGO_SUPEREGO_TWO_STAGE_LOW_CONFIDENCE_THRESHOLD"],
+                    agentYaml.superegoTwoStageLowConfidenceThreshold,
+                    defaults.superego.twoStageLowConfidenceThreshold
+                ),
+                twoStageEscalateOnMediumPolicyRisk = readBoolean(
+                    env["EGO_SUPEREGO_TWO_STAGE_ESCALATE_ON_MEDIUM_POLICY_RISK"],
+                    agentYaml.superegoTwoStageEscalateOnMediumPolicyRisk,
+                    defaults.superego.twoStageEscalateOnMediumPolicyRisk
+                ),
             ),
             memory = MemoryConfig(
                 maxShortTermContextChars = readPositiveInt(
@@ -172,6 +221,21 @@ object AgentRuntimeSettingsLoader {
                     agentYaml.longTermMemoryRecallMaxChars,
                     defaults.memory.longTermMemoryRecallMaxChars
                 ),
+                longTermMemoryPromptCompressionEnabled = readBoolean(
+                    env["EGO_LONG_TERM_MEMORY_PROMPT_COMPRESSION_ENABLED"],
+                    agentYaml.longTermMemoryPromptCompressionEnabled,
+                    defaults.memory.longTermMemoryPromptCompressionEnabled
+                ),
+                longTermMemoryPromptDialogueMaxChars = readPositiveInt(
+                    env["EGO_LONG_TERM_MEMORY_PROMPT_DIALOGUE_MAX_CHARS"],
+                    agentYaml.longTermMemoryPromptDialogueMaxChars,
+                    defaults.memory.longTermMemoryPromptDialogueMaxChars
+                ),
+                longTermMemoryPromptRecallMaxChars = readPositiveInt(
+                    env["EGO_LONG_TERM_MEMORY_PROMPT_RECALL_MAX_CHARS"],
+                    agentYaml.longTermMemoryPromptRecallMaxChars,
+                    defaults.memory.longTermMemoryPromptRecallMaxChars
+                ),
                 longTermMemoryAssessEverySteps = readPositiveInt(
                     env["EGO_LONG_TERM_MEMORY_ASSESS_EVERY_STEPS"],
                     agentYaml.longTermMemoryAssessEverySteps,
@@ -191,6 +255,26 @@ object AgentRuntimeSettingsLoader {
                     env["EGO_LONG_TERM_MEMORY_MAX_TOKENS"],
                     agentYaml.longTermMemoryMaxTokens,
                     defaults.memory.longTermMemoryMaxTokens
+                ),
+                longTermMemoryDynamicCompletionEnabled = readBoolean(
+                    env["EGO_LONG_TERM_MEMORY_DYNAMIC_COMPLETION_ENABLED"],
+                    agentYaml.longTermMemoryDynamicCompletionEnabled,
+                    defaults.memory.longTermMemoryDynamicCompletionEnabled
+                ),
+                longTermMemoryDynamicCompletionHardMaxTokens = readPositiveInt(
+                    env["EGO_LONG_TERM_MEMORY_DYNAMIC_COMPLETION_HARD_MAX_TOKENS"],
+                    agentYaml.longTermMemoryDynamicCompletionHardMaxTokens,
+                    defaults.memory.longTermMemoryDynamicCompletionHardMaxTokens
+                ),
+                longTermMemoryDynamicPromptToCompletionRatio = readProbability(
+                    env["EGO_LONG_TERM_MEMORY_DYNAMIC_PROMPT_TO_COMPLETION_RATIO"],
+                    agentYaml.longTermMemoryDynamicPromptToCompletionRatio,
+                    defaults.memory.longTermMemoryDynamicPromptToCompletionRatio
+                ),
+                longTermMemoryDynamicCompletionMinPromptTokens = readPositiveInt(
+                    env["EGO_LONG_TERM_MEMORY_DYNAMIC_COMPLETION_MIN_PROMPT_TOKENS"],
+                    agentYaml.longTermMemoryDynamicCompletionMinPromptTokens,
+                    defaults.memory.longTermMemoryDynamicCompletionMinPromptTokens
                 ),
                 longTermMemoryMaxSummaryChars = readPositiveInt(
                     env["EGO_LONG_TERM_MEMORY_MAX_SUMMARY_CHARS"],
