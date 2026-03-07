@@ -16,8 +16,11 @@ flowchart LR
     E --> P["LlmEgoPlanner"]
     P --> AV["Action Verifier LLM Call"]
     E --> S["Superego"]
+    S --> S1["SingleStage Review Engine"]
+    S --> S2["TwoStage Escalation Engine"]
     E --> M["MotorCortex"]
     E --> BG["LLM Token Budget Gate"]
+    E --> MCat["Model Catalog (ROI token_weight)"]
 
     E --> DE["DeliberationEngine"]
     DE --> MR["LlmMetaReasoner"]
@@ -41,6 +44,8 @@ flowchart LR
     BG --> MR
     BG --> LTM
     BG --> WS
+    MCat --> S
+    MCat --> LTM
 
     E --> I["InstrumentationBus + Metrics"]
 ```
@@ -87,7 +92,10 @@ sequenceDiagram
                     Ego->>Sched: enqueue safe-alternative thought
                 else deterministic pass
                     Ego->>Sup: llm review(action)
-                    Note over Ego,Sup: Superego parse failures trigger one strict-JSON retry before default deny
+                    Note over Ego,Sup: Stage-1 uses cheaper model from catalog when two-stage is enabled
+                    Note over Ego,Sup: Escalate only on low confidence or policy-risk (or technical fallback)
+                    Note over Ego,Sup: Superego completion max_tokens scales with prompt estimate (bounded floor/hard-cap) and model token_weight
+                    Note over Ego,Sup: Stage parse failures trigger one strict-JSON retry before default deny
                     Sup-->>Ego: allow/deny (+ reason_code on deny)
                     alt allow
                         Ego->>Motor: execute(action)
@@ -108,6 +116,8 @@ sequenceDiagram
 
         Ego->>Delib: maybeForceTerminalAnswer
         Ego->>Mem: maybeAssessLongTermMemory(interval or explicit remember-intent)
+        Note over Ego,Mem: Memory-advisor completion max_tokens scales with prompt estimate (bounded floor/hard-cap) and model token_weight
+        Note over Ego,Mem: Long dialogue/recall blocks are compressed before advisor prompt
     end
 ```
 
@@ -177,6 +187,16 @@ stateDiagram-v2
     CleanupResolvedInput --> Complete
     Processing --> Complete: queues drained
     Complete --> [*]
+```
+
+## 4) OpenAI Standalone Moderation Utility
+
+```mermaid
+flowchart LR
+    A["Caller invokes moderateWithOpenAi(input)"] --> B["OpenAiModerationClient.moderate(input)"]
+    B --> C["POST /moderations (omni-moderation-latest)"]
+    C --> D["Return decision(flagged, categories, model, id)"]
+    E["OpenAiChatClient chat calls"] --> F["POST /chat/completions only"]
 ```
 
 ## Edit Rules

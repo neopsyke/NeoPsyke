@@ -3,6 +3,7 @@ package psyke.llm
 import com.fasterxml.jackson.annotation.JsonInclude
 import com.fasterxml.jackson.annotation.JsonProperty
 import com.fasterxml.jackson.databind.DeserializationFeature
+import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
 import mu.KotlinLogging
@@ -76,12 +77,21 @@ class GroqChatClient(
                 }
 
                 val parsed = mapper.readValue<GroqChatCompletionResponse>(responseBody)
-                val choice = parsed.choices.firstOrNull()
+                val choices = parsed.choices
+                val firstChoice = choices.firstOrNull()
                     ?: throw IOException("Groq chat returned no choices.")
-                val content = choice.message.content.trim()
-                if (content.isBlank()) {
-                    throw IOException("Groq chat returned empty message content.")
+                val selectedChoice = choices.firstOrNull { choice ->
+                    extractAssistantContentInfo(choice.message.content).trimmedChars > 0
                 }
+                if (selectedChoice == null) {
+                    val contentInfo = extractAssistantContentInfo(firstChoice.message.content)
+                    throw IOException(
+                        "Groq chat returned empty message content " +
+                            "(finish_reason=${firstChoice.finishReason ?: "none"}, " +
+                            "${contentInfo.summary()}, choices=${choices.size})."
+                    )
+                }
+                val content = extractAssistantContentInfo(selectedChoice.message.content).trimmedText
 
                 val usage = parsed.usage?.toChatUsage()
                 val resolvedModel = parsed.model ?: modelName
@@ -101,7 +111,7 @@ class GroqChatClient(
                 return ChatCompletion(
                     content = content,
                     model = resolvedModel,
-                    finishReason = choice.finishReason,
+                    finishReason = selectedChoice.finishReason,
                     id = parsed.id,
                     usage = usage
                 )
@@ -199,7 +209,7 @@ private data class GroqChoice(
 
 private data class GroqResponseMessage(
     val role: String,
-    val content: String,
+    val content: JsonNode? = null,
 )
 
 private data class GroqUsage(

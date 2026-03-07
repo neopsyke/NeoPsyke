@@ -7,6 +7,7 @@ import psyke.support.StubChatModelClient
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 class SuperegoGatekeeperTest {
@@ -38,7 +39,7 @@ class SuperegoGatekeeperTest {
         assertEquals("superego", llm.lastOptions.metadata.actor)
         assertEquals("action_review", llm.lastOptions.metadata.callSite)
         assertEquals("answer", llm.lastOptions.metadata.actionType)
-        assertEquals(192, llm.lastOptions.maxTokens)
+        assertTrue(assertNotNull(llm.lastOptions.maxTokens) >= 192)
         assertTrue(instrumentation.events.any { it.type == "superego_input" })
         assertTrue(
             instrumentation.events.any {
@@ -131,7 +132,12 @@ class SuperegoGatekeeperTest {
         llm.enqueueRawResponse("""{"allow":true}""")
         val gatekeeper = Superego(
             modelClient = llm,
-            config = AgentConfig(superego = SuperegoConfig(maxCompletionTokens = 77))
+            config = AgentConfig(
+                superego = SuperegoConfig(
+                    maxCompletionTokens = 77,
+                    dynamicCompletionEnabled = false
+                )
+            )
         )
 
         gatekeeper.review(action, snapshot)
@@ -163,7 +169,8 @@ class SuperegoGatekeeperTest {
         assertTrue(
             instrumentation.events.any {
                 it.type == "warning" &&
-                    (it.data["message"] as? String)?.contains("Superego call failed", ignoreCase = true) == true
+                    (it.data["message"] as? String)?.contains("Superego", ignoreCase = true) == true &&
+                    (it.data["message"] as? String)?.contains("call failed", ignoreCase = true) == true
             }
         )
     }
@@ -237,5 +244,67 @@ class SuperegoGatekeeperTest {
 
         assertTrue(decision.allow)
         assertEquals(1, llm.calls.size)
+    }
+
+    @Test
+    fun `gatekeeper escalates to second model when primary confidence is low`() {
+        val primary = StubChatModelClient(modelName = "cheap").apply {
+            enqueueRawResponse("""{"allow":true,"confidence":0.32,"policy_risk":"low"}""")
+        }
+        val escalation = StubChatModelClient(modelName = "strong").apply {
+            enqueueRawResponse("""{"allow":false,"reason":"needs safer path","reason_code":"POLICY_RISK","confidence":0.93,"policy_risk":"high"}""")
+        }
+        val instrumentation = RecordingInstrumentation()
+        val gatekeeper = Superego(
+            modelClient = primary,
+            escalationModelClient = escalation,
+            config = AgentConfig(
+                superego = SuperegoConfig(
+                    twoStageReviewEnabled = true,
+                    twoStageLowConfidenceThreshold = 0.70
+                )
+            ),
+            instrumentation = instrumentation
+        )
+
+        val decision = gatekeeper.review(action, snapshot)
+
+        assertFalse(decision.allow)
+        assertEquals(1, primary.calls.size)
+        assertEquals(1, escalation.calls.size)
+        assertEquals("action_review", primary.calls.first().options.metadata.callSite)
+        assertEquals("action_review_escalated", escalation.calls.first().options.metadata.callSite)
+        assertTrue(
+            instrumentation.events.any { event ->
+                event.type == "warning" &&
+                    (event.data["message"] as? String)?.contains("two-stage escalation", ignoreCase = true) == true
+            }
+        )
+    }
+
+    @Test
+    fun `gatekeeper does not escalate when primary is high confidence and low risk`() {
+        val primary = StubChatModelClient(modelName = "cheap").apply {
+            enqueueRawResponse("""{"allow":true,"confidence":0.92,"policy_risk":"low"}""")
+        }
+        val escalation = StubChatModelClient(modelName = "strong").apply {
+            enqueueRawResponse("""{"allow":false,"reason":"should not run"}""")
+        }
+        val gatekeeper = Superego(
+            modelClient = primary,
+            escalationModelClient = escalation,
+            config = AgentConfig(
+                superego = SuperegoConfig(
+                    twoStageReviewEnabled = true,
+                    twoStageLowConfidenceThreshold = 0.70
+                )
+            )
+        )
+
+        val decision = gatekeeper.review(action, snapshot)
+
+        assertTrue(decision.allow)
+        assertEquals(1, primary.calls.size)
+        assertEquals(0, escalation.calls.size)
     }
 }

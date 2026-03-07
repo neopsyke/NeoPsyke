@@ -8,6 +8,7 @@ import com.fasterxml.jackson.module.kotlin.readValue
 import com.fasterxml.jackson.module.kotlin.registerKotlinModule
 import psyke.llm.GroqChatClient
 import psyke.llm.MistralChatClient
+import psyke.llm.OpenAiChatClient
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
@@ -15,7 +16,8 @@ import java.nio.file.Paths
 enum class LlmProvider(val id: String) {
     GROQ("groq"),
     MISTRAL("mistral"),
-    GOOGLE("google");
+    GOOGLE("google"),
+    OPENAI("openai");
 
     companion object {
         fun parse(raw: String?): LlmProvider? =
@@ -45,6 +47,7 @@ data class LlmCognitiveRolesConfig(
 data class LlmRuntimeConfig(
     val cognitiveRoles: LlmCognitiveRolesConfig,
     val webSearch: LlmEndpointConfig,
+    val modelCatalog: LlmModelCatalog = LlmModelCatalog.defaults(),
 ) {
     val planner: LlmEndpointConfig
         get() = cognitiveRoles.planner
@@ -111,11 +114,11 @@ data class LlmRuntimeConfig(
 private data class LlmRuntimeYamlModels(
     val ego: String? = null,
     val superego: String? = null,
-    @JsonProperty("meta_reasoner")
+    @param:JsonProperty("meta_reasoner")
     val metaReasoner: String? = null,
-    @JsonProperty("memory_consolidation")
+    @param:JsonProperty("memory_consolidation")
     val memoryConsolidation: String? = null,
-    @JsonProperty("web_search")
+    @param:JsonProperty("web_search")
     val webSearch: String? = null,
 )
 
@@ -126,19 +129,19 @@ private data class LlmRuntimeYamlRole(
 
 private data class LlmRuntimeYamlCognitiveRoles(
     val planner: LlmRuntimeYamlRole? = null,
-    @JsonProperty("action_verifier")
+    @param:JsonProperty("action_verifier")
     val actionVerifier: LlmRuntimeYamlRole? = null,
     val superego: LlmRuntimeYamlRole? = null,
-    @JsonProperty("meta_reasoner")
+    @param:JsonProperty("meta_reasoner")
     val metaReasoner: LlmRuntimeYamlRole? = null,
-    @JsonProperty("memory_advisor")
+    @param:JsonProperty("memory_advisor")
     val memoryAdvisor: LlmRuntimeYamlRole? = null,
 )
 
 private data class LlmRuntimeYamlProvider(
-    @JsonProperty("base_url")
+    @param:JsonProperty("base_url")
     val baseUrl: String? = null,
-    @JsonProperty("api_key_env")
+    @param:JsonProperty("api_key_env")
     val apiKeyEnvVar: String? = null,
 )
 
@@ -146,29 +149,50 @@ private data class LlmRuntimeYamlProviders(
     val groq: LlmRuntimeYamlProvider? = null,
     val mistral: LlmRuntimeYamlProvider? = null,
     val google: LlmRuntimeYamlProvider? = null,
+    val openai: LlmRuntimeYamlProvider? = null,
 )
 
 private data class LlmRuntimeYamlConfig(
     val provider: String? = null,
-    @JsonProperty("base_url")
+    @param:JsonProperty("base_url")
     val baseUrl: String? = null,
-    @JsonProperty("api_key_env")
+    @param:JsonProperty("api_key_env")
     val apiKeyEnvVar: String? = null,
-    @JsonProperty("web_search")
+    @param:JsonProperty("web_search")
     val webSearch: LlmRuntimeYamlWebSearch? = null,
-    @JsonProperty("cognitive_roles")
+    @param:JsonProperty("cognitive_roles")
     val cognitiveRoles: LlmRuntimeYamlCognitiveRoles? = null,
     val providers: LlmRuntimeYamlProviders? = null,
     val models: LlmRuntimeYamlModels = LlmRuntimeYamlModels(),
+    @param:JsonProperty("model_catalog")
+    val modelCatalog: LlmRuntimeYamlModelCatalog? = null,
 )
 
 private data class LlmRuntimeYamlWebSearch(
     val provider: String? = null,
-    @JsonProperty("base_url")
+    @param:JsonProperty("base_url")
     val baseUrl: String? = null,
-    @JsonProperty("api_key_env")
+    @param:JsonProperty("api_key_env")
     val apiKeyEnvVar: String? = null,
     val model: String? = null,
+)
+
+private data class LlmRuntimeYamlModelProfile(
+    val model: String? = null,
+    val tier: String? = null,
+    @param:JsonProperty("token_weight")
+    val tokenWeight: Double? = null,
+    @param:JsonProperty("input_cost_per_million_tokens_usd")
+    val inputCostPerMillionTokensUsd: Double? = null,
+    @param:JsonProperty("output_cost_per_million_tokens_usd")
+    val outputCostPerMillionTokensUsd: Double? = null,
+)
+
+private data class LlmRuntimeYamlModelCatalog(
+    val groq: List<LlmRuntimeYamlModelProfile>? = null,
+    val mistral: List<LlmRuntimeYamlModelProfile>? = null,
+    val google: List<LlmRuntimeYamlModelProfile>? = null,
+    val openai: List<LlmRuntimeYamlModelProfile>? = null,
 )
 
 private data class ProviderDefaults(
@@ -268,7 +292,8 @@ object LlmRuntimeConfigLoader {
                 metaReasoner = metaReasoner,
                 memoryAdvisor = memoryAdvisor
             ),
-            webSearch = webSearch
+            webSearch = webSearch,
+            modelCatalog = resolveModelCatalog(yaml.modelCatalog)
         )
     }
 
@@ -354,7 +379,39 @@ object LlmRuntimeConfigLoader {
             LlmProvider.GROQ -> this?.groq
             LlmProvider.MISTRAL -> this?.mistral
             LlmProvider.GOOGLE -> this?.google
+            LlmProvider.OPENAI -> this?.openai
         }
+
+    private fun resolveModelCatalog(yamlCatalog: LlmRuntimeYamlModelCatalog?): LlmModelCatalog {
+        val defaults = LlmModelCatalog.defaults()
+        if (yamlCatalog == null) return defaults
+        val overrides = linkedMapOf(
+            LlmProvider.GROQ to parseModelProfiles(yamlCatalog.groq),
+            LlmProvider.MISTRAL to parseModelProfiles(yamlCatalog.mistral),
+            LlmProvider.GOOGLE to parseModelProfiles(yamlCatalog.google),
+            LlmProvider.OPENAI to parseModelProfiles(yamlCatalog.openai),
+        ).filterValues { it.isNotEmpty() }
+        return defaults.merge(overrides)
+    }
+
+    private fun parseModelProfiles(entries: List<LlmRuntimeYamlModelProfile>?): List<LlmModelProfile> =
+        entries.orEmpty()
+            .mapNotNull { entry ->
+                val model = firstNonBlank(entry.model) ?: return@mapNotNull null
+                val tier = LlmModelTier.parse(entry.tier) ?: LlmModelTier.LIGHT
+                val weight = entry.tokenWeight
+                    ?.takeIf { it > 0.0 }
+                    ?.coerceIn(MODEL_WEIGHT_MIN, MODEL_WEIGHT_MAX)
+                    ?: LlmModelProfile.DEFAULT_TOKEN_WEIGHT
+                LlmModelProfile(
+                    model = model,
+                    tier = tier,
+                    tokenWeight = weight,
+                    inputCostPerMillionTokensUsd = entry.inputCostPerMillionTokensUsd?.takeIf { it >= 0.0 },
+                    outputCostPerMillionTokensUsd = entry.outputCostPerMillionTokensUsd?.takeIf { it >= 0.0 }
+                )
+            }
+            .distinctBy { it.normalizedModel() }
 
     private fun LlmProvider.defaults(): ProviderDefaults =
         when (this) {
@@ -378,8 +435,18 @@ object LlmRuntimeConfigLoader {
                 defaultModel = "gemini-3.1-pro-preview",
                 defaultWebSearchModel = "gemini-3.1-flash-lite-preview"
             )
+
+            LlmProvider.OPENAI -> ProviderDefaults(
+                baseUrl = "https://api.openai.com/v1",
+                apiKeyEnvVar = "OPENAI_API_KEY",
+                defaultModel = OpenAiChatClient.DEFAULT_MODEL,
+                defaultWebSearchModel = OpenAiChatClient.DEFAULT_MODEL
+            )
         }
 
     private fun firstNonBlank(vararg values: String?): String? =
         values.firstOrNull { !it.isNullOrBlank() }?.trim()
+
+    private const val MODEL_WEIGHT_MIN: Double = 0.25
+    private const val MODEL_WEIGHT_MAX: Double = 4.0
 }

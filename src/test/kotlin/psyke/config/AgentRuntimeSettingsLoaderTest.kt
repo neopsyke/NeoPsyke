@@ -21,6 +21,21 @@ class AgentRuntimeSettingsLoaderTest {
         assertEquals(0, settings.agentConfig.planner.maxRunTokensPerProvider)
         assertEquals(0, settings.agentConfig.planner.maxRunTokensPerRole)
         assertEquals(192, settings.agentConfig.superego.maxCompletionTokens)
+        assertEquals(true, settings.agentConfig.superego.dynamicCompletionEnabled)
+        assertEquals(640, settings.agentConfig.superego.dynamicCompletionHardMaxTokens)
+        assertEquals(0.10, settings.agentConfig.superego.dynamicPromptToCompletionRatio)
+        assertEquals(160, settings.agentConfig.superego.dynamicCompletionMinPromptTokens)
+        assertEquals(false, settings.agentConfig.superego.twoStageReviewEnabled)
+        assertEquals(0.70, settings.agentConfig.superego.twoStageLowConfidenceThreshold)
+        assertEquals(true, settings.agentConfig.superego.twoStageEscalateOnMediumPolicyRisk)
+        assertEquals(320, settings.agentConfig.memory.longTermMemoryMaxTokens)
+        assertEquals(true, settings.agentConfig.memory.longTermMemoryPromptCompressionEnabled)
+        assertEquals(1100, settings.agentConfig.memory.longTermMemoryPromptDialogueMaxChars)
+        assertEquals(900, settings.agentConfig.memory.longTermMemoryPromptRecallMaxChars)
+        assertEquals(true, settings.agentConfig.memory.longTermMemoryDynamicCompletionEnabled)
+        assertEquals(512, settings.agentConfig.memory.longTermMemoryDynamicCompletionHardMaxTokens)
+        assertEquals(0.08, settings.agentConfig.memory.longTermMemoryDynamicPromptToCompletionRatio)
+        assertEquals(160, settings.agentConfig.memory.longTermMemoryDynamicCompletionMinPromptTokens)
         assertEquals(true, settings.agentConfig.memory.longTermMemoryForceAssessOnTerminalAnswer)
         assertTrue(settings.dashboardEnabled)
         assertEquals(8787, settings.dashboardPort)
@@ -48,6 +63,20 @@ class AgentRuntimeSettingsLoaderTest {
               max_run_tokens_per_provider: 3200
               max_run_tokens_per_role: 1800
               llm_retry_attempts: 4
+              superego_dynamic_completion_enabled: false
+              superego_dynamic_completion_hard_max_tokens: 700
+              superego_dynamic_prompt_to_completion_ratio: 0.21
+              superego_dynamic_completion_min_prompt_tokens: 110
+              superego_two_stage_review_enabled: true
+              superego_two_stage_low_confidence_threshold: 0.74
+              superego_two_stage_escalate_on_medium_policy_risk: false
+              long_term_memory_prompt_compression_enabled: true
+              long_term_memory_prompt_dialogue_max_chars: 780
+              long_term_memory_prompt_recall_max_chars: 640
+              long_term_memory_dynamic_completion_enabled: false
+              long_term_memory_dynamic_completion_hard_max_tokens: 480
+              long_term_memory_dynamic_prompt_to_completion_ratio: 0.12
+              long_term_memory_dynamic_completion_min_prompt_tokens: 90
             """.trimIndent()
         )
 
@@ -66,6 +95,20 @@ class AgentRuntimeSettingsLoaderTest {
         assertEquals(3200, settings.agentConfig.planner.maxRunTokensPerProvider)
         assertEquals(1800, settings.agentConfig.planner.maxRunTokensPerRole)
         assertEquals(4, settings.agentConfig.planner.llmRetryAttempts)
+        assertEquals(false, settings.agentConfig.superego.dynamicCompletionEnabled)
+        assertEquals(700, settings.agentConfig.superego.dynamicCompletionHardMaxTokens)
+        assertEquals(0.21, settings.agentConfig.superego.dynamicPromptToCompletionRatio)
+        assertEquals(110, settings.agentConfig.superego.dynamicCompletionMinPromptTokens)
+        assertEquals(true, settings.agentConfig.superego.twoStageReviewEnabled)
+        assertEquals(0.74, settings.agentConfig.superego.twoStageLowConfidenceThreshold)
+        assertEquals(false, settings.agentConfig.superego.twoStageEscalateOnMediumPolicyRisk)
+        assertEquals(true, settings.agentConfig.memory.longTermMemoryPromptCompressionEnabled)
+        assertEquals(780, settings.agentConfig.memory.longTermMemoryPromptDialogueMaxChars)
+        assertEquals(640, settings.agentConfig.memory.longTermMemoryPromptRecallMaxChars)
+        assertEquals(false, settings.agentConfig.memory.longTermMemoryDynamicCompletionEnabled)
+        assertEquals(480, settings.agentConfig.memory.longTermMemoryDynamicCompletionHardMaxTokens)
+        assertEquals(0.12, settings.agentConfig.memory.longTermMemoryDynamicPromptToCompletionRatio)
+        assertEquals(90, settings.agentConfig.memory.longTermMemoryDynamicCompletionMinPromptTokens)
     }
 
     @Test

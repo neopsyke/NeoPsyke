@@ -175,6 +175,21 @@ class GroqProviderStatusChecker(
         ).check()
 }
 
+class OpenAiProviderStatusChecker(
+    private val apiKey: String,
+    private val baseUrl: String = "https://api.openai.com/v1",
+    private val timeoutMs: Long = 4_000,
+) : LlmProviderStatusChecker {
+    override fun check(): ProviderStatus =
+        HttpModelsProviderStatusChecker(
+            providerLabel = "openai",
+            missingApiKeyEnvVar = "OPENAI_API_KEY",
+            apiKey = apiKey,
+            baseUrl = baseUrl,
+            timeoutMs = timeoutMs
+        ).check()
+}
+
 fun reportProviderStatusAndDecide(
     modeLabel: String,
     status: ProviderStatus,

@@ -18,7 +18,7 @@ Standalone Kotlin JVM app using Gradle with:
 - Gradle can run on JDK 21+; Kotlin and Java compilation emit Java 21-compatible bytecode.
 - LLM API key is required for interactive mode and for `--eval-reasoning-mode model`:
   - Set keys for every provider used by configured cognitive roles in `llm-runtime.yaml`.
-  - Example mixed setup: `GOOGLE_API_KEY` for planner/meta-reasoner and `GROQ_API_KEY` for superego/verifier/memory-advisor.
+  - Example mixed setup: `OPENAI_API_KEY` for planner/meta-reasoner and `GROQ_API_KEY` for superego/verifier/memory-advisor.
   - If `web_search.provider` is different, set that provider key too.
 
 ## Configuration
@@ -28,6 +28,7 @@ Standalone Kotlin JVM app using Gradle with:
   - Each cognitive role can set independent `provider` and `model`.
   - Provider credentials/endpoints are set under `providers` (`api_key_env`, `base_url`).
   - `web_search` remains independently configurable (`provider`, `model`, optional `api_key_env`, `base_url`).
+  - Optional `model_catalog` can list per-provider ROI profiles (`tier`, `token_weight`, optional input/output cost metadata). Psyke uses `token_weight` to scale dynamic completion budgets for superego and memory-advisor.
   - If a role/model is omitted, Psyke falls back to provider defaults.
   - Optional override file path: `PSYKE_LLM_CONFIG_FILE=/path/to/llm-runtime.yaml`.
   - Example:
@@ -37,20 +38,22 @@ Standalone Kotlin JVM app using Gradle with:
         api_key_env: GROQ_API_KEY
       google:
         api_key_env: GOOGLE_API_KEY
+      openai:
+        api_key_env: OPENAI_API_KEY
 
     cognitive_roles:
       planner:
-        provider: google
-        model: gemini-3.1-flash-lite-preview
+        provider: openai
+        model: gpt-4o-mini
       action_verifier:
         provider: groq
         model: openai/gpt-oss-20b
       superego:
-        provider: groq
-        model: openai/gpt-oss-safeguard-20b
+        provider: openai
+        model: gpt-4o-mini
       meta_reasoner:
-        provider: google
-        model: gemini-3.1-flash-lite-preview
+        provider: openai
+        model: gpt-4o-mini
       memory_advisor:
         provider: groq
         model: openai/gpt-oss-20b
@@ -63,6 +66,8 @@ Standalone Kotlin JVM app using Gradle with:
   - `GROQ_API_KEY`
   - `MISTRAL_API_KEY`
   - `GOOGLE_API_KEY`
+  - `OPENAI_API_KEY`
+- OpenAI moderation is available as a standalone utility (`moderateWithOpenAi` / `OpenAiModerationClient`) using `omni-moderation-latest`; it is not auto-wired into cognitive-role chat calls.
 - MCP/time/fetch/memory provider settings are now centralized in `mcp-runtime.yaml` (repository root).
   - Default config enables `time`, `fetch`, and `memory` in `stdio` mode with command/fallback lists.
   - Optional override file path: `PSYKE_MCP_CONFIG_FILE=/path/to/mcp-runtime.yaml`.
@@ -94,6 +99,13 @@ Standalone Kotlin JVM app using Gradle with:
   - `EGO_MAX_RUN_TOKENS_PER_ROLE` (default: `0`, disabled)
   - `EGO_LLM_RETRY_ATTEMPTS` (default: `2`)
   - `EGO_SUPEREGO_MAX_COMPLETION_TOKENS` (default: `192`)
+  - `EGO_SUPEREGO_DYNAMIC_COMPLETION_ENABLED` (default: `true`)
+  - `EGO_SUPEREGO_DYNAMIC_COMPLETION_HARD_MAX_TOKENS` (default: `640`)
+  - `EGO_SUPEREGO_DYNAMIC_PROMPT_TO_COMPLETION_RATIO` (default: `0.10`)
+  - `EGO_SUPEREGO_DYNAMIC_COMPLETION_MIN_PROMPT_TOKENS` (default: `160`)
+  - `EGO_SUPEREGO_TWO_STAGE_REVIEW_ENABLED` (default: `false`; when enabled, cheap model first then escalate)
+  - `EGO_SUPEREGO_TWO_STAGE_LOW_CONFIDENCE_THRESHOLD` (default: `0.70`)
+  - `EGO_SUPEREGO_TWO_STAGE_ESCALATE_ON_MEDIUM_POLICY_RISK` (default: `true`)
   - `EGO_LOOP_DELAY_MS` (default app value: `0`)
   - `EGO_SHORT_TERM_CONTEXT_MAX_CHARS` (default: `20000`)
   - `EGO_SHORT_TERM_CONTEXT_MAX_PROMPT_TOKENS` (default: `384`)
@@ -111,6 +123,9 @@ Standalone Kotlin JVM app using Gradle with:
   - `MCP_FETCH_MAX_CHARS` (default: `4000`)
   - `EGO_LONG_TERM_MEMORY_RECALL_MAX_ITEMS` (default: `4`)
   - `EGO_LONG_TERM_MEMORY_RECALL_MAX_CHARS` (default: `1200`)
+  - `EGO_LONG_TERM_MEMORY_PROMPT_COMPRESSION_ENABLED` (default: `true`)
+  - `EGO_LONG_TERM_MEMORY_PROMPT_DIALOGUE_MAX_CHARS` (default: `1100`)
+  - `EGO_LONG_TERM_MEMORY_PROMPT_RECALL_MAX_CHARS` (default: `900`)
   - `EGO_PRESSURE_MIN_STEP` (default: `16`)
   - `EGO_PRESSURE_ASSESS_EVERY_STEPS` (default: `8`)
   - `EGO_PRESSURE_ASSESS_THRESHOLD` (default: `0.68`)
@@ -121,7 +136,11 @@ Standalone Kotlin JVM app using Gradle with:
   - `EGO_LONG_TERM_MEMORY_ASSESS_EVERY_STEPS` (default: `16`)
   - `EGO_LONG_TERM_MEMORY_ASSESS_COOLDOWN_STEPS` (default: `8`)
   - `EGO_LONG_TERM_MEMORY_MIN_CONFIDENCE` (default: `0.65`)
-  - `EGO_LONG_TERM_MEMORY_MAX_TOKENS` (default: `180`)
+  - `EGO_LONG_TERM_MEMORY_MAX_TOKENS` (default: `320`)
+  - `EGO_LONG_TERM_MEMORY_DYNAMIC_COMPLETION_ENABLED` (default: `true`)
+  - `EGO_LONG_TERM_MEMORY_DYNAMIC_COMPLETION_HARD_MAX_TOKENS` (default: `512`)
+  - `EGO_LONG_TERM_MEMORY_DYNAMIC_PROMPT_TO_COMPLETION_RATIO` (default: `0.08`)
+  - `EGO_LONG_TERM_MEMORY_DYNAMIC_COMPLETION_MIN_PROMPT_TOKENS` (default: `160`)
   - `EGO_LONG_TERM_MEMORY_MAX_SUMMARY_CHARS` (default: `320`)
   - `EGO_LONG_TERM_MEMORY_FORCE_ASSESS_ON_ALLOWED_ACTION` (default: `false`)
   - `EGO_LONG_TERM_MEMORY_FORCE_ASSESS_ON_TERMINAL_ANSWER` (default: `true`)
@@ -290,9 +309,11 @@ you> exit
 - Every proposed action includes a context summary capped at 180 chars.
 - MotorCortex runs a startup capability smoke test and emits `action_capabilities` instrumentation.
 - Ego planner receives runtime `available_action_types` and avoids proposing unavailable actions.
-- `web_search` is supported for both providers:
+- `web_search` provider support:
   - `mistral`: Conversations web-search integration (agent-backed)
   - `groq`: Groq web search via Chat Completions (`browser_search` tool for standard models, or built-in search behavior for `groq/compound*` models)
+  - `google`: Gemini web search via OpenAI-compatible Chat Completions
+  - `openai`: not currently implemented for `web_search` runtime (supported for cognitive roles only)
 - Superego validates every action against directives before execution.
 - If denied, denial reason (<=180 chars) is pushed back as a new thought.
 

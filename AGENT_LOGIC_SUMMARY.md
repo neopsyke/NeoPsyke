@@ -14,6 +14,11 @@ It is intentionally high-level and should stay aligned with the code.
 - `runInteractiveMode` composes:
   - LLM clients (planner, action-verifier, superego, meta-reasoner, long-term-memory advisor)
     - Each cognitive role can use an independent provider/api key/base URL/model from `llm-runtime.yaml`.
+    - Optional `model_catalog` in `llm-runtime.yaml` provides per-provider model ROI metadata (`tier`, `token_weight`, optional cost fields).
+    - Superego and memory-advisor read `token_weight` for their configured models and apply it to dynamic completion-budget scaling.
+    - When `SuperegoConfig.twoStageReviewEnabled` is on, runtime resolves a cheaper primary superego model from `model_catalog` (same provider) and keeps the configured superego model as escalation stage.
+    - Supported cognitive-role providers are `groq`, `mistral`, `google`, and `openai`.
+    - OpenAI moderation utility (`omni-moderation-latest`) exists as a standalone callable path and is not auto-wired into cognitive-role chat calls.
     - `web_search` runtime remains independently configurable.
   - `Superego`
   - `MotorCortex` (answer + web search + MCP tools)
@@ -128,9 +133,20 @@ It is intentionally high-level and should stay aligned with the code.
 - Reviews each non-fallback action with layered checks:
   - deterministic hard-deny checks first (`SuperegoDeterministicConscience`)
   - LLM semantic review second (only if deterministic checks pass)
+- Superego LLM review is separated into dedicated engines:
+  - `SingleStageSuperegoReviewEngine` handles one model (retry, strict-JSON retry, parse validation, safe deny fallback).
+  - `TwoStageSuperegoReviewEngine` runs cheap primary review first and escalates only on:
+    - technical/parsing fallback
+    - low confidence (`twoStageLowConfidenceThreshold`)
+    - medium/high `policy_risk` (configurable for medium)
+- Superego completion budget is adaptive by prompt size (rough token estimate) and bounded by `SuperegoConfig`:
+  - `maxCompletionTokens` is the base floor
+  - optional dynamic expansion uses `dynamicPromptToCompletionRatio`
+  - hard-capped by `dynamicCompletionHardMaxTokens`
+  - expansion is cost-weighted by configured model `token_weight`
 - Returns `GateDecision(allow, reason, reasonCode)` from strict JSON.
 - LLM deny responses can include optional `reason_code`; deterministic denials emit policy-prefixed `reason_code`s.
-- If initial LLM output is non-parseable, Superego performs one strict-JSON retry before default deny fallback.
+- If initial LLM output is non-parseable, stage engine performs one strict-JSON retry before default deny fallback.
 - Default behavior on model/parse failure is deny (safe fallback).
 - Deterministic deny is authoritative (LLM cannot override a hard deny).
 
@@ -164,6 +180,12 @@ It is intentionally high-level and should stay aligned with the code.
   - MCP stdio connect uses bounded startup retry (2 attempts) to absorb transient transport-close failures.
 - Long-term consolidation:
   - `LlmLongTermMemoryAdvisor` decides `save|skip` with confidence/tags/summary.
+  - Advisor compresses oversized dialogue and recall blocks before prompting (`ContextBlockCompressor`) and emits `memory_advisor_prompt_compressed` diagnostics.
+  - Memory-advisor completion budget is adaptive by prompt size and bounded by `MemoryConfig`:
+    - `longTermMemoryMaxTokens` is the base floor
+    - optional dynamic expansion uses `longTermMemoryDynamicPromptToCompletionRatio`
+    - hard-capped by `longTermMemoryDynamicCompletionHardMaxTokens`
+    - expansion is cost-weighted by configured model `token_weight`
   - `MemoryCoordinator` enforces:
     - interval/cooldown gates
     - explicit remember-intent fast path (one forced assessment per input when user asks to remember)
@@ -185,6 +207,7 @@ It is intentionally high-level and should stay aligned with the code.
   - `mcp_fetch`
 - `web_search` provider routing is independent from cognitive-role routing:
   - configured directly via `web_search.provider` in `llm-runtime.yaml`.
+  - current web-search runtimes are `mistral`, `groq`, and `google`; configuring `openai` degrades to unavailable with a startup warning.
   - startup initialization failures (missing key, bad base URL, provider/session errors) degrade web search to an unavailable engine instead of crashing the app.
 - Action availability is runtime health-dependent and fed back into planner context.
 - `mcp_fetch` errors are classified as retryable vs non-retryable; non-retryable failures
