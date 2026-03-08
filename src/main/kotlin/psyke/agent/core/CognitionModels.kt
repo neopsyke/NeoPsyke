@@ -38,7 +38,10 @@ sealed interface EgoDecision {
         val summary: String,
     ) : EgoDecision
 
-    data class Noop(val reason: String) : EgoDecision
+    data class Noop(
+        val reason: String,
+        val parseFailureShortCircuit: Boolean = false,
+    ) : EgoDecision
 
     data class EnqueuePlan(
         val urgency: Urgency,

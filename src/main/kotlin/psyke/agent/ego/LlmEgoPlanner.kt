@@ -9,6 +9,8 @@ import mu.KotlinLogging
 import psyke.agent.core.*
 import psyke.agent.support.AdaptiveCompletionBudget
 import psyke.agent.support.DenialReasonClassifier
+import psyke.agent.support.LlmCallCircuitBreaker
+import psyke.agent.support.OnTripBehavior
 import psyke.agent.support.PromptBudgetAllocator
 import psyke.agent.support.RetryPolicy
 import psyke.agent.support.TextSecurity
@@ -34,14 +36,28 @@ class LlmEgoPlanner(
     private val onPlannerNoop: () -> Unit = {},
     private val onPlannerOutputRepaired: () -> Unit = {},
 ) : Ego.Planner {
-    private val actionVerifierParseFailureStreakByKey = mutableMapOf<ActionVerifierCircuitKey, Int>()
-    private val actionVerifierBypassRemainingByKey = mutableMapOf<ActionVerifierCircuitKey, Int>()
+    private val plannerCircuitBreaker = LlmCallCircuitBreaker(
+        tripThreshold = PLANNER_PARSE_FAILURE_TRIP_THRESHOLD,
+        onTripBehavior = OnTripBehavior.BYPASS,
+    )
+    private val actionVerifierCircuitBreakers = mutableMapOf<ActionVerifierCircuitKey, LlmCallCircuitBreaker>()
 
     override fun decide(trigger: EgoTrigger, context: PlannerContext): EgoDecision {
         val triggerLabel = when (trigger) {
             is EgoTrigger.IncomingInput -> "input"
             is EgoTrigger.PendingThoughtInput -> "thought"
         }
+
+        if (plannerCircuitBreaker.isTripped()) {
+            val shortCircuit = EgoDecision.Noop(
+                reason = "Planner circuit breaker tripped after ${plannerCircuitBreaker.streak()} consecutive parse failures.",
+                parseFailureShortCircuit = true,
+            )
+            instrumentation.emit(AgentEvents.warning("Planner circuit breaker tripped; short-circuiting to fallback."))
+            emitDecision(triggerLabel, shortCircuit)
+            return shortCircuit
+        }
+
         instrumentation.emit(
             AgentEvent(
                 type = "planner_start",
@@ -110,9 +126,16 @@ class LlmEgoPlanner(
                 )
             }
             repairedDecision ?: run {
-                instrumentation.emit(AgentEvents.warning("Planner response remained non-parseable after strict JSON retry."))
-                EgoDecision.Noop("Planner produced non-parseable output.")
+                plannerCircuitBreaker.recordParseFailure()
+                instrumentation.emit(AgentEvents.warning("Planner response remained non-parseable after strict JSON retry (streak=${plannerCircuitBreaker.streak()})."))
+                EgoDecision.Noop(
+                    reason = "Planner produced non-parseable output.",
+                    parseFailureShortCircuit = plannerCircuitBreaker.isTripped(),
+                )
             }
+        }
+        if (decision !is EgoDecision.Noop || !decision.parseFailureShortCircuit) {
+            plannerCircuitBreaker.recordSuccess()
         }
         val verifiedDecision = verifyActionDecision(
             trigger = trigger,
@@ -243,24 +266,22 @@ class LlmEgoPlanner(
             return decision
         }
         val circuitKey = resolveActionVerifierCircuitKey(trigger, decision)
-        val bypassRemaining = actionVerifierBypassRemainingByKey[circuitKey] ?: 0
-        if (bypassRemaining > 0) {
-            val next = bypassRemaining - 1
-            if (next > 0) {
-                actionVerifierBypassRemainingByKey[circuitKey] = next
-            } else {
-                actionVerifierBypassRemainingByKey.remove(circuitKey)
-            }
+        val cb = actionVerifierCircuitBreakers.getOrPut(circuitKey) {
+            LlmCallCircuitBreaker(
+                tripThreshold = ACTION_VERIFIER_PARSE_FAILURE_TRIP_THRESHOLD,
+                onTripBehavior = OnTripBehavior.BYPASS,
+            )
+        }
+        if (cb.isTripped()) {
             instrumentation.emit(
                 AgentEvents.warning(
-                    "Action verifier temporarily bypassed after repeated parse failures; keeping original action proposal."
+                    "Action verifier bypassed after repeated parse failures; keeping original action proposal."
                 )
             )
             emitActionVerifierCircuitBreakerEvent(
                 phase = "bypassed",
                 circuitKey = circuitKey,
-                parseFailureStreak = actionVerifierParseFailureStreakByKey[circuitKey] ?: 0,
-                bypassRemaining = next
+                parseFailureStreak = cb.streak(),
             )
             return decision
         }
@@ -321,9 +342,15 @@ class LlmEgoPlanner(
             instrumentation.emit(AgentEvents.warning("Action verifier unavailable; keeping original action proposal."))
             return ActionVerifierOutcome(payload = null, parseFailed = false)
         }
+        val cb = actionVerifierCircuitBreakers.getOrPut(circuitKey) {
+            LlmCallCircuitBreaker(
+                tripThreshold = ACTION_VERIFIER_PARSE_FAILURE_TRIP_THRESHOLD,
+                onTripBehavior = OnTripBehavior.BYPASS,
+            )
+        }
         val initialParse = tryParseActionVerifierPayload(response.content, actionType, emitParseWarning = false)
         if (!initialParse.parseFailed) {
-            actionVerifierParseFailureStreakByKey.remove(circuitKey)
+            cb.recordSuccess()
             return initialParse
         }
         instrumentation.emit(
@@ -336,28 +363,24 @@ class LlmEgoPlanner(
             tryParseActionVerifierPayload(retryResponse.content, actionType, emitParseWarning = true)
         }
         if (parseResult.parseFailed) {
-            val parseFailureStreak = (actionVerifierParseFailureStreakByKey[circuitKey] ?: 0) + 1
-            actionVerifierParseFailureStreakByKey[circuitKey] = parseFailureStreak
+            val tripped = cb.recordParseFailure()
             instrumentation.emit(
-                AgentEvents.warning("Action verifier response remained non-parseable after strict JSON retry.")
+                AgentEvents.warning("Action verifier response remained non-parseable after strict JSON retry (streak=${cb.streak()}).")
             )
-            if (parseFailureStreak >= ACTION_VERIFIER_PARSE_FAILURE_TRIP_THRESHOLD) {
-                actionVerifierBypassRemainingByKey[circuitKey] = ACTION_VERIFIER_BYPASS_TURNS
-                actionVerifierParseFailureStreakByKey.remove(circuitKey)
+            if (tripped) {
                 instrumentation.emit(
                     AgentEvents.warning(
-                        "Action verifier parse-failure circuit breaker tripped for action_type=${circuitKey.actionType.name.lowercase()} root_input_id=${circuitKey.rootInputId}; bypassing verifier for $ACTION_VERIFIER_BYPASS_TURNS decision."
+                        "Action verifier parse-failure circuit breaker tripped for action_type=${circuitKey.actionType.name.lowercase()} root_input_id=${circuitKey.rootInputId}; bypassing verifier."
                     )
                 )
                 emitActionVerifierCircuitBreakerEvent(
                     phase = "tripped",
                     circuitKey = circuitKey,
-                    parseFailureStreak = parseFailureStreak,
-                    bypassRemaining = ACTION_VERIFIER_BYPASS_TURNS
+                    parseFailureStreak = cb.streak(),
                 )
             }
         } else {
-            actionVerifierParseFailureStreakByKey.remove(circuitKey)
+            cb.recordSuccess()
         }
         return parseResult
     }
@@ -380,7 +403,6 @@ class LlmEgoPlanner(
         phase: String,
         circuitKey: ActionVerifierCircuitKey,
         parseFailureStreak: Int,
-        bypassRemaining: Int,
     ) {
         instrumentation.emit(
             AgentEvent(
@@ -390,7 +412,6 @@ class LlmEgoPlanner(
                     "action_type" to circuitKey.actionType.name.lowercase(),
                     "root_input_id" to circuitKey.rootInputId,
                     "parse_failure_streak" to parseFailureStreak,
-                    "bypass_remaining" to bypassRemaining
                 )
             )
         )
@@ -1079,11 +1100,16 @@ class LlmEgoPlanner(
         return resolution.budget
     }
 
+    override fun resetForInput(rootInputId: String) {
+        plannerCircuitBreaker.reset()
+        actionVerifierCircuitBreakers.keys.removeAll { it.rootInputId == rootInputId }
+    }
+
     private companion object {
         const val ACTION_VERIFIER_BASE_TOKENS: Int = 80
         const val ACTION_VERIFIER_MAX_TOKENS: Int = 220
         const val ACTION_VERIFIER_PARSE_FAILURE_TRIP_THRESHOLD: Int = 2
-        const val ACTION_VERIFIER_BYPASS_TURNS: Int = 1
+        const val PLANNER_PARSE_FAILURE_TRIP_THRESHOLD: Int = 3
         val mapper = jacksonObjectMapper()
             .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
         val invalidJsonEscapeRegex = Regex("""\\(?!["\\/bfnrtu])""")

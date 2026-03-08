@@ -9,6 +9,8 @@ import psyke.agent.core.AgentConfig
 import psyke.agent.core.GateDecision
 import psyke.agent.core.PendingAction
 import psyke.agent.support.AdaptiveCompletionBudget
+import psyke.agent.support.LlmCallCircuitBreaker
+import psyke.agent.support.OnTripBehavior
 import psyke.agent.support.RetryPolicy
 import psyke.agent.support.TextSecurity
 import psyke.instrumentation.AgentEvent
@@ -36,10 +38,27 @@ internal class SingleStageSuperegoReviewEngine(
     private val stageLabel: String,
     private val callSiteBase: String,
 ) : SuperegoReviewEngine {
+    private val circuitBreaker = LlmCallCircuitBreaker(
+        tripThreshold = PARSE_FAILURE_TRIP_THRESHOLD,
+        onTripBehavior = OnTripBehavior.ALLOW,
+    )
+
     override fun review(action: PendingAction, messages: List<ChatMessage>): GateDecision =
         reviewDetailed(action, messages).decision
 
     fun reviewDetailed(action: PendingAction, messages: List<ChatMessage>): SuperegoStageOutcome {
+        if (circuitBreaker.isTripped()) {
+            instrumentation.emit(
+                AgentEvents.warning("Superego($stageLabel) circuit breaker tripped; allowing action to prevent denial loop.")
+            )
+            return SuperegoStageOutcome(
+                decision = GateDecision(allow = true, reason = ""),
+                confidence = 0.0,
+                policyRisk = SuperegoPolicyRisk.LOW,
+                parseFailed = false,
+                technicalFallback = true,
+            )
+        }
         val completionTokenBudget = resolveCompletionTokenBudget(messages)
         var response: ChatCompletion? = null
         var lastError: Exception? = null
@@ -115,6 +134,11 @@ internal class SingleStageSuperegoReviewEngine(
                     AgentEvents.warning("Superego($stageLabel) response remained non-parseable after strict JSON retry.")
                 )
             }
+        }
+        if (parseResult.parseFailed) {
+            circuitBreaker.recordParseFailure()
+        } else {
+            circuitBreaker.recordSuccess()
         }
         return parseResult
     }
@@ -260,6 +284,7 @@ internal class SingleStageSuperegoReviewEngine(
     companion object {
         private const val MAX_DENY_REASON_CHARS: Int = 180
         private const val DEFAULT_MISSING_CONFIDENCE: Double = 0.5
+        private const val PARSE_FAILURE_TRIP_THRESHOLD: Int = 2
         private const val REASON_CODE_TECH_MODEL_UNAVAILABLE: String = "TECH_MODEL_UNAVAILABLE"
         private const val REASON_CODE_TECH_PARSE_ERROR: String = "TECH_PARSE_ERROR"
         private const val REASON_CODE_TECH_MISSING_REQUIRED_FIELD: String = "TECH_MISSING_REQUIRED_FIELD"

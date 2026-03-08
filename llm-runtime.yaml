@@ -14,8 +14,8 @@ providers:
 
 cognitive_roles:
   planner:
-    provider: google
-    model: gemini-3.1-flash-lite-preview
+    provider: groq
+    model: openai/gpt-oss-120b
   action_verifier:
     provider: openai
     model: gpt-4o-mini
@@ -26,8 +26,8 @@ cognitive_roles:
     provider: openai
     model: gpt-5-mini
   meta_reasoner:
-    provider: google
-    model: gemini-3.1-flash-lite-preview
+    provider: groq
+    model: openai/gpt-oss-120b
   memory_advisor:
     provider: openai
     model: gpt-4o-mini
@@ -81,6 +81,12 @@ model_catalog:
       context_window: 1048576
       input_cost_per_million_tokens_usd: 0.30
       output_cost_per_million_tokens_usd: 2.50
+    - model: gemini-3.1-flash-lite-preview
+      tier: light
+      token_weight: 1.00
+      context_window: 1048576
+      input_cost_per_million_tokens_usd: 0.25
+      output_cost_per_million_tokens_usd: 1.50
     - model: gemini-2.5-flash-lite
       tier: light
       token_weight: 0.90

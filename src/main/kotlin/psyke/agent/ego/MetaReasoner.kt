@@ -7,6 +7,8 @@ import mu.KotlinLogging
 import psyke.agent.core.AgentConfig
 import psyke.agent.core.EgoTrigger
 import psyke.agent.core.PlannerContext
+import psyke.agent.support.LlmCallCircuitBreaker
+import psyke.agent.support.OnTripBehavior
 import psyke.agent.support.RetryPolicy
 import psyke.agent.support.TextSecurity
 import psyke.llm.ChatCallMetadata
@@ -53,7 +55,19 @@ class LlmMetaReasoner(
     private val modelClient: ChatModelClient,
     private val config: AgentConfig,
 ) : MetaReasoner {
+    private val circuitBreaker = LlmCallCircuitBreaker(
+        tripThreshold = PARSE_FAILURE_TRIP_THRESHOLD,
+        onTripBehavior = OnTripBehavior.BYPASS,
+    )
+
     override fun assess(trigger: EgoTrigger, context: PlannerContext): MetaReasonerAssessment {
+        if (circuitBreaker.isTripped()) {
+            return MetaReasonerAssessment(
+                verdict = MetaReasonerVerdict.CONTINUE,
+                confidence = 0.2,
+                reason = "Meta reasoner circuit breaker tripped; using safe default."
+            )
+        }
         val messages = buildMessages(trigger, context)
         var response: psyke.llm.ChatCompletion? = null
         var lastError: Exception? = null
@@ -87,7 +101,13 @@ class LlmMetaReasoner(
                 reason = "Meta reasoner unavailable."
             )
         }
-        return parseResponse(response.content)
+        val assessment = parseResponse(response.content)
+        if (assessment.reason.contains("parse fallback", ignoreCase = true)) {
+            circuitBreaker.recordParseFailure()
+        } else {
+            circuitBreaker.recordSuccess()
+        }
+        return assessment
     }
 
     private fun buildMessages(trigger: EgoTrigger, context: PlannerContext): List<ChatMessage> {
@@ -234,6 +254,8 @@ class LlmMetaReasoner(
     )
 
     internal companion object {
+        private const val PARSE_FAILURE_TRIP_THRESHOLD: Int = 3
+
         val mapper = jacksonObjectMapper()
             .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
 

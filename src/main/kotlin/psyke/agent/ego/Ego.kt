@@ -45,10 +45,15 @@ class Ego(
 ) {
     interface Planner {
         fun decide(trigger: EgoTrigger, context: PlannerContext): EgoDecision
+        fun resetForInput(rootInputId: String) {}
     }
 
     private val scheduler = AttentionScheduler(config)
-    private val dialogueBySession = mutableMapOf<String, ArrayDeque<DialogueTurn>>()
+    private val dialogueBySession: MutableMap<String, ArrayDeque<DialogueTurn>> =
+        object : LinkedHashMap<String, ArrayDeque<DialogueTurn>>(16, 0.75f, true) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, ArrayDeque<DialogueTurn>>): Boolean =
+                size > MAX_TRACKED_SESSIONS
+        }
     private val deliberation = DeliberationEngine(config, instrumentation, metaReasoner)
     private val memory = MemoryCoordinator(
         hippocampus, longTermMemoryAdvisor, config, instrumentation,
@@ -612,36 +617,7 @@ class Ego(
                     return
                 }
 
-                // ── Gate 2: pressure-gated plan emission ──
-                val pressure = deliberation.snapshot().decisionPressure
-                if (pressure >= config.planner.planEmissionPressureThreshold) {
-                    instrumentation.emit(
-                        AgentEvents.warning(
-                            "Duplicate plan suppressed; decision pressure ${"%.2f".format(pressure)} " +
-                                ">= threshold ${config.planner.planEmissionPressureThreshold}."
-                        )
-                    )
-                    instrumentation.emit(
-                        AgentEvents.duplicatePlanSuppressed(
-                            reason = "pressure_gate",
-                            rootInputId = rootInputId,
-                            rootInputReceivedAtMs = rootInputReceivedAtMs
-                        )
-                    )
-                    recoverFromSuppressedPlan(
-                        suppressionReason = "pressure_gate",
-                        decision = decision,
-                        nextPassCount = nextPassCount,
-                        originThought = originThought,
-                        rootInputId = rootInputId,
-                        rootInputReceivedAtMs = rootInputReceivedAtMs,
-                        conversationContext = conversationContext
-                    )
-                    emitQueueSnapshot("decision_plan_suppressed_pressure")
-                    return
-                }
-
-                // ── Gate 3: exact plan hash dedup ──
+                // ── Gate 2: exact plan hash dedup ──
                 val planHash = normalizePlanHash(decision.goal, decision.steps)
                 val inputHashes = emittedPlanHashes.getOrPut(inputScope) { mutableSetOf() }
                 if (!inputHashes.add(planHash)) {
@@ -667,73 +643,6 @@ class Ego(
                         conversationContext = conversationContext
                     )
                     emitQueueSnapshot("decision_plan_suppressed_hash")
-                    return
-                }
-
-                // ── Gate 4: pending plan thoughts / convergence (existing) ──
-                if (scheduler.hasPendingPlanThoughtsForInput(rootInputId, inputScope.sessionId)) {
-                    if (scheduler.hasPendingConvergenceThoughtForInput(rootInputId, inputScope.sessionId)) {
-                        instrumentation.emit(
-                            AgentEvents.warning(
-                                "Duplicate plan suppressed; convergence thought already pending for this input."
-                            )
-                        )
-                        instrumentation.emit(
-                            AgentEvents.duplicatePlanSuppressed(
-                                reason = "convergence_pending",
-                                rootInputId = rootInputId,
-                                rootInputReceivedAtMs = rootInputReceivedAtMs
-                            )
-                        )
-                        emitQueueSnapshot("decision_plan_skipped_duplicate")
-                        return
-                    }
-                    instrumentation.emit(
-                        AgentEvents.warning(
-                            "Planner emitted duplicate plan while plan steps are still pending; " +
-                                "enqueueing convergence thought instead."
-                        )
-                    )
-                    instrumentation.emit(
-                        AgentEvents.duplicatePlanSuppressed(
-                            reason = "pending_plan_thoughts",
-                            rootInputId = rootInputId,
-                            rootInputReceivedAtMs = rootInputReceivedAtMs
-                        )
-                    )
-                    val convergenceThought = TextSecurity.clamp(
-                        "${AttentionScheduler.CONVERGENCE_THOUGHT_PREFIX}Plan steps are already queued. " +
-                            "Continue with current steps and converge to a final answer " +
-                            "instead of starting another plan.",
-                        config.planner.maxThoughtChars
-                    )
-                    val queued = scheduler.enqueueThought(
-                        content = convergenceThought,
-                        urgency = decision.urgency,
-                        passes = nextPassCount,
-                        rootInputId = rootInputId,
-                        rootInputReceivedAtMs = rootInputReceivedAtMs,
-                        allowFallbackExplanation = originThought?.allowFallbackExplanation ?: false,
-                        conversationContext = conversationContext
-                    )
-                    if (queued) {
-                        instrumentation.emit(
-                            AgentEvents.convergenceThoughtEnqueued(
-                                rootInputId = rootInputId,
-                                rootInputReceivedAtMs = rootInputReceivedAtMs
-                            )
-                        )
-                    } else {
-                        instrumentation.emit(
-                            AgentEvents.warning("Failed to enqueue convergence thought after duplicate plan suppression.")
-                        )
-                        recordQueueSaturation(
-                            queueType = "thought",
-                            capacity = config.maxPendingThoughts,
-                            reason = "enqueue_duplicate_plan_convergence_thought_failed_full"
-                        )
-                    }
-                    emitQueueSnapshot("decision_plan_skipped_duplicate")
                     return
                 }
 
@@ -816,35 +725,48 @@ class Ego(
             }
 
             is EgoDecision.Noop -> {
-                val noopThought = TextSecurity.clamp("Noop decision: ${decision.reason}", config.planner.maxThoughtChars)
-                val queued = scheduler.enqueueThought(
-                    content = noopThought,
-                    urgency = Urgency.LOW,
-                    passes = nextPassCount,
-                    rootInputId = rootInputId,
-                    rootInputReceivedAtMs = rootInputReceivedAtMs,
-                    deniedActionType = originThought?.deniedActionType,
-                    deniedActionPayload = originThought?.deniedActionPayload,
-                    denialReason = originThought?.denialReason,
-                    denialReasonCode = originThought?.denialReasonCode,
-                    allowFallbackExplanation = originThought?.allowFallbackExplanation ?: false,
-                    conversationContext = conversationContext
-                )
-                instrumentation.emit(
-                    AgentEvent(
-                        type = "noop_recorded",
-                        data = mapOf("queued_thought" to queued, "reason" to decision.reason)
+                if (decision.parseFailureShortCircuit) {
+                    instrumentation.emit(
+                        AgentEvents.warning("Parse-failure circuit breaker tripped; skipping noop re-enqueue and going to fallback.")
                     )
-                )
-                if (!queued) {
-                    instrumentation.emit(AgentEvents.warning("Failed to enqueue noop thought."))
-                    recordQueueSaturation(
-                        queueType = "thought",
-                        capacity = config.maxPendingThoughts,
-                        reason = "enqueue_noop_thought_failed_full"
+                    enqueueFallbackExplanation(
+                        rootInputId = rootInputId,
+                        rootInputReceivedAtMs = rootInputReceivedAtMs,
+                        reason = decision.reason,
+                        conversationContext = conversationContext
                     )
+                    emitQueueSnapshot("decision_noop_short_circuit")
+                } else {
+                    val noopThought = TextSecurity.clamp("Noop decision: ${decision.reason}", config.planner.maxThoughtChars)
+                    val queued = scheduler.enqueueThought(
+                        content = noopThought,
+                        urgency = Urgency.LOW,
+                        passes = nextPassCount,
+                        rootInputId = rootInputId,
+                        rootInputReceivedAtMs = rootInputReceivedAtMs,
+                        deniedActionType = originThought?.deniedActionType,
+                        deniedActionPayload = originThought?.deniedActionPayload,
+                        denialReason = originThought?.denialReason,
+                        denialReasonCode = originThought?.denialReasonCode,
+                        allowFallbackExplanation = originThought?.allowFallbackExplanation ?: false,
+                        conversationContext = conversationContext
+                    )
+                    instrumentation.emit(
+                        AgentEvent(
+                            type = "noop_recorded",
+                            data = mapOf("queued_thought" to queued, "reason" to decision.reason)
+                        )
+                    )
+                    if (!queued) {
+                        instrumentation.emit(AgentEvents.warning("Failed to enqueue noop thought."))
+                        recordQueueSaturation(
+                            queueType = "thought",
+                            capacity = config.maxPendingThoughts,
+                            reason = "enqueue_noop_thought_failed_full"
+                        )
+                    }
+                    emitQueueSnapshot("decision_noop")
                 }
-                emitQueueSnapshot("decision_noop")
             }
         }
     }
@@ -989,6 +911,35 @@ class Ego(
         emitQueueSnapshot("fallback_explanation_enqueued")
     }
 
+    private fun enqueueFallbackExplanation(
+        rootInputId: String?,
+        rootInputReceivedAtMs: Long?,
+        reason: String,
+        conversationContext: ConversationContext,
+    ) {
+        val sessionId = resolveSessionId(conversationContext)
+        if (scheduler.hasPendingFallbackExplanationAction(rootInputId, sessionId)) {
+            return
+        }
+        val payload = "I encountered repeated internal parsing/formatting failures while preparing the response. " +
+            "Reason: $reason"
+        val summary = "Fallback answer after planner circuit breaker trip."
+        val queued = scheduler.enqueueAction(
+            type = ActionType.ANSWER,
+            payload = TextSecurity.clamp(payload, config.planner.maxActionPayloadChars),
+            summary = summary,
+            urgency = Urgency.HIGH,
+            isFallbackExplanation = true,
+            rootInputId = rootInputId,
+            rootInputReceivedAtMs = rootInputReceivedAtMs,
+            conversationContext = conversationContext
+        )
+        if (!queued) {
+            instrumentation.emit(AgentEvents.warning("Failed to enqueue circuit-breaker fallback."))
+        }
+        emitQueueSnapshot("fallback_explanation_circuit_breaker")
+    }
+
     private fun isRepeatOfDeniedAction(thought: PendingThought, decision: EgoDecision.ProposeAction): Boolean {
         val deniedType = thought.deniedActionType ?: return false
         val deniedPayload = thought.deniedActionPayload ?: return false
@@ -1085,6 +1036,19 @@ class Ego(
             candidateAnswer = action.payload,
             maxChars = config.memory.taskWorkspace.finalCompilationMaxChars
         ) ?: return action
+        if (finalPassInput.evidenceCount == 0) {
+            instrumentation.emit(
+                AgentEvent(
+                    type = "task_workspace_final_pass_skipped",
+                    data = mapOf(
+                        "root_input_id" to action.rootInputId,
+                        "action_id" to action.id,
+                        "reason" to "no_evidence",
+                    )
+                )
+            )
+            return action
+        }
         instrumentation.emit(
             AgentEvent(
                 type = "task_workspace_final_pass",
@@ -1309,6 +1273,8 @@ class Ego(
     private fun cleanupResolvedInputAfterAnswer(action: PendingAction) {
         val rootInputId = action.rootInputId ?: return
         val sessionId = resolveSessionId(action.conversationContext)
+        planner.resetForInput(rootInputId)
+        deliberation.clearForInput(rootInputId)
         emitTaskWorkspaceTelemetry(
             rootInputId = rootInputId,
             rootInputReceivedAtMs = action.rootInputReceivedAtMs,
@@ -1504,5 +1470,6 @@ class Ego(
         const val MAX_EVIDENCE_HINT_SIGNALS: Int = 3
         const val MAX_EVIDENCE_HINT_CHARS: Int = 420
         const val JOURNAL_SUMMARY_PREVIEW_CHARS: Int = 160
+        const val MAX_TRACKED_SESSIONS: Int = 32
     }
 }

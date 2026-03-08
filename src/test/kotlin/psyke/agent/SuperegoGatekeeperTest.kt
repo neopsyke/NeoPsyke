@@ -261,7 +261,8 @@ class SuperegoGatekeeperTest {
             config = AgentConfig(
                 superego = SuperegoConfig(
                     twoStageReviewEnabled = true,
-                    twoStageLowConfidenceThreshold = 0.70
+                    twoStageLowConfidenceThreshold = 0.70,
+                    twoStageSkipForAnswerActions = false
                 )
             ),
             instrumentation = instrumentation
@@ -324,7 +325,8 @@ class SuperegoGatekeeperTest {
             config = AgentConfig(
                 superego = SuperegoConfig(
                     twoStageReviewEnabled = true,
-                    twoStageLowConfidenceThreshold = 0.70
+                    twoStageLowConfidenceThreshold = 0.70,
+                    twoStageSkipForAnswerActions = false
                 )
             )
         )
