@@ -1,7 +1,10 @@
 package psyke.agent.cortex.sensory
 
 import psyke.agent.core.AgentConfig
+import psyke.agent.core.ConversationContext
+import psyke.agent.core.DefaultInterlocutorResolver
 import psyke.agent.core.InputPriority
+import psyke.agent.core.InterlocutorResolver
 import psyke.agent.support.TextSecurity
 import java.io.Closeable
 import java.util.concurrent.LinkedBlockingQueue
@@ -12,6 +15,7 @@ data class SensoryInput(
     val content: String,
     val priority: InputPriority = InputPriority.MEDIUM,
     val source: String = "external",
+    val conversationContext: ConversationContext = ConversationContext.default(),
 )
 
 sealed interface SensorySignal {
@@ -96,12 +100,14 @@ class AsyncSensoryInputSource(
         content: String,
         source: String,
         priority: InputPriority = InputPriority.HIGH,
+        conversationContext: ConversationContext = ConversationContext.default(),
     ): Boolean = offerSignal(
         SensorySignal.InputReceived(
             SensoryInput(
                 content = content,
                 priority = priority,
-                source = source
+                source = source,
+                conversationContext = conversationContext
             )
         )
     )
@@ -139,6 +145,7 @@ class AsyncSensoryInputSource(
 class SensoryCortex(
     private val config: AgentConfig,
     private val source: SensoryInputSource,
+    private val interlocutorResolver: InterlocutorResolver = DefaultInterlocutorResolver(),
 ) {
     fun nextSignal(): SensorySignal {
         val signal = source.nextSignal()
@@ -150,9 +157,26 @@ class SensoryCortex(
         if (sanitized.isBlank()) {
             return SensorySignal.NoInput
         }
-        return SensorySignal.InputReceived(
-            signal.input.copy(content = sanitized)
+
+        val resolvedContext = signal.input.conversationContext
+        val enrichedInput = signal.input.copy(
+            content = sanitized,
+            conversationContext = if (resolvedContext.sessionId.isNotBlank()) {
+                resolvedContext
+            } else {
+                val sessionId = resolveSessionId(signal.input.source)
+                val interlocutor = interlocutorResolver.resolve(signal.input.source)
+                ConversationContext(sessionId, interlocutor)
+            }
         )
+
+        return SensorySignal.InputReceived(enrichedInput)
+    }
+
+    private fun resolveSessionId(source: String): String = when {
+        source == "stdin" -> ConversationContext.DEFAULT_SESSION_ID
+        source.startsWith("chat:") -> source.removePrefix("chat:")
+        else -> ConversationContext.DEFAULT_SESSION_ID
     }
 
     companion object {

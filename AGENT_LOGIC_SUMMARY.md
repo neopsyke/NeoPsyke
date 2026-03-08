@@ -70,11 +70,15 @@ It is intentionally high-level and should stay aligned with the code.
 
 ## Input Path
 - `SensoryCortex` sanitizes and clamps input to configured limits.
-- `PendingInput` now carries `source` metadata (for example `stdin`, `chat:<sessionId>`) so runtime telemetry can map root requests to conversation sessions.
+- `ConversationContext` is mandatory end-to-end and requires a non-blank `sessionId`.
+- `PendingInput` carries:
+  - `source` metadata (for example `stdin`, `chat:<sessionId>`) so runtime telemetry can map root requests to conversation sessions.
+  - `rootInputId` (UUID string identity for request-scoped orchestration)
+  - `receivedAtMs` (request timing anchor, not an identity key)
 - `processInput`:
   - Appends user turn to dialogue deque.
   - Stores turn in short-term `MemoryStore`.
-  - Creates/refreshes a task-scoped ephemeral workspace keyed by root input timestamp.
+  - Creates/refreshes a task-scoped ephemeral workspace keyed by `rootInputId`; workspace telemetry also carries `root_input_received_at_ms` for latency/timing views.
   - Builds `PlannerContext`:
     - recent dialogue
     - queue snapshot
@@ -91,7 +95,7 @@ It is intentionally high-level and should stay aligned with the code.
 - `processThought`:
   - Drops thought if `passes >= maxThoughtPasses`.
   - If dropped and fallback explanation is allowed, enqueue fallback answer action.
-  - Duplicate fallback answer enqueues for the same root input are suppressed if one is already pending.
+  - Duplicate fallback answer enqueues are suppressed per `(root input, sessionId)` scope so one session cannot block fallback for another.
   - Otherwise mirrors input path:
     - build context
     - optional meta assessment/guidance
@@ -100,7 +104,7 @@ It is intentionally high-level and should stay aligned with the code.
 
 ## Action Path
 - `processAction`:
-  - For terminal `answer` actions, runs task-workspace final-pass processing before action execution:
+- For terminal `answer` actions, runs task-workspace final-pass processing before action execution:
     - records candidate answer draft into workspace
     - builds final compilation from workspace sections/evidence
     - applies workspace-confidence gate (`finalPassMinWorkspaceConfidence`)
@@ -122,10 +126,10 @@ It is intentionally high-level and should stay aligned with the code.
     - For `answer`, optionally force a post-terminal-answer long-term memory assessment.
     - For evidence actions (`web_search`, `mcp_time`, `mcp_fetch`), enqueue follow-up thought.
     - Optionally run immediate post-allowed-action long-term memory assessment.
-  - For `answer`, response latency is emitted and per-input evidence cache is cleared.
-  - After `answer`, pending thoughts/actions for the same root input are pruned from queues
-    (`input_resolution_cleanup`) so stale plan/follow-up work cannot continue cycling.
-  - After `answer`, the task workspace for that root input is destroyed (`task_workspace_destroyed`).
+- For `answer`, response latency is emitted and per-input evidence cache is cleared.
+- After `answer`, pending thoughts/actions for the same `(root input, sessionId)` scope are pruned from queues
+    (`input_resolution_cleanup`) so stale plan/follow-up work cannot continue cycling or leak across sessions.
+- After `answer`, the task workspace for that root input is destroyed (`task_workspace_destroyed`).
 
 ## Planner Logic
 - File: `src/main/kotlin/psyke/agent/ego/LlmEgoPlanner.kt`
@@ -154,6 +158,7 @@ It is intentionally high-level and should stay aligned with the code.
   - `SingleStageSuperegoReviewEngine` handles one model (retry, strict-JSON retry, parse validation, safe deny fallback).
   - `TwoStageSuperegoReviewEngine` runs cheap primary review first and escalates only on:
     - technical/parsing fallback
+    - explicit `POLICY_REDUNDANT` denies (to reduce false-positive redundant blocks on fresh verification attempts)
     - low confidence (`twoStageLowConfidenceThreshold`)
     - medium/high `policy_risk` (configurable for medium)
 - Superego completion budget is adaptive by prompt size (rough token estimate) and bounded by `SuperegoConfig`:
@@ -233,6 +238,9 @@ It is intentionally high-level and should stay aligned with the code.
   - API namespaces are split:
     - Chat control plane and session-scoped SSE: `/api/chat/*`
     - Observability snapshot/events/workspace: `/api/obs/*`
+  - Workspace identity and timing are both exposed in telemetry/event payloads:
+    - `root_input_id`: stable request identity key
+    - `root_input_received_at_ms`: timing anchor used for latency/timeline correlation
   - Observability SSE lane streams lightweight events only; heavy workspace debug snapshots are captured in a bounded TTL ring and served on-demand via `/api/obs/workspace` and `/api/obs/workspace/{rootId}`.
   - The dashboard drawer fetches snapshot detail on demand to avoid continuous large-payload updates in timeline/event streams.
 
@@ -258,9 +266,9 @@ It is intentionally high-level and should stay aligned with the code.
   - thoughts (`Urgency`)
   - actions (`Urgency`)
 - Supports root-input scoped queue operations used by convergence logic:
-  - detect pending fallback explanation actions per input
-  - detect pending plan-context thoughts per input
-  - clear pending thoughts/actions for a resolved input after terminal answer
+  - detect pending fallback explanation actions per `(rootInputId, sessionId)` scope
+  - detect pending plan-context or convergence thoughts per `(rootInputId, sessionId)` scope
+  - clear pending thoughts/actions for a resolved `(rootInputId, sessionId)` scope after terminal answer
 - Saturation leads to drop + instrumentation warning/event.
 
 ## Safety and Fallback Patterns
@@ -284,6 +292,7 @@ It is intentionally high-level and should stay aligned with the code.
   3. **Exact hash dedup**: normalized goal+steps hash prevents identical plans from being re-emitted.
   4. **Pending plan detection**: if plan-context thoughts are already queued, suppress and enqueue a convergence thought instead.
   5. **Convergence thought dedupe**: at most one convergence thought per root input to prevent churn.
+- Suppressions from budget/pressure/hash gates now run a recovery step: if no same-scope plan/convergence work remains, enqueue a convergence thought (and fallback explanation if needed) so the input does not end silently without an answer.
 - `mcp_fetch` circuit breaker: after `FETCH_CIRCUIT_BREAKER_THRESHOLD` (default 3) non-retryable failures
   (403, 404, 401, install errors, etc.) for a root input, `MCP_FETCH` is removed from available actions,
   forcing the planner to use alternatives like `web_search`.

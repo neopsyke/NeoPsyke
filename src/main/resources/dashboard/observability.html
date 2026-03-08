@@ -261,6 +261,15 @@
       background: rgba(245, 108, 108, 0.08);
     }
     .tl-critical .tl-type { color: #f56c6c; }
+    .tl-session-chip {
+      display: inline-block;
+      font-size: 9px;
+      padding: 1px 5px;
+      border-radius: 3px;
+      border: 1px solid rgba(255,255,255,0.15);
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
 
     .cap-list {
       border: 1px solid var(--line);
@@ -884,6 +893,7 @@
       const content = extractTimelineContent(event);
       const time = formatTimeOnly(event);
       const typeLabel = event.type.replace(/_/g, " ");
+      const sessionChip = sessionChipHtml(event);
 
       if (isPrimary) {
         const contentHtml = content
@@ -892,6 +902,7 @@
         return "<div class=\"tl-row tl-primary" + catClass + criticalClass + "\">" +
           "<div class=\"tl-header\">" +
             "<span class=\"tl-type\">" + escapeHtml(typeLabel) + "</span>" +
+            sessionChip +
             "<span class=\"tl-ts\">" + escapeHtml(time) + "</span>" +
           "</div>" +
           contentHtml +
@@ -905,6 +916,7 @@
         "<details>" +
           "<summary>" +
             "<span class=\"tl-type\">" + escapeHtml(typeLabel) + "</span> " +
+            sessionChip +
             "<span class=\"tl-ts\">" + escapeHtml(time) + "</span>" +
           "</summary>" +
           (content ? "<div class=\"tl-content\">" + escapeHtml(short(content, 200)) + "</div>" : "") +
@@ -965,6 +977,29 @@
       }
       return null;
     };
+
+    function sessionHue(sessionId) {
+      if (!sessionId) return 0;
+      let h = 0;
+      for (let i = 0; i < sessionId.length; i++) {
+        h = ((h << 5) - h + sessionId.charCodeAt(i)) | 0;
+      }
+      return Math.abs(h) % 360;
+    }
+
+    function sessionChipHtml(event) {
+      const d = event.data || {};
+      const sid = d.session_id || d.input?.conversationContext?.sessionId || d.thought?.conversationContext?.sessionId || d.action?.conversationContext?.sessionId || null;
+      if (!sid) return "";
+      const interlocutor = d.interlocutor || d.input?.conversationContext?.interlocutor?.label || d.thought?.conversationContext?.interlocutor?.label || d.action?.conversationContext?.interlocutor?.label || null;
+      const hue = sessionHue(sid);
+      const bg = "hsla(" + hue + ",55%,35%,0.35)";
+      const border = "hsla(" + hue + ",55%,50%,0.5)";
+      const color = "hsl(" + hue + ",60%,75%)";
+      const title = interlocutor ? "session: " + sid + " • " + interlocutor : "session: " + sid;
+      const label = sid.length > 8 ? sid.slice(0, 8) + "…" : sid;
+      return "<span class=\"tl-session-chip\" style=\"background:" + bg + ";border-color:" + border + ";color:" + color + ";\" title=\"" + escapeHtml(title) + "\">" + escapeHtml(label) + "</span>";
+    }
 
     const compactHiddenKeys = new Set(["provider", "model"]);
 
@@ -1408,6 +1443,13 @@
       parts.push(chip("Sat Thought", satByType.thought || 0, null));
       parts.push(chip("Sat Action", satByType.action || 0, null));
       parts.push(chip("Updated", metrics?.updatedAtIso || "-", null));
+      const activeSessions = new Set();
+      state.recentEvents.forEach(function(e) {
+        const d = e.data || {};
+        const sid = d.session_id || d.input?.conversationContext?.sessionId || d.thought?.conversationContext?.sessionId || d.action?.conversationContext?.sessionId || null;
+        if (sid) activeSessions.add(sid);
+      });
+      parts.push(chip("Sessions", activeSessions.size, null));
       el.innerHTML = parts.join("");
     }
 

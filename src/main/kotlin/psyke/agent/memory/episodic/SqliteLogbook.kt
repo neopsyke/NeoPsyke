@@ -47,6 +47,22 @@ class SqliteLogbook(
             stmt.execute("CREATE INDEX IF NOT EXISTS idx_entries_event_type ON entries(event_type);")
             stmt.execute("CREATE INDEX IF NOT EXISTS idx_entries_run_id ON entries(run_id);")
 
+            // --- Schema migration: add session_id and interlocutor_id columns ---
+            val existingColumns = mutableSetOf<String>()
+            stmt.executeQuery("PRAGMA table_info(entries)").use { rs ->
+                while (rs.next()) {
+                    existingColumns.add(rs.getString("name"))
+                }
+            }
+            if ("session_id" !in existingColumns) {
+                stmt.execute("ALTER TABLE entries ADD COLUMN session_id TEXT;")
+            }
+            if ("interlocutor_id" !in existingColumns) {
+                stmt.execute("ALTER TABLE entries ADD COLUMN interlocutor_id TEXT;")
+            }
+            stmt.execute("CREATE INDEX IF NOT EXISTS idx_entries_session_id ON entries(session_id);")
+            stmt.execute("CREATE INDEX IF NOT EXISTS idx_entries_interlocutor_id ON entries(interlocutor_id);")
+
             stmt.execute(
                 """
                 CREATE VIRTUAL TABLE IF NOT EXISTS entries_fts USING fts5(
@@ -76,8 +92,8 @@ class SqliteLogbook(
         synchronized(connection) {
             connection.prepareStatement(
                 """
-                INSERT INTO entries(ts, ts_epoch_ms, event_type, summary, keywords, action_type, run_id, metadata)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO entries(ts, ts_epoch_ms, event_type, summary, keywords, action_type, run_id, metadata, session_id, interlocutor_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """.trimIndent()
             ).use { stmt ->
                 stmt.setString(1, entry.ts.toString())
@@ -88,6 +104,8 @@ class SqliteLogbook(
                 stmt.setString(6, entry.actionType)
                 stmt.setString(7, entry.runId)
                 stmt.setString(8, entry.metadata?.toString())
+                stmt.setString(9, entry.sessionId)
+                stmt.setString(10, entry.interlocutorId)
                 stmt.executeUpdate()
             }
             connection.prepareStatement("SELECT last_insert_rowid()").use { stmt ->
@@ -122,6 +140,14 @@ class SqliteLogbook(
                 conditions.add("e.action_type IN ($placeholders)")
                 params.addAll(query.actionTypes)
             }
+            if (query.sessionId != null) {
+                conditions.add("e.session_id = ?")
+                params.add(query.sessionId)
+            }
+            if (query.interlocutorId != null) {
+                conditions.add("e.interlocutor_id = ?")
+                params.add(query.interlocutorId)
+            }
 
             val useFts = !query.keywordSearch.isNullOrBlank()
             val fromClause = if (useFts) {
@@ -146,7 +172,7 @@ class SqliteLogbook(
 
             val selectSql = """
                 SELECT e.id, e.ts, e.ts_epoch_ms, e.event_type, e.summary, e.keywords,
-                       e.action_type, e.run_id, e.metadata
+                       e.action_type, e.run_id, e.metadata, e.session_id, e.interlocutor_id
                 FROM $fromClause
                 $whereClause
                 ORDER BY e.ts_epoch_ms DESC
@@ -172,6 +198,8 @@ class SqliteLogbook(
                                     actionType = rs.getString("action_type"),
                                     runId = rs.getString("run_id"),
                                     metadata = null,
+                                    sessionId = rs.getString("session_id"),
+                                    interlocutorId = rs.getString("interlocutor_id"),
                                 )
                             )
                         }

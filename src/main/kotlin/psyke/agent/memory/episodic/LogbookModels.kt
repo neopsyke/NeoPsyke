@@ -33,6 +33,8 @@ data class LogbookEntry(
     val actionType: String? = null,
     val runId: String? = null,
     val metadata: Map<String, Any?>? = null,
+    val sessionId: String? = null,
+    val interlocutorId: String? = null,
 )
 
 /**
@@ -45,6 +47,8 @@ data class LogbookQuery(
     val eventTypes: Set<EpisodicEventType>? = null,
     val actionTypes: Set<String>? = null,
     val maxResults: Int = 20,
+    val sessionId: String? = null,
+    val interlocutorId: String? = null,
 )
 
 /**

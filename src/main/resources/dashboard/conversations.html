@@ -115,6 +115,15 @@
       overflow: hidden;
       text-overflow: ellipsis;
     }
+    .session-interlocutor {
+      display: inline-block;
+      font-size: 10px;
+      color: var(--accent);
+      border: 1px solid rgba(53, 195, 168, 0.3);
+      border-radius: 4px;
+      padding: 1px 5px;
+      margin-bottom: 3px;
+    }
     .messages {
       flex: 1;
       min-height: 0;
@@ -147,6 +156,11 @@
       margin-bottom: 4px;
       text-transform: uppercase;
       letter-spacing: .03em;
+    }
+    .msg-interlocutor {
+      color: var(--accent);
+      text-transform: none;
+      font-weight: 600;
     }
     .composer {
       border-top: 1px solid var(--line);
@@ -259,10 +273,13 @@
       root.innerHTML = state.sessions.map((s) => {
         const active = s.session_id === state.selectedSessionId ? "active" : "";
         const preview = s.last_message_preview ? s.last_message_preview : "No messages yet";
+        const interlocutorChip = s.interlocutor
+          ? "<span class=\"session-interlocutor\">" + esc(s.interlocutor) + "</span> "
+          : "";
         return (
           "<button class=\"session " + active + "\" data-id=\"" + esc(s.session_id) + "\">" +
           "<div class=\"session-title\">" + esc(s.title || s.session_id) + "</div>" +
-          "<div class=\"session-meta\">#" + esc(s.session_id) + " • " + esc(s.message_count || 0) + " msgs</div>" +
+          "<div class=\"session-meta\">" + interlocutorChip + "#" + esc(s.session_id) + " • " + esc(s.message_count || 0) + " msgs</div>" +
           "<div class=\"session-meta\">" + esc(preview) + "</div>" +
           "</button>"
         );
@@ -277,9 +294,12 @@
       const root = document.getElementById("messages");
       root.innerHTML = state.selectedSessionMessages.map((m) => {
         const role = m.role === "assistant" ? "assistant" : "user";
+        const interlocutorLabel = (role === "user" && m.interlocutor)
+          ? "<span class=\"msg-interlocutor\">" + esc(m.interlocutor) + "</span> • "
+          : "";
         return (
           "<div class=\"msg " + role + "\" data-id=\"" + esc(m.id) + "\">" +
-          "<div class=\"msg-meta\">" + esc(role) + " • " + esc(fmtTime(m.created_at_ms)) + "</div>" +
+          "<div class=\"msg-meta\">" + interlocutorLabel + esc(role) + " • " + esc(fmtTime(m.created_at_ms)) + "</div>" +
           "<div>" + esc(m.content) + "</div>" +
           "</div>"
         );
@@ -296,7 +316,8 @@
         id.textContent = "";
         return;
       }
-      title.textContent = current.title || current.session_id;
+      const interlocutorSuffix = current.interlocutor ? " (" + current.interlocutor + ")" : "";
+      title.textContent = (current.title || current.session_id) + interlocutorSuffix;
       id.textContent = "#" + current.session_id;
     }
 

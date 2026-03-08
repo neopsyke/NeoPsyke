@@ -343,30 +343,45 @@ object AgentEvents {
             )
         )
 
-    fun duplicatePlanSuppressed(reason: String, rootInputEnqueuedAtMs: Long? = null): AgentEvent =
+    fun duplicatePlanSuppressed(
+        reason: String,
+        rootInputId: String? = null,
+        rootInputReceivedAtMs: Long? = null,
+    ): AgentEvent =
         AgentEvent(
             type = "duplicate_plan_suppressed",
             data = mapOf(
                 "reason" to reason,
-                "root_input_enqueued_at_ms" to rootInputEnqueuedAtMs
+                "root_input_id" to rootInputId,
+                "root_input_received_at_ms" to rootInputReceivedAtMs
             )
         )
 
-    fun convergenceThoughtEnqueued(rootInputEnqueuedAtMs: Long? = null): AgentEvent =
+    fun convergenceThoughtEnqueued(
+        rootInputId: String? = null,
+        rootInputReceivedAtMs: Long? = null,
+    ): AgentEvent =
         AgentEvent(
             type = "convergence_thought_enqueued",
             data = mapOf(
-                "root_input_enqueued_at_ms" to rootInputEnqueuedAtMs
+                "root_input_id" to rootInputId,
+                "root_input_received_at_ms" to rootInputReceivedAtMs
             )
         )
 
-    fun actionTypeTemporarilyDisabled(actionType: String, reason: String, rootInputEnqueuedAtMs: Long? = null): AgentEvent =
+    fun actionTypeTemporarilyDisabled(
+        actionType: String,
+        reason: String,
+        rootInputId: String? = null,
+        rootInputReceivedAtMs: Long? = null,
+    ): AgentEvent =
         AgentEvent(
             type = "action_type_temporarily_disabled",
             data = mapOf(
                 "action_type" to actionType,
                 "reason" to reason,
-                "root_input_enqueued_at_ms" to rootInputEnqueuedAtMs
+                "root_input_id" to rootInputId,
+                "root_input_received_at_ms" to rootInputReceivedAtMs
             )
         )
 

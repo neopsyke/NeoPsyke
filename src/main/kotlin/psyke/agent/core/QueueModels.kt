@@ -1,11 +1,15 @@
 package psyke.agent.core
 
+import java.util.UUID
+
 data class PendingInput(
     val id: Long,
     val content: String,
     val priority: InputPriority = InputPriority.MEDIUM,
     val source: String = "external",
-    val enqueuedAtMs: Long = System.currentTimeMillis(),
+    val rootInputId: String = RootInputIds.next(),
+    val receivedAtMs: Long = System.currentTimeMillis(),
+    val conversationContext: ConversationContext = ConversationContext.default(),
 )
 
 data class PlanContext(
@@ -22,13 +26,15 @@ data class PendingThought(
     val content: String,
     val passes: Int = 0,
     val longTermMemoryRecallQuery: String? = null,
-    val rootInputEnqueuedAtMs: Long? = null,
+    val rootInputId: String? = null,
+    val rootInputReceivedAtMs: Long? = null,
     val deniedActionType: ActionType? = null,
     val deniedActionPayload: String? = null,
     val denialReason: String? = null,
     val allowFallbackExplanation: Boolean = false,
     val planContext: PlanContext? = null,
     val denialReasonCode: String? = null,
+    val conversationContext: ConversationContext = ConversationContext.default(),
 )
 
 data class PendingAction(
@@ -39,7 +45,9 @@ data class PendingAction(
     val summary: String,
     val attempts: Int = 0,
     val isFallbackExplanation: Boolean = false,
-    val rootInputEnqueuedAtMs: Long? = null,
+    val rootInputId: String? = null,
+    val rootInputReceivedAtMs: Long? = null,
+    val conversationContext: ConversationContext = ConversationContext.default(),
 )
 
 data class QueueSnapshot(
@@ -63,4 +71,8 @@ sealed interface LoopTask {
     data class ProcessInput(val item: PendingInput) : LoopTask
     data class ProcessThought(val item: PendingThought) : LoopTask
     data class PerformAction(val item: PendingAction) : LoopTask
+}
+
+object RootInputIds {
+    fun next(): String = UUID.randomUUID().toString()
 }

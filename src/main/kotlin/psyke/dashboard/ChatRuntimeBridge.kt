@@ -1,6 +1,9 @@
 package psyke.dashboard
 
+import psyke.agent.core.ConversationContext
+import psyke.agent.core.DefaultInterlocutorResolver
 import psyke.agent.core.InputPriority
+import psyke.agent.core.InterlocutorResolver
 import psyke.agent.cortex.sensory.AsyncSensoryInputSource
 
 data class ChatSubmitResult(
@@ -11,6 +14,7 @@ data class ChatSubmitResult(
 class ChatRuntimeBridge(
     private val store: DashboardStateStore,
     private val sensoryInput: AsyncSensoryInputSource,
+    private val interlocutorResolver: InterlocutorResolver = DefaultInterlocutorResolver(),
 ) {
     init {
         store.ensureChatSession()
@@ -45,10 +49,17 @@ class ChatRuntimeBridge(
             accepted = false,
             detail = "Failed to record user message."
         )
+        val source = "chat:${message.sessionId}"
+        val interlocutor = interlocutorResolver.resolve(source)
+        val conversationContext = ConversationContext(
+            sessionId = message.sessionId,
+            interlocutor = interlocutor
+        )
         val accepted = sensoryInput.submitInput(
             content = message.content,
-            source = "chat:${message.sessionId}",
-            priority = InputPriority.HIGH
+            source = source,
+            priority = InputPriority.HIGH,
+            conversationContext = conversationContext
         )
         return if (accepted) {
             ChatSubmitResult(

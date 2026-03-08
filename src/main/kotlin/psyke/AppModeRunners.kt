@@ -497,14 +497,20 @@ internal object AppModeRunners {
         val dashboardEnabled = runtimeSettings.dashboardEnabled
     
         val dashboardStore = DashboardStateStore()
+        val interlocutorResolver = psyke.agent.core.DefaultInterlocutorResolver()
         val sensoryInput = AsyncSensoryInputSource(
             includeStdin = true,
             emitStdinClosedSignal = !dashboardEnabled
         )
-        val sensoryCortex = SensoryCortex(config = config, source = sensoryInput)
+        val sensoryCortex = SensoryCortex(
+            config = config,
+            source = sensoryInput,
+            interlocutorResolver = interlocutorResolver
+        )
         val chatBridge = ChatRuntimeBridge(
             store = dashboardStore,
-            sensoryInput = sensoryInput
+            sensoryInput = sensoryInput,
+            interlocutorResolver = interlocutorResolver
         )
         val sidecarPath = resolveEvalEventSidecarPath()
         val sidecarSink = if (sidecarPath == null) {

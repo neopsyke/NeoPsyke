@@ -9,7 +9,8 @@ import psyke.agent.support.TextSecurity
 import kotlin.math.max
 
 data class TaskWorkspaceDestroyed(
-    val rootInputEnqueuedAtMs: Long,
+    val rootInputId: String,
+    val rootInputReceivedAtMs: Long,
     val sectionCount: Int,
     val evidenceCount: Int,
 )
@@ -22,7 +23,8 @@ data class TaskWorkspaceFinalPassInput(
 )
 
 data class TaskWorkspaceDebugHead(
-    val rootInputEnqueuedAtMs: Long,
+    val rootInputId: String,
+    val rootInputReceivedAtMs: Long,
     val version: Long,
     val updatedAtMs: Long,
     val goal: String,
@@ -51,11 +53,12 @@ class TaskWorkspaceStore(
     @Synchronized
     fun ensureForInput(input: PendingInput): Boolean {
         if (!config.enabled) return false
-        val rootId = input.enqueuedAtMs
+        val rootId = input.rootInputId
         if (workspaces.containsKey(rootId)) return false
         evictOldestIfNeeded()
         val workspace = TaskWorkspace(
-            rootInputEnqueuedAtMs = rootId,
+            rootInputId = rootId,
+            rootInputReceivedAtMs = input.receivedAtMs,
             goal = TextSecurity.preview(input.content, MAX_GOAL_CHARS)
         )
         workspace.addSection(
@@ -69,8 +72,8 @@ class TaskWorkspaceStore(
     }
 
     @Synchronized
-    fun recordPlan(rootInputEnqueuedAtMs: Long?, goal: String, steps: List<String>) {
-        val workspace = lookup(rootInputEnqueuedAtMs) ?: return
+    fun recordPlan(rootInputId: String?, goal: String, steps: List<String>) {
+        val workspace = lookup(rootInputId) ?: return
         val normalizedGoal = TextSecurity.preview(goal, MAX_GOAL_CHARS)
         if (normalizedGoal.isNotBlank()) {
             workspace.updateGoal(normalizedGoal)
@@ -98,12 +101,12 @@ class TaskWorkspaceStore(
 
     @Synchronized
     fun recordActionOutcome(
-        rootInputEnqueuedAtMs: Long?,
+        rootInputId: String?,
         action: PendingAction,
         outcome: ActionOutcome,
         observedEvidence: Boolean,
     ) {
-        val workspace = lookup(rootInputEnqueuedAtMs) ?: return
+        val workspace = lookup(rootInputId) ?: return
         if (action.type == ActionType.ANSWER) {
             return
         }
@@ -125,8 +128,8 @@ class TaskWorkspaceStore(
     }
 
     @Synchronized
-    fun recordAnswerDraft(rootInputEnqueuedAtMs: Long?, payload: String) {
-        val workspace = lookup(rootInputEnqueuedAtMs) ?: return
+    fun recordAnswerDraft(rootInputId: String?, payload: String) {
+        val workspace = lookup(rootInputId) ?: return
         val normalized = TextSecurity.preview(payload, config.maxSectionChars)
         if (normalized.isBlank()) return
         workspace.addSection(
@@ -138,8 +141,8 @@ class TaskWorkspaceStore(
     }
 
     @Synchronized
-    fun promptSummary(rootInputEnqueuedAtMs: Long?, maxTokens: Int): String {
-        val workspace = lookup(rootInputEnqueuedAtMs) ?: return ""
+    fun promptSummary(rootInputId: String?, maxTokens: Int): String {
+        val workspace = lookup(rootInputId) ?: return ""
         val tokenBudget = minOf(config.maxPromptTokens, max(32, maxTokens))
         val summary = workspace.buildPromptSummary()
         if (summary.isBlank()) return ""
@@ -148,11 +151,11 @@ class TaskWorkspaceStore(
 
     @Synchronized
     fun buildFinalCompilation(
-        rootInputEnqueuedAtMs: Long?,
+        rootInputId: String?,
         candidateAnswer: String,
         maxChars: Int,
     ): String {
-        val workspace = lookup(rootInputEnqueuedAtMs) ?: return ""
+        val workspace = lookup(rootInputId) ?: return ""
         val cap = minOf(config.finalCompilationMaxChars, maxChars)
         if (cap <= 0) return ""
         val sections = workspace.sections.takeLast(FINAL_COMPILATION_SECTION_LIMIT)
@@ -196,12 +199,12 @@ class TaskWorkspaceStore(
 
     @Synchronized
     fun buildFinalPassInput(
-        rootInputEnqueuedAtMs: Long?,
+        rootInputId: String?,
         candidateAnswer: String,
         maxChars: Int,
     ): TaskWorkspaceFinalPassInput? {
-        val workspace = lookup(rootInputEnqueuedAtMs) ?: return null
-        val compilation = buildFinalCompilation(rootInputEnqueuedAtMs, candidateAnswer, maxChars)
+        val workspace = lookup(rootInputId) ?: return null
+        val compilation = buildFinalCompilation(rootInputId, candidateAnswer, maxChars)
         if (compilation.isBlank()) return null
         val confidence = workspace.estimateConfidence()
         return TaskWorkspaceFinalPassInput(
@@ -213,19 +216,20 @@ class TaskWorkspaceStore(
     }
 
     @Synchronized
-    fun debugHead(rootInputEnqueuedAtMs: Long?): TaskWorkspaceDebugHead? =
-        lookup(rootInputEnqueuedAtMs)?.debugHead()
+    fun debugHead(rootInputId: String?): TaskWorkspaceDebugHead? =
+        lookup(rootInputId)?.debugHead()
 
     @Synchronized
-    fun debugSnapshot(rootInputEnqueuedAtMs: Long?): TaskWorkspaceDebugSnapshot? =
-        lookup(rootInputEnqueuedAtMs)?.debugSnapshot()
+    fun debugSnapshot(rootInputId: String?): TaskWorkspaceDebugSnapshot? =
+        lookup(rootInputId)?.debugSnapshot()
 
     @Synchronized
-    fun destroy(rootInputEnqueuedAtMs: Long?): TaskWorkspaceDestroyed? {
-        if (!config.enabled || rootInputEnqueuedAtMs == null) return null
-        val removed = workspaces.remove(rootInputEnqueuedAtMs) ?: return null
+    fun destroy(rootInputId: String?): TaskWorkspaceDestroyed? {
+        if (!config.enabled || rootInputId.isNullOrBlank()) return null
+        val removed = workspaces.remove(rootInputId) ?: return null
         return TaskWorkspaceDestroyed(
-            rootInputEnqueuedAtMs = removed.rootInputEnqueuedAtMs,
+            rootInputId = removed.rootInputId,
+            rootInputReceivedAtMs = removed.rootInputReceivedAtMs,
             sectionCount = removed.sections.size,
             evidenceCount = removed.evidence.size
         )
@@ -242,9 +246,9 @@ class TaskWorkspaceStore(
     @Synchronized
     fun activeTaskCount(): Int = workspaces.size
 
-    private fun lookup(rootInputEnqueuedAtMs: Long?): TaskWorkspace? {
-        if (!config.enabled || rootInputEnqueuedAtMs == null) return null
-        return workspaces[rootInputEnqueuedAtMs]
+    private fun lookup(rootInputId: String?): TaskWorkspace? {
+        if (!config.enabled || rootInputId.isNullOrBlank()) return null
+        return workspaces[rootInputId]
     }
 
     private fun evictOldestIfNeeded() {
@@ -262,7 +266,8 @@ class TaskWorkspaceStore(
     )
 
     private inner class TaskWorkspace(
-        val rootInputEnqueuedAtMs: Long,
+        val rootInputId: String,
+        val rootInputReceivedAtMs: Long,
         var goal: String,
         val sections: ArrayDeque<TaskWorkspaceSection> = ArrayDeque(),
         val evidence: ArrayDeque<String> = ArrayDeque(),
@@ -353,7 +358,8 @@ class TaskWorkspaceStore(
 
         fun debugHead(): TaskWorkspaceDebugHead =
             TaskWorkspaceDebugHead(
-                rootInputEnqueuedAtMs = rootInputEnqueuedAtMs,
+                rootInputId = rootInputId,
+                rootInputReceivedAtMs = rootInputReceivedAtMs,
                 version = version,
                 updatedAtMs = updatedAtMs,
                 goal = goal,
@@ -407,5 +413,5 @@ class TaskWorkspaceStore(
         const val GOAL_SIGNAL_WEIGHT: Double = 0.10
     }
 
-    private val workspaces = LinkedHashMap<Long, TaskWorkspace>()
+    private val workspaces = LinkedHashMap<String, TaskWorkspace>()
 }

@@ -3,6 +3,7 @@ package psyke.agent.ego
 import mu.KotlinLogging
 import psyke.agent.core.ActionType
 import psyke.agent.core.AgentConfig
+import psyke.agent.core.ConversationContext
 import psyke.agent.core.DeliberationState
 import psyke.agent.core.EgoDecision
 import psyke.agent.core.EgoTrigger
@@ -28,17 +29,22 @@ internal class DeliberationEngine(
     private val metaReasoner: MetaReasoner,
 ) {
     private val monitor = DeliberationProgressMonitor()
-    private var latestGuidance: String = ""
+    private val guidanceBySession = mutableMapOf<String, String>()
+    private var activeSessionId: String = ConversationContext.DEFAULT_SESSION_ID
     private var lastAssessmentStep: Int = 0
     private var forcedTerminalAnswerQueued: Boolean = false
-    private val externalEvidence: MutableMap<Long, ExternalEvidenceProgress> =
-        object : LinkedHashMap<Long, ExternalEvidenceProgress>(16, 0.75f, false) {
-            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Long, ExternalEvidenceProgress>): Boolean =
+
+    fun setActiveSession(sessionId: String) {
+        activeSessionId = sessionId
+    }
+    private val externalEvidence: MutableMap<String, ExternalEvidenceProgress> =
+        object : LinkedHashMap<String, ExternalEvidenceProgress>(16, 0.75f, false) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, ExternalEvidenceProgress>): Boolean =
                 size > MAX_EVIDENCE_ENTRIES
         }
-    private val fetchCircuitBreaker: MutableMap<Long, Int> =
-        object : LinkedHashMap<Long, Int>(16, 0.75f, false) {
-            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Long, Int>): Boolean =
+    private val fetchCircuitBreaker: MutableMap<String, Int> =
+        object : LinkedHashMap<String, Int>(16, 0.75f, false) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Int>): Boolean =
                 size > MAX_EVIDENCE_ENTRIES
         }
 
@@ -61,7 +67,7 @@ internal class DeliberationEngine(
 
     // --- Guidance ---
 
-    fun guidance(): String = latestGuidance
+    fun guidance(): String = guidanceBySession[activeSessionId] ?: ""
 
     // --- Meta-reasoning ---
 
@@ -71,7 +77,7 @@ internal class DeliberationEngine(
      */
     fun maybeAssessAndUpdateGuidance(trigger: EgoTrigger, context: PlannerContext): MetaReasonerAssessment? {
         val assessment = maybeAssessDeliberation(trigger, context) ?: return null
-        latestGuidance = buildMetaGuidance(assessment)
+        guidanceBySession[activeSessionId] = buildMetaGuidance(assessment)
         return assessment
     }
 
@@ -98,7 +104,9 @@ internal class DeliberationEngine(
      */
     fun maybeForceTerminalAnswer(
         scheduler: AttentionScheduler,
-        rootInputEnqueuedAtMs: Long?,
+        rootInputId: String?,
+        rootInputReceivedAtMs: Long?,
+        conversationContext: ConversationContext,
     ) {
         if (forcedTerminalAnswerQueued) return
         val state = monitor.snapshot()
@@ -118,12 +126,14 @@ internal class DeliberationEngine(
             ),
             summary = "Forced terminal answer due to high decision pressure.",
             urgency = Urgency.HIGH,
-            rootInputEnqueuedAtMs = rootInputEnqueuedAtMs
+            rootInputId = rootInputId,
+            rootInputReceivedAtMs = rootInputReceivedAtMs,
+            conversationContext = conversationContext
         )
         if (queued) {
             forcedTerminalAnswerQueued = true
             instrumentation.emit(AgentEvents.warning("Forced terminal answer queued due to persistent circular deliberation pressure."))
-            latestGuidance = "Finalize immediately due to persistent circular reasoning pressure."
+            guidanceBySession[activeSessionId] = "Finalize immediately due to persistent circular reasoning pressure."
         }
     }
 
@@ -154,8 +164,8 @@ internal class DeliberationEngine(
 
     fun recordEvidenceProgress(action: PendingAction, outcome: ActionOutcome, observed: Boolean) {
         if (!action.type.requiresFollowUpThought()) return
-        val rootInput = action.rootInputEnqueuedAtMs ?: return
-        val current = externalEvidence[rootInput] ?: ExternalEvidenceProgress()
+        val rootInputId = action.rootInputId ?: return
+        val current = externalEvidence[rootInputId] ?: ExternalEvidenceProgress()
         val updatedSignals = if (observed) {
             val signal = TextSecurity.clamp(outcome.plannerSignal, 280)
             val newList = current.successfulEvidenceSignals.toMutableList()
@@ -166,7 +176,7 @@ internal class DeliberationEngine(
         } else {
             current.successfulEvidenceSignals
         }
-        externalEvidence[rootInput] = current.copy(
+        externalEvidence[rootInputId] = current.copy(
             hadSuccessfulEvidence = current.hadSuccessfulEvidence || observed,
             hadExternalFailures = current.hadExternalFailures || !observed,
             latestPlannerSignal = if (observed) TextSecurity.clamp(outcome.plannerSignal, 420) else current.latestPlannerSignal,
@@ -176,33 +186,33 @@ internal class DeliberationEngine(
 
     fun markEvidenceFailure(action: PendingAction) {
         if (!action.type.requiresFollowUpThought()) return
-        val rootInput = action.rootInputEnqueuedAtMs ?: return
-        val current = externalEvidence[rootInput] ?: ExternalEvidenceProgress()
-        externalEvidence[rootInput] = current.copy(hadExternalFailures = true)
+        val rootInputId = action.rootInputId ?: return
+        val current = externalEvidence[rootInputId] ?: ExternalEvidenceProgress()
+        externalEvidence[rootInputId] = current.copy(hadExternalFailures = true)
     }
 
-    fun clearEvidenceForInput(rootInputEnqueuedAtMs: Long?) {
-        if (rootInputEnqueuedAtMs == null) return
-        externalEvidence.remove(rootInputEnqueuedAtMs)
+    fun clearEvidenceForInput(rootInputId: String?) {
+        if (rootInputId.isNullOrBlank()) return
+        externalEvidence.remove(rootInputId)
     }
 
-    fun evidenceFor(rootInputEnqueuedAtMs: Long?): ExternalEvidenceProgress? =
-        rootInputEnqueuedAtMs?.let { externalEvidence[it] }
+    fun evidenceFor(rootInputId: String?): ExternalEvidenceProgress? =
+        rootInputId?.let { externalEvidence[it] }
 
     // --- Fetch circuit breaker ---
 
-    fun recordFetchFailure(rootInputEnqueuedAtMs: Long?, errorCategory: FetchErrorCategory) {
-        if (rootInputEnqueuedAtMs == null) return
+    fun recordFetchFailure(rootInputId: String?, errorCategory: FetchErrorCategory) {
+        if (rootInputId.isNullOrBlank()) return
         if (errorCategory == FetchErrorCategory.NON_RETRYABLE) {
-            val count = (fetchCircuitBreaker[rootInputEnqueuedAtMs] ?: 0) + 1
-            fetchCircuitBreaker[rootInputEnqueuedAtMs] = count
+            val count = (fetchCircuitBreaker[rootInputId] ?: 0) + 1
+            fetchCircuitBreaker[rootInputId] = count
             if (count >= FETCH_CIRCUIT_BREAKER_THRESHOLD) {
                 instrumentation.emit(
                     AgentEvent(
                         type = "action_type_circuit_breaker_tripped",
                         data = mapOf(
                             "action_type" to "mcp_fetch",
-                            "root_input_enqueued_at_ms" to rootInputEnqueuedAtMs,
+                            "root_input_id" to rootInputId,
                             "non_retryable_failure_count" to count,
                             "threshold" to FETCH_CIRCUIT_BREAKER_THRESHOLD
                         )
@@ -212,16 +222,16 @@ internal class DeliberationEngine(
                     AgentEvents.actionTypeTemporarilyDisabled(
                         actionType = "mcp_fetch",
                         reason = "circuit_breaker_non_retryable_failures",
-                        rootInputEnqueuedAtMs = rootInputEnqueuedAtMs
+                        rootInputId = rootInputId
                     )
                 )
             }
         }
     }
 
-    fun disabledActionTypes(rootInputEnqueuedAtMs: Long?): Set<ActionType> {
-        if (rootInputEnqueuedAtMs == null) return emptySet()
-        val fetchFailures = fetchCircuitBreaker[rootInputEnqueuedAtMs] ?: 0
+    fun disabledActionTypes(rootInputId: String?): Set<ActionType> {
+        if (rootInputId.isNullOrBlank()) return emptySet()
+        val fetchFailures = fetchCircuitBreaker[rootInputId] ?: 0
         return if (fetchFailures >= FETCH_CIRCUIT_BREAKER_THRESHOLD) {
             setOf(ActionType.MCP_FETCH)
         } else {
@@ -232,7 +242,7 @@ internal class DeliberationEngine(
     // --- Reset ---
 
     fun reset() {
-        latestGuidance = ""
+        guidanceBySession.clear()
         lastAssessmentStep = 0
         forcedTerminalAnswerQueued = false
         externalEvidence.clear()

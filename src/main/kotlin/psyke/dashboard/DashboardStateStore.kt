@@ -2,6 +2,8 @@ package psyke.dashboard
 
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import psyke.agent.core.ActionType
+import psyke.agent.core.ConversationContext
+import psyke.agent.core.Interlocutor
 import psyke.agent.core.PendingAction
 import psyke.agent.core.PendingInput
 import psyke.agent.core.QueueState
@@ -36,10 +38,10 @@ class DashboardStateStore(
     private var queueSaturationEvents: Long = 0
     private val queueSaturationByType = mutableMapOf<String, Long>()
     private val workspaceSnapshots = ArrayDeque<WorkspaceSnapshotRecord>()
-    private val latestWorkspaceSnapshotByRoot = mutableMapOf<Long, WorkspaceSnapshotRecord>()
+    private val latestWorkspaceSnapshotByRoot = mutableMapOf<String, WorkspaceSnapshotRecord>()
     private val subscribers = mutableSetOf<LinkedBlockingDeque<String>>()
     private val chatSessions = linkedMapOf<String, ChatSessionRecord>()
-    private val rootInputSessionMap = mutableMapOf<Long, String>()
+    private val rootInputSessionMap = mutableMapOf<String, String>()
     private val chatSubscribers = mutableMapOf<String, MutableSet<LinkedBlockingDeque<String>>>()
     private var nextChatMessageId: Long = 1L
 
@@ -87,19 +89,23 @@ class DashboardStateStore(
                 "input_queued" -> {
                     val input = event.data["input"] as? PendingInput
                     if (input != null) {
-                        val sessionId = resolveSessionIdFromInputSource(input.source)
-                        if (sessionId != null) {
-                            ensureChatSessionLocked(sessionId = sessionId, title = if (sessionId == DEFAULT_SESSION_ID) "Default" else null)
-                            rootInputSessionMap[input.enqueuedAtMs] = sessionId
-                            if (input.source.equals("stdin", ignoreCase = true)) {
-                                addChatMessageLocked(
-                                    sessionId = sessionId,
-                                    role = "user",
-                                    content = input.content,
-                                    source = "stdin",
-                                    emitEvent = true
-                                )
-                            }
+                        val sessionId = input.conversationContext.sessionId
+                        val interlocutor = input.conversationContext.interlocutor
+                        ensureChatSessionLocked(
+                            sessionId = sessionId,
+                            title = if (sessionId == DEFAULT_SESSION_ID) "Default" else null,
+                            interlocutor = interlocutor
+                        )
+                        rootInputSessionMap[input.rootInputId] = sessionId
+                        if (input.source.equals("stdin", ignoreCase = true)) {
+                            addChatMessageLocked(
+                                sessionId = sessionId,
+                                role = "user",
+                                content = input.content,
+                                source = "stdin",
+                                interlocutorName = interlocutor.displayName(),
+                                emitEvent = true
+                            )
                         }
                     }
                 }
@@ -128,10 +134,10 @@ class DashboardStateStore(
                     if (
                         action != null &&
                         action.type == ActionType.ANSWER &&
-                        action.rootInputEnqueuedAtMs != null
+                        action.rootInputId != null
                     ) {
-                        val rootInputEnqueuedAtMs = action.rootInputEnqueuedAtMs
-                        val sessionId = rootInputSessionMap[rootInputEnqueuedAtMs]
+                        val rootInputId = action.rootInputId ?: return
+                        val sessionId = rootInputSessionMap[rootInputId]
                         if (sessionId != null) {
                             addChatMessageLocked(
                                 sessionId = sessionId,
@@ -181,7 +187,7 @@ class DashboardStateStore(
                 }
 
                 "task_workspace_destroyed" -> {
-                    val rootId = event.data["root_input_enqueued_at_ms"].asLong()
+                    val rootId = event.data["root_input_id"].asString()
                     if (rootId != null) {
                         rootInputSessionMap.remove(rootId)
                     }
@@ -225,7 +231,8 @@ class DashboardStateStore(
                 .sortedByDescending { it.updatedAtMs }
                 .map { snapshot ->
                     mapOf(
-                        "root_input_enqueued_at_ms" to snapshot.rootInputEnqueuedAtMs,
+                        "root_input_id" to snapshot.rootInputId,
+                        "root_input_received_at_ms" to snapshot.rootInputReceivedAtMs,
                         "version" to snapshot.version,
                         "updated_at_ms" to snapshot.updatedAtMs,
                         "update_type" to snapshot.updateType,
@@ -245,19 +252,19 @@ class DashboardStateStore(
         return mapper.writeValueAsString(payload)
     }
 
-    fun workspaceSnapshotJson(rootInputEnqueuedAtMs: Long, version: Long? = null): String? {
+    fun workspaceSnapshotJson(rootInputId: String, version: Long? = null): String? {
         val payload = synchronized(lock) {
             pruneWorkspaceSnapshotsLocked()
             val record = if (version == null) {
-                latestWorkspaceSnapshotByRoot[rootInputEnqueuedAtMs]
+                latestWorkspaceSnapshotByRoot[rootInputId]
             } else {
                 workspaceSnapshots.lastOrNull {
-                    it.rootInputEnqueuedAtMs == rootInputEnqueuedAtMs && it.version == version
+                    it.rootInputId == rootInputId && it.version == version
                 }
             } ?: return null
             val versions = workspaceSnapshots
                 .asSequence()
-                .filter { it.rootInputEnqueuedAtMs == rootInputEnqueuedAtMs }
+                .filter { it.rootInputId == rootInputId }
                 .sortedByDescending { it.version }
                 .take(WORKSPACE_VERSION_LIST_LIMIT)
                 .map {
@@ -269,7 +276,8 @@ class DashboardStateStore(
                 }
                 .toList()
             mapOf(
-                "root_input_enqueued_at_ms" to record.rootInputEnqueuedAtMs,
+                "root_input_id" to record.rootInputId,
+                "root_input_received_at_ms" to record.rootInputReceivedAtMs,
                 "version" to record.version,
                 "updated_at_ms" to record.updatedAtMs,
                 "update_type" to record.updateType,
@@ -427,11 +435,16 @@ class DashboardStateStore(
         subscribers.removeAll(staleSubscribers.toSet())
     }
 
-    private fun ensureChatSessionLocked(sessionId: String, title: String?): ChatSessionRecord {
+    private fun ensureChatSessionLocked(
+        sessionId: String,
+        title: String?,
+        interlocutor: Interlocutor? = null,
+    ): ChatSessionRecord {
         val existing = chatSessions[sessionId]
         if (existing != null) {
             val normalizedTitle = normalizeTitle(title) ?: existing.title
-            val updated = existing.copy(title = normalizedTitle)
+            val updatedInterlocutor = interlocutor ?: existing.interlocutor
+            val updated = existing.copy(title = normalizedTitle, interlocutor = updatedInterlocutor)
             chatSessions[sessionId] = updated
             return updated
         }
@@ -441,7 +454,8 @@ class DashboardStateStore(
             title = normalizeTitle(title) ?: defaultTitleForSession(sessionId),
             createdAtMs = now,
             updatedAtMs = now,
-            messages = ArrayDeque()
+            messages = ArrayDeque(),
+            interlocutor = interlocutor
         )
         chatSessions[sessionId] = created
         return created
@@ -452,6 +466,7 @@ class DashboardStateStore(
         role: String,
         content: String,
         source: String,
+        interlocutorName: String? = null,
         emitEvent: Boolean,
     ): ChatMessage {
         val session = ensureChatSessionLocked(sessionId, title = null)
@@ -462,7 +477,8 @@ class DashboardStateStore(
             role = role,
             content = content,
             source = source,
-            createdAtMs = now
+            createdAtMs = now,
+            interlocutor = interlocutorName
         )
         if (session.messages.size >= MAX_CHAT_MESSAGES_PER_SESSION) {
             session.messages.removeFirst()
@@ -480,7 +496,8 @@ class DashboardStateStore(
                         "role" to message.role,
                         "content" to message.content,
                         "source" to message.source,
-                        "created_at_ms" to message.createdAtMs
+                        "created_at_ms" to message.createdAtMs,
+                        "interlocutor" to message.interlocutor
                     )
                 )
             )
@@ -492,6 +509,9 @@ class DashboardStateStore(
         mapOf(
             "session_id" to session.sessionId,
             "title" to session.title,
+            "interlocutor" to session.interlocutor?.let {
+                mapOf("id" to it.id, "label" to it.label, "display_name" to it.displayName())
+            },
             "created_at_ms" to session.createdAtMs,
             "updated_at_ms" to session.updatedAtMs,
             "message_count" to session.messages.size,
@@ -503,7 +523,8 @@ class DashboardStateStore(
                         "role" to message.role,
                         "content" to message.content,
                         "source" to message.source,
-                        "created_at_ms" to message.createdAtMs
+                        "created_at_ms" to message.createdAtMs,
+                        "interlocutor" to message.interlocutor
                     )
                 }
             } else {
@@ -585,11 +606,13 @@ class DashboardStateStore(
     }
 
     private fun captureWorkspaceSnapshot(data: Map<String, Any?>) {
-        val rootInputEnqueuedAtMs = data["root_input_enqueued_at_ms"].asLong() ?: return
+        val rootInputId = data["root_input_id"].asString() ?: return
+        val rootInputReceivedAtMs = data["root_input_received_at_ms"].asLong() ?: 0L
         val version = data["version"].asLong() ?: return
         val updatedAtMs = data["updated_at_ms"].asLong() ?: System.currentTimeMillis()
         val record = WorkspaceSnapshotRecord(
-            rootInputEnqueuedAtMs = rootInputEnqueuedAtMs,
+            rootInputId = rootInputId,
+            rootInputReceivedAtMs = rootInputReceivedAtMs,
             version = version,
             updatedAtMs = updatedAtMs,
             updateType = data["update_type"]?.toString().orEmpty(),
@@ -609,7 +632,7 @@ class DashboardStateStore(
                 .orEmpty()
         )
         val sameVersionIndex = workspaceSnapshots.indexOfFirst {
-            it.rootInputEnqueuedAtMs == rootInputEnqueuedAtMs && it.version == version
+            it.rootInputId == rootInputId && it.version == version
         }
         if (sameVersionIndex >= 0) {
             workspaceSnapshots.removeAt(sameVersionIndex)
@@ -619,18 +642,20 @@ class DashboardStateStore(
     }
 
     private fun captureWorkspaceHead(data: Map<String, Any?>) {
-        val rootInputEnqueuedAtMs = data["root_input_enqueued_at_ms"].asLong() ?: return
+        val rootInputId = data["root_input_id"].asString() ?: return
+        val rootInputReceivedAtMs = data["root_input_received_at_ms"].asLong() ?: 0L
         val version = data["version"].asLong() ?: return
         val updatedAtMs = data["updated_at_ms"].asLong() ?: System.currentTimeMillis()
         val sameVersionIndex = workspaceSnapshots.indexOfFirst {
-            it.rootInputEnqueuedAtMs == rootInputEnqueuedAtMs && it.version == version
+            it.rootInputId == rootInputId && it.version == version
         }
         if (sameVersionIndex >= 0) {
             return
         }
         workspaceSnapshots.addLast(
             WorkspaceSnapshotRecord(
-                rootInputEnqueuedAtMs = rootInputEnqueuedAtMs,
+                rootInputId = rootInputId,
+                rootInputReceivedAtMs = rootInputReceivedAtMs,
                 version = version,
                 updatedAtMs = updatedAtMs,
                 updateType = data["update_type"]?.toString().orEmpty(),
@@ -659,13 +684,13 @@ class DashboardStateStore(
         }
         latestWorkspaceSnapshotByRoot.clear()
         workspaceSnapshots.forEach { record ->
-            val current = latestWorkspaceSnapshotByRoot[record.rootInputEnqueuedAtMs]
+            val current = latestWorkspaceSnapshotByRoot[record.rootInputId]
             if (
                 current == null ||
                 record.version > current.version ||
                 (record.version == current.version && record.updatedAtMs >= current.updatedAtMs)
             ) {
-                latestWorkspaceSnapshotByRoot[record.rootInputEnqueuedAtMs] = record
+                latestWorkspaceSnapshotByRoot[record.rootInputId] = record
             }
         }
     }
@@ -676,6 +701,9 @@ class DashboardStateStore(
             is String -> this.toLongOrNull()
             else -> null
         }
+
+    private fun Any?.asString(): String? =
+        this?.toString()?.trim()?.takeIf { it.isNotBlank() }
 
     private fun Any?.asInt(): Int =
         when (this) {
@@ -692,7 +720,8 @@ class DashboardStateStore(
         }
 
     private data class WorkspaceSnapshotRecord(
-        val rootInputEnqueuedAtMs: Long,
+        val rootInputId: String,
+        val rootInputReceivedAtMs: Long,
         val version: Long,
         val updatedAtMs: Long,
         val updateType: String,
@@ -732,6 +761,7 @@ data class ChatMessage(
     val content: String,
     val source: String,
     val createdAtMs: Long,
+    val interlocutor: String? = null,
 )
 
 private data class ChatSessionRecord(
@@ -740,6 +770,7 @@ private data class ChatSessionRecord(
     val createdAtMs: Long,
     val updatedAtMs: Long,
     val messages: ArrayDeque<ChatMessage>,
+    val interlocutor: Interlocutor? = null,
 )
 
 data class DashboardSnapshot(

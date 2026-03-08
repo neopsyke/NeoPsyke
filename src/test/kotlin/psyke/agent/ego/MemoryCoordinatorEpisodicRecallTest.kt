@@ -44,7 +44,7 @@ class MemoryCoordinatorEpisodicRecallTest {
             longTermMemoryAdvisor = NoopLongTermMemoryAdvisor,
             config = config,
             instrumentation = NoopAgentInstrumentation,
-            memoryStore = MemoryStore(maxChars = 20000),
+            initialMemoryStore = MemoryStore(maxChars = 20000),
             logbook = logbook,
         )
     }

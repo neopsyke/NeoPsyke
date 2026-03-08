@@ -1,11 +1,29 @@
 package psyke.instrumentation
 
 import mu.KotlinLogging
+import psyke.agent.core.PendingInput
+import psyke.agent.core.PendingThought
+import psyke.agent.core.PendingAction
 import psyke.agent.core.QueueState
 
 private val logger = KotlinLogging.logger {}
 
 class StructuredLogSink : InstrumentationSink {
+    private fun sessionPrefix(event: AgentEvent): String {
+        val sessionId = event.data["session_id"]
+            ?: (event.data["input"] as? PendingInput)?.conversationContext?.sessionId
+            ?: (event.data["thought"] as? PendingThought)?.conversationContext?.sessionId
+            ?: (event.data["action"] as? PendingAction)?.conversationContext?.sessionId
+        val interlocutor = event.data["interlocutor"]
+            ?: (event.data["input"] as? PendingInput)?.conversationContext?.interlocutor?.id
+            ?: (event.data["thought"] as? PendingThought)?.conversationContext?.interlocutor?.id
+            ?: (event.data["action"] as? PendingAction)?.conversationContext?.interlocutor?.id
+        return buildString {
+            if (sessionId != null) append("session=$sessionId ")
+            if (interlocutor != null) append("interlocutor=$interlocutor ")
+        }
+    }
+
     override fun onEvent(event: AgentEvent) {
         when (event.type) {
             "loop_status" -> {
@@ -29,7 +47,7 @@ class StructuredLogSink : InstrumentationSink {
 
             "planner_decision" -> {
                 logger.trace {
-                    "planner.decision trigger=${event.data["trigger"]} type=${event.data["decision_type"]} urgency=${event.data["urgency"]} action=${event.data["action_type"]}"
+                    "${sessionPrefix(event)}planner.decision trigger=${event.data["trigger"]} type=${event.data["decision_type"]} urgency=${event.data["urgency"]} action=${event.data["action_type"]}"
                 }
             }
 
@@ -177,49 +195,49 @@ class StructuredLogSink : InstrumentationSink {
 
             "task_workspace_created" -> {
                 logger.trace {
-                    "task_workspace.created root=${event.data["root_input_enqueued_at_ms"]} active=${event.data["active_tasks"]} goal=${event.data["goal_preview"]}"
+                    "task_workspace.created root_id=${event.data["root_input_id"]} root_received_at_ms=${event.data["root_input_received_at_ms"]} active=${event.data["active_tasks"]} goal=${event.data["goal_preview"]}"
                 }
             }
 
             "task_workspace_updated" -> {
                 logger.trace {
-                    "task_workspace.updated root=${event.data["root_input_enqueued_at_ms"]} type=${event.data["update_type"]} active=${event.data["active_tasks"]}"
+                    "task_workspace.updated root_id=${event.data["root_input_id"]} root_received_at_ms=${event.data["root_input_received_at_ms"]} type=${event.data["update_type"]} active=${event.data["active_tasks"]}"
                 }
             }
 
             "task_workspace_head" -> {
                 logger.trace {
-                    "task_workspace.head root=${event.data["root_input_enqueued_at_ms"]} type=${event.data["update_type"]} version=${event.data["version"]} sections=${event.data["section_count"]} evidence=${event.data["evidence_count"]}"
+                    "task_workspace.head root_id=${event.data["root_input_id"]} root_received_at_ms=${event.data["root_input_received_at_ms"]} type=${event.data["update_type"]} version=${event.data["version"]} sections=${event.data["section_count"]} evidence=${event.data["evidence_count"]}"
                 }
             }
 
             "task_workspace_debug_snapshot" -> {
                 logger.trace {
-                    "task_workspace.debug_snapshot root=${event.data["root_input_enqueued_at_ms"]} type=${event.data["update_type"]} version=${event.data["version"]} bytes=${event.data["bytes_estimate"]}"
+                    "task_workspace.debug_snapshot root_id=${event.data["root_input_id"]} root_received_at_ms=${event.data["root_input_received_at_ms"]} type=${event.data["update_type"]} version=${event.data["version"]} bytes=${event.data["bytes_estimate"]}"
                 }
             }
 
             "task_workspace_final_pass" -> {
                 logger.trace {
-                    "task_workspace.final_pass root=${event.data["root_input_enqueued_at_ms"]} action_id=${event.data["action_id"]} workspace_confidence=${event.data["workspace_confidence"]}"
+                    "task_workspace.final_pass root_id=${event.data["root_input_id"]} root_received_at_ms=${event.data["root_input_received_at_ms"]} action_id=${event.data["action_id"]} workspace_confidence=${event.data["workspace_confidence"]}"
                 }
             }
 
             "task_workspace_final_pass_skipped" -> {
                 logger.trace {
-                    "task_workspace.final_pass.skipped root=${event.data["root_input_enqueued_at_ms"]} action_id=${event.data["action_id"]} reason=${event.data["reason"]}"
+                    "task_workspace.final_pass.skipped root_id=${event.data["root_input_id"]} root_received_at_ms=${event.data["root_input_received_at_ms"]} action_id=${event.data["action_id"]} reason=${event.data["reason"]}"
                 }
             }
 
             "task_workspace_final_pass_applied" -> {
                 logger.trace {
-                    "task_workspace.final_pass.applied root=${event.data["root_input_enqueued_at_ms"]} action_id=${event.data["action_id"]} workspace_confidence=${event.data["workspace_confidence"]} model_confidence=${event.data["model_confidence"]}"
+                    "task_workspace.final_pass.applied root_id=${event.data["root_input_id"]} root_received_at_ms=${event.data["root_input_received_at_ms"]} action_id=${event.data["action_id"]} workspace_confidence=${event.data["workspace_confidence"]} model_confidence=${event.data["model_confidence"]}"
                 }
             }
 
             "task_workspace_destroyed" -> {
                 logger.trace {
-                    "task_workspace.destroyed root=${event.data["root_input_enqueued_at_ms"]} sections=${event.data["section_count"]} evidence=${event.data["evidence_count"]} reason=${event.data["reason"]}"
+                    "task_workspace.destroyed root_id=${event.data["root_input_id"]} root_received_at_ms=${event.data["root_input_received_at_ms"]} sections=${event.data["section_count"]} evidence=${event.data["evidence_count"]} reason=${event.data["reason"]}"
                 }
             }
 
@@ -312,13 +330,13 @@ class StructuredLogSink : InstrumentationSink {
 
             "action_executed" -> {
                 logger.trace {
-                    "action.executed action=${event.data["action"]}"
+                    "${sessionPrefix(event)}action.executed action=${event.data["action"]}"
                 }
             }
 
             "response_latency_recorded" -> {
                 logger.trace {
-                    "response.latency.recorded latency_ms=${event.data["latency_ms"]} action_id=${event.data["action_id"]}"
+                    "${sessionPrefix(event)}response.latency.recorded latency_ms=${event.data["latency_ms"]} action_id=${event.data["action_id"]}"
                 }
             }
 

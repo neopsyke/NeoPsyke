@@ -131,13 +131,9 @@ class DashboardServer(
             respondText(exchange, 404, "Not found", "text/plain; charset=utf-8")
             return
         }
-        val rootId = rootIdRaw.toLongOrNull()
-        if (rootId == null) {
-            respondText(exchange, 400, "Invalid workspace id", "text/plain; charset=utf-8")
-            return
-        }
+        val rootId = rootIdRaw
         val version = parseQueryParam(exchange.requestURI.query, "version")?.toLongOrNull()
-        val snapshot = store.workspaceSnapshotJson(rootInputEnqueuedAtMs = rootId, version = version)
+        val snapshot = store.workspaceSnapshotJson(rootInputId = rootId, version = version)
         if (snapshot == null) {
             respondText(exchange, 404, "Workspace snapshot not found", "text/plain; charset=utf-8")
             return

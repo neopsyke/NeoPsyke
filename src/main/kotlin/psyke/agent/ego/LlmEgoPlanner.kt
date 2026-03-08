@@ -346,7 +346,7 @@ class LlmEgoPlanner(
                 actionVerifierParseFailureStreakByKey.remove(circuitKey)
                 instrumentation.emit(
                     AgentEvents.warning(
-                        "Action verifier parse-failure circuit breaker tripped for action_type=${circuitKey.actionType.name.lowercase()} root_input=${circuitKey.rootInputEnqueuedAtMs}; bypassing verifier for $ACTION_VERIFIER_BYPASS_TURNS decision."
+                        "Action verifier parse-failure circuit breaker tripped for action_type=${circuitKey.actionType.name.lowercase()} root_input_id=${circuitKey.rootInputId}; bypassing verifier for $ACTION_VERIFIER_BYPASS_TURNS decision."
                     )
                 )
                 emitActionVerifierCircuitBreakerEvent(
@@ -366,12 +366,12 @@ class LlmEgoPlanner(
         trigger: EgoTrigger,
         decision: EgoDecision.ProposeAction,
     ): ActionVerifierCircuitKey {
-        val rootInputEnqueuedAtMs = when (trigger) {
-            is EgoTrigger.IncomingInput -> trigger.input.enqueuedAtMs
-            is EgoTrigger.PendingThoughtInput -> trigger.thought.rootInputEnqueuedAtMs
+        val rootInputId = when (trigger) {
+            is EgoTrigger.IncomingInput -> trigger.input.rootInputId
+            is EgoTrigger.PendingThoughtInput -> trigger.thought.rootInputId
         }
         return ActionVerifierCircuitKey(
-            rootInputEnqueuedAtMs = rootInputEnqueuedAtMs,
+            rootInputId = rootInputId,
             actionType = decision.actionType
         )
     }
@@ -388,7 +388,7 @@ class LlmEgoPlanner(
                 data = mapOf(
                     "phase" to phase,
                     "action_type" to circuitKey.actionType.name.lowercase(),
-                    "root_input_enqueued_at_ms" to circuitKey.rootInputEnqueuedAtMs,
+                    "root_input_id" to circuitKey.rootInputId,
                     "parse_failure_streak" to parseFailureStreak,
                     "bypass_remaining" to bypassRemaining
                 )
@@ -1054,7 +1054,7 @@ class LlmEgoPlanner(
     )
 
     private data class ActionVerifierCircuitKey(
-        val rootInputEnqueuedAtMs: Long?,
+        val rootInputId: String?,
         val actionType: ActionType,
     )
 

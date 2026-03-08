@@ -484,10 +484,10 @@ class EgoPlannerTest {
         val planner = LlmEgoPlanner(modelClient = llm, config = AgentConfig())
         val context = PlannerContext(recentDialogue = emptyList(), queue = QueueSnapshot(0, 0, 0))
         val triggerA = psyke.agent.core.EgoTrigger.IncomingInput(
-            PendingInput(id = 1, content = "test-a", enqueuedAtMs = 1L)
+            PendingInput(id = 1, content = "test-a", receivedAtMs = 1L)
         )
         val triggerB = psyke.agent.core.EgoTrigger.IncomingInput(
-            PendingInput(id = 2, content = "test-b", enqueuedAtMs = 2L)
+            PendingInput(id = 2, content = "test-b", receivedAtMs = 2L)
         )
 
         assertIs<psyke.agent.core.EgoDecision.ProposeAction>(planner.decide(triggerA, context))
