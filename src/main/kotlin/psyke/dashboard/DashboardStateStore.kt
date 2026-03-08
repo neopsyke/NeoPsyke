@@ -147,6 +147,7 @@ class DashboardStateStore(
                                 emitEvent = true
                             )
                         }
+                        rootInputSessionMap.remove(rootInputId)
                     }
                 }
 

@@ -37,7 +37,6 @@ data class AgentConfig(
                     maxPlanSteps = readInt("EGO_MAX_PLAN_STEPS", 6),
                     maxPlanStepDescriptionChars = readInt("EGO_MAX_PLAN_STEP_DESC_CHARS", 120),
                     maxPlansPerInput = readInt("EGO_MAX_PLANS_PER_INPUT", 2),
-                    planEmissionPressureThreshold = readDouble("EGO_PLAN_EMISSION_PRESSURE_THRESHOLD", 0.55),
                 ),
                 superego = SuperegoConfig(
                     maxCompletionTokens = readInt("EGO_SUPEREGO_MAX_COMPLETION_TOKENS", 192),
@@ -49,6 +48,8 @@ data class AgentConfig(
                     twoStageLowConfidenceThreshold = readDouble("EGO_SUPEREGO_TWO_STAGE_LOW_CONFIDENCE_THRESHOLD", 0.70),
                     twoStageEscalateOnMediumPolicyRisk =
                         readBoolean("EGO_SUPEREGO_TWO_STAGE_ESCALATE_ON_MEDIUM_POLICY_RISK", true),
+                    twoStageSkipForAnswerActions =
+                        readBoolean("EGO_SUPEREGO_TWO_STAGE_SKIP_FOR_ANSWER_ACTIONS", true),
                 ),
                 memory = MemoryConfig(
                     maxShortTermContextChars = readInt("EGO_SHORT_TERM_CONTEXT_MAX_CHARS", 20000),

@@ -1,5 +1,6 @@
 package psyke.agent.superego
 
+import psyke.agent.core.ActionType
 import psyke.agent.core.AgentConfig
 import psyke.agent.core.DialogueRole
 import psyke.agent.core.GateDecision
@@ -27,7 +28,8 @@ class Superego(
     private val instrumentation: AgentInstrumentation = NoopAgentInstrumentation,
 ) {
     private val deterministicConscience = SuperegoDeterministicConscience(config)
-    private val reviewEngine: SuperegoReviewEngine = buildReviewEngine()
+    private val primaryEngine: SingleStageSuperegoReviewEngine = buildPrimaryEngine()
+    private val reviewEngine: SuperegoReviewEngine = buildReviewEngine(primaryEngine)
 
     fun review(action: PendingAction, context: SuperegoContext): GateDecision {
         val resolvedDirectives = policy.forAction(action.type).all
@@ -82,7 +84,12 @@ class Superego(
         )
 
         val messages = buildMessages(action, context, resolvedDirectives)
-        val decision = reviewEngine.review(action, messages)
+        val effectiveEngine = if (action.type == ActionType.ANSWER && config.superego.twoStageSkipForAnswerActions) {
+            primaryEngine
+        } else {
+            reviewEngine
+        }
+        val decision = effectiveEngine.review(action, messages)
         instrumentation.emit(
             AgentEvents.superegoReviewOutput(
                 actionId = action.id,
@@ -94,8 +101,8 @@ class Superego(
         return decision
     }
 
-    private fun buildReviewEngine(): SuperegoReviewEngine {
-        val primary = SingleStageSuperegoReviewEngine(
+    private fun buildPrimaryEngine(): SingleStageSuperegoReviewEngine =
+        SingleStageSuperegoReviewEngine(
             modelClient = modelClient,
             config = config,
             modelTokenWeight = modelTokenWeight,
@@ -104,6 +111,8 @@ class Superego(
             stageLabel = "primary",
             callSiteBase = "action_review"
         )
+
+    private fun buildReviewEngine(primary: SingleStageSuperegoReviewEngine): SuperegoReviewEngine {
         val escalationClient = escalationModelClient
         if (!config.superego.twoStageReviewEnabled || escalationClient == null) {
             return primary

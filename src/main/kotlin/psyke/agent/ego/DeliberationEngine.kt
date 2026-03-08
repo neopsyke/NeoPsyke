@@ -32,7 +32,7 @@ internal class DeliberationEngine(
     private val guidanceBySession = mutableMapOf<String, String>()
     private var activeSessionId: String = ConversationContext.DEFAULT_SESSION_ID
     private var lastAssessmentStep: Int = 0
-    private var forcedTerminalAnswerQueued: Boolean = false
+    private val forcedTerminalAnswerQueuedByInput = mutableSetOf<String>()
 
     fun setActiveSession(sessionId: String) {
         activeSessionId = sessionId
@@ -108,7 +108,8 @@ internal class DeliberationEngine(
         rootInputReceivedAtMs: Long?,
         conversationContext: ConversationContext,
     ) {
-        if (forcedTerminalAnswerQueued) return
+        val effectiveRootInputId = rootInputId ?: ""
+        if (effectiveRootInputId in forcedTerminalAnswerQueuedByInput) return
         val state = monitor.snapshot()
         if (state.stepIndex < config.metaReasoner.deliberationPressureAssessmentMinStep) return
         val circularPressureHigh = state.decisionPressure >= config.metaReasoner.forcedTerminalPressureThreshold &&
@@ -131,7 +132,7 @@ internal class DeliberationEngine(
             conversationContext = conversationContext
         )
         if (queued) {
-            forcedTerminalAnswerQueued = true
+            forcedTerminalAnswerQueuedByInput.add(effectiveRootInputId)
             instrumentation.emit(AgentEvents.warning("Forced terminal answer queued due to persistent circular deliberation pressure."))
             guidanceBySession[activeSessionId] = "Finalize immediately due to persistent circular reasoning pressure."
         }
@@ -241,10 +242,17 @@ internal class DeliberationEngine(
 
     // --- Reset ---
 
+    fun clearForInput(rootInputId: String?) {
+        if (rootInputId.isNullOrBlank()) return
+        forcedTerminalAnswerQueuedByInput.remove(rootInputId)
+        externalEvidence.remove(rootInputId)
+        fetchCircuitBreaker.remove(rootInputId)
+    }
+
     fun reset() {
         guidanceBySession.clear()
         lastAssessmentStep = 0
-        forcedTerminalAnswerQueued = false
+        forcedTerminalAnswerQueuedByInput.clear()
         externalEvidence.clear()
         fetchCircuitBreaker.clear()
         monitor.reset()

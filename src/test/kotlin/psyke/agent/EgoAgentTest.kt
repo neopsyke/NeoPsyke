@@ -426,7 +426,7 @@ class EgoAgentTest {
     }
 
     @Test
-    fun `duplicate plan emission is suppressed while plan steps are still pending`() {
+    fun `duplicate plan emission is suppressed when identical plan hash is emitted`() {
         val plannerLlm = StubChatModelClient().apply {
             enqueueRawResponse(
                 """
@@ -443,8 +443,8 @@ class EgoAgentTest {
                 {
                   "decision":"plan",
                   "urgency":"medium",
-                  "plan_goal":"Get pricing again",
-                  "plan_steps":["repeat one","repeat two"]
+                  "plan_goal":"Get pricing",
+                  "plan_steps":["step one","step two"]
                 }
                 """.trimIndent()
             )
@@ -471,7 +471,7 @@ class EgoAgentTest {
         assertEquals(1, instrumentation.events.count { it.type == "plan_created" })
         assertTrue(
             instrumentation.events.any {
-                it.type == "queue_snapshot" && it.data["source"] == "decision_plan_skipped_duplicate"
+                it.type == "queue_snapshot" && it.data["source"] == "decision_plan_suppressed_hash"
             }
         )
     }
@@ -769,7 +769,7 @@ class EgoAgentTest {
     }
 
     @Test
-    fun `task workspace final pass skips rewrite when workspace confidence gate fails`() {
+    fun `task workspace final pass skips rewrite when no evidence gathered`() {
         val plannerLlm = StubChatModelClient().apply {
             enqueueRawResponse(
                 """
@@ -819,7 +819,7 @@ class EgoAgentTest {
         assertTrue(
             instrumentation.events.any {
                 it.type == "task_workspace_final_pass_skipped" &&
-                    it.data["reason"] == "workspace_confidence_gate"
+                    it.data["reason"] == "no_evidence"
             }
         )
     }

@@ -22,6 +22,8 @@ import psyke.agent.memory.longterm.LongTermMemoryAssessmentContext
 import psyke.agent.memory.longterm.MemoryImprint
 import psyke.agent.memory.longterm.MemoryRecallQuery
 import psyke.agent.memory.shortterm.MemoryStore
+import psyke.agent.support.LlmCallCircuitBreaker
+import psyke.agent.support.OnTripBehavior
 import psyke.agent.support.PromptInjectionDefense
 import psyke.agent.support.TextSecurity
 import psyke.instrumentation.AgentEvent
@@ -68,12 +70,26 @@ internal class MemoryCoordinator(
         sessionMemoryStores.getOrPut(activeSessionId) { memoryStoreFactory() }
 
     private var lastConsolidationStep: Int = 0
-    private var latestShortTermSummary: String = ""
-    private var latestLongTermRecall: String = ""
-    private var parseFallbackStreak: Int = 0
-    private var assessmentTemporarilyDisabled: Boolean = false
-    private var explicitIntentAssessmentTriggeredForInput: Boolean = false
     private val recentImprintFingerprints = ArrayDeque<String>()
+
+    private data class SessionMemoryState(
+        var latestShortTermSummary: String = "",
+        var latestLongTermRecall: String = "",
+        val circuitBreaker: LlmCallCircuitBreaker,
+        var explicitIntentAssessmentTriggeredForInput: Boolean = false,
+    )
+
+    private val sessionStates = mutableMapOf<String, SessionMemoryState>()
+
+    private fun activeState(): SessionMemoryState =
+        sessionStates.getOrPut(activeSessionId) {
+            SessionMemoryState(
+                circuitBreaker = LlmCallCircuitBreaker(
+                    tripThreshold = config.memory.longTermMemoryParseFallbackDisableAfter,
+                    onTripBehavior = OnTripBehavior.DISABLE,
+                )
+            )
+        }
 
     // --- Short-term memory delegation ---
 
@@ -109,8 +125,9 @@ internal class MemoryCoordinator(
         episodicCues: List<String> = emptyList(),
     ): String {
         val text = recallMemory(trigger, shortTermSummary, recentDialogue, episodicCues)
-        latestShortTermSummary = shortTermSummary
-        latestLongTermRecall = text
+        val state = activeState()
+        state.latestShortTermSummary = shortTermSummary
+        state.latestLongTermRecall = text
         return text
     }
 
@@ -124,11 +141,12 @@ internal class MemoryCoordinator(
         deliberation: DeliberationState,
         recentDialogue: List<DialogueTurn>,
     ) {
-        if (!hippocampus.enabled || !longTermMemoryAdvisor.enabled || assessmentTemporarilyDisabled) return
+        val sessionState = activeState()
+        if (!hippocampus.enabled || !longTermMemoryAdvisor.enabled || sessionState.circuitBreaker.isTripped()) return
         val stepIndex = deliberation.stepIndex
         val explicitIntent = detectExplicitRememberIntent(recentDialogue)
         val forcedByExplicitIntent = !force &&
-            !explicitIntentAssessmentTriggeredForInput &&
+            !sessionState.explicitIntentAssessmentTriggeredForInput &&
             explicitIntent != null
         val shouldByInterval = !force &&
             !forcedByExplicitIntent &&
@@ -144,7 +162,7 @@ internal class MemoryCoordinator(
 
         val effectiveTrigger = if (forcedByExplicitIntent) EXPLICIT_REMEMBER_INTENT_TRIGGER else trigger
         if (forcedByExplicitIntent) {
-            explicitIntentAssessmentTriggeredForInput = true
+            sessionState.explicitIntentAssessmentTriggeredForInput = true
             instrumentation.emit(
                 AgentEvent(
                     type = "long_term_memory_explicit_intent_detected",
@@ -162,8 +180,8 @@ internal class MemoryCoordinator(
             trigger = effectiveTrigger,
             deliberation = deliberation,
             recentDialogue = recentDialogue,
-            shortTermContextSummary = latestShortTermSummary.ifBlank { currentShortTermSummary() },
-            longTermMemoryRecall = latestLongTermRecall,
+            shortTermContextSummary = sessionState.latestShortTermSummary.ifBlank { currentShortTermSummary() },
+            longTermMemoryRecall = sessionState.latestLongTermRecall,
             metaGuidance = "",
             latestActionType = latestActionType,
             latestActionOutcome = latestActionOutcome
@@ -201,15 +219,16 @@ internal class MemoryCoordinator(
         )
 
         if (decision.parseFallback) {
-            parseFallbackStreak += 1
+            val tripped = sessionState.circuitBreaker.recordParseFailure()
+            val streak = sessionState.circuitBreaker.streak()
             emitMemoryPersistenceSkipped(
                 trigger = effectiveTrigger,
                 stepIndex = stepIndex,
                 reasonCode = REASON_CODE_PARSE_FALLBACK,
-                reasonDetail = "Advisor response parse fallback blocked persistence for this cycle (streak=$parseFallbackStreak, disable_after=${config.memory.longTermMemoryParseFallbackDisableAfter}).",
+                reasonDetail = "Advisor response parse fallback blocked persistence for this cycle (streak=$streak, disable_after=${config.memory.longTermMemoryParseFallbackDisableAfter}).",
                 decision = decision,
                 extra = mapOf(
-                    "parse_fallback_streak" to parseFallbackStreak,
+                    "parse_fallback_streak" to streak,
                     "parse_fallback_disable_after" to config.memory.longTermMemoryParseFallbackDisableAfter
                 )
             )
@@ -217,24 +236,23 @@ internal class MemoryCoordinator(
                 AgentEvents.longTermMemoryAssessmentParseFallback(
                     trigger = effectiveTrigger,
                     stepIndex = stepIndex,
-                    streak = parseFallbackStreak
+                    streak = streak
                 )
             )
-            if (parseFallbackStreak >= config.memory.longTermMemoryParseFallbackDisableAfter) {
-                assessmentTemporarilyDisabled = true
+            if (tripped) {
                 instrumentation.emit(
                     AgentEvents.longTermMemoryAssessmentTemporarilyDisabled(
                         trigger = effectiveTrigger,
                         stepIndex = stepIndex,
-                        streak = parseFallbackStreak,
+                        streak = streak,
                         threshold = config.memory.longTermMemoryParseFallbackDisableAfter
                     )
                 )
-                instrumentation.emit(AgentEvents.warning("Long-term memory assessment disabled for this run after repeated parse fallbacks."))
+                instrumentation.emit(AgentEvents.warning("Long-term memory assessment disabled for session $activeSessionId after repeated parse fallbacks."))
             }
             return
         } else {
-            parseFallbackStreak = 0
+            sessionState.circuitBreaker.recordSuccess()
         }
 
         if (!decision.shouldSave) {
@@ -482,12 +500,13 @@ internal class MemoryCoordinator(
 
     fun resetForNewInput() {
         lastConsolidationStep = 0
-        explicitIntentAssessmentTriggeredForInput = false
+        activeState().explicitIntentAssessmentTriggeredForInput = false
     }
 
-    /** Removes the per-session short-term memory store for the given session. */
+    /** Removes the per-session short-term memory store and session state for the given session. */
     fun destroySession(sessionId: String) {
         sessionMemoryStores.remove(sessionId)
+        sessionStates.remove(sessionId)
     }
 
     // --- Private helpers ---
@@ -614,7 +633,7 @@ internal class MemoryCoordinator(
         if (canonicalSummary.length < config.memory.longTermMemoryRecallEchoMinSummaryChars) {
             return RecallEchoEvaluation(isEcho = false)
         }
-        val canonicalRecall = canonicalizeForComparison(latestLongTermRecall)
+        val canonicalRecall = canonicalizeForComparison(activeState().latestLongTermRecall)
         if (canonicalRecall.isBlank()) return RecallEchoEvaluation(isEcho = false)
         if (canonicalRecall.contains(canonicalSummary)) {
             return RecallEchoEvaluation(
