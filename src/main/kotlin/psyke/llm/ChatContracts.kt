@@ -14,8 +14,17 @@ data class ChatRequestOptions(
     val temperature: Double? = null,
     val maxTokens: Int? = null,
     val safePrompt: Boolean? = null,
+    val responseFormat: ChatResponseFormat? = null,
     val metadata: ChatCallMetadata = ChatCallMetadata()
 )
+
+sealed interface ChatResponseFormat {
+    data class JsonSchema(
+        val name: String,
+        val schemaJson: String,
+        val strict: Boolean = true,
+    ) : ChatResponseFormat
+}
 
 data class ChatCallMetadata(
     val actor: String = "",

@@ -25,6 +25,7 @@ flowchart LR
 
     E --> DE["DeliberationEngine"]
     DE --> MR["LlmMetaReasoner"]
+    MR -.-> MRF["MetaReasoner Fallback Model (optional, repeated empty-content failures)"]
 
     E --> MC["MemoryCoordinator"]
     MC --> MS["MemoryStore (Short-term)"]
@@ -108,7 +109,8 @@ sequenceDiagram
                     Note over Ego,Sup: Stage-1 uses cheaper model from catalog when two-stage is enabled
                     Note over Ego,Sup: Escalate on low confidence, policy-risk, technical fallback, or POLICY_REDUNDANT deny
                     Note over Ego,Sup: Superego completion max_tokens scales with prompt estimate (bounded floor/hard-cap) and model token_weight
-                    Note over Ego,Sup: Stage parse failures trigger one strict-JSON retry before default deny
+                    Note over Ego,Sup: Structured output is schema-enforced (response_format=json_schema)
+                    Note over Ego,Sup: Stage parse failures trigger one schema-enforced retry before default deny
                     Sup-->>Ego: allow/deny (+ reason_code on deny)
                     alt allow
                         alt action = answer
@@ -137,6 +139,7 @@ sequenceDiagram
         end
 
         Ego->>Delib: maybeForceTerminalAnswer
+        Note over Ego,Delib: Meta-reasoner output is schema-enforced; repeated empty-content transport failures can trigger optional fallback endpoint
         Ego->>Mem: maybeAssessLongTermMemory(interval or explicit remember-intent)
         Note over Ego,Mem: Memory-advisor completion max_tokens scales with prompt estimate (bounded floor/hard-cap) and model token_weight
         Note over Ego,Mem: Long dialogue/recall blocks are compressed before advisor prompt

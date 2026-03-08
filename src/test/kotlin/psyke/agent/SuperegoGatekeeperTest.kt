@@ -2,11 +2,13 @@ package psyke.agent
 
 import psyke.llm.ChatRole
 import psyke.llm.ChatModelClient
+import psyke.llm.ChatRequestOptions
 import psyke.support.RecordingInstrumentation
 import psyke.support.StubChatModelClient
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
@@ -40,6 +42,7 @@ class SuperegoGatekeeperTest {
         assertEquals("action_review", llm.lastOptions.metadata.callSite)
         assertEquals("answer", llm.lastOptions.metadata.actionType)
         assertTrue(assertNotNull(llm.lastOptions.maxTokens) >= 192)
+        assertIs<psyke.llm.ChatResponseFormat.JsonSchema>(llm.lastOptions.responseFormat)
         assertTrue(instrumentation.events.any { it.type == "superego_input" })
         assertTrue(
             instrumentation.events.any {
@@ -173,6 +176,36 @@ class SuperegoGatekeeperTest {
                     (it.data["message"] as? String)?.contains("call failed", ignoreCase = true) == true
             }
         )
+    }
+
+    @Test
+    fun `gatekeeper trips breaker on repeated empty-content transport failures`() {
+        var callCount = 0
+        val failingClient = object : ChatModelClient {
+            override val modelName: String = "empty-content-failing"
+
+            override fun chat(messages: List<psyke.llm.ChatMessage>, options: ChatRequestOptions): psyke.llm.ChatCompletion {
+                callCount += 1
+                throw IllegalStateException(
+                    "OpenAI chat returned empty message content (finish_reason=length, content_chars=0)."
+                )
+            }
+        }
+        val instrumentation = RecordingInstrumentation()
+        val gatekeeper = Superego(
+            modelClient = failingClient,
+            config = AgentConfig(planner = PlannerConfig(llmRetryAttempts = 1)),
+            instrumentation = instrumentation
+        )
+
+        val first = gatekeeper.review(action, snapshot)
+        val second = gatekeeper.review(action, snapshot)
+        val third = gatekeeper.review(action, snapshot)
+
+        assertFalse(first.allow)
+        assertFalse(second.allow)
+        assertTrue(third.allow, "After threshold failures, breaker should allow to prevent denial loop.")
+        assertEquals(2, callCount, "Tripped breaker should bypass subsequent LLM calls.")
     }
 
     @Test

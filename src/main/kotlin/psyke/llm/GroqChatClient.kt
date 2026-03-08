@@ -44,12 +44,28 @@ class GroqChatClient(
     override fun chat(messages: List<ChatMessage>, options: ChatRequestOptions): ChatCompletion {
         require(messages.isNotEmpty()) { "At least one chat message is required." }
         val startedAt = System.nanoTime()
+        val responseFormatAdaptation = StructuredOutputCompatibility.adapt(
+            provider = LlmProvider.GROQ,
+            modelName = modelName,
+            responseFormat = options.responseFormat,
+            mapper = mapper
+        )
+        StructuredOutputCompatibility.warningMessageIfNeeded(
+            provider = LlmProvider.GROQ,
+            modelName = modelName,
+            requestedFormat = options.responseFormat,
+            adaptation = responseFormatAdaptation,
+            metadata = options.metadata
+        )?.let { warning ->
+            logger.warn { warning }
+        }
 
         val payload = GroqChatCompletionRequest(
             model = modelName,
             messages = messages.map { GroqChatMessage(role = it.role.apiValue, content = it.content) },
             temperature = options.temperature,
-            maxTokens = options.maxTokens
+            maxTokens = options.maxTokens,
+            responseFormat = responseFormatAdaptation.responseFormat.toGroqResponseFormat()
         )
 
         val requestBody = mapper.writeValueAsString(payload).toRequestBody(jsonMediaType)
@@ -60,7 +76,10 @@ class GroqChatClient(
             .post(requestBody)
             .build()
 
-        logger.debug { "Sending chat request to $modelName with ${messages.size} message(s)." }
+        logger.debug {
+            "Sending chat request to $modelName with ${messages.size} message(s), " +
+                "response_format=${if (options.responseFormat == null) "none" else "json_schema"}."
+        }
 
         try {
             httpClient.newCall(request).execute().use { response ->
@@ -157,6 +176,19 @@ class GroqChatClient(
             logger.warn(ignored) { "Failed to persist chat-call metrics; continuing." }
         }
     }
+
+    private fun ChatResponseFormat?.toGroqResponseFormat(): GroqResponseFormat? =
+        when (this) {
+            null -> null
+            is ChatResponseFormat.JsonSchema -> GroqResponseFormat(
+                type = "json_schema",
+                jsonSchema = GroqJsonSchemaFormat(
+                    name = name,
+                    strict = strict,
+                    schema = mapper.readTree(schemaJson)
+                )
+            )
+        }
 }
 
 private class GroqHttpException(
@@ -184,6 +216,20 @@ private data class GroqChatCompletionRequest(
     val temperature: Double? = null,
     @JsonProperty("max_tokens")
     val maxTokens: Int? = null,
+    @JsonProperty("response_format")
+    val responseFormat: GroqResponseFormat? = null,
+)
+
+private data class GroqResponseFormat(
+    val type: String,
+    @JsonProperty("json_schema")
+    val jsonSchema: GroqJsonSchemaFormat,
+)
+
+private data class GroqJsonSchemaFormat(
+    val name: String,
+    val strict: Boolean = true,
+    val schema: JsonNode,
 )
 
 private data class GroqChatMessage(

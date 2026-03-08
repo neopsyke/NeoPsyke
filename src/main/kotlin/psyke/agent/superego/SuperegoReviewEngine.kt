@@ -10,6 +10,7 @@ import psyke.agent.core.GateDecision
 import psyke.agent.core.PendingAction
 import psyke.agent.support.AdaptiveCompletionBudget
 import psyke.agent.support.LlmCallCircuitBreaker
+import psyke.agent.support.LlmFailureClassifier
 import psyke.agent.support.OnTripBehavior
 import psyke.agent.support.RetryPolicy
 import psyke.agent.support.TextSecurity
@@ -21,6 +22,7 @@ import psyke.llm.ChatCompletion
 import psyke.llm.ChatMessage
 import psyke.llm.ChatModelClient
 import psyke.llm.ChatRequestOptions
+import psyke.llm.ChatResponseFormat
 import psyke.llm.ChatRole
 
 private val logger = KotlinLogging.logger {}
@@ -70,6 +72,7 @@ internal class SingleStageSuperegoReviewEngine(
                     options = ChatRequestOptions(
                         temperature = 0.0,
                         maxTokens = completionTokenBudget,
+                        responseFormat = SUPEREGO_RESPONSE_FORMAT,
                         metadata = ChatCallMetadata(
                             actor = "superego",
                             callSite = callSiteBase,
@@ -91,6 +94,9 @@ internal class SingleStageSuperegoReviewEngine(
         }
 
         if (response == null) {
+            if (LlmFailureClassifier.isEmptyContentTransportFailure(lastError)) {
+                circuitBreaker.recordFailure()
+            }
             logger.warn(lastError) {
                 "Superego($stageLabel) review call failed for action=${action.id} type=${action.type}."
             }
@@ -114,7 +120,7 @@ internal class SingleStageSuperegoReviewEngine(
         if (parseResult.parseFailed) {
             instrumentation.emit(
                 AgentEvents.warning(
-                    "Superego($stageLabel) response was non-parseable; requesting strict JSON retry."
+                    "Superego($stageLabel) response was non-parseable; requesting schema-enforced retry."
                 )
             )
             val retryResponse = requestStrictJsonRetry(
@@ -124,14 +130,14 @@ internal class SingleStageSuperegoReviewEngine(
             )
             if (retryResponse == null) {
                 instrumentation.emit(
-                    AgentEvents.warning("Superego($stageLabel) strict JSON retry call failed; denying action by default.")
+                    AgentEvents.warning("Superego($stageLabel) schema-enforced retry call failed; denying action by default.")
                 )
             } else {
                 parseResult = parseResponse(retryResponse.content, emitWarning = true)
             }
             if (parseResult.parseFailed) {
                 instrumentation.emit(
-                    AgentEvents.warning("Superego($stageLabel) response remained non-parseable after strict JSON retry.")
+                    AgentEvents.warning("Superego($stageLabel) response remained non-parseable after schema-enforced retry.")
                 )
             }
         }
@@ -239,12 +245,8 @@ internal class SingleStageSuperegoReviewEngine(
         val retryMessages = messages + ChatMessage(
             role = ChatRole.USER,
             content = """
-                Your previous output was not valid JSON.
-                Reply with STRICT JSON only using one schema:
-                {"allow":true,"confidence":0.0-1.0,"policy_risk":"low|medium|high"}
-                or
-                {"allow":false,"reason":"<=${MAX_DENY_REASON_CHARS} chars","reason_code":"TECH_*|POLICY_* optional","confidence":0.0-1.0,"policy_risk":"low|medium|high"}
-                Do not include markdown, prose, code fences, or extra keys.
+                Your previous output did not match the required schema.
+                Retry and return only a payload that conforms to the response format.
             """.trimIndent()
         )
         return try {
@@ -253,6 +255,7 @@ internal class SingleStageSuperegoReviewEngine(
                 options = ChatRequestOptions(
                     temperature = 0.0,
                     maxTokens = completionTokenBudget,
+                    responseFormat = SUPEREGO_RESPONSE_FORMAT,
                     metadata = ChatCallMetadata(
                         actor = "superego",
                         callSite = "${callSiteBase}_json_retry",
@@ -289,9 +292,30 @@ internal class SingleStageSuperegoReviewEngine(
         private const val REASON_CODE_TECH_PARSE_ERROR: String = "TECH_PARSE_ERROR"
         private const val REASON_CODE_TECH_MISSING_REQUIRED_FIELD: String = "TECH_MISSING_REQUIRED_FIELD"
         private const val REASON_CODE_POLICY_LLM_DENY: String = "POLICY_LLM_DENY"
+        private const val SUPEREGO_RESPONSE_SCHEMA: String = """
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["allow", "reason", "reason_code", "confidence", "policy_risk"],
+              "properties": {
+                "allow": { "type": "boolean" },
+                "reason": { "type": ["string", "null"], "maxLength": 180 },
+                "reason_code": { "type": ["string", "null"] },
+                "confidence": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
+                "policy_risk": { "type": "string", "enum": ["low", "medium", "high"] }
+              }
+            }
+        """
 
         private val mapper = jacksonObjectMapper()
             .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
+
+        private val SUPEREGO_RESPONSE_FORMAT: ChatResponseFormat.JsonSchema =
+            ChatResponseFormat.JsonSchema(
+                name = "superego_review",
+                schemaJson = SUPEREGO_RESPONSE_SCHEMA,
+                strict = true
+            )
 
         private fun normalizeReasonCode(raw: String?): String? =
             raw?.trim()

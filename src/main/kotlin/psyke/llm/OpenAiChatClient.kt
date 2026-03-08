@@ -112,12 +112,29 @@ class OpenAiChatClient(
         options: ChatRequestOptions,
         tuning: OpenAiRequestTuning,
     ): ChatCompletion {
+        val responseFormatAdaptation = StructuredOutputCompatibility.adapt(
+            provider = LlmProvider.OPENAI,
+            modelName = modelName,
+            responseFormat = options.responseFormat,
+            mapper = mapper
+        )
+        StructuredOutputCompatibility.warningMessageIfNeeded(
+            provider = LlmProvider.OPENAI,
+            modelName = modelName,
+            requestedFormat = options.responseFormat,
+            adaptation = responseFormatAdaptation,
+            metadata = options.metadata
+        )?.let { warning ->
+            logger.warn { warning }
+        }
+
         val payload = OpenAiChatCompletionRequest(
             model = modelName,
             messages = messages.map { OpenAiChatMessage(role = it.role.apiValue, content = it.content) },
             temperature = if (tuning.includeTemperature) options.temperature else null,
             maxTokens = if (tuning.maxTokensField == OpenAiMaxTokensField.MAX_TOKENS) options.maxTokens else null,
-            maxCompletionTokens = if (tuning.maxTokensField == OpenAiMaxTokensField.MAX_COMPLETION_TOKENS) options.maxTokens else null
+            maxCompletionTokens = if (tuning.maxTokensField == OpenAiMaxTokensField.MAX_COMPLETION_TOKENS) options.maxTokens else null,
+            responseFormat = responseFormatAdaptation.responseFormat.toOpenAiResponseFormat()
         )
         val request = Request.Builder()
             .url("${baseUrl.trimEnd('/')}/chat/completions")
@@ -128,7 +145,8 @@ class OpenAiChatClient(
 
         logger.debug {
             "Sending OpenAI chat request to $modelName with ${messages.size} message(s), " +
-                "temperature_enabled=${tuning.includeTemperature}, max_tokens_field=${tuning.maxTokensField?.wireName ?: "none"}."
+                "temperature_enabled=${tuning.includeTemperature}, max_tokens_field=${tuning.maxTokensField?.wireName ?: "none"}, " +
+                "response_format=${if (options.responseFormat == null) "none" else "json_schema"}."
         }
 
         httpClient.newCall(request).execute().use { response ->
@@ -263,6 +281,19 @@ class OpenAiChatClient(
         return if (value.isTextual) value.asText() else value.toString()
     }
 
+    private fun ChatResponseFormat?.toOpenAiResponseFormat(): OpenAiResponseFormat? =
+        when (this) {
+            null -> null
+            is ChatResponseFormat.JsonSchema -> OpenAiResponseFormat(
+                type = "json_schema",
+                jsonSchema = OpenAiJsonSchemaFormat(
+                    name = name,
+                    strict = strict,
+                    schema = mapper.readTree(schemaJson)
+                )
+            )
+        }
+
     private fun prefersMaxCompletionTokens(model: String): Boolean {
         val normalized = model.trim().lowercase()
         return normalized.startsWith("gpt-5") ||
@@ -339,6 +370,20 @@ private data class OpenAiChatCompletionRequest(
     val maxTokens: Int? = null,
     @param:JsonProperty("max_completion_tokens")
     val maxCompletionTokens: Int? = null,
+    @param:JsonProperty("response_format")
+    val responseFormat: OpenAiResponseFormat? = null,
+)
+
+private data class OpenAiResponseFormat(
+    val type: String,
+    @param:JsonProperty("json_schema")
+    val jsonSchema: OpenAiJsonSchemaFormat,
+)
+
+private data class OpenAiJsonSchemaFormat(
+    val name: String,
+    val strict: Boolean = true,
+    val schema: JsonNode,
 )
 
 private data class OpenAiChatMessage(

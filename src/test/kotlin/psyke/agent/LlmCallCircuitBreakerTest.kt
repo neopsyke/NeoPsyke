@@ -65,4 +65,12 @@ class LlmCallCircuitBreakerTest {
         assertTrue(cb.recordParseFailure())
         assertEquals(3, cb.streak())
     }
+
+    @Test
+    fun `generic failure increments streak`() {
+        val cb = LlmCallCircuitBreaker(tripThreshold = 2, onTripBehavior = OnTripBehavior.BYPASS)
+        assertFalse(cb.recordFailure())
+        assertTrue(cb.recordFailure())
+        assertEquals(2, cb.streak())
+    }
 }

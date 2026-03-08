@@ -107,7 +107,14 @@ data class AgentConfig(
                     deliberationPressureAssessmentEverySteps = readInt("EGO_PRESSURE_ASSESS_EVERY_STEPS", 8),
                     deliberationPressureAssessmentThreshold = readDouble("EGO_PRESSURE_ASSESS_THRESHOLD", 0.68),
                     cooldownSteps = readInt("EGO_META_REASONER_COOLDOWN_STEPS", 6),
-                    maxTokens = readInt("EGO_META_REASONER_MAX_TOKENS", 120),
+                    maxTokens = readInt("EGO_META_REASONER_MAX_TOKENS", 384),
+                    dynamicCompletionEnabled = readBoolean("EGO_META_REASONER_DYNAMIC_COMPLETION_ENABLED", true),
+                    dynamicCompletionHardMaxTokens =
+                        readInt("EGO_META_REASONER_DYNAMIC_COMPLETION_HARD_MAX_TOKENS", 640),
+                    dynamicPromptToCompletionRatio =
+                        readRatio("EGO_META_REASONER_DYNAMIC_PROMPT_TO_COMPLETION_RATIO", 0.10),
+                    dynamicCompletionMinPromptTokens =
+                        readInt("EGO_META_REASONER_DYNAMIC_COMPLETION_MIN_PROMPT_TOKENS", 160),
                     forcedTerminalPressureThreshold = readDouble("EGO_FORCE_TERMINAL_PRESSURE_THRESHOLD", 0.98),
                     forcedTerminalStaleStreakThreshold = readInt("EGO_FORCE_TERMINAL_STALE_STREAK_THRESHOLD", 8),
                 ),

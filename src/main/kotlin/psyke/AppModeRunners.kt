@@ -406,7 +406,7 @@ internal object AppModeRunners {
             "superego" to llm.superego,
             "meta_reasoner" to llm.metaReasoner,
             "memory_advisor" to llm.memoryAdvisor
-        )
+        ) + llm.metaReasonerFallback?.let { listOf("meta_reasoner_fallback" to it) }.orEmpty()
         for ((roleLabel, endpoint) in endpoints) {
             if (!checkProviderHealth(endpoint = endpoint, modeLabel = modeLabel, roleLabel = roleLabel)) {
                 return false
@@ -421,8 +421,9 @@ internal object AppModeRunners {
             llm.actionVerifier.providerLabel,
             llm.superego.providerLabel,
             llm.metaReasoner.providerLabel,
+            llm.metaReasonerFallback?.providerLabel ?: "",
             llm.memoryAdvisor.providerLabel
-        )
+        ).filter { it.isNotBlank() }
         return if (providers.size == 1) {
             providers.first()
         } else {
@@ -591,6 +592,13 @@ internal object AppModeRunners {
                                 "pressure_assess_threshold" to config.metaReasoner.deliberationPressureAssessmentThreshold,
                                 "meta_reasoner_cooldown_steps" to config.metaReasoner.cooldownSteps,
                                 "meta_reasoner_max_tokens" to config.metaReasoner.maxTokens,
+                                "meta_reasoner_dynamic_completion_enabled" to config.metaReasoner.dynamicCompletionEnabled,
+                                "meta_reasoner_dynamic_completion_hard_max_tokens" to
+                                    config.metaReasoner.dynamicCompletionHardMaxTokens,
+                                "meta_reasoner_dynamic_prompt_to_completion_ratio" to
+                                    config.metaReasoner.dynamicPromptToCompletionRatio,
+                                "meta_reasoner_dynamic_completion_min_prompt_tokens" to
+                                    config.metaReasoner.dynamicCompletionMinPromptTokens,
                                 "long_term_memory_assess_every_steps" to config.memory.longTermMemoryAssessEverySteps,
                                 "long_term_memory_assess_cooldown_steps" to config.memory.longTermMemoryAssessCooldownSteps,
                                 "long_term_memory_min_confidence" to config.memory.longTermMemoryMinConfidence,
@@ -621,6 +629,7 @@ internal object AppModeRunners {
                                 "long_term_memory_dynamic_completion_min_prompt_tokens" to
                                     config.memory.longTermMemoryDynamicCompletionMinPromptTokens,
                                 "superego_model_token_weight" to llm.modelCatalog.tokenWeightFor(llm.superego),
+                                "meta_reasoner_model_token_weight" to llm.modelCatalog.tokenWeightFor(llm.metaReasoner),
                                 "memory_advisor_model_token_weight" to llm.modelCatalog.tokenWeightFor(llm.memoryAdvisor)
                             )
                         )
@@ -731,6 +740,20 @@ internal object AppModeRunners {
                                         hooks = listOf(rawResponseHook)
                                     )
                                 }
+                                val metaReasonerFallbackClient = llm.metaReasonerFallback?.let { fallbackEndpoint ->
+                                    InstrumentedChatModelClient(
+                                        delegate = TokenBudgetGuardedChatClient(
+                                            delegate = createChatClient(
+                                                endpoint = fallbackEndpoint,
+                                                callObserver = callObserverForProvider(fallbackEndpoint.providerLabel)
+                                            ),
+                                            budgetGate = tokenBudgetGate,
+                                            provider = fallbackEndpoint.providerLabel,
+                                            role = LlmRoleLabels.META_REASONER
+                                        ),
+                                        hooks = listOf(rawResponseHook)
+                                    )
+                                }
                                 InstrumentedChatModelClient(
                                     delegate = TokenBudgetGuardedChatClient(
                                         delegate = createChatClient(
@@ -762,6 +785,7 @@ internal object AppModeRunners {
                                                 "superego_primary=${superegoReviewRouting.primaryEndpoint.providerLabel}/${superegoReviewRouting.primaryEndpoint.model}, " +
                                                 "superego_escalation=${superegoReviewRouting.escalationEndpoint?.let { "${it.providerLabel}/${it.model}" } ?: "disabled"}, " +
                                                 "meta_reasoner=${llm.metaReasoner.providerLabel}/${llm.metaReasoner.model}, " +
+                                                "meta_reasoner_fallback=${llm.metaReasonerFallback?.let { "${it.providerLabel}/${it.model}" } ?: "disabled"}, " +
                                                 "memory_advisor=${llm.memoryAdvisor.providerLabel}/${llm.memoryAdvisor.model}, " +
                                                 "web_search=${llm.webSearch.providerLabel}/${llm.webSearch.model}"
                                         }
@@ -839,7 +863,10 @@ internal object AppModeRunners {
                                                     )
                                                     val metaReasoner = LlmMetaReasoner(
                                                         modelClient = metaReasonerClient,
-                                                        config = config
+                                                        config = config,
+                                                        modelTokenWeight = llm.modelCatalog.tokenWeightFor(llm.metaReasoner),
+                                                        modelContextWindow = llm.modelCatalog.contextWindowFor(llm.metaReasoner),
+                                                        fallbackModelClient = metaReasonerFallbackClient
                                                     )
                                                     val longTermMemoryAdvisor = LlmLongTermMemoryAdvisor(
                                                         modelClient = longTermMemoryClient,
@@ -903,6 +930,7 @@ internal object AppModeRunners {
                                             }
                                         } finally {
                                             superegoEscalationClient?.close()
+                                            metaReasonerFallbackClient?.close()
                                         }
                                     }
                                 }

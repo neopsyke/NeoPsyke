@@ -14,6 +14,7 @@ It is intentionally high-level and should stay aligned with the code.
 - `runInteractiveMode` composes:
   - LLM clients (planner, action-verifier, superego, meta-reasoner, long-term-memory advisor)
     - Each cognitive role can use an independent provider/api key/base URL/model from `llm-runtime.yaml`.
+    - `meta_reasoner_fallback` is optional and only used when repeated empty-content transport failures occur on the primary meta-reasoner endpoint.
     - Optional `model_catalog` in `llm-runtime.yaml` provides per-provider model ROI metadata (`tier`, `token_weight`, optional cost fields).
     - Superego and memory-advisor read `token_weight` for their configured models and apply it to dynamic completion-budget scaling.
     - When `SuperegoConfig.twoStageReviewEnabled` is on, runtime resolves a cheaper primary superego model from `model_catalog` (same provider) and keeps the configured superego model as escalation stage.
@@ -166,9 +167,10 @@ It is intentionally high-level and should stay aligned with the code.
   - optional dynamic expansion uses `dynamicPromptToCompletionRatio`
   - hard-capped by `dynamicCompletionHardMaxTokens`
   - expansion is cost-weighted by configured model `token_weight`
-- Returns `GateDecision(allow, reason, reasonCode)` from strict JSON.
+- Returns `GateDecision(allow, reason, reasonCode)` from schema-enforced structured output (`response_format=json_schema`), with parser fallback for defensive handling.
 - LLM deny responses can include optional `reason_code`; deterministic denials emit policy-prefixed `reason_code`s.
-- If initial LLM output is non-parseable, stage engine performs one strict-JSON retry before default deny fallback.
+- If initial LLM output is non-parseable, stage engine performs one schema-enforced retry before default deny fallback.
+- Empty-content transport failures (`finish_reason=length` + blank content) now increment the stage circuit-breaker streak before safe fallback.
 - Default behavior on model/parse failure is deny (safe fallback).
 - Deterministic deny is authoritative (LLM cannot override a hard deny).
 
@@ -190,6 +192,13 @@ It is intentionally high-level and should stay aligned with the code.
   - guidance text for planner
   - optional override toward finalization
   - forced terminal answer enqueue under persistent circular pressure
+- Meta-reasoner completion budget is adaptive by prompt size (same allocator pattern as superego/memory-advisor) and bounded by `MetaReasonerConfig`:
+  - `maxTokens` as base floor
+  - optional dynamic expansion with `dynamicPromptToCompletionRatio`
+  - hard cap with `dynamicCompletionHardMaxTokens`
+  - expansion weighted by configured model `token_weight`
+- Meta-reasoner calls now request schema-enforced structured output (`response_format=json_schema`) and keep parse fallback semantics for safety.
+- Meta-reasoner primary endpoint can fail over to optional `meta_reasoner_fallback` after repeated empty-content transport failures.
 
 ## Memory System
 - Short-term:
@@ -285,6 +294,7 @@ It is intentionally high-level and should stay aligned with the code.
   - superego -> deny fallback
   - meta-reasoner -> continue fallback
   - long-term advisor -> parse-fallback/skip save
+- For meta-reasoner and superego, circuit-breaker streaks now include repeated empty-content transport failures in addition to parse failures.
 - Repeated denied-action loops are blocked by payload/type comparison, except when denial is classified as technical/transient. Classification prefers structured `reason_code` (for example `TECH_*`) and falls back to text heuristics only if code is missing.
 - Multi-layer duplicate plan suppression (evaluated cheapest-first):
   1. **Plan budget**: hard cap (`maxPlansPerInput`, default 2) on plans emitted per root input.

@@ -7,14 +7,18 @@ import mu.KotlinLogging
 import psyke.agent.core.AgentConfig
 import psyke.agent.core.EgoTrigger
 import psyke.agent.core.PlannerContext
+import psyke.agent.support.AdaptiveCompletionBudget
 import psyke.agent.support.LlmCallCircuitBreaker
+import psyke.agent.support.LlmFailureClassifier
 import psyke.agent.support.OnTripBehavior
 import psyke.agent.support.RetryPolicy
 import psyke.agent.support.TextSecurity
 import psyke.llm.ChatCallMetadata
+import psyke.llm.ChatCompletion
 import psyke.llm.ChatMessage
 import psyke.llm.ChatModelClient
 import psyke.llm.ChatRequestOptions
+import psyke.llm.ChatResponseFormat
 import psyke.llm.ChatRole
 import java.util.Locale
 
@@ -54,11 +58,15 @@ object NoopMetaReasoner : MetaReasoner {
 class LlmMetaReasoner(
     private val modelClient: ChatModelClient,
     private val config: AgentConfig,
+    private val modelTokenWeight: Double = DEFAULT_MODEL_TOKEN_WEIGHT,
+    private val modelContextWindow: Int? = null,
+    private val fallbackModelClient: ChatModelClient? = null,
 ) : MetaReasoner {
     private val circuitBreaker = LlmCallCircuitBreaker(
         tripThreshold = PARSE_FAILURE_TRIP_THRESHOLD,
         onTripBehavior = OnTripBehavior.BYPASS,
     )
+    private var emptyContentFailureStreak: Int = 0
 
     override fun assess(trigger: EgoTrigger, context: PlannerContext): MetaReasonerAssessment {
         if (circuitBreaker.isTripped()) {
@@ -69,19 +77,78 @@ class LlmMetaReasoner(
             )
         }
         val messages = buildMessages(trigger, context)
-        var response: psyke.llm.ChatCompletion? = null
+        val completionTokenBudget = resolveCompletionTokenBudget(messages)
+        val primaryCall = callModel(
+            client = modelClient,
+            messages = messages,
+            completionTokenBudget = completionTokenBudget,
+            callSite = CALL_SITE_PRIMARY
+        )
+        var resolvedResponse = primaryCall.response
+        var resolvedError = primaryCall.lastError
+        val primaryFailedWithEmptyContent = LlmFailureClassifier.isEmptyContentTransportFailure(primaryCall.lastError)
+        if (primaryCall.response == null && primaryFailedWithEmptyContent) {
+            emptyContentFailureStreak += 1
+            circuitBreaker.recordFailure()
+            if (emptyContentFailureStreak >= EMPTY_CONTENT_FALLBACK_THRESHOLD && fallbackModelClient != null) {
+                logger.warn {
+                    "MetaReasoner primary model returned repeated empty-content failures " +
+                        "(streak=$emptyContentFailureStreak); trying fallback model."
+                }
+                val fallbackCall = callModel(
+                    client = fallbackModelClient,
+                    messages = messages,
+                    completionTokenBudget = completionTokenBudget,
+                    callSite = CALL_SITE_FALLBACK
+                )
+                if (fallbackCall.response != null) {
+                    resolvedResponse = fallbackCall.response
+                    resolvedError = null
+                } else {
+                    resolvedError = fallbackCall.lastError
+                }
+            }
+        } else if (primaryCall.response == null) {
+            emptyContentFailureStreak = 0
+        }
+        if (resolvedResponse == null) {
+            logger.warn(resolvedError) { "MetaReasoner call failed after retries." }
+            return MetaReasonerAssessment(
+                verdict = MetaReasonerVerdict.CONTINUE,
+                confidence = 0.2,
+                reason = "Meta reasoner unavailable."
+            )
+        }
+        emptyContentFailureStreak = 0
+        val assessment = parseResponse(resolvedResponse.content)
+        if (isParseFailureAssessment(assessment)) {
+            circuitBreaker.recordParseFailure()
+        } else {
+            circuitBreaker.recordSuccess()
+        }
+        return assessment
+    }
+
+    private fun callModel(
+        client: ChatModelClient,
+        messages: List<ChatMessage>,
+        completionTokenBudget: Int,
+        callSite: String,
+    ): ChatAttemptResult {
+        var response: ChatCompletion? = null
         var lastError: Exception? = null
         val retryAttempts = RetryPolicy.boundedLlmRetryAttempts(config.planner.llmRetryAttempts)
         for (attempt in 1..retryAttempts) {
             try {
-                response = modelClient.chat(
+                response = client.chat(
                     messages = messages,
                     options = ChatRequestOptions(
                         temperature = 0.0,
-                        maxTokens = config.metaReasoner.maxTokens,
+                        maxTokens = completionTokenBudget,
+                        responseFormat = META_REASONER_RESPONSE_FORMAT,
                         metadata = ChatCallMetadata(
                             actor = "ego",
-                            callSite = "meta_reasoner"
+                            callSite = callSite
                         )
                     )
                 )
@@ -89,25 +156,41 @@ class LlmMetaReasoner(
             } catch (ex: Exception) {
                 lastError = ex
                 if (attempt < retryAttempts) {
-                    logger.warn(ex) { "MetaReasoner call failed (attempt $attempt/$retryAttempts); retrying." }
+                    logger.warn(ex) { "MetaReasoner call failed for call_site=$callSite (attempt $attempt/$retryAttempts); retrying." }
                 }
             }
         }
-        if (response == null) {
-            logger.warn(lastError) { "MetaReasoner call failed after $retryAttempts attempts." }
-            return MetaReasonerAssessment(
-                verdict = MetaReasonerVerdict.CONTINUE,
-                confidence = 0.2,
-                reason = "Meta reasoner unavailable."
+        return ChatAttemptResult(response = response, lastError = lastError)
+    }
+
+    private fun resolveCompletionTokenBudget(messages: List<ChatMessage>): Int {
+        val baseBudget = config.metaReasoner.maxTokens
+        if (!config.metaReasoner.dynamicCompletionEnabled) {
+            return baseBudget
+        }
+        val resolution = AdaptiveCompletionBudget.resolveDetailed(
+            request = AdaptiveCompletionBudget.Request(
+                messages = messages,
+                baseMaxTokens = baseBudget,
+                hardMaxTokens = config.metaReasoner.dynamicCompletionHardMaxTokens,
+                promptToCompletionRatio = config.metaReasoner.dynamicPromptToCompletionRatio,
+                minPromptTokensForScaling = config.metaReasoner.dynamicCompletionMinPromptTokens,
+                modelTokenWeight = modelTokenWeight,
+                modelContextWindow = modelContextWindow
             )
+        )
+        if (resolution.contextClamped) {
+            logger.warn {
+                "MetaReasoner completion budget clamped by context window " +
+                    "(prompt_estimate=${resolution.promptEstimate}, budget=${resolution.budget}, context_window=$modelContextWindow)."
+            }
         }
-        val assessment = parseResponse(response.content)
-        if (assessment.reason.contains("parse fallback", ignoreCase = true)) {
-            circuitBreaker.recordParseFailure()
-        } else {
-            circuitBreaker.recordSuccess()
-        }
-        return assessment
+        return resolution.budget
+    }
+
+    private fun isParseFailureAssessment(assessment: MetaReasonerAssessment): Boolean {
+        val reason = assessment.reason.lowercase()
+        return reason.contains("parse fallback") || reason.contains("missing verdict")
     }
 
     private fun buildMessages(trigger: EgoTrigger, context: PlannerContext): List<ChatMessage> {
@@ -133,10 +216,8 @@ class LlmMetaReasoner(
                 role = ChatRole.SYSTEM,
                 content = """
                 You are MetaReasoner for Ego's thought loop.
-                Return STRICT JSON only.
                 Decide if continued deliberation is productive or stale.
-                Output schema:
-                {"verdict":"continue|continue_with_constraints|finalize_now|request_tool_then_finalize","confidence":0.0-1.0,"reason":"<=140 chars"}
+                Return only data that matches the response format schema.
                 Use finalize_now when repeated loops or high pressure suggest diminishing returns.
                 Use request_tool_then_finalize only if one decisive external action can unlock a better final answer.
                 """.trimIndent()
@@ -253,11 +334,49 @@ class LlmMetaReasoner(
         val reason: String? = null,
     )
 
+    private data class ChatAttemptResult(
+        val response: ChatCompletion? = null,
+        val lastError: Exception? = null,
+    )
+
     internal companion object {
         private const val PARSE_FAILURE_TRIP_THRESHOLD: Int = 3
+        private const val EMPTY_CONTENT_FALLBACK_THRESHOLD: Int = 2
+        private const val CALL_SITE_PRIMARY: String = "meta_reasoner"
+        private const val CALL_SITE_FALLBACK: String = "meta_reasoner_fallback"
+        private const val DEFAULT_MODEL_TOKEN_WEIGHT: Double = 1.0
+        private const val META_REASONER_RESPONSE_SCHEMA: String = """
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["verdict", "confidence", "reason"],
+              "properties": {
+                "verdict": {
+                  "type": "string",
+                  "enum": ["continue", "continue_with_constraints", "finalize_now", "request_tool_then_finalize"]
+                },
+                "confidence": {
+                  "type": "number",
+                  "minimum": 0.0,
+                  "maximum": 1.0
+                },
+                "reason": {
+                  "type": "string",
+                  "maxLength": 140
+                }
+              }
+            }
+        """
 
         val mapper = jacksonObjectMapper()
             .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
+
+        val META_REASONER_RESPONSE_FORMAT: ChatResponseFormat.JsonSchema =
+            ChatResponseFormat.JsonSchema(
+                name = "meta_reasoner_assessment",
+                schemaJson = META_REASONER_RESPONSE_SCHEMA,
+                strict = true
+            )
 
         /** Matches `"verdict":"<value>"` even if the surrounding JSON is truncated. */
         internal val TRUNCATED_VERDICT_REGEX =

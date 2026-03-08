@@ -58,6 +58,9 @@ class LlmRuntimeConfigLoaderTest {
               meta_reasoner:
                 provider: google
                 model: gemini-3.1-flash-lite-preview
+              meta_reasoner_fallback:
+                provider: openai
+                model: gpt-5-mini
               memory_advisor:
                 provider: groq
                 model: openai/gpt-oss-20b
@@ -70,7 +73,8 @@ class LlmRuntimeConfigLoaderTest {
         val config = LlmRuntimeConfigLoader.load(
             env = mapOf(
                 "CUSTOM_GROQ_KEY" to "groq-key",
-                "CUSTOM_GOOGLE_KEY" to "google-key"
+                "CUSTOM_GOOGLE_KEY" to "google-key",
+                "OPENAI_API_KEY" to "openai-key"
             ),
             defaultPath = yamlPath
         )
@@ -87,6 +91,8 @@ class LlmRuntimeConfigLoaderTest {
         assertEquals("openai/gpt-oss-safeguard-20b", resolved.superego.model)
         assertEquals(LlmProvider.GROQ, resolved.memoryAdvisor.provider)
         assertEquals("openai/gpt-oss-20b", resolved.memoryAdvisor.model)
+        assertEquals(LlmProvider.OPENAI, resolved.metaReasonerFallback?.provider)
+        assertEquals("gpt-5-mini", resolved.metaReasonerFallback?.model)
 
         assertEquals(LlmProvider.GROQ, resolved.webSearch.provider)
         assertEquals("groq/compound-mini", resolved.webSearch.model)
