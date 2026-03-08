@@ -11,19 +11,55 @@ object AdaptiveCompletionBudget {
         val promptToCompletionRatio: Double,
         val minPromptTokensForScaling: Int,
         val modelTokenWeight: Double,
+        val modelContextWindow: Int? = null,
     )
 
-    fun resolve(request: Request): Int {
+    data class Resolution(
+        val budget: Int,
+        val contextClamped: Boolean,
+        val promptEstimate: Int,
+    )
+
+    fun resolve(request: Request): Int = resolveDetailed(request).budget
+
+    fun resolveDetailed(request: Request): Resolution {
         val base = request.baseMaxTokens.coerceAtLeast(MIN_BASE_TOKENS)
         val hardMax = request.hardMaxTokens.coerceAtLeast(base)
-        val normalizedRatio = request.promptToCompletionRatio.coerceIn(MIN_RATIO, MAX_RATIO)
         val promptEstimate = estimatePromptTokens(request.messages)
-        if (promptEstimate < request.minPromptTokensForScaling.coerceAtLeast(1)) {
-            return base
+
+        val desired = if (promptEstimate < request.minPromptTokensForScaling.coerceAtLeast(1)) {
+            base
+        } else {
+            val normalizedRatio = request.promptToCompletionRatio.coerceIn(MIN_RATIO, MAX_RATIO)
+            val normalizedWeight = request.modelTokenWeight.coerceIn(MIN_MODEL_WEIGHT, MAX_MODEL_WEIGHT)
+            val scaledExtra = ((promptEstimate * normalizedRatio) / normalizedWeight).roundToInt()
+            (base + scaledExtra).coerceIn(base, hardMax)
         }
-        val normalizedWeight = request.modelTokenWeight.coerceIn(MIN_MODEL_WEIGHT, MAX_MODEL_WEIGHT)
-        val scaledExtra = ((promptEstimate * normalizedRatio) / normalizedWeight).roundToInt()
-        return (base + scaledExtra).coerceIn(base, hardMax)
+
+        val contextWindow = request.modelContextWindow
+        if (contextWindow != null && contextWindow > 0) {
+            val available = contextWindow - promptEstimate - CONTEXT_SAFETY_MARGIN
+            if (available < MIN_VIABLE_COMPLETION_TOKENS) {
+                return Resolution(
+                    budget = MIN_VIABLE_COMPLETION_TOKENS,
+                    contextClamped = true,
+                    promptEstimate = promptEstimate
+                )
+            }
+            if (desired > available) {
+                return Resolution(
+                    budget = available,
+                    contextClamped = true,
+                    promptEstimate = promptEstimate
+                )
+            }
+        }
+
+        return Resolution(
+            budget = desired,
+            contextClamped = false,
+            promptEstimate = promptEstimate
+        )
     }
 
     fun estimatePromptTokens(messages: List<ChatMessage>): Int {
@@ -41,4 +77,6 @@ object AdaptiveCompletionBudget {
     private const val MAX_RATIO: Double = 0.75
     private const val MIN_MODEL_WEIGHT: Double = 0.25
     private const val MAX_MODEL_WEIGHT: Double = 4.0
+    private const val CONTEXT_SAFETY_MARGIN: Int = 64
+    private const val MIN_VIABLE_COMPLETION_TOKENS: Int = 16
 }
