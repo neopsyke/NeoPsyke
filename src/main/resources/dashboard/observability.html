@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Psyke Dashboard</title>
+  <title>Psyke Observability</title>
   <style>
     :root {
       --bg: #0f1a1f;
@@ -565,7 +565,10 @@
 <body>
   <header>
     <div><strong>Psyke Realtime Dashboard</strong></div>
-    <div class="status" id="status">connecting...</div>
+    <div style="display:flex;align-items:center;gap:10px;">
+      <a class="ghost-btn" href="/" target="_blank" rel="noopener noreferrer">Open Conversations</a>
+      <div class="status" id="status">connecting...</div>
+    </div>
   </header>
 
   <div class="layout" id="layout">
@@ -1056,7 +1059,7 @@
       if (!state.workspace.open) return;
       setWorkspaceStatus("loading...");
       try {
-        const payload = await fetchJsonNoStore("/api/workspace");
+        const payload = await fetchJsonNoStore("/api/obs/workspace");
         state.workspace.index = Array.isArray(payload.items) ? payload.items : [];
         if (state.workspace.index.length === 0) {
           state.workspace.selectedRoot = null;
@@ -1087,7 +1090,7 @@
         return;
       }
       const versionQuery = version != null ? ("?version=" + encodeURIComponent(String(version))) : "";
-      const payload = await fetchJsonNoStore("/api/workspace/" + encodeURIComponent(String(rootId)) + versionQuery);
+      const payload = await fetchJsonNoStore("/api/obs/workspace/" + encodeURIComponent(String(rootId)) + versionQuery);
       state.workspace.snapshot = payload;
       state.workspace.selectedRoot = Number(payload.root_input_enqueued_at_ms);
       state.workspace.selectedVersion = payload.version == null ? null : Number(payload.version);
@@ -1554,7 +1557,7 @@
     async function boot() {
       const status = document.getElementById("status");
       try {
-        const snapshot = await fetch("/api/snapshot", { cache: "no-store" }).then(r => r.json());
+        const snapshot = await fetch("/api/obs/snapshot", { cache: "no-store" }).then(r => r.json());
         Object.assign(state, snapshot);
         if (!Array.isArray(state.actionCapabilities)) state.actionCapabilities = [];
         state.lastLlmCall = latestLlmCallFromEvents(state.recentEvents);
@@ -1580,7 +1583,7 @@
       });
       render();
 
-      const es = new EventSource("/api/events");
+      const es = new EventSource("/api/obs/events");
       es.addEventListener("open", () => { status.textContent = "connected"; });
       es.addEventListener("error", () => { status.textContent = "reconnecting..."; });
       es.addEventListener("agent", (msg) => {

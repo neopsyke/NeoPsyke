@@ -159,4 +159,59 @@ class DashboardStateStoreTest {
         subscription.close()
         store.close()
     }
+
+    @Test
+    fun `chat session captures user and assistant messages scoped by root input`() {
+        val store = DashboardStateStore(maxEvents = 20)
+        val session = store.createChatSession(title = "Test Session")
+        val sessionId = session.sessionId
+
+        val user = store.addUserMessage(sessionId = sessionId, content = "hello from web")
+        assertNotNull(user)
+
+        val rootInputMs = 4242L
+        store.onEvent(
+            AgentEvent(
+                id = 1,
+                type = "input_queued",
+                data = mapOf(
+                    "input" to PendingInput(
+                        id = 10L,
+                        content = "hello from web",
+                        source = "chat:$sessionId",
+                        enqueuedAtMs = rootInputMs
+                    )
+                )
+            )
+        )
+        store.onEvent(
+            AgentEvent(
+                id = 2,
+                type = "action_executed",
+                data = mapOf(
+                    "action" to PendingAction(
+                        id = 11L,
+                        urgency = Urgency.HIGH,
+                        type = ActionType.ANSWER,
+                        payload = "assistant reply",
+                        summary = "summary",
+                        rootInputEnqueuedAtMs = rootInputMs
+                    ),
+                    "outcome_summary" to "ok"
+                )
+            )
+        )
+
+        val sessionPayload = store.chatSessionJson(sessionId)
+        assertNotNull(sessionPayload)
+        val detail: Map<String, Any?> = mapper.readValue(sessionPayload)
+        @Suppress("UNCHECKED_CAST")
+        val messages = detail["messages"] as List<Map<String, Any?>>
+        assertEquals(2, messages.size)
+        assertEquals("user", messages[0]["role"])
+        assertEquals("assistant", messages[1]["role"])
+        assertEquals("assistant reply", messages[1]["content"])
+
+        store.close()
+    }
 }

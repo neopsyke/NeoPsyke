@@ -18,7 +18,7 @@ cognitive_roles:
     model: gemini-3.1-flash-lite-preview
   action_verifier:
     provider: openai
-    model: gpt-4o-mini
+    model: gpt-5-nano
   superego:
     provider: openai
     model: gpt-4o-mini

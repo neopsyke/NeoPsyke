@@ -48,6 +48,7 @@ It is intentionally high-level and should stay aligned with the code.
   - Pulls signals from `SensoryCortex`.
   - Enqueues new user input in `AttentionScheduler`.
   - Runs `runLoop()` while there is pending work.
+  - Interactive wiring uses `AsyncSensoryInputSource` to multiplex stdin and web chat submissions.
 - `runLoop()` (bounded by `config.planner.maxLoopStepsPerInput`):
   - Scheduler priority:
     - Inputs first
@@ -69,6 +70,7 @@ It is intentionally high-level and should stay aligned with the code.
 
 ## Input Path
 - `SensoryCortex` sanitizes and clamps input to configured limits.
+- `PendingInput` now carries `source` metadata (for example `stdin`, `chat:<sessionId>`) so runtime telemetry can map root requests to conversation sessions.
 - `processInput`:
   - Appends user turn to dialogue deque.
   - Stores turn in short-term `MemoryStore`.
@@ -224,8 +226,14 @@ It is intentionally high-level and should stay aligned with the code.
   - Workspace is destroyed on input resolution or queue drain cleanup.
 
 - Dashboard workspace observability:
-  - Files: `src/main/kotlin/psyke/dashboard/DashboardStateStore.kt`, `src/main/kotlin/psyke/dashboard/DashboardServer.kt`, `src/main/resources/dashboard/index.html`
-  - SSE lane streams lightweight events only; heavy workspace debug snapshots are captured in a bounded TTL ring and served on-demand via `/api/workspace` and `/api/workspace/{rootId}`.
+  - Files: `src/main/kotlin/psyke/dashboard/DashboardStateStore.kt`, `src/main/kotlin/psyke/dashboard/DashboardServer.kt`, `src/main/resources/dashboard/conversations.html`, `src/main/resources/dashboard/observability.html`
+  - UI routes are split:
+    - Conversations page: `/`
+    - Observability dashboard: `/dashboard`
+  - API namespaces are split:
+    - Chat control plane and session-scoped SSE: `/api/chat/*`
+    - Observability snapshot/events/workspace: `/api/obs/*`
+  - Observability SSE lane streams lightweight events only; heavy workspace debug snapshots are captured in a bounded TTL ring and served on-demand via `/api/obs/workspace` and `/api/obs/workspace/{rootId}`.
   - The dashboard drawer fetches snapshot detail on demand to avoid continuous large-payload updates in timeline/event streams.
 
 ## Action Execution Surface

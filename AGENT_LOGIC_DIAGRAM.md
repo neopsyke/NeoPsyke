@@ -7,7 +7,7 @@ Keep diagrams high signal: small, readable, and updated as runtime logic evolves
 
 ```mermaid
 flowchart LR
-    U["User / Stdin"] --> SC["SensoryCortex"]
+    U["User / Stdin / Web UI"] --> SC["SensoryCortex (Async Multiplex Input)"]
     SC --> E["Ego Orchestrator"]
 
     E --> AS["AttentionScheduler"]
@@ -52,6 +52,9 @@ flowchart LR
     MCat --> LTM
 
     E --> I["InstrumentationBus + Metrics"]
+    I --> DS["DashboardStateStore"]
+    DS --> CP["Conversations Page (`/`) + Chat API (`/api/chat/*`)"]
+    DS --> OP["Observability Page (`/dashboard`) + Obs API (`/api/obs/*`)"]
 ```
 
 ## 2) Loop Sequence (Per Input)
@@ -116,7 +119,7 @@ sequenceDiagram
                         alt action = answer
                             Ego->>Sched: clear pending thought/action work for same root input
                             Ego->>TWS: destroy workspace for resolved input
-                            Ego->>Dash: drawer reads full snapshots via /api/workspace/{rootId}
+                            Ego->>Dash: drawer reads full snapshots via /api/obs/workspace/{rootId}
                             Ego->>Mem: maybeAssessLongTermMemory(post_terminal_answer, forced)
                         end
                         Ego->>TWS: record non-answer action outcomes/evidence
