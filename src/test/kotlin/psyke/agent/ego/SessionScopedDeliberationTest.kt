@@ -68,4 +68,23 @@ class SessionScopedDeliberationTest {
         engine.setActiveSession(ConversationContext.DEFAULT_SESSION_ID)
         assertEquals("", engine.guidance())
     }
+
+    @Test
+    fun `deliberation progress is isolated per session`() {
+        val engine = createEngine()
+
+        engine.setActiveSession("session-A")
+        val stateAAfterStep = engine.startStep()
+        assertEquals(1, stateAAfterStep.stepIndex)
+
+        engine.setActiveSession("session-B")
+        val stateBInitial = engine.snapshot()
+        assertEquals(0, stateBInitial.stepIndex, "Session B should start from clean deliberation state")
+        val stateBAfterStep = engine.startStep()
+        assertEquals(1, stateBAfterStep.stepIndex)
+
+        engine.setActiveSession("session-A")
+        val stateAReturn = engine.snapshot()
+        assertEquals(1, stateAReturn.stepIndex, "Session A should preserve its own deliberation progress")
+    }
 }

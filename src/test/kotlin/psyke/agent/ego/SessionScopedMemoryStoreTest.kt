@@ -5,13 +5,22 @@ import psyke.agent.core.ConversationContext
 import psyke.agent.core.DialogueRole
 import psyke.agent.core.DialogueTurn
 import psyke.agent.core.Interlocutor
+import psyke.agent.core.MemoryConfig
+import psyke.agent.core.DeliberationState
 import psyke.agent.memory.longterm.NoopHippocampus
 import psyke.agent.memory.longterm.NoopLongTermMemoryAdvisor
+import psyke.agent.memory.longterm.Hippocampus
+import psyke.agent.memory.longterm.LongTermMemoryAdvisor
+import psyke.agent.memory.longterm.LongTermMemoryAssessmentContext
+import psyke.agent.memory.longterm.LongTermMemoryAssessmentDecision
+import psyke.agent.memory.longterm.MemoryRecall
+import psyke.agent.memory.longterm.MemoryRecallQuery
 import psyke.agent.memory.shortterm.MemoryStore
 import psyke.instrumentation.NoopAgentInstrumentation
 import kotlin.test.Test
 import kotlin.test.assertContains
 import kotlin.test.assertFalse
+import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /**
@@ -123,5 +132,57 @@ class SessionScopedMemoryStoreTest {
                 assertFalse(summary.contains(otherTopic), "Session $sessionId should NOT contain $otherTopic")
             }
         }
+    }
+
+    @Test
+    fun `long-term memory assessment cooldown is isolated per session`() {
+        var assessCalls = 0
+        val advisor = object : LongTermMemoryAdvisor {
+            override val enabled: Boolean = true
+            override fun assess(context: LongTermMemoryAssessmentContext): LongTermMemoryAssessmentDecision {
+                assessCalls += 1
+                return LongTermMemoryAssessmentDecision(
+                    shouldSave = false,
+                    summary = "",
+                    confidence = 0.0,
+                    reason = "test"
+                )
+            }
+        }
+        val hippocampus = object : Hippocampus {
+            override val providerName: String = "test"
+            override val enabled: Boolean = true
+            override fun recall(query: MemoryRecallQuery): MemoryRecall =
+                MemoryRecall(provider = providerName, text = "")
+        }
+        val config = AgentConfig(
+            memory = MemoryConfig(
+                longTermMemoryAssessEverySteps = 1,
+                longTermMemoryAssessCooldownSteps = 50,
+            )
+        )
+        val mc = MemoryCoordinator(
+            hippocampus = hippocampus,
+            longTermMemoryAdvisor = advisor,
+            config = config,
+            instrumentation = NoopAgentInstrumentation,
+        )
+        val deliberation = DeliberationState(stepIndex = 10)
+
+        mc.setActiveSession("session-A", Interlocutor.named("Alice"))
+        mc.maybeAssessLongTermMemory(
+            trigger = "interval",
+            deliberation = deliberation,
+            recentDialogue = listOf(userTurn("remember A", "session-A"))
+        )
+
+        mc.setActiveSession("session-B", Interlocutor.named("Bob"))
+        mc.maybeAssessLongTermMemory(
+            trigger = "interval",
+            deliberation = deliberation,
+            recentDialogue = listOf(userTurn("remember B", "session-B"))
+        )
+
+        assertEquals(2, assessCalls, "Each session should run its own cooldown window")
     }
 }

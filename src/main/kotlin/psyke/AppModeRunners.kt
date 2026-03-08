@@ -496,12 +496,18 @@ internal object AppModeRunners {
         }
         val dashboardPort = runtimeSettings.dashboardPort
         val dashboardEnabled = runtimeSettings.dashboardEnabled
+        if (!dashboardEnabled) {
+            logger.warn {
+                "Interactive mode requires the web dashboard input path. Enable dashboard mode to continue."
+            }
+            return
+        }
     
         val dashboardStore = DashboardStateStore()
         val interlocutorResolver = psyke.agent.core.DefaultInterlocutorResolver()
         val sensoryInput = AsyncSensoryInputSource(
-            includeStdin = true,
-            emitStdinClosedSignal = !dashboardEnabled
+            includeStdin = false,
+            emitStdinClosedSignal = false
         )
         val sensoryCortex = SensoryCortex(
             config = config,

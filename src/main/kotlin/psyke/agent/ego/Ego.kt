@@ -87,7 +87,7 @@ class Ego(
     }
 
     fun runInteractive() {
-        logger.info { "Ego loop started. Type 'exit' to quit." }
+        logger.info { "Ego loop started. Web dashboard chat is the active input path." }
         instrumentation.emit(AgentEvents.loopStatus(status = "running", message = "Interactive loop started"))
         emitQueueSnapshot("loop_start")
         while (true) {
@@ -140,6 +140,8 @@ class Ego(
             val task = scheduler.nextTask() ?: break
             steps += 1
             instrumentation.emit(AgentEvents.loopStep(step = steps, taskType = taskType(task)))
+            val taskConversationContext = taskConversationContext(task)
+            activateSession(taskConversationContext)
             val state = deliberation.startStep()
             emitDeliberationState(taskType(task), state)
             try {
@@ -157,11 +159,11 @@ class Ego(
                 scheduler = scheduler,
                 rootInputId = taskRootInputId(task),
                 rootInputReceivedAtMs = taskRootInputReceivedAtMs(task),
-                conversationContext = taskConversationContext(task)
+                conversationContext = taskConversationContext
             )
             maybeRunLongTermMemoryAssessment(
                 trigger = "interval",
-                sessionId = resolveSessionId(taskConversationContext(task))
+                sessionId = resolveSessionId(taskConversationContext)
             )
             emitQueueSnapshot("task_processed")
         }
@@ -313,7 +315,7 @@ class Ego(
                     val latencyMs = (System.currentTimeMillis() - receivedAtMs).coerceAtLeast(0L)
                     instrumentation.emit(AgentEvents.responseLatencyRecorded(latencyMs = latencyMs, actionId = resolvedAction.id))
                 }
-                deliberation.clearEvidenceForInput(resolvedAction.rootInputId)
+                deliberation.clearEvidenceForInput(resolvedAction.rootInputId, sessionId)
                 cleanupResolvedInputAfterAnswer(resolvedAction)
             }
             if (outcome.assistantOutput != null) {
@@ -339,7 +341,7 @@ class Ego(
             action = resolvedAction,
             context = TaskVerifierContext(
                 recentDialogue = dialogueFor(sessionId).takeLast(12),
-                externalEvidence = deliberation.evidenceFor(resolvedAction.rootInputId)
+                externalEvidence = deliberation.evidenceFor(resolvedAction.rootInputId, sessionId)
             )
         )
         instrumentation.emit(
@@ -416,7 +418,7 @@ class Ego(
             val category = FetchErrorCategory.entries.firstOrNull {
                 it.name.equals(outcome.fetchErrorCategory, ignoreCase = true)
             } ?: FetchErrorCategory.RETRYABLE
-            deliberation.recordFetchFailure(resolvedAction.rootInputId, category)
+            deliberation.recordFetchFailure(resolvedAction.rootInputId, sessionId, category)
         }
         if (resolvedAction.type == ActionType.ANSWER) {
             val receivedAtMs = resolvedAction.rootInputReceivedAtMs
@@ -424,7 +426,7 @@ class Ego(
                 val latencyMs = (System.currentTimeMillis() - receivedAtMs).coerceAtLeast(0L)
                 instrumentation.emit(AgentEvents.responseLatencyRecorded(latencyMs = latencyMs, actionId = resolvedAction.id))
             }
-            deliberation.clearEvidenceForInput(resolvedAction.rootInputId)
+            deliberation.clearEvidenceForInput(resolvedAction.rootInputId, sessionId)
             cleanupResolvedInputAfterAnswer(resolvedAction)
         }
         if (outcome.assistantOutput != null) {
@@ -919,7 +921,7 @@ class Ego(
             )
             return
         }
-        val evidence = deliberation.evidenceFor(thought.rootInputId)
+        val evidence = deliberation.evidenceFor(thought.rootInputId, sessionId)
         val parseFailureLikely = thought.content.contains("non-parseable", ignoreCase = true)
         val (payload, summary) = when {
             !thought.denialReason.isNullOrBlank() -> {
@@ -1046,7 +1048,7 @@ class Ego(
         val signatureHits = (hitsBySignature[signature] ?: 0) + 1
         hitsBySignature[signature] = signatureHits
 
-        val evidence = deliberation.evidenceFor(rootInputId)
+        val evidence = deliberation.evidenceFor(rootInputId, conversationContext.sessionId)
         val hadSuccessfulEvidence = evidence?.hadSuccessfulEvidence == true
         val hadExternalFailures = evidence?.hadExternalFailures == true
         val redundantRisk = hadSuccessfulEvidence && signatureHits > 1
@@ -1283,8 +1285,8 @@ class Ego(
             rootInputId = rootInputId,
             maxTokens = config.memory.taskWorkspace.maxPromptTokens
         )
-        val disabled = deliberation.disabledActionTypes(rootInputId)
-        val evidenceHints = buildEvidenceHints(rootInputId)
+        val disabled = deliberation.disabledActionTypes(rootInputId, sessionId)
+        val evidenceHints = buildEvidenceHints(rootInputId, sessionId)
         return PlannerContext(
             recentDialogue = recentDialogue,
             queue = scheduler.queueSnapshot(),
@@ -1301,8 +1303,8 @@ class Ego(
         )
     }
 
-    private fun buildEvidenceHints(rootInputId: String?): String {
-        val evidence = deliberation.evidenceFor(rootInputId) ?: return ""
+    private fun buildEvidenceHints(rootInputId: String?, sessionId: String): String {
+        val evidence = deliberation.evidenceFor(rootInputId, sessionId) ?: return ""
         val hints = mutableListOf<String>()
         if (evidence.hadSuccessfulEvidence) {
             val topSignals = evidence.successfulEvidenceSignals
@@ -1395,7 +1397,7 @@ class Ego(
         val sessionId = resolveSessionId(action.conversationContext)
         val scope = inputScope(rootInputId, action.conversationContext)
         planner.resetForInput(rootInputId)
-        deliberation.clearForInput(rootInputId)
+        deliberation.clearForInput(rootInputId, sessionId)
         externalActionSignatureHitsByInput.remove(scope)
         emitTaskWorkspaceTelemetry(
             rootInputId = rootInputId,

@@ -49,12 +49,14 @@ It is intentionally high-level and should stay aligned with the code.
   - Pulls signals from `SensoryCortex`.
   - Enqueues new user input in `AttentionScheduler`.
   - Runs `runLoop()` while there is pending work.
-  - Interactive wiring uses `AsyncSensoryInputSource` to multiplex stdin and web chat submissions.
+  - Interactive wiring uses `AsyncSensoryInputSource` for web chat submissions only (stdin input path disabled).
+  - Interactive startup requires dashboard mode enabled; without dashboard input path the loop does not start.
 - `runLoop()` (bounded by `config.planner.maxLoopStepsPerInput`):
   - Scheduler priority:
     - Inputs first
     - Then highest-urgency between pending action and thought
   - Per task:
+    - Activate session context for the task (`sessionId` + interlocutor) before deliberation/memory updates.
     - Advance deliberation step.
     - Dispatch one of:
       - `processInput`
@@ -73,7 +75,7 @@ It is intentionally high-level and should stay aligned with the code.
 - `SensoryCortex` sanitizes and clamps input to configured limits.
 - `ConversationContext` is mandatory end-to-end and requires a non-blank `sessionId`.
 - `PendingInput` carries:
-  - `source` metadata (for example `stdin`, `chat:<sessionId>`) so runtime telemetry can map root requests to conversation sessions.
+  - `source` metadata (for example `chat:<sessionId>`) so runtime telemetry can map root requests to conversation sessions.
   - `rootInputId` (UUID string identity for request-scoped orchestration)
   - `receivedAtMs` (request timing anchor, not an identity key)
 - `processInput`:
@@ -211,6 +213,9 @@ It is intentionally high-level and should stay aligned with the code.
   - guidance text for planner
   - optional override toward finalization
   - forced terminal answer enqueue under persistent circular pressure
+- Deliberation runtime state is session-scoped:
+  - each session has its own `DeliberationProgressMonitor`, `lastAssessmentStep`, and guidance text
+  - forced terminal/evidence/fetch-circuit bookkeeping is scoped by `(rootInputId, sessionId)`
 - Meta-reasoner completion budget is adaptive by prompt size (same allocator pattern as superego/memory-advisor) and bounded by `MetaReasonerConfig`:
   - `maxTokens` as base floor
   - optional dynamic expansion with `dynamicPromptToCompletionRatio`
@@ -247,6 +252,14 @@ It is intentionally high-level and should stay aligned with the code.
     - duplicate fingerprint suppression
     - temporary disable after repeated parse-fallback streaks
     - every blocked persistence emits `long_term_memory_persistence_skipped` with exact `reason_code` + `reason_detail`
+  - Consolidation state is session-scoped:
+    - per-session cooldown step tracking
+    - per-session parse-fallback circuit breaker
+    - per-session explicit remember-intent trigger flag
+    - per-session recent imprint fingerprint ring
+  - Session/interlocutor filters are optional in episodic recall:
+    - default temporal recall is cross-session
+    - session/interlocutor filters are applied only when the user explicitly requests them (for example, “this session”, `session:<id>`, `interlocutor:<id>`)
   - `McpHippocampus` requests `write_mode=dedupe_if_similar` when calling memory write tools.
   - Reflection lessons:
     - Triggered on denied-action/repeated-denied loops.
