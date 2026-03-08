@@ -52,7 +52,7 @@ class AgentModelsTest {
         assertEquals(ActionType.WEB_SEARCH, ActionType.fromRaw("web_search"))
         assertEquals(ActionType.ANSWER, ActionType.fromRaw("answer"))
         assertEquals(ActionType.MCP_TIME, ActionType.fromRaw("mcp_time"))
-        assertEquals(ActionType.MCP_FETCH, ActionType.fromRaw("mcp_fetch"))
+        assertEquals(ActionType.WEBSITE_FETCH, ActionType.fromRaw("website_fetch"))
         assertNull(ActionType.fromRaw("search"))
         assertNull(ActionType.fromRaw(null))
     }

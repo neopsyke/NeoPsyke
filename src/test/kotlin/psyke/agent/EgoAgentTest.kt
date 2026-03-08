@@ -1706,16 +1706,16 @@ class EgoAgentTest {
     }
 
     @Test
-    fun `mcp fetch circuit breaker disables action after repeated non retryable failures`() {
+    fun `fetch circuit breaker disables action after repeated non retryable failures`() {
         val plannerLlm = StubChatModelClient().apply {
             enqueueRawResponse(
-                """{"decision":"action","urgency":"medium","action_type":"mcp_fetch","action_payload":"{\"url\":\"https://blocked.example.com\"}","action_summary":"fetch page"}"""
+                """{"decision":"action","urgency":"medium","action_type":"website_fetch","action_payload":"{\"url\":\"https://blocked.example.com\"}","action_summary":"fetch page"}"""
             )
             enqueueRawResponse(
-                """{"decision":"action","urgency":"medium","action_type":"mcp_fetch","action_payload":"{\"url\":\"https://blocked.example.com\"}","action_summary":"retry fetch"}"""
+                """{"decision":"action","urgency":"medium","action_type":"website_fetch","action_payload":"{\"url\":\"https://blocked.example.com\"}","action_summary":"retry fetch"}"""
             )
             enqueueRawResponse(
-                """{"decision":"action","urgency":"medium","action_type":"mcp_fetch","action_payload":"{\"url\":\"https://blocked.example.com\"}","action_summary":"retry fetch 2"}"""
+                """{"decision":"action","urgency":"medium","action_type":"website_fetch","action_payload":"{\"url\":\"https://blocked.example.com\"}","action_summary":"retry fetch 2"}"""
             )
             enqueueRawResponse(
                 """{"decision":"action","urgency":"medium","action_type":"answer","action_payload":"Could not fetch the page.","action_summary":"fallback answer"}"""
@@ -1733,7 +1733,7 @@ class EgoAgentTest {
             override fun fetch(payload: String): String = "unused"
             override fun fetchWithOutcome(payload: String): FetchOutcome =
                 FetchOutcome(
-                    message = "MCP fetch tool returned an error: 403 Forbidden",
+                    message = "Fetch tool returned an error: 403 Forbidden",
                     errorCategory = FetchErrorCategory.NON_RETRYABLE
                 )
         }
@@ -1753,9 +1753,9 @@ class EgoAgentTest {
         assertTrue(
             instrumentation.events.any {
                 it.type == "action_type_temporarily_disabled" &&
-                    it.data["action_type"] == "mcp_fetch"
+                    it.data["action_type"] == "website_fetch"
             },
-            "Expected action_type_temporarily_disabled event for mcp_fetch"
+            "Expected action_type_temporarily_disabled event for fetch"
         )
         assertTrue(
             instrumentation.events.any {
@@ -1766,16 +1766,16 @@ class EgoAgentTest {
     }
 
     @Test
-    fun `mcp fetch malformed request does not trip circuit breaker`() {
+    fun `fetch malformed request does not trip circuit breaker`() {
         val plannerLlm = StubChatModelClient().apply {
             enqueueRawResponse(
-                """{"decision":"action","urgency":"medium","action_type":"mcp_fetch","action_payload":"bad json","action_summary":"fetch 1"}"""
+                """{"decision":"action","urgency":"medium","action_type":"website_fetch","action_payload":"bad json","action_summary":"fetch 1"}"""
             )
             enqueueRawResponse(
-                """{"decision":"action","urgency":"medium","action_type":"mcp_fetch","action_payload":"still bad","action_summary":"fetch 2"}"""
+                """{"decision":"action","urgency":"medium","action_type":"website_fetch","action_payload":"still bad","action_summary":"fetch 2"}"""
             )
             enqueueRawResponse(
-                """{"decision":"action","urgency":"medium","action_type":"mcp_fetch","action_payload":"nope","action_summary":"fetch 3"}"""
+                """{"decision":"action","urgency":"medium","action_type":"website_fetch","action_payload":"nope","action_summary":"fetch 3"}"""
             )
             enqueueRawResponse(
                 """{"decision":"action","urgency":"medium","action_type":"answer","action_payload":"answering from context","action_summary":"fallback"}"""
@@ -1793,7 +1793,7 @@ class EgoAgentTest {
             override fun fetch(payload: String): String = "unused"
             override fun fetchWithOutcome(payload: String): FetchOutcome =
                 FetchOutcome(
-                    message = "MCP fetch payload is invalid.",
+                    message = "Fetch payload is invalid.",
                     errorCategory = FetchErrorCategory.MALFORMED_REQUEST
                 )
         }

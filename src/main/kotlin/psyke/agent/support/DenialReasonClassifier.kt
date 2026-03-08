@@ -2,6 +2,7 @@ package psyke.agent.support
 
 object DenialReasonClassifier {
     private const val TECHNICAL_REASON_CODE_PREFIX: String = "TECH_"
+    private const val POLICY_REASON_CODE_PREFIX: String = "POLICY_"
     private val technicalSignals = listOf(
         "could not be parsed",
         "parse",
@@ -20,6 +21,11 @@ object DenialReasonClassifier {
         val normalizedCode = reasonCode?.trim()?.uppercase().orEmpty()
         if (normalizedCode.startsWith(TECHNICAL_REASON_CODE_PREFIX)) {
             return true
+        }
+        // Deterministic policy denials (POLICY_*) are hard validation errors, never transient.
+        // Skip the text heuristic which can misclassify them (e.g. "json" in reason text).
+        if (normalizedCode.startsWith(POLICY_REASON_CODE_PREFIX)) {
+            return false
         }
         return isLikelyTechnical(reason)
     }

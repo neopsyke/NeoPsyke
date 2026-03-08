@@ -83,7 +83,7 @@ object McpRuntimeConfigLoader {
     private fun McpRuntimeConfig.applyEnvOverrides(env: Map<String, String>): McpRuntimeConfig =
         copy(
             time = time.applyEnvOverrides(env, prefix = "MCP_TIME", commandEnv = "MCP_TIME_SERVER_CMD"),
-            fetch = fetch.applyEnvOverrides(env, prefix = "MCP_FETCH", commandEnv = "MCP_FETCH_SERVER_CMD"),
+            fetch = fetch.applyEnvOverrides(env, prefix = "WEBSITE_FETCH", commandEnv = "WEBSITE_FETCH_SERVER_CMD"),
             memory = memory.applyEnvOverrides(env, prefix = "MCP_MEMORY", commandEnv = "MCP_MEMORY_SERVER_CMD")
         )
 

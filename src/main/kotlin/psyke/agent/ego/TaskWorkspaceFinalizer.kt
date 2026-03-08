@@ -178,7 +178,7 @@ class LlmTaskWorkspaceFinalizer(
             ActionType.ANSWER -> if (action.isFallbackExplanation) MODE_FALLBACK_EXPLANATION else MODE_DIRECT_ANSWER
             ActionType.WEB_SEARCH -> "web_search_summary"
             ActionType.MCP_TIME -> "mcp_time_summary"
-            ActionType.MCP_FETCH -> "mcp_fetch_summary"
+            ActionType.WEBSITE_FETCH -> "website_fetch_summary"
             ActionType.MEMORY -> "memory_summary"
         }
 

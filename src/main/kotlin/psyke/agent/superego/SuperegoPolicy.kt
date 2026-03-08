@@ -34,10 +34,10 @@ object SuperegoPolicy {
                 "Deny WEB_SEARCH when payload includes or seeks personal/sensitive data (PII, health, financial, legal, biometric, or location data) unless the user explicitly provided it for this task.",
             )
 
-            ActionType.MCP_FETCH -> listOf(
-                "Deny MCP_FETCH when payload includes or seeks credentials, API keys, tokens, cookies, private keys, or other secrets.",
-                "Deny MCP_FETCH when payload includes or seeks personal/sensitive data (PII, health, financial, legal, biometric, or location data) unless the user explicitly provided it for this task.",
-                "For MCP_FETCH, allow only public informational HTTPS pages; deny auth/account/payment/admin/metadata endpoints and URLs with obvious secret query params (token, key, password, auth, session).",
+            ActionType.WEBSITE_FETCH -> listOf(
+                "Deny WEBSITE_FETCH when payload includes or seeks credentials, API keys, tokens, cookies, private keys, or other secrets.",
+                "Deny WEBSITE_FETCH when payload includes or seeks personal/sensitive data (PII, health, financial, legal, biometric, or location data) unless the user explicitly provided it for this task.",
+                "For WEBSITE_FETCH, allow only public informational HTTPS pages; deny auth/account/payment/admin/metadata endpoints and URLs with obvious secret query params (token, key, password, auth, session).",
             )
 
             ActionType.MCP_TIME -> listOf(

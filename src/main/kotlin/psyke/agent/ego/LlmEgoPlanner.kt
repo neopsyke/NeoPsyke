@@ -171,7 +171,12 @@ class LlmEgoPlanner(
 
                 "action" -> {
                     val actionType = ActionType.fromRaw(payload.actionType)
-                    val actionPayload = normalizeActionPayload(payload.actionPayload)?.trim().orEmpty()
+                    val rawPayload = normalizeActionPayload(payload.actionPayload)?.trim().orEmpty()
+                    val actionPayload = if (actionType == ActionType.WEBSITE_FETCH) {
+                        repairWebsiteFetchPayload(rawPayload)
+                    } else {
+                        rawPayload
+                    }
                     val actionSummary = payload.actionSummary?.trim().orEmpty()
                     val resolvedSummary = if (actionSummary.isBlank() && actionType != null && actionPayload.isNotBlank()) {
                         onPlannerOutputRepaired()
@@ -453,7 +458,7 @@ class LlmEgoPlanner(
                   "urgency":"low|medium|high",
                   "thought":"optional when decision=thought",
                   "long_term_memory_recall_query":"optional query string",
-                  "action_type":"web_search|answer|mcp_time|mcp_fetch",
+                  "action_type":"web_search|answer|mcp_time|website_fetch",
                   "action_payload":"optional when decision=action",
                   "action_summary":"required when decision=action",
                   "plan_goal":"required when decision=plan",
@@ -588,7 +593,12 @@ class LlmEgoPlanner(
                     return EgoDecision.Noop(reason)
                 }
 
-                val repairedPayload = normalizeActionPayload(payload.actionPayload)?.trim().orEmpty()
+                val rawRepairedPayload = normalizeActionPayload(payload.actionPayload)?.trim().orEmpty()
+                val repairedPayload = if (repairedActionType == ActionType.WEBSITE_FETCH) {
+                    repairWebsiteFetchPayload(rawRepairedPayload)
+                } else {
+                    rawRepairedPayload
+                }
                 if (repairedPayload.isBlank()) {
                     instrumentation.emit(
                         AgentEvents.warning(
@@ -765,7 +775,7 @@ class LlmEgoPlanner(
                     - web_search: payload is a concise search query.
                     - answer: payload is the exact answer text for the interlocutor.
                     - mcp_time: payload is JSON like {"timezone":"Europe/Berlin"} (timezone optional).
-                    - mcp_fetch: payload is JSON like {"url":"https://example.com","max_chars":1200}.
+                    - website_fetch: payload is JSON like {"url":"https://example.com","max_chars":1200}.
                     You may receive Long-term memory recall from Hippocampus search.
                     Use long-term memory recall only when relevant to the current trigger.
                     If long-term memory recall is missing or ambiguous, do not invent details.
@@ -792,7 +802,7 @@ class LlmEgoPlanner(
                       "urgency":"low|medium|high",
                       "thought":"... optional when decision=thought",
                       "long_term_memory_recall_query":"optional query string for explicit extra long-term recall",
-                      "action_type":"web_search|answer|mcp_time|mcp_fetch",
+                      "action_type":"web_search|answer|mcp_time|website_fetch",
                       "action_payload":"... optional when decision=action",
                       "action_summary":"required when decision=action; <=180 chars context summary for action review",
                       "plan_goal":"required when decision=plan; overall objective",
@@ -1135,6 +1145,30 @@ class LlmEgoPlanner(
             node.isObject || node.isArray -> mapper.writeValueAsString(node)
             else -> node.asText()
         }
+    }
+
+    /**
+     * Repairs common LLM mistakes in website_fetch payloads.
+     * If the payload is a bare URL (not wrapped in JSON), wraps it as {"url":"<url>"}.
+     */
+    private fun repairWebsiteFetchPayload(raw: String): String {
+        if (raw.isBlank()) return raw
+        try {
+            mapper.readTree(raw)
+            return raw // already valid JSON
+        } catch (_: Exception) { /* not JSON */ }
+        val trimmed = raw.trim()
+        if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+            onPlannerOutputRepaired()
+            instrumentation.emit(
+                AgentEvents.plannerOutputRepaired(
+                    actionType = "website_fetch",
+                    repair = "bare_url_wrapped"
+                )
+            )
+            return mapper.writeValueAsString(mapOf("url" to trimmed))
+        }
+        return raw
     }
 
     private fun synthesizeActionSummary(actionPayload: String): String {

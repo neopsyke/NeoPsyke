@@ -39,7 +39,7 @@ flowchart LR
     M --> WS["Web Search Handler/Engine"]
     CfgWS["WebSearch Provider Config (provider/key/base/model)"] --> WS
     M --> MT["MCP Time Tool"]
-    M --> MF["MCP Fetch Tool"]
+    M --> MF["Fetch Tool"]
     WS --> PID["PromptInjectionDefense"]
     MT --> PID
     MF --> PID

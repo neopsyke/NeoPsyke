@@ -27,7 +27,7 @@ enum class ActionType(val dispatchable: Boolean = true) {
     WEB_SEARCH,
     ANSWER,
     MCP_TIME,
-    MCP_FETCH,
+    WEBSITE_FETCH,
     MEMORY(dispatchable = false);
 
     companion object {
@@ -39,7 +39,7 @@ enum class ActionType(val dispatchable: Boolean = true) {
                 "web_search" -> WEB_SEARCH
                 "answer" -> ANSWER
                 "mcp_time" -> MCP_TIME
-                "mcp_fetch" -> MCP_FETCH
+                "website_fetch" -> WEBSITE_FETCH
                 "memory" -> MEMORY
                 else -> null
             }

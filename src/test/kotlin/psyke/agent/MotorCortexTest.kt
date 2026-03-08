@@ -110,7 +110,7 @@ class MotorCortexTest {
     }
 
     @Test
-    fun `mcp fetch action delegates to configured tool and propagates success category`() {
+    fun `fetch action delegates to configured tool and propagates success category`() {
         val cortex = MotorCortex(
             webSearchActionHandler = WebSearchActionHandler(
                 engine = object : WebSearchEngine {
@@ -123,7 +123,7 @@ class MotorCortexTest {
                 override fun fetchWithOutcome(payload: String): FetchOutcome {
                     assertEquals("""{"url":"https://example.com","max_chars":500}""", payload)
                     return FetchOutcome(
-                        message = "MCP fetch completed for https://example.com.",
+                        message = "Fetch completed for https://example.com.",
                         errorCategory = FetchErrorCategory.NONE
                     )
                 }
@@ -134,20 +134,20 @@ class MotorCortexTest {
             PendingAction(
                 id = 4,
                 urgency = Urgency.HIGH,
-                type = ActionType.MCP_FETCH,
+                type = ActionType.WEBSITE_FETCH,
                 payload = """{"url":"https://example.com","max_chars":500}""",
                 summary = "fetch page"
             ),
             searchResultCount = 1
         )
 
-        assertEquals("MCP fetch completed for https://example.com.", outcome.statusSummary)
+        assertEquals("Fetch completed for https://example.com.", outcome.statusSummary)
         assertEquals("none", outcome.fetchErrorCategory)
         assertNull(outcome.assistantOutput)
     }
 
     @Test
-    fun `mcp fetch propagates non retryable error category through action outcome`() {
+    fun `fetch propagates non retryable error category through action outcome`() {
         val cortex = MotorCortex(
             webSearchActionHandler = WebSearchActionHandler(
                 engine = object : WebSearchEngine {
@@ -159,7 +159,7 @@ class MotorCortexTest {
                 override fun fetch(payload: String): String = "unused"
                 override fun fetchWithOutcome(payload: String): FetchOutcome =
                     FetchOutcome(
-                        message = "MCP fetch tool returned an error: 403 Forbidden",
+                        message = "Fetch tool returned an error: 403 Forbidden",
                         errorCategory = FetchErrorCategory.NON_RETRYABLE
                     )
             }
@@ -169,7 +169,7 @@ class MotorCortexTest {
             PendingAction(
                 id = 5,
                 urgency = Urgency.HIGH,
-                type = ActionType.MCP_FETCH,
+                type = ActionType.WEBSITE_FETCH,
                 payload = """{"url":"https://example.com"}""",
                 summary = "fetch page"
             ),
@@ -180,7 +180,7 @@ class MotorCortexTest {
     }
 
     @Test
-    fun `mcp fetch propagates malformed request category through action outcome`() {
+    fun `fetch propagates malformed request category through action outcome`() {
         val cortex = MotorCortex(
             webSearchActionHandler = WebSearchActionHandler(
                 engine = object : WebSearchEngine {
@@ -192,7 +192,7 @@ class MotorCortexTest {
                 override fun fetch(payload: String): String = "unused"
                 override fun fetchWithOutcome(payload: String): FetchOutcome =
                     FetchOutcome(
-                        message = "MCP fetch payload is invalid.",
+                        message = "Fetch payload is invalid.",
                         errorCategory = FetchErrorCategory.MALFORMED_REQUEST
                     )
             }
@@ -202,7 +202,7 @@ class MotorCortexTest {
             PendingAction(
                 id = 6,
                 urgency = Urgency.MEDIUM,
-                type = ActionType.MCP_FETCH,
+                type = ActionType.WEBSITE_FETCH,
                 payload = "bad payload",
                 summary = "fetch page"
             ),
@@ -247,9 +247,9 @@ class MotorCortexTest {
         assertEquals(true, byType[ActionType.ANSWER]?.available)
         assertEquals(false, byType[ActionType.WEB_SEARCH]?.available)
         assertEquals(false, byType[ActionType.MCP_TIME]?.available)
-        assertEquals(true, byType[ActionType.MCP_FETCH]?.available)
+        assertEquals(true, byType[ActionType.WEBSITE_FETCH]?.available)
         assertEquals(
-            setOf(ActionType.ANSWER, ActionType.MCP_FETCH),
+            setOf(ActionType.ANSWER, ActionType.WEBSITE_FETCH),
             cortex.availableActionTypes()
         )
     }

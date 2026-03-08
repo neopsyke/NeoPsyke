@@ -55,7 +55,7 @@ class DashboardStateStoreTest {
                 data = mapOf(
                     "statuses" to listOf(
                         mapOf("action_type" to "answer", "available" to true, "detail" to "ok"),
-                        mapOf("action_type" to "mcp_fetch", "available" to false, "detail" to "offline")
+                        mapOf("action_type" to "website_fetch", "available" to false, "detail" to "offline")
                     )
                 )
             )
@@ -81,7 +81,7 @@ class DashboardStateStoreTest {
         assertEquals(1, snapshot.queues.actions.size)
         assertEquals(true, snapshot.lastSuperegoOutput?.get("allow"))
         assertEquals(2, snapshot.actionCapabilities.size)
-        assertEquals("mcp_fetch", snapshot.actionCapabilities[1]["action_type"])
+        assertEquals("website_fetch", snapshot.actionCapabilities[1]["action_type"])
         assertEquals(false, snapshot.actionCapabilities[1]["available"])
         assertEquals(2400, snapshot.limits["max_prompt_tokens"])
         assertEquals(metrics, snapshot.metrics)

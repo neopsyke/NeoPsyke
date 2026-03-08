@@ -481,7 +481,7 @@ object AgentRuntimeSettingsLoader {
             maxPendingInputs = readPositiveInt(null, agentYaml.maxPendingInputs, defaults.maxPendingInputs),
             searchResultCount = readPositiveInt(env["EGO_SEARCH_RESULT_COUNT"], agentYaml.searchResultCount, defaults.searchResultCount),
             mcpCallTimeoutMs = mcpCallTimeoutMs,
-            fetchMaxChars = readPositiveInt(env["MCP_FETCH_MAX_CHARS"], agentYaml.fetchMaxChars, defaults.fetchMaxChars),
+            fetchMaxChars = readPositiveInt(env["WEBSITE_FETCH_MAX_CHARS"], agentYaml.fetchMaxChars, defaults.fetchMaxChars),
         )
 
         return AgentRuntimeSettings(

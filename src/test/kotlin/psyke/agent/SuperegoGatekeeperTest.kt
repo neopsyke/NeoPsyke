@@ -209,7 +209,7 @@ class SuperegoGatekeeperTest {
     }
 
     @Test
-    fun `gatekeeper hard denies invalid mcp fetch payload before llm review`() {
+    fun `gatekeeper hard denies invalid fetch payload before llm review`() {
         val llm = StubChatModelClient().apply {
             enqueueRawResponse("""{"allow":true}""")
         }
@@ -217,18 +217,18 @@ class SuperegoGatekeeperTest {
             modelClient = llm,
             config = AgentConfig()
         )
-        val mcpFetchAction = PendingAction(
+        val fetchAction = PendingAction(
             id = 99,
             urgency = Urgency.MEDIUM,
-            type = ActionType.MCP_FETCH,
+            type = ActionType.WEBSITE_FETCH,
             payload = "not-json",
             summary = "fetch page"
         )
 
-        val decision = gatekeeper.review(mcpFetchAction, snapshot)
+        val decision = gatekeeper.review(fetchAction, snapshot)
 
         assertFalse(decision.allow)
-        assertTrue(decision.reason.contains("mcp_fetch_payload_invalid_json", ignoreCase = true))
+        assertTrue(decision.reason.contains("website_fetch_payload_invalid_json", ignoreCase = true))
         assertEquals(0, llm.calls.size)
     }
 
@@ -265,15 +265,15 @@ class SuperegoGatekeeperTest {
             modelClient = llm,
             config = AgentConfig()
         )
-        val mcpFetchAction = PendingAction(
+        val fetchAction = PendingAction(
             id = 101,
             urgency = Urgency.MEDIUM,
-            type = ActionType.MCP_FETCH,
+            type = ActionType.WEBSITE_FETCH,
             payload = """{"url":"https://example.com/docs","max_chars":1200}""",
             summary = "fetch docs"
         )
 
-        val decision = gatekeeper.review(mcpFetchAction, snapshot)
+        val decision = gatekeeper.review(fetchAction, snapshot)
 
         assertTrue(decision.allow)
         assertEquals(1, llm.calls.size)

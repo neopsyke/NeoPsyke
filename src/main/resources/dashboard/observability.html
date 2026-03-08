@@ -1278,7 +1278,7 @@
       const runActionCalls = metrics?.runActionCallsByType || {};
       const allActionCalls = metrics?.persistentActionCallsByType || {};
 
-      const order = ["answer", "web_search", "mcp_time", "mcp_fetch", "memory"];
+      const order = ["answer", "web_search", "mcp_time", "website_fetch", "memory"];
       const sorted = list
         .slice()
         .sort((a, b) => {

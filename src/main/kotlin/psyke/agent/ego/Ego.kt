@@ -401,7 +401,7 @@ class Ego(
         deliberation.recordEvidenceProgress(resolvedAction, outcome, observed)
         deliberation.onActionExecuted(resolvedAction, observed)
         maybeRecordTaskWorkspaceOutcome(resolvedAction, outcome, observed)
-        if (resolvedAction.type == ActionType.MCP_FETCH && !observed) {
+        if (resolvedAction.type == ActionType.WEBSITE_FETCH && !observed) {
             val category = FetchErrorCategory.entries.firstOrNull {
                 it.name.equals(outcome.fetchErrorCategory, ignoreCase = true)
             } ?: FetchErrorCategory.RETRYABLE
@@ -1470,13 +1470,13 @@ class Ego(
         }
 
     private fun ActionType.requiresFollowUpThought(): Boolean =
-        this == ActionType.WEB_SEARCH || this == ActionType.MCP_TIME || this == ActionType.MCP_FETCH
+        this == ActionType.WEB_SEARCH || this == ActionType.MCP_TIME || this == ActionType.WEBSITE_FETCH
 
     private fun ActionType.followUpPrefix(): String =
         when (this) {
             ActionType.WEB_SEARCH -> "Web search completed."
             ActionType.MCP_TIME -> "MCP time lookup completed."
-            ActionType.MCP_FETCH -> "Fetch completed."
+            ActionType.WEBSITE_FETCH -> "Fetch completed."
             ActionType.ANSWER -> "Action completed."
             ActionType.MEMORY -> "Memory operation completed."
         }

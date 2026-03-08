@@ -43,7 +43,7 @@ class MotorCortex(
                 notConfiguredDetail = "MCP time tool not configured."
             ),
             actionStatusFromTool(
-                actionType = ActionType.MCP_FETCH,
+                actionType = ActionType.WEBSITE_FETCH,
                 configured = fetchTool != null,
                 toolStatus = fetchTool?.healthCheck(),
                 notConfiguredDetail = "Fetch tool not configured."
@@ -72,7 +72,7 @@ class MotorCortex(
                 detail = if (mcpTimeTool != null) "MCP time tool configured (not smoke-tested)." else "MCP time tool not configured."
             ),
             ActionImplementationStatus(
-                actionType = ActionType.MCP_FETCH,
+                actionType = ActionType.WEBSITE_FETCH,
                 available = fetchTool != null,
                 detail = if (fetchTool != null) "Fetch tool configured (not smoke-tested)." else "Fetch tool not configured."
             )
@@ -105,7 +105,7 @@ class MotorCortex(
                 ActionOutcome(statusSummary = status)
             }
 
-            ActionType.MCP_FETCH -> {
+            ActionType.WEBSITE_FETCH -> {
                 if (fetchTool == null) {
                     ActionOutcome(statusSummary = "Fetch tool is not configured.")
                 } else {

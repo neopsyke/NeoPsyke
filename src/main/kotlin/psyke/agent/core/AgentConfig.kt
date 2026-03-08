@@ -134,7 +134,7 @@ data class AgentConfig(
                 maxPendingInputs = readInt("EGO_MAX_PENDING_INPUTS", 32),
                 searchResultCount = readInt("EGO_SEARCH_RESULT_COUNT", 5),
                 mcpCallTimeoutMs = mcpCallTimeoutMs,
-                fetchMaxChars = readInt("MCP_FETCH_MAX_CHARS", 4000),
+                fetchMaxChars = readInt("WEBSITE_FETCH_MAX_CHARS", 4000),
             )
         }
 
