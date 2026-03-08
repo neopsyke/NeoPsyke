@@ -12,7 +12,6 @@ import psyke.agent.core.PendingAction
 import psyke.agent.core.PlannerContext
 import psyke.agent.core.Urgency
 import psyke.agent.support.TextSecurity
-import psyke.agent.tools.mcp.FetchErrorCategory
 import psyke.instrumentation.AgentEvent
 import psyke.instrumentation.AgentEvents
 import psyke.instrumentation.AgentInstrumentation
@@ -56,9 +55,9 @@ internal class DeliberationEngine(
             override fun removeEldestEntry(eldest: MutableMap.MutableEntry<InputScope, ExternalEvidenceProgress>): Boolean =
                 size > MAX_EVIDENCE_ENTRIES
         }
-    private val fetchCircuitBreaker: MutableMap<InputScope, Int> =
-        object : LinkedHashMap<InputScope, Int>(16, 0.75f, true) {
-            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<InputScope, Int>): Boolean =
+    private val actionCooldownByScope: MutableMap<InputScope, MutableMap<ActionType, ActionCooldownState>> =
+        object : LinkedHashMap<InputScope, MutableMap<ActionType, ActionCooldownState>>(16, 0.75f, true) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<InputScope, MutableMap<ActionType, ActionCooldownState>>): Boolean =
                 size > MAX_EVIDENCE_ENTRIES
         }
 
@@ -173,7 +172,7 @@ internal class DeliberationEngine(
     // --- External evidence tracking ---
 
     fun observedEvidence(action: PendingAction, outcome: ActionOutcome): Boolean {
-        if (!action.type.requiresFollowUpThought()) return true
+        if (!isEvidenceAction(action)) return true
         outcome.observedEvidence?.let { return it }
         val summary = outcome.plannerSignal.lowercase(java.util.Locale.ROOT)
         return when (action.type) {
@@ -192,11 +191,12 @@ internal class DeliberationEngine(
             }
             ActionType.ANSWER -> true
             ActionType.MEMORY -> true // Memory ops are internal; treat as observed.
+            else -> true
         }
     }
 
     fun recordEvidenceProgress(action: PendingAction, outcome: ActionOutcome, observed: Boolean) {
-        if (!action.type.requiresFollowUpThought()) return
+        if (!isEvidenceAction(action)) return
         val scope = inputScope(action.rootInputId, action.conversationContext.sessionId) ?: return
         val current = externalEvidence[scope] ?: ExternalEvidenceProgress()
         val updatedSignals = if (observed) {
@@ -218,7 +218,7 @@ internal class DeliberationEngine(
     }
 
     fun markEvidenceFailure(action: PendingAction) {
-        if (!action.type.requiresFollowUpThought()) return
+        if (!isEvidenceAction(action)) return
         val scope = inputScope(action.rootInputId, action.conversationContext.sessionId) ?: return
         val current = externalEvidence[scope] ?: ExternalEvidenceProgress()
         externalEvidence[scope] = current.copy(hadExternalFailures = true)
@@ -234,45 +234,80 @@ internal class DeliberationEngine(
         return externalEvidence[scope]
     }
 
-    // --- Fetch circuit breaker ---
+    // --- Action retry budget / cooldown ---
 
-    fun recordFetchFailure(rootInputId: String?, sessionId: String, errorCategory: FetchErrorCategory) {
-        val scope = inputScope(rootInputId, sessionId) ?: return
-        if (errorCategory == FetchErrorCategory.NON_RETRYABLE) {
-            val count = (fetchCircuitBreaker[scope] ?: 0) + 1
-            fetchCircuitBreaker[scope] = count
-            if (count >= FETCH_CIRCUIT_BREAKER_THRESHOLD) {
-                instrumentation.emit(
-                    AgentEvent(
-                        type = "action_type_circuit_breaker_tripped",
-                        data = mapOf(
-                            "action_type" to "website_fetch",
-                            "root_input_id" to scope.rootInputId,
-                            "session_id" to scope.sessionId,
-                            "non_retryable_failure_count" to count,
-                            "threshold" to FETCH_CIRCUIT_BREAKER_THRESHOLD
-                        )
-                    )
-                )
-                instrumentation.emit(
-                    AgentEvents.actionTypeTemporarilyDisabled(
-                        actionType = "website_fetch",
-                        reason = "circuit_breaker_non_retryable_failures",
-                        rootInputId = scope.rootInputId
-                    )
-                )
+    fun recordActionOutcome(action: PendingAction, outcome: ActionOutcome, observed: Boolean) {
+        if (!isEvidenceAction(action)) return
+        val scope = inputScope(action.rootInputId, action.conversationContext.sessionId) ?: return
+        val failureBudget = config.planner.actionRetryBudgetNonRetryableFailures
+        val cooldownSteps = config.planner.actionRetryCooldownSteps
+        if (failureBudget <= 0 || cooldownSteps <= 0) {
+            return
+        }
+
+        val category = normalizeActionErrorCategory(outcome)
+        val byAction = actionCooldownByScope.getOrPut(scope) { mutableMapOf() }
+        val state = byAction[action.type] ?: ActionCooldownState()
+
+        if (observed || category == ACTION_ERROR_CATEGORY_NONE) {
+            byAction.remove(action.type)
+            if (byAction.isEmpty()) {
+                actionCooldownByScope.remove(scope)
             }
+            return
+        }
+        if (category != ACTION_ERROR_CATEGORY_NON_RETRYABLE) {
+            return
+        }
+
+        val nextCount = state.nonRetryableFailureCount + 1
+        val nowStep = activeState().monitor.snapshot().stepIndex
+        if (nextCount >= failureBudget) {
+            val cooldownUntilStepExclusive = nowStep + cooldownSteps
+            byAction[action.type] = ActionCooldownState(
+                nonRetryableFailureCount = nextCount,
+                cooldownUntilStepExclusive = cooldownUntilStepExclusive
+            )
+            instrumentation.emit(
+                AgentEvent(
+                    type = "action_type_circuit_breaker_tripped",
+                    data = mapOf(
+                        "action_type" to action.type.id,
+                        "root_input_id" to scope.rootInputId,
+                        "session_id" to scope.sessionId,
+                        "non_retryable_failure_count" to nextCount,
+                        "threshold" to failureBudget,
+                        "cooldown_steps" to cooldownSteps,
+                        "cooldown_until_step_exclusive" to cooldownUntilStepExclusive
+                    )
+                )
+            )
+            instrumentation.emit(
+                AgentEvents.actionTypeTemporarilyDisabled(
+                    actionType = action.type.id,
+                    reason = "retry_budget_cooldown_non_retryable_failures",
+                    rootInputId = scope.rootInputId
+                )
+            )
+        } else {
+            byAction[action.type] = state.copy(nonRetryableFailureCount = nextCount)
         }
     }
 
     fun disabledActionTypes(rootInputId: String?, sessionId: String): Set<ActionType> {
         val scope = inputScope(rootInputId, sessionId) ?: return emptySet()
-        val fetchFailures = fetchCircuitBreaker[scope] ?: 0
-        return if (fetchFailures >= FETCH_CIRCUIT_BREAKER_THRESHOLD) {
-            setOf(ActionType.WEBSITE_FETCH)
-        } else {
-            emptySet()
+        val byAction = actionCooldownByScope[scope] ?: return emptySet()
+        if (byAction.isEmpty()) {
+            actionCooldownByScope.remove(scope)
+            return emptySet()
         }
+        val nowStep = activeState().monitor.snapshot().stepIndex
+        byAction.entries.removeIf { (_, state) -> state.cooldownUntilStepExclusive <= nowStep }
+        if (byAction.isEmpty()) {
+            actionCooldownByScope.remove(scope)
+            return emptySet()
+        }
+        return byAction.keys.toSet()
     }
 
     // --- Reset ---
@@ -281,14 +316,14 @@ internal class DeliberationEngine(
         val scope = inputScope(rootInputId, sessionId) ?: return
         forcedTerminalAnswerQueuedByInput.remove(scope)
         externalEvidence.remove(scope)
-        fetchCircuitBreaker.remove(scope)
+        actionCooldownByScope.remove(scope)
     }
 
     fun reset() {
         sessionStates.clear()
         forcedTerminalAnswerQueuedByInput.clear()
         externalEvidence.clear()
-        fetchCircuitBreaker.clear()
+        actionCooldownByScope.clear()
     }
 
     // --- Private helpers ---
@@ -340,9 +375,6 @@ internal class DeliberationEngine(
                 "At most one decisive external action is allowed, then finalize with action=answer immediately. Reason: ${assessment.reason}"
         }
 
-    private fun ActionType.requiresFollowUpThought(): Boolean =
-        this == ActionType.WEB_SEARCH || this == ActionType.MCP_TIME || this == ActionType.WEBSITE_FETCH
-
     data class ExternalEvidenceProgress(
         val hadSuccessfulEvidence: Boolean = false,
         val hadExternalFailures: Boolean = false,
@@ -350,14 +382,39 @@ internal class DeliberationEngine(
         val successfulEvidenceSignals: List<String> = emptyList(),
     )
 
+    data class ActionCooldownState(
+        val nonRetryableFailureCount: Int = 0,
+        val cooldownUntilStepExclusive: Int = Int.MIN_VALUE,
+    )
+
     private companion object {
         private const val MODEL_ERROR_STREAK_THRESHOLD: Int = 3
         private const val MODEL_ERROR_PRESSURE_THRESHOLD: Double = 0.72
         private const val MODEL_ERROR_MIN_STEP_INDEX: Int = 6
         private const val MAX_EVIDENCE_ENTRIES: Int = 64
-        private const val FETCH_CIRCUIT_BREAKER_THRESHOLD: Int = 3
         private const val MAX_EVIDENCE_SIGNALS_PER_INPUT: Int = 6
         private const val MAX_TRACKED_SESSIONS: Int = 128
         private const val MAX_FORCED_TERMINAL_SCOPES: Int = 256
+        private const val ACTION_ERROR_CATEGORY_NONE: String = "none"
+        private const val ACTION_ERROR_CATEGORY_NON_RETRYABLE: String = "non_retryable"
     }
+
+    private fun normalizeActionErrorCategory(outcome: ActionOutcome): String {
+        val explicit = outcome.actionErrorCategory?.trim()?.lowercase().orEmpty()
+        if (explicit.isNotBlank()) {
+            return explicit
+        }
+        val legacyFetch = outcome.fetchErrorCategory?.trim()?.lowercase().orEmpty()
+        return when (legacyFetch) {
+            "none" -> ACTION_ERROR_CATEGORY_NONE
+            "non_retryable" -> ACTION_ERROR_CATEGORY_NON_RETRYABLE
+            else -> "retryable"
+        }
+    }
+
+    private fun isEvidenceAction(action: PendingAction): Boolean =
+        action.requiresFollowUpThought ||
+            action.type == ActionType.WEB_SEARCH ||
+            action.type == ActionType.MCP_TIME ||
+            action.type == ActionType.WEBSITE_FETCH
 }

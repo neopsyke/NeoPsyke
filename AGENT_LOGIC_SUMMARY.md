@@ -22,7 +22,8 @@ It is intentionally high-level and should stay aligned with the code.
     - OpenAI moderation utility (`omni-moderation-latest`) exists as a standalone callable path and is not auto-wired into cognitive-role chat calls.
     - `web_search` runtime remains independently configurable.
   - `Superego`
-  - `MotorCortex` (answer + web search + MCP tools)
+  - `ActionRegistry` (startup plugin discovery via `ServiceLoader<AgentActionPluginFactory>`)
+  - `MotorCortex` (plugin-dispatched action execution)
   - `LlmEgoPlanner`
   - `LlmMetaReasoner`
   - `LlmLongTermMemoryAdvisor`
@@ -92,6 +93,7 @@ It is intentionally high-level and should stay aligned with the code.
     - external evidence hints derived from prior successful/failed evidence actions for the same root input
     - deliberation state and meta-guidance
     - currently available action types from `MotorCortex`
+    - dispatchable action set + per-action planner definitions (description/payload guidance/example)
   - Runs planner (`LlmEgoPlanner`) and applies deliberation pressure override if needed.
   - Applies decision by enqueueing thought/action/plan/noop-thought.
 
@@ -131,7 +133,7 @@ It is intentionally high-level and should stay aligned with the code.
     - Record non-answer action outcomes into the task workspace (when enabled).
     - Store assistant output in dialogue and short-term memory when applicable.
     - For `answer`, optionally force a post-terminal-answer long-term memory assessment.
-    - For evidence actions (`web_search`, `mcp_time`, `website_fetch`), enqueue follow-up thought.
+    - Follow-up thought behavior is action-descriptor-driven (`requiresFollowUpThought` + `followUpPrefix`).
     - Optionally run immediate post-allowed-action long-term memory assessment.
 - For `answer`, response latency is emitted and per-input evidence cache is cleared.
 - After `answer`, pending thoughts/actions for the same `(root input, sessionId)` scope are pruned from queues
@@ -293,18 +295,28 @@ It is intentionally high-level and should stay aligned with the code.
 
 ## Action Execution Surface
 - File: `src/main/kotlin/psyke/agent/cortex/motor/MotorCortex.kt`
-- Supported action types:
+- Startup discovery:
+  - Action plugins are discovered at runtime through `ServiceLoader` factories (`AgentActionPluginFactory`).
+  - Each plugin self-describes:
+    - action id (`ActionType` id string)
+    - dispatchable flag
+    - planner description/payload guidance/example
+    - deterministic superego directives
+    - follow-up-thought behavior
+- Built-in discovered action plugins:
   - `answer`
   - `web_search`
   - `mcp_time`
   - `website_fetch`
+  - `email_send` (Microsoft Graph adapter; disabled unless env config is present)
 - `web_search` provider routing is independent from cognitive-role routing:
   - configured directly via `web_search.provider` in `llm-runtime.yaml`.
   - current web-search runtimes are `mistral`, `groq`, and `google`; configuring `openai` degrades to unavailable with a startup warning.
   - startup initialization failures (missing key, bad base URL, provider/session errors) degrade web search to an unavailable engine instead of crashing the app.
 - Action availability is runtime health-dependent and fed back into planner context.
-- `website_fetch` errors are classified as retryable vs non-retryable; non-retryable failures
-  feed into the per-input circuit breaker in `DeliberationEngine`.
+- Planner payload repair is now action-type aware via registry hooks (plugin-specific `repairPlannerPayload`), with legacy default repair retained for bare `website_fetch` URLs.
+- Action outcomes can carry a generic `actionErrorCategory` (`none`, `retryable`, `non_retryable`).
+  `website_fetch` currently maps its internal error categories into this generic field.
 
 ## Queueing Model
 - File: `src/main/kotlin/psyke/agent/ego/AttentionScheduler.kt`
@@ -342,9 +354,10 @@ It is intentionally high-level and should stay aligned with the code.
   4. **Pending plan detection**: if plan-context thoughts are already queued, suppress and enqueue a convergence thought instead.
   5. **Convergence thought dedupe**: at most one convergence thought per root input to prevent churn.
 - Suppressions from budget/pressure/hash gates now run a recovery step: if no same-scope plan/convergence work remains, enqueue a convergence thought (and fallback explanation if needed) so the input does not end silently without an answer.
-- `website_fetch` circuit breaker: after `FETCH_CIRCUIT_BREAKER_THRESHOLD` (default 3) non-retryable failures
-  (403, 404, 401, install errors, etc.) for a root input, `WEBSITE_FETCH` is removed from available actions,
-  forcing the planner to use alternatives like `web_search`.
+- Generic action retry-budget cooldown: for evidence-style actions, repeated non-retryable failures
+  (default budget `actionRetryBudgetNonRetryableFailures=3`) trigger a temporary per-input/per-action disable
+  for `actionRetryCooldownSteps` loop steps (default `10`). Disabled action types are removed from planner availability
+  until cooldown expiry, pushing the planner toward alternative actions.
 - Fallback answer synthesis aggregates up to 6 successful evidence signals from the deliberation session
   instead of relying only on the latest planner signal.
 

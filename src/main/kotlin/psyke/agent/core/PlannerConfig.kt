@@ -16,4 +16,6 @@ data class PlannerConfig(
     val maxPlanSteps: Int = 6,
     val maxPlanStepDescriptionChars: Int = 120,
     val maxPlansPerInput: Int = 2,
+    val actionRetryBudgetNonRetryableFailures: Int = 3,
+    val actionRetryCooldownSteps: Int = 10,
 )

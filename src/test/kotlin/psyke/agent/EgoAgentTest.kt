@@ -1869,7 +1869,14 @@ class EgoAgentTest {
                     errorCategory = FetchErrorCategory.NON_RETRYABLE
                 )
         }
-        val config = AgentConfig(planner = PlannerConfig(maxLoopStepsPerInput = 16, maxThoughtPasses = 5))
+        val config = AgentConfig(
+            planner = PlannerConfig(
+                maxLoopStepsPerInput = 16,
+                maxThoughtPasses = 5,
+                actionRetryBudgetNonRetryableFailures = 1,
+                actionRetryCooldownSteps = 8
+            )
+        )
         val agent = Ego(
             planner = LlmEgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
             superego = Superego(modelClient = superegoLlm, config = config, instrumentation = instrumentation),

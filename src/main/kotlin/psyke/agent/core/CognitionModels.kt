@@ -12,7 +12,16 @@ data class PlannerContext(
     val deliberation: DeliberationState = DeliberationState(),
     val metaGuidance: String = "",
     val availableActions: Set<ActionType> = ActionType.entries.toSet(),
+    val dispatchableActions: Set<ActionType> = availableActions,
+    val actionDefinitions: List<ActionPlanningDefinition> = emptyList(),
     val conversationContext: ConversationContext = ConversationContext.default(),
+)
+
+data class ActionPlanningDefinition(
+    val actionType: ActionType,
+    val description: String,
+    val payloadGuidance: String,
+    val payloadSchemaExample: String? = null,
 )
 
 data class SuperegoContext(
@@ -62,6 +71,7 @@ data class ActionOutcome(
     val assistantOutput: String? = null,
     val plannerSignal: String = statusSummary,
     val observedEvidence: Boolean? = null,
+    val actionErrorCategory: String? = null,
     val fetchErrorCategory: String? = null,
 )
 

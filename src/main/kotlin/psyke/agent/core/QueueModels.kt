@@ -48,6 +48,8 @@ data class PendingAction(
     val rootInputId: String? = null,
     val rootInputReceivedAtMs: Long? = null,
     val conversationContext: ConversationContext = ConversationContext.default(),
+    val requiresFollowUpThought: Boolean = false,
+    val followUpPrefix: String = "Action completed.",
 )
 
 data class QueueSnapshot(

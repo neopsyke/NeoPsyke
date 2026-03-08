@@ -37,6 +37,10 @@ data class AgentConfig(
                     maxPlanSteps = readInt("EGO_MAX_PLAN_STEPS", 6),
                     maxPlanStepDescriptionChars = readInt("EGO_MAX_PLAN_STEP_DESC_CHARS", 120),
                     maxPlansPerInput = readInt("EGO_MAX_PLANS_PER_INPUT", 2),
+                    actionRetryBudgetNonRetryableFailures =
+                        readNonNegativeInt("EGO_ACTION_RETRY_BUDGET_NON_RETRYABLE_FAILURES", 3),
+                    actionRetryCooldownSteps =
+                        readNonNegativeInt("EGO_ACTION_RETRY_COOLDOWN_STEPS", 10),
                 ),
                 superego = SuperegoConfig(
                     maxCompletionTokens = readInt("EGO_SUPEREGO_MAX_COMPLETION_TOKENS", 192),
