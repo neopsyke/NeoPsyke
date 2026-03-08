@@ -2,6 +2,8 @@ package psyke.dashboard
 
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import psyke.agent.core.ActionType
+import psyke.agent.core.ConversationContext
+import psyke.agent.core.Interlocutor
 import psyke.agent.core.PendingAction
 import psyke.agent.core.PendingInput
 import psyke.agent.core.QueueState
@@ -89,7 +91,12 @@ class DashboardStateStore(
                     if (input != null) {
                         val sessionId = resolveSessionIdFromInputSource(input.source)
                         if (sessionId != null) {
-                            ensureChatSessionLocked(sessionId = sessionId, title = if (sessionId == DEFAULT_SESSION_ID) "Default" else null)
+                            val interlocutor = input.conversationContext?.interlocutor
+                            val session = ensureChatSessionLocked(
+                                sessionId = sessionId,
+                                title = if (sessionId == DEFAULT_SESSION_ID) "Default" else null,
+                                interlocutor = interlocutor
+                            )
                             rootInputSessionMap[input.enqueuedAtMs] = sessionId
                             if (input.source.equals("stdin", ignoreCase = true)) {
                                 addChatMessageLocked(
@@ -97,6 +104,7 @@ class DashboardStateStore(
                                     role = "user",
                                     content = input.content,
                                     source = "stdin",
+                                    interlocutorName = interlocutor?.displayName(),
                                     emitEvent = true
                                 )
                             }
@@ -427,11 +435,16 @@ class DashboardStateStore(
         subscribers.removeAll(staleSubscribers.toSet())
     }
 
-    private fun ensureChatSessionLocked(sessionId: String, title: String?): ChatSessionRecord {
+    private fun ensureChatSessionLocked(
+        sessionId: String,
+        title: String?,
+        interlocutor: Interlocutor? = null,
+    ): ChatSessionRecord {
         val existing = chatSessions[sessionId]
         if (existing != null) {
             val normalizedTitle = normalizeTitle(title) ?: existing.title
-            val updated = existing.copy(title = normalizedTitle)
+            val updatedInterlocutor = interlocutor ?: existing.interlocutor
+            val updated = existing.copy(title = normalizedTitle, interlocutor = updatedInterlocutor)
             chatSessions[sessionId] = updated
             return updated
         }
@@ -441,7 +454,8 @@ class DashboardStateStore(
             title = normalizeTitle(title) ?: defaultTitleForSession(sessionId),
             createdAtMs = now,
             updatedAtMs = now,
-            messages = ArrayDeque()
+            messages = ArrayDeque(),
+            interlocutor = interlocutor
         )
         chatSessions[sessionId] = created
         return created
@@ -452,6 +466,7 @@ class DashboardStateStore(
         role: String,
         content: String,
         source: String,
+        interlocutorName: String? = null,
         emitEvent: Boolean,
     ): ChatMessage {
         val session = ensureChatSessionLocked(sessionId, title = null)
@@ -462,7 +477,8 @@ class DashboardStateStore(
             role = role,
             content = content,
             source = source,
-            createdAtMs = now
+            createdAtMs = now,
+            interlocutor = interlocutorName
         )
         if (session.messages.size >= MAX_CHAT_MESSAGES_PER_SESSION) {
             session.messages.removeFirst()
@@ -480,7 +496,8 @@ class DashboardStateStore(
                         "role" to message.role,
                         "content" to message.content,
                         "source" to message.source,
-                        "created_at_ms" to message.createdAtMs
+                        "created_at_ms" to message.createdAtMs,
+                        "interlocutor" to message.interlocutor
                     )
                 )
             )
@@ -492,6 +509,9 @@ class DashboardStateStore(
         mapOf(
             "session_id" to session.sessionId,
             "title" to session.title,
+            "interlocutor" to session.interlocutor?.let {
+                mapOf("id" to it.id, "label" to it.label, "display_name" to it.displayName())
+            },
             "created_at_ms" to session.createdAtMs,
             "updated_at_ms" to session.updatedAtMs,
             "message_count" to session.messages.size,
@@ -503,7 +523,8 @@ class DashboardStateStore(
                         "role" to message.role,
                         "content" to message.content,
                         "source" to message.source,
-                        "created_at_ms" to message.createdAtMs
+                        "created_at_ms" to message.createdAtMs,
+                        "interlocutor" to message.interlocutor
                     )
                 }
             } else {
@@ -732,6 +753,7 @@ data class ChatMessage(
     val content: String,
     val source: String,
     val createdAtMs: Long,
+    val interlocutor: String? = null,
 )
 
 private data class ChatSessionRecord(
@@ -740,6 +762,7 @@ private data class ChatSessionRecord(
     val createdAtMs: Long,
     val updatedAtMs: Long,
     val messages: ArrayDeque<ChatMessage>,
+    val interlocutor: Interlocutor? = null,
 )
 
 data class DashboardSnapshot(

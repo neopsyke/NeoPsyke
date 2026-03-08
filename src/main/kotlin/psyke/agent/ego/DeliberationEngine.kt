@@ -3,6 +3,7 @@ package psyke.agent.ego
 import mu.KotlinLogging
 import psyke.agent.core.ActionType
 import psyke.agent.core.AgentConfig
+import psyke.agent.core.ConversationContext
 import psyke.agent.core.DeliberationState
 import psyke.agent.core.EgoDecision
 import psyke.agent.core.EgoTrigger
@@ -28,9 +29,14 @@ internal class DeliberationEngine(
     private val metaReasoner: MetaReasoner,
 ) {
     private val monitor = DeliberationProgressMonitor()
-    private var latestGuidance: String = ""
+    private val guidanceBySession = mutableMapOf<String, String>()
+    private var activeSessionId: String = ConversationContext.DEFAULT_SESSION_ID
     private var lastAssessmentStep: Int = 0
     private var forcedTerminalAnswerQueued: Boolean = false
+
+    fun setActiveSession(sessionId: String) {
+        activeSessionId = sessionId
+    }
     private val externalEvidence: MutableMap<Long, ExternalEvidenceProgress> =
         object : LinkedHashMap<Long, ExternalEvidenceProgress>(16, 0.75f, false) {
             override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Long, ExternalEvidenceProgress>): Boolean =
@@ -61,7 +67,7 @@ internal class DeliberationEngine(
 
     // --- Guidance ---
 
-    fun guidance(): String = latestGuidance
+    fun guidance(): String = guidanceBySession[activeSessionId] ?: ""
 
     // --- Meta-reasoning ---
 
@@ -71,7 +77,7 @@ internal class DeliberationEngine(
      */
     fun maybeAssessAndUpdateGuidance(trigger: EgoTrigger, context: PlannerContext): MetaReasonerAssessment? {
         val assessment = maybeAssessDeliberation(trigger, context) ?: return null
-        latestGuidance = buildMetaGuidance(assessment)
+        guidanceBySession[activeSessionId] = buildMetaGuidance(assessment)
         return assessment
     }
 
@@ -123,7 +129,7 @@ internal class DeliberationEngine(
         if (queued) {
             forcedTerminalAnswerQueued = true
             instrumentation.emit(AgentEvents.warning("Forced terminal answer queued due to persistent circular deliberation pressure."))
-            latestGuidance = "Finalize immediately due to persistent circular reasoning pressure."
+            guidanceBySession[activeSessionId] = "Finalize immediately due to persistent circular reasoning pressure."
         }
     }
 
@@ -232,7 +238,7 @@ internal class DeliberationEngine(
     // --- Reset ---
 
     fun reset() {
-        latestGuidance = ""
+        guidanceBySession.clear()
         lastAssessmentStep = 0
         forcedTerminalAnswerQueued = false
         externalEvidence.clear()

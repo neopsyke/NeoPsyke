@@ -6,6 +6,7 @@ data class PendingInput(
     val priority: InputPriority = InputPriority.MEDIUM,
     val source: String = "external",
     val enqueuedAtMs: Long = System.currentTimeMillis(),
+    val conversationContext: ConversationContext? = null,
 )
 
 data class PlanContext(
@@ -29,6 +30,7 @@ data class PendingThought(
     val allowFallbackExplanation: Boolean = false,
     val planContext: PlanContext? = null,
     val denialReasonCode: String? = null,
+    val conversationContext: ConversationContext? = null,
 )
 
 data class PendingAction(
@@ -40,6 +42,7 @@ data class PendingAction(
     val attempts: Int = 0,
     val isFallbackExplanation: Boolean = false,
     val rootInputEnqueuedAtMs: Long? = null,
+    val conversationContext: ConversationContext? = null,
 )
 
 data class QueueSnapshot(

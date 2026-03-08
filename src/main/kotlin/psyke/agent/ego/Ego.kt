@@ -48,16 +48,30 @@ class Ego(
     }
 
     private val scheduler = AttentionScheduler(config)
-    private val dialogue = ArrayDeque<DialogueTurn>()
+    private val dialogueBySession = mutableMapOf<String, ArrayDeque<DialogueTurn>>()
     private val deliberation = DeliberationEngine(config, instrumentation, metaReasoner)
     private val memory = MemoryCoordinator(
-        hippocampus, longTermMemoryAdvisor, config, instrumentation, memoryStore,
+        hippocampus, longTermMemoryAdvisor, config, instrumentation,
+        initialMemoryStore = memoryStore,
         logbook = logbook,
         logbookSummarizer = logbookSummarizer ?: psyke.agent.memory.episodic.DeterministicLogbookSummarizer(config.logbook),
         runId = runId,
     )
     private val planCountByInput = mutableMapOf<Long?, Int>()
     private val emittedPlanHashes = mutableMapOf<Long?, MutableSet<String>>()
+
+    private fun dialogueFor(sessionId: String): ArrayDeque<DialogueTurn> =
+        dialogueBySession.getOrPut(sessionId) { ArrayDeque() }
+
+    private fun resolveSessionId(conversationContext: ConversationContext?): String =
+        conversationContext?.sessionId ?: ConversationContext.DEFAULT_SESSION_ID
+
+    private fun activateSession(conversationContext: ConversationContext?) {
+        val sessionId = resolveSessionId(conversationContext)
+        val interlocutor = conversationContext?.interlocutor ?: Interlocutor.UNKNOWN
+        memory.setActiveSession(sessionId, interlocutor)
+        deliberation.setActiveSession(sessionId)
+    }
 
     fun runInteractive() {
         logger.info { "Ego loop started. Type 'exit' to quit." }
@@ -84,7 +98,8 @@ class Ego(
                     if (!scheduler.enqueueInput(
                             content = signal.input.content,
                             priority = signal.input.priority,
-                            source = signal.input.source
+                            source = signal.input.source,
+                            conversationContext = signal.input.conversationContext
                         )
                     ) {
                         logger.warn { "Input queue full; dropping input." }
@@ -129,7 +144,10 @@ class Ego(
                 scheduler = scheduler,
                 rootInputEnqueuedAtMs = taskRootInputEnqueuedAtMs(task)
             )
-            maybeRunLongTermMemoryAssessment(trigger = "interval")
+            maybeRunLongTermMemoryAssessment(
+                trigger = "interval",
+                sessionId = resolveSessionId(taskConversationContext(task))
+            )
             emitQueueSnapshot("task_processed")
         }
 
@@ -175,14 +193,24 @@ class Ego(
     }
 
     private fun processInput(input: PendingInput) {
+        val convCtx = input.conversationContext
+        val sessionId = resolveSessionId(convCtx)
+        activateSession(convCtx)
+
         instrumentation.emit(AgentEvents.inputProcessing(input))
-        val userTurn = DialogueTurn(DialogueRole.USER, input.content)
-        dialogue.addLast(userTurn)
+        val userTurn = DialogueTurn(
+            role = DialogueRole.USER,
+            content = input.content,
+            sessionId = sessionId,
+            interlocutor = convCtx?.interlocutor,
+            timestamp = java.time.Instant.now()
+        )
+        dialogueFor(sessionId).addLast(userTurn)
         memory.remember(userTurn)
         maybeCreateTaskWorkspace(input)
-        trimDialogue()
+        trimDialogue(sessionId)
         val trigger = EgoTrigger.IncomingInput(input)
-        val context = plannerContext(trigger, rootInputEnqueuedAtMs = input.enqueuedAtMs)
+        val context = plannerContext(trigger, rootInputEnqueuedAtMs = input.enqueuedAtMs, sessionId = sessionId, conversationContext = convCtx)
         val assessment = deliberation.maybeAssessAndUpdateGuidance(trigger, context)
         val decision = planner.decide(
             trigger = trigger,
@@ -195,11 +223,16 @@ class Ego(
             finalDecision,
             nextPassCount = 0,
             originThought = null,
-            rootInputEnqueuedAtMs = input.enqueuedAtMs
+            rootInputEnqueuedAtMs = input.enqueuedAtMs,
+            conversationContext = convCtx
         )
     }
 
     private fun processThought(thought: PendingThought) {
+        val convCtx = thought.conversationContext
+        val sessionId = resolveSessionId(convCtx)
+        activateSession(convCtx)
+
         if (thought.passes >= config.planner.maxThoughtPasses) {
             logger.info { "Dropping thought ${thought.id} due to max thought passes." }
             instrumentation.emit(AgentEvents.thoughtDropped(thought = thought, reason = "max_passes_reached"))
@@ -210,7 +243,7 @@ class Ego(
         }
         instrumentation.emit(AgentEvents.thoughtProcessing(thought))
         val trigger = EgoTrigger.PendingThoughtInput(thought)
-        val context = plannerContext(trigger, rootInputEnqueuedAtMs = thought.rootInputEnqueuedAtMs)
+        val context = plannerContext(trigger, rootInputEnqueuedAtMs = thought.rootInputEnqueuedAtMs, sessionId = sessionId, conversationContext = convCtx)
         val assessment = deliberation.maybeAssessAndUpdateGuidance(trigger, context)
         val decision = planner.decide(
             trigger = trigger,
@@ -223,11 +256,16 @@ class Ego(
             finalDecision,
             nextPassCount = thought.passes + 1,
             originThought = thought,
-            rootInputEnqueuedAtMs = thought.rootInputEnqueuedAtMs
+            rootInputEnqueuedAtMs = thought.rootInputEnqueuedAtMs,
+            conversationContext = convCtx
         )
     }
 
     private fun processAction(action: PendingAction) {
+        val convCtx = action.conversationContext
+        val sessionId = resolveSessionId(convCtx)
+        activateSession(convCtx)
+
         val resolvedAction = applyTaskWorkspaceFinalPass(action)
         instrumentation.emit(AgentEvents.actionReviewRequested(resolvedAction))
         if (resolvedAction.isFallbackExplanation) {
@@ -256,19 +294,25 @@ class Ego(
                 cleanupResolvedInputAfterAnswer(resolvedAction)
             }
             if (outcome.assistantOutput != null) {
-                val assistantTurn = DialogueTurn(DialogueRole.ASSISTANT, outcome.assistantOutput)
-                dialogue.addLast(assistantTurn)
+                val assistantTurn = DialogueTurn(
+                    role = DialogueRole.ASSISTANT,
+                    content = outcome.assistantOutput,
+                    sessionId = sessionId,
+                    interlocutor = convCtx?.interlocutor,
+                    timestamp = java.time.Instant.now()
+                )
+                dialogueFor(sessionId).addLast(assistantTurn)
                 memory.remember(assistantTurn)
-                trimDialogue()
+                trimDialogue(sessionId)
             }
             val observed = deliberation.observedEvidence(resolvedAction, outcome)
             deliberation.recordEvidenceProgress(resolvedAction, outcome, observed)
             deliberation.onActionExecuted(resolvedAction, observed)
             maybeRecordTaskWorkspaceOutcome(resolvedAction, outcome, observed)
-            maybeRunTerminalAnswerMemoryAssessment(resolvedAction, outcome)
+            maybeRunTerminalAnswerMemoryAssessment(resolvedAction, outcome, sessionId)
             return
         }
-        val gateDecision = superego.review(resolvedAction, superegoContext())
+        val gateDecision = superego.review(resolvedAction, superegoContext(sessionId))
         instrumentation.emit(
             AgentEvents.actionReviewResult(
                 actionId = resolvedAction.id,
@@ -294,7 +338,8 @@ class Ego(
                 deniedActionPayload = TextSecurity.clamp(resolvedAction.payload, 240),
                 denialReason = gateDecision.reason,
                 denialReasonCode = gateDecision.reasonCode,
-                allowFallbackExplanation = true
+                allowFallbackExplanation = true,
+                conversationContext = convCtx
             )
             instrumentation.emit(AgentEvents.actionDenied(resolvedAction, gateDecision.reason, gateDecision.reasonCode))
             memory.journal(
@@ -349,17 +394,24 @@ class Ego(
             cleanupResolvedInputAfterAnswer(resolvedAction)
         }
         if (outcome.assistantOutput != null) {
-            val assistantTurn = DialogueTurn(DialogueRole.ASSISTANT, outcome.assistantOutput)
-            dialogue.addLast(assistantTurn)
+            val assistantTurn = DialogueTurn(
+                role = DialogueRole.ASSISTANT,
+                content = outcome.assistantOutput,
+                sessionId = sessionId,
+                interlocutor = convCtx?.interlocutor,
+                timestamp = java.time.Instant.now()
+            )
+            dialogueFor(sessionId).addLast(assistantTurn)
             memory.remember(assistantTurn)
-            trimDialogue()
+            trimDialogue(sessionId)
         }
-        maybeRunTerminalAnswerMemoryAssessment(resolvedAction, outcome)
+        maybeRunTerminalAnswerMemoryAssessment(resolvedAction, outcome, sessionId)
         maybeRunLongTermMemoryAssessment(
             trigger = "post_allowed_action",
             force = config.memory.longTermMemoryForceAssessOnAllowedAction,
             latestActionType = resolvedAction.type,
-            latestActionOutcome = outcome.plannerSignal
+            latestActionOutcome = outcome.plannerSignal,
+            sessionId = sessionId
         )
 
         if (resolvedAction.type.requiresFollowUpThought()) {
@@ -376,7 +428,8 @@ class Ego(
                 urgency = resolvedAction.urgency,
                 passes = resolvedAction.attempts,
                 rootInputEnqueuedAtMs = resolvedAction.rootInputEnqueuedAtMs,
-                allowFallbackExplanation = true
+                allowFallbackExplanation = true,
+                conversationContext = convCtx
             )
             if (!queued) {
                 instrumentation.emit(AgentEvents.warning("Failed to enqueue follow-up thought after action."))
@@ -395,6 +448,7 @@ class Ego(
         nextPassCount: Int,
         originThought: PendingThought?,
         rootInputEnqueuedAtMs: Long?,
+        conversationContext: ConversationContext? = null,
     ) {
         when (decision) {
             is EgoDecision.EnqueueThought -> {
@@ -408,7 +462,8 @@ class Ego(
                     deniedActionPayload = originThought?.deniedActionPayload,
                     denialReason = originThought?.denialReason,
                     denialReasonCode = originThought?.denialReasonCode,
-                    allowFallbackExplanation = originThought?.allowFallbackExplanation ?: false
+                    allowFallbackExplanation = originThought?.allowFallbackExplanation ?: false,
+                    conversationContext = conversationContext
                 )
                 if (!decision.longTermMemoryRecallQuery.isNullOrBlank()) {
                     instrumentation.emit(
@@ -462,7 +517,8 @@ class Ego(
                         deniedActionPayload = originThought.deniedActionPayload,
                         denialReason = originThought.denialReason,
                         denialReasonCode = originThought.denialReasonCode,
-                        allowFallbackExplanation = originThought.allowFallbackExplanation
+                        allowFallbackExplanation = originThought.allowFallbackExplanation,
+                        conversationContext = conversationContext
                     )
                     if (!queuedRetry) {
                         instrumentation.emit(AgentEvents.warning("Failed to enqueue retry thought after repeated denied action."))
@@ -481,7 +537,8 @@ class Ego(
                     summary = decision.summary,
                     urgency = decision.urgency,
                     attempts = nextPassCount,
-                    rootInputEnqueuedAtMs = rootInputEnqueuedAtMs
+                    rootInputEnqueuedAtMs = rootInputEnqueuedAtMs,
+                    conversationContext = conversationContext
                 )
                 instrumentation.emit(
                     AgentEvents.actionProposed(
@@ -586,7 +643,8 @@ class Ego(
                         urgency = decision.urgency,
                         passes = nextPassCount,
                         rootInputEnqueuedAtMs = rootInputEnqueuedAtMs,
-                        allowFallbackExplanation = originThought?.allowFallbackExplanation ?: false
+                        allowFallbackExplanation = originThought?.allowFallbackExplanation ?: false,
+                        conversationContext = conversationContext
                     )
                     if (queued) {
                         instrumentation.emit(
@@ -657,6 +715,7 @@ class Ego(
                             totalSteps = decision.steps.size,
                             stepDescription = stepDescription,
                         ),
+                        conversationContext = conversationContext
                     )
                     if (!queued) {
                         allQueued = false
@@ -691,7 +750,8 @@ class Ego(
                     deniedActionPayload = originThought?.deniedActionPayload,
                     denialReason = originThought?.denialReason,
                     denialReasonCode = originThought?.denialReasonCode,
-                    allowFallbackExplanation = originThought?.allowFallbackExplanation ?: false
+                    allowFallbackExplanation = originThought?.allowFallbackExplanation ?: false,
+                    conversationContext = conversationContext
                 )
                 instrumentation.emit(
                     AgentEvent(
@@ -765,7 +825,8 @@ class Ego(
             urgency = thought.urgency,
             attempts = thought.passes,
             isFallbackExplanation = true,
-            rootInputEnqueuedAtMs = thought.rootInputEnqueuedAtMs
+            rootInputEnqueuedAtMs = thought.rootInputEnqueuedAtMs,
+            conversationContext = thought.conversationContext
         )
         if (!queued) {
             logger.warn { "Fallback explanation enqueue failed; executing immediate fallback action." }
@@ -784,7 +845,8 @@ class Ego(
                     summary = summary,
                     attempts = thought.passes,
                     isFallbackExplanation = true,
-                    rootInputEnqueuedAtMs = thought.rootInputEnqueuedAtMs
+                    rootInputEnqueuedAtMs = thought.rootInputEnqueuedAtMs,
+                    conversationContext = thought.conversationContext
                 )
             )
             emitQueueSnapshot("fallback_explanation_executed_immediate")
@@ -809,9 +871,10 @@ class Ego(
         return normalized.hashCode().toString(16)
     }
 
-    private fun trimDialogue() {
-        while (dialogue.size > 20) {
-            dialogue.removeFirst()
+    private fun trimDialogue(sessionId: String) {
+        val deque = dialogueFor(sessionId)
+        while (deque.size > 20) {
+            deque.removeFirst()
         }
     }
 
@@ -860,6 +923,7 @@ class Ego(
     }
 
     private fun applyTaskWorkspaceFinalPass(action: PendingAction): PendingAction {
+        val sessionId = resolveSessionId(action.conversationContext)
         if (action.type != ActionType.ANSWER) {
             return action
         }
@@ -912,7 +976,7 @@ class Ego(
                 action = action,
                 workspaceCompilation = finalPassInput.compilation,
                 workspaceConfidence = finalPassInput.workspaceConfidence,
-                recentDialogue = dialogue.takeLast(12)
+                recentDialogue = dialogueFor(sessionId).takeLast(12)
             )
         ) ?: run {
             instrumentation.emit(
@@ -973,8 +1037,13 @@ class Ego(
         return action.copy(payload = rewrittenPayload)
     }
 
-    private fun plannerContext(trigger: EgoTrigger, rootInputEnqueuedAtMs: Long? = null): PlannerContext {
-        val recentDialogue = dialogue.takeLast(12)
+    private fun plannerContext(
+        trigger: EgoTrigger,
+        rootInputEnqueuedAtMs: Long? = null,
+        sessionId: String = ConversationContext.DEFAULT_SESSION_ID,
+        conversationContext: ConversationContext? = null,
+    ): PlannerContext {
+        val recentDialogue = dialogueFor(sessionId).takeLast(12)
         val shortTermSummary = memory.currentShortTermSummary()
         val episodicCues = memory.recallEpisodicAsVectorCues(recentDialogue)
         val longTermRecall = memory.recall(trigger, shortTermSummary, recentDialogue, episodicCues)
@@ -995,7 +1064,8 @@ class Ego(
             evidenceHints = evidenceHints,
             deliberation = deliberation.snapshot(),
             metaGuidance = deliberation.guidance(),
-            availableActions = motorCortex.availableActionTypes() - disabled
+            availableActions = motorCortex.availableActionTypes() - disabled,
+            conversationContext = conversationContext
         )
     }
 
@@ -1022,10 +1092,10 @@ class Ego(
         return TextSecurity.clamp(hints.joinToString("\n"), MAX_EVIDENCE_HINT_CHARS)
     }
 
-    private fun superegoContext(): SuperegoContext {
+    private fun superegoContext(sessionId: String = ConversationContext.DEFAULT_SESSION_ID): SuperegoContext {
         val shortTermSummary = memory.currentShortTermSummary()
         return SuperegoContext(
-            recentDialogue = dialogue.takeLast(12),
+            recentDialogue = dialogueFor(sessionId).takeLast(12),
             shortTermContextSummary = shortTermSummary
         )
     }
@@ -1035,6 +1105,7 @@ class Ego(
         force: Boolean = false,
         latestActionType: ActionType? = null,
         latestActionOutcome: String? = null,
+        sessionId: String = ConversationContext.DEFAULT_SESSION_ID,
     ) {
         memory.maybeAssessLongTermMemory(
             trigger = trigger,
@@ -1042,17 +1113,22 @@ class Ego(
             latestActionType = latestActionType,
             latestActionOutcome = latestActionOutcome,
             deliberation = deliberation.snapshot(),
-            recentDialogue = dialogue.takeLast(12)
+            recentDialogue = dialogueFor(sessionId).takeLast(12)
         )
     }
 
-    private fun maybeRunTerminalAnswerMemoryAssessment(action: PendingAction, outcome: ActionOutcome) {
+    private fun maybeRunTerminalAnswerMemoryAssessment(
+        action: PendingAction,
+        outcome: ActionOutcome,
+        sessionId: String = ConversationContext.DEFAULT_SESSION_ID,
+    ) {
         if (action.type != ActionType.ANSWER) return
         maybeRunLongTermMemoryAssessment(
             trigger = "post_terminal_answer",
             force = config.memory.longTermMemoryForceAssessOnTerminalAnswer,
             latestActionType = action.type,
-            latestActionOutcome = outcome.plannerSignal
+            latestActionOutcome = outcome.plannerSignal,
+            sessionId = sessionId
         )
     }
 
@@ -1210,6 +1286,13 @@ class Ego(
             is LoopTask.ProcessInput -> task.item.enqueuedAtMs
             is LoopTask.ProcessThought -> task.item.rootInputEnqueuedAtMs
             is LoopTask.PerformAction -> task.item.rootInputEnqueuedAtMs
+        }
+
+    private fun taskConversationContext(task: LoopTask): ConversationContext? =
+        when (task) {
+            is LoopTask.ProcessInput -> task.item.conversationContext
+            is LoopTask.ProcessThought -> task.item.conversationContext
+            is LoopTask.PerformAction -> task.item.conversationContext
         }
 
     private fun ActionType.requiresFollowUpThought(): Boolean =

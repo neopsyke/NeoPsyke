@@ -40,7 +40,7 @@ class MemoryCoordinatorTemporalVectorTest {
             longTermMemoryAdvisor = NoopLongTermMemoryAdvisor,
             config = AgentConfig(),
             instrumentation = NoopAgentInstrumentation,
-            memoryStore = MemoryStore(maxChars = 20000),
+            initialMemoryStore = MemoryStore(maxChars = 20000),
             logbook = logbook,
         )
     }

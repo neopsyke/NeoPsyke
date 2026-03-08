@@ -16,6 +16,7 @@ class AttentionScheduler(
         content: String,
         priority: InputPriority = InputPriority.MEDIUM,
         source: String = "external",
+        conversationContext: ConversationContext? = null,
     ): Boolean {
         if (inputs.size >= config.maxPendingInputs) {
             return false
@@ -24,7 +25,8 @@ class AttentionScheduler(
             id = nextId(),
             content = content,
             priority = priority,
-            source = source
+            source = source,
+            conversationContext = conversationContext
         )
         inputs.add(input)
         latestQueuedInput = input
@@ -45,6 +47,7 @@ class AttentionScheduler(
         allowFallbackExplanation: Boolean = false,
         planContext: PlanContext? = null,
         denialReasonCode: String? = null,
+        conversationContext: ConversationContext? = null,
     ): Boolean {
         if (thoughts.size >= config.maxPendingThoughts) {
             return false
@@ -63,6 +66,7 @@ class AttentionScheduler(
                 allowFallbackExplanation = allowFallbackExplanation,
                 planContext = planContext,
                 denialReasonCode = denialReasonCode,
+                conversationContext = conversationContext,
             )
         )
         return true
@@ -76,6 +80,7 @@ class AttentionScheduler(
         attempts: Int = 0,
         isFallbackExplanation: Boolean = false,
         rootInputEnqueuedAtMs: Long? = null,
+        conversationContext: ConversationContext? = null,
     ): Boolean {
         if (actions.size >= config.maxPendingActions) {
             return false
@@ -89,7 +94,8 @@ class AttentionScheduler(
                 summary = summary,
                 attempts = attempts,
                 isFallbackExplanation = isFallbackExplanation,
-                rootInputEnqueuedAtMs = rootInputEnqueuedAtMs
+                rootInputEnqueuedAtMs = rootInputEnqueuedAtMs,
+                conversationContext = conversationContext
             )
         )
         return true

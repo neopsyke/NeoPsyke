@@ -3,10 +3,12 @@ package psyke.agent.ego
 import mu.KotlinLogging
 import psyke.agent.core.AgentConfig
 import psyke.agent.core.ActionType
+import psyke.agent.core.ConversationContext
 import psyke.agent.core.DeliberationState
 import psyke.agent.core.DialogueTurn
 import psyke.agent.core.EgoTrigger
 import psyke.agent.core.DialogueRole
+import psyke.agent.core.Interlocutor
 import psyke.agent.memory.episodic.DeterministicLogbookSummarizer
 import psyke.agent.memory.episodic.EpisodicEventType
 import psyke.agent.memory.episodic.Logbook
@@ -40,11 +42,31 @@ internal class MemoryCoordinator(
     private val longTermMemoryAdvisor: LongTermMemoryAdvisor,
     private val config: AgentConfig,
     private val instrumentation: AgentInstrumentation,
-    private val memoryStore: MemoryStore,
+    initialMemoryStore: MemoryStore? = null,
     private val logbook: Logbook? = null,
     private val logbookSummarizer: LogbookSummarizer = DeterministicLogbookSummarizer(config.logbook),
     private val runId: String? = null,
 ) {
+    private val memoryStoreFactory: () -> MemoryStore = { MemoryStore(config.memory.maxShortTermContextChars) }
+    private val sessionMemoryStores = mutableMapOf<String, MemoryStore>()
+    private var activeSessionId: String = ConversationContext.DEFAULT_SESSION_ID
+    private var activeInterlocutor: Interlocutor = Interlocutor.UNKNOWN
+
+    init {
+        // Backward compatibility: inject the initial memory store into the default session.
+        if (initialMemoryStore != null) {
+            sessionMemoryStores[ConversationContext.DEFAULT_SESSION_ID] = initialMemoryStore
+        }
+    }
+
+    fun setActiveSession(sessionId: String, interlocutor: Interlocutor = Interlocutor.UNKNOWN) {
+        activeSessionId = sessionId
+        activeInterlocutor = interlocutor
+    }
+
+    private fun activeMemoryStore(): MemoryStore =
+        sessionMemoryStores.getOrPut(activeSessionId) { memoryStoreFactory() }
+
     private var lastConsolidationStep: Int = 0
     private var latestShortTermSummary: String = ""
     private var latestLongTermRecall: String = ""
@@ -56,7 +78,7 @@ internal class MemoryCoordinator(
     // --- Short-term memory delegation ---
 
     fun remember(turn: DialogueTurn) {
-        memoryStore.remember(turn)
+        activeMemoryStore().remember(turn)
         if (turn.role == DialogueRole.USER) {
             journalSafe(
                 eventType = EpisodicEventType.INPUT_RECEIVED,
@@ -71,7 +93,7 @@ internal class MemoryCoordinator(
             config.memory.maxShortTermContextPromptTokens,
             maxOf(64, config.planner.maxPromptTokens / 3)
         )
-        return memoryStore.summaryForPrompt(memoryTokenBudget)
+        return activeMemoryStore().summaryForPrompt(memoryTokenBudget)
     }
 
     // --- Long-term memory recall ---
@@ -278,6 +300,10 @@ internal class MemoryCoordinator(
             return
         }
 
+        val contextTags = listOfNotNull(
+            "session:$activeSessionId",
+            "interlocutor:${activeInterlocutor.id}",
+        )
         val imprintStartedAt = System.nanoTime()
         val saved = try {
             hippocampus.imprint(
@@ -285,7 +311,7 @@ internal class MemoryCoordinator(
                     summary = decision.summary,
                     source = effectiveTrigger,
                     confidence = decision.confidence,
-                    tags = decision.tags
+                    tags = contextTags + decision.tags
                 )
             )
         } catch (ex: Exception) {
@@ -445,6 +471,8 @@ internal class MemoryCoordinator(
                     actionType = actionType,
                     runId = runId,
                     metadata = metadata,
+                    sessionId = activeSessionId,
+                    interlocutorId = activeInterlocutor.id,
                 )
             )
         } catch (ex: Exception) {
@@ -455,6 +483,11 @@ internal class MemoryCoordinator(
     fun resetForNewInput() {
         lastConsolidationStep = 0
         explicitIntentAssessmentTriggeredForInput = false
+    }
+
+    /** Removes the per-session short-term memory store for the given session. */
+    fun destroySession(sessionId: String) {
+        sessionMemoryStores.remove(sessionId)
     }
 
     // --- Private helpers ---
@@ -727,7 +760,12 @@ internal class MemoryCoordinator(
             val event = entry.eventType.dbValue()
             val summary = TextSecurity.preview(entry.summary, EPISODIC_RECALL_ENTRY_MAX_CHARS)
             val action = entry.actionType?.let { " [$it]" } ?: ""
-            "$ts $event$action: $summary"
+            val sessionTag = entry.sessionId?.let { " session:$it" } ?: ""
+            val interlocutorTag = entry.interlocutorId?.let { " interlocutor:$it" } ?: ""
+            val contextPrefix = if (sessionTag.isNotEmpty() || interlocutorTag.isNotEmpty()) {
+                " [${sessionTag.trim()}${interlocutorTag}]"
+            } else ""
+            "$ts $event$action$contextPrefix: $summary"
         }
         val truncationNote = if (recall.truncated) ", truncated" else ""
         val header = "Episodic timeline (${recall.entries.size} of ${recall.totalMatched} events$truncationNote):"

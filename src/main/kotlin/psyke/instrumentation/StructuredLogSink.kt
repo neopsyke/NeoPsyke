@@ -1,11 +1,29 @@
 package psyke.instrumentation
 
 import mu.KotlinLogging
+import psyke.agent.core.PendingInput
+import psyke.agent.core.PendingThought
+import psyke.agent.core.PendingAction
 import psyke.agent.core.QueueState
 
 private val logger = KotlinLogging.logger {}
 
 class StructuredLogSink : InstrumentationSink {
+    private fun sessionPrefix(event: AgentEvent): String {
+        val sessionId = event.data["session_id"]
+            ?: (event.data["input"] as? PendingInput)?.conversationContext?.sessionId
+            ?: (event.data["thought"] as? PendingThought)?.conversationContext?.sessionId
+            ?: (event.data["action"] as? PendingAction)?.conversationContext?.sessionId
+        val interlocutor = event.data["interlocutor"]
+            ?: (event.data["input"] as? PendingInput)?.conversationContext?.interlocutor?.id
+            ?: (event.data["thought"] as? PendingThought)?.conversationContext?.interlocutor?.id
+            ?: (event.data["action"] as? PendingAction)?.conversationContext?.interlocutor?.id
+        return buildString {
+            if (sessionId != null) append("session=$sessionId ")
+            if (interlocutor != null) append("interlocutor=$interlocutor ")
+        }
+    }
+
     override fun onEvent(event: AgentEvent) {
         when (event.type) {
             "loop_status" -> {
@@ -29,7 +47,7 @@ class StructuredLogSink : InstrumentationSink {
 
             "planner_decision" -> {
                 logger.trace {
-                    "planner.decision trigger=${event.data["trigger"]} type=${event.data["decision_type"]} urgency=${event.data["urgency"]} action=${event.data["action_type"]}"
+                    "${sessionPrefix(event)}planner.decision trigger=${event.data["trigger"]} type=${event.data["decision_type"]} urgency=${event.data["urgency"]} action=${event.data["action_type"]}"
                 }
             }
 
@@ -312,13 +330,13 @@ class StructuredLogSink : InstrumentationSink {
 
             "action_executed" -> {
                 logger.trace {
-                    "action.executed action=${event.data["action"]}"
+                    "${sessionPrefix(event)}action.executed action=${event.data["action"]}"
                 }
             }
 
             "response_latency_recorded" -> {
                 logger.trace {
-                    "response.latency.recorded latency_ms=${event.data["latency_ms"]} action_id=${event.data["action_id"]}"
+                    "${sessionPrefix(event)}response.latency.recorded latency_ms=${event.data["latency_ms"]} action_id=${event.data["action_id"]}"
                 }
             }
 
