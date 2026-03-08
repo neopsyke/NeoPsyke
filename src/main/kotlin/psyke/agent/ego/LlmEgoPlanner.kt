@@ -774,6 +774,9 @@ class LlmEgoPlanner(
                     If the user asks about past events, prefer episodic memory over other sources.
                     You may receive a Task workspace summary scoped to the current request.
                     Treat Task workspace as ephemeral working notes, not durable long-term memory.
+                    External actions have real latency/cost and must be value-add.
+                    Treat redundancy as a soft cost signal: if recent evidence already answers the trigger
+                    and the trigger does not explicitly ask to refresh/retry, prefer action=answer or noop.
                     You may also receive Decision pressure metadata.
                     As pressure rises, reduce exploratory loops and converge on a final answer.
                     """.trimIndent()
@@ -882,6 +885,7 @@ class LlmEgoPlanner(
                     Guidance:
                     - if decision_pressure >= 0.75, prefer a concrete action or final answer.
                     - if decision_pressure >= 0.90, avoid new thought loops unless strictly necessary.
+                    - if external evidence hints already contain useful signals, avoid repeating the same external call unless refresh/retry is explicitly requested.
                     """.trimIndent()
                 ),
                 PromptBudgetAllocator.Section(
@@ -923,6 +927,7 @@ class LlmEgoPlanner(
         val shortTermContextSummary = context.shortTermContextSummary.ifBlank { "none" }
         val longTermMemoryRecall = context.longTermMemoryRecall.ifBlank { "none" }
         val taskWorkspaceSummary = context.taskWorkspaceSummary.ifBlank { "none" }
+        val evidenceHints = context.evidenceHints.ifBlank { "none" }
 
         return PromptBudgetAllocator.allocate(
             sections = listOf(
@@ -948,6 +953,7 @@ class LlmEgoPlanner(
                     - repair: one-shot correction to make action coherent.
                     - reject: action cannot be repaired safely/coherently.
                     - Never use action types outside available_action_types.
+                    - Treat redundancy as a cost signal: reject low-value repeated external calls when external evidence hints already contain usable signals and trigger does not explicitly request refresh/retry.
                     """.trimIndent()
                 ),
                 PromptBudgetAllocator.Section(
@@ -976,6 +982,11 @@ class LlmEgoPlanner(
                     role = ChatRole.USER,
                     priority = PromptBudgetAllocator.Priority.OPTIONAL,
                     content = "Task workspace summary:\n$taskWorkspaceSummary"
+                ),
+                PromptBudgetAllocator.Section(
+                    role = ChatRole.USER,
+                    priority = PromptBudgetAllocator.Priority.OPTIONAL,
+                    content = "External evidence hints:\n$evidenceHints"
                 ),
                 PromptBudgetAllocator.Section(
                     role = ChatRole.USER,

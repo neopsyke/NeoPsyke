@@ -385,6 +385,28 @@ object AgentEvents {
             )
         )
 
+    fun externalActionRedundancySignal(
+        actionType: String,
+        signatureHits: Int,
+        hadSuccessfulEvidence: Boolean,
+        hadExternalFailures: Boolean,
+        redundantRisk: Boolean,
+        rootInputId: String? = null,
+        rootInputReceivedAtMs: Long? = null,
+    ): AgentEvent =
+        AgentEvent(
+            type = "external_action_redundancy_signal",
+            data = mapOf(
+                "action_type" to actionType,
+                "signature_hits" to signatureHits,
+                "had_successful_evidence" to hadSuccessfulEvidence,
+                "had_external_failures" to hadExternalFailures,
+                "redundant_risk" to redundantRisk,
+                "root_input_id" to rootInputId,
+                "root_input_received_at_ms" to rootInputReceivedAtMs
+            )
+        )
+
     fun planCreated(planId: String, goal: String, stepCount: Int, urgency: String): AgentEvent =
         AgentEvent(
             type = "plan_created",

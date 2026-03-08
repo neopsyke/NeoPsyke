@@ -350,9 +350,6 @@ internal class TwoStageSuperegoReviewEngine(
         if (outcome.technicalFallback) {
             return "technical_fallback"
         }
-        if (!outcome.decision.allow && outcome.decision.reasonCode == REASON_CODE_POLICY_REDUNDANT) {
-            return "policy_redundant_deny"
-        }
         if (outcome.confidence < config.superego.twoStageLowConfidenceThreshold) {
             return "low_confidence"
         }
@@ -363,10 +360,6 @@ internal class TwoStageSuperegoReviewEngine(
 
             SuperegoPolicyRisk.LOW -> null
         }
-    }
-
-    private companion object {
-        private const val REASON_CODE_POLICY_REDUNDANT: String = "POLICY_REDUNDANT"
     }
 
     private fun emitStageEvent(stage: String, escalated: Boolean, outcome: SuperegoStageOutcome) {

@@ -1,6 +1,7 @@
 package psyke.agent
 
 import kotlin.test.Test
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class SuperegoDirectivesTest {
@@ -37,6 +38,7 @@ class SuperegoDirectivesTest {
     @Test
     fun `general directives are always included`() {
         val general = SuperegoPolicy.GENERAL_DIRECTIVES
+        assertFalse(general.any { it.contains("redundant or low-value", ignoreCase = true) })
         ActionType.entries.forEach { actionType ->
             val all = SuperegoPolicy.forAction(actionType).all
             general.forEach { directive ->

@@ -343,7 +343,7 @@ class SuperegoGatekeeperTest {
     }
 
     @Test
-    fun `gatekeeper escalates policy redundant denies even when confidence is high`() {
+    fun `gatekeeper does not escalate policy redundant deny when confidence is high and risk is low`() {
         val primary = StubChatModelClient(modelName = "cheap").apply {
             enqueueRawResponse(
                 """{"allow":false,"reason":"already have enough context","reason_code":"POLICY_REDUNDANT","confidence":0.95,"policy_risk":"low"}"""
@@ -366,8 +366,8 @@ class SuperegoGatekeeperTest {
 
         val decision = gatekeeper.review(action, snapshot)
 
-        assertTrue(decision.allow)
+        assertFalse(decision.allow)
         assertEquals(1, primary.calls.size)
-        assertEquals(1, escalation.calls.size)
+        assertEquals(0, escalation.calls.size)
     }
 }

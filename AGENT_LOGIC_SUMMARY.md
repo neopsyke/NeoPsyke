@@ -145,6 +145,10 @@ It is intentionally high-level and should stay aligned with the code.
     - `plan` (decomposed into multiple thought steps)
     - `noop`
   - Action proposal validation against runtime available actions.
+  - Redundancy handling is planner-side and cost-oriented:
+    - planner prompt treats repeated external calls as low-value unless refresh/retry is explicitly requested
+    - action verifier can reject low-value repeated external calls when evidence hints already contain usable signal
+    - `Ego` emits `external_action_redundancy_signal` telemetry (soft signal, not policy deny) with repeated signature hit count and evidence state
   - Secondary action verifier pass (`approve|repair|reject`) with:
     - one strict-JSON retry on parse failure
     - parse-failure circuit breaker (scoped by `root_input + action_type`) that bypasses verifier for one decision after repeated malformed verifier outputs
@@ -159,9 +163,10 @@ It is intentionally high-level and should stay aligned with the code.
   - `SingleStageSuperegoReviewEngine` handles one model (retry, strict-JSON retry, parse validation, safe deny fallback).
   - `TwoStageSuperegoReviewEngine` runs cheap primary review first and escalates only on:
     - technical/parsing fallback
-    - explicit `POLICY_REDUNDANT` denies (to reduce false-positive redundant blocks on fresh verification attempts)
     - low confidence (`twoStageLowConfidenceThreshold`)
     - medium/high `policy_risk` (configurable for medium)
+- Redundancy/low-value suppression is no longer a Superego hard-deny directive.
+  - It is a planner/cost optimization signal, so Superego remains focused on safety/privacy policy boundaries.
 - Superego completion budget is adaptive by prompt size (rough token estimate) and bounded by `SuperegoConfig`:
   - `maxCompletionTokens` is the base floor
   - optional dynamic expansion uses `dynamicPromptToCompletionRatio`

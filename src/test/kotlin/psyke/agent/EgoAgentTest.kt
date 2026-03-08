@@ -150,6 +150,69 @@ class EgoAgentTest {
     }
 
     @Test
+    fun `repeated external action after successful evidence emits redundancy soft signal`() {
+        val plannerLlm = StubChatModelClient().apply {
+            enqueueRawResponse(
+                """
+                {"decision":"action","urgency":"medium","action_type":"web_search","action_payload":"official pricing page","action_summary":"first search"}
+                """.trimIndent()
+            )
+            enqueueRawResponse(
+                """
+                {"decision":"action","urgency":"medium","action_type":"web_search","action_payload":"official pricing page","action_summary":"repeat search"}
+                """.trimIndent()
+            )
+            enqueueRawResponse(
+                """
+                {"decision":"action","urgency":"medium","action_type":"answer","action_payload":"pricing compiled","action_summary":"final answer"}
+                """.trimIndent()
+            )
+        }
+        val superegoLlm = StubChatModelClient().apply {
+            enqueueRawResponse("""{"allow":true}""")
+            enqueueRawResponse("""{"allow":true}""")
+            enqueueRawResponse("""{"allow":true}""")
+        }
+        val instrumentation = RecordingInstrumentation()
+        val outputs = mutableListOf<String>()
+        val searchEngine = object : WebSearchEngine {
+            override fun search(query: String, maxResults: Int): WebSearchResult =
+                WebSearchResult(
+                    summary = "Official pricing page with current rates.",
+                    snippets = listOf("Rates updated this week."),
+                    sources = listOf(
+                        WebSearchSource(
+                            title = "Pricing",
+                            url = "https://example.com/pricing"
+                        )
+                    )
+                )
+        }
+        val config = AgentConfig(planner = PlannerConfig(maxLoopStepsPerInput = 10, maxThoughtPasses = 4))
+        val agent = Ego(
+            planner = LlmEgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
+            superego = Superego(modelClient = superegoLlm, config = config, instrumentation = instrumentation),
+            motorCortex = buildMotorCortex(output = { outputs.add(it) }, webSearchEngine = searchEngine),
+            config = config,
+            instrumentation = instrumentation
+        )
+
+        runAgentWithInput(agent, "find pricing\nexit\n")
+
+        assertEquals(1, outputs.size)
+        val redundancySignals = instrumentation.events.filter {
+            it.type == "external_action_redundancy_signal" && it.data["action_type"] == "web_search"
+        }
+        assertTrue(redundancySignals.isNotEmpty())
+        assertTrue(
+            redundancySignals.any {
+                it.data["redundant_risk"] == true &&
+                    ((it.data["signature_hits"] as? Int) ?: 0) >= 2
+            }
+        )
+    }
+
+    @Test
     fun `fallback explanation executes with one grace step when thought limit is reached`() {
         val plannerLlm = StubChatModelClient().apply {
             enqueueRawResponse(
