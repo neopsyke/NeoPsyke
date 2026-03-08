@@ -42,6 +42,8 @@ data class LlmCognitiveRolesConfig(
     val superego: LlmEndpointConfig,
     val metaReasoner: LlmEndpointConfig,
     val memoryAdvisor: LlmEndpointConfig,
+    val superegoPrimary: LlmEndpointConfig? = null,
+    val superegoEscalation: LlmEndpointConfig? = null,
 )
 
 data class LlmRuntimeConfig(
@@ -89,6 +91,12 @@ data class LlmRuntimeConfig(
     val memoryConsolidationModel: String
         get() = memoryAdvisor.model
 
+    val superegoPrimary: LlmEndpointConfig?
+        get() = cognitiveRoles.superegoPrimary
+
+    val superegoEscalation: LlmEndpointConfig?
+        get() = cognitiveRoles.superegoEscalation
+
     val webSearchProvider: LlmProvider
         get() = webSearch.provider
 
@@ -132,6 +140,10 @@ private data class LlmRuntimeYamlCognitiveRoles(
     @param:JsonProperty("action_verifier")
     val actionVerifier: LlmRuntimeYamlRole? = null,
     val superego: LlmRuntimeYamlRole? = null,
+    @param:JsonProperty("superego_primary")
+    val superegoPrimary: LlmRuntimeYamlRole? = null,
+    @param:JsonProperty("superego_escalation")
+    val superegoEscalation: LlmRuntimeYamlRole? = null,
     @param:JsonProperty("meta_reasoner")
     val metaReasoner: LlmRuntimeYamlRole? = null,
     @param:JsonProperty("memory_advisor")
@@ -186,6 +198,8 @@ private data class LlmRuntimeYamlModelProfile(
     val inputCostPerMillionTokensUsd: Double? = null,
     @param:JsonProperty("output_cost_per_million_tokens_usd")
     val outputCostPerMillionTokensUsd: Double? = null,
+    @param:JsonProperty("context_window")
+    val contextWindow: Int? = null,
 )
 
 private data class LlmRuntimeYamlModelCatalog(
@@ -242,7 +256,7 @@ object LlmRuntimeConfigLoader {
             env = env,
             yaml = yaml,
             fallbackProvider = fallbackProvider,
-            role = yaml.cognitiveRoles?.superego,
+            role = yaml.cognitiveRoles?.superego ?: yaml.cognitiveRoles?.superegoPrimary,
             legacyModel = yaml.models.superego ?: planner.model
         ) ?: return null
 
@@ -261,6 +275,26 @@ object LlmRuntimeConfigLoader {
             role = yaml.cognitiveRoles?.memoryAdvisor,
             legacyModel = yaml.models.memoryConsolidation ?: planner.model
         ) ?: return null
+
+        val superegoPrimary = yaml.cognitiveRoles?.superegoPrimary?.let { role ->
+            resolveRoleEndpoint(
+                env = env,
+                yaml = yaml,
+                fallbackProvider = fallbackProvider,
+                role = role,
+                legacyModel = superego.model
+            )
+        }
+
+        val superegoEscalation = yaml.cognitiveRoles?.superegoEscalation?.let { role ->
+            resolveRoleEndpoint(
+                env = env,
+                yaml = yaml,
+                fallbackProvider = fallbackProvider,
+                role = role,
+                legacyModel = superego.model
+            )
+        }
 
         val webSearchProvider = LlmProvider.parse(yaml.webSearch?.provider) ?: fallbackProvider
         val webSearchProviderSettings = resolveProviderSettings(
@@ -290,7 +324,9 @@ object LlmRuntimeConfigLoader {
                 actionVerifier = actionVerifier,
                 superego = superego,
                 metaReasoner = metaReasoner,
-                memoryAdvisor = memoryAdvisor
+                memoryAdvisor = memoryAdvisor,
+                superegoPrimary = superegoPrimary,
+                superegoEscalation = superegoEscalation
             ),
             webSearch = webSearch,
             modelCatalog = resolveModelCatalog(yaml.modelCatalog)
@@ -408,7 +444,8 @@ object LlmRuntimeConfigLoader {
                     tier = tier,
                     tokenWeight = weight,
                     inputCostPerMillionTokensUsd = entry.inputCostPerMillionTokensUsd?.takeIf { it >= 0.0 },
-                    outputCostPerMillionTokensUsd = entry.outputCostPerMillionTokensUsd?.takeIf { it >= 0.0 }
+                    outputCostPerMillionTokensUsd = entry.outputCostPerMillionTokensUsd?.takeIf { it >= 0.0 },
+                    contextWindow = entry.contextWindow?.takeIf { it > 0 }
                 )
             }
             .distinctBy { it.normalizedModel() }

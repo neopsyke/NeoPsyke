@@ -19,8 +19,10 @@ class Superego(
     private val modelClient: ChatModelClient,
     private val config: AgentConfig,
     private val modelTokenWeight: Double = DEFAULT_MODEL_TOKEN_WEIGHT,
+    private val modelContextWindow: Int? = null,
     private val escalationModelClient: ChatModelClient? = null,
     private val escalationModelTokenWeight: Double = DEFAULT_MODEL_TOKEN_WEIGHT,
+    private val escalationModelContextWindow: Int? = null,
     private val policy: SuperegoPolicy = SuperegoPolicy,
     private val instrumentation: AgentInstrumentation = NoopAgentInstrumentation,
 ) {
@@ -97,6 +99,7 @@ class Superego(
             modelClient = modelClient,
             config = config,
             modelTokenWeight = modelTokenWeight,
+            modelContextWindow = modelContextWindow,
             instrumentation = instrumentation,
             stageLabel = "primary",
             callSiteBase = "action_review"
@@ -117,6 +120,7 @@ class Superego(
             modelClient = escalationClient,
             config = config,
             modelTokenWeight = escalationModelTokenWeight,
+            modelContextWindow = escalationModelContextWindow,
             instrumentation = instrumentation,
             stageLabel = "escalation",
             callSiteBase = "action_review_escalated"

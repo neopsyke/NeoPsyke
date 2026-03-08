@@ -307,6 +307,7 @@ internal object AppModeRunners {
                                 modelClient = client,
                                 config = config,
                                 modelTokenWeight = llm.modelCatalog.tokenWeightFor(llm.planner),
+                                modelContextWindow = llm.modelCatalog.contextWindowFor(llm.planner),
                                 instrumentation = instrumentation
                             ),
                             hippocampus = hippocampus,
@@ -763,9 +764,11 @@ internal object AppModeRunners {
                                                 modelClient = superegoClient,
                                                 config = config,
                                                 modelTokenWeight = superegoReviewRouting.primaryTokenWeight,
+                                                modelContextWindow = superegoReviewRouting.primaryContextWindow,
                                                 escalationModelClient = superegoEscalationClient,
                                                 escalationModelTokenWeight = superegoReviewRouting.escalationTokenWeight
                                                     ?: superegoReviewRouting.primaryTokenWeight,
+                                                escalationModelContextWindow = superegoReviewRouting.escalationContextWindow,
                                                 instrumentation = instrumentation
                                             )
                                             val mcpTimeTool = createMcpTimeTool(config, mcpRuntimeConfig.time)
@@ -802,6 +805,7 @@ internal object AppModeRunners {
                                                     val planner = LlmEgoPlanner(
                                                         modelClient = plannerClient,
                                                         actionVerifierModelClient = actionVerifierClient,
+                                                        actionVerifierContextWindow = llm.modelCatalog.contextWindowFor(llm.actionVerifier),
                                                         config = config,
                                                         instrumentation = instrumentation,
                                                         onPlannerNoop = {
@@ -835,6 +839,7 @@ internal object AppModeRunners {
                                                         modelClient = longTermMemoryClient,
                                                         config = config,
                                                         modelTokenWeight = llm.modelCatalog.tokenWeightFor(llm.memoryAdvisor),
+                                                        modelContextWindow = llm.modelCatalog.contextWindowFor(llm.memoryAdvisor),
                                                         instrumentation = instrumentation
                                                     )
                                                     val taskWorkspaceFinalizer =
@@ -1049,8 +1054,10 @@ internal object AppModeRunners {
     private data class SuperegoReviewRouting(
         val primaryEndpoint: LlmEndpointConfig,
         val primaryTokenWeight: Double,
+        val primaryContextWindow: Int? = null,
         val escalationEndpoint: LlmEndpointConfig? = null,
         val escalationTokenWeight: Double? = null,
+        val escalationContextWindow: Int? = null,
     )
 
     private fun resolveSuperegoReviewRouting(
@@ -1058,48 +1065,96 @@ internal object AppModeRunners {
         config: AgentConfig,
         instrumentation: psyke.instrumentation.AgentInstrumentation,
     ): SuperegoReviewRouting {
-        val escalationEndpoint = llm.superego
-        val escalationWeight = llm.modelCatalog.tokenWeightFor(escalationEndpoint)
-        if (!config.superego.twoStageReviewEnabled) {
-            return SuperegoReviewRouting(
-                primaryEndpoint = escalationEndpoint,
-                primaryTokenWeight = escalationWeight
-            )
-        }
-        val cheapPrimary = llm.modelCatalog.cheapestProfileForProvider(
-            provider = escalationEndpoint.provider,
-            excludingModel = escalationEndpoint.model
-        )
-        if (cheapPrimary == null) {
+        val explicitPrimary = llm.superegoPrimary
+        val explicitEscalation = llm.superegoEscalation
+
+        // Case 1: Both superego_primary and superego_escalation are explicitly configured.
+        if (explicitPrimary != null && explicitEscalation != null) {
+            if (!config.superego.twoStageReviewEnabled) {
+                instrumentation.emit(
+                    AgentEvents.warning(
+                        "superego_primary and superego_escalation are both configured but superego_two_stage_review_enabled=false; using superego_primary only as single-stage."
+                    )
+                )
+                return SuperegoReviewRouting(
+                    primaryEndpoint = explicitPrimary,
+                    primaryTokenWeight = llm.modelCatalog.tokenWeightFor(explicitPrimary),
+                    primaryContextWindow = llm.modelCatalog.contextWindowFor(explicitPrimary)
+                )
+            }
             instrumentation.emit(
-                AgentEvents.warning(
-                    "Superego two-stage review enabled but no cheaper model found in catalog for provider=${escalationEndpoint.providerLabel}; using single-stage."
+                AgentEvent(
+                    type = "superego_two_stage_routing",
+                    data = mapOf(
+                        "enabled" to true,
+                        "selection_mode" to "explicit",
+                        "primary_model" to explicitPrimary.model,
+                        "primary_provider" to explicitPrimary.providerLabel,
+                        "escalation_model" to explicitEscalation.model,
+                        "escalation_provider" to explicitEscalation.providerLabel,
+                        "low_confidence_threshold" to config.superego.twoStageLowConfidenceThreshold,
+                        "escalate_on_medium_policy_risk" to config.superego.twoStageEscalateOnMediumPolicyRisk
+                    )
                 )
             )
             return SuperegoReviewRouting(
-                primaryEndpoint = escalationEndpoint,
-                primaryTokenWeight = escalationWeight
+                primaryEndpoint = explicitPrimary,
+                primaryTokenWeight = llm.modelCatalog.tokenWeightFor(explicitPrimary),
+                primaryContextWindow = llm.modelCatalog.contextWindowFor(explicitPrimary),
+                escalationEndpoint = explicitEscalation,
+                escalationTokenWeight = llm.modelCatalog.tokenWeightFor(explicitEscalation),
+                escalationContextWindow = llm.modelCatalog.contextWindowFor(explicitEscalation)
             )
         }
-        val primaryEndpoint = escalationEndpoint.copy(model = cheapPrimary.model)
+
+        // Case 2: Only superego_primary configured (no escalation) → single-stage.
+        if (explicitPrimary != null) {
+            return SuperegoReviewRouting(
+                primaryEndpoint = explicitPrimary,
+                primaryTokenWeight = llm.modelCatalog.tokenWeightFor(explicitPrimary),
+                primaryContextWindow = llm.modelCatalog.contextWindowFor(explicitPrimary)
+            )
+        }
+
+        // Case 3: Only superego_escalation configured (no primary) → single-stage with warning.
+        if (explicitEscalation != null) {
+            instrumentation.emit(
+                AgentEvents.warning(
+                    "superego_escalation configured without superego_primary; using superego_escalation as single-stage."
+                )
+            )
+            return SuperegoReviewRouting(
+                primaryEndpoint = explicitEscalation,
+                primaryTokenWeight = llm.modelCatalog.tokenWeightFor(explicitEscalation),
+                primaryContextWindow = llm.modelCatalog.contextWindowFor(explicitEscalation)
+            )
+        }
+
+        // Case 4: Neither configured → legacy fallback using `superego` field.
+        val legacyEndpoint = llm.superego
+        if (config.superego.twoStageReviewEnabled) {
+            instrumentation.emit(
+                AgentEvents.warning(
+                    "superego_two_stage_review_enabled=true but superego_primary/superego_escalation are not configured; " +
+                        "add both to cognitive_roles in llm-runtime.yaml for two-stage review. Falling back to single-stage with superego model."
+                )
+            )
+        }
         instrumentation.emit(
             AgentEvent(
                 type = "superego_two_stage_routing",
                 data = mapOf(
-                    "enabled" to true,
-                    "primary_model" to primaryEndpoint.model,
-                    "escalation_model" to escalationEndpoint.model,
-                    "provider" to escalationEndpoint.providerLabel,
-                    "low_confidence_threshold" to config.superego.twoStageLowConfidenceThreshold,
-                    "escalate_on_medium_policy_risk" to config.superego.twoStageEscalateOnMediumPolicyRisk
+                    "enabled" to false,
+                    "selection_mode" to "legacy_single_stage",
+                    "primary_model" to legacyEndpoint.model,
+                    "primary_provider" to legacyEndpoint.providerLabel
                 )
             )
         )
         return SuperegoReviewRouting(
-            primaryEndpoint = primaryEndpoint,
-            primaryTokenWeight = cheapPrimary.tokenWeight,
-            escalationEndpoint = escalationEndpoint,
-            escalationTokenWeight = escalationWeight
+            primaryEndpoint = legacyEndpoint,
+            primaryTokenWeight = llm.modelCatalog.tokenWeightFor(legacyEndpoint),
+            primaryContextWindow = llm.modelCatalog.contextWindowFor(legacyEndpoint)
         )
     }
     

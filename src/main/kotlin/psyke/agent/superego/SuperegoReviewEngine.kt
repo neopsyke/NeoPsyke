@@ -31,6 +31,7 @@ internal class SingleStageSuperegoReviewEngine(
     private val modelClient: ChatModelClient,
     private val config: AgentConfig,
     private val modelTokenWeight: Double,
+    private val modelContextWindow: Int? = null,
     private val instrumentation: AgentInstrumentation,
     private val stageLabel: String,
     private val callSiteBase: String,
@@ -123,16 +124,24 @@ internal class SingleStageSuperegoReviewEngine(
         if (!config.superego.dynamicCompletionEnabled) {
             return baseBudget
         }
-        return AdaptiveCompletionBudget.resolve(
+        val resolution = AdaptiveCompletionBudget.resolveDetailed(
             request = AdaptiveCompletionBudget.Request(
                 messages = messages,
                 baseMaxTokens = baseBudget,
                 hardMaxTokens = config.superego.dynamicCompletionHardMaxTokens,
                 promptToCompletionRatio = config.superego.dynamicPromptToCompletionRatio,
                 minPromptTokensForScaling = config.superego.dynamicCompletionMinPromptTokens,
-                modelTokenWeight = modelTokenWeight
+                modelTokenWeight = modelTokenWeight,
+                modelContextWindow = modelContextWindow
             )
         )
+        if (resolution.contextClamped) {
+            logger.warn {
+                "Superego($stageLabel) completion budget clamped by context window " +
+                    "(prompt_estimate=${resolution.promptEstimate}, budget=${resolution.budget}, context_window=$modelContextWindow)."
+            }
+        }
+        return resolution.budget
     }
 
     private fun parseResponse(raw: String, emitWarning: Boolean): SuperegoStageOutcome {

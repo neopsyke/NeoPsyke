@@ -7,6 +7,7 @@ import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
 import mu.KotlinLogging
 import psyke.agent.core.*
+import psyke.agent.support.AdaptiveCompletionBudget
 import psyke.agent.support.DenialReasonClassifier
 import psyke.agent.support.PromptBudgetAllocator
 import psyke.agent.support.RetryPolicy
@@ -27,6 +28,7 @@ private val logger = KotlinLogging.logger {}
 class LlmEgoPlanner(
     private val modelClient: ChatModelClient,
     private val actionVerifierModelClient: ChatModelClient = modelClient,
+    private val actionVerifierContextWindow: Int? = null,
     private val config: AgentConfig,
     private val instrumentation: AgentInstrumentation = NoopAgentInstrumentation,
     private val onPlannerNoop: () -> Unit = {},
@@ -294,7 +296,7 @@ class LlmEgoPlanner(
                     messages = messages,
                     options = ChatRequestOptions(
                         temperature = 0.1,
-                        maxTokens = minOf(config.planner.maxCompletionTokens, ACTION_VERIFIER_MAX_TOKENS),
+                        maxTokens = resolveActionVerifierBudget(messages),
                         metadata = ChatCallMetadata(
                             actor = "ego",
                             callSite = "action_verifier",
@@ -481,7 +483,7 @@ class LlmEgoPlanner(
                 messages = retryMessages,
                 options = ChatRequestOptions(
                     temperature = 0.0,
-                    maxTokens = minOf(config.planner.maxCompletionTokens, ACTION_VERIFIER_MAX_TOKENS),
+                    maxTokens = resolveActionVerifierBudget(retryMessages),
                     metadata = ChatCallMetadata(
                         actor = "ego",
                         callSite = "action_verifier_json_retry",
@@ -1056,7 +1058,29 @@ class LlmEgoPlanner(
         val actionType: ActionType,
     )
 
+    private fun resolveActionVerifierBudget(messages: List<ChatMessage>): Int {
+        val resolution = AdaptiveCompletionBudget.resolveDetailed(
+            AdaptiveCompletionBudget.Request(
+                messages = messages,
+                baseMaxTokens = ACTION_VERIFIER_BASE_TOKENS,
+                hardMaxTokens = ACTION_VERIFIER_MAX_TOKENS,
+                promptToCompletionRatio = 0.05,
+                minPromptTokensForScaling = 200,
+                modelTokenWeight = 1.0,
+                modelContextWindow = actionVerifierContextWindow
+            )
+        )
+        if (resolution.contextClamped) {
+            logger.warn {
+                "Action verifier completion budget clamped by context window " +
+                    "(prompt_estimate=${resolution.promptEstimate}, budget=${resolution.budget}, context_window=$actionVerifierContextWindow)."
+            }
+        }
+        return resolution.budget
+    }
+
     private companion object {
+        const val ACTION_VERIFIER_BASE_TOKENS: Int = 80
         const val ACTION_VERIFIER_MAX_TOKENS: Int = 220
         const val ACTION_VERIFIER_PARSE_FAILURE_TRIP_THRESHOLD: Int = 2
         const val ACTION_VERIFIER_BYPASS_TURNS: Int = 1

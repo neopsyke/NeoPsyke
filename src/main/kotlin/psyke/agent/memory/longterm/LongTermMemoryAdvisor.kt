@@ -67,6 +67,7 @@ class LlmLongTermMemoryAdvisor(
     private val modelClient: ChatModelClient,
     private val config: AgentConfig,
     private val modelTokenWeight: Double = DEFAULT_MODEL_TOKEN_WEIGHT,
+    private val modelContextWindow: Int? = null,
     private val instrumentation: AgentInstrumentation = NoopAgentInstrumentation,
 ) : LongTermMemoryAdvisor {
     override fun assess(context: LongTermMemoryAssessmentContext): LongTermMemoryAssessmentDecision {
@@ -116,16 +117,24 @@ class LlmLongTermMemoryAdvisor(
         if (!config.memory.longTermMemoryDynamicCompletionEnabled) {
             return baseBudget
         }
-        return AdaptiveCompletionBudget.resolve(
+        val resolution = AdaptiveCompletionBudget.resolveDetailed(
             request = AdaptiveCompletionBudget.Request(
                 messages = messages,
                 baseMaxTokens = baseBudget,
                 hardMaxTokens = config.memory.longTermMemoryDynamicCompletionHardMaxTokens,
                 promptToCompletionRatio = config.memory.longTermMemoryDynamicPromptToCompletionRatio,
                 minPromptTokensForScaling = config.memory.longTermMemoryDynamicCompletionMinPromptTokens,
-                modelTokenWeight = modelTokenWeight
+                modelTokenWeight = modelTokenWeight,
+                modelContextWindow = modelContextWindow
             )
         )
+        if (resolution.contextClamped) {
+            logger.warn {
+                "LongTermMemoryAdvisor completion budget clamped by context window " +
+                    "(prompt_estimate=${resolution.promptEstimate}, budget=${resolution.budget}, context_window=$modelContextWindow)."
+            }
+        }
+        return resolution.budget
     }
 
     private fun buildPromptPayload(context: LongTermMemoryAssessmentContext): MemoryAdvisorPromptPayload {

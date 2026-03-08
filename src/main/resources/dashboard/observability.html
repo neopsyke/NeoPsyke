@@ -717,7 +717,8 @@
       "meta_reasoner_assessment", "deliberation_state",
       "memory_consolidation_assessment", "long_term_memory_assessment",
       "convergence_thought_enqueued", "warning",
-      "long_term_memory_explicit_intent_detected"
+      "long_term_memory_explicit_intent_detected",
+      "memory_recall_failure"
     ]);
 
     const reasoningImpactingLlmCallSites = new Set([
@@ -755,7 +756,13 @@
 
     function isTimelinePriorityEvent(event) {
       if (!event || !event.type) return false;
-      return timelinePrimary.has(event.type) || isReasoningImpactingLlmError(event);
+      if (timelinePrimary.has(event.type)) return true;
+      if (isReasoningImpactingLlmError(event)) return true;
+      const d = event.data || {};
+      if (event.type === "episodic_recall_result") return (d.entries_returned || 0) > 0;
+      if (event.type === "memory_recall_result") return (d.hit_count || 0) > 0;
+      if (event.type === "memory_imprint_result") return d.saved === true;
+      return false;
     }
 
     function eventCategory(event) {
@@ -817,6 +824,28 @@
           return (d.recommendation || d.verdict || "") + (d.reason ? ": " + d.reason : "");
         case "long_term_memory_explicit_intent_detected":
           return d.intent || d.content || null;
+        case "episodic_recall_intent_detected":
+          return "pattern: " + (d.pattern_label || "unknown") +
+            (d.keyword_search ? ", keyword: " + d.keyword_search : "");
+        case "episodic_recall_result":
+          return (d.entries_returned || 0) + " entries recalled" +
+            " (" + (d.total_matched || 0) + " matched" +
+            (d.truncated ? ", truncated" : "") + ")";
+        case "memory_imprint_result":
+          return (d.saved ? "saved" : "not saved") +
+            (d.confidence != null ? ", confidence=" + d.confidence : "") +
+            (d.tags && d.tags.length ? " [" + d.tags.join(", ") + "]" : "") +
+            (d.latency_ms != null ? " " + d.latency_ms + "ms" : "");
+        case "memory_recall_start":
+          return (d.provider || "") + " — " + (d.cue_preview || "");
+        case "memory_recall_result":
+          return (d.hit_count || 0) + " hits, " +
+            (d.recall_chars || 0) + " chars" +
+            (d.truncated ? " (truncated)" : "") +
+            " in " + (d.latency_ms || 0) + "ms";
+        case "memory_recall_failure":
+          return (d.provider || "") + " — " + (d.reason || "unknown error") +
+            " (" + (d.latency_ms || 0) + "ms)";
         case "memory_advisor_prompt_compressed":
           return "dialogue " + (d.dialogue_original_chars || 0) + "→" + (d.dialogue_final_chars || 0) +
             ", recall " + (d.recall_original_chars || 0) + "→" + (d.recall_final_chars || 0);
