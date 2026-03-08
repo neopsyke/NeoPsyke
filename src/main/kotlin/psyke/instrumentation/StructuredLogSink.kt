@@ -159,7 +159,19 @@ class StructuredLogSink : InstrumentationSink {
 
             "memory_imprint_result" -> {
                 logger.trace {
-                    "memory.imprint.result trigger=${event.data["trigger"]} provider=${event.data["provider"]} saved=${event.data["saved"]} summary_chars=${event.data["summary_chars"]} latency_ms=${event.data["latency_ms"]} confidence=${event.data["confidence"]}"
+                    "memory.imprint.result trigger=${event.data["trigger"]} provider=${event.data["provider"]} saved=${event.data["saved"]} summary_chars=${event.data["summary_chars"]} latency_ms=${event.data["latency_ms"]} confidence=${event.data["confidence"]} tags=${event.data["tags"]}"
+                }
+            }
+
+            "episodic_recall_intent_detected" -> {
+                logger.trace {
+                    "episodic.recall.intent pattern=${event.data["pattern_label"]} start=${event.data["start_time"]} end=${event.data["end_time"]} keyword=${event.data["keyword_search"]}"
+                }
+            }
+
+            "episodic_recall_result" -> {
+                logger.trace {
+                    "episodic.recall.result pattern=${event.data["pattern_label"]} entries=${event.data["entries_returned"]} total=${event.data["total_matched"]} truncated=${event.data["truncated"]}"
                 }
             }
 
