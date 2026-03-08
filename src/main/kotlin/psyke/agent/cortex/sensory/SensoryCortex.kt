@@ -15,7 +15,7 @@ data class SensoryInput(
     val content: String,
     val priority: InputPriority = InputPriority.MEDIUM,
     val source: String = "external",
-    val conversationContext: ConversationContext? = null,
+    val conversationContext: ConversationContext = ConversationContext.default(),
 )
 
 sealed interface SensorySignal {
@@ -100,7 +100,7 @@ class AsyncSensoryInputSource(
         content: String,
         source: String,
         priority: InputPriority = InputPriority.HIGH,
-        conversationContext: ConversationContext? = null,
+        conversationContext: ConversationContext = ConversationContext.default(),
     ): Boolean = offerSignal(
         SensorySignal.InputReceived(
             SensoryInput(
@@ -158,17 +158,17 @@ class SensoryCortex(
             return SensorySignal.NoInput
         }
 
-        // Enrich with ConversationContext if not already present (stdin and other non-chat sources).
-        val enrichedInput = if (signal.input.conversationContext != null) {
-            signal.input.copy(content = sanitized)
-        } else {
-            val sessionId = resolveSessionId(signal.input.source)
-            val interlocutor = interlocutorResolver.resolve(signal.input.source)
-            signal.input.copy(
-                content = sanitized,
-                conversationContext = ConversationContext(sessionId, interlocutor)
-            )
-        }
+        val resolvedContext = signal.input.conversationContext
+        val enrichedInput = signal.input.copy(
+            content = sanitized,
+            conversationContext = if (resolvedContext.sessionId.isNotBlank()) {
+                resolvedContext
+            } else {
+                val sessionId = resolveSessionId(signal.input.source)
+                val interlocutor = interlocutorResolver.resolve(signal.input.source)
+                ConversationContext(sessionId, interlocutor)
+            }
+        )
 
         return SensorySignal.InputReceived(enrichedInput)
     }

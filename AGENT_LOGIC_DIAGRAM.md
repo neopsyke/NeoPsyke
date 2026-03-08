@@ -9,6 +9,7 @@ Keep diagrams high signal: small, readable, and updated as runtime logic evolves
 flowchart LR
     U["User / Stdin / Web UI"] --> SC["SensoryCortex (Async Multiplex Input)"]
     SC --> E["Ego Orchestrator"]
+    NoteCtx["ConversationContext(sessionId required)"] --> SC
 
     E --> AS["AttentionScheduler"]
     AS --> E
@@ -75,6 +76,7 @@ sequenceDiagram
 
     User->>SC: Input text
     SC->>Ego: InputReceived
+    Note over SC,Ego: Input carries ConversationContext(sessionId) + rootInputId(identity) + receivedAtMs(timing)
     Ego->>Sched: enqueueInput
 
     loop While pending work and step limit not reached
@@ -104,7 +106,7 @@ sequenceDiagram
                 else deterministic pass
                     Ego->>Sup: llm review(action)
                     Note over Ego,Sup: Stage-1 uses cheaper model from catalog when two-stage is enabled
-                    Note over Ego,Sup: Escalate only on low confidence or policy-risk (or technical fallback)
+                    Note over Ego,Sup: Escalate on low confidence, policy-risk, technical fallback, or POLICY_REDUNDANT deny
                     Note over Ego,Sup: Superego completion max_tokens scales with prompt estimate (bounded floor/hard-cap) and model token_weight
                     Note over Ego,Sup: Stage parse failures trigger one strict-JSON retry before default deny
                     Sup-->>Ego: allow/deny (+ reason_code on deny)
@@ -117,8 +119,9 @@ sequenceDiagram
                         Ego->>Motor: execute(action)
                         Ego->>Ego: PromptInjectionDefense sanitize untrusted tool output
                         alt action = answer
-                            Ego->>Sched: clear pending thought/action work for same root input
+                            Ego->>Sched: clear pending thought/action work for same root+session scope
                             Ego->>TWS: destroy workspace for resolved input
+                            Note over Ego,Dash: Workspace telemetry carries root_input_id(identity) and root_input_received_at_ms(timing)
                             Ego->>Dash: drawer reads full snapshots via /api/obs/workspace/{rootId}
                             Ego->>Mem: maybeAssessLongTermMemory(post_terminal_answer, forced)
                         end
@@ -174,7 +177,7 @@ stateDiagram-v2
     Processing --> Planning: input/thought task
     Planning --> ActionQueued: decision=action
     Planning --> ThoughtQueued: decision=thought/plan/noop-thought
-    Planning --> ThoughtQueued: plan suppressed (budget/pressure/hash/pending) -> convergence thought
+    Planning --> ThoughtQueued: plan suppressed (budget/pressure/hash/pending) -> convergence/recovery thought
 
     ActionQueued --> PolicyReview: non-fallback action
     ActionQueued --> Executing: fallback explanation action

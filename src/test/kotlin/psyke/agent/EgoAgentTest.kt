@@ -477,6 +477,70 @@ class EgoAgentTest {
     }
 
     @Test
+    fun `plan suppression recovery enqueues convergence thought instead of silently ending input`() {
+        val plannerLlm = StubChatModelClient().apply {
+            enqueueRawResponse(
+                """
+                {
+                  "decision":"plan",
+                  "urgency":"medium",
+                  "plan_goal":"Initial plan",
+                  "plan_steps":["step one"]
+                }
+                """.trimIndent()
+            )
+            enqueueRawResponse(
+                """
+                {
+                  "decision":"plan",
+                  "urgency":"medium",
+                  "plan_goal":"Duplicate plan after first step",
+                  "plan_steps":["step again"]
+                }
+                """.trimIndent()
+            )
+            enqueueRawResponse(
+                """
+                {"decision":"action","urgency":"medium","action_type":"answer","action_payload":"final after suppression","action_summary":"converged"}
+                """.trimIndent()
+            )
+        }
+        val superegoLlm = StubChatModelClient().apply {
+            enqueueRawResponse("""{"allow":true}""")
+        }
+        val instrumentation = RecordingInstrumentation()
+        val outputs = mutableListOf<String>()
+        val config = AgentConfig(
+            planner = PlannerConfig(
+                maxLoopStepsPerInput = 8,
+                maxThoughtPasses = 3,
+                maxPlansPerInput = 1
+            )
+        )
+        val agent = Ego(
+            planner = LlmEgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
+            superego = Superego(
+                modelClient = superegoLlm,
+                config = config,
+                instrumentation = instrumentation
+            ),
+            motorCortex = buildMotorCortex(output = { outputs.add(it) }),
+            config = config,
+            instrumentation = instrumentation
+        )
+
+        runAgentWithInput(agent, "hello\nexit\n")
+
+        assertEquals(listOf("ego> final after suppression"), outputs)
+        assertTrue(
+            instrumentation.events.any {
+                it.type == "duplicate_plan_suppressed" && it.data["reason"] == "budget_exhausted"
+            }
+        )
+        assertTrue(instrumentation.events.any { it.type == "convergence_thought_enqueued" })
+    }
+
+    @Test
     fun `agent keeps loop alive when action execution throws`() {
         val plannerLlm = StubChatModelClient().apply {
             enqueueRawResponse(

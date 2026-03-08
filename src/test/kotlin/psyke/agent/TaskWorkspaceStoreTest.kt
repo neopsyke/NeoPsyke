@@ -20,10 +20,24 @@ class TaskWorkspaceStoreTest {
                 maxPromptTokens = 400
             )
         )
-        val rootA = 101L
-        val rootB = 202L
-        store.ensureForInput(PendingInput(id = 1, content = "research the latest pricing and summarize", enqueuedAtMs = rootA))
-        store.ensureForInput(PendingInput(id = 2, content = "draft release notes", enqueuedAtMs = rootB))
+        val rootA = "root-a"
+        val rootB = "root-b"
+        store.ensureForInput(
+            PendingInput(
+                id = 1,
+                content = "research the latest pricing and summarize",
+                rootInputId = rootA,
+                receivedAtMs = 101L
+            )
+        )
+        store.ensureForInput(
+            PendingInput(
+                id = 2,
+                content = "draft release notes",
+                rootInputId = rootB,
+                receivedAtMs = 202L
+            )
+        )
         store.recordPlan(rootA, "Research pricing", listOf("Search official docs", "Compare and summarize"))
 
         val summaryA = store.promptSummary(rootA, maxTokens = 400)
@@ -39,10 +53,17 @@ class TaskWorkspaceStoreTest {
     @Test
     fun `final compilation includes evidence and candidate answer`() {
         val store = TaskWorkspaceStore(TaskWorkspaceConfig(enabled = true))
-        val root = 999L
-        store.ensureForInput(PendingInput(id = 1, content = "find official pricing", enqueuedAtMs = root))
+        val root = "root-pricing"
+        store.ensureForInput(
+            PendingInput(
+                id = 1,
+                content = "find official pricing",
+                rootInputId = root,
+                receivedAtMs = 999L
+            )
+        )
         store.recordActionOutcome(
-            rootInputEnqueuedAtMs = root,
+            rootInputId = root,
             action = PendingAction(
                 id = 7,
                 urgency = Urgency.MEDIUM,
@@ -58,7 +79,7 @@ class TaskWorkspaceStoreTest {
         )
 
         val compiled = store.buildFinalCompilation(
-            rootInputEnqueuedAtMs = root,
+            rootInputId = root,
             candidateAnswer = "Pro costs $20/month.",
             maxChars = 2000
         )
@@ -71,12 +92,19 @@ class TaskWorkspaceStoreTest {
     @Test
     fun `final pass input reports workspace confidence`() {
         val store = TaskWorkspaceStore(TaskWorkspaceConfig(enabled = true))
-        val root = 777L
-        store.ensureForInput(PendingInput(id = 1, content = "find release date", enqueuedAtMs = root))
+        val root = "root-release"
+        store.ensureForInput(
+            PendingInput(
+                id = 1,
+                content = "find release date",
+                rootInputId = root,
+                receivedAtMs = 777L
+            )
+        )
         store.recordPlan(root, "Find release date", listOf("Search official release notes"))
 
         val input = store.buildFinalPassInput(
-            rootInputEnqueuedAtMs = root,
+            rootInputId = root,
             candidateAnswer = "Release date is pending confirmation.",
             maxChars = 1200
         )
@@ -89,22 +117,30 @@ class TaskWorkspaceStoreTest {
     @Test
     fun `destroy removes only targeted workspace`() {
         val store = TaskWorkspaceStore(TaskWorkspaceConfig(enabled = true))
-        store.ensureForInput(PendingInput(id = 1, content = "task A", enqueuedAtMs = 1L))
-        store.ensureForInput(PendingInput(id = 2, content = "task B", enqueuedAtMs = 2L))
+        store.ensureForInput(PendingInput(id = 1, content = "task A", rootInputId = "root-a", receivedAtMs = 1L))
+        store.ensureForInput(PendingInput(id = 2, content = "task B", rootInputId = "root-b", receivedAtMs = 2L))
 
-        val destroyed = store.destroy(1L)
+        val destroyed = store.destroy("root-a")
 
         assertTrue(destroyed != null)
-        assertEquals(1L, destroyed?.rootInputEnqueuedAtMs)
-        assertEquals("", store.promptSummary(1L, maxTokens = 200))
-        assertTrue(store.promptSummary(2L, maxTokens = 200).isNotBlank())
+        assertEquals("root-a", destroyed?.rootInputId)
+        assertEquals(1L, destroyed?.rootInputReceivedAtMs)
+        assertEquals("", store.promptSummary("root-a", maxTokens = 200))
+        assertTrue(store.promptSummary("root-b", maxTokens = 200).isNotBlank())
     }
 
     @Test
     fun `debug snapshot exposes full sections evidence and monotonic version`() {
         val store = TaskWorkspaceStore(TaskWorkspaceConfig(enabled = true))
-        val root = 12L
-        store.ensureForInput(PendingInput(id = 1, content = "collect references", enqueuedAtMs = root))
+        val root = "root-debug"
+        store.ensureForInput(
+            PendingInput(
+                id = 1,
+                content = "collect references",
+                rootInputId = root,
+                receivedAtMs = 12L
+            )
+        )
         val v1 = store.debugHead(root)?.version ?: -1L
         store.recordPlan(root, "Collect references", listOf("Find docs"))
         val snapshot = store.debugSnapshot(root)

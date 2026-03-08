@@ -10,7 +10,7 @@ enum class DialogueRole {
 data class DialogueTurn(
     val role: DialogueRole,
     val content: String,
-    val sessionId: String? = null,
+    val sessionId: String = ConversationContext.DEFAULT_SESSION_ID,
     val interlocutor: Interlocutor? = null,
     val timestamp: Instant? = null,
 )

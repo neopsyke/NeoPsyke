@@ -11,7 +11,7 @@ data class PlannerContext(
     val deliberation: DeliberationState = DeliberationState(),
     val metaGuidance: String = "",
     val availableActions: Set<ActionType> = ActionType.entries.toSet(),
-    val conversationContext: ConversationContext? = null,
+    val conversationContext: ConversationContext = ConversationContext.default(),
 )
 
 data class SuperegoContext(

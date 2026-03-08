@@ -30,7 +30,7 @@ class SessionScopedMemoryStoreTest {
         )
     }
 
-    private fun userTurn(content: String, sessionId: String? = null): DialogueTurn =
+    private fun userTurn(content: String, sessionId: String = ConversationContext.DEFAULT_SESSION_ID): DialogueTurn =
         DialogueTurn(role = DialogueRole.USER, content = content, sessionId = sessionId)
 
     @Test

@@ -42,7 +42,13 @@ class MemoryStore(
             return
         }
 
-        val newTurn = DialogueTurn(role = turn.role, content = normalized)
+        val newTurn = DialogueTurn(
+            role = turn.role,
+            content = normalized,
+            sessionId = turn.sessionId,
+            interlocutor = turn.interlocutor,
+            timestamp = turn.timestamp
+        )
         recentTurns.addLast(newTurn)
         recentTurnsCharCount += normalized.length + 12
         compactIfNeeded()

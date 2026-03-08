@@ -16,7 +16,7 @@ class AttentionScheduler(
         content: String,
         priority: InputPriority = InputPriority.MEDIUM,
         source: String = "external",
-        conversationContext: ConversationContext? = null,
+        conversationContext: ConversationContext = ConversationContext.default(),
     ): Boolean {
         if (inputs.size >= config.maxPendingInputs) {
             return false
@@ -40,14 +40,15 @@ class AttentionScheduler(
         urgency: Urgency,
         passes: Int = 0,
         longTermMemoryRecallQuery: String? = null,
-        rootInputEnqueuedAtMs: Long? = null,
+        rootInputId: String? = null,
+        rootInputReceivedAtMs: Long? = null,
         deniedActionType: ActionType? = null,
         deniedActionPayload: String? = null,
         denialReason: String? = null,
         allowFallbackExplanation: Boolean = false,
         planContext: PlanContext? = null,
         denialReasonCode: String? = null,
-        conversationContext: ConversationContext? = null,
+        conversationContext: ConversationContext = ConversationContext.default(),
     ): Boolean {
         if (thoughts.size >= config.maxPendingThoughts) {
             return false
@@ -59,7 +60,8 @@ class AttentionScheduler(
                 content = content,
                 passes = passes,
                 longTermMemoryRecallQuery = longTermMemoryRecallQuery,
-                rootInputEnqueuedAtMs = rootInputEnqueuedAtMs,
+                rootInputId = rootInputId,
+                rootInputReceivedAtMs = rootInputReceivedAtMs,
                 deniedActionType = deniedActionType,
                 deniedActionPayload = deniedActionPayload,
                 denialReason = denialReason,
@@ -79,8 +81,9 @@ class AttentionScheduler(
         urgency: Urgency,
         attempts: Int = 0,
         isFallbackExplanation: Boolean = false,
-        rootInputEnqueuedAtMs: Long? = null,
-        conversationContext: ConversationContext? = null,
+        rootInputId: String? = null,
+        rootInputReceivedAtMs: Long? = null,
+        conversationContext: ConversationContext = ConversationContext.default(),
     ): Boolean {
         if (actions.size >= config.maxPendingActions) {
             return false
@@ -94,7 +97,8 @@ class AttentionScheduler(
                 summary = summary,
                 attempts = attempts,
                 isFallbackExplanation = isFallbackExplanation,
-                rootInputEnqueuedAtMs = rootInputEnqueuedAtMs,
+                rootInputId = rootInputId,
+                rootInputReceivedAtMs = rootInputReceivedAtMs,
                 conversationContext = conversationContext
             )
         )
@@ -111,44 +115,73 @@ class AttentionScheduler(
         return candidate
     }
 
-    fun hasPendingFallbackExplanationAction(rootInputEnqueuedAtMs: Long?): Boolean {
-        if (rootInputEnqueuedAtMs == null) {
+    fun hasPendingFallbackExplanationAction(rootInputId: String?, sessionId: String): Boolean {
+        if (rootInputId.isNullOrBlank()) {
             return false
         }
         return actions.any { action ->
             action.isFallbackExplanation &&
-                action.rootInputEnqueuedAtMs == rootInputEnqueuedAtMs
+                matchesInputScope(
+                    itemRootInputId = action.rootInputId,
+                    itemConversationContext = action.conversationContext,
+                    rootInputId = rootInputId,
+                    sessionId = sessionId
+                )
         }
     }
 
-    fun hasPendingPlanThoughtsForInput(rootInputEnqueuedAtMs: Long?): Boolean {
-        if (rootInputEnqueuedAtMs == null) {
+    fun hasPendingPlanThoughtsForInput(rootInputId: String?, sessionId: String): Boolean {
+        if (rootInputId.isNullOrBlank()) {
             return false
         }
         return thoughts.any { thought ->
-            thought.rootInputEnqueuedAtMs == rootInputEnqueuedAtMs &&
+            matchesInputScope(
+                itemRootInputId = thought.rootInputId,
+                itemConversationContext = thought.conversationContext,
+                rootInputId = rootInputId,
+                sessionId = sessionId
+            ) &&
                 thought.planContext != null
         }
     }
 
-    fun hasPendingConvergenceThoughtForInput(rootInputEnqueuedAtMs: Long?): Boolean {
-        if (rootInputEnqueuedAtMs == null) {
+    fun hasPendingConvergenceThoughtForInput(rootInputId: String?, sessionId: String): Boolean {
+        if (rootInputId.isNullOrBlank()) {
             return false
         }
         return thoughts.any { thought ->
-            thought.rootInputEnqueuedAtMs == rootInputEnqueuedAtMs &&
+            matchesInputScope(
+                itemRootInputId = thought.rootInputId,
+                itemConversationContext = thought.conversationContext,
+                rootInputId = rootInputId,
+                sessionId = sessionId
+            ) &&
                 thought.content.startsWith(CONVERGENCE_THOUGHT_PREFIX)
         }
     }
 
-    fun clearPendingWorkForInput(rootInputEnqueuedAtMs: Long?): ClearedPendingWork {
-        if (rootInputEnqueuedAtMs == null) {
+    fun clearPendingWorkForInput(rootInputId: String?, sessionId: String): ClearedPendingWork {
+        if (rootInputId.isNullOrBlank()) {
             return ClearedPendingWork()
         }
         val thoughtBefore = thoughts.size
         val actionBefore = actions.size
-        thoughts.removeIf { it.rootInputEnqueuedAtMs == rootInputEnqueuedAtMs }
-        actions.removeIf { it.rootInputEnqueuedAtMs == rootInputEnqueuedAtMs }
+        thoughts.removeIf { thought ->
+            matchesInputScope(
+                itemRootInputId = thought.rootInputId,
+                itemConversationContext = thought.conversationContext,
+                rootInputId = rootInputId,
+                sessionId = sessionId
+            )
+        }
+        actions.removeIf { action ->
+            matchesInputScope(
+                itemRootInputId = action.rootInputId,
+                itemConversationContext = action.conversationContext,
+                rootInputId = rootInputId,
+                sessionId = sessionId
+            )
+        }
         return ClearedPendingWork(
             thoughtsRemoved = thoughtBefore - thoughts.size,
             actionsRemoved = actionBefore - actions.size
@@ -199,6 +232,18 @@ class AttentionScheduler(
     private fun nextId(): Long {
         idCounter += 1
         return idCounter
+    }
+
+    private fun matchesInputScope(
+        itemRootInputId: String?,
+        itemConversationContext: ConversationContext,
+        rootInputId: String?,
+        sessionId: String,
+    ): Boolean {
+        if (itemRootInputId != rootInputId) {
+            return false
+        }
+        return itemConversationContext.sessionId == sessionId
     }
 
     companion object {

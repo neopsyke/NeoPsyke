@@ -39,6 +39,10 @@ data class ConversationContext(
     val sessionId: String,
     val interlocutor: Interlocutor,
 ) {
+    init {
+        require(sessionId.isNotBlank()) { "sessionId must not be blank." }
+    }
+
     companion object {
         const val DEFAULT_SESSION_ID: String = "default"
 

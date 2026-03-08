@@ -110,26 +110,72 @@ class AttentionSchedulerTest {
     @Test
     fun `scheduler can clear pending thoughts and actions for a resolved input`() {
         val scheduler = AttentionScheduler(config.copy(maxPendingThoughts = 8, maxPendingActions = 8))
-        val rootA = 100L
-        val rootB = 200L
-        scheduler.enqueueThought("a-thought", Urgency.HIGH, rootInputEnqueuedAtMs = rootA)
-        scheduler.enqueueThought("b-thought", Urgency.HIGH, rootInputEnqueuedAtMs = rootB)
+        val rootA = "root-a"
+        val rootB = "root-b"
+        scheduler.enqueueThought("a-thought", Urgency.HIGH, rootInputId = rootA)
+        scheduler.enqueueThought("b-thought", Urgency.HIGH, rootInputId = rootB)
         scheduler.enqueueAction(
             ActionType.WEB_SEARCH,
             "a-action",
             "a-summary",
             Urgency.HIGH,
-            rootInputEnqueuedAtMs = rootA
+            rootInputId = rootA
         )
         scheduler.enqueueAction(
             ActionType.WEB_SEARCH,
             "b-action",
             "b-summary",
             Urgency.HIGH,
-            rootInputEnqueuedAtMs = rootB
+            rootInputId = rootB
         )
 
-        val cleared = scheduler.clearPendingWorkForInput(rootA)
+        val cleared = scheduler.clearPendingWorkForInput(rootA, "default")
+
+        assertEquals(1, cleared.thoughtsRemoved)
+        assertEquals(1, cleared.actionsRemoved)
+        val state = scheduler.queueState()
+        assertEquals(listOf("b-thought"), state.thoughts.map { it.content })
+        assertEquals(listOf("b-action"), state.actions.map { it.payload })
+    }
+
+    @Test
+    fun `scheduler clear pending work is scoped by session for same root input`() {
+        val scheduler = AttentionScheduler(config.copy(maxPendingThoughts = 8, maxPendingActions = 8))
+        val root = "root-shared"
+        val sessionA = "session-a"
+        val sessionB = "session-b"
+        val ctxA = psyke.agent.core.ConversationContext(sessionA, psyke.agent.core.Interlocutor.named("a"))
+        val ctxB = psyke.agent.core.ConversationContext(sessionB, psyke.agent.core.Interlocutor.named("b"))
+        scheduler.enqueueThought(
+            content = "a-thought",
+            urgency = Urgency.HIGH,
+            rootInputId = root,
+            conversationContext = ctxA
+        )
+        scheduler.enqueueThought(
+            content = "b-thought",
+            urgency = Urgency.HIGH,
+            rootInputId = root,
+            conversationContext = ctxB
+        )
+        scheduler.enqueueAction(
+            type = ActionType.WEB_SEARCH,
+            payload = "a-action",
+            summary = "a-summary",
+            urgency = Urgency.HIGH,
+            rootInputId = root,
+            conversationContext = ctxA
+        )
+        scheduler.enqueueAction(
+            type = ActionType.WEB_SEARCH,
+            payload = "b-action",
+            summary = "b-summary",
+            urgency = Urgency.HIGH,
+            rootInputId = root,
+            conversationContext = ctxB
+        )
+
+        val cleared = scheduler.clearPendingWorkForInput(rootInputId = root, sessionId = sessionA)
 
         assertEquals(1, cleared.thoughtsRemoved)
         assertEquals(1, cleared.actionsRemoved)
@@ -141,11 +187,11 @@ class AttentionSchedulerTest {
     @Test
     fun `scheduler can detect pending fallback and plan thoughts for an input`() {
         val scheduler = AttentionScheduler(config.copy(maxPendingThoughts = 8, maxPendingActions = 8))
-        val root = 300L
+        val root = "root-plan"
         scheduler.enqueueThought(
             content = "step 1",
             urgency = Urgency.MEDIUM,
-            rootInputEnqueuedAtMs = root,
+            rootInputId = root,
             planContext = psyke.agent.core.PlanContext(
                 planId = "p1",
                 planGoal = "goal",
@@ -160,12 +206,55 @@ class AttentionSchedulerTest {
             summary = "fallback",
             urgency = Urgency.HIGH,
             isFallbackExplanation = true,
-            rootInputEnqueuedAtMs = root
+            rootInputId = root
         )
 
-        assertTrue(scheduler.hasPendingPlanThoughtsForInput(root))
-        assertTrue(scheduler.hasPendingFallbackExplanationAction(root))
-        assertFalse(scheduler.hasPendingPlanThoughtsForInput(999L))
-        assertFalse(scheduler.hasPendingFallbackExplanationAction(999L))
+        assertTrue(scheduler.hasPendingPlanThoughtsForInput(root, "default"))
+        assertTrue(scheduler.hasPendingFallbackExplanationAction(root, "default"))
+        assertFalse(scheduler.hasPendingPlanThoughtsForInput("root-missing", "default"))
+        assertFalse(scheduler.hasPendingFallbackExplanationAction("root-missing", "default"))
+    }
+
+    @Test
+    fun `scheduler pending checks are scoped by session for same root input`() {
+        val scheduler = AttentionScheduler(config.copy(maxPendingThoughts = 8, maxPendingActions = 8))
+        val root = "root-shared-2"
+        val ctxA = psyke.agent.core.ConversationContext("session-a", psyke.agent.core.Interlocutor.named("a"))
+        val ctxB = psyke.agent.core.ConversationContext("session-b", psyke.agent.core.Interlocutor.named("b"))
+        scheduler.enqueueThought(
+            content = "step one",
+            urgency = Urgency.MEDIUM,
+            rootInputId = root,
+            planContext = psyke.agent.core.PlanContext(
+                planId = "p1",
+                planGoal = "goal-a",
+                stepIndex = 0,
+                totalSteps = 1,
+                stepDescription = "step-a"
+            ),
+            conversationContext = ctxA
+        )
+        scheduler.enqueueAction(
+            type = ActionType.ANSWER,
+            payload = "fallback-a",
+            summary = "fallback-a",
+            urgency = Urgency.HIGH,
+            isFallbackExplanation = true,
+            rootInputId = root,
+            conversationContext = ctxA
+        )
+        scheduler.enqueueThought(
+            content = "${AttentionScheduler.CONVERGENCE_THOUGHT_PREFIX}other session",
+            urgency = Urgency.MEDIUM,
+            rootInputId = root,
+            conversationContext = ctxB
+        )
+
+        assertTrue(scheduler.hasPendingPlanThoughtsForInput(root, "session-a"))
+        assertTrue(scheduler.hasPendingFallbackExplanationAction(root, "session-a"))
+        assertFalse(scheduler.hasPendingPlanThoughtsForInput(root, "session-b"))
+        assertFalse(scheduler.hasPendingFallbackExplanationAction(root, "session-b"))
+        assertFalse(scheduler.hasPendingConvergenceThoughtForInput(root, "session-a"))
+        assertTrue(scheduler.hasPendingConvergenceThoughtForInput(root, "session-b"))
     }
 }

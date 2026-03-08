@@ -2,6 +2,7 @@ package psyke.agent.core
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertNotEquals
 
 class ConversationModelsTest {
@@ -67,6 +68,13 @@ class ConversationModelsTest {
         val c = ConversationContext("s2", Interlocutor.named("A"))
         assertEquals(a, b)
         assertNotEquals(a, c)
+    }
+
+    @Test
+    fun `ConversationContext rejects blank session id`() {
+        assertFailsWith<IllegalArgumentException> {
+            ConversationContext("  ", Interlocutor.named("A"))
+        }
     }
 
     // --- DefaultInterlocutorResolver ---

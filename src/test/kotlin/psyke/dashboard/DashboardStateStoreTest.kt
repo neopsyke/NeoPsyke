@@ -3,6 +3,8 @@ package psyke.dashboard
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
 import psyke.agent.core.ActionType
+import psyke.agent.core.ConversationContext
+import psyke.agent.core.Interlocutor
 import psyke.agent.core.PendingAction
 import psyke.agent.core.PendingInput
 import psyke.agent.core.PendingThought
@@ -114,7 +116,8 @@ class DashboardStateStoreTest {
                 id = 1,
                 type = "task_workspace_debug_snapshot",
                 data = mapOf(
-                    "root_input_enqueued_at_ms" to 99L,
+                    "root_input_id" to "root-99",
+                    "root_input_received_at_ms" to 99L,
                     "update_type" to "plan_recorded",
                     "version" to 4L,
                     "updated_at_ms" to nowMs,
@@ -144,10 +147,10 @@ class DashboardStateStoreTest {
         assertEquals(1, items.size)
         @Suppress("UNCHECKED_CAST")
         val first = items.first() as Map<String, Any?>
-        assertEquals(99L, (first["root_input_enqueued_at_ms"] as Number).toLong())
+        assertEquals("root-99", first["root_input_id"])
         assertEquals(4L, (first["version"] as Number).toLong())
 
-        val detailJson = store.workspaceSnapshotJson(rootInputEnqueuedAtMs = 99L)
+        val detailJson = store.workspaceSnapshotJson(rootInputId = "root-99")
         assertNotNull(detailJson)
         val detail: Map<String, Any?> = mapper.readValue(detailJson)
         assertEquals("Verify pricing and summarize", detail["goal"])
@@ -169,7 +172,9 @@ class DashboardStateStoreTest {
         val user = store.addUserMessage(sessionId = sessionId, content = "hello from web")
         assertNotNull(user)
 
+        val rootInputId = "root-chat-4242"
         val rootInputMs = 4242L
+        val conversationContext = ConversationContext(sessionId, Interlocutor.named("test-user"))
         store.onEvent(
             AgentEvent(
                 id = 1,
@@ -179,7 +184,9 @@ class DashboardStateStoreTest {
                         id = 10L,
                         content = "hello from web",
                         source = "chat:$sessionId",
-                        enqueuedAtMs = rootInputMs
+                        rootInputId = rootInputId,
+                        conversationContext = conversationContext,
+                        receivedAtMs = rootInputMs
                     )
                 )
             )
@@ -195,7 +202,9 @@ class DashboardStateStoreTest {
                         type = ActionType.ANSWER,
                         payload = "assistant reply",
                         summary = "summary",
-                        rootInputEnqueuedAtMs = rootInputMs
+                        rootInputId = rootInputId,
+                        rootInputReceivedAtMs = rootInputMs,
+                        conversationContext = conversationContext
                     ),
                     "outcome_summary" to "ok"
                 )
