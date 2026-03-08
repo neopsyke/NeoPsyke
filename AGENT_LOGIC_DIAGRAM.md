@@ -16,6 +16,7 @@ flowchart LR
 
     E --> P["LlmEgoPlanner"]
     P --> AV["Action Verifier LLM Call"]
+    E --> TV["TaskVerifier (Deterministic Task Gate)"]
     E --> S["Superego"]
     S --> S1["SingleStage Review Engine"]
     S --> S2["TwoStage Escalation Engine"]
@@ -32,6 +33,7 @@ flowchart LR
     MC --> H["Hippocampus (Long-term Recall/Imprint)"]
     MC --> LTM["LlmLongTermMemoryAdvisor"]
     MC --> LB["Logbook (Episodic, SQLite+FTS5)"]
+    MC --> RL["Reflection Lessons (Recall + Imprint Filters)"]
     MC -.->|"temporal intent → episodic recall + vector cues"| LB
     E --> TWS["TaskWorkspaceStore (Ephemeral Per Request)"]
     E --> TWF["TaskWorkspaceFinalizer (Noop or LLM)"]
@@ -87,6 +89,7 @@ sequenceDiagram
 
         alt Task = input or thought
             Ego->>Mem: recall + short-term summary
+            Note over Ego,Mem: Planner context now includes targeted reflection-lesson recall
             Ego->>TWS: create/update request workspace + index summary
             Ego->>Dash: emit task_workspace_head (+ optional debug snapshot)
             Ego->>Planner: decide(context)
@@ -101,39 +104,48 @@ sequenceDiagram
             alt Fallback explanation action
                 Ego->>Motor: execute (bypass Superego)
             else Normal action
-                Ego->>Sup: deterministic checks
-                alt deterministic deny
-                    Sup-->>Ego: deny (hard deny)
+                Ego->>TV: review(action, evidence/recent dialogue)
+                alt task verifier deny
+                    TV-->>Ego: deny (+ reason_code)
                     Ego->>Sched: enqueue safe-alternative thought
-                else deterministic pass
-                    Ego->>Sup: llm review(action)
-                    Note over Ego,Sup: Stage-1 uses cheaper model from catalog when two-stage is enabled
-                    Note over Ego,Sup: Escalate on low confidence, policy-risk, or technical fallback
-                    Note over Ego,Sup: Superego completion max_tokens scales with prompt estimate (bounded floor/hard-cap) and model token_weight
-                    Note over Ego,Sup: Structured output is schema-enforced (response_format=json_schema)
-                    Note over Ego,Sup: Stage parse failures trigger one schema-enforced retry before default deny
-                    Sup-->>Ego: allow/deny (+ reason_code on deny)
-                    alt allow
-                        alt action = answer
-                            Ego->>TWS: final-pass compilation from workspace index/evidence
-                            Ego->>TWF: rewrite candidate payload (if enabled)
-                            Note over Ego,TWF: Apply workspace-confidence gate first, then model-confidence gate
-                        end
-                        Ego->>Motor: execute(action)
-                        Ego->>Ego: PromptInjectionDefense sanitize untrusted tool output
-                        alt action = answer
-                            Ego->>Sched: clear pending thought/action work for same root+session scope
-                            Ego->>TWS: destroy workspace for resolved input
-                            Note over Ego,Dash: Workspace telemetry carries root_input_id(identity) and root_input_received_at_ms(timing)
-                            Ego->>Dash: drawer reads full snapshots via /api/obs/workspace/{rootId}
-                            Ego->>Mem: maybeAssessLongTermMemory(post_terminal_answer, forced)
-                        end
-                        Ego->>TWS: record non-answer action outcomes/evidence
-                        Ego->>Sched: enqueue follow-up thought (for evidence actions)
-                        Ego->>Mem: maybeAssessLongTermMemory(post_allowed_action, optional force)
-                        Note over Ego,Mem: Blocked imprints emit long_term_memory_persistence_skipped (reason_code + reason_detail) for timeline visibility
-                    else deny
+                    Ego->>Mem: maybeRecordReflectionLesson(filtered)
+                else task verifier allow
+                    Ego->>Sup: deterministic checks
+                    alt deterministic deny
+                        Sup-->>Ego: deny (hard deny)
                         Ego->>Sched: enqueue safe-alternative thought
+                        Ego->>Mem: maybeRecordReflectionLesson(filtered)
+                    else deterministic pass
+                        Ego->>Sup: llm review(action)
+                        Note over Ego,Sup: Stage-1 uses cheaper model from catalog when two-stage is enabled
+                        Note over Ego,Sup: Escalate on low confidence, policy-risk, or technical fallback
+                        Note over Ego,Sup: Superego completion max_tokens scales with prompt estimate (bounded floor/hard-cap) and model token_weight
+                        Note over Ego,Sup: Structured output is schema-enforced (response_format=json_schema)
+                        Note over Ego,Sup: Stage parse failures trigger one schema-enforced retry before default deny
+                        Sup-->>Ego: allow/deny (+ reason_code on deny)
+                        alt allow
+                            alt action = answer
+                                Ego->>TWS: final-pass compilation from workspace index/evidence
+                                Ego->>TWF: rewrite candidate payload (if enabled)
+                                Note over Ego,TWF: Apply workspace-confidence gate first, then model-confidence gate
+                            end
+                            Ego->>Motor: execute(action)
+                            Ego->>Ego: PromptInjectionDefense sanitize untrusted tool output
+                            alt action = answer
+                                Ego->>Sched: clear pending thought/action work for same root+session scope
+                                Ego->>TWS: destroy workspace for resolved input
+                                Note over Ego,Dash: Workspace telemetry carries root_input_id(identity) and root_input_received_at_ms(timing)
+                                Ego->>Dash: drawer reads full snapshots via /api/obs/workspace/{rootId}
+                                Ego->>Mem: maybeAssessLongTermMemory(post_terminal_answer, forced)
+                            end
+                            Ego->>TWS: record non-answer action outcomes/evidence
+                            Ego->>Sched: enqueue follow-up thought (for evidence actions)
+                            Ego->>Mem: maybeAssessLongTermMemory(post_allowed_action, optional force)
+                            Note over Ego,Mem: Blocked imprints emit long_term_memory_persistence_skipped (reason_code + reason_detail) for timeline visibility
+                        else deny
+                            Ego->>Sched: enqueue safe-alternative thought
+                            Ego->>Mem: maybeRecordReflectionLesson(filtered)
+                        end
                     end
                 end
             end
@@ -183,13 +195,14 @@ stateDiagram-v2
     Planning --> ThoughtQueued: decision=thought/plan/noop-thought
     Planning --> ThoughtQueued: plan suppressed (budget/pressure/hash/pending) -> convergence/recovery thought
 
-    ActionQueued --> PolicyReview: non-fallback action
+    ActionQueued --> TaskReview: non-fallback action
     ActionQueued --> Executing: fallback explanation action
-    ActionQueued --> Denied: deterministic hard deny
+    TaskReview --> Denied: task verifier deny
 
-    PolicyReview --> Denied: superego deny
+    TaskReview --> PolicyReview: task verifier allow
+    PolicyReview --> Denied: deterministic hard deny / superego deny
     Denied --> ThoughtQueued: enqueue safe alternative thought
-    Note right of ThoughtQueued: Repeat-denied payload block is skipped for technical/transient denial reasons (prefer reason_code classification)
+    Note right of ThoughtQueued: Repeat-denied payload block is skipped for technical/transient denial reasons (prefer reason_code classification); reflection lessons persist only for non-technical/system denials
 
     PolicyReview --> Executing: superego allow
     Executing --> EvidenceObserved: external action succeeded

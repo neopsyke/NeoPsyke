@@ -150,6 +150,135 @@ class EgoAgentTest {
     }
 
     @Test
+    fun `task verifier blocks verification-sensitive answer until evidence exists`() {
+        val plannerLlm = StubChatModelClient().apply {
+            enqueueRawResponse(
+                """
+                {"decision":"action","urgency":"high","action_type":"answer","action_payload":"The current price is 20.","action_summary":"answer quickly"}
+                """.trimIndent()
+            )
+            enqueueRawResponse(
+                """
+                {"decision":"action","urgency":"high","action_type":"web_search","action_payload":"current product price official source","action_summary":"verify current price"}
+                """.trimIndent()
+            )
+            enqueueRawResponse(
+                """
+                {"decision":"action","urgency":"high","action_type":"answer","action_payload":"Latest verified price from source is 20.","action_summary":"deliver verified answer"}
+                """.trimIndent()
+            )
+        }
+        val superegoLlm = StubChatModelClient().apply {
+            enqueueRawResponse("""{"allow":true}""")
+            enqueueRawResponse("""{"allow":true}""")
+        }
+        val instrumentation = RecordingInstrumentation()
+        val outputs = mutableListOf<String>()
+        val searchEngine = object : WebSearchEngine {
+            override fun search(query: String, maxResults: Int): WebSearchResult =
+                WebSearchResult(
+                    summary = "Official source confirms price is 20.",
+                    snippets = listOf("Official source: current price is 20."),
+                    sources = listOf(
+                        WebSearchSource(
+                            title = "Official pricing",
+                            url = "https://example.com/pricing"
+                        )
+                    )
+                )
+        }
+        val config = AgentConfig(planner = PlannerConfig(maxLoopStepsPerInput = 10, maxThoughtPasses = 4))
+        val agent = Ego(
+            planner = LlmEgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
+            superego = Superego(modelClient = superegoLlm, config = config, instrumentation = instrumentation),
+            motorCortex = buildMotorCortex(output = { outputs.add(it) }, webSearchEngine = searchEngine),
+            config = config,
+            instrumentation = instrumentation
+        )
+
+        runAgentWithInput(agent, "What is the latest price?\nexit\n")
+
+        assertEquals(listOf("ego> Latest verified price from source is 20."), outputs)
+        assertTrue(
+            instrumentation.events.any {
+                it.type == "task_verifier_review" &&
+                    it.data["allow"] == false &&
+                    it.data["reason_code"] == "TASK_EVIDENCE_REQUIRED"
+            }
+        )
+    }
+
+    @Test
+    fun `non technical denial stores reflection lesson in long term memory`() {
+        val plannerLlm = StubChatModelClient().apply {
+            enqueueRawResponse(
+                """
+                {"decision":"action","urgency":"medium","action_type":"answer","action_payload":"unsafe","action_summary":"attempt"}
+                """.trimIndent()
+            )
+            enqueueRawResponse("""{"decision":"noop","reason":"done"}""")
+        }
+        val superegoLlm = StubChatModelClient().apply {
+            enqueueRawResponse("""{"allow":false,"reason":"unsafe action for policy reasons","reason_code":"POLICY_CUSTOM"}""")
+        }
+        val instrumentation = RecordingInstrumentation()
+        val outputs = mutableListOf<String>()
+        val hippocampus = RecordingHippocampus(
+            recall = MemoryRecall(provider = "test_memory", text = "")
+        )
+        val config = AgentConfig(planner = PlannerConfig(maxLoopStepsPerInput = 4, maxThoughtPasses = 2))
+        val agent = Ego(
+            planner = LlmEgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
+            superego = Superego(modelClient = superegoLlm, config = config, instrumentation = instrumentation),
+            motorCortex = buildMotorCortex(output = { outputs.add(it) }),
+            config = config,
+            hippocampus = hippocampus,
+            instrumentation = instrumentation
+        )
+
+        runAgentWithInput(agent, "hello\nexit\n")
+
+        assertTrue(
+            hippocampus.imprints.any {
+                it.source == "ego_reflection_lesson" && it.summary.startsWith("REFLECTION_LESSON:")
+            }
+        )
+    }
+
+    @Test
+    fun `technical denial does not store reflection lesson`() {
+        val plannerLlm = StubChatModelClient().apply {
+            enqueueRawResponse(
+                """
+                {"decision":"action","urgency":"medium","action_type":"answer","action_payload":"quick answer","action_summary":"attempt"}
+                """.trimIndent()
+            )
+            enqueueRawResponse("""{"decision":"noop","reason":"done"}""")
+        }
+        val superegoLlm = StubChatModelClient().apply {
+            enqueueRawResponse("""{"allow":false,"reason":"model response could not be parsed","reason_code":"TECH_PARSE_ERROR"}""")
+        }
+        val instrumentation = RecordingInstrumentation()
+        val outputs = mutableListOf<String>()
+        val hippocampus = RecordingHippocampus(
+            recall = MemoryRecall(provider = "test_memory", text = "")
+        )
+        val config = AgentConfig(planner = PlannerConfig(maxLoopStepsPerInput = 4, maxThoughtPasses = 2))
+        val agent = Ego(
+            planner = LlmEgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
+            superego = Superego(modelClient = superegoLlm, config = config, instrumentation = instrumentation),
+            motorCortex = buildMotorCortex(output = { outputs.add(it) }),
+            config = config,
+            hippocampus = hippocampus,
+            instrumentation = instrumentation
+        )
+
+        runAgentWithInput(agent, "hello\nexit\n")
+
+        assertTrue(hippocampus.imprints.none { it.source == "ego_reflection_lesson" })
+    }
+
+    @Test
     fun `repeated external action after successful evidence emits redundancy soft signal`() {
         val plannerLlm = StubChatModelClient().apply {
             enqueueRawResponse(
@@ -679,8 +808,8 @@ class EgoAgentTest {
 
         runAgentWithInput(agent, "hello\nexit\n")
 
-        assertEquals(1, hippocampus.queries.size)
-        assertTrue(hippocampus.queries.single().cue.contains("hello"))
+        assertTrue(hippocampus.queries.isNotEmpty())
+        assertTrue(hippocampus.queries.any { it.cue.contains("hello") })
         val prompt = plannerLlm.lastMessages.last().content
         assertTrue(prompt.contains("Long-term memory recall:"))
         assertTrue(prompt.contains("prior preference: concise responses"))
@@ -927,7 +1056,7 @@ class EgoAgentTest {
 
         runAgentWithInput(agent, "hello\nexit\n")
 
-        assertEquals(1, hippocampus.queries.size)
+        assertTrue(hippocampus.queries.isNotEmpty())
         assertEquals(1, instrumentation.events.count { it.type == "long_term_memory_recall_skipped" })
     }
 
@@ -971,8 +1100,8 @@ class EgoAgentTest {
 
         runAgentWithInput(agent, "hello\nexit\n")
 
-        assertEquals(2, hippocampus.queries.size)
-        assertTrue(hippocampus.queries.last().cue.contains("project constraints and deadlines"))
+        assertTrue(hippocampus.queries.size >= 2)
+        assertTrue(hippocampus.queries.any { it.cue.contains("project constraints and deadlines") })
         assertTrue(instrumentation.events.any { it.type == "long_term_memory_recall_requested" })
     }
 
@@ -1341,7 +1470,7 @@ class EgoAgentTest {
         runAgentWithInput(agent, "what is my name?\nexit\n")
 
         assertEquals(listOf("ego> Your name is Victor."), outputs)
-        assertTrue(hippocampus.imprints.isEmpty())
+        assertTrue(hippocampus.imprints.none { it.source == "ego_long_term_memory_assessment" })
         val skipEvent = instrumentation.events.firstOrNull { it.type == "long_term_memory_persistence_skipped" }
         assertTrue(skipEvent != null)
         assertEquals("recall_echo_suppression", skipEvent?.data?.get("reason_code"))
@@ -1455,7 +1584,7 @@ class EgoAgentTest {
 
         runAgentWithInput(agent, "hello\nexit\n")
 
-        assertTrue(hippocampus.imprints.isEmpty())
+        assertTrue(hippocampus.imprints.none { it.source == "ego_long_term_memory_assessment" })
         val skipEvent = instrumentation.events.firstOrNull { it.type == "long_term_memory_persistence_skipped" }
         assertTrue(skipEvent != null)
         assertEquals("confidence_below_threshold", skipEvent?.data?.get("reason_code"))
@@ -1510,7 +1639,7 @@ class EgoAgentTest {
 
         runAgentWithInput(agent, "hello\nexit\n")
 
-        assertTrue(hippocampus.imprints.isEmpty())
+        assertTrue(hippocampus.imprints.none { it.source == "ego_long_term_memory_assessment" })
         val skipEvent = instrumentation.events.firstOrNull { it.type == "long_term_memory_persistence_skipped" }
         assertTrue(skipEvent != null)
         assertEquals("advisor_declined_save", skipEvent?.data?.get("reason_code"))
@@ -1608,7 +1737,10 @@ class EgoAgentTest {
         }
         val config = AgentConfig(
             planner = PlannerConfig(maxLoopStepsPerInput = 3),
-            memory = MemoryConfig(longTermMemoryAssessEverySteps = 100)
+            memory = MemoryConfig(
+                longTermMemoryAssessEverySteps = 100,
+                longTermMemoryForceAssessOnTerminalAnswer = false
+            )
         )
         val agent = Ego(
             planner = LlmEgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
@@ -1626,7 +1758,7 @@ class EgoAgentTest {
 
         runAgentWithInput(agent, "hello\nexit\n")
 
-        assertTrue(hippocampus.imprints.isEmpty())
+        assertTrue(hippocampus.imprints.none { it.source == "ego_long_term_memory_assessment" })
         assertFalse(
             instrumentation.events.any {
                 it.type == "long_term_memory_assessment" &&

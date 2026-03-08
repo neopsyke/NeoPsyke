@@ -36,8 +36,8 @@ cognitive_roles:
     model: gpt-4.1-mini
 
 web_search:
-  provider: google
-  model: gemini-2.5-flash
+  provider: groq
+  model: groq/compound-mini
 
 model_catalog:
   openai:

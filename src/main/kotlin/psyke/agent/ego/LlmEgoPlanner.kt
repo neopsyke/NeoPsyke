@@ -736,6 +736,7 @@ class LlmEgoPlanner(
         }
         val shortTermContextSummary = context.shortTermContextSummary.ifBlank { "none" }
         val longTermMemoryRecall = context.longTermMemoryRecall.ifBlank { "none" }
+        val reflectionLessons = context.reflectionLessons.ifBlank { "none" }
         val episodicRecall = context.episodicRecall.ifBlank { "none" }
         val taskWorkspaceSummary = context.taskWorkspaceSummary.ifBlank { "none" }
         val evidenceHints = context.evidenceHints.ifBlank { "none" }
@@ -863,6 +864,12 @@ class LlmEgoPlanner(
                 PromptBudgetAllocator.Section(
                     role = ChatRole.USER,
                     priority = PromptBudgetAllocator.Priority.IMPORTANT,
+                    minTokens = 20,
+                    content = "Reflection lessons (avoid repeated failed strategies):\n$reflectionLessons"
+                ),
+                PromptBudgetAllocator.Section(
+                    role = ChatRole.USER,
+                    priority = PromptBudgetAllocator.Priority.IMPORTANT,
                     minTokens = 24,
                     content = "Episodic memory timeline:\n$episodicRecall"
                 ),
@@ -936,6 +943,7 @@ class LlmEgoPlanner(
             .ifBlank { "none" }
         val shortTermContextSummary = context.shortTermContextSummary.ifBlank { "none" }
         val longTermMemoryRecall = context.longTermMemoryRecall.ifBlank { "none" }
+        val reflectionLessons = context.reflectionLessons.ifBlank { "none" }
         val taskWorkspaceSummary = context.taskWorkspaceSummary.ifBlank { "none" }
         val evidenceHints = context.evidenceHints.ifBlank { "none" }
 
@@ -987,6 +995,11 @@ class LlmEgoPlanner(
                     role = ChatRole.USER,
                     priority = PromptBudgetAllocator.Priority.OPTIONAL,
                     content = "Long-term memory recall:\n$longTermMemoryRecall"
+                ),
+                PromptBudgetAllocator.Section(
+                    role = ChatRole.USER,
+                    priority = PromptBudgetAllocator.Priority.OPTIONAL,
+                    content = "Reflection lessons:\n$reflectionLessons"
                 ),
                 PromptBudgetAllocator.Section(
                     role = ChatRole.USER,
