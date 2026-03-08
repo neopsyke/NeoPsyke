@@ -299,13 +299,19 @@ you> exit
 
 ## Realtime dashboard
 - Enabled by default and served locally on `http://127.0.0.1:8787/`.
+- Split pages:
+  - Conversations (primary): `http://127.0.0.1:8787/`
+  - Observability dashboard: `http://127.0.0.1:8787/dashboard`
 - Uses async instrumentation (`InstrumentationBus`) with pluggable sinks:
   - `StructuredLogSink` (logs)
   - `DashboardStateStore` + SSE stream (UI)
 - Queue, loop, thought/action flow, Superego in/out, and LLM events are streamed as typed events.
 - Thought Chain / Timeline includes non-snapshot events, including `llm_raw_response` payloads.
 - Queue snapshots are used for queue panels/counts, not shown as timeline items.
-- Task Workspace drawer (Action Flow -> `Workspace`) fetches full debug snapshots on demand from `/api/workspace` and `/api/workspace/{rootId}`.
+- API namespaces:
+  - Chat control plane: `/api/chat/*` (`sessions`, `messages`, session-scoped SSE)
+  - Observability: `/api/obs/*` (`snapshot`, global `events`, `workspace`)
+- Task Workspace drawer (Action Flow -> `Workspace`) fetches full debug snapshots on demand from `/api/obs/workspace` and `/api/obs/workspace/{rootId}`.
 - Full workspace snapshots use two-lane instrumentation: lightweight `task_workspace_head` is streamed live; heavy `task_workspace_debug_snapshot` is captured server-side and excluded from SSE broadcasting.
 - If dashboard bind fails, app continues running without the dashboard server.
 
@@ -313,7 +319,9 @@ you> exit
 - Priority order: incoming inputs first.
 - Inputs are ingested through `SensoryCortex` (extensible input-source abstraction).
 - Input priority levels: `low` (1), `medium` (2, default), `high` (3).
-- The built-in stdin source always submits with `high` priority.
+- Interactive runtime uses an async multiplexer input source:
+  - built-in stdin source submits with `high` priority
+  - chat API submissions (`/api/chat/sessions/{id}/messages`) are also ingested as high-priority signals
 - `MemoryStore` keeps bounded rolling memory and compacts older turns into a summary as it nears capacity.
 - Memory summary included in Ego/Superego prompts is token-capped to stay within LLM context budgets.
 - Optional Task Workspace (`EGO_TASK_WORKSPACE_ENABLED=true`) keeps an ephemeral per-request notebook (index + summaries + evidence).

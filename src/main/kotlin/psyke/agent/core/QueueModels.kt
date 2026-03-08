@@ -4,6 +4,7 @@ data class PendingInput(
     val id: Long,
     val content: String,
     val priority: InputPriority = InputPriority.MEDIUM,
+    val source: String = "external",
     val enqueuedAtMs: Long = System.currentTimeMillis(),
 )
 

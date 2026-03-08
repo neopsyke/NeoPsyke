@@ -14,6 +14,8 @@ import psyke.agent.memory.longterm.LlmLongTermMemoryAdvisor
 import psyke.agent.memory.longterm.McpHippocampus
 import psyke.agent.tools.mcp.McpStdioClient
 import psyke.agent.core.ActionType
+import psyke.agent.cortex.sensory.AsyncSensoryInputSource
+import psyke.agent.cortex.sensory.SensoryCortex
 import psyke.agent.cortex.motor.ActionImplementationStatus
 import psyke.agent.cortex.motor.MotorCortex
 import psyke.agent.memory.longterm.NoopHippocampus
@@ -32,6 +34,7 @@ import psyke.config.LlmRuntimeConfig
 import psyke.config.McpRuntimeConfig
 import psyke.dashboard.DashboardServer
 import psyke.dashboard.DashboardStateStore
+import psyke.dashboard.ChatRuntimeBridge
 import psyke.eval.MemoryLiveEvalOptions
 import psyke.eval.MemoryLiveEvalReporter
 import psyke.eval.MemoryLiveEvalRunner
@@ -493,6 +496,15 @@ internal object AppModeRunners {
         val dashboardEnabled = runtimeSettings.dashboardEnabled
     
         val dashboardStore = DashboardStateStore()
+        val sensoryInput = AsyncSensoryInputSource(
+            includeStdin = true,
+            emitStdinClosedSignal = !dashboardEnabled
+        )
+        val sensoryCortex = SensoryCortex(config = config, source = sensoryInput)
+        val chatBridge = ChatRuntimeBridge(
+            store = dashboardStore,
+            sensoryInput = sensoryInput
+        )
         val sidecarPath = resolveEvalEventSidecarPath()
         val sidecarSink = if (sidecarPath == null) {
             null
@@ -506,37 +518,39 @@ internal object AppModeRunners {
                 null
             }
         }
-        InstrumentationBus(
-            sinks = listOfNotNull(
-                StructuredLogSink(),
-                dashboardStore
-            ),
-            criticalSinks = listOfNotNull(sidecarSink)
-        ).use { instrumentation ->
-            val dashboardServer = if (dashboardEnabled) {
-                try {
-                    DashboardServer(
-                        store = dashboardStore,
-                        port = dashboardPort
-                    ).also { it.start() }
-                } catch (ex: Exception) {
-                    logger.warn(ex) { "Dashboard failed to start on port $dashboardPort. Continuing without dashboard server." }
+        try {
+            InstrumentationBus(
+                sinks = listOfNotNull(
+                    StructuredLogSink(),
+                    dashboardStore
+                ),
+                criticalSinks = listOfNotNull(sidecarSink)
+            ).use { instrumentation ->
+                val dashboardServer = if (dashboardEnabled) {
+                    try {
+                        DashboardServer(
+                            store = dashboardStore,
+                            chatBridge = chatBridge,
+                            port = dashboardPort
+                        ).also { it.start() }
+                    } catch (ex: Exception) {
+                        logger.warn(ex) { "Dashboard failed to start on port $dashboardPort. Continuing without dashboard server." }
+                        null
+                    }
+                } else {
                     null
                 }
-            } else {
-                null
-            }
     
-            dashboardServer.use {
-                if (dashboardEnabled) {
-                    logger.info { "Dashboard available at ${dashboardServer?.url}" }
-                }
-                instrumentation.emit(AgentEvents.loopStatus(status = "booting", message = "application_start"))
-                instrumentation.emit(
-                    AgentEvent(
-                        type = "limits_config",
-                        data = mapOf(
-                            "limits" to mapOf(
+                dashboardServer.use {
+                    if (dashboardEnabled) {
+                        logger.info { "Dashboard available at ${dashboardServer?.url}" }
+                    }
+                    instrumentation.emit(AgentEvents.loopStatus(status = "booting", message = "application_start"))
+                    instrumentation.emit(
+                        AgentEvent(
+                            type = "limits_config",
+                            data = mapOf(
+                                "limits" to mapOf(
                                 "max_loop_steps" to config.planner.maxLoopStepsPerInput,
                                 "loop_delay_ms" to config.loopDelayMs,
                                 "max_thought_passes" to config.planner.maxThoughtPasses,
@@ -861,6 +875,7 @@ internal object AppModeRunners {
                                                             hippocampus = hippocampus,
                                                             metaReasoner = metaReasoner,
                                                             longTermMemoryAdvisor = longTermMemoryAdvisor,
+                                                            sensoryCortex = sensoryCortex,
                                                             taskWorkspaceFinalizer = taskWorkspaceFinalizer,
                                                             instrumentation = instrumentation,
                                                             logbook = logbook,
@@ -882,11 +897,13 @@ internal object AppModeRunners {
                                 }
                             }
                         }
+                    }
                 }
             }
+            }
+        } finally {
+            sensoryInput.close()
         }
-    }
-    
     }
 
     private data class WebSearchRuntime(

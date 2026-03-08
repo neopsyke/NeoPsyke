@@ -81,7 +81,12 @@ class Ego(
                 }
 
                 is SensorySignal.InputReceived -> {
-                    if (!scheduler.enqueueInput(signal.input.content, signal.input.priority)) {
+                    if (!scheduler.enqueueInput(
+                            content = signal.input.content,
+                            priority = signal.input.priority,
+                            source = signal.input.source
+                        )
+                    ) {
                         logger.warn { "Input queue full; dropping input." }
                         instrumentation.emit(AgentEvents.warning("Input queue full; dropping input."))
                         recordQueueSaturation(

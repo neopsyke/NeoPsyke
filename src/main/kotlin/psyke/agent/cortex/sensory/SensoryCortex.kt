@@ -3,6 +3,10 @@ package psyke.agent.cortex.sensory
 import psyke.agent.core.AgentConfig
 import psyke.agent.core.InputPriority
 import psyke.agent.support.TextSecurity
+import java.io.Closeable
+import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.TimeUnit
+import kotlin.concurrent.thread
 
 data class SensoryInput(
     val content: String,
@@ -41,6 +45,94 @@ class StdinSensoryInputSource(
                 source = "stdin"
             )
         )
+    }
+}
+
+class AsyncSensoryInputSource(
+    private val includeStdin: Boolean = true,
+    private val emitStdinClosedSignal: Boolean = true,
+    private val pollTimeoutMs: Long = DEFAULT_POLL_TIMEOUT_MS,
+    private val readLineFn: () -> String? = { readLine() },
+    private val prompt: () -> Unit = { print("you> ") },
+) : SensoryInputSource, Closeable {
+    private val queue = LinkedBlockingQueue<SensorySignal>(MAX_SIGNAL_QUEUE)
+    @Volatile
+    private var running: Boolean = true
+    private val stdinReaderThread: Thread? = if (includeStdin) {
+        thread(name = "psyke-stdin-sensory", isDaemon = true) {
+            while (running) {
+                prompt()
+                val rawInput = readLineFn()
+                if (rawInput == null) {
+                    if (emitStdinClosedSignal) {
+                        offerSignal(SensorySignal.SourceClosed(source = "stdin"))
+                    }
+                    break
+                }
+                if (rawInput.trim().equals("exit", ignoreCase = true)) {
+                    offerSignal(SensorySignal.ExitRequested(source = "stdin"))
+                    continue
+                }
+                if (rawInput.isBlank()) {
+                    offerSignal(SensorySignal.NoInput)
+                    continue
+                }
+                offerSignal(
+                    SensorySignal.InputReceived(
+                        SensoryInput(
+                            content = rawInput,
+                            priority = InputPriority.HIGH,
+                            source = "stdin"
+                        )
+                    )
+                )
+            }
+        }
+    } else {
+        null
+    }
+
+    fun submitInput(
+        content: String,
+        source: String,
+        priority: InputPriority = InputPriority.HIGH,
+    ): Boolean = offerSignal(
+        SensorySignal.InputReceived(
+            SensoryInput(
+                content = content,
+                priority = priority,
+                source = source
+            )
+        )
+    )
+
+    override fun nextSignal(): SensorySignal {
+        return try {
+            val signal = queue.poll(pollTimeoutMs, TimeUnit.MILLISECONDS)
+            signal ?: SensorySignal.NoInput
+        } catch (_: InterruptedException) {
+            Thread.currentThread().interrupt()
+            SensorySignal.NoInput
+        }
+    }
+
+    override fun close() {
+        running = false
+        stdinReaderThread?.interrupt()
+        queue.clear()
+    }
+
+    private fun offerSignal(signal: SensorySignal): Boolean {
+        if (queue.offer(signal)) {
+            return true
+        }
+        queue.poll()
+        return queue.offer(signal)
+    }
+
+    private companion object {
+        const val MAX_SIGNAL_QUEUE: Int = 4_096
+        const val DEFAULT_POLL_TIMEOUT_MS: Long = 250L
     }
 }
 

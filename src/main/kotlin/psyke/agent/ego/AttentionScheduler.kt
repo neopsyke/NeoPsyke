@@ -12,14 +12,19 @@ class AttentionScheduler(
     private val actions = PriorityQueue<PendingAction>(actionComparator)
     private var latestQueuedInput: PendingInput? = null
 
-    fun enqueueInput(content: String, priority: InputPriority = InputPriority.MEDIUM): Boolean {
+    fun enqueueInput(
+        content: String,
+        priority: InputPriority = InputPriority.MEDIUM,
+        source: String = "external",
+    ): Boolean {
         if (inputs.size >= config.maxPendingInputs) {
             return false
         }
         val input = PendingInput(
             id = nextId(),
             content = content,
-            priority = priority
+            priority = priority,
+            source = source
         )
         inputs.add(input)
         latestQueuedInput = input

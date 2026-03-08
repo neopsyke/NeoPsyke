@@ -3,8 +3,12 @@ package psyke.dashboard
 import java.nio.charset.StandardCharsets
 
 object DashboardAssets {
-    val indexHtml: String by lazy {
-        loadText("/dashboard/index.html")
+    val conversationsHtml: String by lazy {
+        loadText("/dashboard/conversations.html")
+    }
+
+    val observabilityHtml: String by lazy {
+        loadText("/dashboard/observability.html")
     }
 
     private fun loadText(path: String): String {

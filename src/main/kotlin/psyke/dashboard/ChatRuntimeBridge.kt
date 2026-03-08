@@ -1,0 +1,68 @@
+package psyke.dashboard
+
+import psyke.agent.core.InputPriority
+import psyke.agent.cortex.sensory.AsyncSensoryInputSource
+
+data class ChatSubmitResult(
+    val accepted: Boolean,
+    val detail: String,
+)
+
+class ChatRuntimeBridge(
+    private val store: DashboardStateStore,
+    private val sensoryInput: AsyncSensoryInputSource,
+) {
+    init {
+        store.ensureChatSession()
+    }
+
+    fun createSession(title: String? = null): ChatSessionSummary =
+        store.createChatSession(title = title)
+
+    fun listSessionsJson(): String = store.chatSessionsJson()
+
+    fun sessionJson(sessionId: String): String? = store.chatSessionJson(sessionId = sessionId)
+
+    fun submitMessage(sessionId: String, content: String): ChatSubmitResult {
+        val sanitizedContent = content.trim()
+        if (sanitizedContent.isBlank()) {
+            return ChatSubmitResult(
+                accepted = false,
+                detail = "Message content cannot be blank."
+            )
+        }
+        if (!store.hasChatSession(sessionId)) {
+            return ChatSubmitResult(
+                accepted = false,
+                detail = "Unknown session id."
+            )
+        }
+        val message = store.addUserMessage(
+            sessionId = sessionId,
+            content = sanitizedContent,
+            source = "web"
+        ) ?: return ChatSubmitResult(
+            accepted = false,
+            detail = "Failed to record user message."
+        )
+        val accepted = sensoryInput.submitInput(
+            content = message.content,
+            source = "chat:${message.sessionId}",
+            priority = InputPriority.HIGH
+        )
+        return if (accepted) {
+            ChatSubmitResult(
+                accepted = true,
+                detail = "Message enqueued."
+            )
+        } else {
+            ChatSubmitResult(
+                accepted = false,
+                detail = "Input queue is full."
+            )
+        }
+    }
+
+    fun subscribe(sessionId: String): DashboardSubscription? =
+        store.subscribeChat(sessionId)
+}

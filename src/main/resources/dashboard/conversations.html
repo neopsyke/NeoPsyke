@@ -1,0 +1,426 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Psyke Conversations</title>
+  <style>
+    :root {
+      --bg: #0e171c;
+      --panel: #14262d;
+      --line: #25424f;
+      --text: #d6e6eb;
+      --muted: #8faab4;
+      --accent: #35c3a8;
+      --user: #245e73;
+      --assistant: #2b4430;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      background: radial-gradient(circle at 20% 0%, #183039 0%, var(--bg) 55%);
+      color: var(--text);
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr);
+      overflow: hidden;
+    }
+    header {
+      border-bottom: 1px solid var(--line);
+      padding: 12px 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .btn {
+      border: 1px solid var(--line);
+      background: rgba(14, 23, 28, 0.7);
+      color: var(--text);
+      border-radius: 6px;
+      padding: 7px 10px;
+      font-size: 12px;
+      cursor: pointer;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .btn:hover {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+    .layout {
+      min-height: 0;
+      display: grid;
+      grid-template-columns: 320px minmax(0, 1fr);
+      gap: 12px;
+      padding: 12px;
+    }
+    .panel {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(20, 38, 45, 0.9);
+      min-height: 0;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+    .panel-head {
+      padding: 10px;
+      border-bottom: 1px solid var(--line);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .sessions {
+      min-height: 0;
+      overflow: auto;
+    }
+    .session {
+      width: 100%;
+      border: 0;
+      border-bottom: 1px solid var(--line);
+      background: transparent;
+      color: var(--text);
+      text-align: left;
+      padding: 10px;
+      cursor: pointer;
+      font: inherit;
+    }
+    .session:hover {
+      background: rgba(53, 195, 168, 0.08);
+    }
+    .session.active {
+      background: rgba(53, 195, 168, 0.14);
+    }
+    .session-title {
+      font-size: 12px;
+      font-weight: 700;
+      margin-bottom: 4px;
+    }
+    .session-meta {
+      font-size: 11px;
+      color: var(--muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .messages {
+      flex: 1;
+      min-height: 0;
+      overflow: auto;
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .msg {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 8px 10px;
+      font-size: 12px;
+      line-height: 1.35;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .msg.user {
+      background: rgba(36, 94, 115, 0.45);
+      border-color: rgba(78, 167, 199, 0.45);
+    }
+    .msg.assistant {
+      background: rgba(43, 68, 48, 0.5);
+      border-color: rgba(90, 164, 104, 0.45);
+    }
+    .msg-meta {
+      font-size: 10px;
+      color: var(--muted);
+      margin-bottom: 4px;
+      text-transform: uppercase;
+      letter-spacing: .03em;
+    }
+    .composer {
+      border-top: 1px solid var(--line);
+      padding: 10px;
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 8px;
+    }
+    textarea {
+      width: 100%;
+      min-height: 72px;
+      max-height: 240px;
+      resize: vertical;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: rgba(14, 23, 28, 0.7);
+      color: var(--text);
+      font: inherit;
+      padding: 8px;
+    }
+    .status {
+      color: var(--muted);
+      font-size: 11px;
+      padding: 0 10px 10px;
+    }
+    @media (max-width: 960px) {
+      .layout {
+        grid-template-columns: 1fr;
+        grid-template-rows: 220px minmax(0, 1fr);
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div><strong>Psyke Conversations</strong></div>
+    <div class="actions">
+      <button id="new-session-btn" class="btn" type="button">New Conversation</button>
+      <a class="btn" href="/dashboard" target="_blank" rel="noopener noreferrer">Open Dashboard</a>
+    </div>
+  </header>
+
+  <div class="layout">
+    <section class="panel">
+      <div class="panel-head">
+        <span>Conversations</span>
+        <span id="sessions-count">0</span>
+      </div>
+      <div class="sessions" id="sessions"></div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <span id="active-session-title">Select a conversation</span>
+        <span id="active-session-id"></span>
+      </div>
+      <div id="messages" class="messages"></div>
+      <div class="composer">
+        <textarea id="composer" placeholder="Type a message..."></textarea>
+        <button id="send-btn" class="btn" type="button">Send</button>
+      </div>
+      <div id="status" class="status">Loading sessions...</div>
+    </section>
+  </div>
+
+  <script>
+    const state = {
+      sessions: [],
+      selectedSessionId: null,
+      selectedSessionMessages: [],
+      eventSource: null
+    };
+
+    function setStatus(text) {
+      document.getElementById("status").textContent = text;
+    }
+
+    function fmtTime(ms) {
+      if (!ms) return "-";
+      try {
+        return new Date(Number(ms)).toLocaleTimeString();
+      } catch (_) {
+        return "-";
+      }
+    }
+
+    function esc(str) {
+      return String(str == null ? "" : str)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;");
+    }
+
+    async function fetchJson(url, init) {
+      const res = await fetch(url, Object.assign({ cache: "no-store" }, init || {}));
+      const text = await res.text();
+      let payload = null;
+      try { payload = text ? JSON.parse(text) : null; } catch (_) {}
+      if (!res.ok) {
+        const detail = payload && payload.detail ? payload.detail : ("HTTP " + res.status);
+        throw new Error(detail);
+      }
+      return payload;
+    }
+
+    function renderSessions() {
+      const root = document.getElementById("sessions");
+      const count = document.getElementById("sessions-count");
+      count.textContent = String(state.sessions.length);
+      root.innerHTML = state.sessions.map((s) => {
+        const active = s.session_id === state.selectedSessionId ? "active" : "";
+        const preview = s.last_message_preview ? s.last_message_preview : "No messages yet";
+        return (
+          "<button class=\"session " + active + "\" data-id=\"" + esc(s.session_id) + "\">" +
+          "<div class=\"session-title\">" + esc(s.title || s.session_id) + "</div>" +
+          "<div class=\"session-meta\">#" + esc(s.session_id) + " • " + esc(s.message_count || 0) + " msgs</div>" +
+          "<div class=\"session-meta\">" + esc(preview) + "</div>" +
+          "</button>"
+        );
+      }).join("");
+
+      root.querySelectorAll(".session").forEach((btn) => {
+        btn.addEventListener("click", () => selectSession(btn.getAttribute("data-id")));
+      });
+    }
+
+    function renderMessages() {
+      const root = document.getElementById("messages");
+      root.innerHTML = state.selectedSessionMessages.map((m) => {
+        const role = m.role === "assistant" ? "assistant" : "user";
+        return (
+          "<div class=\"msg " + role + "\" data-id=\"" + esc(m.id) + "\">" +
+          "<div class=\"msg-meta\">" + esc(role) + " • " + esc(fmtTime(m.created_at_ms)) + "</div>" +
+          "<div>" + esc(m.content) + "</div>" +
+          "</div>"
+        );
+      }).join("");
+      root.scrollTop = root.scrollHeight;
+    }
+
+    function refreshSessionHeader() {
+      const title = document.getElementById("active-session-title");
+      const id = document.getElementById("active-session-id");
+      const current = state.sessions.find((s) => s.session_id === state.selectedSessionId);
+      if (!current) {
+        title.textContent = "Select a conversation";
+        id.textContent = "";
+        return;
+      }
+      title.textContent = current.title || current.session_id;
+      id.textContent = "#" + current.session_id;
+    }
+
+    function closeEventSource() {
+      if (state.eventSource) {
+        state.eventSource.close();
+        state.eventSource = null;
+      }
+    }
+
+    function connectSessionEvents(sessionId) {
+      closeEventSource();
+      const es = new EventSource("/api/chat/sessions/" + encodeURIComponent(sessionId) + "/events");
+      state.eventSource = es;
+      es.addEventListener("open", () => setStatus("Connected"));
+      es.addEventListener("error", () => setStatus("Reconnecting..."));
+      es.addEventListener("chat", (event) => {
+        let payload = null;
+        try { payload = JSON.parse(event.data); } catch (_) { return; }
+        if (!payload || payload.type !== "message" || !payload.message) return;
+        const incoming = payload.message;
+        const exists = state.selectedSessionMessages.some((m) => Number(m.id) === Number(incoming.id));
+        if (!exists) {
+          state.selectedSessionMessages.push(incoming);
+          renderMessages();
+          refreshSessionSnapshotCounts();
+        }
+      });
+    }
+
+    function refreshSessionSnapshotCounts() {
+      const current = state.sessions.find((s) => s.session_id === state.selectedSessionId);
+      if (!current) return;
+      current.message_count = state.selectedSessionMessages.length;
+      current.last_message_preview = state.selectedSessionMessages.length
+        ? state.selectedSessionMessages[state.selectedSessionMessages.length - 1].content
+        : "";
+      current.updated_at_ms = Date.now();
+      renderSessions();
+    }
+
+    async function loadSessions() {
+      const payload = await fetchJson("/api/chat/sessions");
+      state.sessions = Array.isArray(payload && payload.sessions) ? payload.sessions : [];
+      if (!state.sessions.length) {
+        const created = await createSession("Default");
+        state.sessions = [created];
+      }
+      if (!state.selectedSessionId) {
+        state.selectedSessionId = state.sessions[0].session_id;
+      }
+      renderSessions();
+      await selectSession(state.selectedSessionId);
+    }
+
+    async function selectSession(sessionId) {
+      if (!sessionId) return;
+      state.selectedSessionId = sessionId;
+      renderSessions();
+      refreshSessionHeader();
+      const payload = await fetchJson("/api/chat/sessions/" + encodeURIComponent(sessionId));
+      state.selectedSessionMessages = Array.isArray(payload && payload.messages) ? payload.messages.slice() : [];
+      renderMessages();
+      connectSessionEvents(sessionId);
+      setStatus("Connected");
+    }
+
+    async function createSession(defaultTitle) {
+      const maybeTitle = window.prompt("Conversation title:", defaultTitle || "");
+      if (maybeTitle === null) {
+        throw new Error("cancelled");
+      }
+      const payload = await fetchJson("/api/chat/sessions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: maybeTitle || "Conversation" })
+      });
+      return payload;
+    }
+
+    async function onNewSession() {
+      try {
+        const created = await createSession("Conversation");
+        state.sessions.unshift(created);
+        state.selectedSessionId = created.session_id;
+        renderSessions();
+        await selectSession(created.session_id);
+      } catch (err) {
+        if (String(err && err.message) !== "cancelled") {
+          setStatus("Failed to create session: " + (err && err.message ? err.message : "unknown"));
+        }
+      }
+    }
+
+    async function onSend() {
+      const textarea = document.getElementById("composer");
+      const content = textarea.value.trim();
+      if (!content || !state.selectedSessionId) return;
+      textarea.value = "";
+      try {
+        await fetchJson("/api/chat/sessions/" + encodeURIComponent(state.selectedSessionId) + "/messages", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ content: content })
+        });
+      } catch (err) {
+        setStatus("Send failed: " + (err && err.message ? err.message : "unknown"));
+      }
+    }
+
+    document.getElementById("new-session-btn").addEventListener("click", () => onNewSession());
+    document.getElementById("send-btn").addEventListener("click", () => onSend());
+    document.getElementById("composer").addEventListener("keydown", (event) => {
+      if (event.key === "Enter" && !event.shiftKey) {
+        event.preventDefault();
+        onSend();
+      }
+    });
+
+    loadSessions()
+      .then(() => setStatus("Connected"))
+      .catch((err) => setStatus("Failed to load sessions: " + (err && err.message ? err.message : "unknown")));
+
+    window.addEventListener("beforeunload", () => closeEventSource());
+  </script>
+</body>
+</html>
