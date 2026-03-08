@@ -50,7 +50,11 @@ internal class MemoryCoordinator(
     private val runId: String? = null,
 ) {
     private val memoryStoreFactory: () -> MemoryStore = { MemoryStore(config.memory.maxShortTermContextChars) }
-    private val sessionMemoryStores = mutableMapOf<String, MemoryStore>()
+    private val sessionMemoryStores: MutableMap<String, MemoryStore> =
+        object : LinkedHashMap<String, MemoryStore>(16, 0.75f, true) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, MemoryStore>): Boolean =
+                size > MAX_TRACKED_SESSIONS
+        }
     private var activeSessionId: String = ConversationContext.DEFAULT_SESSION_ID
     private var activeInterlocutor: Interlocutor = Interlocutor.UNKNOWN
 
@@ -69,17 +73,20 @@ internal class MemoryCoordinator(
     private fun activeMemoryStore(): MemoryStore =
         sessionMemoryStores.getOrPut(activeSessionId) { memoryStoreFactory() }
 
-    private var lastConsolidationStep: Int = 0
-    private val recentImprintFingerprints = ArrayDeque<String>()
-
     private data class SessionMemoryState(
         var latestShortTermSummary: String = "",
         var latestLongTermRecall: String = "",
         val circuitBreaker: LlmCallCircuitBreaker,
         var explicitIntentAssessmentTriggeredForInput: Boolean = false,
+        var lastConsolidationStep: Int = 0,
+        val recentImprintFingerprints: ArrayDeque<String> = ArrayDeque(),
     )
 
-    private val sessionStates = mutableMapOf<String, SessionMemoryState>()
+    private val sessionStates: MutableMap<String, SessionMemoryState> =
+        object : LinkedHashMap<String, SessionMemoryState>(16, 0.75f, true) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, SessionMemoryState>): Boolean =
+                size > MAX_TRACKED_SESSIONS
+        }
 
     private fun activeState(): SessionMemoryState =
         sessionStates.getOrPut(activeSessionId) {
@@ -155,10 +162,10 @@ internal class MemoryCoordinator(
         if (!force && !forcedByExplicitIntent && !shouldByInterval) return
         val effectiveForce = force || forcedByExplicitIntent
         if (!effectiveForce) {
-            val stepsSinceLast = stepIndex - lastConsolidationStep
+            val stepsSinceLast = stepIndex - sessionState.lastConsolidationStep
             if (stepsSinceLast in 0 until config.memory.longTermMemoryAssessCooldownSteps) return
         }
-        if (stepIndex == lastConsolidationStep && lastConsolidationStep > 0) return
+        if (stepIndex == sessionState.lastConsolidationStep && sessionState.lastConsolidationStep > 0) return
 
         val effectiveTrigger = if (forcedByExplicitIntent) EXPLICIT_REMEMBER_INTENT_TRIGGER else trigger
         if (forcedByExplicitIntent) {
@@ -201,7 +208,7 @@ internal class MemoryCoordinator(
             instrumentation.emit(AgentEvents.warning("Long-term memory assessment failed; skipping this cycle."))
             return
         } finally {
-            lastConsolidationStep = stepIndex
+            sessionState.lastConsolidationStep = stepIndex
         }
 
         instrumentation.emit(
@@ -307,7 +314,7 @@ internal class MemoryCoordinator(
         }
 
         val fingerprint = normalizePayload(decision.summary)
-        if (recentImprintFingerprints.contains(fingerprint)) {
+        if (sessionState.recentImprintFingerprints.contains(fingerprint)) {
             emitMemoryPersistenceSkipped(
                 trigger = effectiveTrigger,
                 stepIndex = stepIndex,
@@ -352,9 +359,9 @@ internal class MemoryCoordinator(
             )
         )
         if (saved) {
-            recentImprintFingerprints.addLast(fingerprint)
-            while (recentImprintFingerprints.size > 24) {
-                recentImprintFingerprints.removeFirst()
+            sessionState.recentImprintFingerprints.addLast(fingerprint)
+            while (sessionState.recentImprintFingerprints.size > MAX_RECENT_IMPRINT_FINGERPRINTS) {
+                sessionState.recentImprintFingerprints.removeFirst()
             }
             journalSafe(
                 eventType = EpisodicEventType.MEMORY_IMPRINT,
@@ -402,6 +409,8 @@ internal class MemoryCoordinator(
                     "start_time" to intent.startTime?.toString(),
                     "end_time" to intent.endTime?.toString(),
                     "keyword_search" to intent.keywordSearch,
+                    "session_id_filter" to intent.sessionIdFilter,
+                    "interlocutor_id_filter" to intent.interlocutorIdFilter,
                     "user_message_preview" to intent.latestUserMessagePreview,
                 )
             )
@@ -412,6 +421,8 @@ internal class MemoryCoordinator(
             endTime = intent.endTime,
             keywordSearch = intent.keywordSearch,
             maxResults = config.logbook.episodicRecallMaxResults,
+            sessionId = intent.sessionIdFilter,
+            interlocutorId = intent.interlocutorIdFilter,
         )
 
         val recall = try {
@@ -456,6 +467,8 @@ internal class MemoryCoordinator(
             keywordSearch = intent.keywordSearch,
             eventTypes = VECTOR_CUE_EVENT_TYPES,
             maxResults = config.logbook.episodicRecallMaxResults,
+            sessionId = intent.sessionIdFilter,
+            interlocutorId = intent.interlocutorIdFilter,
         )
 
         val recall = try {
@@ -499,8 +512,10 @@ internal class MemoryCoordinator(
     }
 
     fun resetForNewInput() {
-        lastConsolidationStep = 0
-        activeState().explicitIntentAssessmentTriggeredForInput = false
+        sessionStates.values.forEach { state ->
+            state.lastConsolidationStep = 0
+            state.explicitIntentAssessmentTriggeredForInput = false
+        }
     }
 
     /** Removes the per-session short-term memory store and session state for the given session. */
@@ -718,12 +733,16 @@ internal class MemoryCoordinator(
         val now = Instant.now()
         val (startTime, endTime) = resolveTemporalWindow(matchedPattern.label, normalized, now)
         val keywordSearch = extractTopicKeyword(normalized)
+        val sessionIdFilter = resolveSessionFilter(normalized)
+        val interlocutorIdFilter = resolveInterlocutorFilter(normalized)
 
         return TemporalRecallIntent(
             patternLabel = matchedPattern.label,
             startTime = startTime,
             endTime = endTime,
             keywordSearch = keywordSearch,
+            sessionIdFilter = sessionIdFilter,
+            interlocutorIdFilter = interlocutorIdFilter,
             latestUserMessagePreview = TextSecurity.preview(latestUserTurn, TEMPORAL_INTENT_PREVIEW_MAX_CHARS),
         )
     }
@@ -771,6 +790,34 @@ internal class MemoryCoordinator(
         val aboutMatch = TOPIC_KEYWORD_REGEX.find(normalizedText) ?: return null
         val topic = aboutMatch.groupValues.getOrNull(1)?.trim() ?: return null
         return topic.takeIf { it.length in TOPIC_KEYWORD_MIN_LENGTH..TOPIC_KEYWORD_MAX_LENGTH }
+    }
+
+    private fun resolveSessionFilter(normalizedText: String): String? {
+        val thisSessionRequested = THIS_SESSION_SCOPE_REGEX.containsMatchIn(normalizedText)
+        if (thisSessionRequested) {
+            return activeSessionId
+        }
+        val explicitSessionId = EXPLICIT_SESSION_SCOPE_REGEX
+            .find(normalizedText)
+            ?.groupValues
+            ?.getOrNull(1)
+            ?.trim()
+            ?.takeIf { it.isNotBlank() && it !in RESERVED_SESSION_SCOPE_TOKENS }
+        return explicitSessionId
+    }
+
+    private fun resolveInterlocutorFilter(normalizedText: String): String? {
+        val thisInterlocutorRequested = THIS_INTERLOCUTOR_SCOPE_REGEX.containsMatchIn(normalizedText)
+        if (thisInterlocutorRequested) {
+            return activeInterlocutor.id
+        }
+        val explicitInterlocutor = EXPLICIT_INTERLOCUTOR_SCOPE_REGEX
+            .find(normalizedText)
+            ?.groupValues
+            ?.getOrNull(1)
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+        return explicitInterlocutor
     }
 
     private fun formatEpisodicRecall(recall: LogbookRecall): String {
@@ -854,6 +901,8 @@ internal class MemoryCoordinator(
         val startTime: Instant?,
         val endTime: Instant?,
         val keywordSearch: String?,
+        val sessionIdFilter: String? = null,
+        val interlocutorIdFilter: String? = null,
         val latestUserMessagePreview: String,
     )
 
@@ -880,6 +929,8 @@ internal class MemoryCoordinator(
         const val REASON_CODE_RECALL_ECHO: String = "recall_echo_suppression"
         const val REASON_CODE_DUPLICATE_FINGERPRINT: String = "duplicate_recent_fingerprint"
         const val LOGBOOK_IMPRINT_PREVIEW_CHARS: Int = 160
+        const val MAX_RECENT_IMPRINT_FINGERPRINTS: Int = 24
+        const val MAX_TRACKED_SESSIONS: Int = 128
 
         // --- Temporal recall intent constants ---
         const val TEMPORAL_INTENT_PREVIEW_MAX_CHARS: Int = 180
@@ -900,6 +951,11 @@ internal class MemoryCoordinator(
         val RECALL_ECHO_NON_ALPHANUMERIC_REGEX: Regex = Regex("[^a-z0-9]+")
         val RECALL_ECHO_WHITESPACE_REGEX: Regex = Regex("\\s+")
         val TOPIC_KEYWORD_REGEX: Regex = Regex("""\babout\s+(.+?)(?:\?|$)""")
+        val THIS_SESSION_SCOPE_REGEX: Regex = Regex("""\b(this|current)\s+(session|conversation|chat)\b""")
+        val EXPLICIT_SESSION_SCOPE_REGEX: Regex = Regex("""\bsession\s*(?:id)?\s*[:=]?\s*([a-z0-9._-]{2,80})\b""")
+        val THIS_INTERLOCUTOR_SCOPE_REGEX: Regex = Regex("""\b(this|current)\s+interlocutor\b""")
+        val EXPLICIT_INTERLOCUTOR_SCOPE_REGEX: Regex = Regex("""\binterlocutor\s*[:=]?\s*([a-z0-9._-]{2,80})\b""")
+        val RESERVED_SESSION_SCOPE_TOKENS: Set<String> = setOf("last", "this", "current", "previous")
 
         val VECTOR_CUE_EVENT_TYPES: Set<EpisodicEventType> = setOf(
             EpisodicEventType.INPUT_RECEIVED,

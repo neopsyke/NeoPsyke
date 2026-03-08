@@ -4,6 +4,7 @@ import psyke.agent.core.AgentConfig
 import psyke.agent.core.DialogueRole
 import psyke.agent.core.DialogueTurn
 import psyke.agent.core.EgoTrigger
+import psyke.agent.core.Interlocutor
 import psyke.agent.core.LogbookConfig
 import psyke.agent.core.PendingInput
 import psyke.agent.memory.episodic.EpisodicEventType
@@ -24,6 +25,7 @@ import java.time.Instant
 import java.time.temporal.ChronoUnit
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class MemoryCoordinatorEpisodicRecallTest {
@@ -274,6 +276,64 @@ class MemoryCoordinatorEpisodicRecallTest {
 
             assertTrue(result.isNotBlank(), "Expected non-empty result for summarize session")
             assertTrue(result.contains("taxes"), "Expected entry about taxes")
+        }
+    }
+
+    @Test
+    fun `recallEpisodic applies current session filter when user requests this session`() {
+        createTempLogbook().use { logbook ->
+            val now = Instant.now()
+            seedLogbook(logbook, listOf(
+                LogbookEntry(
+                    ts = now.minus(10, ChronoUnit.MINUTES),
+                    eventType = EpisodicEventType.INPUT_RECEIVED,
+                    summary = "Session A note",
+                    sessionId = "session-A",
+                ),
+                LogbookEntry(
+                    ts = now.minus(9, ChronoUnit.MINUTES),
+                    eventType = EpisodicEventType.INPUT_RECEIVED,
+                    summary = "Session B note",
+                    sessionId = "session-B",
+                ),
+            ))
+
+            val mc = createCoordinator(logbook = logbook)
+            mc.setActiveSession("session-A", Interlocutor.named("Victor"))
+            val dialogue = listOf(userTurn("what did I ask in this session?"))
+            val result = mc.recallEpisodic(dummyTrigger(), dialogue)
+
+            assertTrue(result.contains("Session A note"), "Expected current session entries to be included")
+            assertFalse(result.contains("Session B note"), "Expected other-session entries to be excluded")
+        }
+    }
+
+    @Test
+    fun `recallEpisodic applies explicit interlocutor filter when requested`() {
+        createTempLogbook().use { logbook ->
+            val now = Instant.now()
+            seedLogbook(logbook, listOf(
+                LogbookEntry(
+                    ts = now.minus(10, ChronoUnit.MINUTES),
+                    eventType = EpisodicEventType.INPUT_RECEIVED,
+                    summary = "Alice memory",
+                    interlocutorId = "alice",
+                ),
+                LogbookEntry(
+                    ts = now.minus(9, ChronoUnit.MINUTES),
+                    eventType = EpisodicEventType.INPUT_RECEIVED,
+                    summary = "Bob memory",
+                    interlocutorId = "bob",
+                ),
+            ))
+
+            val mc = createCoordinator(logbook = logbook)
+            mc.setActiveSession("session-A", Interlocutor.named("Victor"))
+            val dialogue = listOf(userTurn("what did I ask earlier with interlocutor:alice?"))
+            val result = mc.recallEpisodic(dummyTrigger(), dialogue)
+
+            assertTrue(result.contains("Alice memory"), "Expected alice entries to be included")
+            assertFalse(result.contains("Bob memory"), "Expected non-matching interlocutor entries to be excluded")
         }
     }
 }

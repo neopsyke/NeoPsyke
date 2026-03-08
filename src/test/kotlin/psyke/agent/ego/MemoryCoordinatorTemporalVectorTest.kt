@@ -4,6 +4,7 @@ import psyke.agent.core.AgentConfig
 import psyke.agent.core.DialogueRole
 import psyke.agent.core.DialogueTurn
 import psyke.agent.core.EgoTrigger
+import psyke.agent.core.Interlocutor
 import psyke.agent.core.LogbookConfig
 import psyke.agent.core.PendingInput
 import psyke.agent.memory.episodic.EpisodicEventType
@@ -21,6 +22,7 @@ import java.time.Instant
 import java.time.temporal.ChronoUnit
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class MemoryCoordinatorTemporalVectorTest {
@@ -188,5 +190,32 @@ class MemoryCoordinatorTemporalVectorTest {
             !capturedCue!!.contains("temporal_context"),
             "Expected no temporal_context in regular recall, got: $capturedCue"
         )
+    }
+
+    @Test
+    fun `recallEpisodicAsVectorCues applies this-session filter when requested`() {
+        createTempLogbook().use { logbook ->
+            val now = Instant.now()
+            logbook.record(LogbookEntry(
+                ts = now.minus(5, ChronoUnit.MINUTES),
+                eventType = EpisodicEventType.INPUT_RECEIVED,
+                summary = "Session A cue",
+                sessionId = "session-A",
+            ))
+            logbook.record(LogbookEntry(
+                ts = now.minus(4, ChronoUnit.MINUTES),
+                eventType = EpisodicEventType.INPUT_RECEIVED,
+                summary = "Session B cue",
+                sessionId = "session-B",
+            ))
+
+            val mc = createCoordinator(logbook = logbook)
+            mc.setActiveSession("session-A", Interlocutor.named("Victor"))
+            val dialogue = listOf(userTurn("what did I ask in this session?"))
+            val cues = mc.recallEpisodicAsVectorCues(dialogue)
+
+            assertTrue(cues.any { it.contains("Session A cue") }, "Expected current-session cue")
+            assertFalse(cues.any { it.contains("Session B cue") }, "Expected non-current-session cue to be excluded")
+        }
     }
 }

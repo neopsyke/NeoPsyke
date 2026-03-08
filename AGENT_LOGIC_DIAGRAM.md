@@ -7,7 +7,7 @@ Keep diagrams high signal: small, readable, and updated as runtime logic evolves
 
 ```mermaid
 flowchart LR
-    U["User / Stdin / Web UI"] --> SC["SensoryCortex (Async Multiplex Input)"]
+    U["User / Web UI"] --> SC["SensoryCortex (Async Web Chat Input)"]
     SC --> E["Ego Orchestrator"]
     NoteCtx["ConversationContext(sessionId required)"] --> SC
 
@@ -83,6 +83,7 @@ sequenceDiagram
     loop While pending work and step limit not reached
         Ego->>Sched: nextTask()
         Sched-->>Ego: input/thought/action
+        Ego->>Ego: activateSession(task.conversationContext)
         Ego->>Delib: startStep()
 
         alt Task = input or thought
@@ -140,8 +141,10 @@ sequenceDiagram
         end
 
         Ego->>Delib: maybeForceTerminalAnswer
+        Note over Ego,Delib: Deliberation state is session-scoped; evidence/circuit state is scoped by root+session
         Note over Ego,Delib: Meta-reasoner output is schema-enforced; repeated empty-content transport failures can trigger optional fallback endpoint
         Ego->>Mem: maybeAssessLongTermMemory(interval or explicit remember-intent)
+        Note over Ego,Mem: Episodic recall filters session/interlocutor only when explicitly requested by user input
         Note over Ego,Mem: Memory-advisor completion max_tokens scales with prompt estimate (bounded floor/hard-cap) and model token_weight
         Note over Ego,Mem: Long dialogue/recall blocks are compressed before advisor prompt
     end
