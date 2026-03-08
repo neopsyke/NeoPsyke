@@ -21,9 +21,11 @@ class Superego(
     private val config: AgentConfig,
     private val modelTokenWeight: Double = DEFAULT_MODEL_TOKEN_WEIGHT,
     private val modelContextWindow: Int? = null,
+    private val modelReasoningOverhead: Double = DEFAULT_REASONING_OVERHEAD,
     private val escalationModelClient: ChatModelClient? = null,
     private val escalationModelTokenWeight: Double = DEFAULT_MODEL_TOKEN_WEIGHT,
     private val escalationModelContextWindow: Int? = null,
+    private val escalationModelReasoningOverhead: Double = DEFAULT_REASONING_OVERHEAD,
     private val policy: SuperegoPolicy = SuperegoPolicy,
     private val instrumentation: AgentInstrumentation = NoopAgentInstrumentation,
 ) {
@@ -84,10 +86,10 @@ class Superego(
         )
 
         val messages = buildMessages(action, context, resolvedDirectives)
-        val effectiveEngine = if (action.type == ActionType.ANSWER && config.superego.twoStageSkipForAnswerActions) {
-            primaryEngine
-        } else {
-            reviewEngine
+        val effectiveEngine = when {
+            action.type == ActionType.ANSWER && config.superego.twoStageSkipForAnswerActions -> primaryEngine
+            action.type == ActionType.WEB_SEARCH && config.superego.twoStageSkipForWebSearchActions -> primaryEngine
+            else -> reviewEngine
         }
         val decision = effectiveEngine.review(action, messages)
         instrumentation.emit(
@@ -107,6 +109,7 @@ class Superego(
             config = config,
             modelTokenWeight = modelTokenWeight,
             modelContextWindow = modelContextWindow,
+            reasoningOverheadMultiplier = modelReasoningOverhead,
             instrumentation = instrumentation,
             stageLabel = "primary",
             callSiteBase = "action_review"
@@ -130,9 +133,11 @@ class Superego(
             config = config,
             modelTokenWeight = escalationModelTokenWeight,
             modelContextWindow = escalationModelContextWindow,
+            reasoningOverheadMultiplier = escalationModelReasoningOverhead,
             instrumentation = instrumentation,
             stageLabel = "escalation",
-            callSiteBase = "action_review_escalated"
+            callSiteBase = "action_review_escalated",
+            tripThreshold = SingleStageSuperegoReviewEngine.ESCALATION_TRIP_THRESHOLD
         )
         return TwoStageSuperegoReviewEngine(
             primary = primary,
@@ -212,6 +217,7 @@ class Superego(
 
     companion object {
         private const val DEFAULT_MODEL_TOKEN_WEIGHT: Double = 1.0
+        private const val DEFAULT_REASONING_OVERHEAD: Double = 1.0
         private const val MAX_DENY_REASON_CHARS: Int = 180
     }
 }

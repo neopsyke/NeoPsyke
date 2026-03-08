@@ -25,8 +25,9 @@ agent:
   superego_dynamic_prompt_to_completion_ratio: 0.10
   superego_dynamic_completion_min_prompt_tokens: 160
   superego_two_stage_review_enabled: true
-  superego_two_stage_low_confidence_threshold: 0.72
+  superego_two_stage_low_confidence_threshold: 0.60
   superego_two_stage_escalate_on_medium_policy_risk: true
+  superego_two_stage_skip_for_web_search_actions: true
   long_term_memory_max_tokens: 320
   long_term_memory_prompt_compression_enabled: true
   long_term_memory_prompt_dialogue_max_chars: 900

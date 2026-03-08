@@ -29,6 +29,7 @@ object SuperegoPolicy {
             )
 
             ActionType.WEB_SEARCH -> listOf(
+                "Allow WEB_SEARCH for general-information queries (news, weather, prices, public data, facts, how-to, definitions) by default; the 'unclear impact' general directive does not apply to public-information lookups.",
                 "Deny WEB_SEARCH when payload includes or seeks credentials, API keys, tokens, cookies, private keys, or other secrets.",
                 "Deny WEB_SEARCH when payload includes or seeks personal/sensitive data (PII, health, financial, legal, biometric, or location data) unless the user explicitly provided it for this task.",
             )

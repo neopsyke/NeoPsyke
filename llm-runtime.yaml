@@ -24,7 +24,7 @@ cognitive_roles:
     model: gpt-4o-mini
   superego_escalation:
     provider: openai
-    model: gpt-5-mini
+    model: gpt-4.1-mini
   meta_reasoner:
     provider: groq
     model: openai/gpt-oss-120b
@@ -47,12 +47,14 @@ model_catalog:
       context_window: 128000
       input_cost_per_million_tokens_usd: 1.25
       output_cost_per_million_tokens_usd: 10.0
+      reasoning_overhead_multiplier: 3.0
     - model: gpt-5-mini
       tier: medium
       token_weight: 1.35
       context_window: 128000
       input_cost_per_million_tokens_usd: 0.25
       output_cost_per_million_tokens_usd: 2.0
+      reasoning_overhead_multiplier: 3.0
     - model: gpt-5-nano
       tier: light
       token_weight: 0.85

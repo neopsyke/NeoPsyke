@@ -206,6 +206,8 @@ private data class LlmRuntimeYamlModelProfile(
     val outputCostPerMillionTokensUsd: Double? = null,
     @param:JsonProperty("context_window")
     val contextWindow: Int? = null,
+    @param:JsonProperty("reasoning_overhead_multiplier")
+    val reasoningOverheadMultiplier: Double? = null,
 )
 
 private data class LlmRuntimeYamlModelCatalog(
@@ -456,13 +458,18 @@ object LlmRuntimeConfigLoader {
                     ?.takeIf { it > 0.0 }
                     ?.coerceIn(MODEL_WEIGHT_MIN, MODEL_WEIGHT_MAX)
                     ?: LlmModelProfile.DEFAULT_TOKEN_WEIGHT
+                val reasoningOverhead = entry.reasoningOverheadMultiplier
+                    ?.takeIf { it >= 1.0 }
+                    ?.coerceAtMost(5.0)
+                    ?: LlmModelProfile.DEFAULT_REASONING_OVERHEAD
                 LlmModelProfile(
                     model = model,
                     tier = tier,
                     tokenWeight = weight,
                     inputCostPerMillionTokensUsd = entry.inputCostPerMillionTokensUsd?.takeIf { it >= 0.0 },
                     outputCostPerMillionTokensUsd = entry.outputCostPerMillionTokensUsd?.takeIf { it >= 0.0 },
-                    contextWindow = entry.contextWindow?.takeIf { it > 0 }
+                    contextWindow = entry.contextWindow?.takeIf { it > 0 },
+                    reasoningOverheadMultiplier = reasoningOverhead
                 )
             }
             .distinctBy { it.normalizedModel() }

@@ -343,6 +343,81 @@ class SuperegoGatekeeperTest {
     }
 
     @Test
+    fun `gatekeeper falls back to primary decision when escalation fails technically`() {
+        val primary = StubChatModelClient(modelName = "cheap").apply {
+            enqueueRawResponse("""{"allow":false,"reason":"borderline deny","confidence":0.55,"policy_risk":"medium"}""")
+        }
+        val failingEscalation = object : ChatModelClient {
+            override val modelName: String = "strong"
+            override fun chat(messages: List<psyke.llm.ChatMessage>, options: ChatRequestOptions): psyke.llm.ChatCompletion {
+                throw IllegalStateException(
+                    "OpenAI chat returned empty message content (finish_reason=length, content_chars=0)."
+                )
+            }
+        }
+        val instrumentation = RecordingInstrumentation()
+        val gatekeeper = Superego(
+            modelClient = primary,
+            escalationModelClient = failingEscalation,
+            config = AgentConfig(
+                planner = PlannerConfig(llmRetryAttempts = 1),
+                superego = SuperegoConfig(
+                    twoStageReviewEnabled = true,
+                    twoStageLowConfidenceThreshold = 0.70,
+                    twoStageSkipForAnswerActions = false
+                )
+            ),
+            instrumentation = instrumentation
+        )
+
+        val decision = gatekeeper.review(action, snapshot)
+
+        assertFalse(decision.allow)
+        assertEquals("borderline deny", decision.reason)
+        assertTrue(
+            instrumentation.events.any { event ->
+                event.type == "warning" &&
+                    (event.data["message"] as? String)?.contains("falling back to primary", ignoreCase = true) == true
+            }
+        )
+    }
+
+    @Test
+    fun `gatekeeper skips escalation for web search actions by default`() {
+        val primary = StubChatModelClient(modelName = "cheap").apply {
+            enqueueRawResponse("""{"allow":true,"confidence":0.55,"policy_risk":"medium"}""")
+        }
+        val escalation = StubChatModelClient(modelName = "strong").apply {
+            enqueueRawResponse("""{"allow":false,"reason":"should not run"}""")
+        }
+        val gatekeeper = Superego(
+            modelClient = primary,
+            escalationModelClient = escalation,
+            config = AgentConfig(
+                superego = SuperegoConfig(
+                    twoStageReviewEnabled = true,
+                    twoStageLowConfidenceThreshold = 0.70,
+                    twoStageSkipForWebSearchActions = true,
+                    twoStageSkipForAnswerActions = false
+                )
+            )
+        )
+        val webSearchAction = PendingAction(
+            id = 200,
+            urgency = Urgency.MEDIUM,
+            type = ActionType.WEB_SEARCH,
+            payload = "gasoline prices in Mexico",
+            summary = "search gasoline prices"
+        )
+
+        val decision = gatekeeper.review(webSearchAction, snapshot)
+
+        assertTrue(decision.allow)
+        assertEquals(1, primary.calls.size)
+        assertEquals(0, escalation.calls.size)
+    }
+
+    @Test
     fun `gatekeeper does not escalate policy redundant deny when confidence is high and risk is low`() {
         val primary = StubChatModelClient(modelName = "cheap").apply {
             enqueueRawResponse(

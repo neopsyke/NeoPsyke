@@ -21,11 +21,13 @@ data class LlmModelProfile(
     val inputCostPerMillionTokensUsd: Double? = null,
     val outputCostPerMillionTokensUsd: Double? = null,
     val contextWindow: Int? = null,
+    val reasoningOverheadMultiplier: Double = DEFAULT_REASONING_OVERHEAD,
 ) {
     fun normalizedModel(): String = model.trim().lowercase()
 
     companion object {
         const val DEFAULT_TOKEN_WEIGHT: Double = 1.0
+        const val DEFAULT_REASONING_OVERHEAD: Double = 1.0
     }
 }
 
@@ -46,6 +48,9 @@ data class LlmModelCatalog(
 
     fun contextWindowFor(endpoint: LlmEndpointConfig): Int? =
         profileFor(endpoint)?.contextWindow
+
+    fun reasoningOverheadFor(endpoint: LlmEndpointConfig): Double =
+        profileFor(endpoint)?.reasoningOverheadMultiplier ?: LlmModelProfile.DEFAULT_REASONING_OVERHEAD
 
     fun cheapestProfileForProvider(
         provider: LlmProvider,
@@ -100,8 +105,8 @@ data class LlmModelCatalog(
             LlmModelCatalog(
                 byProvider = mapOf(
                     LlmProvider.OPENAI to listOf(
-                        LlmModelProfile("gpt-5", LlmModelTier.MEDIUM_HIGH, tokenWeight = 2.60, inputCostPerMillionTokensUsd = 1.25, outputCostPerMillionTokensUsd = 10.0, contextWindow = 128_000),
-                        LlmModelProfile("gpt-5-mini", LlmModelTier.MEDIUM, tokenWeight = 1.35, inputCostPerMillionTokensUsd = 0.25, outputCostPerMillionTokensUsd = 2.0, contextWindow = 128_000),
+                        LlmModelProfile("gpt-5", LlmModelTier.MEDIUM_HIGH, tokenWeight = 2.60, inputCostPerMillionTokensUsd = 1.25, outputCostPerMillionTokensUsd = 10.0, contextWindow = 128_000, reasoningOverheadMultiplier = 3.0),
+                        LlmModelProfile("gpt-5-mini", LlmModelTier.MEDIUM, tokenWeight = 1.35, inputCostPerMillionTokensUsd = 0.25, outputCostPerMillionTokensUsd = 2.0, contextWindow = 128_000, reasoningOverheadMultiplier = 3.0),
                         LlmModelProfile("gpt-5-nano", LlmModelTier.LIGHT, tokenWeight = 0.85, inputCostPerMillionTokensUsd = 0.05, outputCostPerMillionTokensUsd = 0.4, contextWindow = 8_192),
                         LlmModelProfile("gpt-4.1-mini", LlmModelTier.MEDIUM, tokenWeight = 1.20, inputCostPerMillionTokensUsd = 0.40, outputCostPerMillionTokensUsd = 1.60, contextWindow = 1_048_576),
                         LlmModelProfile("gpt-4o-mini", LlmModelTier.LIGHT, tokenWeight = 1.00, inputCostPerMillionTokensUsd = 0.15, outputCostPerMillionTokensUsd = 0.60, contextWindow = 128_000),

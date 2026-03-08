@@ -795,10 +795,12 @@ internal object AppModeRunners {
                                                 config = config,
                                                 modelTokenWeight = superegoReviewRouting.primaryTokenWeight,
                                                 modelContextWindow = superegoReviewRouting.primaryContextWindow,
+                                                modelReasoningOverhead = superegoReviewRouting.primaryReasoningOverhead,
                                                 escalationModelClient = superegoEscalationClient,
                                                 escalationModelTokenWeight = superegoReviewRouting.escalationTokenWeight
                                                     ?: superegoReviewRouting.primaryTokenWeight,
                                                 escalationModelContextWindow = superegoReviewRouting.escalationContextWindow,
+                                                escalationModelReasoningOverhead = superegoReviewRouting.escalationReasoningOverhead,
                                                 instrumentation = instrumentation
                                             )
                                             val mcpTimeTool = createMcpTimeTool(config, mcpRuntimeConfig.time)
@@ -1089,9 +1091,11 @@ internal object AppModeRunners {
         val primaryEndpoint: LlmEndpointConfig,
         val primaryTokenWeight: Double,
         val primaryContextWindow: Int? = null,
+        val primaryReasoningOverhead: Double = 1.0,
         val escalationEndpoint: LlmEndpointConfig? = null,
         val escalationTokenWeight: Double? = null,
         val escalationContextWindow: Int? = null,
+        val escalationReasoningOverhead: Double = 1.0,
     )
 
     private fun resolveSuperegoReviewRouting(
@@ -1135,9 +1139,11 @@ internal object AppModeRunners {
                 primaryEndpoint = explicitPrimary,
                 primaryTokenWeight = llm.modelCatalog.tokenWeightFor(explicitPrimary),
                 primaryContextWindow = llm.modelCatalog.contextWindowFor(explicitPrimary),
+                primaryReasoningOverhead = llm.modelCatalog.reasoningOverheadFor(explicitPrimary),
                 escalationEndpoint = explicitEscalation,
                 escalationTokenWeight = llm.modelCatalog.tokenWeightFor(explicitEscalation),
-                escalationContextWindow = llm.modelCatalog.contextWindowFor(explicitEscalation)
+                escalationContextWindow = llm.modelCatalog.contextWindowFor(explicitEscalation),
+                escalationReasoningOverhead = llm.modelCatalog.reasoningOverheadFor(explicitEscalation)
             )
         }
 

@@ -12,6 +12,7 @@ object AdaptiveCompletionBudget {
         val minPromptTokensForScaling: Int,
         val modelTokenWeight: Double,
         val modelContextWindow: Int? = null,
+        val reasoningOverheadMultiplier: Double = 1.0,
     )
 
     data class Resolution(
@@ -27,13 +28,14 @@ object AdaptiveCompletionBudget {
         val hardMax = request.hardMaxTokens.coerceAtLeast(base)
         val promptEstimate = estimatePromptTokens(request.messages)
 
+        val overhead = request.reasoningOverheadMultiplier.coerceIn(MIN_REASONING_OVERHEAD, MAX_REASONING_OVERHEAD)
         val desired = if (promptEstimate < request.minPromptTokensForScaling.coerceAtLeast(1)) {
-            base
+            (base * overhead).roundToInt().coerceIn(base, hardMax)
         } else {
             val normalizedRatio = request.promptToCompletionRatio.coerceIn(MIN_RATIO, MAX_RATIO)
             val normalizedWeight = request.modelTokenWeight.coerceIn(MIN_MODEL_WEIGHT, MAX_MODEL_WEIGHT)
             val scaledExtra = ((promptEstimate * normalizedRatio) / normalizedWeight).roundToInt()
-            (base + scaledExtra).coerceIn(base, hardMax)
+            ((base + scaledExtra) * overhead).roundToInt().coerceIn(base, hardMax)
         }
 
         val contextWindow = request.modelContextWindow
@@ -79,4 +81,6 @@ object AdaptiveCompletionBudget {
     private const val MAX_MODEL_WEIGHT: Double = 4.0
     private const val CONTEXT_SAFETY_MARGIN: Int = 64
     private const val MIN_VIABLE_COMPLETION_TOKENS: Int = 16
+    private const val MIN_REASONING_OVERHEAD: Double = 1.0
+    private const val MAX_REASONING_OVERHEAD: Double = 5.0
 }
