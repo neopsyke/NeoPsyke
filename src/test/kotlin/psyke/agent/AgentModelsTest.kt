@@ -20,7 +20,7 @@ class AgentModelsTest {
         assertEquals(0.10, config.superego.dynamicPromptToCompletionRatio)
         assertEquals(160, config.superego.dynamicCompletionMinPromptTokens)
         assertEquals(false, config.superego.twoStageReviewEnabled)
-        assertEquals(0.70, config.superego.twoStageLowConfidenceThreshold)
+        assertEquals(0.60, config.superego.twoStageLowConfidenceThreshold)
         assertEquals(true, config.superego.twoStageEscalateOnMediumPolicyRisk)
         assertEquals(320, config.memory.longTermMemoryMaxTokens)
         assertEquals(true, config.memory.longTermMemoryPromptCompressionEnabled)
@@ -52,7 +52,7 @@ class AgentModelsTest {
         assertEquals(ActionType.WEB_SEARCH, ActionType.fromRaw("web_search"))
         assertEquals(ActionType.ANSWER, ActionType.fromRaw("answer"))
         assertEquals(ActionType.MCP_TIME, ActionType.fromRaw("mcp_time"))
-        assertEquals(ActionType.MCP_FETCH, ActionType.fromRaw("mcp_fetch"))
+        assertEquals(ActionType.WEBSITE_FETCH, ActionType.fromRaw("website_fetch"))
         assertNull(ActionType.fromRaw("search"))
         assertNull(ActionType.fromRaw(null))
     }

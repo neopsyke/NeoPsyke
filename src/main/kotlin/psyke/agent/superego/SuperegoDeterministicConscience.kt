@@ -34,7 +34,7 @@ internal class SuperegoDeterministicConscience(
                 ActionType.ANSWER -> validateAnswer(action)
                 ActionType.WEB_SEARCH -> validateWebSearch(action, context)
                 ActionType.MCP_TIME -> validateMcpTime(action)
-                ActionType.MCP_FETCH -> validateMcpFetch(action, context)
+                ActionType.WEBSITE_FETCH -> validateWebsiteFetch(action, context)
                 ActionType.MEMORY -> allow() // Memory ops are internal subsystem calls, always allowed.
             }
         } catch (_: Exception) {
@@ -123,51 +123,51 @@ internal class SuperegoDeterministicConscience(
         return allow()
     }
 
-    private fun validateMcpFetch(
+    private fun validateWebsiteFetch(
         action: PendingAction,
         @Suppress("UNUSED_PARAMETER") context: SuperegoContext,
     ): SuperegoDeterministicDecision {
         val parsed = try {
-            mapper.readValue<McpFetchPayload>(action.payload)
+            mapper.readValue<FetchValidationPayload>(action.payload)
         } catch (_: Exception) {
             return deny(
-                "mcp_fetch_payload_invalid_json",
-                "MCP_FETCH payload must be JSON like {\"url\":\"https://example.com\",\"max_chars\":1200}."
+                "website_fetch_payload_invalid_json",
+                "WEBSITE_FETCH payload must be JSON like {\"url\":\"https://example.com\",\"max_chars\":1200}."
             )
         }
         val url = parsed.url?.trim().orEmpty()
         if (url.isBlank()) {
-            return deny("mcp_fetch_url_missing", "MCP_FETCH payload is missing required url.")
+            return deny("website_fetch_url_missing", "WEBSITE_FETCH payload is missing required url.")
         }
         if (!isPublicHttpsUrl(url)) {
             return deny(
-                "mcp_fetch_url_blocked",
-                "MCP_FETCH URL must be a public HTTPS URL and must not target private/local hosts."
+                "website_fetch_url_blocked",
+                "WEBSITE_FETCH URL must be a public HTTPS URL and must not target private/local hosts."
             )
         }
         if (hasSensitiveEndpoint(url)) {
             return deny(
-                "mcp_fetch_sensitive_endpoint",
-                "MCP_FETCH URL targets a sensitive endpoint (auth/account/payment/admin/metadata)."
+                "website_fetch_sensitive_endpoint",
+                "WEBSITE_FETCH URL targets a sensitive endpoint (auth/account/payment/admin/metadata)."
             )
         }
         if (hasSensitiveQueryParams(url)) {
             return deny(
-                "mcp_fetch_sensitive_query_params",
-                "MCP_FETCH URL contains sensitive query parameters."
+                "website_fetch_sensitive_query_params",
+                "WEBSITE_FETCH URL contains sensitive query parameters."
             )
         }
         val requestedMaxChars = parsed.maxChars
-        if (requestedMaxChars != null && requestedMaxChars !in MCP_FETCH_MIN_MAX_CHARS..config.fetchMaxChars) {
+        if (requestedMaxChars != null && requestedMaxChars !in WEBSITE_FETCH_MIN_MAX_CHARS..config.fetchMaxChars) {
             return deny(
-                "mcp_fetch_max_chars_out_of_bounds",
-                "MCP_FETCH max_chars must be between $MCP_FETCH_MIN_MAX_CHARS and ${config.fetchMaxChars}."
+                "website_fetch_max_chars_out_of_bounds",
+                "WEBSITE_FETCH max_chars must be between $WEBSITE_FETCH_MIN_MAX_CHARS and ${config.fetchMaxChars}."
             )
         }
         if (containsSecretExfilIntent(action.payload) || containsInlineSecretMaterial(action.payload)) {
             return deny(
-                "mcp_fetch_secret_exfil",
-                "MCP_FETCH payload appears to request credential or secret exfiltration."
+                "website_fetch_secret_exfil",
+                "WEBSITE_FETCH payload appears to request credential or secret exfiltration."
             )
         }
         return allow()
@@ -247,14 +247,14 @@ internal class SuperegoDeterministicConscience(
         val timezone: String? = null,
     )
 
-    private data class McpFetchPayload(
+    private data class FetchValidationPayload(
         val url: String? = null,
         @field:JsonProperty("max_chars")
         val maxChars: Int? = null,
     )
 
     private companion object {
-        private const val MCP_FETCH_MIN_MAX_CHARS: Int = 256
+        private const val WEBSITE_FETCH_MIN_MAX_CHARS: Int = 256
         private val mapper = jacksonObjectMapper()
             .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
         private val timezoneRegex = Regex("""^[A-Za-z0-9_\-+/]{1,80}$""")

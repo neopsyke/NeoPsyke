@@ -112,6 +112,17 @@ class StructuredLogSink : InstrumentationSink {
                 }
             }
 
+            "external_action_redundancy_signal" -> {
+                logger.info {
+                    "planner.redundancy_signal action_type=${event.data["action_type"]} " +
+                        "signature_hits=${event.data["signature_hits"]} " +
+                        "had_successful_evidence=${event.data["had_successful_evidence"]} " +
+                        "had_external_failures=${event.data["had_external_failures"]} " +
+                        "redundant_risk=${event.data["redundant_risk"]} " +
+                        "root_input_id=${event.data["root_input_id"]}"
+                }
+            }
+
             "meta_reasoner_assessment" -> {
                 logger.trace {
                     "meta.reasoner step=${event.data["step_index"]} pressure=${event.data["decision_pressure"]} verdict=${event.data["verdict"]} confidence=${event.data["confidence"]} reason=${event.data["reason"]}"

@@ -80,6 +80,7 @@ private data class AgentRuntimeYamlAgent(
     val superegoTwoStageReviewEnabled: Boolean? = null,
     val superegoTwoStageLowConfidenceThreshold: Double? = null,
     val superegoTwoStageEscalateOnMediumPolicyRisk: Boolean? = null,
+    val superegoTwoStageSkipForWebSearchActions: Boolean? = null,
     val searchResultCount: Int? = null,
     val mcpCallTimeoutMs: Long? = null,
     val fetchMaxChars: Int? = null,
@@ -216,6 +217,11 @@ object AgentRuntimeSettingsLoader {
                     env["EGO_SUPEREGO_TWO_STAGE_ESCALATE_ON_MEDIUM_POLICY_RISK"],
                     agentYaml.superegoTwoStageEscalateOnMediumPolicyRisk,
                     defaults.superego.twoStageEscalateOnMediumPolicyRisk
+                ),
+                twoStageSkipForWebSearchActions = readBoolean(
+                    env["EGO_SUPEREGO_TWO_STAGE_SKIP_FOR_WEB_SEARCH_ACTIONS"],
+                    agentYaml.superegoTwoStageSkipForWebSearchActions,
+                    defaults.superego.twoStageSkipForWebSearchActions
                 ),
             ),
             memory = MemoryConfig(
@@ -475,7 +481,7 @@ object AgentRuntimeSettingsLoader {
             maxPendingInputs = readPositiveInt(null, agentYaml.maxPendingInputs, defaults.maxPendingInputs),
             searchResultCount = readPositiveInt(env["EGO_SEARCH_RESULT_COUNT"], agentYaml.searchResultCount, defaults.searchResultCount),
             mcpCallTimeoutMs = mcpCallTimeoutMs,
-            fetchMaxChars = readPositiveInt(env["MCP_FETCH_MAX_CHARS"], agentYaml.fetchMaxChars, defaults.fetchMaxChars),
+            fetchMaxChars = readPositiveInt(env["WEBSITE_FETCH_MAX_CHARS"], agentYaml.fetchMaxChars, defaults.fetchMaxChars),
         )
 
         return AgentRuntimeSettings(

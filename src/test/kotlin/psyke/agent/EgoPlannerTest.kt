@@ -97,7 +97,7 @@ class EgoPlannerTest {
             {
               "decision":"action",
               "urgency":"medium",
-              "action_type":"mcp_fetch",
+              "action_type":"website_fetch",
               "action_payload":{"url":"https://openai.com/pricing","max_chars":1200},
               "action_summary":"Fetch OpenAI pricing page content"
             }
@@ -117,7 +117,7 @@ class EgoPlannerTest {
         )
 
         val action = assertIs<psyke.agent.core.EgoDecision.ProposeAction>(decision)
-        assertEquals(ActionType.MCP_FETCH, action.actionType)
+        assertEquals(ActionType.WEBSITE_FETCH, action.actionType)
         assertTrue(action.payload.contains("\"url\":\"https://openai.com/pricing\""))
         assertTrue(action.payload.contains("\"max_chars\":1200"))
     }
@@ -130,7 +130,7 @@ class EgoPlannerTest {
             {
               "decision":"action",
               "urgency":"medium",
-              "action_type":"mcp_fetch",
+              "action_type":"website_fetch",
               "action_payload":"{\"url\":\"https://example.com\"}",
               "action_summary":"fetch page"
             }
@@ -339,13 +339,13 @@ class EgoPlannerTest {
         val llm = StubChatModelClient().apply {
             enqueueRawResponse(
                 """
-                {"decision":"action","urgency":"medium","action_type":"mcp_fetch","action_payload":"{\"url\":\"https://example.com\"}","action_summary":"fetch"}
+                {"decision":"action","urgency":"medium","action_type":"website_fetch","action_payload":"{\"url\":\"https://example.com\"}","action_summary":"fetch"}
                 """.trimIndent()
             )
             enqueueRawResponseForCallSite(
                 callSite = "action_verifier",
                 content = """
-                {"verdict":"repair","action_type":"mcp_fetch","action_payload":{"url":"https://openai.com/pricing","max_chars":900},"action_summary":"fetch pricing"}
+                {"verdict":"repair","action_type":"website_fetch","action_payload":{"url":"https://openai.com/pricing","max_chars":900},"action_summary":"fetch pricing"}
                 """.trimIndent()
             )
         }
@@ -360,7 +360,7 @@ class EgoPlannerTest {
         )
 
         val action = assertIs<psyke.agent.core.EgoDecision.ProposeAction>(decision)
-        assertEquals(ActionType.MCP_FETCH, action.actionType)
+        assertEquals(ActionType.WEBSITE_FETCH, action.actionType)
         assertTrue(action.payload.contains("\"url\":\"https://openai.com/pricing\""))
         assertTrue(action.payload.contains("\"max_chars\":900"))
     }
@@ -860,5 +860,49 @@ class EgoPlannerTest {
         assertTrue(allPromptText.contains("plan:"))
         assertTrue(allPromptText.contains("plan_goal"))
         assertTrue(allPromptText.contains("plan_steps"))
+    }
+
+    @Test
+    fun `planner repairs bare URL fetch payload by wrapping in json`() {
+        val llm = StubChatModelClient().apply {
+            enqueueRawResponse(
+                """
+                {
+                  "decision":"action",
+                  "urgency":"medium",
+                  "action_type":"website_fetch",
+                  "action_payload":"https://example.com/pricing",
+                  "action_summary":"Fetch pricing page"
+                }
+                """.trimIndent()
+            )
+        }
+        val instrumentation = RecordingInstrumentation()
+        var repairCount = 0
+        val planner = LlmEgoPlanner(
+            modelClient = llm,
+            config = AgentConfig(),
+            instrumentation = instrumentation,
+            onPlannerOutputRepaired = { repairCount += 1 }
+        )
+
+        val decision = planner.decide(
+            trigger = psyke.agent.core.EgoTrigger.IncomingInput(PendingInput(1, "fetch the pricing page")),
+            context = PlannerContext(
+                recentDialogue = emptyList(),
+                queue = QueueSnapshot(0, 0, 0)
+            )
+        )
+
+        val action = assertIs<psyke.agent.core.EgoDecision.ProposeAction>(decision)
+        assertEquals(ActionType.WEBSITE_FETCH, action.actionType)
+        assertTrue(action.payload.contains("\"url\":\"https://example.com/pricing\""))
+        assertEquals(1, repairCount)
+        assertTrue(
+            instrumentation.events.any {
+                it.type == "planner_output_repaired" &&
+                    it.data["repair"] == "bare_url_wrapped"
+            }
+        )
     }
 }

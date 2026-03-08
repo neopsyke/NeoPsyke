@@ -97,7 +97,7 @@ class DeliberationProgressMonitor(
     fun onActionExecuted(action: PendingAction, observedEvidence: Boolean = true) {
         val isEvidenceAction = action.type == ActionType.WEB_SEARCH ||
             action.type == ActionType.MCP_TIME ||
-            action.type == ActionType.MCP_FETCH
+            action.type == ActionType.WEBSITE_FETCH
         state = if (isEvidenceAction) {
             if (observedEvidence) {
                 state.copy(

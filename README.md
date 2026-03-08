@@ -5,7 +5,7 @@ Standalone Kotlin JVM app using Gradle with:
 - Interactive Ego agent loop (inputs, thoughts, actions)
 - Extensible input abstraction (`SensoryCortex`)
 - Superego action gatekeeper (policy/safety review)
-- Action executor (`MotorCortex`) for `web_search`, `answer`, `mcp_time`, and `mcp_fetch`
+- Action executor (`MotorCortex`) for `web_search`, `answer`, `mcp_time`, and `website_fetch`
 
 ## For Coding Agents
 - Repository-wide coding-agent instructions live in `AGENTS.md`.
@@ -72,9 +72,9 @@ Standalone Kotlin JVM app using Gradle with:
   - `OPENAI_API_KEY`
 - OpenAI moderation is available as a standalone utility (`moderateWithOpenAi` / `OpenAiModerationClient`) using `omni-moderation-latest`; it is not auto-wired into cognitive-role chat calls.
 - MCP/time/fetch/memory provider settings are now centralized in `mcp-runtime.yaml` (repository root).
-  - Default config enables `time`, `fetch`, and `memory` in `stdio` mode with command/fallback lists.
+  - Default config enables `time`, `website_fetch`, and `memory` in `stdio` mode with command/fallback lists.
   - Optional override file path: `PSYKE_MCP_CONFIG_FILE=/path/to/mcp-runtime.yaml`.
-  - Environment variables still override YAML when present (`MCP_TIME_*`, `MCP_FETCH_*`, `MCP_MEMORY_*`, plus legacy `MCP_*_SERVER_CMD`).
+  - Environment variables still override YAML when present (`MCP_TIME_*`, `WEBSITE_FETCH_*`, `MCP_MEMORY_*`, plus legacy `MCP_*_SERVER_CMD`).
   - YAML schema per capability:
     - `enabled` (`true|false`)
     - `mode` (`stdio` currently supported)
@@ -129,15 +129,15 @@ Standalone Kotlin JVM app using Gradle with:
   - `EGO_MAX_ACTION_PAYLOAD_CHARS` (default: `4000`)
   - `EGO_SEARCH_RESULT_COUNT` (default: `5`)
   - `MCP_TIME_SERVER_CMD` (optional env override for YAML time command)
-  - `MCP_FETCH_SERVER_CMD` (optional env override for YAML fetch command)
+  - `WEBSITE_FETCH_SERVER_CMD` (optional env override for YAML fetch command)
   - `MCP_MEMORY_SERVER_CMD` (optional env override for YAML memory command)
-  - `MCP_TIME_MODE` / `MCP_FETCH_MODE` / `MCP_MEMORY_MODE` (optional env override for YAML mode)
-  - `MCP_TIME_PROVIDER` / `MCP_FETCH_PROVIDER` / `MCP_MEMORY_PROVIDER` (optional env override for YAML provider)
-  - `MCP_TIME_ENABLED` / `MCP_FETCH_ENABLED` / `MCP_MEMORY_ENABLED` (optional env override for YAML enabled flag)
+  - `MCP_TIME_MODE` / `WEBSITE_FETCH_MODE` / `MCP_MEMORY_MODE` (optional env override for YAML mode)
+  - `MCP_TIME_PROVIDER` / `WEBSITE_FETCH_PROVIDER` / `MCP_MEMORY_PROVIDER` (optional env override for YAML provider)
+  - `MCP_TIME_ENABLED` / `WEBSITE_FETCH_ENABLED` / `MCP_MEMORY_ENABLED` (optional env override for YAML enabled flag)
   - `MISTRAL_WEBSEARCH_AGENT_ID` (optional when `web_search.provider=mistral`; if omitted, Psyke creates an ephemeral Mistral web-search agent per run)
   - `MCP_CALL_TIMEOUT_MS` (default: `8000`)
   - `MCP_MEMORY_CALL_TIMEOUT_MS` (default: same as `MCP_CALL_TIMEOUT_MS`)
-  - `MCP_FETCH_MAX_CHARS` (default: `4000`)
+  - `WEBSITE_FETCH_MAX_CHARS` (default: `4000`)
   - `EGO_LONG_TERM_MEMORY_RECALL_MAX_ITEMS` (default: `4`)
   - `EGO_LONG_TERM_MEMORY_RECALL_MAX_CHARS` (default: `1200`)
   - `EGO_LONG_TERM_MEMORY_PROMPT_COMPRESSION_ENABLED` (default: `true`)
@@ -355,7 +355,7 @@ you> exit
 - Defined in code at `psyke.agent.superego.SuperegoPolicy`.
 - Structured as:
   - general directives (always included)
-  - action-specific directives selected by action type (`answer`, `web_search`, `mcp_time`, `mcp_fetch`)
+  - action-specific directives selected by action type (`answer`, `web_search`, `mcp_time`, `website_fetch`)
 - Superego prompt includes `general + action-specific(current_action)` to reduce token usage.
 
 ## Metrics persistence

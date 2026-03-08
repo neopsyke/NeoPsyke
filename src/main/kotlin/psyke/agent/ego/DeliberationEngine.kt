@@ -151,7 +151,7 @@ internal class DeliberationEngine(
                     !summary.contains("sources: none") &&
                     !summary.contains("snippets: no snippets")
             }
-            ActionType.MCP_FETCH, ActionType.MCP_TIME -> {
+            ActionType.WEBSITE_FETCH, ActionType.MCP_TIME -> {
                 !summary.contains("not configured") &&
                     !summary.contains("unavailable") &&
                     !summary.contains("failed") &&
@@ -212,7 +212,7 @@ internal class DeliberationEngine(
                     AgentEvent(
                         type = "action_type_circuit_breaker_tripped",
                         data = mapOf(
-                            "action_type" to "mcp_fetch",
+                            "action_type" to "website_fetch",
                             "root_input_id" to rootInputId,
                             "non_retryable_failure_count" to count,
                             "threshold" to FETCH_CIRCUIT_BREAKER_THRESHOLD
@@ -221,7 +221,7 @@ internal class DeliberationEngine(
                 )
                 instrumentation.emit(
                     AgentEvents.actionTypeTemporarilyDisabled(
-                        actionType = "mcp_fetch",
+                        actionType = "website_fetch",
                         reason = "circuit_breaker_non_retryable_failures",
                         rootInputId = rootInputId
                     )
@@ -234,7 +234,7 @@ internal class DeliberationEngine(
         if (rootInputId.isNullOrBlank()) return emptySet()
         val fetchFailures = fetchCircuitBreaker[rootInputId] ?: 0
         return if (fetchFailures >= FETCH_CIRCUIT_BREAKER_THRESHOLD) {
-            setOf(ActionType.MCP_FETCH)
+            setOf(ActionType.WEBSITE_FETCH)
         } else {
             emptySet()
         }
@@ -306,7 +306,7 @@ internal class DeliberationEngine(
         }
 
     private fun ActionType.requiresFollowUpThought(): Boolean =
-        this == ActionType.WEB_SEARCH || this == ActionType.MCP_TIME || this == ActionType.MCP_FETCH
+        this == ActionType.WEB_SEARCH || this == ActionType.MCP_TIME || this == ActionType.WEBSITE_FETCH
 
     data class ExternalEvidenceProgress(
         val hadSuccessfulEvidence: Boolean = false,

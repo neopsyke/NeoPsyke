@@ -64,6 +64,7 @@ class Ego(
     )
     private val planCountByInput = mutableMapOf<InputScope, Int>()
     private val emittedPlanHashes = mutableMapOf<InputScope, MutableSet<String>>()
+    private val externalActionSignatureHitsByInput = mutableMapOf<InputScope, MutableMap<String, Int>>()
 
     private fun dialogueFor(sessionId: String): ArrayDeque<DialogueTurn> =
         dialogueBySession.getOrPut(sessionId) { ArrayDeque() }
@@ -182,6 +183,7 @@ class Ego(
             memory.resetForNewInput()
             planCountByInput.clear()
             emittedPlanHashes.clear()
+            externalActionSignatureHitsByInput.clear()
             val clearedWorkspaces = taskWorkspaceStore.clearAll()
             if (clearedWorkspaces > 0) {
                 instrumentation.emit(
@@ -399,7 +401,7 @@ class Ego(
         deliberation.recordEvidenceProgress(resolvedAction, outcome, observed)
         deliberation.onActionExecuted(resolvedAction, observed)
         maybeRecordTaskWorkspaceOutcome(resolvedAction, outcome, observed)
-        if (resolvedAction.type == ActionType.MCP_FETCH && !observed) {
+        if (resolvedAction.type == ActionType.WEBSITE_FETCH && !observed) {
             val category = FetchErrorCategory.entries.firstOrNull {
                 it.name.equals(outcome.fetchErrorCategory, ignoreCase = true)
             } ?: FetchErrorCategory.RETRYABLE
@@ -556,6 +558,12 @@ class Ego(
                     emitQueueSnapshot("repeated_denied_action_blocked")
                     return
                 }
+                emitExternalActionRedundancySignal(
+                    decision = decision,
+                    rootInputId = rootInputId,
+                    rootInputReceivedAtMs = rootInputReceivedAtMs,
+                    conversationContext = conversationContext
+                )
                 val queued = scheduler.enqueueAction(
                     type = decision.actionType,
                     payload = decision.payload,
@@ -947,6 +955,38 @@ class Ego(
         return normalizeActionPayload(decision.payload) == normalizeActionPayload(deniedPayload)
     }
 
+    private fun emitExternalActionRedundancySignal(
+        decision: EgoDecision.ProposeAction,
+        rootInputId: String?,
+        rootInputReceivedAtMs: Long?,
+        conversationContext: ConversationContext,
+    ) {
+        if (!decision.actionType.requiresFollowUpThought()) return
+        val scope = inputScope(rootInputId, conversationContext)
+        val signature = "${decision.actionType.name.lowercase()}:${normalizeActionPayload(decision.payload)}"
+        val hitsBySignature = externalActionSignatureHitsByInput.getOrPut(scope) { mutableMapOf() }
+        val signatureHits = (hitsBySignature[signature] ?: 0) + 1
+        hitsBySignature[signature] = signatureHits
+
+        val evidence = deliberation.evidenceFor(rootInputId)
+        val hadSuccessfulEvidence = evidence?.hadSuccessfulEvidence == true
+        val hadExternalFailures = evidence?.hadExternalFailures == true
+        val redundantRisk = hadSuccessfulEvidence && signatureHits > 1
+        if (signatureHits < REDUNDANCY_SIGNAL_MIN_HITS && !redundantRisk) return
+
+        instrumentation.emit(
+            AgentEvents.externalActionRedundancySignal(
+                actionType = decision.actionType.name.lowercase(),
+                signatureHits = signatureHits,
+                hadSuccessfulEvidence = hadSuccessfulEvidence,
+                hadExternalFailures = hadExternalFailures,
+                redundantRisk = redundantRisk,
+                rootInputId = rootInputId,
+                rootInputReceivedAtMs = rootInputReceivedAtMs
+            )
+        )
+    }
+
     private fun normalizeActionPayload(payload: String): String =
         payload.lowercase().replace(Regex("\\s+"), " ").trim()
 
@@ -1273,8 +1313,10 @@ class Ego(
     private fun cleanupResolvedInputAfterAnswer(action: PendingAction) {
         val rootInputId = action.rootInputId ?: return
         val sessionId = resolveSessionId(action.conversationContext)
+        val scope = inputScope(rootInputId, action.conversationContext)
         planner.resetForInput(rootInputId)
         deliberation.clearForInput(rootInputId)
+        externalActionSignatureHitsByInput.remove(scope)
         emitTaskWorkspaceTelemetry(
             rootInputId = rootInputId,
             rootInputReceivedAtMs = action.rootInputReceivedAtMs,
@@ -1428,13 +1470,13 @@ class Ego(
         }
 
     private fun ActionType.requiresFollowUpThought(): Boolean =
-        this == ActionType.WEB_SEARCH || this == ActionType.MCP_TIME || this == ActionType.MCP_FETCH
+        this == ActionType.WEB_SEARCH || this == ActionType.MCP_TIME || this == ActionType.WEBSITE_FETCH
 
     private fun ActionType.followUpPrefix(): String =
         when (this) {
             ActionType.WEB_SEARCH -> "Web search completed."
             ActionType.MCP_TIME -> "MCP time lookup completed."
-            ActionType.MCP_FETCH -> "Fetch completed."
+            ActionType.WEBSITE_FETCH -> "Fetch completed."
             ActionType.ANSWER -> "Action completed."
             ActionType.MEMORY -> "Memory operation completed."
         }
@@ -1471,5 +1513,6 @@ class Ego(
         const val MAX_EVIDENCE_HINT_CHARS: Int = 420
         const val JOURNAL_SUMMARY_PREVIEW_CHARS: Int = 160
         const val MAX_TRACKED_SESSIONS: Int = 32
+        const val REDUNDANCY_SIGNAL_MIN_HITS: Int = 2
     }
 }

@@ -36,12 +36,14 @@ internal class SingleStageSuperegoReviewEngine(
     private val config: AgentConfig,
     private val modelTokenWeight: Double,
     private val modelContextWindow: Int? = null,
+    private val reasoningOverheadMultiplier: Double = DEFAULT_REASONING_OVERHEAD_MULTIPLIER,
     private val instrumentation: AgentInstrumentation,
     private val stageLabel: String,
     private val callSiteBase: String,
+    tripThreshold: Int = PARSE_FAILURE_TRIP_THRESHOLD,
 ) : SuperegoReviewEngine {
     private val circuitBreaker = LlmCallCircuitBreaker(
-        tripThreshold = PARSE_FAILURE_TRIP_THRESHOLD,
+        tripThreshold = tripThreshold,
         onTripBehavior = OnTripBehavior.ALLOW,
     )
 
@@ -162,7 +164,8 @@ internal class SingleStageSuperegoReviewEngine(
                 promptToCompletionRatio = config.superego.dynamicPromptToCompletionRatio,
                 minPromptTokensForScaling = config.superego.dynamicCompletionMinPromptTokens,
                 modelTokenWeight = modelTokenWeight,
-                modelContextWindow = modelContextWindow
+                modelContextWindow = modelContextWindow,
+                reasoningOverheadMultiplier = reasoningOverheadMultiplier
             )
         )
         if (resolution.contextClamped) {
@@ -287,7 +290,9 @@ internal class SingleStageSuperegoReviewEngine(
     companion object {
         private const val MAX_DENY_REASON_CHARS: Int = 180
         private const val DEFAULT_MISSING_CONFIDENCE: Double = 0.5
-        private const val PARSE_FAILURE_TRIP_THRESHOLD: Int = 2
+        internal const val PARSE_FAILURE_TRIP_THRESHOLD: Int = 2
+        internal const val ESCALATION_TRIP_THRESHOLD: Int = 1
+        private const val DEFAULT_REASONING_OVERHEAD_MULTIPLIER: Double = 1.0
         private const val REASON_CODE_TECH_MODEL_UNAVAILABLE: String = "TECH_MODEL_UNAVAILABLE"
         private const val REASON_CODE_TECH_PARSE_ERROR: String = "TECH_PARSE_ERROR"
         private const val REASON_CODE_TECH_MISSING_REQUIRED_FIELD: String = "TECH_MISSING_REQUIRED_FIELD"
@@ -343,15 +348,18 @@ internal class TwoStageSuperegoReviewEngine(
 
         val escalationOutcome = escalation.reviewDetailed(action, messages)
         emitStageEvent(stage = "escalation", escalated = true, outcome = escalationOutcome)
+        if (escalationOutcome.technicalFallback) {
+            instrumentation.emit(
+                AgentEvents.warning("Superego escalation failed technically; falling back to primary decision.")
+            )
+            return primaryOutcome.decision
+        }
         return escalationOutcome.decision
     }
 
     private fun resolveEscalationReason(outcome: SuperegoStageOutcome): String? {
         if (outcome.technicalFallback) {
             return "technical_fallback"
-        }
-        if (!outcome.decision.allow && outcome.decision.reasonCode == REASON_CODE_POLICY_REDUNDANT) {
-            return "policy_redundant_deny"
         }
         if (outcome.confidence < config.superego.twoStageLowConfidenceThreshold) {
             return "low_confidence"
@@ -363,10 +371,6 @@ internal class TwoStageSuperegoReviewEngine(
 
             SuperegoPolicyRisk.LOW -> null
         }
-    }
-
-    private companion object {
-        private const val REASON_CODE_POLICY_REDUNDANT: String = "POLICY_REDUNDANT"
     }
 
     private fun emitStageEvent(stage: String, escalated: Boolean, outcome: SuperegoStageOutcome) {

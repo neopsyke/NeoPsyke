@@ -1,12 +1,13 @@
 package psyke.agent
 
 import kotlin.test.Test
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class SuperegoDirectivesTest {
     @Test
     fun `for action includes general and action specific directives`() {
-        val directives = SuperegoPolicy.forAction(ActionType.MCP_FETCH)
+        val directives = SuperegoPolicy.forAction(ActionType.WEBSITE_FETCH)
 
         assertTrue(directives.general.isNotEmpty())
         assertTrue(directives.actionSpecific.isNotEmpty())
@@ -16,11 +17,11 @@ class SuperegoDirectivesTest {
     @Test
     fun `action specific directives differ by action type`() {
         val answer = SuperegoPolicy.forAction(ActionType.ANSWER).actionSpecific
-        val fetch = SuperegoPolicy.forAction(ActionType.MCP_FETCH).actionSpecific
+        val fetch = SuperegoPolicy.forAction(ActionType.WEBSITE_FETCH).actionSpecific
 
         assertTrue(answer != fetch)
         assertTrue(answer.any { it.contains("ANSWER", ignoreCase = true) })
-        assertTrue(fetch.any { it.contains("MCP_FETCH", ignoreCase = true) })
+        assertTrue(fetch.any { it.contains("FETCH", ignoreCase = true) })
     }
 
     @Test
@@ -37,6 +38,7 @@ class SuperegoDirectivesTest {
     @Test
     fun `general directives are always included`() {
         val general = SuperegoPolicy.GENERAL_DIRECTIVES
+        assertFalse(general.any { it.contains("redundant or low-value", ignoreCase = true) })
         ActionType.entries.forEach { actionType ->
             val all = SuperegoPolicy.forAction(actionType).all
             general.forEach { directive ->
@@ -49,8 +51,8 @@ class SuperegoDirectivesTest {
     }
 
     @Test
-    fun `mcp fetch includes url safety directive`() {
-        val fetch = SuperegoPolicy.forAction(ActionType.MCP_FETCH).actionSpecific
+    fun `fetch includes url safety directive`() {
+        val fetch = SuperegoPolicy.forAction(ActionType.WEBSITE_FETCH).actionSpecific
         assertTrue(
             fetch.any { it.contains("HTTPS", ignoreCase = true) }
         )

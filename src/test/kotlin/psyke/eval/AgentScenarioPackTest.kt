@@ -276,7 +276,7 @@ class AgentScenarioPackTest {
         val plannerLlm = StubChatModelClient().apply {
             enqueueRawResponse(
                 """
-                {"decision":"action","urgency":"medium","action_type":"mcp_fetch","action_payload":"{\"url\":\"https://example.com\"}","action_summary":"fetch docs"}
+                {"decision":"action","urgency":"medium","action_type":"website_fetch","action_payload":"{\"url\":\"https://example.com\"}","action_summary":"fetch docs"}
                 """.trimIndent()
             )
             enqueueRawResponse(

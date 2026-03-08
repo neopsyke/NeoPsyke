@@ -7,7 +7,8 @@ data class SuperegoConfig(
     val dynamicPromptToCompletionRatio: Double = 0.10,
     val dynamicCompletionMinPromptTokens: Int = 160,
     val twoStageReviewEnabled: Boolean = false,
-    val twoStageLowConfidenceThreshold: Double = 0.70,
+    val twoStageLowConfidenceThreshold: Double = 0.60,
     val twoStageEscalateOnMediumPolicyRisk: Boolean = true,
     val twoStageSkipForAnswerActions: Boolean = true,
+    val twoStageSkipForWebSearchActions: Boolean = true,
 )

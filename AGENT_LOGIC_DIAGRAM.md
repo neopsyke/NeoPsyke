@@ -39,7 +39,7 @@ flowchart LR
     M --> WS["Web Search Handler/Engine"]
     CfgWS["WebSearch Provider Config (provider/key/base/model)"] --> WS
     M --> MT["MCP Time Tool"]
-    M --> MF["MCP Fetch Tool"]
+    M --> MF["Fetch Tool"]
     WS --> PID["PromptInjectionDefense"]
     MT --> PID
     MF --> PID
@@ -95,6 +95,7 @@ sequenceDiagram
             Ego->>Delib: maybeApplyPressureOverride
             Ego->>Sched: enqueue thought/action/plan steps
             Note over Ego,Sched: Plans gated by budget → pressure → hash dedup → pending-plan check
+            Note over Ego,Planner: Redundancy is planner-side soft cost control (prompt + verifier), with telemetry event `external_action_redundancy_signal`
             Note over Ego,Planner: Action verifier runs after action decisions; parse failures trigger one strict retry and may trip temporary verifier bypass (scoped per root_input + action_type)
         else Task = action
             alt Fallback explanation action
@@ -107,7 +108,7 @@ sequenceDiagram
                 else deterministic pass
                     Ego->>Sup: llm review(action)
                     Note over Ego,Sup: Stage-1 uses cheaper model from catalog when two-stage is enabled
-                    Note over Ego,Sup: Escalate on low confidence, policy-risk, technical fallback, or POLICY_REDUNDANT deny
+                    Note over Ego,Sup: Escalate on low confidence, policy-risk, or technical fallback
                     Note over Ego,Sup: Superego completion max_tokens scales with prompt estimate (bounded floor/hard-cap) and model token_weight
                     Note over Ego,Sup: Structured output is schema-enforced (response_format=json_schema)
                     Note over Ego,Sup: Stage parse failures trigger one schema-enforced retry before default deny

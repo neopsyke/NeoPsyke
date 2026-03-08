@@ -125,7 +125,7 @@ It is intentionally high-level and should stay aligned with the code.
     - Record non-answer action outcomes into the task workspace (when enabled).
     - Store assistant output in dialogue and short-term memory when applicable.
     - For `answer`, optionally force a post-terminal-answer long-term memory assessment.
-    - For evidence actions (`web_search`, `mcp_time`, `mcp_fetch`), enqueue follow-up thought.
+    - For evidence actions (`web_search`, `mcp_time`, `website_fetch`), enqueue follow-up thought.
     - Optionally run immediate post-allowed-action long-term memory assessment.
 - For `answer`, response latency is emitted and per-input evidence cache is cleared.
 - After `answer`, pending thoughts/actions for the same `(root input, sessionId)` scope are pruned from queues
@@ -145,6 +145,10 @@ It is intentionally high-level and should stay aligned with the code.
     - `plan` (decomposed into multiple thought steps)
     - `noop`
   - Action proposal validation against runtime available actions.
+  - Redundancy handling is planner-side and cost-oriented:
+    - planner prompt treats repeated external calls as low-value unless refresh/retry is explicitly requested
+    - action verifier can reject low-value repeated external calls when evidence hints already contain usable signal
+    - `Ego` emits `external_action_redundancy_signal` telemetry (soft signal, not policy deny) with repeated signature hit count and evidence state
   - Secondary action verifier pass (`approve|repair|reject`) with:
     - one strict-JSON retry on parse failure
     - parse-failure circuit breaker (scoped by `root_input + action_type`) that bypasses verifier for one decision after repeated malformed verifier outputs
@@ -159,9 +163,10 @@ It is intentionally high-level and should stay aligned with the code.
   - `SingleStageSuperegoReviewEngine` handles one model (retry, strict-JSON retry, parse validation, safe deny fallback).
   - `TwoStageSuperegoReviewEngine` runs cheap primary review first and escalates only on:
     - technical/parsing fallback
-    - explicit `POLICY_REDUNDANT` denies (to reduce false-positive redundant blocks on fresh verification attempts)
     - low confidence (`twoStageLowConfidenceThreshold`)
     - medium/high `policy_risk` (configurable for medium)
+- Redundancy/low-value suppression is no longer a Superego hard-deny directive.
+  - It is a planner/cost optimization signal, so Superego remains focused on safety/privacy policy boundaries.
 - Superego completion budget is adaptive by prompt size (rough token estimate) and bounded by `SuperegoConfig`:
   - `maxCompletionTokens` is the base floor
   - optional dynamic expansion uses `dynamicPromptToCompletionRatio`
@@ -259,13 +264,13 @@ It is intentionally high-level and should stay aligned with the code.
   - `answer`
   - `web_search`
   - `mcp_time`
-  - `mcp_fetch`
+  - `website_fetch`
 - `web_search` provider routing is independent from cognitive-role routing:
   - configured directly via `web_search.provider` in `llm-runtime.yaml`.
   - current web-search runtimes are `mistral`, `groq`, and `google`; configuring `openai` degrades to unavailable with a startup warning.
   - startup initialization failures (missing key, bad base URL, provider/session errors) degrade web search to an unavailable engine instead of crashing the app.
 - Action availability is runtime health-dependent and fed back into planner context.
-- `mcp_fetch` errors are classified as retryable vs non-retryable; non-retryable failures
+- `website_fetch` errors are classified as retryable vs non-retryable; non-retryable failures
   feed into the per-input circuit breaker in `DeliberationEngine`.
 
 ## Queueing Model
@@ -303,8 +308,8 @@ It is intentionally high-level and should stay aligned with the code.
   4. **Pending plan detection**: if plan-context thoughts are already queued, suppress and enqueue a convergence thought instead.
   5. **Convergence thought dedupe**: at most one convergence thought per root input to prevent churn.
 - Suppressions from budget/pressure/hash gates now run a recovery step: if no same-scope plan/convergence work remains, enqueue a convergence thought (and fallback explanation if needed) so the input does not end silently without an answer.
-- `mcp_fetch` circuit breaker: after `FETCH_CIRCUIT_BREAKER_THRESHOLD` (default 3) non-retryable failures
-  (403, 404, 401, install errors, etc.) for a root input, `MCP_FETCH` is removed from available actions,
+- `website_fetch` circuit breaker: after `FETCH_CIRCUIT_BREAKER_THRESHOLD` (default 3) non-retryable failures
+  (403, 404, 401, install errors, etc.) for a root input, `WEBSITE_FETCH` is removed from available actions,
   forcing the planner to use alternatives like `web_search`.
 - Fallback answer synthesis aggregates up to 6 successful evidence signals from the deliberation session
   instead of relying only on the latest planner signal.
