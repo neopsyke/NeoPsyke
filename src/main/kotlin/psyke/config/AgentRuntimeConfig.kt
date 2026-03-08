@@ -94,6 +94,10 @@ private data class AgentRuntimeYamlAgent(
     val deliberationPressureAssessmentThreshold: Double? = null,
     val metaReasonerCooldownSteps: Int? = null,
     val metaReasonerMaxTokens: Int? = null,
+    val metaReasonerDynamicCompletionEnabled: Boolean? = null,
+    val metaReasonerDynamicCompletionHardMaxTokens: Int? = null,
+    val metaReasonerDynamicPromptToCompletionRatio: Double? = null,
+    val metaReasonerDynamicCompletionMinPromptTokens: Int? = null,
     val longTermMemoryAssessEverySteps: Int? = null,
     val longTermMemoryAssessCooldownSteps: Int? = null,
     val longTermMemoryMinConfidence: Double? = null,
@@ -433,6 +437,26 @@ object AgentRuntimeSettingsLoader {
                     env["EGO_META_REASONER_MAX_TOKENS"],
                     agentYaml.metaReasonerMaxTokens,
                     defaults.metaReasoner.maxTokens
+                ),
+                dynamicCompletionEnabled = readBoolean(
+                    env["EGO_META_REASONER_DYNAMIC_COMPLETION_ENABLED"],
+                    agentYaml.metaReasonerDynamicCompletionEnabled,
+                    defaults.metaReasoner.dynamicCompletionEnabled
+                ),
+                dynamicCompletionHardMaxTokens = readPositiveInt(
+                    env["EGO_META_REASONER_DYNAMIC_COMPLETION_HARD_MAX_TOKENS"],
+                    agentYaml.metaReasonerDynamicCompletionHardMaxTokens,
+                    defaults.metaReasoner.dynamicCompletionHardMaxTokens
+                ),
+                dynamicPromptToCompletionRatio = readProbability(
+                    env["EGO_META_REASONER_DYNAMIC_PROMPT_TO_COMPLETION_RATIO"],
+                    agentYaml.metaReasonerDynamicPromptToCompletionRatio,
+                    defaults.metaReasoner.dynamicPromptToCompletionRatio
+                ),
+                dynamicCompletionMinPromptTokens = readPositiveInt(
+                    env["EGO_META_REASONER_DYNAMIC_COMPLETION_MIN_PROMPT_TOKENS"],
+                    agentYaml.metaReasonerDynamicCompletionMinPromptTokens,
+                    defaults.metaReasoner.dynamicCompletionMinPromptTokens
                 ),
                 forcedTerminalPressureThreshold = readProbability(
                     env["EGO_FORCE_TERMINAL_PRESSURE_THRESHOLD"],

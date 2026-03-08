@@ -50,7 +50,8 @@ class MistralChatClient(
             messages = messages.map { MistralChatMessage(role = it.role.apiValue, content = it.content) },
             temperature = options.temperature,
             maxTokens = options.maxTokens,
-            safePrompt = options.safePrompt
+            safePrompt = options.safePrompt,
+            responseFormat = options.responseFormat.toMistralResponseFormat()
         )
 
         val requestBody = mapper.writeValueAsString(payload).toRequestBody(jsonMediaType)
@@ -61,7 +62,10 @@ class MistralChatClient(
             .post(requestBody)
             .build()
 
-        logger.debug { "Sending chat request to $modelName with ${messages.size} message(s)." }
+        logger.debug {
+            "Sending chat request to $modelName with ${messages.size} message(s), " +
+                "response_format=${if (options.responseFormat == null) "none" else "json_schema"}."
+        }
 
         try {
             httpClient.newCall(request).execute().use { response ->
@@ -158,6 +162,19 @@ class MistralChatClient(
             logger.warn(ignored) { "Failed to persist chat-call metrics; continuing." }
         }
     }
+
+    private fun ChatResponseFormat?.toMistralResponseFormat(): MistralResponseFormat? =
+        when (this) {
+            null -> null
+            is ChatResponseFormat.JsonSchema -> MistralResponseFormat(
+                type = "json_schema",
+                jsonSchema = MistralJsonSchemaFormat(
+                    name = name,
+                    strict = strict,
+                    schema = mapper.readTree(schemaJson)
+                )
+            )
+        }
 }
 
 private class MistralHttpException(
@@ -187,6 +204,20 @@ private data class MistralChatCompletionRequest(
     val maxTokens: Int? = null,
     @JsonProperty("safe_prompt")
     val safePrompt: Boolean? = null,
+    @JsonProperty("response_format")
+    val responseFormat: MistralResponseFormat? = null,
+)
+
+private data class MistralResponseFormat(
+    val type: String,
+    @JsonProperty("json_schema")
+    val jsonSchema: MistralJsonSchemaFormat,
+)
+
+private data class MistralJsonSchemaFormat(
+    val name: String,
+    val strict: Boolean = true,
+    val schema: JsonNode,
 )
 
 private data class MistralChatMessage(

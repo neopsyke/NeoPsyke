@@ -38,5 +38,10 @@ agent:
   deliberation_pressure_assessment_min_step: 16
   deliberation_pressure_assessment_every_steps: 8
   deliberation_pressure_assessment_threshold: 0.68
+  meta_reasoner_max_tokens: 384
+  meta_reasoner_dynamic_completion_enabled: true
+  meta_reasoner_dynamic_completion_hard_max_tokens: 640
+  meta_reasoner_dynamic_prompt_to_completion_ratio: 0.10
+  meta_reasoner_dynamic_completion_min_prompt_tokens: 160
   forced_terminal_pressure_threshold: 0.98
   forced_terminal_stale_streak_threshold: 8

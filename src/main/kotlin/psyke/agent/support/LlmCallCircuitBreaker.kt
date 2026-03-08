@@ -24,6 +24,11 @@ class LlmCallCircuitBreaker(
         return isTripped()
     }
 
+    fun recordFailure(): Boolean {
+        streak += 1
+        return isTripped()
+    }
+
     fun isTripped(): Boolean = streak >= tripThreshold
 
     fun streak(): Int = streak

@@ -159,7 +159,7 @@ class Superego(
                     minTokens = 30,
                     content = """
                         You are Superego, a strict gatekeeper for actions.
-                        Return STRICT JSON only.
+                        Return only data that matches the response format schema.
                         If action violates directives or is unsafe, deny it.
                         Include confidence and policy_risk to support escalation checks.
                     """.trimIndent()
@@ -171,11 +171,6 @@ class Superego(
                     content = """
                         Directives:
                         $directivesBlock
-
-                        JSON schema:
-                        - If allowed: {"allow":true,"confidence":0.0-1.0,"policy_risk":"low|medium|high"}
-                        - If denied: {"allow":false,"reason":"<=${MAX_DENY_REASON_CHARS} chars","reason_code":"TECH_*|POLICY_* optional","confidence":0.0-1.0,"policy_risk":"low|medium|high"}
-                        Keep output minimal JSON only.
                     """.trimIndent()
                 ),
                 PromptBudgetAllocator.Section(
@@ -220,4 +215,3 @@ class Superego(
         private const val MAX_DENY_REASON_CHARS: Int = 180
     }
 }
-

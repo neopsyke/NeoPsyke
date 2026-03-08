@@ -41,6 +41,7 @@ data class LlmCognitiveRolesConfig(
     val actionVerifier: LlmEndpointConfig,
     val superego: LlmEndpointConfig,
     val metaReasoner: LlmEndpointConfig,
+    val metaReasonerFallback: LlmEndpointConfig? = null,
     val memoryAdvisor: LlmEndpointConfig,
     val superegoPrimary: LlmEndpointConfig? = null,
     val superegoEscalation: LlmEndpointConfig? = null,
@@ -62,6 +63,9 @@ data class LlmRuntimeConfig(
 
     val metaReasoner: LlmEndpointConfig
         get() = cognitiveRoles.metaReasoner
+
+    val metaReasonerFallback: LlmEndpointConfig?
+        get() = cognitiveRoles.metaReasonerFallback
 
     val memoryAdvisor: LlmEndpointConfig
         get() = cognitiveRoles.memoryAdvisor
@@ -146,6 +150,8 @@ private data class LlmRuntimeYamlCognitiveRoles(
     val superegoEscalation: LlmRuntimeYamlRole? = null,
     @param:JsonProperty("meta_reasoner")
     val metaReasoner: LlmRuntimeYamlRole? = null,
+    @param:JsonProperty("meta_reasoner_fallback")
+    val metaReasonerFallback: LlmRuntimeYamlRole? = null,
     @param:JsonProperty("memory_advisor")
     val memoryAdvisor: LlmRuntimeYamlRole? = null,
 )
@@ -276,6 +282,16 @@ object LlmRuntimeConfigLoader {
             legacyModel = yaml.models.memoryConsolidation ?: planner.model
         ) ?: return null
 
+        val metaReasonerFallback = yaml.cognitiveRoles?.metaReasonerFallback?.let { role ->
+            resolveRoleEndpoint(
+                env = env,
+                yaml = yaml,
+                fallbackProvider = fallbackProvider,
+                role = role,
+                legacyModel = metaReasoner.model
+            )
+        }
+
         val superegoPrimary = yaml.cognitiveRoles?.superegoPrimary?.let { role ->
             resolveRoleEndpoint(
                 env = env,
@@ -324,6 +340,7 @@ object LlmRuntimeConfigLoader {
                 actionVerifier = actionVerifier,
                 superego = superego,
                 metaReasoner = metaReasoner,
+                metaReasonerFallback = metaReasonerFallback,
                 memoryAdvisor = memoryAdvisor,
                 superegoPrimary = superegoPrimary,
                 superegoEscalation = superegoEscalation

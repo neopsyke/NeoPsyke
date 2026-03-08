@@ -1,15 +1,26 @@
 package psyke.agent
 
 import psyke.support.StubChatModelClient
+import psyke.llm.ChatModelClient
+import psyke.llm.ChatRequestOptions
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
 class MetaReasonerTest {
 
     private fun buildReasoner(response: String, maxTokens: Int = 88): Pair<LlmMetaReasoner, StubChatModelClient> {
         val llm = StubChatModelClient().apply { enqueueRawResponse(response) }
-        val reasoner = LlmMetaReasoner(modelClient = llm, config = AgentConfig(metaReasoner = MetaReasonerConfig(maxTokens = maxTokens)))
+        val reasoner = LlmMetaReasoner(
+            modelClient = llm,
+            config = AgentConfig(
+                metaReasoner = MetaReasonerConfig(
+                    maxTokens = maxTokens,
+                    dynamicCompletionEnabled = false
+                )
+            )
+        )
         return reasoner to llm
     }
 
@@ -48,6 +59,7 @@ class MetaReasonerTest {
         assertTrue(assessment.confidence > 0.8)
         assertEquals("meta_reasoner", llm.lastOptions.metadata.callSite)
         assertEquals(88, llm.lastOptions.maxTokens)
+        assertIs<psyke.llm.ChatResponseFormat.JsonSchema>(llm.lastOptions.responseFormat)
     }
 
     @Test
@@ -198,5 +210,68 @@ class MetaReasonerTest {
 
         assertEquals(MetaReasonerVerdict.FINALIZE_NOW, assessment.verdict)
         assertEquals(0.6, assessment.confidence, 0.01) // default when confidence not extractable
+    }
+
+    @Test
+    fun `meta reasoner empty-content transport failures trip circuit breaker`() {
+        var callCount = 0
+        val failing = object : ChatModelClient {
+            override val modelName: String = "failing-model"
+            override fun chat(messages: List<psyke.llm.ChatMessage>, options: ChatRequestOptions): psyke.llm.ChatCompletion {
+                callCount += 1
+                throw IllegalStateException(
+                    "Groq chat returned empty message content (finish_reason=length, content_chars=0)."
+                )
+            }
+        }
+        val reasoner = LlmMetaReasoner(
+            modelClient = failing,
+            config = AgentConfig(
+                planner = PlannerConfig(llmRetryAttempts = 1),
+                metaReasoner = MetaReasonerConfig(dynamicCompletionEnabled = false)
+            )
+        )
+
+        repeat(3) {
+            val assessment = reasoner.assess(trigger = thoughtTrigger(), context = defaultContext())
+            assertEquals(MetaReasonerVerdict.CONTINUE, assessment.verdict)
+        }
+        val tripped = reasoner.assess(trigger = thoughtTrigger(), context = defaultContext())
+
+        assertTrue(tripped.reason.contains("circuit breaker tripped", ignoreCase = true))
+        assertEquals(3, callCount, "Once tripped, meta reasoner should bypass LLM calls.")
+    }
+
+    @Test
+    fun `meta reasoner retries with fallback model after repeated empty-content failures`() {
+        var primaryCalls = 0
+        val primary = object : ChatModelClient {
+            override val modelName: String = "primary-model"
+            override fun chat(messages: List<psyke.llm.ChatMessage>, options: ChatRequestOptions): psyke.llm.ChatCompletion {
+                primaryCalls += 1
+                throw IllegalStateException(
+                    "OpenAI chat returned empty message content (finish_reason=length, content_chars=0)."
+                )
+            }
+        }
+        val fallback = StubChatModelClient(modelName = "fallback-model").apply {
+            enqueueRawResponse("""{"verdict":"finalize_now","confidence":0.9,"reason":"fallback resolved decision"}""")
+        }
+        val reasoner = LlmMetaReasoner(
+            modelClient = primary,
+            config = AgentConfig(
+                planner = PlannerConfig(llmRetryAttempts = 1),
+                metaReasoner = MetaReasonerConfig(dynamicCompletionEnabled = false)
+            ),
+            fallbackModelClient = fallback
+        )
+
+        val first = reasoner.assess(trigger = thoughtTrigger(), context = defaultContext())
+        val second = reasoner.assess(trigger = thoughtTrigger(), context = defaultContext())
+
+        assertEquals(MetaReasonerVerdict.CONTINUE, first.verdict)
+        assertEquals(MetaReasonerVerdict.FINALIZE_NOW, second.verdict)
+        assertEquals(2, primaryCalls)
+        assertEquals("meta_reasoner_fallback", fallback.lastOptions.metadata.callSite)
     }
 }

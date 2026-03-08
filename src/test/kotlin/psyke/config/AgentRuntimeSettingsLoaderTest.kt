@@ -43,6 +43,10 @@ class AgentRuntimeSettingsLoaderTest {
         assertEquals(512, settings.agentConfig.memory.longTermMemoryDynamicCompletionHardMaxTokens)
         assertEquals(0.08, settings.agentConfig.memory.longTermMemoryDynamicPromptToCompletionRatio)
         assertEquals(160, settings.agentConfig.memory.longTermMemoryDynamicCompletionMinPromptTokens)
+        assertEquals(true, settings.agentConfig.metaReasoner.dynamicCompletionEnabled)
+        assertEquals(640, settings.agentConfig.metaReasoner.dynamicCompletionHardMaxTokens)
+        assertEquals(0.10, settings.agentConfig.metaReasoner.dynamicPromptToCompletionRatio)
+        assertEquals(160, settings.agentConfig.metaReasoner.dynamicCompletionMinPromptTokens)
         assertEquals(true, settings.agentConfig.memory.longTermMemoryForceAssessOnTerminalAnswer)
         assertTrue(settings.dashboardEnabled)
         assertEquals(8787, settings.dashboardPort)
@@ -91,6 +95,10 @@ class AgentRuntimeSettingsLoaderTest {
               long_term_memory_dynamic_completion_hard_max_tokens: 480
               long_term_memory_dynamic_prompt_to_completion_ratio: 0.12
               long_term_memory_dynamic_completion_min_prompt_tokens: 90
+              meta_reasoner_dynamic_completion_enabled: false
+              meta_reasoner_dynamic_completion_hard_max_tokens: 700
+              meta_reasoner_dynamic_prompt_to_completion_ratio: 0.22
+              meta_reasoner_dynamic_completion_min_prompt_tokens: 130
             """.trimIndent()
         )
 
@@ -130,6 +138,10 @@ class AgentRuntimeSettingsLoaderTest {
         assertEquals(480, settings.agentConfig.memory.longTermMemoryDynamicCompletionHardMaxTokens)
         assertEquals(0.12, settings.agentConfig.memory.longTermMemoryDynamicPromptToCompletionRatio)
         assertEquals(90, settings.agentConfig.memory.longTermMemoryDynamicCompletionMinPromptTokens)
+        assertEquals(false, settings.agentConfig.metaReasoner.dynamicCompletionEnabled)
+        assertEquals(700, settings.agentConfig.metaReasoner.dynamicCompletionHardMaxTokens)
+        assertEquals(0.22, settings.agentConfig.metaReasoner.dynamicPromptToCompletionRatio)
+        assertEquals(130, settings.agentConfig.metaReasoner.dynamicCompletionMinPromptTokens)
     }
 
     @Test

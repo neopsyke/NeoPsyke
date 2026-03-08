@@ -24,7 +24,7 @@ Standalone Kotlin JVM app using Gradle with:
 ## Configuration
 - LLM settings are centralized in `llm-runtime.yaml` (repository root).
   - Cognitive role routing is set in `cognitive_roles`:
-    - `planner`, `action_verifier`, `superego`, `meta_reasoner`, `memory_advisor`
+    - `planner`, `action_verifier`, `superego`, `meta_reasoner`, optional `meta_reasoner_fallback`, `memory_advisor`
   - Each cognitive role can set independent `provider` and `model`.
   - Provider credentials/endpoints are set under `providers` (`api_key_env`, `base_url`).
   - `web_search` remains independently configurable (`provider`, `model`, optional `api_key_env`, `base_url`).
@@ -54,6 +54,9 @@ Standalone Kotlin JVM app using Gradle with:
       meta_reasoner:
         provider: openai
         model: gpt-4o-mini
+      meta_reasoner_fallback:
+        provider: openai
+        model: gpt-5-mini
       memory_advisor:
         provider: groq
         model: openai/gpt-oss-20b
@@ -146,7 +149,11 @@ Standalone Kotlin JVM app using Gradle with:
   - `EGO_FORCE_TERMINAL_PRESSURE_THRESHOLD` (default: `0.98`)
   - `EGO_FORCE_TERMINAL_STALE_STREAK_THRESHOLD` (default: `8`)
   - `EGO_META_REASONER_COOLDOWN_STEPS` (default: `6`)
-  - `EGO_META_REASONER_MAX_TOKENS` (default: `120`)
+  - `EGO_META_REASONER_MAX_TOKENS` (default: `384`)
+  - `EGO_META_REASONER_DYNAMIC_COMPLETION_ENABLED` (default: `true`)
+  - `EGO_META_REASONER_DYNAMIC_COMPLETION_HARD_MAX_TOKENS` (default: `640`)
+  - `EGO_META_REASONER_DYNAMIC_PROMPT_TO_COMPLETION_RATIO` (default: `0.10`)
+  - `EGO_META_REASONER_DYNAMIC_COMPLETION_MIN_PROMPT_TOKENS` (default: `160`)
   - `EGO_LONG_TERM_MEMORY_ASSESS_EVERY_STEPS` (default: `16`)
   - `EGO_LONG_TERM_MEMORY_ASSESS_COOLDOWN_STEPS` (default: `8`)
   - `EGO_LONG_TERM_MEMORY_MIN_CONFIDENCE` (default: `0.65`)

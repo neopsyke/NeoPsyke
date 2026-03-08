@@ -28,9 +28,12 @@ cognitive_roles:
   meta_reasoner:
     provider: groq
     model: openai/gpt-oss-120b
+  meta_reasoner_fallback:
+    provider: openai
+    model: gpt-5-mini
   memory_advisor:
     provider: openai
-    model: gpt-4o-mini
+    model: gpt-4.1-mini
 
 web_search:
   provider: google

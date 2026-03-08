@@ -49,7 +49,8 @@ class GeminiChatClient(
             model = modelName,
             messages = messages.map { GeminiChatMessage(role = it.role.apiValue, content = it.content) },
             temperature = options.temperature,
-            maxTokens = options.maxTokens
+            maxTokens = options.maxTokens,
+            responseFormat = options.responseFormat.toGeminiResponseFormat()
         )
 
         val requestBody = mapper.writeValueAsString(payload).toRequestBody(jsonMediaType)
@@ -62,7 +63,10 @@ class GeminiChatClient(
             .post(requestBody)
             .build()
 
-        logger.debug { "Sending chat request to $modelName with ${messages.size} message(s)." }
+        logger.debug {
+            "Sending chat request to $modelName with ${messages.size} message(s), " +
+                "response_format=${if (options.responseFormat == null) "none" else "json_schema"}."
+        }
 
         try {
             httpClient.newCall(request).execute().use { response ->
@@ -158,6 +162,19 @@ class GeminiChatClient(
             logger.warn(ignored) { "Failed to persist chat-call metrics; continuing." }
         }
     }
+
+    private fun ChatResponseFormat?.toGeminiResponseFormat(): GeminiResponseFormat? =
+        when (this) {
+            null -> null
+            is ChatResponseFormat.JsonSchema -> GeminiResponseFormat(
+                type = "json_schema",
+                jsonSchema = GeminiJsonSchemaFormat(
+                    name = name,
+                    strict = strict,
+                    schema = mapper.readTree(schemaJson)
+                )
+            )
+        }
 }
 
 private class GeminiHttpException(
@@ -185,6 +202,20 @@ private data class GeminiChatCompletionRequest(
     val temperature: Double? = null,
     @JsonProperty("max_tokens")
     val maxTokens: Int? = null,
+    @JsonProperty("response_format")
+    val responseFormat: GeminiResponseFormat? = null,
+)
+
+private data class GeminiResponseFormat(
+    val type: String,
+    @JsonProperty("json_schema")
+    val jsonSchema: GeminiJsonSchemaFormat,
+)
+
+private data class GeminiJsonSchemaFormat(
+    val name: String,
+    val strict: Boolean = true,
+    val schema: JsonNode,
 )
 
 private data class GeminiChatMessage(
