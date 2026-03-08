@@ -44,13 +44,28 @@ class GeminiChatClient(
     override fun chat(messages: List<ChatMessage>, options: ChatRequestOptions): ChatCompletion {
         require(messages.isNotEmpty()) { "At least one chat message is required." }
         val startedAt = System.nanoTime()
+        val responseFormatAdaptation = StructuredOutputCompatibility.adapt(
+            provider = LlmProvider.GEMINI,
+            modelName = modelName,
+            responseFormat = options.responseFormat,
+            mapper = mapper
+        )
+        StructuredOutputCompatibility.warningMessageIfNeeded(
+            provider = LlmProvider.GEMINI,
+            modelName = modelName,
+            requestedFormat = options.responseFormat,
+            adaptation = responseFormatAdaptation,
+            metadata = options.metadata
+        )?.let { warning ->
+            logger.warn { warning }
+        }
 
         val payload = GeminiChatCompletionRequest(
             model = modelName,
             messages = messages.map { GeminiChatMessage(role = it.role.apiValue, content = it.content) },
             temperature = options.temperature,
             maxTokens = options.maxTokens,
-            responseFormat = options.responseFormat.toGeminiResponseFormat()
+            responseFormat = responseFormatAdaptation.responseFormat.toGeminiResponseFormat()
         )
 
         val requestBody = mapper.writeValueAsString(payload).toRequestBody(jsonMediaType)

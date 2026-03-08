@@ -1,5 +1,6 @@
 package psyke.llm
 
+import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import okhttp3.Interceptor
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -98,6 +99,120 @@ class OpenAiChatClientTest {
         assertEquals(1, bodies.size)
         assertTrue(bodies.first().contains("\"max_completion_tokens\":77"))
         assertTrue(!bodies.first().contains("\"max_tokens\":77"))
+    }
+
+    @Test
+    fun `chat adapts unsupported schema keywords before sending response_format`() {
+        val bodies = mutableListOf<String>()
+        val httpClient = fakeHttpClient { request ->
+            val body = Buffer().also { request.body?.writeTo(it) }.readUtf8()
+            bodies += body
+            200 to """
+            {
+              "id": "chat-2b",
+              "model": "gpt-4o-mini",
+              "choices": [
+                {"index": 0, "message": {"role": "assistant", "content": "{\"ok\":true}"}, "finish_reason": "stop"}
+              ],
+              "usage": {"prompt_tokens": 8, "completion_tokens": 2, "total_tokens": 10}
+            }
+            """.trimIndent()
+        }
+        val responseFormat = ChatResponseFormat.JsonSchema(
+            name = "test_schema",
+            schemaJson = """
+                {
+                  "type": "object",
+                  "properties": {
+                    "ok": { "type": "boolean" }
+                  },
+                  "allOf": [
+                    {
+                      "if": { "properties": { "ok": { "const": true } } },
+                      "then": { "required": ["ok"] }
+                    }
+                  ]
+                }
+            """.trimIndent(),
+            strict = true
+        )
+
+        OpenAiChatClient(
+            apiKey = "test-key",
+            baseUrl = "https://mock.test/v1",
+            modelName = "gpt-4o-mini",
+            httpClient = httpClient
+        ).use { client ->
+            val completion = client.chat(
+                messages = listOf(ChatMessage(ChatRole.USER, "hi")),
+                options = ChatRequestOptions(responseFormat = responseFormat)
+            )
+            assertEquals("""{"ok":true}""", completion.content)
+        }
+
+        assertEquals(1, bodies.size)
+        assertTrue(bodies.first().contains("\"response_format\""))
+        assertTrue(!bodies.first().contains("\"allOf\""))
+    }
+
+    @Test
+    fun `chat normalizes strict object required fields for openai response_format`() {
+        val bodies = mutableListOf<String>()
+        val httpClient = fakeHttpClient { request ->
+            val body = Buffer().also { request.body?.writeTo(it) }.readUtf8()
+            bodies += body
+            200 to """
+            {
+              "id": "chat-2c",
+              "model": "gpt-4o-mini",
+              "choices": [
+                {"index": 0, "message": {"role": "assistant", "content": "{\"allow\":true,\"reason\":null,\"reason_code\":null,\"confidence\":0.8,\"policy_risk\":\"low\"}"}, "finish_reason": "stop"}
+              ],
+              "usage": {"prompt_tokens": 8, "completion_tokens": 2, "total_tokens": 10}
+            }
+            """.trimIndent()
+        }
+        val responseFormat = ChatResponseFormat.JsonSchema(
+            name = "superego_review",
+            schemaJson = """
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["allow", "confidence", "policy_risk"],
+                  "properties": {
+                    "allow": { "type": "boolean" },
+                    "reason": { "type": "string", "maxLength": 180 },
+                    "reason_code": { "type": "string" },
+                    "confidence": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
+                    "policy_risk": { "type": "string", "enum": ["low", "medium", "high"] }
+                  }
+                }
+            """.trimIndent(),
+            strict = true
+        )
+
+        OpenAiChatClient(
+            apiKey = "test-key",
+            baseUrl = "https://mock.test/v1",
+            modelName = "gpt-4o-mini",
+            httpClient = httpClient
+        ).use { client ->
+            client.chat(
+                messages = listOf(ChatMessage(ChatRole.USER, "hi")),
+                options = ChatRequestOptions(responseFormat = responseFormat)
+            )
+        }
+
+        assertEquals(1, bodies.size)
+        val requestJson = jacksonObjectMapper().readTree(bodies.first())
+        val required = requestJson
+            .path("response_format")
+            .path("json_schema")
+            .path("schema")
+            .path("required")
+        val requiredSet = required.map { it.asText() }.toSet()
+        assertTrue(requiredSet.contains("reason"))
+        assertTrue(requiredSet.contains("reason_code"))
     }
 
     @Test

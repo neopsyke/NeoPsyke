@@ -296,24 +296,14 @@ internal class SingleStageSuperegoReviewEngine(
             {
               "type": "object",
               "additionalProperties": false,
-              "required": ["allow", "confidence", "policy_risk"],
+              "required": ["allow", "reason", "reason_code", "confidence", "policy_risk"],
               "properties": {
                 "allow": { "type": "boolean" },
-                "reason": { "type": "string", "maxLength": 180 },
-                "reason_code": { "type": "string" },
+                "reason": { "type": ["string", "null"], "maxLength": 180 },
+                "reason_code": { "type": ["string", "null"] },
                 "confidence": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
                 "policy_risk": { "type": "string", "enum": ["low", "medium", "high"] }
-              },
-              "allOf": [
-                {
-                  "if": { "properties": { "allow": { "const": true } }, "required": ["allow"] },
-                  "then": { "required": ["allow", "confidence", "policy_risk"] }
-                },
-                {
-                  "if": { "properties": { "allow": { "const": false } }, "required": ["allow"] },
-                  "then": { "required": ["allow", "reason", "confidence", "policy_risk"] }
-                }
-              ]
+              }
             }
         """
 

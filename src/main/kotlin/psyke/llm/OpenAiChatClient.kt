@@ -112,13 +112,29 @@ class OpenAiChatClient(
         options: ChatRequestOptions,
         tuning: OpenAiRequestTuning,
     ): ChatCompletion {
+        val responseFormatAdaptation = StructuredOutputCompatibility.adapt(
+            provider = LlmProvider.OPENAI,
+            modelName = modelName,
+            responseFormat = options.responseFormat,
+            mapper = mapper
+        )
+        StructuredOutputCompatibility.warningMessageIfNeeded(
+            provider = LlmProvider.OPENAI,
+            modelName = modelName,
+            requestedFormat = options.responseFormat,
+            adaptation = responseFormatAdaptation,
+            metadata = options.metadata
+        )?.let { warning ->
+            logger.warn { warning }
+        }
+
         val payload = OpenAiChatCompletionRequest(
             model = modelName,
             messages = messages.map { OpenAiChatMessage(role = it.role.apiValue, content = it.content) },
             temperature = if (tuning.includeTemperature) options.temperature else null,
             maxTokens = if (tuning.maxTokensField == OpenAiMaxTokensField.MAX_TOKENS) options.maxTokens else null,
             maxCompletionTokens = if (tuning.maxTokensField == OpenAiMaxTokensField.MAX_COMPLETION_TOKENS) options.maxTokens else null,
-            responseFormat = options.responseFormat.toOpenAiResponseFormat()
+            responseFormat = responseFormatAdaptation.responseFormat.toOpenAiResponseFormat()
         )
         val request = Request.Builder()
             .url("${baseUrl.trimEnd('/')}/chat/completions")

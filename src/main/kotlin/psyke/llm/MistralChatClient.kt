@@ -44,6 +44,21 @@ class MistralChatClient(
     override fun chat(messages: List<ChatMessage>, options: ChatRequestOptions): ChatCompletion {
         require(messages.isNotEmpty()) { "At least one chat message is required." }
         val startedAt = System.nanoTime()
+        val responseFormatAdaptation = StructuredOutputCompatibility.adapt(
+            provider = LlmProvider.MISTRAL,
+            modelName = modelName,
+            responseFormat = options.responseFormat,
+            mapper = mapper
+        )
+        StructuredOutputCompatibility.warningMessageIfNeeded(
+            provider = LlmProvider.MISTRAL,
+            modelName = modelName,
+            requestedFormat = options.responseFormat,
+            adaptation = responseFormatAdaptation,
+            metadata = options.metadata
+        )?.let { warning ->
+            logger.warn { warning }
+        }
 
         val payload = MistralChatCompletionRequest(
             model = modelName,
@@ -51,7 +66,7 @@ class MistralChatClient(
             temperature = options.temperature,
             maxTokens = options.maxTokens,
             safePrompt = options.safePrompt,
-            responseFormat = options.responseFormat.toMistralResponseFormat()
+            responseFormat = responseFormatAdaptation.responseFormat.toMistralResponseFormat()
         )
 
         val requestBody = mapper.writeValueAsString(payload).toRequestBody(jsonMediaType)
