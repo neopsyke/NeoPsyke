@@ -151,8 +151,8 @@ class AgentScenarioPackTest {
 
         runAgentWithInput(agent, "hello\nexit\n")
 
-        assertEquals(1, hippocampus.queries.size)
-        assertTrue(hippocampus.queries.single().cue.contains("hello"))
+        assertTrue(hippocampus.queries.isNotEmpty())
+        assertTrue(hippocampus.queries.any { it.cue.contains("hello") })
         val prompt = plannerLlm.lastMessages.last().content
         assertTrue(prompt.contains("Long-term memory recall:"))
         assertTrue(prompt.contains("prior preference: concise responses"))
@@ -400,10 +400,23 @@ class AgentScenarioPackTest {
         val instrumentation = RecordingInstrumentation()
         val outputs = mutableListOf<String>()
         val config = AgentConfig(planner = PlannerConfig(maxLoopStepsPerInput = 12, maxThoughtPasses = 4))
+        val search = object : WebSearchEngine {
+            override fun search(query: String, maxResults: Int): WebSearchResult =
+                WebSearchResult(
+                    summary = "Pricing verified from official source.",
+                    snippets = listOf("Official pricing is 20/month."),
+                    sources = listOf(
+                        WebSearchSource(
+                            title = "Official Pricing",
+                            url = "https://example.com/pricing"
+                        )
+                    )
+                )
+        }
         val agent = Ego(
             planner = LlmEgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
             superego = Superego(modelClient = superegoLlm, config = config, instrumentation = instrumentation),
-            motorCortex = buildMotorCortex(output = { outputs.add(it) }),
+            motorCortex = buildMotorCortex(output = { outputs.add(it) }, webSearchEngine = search),
             config = config,
             instrumentation = instrumentation
         )

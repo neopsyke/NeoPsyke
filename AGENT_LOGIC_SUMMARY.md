@@ -87,6 +87,7 @@ It is intentionally high-level and should stay aligned with the code.
     - queue snapshot
     - short-term memory summary
     - long-term memory recall (if available)
+    - reflection-lesson recall (if available)
     - task workspace summary (index + compact section summaries, if enabled)
     - external evidence hints derived from prior successful/failed evidence actions for the same root input
     - deliberation state and meta-guidance
@@ -117,10 +118,13 @@ It is intentionally high-level and should stay aligned with the code.
   - Emits lightweight workspace-head telemetry (`task_workspace_head`) on workspace mutations.
   - When `TaskWorkspaceConfig.debugCaptureEnabled` is on, emits full debug snapshots (`task_workspace_debug_snapshot`) for dashboard-only inspection.
   - Fallback explanation actions bypass policy gate.
-  - Normal actions go through `Superego.review`.
+  - Normal actions pass through deterministic `TaskVerifier` first (task-truth/sufficiency gate), then `Superego.review`.
+    - Current deterministic checks focus on verification-sensitive final answers (for example latest/current/price/news/schedule/weather/law/rates/version) and require at least one successful evidence action before allowing terminal answer.
+    - Forced-terminal system answers (decision-pressure safety path) are exempt from TaskVerifier evidence requirement.
   - If denied:
     - Record denial metrics/evidence.
     - Enqueue a new "find safe alternative" thought with denied-action context, including structured `reason_code`.
+    - Attempt reflection-lesson persistence into long-term memory (filtered; technical/system failures are skipped).
   - If allowed:
     - Execute via `MotorCortex.execute`.
     - Record outcome + deliberation evidence.
@@ -155,6 +159,16 @@ It is intentionally high-level and should stay aligned with the code.
     - one strict-JSON retry on parse failure
     - parse-failure circuit breaker (scoped by `root_input + action_type`) that bypasses verifier for one decision after repeated malformed verifier outputs
   - Retry policy and safe fallback to `Noop` on model/parse failures.
+  - Planner and action-verifier prompts now include "reflection lessons" context to avoid repeated failed strategies.
+
+## Task Verifier Gate
+- File: `src/main/kotlin/psyke/agent/ego/TaskVerifier.kt`
+- Deterministic pre-policy gate for task-level correctness/sufficiency.
+- Returns `TaskVerifierDecision(allow, reason, reasonCode)` and emits `task_verifier_review`.
+- Current deny paths:
+  - `TASK_EVIDENCE_REQUIRED`: verification-sensitive terminal answer proposed without successful evidence.
+  - `TECH_EXTERNAL_EVIDENCE_FAILURE`: verification-sensitive terminal answer proposed after only failed evidence attempts.
+- Gate runs before Superego and reuses the same denied-action recovery loop in `Ego`.
 
 ## Policy Gate (Superego)
 - File: `src/main/kotlin/psyke/agent/superego/Superego.kt`
@@ -218,6 +232,7 @@ It is intentionally high-level and should stay aligned with the code.
 - Long-term recall:
   - Through `MemoryCoordinator` + `Hippocampus.recall`.
   - Input-trigger recalls are cue-based; thought-trigger recalls require explicit planner query.
+  - Reflection-lesson recall is a separate targeted cue path (`REFLECTION_LESSON retrieval`) injected into planner/action-verifier prompts.
   - MCP stdio connect uses bounded startup retry (2 attempts) to absorb transient transport-close failures.
 - Long-term consolidation:
   - `LlmLongTermMemoryAdvisor` decides `save|skip` with confidence/tags/summary.
@@ -246,6 +261,11 @@ It is intentionally high-level and should stay aligned with the code.
     - default temporal recall is cross-session
     - session/interlocutor filters are applied only when the user explicitly requests them (for example, “this session”, `session:<id>`, `interlocutor:<id>`)
   - `McpHippocampus` requests `write_mode=dedupe_if_similar` when calling memory write tools.
+  - Reflection lessons:
+    - Triggered on denied-action/repeated-denied loops.
+    - Persisted as `MemoryImprint(source=ego_reflection_lesson)` with tags (`kind:reflection_lesson`, action/reason/session metadata).
+    - Deduplicated via recent fingerprint window.
+    - Explicitly skipped for technical/system failures (external tool failures, LLM client failures, parse/JSON failures, transport/timeouts, `TECH_*`/`SYSTEM_*` reason codes).
 - Task workspace (ephemeral, per request):
   - File: `src/main/kotlin/psyke/agent/memory/workspace/TaskWorkspaceStore.kt`
   - Optional (disabled by default) via `MemoryConfig.taskWorkspace.enabled`.
@@ -314,6 +334,7 @@ It is intentionally high-level and should stay aligned with the code.
   - long-term advisor -> parse-fallback/skip save
 - For meta-reasoner and superego, circuit-breaker streaks now include repeated empty-content transport failures in addition to parse failures.
 - Repeated denied-action loops are blocked by payload/type comparison, except when denial is classified as technical/transient. Classification prefers structured `reason_code` (for example `TECH_*`) and falls back to text heuristics only if code is missing.
+- Reflection-lesson persistence is disabled for technical/system/transient failure classes, so retries/infra noise do not pollute long-term lesson memory.
 - Multi-layer duplicate plan suppression (evaluated cheapest-first):
   1. **Plan budget**: hard cap (`maxPlansPerInput`, default 2) on plans emitted per root input.
   2. **Pressure gate**: suppress new plans when `decisionPressure >= planEmissionPressureThreshold` (default 0.55).
@@ -354,10 +375,12 @@ It is intentionally high-level and should stay aligned with the code.
 Update this file whenever any of these change:
 - Loop task ordering, step-limit behavior, or fallback execution policy.
 - Planner decision schema or verifier verdict handling.
+- Task verifier decision rules, reason-code semantics, or placement in action path.
 - Superego directives contract or default deny/allow fallback behavior.
 - Superego deterministic rules/validators or deterministic-vs-LLM precedence.
 - Deliberation pressure formula, thresholds, or forced-terminal criteria.
 - Memory recall/consolidation triggers, thresholds, or disable semantics.
+- Reflection-lesson recall/imprint triggers, filters, or dedupe behavior.
 - Episodic memory (logbook) event types, journal call sites, or storage schema.
 - Task workspace lifecycle, scoping, prompt injection, or final-pass compilation behavior.
 - Prompt-injection defense patterns or untrusted-content handling paths.

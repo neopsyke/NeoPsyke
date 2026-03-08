@@ -65,6 +65,7 @@ class Ego(
     private val planCountByInput = mutableMapOf<InputScope, Int>()
     private val emittedPlanHashes = mutableMapOf<InputScope, MutableSet<String>>()
     private val externalActionSignatureHitsByInput = mutableMapOf<InputScope, MutableMap<String, Int>>()
+    private val taskVerifier: TaskVerifier = DeterministicTaskVerifier()
 
     private fun dialogueFor(sessionId: String): ArrayDeque<DialogueTurn> =
         dialogueBySession.getOrPut(sessionId) { ArrayDeque() }
@@ -336,6 +337,43 @@ class Ego(
             maybeRunTerminalAnswerMemoryAssessment(resolvedAction, outcome, sessionId)
             return
         }
+        val taskVerificationDecision = taskVerifier.review(
+            action = resolvedAction,
+            context = TaskVerifierContext(
+                recentDialogue = dialogueFor(sessionId).takeLast(12),
+                externalEvidence = deliberation.evidenceFor(resolvedAction.rootInputId, sessionId)
+            )
+        )
+        instrumentation.emit(
+            AgentEvent(
+                type = "task_verifier_review",
+                data = mapOf(
+                    "action_id" to resolvedAction.id,
+                    "allow" to taskVerificationDecision.allow,
+                    "reason" to taskVerificationDecision.reason,
+                    "reason_code" to taskVerificationDecision.reasonCode
+                )
+            )
+        )
+        if (!taskVerificationDecision.allow) {
+            instrumentation.emit(
+                AgentEvents.actionReviewResult(
+                    actionId = resolvedAction.id,
+                    allow = false,
+                    reason = taskVerificationDecision.reason,
+                    reasonCode = taskVerificationDecision.reasonCode
+                )
+            )
+            handleDeniedAction(
+                action = resolvedAction,
+                reason = taskVerificationDecision.reason,
+                reasonCode = taskVerificationDecision.reasonCode,
+                conversationContext = convCtx,
+                sessionId = sessionId,
+                source = "task_verifier"
+            )
+            return
+        }
         val gateDecision = superego.review(resolvedAction, superegoContext(sessionId))
         instrumentation.emit(
             AgentEvents.actionReviewResult(
@@ -346,41 +384,14 @@ class Ego(
             )
         )
         if (!gateDecision.allow) {
-            deliberation.onActionDenied()
-            val denialThought = TextSecurity.clamp(
-                "Action denied by superego (${gateDecision.reason}). " +
-                    "Try a different safe action than the denied one. " +
-                    "If no safe alternative exists, prepare a concise explanation for the interlocutor.",
-                config.planner.maxThoughtChars
+            handleDeniedAction(
+                action = resolvedAction,
+                reason = gateDecision.reason,
+                reasonCode = gateDecision.reasonCode,
+                conversationContext = convCtx,
+                sessionId = sessionId,
+                source = "superego"
             )
-            val queued = scheduler.enqueueThought(
-                content = denialThought,
-                urgency = resolvedAction.urgency,
-                passes = resolvedAction.attempts + 1,
-                rootInputId = resolvedAction.rootInputId,
-                rootInputReceivedAtMs = resolvedAction.rootInputReceivedAtMs,
-                deniedActionType = resolvedAction.type,
-                deniedActionPayload = TextSecurity.clamp(resolvedAction.payload, 240),
-                denialReason = gateDecision.reason,
-                denialReasonCode = gateDecision.reasonCode,
-                allowFallbackExplanation = true,
-                conversationContext = convCtx
-            )
-            instrumentation.emit(AgentEvents.actionDenied(resolvedAction, gateDecision.reason, gateDecision.reasonCode))
-            memory.journal(
-                EpisodicEventType.ACTION_DENIED,
-                "Denied ${resolvedAction.type.name.lowercase()}: ${gateDecision.reason}",
-                actionType = resolvedAction.type.name.lowercase(),
-            )
-            if (!queued) {
-                instrumentation.emit(AgentEvents.warning("Failed to enqueue denial thought."))
-                recordQueueSaturation(
-                    queueType = "thought",
-                    capacity = config.maxPendingThoughts,
-                    reason = "enqueue_denial_thought_failed_full"
-                )
-            }
-            emitQueueSnapshot("action_denied")
             return
         }
 
@@ -469,6 +480,64 @@ class Ego(
         }
     }
 
+    private fun handleDeniedAction(
+        action: PendingAction,
+        reason: String,
+        reasonCode: String?,
+        conversationContext: ConversationContext,
+        sessionId: String,
+        source: String,
+    ) {
+        deliberation.onActionDenied()
+        val denialThought = TextSecurity.clamp(
+            "Action denied by $source ($reason). " +
+                "Try a different safe action than the denied one. " +
+                "If no safe alternative exists, prepare a concise explanation for the interlocutor.",
+            config.planner.maxThoughtChars
+        )
+        val queued = scheduler.enqueueThought(
+            content = denialThought,
+            urgency = action.urgency,
+            passes = action.attempts + 1,
+            rootInputId = action.rootInputId,
+            rootInputReceivedAtMs = action.rootInputReceivedAtMs,
+            deniedActionType = action.type,
+            deniedActionPayload = TextSecurity.clamp(action.payload, 240),
+            denialReason = reason,
+            denialReasonCode = reasonCode,
+            allowFallbackExplanation = true,
+            conversationContext = conversationContext
+        )
+        instrumentation.emit(AgentEvents.actionDenied(action, reason, reasonCode))
+        memory.journal(
+            EpisodicEventType.ACTION_DENIED,
+            "Denied ${action.type.name.lowercase()} by $source: $reason",
+            actionType = action.type.name.lowercase(),
+            metadata = mapOf(
+                "source" to source,
+                "reason_code" to reasonCode
+            )
+        )
+        memory.maybeRecordReflectionLesson(
+            trigger = "action_denied_$source",
+            actionType = action.type,
+            reasonCode = reasonCode,
+            reason = reason,
+            deniedPayload = action.payload,
+            recentDialogue = dialogueFor(sessionId).takeLast(12),
+            stepIndex = deliberation.snapshot().stepIndex
+        )
+        if (!queued) {
+            instrumentation.emit(AgentEvents.warning("Failed to enqueue denial thought."))
+            recordQueueSaturation(
+                queueType = "thought",
+                capacity = config.maxPendingThoughts,
+                reason = "enqueue_denial_thought_failed_full"
+            )
+        }
+        emitQueueSnapshot("action_denied")
+    }
+
     private fun applyDecision(
         decision: EgoDecision,
         nextPassCount: Int,
@@ -532,6 +601,15 @@ class Ego(
                 if (repeatedDeniedAction && !technicalDenial) {
                     instrumentation.emit(AgentEvents.warning("Planner repeated a denied action; requesting an alternative."))
                     deliberation.onRepeatedDeniedAction()
+                    memory.maybeRecordReflectionLesson(
+                        trigger = "repeated_denied_action",
+                        actionType = decision.actionType,
+                        reasonCode = originThought.denialReasonCode,
+                        reason = originThought.denialReason,
+                        deniedPayload = decision.payload,
+                        recentDialogue = dialogueFor(resolveSessionId(conversationContext)).takeLast(12),
+                        stepIndex = deliberation.snapshot().stepIndex
+                    )
                     val retryThought = TextSecurity.clamp(
                         "Previous proposed action repeats a denied action. Pick a materially different safe action.",
                         config.planner.maxThoughtChars
@@ -1201,6 +1279,7 @@ class Ego(
         val shortTermSummary = memory.currentShortTermSummary()
         val episodicCues = memory.recallEpisodicAsVectorCues(recentDialogue)
         val longTermRecall = memory.recall(trigger, shortTermSummary, recentDialogue, episodicCues)
+        val reflectionLessons = memory.recallReflectionLessons(trigger, recentDialogue)
         val episodicRecall = memory.recallEpisodic(trigger, recentDialogue)
         val taskWorkspaceSummary = taskWorkspaceStore.promptSummary(
             rootInputId = rootInputId,
@@ -1213,6 +1292,7 @@ class Ego(
             queue = scheduler.queueSnapshot(),
             shortTermContextSummary = shortTermSummary,
             longTermMemoryRecall = longTermRecall,
+            reflectionLessons = reflectionLessons,
             episodicRecall = episodicRecall,
             taskWorkspaceSummary = taskWorkspaceSummary,
             evidenceHints = evidenceHints,
