@@ -1158,6 +1158,20 @@ class Ego(
         if (!config.memory.taskWorkspace.enabled || !config.memory.taskWorkspace.finalPassRewriteEnabled) {
             return action
         }
+        val preFinalSnapshot = taskWorkspaceStore.debugSnapshot(action.rootInputId)
+        if (preFinalSnapshot != null) {
+            instrumentation.emit(
+                AgentEvent(
+                    type = "task_workspace_pre_final_dump",
+                    data = mapOf(
+                        "session_id" to sessionId,
+                        "root_input_id" to action.rootInputId,
+                        "candidate_answer" to action.payload,
+                        "snapshot" to preFinalSnapshot
+                    )
+                )
+            )
+        }
         taskWorkspaceStore.recordAnswerDraft(
             rootInputId = action.rootInputId,
             payload = action.payload

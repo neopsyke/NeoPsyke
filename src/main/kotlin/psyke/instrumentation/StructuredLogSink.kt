@@ -204,6 +204,12 @@ class StructuredLogSink : InstrumentationSink {
                 }
             }
 
+            "task_workspace_pre_final_dump" -> {
+                logger.info {
+                    "task_workspace.pre_final_dump session=${event.data["session_id"]} root_input=${event.data["root_input_id"]}"
+                }
+            }
+
             "task_workspace_created" -> {
                 logger.trace {
                     "task_workspace.created root_id=${event.data["root_input_id"]} root_received_at_ms=${event.data["root_input_received_at_ms"]} active=${event.data["active_tasks"]} goal=${event.data["goal_preview"]}"
