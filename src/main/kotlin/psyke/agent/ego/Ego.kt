@@ -1158,6 +1158,20 @@ class Ego(
         if (!config.memory.taskWorkspace.enabled || !config.memory.taskWorkspace.finalPassRewriteEnabled) {
             return action
         }
+        val preFinalSnapshot = taskWorkspaceStore.debugSnapshot(action.rootInputId)
+        if (preFinalSnapshot != null) {
+            instrumentation.emit(
+                AgentEvent(
+                    type = "task_workspace_pre_final_dump",
+                    data = mapOf(
+                        "session_id" to sessionId,
+                        "root_input_id" to action.rootInputId,
+                        "candidate_answer" to action.payload,
+                        "snapshot" to preFinalSnapshot
+                    )
+                )
+            )
+        }
         taskWorkspaceStore.recordAnswerDraft(
             rootInputId = action.rootInputId,
             payload = action.payload
@@ -1301,6 +1315,10 @@ class Ego(
             rootInputId = rootInputId,
             maxTokens = config.memory.taskWorkspace.maxPromptTokens
         )
+        val sessionWorkspaceDigest = taskWorkspaceStore.digestPromptSummary(
+            sessionId = sessionId,
+            maxTokens = config.memory.taskWorkspace.digestMaxPromptTokens
+        )
         val disabled = deliberation.disabledActionTypes(rootInputId, sessionId)
         val availableActions = motorCortex.availableActionTypes() - disabled
         val dispatchableActions = motorCortex.dispatchableActionTypes() - disabled
@@ -1321,6 +1339,7 @@ class Ego(
             reflectionLessons = reflectionLessons,
             episodicRecall = episodicRecall,
             taskWorkspaceSummary = taskWorkspaceSummary,
+            sessionWorkspaceDigest = sessionWorkspaceDigest,
             evidenceHints = evidenceHints,
             deliberation = deliberation.snapshot(),
             metaGuidance = deliberation.guidance(),
@@ -1433,6 +1452,21 @@ class Ego(
             updateType = "before_destroy_input_resolved"
         )
         val cleared = scheduler.clearPendingWorkForInput(rootInputId, sessionId)
+        val digestEntry = taskWorkspaceStore.captureDigest(rootInputId, sessionId)
+        if (digestEntry != null) {
+            instrumentation.emit(
+                AgentEvent(
+                    type = "task_workspace_digest_captured",
+                    data = mapOf(
+                        "root_input_id" to rootInputId,
+                        "session_id" to sessionId,
+                        "goal_preview" to TextSecurity.preview(digestEntry.goal, 140),
+                        "section_count" to digestEntry.sectionIndex.size,
+                        "evidence_count" to digestEntry.keyEvidence.size,
+                    )
+                )
+            )
+        }
         val destroyedWorkspace = taskWorkspaceStore.destroy(rootInputId)
         if (destroyedWorkspace != null) {
             instrumentation.emit(

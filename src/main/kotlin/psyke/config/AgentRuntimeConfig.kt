@@ -64,6 +64,9 @@ private data class AgentRuntimeYamlAgent(
     val taskWorkspaceFinalPassMinModelConfidence: Double? = null,
     val taskWorkspaceDebugCaptureEnabled: Boolean? = null,
     val taskWorkspaceMaxActiveTasks: Int? = null,
+    val taskWorkspaceDigestMaxEntries: Int? = null,
+    val taskWorkspaceDigestMaxChars: Int? = null,
+    val taskWorkspaceDigestMaxPromptTokens: Int? = null,
     val maxThoughtChars: Int? = null,
     val maxActionPayloadChars: Int? = null,
     val maxActionSummaryChars: Int? = null,
@@ -311,6 +314,21 @@ object AgentRuntimeSettingsLoader {
                         env["EGO_TASK_WORKSPACE_MAX_ACTIVE_TASKS"],
                         agentYaml.taskWorkspaceMaxActiveTasks,
                         defaults.memory.taskWorkspace.maxActiveTasks
+                    ),
+                    digestMaxEntries = readPositiveInt(
+                        env["EGO_TASK_WORKSPACE_DIGEST_MAX_ENTRIES"],
+                        agentYaml.taskWorkspaceDigestMaxEntries,
+                        defaults.memory.taskWorkspace.digestMaxEntries
+                    ),
+                    digestMaxChars = readPositiveInt(
+                        env["EGO_TASK_WORKSPACE_DIGEST_MAX_CHARS"],
+                        agentYaml.taskWorkspaceDigestMaxChars,
+                        defaults.memory.taskWorkspace.digestMaxChars
+                    ),
+                    digestMaxPromptTokens = readPositiveInt(
+                        env["EGO_TASK_WORKSPACE_DIGEST_MAX_PROMPT_TOKENS"],
+                        agentYaml.taskWorkspaceDigestMaxPromptTokens,
+                        defaults.memory.taskWorkspace.digestMaxPromptTokens
                     ),
                 ),
                 longTermMemoryRecallMaxItems = readPositiveInt(

@@ -60,6 +60,7 @@ import psyke.instrumentation.MetricsEventSink
 import psyke.instrumentation.MetricsSnapshotObserver
 import psyke.instrumentation.ReasoningEvalFlowLogSink
 import psyke.instrumentation.StructuredLogSink
+import psyke.instrumentation.TaskWorkspaceDumpSink
 import psyke.llm.InstrumentedChatModelClient
 import psyke.llm.ChatModelClient
 import psyke.integrations.google.websearch.GeminiWebSearchEngine
@@ -538,7 +539,8 @@ internal object AppModeRunners {
             InstrumentationBus(
                 sinks = listOfNotNull(
                     StructuredLogSink(),
-                    dashboardStore
+                    dashboardStore,
+                    TaskWorkspaceDumpSink()
                 ),
                 criticalSinks = listOfNotNull(sidecarSink)
             ).use { instrumentation ->

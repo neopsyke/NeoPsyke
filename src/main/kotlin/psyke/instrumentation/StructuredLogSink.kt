@@ -204,6 +204,12 @@ class StructuredLogSink : InstrumentationSink {
                 }
             }
 
+            "task_workspace_pre_final_dump" -> {
+                logger.info {
+                    "task_workspace.pre_final_dump session=${event.data["session_id"]} root_input=${event.data["root_input_id"]}"
+                }
+            }
+
             "task_workspace_created" -> {
                 logger.trace {
                     "task_workspace.created root_id=${event.data["root_input_id"]} root_received_at_ms=${event.data["root_input_received_at_ms"]} active=${event.data["active_tasks"]} goal=${event.data["goal_preview"]}"
@@ -249,6 +255,12 @@ class StructuredLogSink : InstrumentationSink {
             "task_workspace_destroyed" -> {
                 logger.trace {
                     "task_workspace.destroyed root_id=${event.data["root_input_id"]} root_received_at_ms=${event.data["root_input_received_at_ms"]} sections=${event.data["section_count"]} evidence=${event.data["evidence_count"]} reason=${event.data["reason"]}"
+                }
+            }
+
+            "task_workspace_digest_captured" -> {
+                logger.trace {
+                    "task_workspace.digest_captured root_id=${event.data["root_input_id"]} session=${event.data["session_id"]} sections=${event.data["section_count"]} evidence=${event.data["evidence_count"]} goal=${event.data["goal_preview"]}"
                 }
             }
 

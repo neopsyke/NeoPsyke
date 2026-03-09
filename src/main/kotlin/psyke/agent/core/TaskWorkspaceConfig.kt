@@ -16,4 +16,7 @@ data class TaskWorkspaceConfig(
     val finalPassMinModelConfidence: Double = 0.55,
     val debugCaptureEnabled: Boolean = true,
     val maxActiveTasks: Int = 32,
+    val digestMaxEntries: Int = 4,
+    val digestMaxChars: Int = 800,
+    val digestMaxPromptTokens: Int = 160,
 )

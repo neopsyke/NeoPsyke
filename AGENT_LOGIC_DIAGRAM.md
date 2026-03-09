@@ -84,7 +84,7 @@ sequenceDiagram
 
     User->>SC: Input text
     SC->>Ego: InputReceived
-    Note over SC,Ego: Input carries ConversationContext(sessionId) + rootInputId(identity) + receivedAtMs(timing)
+    Note over SC,Ego: Input carries ConversationContext(sessionId), rootInputId(identity), receivedAtMs(timing)
     Ego->>Sched: enqueueInput
 
     loop While pending work and step limit not reached
@@ -94,25 +94,25 @@ sequenceDiagram
         Ego->>Delib: startStep()
 
         alt Task = input or thought
-            Ego->>Mem: recall + short-term summary
+            Ego->>Mem: recall and short-term summary
             Note over Ego,Mem: Planner context now includes targeted reflection-lesson recall
-            Ego->>TWS: create/update request workspace + index summary
-            Ego->>Dash: emit task_workspace_head (+ optional debug snapshot)
+            Ego->>TWS: create or update request workspace and index summary
+            Ego->>Dash: emit task_workspace_head (with optional debug snapshot)
             Ego->>Planner: decide(context)
             Note over Ego,Planner: On non-parseable planner JSON, planner issues one strict-JSON retry before noop fallback
             Planner-->>Ego: thought/action/plan/noop
             Ego->>Delib: maybeApplyPressureOverride
             Ego->>Sched: enqueue thought/action/plan steps
             Note over Ego,Sched: Plans gated by budget → pressure → hash dedup → pending-plan check
-            Note over Ego,Planner: Redundancy is planner-side soft cost control (prompt + verifier), with telemetry event `external_action_redundancy_signal`
-            Note over Ego,Planner: Action verifier runs after action decisions; parse failures trigger one strict retry and may trip temporary verifier bypass (scoped per root_input + action_type)
+            Note over Ego,Planner: Redundancy is planner-side soft cost control (prompt and verifier), with telemetry event external_action_redundancy_signal
+            Note over Ego,Planner: Action verifier runs after action decisions parse failures trigger one strict retry and may trip temporary verifier bypass (scoped per root_input and action_type)
         else Task = action
             alt Fallback explanation action
                 Ego->>Motor: execute (bypass Superego)
             else Normal action
                 Ego->>TV: review(action, evidence/recent dialogue)
                 alt task verifier deny
-                    TV-->>Ego: deny (+ reason_code)
+                    TV-->>Ego: deny (with reason_code)
                     Ego->>Sched: enqueue safe-alternative thought
                     Ego->>Mem: maybeRecordReflectionLesson(filtered)
                 else task verifier allow
@@ -128,7 +128,7 @@ sequenceDiagram
                         Note over Ego,Sup: Superego completion max_tokens scales with prompt estimate (bounded floor/hard-cap) and model token_weight
                         Note over Ego,Sup: Structured output is schema-enforced (response_format=json_schema)
                         Note over Ego,Sup: Stage parse failures trigger one schema-enforced retry before default deny
-                        Sup-->>Ego: allow/deny (+ reason_code on deny)
+                        Sup-->>Ego: allow or deny (with reason_code on deny)
                         alt allow
                             alt action = answer
                                 Ego->>TWS: final-pass compilation from workspace index/evidence
@@ -138,7 +138,7 @@ sequenceDiagram
                             Ego->>Motor: execute(action)
                             Ego->>Ego: PromptInjectionDefense sanitize untrusted tool output
                             alt action = answer
-                                Ego->>Sched: clear pending thought/action work for same root+session scope
+                                Ego->>Sched: clear pending thought and action work for same root-session scope
                                 Ego->>TWS: destroy workspace for resolved input
                                 Note over Ego,Dash: Workspace telemetry carries root_input_id(identity) and root_input_received_at_ms(timing)
                                 Ego->>Dash: drawer reads full snapshots via /api/obs/workspace/{rootId}
@@ -147,7 +147,7 @@ sequenceDiagram
                             Ego->>TWS: record non-answer action outcomes/evidence
                             Ego->>Sched: enqueue follow-up thought (for evidence actions)
                             Ego->>Mem: maybeAssessLongTermMemory(post_allowed_action, optional force)
-                            Note over Ego,Mem: Blocked imprints emit long_term_memory_persistence_skipped (reason_code + reason_detail) for timeline visibility
+                            Note over Ego,Mem: Blocked imprints emit long_term_memory_persistence_skipped (reason_code, reason_detail) for timeline visibility
                         else deny
                             Ego->>Sched: enqueue safe-alternative thought
                             Ego->>Mem: maybeRecordReflectionLesson(filtered)
@@ -158,8 +158,8 @@ sequenceDiagram
         end
 
         Ego->>Delib: maybeForceTerminalAnswer
-        Note over Ego,Delib: Deliberation state is session-scoped; evidence/circuit state is scoped by root+session
-        Note over Ego,Delib: Meta-reasoner output is schema-enforced; repeated empty-content transport failures can trigger optional fallback endpoint
+        Note over Ego,Delib: Deliberation state is session-scoped evidence and circuit state is scoped by root-session
+        Note over Ego,Delib: Meta-reasoner output is schema-enforced, repeated empty-content transport failures can trigger optional fallback endpoint
         Ego->>Mem: maybeAssessLongTermMemory(interval or explicit remember-intent)
         Note over Ego,Mem: Episodic recall filters session/interlocutor only when explicitly requested by user input
         Note over Ego,Mem: Memory-advisor completion max_tokens scales with prompt estimate (bounded floor/hard-cap) and model token_weight
@@ -210,7 +210,7 @@ stateDiagram-v2
     TaskReview --> PolicyReview: task verifier allow
     PolicyReview --> Denied: deterministic hard deny / superego deny
     Denied --> ThoughtQueued: enqueue safe alternative thought
-    Note right of ThoughtQueued: Repeat-denied payload block is skipped for technical/transient denial reasons (prefer reason_code classification); reflection lessons persist only for non-technical/system denials
+    Note right of ThoughtQueued: Repeat-denied payload block is skipped for technical or transient denial reasons (prefer reason_code classification) reflection lessons persist only for non-technical and non-system denials
 
     PolicyReview --> Executing: superego allow
     Executing --> EvidenceObserved: external action succeeded
