@@ -163,6 +163,8 @@ It is intentionally high-level and should stay aligned with the code.
   - Secondary action verifier pass (`approve|repair|reject`) with:
     - one strict-JSON retry on parse failure
     - parse-failure circuit breaker (scoped by `root_input + action_type`) that bypasses verifier for one decision after repeated malformed verifier outputs
+    - structured follow-up lineage guard: follow-up thoughts carry origin action metadata (`originActionType`, `originActionObservedEvidence`), and verifier `repair` back to the same evidence action is ignored when the candidate is `answer`, prior evidence succeeded, and user did not explicitly request refresh/retry
+    - no-op repair collapse: if verifier returns `repair` but action type/payload/summary are materially unchanged, planner treats it as `approve` instead of recording a repair
   - Retry policy and safe fallback to `Noop` on model/parse failures.
   - Planner and action-verifier prompts now include "reflection lessons" context to avoid repeated failed strategies.
 
@@ -309,7 +311,7 @@ It is intentionally high-level and should stay aligned with the code.
 - Built-in discovered action plugins:
   - `answer`
   - `web_search`
-  - `mcp_time`
+  - `mcp_time` (payload timezone is required by current MCP time server contract)
   - `website_fetch`
   - `email_send` (Microsoft Graph adapter; disabled unless env config is present)
 - `web_search` provider routing is independent from cognitive-role routing:

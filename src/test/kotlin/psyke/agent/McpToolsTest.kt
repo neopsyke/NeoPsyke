@@ -1,5 +1,6 @@
 package psyke.agent
 
+import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
@@ -62,7 +63,7 @@ class McpToolsTest {
     // ── NativeFetchTool pre-call validation tests ──
 
     @Test
-    fun `native fetch returns MALFORMED_REQUEST for invalid json payload`() {
+    fun `native fetch returns MALFORMED_REQUEST for invalid json payload`() = runBlocking {
         val tool = NativeFetchTool(callTimeoutMs = 1000, maxChars = 2000)
 
         val outcome = tool.fetchWithOutcome("not json at all")
@@ -72,7 +73,7 @@ class McpToolsTest {
     }
 
     @Test
-    fun `native fetch returns MALFORMED_REQUEST for missing url`() {
+    fun `native fetch returns MALFORMED_REQUEST for missing url`() = runBlocking {
         val tool = NativeFetchTool(callTimeoutMs = 1000, maxChars = 2000)
 
         val outcome = tool.fetchWithOutcome("""{"max_chars":500}""")
@@ -82,7 +83,7 @@ class McpToolsTest {
     }
 
     @Test
-    fun `native fetch returns MALFORMED_REQUEST for blocked urls`() {
+    fun `native fetch returns MALFORMED_REQUEST for blocked urls`() = runBlocking {
         val tool = NativeFetchTool(callTimeoutMs = 1000, maxChars = 2000)
 
         val httpOutcome = tool.fetchWithOutcome("""{"url":"http://example.com"}""")
@@ -97,7 +98,7 @@ class McpToolsTest {
     }
 
     @Test
-    fun `native fetch returns MALFORMED_REQUEST for empty url`() {
+    fun `native fetch returns MALFORMED_REQUEST for empty url`() = runBlocking {
         val tool = NativeFetchTool(callTimeoutMs = 1000, maxChars = 2000)
 
         val outcome = tool.fetchWithOutcome("""{"url":""}""")
@@ -107,7 +108,7 @@ class McpToolsTest {
     }
 
     @Test
-    fun `native fetch health check is always available`() {
+    fun `native fetch health check is always available`() = runBlocking {
         val tool = NativeFetchTool(callTimeoutMs = 1000, maxChars = 2000)
 
         val status = tool.healthCheck()

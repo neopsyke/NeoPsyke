@@ -233,6 +233,30 @@ class SuperegoGatekeeperTest {
     }
 
     @Test
+    fun `gatekeeper hard denies mcp time payload when timezone is missing`() {
+        val llm = StubChatModelClient().apply {
+            enqueueRawResponse("""{"allow":true}""")
+        }
+        val gatekeeper = Superego(
+            modelClient = llm,
+            config = AgentConfig()
+        )
+        val mcpTimeAction = PendingAction(
+            id = 101,
+            urgency = Urgency.MEDIUM,
+            type = ActionType.MCP_TIME,
+            payload = "{}",
+            summary = "lookup current time"
+        )
+
+        val decision = gatekeeper.review(mcpTimeAction, snapshot)
+
+        assertFalse(decision.allow)
+        assertTrue(decision.reason.contains("mcp_time_timezone_missing", ignoreCase = true))
+        assertEquals(0, llm.calls.size)
+    }
+
+    @Test
     fun `gatekeeper hard denies secret exfil style web search payload before llm review`() {
         val llm = StubChatModelClient().apply {
             enqueueRawResponse("""{"allow":true}""")

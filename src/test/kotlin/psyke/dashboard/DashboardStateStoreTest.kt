@@ -2,6 +2,8 @@ package psyke.dashboard
 
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeoutOrNull
 import psyke.agent.core.ActionType
 import psyke.agent.core.ConversationContext
 import psyke.agent.core.Interlocutor
@@ -94,12 +96,12 @@ class DashboardStateStoreTest {
     }
 
     @Test
-    fun `subscription receives json payload for incoming events`() {
+    fun `subscription receives json payload for incoming events`() = runBlocking {
         val store = DashboardStateStore(maxEvents = 10)
         val subscription = store.subscribe()
         store.onEvent(AgentEvent(id = 9, type = "warning", data = mapOf("message" to "test")))
 
-        val payload = subscription.poll(timeoutMs = 200)
+        val payload = withTimeoutOrNull(200) { subscription.receive() }
         assertNotNull(payload)
         assertTrue(payload.contains("\"type\":\"warning\""))
         assertTrue(payload.contains("\"id\":9"))
@@ -139,7 +141,7 @@ class DashboardStateStoreTest {
             )
         )
 
-        val ssePayload = subscription.poll(timeoutMs = 120)
+        val ssePayload = runBlocking { withTimeoutOrNull(120) { subscription.receive() } }
         assertNull(ssePayload)
 
         val index: Map<String, Any?> = mapper.readValue(store.workspaceIndexJson())

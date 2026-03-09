@@ -127,7 +127,10 @@ internal class SuperegoDeterministicConscience(
     private fun validateMcpTime(action: PendingAction): SuperegoDeterministicDecision {
         val payload = action.payload.trim()
         if (payload.isBlank()) {
-            return allow()
+            return deny(
+                "mcp_time_timezone_missing",
+                "MCP_TIME payload must include a timezone, for example {\"timezone\":\"Europe/Berlin\"}."
+            )
         }
         val parsed = try {
             mapper.readValue<McpTimePayload>(payload)
@@ -138,7 +141,13 @@ internal class SuperegoDeterministicConscience(
             )
         }
         val timezone = parsed.timezone?.trim().orEmpty()
-        if (timezone.isNotBlank() && !timezoneRegex.matches(timezone)) {
+        if (timezone.isBlank()) {
+            return deny(
+                "mcp_time_timezone_missing",
+                "MCP_TIME payload must include a non-empty timezone."
+            )
+        }
+        if (!timezoneRegex.matches(timezone)) {
             return deny(
                 "mcp_time_timezone_invalid",
                 "MCP_TIME timezone contains invalid characters."

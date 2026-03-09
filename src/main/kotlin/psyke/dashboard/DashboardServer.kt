@@ -4,6 +4,8 @@ import com.sun.net.httpserver.HttpExchange
 import com.sun.net.httpserver.HttpServer
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeoutOrNull
 import mu.KotlinLogging
 import java.io.Closeable
 import java.net.InetSocketAddress
@@ -13,6 +15,7 @@ import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
 private val logger = KotlinLogging.logger {}
+private const val SSE_HEARTBEAT_TIMEOUT_MS: Long = 30_000L
 
 class DashboardServer(
     private val store: DashboardStateStore,
@@ -101,16 +104,20 @@ class DashboardServer(
             output.write("event: ready\n")
             output.write("data: {\"status\":\"connected\"}\n\n")
             output.flush()
-            while (true) {
-                val payload = subscription.poll(30_000)
-                if (payload == null) {
-                    output.write(": heartbeat\n\n")
-                    output.flush()
-                    continue
+            runBlocking {
+                while (true) {
+                    val payload = withTimeoutOrNull(SSE_HEARTBEAT_TIMEOUT_MS) {
+                        subscription.receive()
+                    }
+                    if (payload != null) {
+                        output.write("event: agent\n")
+                        output.write("data: $payload\n\n")
+                        output.flush()
+                    } else {
+                        output.write(": heartbeat\n\n")
+                        output.flush()
+                    }
                 }
-                output.write("event: agent\n")
-                output.write("data: $payload\n\n")
-                output.flush()
             }
         } catch (_: Exception) {
             // client disconnected
@@ -269,16 +276,20 @@ class DashboardServer(
             output.write("event: ready\n")
             output.write("data: {\"status\":\"connected\",\"session_id\":\"$sessionId\"}\n\n")
             output.flush()
-            while (true) {
-                val payload = subscription.poll(30_000)
-                if (payload == null) {
-                    output.write(": heartbeat\n\n")
-                    output.flush()
-                    continue
+            runBlocking {
+                while (true) {
+                    val payload = withTimeoutOrNull(SSE_HEARTBEAT_TIMEOUT_MS) {
+                        subscription.receive()
+                    }
+                    if (payload != null) {
+                        output.write("event: chat\n")
+                        output.write("data: $payload\n\n")
+                        output.flush()
+                    } else {
+                        output.write(": heartbeat\n\n")
+                        output.flush()
+                    }
                 }
-                output.write("event: chat\n")
-                output.write("data: $payload\n\n")
-                output.flush()
             }
         } catch (_: Exception) {
             // client disconnected

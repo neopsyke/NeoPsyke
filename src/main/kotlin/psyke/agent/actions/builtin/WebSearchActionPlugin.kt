@@ -28,7 +28,7 @@ class WebSearchActionPlugin(
         )
     )
 
-    override fun healthCheck(): ActionPluginHealth {
+    override suspend fun healthCheck(): ActionPluginHealth {
         val active = handler
         if (active == null) {
             return ActionPluginHealth(
@@ -43,7 +43,7 @@ class WebSearchActionPlugin(
         )
     }
 
-    override fun execute(action: PendingAction, context: ActionExecutionContext): ActionOutcome {
+    override suspend fun execute(action: PendingAction, context: ActionExecutionContext): ActionOutcome {
         val active = handler
             ?: return ActionOutcome(statusSummary = "Web search action handler is not configured.")
         return active.execute(action.payload, context.searchResultCount)

@@ -1,5 +1,15 @@
 package psyke.agent.cortex.sensory
 
+import kotlinx.coroutines.CoroutineName
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.channels.ReceiveChannel
 import psyke.agent.core.AgentConfig
 import psyke.agent.core.ConversationContext
 import psyke.agent.core.DefaultInterlocutorResolver
@@ -7,9 +17,6 @@ import psyke.agent.core.InputPriority
 import psyke.agent.core.InterlocutorResolver
 import psyke.agent.support.TextSecurity
 import java.io.Closeable
-import java.util.concurrent.LinkedBlockingQueue
-import java.util.concurrent.TimeUnit
-import kotlin.concurrent.thread
 
 data class SensoryInput(
     val content: String,
@@ -26,23 +33,23 @@ sealed interface SensorySignal {
 }
 
 fun interface SensoryInputSource {
-    fun nextSignal(): SensorySignal
+    suspend fun nextSignal(): SensorySignal
 }
 
 class StdinSensoryInputSource(
     private val readLineFn: () -> String? = { readLine() },
     private val prompt: () -> Unit = { print("you> ") },
     ) : SensoryInputSource {
-    override fun nextSignal(): SensorySignal {
+    override suspend fun nextSignal(): SensorySignal = withContext(Dispatchers.IO) {
         prompt()
-        val rawInput = readLineFn() ?: return SensorySignal.SourceClosed(source = "stdin")
+        val rawInput = readLineFn() ?: return@withContext SensorySignal.SourceClosed(source = "stdin")
         if (rawInput.trim().equals("exit", ignoreCase = true)) {
-            return SensorySignal.ExitRequested(source = "stdin")
+            return@withContext SensorySignal.ExitRequested(source = "stdin")
         }
         if (rawInput.isBlank()) {
-            return SensorySignal.NoInput
+            return@withContext SensorySignal.NoInput
         }
-        return SensorySignal.InputReceived(
+        SensorySignal.InputReceived(
             SensoryInput(
                 content = rawInput,
                 priority = InputPriority.HIGH,
@@ -60,18 +67,23 @@ class AsyncSensoryInputSource(
     private val readLineFn: () -> String? = { readLine() },
     private val prompt: () -> Unit = { print("you> ") },
     private val controlOutput: (String) -> Unit = ::println,
+    scope: CoroutineScope? = null,
 ) : SensoryInputSource, Closeable {
     enum class StdinMode {
         CHAT_AND_CONTROL,
         CONTROL_ONLY,
     }
 
-    private val queue = LinkedBlockingQueue<SensorySignal>(MAX_SIGNAL_QUEUE)
-    @Volatile
-    private var running: Boolean = true
-    private val stdinReaderThread: Thread? = if (includeStdin) {
-        thread(name = "psyke-stdin-sensory", isDaemon = true) {
-            while (running) {
+    private val channel = Channel<SensorySignal>(MAX_SIGNAL_QUEUE)
+
+    /**
+     * Exposes the underlying signal channel for use with `select {}` in
+     * multiplexed sensory source compositions.
+     */
+    val signalChannel: ReceiveChannel<SensorySignal> get() = channel
+    private val stdinReaderJob: Job? = if (includeStdin && scope != null) {
+        scope.launch(Dispatchers.IO + CoroutineName("psyke-stdin-sensory")) {
+            while (isActive) {
                 prompt()
                 val rawInput = readLineFn()
                 if (rawInput == null) {
@@ -128,28 +140,24 @@ class AsyncSensoryInputSource(
         )
     )
 
-    override fun nextSignal(): SensorySignal {
-        return try {
-            val signal = queue.poll(pollTimeoutMs, TimeUnit.MILLISECONDS)
-            signal ?: SensorySignal.NoInput
-        } catch (_: InterruptedException) {
-            Thread.currentThread().interrupt()
-            SensorySignal.NoInput
-        }
-    }
+    override suspend fun nextSignal(): SensorySignal =
+        withTimeoutOrNull(pollTimeoutMs) {
+            channel.receive()
+        } ?: SensorySignal.NoInput
 
     override fun close() {
-        running = false
-        stdinReaderThread?.interrupt()
-        queue.clear()
+        stdinReaderJob?.cancel()
+        channel.close()
     }
 
     private fun offerSignal(signal: SensorySignal): Boolean {
-        if (queue.offer(signal)) {
+        val result = channel.trySend(signal)
+        if (result.isSuccess) {
             return true
         }
-        queue.poll()
-        return queue.offer(signal)
+        // Drop oldest and retry (same overflow behavior as before)
+        channel.tryReceive()
+        return channel.trySend(signal).isSuccess
     }
 
     private companion object {
@@ -163,7 +171,7 @@ class SensoryCortex(
     private val source: SensoryInputSource,
     private val interlocutorResolver: InterlocutorResolver = DefaultInterlocutorResolver(),
 ) {
-    fun nextSignal(): SensorySignal {
+    suspend fun nextSignal(): SensorySignal {
         val signal = source.nextSignal()
         if (signal !is SensorySignal.InputReceived) {
             return signal
