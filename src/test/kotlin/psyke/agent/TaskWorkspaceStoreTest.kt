@@ -252,4 +252,140 @@ class TaskWorkspaceStoreTest {
         assertEquals(1, store.activeTaskCount())
         assertTrue(store.promptSummary(root, maxTokens = 200).isNotBlank())
     }
+
+    // ── Digest tests ──
+
+    @Test
+    fun `captureDigest produces entry with goal and section index`() {
+        val store = TaskWorkspaceStore(
+            TaskWorkspaceConfig(enabled = true, activationMinPlanSteps = 1, digestMaxEntries = 4)
+        )
+        val root = "root-digest-1"
+        store.ensureForInput(
+            PendingInput(id = 1, content = "research pricing", rootInputId = root, receivedAtMs = 100L)
+        )
+        store.recordPlan(root, "Find pricing", listOf("Search", "Verify", "Answer"))
+        store.recordActionOutcome(
+            rootInputId = root,
+            action = PendingAction(
+                id = 2, urgency = Urgency.MEDIUM, type = ActionType.WEB_SEARCH,
+                payload = "pricing", summary = "search pricing"
+            ),
+            outcome = ActionOutcome(
+                statusSummary = "Found pricing page",
+                plannerSignal = "Pro costs \$20/month"
+            ),
+            observedEvidence = true
+        )
+
+        val entry = store.captureDigest(root, "session-1")
+
+        assertTrue(entry != null)
+        assertEquals("Find pricing", entry!!.goal)
+        assertTrue(entry.sectionIndex.size >= 3) // Request, Plan, web_search_result
+        assertTrue(entry.keyEvidence.isNotEmpty())
+        assertTrue(entry.sectionIndex.any { it.startsWith("Plan") })
+    }
+
+    @Test
+    fun `digest ring buffer evicts oldest when exceeding maxEntries`() {
+        val store = TaskWorkspaceStore(
+            TaskWorkspaceConfig(enabled = true, activationMinPlanSteps = 1, digestMaxEntries = 2)
+        )
+        val sessionId = "session-evict"
+        for (i in 1..3) {
+            val root = "root-evict-$i"
+            store.ensureForInput(
+                PendingInput(id = i.toLong(), content = "task $i", rootInputId = root, receivedAtMs = (i * 100).toLong())
+            )
+            store.captureDigest(root, sessionId)
+            store.destroy(root)
+        }
+
+        val summary = store.digestPromptSummary(sessionId, maxTokens = 400)
+        assertTrue(summary.contains("task 2") || summary.contains("task 3"))
+        assertFalse(summary.contains("task 1"))
+    }
+
+    @Test
+    fun `digestPromptSummary returns blank for unknown session`() {
+        val store = TaskWorkspaceStore(TaskWorkspaceConfig(enabled = true, activationMinPlanSteps = 1))
+        assertEquals("", store.digestPromptSummary("nonexistent", maxTokens = 200))
+    }
+
+    @Test
+    fun `captureDigest returns null when workspace not found`() {
+        val store = TaskWorkspaceStore(TaskWorkspaceConfig(enabled = true, activationMinPlanSteps = 1))
+        val entry = store.captureDigest("no-such-root", "session-x")
+        assertNull(entry)
+    }
+
+    @Test
+    fun `digestPromptSummary respects token budget`() {
+        val store = TaskWorkspaceStore(
+            TaskWorkspaceConfig(
+                enabled = true, activationMinPlanSteps = 1,
+                digestMaxEntries = 4, digestMaxPromptTokens = 40
+            )
+        )
+        val sessionId = "session-budget"
+        for (i in 1..4) {
+            val root = "root-budget-$i"
+            store.ensureForInput(
+                PendingInput(
+                    id = i.toLong(),
+                    content = "task $i with a longer description that takes tokens",
+                    rootInputId = root,
+                    receivedAtMs = (i * 100).toLong()
+                )
+            )
+            store.captureDigest(root, sessionId)
+            store.destroy(root)
+        }
+        val summary = store.digestPromptSummary(sessionId, maxTokens = 40)
+        // Token budget of 40 at ~4 chars/token = ~160 chars max
+        assertTrue(summary.length <= 200)
+    }
+
+    @Test
+    fun `clearAll also clears digests`() {
+        val store = TaskWorkspaceStore(
+            TaskWorkspaceConfig(enabled = true, activationMinPlanSteps = 1, digestMaxEntries = 4)
+        )
+        val root = "root-clear"
+        store.ensureForInput(
+            PendingInput(id = 1, content = "task to clear", rootInputId = root, receivedAtMs = 100L)
+        )
+        store.captureDigest(root, "session-clear")
+        assertTrue(store.digestPromptSummary("session-clear", maxTokens = 400).isNotBlank())
+
+        store.clearAll()
+
+        assertEquals("", store.digestPromptSummary("session-clear", maxTokens = 400))
+    }
+
+    @Test
+    fun `digest sessions are isolated`() {
+        val store = TaskWorkspaceStore(
+            TaskWorkspaceConfig(enabled = true, activationMinPlanSteps = 1, digestMaxEntries = 4)
+        )
+        store.ensureForInput(
+            PendingInput(id = 1, content = "session A task", rootInputId = "root-sa", receivedAtMs = 100L)
+        )
+        store.captureDigest("root-sa", "session-a")
+        store.destroy("root-sa")
+
+        store.ensureForInput(
+            PendingInput(id = 2, content = "session B task", rootInputId = "root-sb", receivedAtMs = 200L)
+        )
+        store.captureDigest("root-sb", "session-b")
+        store.destroy("root-sb")
+
+        val summaryA = store.digestPromptSummary("session-a", maxTokens = 400)
+        val summaryB = store.digestPromptSummary("session-b", maxTokens = 400)
+        assertTrue(summaryA.contains("session A task"))
+        assertFalse(summaryA.contains("session B task"))
+        assertTrue(summaryB.contains("session B task"))
+        assertFalse(summaryB.contains("session A task"))
+    }
 }

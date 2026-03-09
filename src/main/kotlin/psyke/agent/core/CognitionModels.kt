@@ -8,6 +8,7 @@ data class PlannerContext(
     val reflectionLessons: String = "",
     val episodicRecall: String = "",
     val taskWorkspaceSummary: String = "",
+    val sessionWorkspaceDigest: String = "",
     val evidenceHints: String = "",
     val deliberation: DeliberationState = DeliberationState(),
     val metaGuidance: String = "",

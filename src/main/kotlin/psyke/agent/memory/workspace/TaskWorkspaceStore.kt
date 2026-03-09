@@ -47,6 +47,14 @@ data class TaskWorkspaceDebugSnapshot(
     val evidence: List<String>,
 )
 
+data class WorkspaceDigestEntry(
+    val rootInputId: String,
+    val goal: String,
+    val sectionIndex: List<String>,
+    val keyEvidence: List<String>,
+    val createdAtMs: Long,
+)
+
 class TaskWorkspaceStore(
     private val config: TaskWorkspaceConfig,
 ) {
@@ -237,6 +245,66 @@ class TaskWorkspaceStore(
     }
 
     @Synchronized
+    fun captureDigest(rootInputId: String?, sessionId: String): WorkspaceDigestEntry? {
+        val workspace = lookup(rootInputId) ?: return null
+        val sectionIndex = workspace.sections.map { section ->
+            if (section.source == SOURCE_PLAN) {
+                val stepCount = section.content.count { it == '\n' }
+                "${section.title} ($stepCount steps)"
+            } else {
+                section.title
+            }
+        }
+        val evidencePerItemCap = max(48, config.digestMaxChars / max(1, DIGEST_MAX_EVIDENCE_ITEMS))
+        val keyEvidence = workspace.evidence
+            .takeLast(DIGEST_MAX_EVIDENCE_ITEMS)
+            .map { TextSecurity.preview(it, evidencePerItemCap) }
+        val entry = WorkspaceDigestEntry(
+            rootInputId = rootInputId ?: "",
+            goal = workspace.goal,
+            sectionIndex = sectionIndex,
+            keyEvidence = keyEvidence,
+            createdAtMs = System.currentTimeMillis(),
+        )
+        val buffer = digestsBySession.getOrPut(sessionId) { ArrayDeque() }
+        buffer.addLast(entry)
+        while (buffer.size > max(1, config.digestMaxEntries)) {
+            buffer.removeFirst()
+        }
+        return entry
+    }
+
+    @Synchronized
+    fun digestPromptSummary(sessionId: String, maxTokens: Int): String {
+        val buffer = digestsBySession[sessionId]
+        if (buffer.isNullOrEmpty()) return ""
+        val tokenBudget = minOf(config.digestMaxPromptTokens, max(32, maxTokens))
+        val summary = buildString {
+            append("Prior workspace digests (session history, most recent last):\n")
+            buffer.forEachIndexed { index, entry ->
+                append("[${index + 1}] goal=${entry.goal}")
+                if (entry.sectionIndex.isNotEmpty()) {
+                    append(" | sections=[${entry.sectionIndex.joinToString(", ")}]")
+                }
+                if (entry.keyEvidence.isNotEmpty()) {
+                    append(" | evidence=[${entry.keyEvidence.joinToString(" | ")}]")
+                }
+                append('\n')
+            }
+        }.trim()
+        if (summary.isBlank()) return ""
+        return TextSecurity.clampToTokenBudget(
+            TextSecurity.clamp(summary, config.digestMaxChars),
+            tokenBudget
+        )
+    }
+
+    @Synchronized
+    fun clearDigestsForSession(sessionId: String) {
+        digestsBySession.remove(sessionId)
+    }
+
+    @Synchronized
     fun debugHead(rootInputId: String?): TaskWorkspaceDebugHead? =
         lookup(rootInputId)?.debugHead()
 
@@ -263,6 +331,7 @@ class TaskWorkspaceStore(
         val cleared = workspaces.size
         workspaces.clear()
         pendingInputs.clear()
+        digestsBySession.clear()
         return cleared
     }
 
@@ -461,6 +530,8 @@ class TaskWorkspaceStore(
         const val SECTION_SIGNAL_WEIGHT: Double = 0.45
         const val EVIDENCE_SIGNAL_WEIGHT: Double = 0.45
         const val GOAL_SIGNAL_WEIGHT: Double = 0.10
+        const val DIGEST_MAX_EVIDENCE_ITEMS: Int = 3
+        const val MAX_DIGEST_TRACKED_SESSIONS: Int = 32
     }
 
     private data class PendingInputRecord(
@@ -471,4 +542,10 @@ class TaskWorkspaceStore(
 
     private val workspaces = LinkedHashMap<String, TaskWorkspace>()
     private val pendingInputs = LinkedHashMap<String, PendingInputRecord>()
+    private val digestsBySession: MutableMap<String, ArrayDeque<WorkspaceDigestEntry>> =
+        object : LinkedHashMap<String, ArrayDeque<WorkspaceDigestEntry>>(16, 0.75f, true) {
+            override fun removeEldestEntry(
+                eldest: MutableMap.MutableEntry<String, ArrayDeque<WorkspaceDigestEntry>>
+            ): Boolean = size > MAX_DIGEST_TRACKED_SESSIONS
+        }
 }

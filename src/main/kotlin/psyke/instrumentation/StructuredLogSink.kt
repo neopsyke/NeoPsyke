@@ -258,6 +258,12 @@ class StructuredLogSink : InstrumentationSink {
                 }
             }
 
+            "task_workspace_digest_captured" -> {
+                logger.trace {
+                    "task_workspace.digest_captured root_id=${event.data["root_input_id"]} session=${event.data["session_id"]} sections=${event.data["section_count"]} evidence=${event.data["evidence_count"]} goal=${event.data["goal_preview"]}"
+                }
+            }
+
             "task_workspace_cleared" -> {
                 logger.trace {
                     "task_workspace.cleared count=${event.data["cleared_count"]} reason=${event.data["reason"]}"

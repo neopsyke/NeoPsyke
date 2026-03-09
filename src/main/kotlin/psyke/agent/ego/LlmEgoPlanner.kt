@@ -743,6 +743,7 @@ class LlmEgoPlanner(
         val reflectionLessons = context.reflectionLessons.ifBlank { "none" }
         val episodicRecall = context.episodicRecall.ifBlank { "none" }
         val taskWorkspaceSummary = context.taskWorkspaceSummary.ifBlank { "none" }
+        val sessionWorkspaceDigest = context.sessionWorkspaceDigest.ifBlank { "none" }
         val evidenceHints = context.evidenceHints.ifBlank { "none" }
         val metaGuidance = context.metaGuidance.ifBlank { "none" }
         val deliberation = context.deliberation
@@ -900,6 +901,11 @@ class LlmEgoPlanner(
                 ),
                 PromptBudgetAllocator.Section(
                     role = ChatRole.USER,
+                    priority = PromptBudgetAllocator.Priority.OPTIONAL,
+                    content = "Prior workspace digests (resolved requests in this session):\n$sessionWorkspaceDigest"
+                ),
+                PromptBudgetAllocator.Section(
+                    role = ChatRole.USER,
                     priority = PromptBudgetAllocator.Priority.IMPORTANT,
                     minTokens = 18,
                     content = "External evidence hints:\n$evidenceHints"
@@ -964,6 +970,7 @@ class LlmEgoPlanner(
         val longTermMemoryRecall = context.longTermMemoryRecall.ifBlank { "none" }
         val reflectionLessons = context.reflectionLessons.ifBlank { "none" }
         val taskWorkspaceSummary = context.taskWorkspaceSummary.ifBlank { "none" }
+        val sessionWorkspaceDigest = context.sessionWorkspaceDigest.ifBlank { "none" }
         val evidenceHints = context.evidenceHints.ifBlank { "none" }
 
         return PromptBudgetAllocator.allocate(
@@ -1024,6 +1031,11 @@ class LlmEgoPlanner(
                     role = ChatRole.USER,
                     priority = PromptBudgetAllocator.Priority.OPTIONAL,
                     content = "Task workspace summary:\n$taskWorkspaceSummary"
+                ),
+                PromptBudgetAllocator.Section(
+                    role = ChatRole.USER,
+                    priority = PromptBudgetAllocator.Priority.OPTIONAL,
+                    content = "Prior workspace digests:\n$sessionWorkspaceDigest"
                 ),
                 PromptBudgetAllocator.Section(
                     role = ChatRole.USER,
