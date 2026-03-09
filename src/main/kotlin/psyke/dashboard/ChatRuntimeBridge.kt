@@ -74,6 +74,6 @@ class ChatRuntimeBridge(
         }
     }
 
-    fun subscribe(sessionId: String): DashboardSubscription? =
+    fun subscribe(sessionId: String): DashboardFlowSubscription? =
         store.subscribeChat(sessionId)
 }

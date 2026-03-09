@@ -442,7 +442,7 @@ class AgentScenarioPackTest {
         val previousIn = System.`in`
         try {
             System.setIn(ByteArrayInputStream(stdinContent.toByteArray()))
-            agent.runInteractive()
+            kotlinx.coroutines.runBlocking { agent.runInteractive() }
         } finally {
             System.setIn(previousIn)
         }

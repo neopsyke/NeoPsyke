@@ -1865,8 +1865,8 @@ class EgoAgentTest {
         val instrumentation = RecordingInstrumentation()
         val outputs = mutableListOf<String>()
         val failingFetchTool = object : FetchTool {
-            override fun fetch(payload: String): String = "unused"
-            override fun fetchWithOutcome(payload: String): FetchOutcome =
+            override suspend fun fetch(payload: String): String = "unused"
+            override suspend fun fetchWithOutcome(payload: String): FetchOutcome =
                 FetchOutcome(
                     message = "Fetch tool returned an error: 403 Forbidden",
                     errorCategory = FetchErrorCategory.NON_RETRYABLE
@@ -1932,8 +1932,8 @@ class EgoAgentTest {
         val instrumentation = RecordingInstrumentation()
         val outputs = mutableListOf<String>()
         val malformedTool = object : FetchTool {
-            override fun fetch(payload: String): String = "unused"
-            override fun fetchWithOutcome(payload: String): FetchOutcome =
+            override suspend fun fetch(payload: String): String = "unused"
+            override suspend fun fetchWithOutcome(payload: String): FetchOutcome =
                 FetchOutcome(
                     message = "Fetch payload is invalid.",
                     errorCategory = FetchErrorCategory.MALFORMED_REQUEST
@@ -1965,7 +1965,7 @@ class EgoAgentTest {
         val previousIn = System.`in`
         try {
             System.setIn(ByteArrayInputStream(stdinContent.toByteArray()))
-            agent.runInteractive()
+            kotlinx.coroutines.runBlocking { agent.runInteractive() }
         } finally {
             System.setIn(previousIn)
         }

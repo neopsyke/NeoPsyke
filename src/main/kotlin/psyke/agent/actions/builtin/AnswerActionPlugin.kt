@@ -25,7 +25,7 @@ class AnswerActionPlugin(
         )
     )
 
-    override fun execute(action: PendingAction, context: ActionExecutionContext): ActionOutcome {
+    override suspend fun execute(action: PendingAction, context: ActionExecutionContext): ActionOutcome {
         output("ego> ${action.payload}")
         return ActionOutcome(
             statusSummary = "Answer delivered to interlocutor.",

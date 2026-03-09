@@ -26,7 +26,7 @@ class McpTimeActionPlugin(
         )
     )
 
-    override fun healthCheck(): ActionPluginHealth {
+    override suspend fun healthCheck(): ActionPluginHealth {
         val active = tool
             ?: return ActionPluginHealth(
                 available = false,
@@ -39,7 +39,7 @@ class McpTimeActionPlugin(
         )
     }
 
-    override fun execute(action: PendingAction, context: ActionExecutionContext): ActionOutcome {
+    override suspend fun execute(action: PendingAction, context: ActionExecutionContext): ActionOutcome {
         val status = tool?.getCurrentTime(action.payload)
             ?: "MCP time tool is not configured."
         return ActionOutcome(statusSummary = status)

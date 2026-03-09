@@ -32,14 +32,14 @@ class ActionRegistry private constructor(
             .map { it.actionType }
             .toSet()
 
-    fun healthCheck(actionType: ActionType): ActionPluginHealth =
+    suspend fun healthCheck(actionType: ActionType): ActionPluginHealth =
         pluginByType[actionType]?.healthCheck()
             ?: ActionPluginHealth(
                 available = false,
                 detail = "Action plugin is not registered."
             )
 
-    fun execute(action: PendingAction, searchResultCount: Int): ActionOutcome {
+    suspend fun execute(action: PendingAction, searchResultCount: Int): ActionOutcome {
         val plugin = pluginByType[action.type]
             ?: return ActionOutcome(statusSummary = "Action type '${action.type.id}' is not registered.")
         return plugin.execute(

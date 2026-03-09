@@ -1,6 +1,10 @@
 package psyke.dashboard
 
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.channels.ReceiveChannel
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.receiveAsFlow
 import psyke.agent.core.ActionType
 import psyke.agent.core.ConversationContext
 import psyke.agent.core.Interlocutor
@@ -11,8 +15,6 @@ import psyke.instrumentation.AgentEvent
 import psyke.instrumentation.InstrumentationSink
 import psyke.metrics.MetricsSnapshot
 import java.io.Closeable
-import java.util.concurrent.LinkedBlockingDeque
-import java.util.concurrent.TimeUnit
 import kotlin.math.max
 
 class DashboardStateStore(
@@ -39,10 +41,10 @@ class DashboardStateStore(
     private val queueSaturationByType = mutableMapOf<String, Long>()
     private val workspaceSnapshots = ArrayDeque<WorkspaceSnapshotRecord>()
     private val latestWorkspaceSnapshotByRoot = mutableMapOf<String, WorkspaceSnapshotRecord>()
-    private val subscribers = mutableSetOf<LinkedBlockingDeque<String>>()
+    private val subscribers = mutableSetOf<Channel<String>>()
     private val chatSessions = linkedMapOf<String, ChatSessionRecord>()
     private val rootInputSessionMap = mutableMapOf<String, String>()
-    private val chatSubscribers = mutableMapOf<String, MutableSet<LinkedBlockingDeque<String>>>()
+    private val chatSubscribers = mutableMapOf<String, MutableSet<Channel<String>>>()
     private var nextChatMessageId: Long = 1L
 
     override fun onEvent(event: AgentEvent) {
@@ -317,15 +319,16 @@ class DashboardStateStore(
         }
     }
 
-    fun subscribe(): DashboardSubscription {
-        val queue = LinkedBlockingDeque<String>(1_000)
+    fun subscribe(): DashboardFlowSubscription {
+        val channel = Channel<String>(SUBSCRIBER_CHANNEL_CAPACITY)
         synchronized(lock) {
-            subscribers.add(queue)
+            subscribers.add(channel)
         }
-        return DashboardSubscription(queue) {
+        return DashboardFlowSubscription(channel) {
             synchronized(lock) {
-                subscribers.remove(queue)
+                subscribers.remove(channel)
             }
+            channel.close()
         }
     }
 
@@ -389,29 +392,32 @@ class DashboardStateStore(
         }
     }
 
-    fun subscribeChat(sessionId: String): DashboardSubscription? {
+    fun subscribeChat(sessionId: String): DashboardFlowSubscription? {
         val sanitizedSessionId = sanitizeSessionId(sessionId)
-        val queue = LinkedBlockingDeque<String>(1_000)
+        val channel = Channel<String>(SUBSCRIBER_CHANNEL_CAPACITY)
         synchronized(lock) {
             if (!chatSessions.containsKey(sanitizedSessionId)) {
                 return null
             }
             val sessionSubscribers = chatSubscribers.getOrPut(sanitizedSessionId) { linkedSetOf() }
-            sessionSubscribers.add(queue)
+            sessionSubscribers.add(channel)
         }
-        return DashboardSubscription(queue) {
+        return DashboardFlowSubscription(channel) {
             synchronized(lock) {
-                chatSubscribers[sanitizedSessionId]?.remove(queue)
+                chatSubscribers[sanitizedSessionId]?.remove(channel)
                 if (chatSubscribers[sanitizedSessionId].isNullOrEmpty()) {
                     chatSubscribers.remove(sanitizedSessionId)
                 }
             }
+            channel.close()
         }
     }
 
     override fun close() {
         synchronized(lock) {
+            subscribers.forEach { it.close() }
             subscribers.clear()
+            chatSubscribers.values.forEach { set -> set.forEach { it.close() } }
             chatSubscribers.clear()
         }
     }
@@ -424,13 +430,15 @@ class DashboardStateStore(
         }
 
     private fun broadcastToSubscribers(payloadJson: String) {
-        val staleSubscribers = mutableListOf<LinkedBlockingDeque<String>>()
-        subscribers.forEach { queue ->
-            if (!queue.offerLast(payloadJson)) {
-                queue.pollFirst()
-                if (!queue.offerLast(payloadJson)) {
-                    staleSubscribers.add(queue)
-                }
+        val staleSubscribers = mutableListOf<Channel<String>>()
+        subscribers.forEach { channel ->
+            val result = channel.trySend(payloadJson)
+            if (result.isFailure && result.isClosed) {
+                staleSubscribers.add(channel)
+            } else if (result.isFailure) {
+                // Buffer full — drop oldest and retry
+                channel.tryReceive()
+                channel.trySend(payloadJson)
             }
         }
         subscribers.removeAll(staleSubscribers.toSet())
@@ -545,13 +553,14 @@ class DashboardStateStore(
     private fun broadcastChatEvent(sessionId: String, payload: Map<String, Any?>) {
         val payloadJson = mapper.writeValueAsString(payload)
         val sessionSubscribers = chatSubscribers[sessionId] ?: return
-        val staleSubscribers = mutableListOf<LinkedBlockingDeque<String>>()
-        sessionSubscribers.forEach { queue ->
-            if (!queue.offerLast(payloadJson)) {
-                queue.pollFirst()
-                if (!queue.offerLast(payloadJson)) {
-                    staleSubscribers.add(queue)
-                }
+        val staleSubscribers = mutableListOf<Channel<String>>()
+        sessionSubscribers.forEach { channel ->
+            val result = channel.trySend(payloadJson)
+            if (result.isFailure && result.isClosed) {
+                staleSubscribers.add(channel)
+            } else if (result.isFailure) {
+                channel.tryReceive()
+                channel.trySend(payloadJson)
             }
         }
         sessionSubscribers.removeAll(staleSubscribers.toSet())
@@ -744,6 +753,7 @@ class DashboardStateStore(
         const val MAX_SESSION_ID_CHARS: Int = 64
         const val MAX_SESSION_TITLE_CHARS: Int = 80
         const val MAX_SESSION_ID_GENERATION_ATTEMPTS: Int = 4
+        const val SUBSCRIBER_CHANNEL_CAPACITY: Int = 1_000
     }
 }
 
@@ -791,11 +801,15 @@ data class DashboardSnapshot(
     val recentEvents: List<AgentEvent>,
 )
 
-class DashboardSubscription(
-    private val queue: LinkedBlockingDeque<String>,
+class DashboardFlowSubscription(
+    private val channel: ReceiveChannel<String>,
     private val onClose: () -> Unit,
 ) : Closeable {
-    fun poll(timeoutMs: Long = 30_000): String? = queue.poll(timeoutMs, TimeUnit.MILLISECONDS)
+    fun asFlow(): Flow<String> = channel.receiveAsFlow()
+
+    suspend fun receive(): String = channel.receive()
+
+    suspend fun receiveCatching() = channel.receiveCatching()
 
     override fun close() {
         onClose()

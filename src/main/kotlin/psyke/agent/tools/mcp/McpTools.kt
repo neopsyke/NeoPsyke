@@ -15,8 +15,12 @@ import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlinx.io.asSink
 import kotlinx.io.asSource
@@ -52,21 +56,21 @@ import kotlin.concurrent.thread
 private val logger = KotlinLogging.logger {}
 
 interface McpTimeTool {
-    fun getCurrentTime(payload: String): String
+    suspend fun getCurrentTime(payload: String): String
 
-    fun healthCheck(): ToolHealthStatus = ToolHealthStatus(
+    suspend fun healthCheck(): ToolHealthStatus = ToolHealthStatus(
         available = true,
         detail = "health check not implemented"
     )
 }
 
 interface FetchTool {
-    fun fetch(payload: String): String
+    suspend fun fetch(payload: String): String
 
-    fun fetchWithOutcome(payload: String): FetchOutcome =
+    suspend fun fetchWithOutcome(payload: String): FetchOutcome =
         FetchOutcome(message = fetch(payload))
 
-    fun healthCheck(): ToolHealthStatus = ToolHealthStatus(
+    suspend fun healthCheck(): ToolHealthStatus = ToolHealthStatus(
         available = true,
         detail = "health check not implemented"
     )
@@ -79,7 +83,7 @@ class SdkMcpTimeTool(
 ) : McpTimeTool, AutoCloseable {
     private val clientHolder = LazyMcpClientHolder(command, serverLabel = "time", scope = scope)
 
-    override fun getCurrentTime(payload: String): String {
+    override suspend fun getCurrentTime(payload: String): String {
         val parsed = try {
             mapper.readValue<TimePayload>(payload)
         } catch (_: Exception) {
@@ -119,7 +123,7 @@ class SdkMcpTimeTool(
         clientHolder.close()
     }
 
-    override fun healthCheck(): ToolHealthStatus {
+    override suspend fun healthCheck(): ToolHealthStatus {
         return try {
             val toolNames = clientHolder.listTools(callTimeoutMs)
             if ("get_current_time" in toolNames) {
@@ -149,17 +153,18 @@ class LazyMcpClientHolder(
 ) : AutoCloseable {
     @Volatile
     private var client: McpStdioClient? = null
+    private val mutex = Mutex()
 
-    fun callTool(toolName: String, arguments: Map<String, Any>, timeoutMs: Long): McpToolCallResult {
+    suspend fun callTool(toolName: String, arguments: Map<String, Any>, timeoutMs: Long): McpToolCallResult {
         val activeClient = ensureClient()
         return activeClient.callTool(toolName = toolName, arguments = arguments, timeoutMs = timeoutMs)
     }
 
-    fun listTools(timeoutMs: Long): Set<String> = ensureClient().listTools(timeoutMs)
+    suspend fun listTools(timeoutMs: Long): Set<String> = ensureClient().listTools(timeoutMs)
 
-    private fun ensureClient(): McpStdioClient {
+    private suspend fun ensureClient(): McpStdioClient {
         client?.let { return it }
-        return synchronized(this) {
+        return mutex.withLock {
             client ?: McpStdioClient.start(command, serverLabel, scope).also { created ->
                 client = created
             }
@@ -167,9 +172,12 @@ class LazyMcpClientHolder(
     }
 
     override fun close() {
-        synchronized(this) {
-            client?.close()
-            client = null
+        // close() must remain synchronous for AutoCloseable contract
+        runBlocking {
+            mutex.withLock {
+                client?.close()
+                client = null
+            }
         }
     }
 }
@@ -179,12 +187,10 @@ class McpStdioClient private constructor(
     private val client: Client,
     private val serverLabel: String,
 ) : AutoCloseable {
-    fun listTools(timeoutMs: Long): Set<String> {
+    suspend fun listTools(timeoutMs: Long): Set<String> {
         val result = try {
-            runBlocking {
-                withTimeout(timeoutMs) {
-                    client.listTools(ListToolsRequest())
-                }
+            withTimeout(timeoutMs) {
+                client.listTools(ListToolsRequest())
             }
         } catch (ex: TimeoutCancellationException) {
             throw IOException("MCP $serverLabel list-tools timed out after ${timeoutMs}ms", ex)
@@ -192,13 +198,11 @@ class McpStdioClient private constructor(
         return result?.tools.orEmpty().map { it.name }.toSet()
     }
 
-    fun callTool(toolName: String, arguments: Map<String, Any>, timeoutMs: Long): McpToolCallResult {
+    suspend fun callTool(toolName: String, arguments: Map<String, Any>, timeoutMs: Long): McpToolCallResult {
         val encodedArguments = encodeMcpArguments(arguments)
         val result = try {
-            runBlocking {
-                withTimeout(timeoutMs) {
-                    client.callTool(toolName, encodedArguments)
-                }
+            withTimeout(timeoutMs) {
+                client.callTool(toolName, encodedArguments)
             }
         } catch (ex: TimeoutCancellationException) {
             throw IOException("MCP $serverLabel tool call timed out after ${timeoutMs}ms", ex)
@@ -230,7 +234,7 @@ class McpStdioClient private constructor(
     }
 
     companion object {
-        fun start(command: List<String>, serverLabel: String, scope: CoroutineScope? = null): McpStdioClient {
+        suspend fun start(command: List<String>, serverLabel: String, scope: CoroutineScope? = null): McpStdioClient {
             require(command.isNotEmpty()) { "MCP command cannot be empty." }
             var lastError: Exception? = null
             for (attempt in 1..START_MAX_ATTEMPTS) {
@@ -242,7 +246,7 @@ class McpStdioClient private constructor(
                         logger.warn(ex) {
                             "MCP $serverLabel connect failed; retrying (attempt $attempt/$START_MAX_ATTEMPTS)."
                         }
-                        Thread.sleep(START_RETRY_DELAY_MS)
+                        delay(START_RETRY_DELAY_MS)
                     } else {
                         logger.warn(ex) {
                             "MCP $serverLabel connect failed after $START_MAX_ATTEMPTS attempts."
@@ -257,7 +261,7 @@ class McpStdioClient private constructor(
             )
         }
 
-        private fun startOnce(command: List<String>, serverLabel: String, scope: CoroutineScope? = null): McpStdioClient {
+        private suspend fun startOnce(command: List<String>, serverLabel: String, scope: CoroutineScope? = null): McpStdioClient {
             require(command.isNotEmpty()) { "MCP command cannot be empty." }
             val processBuilder = ProcessBuilder(command)
             NpmCommandIsolation.apply(processBuilder, command, serverLabel)
@@ -291,9 +295,7 @@ class McpStdioClient private constructor(
                 options = ClientOptions()
             )
             try {
-                runBlocking {
-                    client.connect(transport)
-                }
+                client.connect(transport)
             } catch (ex: Exception) {
                 if (process.isAlive) {
                     process.destroy()
@@ -492,13 +494,13 @@ class NativeFetchTool(
         .readTimeout(callTimeoutMs, TimeUnit.MILLISECONDS)
         .build()
 
-    override fun fetch(payload: String): String = fetchWithOutcome(payload).message
+    override suspend fun fetch(payload: String): String = fetchWithOutcome(payload).message
 
-    override fun fetchWithOutcome(payload: String): FetchOutcome {
+    override suspend fun fetchWithOutcome(payload: String): FetchOutcome = withContext(Dispatchers.IO) {
         val parsed = try {
             mapper.readValue<FetchPayload>(payload)
         } catch (_: Exception) {
-            return FetchOutcome(
+            return@withContext FetchOutcome(
                 message = "Fetch payload is invalid. Expected JSON like {\"url\":\"https://example.com\",\"max_chars\":1200}.",
                 errorCategory = FetchErrorCategory.MALFORMED_REQUEST
             )
@@ -506,13 +508,13 @@ class NativeFetchTool(
 
         val url = parsed.url?.trim().orEmpty()
         if (url.isEmpty()) {
-            return FetchOutcome(
+            return@withContext FetchOutcome(
                 message = "Fetch payload is missing url.",
                 errorCategory = FetchErrorCategory.MALFORMED_REQUEST
             )
         }
         if (!isFetchUrlAllowed(url)) {
-            return FetchOutcome(
+            return@withContext FetchOutcome(
                 message = "Fetch blocked URL by safety policy. Only public HTTPS URLs are allowed.",
                 errorCategory = FetchErrorCategory.MALFORMED_REQUEST
             )
@@ -531,22 +533,22 @@ class NativeFetchTool(
         val response = try {
             httpClient.newCall(request).execute()
         } catch (ex: SocketTimeoutException) {
-            return FetchOutcome(
+            return@withContext FetchOutcome(
                 message = "Fetch timed out for $url: ${ex.message}",
                 errorCategory = FetchErrorCategory.RETRYABLE
             )
         } catch (ex: UnknownHostException) {
-            return FetchOutcome(
+            return@withContext FetchOutcome(
                 message = "DNS resolution failed for $url: ${ex.message}",
                 errorCategory = FetchErrorCategory.NON_RETRYABLE
             )
         } catch (ex: SSLException) {
-            return FetchOutcome(
+            return@withContext FetchOutcome(
                 message = "SSL error fetching $url: ${ex.message}",
                 errorCategory = FetchErrorCategory.NON_RETRYABLE
             )
         } catch (ex: IOException) {
-            return FetchOutcome(
+            return@withContext FetchOutcome(
                 message = "Network error fetching $url: ${ex.message}",
                 errorCategory = FetchErrorCategory.RETRYABLE
             )
@@ -555,14 +557,14 @@ class NativeFetchTool(
         response.use { resp ->
             val code = resp.code
             if (code in NON_RETRYABLE_HTTP_CODES) {
-                return FetchOutcome(
+                return@withContext FetchOutcome(
                     message = "HTTP $code ${resp.message} for $url",
                     errorCategory = FetchErrorCategory.NON_RETRYABLE
                 )
             }
             if (!resp.isSuccessful) {
                 val retryable = code in 500..599 || code == 429
-                return FetchOutcome(
+                return@withContext FetchOutcome(
                     message = "HTTP $code ${resp.message} for $url",
                     errorCategory = if (retryable) FetchErrorCategory.RETRYABLE else FetchErrorCategory.NON_RETRYABLE
                 )
@@ -570,7 +572,7 @@ class NativeFetchTool(
 
             val body = resp.body?.string().orEmpty()
             if (body.isBlank()) {
-                return FetchOutcome(
+                return@withContext FetchOutcome(
                     message = "Fetch completed for $url but returned empty body.",
                     errorCategory = FetchErrorCategory.NONE
                 )
@@ -588,14 +590,14 @@ class NativeFetchTool(
             val preview = TextSecurity.preview(clamped, 240)
             val promptInjectionSignals =
                 if (injectionScan.suspicious) injectionScan.signalIds.sorted().joinToString(",") else "none"
-            return FetchOutcome(
+            FetchOutcome(
                 message = "Fetch completed for $url. Extracted ${clamped.length} chars. Preview: $preview. prompt_injection_signals=$promptInjectionSignals",
                 errorCategory = FetchErrorCategory.NONE
             )
         }
     }
 
-    override fun healthCheck(): ToolHealthStatus = ToolHealthStatus(
+    override suspend fun healthCheck(): ToolHealthStatus = ToolHealthStatus(
         available = true,
         detail = "Native JVM fetch tool (OkHttp + Jsoup). No external process required."
     )

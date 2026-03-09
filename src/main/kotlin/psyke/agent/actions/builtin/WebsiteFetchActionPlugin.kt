@@ -30,7 +30,7 @@ class WebsiteFetchActionPlugin(
         )
     )
 
-    override fun healthCheck(): ActionPluginHealth {
+    override suspend fun healthCheck(): ActionPluginHealth {
         val active = tool
             ?: return ActionPluginHealth(
                 available = false,
@@ -43,7 +43,7 @@ class WebsiteFetchActionPlugin(
         )
     }
 
-    override fun execute(action: PendingAction, context: ActionExecutionContext): ActionOutcome {
+    override suspend fun execute(action: PendingAction, context: ActionExecutionContext): ActionOutcome {
         val active = tool
             ?: return ActionOutcome(statusSummary = "Fetch tool is not configured.")
         val outcome = active.fetchWithOutcome(action.payload)

@@ -1,5 +1,6 @@
 package psyke.agent.ego
 
+import kotlinx.coroutines.delay
 import mu.KotlinLogging
 import psyke.agent.core.*
 import psyke.agent.cortex.motor.MotorCortex
@@ -85,7 +86,7 @@ class Ego(
         deliberation.setActiveSession(sessionId)
     }
 
-    fun runInteractive() {
+    suspend fun runInteractive() {
         logger.info { "Ego loop started. Web dashboard chat is the active input path." }
         instrumentation.emit(AgentEvents.loopStatus(status = "running", message = "Interactive loop started"))
         emitQueueSnapshot("loop_start")
@@ -133,7 +134,7 @@ class Ego(
         }
     }
 
-    private fun runLoop() {
+    private suspend fun runLoop() {
         var steps = 0
         while (steps < config.planner.maxLoopStepsPerInput) {
             val task = scheduler.nextTask() ?: break
@@ -201,15 +202,11 @@ class Ego(
         }
 
         if (config.loopDelayMs > 0) {
-            try {
-                Thread.sleep(config.loopDelayMs.toLong())
-            } catch (_: InterruptedException) {
-                Thread.currentThread().interrupt()
-            }
+            delay(config.loopDelayMs.toLong())
         }
     }
 
-    private fun processInput(input: PendingInput) {
+    private suspend fun processInput(input: PendingInput) {
         val convCtx = input.conversationContext
         val sessionId = resolveSessionId(convCtx)
         activateSession(convCtx)
@@ -251,7 +248,7 @@ class Ego(
         )
     }
 
-    private fun processThought(thought: PendingThought) {
+    private suspend fun processThought(thought: PendingThought) {
         val convCtx = thought.conversationContext
         val sessionId = resolveSessionId(convCtx)
         activateSession(convCtx)
@@ -285,7 +282,7 @@ class Ego(
         )
     }
 
-    private fun processAction(action: PendingAction) {
+    private suspend fun processAction(action: PendingAction) {
         val convCtx = action.conversationContext
         val sessionId = resolveSessionId(convCtx)
         activateSession(convCtx)
@@ -534,7 +531,7 @@ class Ego(
         emitQueueSnapshot("action_denied")
     }
 
-    private fun applyDecision(
+    private suspend fun applyDecision(
         decision: EgoDecision,
         nextPassCount: Int,
         originThought: PendingThought?,
@@ -885,7 +882,7 @@ class Ego(
         }
     }
 
-    private fun recoverFromSuppressedPlan(
+    private suspend fun recoverFromSuppressedPlan(
         suppressionReason: String,
         decision: EgoDecision.EnqueuePlan,
         nextPassCount: Int,
@@ -941,7 +938,7 @@ class Ego(
         }
     }
 
-    private fun enqueueFallbackExplanation(thought: PendingThought) {
+    private suspend fun enqueueFallbackExplanation(thought: PendingThought) {
         val sessionId = resolveSessionId(thought.conversationContext)
         if (scheduler.hasPendingFallbackExplanationAction(thought.rootInputId, sessionId)) {
             instrumentation.emit(
@@ -1311,7 +1308,7 @@ class Ego(
         return action.copy(payload = rewrittenPayload)
     }
 
-    private fun plannerContext(
+    private suspend fun plannerContext(
         trigger: EgoTrigger,
         rootInputId: String? = null,
         sessionId: String = ConversationContext.DEFAULT_SESSION_ID,
@@ -1586,7 +1583,7 @@ class Ego(
         )
     }
 
-    private fun executeActionSafely(action: PendingAction): ActionOutcome? {
+    private suspend fun executeActionSafely(action: PendingAction): ActionOutcome? {
         return try {
             motorCortex.execute(action, config.searchResultCount)
         } catch (ex: Exception) {

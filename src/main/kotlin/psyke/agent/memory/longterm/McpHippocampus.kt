@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import mu.KotlinLogging
 import psyke.agent.support.TextSecurity
+import kotlinx.coroutines.runBlocking
 import psyke.agent.tools.mcp.LazyMcpClientHolder
 import psyke.agent.tools.mcp.McpToolCallResult
 import java.io.IOException
@@ -70,13 +71,13 @@ class McpHippocampus(
     @Suppress("UNCHECKED_CAST")
     override fun fetchServerMetrics(): Map<String, Any>? {
         return try {
-            val tools = clientHolder.listTools(callTimeoutMs)
+            val tools = runBlocking { clientHolder.listTools(callTimeoutMs) }
             if (METRICS_TOOL_NAME !in tools) return null
-            val result = clientHolder.callTool(
+            val result = runBlocking { clientHolder.callTool(
                 toolName = METRICS_TOOL_NAME,
                 arguments = emptyMap(),
                 timeoutMs = callTimeoutMs
-            )
+            ) }
             if (result.isError) return null
             mapper.readValue(result.content, Map::class.java) as? Map<String, Any>
         } catch (ex: Exception) {
@@ -94,7 +95,7 @@ class McpHippocampus(
         }
 
         val toolNames = try {
-            clientHolder.listTools(callTimeoutMs)
+            runBlocking { clientHolder.listTools(callTimeoutMs) }
         } catch (ex: Exception) {
             logger.warn(ex) { "MCP memory purge failed while listing tools." }
             return 0
@@ -161,7 +162,7 @@ class McpHippocampus(
         }
 
         val toolNames = try {
-            clientHolder.listTools(callTimeoutMs)
+            runBlocking { clientHolder.listTools(callTimeoutMs) }
         } catch (ex: Exception) {
             logger.warn(ex) { "MCP memory imprint failed while listing tools." }
             return false
@@ -199,7 +200,7 @@ class McpHippocampus(
 
     private fun resolveSearchToolName(): String? {
         searchToolName?.let { return it }
-        val availableTools = clientHolder.listTools(callTimeoutMs)
+        val availableTools = runBlocking { clientHolder.listTools(callTimeoutMs) }
         val selected = preferredSearchTools.firstOrNull { it in availableTools }
             ?: availableTools.firstOrNull { candidate ->
                 val lower = candidate.lowercase()
@@ -375,11 +376,11 @@ class McpHippocampus(
 
         for (arguments in argumentCandidates) {
             try {
-                val result = clientHolder.callTool(
+                val result = runBlocking { clientHolder.callTool(
                     toolName = toolName,
                     arguments = arguments,
                     timeoutMs = callTimeoutMs
-                )
+                ) }
                 if (!result.isError) {
                     return result
                 }

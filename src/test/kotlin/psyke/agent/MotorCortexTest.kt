@@ -1,5 +1,6 @@
 package psyke.agent
 
+import kotlinx.coroutines.runBlocking
 import psyke.agent.actions.websearch.WebSearchActionHandler
 import psyke.agent.actions.websearch.WebSearchEngine
 import psyke.agent.actions.websearch.WebSearchEngineHealth
@@ -12,7 +13,7 @@ import kotlin.test.assertTrue
 
 class MotorCortexTest {
     @Test
-    fun `answer action writes output and returns assistant output`() {
+    fun `answer action writes output and returns assistant output`() = runBlocking {
         val captured = mutableListOf<String>()
         val cortex = MotorCortex(
             webSearchActionHandler = WebSearchActionHandler(
@@ -41,7 +42,7 @@ class MotorCortexTest {
     }
 
     @Test
-    fun `web search action formats summary and snippets`() {
+    fun `web search action formats summary and snippets`() = runBlocking {
         val cortex = MotorCortex(
             webSearchActionHandler = WebSearchActionHandler(
                 engine = object : WebSearchEngine {
@@ -78,7 +79,7 @@ class MotorCortexTest {
     }
 
     @Test
-    fun `mcp time action delegates to configured tool`() {
+    fun `mcp time action delegates to configured tool`() = runBlocking {
         val cortex = MotorCortex(
             webSearchActionHandler = WebSearchActionHandler(
                 engine = object : WebSearchEngine {
@@ -87,7 +88,7 @@ class MotorCortexTest {
                 }
             ),
             mcpTimeTool = object : McpTimeTool {
-                override fun getCurrentTime(payload: String): String {
+                override suspend fun getCurrentTime(payload: String): String {
                     assertEquals("""{"timezone":"Europe/Berlin"}""", payload)
                     return "MCP time result: 2026-02-28T10:15:00+01:00"
                 }
@@ -110,7 +111,7 @@ class MotorCortexTest {
     }
 
     @Test
-    fun `fetch action delegates to configured tool and propagates success category`() {
+    fun `fetch action delegates to configured tool and propagates success category`() = runBlocking {
         val cortex = MotorCortex(
             webSearchActionHandler = WebSearchActionHandler(
                 engine = object : WebSearchEngine {
@@ -119,8 +120,8 @@ class MotorCortexTest {
                 }
             ),
             fetchTool = object : FetchTool {
-                override fun fetch(payload: String): String = "unused"
-                override fun fetchWithOutcome(payload: String): FetchOutcome {
+                override suspend fun fetch(payload: String): String = "unused"
+                override suspend fun fetchWithOutcome(payload: String): FetchOutcome {
                     assertEquals("""{"url":"https://example.com","max_chars":500}""", payload)
                     return FetchOutcome(
                         message = "Fetch completed for https://example.com.",
@@ -147,7 +148,7 @@ class MotorCortexTest {
     }
 
     @Test
-    fun `fetch propagates non retryable error category through action outcome`() {
+    fun `fetch propagates non retryable error category through action outcome`() = runBlocking {
         val cortex = MotorCortex(
             webSearchActionHandler = WebSearchActionHandler(
                 engine = object : WebSearchEngine {
@@ -156,8 +157,8 @@ class MotorCortexTest {
                 }
             ),
             fetchTool = object : FetchTool {
-                override fun fetch(payload: String): String = "unused"
-                override fun fetchWithOutcome(payload: String): FetchOutcome =
+                override suspend fun fetch(payload: String): String = "unused"
+                override suspend fun fetchWithOutcome(payload: String): FetchOutcome =
                     FetchOutcome(
                         message = "Fetch tool returned an error: 403 Forbidden",
                         errorCategory = FetchErrorCategory.NON_RETRYABLE
@@ -180,7 +181,7 @@ class MotorCortexTest {
     }
 
     @Test
-    fun `fetch propagates malformed request category through action outcome`() {
+    fun `fetch propagates malformed request category through action outcome`() = runBlocking {
         val cortex = MotorCortex(
             webSearchActionHandler = WebSearchActionHandler(
                 engine = object : WebSearchEngine {
@@ -189,8 +190,8 @@ class MotorCortexTest {
                 }
             ),
             fetchTool = object : FetchTool {
-                override fun fetch(payload: String): String = "unused"
-                override fun fetchWithOutcome(payload: String): FetchOutcome =
+                override suspend fun fetch(payload: String): String = "unused"
+                override suspend fun fetchWithOutcome(payload: String): FetchOutcome =
                     FetchOutcome(
                         message = "Fetch payload is invalid.",
                         errorCategory = FetchErrorCategory.MALFORMED_REQUEST
@@ -213,7 +214,7 @@ class MotorCortexTest {
     }
 
     @Test
-    fun `startup smoke test exposes per-action availability`() {
+    fun `startup smoke test exposes per-action availability`() = runBlocking {
         val cortex = MotorCortex(
             webSearchActionHandler = WebSearchActionHandler(
                 engine = object : WebSearchEngine {
@@ -228,15 +229,15 @@ class MotorCortexTest {
                 }
             ),
             mcpTimeTool = object : McpTimeTool {
-                override fun getCurrentTime(payload: String): String = "unused"
+                override suspend fun getCurrentTime(payload: String): String = "unused"
 
-                override fun healthCheck(): ToolHealthStatus =
+                override suspend fun healthCheck(): ToolHealthStatus =
                     ToolHealthStatus(available = false, detail = "time server offline")
             },
             fetchTool = object : FetchTool {
-                override fun fetch(payload: String): String = "unused"
+                override suspend fun fetch(payload: String): String = "unused"
 
-                override fun healthCheck(): ToolHealthStatus =
+                override suspend fun healthCheck(): ToolHealthStatus =
                     ToolHealthStatus(available = true, detail = "fetch ok")
             }
         )

@@ -26,6 +26,8 @@ import psyke.agent.support.TextSecurity
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 import java.util.Locale
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.util.concurrent.TimeUnit
 
 private val logger = KotlinLogging.logger {}
@@ -55,7 +57,7 @@ class MicrosoftGraphEmailActionPlugin(
         )
     )
 
-    override fun healthCheck(): ActionPluginHealth {
+    override suspend fun healthCheck(): ActionPluginHealth {
         if (!graphConfig.enabled) {
             return ActionPluginHealth(
                 available = false,
@@ -150,7 +152,7 @@ class MicrosoftGraphEmailActionPlugin(
         return ActionDeterministicReview(allow = true)
     }
 
-    override fun execute(action: PendingAction, context: ActionExecutionContext): ActionOutcome {
+    override suspend fun execute(action: PendingAction, context: ActionExecutionContext): ActionOutcome {
         val health = healthCheck()
         if (!health.available) {
             return ActionOutcome(statusSummary = "Email send unavailable: ${health.detail}")
@@ -168,26 +170,28 @@ class MicrosoftGraphEmailActionPlugin(
         if (recipients.isEmpty()) {
             return ActionOutcome(statusSummary = "Email send failed: at least one 'to' recipient is required.")
         }
-        val token = try {
-            obtainAccessToken()
-        } catch (ex: Exception) {
-            logger.warn(ex) { "Microsoft Graph token retrieval failed." }
-            return ActionOutcome(statusSummary = "Email send failed: unable to obtain Microsoft Graph access token.")
-        }
-        val response = try {
-            sendMail(token = token, sender = sender, payload = payload)
-        } catch (ex: Exception) {
-            logger.warn(ex) { "Microsoft Graph sendMail call failed." }
-            return ActionOutcome(statusSummary = "Email send failed: ${ex.message ?: "sendMail call failed"}")
-        }
-        return if (response.success) {
-            ActionOutcome(
-                statusSummary = "Email sent via Microsoft Graph. sender=$sender recipients=${recipients.size}"
-            )
-        } else {
-            ActionOutcome(
-                statusSummary = "Email send failed: ${response.message}"
-            )
+        return withContext(Dispatchers.IO) {
+            val token = try {
+                obtainAccessToken()
+            } catch (ex: Exception) {
+                logger.warn(ex) { "Microsoft Graph token retrieval failed." }
+                return@withContext ActionOutcome(statusSummary = "Email send failed: unable to obtain Microsoft Graph access token.")
+            }
+            val response = try {
+                sendMail(token = token, sender = sender, payload = payload)
+            } catch (ex: Exception) {
+                logger.warn(ex) { "Microsoft Graph sendMail call failed." }
+                return@withContext ActionOutcome(statusSummary = "Email send failed: ${ex.message ?: "sendMail call failed"}")
+            }
+            if (response.success) {
+                ActionOutcome(
+                    statusSummary = "Email sent via Microsoft Graph. sender=$sender recipients=${recipients.size}"
+                )
+            } else {
+                ActionOutcome(
+                    statusSummary = "Email send failed: ${response.message}"
+                )
+            }
         }
     }
 

@@ -48,9 +48,9 @@ data class ActionPluginFactoryContext(
 interface AgentActionPlugin : AutoCloseable {
     val descriptor: ActionDescriptor
 
-    fun execute(action: PendingAction, context: ActionExecutionContext): ActionOutcome
+    suspend fun execute(action: PendingAction, context: ActionExecutionContext): ActionOutcome
 
-    fun healthCheck(): ActionPluginHealth =
+    suspend fun healthCheck(): ActionPluginHealth =
         ActionPluginHealth(available = true, detail = "Action plugin configured.")
 
     fun deterministicReview(

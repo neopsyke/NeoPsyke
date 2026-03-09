@@ -49,7 +49,9 @@ import psyke.eval.ReasoningLogicEvalTasks
 import psyke.eval.ReasoningLogicHarnessClient
 import psyke.eval.ReasoningSelfEvalRunner
 import psyke.eval.UsageTrackingChatClient
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.runBlocking
 import psyke.async.agentScope
 import psyke.instrumentation.AgentEvent
 import psyke.instrumentation.AgentEvents
@@ -92,6 +94,7 @@ import psyke.agent.tools.mcp.FetchTool
 import psyke.agent.tools.mcp.McpTimeTool
 import psyke.agent.tools.mcp.ToolHealthStatus
 import java.net.InetSocketAddress
+import java.util.concurrent.Executors
 import java.net.Socket
 import java.nio.file.Files
 import java.nio.file.Path
@@ -446,36 +449,40 @@ internal object AppModeRunners {
         modeLabel: String,
     ): Boolean {
         val status = try {
-            McpStdioClient.start(command = command, serverLabel = "memory-health").use { client ->
-                val tools = client.listTools(timeoutMs)
-                val hasSearchLike = tools.any { tool ->
-                    val lower = tool.lowercase()
-                    lower.contains("search") || lower.contains("recall") || lower.contains("query")
-                }
-                val hasWriteLike = tools.any { tool ->
-                    val lower = tool.lowercase()
-                    lower.contains("add_observations") ||
-                        lower.contains("remember") ||
-                        lower.contains("imprint") ||
-                        lower.contains("create_memory") ||
-                        lower.contains("add_memory") ||
-                        lower.contains("write_memory")
-                }
-                when {
-                    !hasSearchLike || !hasWriteLike -> {
-                        ProviderStatus(
-                            provider = "mcp_memory",
-                            state = ProviderHealthState.UNAVAILABLE,
-                            detail = "MCP memory server reachable but required tools are missing. search_like=$hasSearchLike write_like=$hasWriteLike tools=${tools.sorted().joinToString(",")}"
-                        )
+            runBlocking {
+                McpStdioClient.start(command = command, serverLabel = "memory-health")
+            }.use { client ->
+                runBlocking {
+                    val tools = client.listTools(timeoutMs)
+                    val hasSearchLike = tools.any { tool ->
+                        val lower = tool.lowercase()
+                        lower.contains("search") || lower.contains("recall") || lower.contains("query")
                     }
-    
-                    else -> {
-                        ProviderStatus(
-                            provider = "mcp_memory",
-                            state = ProviderHealthState.AVAILABLE,
-                            detail = "MCP memory server reachable; required tools detected."
-                        )
+                    val hasWriteLike = tools.any { tool ->
+                        val lower = tool.lowercase()
+                        lower.contains("add_observations") ||
+                            lower.contains("remember") ||
+                            lower.contains("imprint") ||
+                            lower.contains("create_memory") ||
+                            lower.contains("add_memory") ||
+                            lower.contains("write_memory")
+                    }
+                    when {
+                        !hasSearchLike || !hasWriteLike -> {
+                            ProviderStatus(
+                                provider = "mcp_memory",
+                                state = ProviderHealthState.UNAVAILABLE,
+                                detail = "MCP memory server reachable but required tools are missing. search_like=$hasSearchLike write_like=$hasWriteLike tools=${tools.sorted().joinToString(",")}"
+                            )
+                        }
+
+                        else -> {
+                            ProviderStatus(
+                                provider = "mcp_memory",
+                                state = ProviderHealthState.AVAILABLE,
+                                detail = "MCP memory server reachable; required tools detected."
+                            )
+                        }
                     }
                 }
             }
@@ -839,6 +846,8 @@ internal object AppModeRunners {
                                                         instrumentation.emit(AgentEvents.warning(warning))
                                                     }
                                                     actionRegistry.use { registry ->
+                                                        val egoDispatcher = Executors.newSingleThreadExecutor { Thread(it, "psyke-ego") }.asCoroutineDispatcher()
+                                                        try { runBlocking(egoDispatcher) {
                                                         val motorCortex = MotorCortex(
                                                             actionRegistry = registry
                                                         )
@@ -960,6 +969,7 @@ internal object AppModeRunners {
                                                             hippocampus.close()
                                                             closeQuietly(logbook)
                                                         }
+                                                        } } finally { egoDispatcher.close() }
                                                     }
                                                 } finally {
                                                     closeQuietly(activeFetchTool)
@@ -1482,25 +1492,25 @@ internal object AppModeRunners {
     private class DisabledMcpTimeTool(
         private val reason: String,
     ) : McpTimeTool, AutoCloseable {
-        override fun getCurrentTime(payload: String): String =
+        override suspend fun getCurrentTime(payload: String): String =
             "MCP time unavailable: $reason"
-    
-        override fun healthCheck(): ToolHealthStatus =
+
+        override suspend fun healthCheck(): ToolHealthStatus =
             ToolHealthStatus(
                 available = false,
                 detail = reason
             )
-    
+
         override fun close() {}
     }
-    
+
     private class DisabledFetchTool(
         private val reason: String,
     ) : FetchTool, AutoCloseable {
-        override fun fetch(payload: String): String =
+        override suspend fun fetch(payload: String): String =
             "Fetch unavailable: $reason"
 
-        override fun healthCheck(): ToolHealthStatus =
+        override suspend fun healthCheck(): ToolHealthStatus =
             ToolHealthStatus(
                 available = false,
                 detail = reason

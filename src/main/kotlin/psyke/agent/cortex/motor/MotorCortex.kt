@@ -41,23 +41,23 @@ class MotorCortex(
     @Volatile
     private var lastStatusSnapshot: List<ActionImplementationStatus>? = null
 
-    fun startupSmokeTest(): List<ActionImplementationStatus> {
+    suspend fun startupSmokeTest(): List<ActionImplementationStatus> {
         val statuses = buildStatusSnapshot()
         lastStatusSnapshot = statuses
         return statuses
     }
 
-    fun actionImplementationStatuses(): List<ActionImplementationStatus> {
+    suspend fun actionImplementationStatuses(): List<ActionImplementationStatus> {
         return lastStatusSnapshot ?: buildStatusSnapshot()
     }
 
-    fun availableActionTypes(): Set<ActionType> =
+    suspend fun availableActionTypes(): Set<ActionType> =
         actionImplementationStatuses()
             .filter { it.dispatchable && it.available }
             .map { it.actionType }
             .toSet()
 
-    fun dispatchableActionTypes(): Set<ActionType> =
+    suspend fun dispatchableActionTypes(): Set<ActionType> =
         actionImplementationStatuses()
             .filter { it.dispatchable }
             .map { it.actionType }
@@ -77,11 +77,11 @@ class MotorCortex(
     fun repairPlannerPayload(actionType: ActionType, raw: String): String =
         actionRegistry.repairPlannerPayload(actionType, raw)
 
-    fun execute(action: PendingAction, searchResultCount: Int): ActionOutcome {
+    suspend fun execute(action: PendingAction, searchResultCount: Int): ActionOutcome {
         return actionRegistry.execute(action, searchResultCount)
     }
 
-    private fun buildStatusSnapshot(): List<ActionImplementationStatus> =
+    private suspend fun buildStatusSnapshot(): List<ActionImplementationStatus> =
         actionRegistry.descriptors()
             .sortedBy { it.actionType.id }
             .map { descriptor ->
