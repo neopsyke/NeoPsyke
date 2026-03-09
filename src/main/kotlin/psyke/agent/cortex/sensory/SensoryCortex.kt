@@ -56,9 +56,16 @@ class AsyncSensoryInputSource(
     private val includeStdin: Boolean = true,
     private val emitStdinClosedSignal: Boolean = true,
     private val pollTimeoutMs: Long = DEFAULT_POLL_TIMEOUT_MS,
+    private val stdinMode: StdinMode = StdinMode.CHAT_AND_CONTROL,
     private val readLineFn: () -> String? = { readLine() },
     private val prompt: () -> Unit = { print("you> ") },
+    private val controlOutput: (String) -> Unit = ::println,
 ) : SensoryInputSource, Closeable {
+    enum class StdinMode {
+        CHAT_AND_CONTROL,
+        CONTROL_ONLY,
+    }
+
     private val queue = LinkedBlockingQueue<SensorySignal>(MAX_SIGNAL_QUEUE)
     @Volatile
     private var running: Boolean = true
@@ -73,8 +80,17 @@ class AsyncSensoryInputSource(
                     }
                     break
                 }
-                if (rawInput.trim().equals("exit", ignoreCase = true)) {
+                val normalizedInput = rawInput.trim()
+                if (normalizedInput.equals("exit", ignoreCase = true)) {
                     offerSignal(SensorySignal.ExitRequested(source = "stdin"))
+                    break
+                }
+                if (stdinMode == StdinMode.CONTROL_ONLY) {
+                    if (normalizedInput.isNotBlank()) {
+                        controlOutput(
+                            "control> Unknown command '$normalizedInput'. Available commands: exit"
+                        )
+                    }
                     continue
                 }
                 if (rawInput.isBlank()) {

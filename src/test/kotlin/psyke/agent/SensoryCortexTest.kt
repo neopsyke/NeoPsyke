@@ -3,6 +3,7 @@ package psyke.agent
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
+import kotlin.test.assertTrue
 
 class SensoryCortexTest {
     @Test
@@ -46,5 +47,45 @@ class SensoryCortexTest {
         assertEquals("x".repeat(12), input.content)
         assertEquals(InputPriority.LOW, input.priority)
         assertEquals("webhook", input.source)
+    }
+
+    @Test
+    fun `async stdin control-only mode ignores text input and only emits exit`() {
+        val scriptedInputs = ArrayDeque(listOf("hello from terminal", "exit"))
+        val controlMessages = mutableListOf<String>()
+        val source = psyke.agent.cortex.sensory.AsyncSensoryInputSource(
+            includeStdin = true,
+            emitStdinClosedSignal = false,
+            pollTimeoutMs = 10L,
+            stdinMode = psyke.agent.cortex.sensory.AsyncSensoryInputSource.StdinMode.CONTROL_ONLY,
+            readLineFn = {
+                synchronized(scriptedInputs) {
+                    scriptedInputs.removeFirstOrNull()
+                }
+            },
+            prompt = {},
+            controlOutput = controlMessages::add
+        )
+        try {
+            var exitSignal: psyke.agent.cortex.sensory.SensorySignal? = null
+            for (@Suppress("unused") attempt in 1..100) {
+                val signal = source.nextSignal()
+                if (signal is psyke.agent.cortex.sensory.SensorySignal.ExitRequested) {
+                    exitSignal = signal
+                    break
+                }
+                if (signal is psyke.agent.cortex.sensory.SensorySignal.InputReceived) {
+                    throw AssertionError("Control-only stdin must not emit InputReceived signals.")
+                }
+            }
+            val exit = assertIs<psyke.agent.cortex.sensory.SensorySignal.ExitRequested>(exitSignal)
+            assertEquals("stdin", exit.source)
+            assertTrue(
+                actual = controlMessages.any { it.contains("Unknown command 'hello from terminal'") },
+                message = "Expected control output to report unknown control command."
+            )
+        } finally {
+            source.close()
+        }
     }
 }

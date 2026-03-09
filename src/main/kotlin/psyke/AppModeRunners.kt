@@ -508,8 +508,10 @@ internal object AppModeRunners {
         val dashboardStore = DashboardStateStore()
         val interlocutorResolver = psyke.agent.core.DefaultInterlocutorResolver()
         val sensoryInput = AsyncSensoryInputSource(
-            includeStdin = false,
-            emitStdinClosedSignal = false
+            includeStdin = true,
+            emitStdinClosedSignal = false,
+            stdinMode = AsyncSensoryInputSource.StdinMode.CONTROL_ONLY,
+            prompt = { print("control> ") }
         )
         val sensoryCortex = SensoryCortex(
             config = config,
@@ -819,7 +821,7 @@ internal object AppModeRunners {
                                                             webSearchActionHandler = webSearchActionHandler,
                                                             mcpTimeTool = timeTool,
                                                             fetchTool = activeFetchTool,
-                                                            output = ::println
+                                                            output = {}
                                                         )
                                                     )
                                                     actionRegistry.loadWarnings.forEach { warning ->
