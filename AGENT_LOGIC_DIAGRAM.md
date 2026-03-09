@@ -166,7 +166,7 @@ sequenceDiagram
         Note over Ego,Mem: Long dialogue/recall blocks are compressed before advisor prompt
     end
 
-    Note over User,SC: Terminal stdin is control-only in interactive mode (`exit`); non-command text is not enqueued as chat input
+    Note over User,SC: Terminal stdin is control-only in interactive mode (exit command), non-command text is not enqueued as chat input
 ```
 
 ## 2.5) Interactive Startup Memory Gate
