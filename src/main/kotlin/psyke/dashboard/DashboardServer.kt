@@ -7,6 +7,7 @@ import com.fasterxml.jackson.module.kotlin.readValue
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
 import mu.KotlinLogging
+import psyke.metrics.MetricsQueryProvider
 import java.io.Closeable
 import java.net.InetSocketAddress
 import java.nio.charset.StandardCharsets
@@ -20,6 +21,7 @@ private const val SSE_HEARTBEAT_TIMEOUT_MS: Long = 30_000L
 class DashboardServer(
     private val store: DashboardStateStore,
     private val chatBridge: ChatRuntimeBridge? = null,
+    @Volatile var metricsQueryProvider: MetricsQueryProvider? = null,
     port: Int,
     host: String = "127.0.0.1",
 ) : Closeable {
@@ -43,6 +45,20 @@ class DashboardServer(
                 return@createContext
             }
             respondText(exchange, 200, DashboardAssets.observabilityHtml, "text/html; charset=utf-8")
+        }
+        server.createContext("/metrics") { exchange ->
+            if (exchange.requestURI.path != "/metrics") {
+                respondText(exchange, 404, "Not found", "text/plain; charset=utf-8")
+                return@createContext
+            }
+            respondText(exchange, 200, DashboardAssets.metricsHtml, "text/html; charset=utf-8")
+        }
+        server.createContext("/api/obs/llm-stats") { exchange ->
+            if (exchange.requestMethod != "GET") {
+                respondText(exchange, 405, "Method not allowed", "text/plain; charset=utf-8")
+                return@createContext
+            }
+            handleLlmStatsApi(exchange)
         }
         server.createContext("/api/obs/snapshot") { exchange ->
             if (exchange.requestMethod != "GET") {
@@ -297,6 +313,20 @@ class DashboardServer(
             subscription.close()
             output.close()
         }
+    }
+
+    private fun handleLlmStatsApi(exchange: HttpExchange) {
+        val provider = metricsQueryProvider
+        if (provider == null) {
+            respondText(exchange, 503, """{"error":"Metrics query not available"}""", "application/json; charset=utf-8")
+            return
+        }
+        val query = exchange.requestURI.query
+        val scope = parseQueryParam(query, "scope") ?: "run"
+        val runOnly = scope != "all"
+        val timeframeMs = parseQueryParam(query, "timeframe")?.toLongOrNull()
+        val report = provider.llmCallStats(runOnly = runOnly, timeframeMs = timeframeMs)
+        respondText(exchange, 200, mapper.writeValueAsString(report), "application/json; charset=utf-8")
     }
 
     private fun parseQueryParam(query: String?, key: String): String? {
