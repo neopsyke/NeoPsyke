@@ -1,10 +1,12 @@
 package psyke.instrumentation
 
+import kotlinx.coroutines.CoroutineName
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.launch
 import java.io.Closeable
-import java.util.concurrent.ArrayBlockingQueue
-import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
-import kotlin.concurrent.thread
 
 interface AgentInstrumentation {
     fun emit(event: AgentEvent)
@@ -23,21 +25,17 @@ interface InstrumentationSink : Closeable {
 class InstrumentationBus(
     sinks: List<InstrumentationSink>,
     criticalSinks: List<InstrumentationSink> = emptyList(),
+    scope: CoroutineScope,
     queueCapacity: Int = 2_048,
 ) : AgentInstrumentation, Closeable {
-    private val queue = ArrayBlockingQueue<AgentEvent>(queueCapacity)
+    private val channel = Channel<AgentEvent>(capacity = queueCapacity)
     private val nextEventId = AtomicLong(1)
     private val droppedEvents = AtomicLong(0)
     private val activeSinks = java.util.concurrent.CopyOnWriteArrayList<InstrumentationSink>(sinks)
     private val activeCriticalSinks = criticalSinks.toList()
     @Volatile
     private var droppedEventsObserver: ((delta: Long, total: Long) -> Unit)? = null
-    @Volatile
-    private var running = true
-    private val worker = thread(
-        name = "psyke-instrumentation-bus",
-        isDaemon = true
-    ) {
+    private val dispatchJob: Job = scope.launch(CoroutineName("psyke-instrumentation-bus")) {
         dispatchLoop()
     }
 
@@ -50,15 +48,18 @@ class InstrumentationBus(
                 // keep instrumentation path robust
             }
         }
-        if (queue.offer(stampedEvent)) {
+        val sendResult = channel.trySend(stampedEvent)
+        if (sendResult.isSuccess) {
             return
         }
 
+        // Channel full — drop oldest and retry (mirrors previous ArrayBlockingQueue behavior)
         var droppedDelta = 0L
-        if (queue.poll() != null) {
+        val polled = channel.tryReceive()
+        if (polled.isSuccess) {
             droppedDelta += 1
         }
-        if (!queue.offer(stampedEvent)) {
+        if (channel.trySend(stampedEvent).isFailure) {
             droppedDelta += 1
         }
         if (droppedDelta > 0) {
@@ -80,8 +81,12 @@ class InstrumentationBus(
     }
 
     override fun close() {
-        running = false
-        worker.join(1_500)
+        channel.close()
+        // dispatchLoop will drain remaining items then exit when channel is closed and empty
+        @Suppress("BlockingMethodInNonBlockingContext")
+        kotlinx.coroutines.runBlocking {
+            dispatchJob.join()
+        }
         (activeCriticalSinks + activeSinks).distinct().forEach { sink ->
             try {
                 sink.close()
@@ -91,9 +96,8 @@ class InstrumentationBus(
         }
     }
 
-    private fun dispatchLoop() {
-        while (running || queue.isNotEmpty()) {
-            val event = queue.poll(200, TimeUnit.MILLISECONDS) ?: continue
+    private suspend fun dispatchLoop() {
+        for (event in channel) {
             activeSinks.forEach { sink ->
                 try {
                     sink.onEvent(event)

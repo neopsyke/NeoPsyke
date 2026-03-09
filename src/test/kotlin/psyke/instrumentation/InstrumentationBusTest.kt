@@ -1,15 +1,19 @@
 package psyke.instrumentation
 
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
 import psyke.support.RecordingSink
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 class InstrumentationBusTest {
+    private fun testScope() = CoroutineScope(SupervisorJob())
+
     @Test
     fun `bus dispatches events and stamps incremental ids`() {
         val sink = RecordingSink(expected = 3)
-        InstrumentationBus(sinks = listOf(sink), queueCapacity = 16).use { bus ->
+        InstrumentationBus(sinks = listOf(sink), scope = testScope(), queueCapacity = 16).use { bus ->
             bus.emit(AgentEvent(type = "a"))
             bus.emit(AgentEvent(type = "b"))
             bus.emit(AgentEvent(type = "c"))
@@ -23,7 +27,7 @@ class InstrumentationBusTest {
     @Test
     fun `bus preserves pre-stamped event ids`() {
         val sink = RecordingSink(expected = 1)
-        InstrumentationBus(sinks = listOf(sink), queueCapacity = 4).use { bus ->
+        InstrumentationBus(sinks = listOf(sink), scope = testScope(), queueCapacity = 4).use { bus ->
             bus.emit(AgentEvent(id = 55, type = "preset"))
             assertTrue(sink.await())
         }
@@ -34,7 +38,7 @@ class InstrumentationBusTest {
     fun `bus reports dropped events when queue overflows`() {
         val sink = RecordingSink(expected = 1)
         var totalDropped = 0L
-        InstrumentationBus(sinks = listOf(sink), queueCapacity = 1).use { bus ->
+        InstrumentationBus(sinks = listOf(sink), scope = testScope(), queueCapacity = 1).use { bus ->
             bus.setDroppedEventsObserver { _, total ->
                 totalDropped = total
             }
@@ -56,6 +60,7 @@ class InstrumentationBusTest {
         InstrumentationBus(
             sinks = listOf(asyncSink),
             criticalSinks = listOf(criticalSink),
+            scope = testScope(),
             queueCapacity = 1
         ).use { bus ->
             bus.setDroppedEventsObserver { _, total ->

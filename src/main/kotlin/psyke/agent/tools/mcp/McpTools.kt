@@ -11,7 +11,11 @@ import io.modelcontextprotocol.kotlin.sdk.TextContent
 import io.modelcontextprotocol.kotlin.sdk.client.Client
 import io.modelcontextprotocol.kotlin.sdk.client.ClientOptions
 import io.modelcontextprotocol.kotlin.sdk.client.StdioClientTransport
+import kotlinx.coroutines.CoroutineName
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import kotlinx.io.asSink
@@ -71,8 +75,9 @@ interface FetchTool {
 class SdkMcpTimeTool(
     command: List<String>,
     private val callTimeoutMs: Long,
+    scope: CoroutineScope? = null,
 ) : McpTimeTool, AutoCloseable {
-    private val clientHolder = LazyMcpClientHolder(command, serverLabel = "time")
+    private val clientHolder = LazyMcpClientHolder(command, serverLabel = "time", scope = scope)
 
     override fun getCurrentTime(payload: String): String {
         val parsed = try {
@@ -140,6 +145,7 @@ class SdkMcpTimeTool(
 class LazyMcpClientHolder(
     private val command: List<String>,
     private val serverLabel: String,
+    private val scope: CoroutineScope? = null,
 ) : AutoCloseable {
     @Volatile
     private var client: McpStdioClient? = null
@@ -154,7 +160,7 @@ class LazyMcpClientHolder(
     private fun ensureClient(): McpStdioClient {
         client?.let { return it }
         return synchronized(this) {
-            client ?: McpStdioClient.start(command, serverLabel).also { created ->
+            client ?: McpStdioClient.start(command, serverLabel, scope).also { created ->
                 client = created
             }
         }
@@ -224,12 +230,12 @@ class McpStdioClient private constructor(
     }
 
     companion object {
-        fun start(command: List<String>, serverLabel: String): McpStdioClient {
+        fun start(command: List<String>, serverLabel: String, scope: CoroutineScope? = null): McpStdioClient {
             require(command.isNotEmpty()) { "MCP command cannot be empty." }
             var lastError: Exception? = null
             for (attempt in 1..START_MAX_ATTEMPTS) {
                 try {
-                    return startOnce(command = command, serverLabel = serverLabel)
+                    return startOnce(command = command, serverLabel = serverLabel, scope = scope)
                 } catch (ex: Exception) {
                     lastError = ex
                     if (attempt < START_MAX_ATTEMPTS) {
@@ -251,17 +257,27 @@ class McpStdioClient private constructor(
             )
         }
 
-        private fun startOnce(command: List<String>, serverLabel: String): McpStdioClient {
+        private fun startOnce(command: List<String>, serverLabel: String, scope: CoroutineScope? = null): McpStdioClient {
             require(command.isNotEmpty()) { "MCP command cannot be empty." }
             val processBuilder = ProcessBuilder(command)
             NpmCommandIsolation.apply(processBuilder, command, serverLabel)
             val process = processBuilder.start()
 
             // Drain stderr continuously to avoid deadlocks if the server logs.
-            thread(name = "mcp-$serverLabel-stderr", isDaemon = true) {
-                process.errorStream.bufferedReader().useLines { lines ->
-                    lines.forEach { line ->
-                        logger.debug { "mcp-$serverLabel stderr: $line" }
+            if (scope != null) {
+                scope.launch(Dispatchers.IO + CoroutineName("mcp-$serverLabel-stderr")) {
+                    process.errorStream.bufferedReader().useLines { lines ->
+                        lines.forEach { line ->
+                            logger.debug { "mcp-$serverLabel stderr: $line" }
+                        }
+                    }
+                }
+            } else {
+                thread(name = "mcp-$serverLabel-stderr", isDaemon = true) {
+                    process.errorStream.bufferedReader().useLines { lines ->
+                        lines.forEach { line ->
+                            logger.debug { "mcp-$serverLabel stderr: $line" }
+                        }
                     }
                 }
             }

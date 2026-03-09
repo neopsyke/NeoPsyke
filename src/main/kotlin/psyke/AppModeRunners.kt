@@ -49,6 +49,8 @@ import psyke.eval.ReasoningLogicEvalTasks
 import psyke.eval.ReasoningLogicHarnessClient
 import psyke.eval.ReasoningSelfEvalRunner
 import psyke.eval.UsageTrackingChatClient
+import kotlinx.coroutines.cancel
+import psyke.async.agentScope
 import psyke.instrumentation.AgentEvent
 import psyke.instrumentation.AgentEvents
 import psyke.instrumentation.InstrumentationBus
@@ -122,9 +124,11 @@ internal object AppModeRunners {
             ReasoningEvalFlowLogSink()
         )
         val evalRawResponseCharLimit = runtimeSettings.evalMaxRawResponseChars
+        val evalScope = agentScope("psyke-reasoning-eval")
         InstrumentationBus(
             sinks = sinks,
-            criticalSinks = listOfNotNull(sidecarSink)
+            criticalSinks = listOfNotNull(sidecarSink),
+            scope = evalScope
         ).use { instrumentation ->
             val provider = if (cliOptions.evalReasoningMode == ReasoningEvalMode.LOGIC) {
                 "logic-harness"
@@ -259,9 +263,11 @@ internal object AppModeRunners {
             MemoryEvalFlowLogSink()
         )
         val evalRawResponseCharLimit = runtimeSettings.evalMaxRawResponseChars
+        val evalScope = agentScope("psyke-memory-eval")
         InstrumentationBus(
             sinks = sinks,
-            criticalSinks = listOfNotNull(sidecarSink)
+            criticalSinks = listOfNotNull(sidecarSink),
+            scope = evalScope
         ).use { instrumentation ->
             MetricsRuntimeFactory.create(
                 provider = llm.planner.providerLabel,
@@ -506,13 +512,15 @@ internal object AppModeRunners {
             return
         }
     
+        val agentScope = agentScope("psyke-agent")
         val dashboardStore = DashboardStateStore()
         val interlocutorResolver = psyke.agent.core.DefaultInterlocutorResolver()
         val sensoryInput = AsyncSensoryInputSource(
             includeStdin = true,
             emitStdinClosedSignal = false,
             stdinMode = AsyncSensoryInputSource.StdinMode.CONTROL_ONLY,
-            prompt = { print("control> ") }
+            prompt = { print("control> ") },
+            scope = agentScope
         )
         val sensoryCortex = SensoryCortex(
             config = config,
@@ -542,9 +550,10 @@ internal object AppModeRunners {
                 sinks = listOfNotNull(
                     StructuredLogSink(),
                     dashboardStore,
-                    TaskWorkspaceDumpSink()
+                    TaskWorkspaceDumpSink(scope = agentScope)
                 ),
-                criticalSinks = listOfNotNull(sidecarSink)
+                criticalSinks = listOfNotNull(sidecarSink),
+                scope = agentScope
             ).use { instrumentation ->
                 val dashboardServer = if (dashboardEnabled) {
                     try {
@@ -802,7 +811,7 @@ internal object AppModeRunners {
                                                 "web_search=${llm.webSearch.providerLabel}/${llm.webSearch.model}"
                                         }
                                         try {
-                                            val mcpTimeTool = createMcpTimeTool(config, mcpRuntimeConfig.time)
+                                            val mcpTimeTool = createMcpTimeTool(config, mcpRuntimeConfig.time, agentScope)
                                             val fetchTool = createFetchTool(config, mcpRuntimeConfig.fetch)
                                             val webSearchRuntime = createWebSearchRuntime(
                                                 llm = llm,
@@ -971,6 +980,7 @@ internal object AppModeRunners {
             }
         } finally {
             sensoryInput.close()
+            agentScope.cancel()
         }
     }
 
@@ -1260,7 +1270,11 @@ internal object AppModeRunners {
         }
     }
     
-    private fun createMcpTimeTool(config: AgentConfig, capability: McpCapabilityConfig): McpTimeTool {
+    private fun createMcpTimeTool(
+        config: AgentConfig,
+        capability: McpCapabilityConfig,
+        scope: kotlinx.coroutines.CoroutineScope? = null,
+    ): McpTimeTool {
         val command = resolveMcpCommand(capability)
         if (command == null) {
             val reason = disabledReason("time", capability)
@@ -1269,7 +1283,8 @@ internal object AppModeRunners {
         }
         return SdkMcpTimeTool(
             command = command,
-            callTimeoutMs = config.mcpCallTimeoutMs
+            callTimeoutMs = config.mcpCallTimeoutMs,
+            scope = scope
         )
     }
     

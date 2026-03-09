@@ -1,24 +1,46 @@
 package psyke.instrumentation
 
+import kotlinx.coroutines.CoroutineName
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.launch
 import mu.KotlinLogging
 import psyke.agent.memory.workspace.TaskWorkspaceDebugSnapshot
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardOpenOption
-import java.time.Instant
-import java.util.concurrent.ExecutorService
-import java.util.concurrent.Executors
-import java.util.concurrent.TimeUnit
 
 private val logger = KotlinLogging.logger {}
 
 class TaskWorkspaceDumpSink(
     private val outputDir: Path = Path.of(".psyke/workspace-dumps"),
+    scope: CoroutineScope,
 ) : InstrumentationSink {
-    private val executor: ExecutorService = Executors.newSingleThreadExecutor { runnable ->
-        Thread(runnable, "workspace-dump-writer").apply { isDaemon = true }
-    }
+    private data class WriteJob(val filePath: Path, val text: String)
+
+    private val writeChannel = Channel<WriteJob>(capacity = 64)
     private var dirCreated = false
+
+    init {
+        scope.launch(Dispatchers.IO + CoroutineName("workspace-dump-writer")) {
+            for (job in writeChannel) {
+                try {
+                    if (!dirCreated) {
+                        Files.createDirectories(outputDir.toAbsolutePath().normalize())
+                        dirCreated = true
+                    }
+                    Files.writeString(
+                        job.filePath, job.text,
+                        StandardOpenOption.CREATE, StandardOpenOption.APPEND
+                    )
+                    logger.info { "Workspace dump written to: ${job.filePath}" }
+                } catch (ex: Exception) {
+                    logger.warn(ex) { "Failed to write workspace dump to ${job.filePath}" }
+                }
+            }
+        }
+    }
 
     override fun onEvent(event: AgentEvent) {
         if (event.type != EVENT_TYPE) return
@@ -28,26 +50,11 @@ class TaskWorkspaceDumpSink(
         val ts = event.tsIso
         val text = formatDump(ts, sessionId, snapshot, candidateAnswer)
         val filePath = outputDir.resolve("$sessionId.txt").toAbsolutePath().normalize()
-        executor.submit {
-            try {
-                if (!dirCreated) {
-                    Files.createDirectories(outputDir.toAbsolutePath().normalize())
-                    dirCreated = true
-                }
-                Files.writeString(
-                    filePath, text,
-                    StandardOpenOption.CREATE, StandardOpenOption.APPEND
-                )
-                logger.info { "Workspace dump written to: $filePath" }
-            } catch (ex: Exception) {
-                logger.warn(ex) { "Failed to write workspace dump to $filePath" }
-            }
-        }
+        writeChannel.trySend(WriteJob(filePath, text))
     }
 
     override fun close() {
-        executor.shutdown()
-        executor.awaitTermination(2, TimeUnit.SECONDS)
+        writeChannel.close()
     }
 
     companion object {

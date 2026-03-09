@@ -1,11 +1,15 @@
 package psyke.agent
 
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
 class SensoryCortexTest {
+    private fun testScope() = CoroutineScope(SupervisorJob())
+
     @Test
     fun `sensory input defaults to medium priority`() {
         val input = SensoryInput(content = "hello")
@@ -51,6 +55,7 @@ class SensoryCortexTest {
 
     @Test
     fun `async stdin control-only mode ignores text input and only emits exit`() {
+        val scope = testScope()
         val scriptedInputs = ArrayDeque(listOf("hello from terminal", "exit"))
         val controlMessages = mutableListOf<String>()
         val source = psyke.agent.cortex.sensory.AsyncSensoryInputSource(
@@ -64,7 +69,8 @@ class SensoryCortexTest {
                 }
             },
             prompt = {},
-            controlOutput = controlMessages::add
+            controlOutput = controlMessages::add,
+            scope = scope
         )
         try {
             var exitSignal: psyke.agent.cortex.sensory.SensorySignal? = null
