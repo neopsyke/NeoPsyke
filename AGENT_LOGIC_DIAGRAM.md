@@ -7,7 +7,7 @@ Keep diagrams high signal: small, readable, and updated as runtime logic evolves
 
 ```mermaid
 flowchart LR
-    U["User / Web UI"] --> SC["SensoryCortex (Async Web Chat Input)"]
+    U["User / Web UI + Terminal Control"] --> SC["SensoryCortex (Async Web Chat Input + Stdin Control)"]
     SC --> E["Ego Orchestrator"]
     NoteCtx["ConversationContext(sessionId required)"] --> SC
 
@@ -82,7 +82,7 @@ sequenceDiagram
     participant TWS as TaskWorkspaceStore
     participant Dash as DashboardStateStore/API
 
-    User->>SC: Input text
+    User->>SC: Web chat input text
     SC->>Ego: InputReceived
     Note over SC,Ego: Input carries ConversationContext(sessionId), rootInputId(identity), receivedAtMs(timing)
     Ego->>Sched: enqueueInput
@@ -165,6 +165,8 @@ sequenceDiagram
         Note over Ego,Mem: Memory-advisor completion max_tokens scales with prompt estimate (bounded floor/hard-cap) and model token_weight
         Note over Ego,Mem: Long dialogue/recall blocks are compressed before advisor prompt
     end
+
+    Note over User,SC: Terminal stdin is control-only in interactive mode (`exit`); non-command text is not enqueued as chat input
 ```
 
 ## 2.5) Interactive Startup Memory Gate

@@ -50,7 +50,10 @@ It is intentionally high-level and should stay aligned with the code.
   - Pulls signals from `SensoryCortex`.
   - Enqueues new user input in `AttentionScheduler`.
   - Runs `runLoop()` while there is pending work.
-  - Interactive wiring uses `AsyncSensoryInputSource` for web chat submissions only (stdin input path disabled).
+  - Interactive wiring uses `AsyncSensoryInputSource` with stdin enabled in control-only mode:
+    - terminal `exit` emits `ExitRequested(source="stdin")` and stops the loop
+    - non-command stdin text is ignored as chat input and never enqueued to the scheduler
+  - Default chat answers from web sessions are delivered via dashboard chat events, not terminal stdout.
   - Interactive startup requires dashboard mode enabled; without dashboard input path the loop does not start.
 - `runLoop()` (bounded by `config.planner.maxLoopStepsPerInput`):
   - Scheduler priority:

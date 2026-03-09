@@ -310,11 +310,9 @@ Notes:
   - Metrics are now fail-safe at client level (LLM/web-search clients emit usage through persistent metrics observer even outside the normal app runner path).
   - If SQLite metrics init fails, Psyke falls back to `.psyke/metrics-fallback.jsonl` so usage events are still persisted.
 
-Then interact:
+Then use the terminal prompt for runtime control commands only:
 ```text
-you> hello
-you> search for latest kotlin release notes
-you> exit
+control> exit
 ```
 
 ## Realtime dashboard
@@ -340,7 +338,7 @@ you> exit
 - Inputs are ingested through `SensoryCortex` (extensible input-source abstraction).
 - Input priority levels: `low` (1), `medium` (2, default), `high` (3).
 - Interactive runtime uses an async multiplexer input source:
-  - built-in stdin source submits with `high` priority
+  - built-in stdin source is control-only (currently supports `exit`; other text is ignored as chat input)
   - chat API submissions (`/api/chat/sessions/{id}/messages`) are also ingested as high-priority signals
 - `MemoryStore` keeps bounded rolling memory and compacts older turns into a summary as it nears capacity.
 - Memory summary included in Ego/Superego prompts is token-capped to stay within LLM context budgets.
