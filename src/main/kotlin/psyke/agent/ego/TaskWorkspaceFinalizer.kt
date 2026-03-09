@@ -180,6 +180,7 @@ class LlmTaskWorkspaceFinalizer(
             ActionType.MCP_TIME -> "mcp_time_summary"
             ActionType.WEBSITE_FETCH -> "website_fetch_summary"
             ActionType.MEMORY -> "memory_summary"
+            else -> "generic_action_summary"
         }
 
     private data class FinalizerPayload(

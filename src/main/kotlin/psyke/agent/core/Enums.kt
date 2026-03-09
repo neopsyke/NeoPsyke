@@ -1,5 +1,8 @@
 package psyke.agent.core
 
+import com.fasterxml.jackson.annotation.JsonIgnore
+import java.util.Locale
+
 enum class Urgency(val priority: Int) {
     LOW(1),
     MEDIUM(2),
@@ -16,33 +19,45 @@ enum class Urgency(val priority: Int) {
 }
 
 /**
- * Types of actions recognized by the agent.
+ * Extensible action type identifier.
  *
- * [dispatchable] indicates whether the LLM planner can propose this action.
- * Non-dispatchable types (e.g. [MEMORY]) represent internal subsystem capabilities
- * that are tracked for status/dashboard purposes but never appear in the
- * planner's available/unavailable action lists.
+ * Built-in action constants are exposed in [companion object], but any valid action
+ * id can be instantiated to support plugin-discovered actions.
  */
-enum class ActionType(val dispatchable: Boolean = true) {
-    WEB_SEARCH,
-    ANSWER,
-    MCP_TIME,
-    WEBSITE_FETCH,
-    MEMORY(dispatchable = false);
+data class ActionType(
+    val id: String,
+) {
+    @get:JsonIgnore
+    val name: String
+        get() = id.uppercase(Locale.ROOT)
+    @get:JsonIgnore
+    val dispatchable: Boolean
+        get() = this != MEMORY
 
     companion object {
-        /** Subset of entries the planner is allowed to propose. */
+        val WEB_SEARCH: ActionType = ActionType("web_search")
+        val ANSWER: ActionType = ActionType("answer")
+        val MCP_TIME: ActionType = ActionType("mcp_time")
+        val WEBSITE_FETCH: ActionType = ActionType("website_fetch")
+        val MEMORY: ActionType = ActionType("memory")
+
+        /** Built-in action set for compatibility with existing loops/tests. */
+        val entries: Set<ActionType> = setOf(
+            WEB_SEARCH,
+            ANSWER,
+            MCP_TIME,
+            WEBSITE_FETCH,
+            MEMORY
+        )
+        /** Built-in subset the planner is allowed to propose by default. */
         val DISPATCHABLE: Set<ActionType> = entries.filter { it.dispatchable }.toSet()
 
         fun fromRaw(value: String?): ActionType? =
-            when (value?.trim()?.lowercase()) {
-                "web_search" -> WEB_SEARCH
-                "answer" -> ANSWER
-                "mcp_time" -> MCP_TIME
-                "website_fetch" -> WEBSITE_FETCH
-                "memory" -> MEMORY
-                else -> null
-            }
+            value
+                ?.trim()
+                ?.lowercase(Locale.ROOT)
+                ?.takeIf { it.matches(Regex("^[a-z][a-z0-9_]{1,63}$")) }
+                ?.let { ActionType(it) }
     }
 }
 

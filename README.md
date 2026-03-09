@@ -5,7 +5,8 @@ Standalone Kotlin JVM app using Gradle with:
 - Interactive Ego agent loop (inputs, thoughts, actions)
 - Extensible input abstraction (`SensoryCortex`)
 - Superego action gatekeeper (policy/safety review)
-- Action executor (`MotorCortex`) for `web_search`, `answer`, `mcp_time`, and `website_fetch`
+- Action executor (`MotorCortex`) with startup-discovered action plugins (`ServiceLoader`)
+  - built-in plugins: `web_search`, `answer`, `mcp_time`, `website_fetch`, `email_send` (disabled by default unless configured)
 
 ## For Coding Agents
 - Repository-wide coding-agent instructions live in `AGENTS.md`.
@@ -81,6 +82,16 @@ Standalone Kotlin JVM app using Gradle with:
     - `provider` (label/selector for provider intent)
     - `command` (primary command string)
     - `fallback_commands` (list of command strings; first executable in `PATH` is used)
+- Microsoft Graph email action (`email_send`) is configured via environment variables:
+  - `MS_GRAPH_EMAIL_ENABLED` (`true|false`, default `false`)
+  - `MS_GRAPH_TENANT_ID`
+  - `MS_GRAPH_CLIENT_ID`
+  - `MS_GRAPH_CLIENT_SECRET`
+  - `MS_GRAPH_SCOPE` (optional, default `https://graph.microsoft.com/.default`)
+  - `MS_GRAPH_DEFAULT_SENDER` (optional fallback mailbox if payload omits sender)
+  - `MS_GRAPH_ALLOWED_RECIPIENT_DOMAINS` (optional comma-separated domain allowlist)
+  - `MS_GRAPH_AUTH_BASE_URL` (optional, default `https://login.microsoftonline.com`)
+  - `MS_GRAPH_BASE_URL` (optional, default `https://graph.microsoft.com/v1.0`)
 - Agent/app/eval runtime settings are centralized in `agent-runtime.yaml` (repository root).
   - Optional override file path: `PSYKE_AGENT_CONFIG_FILE=/path/to/agent-runtime.yaml`.
   - `agent` section covers loop/token/pressure/runtime knobs.
@@ -101,6 +112,8 @@ Standalone Kotlin JVM app using Gradle with:
   - `EGO_MAX_RUN_TOKENS_PER_PROVIDER` (default: `0`, disabled)
   - `EGO_MAX_RUN_TOKENS_PER_ROLE` (default: `0`, disabled)
   - `EGO_LLM_RETRY_ATTEMPTS` (default: `2`)
+  - `EGO_ACTION_RETRY_BUDGET_NON_RETRYABLE_FAILURES` (default: `3`)
+  - `EGO_ACTION_RETRY_COOLDOWN_STEPS` (default: `10`)
   - `EGO_SUPEREGO_MAX_COMPLETION_TOKENS` (default: `192`)
   - `EGO_SUPEREGO_DYNAMIC_COMPLETION_ENABLED` (default: `true`)
   - `EGO_SUPEREGO_DYNAMIC_COMPLETION_HARD_MAX_TOKENS` (default: `640`)

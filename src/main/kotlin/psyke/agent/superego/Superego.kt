@@ -1,5 +1,6 @@
 package psyke.agent.superego
 
+import psyke.agent.actions.ActionRegistry
 import psyke.agent.core.ActionType
 import psyke.agent.core.AgentConfig
 import psyke.agent.core.DialogueRole
@@ -19,6 +20,7 @@ import psyke.llm.ChatRole
 class Superego(
     private val modelClient: ChatModelClient,
     private val config: AgentConfig,
+    private val actionRegistry: ActionRegistry = ActionRegistry.empty(),
     private val modelTokenWeight: Double = DEFAULT_MODEL_TOKEN_WEIGHT,
     private val modelContextWindow: Int? = null,
     private val modelReasoningOverhead: Double = DEFAULT_REASONING_OVERHEAD,
@@ -29,12 +31,12 @@ class Superego(
     private val policy: SuperegoPolicy = SuperegoPolicy,
     private val instrumentation: AgentInstrumentation = NoopAgentInstrumentation,
 ) {
-    private val deterministicConscience = SuperegoDeterministicConscience(config)
+    private val deterministicConscience = SuperegoDeterministicConscience(config, actionRegistry)
     private val primaryEngine: SingleStageSuperegoReviewEngine = buildPrimaryEngine()
     private val reviewEngine: SuperegoReviewEngine = buildReviewEngine(primaryEngine)
 
     fun review(action: PendingAction, context: SuperegoContext): GateDecision {
-        val resolvedDirectives = policy.forAction(action.type).all
+        val resolvedDirectives = policy.forAction(action.type, actionRegistry).all
         val lastUserTurn = context.recentDialogue.lastOrNull { it.role == DialogueRole.USER }?.content ?: "none"
         instrumentation.emit(
             AgentEvents.superegoReviewInput(

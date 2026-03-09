@@ -14,6 +14,8 @@ import psyke.agent.memory.longterm.LlmLongTermMemoryAdvisor
 import psyke.agent.memory.longterm.McpHippocampus
 import psyke.agent.tools.mcp.McpStdioClient
 import psyke.agent.core.ActionType
+import psyke.agent.actions.ActionPluginFactoryContext
+import psyke.agent.actions.ActionRegistry
 import psyke.agent.cortex.sensory.AsyncSensoryInputSource
 import psyke.agent.cortex.sensory.SensoryCortex
 import psyke.agent.cortex.motor.ActionImplementationStatus
@@ -796,19 +798,6 @@ internal object AppModeRunners {
                                                 "web_search=${llm.webSearch.providerLabel}/${llm.webSearch.model}"
                                         }
                                         try {
-                                            val gatekeeper = Superego(
-                                                modelClient = superegoClient,
-                                                config = config,
-                                                modelTokenWeight = superegoReviewRouting.primaryTokenWeight,
-                                                modelContextWindow = superegoReviewRouting.primaryContextWindow,
-                                                modelReasoningOverhead = superegoReviewRouting.primaryReasoningOverhead,
-                                                escalationModelClient = superegoEscalationClient,
-                                                escalationModelTokenWeight = superegoReviewRouting.escalationTokenWeight
-                                                    ?: superegoReviewRouting.primaryTokenWeight,
-                                                escalationModelContextWindow = superegoReviewRouting.escalationContextWindow,
-                                                escalationModelReasoningOverhead = superegoReviewRouting.escalationReasoningOverhead,
-                                                instrumentation = instrumentation
-                                            )
                                             val mcpTimeTool = createMcpTimeTool(config, mcpRuntimeConfig.time)
                                             val fetchTool = createFetchTool(config, mcpRuntimeConfig.fetch)
                                             val webSearchRuntime = createWebSearchRuntime(
@@ -824,112 +813,140 @@ internal object AppModeRunners {
                                                 val activeFetchTool = fetchTool
                                                 try {
                                                     val webSearchActionHandler = WebSearchActionHandler(runtime.engine)
-                                                    val motorCortex = MotorCortex(
-                                                        webSearchActionHandler = webSearchActionHandler,
-                                                        mcpTimeTool = timeTool,
-                                                        fetchTool = activeFetchTool
-                                                    )
-                                                    val actionStatuses = motorCortex.startupSmokeTest()
-                                                    instrumentation.emit(AgentEvents.actionCapabilities(actionStatuses))
-                                                    actionStatuses.filterNot { it.available }.forEach { status ->
-                                                        instrumentation.emit(
-                                                            AgentEvents.warning(
-                                                                "Action ${status.actionType.name.lowercase()} unavailable at startup: ${status.detail}"
-                                                            )
-                                                        )
-                                                    }
-                                                    var plannerNoopCount = 0
-                                                    var plannerOutputRepairedCount = 0
-                                                    val planner = LlmEgoPlanner(
-                                                        modelClient = plannerClient,
-                                                        actionVerifierModelClient = actionVerifierClient,
-                                                        actionVerifierContextWindow = llm.modelCatalog.contextWindowFor(llm.actionVerifier),
-                                                        config = config,
-                                                        instrumentation = instrumentation,
-                                                        onPlannerNoop = {
-                                                            metrics.recordPlannerNoop()
-                                                            plannerNoopCount += 1
-                                                            if (plannerNoopCount == 3) {
-                                                                instrumentation.emit(
-                                                                    AgentEvents.warning(
-                                                                        "Anomaly threshold reached: noop_count >= 3."
-                                                                    )
-                                                                )
-                                                            }
-                                                        },
-                                                        onPlannerOutputRepaired = {
-                                                            metrics.recordPlannerOutputRepaired()
-                                                            plannerOutputRepairedCount += 1
-                                                            if (plannerOutputRepairedCount == 3) {
-                                                                instrumentation.emit(
-                                                                    AgentEvents.warning(
-                                                                        "Anomaly threshold reached: planner_output_repaired_count >= 3."
-                                                                    )
-                                                                )
-                                                            }
-                                                        }
-                                                    )
-                                                    val metaReasoner = LlmMetaReasoner(
-                                                        modelClient = metaReasonerClient,
-                                                        config = config,
-                                                        modelTokenWeight = llm.modelCatalog.tokenWeightFor(llm.metaReasoner),
-                                                        modelContextWindow = llm.modelCatalog.contextWindowFor(llm.metaReasoner),
-                                                        fallbackModelClient = metaReasonerFallbackClient
-                                                    )
-                                                    val longTermMemoryAdvisor = LlmLongTermMemoryAdvisor(
-                                                        modelClient = longTermMemoryClient,
-                                                        config = config,
-                                                        modelTokenWeight = llm.modelCatalog.tokenWeightFor(llm.memoryAdvisor),
-                                                        modelContextWindow = llm.modelCatalog.contextWindowFor(llm.memoryAdvisor),
-                                                        instrumentation = instrumentation
-                                                    )
-                                                    val taskWorkspaceFinalizer =
-                                                        if (config.memory.taskWorkspace.enabled &&
-                                                            config.memory.taskWorkspace.finalPassRewriteEnabled
-                                                        ) {
-                                                            LlmTaskWorkspaceFinalizer(
-                                                                modelClient = plannerClient,
-                                                                config = config,
-                                                                instrumentation = instrumentation
-                                                            )
-                                                        } else {
-                                                            NoopTaskWorkspaceFinalizer
-                                                        }
-                                                    val interactiveMemoryStartup =
-                                                        resolveInteractiveMemoryStartup(config, mcpRuntimeConfig.memory)
-                                                    val hippocampus = interactiveMemoryStartup.hippocampus
-                                                    val memoryProviderDetail = interactiveMemoryStartup.detail
-                                                    val allStatuses = actionStatuses + ActionImplementationStatus(
-                                                        actionType = ActionType.MEMORY,
-                                                        available = hippocampus.enabled,
-                                                        detail = memoryProviderDetail,
-                                                    )
-                                                    instrumentation.emit(AgentEvents.actionCapabilities(allStatuses))
-                                                    if (!hippocampus.enabled) {
-                                                        instrumentation.emit(
-                                                            AgentEvents.warning("Long-term memory is unavailable: $memoryProviderDetail")
-                                                        )
-                                                    }
-                                                    val logbook = createLogbookIfEnabled(config)
-                                                    val logbookSummarizer = createLogbookSummarizer(config, longTermMemoryClient)
-                                                    try {
-                                                        Ego(
-                                                            planner = planner,
-                                                            superego = gatekeeper,
-                                                            motorCortex = motorCortex,
+                                                    val actionRegistry = ActionRegistry.discover(
+                                                        ActionPluginFactoryContext(
                                                             config = config,
-                                                            hippocampus = hippocampus,
-                                                            metaReasoner = metaReasoner,
-                                                            longTermMemoryAdvisor = longTermMemoryAdvisor,
-                                                            sensoryCortex = sensoryCortex,
-                                                            taskWorkspaceFinalizer = taskWorkspaceFinalizer,
+                                                            webSearchActionHandler = webSearchActionHandler,
+                                                            mcpTimeTool = timeTool,
+                                                            fetchTool = activeFetchTool,
+                                                            output = ::println
+                                                        )
+                                                    )
+                                                    actionRegistry.loadWarnings.forEach { warning ->
+                                                        instrumentation.emit(AgentEvents.warning(warning))
+                                                    }
+                                                    actionRegistry.use { registry ->
+                                                        val motorCortex = MotorCortex(
+                                                            actionRegistry = registry
+                                                        )
+                                                        val actionStatuses = motorCortex.startupSmokeTest()
+                                                        instrumentation.emit(AgentEvents.actionCapabilities(actionStatuses))
+                                                        actionStatuses.filterNot { it.available }.forEach { status ->
+                                                            instrumentation.emit(
+                                                                AgentEvents.warning(
+                                                                    "Action ${status.actionType.id} unavailable at startup: ${status.detail}"
+                                                                )
+                                                            )
+                                                        }
+                                                        var plannerNoopCount = 0
+                                                        var plannerOutputRepairedCount = 0
+                                                        val planner = LlmEgoPlanner(
+                                                            modelClient = plannerClient,
+                                                            actionVerifierModelClient = actionVerifierClient,
+                                                            actionVerifierContextWindow = llm.modelCatalog.contextWindowFor(llm.actionVerifier),
+                                                            config = config,
+                                                            actionPayloadRepair = motorCortex::repairPlannerPayload,
                                                             instrumentation = instrumentation,
-                                                            logbook = logbook,
-                                                            logbookSummarizer = logbookSummarizer,
-                                                        ).runInteractive()
-                                                    } finally {
-                                                        hippocampus.close()
-                                                        closeQuietly(logbook)
+                                                            onPlannerNoop = {
+                                                                metrics.recordPlannerNoop()
+                                                                plannerNoopCount += 1
+                                                                if (plannerNoopCount == 3) {
+                                                                    instrumentation.emit(
+                                                                        AgentEvents.warning(
+                                                                            "Anomaly threshold reached: noop_count >= 3."
+                                                                        )
+                                                                    )
+                                                                }
+                                                            },
+                                                            onPlannerOutputRepaired = {
+                                                                metrics.recordPlannerOutputRepaired()
+                                                                plannerOutputRepairedCount += 1
+                                                                if (plannerOutputRepairedCount == 3) {
+                                                                    instrumentation.emit(
+                                                                        AgentEvents.warning(
+                                                                            "Anomaly threshold reached: planner_output_repaired_count >= 3."
+                                                                        )
+                                                                    )
+                                                                }
+                                                            }
+                                                        )
+                                                        val gatekeeper = Superego(
+                                                            modelClient = superegoClient,
+                                                            config = config,
+                                                            actionRegistry = registry,
+                                                            modelTokenWeight = superegoReviewRouting.primaryTokenWeight,
+                                                            modelContextWindow = superegoReviewRouting.primaryContextWindow,
+                                                            modelReasoningOverhead = superegoReviewRouting.primaryReasoningOverhead,
+                                                            escalationModelClient = superegoEscalationClient,
+                                                            escalationModelTokenWeight = superegoReviewRouting.escalationTokenWeight
+                                                                ?: superegoReviewRouting.primaryTokenWeight,
+                                                            escalationModelContextWindow = superegoReviewRouting.escalationContextWindow,
+                                                            escalationModelReasoningOverhead = superegoReviewRouting.escalationReasoningOverhead,
+                                                            instrumentation = instrumentation
+                                                        )
+                                                        val metaReasoner = LlmMetaReasoner(
+                                                            modelClient = metaReasonerClient,
+                                                            config = config,
+                                                            modelTokenWeight = llm.modelCatalog.tokenWeightFor(llm.metaReasoner),
+                                                            modelContextWindow = llm.modelCatalog.contextWindowFor(llm.metaReasoner),
+                                                            fallbackModelClient = metaReasonerFallbackClient
+                                                        )
+                                                        val longTermMemoryAdvisor = LlmLongTermMemoryAdvisor(
+                                                            modelClient = longTermMemoryClient,
+                                                            config = config,
+                                                            modelTokenWeight = llm.modelCatalog.tokenWeightFor(llm.memoryAdvisor),
+                                                            modelContextWindow = llm.modelCatalog.contextWindowFor(llm.memoryAdvisor),
+                                                            instrumentation = instrumentation
+                                                        )
+                                                        val taskWorkspaceFinalizer =
+                                                            if (config.memory.taskWorkspace.enabled &&
+                                                                config.memory.taskWorkspace.finalPassRewriteEnabled
+                                                            ) {
+                                                                LlmTaskWorkspaceFinalizer(
+                                                                    modelClient = plannerClient,
+                                                                    config = config,
+                                                                    instrumentation = instrumentation
+                                                                )
+                                                            } else {
+                                                                NoopTaskWorkspaceFinalizer
+                                                            }
+                                                        val interactiveMemoryStartup =
+                                                            resolveInteractiveMemoryStartup(config, mcpRuntimeConfig.memory)
+                                                        val hippocampus = interactiveMemoryStartup.hippocampus
+                                                        val memoryProviderDetail = interactiveMemoryStartup.detail
+                                                        val allStatuses = actionStatuses + ActionImplementationStatus(
+                                                            actionType = ActionType.MEMORY,
+                                                            dispatchable = false,
+                                                            available = hippocampus.enabled,
+                                                            detail = memoryProviderDetail,
+                                                        )
+                                                        instrumentation.emit(AgentEvents.actionCapabilities(allStatuses))
+                                                        if (!hippocampus.enabled) {
+                                                            instrumentation.emit(
+                                                                AgentEvents.warning("Long-term memory is unavailable: $memoryProviderDetail")
+                                                            )
+                                                        }
+                                                        val logbook = createLogbookIfEnabled(config)
+                                                        val logbookSummarizer = createLogbookSummarizer(config, longTermMemoryClient)
+                                                        try {
+                                                            Ego(
+                                                                planner = planner,
+                                                                superego = gatekeeper,
+                                                                motorCortex = motorCortex,
+                                                                config = config,
+                                                                hippocampus = hippocampus,
+                                                                metaReasoner = metaReasoner,
+                                                                longTermMemoryAdvisor = longTermMemoryAdvisor,
+                                                                sensoryCortex = sensoryCortex,
+                                                                taskWorkspaceFinalizer = taskWorkspaceFinalizer,
+                                                                instrumentation = instrumentation,
+                                                                logbook = logbook,
+                                                                logbookSummarizer = logbookSummarizer,
+                                                            ).runInteractive()
+                                                        } finally {
+                                                            hippocampus.close()
+                                                            closeQuietly(logbook)
+                                                        }
                                                     }
                                                 } finally {
                                                     closeQuietly(activeFetchTool)
