@@ -311,8 +311,28 @@ class LlmEgoPlanner(
         return resolveVerifierDecision(
             original = decision,
             payload = verifierPayload,
-            availableActions = context.availableActions
+            availableActions = context.availableActions,
+            followUpOrigin = resolveFollowUpOrigin(trigger),
+            userRequestedRefresh = userExplicitlyRequestedRefresh(context),
         )
+    }
+
+    private fun resolveFollowUpOrigin(trigger: EgoTrigger): FollowUpOrigin? {
+        val thought = (trigger as? EgoTrigger.PendingThoughtInput)?.thought ?: return null
+        val actionType = thought.originActionType ?: return null
+        val observedEvidence = thought.originActionObservedEvidence ?: return null
+        return FollowUpOrigin(actionType = actionType, observedEvidence = observedEvidence)
+    }
+
+    private fun userExplicitlyRequestedRefresh(context: PlannerContext): Boolean {
+        val latestUserMessage = context.recentDialogue
+            .asReversed()
+            .firstOrNull { it.role == DialogueRole.USER }
+            ?.content
+            ?.trim()
+            .orEmpty()
+        if (latestUserMessage.isBlank()) return false
+        return refreshIntentRegex.containsMatchIn(latestUserMessage)
     }
 
     private fun callActionVerifier(
@@ -560,6 +580,8 @@ class LlmEgoPlanner(
         original: EgoDecision.ProposeAction,
         payload: ActionVerifierPayload,
         availableActions: Set<ActionType>,
+        followUpOrigin: FollowUpOrigin?,
+        userRequestedRefresh: Boolean,
     ): EgoDecision {
         return when (payload.verdict?.trim()?.lowercase()) {
             "approve" -> {
@@ -600,6 +622,22 @@ class LlmEgoPlanner(
                     )
                     return EgoDecision.Noop(reason)
                 }
+                if (shouldIgnoreRepairForEvidenceBackedFollowUp(
+                        original = original,
+                        repairedActionType = repairedActionType,
+                        followUpOrigin = followUpOrigin,
+                        userRequestedRefresh = userRequestedRefresh
+                    )
+                ) {
+                    emitVerifierResult(
+                        verdict = "approve",
+                        originalActionType = original.actionType.name.lowercase(),
+                        resultingActionType = original.actionType.name.lowercase(),
+                        repaired = false,
+                        reason = "Verifier repair ignored: answer is already backed by successful ${followUpOrigin?.actionType?.name?.lowercase()} evidence."
+                    )
+                    return original
+                }
 
                 val rawRepairedPayload = normalizeActionPayload(payload.actionPayload)?.trim().orEmpty()
                 val repairedPayload = actionPayloadRepair(repairedActionType, rawRepairedPayload)
@@ -622,6 +660,22 @@ class LlmEgoPlanner(
                         AgentEvents.warning(
                             "Action verifier repair missing summary; keeping original action."
                         )
+                    )
+                    return original
+                }
+                if (isNoOpVerifierRepair(
+                        original = original,
+                        repairedActionType = repairedActionType,
+                        repairedPayload = repairedPayload,
+                        repairedSummary = resolvedSummary
+                    )
+                ) {
+                    emitVerifierResult(
+                        verdict = "approve",
+                        originalActionType = original.actionType.name.lowercase(),
+                        resultingActionType = original.actionType.name.lowercase(),
+                        repaired = false,
+                        reason = "No-op repair ignored: ${payload.reason?.trim().orEmpty().ifBlank { "materially unchanged action." }}"
                     )
                     return original
                 }
@@ -675,6 +729,49 @@ class LlmEgoPlanner(
                 )
             )
         )
+    }
+
+    private fun shouldIgnoreRepairForEvidenceBackedFollowUp(
+        original: EgoDecision.ProposeAction,
+        repairedActionType: ActionType,
+        followUpOrigin: FollowUpOrigin?,
+        userRequestedRefresh: Boolean,
+    ): Boolean {
+        if (original.actionType != ActionType.ANSWER) {
+            return false
+        }
+        val origin = followUpOrigin ?: return false
+        if (!origin.observedEvidence) {
+            return false
+        }
+        if (userRequestedRefresh) {
+            return false
+        }
+        return repairedActionType == origin.actionType
+    }
+
+    private fun isNoOpVerifierRepair(
+        original: EgoDecision.ProposeAction,
+        repairedActionType: ActionType,
+        repairedPayload: String,
+        repairedSummary: String,
+    ): Boolean {
+        if (original.actionType != repairedActionType) {
+            return false
+        }
+        if (original.summary.trim() != repairedSummary.trim()) {
+            return false
+        }
+        val originalPayload = original.payload.trim()
+        val candidatePayload = repairedPayload.trim()
+        if (originalPayload == candidatePayload) {
+            return true
+        }
+        return try {
+            mapper.readTree(originalPayload) == mapper.readTree(candidatePayload)
+        } catch (_: Exception) {
+            false
+        }
     }
 
     private fun emitDecision(triggerLabel: String, decision: EgoDecision) {
@@ -996,7 +1093,9 @@ class LlmEgoPlanner(
                     - approve: action is coherent and ready for policy review.
                     - repair: one-shot correction to make action coherent.
                     - reject: action cannot be repaired safely/coherently.
+                    - Use repair only for material action changes; if action_type/payload/summary are effectively unchanged, use approve.
                     - Never use action types outside available_action_types.
+                    - If candidate action is answer after a successful evidence action in the same request, avoid repairing it back to the same evidence action unless user explicitly asked for refresh/retry.
                     - Treat redundancy as a cost signal: reject low-value repeated external calls when external evidence hints already contain usable signals and trigger does not explicitly request refresh/retry.
                     """.trimIndent()
                 ),
@@ -1144,6 +1243,11 @@ class LlmEgoPlanner(
         val actionType: ActionType,
     )
 
+    private data class FollowUpOrigin(
+        val actionType: ActionType,
+        val observedEvidence: Boolean,
+    )
+
     private fun resolveActionVerifierBudget(messages: List<ChatMessage>): Int {
         val resolution = AdaptiveCompletionBudget.resolveDetailed(
             AdaptiveCompletionBudget.Request(
@@ -1185,6 +1289,9 @@ class LlmEgoPlanner(
         val mapper = jacksonObjectMapper()
             .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
         val invalidJsonEscapeRegex = Regex("""\\(?!["\\/bfnrtu])""")
+        val refreshIntentRegex = Regex(
+            pattern = """(?i)\b(refresh|recheck|check\s+again|retry|try\s+again|update[sd]?|latest\s+again)\b"""
+        )
 
         private fun defaultActionPayloadRepair(actionType: ActionType, raw: String): String {
             if (actionType != ActionType.WEBSITE_FETCH) {

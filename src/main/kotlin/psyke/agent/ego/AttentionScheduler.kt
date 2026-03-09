@@ -48,6 +48,8 @@ class AttentionScheduler(
         allowFallbackExplanation: Boolean = false,
         planContext: PlanContext? = null,
         denialReasonCode: String? = null,
+        originActionType: ActionType? = null,
+        originActionObservedEvidence: Boolean? = null,
         conversationContext: ConversationContext = ConversationContext.default(),
     ): Boolean {
         if (thoughts.size >= config.maxPendingThoughts) {
@@ -68,6 +70,8 @@ class AttentionScheduler(
                 allowFallbackExplanation = allowFallbackExplanation,
                 planContext = planContext,
                 denialReasonCode = denialReasonCode,
+                originActionType = originActionType,
+                originActionObservedEvidence = originActionObservedEvidence,
                 conversationContext = conversationContext,
             )
         )

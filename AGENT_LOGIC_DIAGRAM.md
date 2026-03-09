@@ -106,6 +106,7 @@ sequenceDiagram
             Note over Ego,Sched: Plans gated by budget → pressure → hash dedup → pending-plan check
             Note over Ego,Planner: Redundancy is planner-side soft cost control (prompt and verifier), with telemetry event external_action_redundancy_signal
             Note over Ego,Planner: Action verifier runs after action decisions parse failures trigger one strict retry and may trip temporary verifier bypass (scoped per root_input and action_type)
+            Note over Ego,Planner: Follow-up thoughts carry structured origin metadata (originActionType + observedEvidence) verifier repairs back to the same evidence action are ignored for evidence-backed answers unless user asked refresh/retry no-op verifier repairs collapse to approve
         else Task = action
             alt Fallback explanation action
                 Ego->>Motor: execute (bypass Superego)

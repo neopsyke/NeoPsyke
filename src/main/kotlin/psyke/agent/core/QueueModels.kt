@@ -34,6 +34,8 @@ data class PendingThought(
     val allowFallbackExplanation: Boolean = false,
     val planContext: PlanContext? = null,
     val denialReasonCode: String? = null,
+    val originActionType: ActionType? = null,
+    val originActionObservedEvidence: Boolean? = null,
     val conversationContext: ConversationContext = ConversationContext.default(),
 )
 

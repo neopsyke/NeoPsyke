@@ -460,6 +460,8 @@ class Ego(
                 rootInputId = resolvedAction.rootInputId,
                 rootInputReceivedAtMs = resolvedAction.rootInputReceivedAtMs,
                 allowFallbackExplanation = true,
+                originActionType = resolvedAction.type,
+                originActionObservedEvidence = observed,
                 conversationContext = convCtx
             )
             if (!queued) {
@@ -554,6 +556,8 @@ class Ego(
                     denialReason = originThought?.denialReason,
                     denialReasonCode = originThought?.denialReasonCode,
                     allowFallbackExplanation = originThought?.allowFallbackExplanation ?: false,
+                    originActionType = originThought?.originActionType,
+                    originActionObservedEvidence = originThought?.originActionObservedEvidence,
                     conversationContext = conversationContext
                 )
                 if (!decision.longTermMemoryRecallQuery.isNullOrBlank()) {
@@ -619,6 +623,8 @@ class Ego(
                         denialReason = originThought.denialReason,
                         denialReasonCode = originThought.denialReasonCode,
                         allowFallbackExplanation = originThought.allowFallbackExplanation,
+                        originActionType = originThought.originActionType,
+                        originActionObservedEvidence = originThought.originActionObservedEvidence,
                         conversationContext = conversationContext
                     )
                     if (!queuedRetry) {
@@ -804,6 +810,8 @@ class Ego(
                             totalSteps = decision.steps.size,
                             stepDescription = stepDescription,
                         ),
+                        originActionType = originThought?.originActionType,
+                        originActionObservedEvidence = originThought?.originActionObservedEvidence,
                         conversationContext = conversationContext
                     )
                     if (!queued) {
@@ -853,6 +861,8 @@ class Ego(
                         denialReason = originThought?.denialReason,
                         denialReasonCode = originThought?.denialReasonCode,
                         allowFallbackExplanation = originThought?.allowFallbackExplanation ?: false,
+                        originActionType = originThought?.originActionType,
+                        originActionObservedEvidence = originThought?.originActionObservedEvidence,
                         conversationContext = conversationContext
                     )
                     instrumentation.emit(
@@ -905,6 +915,8 @@ class Ego(
             rootInputId = rootInputId,
             rootInputReceivedAtMs = rootInputReceivedAtMs,
             allowFallbackExplanation = originThought?.allowFallbackExplanation ?: true,
+            originActionType = originThought?.originActionType,
+            originActionObservedEvidence = originThought?.originActionObservedEvidence,
             conversationContext = conversationContext
         )
         if (queued) {

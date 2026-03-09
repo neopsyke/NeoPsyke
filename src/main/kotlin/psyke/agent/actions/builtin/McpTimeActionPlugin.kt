@@ -16,8 +16,8 @@ class McpTimeActionPlugin(
     override val descriptor: ActionDescriptor = ActionDescriptor(
         actionType = ActionType.MCP_TIME,
         dispatchable = true,
-        plannerDescription = "mcp_time: payload is JSON like {\"timezone\":\"Europe/Berlin\"} (timezone optional).",
-        payloadGuidance = "JSON object; timezone key is optional.",
+        plannerDescription = "mcp_time: payload must be JSON like {\"timezone\":\"Europe/Berlin\"} (timezone required).",
+        payloadGuidance = "JSON object with required timezone field (IANA timezone, for example Europe/Berlin).",
         payloadSchemaExample = """{"timezone":"Europe/Berlin"}""",
         requiresFollowUpThought = true,
         followUpPrefix = "MCP time lookup completed.",
@@ -50,4 +50,3 @@ class McpTimeActionPluginFactory : AgentActionPluginFactory {
     override fun create(context: ActionPluginFactoryContext): AgentActionPlugin =
         McpTimeActionPlugin(tool = context.mcpTimeTool)
 }
-

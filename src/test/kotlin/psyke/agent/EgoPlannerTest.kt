@@ -7,6 +7,7 @@ import psyke.support.RecordingInstrumentation
 import psyke.support.StubChatModelClient
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
@@ -330,6 +331,160 @@ class EgoPlannerTest {
                 it.type == "action_verifier_result" &&
                     it.data["verdict"] == "repair" &&
                     it.data["repaired"] == true
+            }
+        )
+    }
+
+    @Test
+    fun `planner ignores repair back to origin evidence action when follow-up already has successful evidence`() {
+        val llm = StubChatModelClient().apply {
+            enqueueRawResponse(
+                """
+                {"decision":"action","urgency":"medium","action_type":"answer","action_payload":"The current time in Hamburg is 12:18 PM.","action_summary":"Provide current time answer"}
+                """.trimIndent()
+            )
+            enqueueRawResponseForCallSite(
+                callSite = "action_verifier",
+                content = """
+                {"verdict":"repair","action_type":"mcp_time","action_payload":{"timezone":"Europe/Berlin"},"action_summary":"Run another time lookup","reason":"verify recency"}
+                """.trimIndent()
+            )
+        }
+        val instrumentation = RecordingInstrumentation()
+        val planner = LlmEgoPlanner(
+            modelClient = llm,
+            config = AgentConfig(),
+            instrumentation = instrumentation
+        )
+
+        val decision = planner.decide(
+            trigger = psyke.agent.core.EgoTrigger.PendingThoughtInput(
+                PendingThought(
+                    id = 9,
+                    urgency = Urgency.MEDIUM,
+                    content = """
+                    MCP time lookup completed.
+                    UNTRUSTED_EXTERNAL_DATA_BEGIN
+                    MCP time result: {
+                      "timezone": "Europe/Berlin",
+                      "datetime": "2026-03-09T12:18:19+01:00",
+                      "day_of_week": "Monday",
+                      "is_dst": false
+                    }
+                    UNTRUSTED_EXTERNAL_DATA_END
+                    Decide if an answer should be sent.
+                    """.trimIndent(),
+                    passes = 1,
+                    originActionType = ActionType.MCP_TIME,
+                    originActionObservedEvidence = true
+                )
+            ),
+            context = PlannerContext(
+                recentDialogue = listOf(DialogueTurn(DialogueRole.USER, "what is the current time in hamburg?")),
+                queue = QueueSnapshot(0, 1, 0)
+            )
+        )
+
+        val action = assertIs<psyke.agent.core.EgoDecision.ProposeAction>(decision)
+        assertEquals(ActionType.ANSWER, action.actionType)
+        assertTrue(llm.calls.any { it.options.metadata.callSite == "action_verifier" })
+        assertTrue(
+            instrumentation.events.any {
+                it.type == "action_verifier_result" &&
+                    it.data["verdict"] == "approve" &&
+                    (it.data["reason"] as? String)?.contains("repair ignored", ignoreCase = true) == true
+            }
+        )
+    }
+
+    @Test
+    fun `planner keeps repair back to origin evidence action when user explicitly requests refresh`() {
+        val llm = StubChatModelClient().apply {
+            enqueueRawResponse(
+                """
+                {"decision":"action","urgency":"medium","action_type":"answer","action_payload":"The current time in Hamburg is 12:18 PM.","action_summary":"Provide current time answer"}
+                """.trimIndent()
+            )
+            enqueueRawResponseForCallSite(
+                callSite = "action_verifier",
+                content = """
+                {"verdict":"repair","action_type":"mcp_time","action_payload":{"timezone":"Europe/Berlin"},"action_summary":"Run another time lookup","reason":"user asked to refresh"}
+                """.trimIndent()
+            )
+        }
+        val planner = LlmEgoPlanner(modelClient = llm, config = AgentConfig())
+
+        val decision = planner.decide(
+            trigger = psyke.agent.core.EgoTrigger.PendingThoughtInput(
+                PendingThought(
+                    id = 10,
+                    urgency = Urgency.MEDIUM,
+                    content = "follow-up",
+                    passes = 1,
+                    originActionType = ActionType.MCP_TIME,
+                    originActionObservedEvidence = true
+                )
+            ),
+            context = PlannerContext(
+                recentDialogue = listOf(DialogueTurn(DialogueRole.USER, "refresh and check again please")),
+                queue = QueueSnapshot(0, 1, 0)
+            )
+        )
+
+        val action = assertIs<psyke.agent.core.EgoDecision.ProposeAction>(decision)
+        assertEquals(ActionType.MCP_TIME, action.actionType)
+        assertTrue(action.payload.contains("\"timezone\":\"Europe/Berlin\""))
+        assertTrue(llm.calls.any { it.options.metadata.callSite == "action_verifier" })
+    }
+
+    @Test
+    fun `planner treats no-op action verifier repair as approve`() {
+        val llm = StubChatModelClient().apply {
+            enqueueRawResponse(
+                """
+                {"decision":"action","urgency":"medium","action_type":"mcp_time","action_payload":"{\"timezone\":\"Europe/Berlin\"}","action_summary":"Retrieve current time for Hamburg"}
+                """.trimIndent()
+            )
+            enqueueRawResponseForCallSite(
+                callSite = "action_verifier",
+                content = """
+                {"verdict":"repair","action_type":"mcp_time","action_payload":{"timezone":"Europe/Berlin"},"action_summary":"Retrieve current time for Hamburg","reason":"same action wording update"}
+                """.trimIndent()
+            )
+        }
+        val instrumentation = RecordingInstrumentation()
+        var repairCount = 0
+        val planner = LlmEgoPlanner(
+            modelClient = llm,
+            config = AgentConfig(),
+            instrumentation = instrumentation,
+            onPlannerOutputRepaired = { repairCount += 1 }
+        )
+
+        val decision = planner.decide(
+            trigger = psyke.agent.core.EgoTrigger.IncomingInput(PendingInput(1, "what time is it?")),
+            context = PlannerContext(
+                recentDialogue = emptyList(),
+                queue = QueueSnapshot(0, 0, 0)
+            )
+        )
+
+        val action = assertIs<psyke.agent.core.EgoDecision.ProposeAction>(decision)
+        assertEquals(ActionType.MCP_TIME, action.actionType)
+        assertEquals("""{"timezone":"Europe/Berlin"}""", action.payload)
+        assertEquals(0, repairCount)
+        assertTrue(llm.calls.any { it.options.metadata.callSite == "action_verifier" })
+        assertTrue(
+            instrumentation.events.any {
+                it.type == "action_verifier_result" &&
+                    it.data["verdict"] == "approve" &&
+                    it.data["repaired"] == false &&
+                    (it.data["reason"] as? String)?.contains("No-op repair ignored", ignoreCase = true) == true
+            }
+        )
+        assertFalse(
+            instrumentation.events.any {
+                it.type == "planner_output_repaired" && it.data["repair"] == "action_verifier_repair"
             }
         )
     }
