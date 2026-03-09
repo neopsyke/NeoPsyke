@@ -50,6 +50,7 @@ private data class AgentRuntimeYamlAgent(
     val maxShortTermContextChars: Int? = null,
     val maxShortTermContextPromptTokens: Int? = null,
     val taskWorkspaceEnabled: Boolean? = null,
+    val taskWorkspaceActivationMinPlanSteps: Int? = null,
     val taskWorkspaceMaxPromptTokens: Int? = null,
     val taskWorkspaceMaxSections: Int? = null,
     val taskWorkspaceMaxSectionChars: Int? = null,
@@ -240,6 +241,11 @@ object AgentRuntimeSettingsLoader {
                         env["EGO_TASK_WORKSPACE_ENABLED"],
                         agentYaml.taskWorkspaceEnabled,
                         defaults.memory.taskWorkspace.enabled
+                    ),
+                    activationMinPlanSteps = readPositiveInt(
+                        env["EGO_TASK_WORKSPACE_ACTIVATION_MIN_PLAN_STEPS"],
+                        agentYaml.taskWorkspaceActivationMinPlanSteps,
+                        defaults.memory.taskWorkspace.activationMinPlanSteps
                     ),
                     maxPromptTokens = readPositiveInt(
                         env["EGO_TASK_WORKSPACE_MAX_PROMPT_TOKENS"],

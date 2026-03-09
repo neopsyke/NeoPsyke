@@ -736,11 +736,31 @@ class Ego(
 
                 // ── All gates passed: emit plan ──
                 planCountByInput[inputScope] = currentPlanCount + 1
-                taskWorkspaceStore.recordPlan(
+                val workspaceActivated = taskWorkspaceStore.recordPlan(
                     rootInputId = rootInputId,
                     goal = decision.goal,
                     steps = decision.steps
                 )
+                if (workspaceActivated) {
+                    instrumentation.emit(
+                        AgentEvent(
+                            type = "task_workspace_created",
+                            data = mapOf(
+                                "root_input_id" to rootInputId,
+                                "root_input_received_at_ms" to rootInputReceivedAtMs,
+                                "goal_preview" to TextSecurity.preview(decision.goal, 140),
+                                "active_tasks" to taskWorkspaceStore.activeTaskCount(),
+                                "activation_trigger" to "plan_complexity",
+                                "plan_step_count" to decision.steps.size
+                            )
+                        )
+                    )
+                    emitTaskWorkspaceTelemetry(
+                        rootInputId = rootInputId,
+                        rootInputReceivedAtMs = rootInputReceivedAtMs,
+                        updateType = "workspace_activated"
+                    )
+                }
                 instrumentation.emit(
                     AgentEvent(
                         type = "task_workspace_updated",
