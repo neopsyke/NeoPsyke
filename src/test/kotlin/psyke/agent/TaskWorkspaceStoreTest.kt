@@ -9,6 +9,8 @@ import psyke.agent.core.Urgency
 import psyke.agent.memory.workspace.TaskWorkspaceStore
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class TaskWorkspaceStoreTest {
@@ -17,6 +19,7 @@ class TaskWorkspaceStoreTest {
         val store = TaskWorkspaceStore(
             TaskWorkspaceConfig(
                 enabled = true,
+                activationMinPlanSteps = 1,
                 maxPromptTokens = 400
             )
         )
@@ -52,7 +55,7 @@ class TaskWorkspaceStoreTest {
 
     @Test
     fun `final compilation includes evidence and candidate answer`() {
-        val store = TaskWorkspaceStore(TaskWorkspaceConfig(enabled = true))
+        val store = TaskWorkspaceStore(TaskWorkspaceConfig(enabled = true, activationMinPlanSteps = 1))
         val root = "root-pricing"
         store.ensureForInput(
             PendingInput(
@@ -91,7 +94,7 @@ class TaskWorkspaceStoreTest {
 
     @Test
     fun `final pass input reports workspace confidence`() {
-        val store = TaskWorkspaceStore(TaskWorkspaceConfig(enabled = true))
+        val store = TaskWorkspaceStore(TaskWorkspaceConfig(enabled = true, activationMinPlanSteps = 1))
         val root = "root-release"
         store.ensureForInput(
             PendingInput(
@@ -116,7 +119,7 @@ class TaskWorkspaceStoreTest {
 
     @Test
     fun `destroy removes only targeted workspace`() {
-        val store = TaskWorkspaceStore(TaskWorkspaceConfig(enabled = true))
+        val store = TaskWorkspaceStore(TaskWorkspaceConfig(enabled = true, activationMinPlanSteps = 1))
         store.ensureForInput(PendingInput(id = 1, content = "task A", rootInputId = "root-a", receivedAtMs = 1L))
         store.ensureForInput(PendingInput(id = 2, content = "task B", rootInputId = "root-b", receivedAtMs = 2L))
 
@@ -131,7 +134,7 @@ class TaskWorkspaceStoreTest {
 
     @Test
     fun `debug snapshot exposes full sections evidence and monotonic version`() {
-        val store = TaskWorkspaceStore(TaskWorkspaceConfig(enabled = true))
+        val store = TaskWorkspaceStore(TaskWorkspaceConfig(enabled = true, activationMinPlanSteps = 1))
         val root = "root-debug"
         store.ensureForInput(
             PendingInput(
@@ -149,5 +152,104 @@ class TaskWorkspaceStoreTest {
         assertTrue((snapshot?.sections?.size ?: 0) >= 2)
         assertTrue((snapshot?.head?.workspaceConfidence ?: 0.0) > 0.0)
         assertTrue((snapshot?.head?.version ?: -1L) > v1)
+    }
+
+    // ── Complexity gate tests ──
+
+    @Test
+    fun `gate skips workspace for simple plan`() {
+        val store = TaskWorkspaceStore(TaskWorkspaceConfig(enabled = true, activationMinPlanSteps = 3))
+        val root = "root-simple"
+        store.ensureForInput(
+            PendingInput(id = 1, content = "quick question", rootInputId = root, receivedAtMs = 100L)
+        )
+        assertEquals(0, store.activeTaskCount())
+
+        val activated = store.recordPlan(root, "Answer quickly", listOf("Look up answer"))
+
+        assertFalse(activated)
+        assertEquals(0, store.activeTaskCount())
+        assertEquals("", store.promptSummary(root, maxTokens = 200))
+        assertNull(store.debugHead(root))
+    }
+
+    @Test
+    fun `gate activates workspace on complex plan`() {
+        val store = TaskWorkspaceStore(TaskWorkspaceConfig(enabled = true, activationMinPlanSteps = 3))
+        val root = "root-complex"
+        store.ensureForInput(
+            PendingInput(id = 1, content = "research and compare options", rootInputId = root, receivedAtMs = 200L)
+        )
+        assertEquals(0, store.activeTaskCount())
+
+        val activated = store.recordPlan(
+            root,
+            "Research options",
+            listOf("Search provider A", "Search provider B", "Compare results", "Summarize findings")
+        )
+
+        assertTrue(activated)
+        assertEquals(1, store.activeTaskCount())
+        val summary = store.promptSummary(root, maxTokens = 400)
+        assertTrue(summary.contains("Ephemeral task workspace"))
+        assertTrue(summary.contains("Request"))
+        assertTrue(summary.contains("Plan"))
+        assertTrue(summary.contains("research and compare options", ignoreCase = true))
+    }
+
+    @Test
+    fun `gate allows late activation on second plan`() {
+        val store = TaskWorkspaceStore(TaskWorkspaceConfig(enabled = true, activationMinPlanSteps = 3))
+        val root = "root-evolving"
+        store.ensureForInput(
+            PendingInput(id = 1, content = "help with project", rootInputId = root, receivedAtMs = 300L)
+        )
+
+        val firstActivation = store.recordPlan(root, "Quick check", listOf("Look it up"))
+        assertFalse(firstActivation)
+        assertEquals(0, store.activeTaskCount())
+
+        val secondActivation = store.recordPlan(
+            root,
+            "Deep research",
+            listOf("Search docs", "Read API reference", "Compare approaches", "Draft solution")
+        )
+        assertTrue(secondActivation)
+        assertEquals(1, store.activeTaskCount())
+        val summary = store.promptSummary(root, maxTokens = 400)
+        assertTrue(summary.contains("Plan"))
+        assertTrue(summary.contains("Deep research", ignoreCase = true))
+    }
+
+    @Test
+    fun `destroy cleans up pending entries`() {
+        val store = TaskWorkspaceStore(TaskWorkspaceConfig(enabled = true, activationMinPlanSteps = 3))
+        store.ensureForInput(
+            PendingInput(id = 1, content = "pending task", rootInputId = "root-pending", receivedAtMs = 400L)
+        )
+        assertEquals(0, store.activeTaskCount())
+
+        val destroyed = store.destroy("root-pending")
+
+        assertNull(destroyed)
+        val activated = store.recordPlan(
+            "root-pending",
+            "Late plan",
+            listOf("Step 1", "Step 2", "Step 3")
+        )
+        assertFalse(activated)
+    }
+
+    @Test
+    fun `gate disabled when activationMinPlanSteps is 1`() {
+        val store = TaskWorkspaceStore(TaskWorkspaceConfig(enabled = true, activationMinPlanSteps = 1))
+        val root = "root-no-gate"
+        val created = store.ensureForInput(
+            PendingInput(id = 1, content = "any task", rootInputId = root, receivedAtMs = 500L)
+        )
+
+        assertTrue(created)
+        assertEquals(1, store.activeTaskCount())
+        assertTrue(store.promptSummary(root, maxTokens = 200).isNotBlank())
     }
 }

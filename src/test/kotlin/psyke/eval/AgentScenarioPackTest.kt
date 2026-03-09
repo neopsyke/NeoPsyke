@@ -195,7 +195,7 @@ class AgentScenarioPackTest {
         val config = AgentConfig(
             planner = PlannerConfig(maxLoopStepsPerInput = 8, maxThoughtPasses = 3),
             memory = MemoryConfig(
-                taskWorkspace = TaskWorkspaceConfig(enabled = true, maxPromptTokens = 260)
+                taskWorkspace = TaskWorkspaceConfig(enabled = true, activationMinPlanSteps = 1, maxPromptTokens = 260)
             )
         )
         val agent = Ego(

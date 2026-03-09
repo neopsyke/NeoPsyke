@@ -861,6 +861,7 @@ class EgoAgentTest {
             memory = MemoryConfig(
                 taskWorkspace = TaskWorkspaceConfig(
                     enabled = true,
+                    activationMinPlanSteps = 1,
                     maxPromptTokens = 280
                 )
             )
@@ -930,6 +931,7 @@ class EgoAgentTest {
             memory = MemoryConfig(
                 taskWorkspace = TaskWorkspaceConfig(
                     enabled = true,
+                    activationMinPlanSteps = 1,
                     finalPassMinWorkspaceConfidence = 0.30,
                     finalPassMinModelConfidence = 0.60
                 )
@@ -990,6 +992,7 @@ class EgoAgentTest {
             memory = MemoryConfig(
                 taskWorkspace = TaskWorkspaceConfig(
                     enabled = true,
+                    activationMinPlanSteps = 1,
                     finalPassMinWorkspaceConfidence = 0.90,
                     finalPassMinModelConfidence = 0.50
                 )

@@ -2,6 +2,7 @@ package psyke.agent.core
 
 data class TaskWorkspaceConfig(
     val enabled: Boolean = false,
+    val activationMinPlanSteps: Int = 3,
     val maxPromptTokens: Int = 220,
     val maxSections: Int = 10,
     val maxSectionChars: Int = 1_200,

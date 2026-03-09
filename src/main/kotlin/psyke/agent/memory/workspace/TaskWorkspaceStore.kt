@@ -54,7 +54,15 @@ class TaskWorkspaceStore(
     fun ensureForInput(input: PendingInput): Boolean {
         if (!config.enabled) return false
         val rootId = input.rootInputId
-        if (workspaces.containsKey(rootId)) return false
+        if (workspaces.containsKey(rootId) || pendingInputs.containsKey(rootId)) return false
+        if (isGateEnabled()) {
+            pendingInputs[rootId] = PendingInputRecord(
+                rootInputId = rootId,
+                receivedAtMs = input.receivedAtMs,
+                contentPreview = input.content
+            )
+            return false
+        }
         evictOldestIfNeeded()
         val workspace = TaskWorkspace(
             rootInputId = rootId,
@@ -72,8 +80,21 @@ class TaskWorkspaceStore(
     }
 
     @Synchronized
-    fun recordPlan(rootInputId: String?, goal: String, steps: List<String>) {
-        val workspace = lookup(rootInputId) ?: return
+    fun recordPlan(rootInputId: String?, goal: String, steps: List<String>): Boolean {
+        val workspace = lookup(rootInputId)
+        if (workspace != null) {
+            appendPlanToWorkspace(workspace, goal, steps)
+            return false
+        }
+        val activated = maybeActivateFromPending(rootInputId, goal, steps)
+        if (activated) {
+            val activatedWorkspace = lookup(rootInputId) ?: return true
+            appendPlanToWorkspace(activatedWorkspace, goal, steps)
+        }
+        return activated
+    }
+
+    private fun appendPlanToWorkspace(workspace: TaskWorkspace, goal: String, steps: List<String>) {
         val normalizedGoal = TextSecurity.preview(goal, MAX_GOAL_CHARS)
         if (normalizedGoal.isNotBlank()) {
             workspace.updateGoal(normalizedGoal)
@@ -226,6 +247,7 @@ class TaskWorkspaceStore(
     @Synchronized
     fun destroy(rootInputId: String?): TaskWorkspaceDestroyed? {
         if (!config.enabled || rootInputId.isNullOrBlank()) return null
+        pendingInputs.remove(rootInputId)
         val removed = workspaces.remove(rootInputId) ?: return null
         return TaskWorkspaceDestroyed(
             rootInputId = removed.rootInputId,
@@ -240,6 +262,7 @@ class TaskWorkspaceStore(
         if (!config.enabled) return 0
         val cleared = workspaces.size
         workspaces.clear()
+        pendingInputs.clear()
         return cleared
     }
 
@@ -249,6 +272,33 @@ class TaskWorkspaceStore(
     private fun lookup(rootInputId: String?): TaskWorkspace? {
         if (!config.enabled || rootInputId.isNullOrBlank()) return null
         return workspaces[rootInputId]
+    }
+
+    private fun isGateEnabled(): Boolean =
+        config.activationMinPlanSteps >= 2
+
+    private fun maybeActivateFromPending(rootInputId: String?, goal: String, steps: List<String>): Boolean {
+        if (!config.enabled || rootInputId.isNullOrBlank()) return false
+        val pending = pendingInputs[rootInputId] ?: return false
+        if (steps.size < config.activationMinPlanSteps) return false
+        pendingInputs.remove(rootInputId)
+        evictOldestIfNeeded()
+        val workspace = TaskWorkspace(
+            rootInputId = pending.rootInputId,
+            rootInputReceivedAtMs = pending.receivedAtMs,
+            goal = TextSecurity.preview(
+                goal.ifBlank { pending.contentPreview },
+                MAX_GOAL_CHARS
+            )
+        )
+        workspace.addSection(
+            title = "Request",
+            summary = TextSecurity.preview(pending.contentPreview, config.maxSectionSummaryChars),
+            content = TextSecurity.preview(pending.contentPreview, config.maxSectionChars),
+            source = SOURCE_INPUT
+        )
+        workspaces[pending.rootInputId] = workspace
+        return true
     }
 
     private fun evictOldestIfNeeded() {
@@ -413,5 +463,12 @@ class TaskWorkspaceStore(
         const val GOAL_SIGNAL_WEIGHT: Double = 0.10
     }
 
+    private data class PendingInputRecord(
+        val rootInputId: String,
+        val receivedAtMs: Long,
+        val contentPreview: String,
+    )
+
     private val workspaces = LinkedHashMap<String, TaskWorkspace>()
+    private val pendingInputs = LinkedHashMap<String, PendingInputRecord>()
 }
