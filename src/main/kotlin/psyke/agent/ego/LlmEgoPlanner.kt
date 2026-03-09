@@ -32,6 +32,7 @@ class LlmEgoPlanner(
     private val actionVerifierModelClient: ChatModelClient = modelClient,
     private val actionVerifierContextWindow: Int? = null,
     private val config: AgentConfig,
+    private val actionPayloadRepair: (ActionType, String) -> String = ::defaultActionPayloadRepair,
     private val instrumentation: AgentInstrumentation = NoopAgentInstrumentation,
     private val onPlannerNoop: () -> Unit = {},
     private val onPlannerOutputRepaired: () -> Unit = {},
@@ -116,7 +117,8 @@ class LlmEgoPlanner(
             instrumentation.emit(AgentEvents.warning("Planner response was non-parseable; requesting strict JSON retry."))
             val recovered = requestStrictJsonRetry(
                 baseMessages = messages,
-                callSite = triggerLabel
+                callSite = triggerLabel,
+                actionSchemaEnum = actionSchemaEnum(context.dispatchableActions)
             )
             val repairedDecision = recovered?.let {
                 parseResponse(
@@ -172,10 +174,15 @@ class LlmEgoPlanner(
                 "action" -> {
                     val actionType = ActionType.fromRaw(payload.actionType)
                     val rawPayload = normalizeActionPayload(payload.actionPayload)?.trim().orEmpty()
-                    val actionPayload = if (actionType == ActionType.WEBSITE_FETCH) {
-                        repairWebsiteFetchPayload(rawPayload)
-                    } else {
-                        rawPayload
+                    val actionPayload = actionType?.let { type -> actionPayloadRepair(type, rawPayload) } ?: rawPayload
+                    if (actionType == ActionType.WEBSITE_FETCH && rawPayload != actionPayload) {
+                        onPlannerOutputRepaired()
+                        instrumentation.emit(
+                            AgentEvents.plannerOutputRepaired(
+                                actionType = actionType.id,
+                                repair = "bare_url_wrapped"
+                            )
+                        )
                     }
                     val actionSummary = payload.actionSummary?.trim().orEmpty()
                     val resolvedSummary = if (actionSummary.isBlank() && actionType != null && actionPayload.isNotBlank()) {
@@ -190,7 +197,7 @@ class LlmEgoPlanner(
                         EgoDecision.Noop("Planner returned invalid action payload.")
                     } else if (!availableActions.contains(actionType)) {
                         EgoDecision.Noop(
-                            "Planner proposed unavailable action type: ${actionType.name.lowercase()}."
+                            "Planner proposed unavailable action type: ${actionType.id}."
                         )
                     } else {
                         EgoDecision.ProposeAction(
@@ -446,6 +453,7 @@ class LlmEgoPlanner(
     private fun requestStrictJsonRetry(
         baseMessages: List<ChatMessage>,
         callSite: String,
+        actionSchemaEnum: String,
     ): psyke.llm.ChatCompletion? {
         val retryMessages = baseMessages + ChatMessage(
             role = ChatRole.USER,
@@ -458,7 +466,7 @@ class LlmEgoPlanner(
                   "urgency":"low|medium|high",
                   "thought":"optional when decision=thought",
                   "long_term_memory_recall_query":"optional query string",
-                  "action_type":"web_search|answer|mcp_time|website_fetch",
+                  "action_type":"$actionSchemaEnum",
                   "action_payload":"optional when decision=action",
                   "action_summary":"required when decision=action",
                   "plan_goal":"required when decision=plan",
@@ -594,11 +602,7 @@ class LlmEgoPlanner(
                 }
 
                 val rawRepairedPayload = normalizeActionPayload(payload.actionPayload)?.trim().orEmpty()
-                val repairedPayload = if (repairedActionType == ActionType.WEBSITE_FETCH) {
-                    repairWebsiteFetchPayload(rawRepairedPayload)
-                } else {
-                    rawRepairedPayload
-                }
+                val repairedPayload = actionPayloadRepair(repairedActionType, rawRepairedPayload)
                 if (repairedPayload.isBlank()) {
                     instrumentation.emit(
                         AgentEvents.warning(
@@ -743,16 +747,34 @@ class LlmEgoPlanner(
         val metaGuidance = context.metaGuidance.ifBlank { "none" }
         val deliberation = context.deliberation
         val availableActionList = context.availableActions
-            .map { it.name.lowercase() }
+            .map { it.id }
             .sorted()
             .joinToString(", ")
             .ifBlank { "none" }
-        val unavailableActionList = ActionType.DISPATCHABLE
+        val dispatchableActions = if (context.dispatchableActions.isEmpty()) {
+            context.availableActions
+        } else {
+            context.dispatchableActions
+        }
+        val unavailableActionList = dispatchableActions
             .filterNot { context.availableActions.contains(it) }
-            .map { it.name.lowercase() }
+            .map { it.id }
             .sorted()
             .joinToString(", ")
             .ifBlank { "none" }
+        val actionSchemaEnum = dispatchableActions
+            .map { it.id }
+            .sorted()
+            .joinToString("|")
+            .ifBlank { "answer" }
+        val actionGuidanceBlock = context.actionDefinitions
+            .sortedBy { it.actionType.id }
+            .joinToString("\n") { definition ->
+                val example = definition.payloadSchemaExample?.trim().orEmpty()
+                val exampleSuffix = if (example.isBlank()) "" else " Example: $example"
+                "- ${definition.description} Payload: ${definition.payloadGuidance}.$exampleSuffix"
+            }
+            .ifBlank { "- answer: payload is plain answer text." }
 
         return PromptBudgetAllocator.allocate(
             sections = listOf(
@@ -773,10 +795,7 @@ class LlmEgoPlanner(
                     Each plan_step is a concise directive (<=120 chars). The planner re-evaluates each step.
                     Do not use plan for simple tasks solvable in one or two steps.
                     Allowed actions:
-                    - web_search: payload is a concise search query.
-                    - answer: payload is the exact answer text for the interlocutor.
-                    - mcp_time: payload is JSON like {"timezone":"Europe/Berlin"} (timezone optional).
-                    - website_fetch: payload is JSON like {"url":"https://example.com","max_chars":1200}.
+                    $actionGuidanceBlock
                     You may receive Long-term memory recall from Hippocampus search.
                     Use long-term memory recall only when relevant to the current trigger.
                     If long-term memory recall is missing or ambiguous, do not invent details.
@@ -803,7 +822,7 @@ class LlmEgoPlanner(
                       "urgency":"low|medium|high",
                       "thought":"... optional when decision=thought",
                       "long_term_memory_recall_query":"optional query string for explicit extra long-term recall",
-                      "action_type":"web_search|answer|mcp_time|website_fetch",
+                      "action_type":"$actionSchemaEnum",
                       "action_payload":"... optional when decision=action",
                       "action_summary":"required when decision=action; <=180 chars context summary for action review",
                       "plan_goal":"required when decision=plan; overall objective",
@@ -937,7 +956,7 @@ class LlmEgoPlanner(
             }
         }
         val availableActionList = context.availableActions
-            .map { it.name.lowercase() }
+            .map { it.id }
             .sorted()
             .joinToString(", ")
             .ifBlank { "none" }
@@ -1139,6 +1158,13 @@ class LlmEgoPlanner(
         actionVerifierCircuitBreakers.keys.removeAll { it.rootInputId == rootInputId }
     }
 
+    private fun actionSchemaEnum(actions: Set<ActionType>): String =
+        actions
+            .map { it.id }
+            .sorted()
+            .joinToString("|")
+            .ifBlank { "answer" }
+
     private companion object {
         const val ACTION_VERIFIER_BASE_TOKENS: Int = 80
         const val ACTION_VERIFIER_MAX_TOKENS: Int = 220
@@ -1147,6 +1173,25 @@ class LlmEgoPlanner(
         val mapper = jacksonObjectMapper()
             .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
         val invalidJsonEscapeRegex = Regex("""\\(?!["\\/bfnrtu])""")
+
+        private fun defaultActionPayloadRepair(actionType: ActionType, raw: String): String {
+            if (actionType != ActionType.WEBSITE_FETCH) {
+                return raw
+            }
+            if (raw.isBlank()) return raw
+            try {
+                mapper.readTree(raw)
+                return raw
+            } catch (_: Exception) {
+                // fall through
+            }
+            val trimmed = raw.trim()
+            return if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+                mapper.writeValueAsString(mapOf("url" to trimmed))
+            } else {
+                raw
+            }
+        }
     }
 
     private fun normalizeActionPayload(node: JsonNode?): String? {
@@ -1158,30 +1203,6 @@ class LlmEgoPlanner(
             node.isObject || node.isArray -> mapper.writeValueAsString(node)
             else -> node.asText()
         }
-    }
-
-    /**
-     * Repairs common LLM mistakes in website_fetch payloads.
-     * If the payload is a bare URL (not wrapped in JSON), wraps it as {"url":"<url>"}.
-     */
-    private fun repairWebsiteFetchPayload(raw: String): String {
-        if (raw.isBlank()) return raw
-        try {
-            mapper.readTree(raw)
-            return raw // already valid JSON
-        } catch (_: Exception) { /* not JSON */ }
-        val trimmed = raw.trim()
-        if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
-            onPlannerOutputRepaired()
-            instrumentation.emit(
-                AgentEvents.plannerOutputRepaired(
-                    actionType = "website_fetch",
-                    repair = "bare_url_wrapped"
-                )
-            )
-            return mapper.writeValueAsString(mapOf("url" to trimmed))
-        }
-        return raw
     }
 
     private fun synthesizeActionSummary(actionPayload: String): String {

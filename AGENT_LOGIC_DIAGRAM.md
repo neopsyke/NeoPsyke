@@ -20,6 +20,7 @@ flowchart LR
     E --> S["Superego"]
     S --> S1["SingleStage Review Engine"]
     S --> S2["TwoStage Escalation Engine"]
+    E --> AR["ActionRegistry (ServiceLoader Discovery)"]
     E --> M["MotorCortex"]
     E --> BG["LLM Token Budget Gate"]
     E --> MCat["Model Catalog (ROI token_weight)"]
@@ -38,10 +39,14 @@ flowchart LR
     E --> TWS["TaskWorkspaceStore (Ephemeral Per Request)"]
     E --> TWF["TaskWorkspaceFinalizer (Noop or LLM)"]
 
+    AR --> AP["Action Plugins (self-described)"]
+    AP --> M
+
     M --> WS["Web Search Handler/Engine"]
     CfgWS["WebSearch Provider Config (provider/key/base/model)"] --> WS
     M --> MT["MCP Time Tool"]
     M --> MF["Fetch Tool"]
+    M --> EM["Email Send (Microsoft Graph)"]
     WS --> PID["PromptInjectionDefense"]
     MT --> PID
     MF --> PID
@@ -214,7 +219,7 @@ stateDiagram-v2
     WebSearchUnavailable --> ThoughtQueued: planner uses remaining available actions
     EvidenceObserved --> ThoughtQueued: follow-up thought
     EvidenceMissing --> ThoughtQueued: retry/adjust path
-    EvidenceMissing --> ActionDisabled: circuit breaker trips (non-retryable fetch failures)
+    EvidenceMissing --> ActionDisabled: retry-budget cooldown trips (non-retryable action failures)
     ActionDisabled --> ThoughtQueued: planner uses remaining available actions
 
     Processing --> HighPressure: pressure threshold reached

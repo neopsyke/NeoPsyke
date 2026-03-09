@@ -4,6 +4,7 @@ import com.fasterxml.jackson.annotation.JsonProperty
 import com.fasterxml.jackson.databind.DeserializationFeature
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
+import psyke.agent.actions.ActionRegistry
 import psyke.agent.core.ActionType
 import psyke.agent.core.AgentConfig
 import psyke.agent.core.PendingAction
@@ -26,16 +27,22 @@ internal data class SuperegoDeterministicDecision(
  */
 internal class SuperegoDeterministicConscience(
     private val config: AgentConfig,
+    private val actionRegistry: ActionRegistry,
 ) {
     fun review(action: PendingAction, context: SuperegoContext): SuperegoDeterministicDecision {
         return try {
             validateActionShape(action)?.let { return it }
+            actionRegistry.deterministicReview(action = action, context = context, config = config)
+                ?.let { pluginDecision ->
+                    return mapPluginDecision(pluginDecision)
+                }
             when (action.type) {
                 ActionType.ANSWER -> validateAnswer(action)
                 ActionType.WEB_SEARCH -> validateWebSearch(action, context)
                 ActionType.MCP_TIME -> validateMcpTime(action)
                 ActionType.WEBSITE_FETCH -> validateWebsiteFetch(action, context)
                 ActionType.MEMORY -> allow() // Memory ops are internal subsystem calls, always allowed.
+                else -> allow()
             }
         } catch (_: Exception) {
             deny(
@@ -43,6 +50,23 @@ internal class SuperegoDeterministicConscience(
                 reason = "Deterministic superego checks failed unexpectedly; denying by default."
             )
         }
+    }
+
+    private fun mapPluginDecision(
+        decision: psyke.agent.actions.ActionDeterministicReview,
+    ): SuperegoDeterministicDecision {
+        if (decision.allow) {
+            return allow()
+        }
+        val ruleId = decision.ruleId ?: "action_policy_denied"
+        val reasonCode = decision.reasonCode ?: "POLICY_${normalizeRuleId(ruleId)}"
+        val reason = decision.reason.ifBlank { "Deterministic policy denied action." }
+        return SuperegoDeterministicDecision(
+            allow = false,
+            reason = "$reason [rule:$ruleId]",
+            ruleId = ruleId,
+            reasonCode = reasonCode
+        )
     }
 
     private fun validateActionShape(action: PendingAction): SuperegoDeterministicDecision? {

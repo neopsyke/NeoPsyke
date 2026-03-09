@@ -18,7 +18,6 @@ import psyke.agent.support.DenialReasonClassifier
 import psyke.agent.support.PromptInjectionDefense
 import psyke.agent.support.TextSecurity
 import psyke.agent.superego.Superego
-import psyke.agent.tools.mcp.FetchErrorCategory
 import psyke.instrumentation.AgentEvent
 import psyke.instrumentation.AgentEvents
 import psyke.instrumentation.AgentInstrumentation
@@ -414,12 +413,7 @@ class Ego(
         deliberation.recordEvidenceProgress(resolvedAction, outcome, observed)
         deliberation.onActionExecuted(resolvedAction, observed)
         maybeRecordTaskWorkspaceOutcome(resolvedAction, outcome, observed)
-        if (resolvedAction.type == ActionType.WEBSITE_FETCH && !observed) {
-            val category = FetchErrorCategory.entries.firstOrNull {
-                it.name.equals(outcome.fetchErrorCategory, ignoreCase = true)
-            } ?: FetchErrorCategory.RETRYABLE
-            deliberation.recordFetchFailure(resolvedAction.rootInputId, sessionId, category)
-        }
+        deliberation.recordActionOutcome(resolvedAction, outcome, observed)
         if (resolvedAction.type == ActionType.ANSWER) {
             val receivedAtMs = resolvedAction.rootInputReceivedAtMs
             if (receivedAtMs != null) {
@@ -450,13 +444,13 @@ class Ego(
             sessionId = sessionId
         )
 
-        if (resolvedAction.type.requiresFollowUpThought()) {
+        if (resolvedAction.requiresFollowUpThought) {
             val safePlannerSignal = PromptInjectionDefense.asUntrustedDataBlock(
                 text = outcome.plannerSignal,
                 maxChars = FOLLOW_UP_SIGNAL_MAX_CHARS
             )
             val followUpThought = TextSecurity.clamp(
-                "${resolvedAction.type.followUpPrefix()}\n$safePlannerSignal\nDecide if an answer should be sent.",
+                "${resolvedAction.followUpPrefix}\n$safePlannerSignal\nDecide if an answer should be sent.",
                 config.planner.maxThoughtChars
             )
             val queued = scheduler.enqueueThought(
@@ -649,6 +643,8 @@ class Ego(
                     payload = decision.payload,
                     summary = decision.summary,
                     urgency = decision.urgency,
+                    requiresFollowUpThought = motorCortex.requiresFollowUpThought(decision.actionType),
+                    followUpPrefix = motorCortex.followUpPrefix(decision.actionType),
                     attempts = nextPassCount,
                     rootInputId = rootInputId,
                     rootInputReceivedAtMs = rootInputReceivedAtMs,
@@ -656,7 +652,7 @@ class Ego(
                 )
                 instrumentation.emit(
                     AgentEvents.actionProposed(
-                        actionType = decision.actionType.name.lowercase(),
+                        actionType = decision.actionType.id,
                         urgency = decision.urgency.name.lowercase(),
                         payload = decision.payload,
                         summary = decision.summary,
@@ -1061,9 +1057,9 @@ class Ego(
         rootInputReceivedAtMs: Long?,
         conversationContext: ConversationContext,
     ) {
-        if (!decision.actionType.requiresFollowUpThought()) return
+        if (!motorCortex.requiresFollowUpThought(decision.actionType)) return
         val scope = inputScope(rootInputId, conversationContext)
-        val signature = "${decision.actionType.name.lowercase()}:${normalizeActionPayload(decision.payload)}"
+        val signature = "${decision.actionType.id}:${normalizeActionPayload(decision.payload)}"
         val hitsBySignature = externalActionSignatureHitsByInput.getOrPut(scope) { mutableMapOf() }
         val signatureHits = (hitsBySignature[signature] ?: 0) + 1
         hitsBySignature[signature] = signatureHits
@@ -1076,7 +1072,7 @@ class Ego(
 
         instrumentation.emit(
             AgentEvents.externalActionRedundancySignal(
-                actionType = decision.actionType.name.lowercase(),
+                actionType = decision.actionType.id,
                 signatureHits = signatureHits,
                 hadSuccessfulEvidence = hadSuccessfulEvidence,
                 hadExternalFailures = hadExternalFailures,
@@ -1306,6 +1302,16 @@ class Ego(
             maxTokens = config.memory.taskWorkspace.maxPromptTokens
         )
         val disabled = deliberation.disabledActionTypes(rootInputId, sessionId)
+        val availableActions = motorCortex.availableActionTypes() - disabled
+        val dispatchableActions = motorCortex.dispatchableActionTypes() - disabled
+        val actionDefinitions = motorCortex.plannerDescriptors().map { descriptor ->
+            ActionPlanningDefinition(
+                actionType = descriptor.actionType,
+                description = descriptor.plannerDescription,
+                payloadGuidance = descriptor.payloadGuidance,
+                payloadSchemaExample = descriptor.payloadSchemaExample
+            )
+        }
         val evidenceHints = buildEvidenceHints(rootInputId, sessionId)
         return PlannerContext(
             recentDialogue = recentDialogue,
@@ -1318,7 +1324,9 @@ class Ego(
             evidenceHints = evidenceHints,
             deliberation = deliberation.snapshot(),
             metaGuidance = deliberation.guidance(),
-            availableActions = motorCortex.availableActionTypes() - disabled,
+            availableActions = availableActions,
+            dispatchableActions = dispatchableActions,
+            actionDefinitions = actionDefinitions,
             conversationContext = conversationContext
         )
     }
@@ -1569,18 +1577,6 @@ class Ego(
             is LoopTask.ProcessInput -> task.item.conversationContext
             is LoopTask.ProcessThought -> task.item.conversationContext
             is LoopTask.PerformAction -> task.item.conversationContext
-        }
-
-    private fun ActionType.requiresFollowUpThought(): Boolean =
-        this == ActionType.WEB_SEARCH || this == ActionType.MCP_TIME || this == ActionType.WEBSITE_FETCH
-
-    private fun ActionType.followUpPrefix(): String =
-        when (this) {
-            ActionType.WEB_SEARCH -> "Web search completed."
-            ActionType.MCP_TIME -> "MCP time lookup completed."
-            ActionType.WEBSITE_FETCH -> "Fetch completed."
-            ActionType.ANSWER -> "Action completed."
-            ActionType.MEMORY -> "Memory operation completed."
         }
 
     private fun journalPlannerDecision(decision: EgoDecision) {
