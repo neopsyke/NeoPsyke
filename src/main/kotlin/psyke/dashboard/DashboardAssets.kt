@@ -11,6 +11,10 @@ object DashboardAssets {
         loadText("/dashboard/observability.html")
     }
 
+    val metricsHtml: String by lazy {
+        loadText("/dashboard/metrics.html")
+    }
+
     private fun loadText(path: String): String {
         val stream = DashboardAssets::class.java.getResourceAsStream(path)
             ?: error("Missing dashboard asset: $path")

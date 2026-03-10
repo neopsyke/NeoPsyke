@@ -443,4 +443,37 @@ object AgentEvents {
                 "raw_response" to rawResponse
             )
         )
+
+    fun phaseTimings(timings: TaskPhaseTimings): AgentEvent =
+        AgentEvent(
+            type = "phase_timings",
+            data = mapOf(
+                "task_type" to timings.taskType,
+                "root_input_id" to timings.rootInputId,
+                "total_duration_ms" to timings.totalDurationMs,
+                "phases" to timings.phases.map { mapOf("name" to it.phaseName, "duration_ms" to it.durationMs) },
+                "timestamp_ms" to timings.timestampMs,
+            )
+        )
+
+    fun heapSnapshot(
+        jvmTotalBytes: Long,
+        jvmFreeBytes: Long,
+        jvmMaxBytes: Long,
+        jvmUsedBytes: Long,
+        jvmUsedPercent: Double,
+        moduleEstimates: Map<String, Map<String, Any?>>,
+    ): AgentEvent =
+        AgentEvent(
+            type = "heap_snapshot",
+            data = mapOf(
+                "jvm_total_bytes" to jvmTotalBytes,
+                "jvm_free_bytes" to jvmFreeBytes,
+                "jvm_max_bytes" to jvmMaxBytes,
+                "jvm_used_bytes" to jvmUsedBytes,
+                "jvm_used_percent" to jvmUsedPercent,
+                "module_estimates" to moduleEstimates,
+                "timestamp_ms" to System.currentTimeMillis(),
+            )
+        )
 }

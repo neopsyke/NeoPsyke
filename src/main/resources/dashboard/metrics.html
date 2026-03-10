@@ -1,0 +1,674 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Psyke Metrics</title>
+  <style>
+    :root {
+      --bg: #0f1a1f;
+      --panel: #16272e;
+      --line: #27414d;
+      --text: #d9e7eb;
+      --muted: #98b0b9;
+      --accent: #36c3a7;
+      --blue: #409eff;
+      --amber: #e6a23c;
+      --red: #f56c6c;
+      --purple: #b37feb;
+      --green: #67c23a;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      background: radial-gradient(circle at 20% 0%, #17303a 0%, var(--bg) 55%);
+      color: var(--text);
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr);
+      overflow: hidden;
+    }
+    header {
+      padding: 14px 18px;
+      border-bottom: 1px solid var(--line);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .nav-links { display: flex; gap: 10px; align-items: center; }
+    .ghost-btn {
+      background: none;
+      border: 1px solid var(--line);
+      color: var(--muted);
+      padding: 4px 10px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 12px;
+      font-family: inherit;
+      text-decoration: none;
+    }
+    .ghost-btn:hover { border-color: var(--accent); color: var(--accent); }
+    .status { font-size: 12px; color: var(--muted); }
+
+    .main-scroll {
+      overflow-y: auto;
+      padding: 14px;
+    }
+
+    .panel {
+      background: rgba(22, 39, 46, 0.9);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 14px;
+      margin-bottom: 14px;
+    }
+    .panel h3 {
+      margin: 0 0 10px;
+      font-size: 13px;
+      color: var(--accent);
+      letter-spacing: .03em;
+      text-transform: uppercase;
+    }
+    .panel-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 10px;
+    }
+    .panel-head h3 { margin-bottom: 0; }
+
+    .grid3 { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; }
+    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    .card {
+      background: rgba(15, 26, 31, 0.6);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 10px;
+    }
+    .card .label { font-size: 11px; color: var(--muted); margin-bottom: 4px; text-transform: uppercase; }
+    .card .value { font-size: 18px; font-weight: bold; }
+    .card .sub { font-size: 11px; color: var(--muted); margin-top: 2px; }
+
+    .pill {
+      display: inline-block;
+      background: rgba(54, 195, 167, 0.12);
+      color: var(--accent);
+      font-size: 11px;
+      padding: 2px 8px;
+      border-radius: 10px;
+      margin-bottom: 6px;
+    }
+
+    /* Gauge bar */
+    .gauge { width: 100%; height: 22px; background: rgba(15, 26, 31, 0.8); border-radius: 4px; position: relative; overflow: hidden; margin: 6px 0; }
+    .gauge-fill { height: 100%; border-radius: 4px; transition: width 0.3s; }
+    .gauge-label { position: absolute; top: 0; left: 0; right: 0; height: 100%; display: flex; align-items: center; justify-content: center; font-size: 11px; color: var(--text); }
+
+    /* Waterfall bars */
+    .waterfall { display: flex; flex-direction: column; gap: 4px; }
+    .wf-row { display: flex; align-items: center; gap: 8px; }
+    .wf-label { width: 140px; font-size: 11px; color: var(--muted); text-align: right; flex-shrink: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .wf-track { flex: 1; height: 18px; background: rgba(15, 26, 31, 0.6); border-radius: 3px; overflow: hidden; position: relative; }
+    .wf-bar { height: 100%; border-radius: 3px; min-width: 2px; transition: width 0.3s; }
+    .wf-dur { width: 60px; font-size: 11px; color: var(--muted); text-align: right; flex-shrink: 0; }
+
+    /* Stacked bar */
+    .stacked-bar { display: flex; height: 24px; border-radius: 4px; overflow: hidden; margin: 6px 0; }
+    .stacked-seg { height: 100%; min-width: 2px; transition: width 0.3s; position: relative; }
+    .stacked-seg:hover::after {
+      content: attr(data-tooltip);
+      position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%);
+      background: rgba(0,0,0,0.85); color: var(--text); font-size: 10px; padding: 2px 6px; border-radius: 3px; white-space: nowrap; z-index: 10;
+    }
+
+    /* Stat table */
+    .stat-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    .stat-table th { text-align: left; color: var(--muted); font-weight: normal; padding: 6px 8px; border-bottom: 1px solid var(--line); text-transform: uppercase; font-size: 10px; }
+    .stat-table td { padding: 6px 8px; border-bottom: 1px solid rgba(39, 65, 77, 0.4); }
+    .stat-table tr:hover td { background: rgba(54, 195, 167, 0.04); }
+    .stat-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+
+    /* Horizontal bar for inline stats */
+    .hbar-track { width: 100%; max-width: 120px; height: 8px; background: rgba(15, 26, 31, 0.8); border-radius: 3px; overflow: hidden; display: inline-block; vertical-align: middle; margin-left: 6px; }
+    .hbar-fill { height: 100%; border-radius: 3px; }
+
+    /* Error badges */
+    .err-badge { display: inline-block; font-size: 10px; padding: 1px 6px; border-radius: 8px; margin: 1px 2px; }
+    .err-badge.rate-limit { background: rgba(230, 162, 60, 0.2); color: var(--amber); }
+    .err-badge.timeout { background: rgba(179, 127, 235, 0.2); color: var(--purple); }
+    .err-badge.api-error { background: rgba(245, 108, 108, 0.2); color: var(--red); }
+    .err-badge.other { background: rgba(152, 176, 185, 0.2); color: var(--muted); }
+
+    /* Timeframe / scope controls */
+    .controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .controls select {
+      background: var(--bg);
+      border: 1px solid var(--line);
+      color: var(--text);
+      padding: 3px 8px;
+      border-radius: 4px;
+      font-family: inherit;
+      font-size: 11px;
+    }
+    .controls label { font-size: 11px; color: var(--muted); }
+
+    /* Legend */
+    .legend { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 6px; }
+    .legend-item { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--muted); }
+    .legend-swatch { width: 12px; height: 12px; border-radius: 2px; }
+
+    .empty-msg { font-size: 12px; color: var(--muted); font-style: italic; padding: 8px 0; }
+
+    @media (max-width: 800px) {
+      .grid2 { grid-template-columns: 1fr; }
+      .grid3 { grid-template-columns: 1fr 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div><strong>Psyke Metrics</strong></div>
+    <div class="nav-links">
+      <a class="ghost-btn" href="/" target="_blank" rel="noopener noreferrer">Conversations</a>
+      <a class="ghost-btn" href="/dashboard" target="_blank" rel="noopener noreferrer">Observability</a>
+      <div class="status" id="status">connecting...</div>
+    </div>
+  </header>
+
+  <div class="main-scroll">
+    <!-- Section 1: Heap Memory -->
+    <div class="panel">
+      <h3>Heap Memory</h3>
+      <div id="heap-gauge"></div>
+      <div class="grid3" id="heap-modules"></div>
+    </div>
+
+    <!-- Section 2: Processing Phase Timing -->
+    <div class="panel">
+      <div class="panel-head">
+        <h3>Processing Phase Timing</h3>
+        <div class="controls">
+          <label>Timeframe</label>
+          <select id="timing-timeframe">
+            <option value="300000">Last 5 min</option>
+            <option value="900000">Last 15 min</option>
+            <option value="3600000">Last 1 hour</option>
+            <option value="0" selected>Full session</option>
+          </select>
+        </div>
+      </div>
+      <div style="margin-bottom:10px;">
+        <div class="pill">Last Input Waterfall</div>
+        <div id="last-waterfall"></div>
+      </div>
+      <div style="margin-bottom:10px;">
+        <div class="pill">Phase Share</div>
+        <div id="phase-stacked"></div>
+        <div class="legend" id="phase-legend"></div>
+      </div>
+      <div>
+        <div class="pill">Aggregate Timings</div>
+        <div id="phase-aggregate"></div>
+      </div>
+    </div>
+
+    <!-- Section 3: LLM Integration Dashboard -->
+    <div class="panel">
+      <div class="panel-head">
+        <h3>LLM Integration</h3>
+        <div class="controls">
+          <label>Scope</label>
+          <select id="llm-scope">
+            <option value="run" selected>Current run</option>
+            <option value="all">All-time</option>
+          </select>
+          <label>Timeframe</label>
+          <select id="llm-timeframe">
+            <option value="0" selected>Full</option>
+            <option value="300000">Last 5 min</option>
+            <option value="900000">Last 15 min</option>
+            <option value="3600000">Last 1 hour</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="grid2">
+        <div>
+          <div class="pill">Token Usage by Role</div>
+          <div id="tokens-by-role"></div>
+        </div>
+        <div>
+          <div class="pill">Token Usage by Model</div>
+          <div id="tokens-by-model"></div>
+        </div>
+      </div>
+
+      <div style="margin-top:14px;">
+        <div class="pill">Latency by Model</div>
+        <div id="latency-table"></div>
+      </div>
+
+      <div class="grid2" style="margin-top:14px;">
+        <div>
+          <div class="pill">Errors by Model</div>
+          <div id="error-table"></div>
+        </div>
+        <div>
+          <div class="pill">Calls by Role</div>
+          <div class="grid3" id="calls-by-role"></div>
+        </div>
+      </div>
+
+      <div style="margin-top:14px;" id="budget-section" hidden>
+        <div class="pill">Token Budget Utilization</div>
+        <div id="budget-gauges"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    /* ── State ── */
+    const state = {
+      heapMetrics: null,
+      phaseTimings: [],
+      metrics: null,
+      limits: {},
+      storeStats: {},
+      llmStats: null,
+    };
+
+    const phaseColors = {
+      input_processing: "#409eff",
+      thought_processing: "#409eff",
+      planner_context: "#5ba1cf",
+      planner_decide: "#e6a23c",
+      meta_assessment: "#b37feb",
+      apply_decision: "#67c23a",
+      workspace_final_pass: "#5ba1cf",
+      task_verifier: "#f56c6c",
+      superego_review: "#f56c6c",
+      action_execute: "#36c3a7",
+      post_execute: "#67c23a",
+      follow_up: "#98b0b9",
+    };
+
+    function phaseColor(name) { return phaseColors[name] || "#98b0b9"; }
+    function escapeHtml(v) { return String(v ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+    function fmtBytes(b) {
+      if (b >= 1073741824) return (b / 1073741824).toFixed(1) + " GB";
+      if (b >= 1048576) return (b / 1048576).toFixed(1) + " MB";
+      if (b >= 1024) return (b / 1024).toFixed(1) + " KB";
+      return b + " B";
+    }
+    function fmtMs(ms) { return ms >= 1000 ? (ms / 1000).toFixed(2) + "s" : ms + "ms"; }
+    function fmtNum(n) { return Number(n || 0).toLocaleString(); }
+    function pct(a, b) { return b > 0 ? ((a / b) * 100).toFixed(1) : "0.0"; }
+
+    /* ── Rendering ── */
+    function renderHeap() {
+      const el = document.getElementById("heap-gauge");
+      const modEl = document.getElementById("heap-modules");
+      const h = state.heapMetrics;
+      if (!h) {
+        el.innerHTML = "<div class='empty-msg'>Waiting for heap data...</div>";
+        modEl.innerHTML = "";
+        return;
+      }
+      const usedPct = Number(h.jvm_used_percent || 0);
+      const color = usedPct > 85 ? "var(--red)" : usedPct > 60 ? "var(--amber)" : "var(--accent)";
+      el.innerHTML =
+        "<div class='gauge'><div class='gauge-fill' style='width:" + usedPct.toFixed(1) + "%;background:" + color + "'></div>" +
+        "<div class='gauge-label'>JVM Heap: " + fmtBytes(h.jvm_used_bytes) + " / " + fmtBytes(h.jvm_max_bytes) + " (" + usedPct.toFixed(1) + "%)</div></div>";
+
+      const modules = h.module_estimates || {};
+      const ss = state.storeStats || {};
+      let cards = "";
+      for (const [key, mod] of Object.entries(modules)) {
+        cards += "<div class='card'><div class='label'>" + escapeHtml(mod.label || key) + "</div>" +
+          "<div class='value'>" + fmtNum(mod.item_count) + " <span style='font-size:12px;color:var(--muted)'>" + escapeHtml(mod.unit) + "</span></div>";
+        if (mod.chars_or_bytes > 0 && mod.unit === "chars") {
+          cards += "<div class='sub'>" + fmtNum(mod.chars_or_bytes) + " chars</div>";
+        }
+        cards += "</div>";
+      }
+      if (ss.event_count != null) {
+        cards += "<div class='card'><div class='label'>Dashboard Events</div><div class='value'>" + ss.event_count + " / " + ss.max_events + "</div></div>";
+      }
+      if (ss.workspace_snapshot_count != null) {
+        cards += "<div class='card'><div class='label'>Workspace Snapshots</div><div class='value'>" + ss.workspace_snapshot_count + "</div></div>";
+      }
+      if (ss.chat_session_count != null) {
+        cards += "<div class='card'><div class='label'>Chat Sessions</div><div class='value'>" + ss.chat_session_count + "</div></div>";
+      }
+      modEl.innerHTML = cards;
+    }
+
+    function filteredTimings() {
+      const tf = parseInt(document.getElementById("timing-timeframe").value) || 0;
+      if (tf === 0) return state.phaseTimings;
+      const cutoff = Date.now() - tf;
+      return state.phaseTimings.filter(t => (t.timestamp_ms || 0) >= cutoff);
+    }
+
+    function renderPhaseTimings() {
+      const timings = filteredTimings();
+      // Last waterfall
+      const wfEl = document.getElementById("last-waterfall");
+      const lastInput = [...timings].reverse().find(t => t.task_type === "input");
+      if (!lastInput || !lastInput.phases || lastInput.phases.length === 0) {
+        wfEl.innerHTML = "<div class='empty-msg'>No input timing data yet</div>";
+      } else {
+        const maxDur = Math.max(...lastInput.phases.map(p => p.duration_ms), 1);
+        let html = "<div class='waterfall'>";
+        for (const p of lastInput.phases) {
+          const w = Math.max((p.duration_ms / maxDur) * 100, 1);
+          html += "<div class='wf-row'><div class='wf-label'>" + escapeHtml(p.name) + "</div>" +
+            "<div class='wf-track'><div class='wf-bar' style='width:" + w.toFixed(1) + "%;background:" + phaseColor(p.name) + "'></div></div>" +
+            "<div class='wf-dur'>" + fmtMs(p.duration_ms) + "</div></div>";
+        }
+        html += "</div>";
+        html += "<div style='font-size:11px;color:var(--muted);margin-top:4px'>Total: " + fmtMs(lastInput.total_duration_ms) + "</div>";
+        wfEl.innerHTML = html;
+      }
+
+      // Stacked bar (aggregate phase share)
+      const stackEl = document.getElementById("phase-stacked");
+      const legendEl = document.getElementById("phase-legend");
+      const phaseSums = {};
+      let totalSum = 0;
+      for (const t of timings) {
+        if (!t.phases) continue;
+        for (const p of t.phases) {
+          phaseSums[p.name] = (phaseSums[p.name] || 0) + p.duration_ms;
+          totalSum += p.duration_ms;
+        }
+      }
+      if (totalSum === 0) {
+        stackEl.innerHTML = "<div class='empty-msg'>No timing data in selected timeframe</div>";
+        legendEl.innerHTML = "";
+      } else {
+        let barHtml = "<div class='stacked-bar'>";
+        let legHtml = "";
+        for (const [name, sum] of Object.entries(phaseSums).sort((a, b) => b[1] - a[1])) {
+          const w = (sum / totalSum) * 100;
+          barHtml += "<div class='stacked-seg' style='width:" + w.toFixed(2) + "%;background:" + phaseColor(name) + "' data-tooltip='" + escapeHtml(name) + ": " + pct(sum, totalSum) + "%'></div>";
+          legHtml += "<div class='legend-item'><div class='legend-swatch' style='background:" + phaseColor(name) + "'></div>" + escapeHtml(name) + " " + pct(sum, totalSum) + "%</div>";
+        }
+        barHtml += "</div>";
+        stackEl.innerHTML = barHtml;
+        legendEl.innerHTML = legHtml;
+      }
+
+      // Aggregate table
+      const aggEl = document.getElementById("phase-aggregate");
+      const phaseStats = {};
+      for (const t of timings) {
+        if (!t.phases) continue;
+        for (const p of t.phases) {
+          if (!phaseStats[p.name]) phaseStats[p.name] = { sum: 0, count: 0, min: Infinity, max: 0 };
+          const s = phaseStats[p.name];
+          s.sum += p.duration_ms;
+          s.count += 1;
+          s.min = Math.min(s.min, p.duration_ms);
+          s.max = Math.max(s.max, p.duration_ms);
+        }
+      }
+      const entries = Object.entries(phaseStats).sort((a, b) => b[1].sum - a[1].sum);
+      if (entries.length === 0) {
+        aggEl.innerHTML = "<div class='empty-msg'>No data</div>";
+      } else {
+        let html = "<table class='stat-table'><thead><tr><th>Phase</th><th class='num'>Avg</th><th class='num'>Min</th><th class='num'>Max</th><th class='num'>Count</th><th class='num'>Total</th></tr></thead><tbody>";
+        for (const [name, s] of entries) {
+          const avg = s.count > 0 ? Math.round(s.sum / s.count) : 0;
+          html += "<tr><td><span class='legend-swatch' style='display:inline-block;width:8px;height:8px;border-radius:2px;background:" + phaseColor(name) + ";margin-right:4px;vertical-align:middle'></span>" + escapeHtml(name) + "</td>" +
+            "<td class='num'>" + fmtMs(avg) + "</td><td class='num'>" + fmtMs(s.min === Infinity ? 0 : s.min) + "</td><td class='num'>" + fmtMs(s.max) + "</td>" +
+            "<td class='num'>" + s.count + "</td><td class='num'>" + fmtMs(s.sum) + "</td></tr>";
+        }
+        html += "</tbody></table>";
+        aggEl.innerHTML = html;
+      }
+    }
+
+    function renderTokenUsage() {
+      const m = state.metrics;
+      if (!m) {
+        document.getElementById("tokens-by-role").innerHTML = "<div class='empty-msg'>Waiting for metrics...</div>";
+        document.getElementById("tokens-by-model").innerHTML = "<div class='empty-msg'>Waiting for metrics...</div>";
+        return;
+      }
+      const scope = document.getElementById("llm-scope").value;
+      const byRole = scope === "all" ? (m.persistentTokensByRole || {}) : (m.runTokensByRole || {});
+      const modelsByRole = scope === "all" ? (m.persistentModelsByRole || {}) : (m.runModelsByRole || {});
+      const byModel = scope === "all" ? (m.persistentTokensByModel || {}) : (m.runTokensByModel || {});
+
+      renderRoleBarList("tokens-by-role", byRole, modelsByRole, "tokens");
+      renderBarList("tokens-by-model", byModel, "tokens");
+    }
+
+    function renderRoleBarList(elId, data, modelsByRole, unit) {
+      const el = document.getElementById(elId);
+      const entries = Object.entries(data).sort((a, b) => b[1] - a[1]);
+      if (entries.length === 0) {
+        el.innerHTML = "<div class='empty-msg'>No data</div>";
+        return;
+      }
+      const maxVal = Math.max(...entries.map(e => e[1]), 1);
+      let html = "";
+      for (const [name, val] of entries) {
+        const w = (val / maxVal) * 100;
+        const models = modelsByRole[name];
+        const modelLabel = models && models.length > 0 ? models.join(", ") : "";
+        html += "<div style='margin-bottom:6px'><div style='display:flex;justify-content:space-between;font-size:11px;margin-bottom:2px'>" +
+          "<span>" + escapeHtml(name);
+        if (modelLabel) {
+          html += " <span style='color:var(--muted);font-size:10px;opacity:0.7'>" + escapeHtml(modelLabel) + "</span>";
+        }
+        html += "</span><span style='color:var(--muted)'>" + fmtNum(val) + " " + unit + "</span></div>" +
+          "<div class='gauge' style='height:8px'><div class='gauge-fill' style='width:" + w.toFixed(1) + "%;background:var(--accent)'></div></div></div>";
+      }
+      el.innerHTML = html;
+    }
+
+    function renderBarList(elId, data, unit) {
+      const el = document.getElementById(elId);
+      const entries = Object.entries(data).sort((a, b) => b[1] - a[1]);
+      if (entries.length === 0) {
+        el.innerHTML = "<div class='empty-msg'>No data</div>";
+        return;
+      }
+      const maxVal = Math.max(...entries.map(e => e[1]), 1);
+      let html = "";
+      for (const [name, val] of entries) {
+        const w = (val / maxVal) * 100;
+        html += "<div style='margin-bottom:6px'><div style='display:flex;justify-content:space-between;font-size:11px;margin-bottom:2px'>" +
+          "<span>" + escapeHtml(name) + "</span><span style='color:var(--muted)'>" + fmtNum(val) + " " + unit + "</span></div>" +
+          "<div class='gauge' style='height:8px'><div class='gauge-fill' style='width:" + w.toFixed(1) + "%;background:var(--accent)'></div></div></div>";
+      }
+      el.innerHTML = html;
+    }
+
+    function renderLlmStats() {
+      const stats = state.llmStats;
+      if (!stats) {
+        document.getElementById("latency-table").innerHTML = "<div class='empty-msg'>Loading LLM stats...</div>";
+        document.getElementById("error-table").innerHTML = "<div class='empty-msg'>Loading...</div>";
+        document.getElementById("calls-by-role").innerHTML = "";
+        return;
+      }
+
+      // Latency table
+      const models = Object.entries(stats.byModel || {}).sort((a, b) => b[1].callCount - a[1].callCount);
+      const latEl = document.getElementById("latency-table");
+      if (models.length === 0) {
+        latEl.innerHTML = "<div class='empty-msg'>No LLM calls recorded</div>";
+      } else {
+        const maxP95 = Math.max(...models.map(m => m[1].p95LatencyMs), 1);
+        let html = "<table class='stat-table'><thead><tr><th>Model</th><th class='num'>Calls</th><th class='num'>Avg</th><th class='num'>p50</th><th class='num'>p95</th><th class='num'>Tokens</th><th class='num'>Errors</th><th>Latency</th></tr></thead><tbody>";
+        for (const [name, s] of models) {
+          const errPct = s.callCount > 0 ? ((s.errorCount / s.callCount) * 100).toFixed(1) : "0.0";
+          const barW = (s.p95LatencyMs / maxP95) * 100;
+          html += "<tr><td>" + escapeHtml(name) + "</td>" +
+            "<td class='num'>" + fmtNum(s.callCount) + "</td>" +
+            "<td class='num'>" + fmtMs(s.avgLatencyMs) + "</td>" +
+            "<td class='num'>" + fmtMs(s.p50LatencyMs) + "</td>" +
+            "<td class='num'>" + fmtMs(s.p95LatencyMs) + "</td>" +
+            "<td class='num'>" + fmtNum(s.totalTokens) + "</td>" +
+            "<td class='num'>" + s.errorCount + " (" + errPct + "%)</td>" +
+            "<td><div class='hbar-track'><div class='hbar-fill' style='width:" + barW.toFixed(1) + "%;background:var(--accent)'></div></div></td></tr>";
+        }
+        html += "</tbody></table>";
+        latEl.innerHTML = html;
+      }
+
+      // Error breakdown
+      const errEl = document.getElementById("error-table");
+      const errBreakdown = stats.errorBreakdown || {};
+      const errModels = Object.entries(errBreakdown);
+      if (errModels.length === 0) {
+        errEl.innerHTML = "<div class='empty-msg'>No errors recorded</div>";
+      } else {
+        let html = "<table class='stat-table'><thead><tr><th>Model</th><th>Errors</th></tr></thead><tbody>";
+        for (const [model, codes] of errModels.sort((a, b) => a[0].localeCompare(b[0]))) {
+          const badges = Object.entries(codes).map(([code, count]) => {
+            const cls = code.includes("rate") ? "rate-limit" : code.includes("timeout") ? "timeout" : code.includes("api") ? "api-error" : "other";
+            return "<span class='err-badge " + cls + "'>" + escapeHtml(code) + ": " + count + "</span>";
+          }).join(" ");
+          html += "<tr><td>" + escapeHtml(model) + "</td><td>" + badges + "</td></tr>";
+        }
+        html += "</tbody></table>";
+        errEl.innerHTML = html;
+      }
+
+      // Calls by role
+      const roleEl = document.getElementById("calls-by-role");
+      const roles = Object.entries(stats.byRole || {}).sort((a, b) => b[1].callCount - a[1].callCount);
+      if (roles.length === 0) {
+        roleEl.innerHTML = "<div class='empty-msg'>No data</div>";
+      } else {
+        let html = "";
+        for (const [name, s] of roles) {
+          html += "<div class='card'><div class='label'>" + escapeHtml(name) + "</div>" +
+            "<div class='value'>" + fmtNum(s.callCount) + " <span style='font-size:12px;color:var(--muted)'>calls</span></div>" +
+            "<div class='sub'>" + fmtNum(s.totalTokens) + " tokens &middot; " + fmtMs(s.avgLatencyMs) + " avg</div></div>";
+        }
+        roleEl.innerHTML = html;
+      }
+    }
+
+    function renderBudget() {
+      const limits = state.limits || {};
+      const m = state.metrics;
+      const section = document.getElementById("budget-section");
+      const el = document.getElementById("budget-gauges");
+      if (!m) { section.hidden = true; return; }
+      const run = m.runTotals || {};
+      const budgets = [];
+      const maxRunTokens = limits.max_run_total_tokens;
+      if (maxRunTokens && maxRunTokens > 0) {
+        budgets.push({ label: "Run Total Tokens", used: run.totalTokens || 0, limit: maxRunTokens });
+      }
+      if (budgets.length === 0) { section.hidden = true; return; }
+      section.hidden = false;
+      let html = "";
+      for (const b of budgets) {
+        const usedPct = (b.used / b.limit) * 100;
+        const color = usedPct > 90 ? "var(--red)" : usedPct > 70 ? "var(--amber)" : "var(--accent)";
+        html += "<div style='margin-bottom:8px'><div style='font-size:11px;color:var(--muted);margin-bottom:2px'>" + escapeHtml(b.label) + ": " + fmtNum(b.used) + " / " + fmtNum(b.limit) + "</div>" +
+          "<div class='gauge'><div class='gauge-fill' style='width:" + Math.min(usedPct, 100).toFixed(1) + "%;background:" + color + "'></div>" +
+          "<div class='gauge-label'>" + usedPct.toFixed(1) + "%</div></div></div>";
+      }
+      el.innerHTML = html;
+    }
+
+    function render() {
+      renderHeap();
+      renderPhaseTimings();
+      renderTokenUsage();
+      renderLlmStats();
+      renderBudget();
+    }
+
+    /* ── SSE Event Processing ── */
+    function applyEvent(event) {
+      if (!event || !event.type) return;
+      switch (event.type) {
+        case "heap_snapshot":
+          state.heapMetrics = event.data;
+          renderHeap();
+          break;
+        case "phase_timings":
+          state.phaseTimings.push(event.data);
+          if (state.phaseTimings.length > 200) state.phaseTimings.shift();
+          renderPhaseTimings();
+          break;
+        case "metrics_snapshot":
+          state.metrics = event.data.metrics || event.data;
+          renderTokenUsage();
+          renderBudget();
+          break;
+        case "limits_config":
+          state.limits = event.data.limits || event.data;
+          renderBudget();
+          break;
+      }
+    }
+
+    /* ── LLM Stats Fetch ── */
+    let llmStatsFetchTimer = null;
+    async function fetchLlmStats() {
+      const scope = document.getElementById("llm-scope").value;
+      const tf = document.getElementById("llm-timeframe").value;
+      let url = "/api/obs/llm-stats?scope=" + scope;
+      if (tf && tf !== "0") url += "&timeframe=" + tf;
+      try {
+        const resp = await fetch(url, { cache: "no-store" });
+        if (resp.ok) {
+          state.llmStats = await resp.json();
+          renderLlmStats();
+        }
+      } catch (_) {}
+    }
+
+    function scheduleLlmStatsFetch() {
+      if (llmStatsFetchTimer) clearInterval(llmStatsFetchTimer);
+      fetchLlmStats();
+      llmStatsFetchTimer = setInterval(fetchLlmStats, 10000);
+    }
+
+    /* ── Boot ── */
+    async function boot() {
+      const statusEl = document.getElementById("status");
+
+      // Load initial snapshot
+      try {
+        const snapshot = await fetch("/api/obs/snapshot", { cache: "no-store" }).then(r => r.json());
+        state.heapMetrics = snapshot.heapMetrics || null;
+        state.phaseTimings = snapshot.phaseTimings || [];
+        state.metrics = snapshot.metrics || null;
+        state.limits = snapshot.limits || {};
+        state.storeStats = snapshot.storeStats || {};
+      } catch (_) {}
+
+      render();
+      scheduleLlmStatsFetch();
+
+      // Event listeners for controls
+      document.getElementById("timing-timeframe").addEventListener("change", renderPhaseTimings);
+      document.getElementById("llm-scope").addEventListener("change", () => { renderTokenUsage(); scheduleLlmStatsFetch(); });
+      document.getElementById("llm-timeframe").addEventListener("change", scheduleLlmStatsFetch);
+
+      // SSE connection
+      const es = new EventSource("/api/obs/events");
+      es.addEventListener("open", () => { statusEl.textContent = "connected"; });
+      es.addEventListener("error", () => { statusEl.textContent = "reconnecting..."; });
+      es.addEventListener("agent", (msg) => {
+        try { applyEvent(JSON.parse(msg.data)); } catch (_) {}
+      });
+    }
+
+    boot();
+  </script>
+</body>
+</html>

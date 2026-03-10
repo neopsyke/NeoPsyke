@@ -41,6 +41,8 @@ class DashboardStateStore(
     private val queueSaturationByType = mutableMapOf<String, Long>()
     private val workspaceSnapshots = ArrayDeque<WorkspaceSnapshotRecord>()
     private val latestWorkspaceSnapshotByRoot = mutableMapOf<String, WorkspaceSnapshotRecord>()
+    private val phaseTimings = ArrayDeque<Map<String, Any?>>()
+    private var heapMetrics: Map<String, Any?>? = null
     private val subscribers = mutableSetOf<Channel<String>>()
     private val chatSessions = linkedMapOf<String, ChatSessionRecord>()
     private val rootInputSessionMap = mutableMapOf<String, String>()
@@ -189,6 +191,17 @@ class DashboardStateStore(
                     }
                 }
 
+                "phase_timings" -> {
+                    if (phaseTimings.size >= MAX_PHASE_TIMINGS) {
+                        phaseTimings.removeFirst()
+                    }
+                    phaseTimings.addLast(event.data)
+                }
+
+                "heap_snapshot" -> {
+                    heapMetrics = event.data
+                }
+
                 "task_workspace_destroyed" -> {
                     val rootId = event.data["root_input_id"].asString()
                     if (rootId != null) {
@@ -221,7 +234,16 @@ class DashboardStateStore(
                 limits = limits,
                 metrics = metrics,
                 instrumentationHealth = instrumentationHealthMap(),
-                recentEvents = events.toList().sortedBy { it.id }
+                recentEvents = events.toList().sortedBy { it.id },
+                phaseTimings = phaseTimings.toList(),
+                heapMetrics = heapMetrics,
+                storeStats = mapOf(
+                    "event_count" to events.size,
+                    "max_events" to maxEvents,
+                    "workspace_snapshot_count" to workspaceSnapshots.size,
+                    "chat_session_count" to chatSessions.size,
+                    "subscriber_count" to subscribers.size,
+                ),
             )
         }
         return mapper.writeValueAsString(snapshot)
@@ -754,6 +776,7 @@ class DashboardStateStore(
         const val MAX_SESSION_TITLE_CHARS: Int = 80
         const val MAX_SESSION_ID_GENERATION_ATTEMPTS: Int = 4
         const val SUBSCRIBER_CHANNEL_CAPACITY: Int = 1_000
+        const val MAX_PHASE_TIMINGS: Int = 200
     }
 }
 
@@ -799,6 +822,9 @@ data class DashboardSnapshot(
     val metrics: MetricsSnapshot?,
     val instrumentationHealth: Map<String, Any?> = emptyMap(),
     val recentEvents: List<AgentEvent>,
+    val phaseTimings: List<Map<String, Any?>> = emptyList(),
+    val heapMetrics: Map<String, Any?>? = null,
+    val storeStats: Map<String, Any?> = emptyMap(),
 )
 
 class DashboardFlowSubscription(

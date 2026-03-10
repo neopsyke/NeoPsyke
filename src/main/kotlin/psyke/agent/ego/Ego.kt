@@ -23,6 +23,7 @@ import psyke.instrumentation.AgentEvent
 import psyke.instrumentation.AgentEvents
 import psyke.instrumentation.AgentInstrumentation
 import psyke.instrumentation.NoopAgentInstrumentation
+import psyke.instrumentation.PhaseTimingCollector
 
 private val logger = KotlinLogging.logger {}
 
@@ -166,6 +167,9 @@ class Ego(
                 sessionId = resolveSessionId(taskConversationContext)
             )
             emitQueueSnapshot("task_processed")
+            if (steps == 1 || steps % HEAP_SNAPSHOT_INTERVAL == 0) {
+                emitHeapSnapshot()
+            }
         }
 
         if (steps >= config.planner.maxLoopStepsPerInput && scheduler.hasPendingWork()) {
@@ -207,10 +211,12 @@ class Ego(
     }
 
     private suspend fun processInput(input: PendingInput) {
+        val timing = PhaseTimingCollector("input", input.rootInputId)
         val convCtx = input.conversationContext
         val sessionId = resolveSessionId(convCtx)
         activateSession(convCtx)
 
+        timing.startPhase("input_processing")
         instrumentation.emit(AgentEvents.inputProcessing(input))
         val userTurn = DialogueTurn(
             role = DialogueRole.USER,
@@ -223,6 +229,8 @@ class Ego(
         memory.remember(userTurn)
         maybeCreateTaskWorkspace(input)
         trimDialogue(sessionId)
+
+        timing.startPhase("planner_context")
         val trigger = EgoTrigger.IncomingInput(input)
         val context = plannerContext(
             trigger = trigger,
@@ -230,7 +238,11 @@ class Ego(
             sessionId = sessionId,
             conversationContext = convCtx
         )
+
+        timing.startPhase("meta_assessment")
         val assessment = deliberation.maybeAssessAndUpdateGuidance(trigger, context)
+
+        timing.startPhase("planner_decide")
         val decision = planner.decide(
             trigger = trigger,
             context = context.copy(metaGuidance = deliberation.guidance())
@@ -238,6 +250,8 @@ class Ego(
         val finalDecision = deliberation.maybeApplyPressureOverride(decision, assessment)
         deliberation.onPlannerDecision(finalDecision)
         journalPlannerDecision(finalDecision)
+
+        timing.startPhase("apply_decision")
         applyDecision(
             finalDecision,
             nextPassCount = 0,
@@ -246,9 +260,12 @@ class Ego(
             rootInputReceivedAtMs = input.receivedAtMs,
             conversationContext = convCtx
         )
+
+        instrumentation.emit(AgentEvents.phaseTimings(timing.build()))
     }
 
     private suspend fun processThought(thought: PendingThought) {
+        val timing = PhaseTimingCollector("thought", thought.rootInputId)
         val convCtx = thought.conversationContext
         val sessionId = resolveSessionId(convCtx)
         activateSession(convCtx)
@@ -261,10 +278,18 @@ class Ego(
             }
             return
         }
+
+        timing.startPhase("thought_processing")
         instrumentation.emit(AgentEvents.thoughtProcessing(thought))
+
+        timing.startPhase("planner_context")
         val trigger = EgoTrigger.PendingThoughtInput(thought)
         val context = plannerContext(trigger, rootInputId = thought.rootInputId, sessionId = sessionId, conversationContext = convCtx)
+
+        timing.startPhase("meta_assessment")
         val assessment = deliberation.maybeAssessAndUpdateGuidance(trigger, context)
+
+        timing.startPhase("planner_decide")
         val decision = planner.decide(
             trigger = trigger,
             context = context.copy(metaGuidance = deliberation.guidance())
@@ -272,6 +297,8 @@ class Ego(
         val finalDecision = deliberation.maybeApplyPressureOverride(decision, assessment)
         deliberation.onPlannerDecision(finalDecision)
         journalPlannerDecision(finalDecision)
+
+        timing.startPhase("apply_decision")
         applyDecision(
             finalDecision,
             nextPassCount = thought.passes + 1,
@@ -280,13 +307,17 @@ class Ego(
             rootInputReceivedAtMs = thought.rootInputReceivedAtMs,
             conversationContext = convCtx
         )
+
+        instrumentation.emit(AgentEvents.phaseTimings(timing.build()))
     }
 
     private suspend fun processAction(action: PendingAction) {
+        val timing = PhaseTimingCollector("action", action.rootInputId)
         val convCtx = action.conversationContext
         val sessionId = resolveSessionId(convCtx)
         activateSession(convCtx)
 
+        timing.startPhase("workspace_final_pass")
         val resolvedAction = applyTaskWorkspaceFinalPass(action)
         instrumentation.emit(AgentEvents.actionReviewRequested(resolvedAction))
         if (resolvedAction.isFallbackExplanation) {
@@ -331,8 +362,10 @@ class Ego(
             deliberation.onActionExecuted(resolvedAction, observed)
             maybeRecordTaskWorkspaceOutcome(resolvedAction, outcome, observed)
             maybeRunTerminalAnswerMemoryAssessment(resolvedAction, outcome, sessionId)
+            instrumentation.emit(AgentEvents.phaseTimings(timing.build()))
             return
         }
+        timing.startPhase("task_verifier")
         val taskVerificationDecision = taskVerifier.review(
             action = resolvedAction,
             context = TaskVerifierContext(
@@ -368,8 +401,10 @@ class Ego(
                 sessionId = sessionId,
                 source = "task_verifier"
             )
+            instrumentation.emit(AgentEvents.phaseTimings(timing.build()))
             return
         }
+        timing.startPhase("superego_review")
         val gateDecision = superego.review(resolvedAction, superegoContext(sessionId))
         instrumentation.emit(
             AgentEvents.actionReviewResult(
@@ -388,9 +423,11 @@ class Ego(
                 sessionId = sessionId,
                 source = "superego"
             )
+            instrumentation.emit(AgentEvents.phaseTimings(timing.build()))
             return
         }
 
+        timing.startPhase("action_execute")
         val outcome = executeActionSafely(resolvedAction) ?: return
         instrumentation.emit(AgentEvents.actionExecuted(resolvedAction, outcome.statusSummary))
         if (resolvedAction.type == ActionType.ANSWER) {
@@ -406,6 +443,7 @@ class Ego(
                 actionType = resolvedAction.type.name.lowercase(),
             )
         }
+        timing.startPhase("post_execute")
         val observed = deliberation.observedEvidence(resolvedAction, outcome)
         deliberation.recordEvidenceProgress(resolvedAction, outcome, observed)
         deliberation.onActionExecuted(resolvedAction, observed)
@@ -441,6 +479,7 @@ class Ego(
             sessionId = sessionId
         )
 
+        timing.startPhase("follow_up")
         if (resolvedAction.requiresFollowUpThought) {
             val safePlannerSignal = PromptInjectionDefense.asUntrustedDataBlock(
                 text = outcome.plannerSignal,
@@ -471,6 +510,8 @@ class Ego(
             }
             emitQueueSnapshot("follow_up_thought_enqueued")
         }
+
+        instrumentation.emit(AgentEvents.phaseTimings(timing.build()))
     }
 
     private fun handleDeniedAction(
@@ -1448,6 +1489,44 @@ class Ego(
         )
     }
 
+    private fun emitHeapSnapshot() {
+        val rt = Runtime.getRuntime()
+        val usedBytes = rt.totalMemory() - rt.freeMemory()
+        val maxBytes = rt.maxMemory()
+        val memStats = memoryStore.stats()
+        val queueSnap = scheduler.queueSnapshot()
+        val modules = buildMap<String, Map<String, Any?>> {
+            put("memory_store", mapOf(
+                "label" to "Short-term memory",
+                "item_count" to memStats.recentTurns,
+                "chars_or_bytes" to memStats.totalChars.toLong(),
+                "unit" to "chars",
+            ))
+            put("task_workspaces", mapOf(
+                "label" to "Task workspaces",
+                "item_count" to taskWorkspaceStore.activeTaskCount(),
+                "chars_or_bytes" to 0L,
+                "unit" to "items",
+            ))
+            put("attention_queues", mapOf(
+                "label" to "Attention queues",
+                "item_count" to (queueSnap.pendingInputCount + queueSnap.pendingThoughtCount + queueSnap.pendingActionCount),
+                "chars_or_bytes" to 0L,
+                "unit" to "items",
+            ))
+        }
+        instrumentation.emit(
+            AgentEvents.heapSnapshot(
+                jvmTotalBytes = rt.totalMemory(),
+                jvmFreeBytes = rt.freeMemory(),
+                jvmMaxBytes = maxBytes,
+                jvmUsedBytes = usedBytes,
+                jvmUsedPercent = if (maxBytes > 0) (usedBytes.toDouble() / maxBytes) * 100.0 else 0.0,
+                moduleEstimates = modules,
+            )
+        )
+    }
+
     private fun cleanupResolvedInputAfterAnswer(action: PendingAction) {
         val rootInputId = action.rootInputId ?: return
         val sessionId = resolveSessionId(action.conversationContext)
@@ -1655,5 +1734,6 @@ class Ego(
         const val JOURNAL_SUMMARY_PREVIEW_CHARS: Int = 160
         const val MAX_TRACKED_SESSIONS: Int = 32
         const val REDUNDANCY_SIGNAL_MIN_HITS: Int = 2
+        const val HEAP_SNAPSHOT_INTERVAL: Int = 5
     }
 }
