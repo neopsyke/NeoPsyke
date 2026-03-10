@@ -10,6 +10,9 @@ import psyke.agent.support.RetryPolicy
 import psyke.agent.support.TextSecurity
 import psyke.agent.actions.websearch.WebSearchEngine
 import psyke.agent.actions.websearch.WebSearchResult
+import psyke.instrumentation.AgentEvent
+import psyke.instrumentation.AgentInstrumentation
+import psyke.instrumentation.NoopAgentInstrumentation
 import psyke.llm.ChatCallMetadata
 import psyke.llm.ChatMessage
 import psyke.llm.ChatModelClient
@@ -25,16 +28,18 @@ private val logger = KotlinLogging.logger {}
 class LegacyPromptWebSearchEngine(
     private val modelClient: ChatModelClient,
     private val config: AgentConfig,
+    private val instrumentation: AgentInstrumentation = NoopAgentInstrumentation,
 ) : WebSearchEngine {
 
     override fun search(query: String, maxResults: Int): WebSearchResult {
-        val messages = PromptBudgetAllocator.allocate(
+        val promptAllocation = PromptBudgetAllocator.allocate(
             sections = listOf(
                 PromptBudgetAllocator.Section(
+                    key = "legacy_web_search_system_instructions",
                     role = ChatRole.SYSTEM,
-                    priority = PromptBudgetAllocator.Priority.MANDATORY,
-                    required = true,
-                    minTokens = 20,
+                    band = PromptBudgetAllocator.Band.REQUIRED_CORE,
+                    importance = PromptBudgetAllocator.Importance.MEDIUM,
+                    floorTokens = 20,
                     content = """
                     You are a web research assistant.
                     If your runtime has web access, use it. If not, provide best-effort knowledge and mark uncertainty.
@@ -42,9 +47,10 @@ class LegacyPromptWebSearchEngine(
                     """.trimIndent()
                 ),
                 PromptBudgetAllocator.Section(
+                    key = "legacy_web_search_json_schema",
                     role = ChatRole.SYSTEM,
-                    priority = PromptBudgetAllocator.Priority.IMPORTANT,
-                    minTokens = 16,
+                    band = PromptBudgetAllocator.Band.REQUIRED_CONTEXT,
+                    floorTokens = 16,
                     content = """
                     JSON schema:
                     {
@@ -55,15 +61,23 @@ class LegacyPromptWebSearchEngine(
                     """.trimIndent()
                 ),
                 PromptBudgetAllocator.Section(
+                    key = "legacy_web_search_query",
                     role = ChatRole.USER,
-                    priority = PromptBudgetAllocator.Priority.MANDATORY,
-                    required = true,
-                    minTokens = 12,
+                    band = PromptBudgetAllocator.Band.REQUIRED_CORE,
+                    importance = PromptBudgetAllocator.Importance.HIGH,
+                    floorTokens = 12,
                     content = "Search query: $query"
                 )
             ),
             maxTokens = config.planner.maxPromptTokens
         )
+        instrumentation.emit(
+            AgentEvent(
+                type = "prompt_budget_allocation",
+                data = promptAllocation.diagnostics.toTelemetryData(callSite = "legacy_web_search_prompt"),
+            )
+        )
+        val messages = promptAllocation.messages
 
         var response = null as psyke.llm.ChatCompletion?
         var lastError: Exception? = null

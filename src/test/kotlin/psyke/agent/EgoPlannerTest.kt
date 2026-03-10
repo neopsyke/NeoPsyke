@@ -47,6 +47,12 @@ class EgoPlannerTest {
                 it.type == "planner_decision" && it.data["decision_type"] == "thought"
             }
         )
+        assertTrue(
+            instrumentation.events.any {
+                it.type == "prompt_budget_allocation" &&
+                    it.data["call_site"] == "planner_prompt"
+            }
+        )
     }
 
     @Test
@@ -662,7 +668,7 @@ class EgoPlannerTest {
         llm.enqueueRawResponse("""{"decision":"noop","reason":"done"}""")
         val planner = LlmEgoPlanner(
             modelClient = llm,
-            config = AgentConfig(planner = PlannerConfig(maxPromptTokens = 120))
+            config = AgentConfig(planner = PlannerConfig(maxPromptTokens = 180))
         )
 
         val context = PlannerContext(
@@ -683,7 +689,7 @@ class EgoPlannerTest {
         assertTrue(llm.lastMessages.isNotEmpty())
         assertTrue(llm.lastMessages.any { it.role == ChatRole.USER && it.content.contains("Trigger:") })
         val estimatedPromptTokens = llm.lastMessages.sumOf { TextSecurity.estimateTokens(it.content) + 4 }
-        assertTrue(estimatedPromptTokens <= 120)
+        assertTrue(estimatedPromptTokens <= 180)
         assertIs<ChatMessage>(llm.lastMessages.first())
     }
 

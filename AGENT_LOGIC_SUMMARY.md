@@ -152,7 +152,9 @@ It is intentionally high-level and should stay aligned with the code.
 ## Planner Logic
 - File: `src/main/kotlin/psyke/agent/ego/LlmEgoPlanner.kt`
 - Responsibilities:
-  - Prompt assembly with budget allocation.
+  - Prompt assembly with contract-based budget allocation (`required_core` > `required_context` > `optional`).
+  - Overhead-aware floor reservation per section, tiered degradation, and single-message fallback under extreme prompt pressure.
+  - Emits `prompt_budget_allocation` telemetry for planner and action-verifier prompt builds (cost estimates, degradation path, fallback/floor-violation signals).
   - Strict JSON parse + minimal repair for invalid escapes.
   - One strict-JSON retry when initial planner output is non-parseable.
   - Normalizes `action_payload` from either JSON string or structured JSON (object/array) into a string payload.
@@ -203,6 +205,7 @@ It is intentionally high-level and should stay aligned with the code.
   - optional dynamic expansion uses `dynamicPromptToCompletionRatio`
   - hard-capped by `dynamicCompletionHardMaxTokens`
   - expansion is cost-weighted by configured model `token_weight`
+- Superego prompt assembly uses the same contract allocator and emits `prompt_budget_allocation` telemetry (`call_site=superego_prompt`).
 - Returns `GateDecision(allow, reason, reasonCode)` from schema-enforced structured output (`response_format=json_schema`), with parser fallback for defensive handling.
 - LLM deny responses can include optional `reason_code`; deterministic denials emit policy-prefixed `reason_code`s.
 - If initial LLM output is non-parseable, stage engine performs one schema-enforced retry before default deny fallback.

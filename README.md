@@ -397,6 +397,25 @@ control> exit
   - default input: `.psyke/logs/latest-events.jsonl`
   - example: `freud/scripts/task-verifier-telemetry.sh .psyke/logs/runs/<run-id>.events.jsonl`
 
+## Prompt Budget Telemetry And Tuning
+- `prompt_budget_allocation` events are emitted when prompts are assembled for:
+  - planner (`call_site=planner_prompt`)
+  - planner action verifier (`call_site=action_verifier_prompt`)
+  - superego (`call_site=superego_prompt`)
+  - legacy prompt web search (`call_site=legacy_web_search_prompt`)
+- Event payload includes:
+  - budget and cost estimates (`max_tokens`, `estimated_total_cost`, `allocated_total_cost`, `reserved_floor_cost`)
+  - degradation path (`degradation_path`)
+  - fallback/floor pressure (`single_message_fallback`, `floor_violation_count`, `dropped_section_count`)
+  - per-band rollup (`bands.required_core|required_context|optional`)
+- Dashboard snapshot (`/api/obs/snapshot`) exposes aggregated `promptBudgetStats`.
+- Detailed tuning workflow: `PROMPT_BUDGET_TUNING_GUIDE.md`.
+- Runbook for live `./run-psyke.sh` diagnostics: `PROMPT_BUDGET_RUN_DIAGNOSTICS.md`.
+- For run-log aggregation from sidecar JSONL:
+  - `freud/scripts/prompt-budget-telemetry.sh`
+  - default input: `.psyke/logs/latest-events.jsonl`
+  - example: `freud/scripts/prompt-budget-telemetry.sh .psyke/logs/runs/<run-id>.events.jsonl`
+
 ## Provider status checks
 - Before interactive mode, Psyke runs provider health checks for each configured cognitive role endpoint.
 - Before live/model eval modes, Psyke runs a provider health check for the planner endpoint.

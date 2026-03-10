@@ -31,7 +31,7 @@ class SuperegoGatekeeperTest {
         val instrumentation = RecordingInstrumentation()
         val gatekeeper = Superego(
             modelClient = llm,
-            config = AgentConfig(planner = PlannerConfig(maxPromptTokens = 100)),
+            config = AgentConfig(planner = PlannerConfig(maxPromptTokens = 160)),
             instrumentation = instrumentation
         )
 
@@ -49,9 +49,15 @@ class SuperegoGatekeeperTest {
                 it.type == "superego_output" && it.data["allow"] == true
             }
         )
+        assertTrue(
+            instrumentation.events.any {
+                it.type == "prompt_budget_allocation" &&
+                    it.data["call_site"] == "superego_prompt"
+            }
+        )
         assertTrue(llm.lastMessages.any { it.role == ChatRole.USER && it.content.contains("Candidate action:") })
         val estimatedPromptTokens = llm.lastMessages.sumOf { TextSecurity.estimateTokens(it.content) + 4 }
-        assertTrue(estimatedPromptTokens <= 100)
+        assertTrue(estimatedPromptTokens <= 160)
     }
 
     @Test

@@ -47,6 +47,12 @@ class DashboardStateStore(
     private val taskVerifierByReasonCode = mutableMapOf<String, Long>()
     private val taskVerifierByIntent = mutableMapOf<String, Long>()
     private val taskVerifierByVolatility = mutableMapOf<String, Long>()
+    private var promptBudgetAllocationsTotal: Long = 0
+    private var promptBudgetFallbackCount: Long = 0
+    private var promptBudgetFloorViolationEvents: Long = 0
+    private var promptBudgetDroppedSectionsTotal: Long = 0
+    private val promptBudgetByCallSite = mutableMapOf<String, Long>()
+    private val promptBudgetByDegradationPath = mutableMapOf<String, Long>()
     private val workspaceSnapshots = ArrayDeque<WorkspaceSnapshotRecord>()
     private val latestWorkspaceSnapshotByRoot = mutableMapOf<String, WorkspaceSnapshotRecord>()
     private val phaseTimings = ArrayDeque<Map<String, Any?>>()
@@ -228,6 +234,29 @@ class DashboardStateStore(
                     }
                 }
 
+                "prompt_budget_allocation" -> {
+                    promptBudgetAllocationsTotal += 1
+                    val callSite = event.data["call_site"]?.toString()?.ifBlank { "unknown" } ?: "unknown"
+                    promptBudgetByCallSite[callSite] = (promptBudgetByCallSite[callSite] ?: 0L) + 1L
+
+                    val degradationPath = event.data["degradation_path"]?.toString()?.ifBlank { "none" } ?: "none"
+                    promptBudgetByDegradationPath[degradationPath] =
+                        (promptBudgetByDegradationPath[degradationPath] ?: 0L) + 1L
+
+                    val fallback = (event.data["single_message_fallback"] as? Boolean) ?: false
+                    if (fallback) {
+                        promptBudgetFallbackCount += 1
+                    }
+
+                    val floorViolationCount = (event.data["floor_violation_count"] as? Number)?.toLong() ?: 0L
+                    if (floorViolationCount > 0) {
+                        promptBudgetFloorViolationEvents += 1
+                    }
+
+                    val droppedSectionCount = (event.data["dropped_section_count"] as? Number)?.toLong() ?: 0L
+                    promptBudgetDroppedSectionsTotal += droppedSectionCount
+                }
+
                 "phase_timings" -> {
                     if (phaseTimings.size >= MAX_PHASE_TIMINGS) {
                         phaseTimings.removeFirst()
@@ -272,6 +301,7 @@ class DashboardStateStore(
                 metrics = metrics,
                 instrumentationHealth = instrumentationHealthMap(),
                 taskVerifierStats = taskVerifierStatsMap(),
+                promptBudgetStats = promptBudgetStatsMap(),
                 recentEvents = events.toList().sortedBy { it.id },
                 phaseTimings = phaseTimings.toList(),
                 heapMetrics = heapMetrics,
@@ -511,6 +541,23 @@ class DashboardStateStore(
             put("by_reason_code", taskVerifierByReasonCode.toMap())
             put("by_intent_category", taskVerifierByIntent.toMap())
             put("by_volatility_level", taskVerifierByVolatility.toMap())
+        }
+    }
+
+    private fun promptBudgetStatsMap(): Map<String, Any?> {
+        val fallbackRate = if (promptBudgetAllocationsTotal > 0) {
+            promptBudgetFallbackCount.toDouble() / promptBudgetAllocationsTotal.toDouble()
+        } else {
+            0.0
+        }
+        return buildMap {
+            put("total_allocations", promptBudgetAllocationsTotal)
+            put("single_message_fallback_count", promptBudgetFallbackCount)
+            put("single_message_fallback_rate", fallbackRate)
+            put("floor_violation_events", promptBudgetFloorViolationEvents)
+            put("dropped_sections_total", promptBudgetDroppedSectionsTotal)
+            put("by_call_site", promptBudgetByCallSite.toMap())
+            put("by_degradation_path", promptBudgetByDegradationPath.toMap())
         }
     }
 
@@ -885,6 +932,7 @@ data class DashboardSnapshot(
     val metrics: MetricsSnapshot?,
     val instrumentationHealth: Map<String, Any?> = emptyMap(),
     val taskVerifierStats: Map<String, Any?> = emptyMap(),
+    val promptBudgetStats: Map<String, Any?> = emptyMap(),
     val recentEvents: List<AgentEvent>,
     val phaseTimings: List<Map<String, Any?>> = emptyList(),
     val heapMetrics: Map<String, Any?>? = null,

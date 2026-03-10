@@ -99,6 +99,7 @@ sequenceDiagram
             Ego->>TWS: create or update request workspace and index summary
             Ego->>Dash: emit task_workspace_head (with optional debug snapshot)
             Ego->>Planner: decide(context)
+            Note over Ego,Planner: PromptBudgetAllocator reserves required-core/context floors with message-overhead accounting, trims optional first, and emits prompt_budget_allocation
             Note over Ego,Planner: On non-parseable planner JSON, planner issues one strict-JSON retry before noop fallback
             Planner-->>Ego: thought/action/plan/noop
             Ego->>Delib: maybeApplyPressureOverride
@@ -127,6 +128,7 @@ sequenceDiagram
                     else deterministic pass
                         Ego->>Sup: llm review(action)
                         Note over Ego,Sup: Stage-1 uses cheaper model from catalog when two-stage is enabled
+                        Note over Ego,Sup: Superego prompt build uses same prompt allocator contract and emits prompt_budget_allocation
                         Note over Ego,Sup: Escalate on low confidence, policy-risk, or technical fallback
                         Note over Ego,Sup: Superego completion max_tokens scales with prompt estimate (bounded floor/hard-cap) and model token_weight
                         Note over Ego,Sup: Structured output is schema-enforced (response_format=json_schema)
