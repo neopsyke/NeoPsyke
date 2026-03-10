@@ -1,6 +1,7 @@
 package psyke.agent
 
 import psyke.support.StubChatModelClient
+import psyke.support.RecordingInstrumentation
 import psyke.llm.ChatModelClient
 import psyke.llm.ChatRequestOptions
 import kotlin.test.Test
@@ -273,5 +274,134 @@ class MetaReasonerTest {
         assertEquals(MetaReasonerVerdict.FINALIZE_NOW, second.verdict)
         assertEquals(2, primaryCalls)
         assertEquals("meta_reasoner_fallback", fallback.lastOptions.metadata.callSite)
+    }
+
+    @Test
+    fun `meta reasoner retries with relaxed schema after provider schema validation failure`() {
+        var calls = 0
+        val observedSchemas = mutableListOf<String>()
+        val client = object : ChatModelClient {
+            override val modelName: String = "schema-sensitive-model"
+
+            override fun chat(messages: List<psyke.llm.ChatMessage>, options: ChatRequestOptions): psyke.llm.ChatCompletion {
+                calls += 1
+                val schema = (options.responseFormat as? psyke.llm.ChatResponseFormat.JsonSchema)?.schemaJson
+                if (schema != null) {
+                    observedSchemas += schema
+                }
+                if (calls == 1) {
+                    throw IllegalStateException(
+                        """[HTTP_400] Generated JSON does not match the expected schema. Error: jsonschema: '/reason' does not validate"""
+                    )
+                }
+                return psyke.llm.ChatCompletion(
+                    content = """{"verdict":"finalize_now","confidence":0.9,"reason":"${"a".repeat(220)}"}""",
+                    model = modelName
+                )
+            }
+        }
+        val reasoner = LlmMetaReasoner(
+            modelClient = client,
+            config = AgentConfig(
+                planner = PlannerConfig(llmRetryAttempts = 2),
+                metaReasoner = MetaReasonerConfig(dynamicCompletionEnabled = false)
+            )
+        )
+
+        val assessment = reasoner.assess(trigger = thoughtTrigger(), context = defaultContext())
+
+        assertEquals(MetaReasonerVerdict.FINALIZE_NOW, assessment.verdict)
+        assertEquals(180, assessment.reason.length)
+        assertEquals(2, calls)
+        assertTrue(observedSchemas.first().contains("maxLength"))
+        assertTrue(!observedSchemas.last().contains("maxLength"))
+    }
+
+    @Test
+    fun `meta reasoner retries empty-content failure with increased completion budget`() {
+        val observedBudgets = mutableListOf<Int>()
+        val client = object : ChatModelClient {
+            override val modelName: String = "empty-content-sensitive-model"
+
+            override fun chat(messages: List<psyke.llm.ChatMessage>, options: ChatRequestOptions): psyke.llm.ChatCompletion {
+                observedBudgets += options.maxTokens ?: -1
+                if ((options.maxTokens ?: 0) < 640) {
+                    throw IllegalStateException(
+                        "Groq chat returned empty message content (finish_reason=length, content_chars=0)."
+                    )
+                }
+                return psyke.llm.ChatCompletion(
+                    content = """{"verdict":"finalize_now","confidence":0.82,"reason":"budget bump worked"}""",
+                    model = modelName
+                )
+            }
+        }
+        val reasoner = LlmMetaReasoner(
+            modelClient = client,
+            config = AgentConfig(
+                planner = PlannerConfig(llmRetryAttempts = 2),
+                metaReasoner = MetaReasonerConfig(maxTokens = 512, dynamicCompletionEnabled = false)
+            )
+        )
+
+        val assessment = reasoner.assess(trigger = thoughtTrigger(), context = defaultContext())
+
+        assertEquals(MetaReasonerVerdict.FINALIZE_NOW, assessment.verdict)
+        assertEquals(listOf(512, 640), observedBudgets)
+    }
+
+    @Test
+    fun `meta reasoner retries with fallback model after repeated schema validation failures`() {
+        var primaryCalls = 0
+        val primary = object : ChatModelClient {
+            override val modelName: String = "primary-model"
+
+            override fun chat(messages: List<psyke.llm.ChatMessage>, options: ChatRequestOptions): psyke.llm.ChatCompletion {
+                primaryCalls += 1
+                throw IllegalStateException(
+                    """[HTTP_400] Generated JSON does not match the expected schema. Error: jsonschema: '/reason' does not validate"""
+                )
+            }
+        }
+        val fallback = StubChatModelClient(modelName = "fallback-model").apply {
+            enqueueRawResponse("""{"verdict":"request_tool_then_finalize","confidence":0.88,"reason":"fallback resolved decision"}""")
+        }
+        val reasoner = LlmMetaReasoner(
+            modelClient = primary,
+            config = AgentConfig(
+                planner = PlannerConfig(llmRetryAttempts = 1),
+                metaReasoner = MetaReasonerConfig(dynamicCompletionEnabled = false)
+            ),
+            fallbackModelClient = fallback
+        )
+
+        val first = reasoner.assess(trigger = thoughtTrigger(), context = defaultContext())
+        val second = reasoner.assess(trigger = thoughtTrigger(), context = defaultContext())
+
+        assertEquals(MetaReasonerVerdict.CONTINUE, first.verdict)
+        assertEquals(MetaReasonerVerdict.REQUEST_TOOL_THEN_FINALIZE, second.verdict)
+        assertEquals(2, primaryCalls)
+        assertEquals("meta_reasoner_fallback", fallback.lastOptions.metadata.callSite)
+    }
+
+    @Test
+    fun `meta reasoner emits prompt budget telemetry`() {
+        val llm = StubChatModelClient().apply {
+            enqueueRawResponse("""{"verdict":"continue","confidence":0.9,"reason":"ok"}""")
+        }
+        val instrumentation = RecordingInstrumentation()
+        val reasoner = LlmMetaReasoner(
+            modelClient = llm,
+            config = AgentConfig(metaReasoner = MetaReasonerConfig(dynamicCompletionEnabled = false)),
+            instrumentation = instrumentation
+        )
+
+        reasoner.assess(trigger = thoughtTrigger(), context = defaultContext())
+
+        assertTrue(
+            instrumentation.events.any {
+                it.type == "prompt_budget_allocation" && it.data["call_site"] == "meta_reasoner_prompt"
+            }
+        )
     }
 }

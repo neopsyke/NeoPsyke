@@ -169,7 +169,7 @@ Standalone Kotlin JVM app using Gradle with:
   - `EGO_FORCE_TERMINAL_PRESSURE_THRESHOLD` (default: `0.98`)
   - `EGO_FORCE_TERMINAL_STALE_STREAK_THRESHOLD` (default: `8`)
   - `EGO_META_REASONER_COOLDOWN_STEPS` (default: `6`)
-  - `EGO_META_REASONER_MAX_TOKENS` (default: `384`)
+  - `EGO_META_REASONER_MAX_TOKENS` (default: `512`)
   - `EGO_META_REASONER_DYNAMIC_COMPLETION_ENABLED` (default: `true`)
   - `EGO_META_REASONER_DYNAMIC_COMPLETION_HARD_MAX_TOKENS` (default: `640`)
   - `EGO_META_REASONER_DYNAMIC_PROMPT_TO_COMPLETION_RATIO` (default: `0.10`)
@@ -402,6 +402,7 @@ control> exit
   - planner (`call_site=planner_prompt`)
   - planner action verifier (`call_site=action_verifier_prompt`)
   - superego (`call_site=superego_prompt`)
+  - meta reasoner (`call_site=meta_reasoner_prompt`)
   - legacy prompt web search (`call_site=legacy_web_search_prompt`)
 - Event payload includes:
   - budget and cost estimates (`max_tokens`, `estimated_total_cost`, `allocated_total_cost`, `reserved_floor_cost`)

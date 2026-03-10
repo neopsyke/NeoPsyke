@@ -14,7 +14,7 @@ It is intentionally high-level and should stay aligned with the code.
 - `runInteractiveMode` composes:
   - LLM clients (planner, action-verifier, superego, meta-reasoner, long-term-memory advisor)
     - Each cognitive role can use an independent provider/api key/base URL/model from `llm-runtime.yaml`.
-    - `meta_reasoner_fallback` is optional and only used when repeated empty-content transport failures occur on the primary meta-reasoner endpoint.
+    - `meta_reasoner_fallback` is optional and used when repeated primary meta-reasoner technical failures occur (empty-content transport failures and schema-validation failures).
     - Optional `model_catalog` in `llm-runtime.yaml` provides per-provider model ROI metadata (`tier`, `token_weight`, optional cost fields).
     - Superego and memory-advisor read `token_weight` for their configured models and apply it to dynamic completion-budget scaling.
     - When `SuperegoConfig.twoStageReviewEnabled` is on, runtime resolves a cheaper primary superego model from `model_catalog` (same provider) and keeps the configured superego model as escalation stage.
@@ -239,8 +239,12 @@ It is intentionally high-level and should stay aligned with the code.
   - optional dynamic expansion with `dynamicPromptToCompletionRatio`
   - hard cap with `dynamicCompletionHardMaxTokens`
   - expansion weighted by configured model `token_weight`
-- Meta-reasoner calls now request schema-enforced structured output (`response_format=json_schema`) and keep parse fallback semantics for safety.
-- Meta-reasoner primary endpoint can fail over to optional `meta_reasoner_fallback` after repeated empty-content transport failures.
+- Meta-reasoner calls now request schema-enforced structured output (`response_format=json_schema`) with adaptive safeguards:
+  - local parse clamp on `reason` at 180 chars
+  - schema-validation fallback retry using relaxed schema (removes `reason.maxLength`) before giving up
+  - empty-content retry with one adaptive completion-budget increase (bounded by config)
+- Meta-reasoner emits `prompt_budget_allocation` telemetry (`call_site=meta_reasoner_prompt`) with completion-budget metadata.
+- Meta-reasoner primary endpoint can fail over to optional `meta_reasoner_fallback` after repeated technical failures (empty-content or schema-validation).
 
 ## Memory System
 - Short-term:
@@ -360,7 +364,7 @@ It is intentionally high-level and should stay aligned with the code.
   - superego -> deny fallback
   - meta-reasoner -> continue fallback
   - long-term advisor -> parse-fallback/skip save
-- For meta-reasoner and superego, circuit-breaker streaks now include repeated empty-content transport failures in addition to parse failures.
+- For meta-reasoner and superego, circuit-breaker streaks now include repeated empty-content transport failures (and meta-reasoner also tracks repeated schema-validation failures) in addition to parse failures.
 - Repeated denied-action loops are blocked by payload/type comparison, except when denial is classified as technical/transient. Classification prefers structured `reason_code` (for example `TECH_*`) and falls back to text heuristics only if code is missing.
 - Reflection-lesson persistence is disabled for technical/system/transient failure classes, so retries/infra noise do not pollute long-term lesson memory.
 - Multi-layer duplicate plan suppression (evaluated cheapest-first):

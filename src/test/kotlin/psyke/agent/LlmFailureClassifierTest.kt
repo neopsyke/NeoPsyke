@@ -19,4 +19,18 @@ class LlmFailureClassifierTest {
         val error = IllegalStateException("HTTP 429 rate limit")
         assertFalse(LlmFailureClassifier.isEmptyContentTransportFailure(error))
     }
+
+    @Test
+    fun `classifies structured output schema validation failures`() {
+        val error = IllegalStateException(
+            """[HTTP_400] Generated JSON does not match the expected schema. Error: jsonschema: '/reason' does not validate"""
+        )
+        assertTrue(LlmFailureClassifier.isStructuredOutputSchemaValidationFailure(error))
+    }
+
+    @Test
+    fun `ignores non schema related http 400 errors`() {
+        val error = IllegalStateException("[HTTP_400] invalid_api_key")
+        assertFalse(LlmFailureClassifier.isStructuredOutputSchemaValidationFailure(error))
+    }
 }

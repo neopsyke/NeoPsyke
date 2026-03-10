@@ -12,6 +12,7 @@ This guide explains how to monitor and tune the contract-based `PromptBudgetAllo
 - `planner_prompt`
 - `action_verifier_prompt`
 - `superego_prompt`
+- `meta_reasoner_prompt`
 - `legacy_web_search_prompt`
 
 ## Event fields to monitor
