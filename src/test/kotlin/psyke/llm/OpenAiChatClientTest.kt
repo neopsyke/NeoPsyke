@@ -359,7 +359,7 @@ class OpenAiChatClientTest {
         OpenAiChatClient(
             apiKey = "test-key",
             baseUrl = "https://mock.test/v1",
-            modelName = "gpt-5-mini",
+            modelName = "gpt-4o-mini",
             httpClient = httpClient
         ).use { client ->
             val completion = client.chat(
@@ -372,6 +372,42 @@ class OpenAiChatClientTest {
         assertEquals(2, calls)
         assertTrue(bodies[0].contains("\"temperature\":0.0"))
         assertTrue(!bodies[1].contains("\"temperature\":0.0"))
+    }
+
+    @Test
+    fun `chat omits temperature by default for gpt5 models`() {
+        val bodies = mutableListOf<String>()
+        val httpClient = fakeHttpClient { request ->
+            val body = Buffer().also { request.body?.writeTo(it) }.readUtf8()
+            bodies += body
+            200 to """
+            {
+              "id": "chat-5b",
+              "model": "gpt-5-mini",
+              "choices": [
+                {"index": 0, "message": {"role": "assistant", "content": "ok"}, "finish_reason": "stop"}
+              ],
+              "usage": {"prompt_tokens": 9, "completion_tokens": 3, "total_tokens": 12}
+            }
+            """.trimIndent()
+        }
+
+        OpenAiChatClient(
+            apiKey = "test-key",
+            baseUrl = "https://mock.test/v1",
+            modelName = "gpt-5-mini",
+            httpClient = httpClient
+        ).use { client ->
+            val completion = client.chat(
+                messages = listOf(ChatMessage(ChatRole.USER, "hello")),
+                options = ChatRequestOptions(temperature = 0.0, maxTokens = 33)
+            )
+            assertEquals("ok", completion.content)
+        }
+
+        assertEquals(1, bodies.size)
+        assertTrue(!bodies[0].contains("\"temperature\":"))
+        assertTrue(bodies[0].contains("\"max_completion_tokens\":33"))
     }
 
     @Test

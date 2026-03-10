@@ -27,7 +27,7 @@ flowchart LR
 
     E --> DE["DeliberationEngine"]
     DE --> MR["LlmMetaReasoner"]
-    MR -.-> MRF["MetaReasoner Fallback Model (optional, repeated empty-content failures)"]
+    MR -.-> MRF["MetaReasoner Fallback Model (optional, repeated technical failures: empty-content or schema-validation)"]
 
     E --> MC["MemoryCoordinator"]
     MC --> MS["MemoryStore (Short-term)"]
@@ -165,7 +165,7 @@ sequenceDiagram
 
         Ego->>Delib: maybeForceTerminalAnswer
         Note over Ego,Delib: Deliberation state is session-scoped evidence and circuit state is scoped by root-session
-        Note over Ego,Delib: Meta-reasoner output is schema-enforced, repeated empty-content transport failures can trigger optional fallback endpoint
+        Note over Ego,Delib: Meta-reasoner output is schema-enforced; repeated empty-content or schema-validation failures can trigger optional fallback endpoint
         Ego->>Mem: maybeAssessLongTermMemory(interval or explicit remember-intent)
         Note over Ego,Mem: Episodic recall filters session/interlocutor only when explicitly requested by user input
         Note over Ego,Mem: Memory-advisor completion max_tokens scales with prompt estimate (bounded floor/hard-cap) and model token_weight

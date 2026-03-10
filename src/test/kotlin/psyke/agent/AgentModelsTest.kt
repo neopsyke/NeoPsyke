@@ -30,7 +30,7 @@ class AgentModelsTest {
         assertEquals(512, config.memory.longTermMemoryDynamicCompletionHardMaxTokens)
         assertEquals(0.08, config.memory.longTermMemoryDynamicPromptToCompletionRatio)
         assertEquals(160, config.memory.longTermMemoryDynamicCompletionMinPromptTokens)
-        assertEquals(384, config.metaReasoner.maxTokens)
+        assertEquals(512, config.metaReasoner.maxTokens)
         assertEquals(true, config.metaReasoner.dynamicCompletionEnabled)
         assertEquals(640, config.metaReasoner.dynamicCompletionHardMaxTokens)
         assertEquals(0.10, config.metaReasoner.dynamicPromptToCompletionRatio)

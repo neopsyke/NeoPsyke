@@ -78,8 +78,14 @@ class OpenAiChatClient(
         messages: List<ChatMessage>,
         options: ChatRequestOptions,
     ): ChatCompletion {
+        val includeTemperature = options.temperature != null && !prefersNoTemperature(modelName)
+        if (options.temperature != null && !includeTemperature) {
+            logger.warn {
+                "OpenAI model=$modelName defaults to temperature-disabled requests; omitting temperature parameter."
+            }
+        }
         val tuning = OpenAiRequestTuning(
-            includeTemperature = options.temperature != null,
+            includeTemperature = includeTemperature,
             maxTokensField = options.maxTokens?.let {
                 if (prefersMaxCompletionTokens(modelName)) {
                     OpenAiMaxTokensField.MAX_COMPLETION_TOKENS
@@ -300,6 +306,11 @@ class OpenAiChatClient(
             normalized.startsWith("o1") ||
             normalized.startsWith("o3") ||
             normalized.startsWith("o4")
+    }
+
+    private fun prefersNoTemperature(model: String): Boolean {
+        val normalized = model.trim().lowercase()
+        return normalized.startsWith("gpt-5")
     }
 
     override fun close() {

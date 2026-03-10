@@ -915,7 +915,8 @@ internal object AppModeRunners {
                                                             config = config,
                                                             modelTokenWeight = llm.modelCatalog.tokenWeightFor(llm.metaReasoner),
                                                             modelContextWindow = llm.modelCatalog.contextWindowFor(llm.metaReasoner),
-                                                            fallbackModelClient = metaReasonerFallbackClient
+                                                            fallbackModelClient = metaReasonerFallbackClient,
+                                                            instrumentation = instrumentation
                                                         )
                                                         val longTermMemoryAdvisor = LlmLongTermMemoryAdvisor(
                                                             modelClient = longTermMemoryClient,

@@ -92,7 +92,7 @@ agent:
     deliberation_pressure_assessment_every_steps: 8
     deliberation_pressure_assessment_threshold: 0.68
     cooldown_steps: 6
-    max_tokens: 384
+    max_tokens: 512
     dynamic_completion_enabled: true
     dynamic_completion_hard_max_tokens: 640
     dynamic_prompt_to_completion_ratio: 0.10
