@@ -3,6 +3,9 @@ package psyke.agent
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.runBlocking
+import psyke.agent.core.ConversationContext
+import psyke.agent.core.Interlocutor
+import psyke.agent.core.InterlocutorResolver
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
@@ -52,6 +55,64 @@ class SensoryCortexTest {
         assertEquals("x".repeat(12), input.content)
         assertEquals(InputPriority.LOW, input.priority)
         assertEquals("webhook", input.source)
+    }
+
+    @Test
+    fun `sensory cortex resolves unknown interlocutor and derives session from chat source`() = runBlocking {
+        val source = SensoryInputSource {
+            psyke.agent.cortex.sensory.SensorySignal.InputReceived(
+                SensoryInput(
+                    content = "hello",
+                    source = "chat:session-42",
+                    conversationContext = ConversationContext.default()
+                )
+            )
+        }
+        val resolver = object : InterlocutorResolver {
+            override fun resolve(source: String, metadata: Map<String, Any>?): Interlocutor =
+                Interlocutor.named("Victor")
+        }
+        val cortex = SensoryCortex(
+            config = AgentConfig(),
+            source = source,
+            interlocutorResolver = resolver
+        )
+
+        val signal = cortex.nextSignal()
+        val input = assertIs<psyke.agent.cortex.sensory.SensorySignal.InputReceived>(signal).input
+        assertEquals("session-42", input.conversationContext.sessionId)
+        assertEquals("Victor", input.conversationContext.interlocutor.id)
+    }
+
+    @Test
+    fun `sensory cortex preserves explicit session and interlocutor`() = runBlocking {
+        val explicitContext = ConversationContext(
+            sessionId = "explicit-session",
+            interlocutor = Interlocutor.named("Alice")
+        )
+        val source = SensoryInputSource {
+            psyke.agent.cortex.sensory.SensorySignal.InputReceived(
+                SensoryInput(
+                    content = "hello",
+                    source = "chat:ignored-session",
+                    conversationContext = explicitContext
+                )
+            )
+        }
+        val resolver = object : InterlocutorResolver {
+            override fun resolve(source: String, metadata: Map<String, Any>?): Interlocutor =
+                Interlocutor.named("Victor")
+        }
+        val cortex = SensoryCortex(
+            config = AgentConfig(),
+            source = source,
+            interlocutorResolver = resolver
+        )
+
+        val signal = cortex.nextSignal()
+        val input = assertIs<psyke.agent.cortex.sensory.SensorySignal.InputReceived>(signal).input
+        assertEquals("explicit-session", input.conversationContext.sessionId)
+        assertEquals("Alice", input.conversationContext.interlocutor.id)
     }
 
     @Test

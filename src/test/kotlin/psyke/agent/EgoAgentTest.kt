@@ -209,6 +209,54 @@ class EgoAgentTest {
     }
 
     @Test
+    fun `session workspace digest persists across turns when queues drain`() {
+        val plannerLlm = StubChatModelClient().apply {
+            enqueueRawResponse(
+                """{"decision":"action","urgency":"medium","action_type":"answer","action_payload":"first done","action_summary":"respond first"}"""
+            )
+            enqueueRawResponse(
+                """{"decision":"action","urgency":"medium","action_type":"answer","action_payload":"second done","action_summary":"respond second"}"""
+            )
+        }
+        val superegoLlm = StubChatModelClient().apply {
+            enqueueRawResponse("""{"allow":true}""")
+            enqueueRawResponse("""{"allow":true}""")
+        }
+        val instrumentation = RecordingInstrumentation()
+        val outputs = mutableListOf<String>()
+        val config = AgentConfig(
+            planner = PlannerConfig(maxLoopStepsPerInput = 8, maxThoughtPasses = 3),
+            memory = MemoryConfig(
+                taskWorkspace = TaskWorkspaceConfig(
+                    enabled = true,
+                    activationMinPlanSteps = 1,
+                    digestMaxEntries = 4
+                )
+            )
+        )
+        val agent = Ego(
+            planner = LlmEgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
+            superego = Superego(modelClient = superegoLlm, config = config, instrumentation = instrumentation),
+            motorCortex = buildMotorCortex(output = { outputs.add(it) }),
+            config = config,
+            instrumentation = instrumentation
+        )
+
+        runAgentWithInput(agent, "digest sentinel one\ndigest sentinel two\nexit\n")
+
+        assertEquals(listOf("ego> first done", "ego> second done"), outputs)
+        val plannerInputCalls = plannerLlm.calls.filter { it.options.metadata.callSite == "input" }
+        assertTrue(plannerInputCalls.size >= 2)
+        val secondPrompt = plannerInputCalls[1].messages.joinToString("\\n\\n") { it.content }
+        assertTrue(secondPrompt.contains("Prior workspace digests"))
+        assertTrue(secondPrompt.contains("digest sentinel one"))
+        assertTrue(
+            instrumentation.events.any { it.type == "task_workspace_digest_captured" },
+            "Expected digest capture event after first resolved answer."
+        )
+    }
+
+    @Test
     fun `non technical denial stores reflection lesson in long term memory`() {
         val plannerLlm = StubChatModelClient().apply {
             enqueueRawResponse(
@@ -862,7 +910,8 @@ class EgoAgentTest {
                 taskWorkspace = TaskWorkspaceConfig(
                     enabled = true,
                     activationMinPlanSteps = 1,
-                    maxPromptTokens = 280
+                    maxPromptTokens = 280,
+                    debugCaptureEnabled = true
                 )
             )
         )

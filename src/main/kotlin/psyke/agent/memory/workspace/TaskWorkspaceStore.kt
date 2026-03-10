@@ -305,6 +305,15 @@ class TaskWorkspaceStore(
     }
 
     @Synchronized
+    fun clearActiveWorkspaces(): Int {
+        if (!config.enabled) return 0
+        val cleared = workspaces.size
+        workspaces.clear()
+        pendingInputs.clear()
+        return cleared
+    }
+
+    @Synchronized
     fun debugHead(rootInputId: String?): TaskWorkspaceDebugHead? =
         lookup(rootInputId)?.debugHead()
 
@@ -327,10 +336,7 @@ class TaskWorkspaceStore(
 
     @Synchronized
     fun clearAll(): Int {
-        if (!config.enabled) return 0
-        val cleared = workspaces.size
-        workspaces.clear()
-        pendingInputs.clear()
+        val cleared = clearActiveWorkspaces()
         digestsBySession.clear()
         return cleared
     }

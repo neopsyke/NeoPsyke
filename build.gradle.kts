@@ -36,6 +36,7 @@ dependencies {
 
 tasks.test {
     useJUnitPlatform()
+    environment("EGO_TASK_WORKSPACE_DEBUG_CAPTURE_ENABLED", "true")
 }
 
 tasks.withType<KotlinCompile>().configureEach {

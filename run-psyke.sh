@@ -213,6 +213,7 @@ export EGO_LOOP_DELAY_MS="${LOOP_DELAY_MS}"
 export PSYKE_LOG_FILE="$RUN_LOG_FILE"
 export PSYKE_EVENT_LOG_FILE="$RUN_EVENT_FILE"
 export MEMORY_DEFAULT_NAMESPACE="${MEMORY_DEFAULT_NAMESPACE:-psyke}"
+export EGO_TASK_WORKSPACE_DEBUG_CAPTURE_ENABLED="true"
 
 JAVA_OPTS_APPEND=" -Dorg.slf4j.simpleLogger.defaultLogLevel=${LOG_LEVEL} -Dorg.slf4j.simpleLogger.logFile=${RUN_LOG_FILE} -Dorg.slf4j.simpleLogger.showDateTime=true -Dorg.slf4j.simpleLogger.dateTimeFormat=yyyy-MM-dd_HH:mm:ss.SSSZ"
 if [[ "$EVAL_MODE" -eq 1 ]] && [[ "${PSYKE_EVAL_TRANSPORT_DEBUG:-false}" != "true" ]]; then

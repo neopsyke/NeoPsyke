@@ -74,10 +74,13 @@ It is intentionally high-level and should stay aligned with the code.
   - If queues drain:
     - Reset deliberation state.
     - Reset per-input memory coordinator state.
+    - Clear active task workspaces and pending workspace gates, while preserving per-session workspace digests.
 
 ## Input Path
 - `SensoryCortex` sanitizes and clamps input to configured limits.
 - `ConversationContext` is mandatory end-to-end and requires a non-blank `sessionId`.
+- For incoming inputs with `ConversationContext.interlocutor=UNKNOWN`, `SensoryCortex` resolves interlocutor via `InterlocutorResolver`.
+- Session id derivation from `source` (for example `chat:<sessionId>`) only applies when incoming context uses the default session id.
 - `PendingInput` carries:
   - `source` metadata (for example `chat:<sessionId>`) so runtime telemetry can map root requests to conversation sessions.
   - `rootInputId` (UUID string identity for request-scoped orchestration)
@@ -141,6 +144,7 @@ It is intentionally high-level and should stay aligned with the code.
 - For `answer`, response latency is emitted and per-input evidence cache is cleared.
 - After `answer`, pending thoughts/actions for the same `(root input, sessionId)` scope are pruned from queues
     (`input_resolution_cleanup`) so stale plan/follow-up work cannot continue cycling or leak across sessions.
+- After `answer`, task workspace digest is captured into the session digest ring before workspace destruction.
 - After `answer`, the task workspace for that root input is destroyed (`task_workspace_destroyed`).
 
 ## Planner Logic

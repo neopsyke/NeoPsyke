@@ -33,6 +33,9 @@ prime_gradle_wrapper_cache
 scenario_file="$repo_root/freud/scenarios/v1/psyke-agent-scenarios.json"
 dry_run="false"
 
+# Keep full workspace debug dumps enabled in direct scenario runs.
+export EGO_TASK_WORKSPACE_DEBUG_CAPTURE_ENABLED="true"
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --help|-h)

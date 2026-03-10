@@ -365,6 +365,25 @@ class TaskWorkspaceStoreTest {
     }
 
     @Test
+    fun `clearActiveWorkspaces preserves session digests`() {
+        val store = TaskWorkspaceStore(
+            TaskWorkspaceConfig(enabled = true, activationMinPlanSteps = 1, digestMaxEntries = 4)
+        )
+        val root = "root-active-clear"
+        store.ensureForInput(
+            PendingInput(id = 1, content = "task to keep digest", rootInputId = root, receivedAtMs = 100L)
+        )
+        store.captureDigest(root, "session-keep")
+        assertTrue(store.digestPromptSummary("session-keep", maxTokens = 400).isNotBlank())
+
+        val cleared = store.clearActiveWorkspaces()
+
+        assertEquals(1, cleared)
+        assertEquals(0, store.activeTaskCount())
+        assertTrue(store.digestPromptSummary("session-keep", maxTokens = 400).isNotBlank())
+    }
+
+    @Test
     fun `digest sessions are isolated`() {
         val store = TaskWorkspaceStore(
             TaskWorkspaceConfig(enabled = true, activationMinPlanSteps = 1, digestMaxEntries = 4)
