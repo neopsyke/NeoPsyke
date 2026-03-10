@@ -18,7 +18,7 @@ import java.io.Closeable
 import kotlin.math.max
 
 class DashboardStateStore(
-    private val maxEvents: Int = 500,
+    private val maxEvents: Int = 2000,
     private val maxWorkspaceSnapshots: Int = 120,
     private val workspaceSnapshotTtlMs: Long = 15 * 60 * 1000L,
 ) : InstrumentationSink {

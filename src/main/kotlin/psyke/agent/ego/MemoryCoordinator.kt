@@ -731,7 +731,8 @@ internal class MemoryCoordinator(
                     hitCount = recall.hitCount,
                     latencyMs = latencyMs,
                     recallChars = recallText.length,
-                    truncated = recall.truncated
+                    truncated = recall.truncated,
+                    recallTextPreview = recallText
                 )
             )
             if (recallScan.suspicious) {

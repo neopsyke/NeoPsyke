@@ -238,6 +238,7 @@ object AgentEvents {
         latencyMs: Long,
         recallChars: Int,
         truncated: Boolean,
+        recallTextPreview: String = "",
     ): AgentEvent =
         AgentEvent(
             type = "memory_recall_result",
@@ -247,7 +248,8 @@ object AgentEvents {
                 "hit_count" to hitCount,
                 "latency_ms" to latencyMs,
                 "recall_chars" to recallChars,
-                "truncated" to truncated
+                "truncated" to truncated,
+                "recall_text_preview" to recallTextPreview,
             )
         )
 

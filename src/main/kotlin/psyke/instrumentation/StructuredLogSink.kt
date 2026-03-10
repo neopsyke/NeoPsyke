@@ -107,6 +107,10 @@ class StructuredLogSink : InstrumentationSink {
                 logger.trace {
                     "memory.recall.result provider=${event.data["provider"]} trigger=${event.data["trigger"]} hits=${event.data["hit_count"]} latency_ms=${event.data["latency_ms"]} chars=${event.data["recall_chars"]} truncated=${event.data["truncated"]}"
                 }
+                val recallPreview = event.data["recall_text_preview"]
+                if (recallPreview is String && recallPreview.isNotBlank()) {
+                    logger.debug { "memory.recall.text trigger=${event.data["trigger"]}\n$recallPreview" }
+                }
             }
 
             "memory_recall_failure" -> {

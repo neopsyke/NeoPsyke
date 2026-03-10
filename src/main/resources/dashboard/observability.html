@@ -781,7 +781,6 @@
       if (isReasoningImpactingLlmError(event)) return true;
       const d = event.data || {};
       if (event.type === "episodic_recall_result") return (d.entries_returned || 0) > 0;
-      if (event.type === "memory_recall_result") return (d.hit_count || 0) > 0;
       if (event.type === "memory_imprint_result") return d.saved === true;
       return false;
     }
@@ -859,11 +858,14 @@
             (d.latency_ms != null ? " " + d.latency_ms + "ms" : "");
         case "memory_recall_start":
           return (d.provider || "") + " — " + (d.cue_preview || "");
-        case "memory_recall_result":
-          return (d.hit_count || 0) + " hits, " +
+        case "memory_recall_result": {
+          const header = (d.hit_count || 0) + " hits, " +
             (d.recall_chars || 0) + " chars" +
             (d.truncated ? " (truncated)" : "") +
             " in " + (d.latency_ms || 0) + "ms";
+          const preview = d.recall_text_preview || "";
+          return preview ? header + "\n" + preview : header;
+        }
         case "memory_recall_failure":
           return (d.provider || "") + " — " + (d.reason || "unknown error") +
             " (" + (d.latency_ms || 0) + "ms)";
@@ -1476,16 +1478,17 @@
       document.getElementById("superego-out").textContent = fmt(state.lastSuperegoOutput || {});
       renderActionCapabilities(state.actionCapabilities || [], state.metrics);
 
-      const orderedEvents = state.recentEvents.slice().sort((a, b) => (a.id || 0) - (b.id || 0));
-      const timelineEvents = orderedEvents
-        .filter(shouldShowInTimeline)
-        .slice(-140);
-      document.getElementById("timeline").innerHTML = timelineEvents.map(renderTimelineItem).join("");
+      const tlEl = document.getElementById("timeline");
+      const tlPinned = tlEl.scrollTop + tlEl.clientHeight >= tlEl.scrollHeight - 24;
+      const timelineEvents = state.recentEvents.filter(shouldShowInTimeline);
+      tlEl.innerHTML = timelineEvents.map(renderTimelineItem).join("");
+      if (tlPinned) tlEl.scrollTop = tlEl.scrollHeight;
 
-      const actionEvents = orderedEvents
-        .filter(e => e.type.startsWith("action_") || e.type.startsWith("superego_"))
-        .slice(-80);
-      document.getElementById("actions").innerHTML = actionEvents.map(renderEventItem).join("");
+      const acEl = document.getElementById("actions");
+      const acPinned = acEl.scrollTop + acEl.clientHeight >= acEl.scrollHeight - 24;
+      const actionEvents = state.recentEvents.filter(e => e.type.startsWith("action_") || e.type.startsWith("superego_"));
+      acEl.innerHTML = actionEvents.map(renderEventItem).join("");
+      if (acPinned) acEl.scrollTop = acEl.scrollHeight;
 
       renderStatusBar();
       if (state.workspace.open) {
@@ -1495,7 +1498,7 @@
 
     function applyEvent(event) {
       state.recentEvents.push(event);
-      if (state.recentEvents.length > 800) state.recentEvents.shift();
+      if (state.recentEvents.length > 2000) state.recentEvents.shift();
 
       switch (event.type) {
         case "loop_status":
