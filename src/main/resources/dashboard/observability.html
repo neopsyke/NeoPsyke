@@ -128,12 +128,23 @@
       min-width: 0;
     }
     .pill {
-      display: inline-block;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
       padding: 1px 7px;
       border-radius: 12px;
       border: 1px solid var(--line);
       font-size: 11px;
       color: var(--muted);
+    }
+    .pill .q-count {
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+      color: var(--text);
+      font-size: 10px;
+    }
+    .pill .q-count.non-zero {
+      color: var(--accent);
     }
 
     pre {
@@ -590,9 +601,9 @@
       <div class="panel">
         <h3>Queues</h3>
         <div class="grid3">
-          <div class="card"><div class="pill">Inputs</div><div id="q-inputs"></div></div>
-          <div class="card"><div class="pill">Thoughts</div><div id="q-thoughts"></div></div>
-          <div class="card"><div class="pill">Actions</div><div id="q-actions"></div></div>
+          <div class="card"><div class="pill" title="Pending inputs">Inputs <span class="q-count" id="q-inputs-count">0</span></div><div id="q-inputs"></div></div>
+          <div class="card"><div class="pill" title="Pending thoughts">Thoughts <span class="q-count" id="q-thoughts-count">0</span></div><div id="q-thoughts"></div></div>
+          <div class="card"><div class="pill" title="Pending actions">Actions <span class="q-count" id="q-actions-count">0</span></div><div id="q-actions"></div></div>
         </div>
       </div>
       <div class="panel">
@@ -1450,6 +1461,15 @@
       renderQueue("q-inputs", state.queues.inputs, (i) => "#" + i.id + " [" + (i.priority || "MEDIUM") + "] " + short(i.content, 100));
       renderQueue("q-thoughts", state.queues.thoughts, (i) => "#" + i.id + " [" + i.urgency + "] p" + i.passes + " " + short(i.content, 90));
       renderQueue("q-actions", state.queues.actions, (i) => "#" + i.id + " [" + i.urgency + "] " + i.type + " " + short(i.summary, 70));
+
+      function updateQueueCount(elId, count) {
+        const el = document.getElementById(elId);
+        el.textContent = String(count);
+        el.classList.toggle("non-zero", count > 0);
+      }
+      updateQueueCount("q-inputs-count", state.queues.inputs.length);
+      updateQueueCount("q-thoughts-count", state.queues.thoughts.length);
+      updateQueueCount("q-actions-count", state.queues.actions.length);
 
       document.getElementById("current-processing").textContent = fmt(state.currentProcessing || {});
       document.getElementById("superego-in").textContent = fmt(state.lastSuperegoInput || {});
