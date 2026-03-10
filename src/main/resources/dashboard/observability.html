@@ -730,7 +730,7 @@
     ]);
 
     const timelinePrimary = new Set([
-      "planner_decision", "planner_start",
+      "plan_created", "planner_decision", "planner_start",
       "superego_output", "action_review_result",
       "superego_two_stage_review",
       "action_proposed", "action_executed", "action_denied",
@@ -808,6 +808,8 @@
     function extractTimelineContent(event) {
       const d = event.data || {};
       switch (event.type) {
+        case "plan_created":
+          return (d.goal || "plan") + " (" + (d.step_count || 0) + " steps, " + (d.urgency || "normal") + ")";
         case "planner_decision":
           return d.decision || d.summary || d.action_type || null;
         case "planner_start":
@@ -924,6 +926,21 @@
         const contentHtml = content
           ? "<div class=\"tl-content\">" + escapeHtml(short(content, 300)) + "</div>"
           : "";
+        let detailsHtml;
+        if (event.type === "plan_created" && Array.isArray((event.data || {}).steps) && event.data.steps.length) {
+          const stepsHtml = event.data.steps
+            .map((s, i) => escapeHtml((i + 1) + ". " + s))
+            .join("\n");
+          detailsHtml =
+            "<details class=\"tl-raw\"><summary>plan steps</summary>" +
+              "<pre>" + stepsHtml + "</pre>" +
+            "</details>";
+        } else {
+          detailsHtml =
+            "<details class=\"tl-raw\"><summary>raw</summary>" +
+              "<pre>" + escapeHtml(fmt(event.data || {})) + "</pre>" +
+            "</details>";
+        }
         return "<div class=\"tl-row tl-primary" + catClass + criticalClass + "\">" +
           "<div class=\"tl-header\">" +
             "<span class=\"tl-type\">" + escapeHtml(typeLabel) + "</span>" +
@@ -931,9 +948,7 @@
             "<span class=\"tl-ts\">" + escapeHtml(time) + "</span>" +
           "</div>" +
           contentHtml +
-          "<details class=\"tl-raw\"><summary>raw</summary>" +
-            "<pre>" + escapeHtml(fmt(event.data || {})) + "</pre>" +
-          "</details>" +
+          detailsHtml +
         "</div>";
       }
 

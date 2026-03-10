@@ -106,6 +106,10 @@ class StubMetricsRuntime(
 
     override fun recordMemoryImprint(saved: Boolean, summaryChars: Int, latencyMs: Long) {}
 
+    override fun recordEpisodicRecall(hitCount: Int, recallChars: Int) {}
+
+    override fun recordReflectionRecall(hitCount: Int, recallChars: Int) {}
+
     override fun recordEndToEndResponseLatency(latencyMs: Long) {}
 
     override fun snapshot(): MetricsSnapshot? = snapshotValue

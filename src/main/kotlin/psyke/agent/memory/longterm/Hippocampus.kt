@@ -36,6 +36,13 @@ interface Hippocampus : AutoCloseable {
     fun purgeTaggedObservations(tagMarkers: List<String>): Int = 0
 
     /**
+     * Deletes **all** observations from the memory backend, regardless of tags.
+     * Returns the total number of observations removed, or 0 if the operation
+     * is not supported or the backend is empty.
+     */
+    fun clearAll(): Int = 0
+
+    /**
      * Returns server-side metrics from the memory backend, or null if unsupported.
      * Keys follow the structure emitted by [psyke.mcp.memory.metrics.MemoryServerMetrics.snapshot].
      */
@@ -67,4 +74,5 @@ object NoopHippocampus : Hippocampus {
     override fun imprint(imprint: MemoryImprint): Boolean = false
 
     override fun purgeTaggedObservations(tagMarkers: List<String>): Int = 0
+    override fun clearAll(): Int = 0
 }

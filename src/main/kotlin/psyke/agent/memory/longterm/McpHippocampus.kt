@@ -155,6 +155,68 @@ class McpHippocampus(
         }
     }
 
+    override fun clearAll(): Int {
+        val toolNames = try {
+            runBlocking { clientHolder.listTools(callTimeoutMs) }
+        } catch (ex: Exception) {
+            logger.warn(ex) { "MCP memory clearAll failed while listing tools." }
+            return 0
+        }
+
+        if ("read_graph" !in toolNames || "delete_observations" !in toolNames) {
+            logger.warn {
+                "MCP memory clearAll skipped; required tools missing. has_read_graph=${"read_graph" in toolNames} has_delete_observations=${"delete_observations" in toolNames}"
+            }
+            return 0
+        }
+
+        val readResult = try {
+            callWithFallbackArguments(
+                toolName = "read_graph",
+                argumentCandidates = listOf(emptyMap<String, Any>())
+            )
+        } catch (ex: Exception) {
+            logger.warn(ex) { "MCP memory clearAll failed while reading graph." }
+            return 0
+        }
+
+        if (readResult.isError) {
+            logger.warn {
+                "MCP memory clearAll read_graph returned error: ${TextSecurity.preview(readResult.content, 220)}"
+            }
+            return 0
+        }
+
+        val deletions = buildAllObservationDeletions(readResult.content)
+        if (deletions.isEmpty()) {
+            return 0
+        }
+
+        val deleteResult = try {
+            callWithFallbackArguments(
+                toolName = "delete_observations",
+                argumentCandidates = listOf(
+                    mapOf("deletions" to deletions)
+                )
+            )
+        } catch (ex: Exception) {
+            logger.warn(ex) { "MCP memory clearAll failed while deleting observations." }
+            return 0
+        }
+
+        if (deleteResult.isError) {
+            logger.warn {
+                "MCP memory clearAll delete_observations returned error: ${TextSecurity.preview(deleteResult.content, 220)}"
+            }
+            return 0
+        }
+
+        return deletions.sumOf { deletion ->
+            @Suppress("UNCHECKED_CAST")
+            (deletion["observations"] as? List<String>)?.size ?: 0
+        }
+    }
+
     override fun imprint(imprint: MemoryImprint): Boolean {
         val summary = TextSecurity.clamp(imprint.summary.trim(), 600)
         if (summary.isBlank()) {
@@ -420,6 +482,33 @@ class McpHippocampus(
             dialogue.ifBlank { null }?.let { "recent_dialogue:\n$it" },
             summary.ifBlank { null }?.let { "short_term_context_summary:\n$it" }
         ).joinToString(separator = "\n\n")
+    }
+
+    internal fun buildAllObservationDeletions(rawGraph: String): List<Map<String, Any>> {
+        val root = try {
+            mapper.readTree(rawGraph)
+        } catch (_: Exception) {
+            return emptyList()
+        }
+        val entities = root.get("entities")?.takeIf { it.isArray } ?: return emptyList()
+
+        return entities.mapNotNull { entity ->
+            val entityName = entity.get("name")?.asText()?.trim().orEmpty()
+            if (entityName.isBlank()) {
+                return@mapNotNull null
+            }
+            val observations = entity.get("observations")
+                ?.takeIf { it.isArray }
+                ?.mapNotNull { it.asText().trim().ifBlank { null } }
+                .orEmpty()
+            if (observations.isEmpty()) {
+                return@mapNotNull null
+            }
+            mapOf(
+                "entityName" to entityName,
+                "observations" to observations
+            )
+        }
     }
 
     internal fun buildObservationDeletions(rawGraph: String, tagMarkers: List<String>): List<Map<String, Any>> {

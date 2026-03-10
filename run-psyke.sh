@@ -106,15 +106,25 @@ while [[ $# -gt 0 ]]; do
       APP_ARGS+=("$1")
       shift
       ;;
+    --clear-memory-all|--clear-memory-vector|--clear-memory-episodic|--clear-memory-reflection)
+      APP_ARGS+=("$1")
+      shift
+      ;;
     -h|--help)
       cat <<'EOF'
-Usage: ./run-psyke.sh [--log-level LEVEL] [--loop-delay-ms MS|--no-delay] [--] [app-args...]
+Usage: ./run-psyke.sh [--log-level LEVEL] [--loop-delay-ms MS|--no-delay] [--clear-memory-*] [--] [app-args...]
 
 Options:
   -l, --log-level LEVEL   SLF4J simple logger level (default: warning)
       --loop-delay-ms MS  Delay between interactive loop cycles (default: 1000)
       --no-delay          Alias for --loop-delay-ms 0
   -h, --help              Show this help message
+
+Memory clearing (applied before agent startup):
+      --clear-memory-all         Clear ALL long-term memory (vector + episodic) before starting
+      --clear-memory-vector      Clear vector/hippocampus memory before starting
+      --clear-memory-episodic    Clear episodic logbook memory before starting
+      --clear-memory-reflection  Clear reflection lessons from vector memory before starting
 
 Environment:
   PSYKE_LLM_CONFIG_FILE   Optional path to LLM runtime YAML (default: ./llm-runtime.yaml)

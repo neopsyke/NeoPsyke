@@ -19,9 +19,16 @@ internal data class AppCliOptions(
     val evalReasoningTaskFilter: Set<String>,
     val evalMemoryMaxAttempts: Int,
     val evalMemoryTaskFilter: Set<String>,
+    val clearMemoryAll: Boolean = false,
+    val clearMemoryVector: Boolean = false,
+    val clearMemoryEpisodic: Boolean = false,
+    val clearMemoryReflection: Boolean = false,
     val unknownArgs: List<String>,
     val parseErrors: List<String>,
-)
+) {
+    val hasClearMemoryRequest: Boolean
+        get() = clearMemoryAll || clearMemoryVector || clearMemoryEpisodic || clearMemoryReflection
+}
 
 fun main(args: Array<String>) {
     logger.info { "Starting psyke Kotlin app." }
@@ -73,7 +80,8 @@ fun main(args: Array<String>) {
         llm = llmRuntimeConfig,
         config = config,
         mcpRuntimeConfig = mcpRuntimeConfig,
-        runtimeSettings = runtimeSettings
+        runtimeSettings = runtimeSettings,
+        cliOptions = cliOptions
     )
 }
 
@@ -89,6 +97,10 @@ private fun printAppHelp() {
           --eval-reasoning-tasks id1,id2  Run only selected reasoning task ids
           --eval-memory-max-attempts N    Max long-term memory assessment retries per memory task (default: 2)
           --eval-memory-tasks id1,id2     Run only selected memory eval task ids
+          --clear-memory-all              Clear ALL long-term memory (vector + episodic) before starting
+          --clear-memory-vector           Clear vector/hippocampus memory before starting
+          --clear-memory-episodic         Clear episodic logbook memory before starting
+          --clear-memory-reflection       Clear reflection lessons from vector memory before starting
           -h, --help                      Show this help message
         """.trimIndent()
     )
@@ -104,6 +116,10 @@ private fun parseCliOptions(args: Array<String>): AppCliOptions {
     var evalReasoningTaskFilter: Set<String> = emptySet()
     var evalMemoryMaxAttempts = 2
     var evalMemoryTaskFilter: Set<String> = emptySet()
+    var clearMemoryAll = false
+    var clearMemoryVector = false
+    var clearMemoryEpisodic = false
+    var clearMemoryReflection = false
     val unknownArgs = mutableListOf<String>()
     val parseErrors = mutableListOf<String>()
 
@@ -235,6 +251,23 @@ private fun parseCliOptions(args: Array<String>): AppCliOptions {
                 index += 1
             }
 
+            arg == "--clear-memory-all" -> {
+                clearMemoryAll = true
+                index += 1
+            }
+            arg == "--clear-memory-vector" -> {
+                clearMemoryVector = true
+                index += 1
+            }
+            arg == "--clear-memory-episodic" -> {
+                clearMemoryEpisodic = true
+                index += 1
+            }
+            arg == "--clear-memory-reflection" -> {
+                clearMemoryReflection = true
+                index += 1
+            }
+
             else -> {
                 unknownArgs += arg
                 index += 1
@@ -256,6 +289,10 @@ private fun parseCliOptions(args: Array<String>): AppCliOptions {
         evalReasoningTaskFilter = evalReasoningTaskFilter,
         evalMemoryMaxAttempts = evalMemoryMaxAttempts,
         evalMemoryTaskFilter = evalMemoryTaskFilter,
+        clearMemoryAll = clearMemoryAll,
+        clearMemoryVector = clearMemoryVector,
+        clearMemoryEpisodic = clearMemoryEpisodic,
+        clearMemoryReflection = clearMemoryReflection,
         unknownArgs = unknownArgs,
         parseErrors = parseErrors
     )

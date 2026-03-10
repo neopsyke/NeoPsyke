@@ -194,6 +194,21 @@
       <canvas id="stm-chart" height="60" style="width:100%;"></canvas>
     </div>
 
+    <!-- Section: Long-term Memory -->
+    <div class="panel">
+      <div class="panel-head">
+        <h3>Long-term Memory</h3>
+        <div class="controls">
+          <label>Scope</label>
+          <select id="mem-scope">
+            <option value="run" selected>Current run</option>
+            <option value="all">All-time</option>
+          </select>
+        </div>
+      </div>
+      <div id="ltm-content"><div class="empty-msg">Waiting for metrics...</div></div>
+    </div>
+
     <!-- Section 2: Processing Phase Timing -->
     <div class="panel">
       <div class="panel-head">
@@ -274,6 +289,12 @@
         <div class="pill">Token Budget Utilization</div>
         <div id="budget-gauges"></div>
       </div>
+    </div>
+
+    <!-- Section: Errors & Reliability -->
+    <div class="panel">
+      <h3>Errors &amp; Reliability</h3>
+      <div id="errors-content"><div class="empty-msg">Waiting for metrics...</div></div>
     </div>
   </div>
 
@@ -507,6 +528,73 @@
       ctx.fillRect(lx + 50, ly - 6, 10, 3);
       ctx.fillStyle = "#98b0b9";
       ctx.fillText("summary", lx + 64, ly);
+    }
+
+    function renderLongTermMemory() {
+      const el = document.getElementById("ltm-content");
+      const m = state.metrics;
+      if (!m) { el.innerHTML = "<div class='empty-msg'>Waiting for metrics...</div>"; return; }
+      const scope = document.getElementById("mem-scope").value;
+      const t = scope === "all" ? (m.persistentTotals || {}) : (m.runTotals || {});
+
+      function hitRate(hits, attempts) {
+        if (!attempts) return "—";
+        return ((hits / attempts) * 100).toFixed(1) + "%";
+      }
+      function avgMs(totalMs, count) {
+        if (!count) return "—";
+        return fmtMs(Math.round(totalMs / count));
+      }
+
+      let html = "";
+
+      // --- Vector Recall ---
+      html += "<div class='pill'>Vector Recall (Hippocampus)</div>";
+      html += "<div class='grid3' style='margin-bottom:12px'>";
+      html += "<div class='card'><div class='label'>Attempts</div><div class='value'>" + fmtNum(t.memoryRecallAttempts) + "</div></div>";
+      html += "<div class='card'><div class='label'>Hits</div><div class='value'>" + fmtNum(t.memoryRecallHits) + "</div><div class='sub'>hit rate " + hitRate(t.memoryRecallHits, t.memoryRecallAttempts) + "</div></div>";
+      html += "<div class='card'><div class='label'>Failures</div><div class='value'>" + fmtNum(t.memoryRecallFailures) + "</div></div>";
+      html += "<div class='card'><div class='label'>Truncated</div><div class='value'>" + fmtNum(t.memoryRecallTruncated) + "</div></div>";
+      html += "<div class='card'><div class='label'>Chars Retrieved</div><div class='value'>" + fmtNum(t.memoryRecallCharsTotal) + "</div></div>";
+      html += "<div class='card'><div class='label'>Avg Latency</div><div class='value'>" + avgMs(t.memoryRecallLatencyMsTotal, t.memoryRecallAttempts) + "</div></div>";
+      html += "</div>";
+
+      // --- Episodic Recall ---
+      html += "<div class='pill'>Episodic Recall (Temporal)</div>";
+      html += "<div class='grid3' style='margin-bottom:12px'>";
+      html += "<div class='card'><div class='label'>Attempts</div><div class='value'>" + fmtNum(t.episodicRecallAttempts) + "</div></div>";
+      html += "<div class='card'><div class='label'>Hits</div><div class='value'>" + fmtNum(t.episodicRecallHits) + "</div><div class='sub'>hit rate " + hitRate(t.episodicRecallHits, t.episodicRecallAttempts) + "</div></div>";
+      html += "<div class='card'><div class='label'>Chars Retrieved</div><div class='value'>" + fmtNum(t.episodicRecallCharsTotal) + "</div></div>";
+      html += "</div>";
+
+      // --- Reflection Recall ---
+      html += "<div class='pill'>Reflection Recall (Lessons)</div>";
+      html += "<div class='grid3' style='margin-bottom:12px'>";
+      html += "<div class='card'><div class='label'>Attempts</div><div class='value'>" + fmtNum(t.reflectionRecallAttempts) + "</div></div>";
+      html += "<div class='card'><div class='label'>Hits</div><div class='value'>" + fmtNum(t.reflectionRecallHits) + "</div><div class='sub'>hit rate " + hitRate(t.reflectionRecallHits, t.reflectionRecallAttempts) + "</div></div>";
+      html += "<div class='card'><div class='label'>Chars Retrieved</div><div class='value'>" + fmtNum(t.reflectionRecallCharsTotal) + "</div></div>";
+      html += "</div>";
+
+      // --- Recall Skipped ---
+      if (t.longTermMemoryRecallSkipped > 0) {
+        html += "<div style='font-size:11px;color:var(--muted);margin-bottom:12px'>Recall skipped: " + fmtNum(t.longTermMemoryRecallSkipped) + " times</div>";
+      }
+
+      // --- Imprint & Consolidation ---
+      html += "<div class='pill'>Imprint &amp; Consolidation</div>";
+      html += "<div class='grid3'>";
+      html += "<div class='card'><div class='label'>Imprint Attempts</div><div class='value'>" + fmtNum(t.memoryImprintAttempts) + "</div></div>";
+      html += "<div class='card'><div class='label'>Saved</div><div class='value'>" + fmtNum(t.memoryImprintSaved) + "</div></div>";
+      html += "<div class='card'><div class='label'>Imprint Failures</div><div class='value'>" + fmtNum(t.memoryImprintFailures) + "</div></div>";
+      html += "<div class='card'><div class='label'>Imprint Chars</div><div class='value'>" + fmtNum(t.memoryImprintCharsTotal) + "</div></div>";
+      html += "<div class='card'><div class='label'>Avg Imprint Latency</div><div class='value'>" + avgMs(t.memoryImprintLatencyMsTotal, t.memoryImprintAttempts) + "</div></div>";
+      html += "<div class='card'><div class='label'>Consolidation Assessments</div><div class='value'>" + fmtNum(t.memoryConsolidationAssessments) + "</div><div class='sub'>save recommended " + fmtNum(t.memoryConsolidationSaveRecommended) + "</div></div>";
+      html += "</div>";
+      if (t.memoryConsolidationParseFailures > 0) {
+        html += "<div style='font-size:11px;color:var(--red);margin-top:6px'>Parse failures: " + fmtNum(t.memoryConsolidationParseFailures) + "</div>";
+      }
+
+      el.innerHTML = html;
     }
 
     function filteredTimings() {
@@ -746,13 +834,67 @@
       el.innerHTML = html;
     }
 
+    function renderErrorsReliability() {
+      const el = document.getElementById("errors-content");
+      const m = state.metrics;
+      const stats = state.llmStats;
+      if (!m) { el.innerHTML = "<div class='empty-msg'>Waiting for metrics...</div>"; return; }
+      const run = m.runTotals || {};
+      const totalCalls = run.calls || 0;
+      const totalErrors = run.errorCount || 0;
+      const errorRate = totalCalls > 0 ? ((totalErrors / totalCalls) * 100).toFixed(1) + "%" : "—";
+
+      // Aggregate LLM errors by category from errorBreakdown
+      let rateLimits = 0, timeouts = 0, invalidResponses = 0, otherErrors = 0;
+      if (stats && stats.errorBreakdown) {
+        for (const codes of Object.values(stats.errorBreakdown)) {
+          for (const [code, count] of Object.entries(codes)) {
+            const lc = code.toLowerCase();
+            if (lc.includes("rate")) rateLimits += count;
+            else if (lc.includes("timeout")) timeouts += count;
+            else if (lc.includes("invalid") || lc.includes("empty") || lc.includes("parse")) invalidResponses += count;
+            else otherErrors += count;
+          }
+        }
+      }
+
+      let html = "";
+
+      // LLM Error Summary
+      html += "<div class='pill'>LLM Errors</div>";
+      html += "<div class='grid3' style='margin-bottom:12px'>";
+      html += "<div class='card'><div class='label'>Total Errors</div><div class='value' style='color:" + (totalErrors > 0 ? "var(--red)" : "var(--text)") + "'>" + fmtNum(totalErrors) + "</div><div class='sub'>error rate " + errorRate + "</div></div>";
+      html += "<div class='card'><div class='label'>Rate Limits</div><div class='value' style='color:" + (rateLimits > 0 ? "var(--amber)" : "var(--text)") + "'>" + fmtNum(rateLimits) + "</div></div>";
+      html += "<div class='card'><div class='label'>Timeouts</div><div class='value' style='color:" + (timeouts > 0 ? "var(--purple)" : "var(--text)") + "'>" + fmtNum(timeouts) + "</div></div>";
+      html += "<div class='card'><div class='label'>Invalid / Parse</div><div class='value' style='color:" + (invalidResponses > 0 ? "var(--red)" : "var(--text)") + "'>" + fmtNum(invalidResponses) + "</div></div>";
+      if (otherErrors > 0) {
+        html += "<div class='card'><div class='label'>Other</div><div class='value'>" + fmtNum(otherErrors) + "</div></div>";
+      }
+      html += "</div>";
+
+      // System Health
+      html += "<div class='pill'>System Health</div>";
+      html += "<div class='grid3'>";
+      html += "<div class='card'><div class='label'>Queue Saturations</div><div class='value' style='color:" + (run.queueSaturationEvents > 0 ? "var(--amber)" : "var(--text)") + "'>" + fmtNum(run.queueSaturationEvents) + "</div></div>";
+      html += "<div class='card'><div class='label'>Dropped Events</div><div class='value' style='color:" + (run.droppedEvents > 0 ? "var(--red)" : "var(--text)") + "'>" + fmtNum(run.droppedEvents) + "</div></div>";
+      html += "<div class='card'><div class='label'>Planner Noops</div><div class='value'>" + fmtNum(run.plannerNoopCount) + "</div></div>";
+      html += "<div class='card'><div class='label'>Output Repairs</div><div class='value' style='color:" + (run.plannerOutputRepairedCount > 0 ? "var(--amber)" : "var(--text)") + "'>" + fmtNum(run.plannerOutputRepairedCount) + "</div><div class='sub'>JSON parse fixes</div></div>";
+      html += "<div class='card'><div class='label'>Denied Actions</div><div class='value' style='color:" + (run.deniedActions > 0 ? "var(--red)" : "var(--text)") + "'>" + fmtNum(run.deniedActions) + "</div></div>";
+      html += "<div class='card'><div class='label'>Memory Parse Failures</div><div class='value' style='color:" + (run.memoryConsolidationParseFailures > 0 ? "var(--red)" : "var(--text)") + "'>" + fmtNum(run.memoryConsolidationParseFailures) + "</div></div>";
+      html += "</div>";
+
+      el.innerHTML = html;
+    }
+
     function render() {
       renderHeap();
       renderStmChart();
+      renderLongTermMemory();
       renderPhaseTimings();
       renderTokenUsage();
       renderLlmStats();
       renderBudget();
+      renderErrorsReliability();
     }
 
     /* ── SSE Event Processing ── */
@@ -770,8 +912,10 @@
           break;
         case "metrics_snapshot":
           state.metrics = event.data.metrics || event.data;
+          renderLongTermMemory();
           renderTokenUsage();
           renderBudget();
+          renderErrorsReliability();
           break;
         case "limits_config":
           state.limits = event.data.limits || event.data;
@@ -792,6 +936,7 @@
         if (resp.ok) {
           state.llmStats = await resp.json();
           renderLlmStats();
+          renderErrorsReliability();
         }
       } catch (_) {}
     }
@@ -821,6 +966,7 @@
 
       // Event listeners for controls
       document.getElementById("timing-timeframe").addEventListener("change", renderPhaseTimings);
+      document.getElementById("mem-scope").addEventListener("change", renderLongTermMemory);
       document.getElementById("llm-scope").addEventListener("change", () => { renderTokenUsage(); scheduleLlmStatsFetch(); });
       document.getElementById("llm-timeframe").addEventListener("change", scheduleLlmStatsFetch);
 

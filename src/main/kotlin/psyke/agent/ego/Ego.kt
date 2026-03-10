@@ -852,7 +852,8 @@ class Ego(
                         planId = planId,
                         goal = decision.goal,
                         stepCount = decision.steps.size,
-                        urgency = decision.urgency.name.lowercase()
+                        urgency = decision.urgency.name.lowercase(),
+                        steps = decision.steps
                     )
                 )
                 var allQueued = true

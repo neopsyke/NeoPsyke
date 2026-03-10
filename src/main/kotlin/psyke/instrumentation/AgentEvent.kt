@@ -409,14 +409,15 @@ object AgentEvents {
             )
         )
 
-    fun planCreated(planId: String, goal: String, stepCount: Int, urgency: String): AgentEvent =
+    fun planCreated(planId: String, goal: String, stepCount: Int, urgency: String, steps: List<String> = emptyList()): AgentEvent =
         AgentEvent(
             type = "plan_created",
             data = mapOf(
                 "plan_id" to planId,
                 "goal" to goal,
                 "step_count" to stepCount,
-                "urgency" to urgency
+                "urgency" to urgency,
+                "steps" to steps,
             )
         )
 

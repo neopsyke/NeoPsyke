@@ -101,6 +101,20 @@ class MetricsEventSink(
                 emitSnapshot()
             }
 
+            "reflection_lesson_recall" -> {
+                val hitCount = (event.data["hit_count"] as? Int) ?: return
+                val recallChars = (event.data["recall_chars"] as? Int) ?: return
+                metrics.recordReflectionRecall(hitCount = hitCount, recallChars = recallChars)
+                emitSnapshot()
+            }
+
+            "episodic_recall_result" -> {
+                val entriesReturned = (event.data["entries_returned"] as? Int) ?: return
+                val formattedChars = (event.data["formatted_chars"] as? Int) ?: return
+                metrics.recordEpisodicRecall(hitCount = entriesReturned, recallChars = formattedChars)
+                emitSnapshot()
+            }
+
             "memory_imprint_result" -> {
                 val saved = (event.data["saved"] as? Boolean) ?: return
                 val summaryChars = (event.data["summary_chars"] as? Int) ?: return

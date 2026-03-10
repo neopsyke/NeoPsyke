@@ -129,6 +129,17 @@ class StructuredLogSink : InstrumentationSink {
                 }
             }
 
+            "plan_created" -> {
+                logger.trace {
+                    "plan.created id=${event.data["plan_id"]} goal=${event.data["goal"]} steps=${event.data["step_count"]} urgency=${event.data["urgency"]}"
+                }
+                val steps = event.data["steps"]
+                if (steps is List<*> && steps.isNotEmpty()) {
+                    val planText = steps.mapIndexed { i, s -> "  ${i + 1}. $s" }.joinToString("\n")
+                    logger.debug { "plan.created.steps id=${event.data["plan_id"]} goal=${event.data["goal"]}\n$planText" }
+                }
+            }
+
             "planner_output_repaired" -> {
                 logger.trace {
                     "planner.output.repaired action=${event.data["action_type"]} repair=${event.data["repair"]}"

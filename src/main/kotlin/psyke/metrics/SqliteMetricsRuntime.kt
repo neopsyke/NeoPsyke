@@ -100,6 +100,12 @@ class SqliteMetricsRuntime(
             addRunsColumnIfMissing(statement, "memory_imprint_failures", "INTEGER NOT NULL DEFAULT 0")
             addRunsColumnIfMissing(statement, "memory_imprint_latency_ms_total", "INTEGER NOT NULL DEFAULT 0")
             addRunsColumnIfMissing(statement, "memory_imprint_chars_total", "INTEGER NOT NULL DEFAULT 0")
+            addRunsColumnIfMissing(statement, "episodic_recall_attempts", "INTEGER NOT NULL DEFAULT 0")
+            addRunsColumnIfMissing(statement, "episodic_recall_hits", "INTEGER NOT NULL DEFAULT 0")
+            addRunsColumnIfMissing(statement, "episodic_recall_chars_total", "INTEGER NOT NULL DEFAULT 0")
+            addRunsColumnIfMissing(statement, "reflection_recall_attempts", "INTEGER NOT NULL DEFAULT 0")
+            addRunsColumnIfMissing(statement, "reflection_recall_hits", "INTEGER NOT NULL DEFAULT 0")
+            addRunsColumnIfMissing(statement, "reflection_recall_chars_total", "INTEGER NOT NULL DEFAULT 0")
             addRunsColumnIfMissing(statement, "response_latency_count", "INTEGER NOT NULL DEFAULT 0")
             addRunsColumnIfMissing(statement, "response_latency_sum_ms", "INTEGER NOT NULL DEFAULT 0")
             addRunsColumnIfMissing(statement, "response_latency_p50_ms", "REAL")
@@ -335,6 +341,44 @@ class SqliteMetricsRuntime(
         }
     }
 
+    override fun recordEpisodicRecall(hitCount: Int, recallChars: Int) {
+        synchronized(connection) {
+            connection.prepareStatement(
+                """
+                UPDATE runs
+                SET episodic_recall_attempts = episodic_recall_attempts + 1,
+                    episodic_recall_hits = episodic_recall_hits + ?,
+                    episodic_recall_chars_total = episodic_recall_chars_total + ?
+                WHERE run_id = ?
+                """.trimIndent()
+            ).use { statement ->
+                statement.setLong(1, hitCount.coerceAtLeast(0).toLong())
+                statement.setLong(2, recallChars.coerceAtLeast(0).toLong())
+                statement.setString(3, runId)
+                statement.executeUpdate()
+            }
+        }
+    }
+
+    override fun recordReflectionRecall(hitCount: Int, recallChars: Int) {
+        synchronized(connection) {
+            connection.prepareStatement(
+                """
+                UPDATE runs
+                SET reflection_recall_attempts = reflection_recall_attempts + 1,
+                    reflection_recall_hits = reflection_recall_hits + ?,
+                    reflection_recall_chars_total = reflection_recall_chars_total + ?
+                WHERE run_id = ?
+                """.trimIndent()
+            ).use { statement ->
+                statement.setLong(1, hitCount.coerceAtLeast(0).toLong())
+                statement.setLong(2, recallChars.coerceAtLeast(0).toLong())
+                statement.setString(3, runId)
+                statement.executeUpdate()
+            }
+        }
+    }
+
     override fun recordEndToEndResponseLatency(latencyMs: Long) {
         val normalizedLatency = latencyMs.coerceAtLeast(0L)
         synchronized(connection) {
@@ -404,6 +448,12 @@ class SqliteMetricsRuntime(
                        memory_imprint_failures,
                        memory_imprint_latency_ms_total,
                        memory_imprint_chars_total,
+                       episodic_recall_attempts,
+                       episodic_recall_hits,
+                       episodic_recall_chars_total,
+                       reflection_recall_attempts,
+                       reflection_recall_hits,
+                       reflection_recall_chars_total,
                        response_latency_count,
                        response_latency_sum_ms,
                        response_latency_p50_ms
@@ -441,6 +491,12 @@ class SqliteMetricsRuntime(
                             memoryImprintFailures = rs.getLong("memory_imprint_failures"),
                             memoryImprintLatencyMsTotal = rs.getLong("memory_imprint_latency_ms_total"),
                             memoryImprintCharsTotal = rs.getLong("memory_imprint_chars_total"),
+                            episodicRecallAttempts = rs.getLong("episodic_recall_attempts"),
+                            episodicRecallHits = rs.getLong("episodic_recall_hits"),
+                            episodicRecallCharsTotal = rs.getLong("episodic_recall_chars_total"),
+                            reflectionRecallAttempts = rs.getLong("reflection_recall_attempts"),
+                            reflectionRecallHits = rs.getLong("reflection_recall_hits"),
+                            reflectionRecallCharsTotal = rs.getLong("reflection_recall_chars_total"),
                             responseLatencyCount = rs.getLong("response_latency_count"),
                             responseLatencySumMs = rs.getLong("response_latency_sum_ms"),
                             medianEndToEndResponseLatencyMs = rs.getDouble("response_latency_p50_ms").let {
@@ -479,6 +535,12 @@ class SqliteMetricsRuntime(
                        COALESCE(SUM(memory_imprint_failures), 0) AS memory_imprint_failures,
                        COALESCE(SUM(memory_imprint_latency_ms_total), 0) AS memory_imprint_latency_ms_total,
                        COALESCE(SUM(memory_imprint_chars_total), 0) AS memory_imprint_chars_total,
+                       COALESCE(SUM(episodic_recall_attempts), 0) AS episodic_recall_attempts,
+                       COALESCE(SUM(episodic_recall_hits), 0) AS episodic_recall_hits,
+                       COALESCE(SUM(episodic_recall_chars_total), 0) AS episodic_recall_chars_total,
+                       COALESCE(SUM(reflection_recall_attempts), 0) AS reflection_recall_attempts,
+                       COALESCE(SUM(reflection_recall_hits), 0) AS reflection_recall_hits,
+                       COALESCE(SUM(reflection_recall_chars_total), 0) AS reflection_recall_chars_total,
                        COALESCE(SUM(response_latency_count), 0) AS response_latency_count,
                        COALESCE(SUM(response_latency_sum_ms), 0) AS response_latency_sum_ms
                 FROM runs
@@ -515,6 +577,12 @@ class SqliteMetricsRuntime(
                         memoryImprintFailures = rs.getLong("memory_imprint_failures"),
                         memoryImprintLatencyMsTotal = rs.getLong("memory_imprint_latency_ms_total"),
                         memoryImprintCharsTotal = rs.getLong("memory_imprint_chars_total"),
+                        episodicRecallAttempts = rs.getLong("episodic_recall_attempts"),
+                        episodicRecallHits = rs.getLong("episodic_recall_hits"),
+                        episodicRecallCharsTotal = rs.getLong("episodic_recall_chars_total"),
+                        reflectionRecallAttempts = rs.getLong("reflection_recall_attempts"),
+                        reflectionRecallHits = rs.getLong("reflection_recall_hits"),
+                        reflectionRecallCharsTotal = rs.getLong("reflection_recall_chars_total"),
                         responseLatencyCount = rs.getLong("response_latency_count"),
                         responseLatencySumMs = rs.getLong("response_latency_sum_ms"),
                         medianEndToEndResponseLatencyMs = null

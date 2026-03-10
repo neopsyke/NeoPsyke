@@ -227,6 +227,14 @@ class SqliteLogbook(
         }
     }
 
+    override fun clearAll(): Int {
+        synchronized(connection) {
+            return connection.createStatement().use { stmt ->
+                stmt.executeUpdate("DELETE FROM entries")
+            }
+        }
+    }
+
     override fun close() {
         try {
             synchronized(connection) {

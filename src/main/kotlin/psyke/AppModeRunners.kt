@@ -507,6 +507,7 @@ internal object AppModeRunners {
         config: AgentConfig,
         mcpRuntimeConfig: McpRuntimeConfig,
         runtimeSettings: AgentRuntimeSettings,
+        cliOptions: AppCliOptions? = null,
     ) {
         if (!checkInteractiveLlmHealth(llm = llm, modeLabel = "interactive")) {
             return
@@ -955,6 +956,14 @@ internal object AppModeRunners {
                                                         }
                                                         val logbook = createLogbookIfEnabled(config)
                                                         val logbookSummarizer = createLogbookSummarizer(config, longTermMemoryClient)
+                                                        if (cliOptions?.hasClearMemoryRequest == true) {
+                                                            executeLongTermMemoryClear(
+                                                                cliOptions = cliOptions,
+                                                                hippocampus = hippocampus,
+                                                                logbook = logbook,
+                                                                instrumentation = instrumentation
+                                                            )
+                                                        }
                                                         try {
                                                             Ego(
                                                                 planner = planner,
@@ -1465,6 +1474,80 @@ internal object AppModeRunners {
             modelClient = memoryClient,
             config = config,
         )
+    }
+
+    private fun executeLongTermMemoryClear(
+        cliOptions: AppCliOptions,
+        hippocampus: Hippocampus,
+        logbook: psyke.agent.memory.episodic.Logbook?,
+        instrumentation: psyke.instrumentation.AgentInstrumentation,
+    ) {
+        val clearVector = cliOptions.clearMemoryAll || cliOptions.clearMemoryVector
+        val clearEpisodic = cliOptions.clearMemoryAll || cliOptions.clearMemoryEpisodic
+        val clearReflection = cliOptions.clearMemoryReflection && !clearVector
+
+        if (clearVector) {
+            if (hippocampus.enabled) {
+                output.info("Clearing vector/hippocampus memory...")
+                try {
+                    val deleted = hippocampus.clearAll()
+                    output.info("Vector memory cleared ($deleted observations removed).")
+                    logger.info { "CLI --clear-memory: vector/hippocampus cleared, $deleted observations removed." }
+                    instrumentation.emit(
+                        psyke.instrumentation.AgentEvents.warning(
+                            "Memory cleared via CLI: vector/hippocampus ($deleted observations removed)."
+                        )
+                    )
+                } catch (ex: Exception) {
+                    output.error("Failed to clear vector memory: ${ex.message}")
+                    logger.warn(ex) { "CLI --clear-memory: vector/hippocampus clear failed." }
+                }
+            } else {
+                output.info("Vector memory is not enabled; skipping --clear-memory-vector.")
+            }
+        }
+
+        if (clearReflection) {
+            if (hippocampus.enabled) {
+                output.info("Clearing reflection lessons from vector memory...")
+                try {
+                    val deleted = hippocampus.purgeTaggedObservations(listOf("kind:reflection_lesson"))
+                    output.info("Reflection lessons cleared ($deleted observations removed).")
+                    logger.info { "CLI --clear-memory: reflection lessons cleared, $deleted observations removed." }
+                    instrumentation.emit(
+                        psyke.instrumentation.AgentEvents.warning(
+                            "Memory cleared via CLI: reflection lessons ($deleted observations removed)."
+                        )
+                    )
+                } catch (ex: Exception) {
+                    output.error("Failed to clear reflection lessons: ${ex.message}")
+                    logger.warn(ex) { "CLI --clear-memory: reflection lessons clear failed." }
+                }
+            } else {
+                output.info("Vector memory is not enabled; skipping --clear-memory-reflection.")
+            }
+        }
+
+        if (clearEpisodic) {
+            if (logbook != null) {
+                output.info("Clearing episodic logbook memory...")
+                try {
+                    val deleted = logbook.clearAll()
+                    output.info("Episodic logbook cleared ($deleted entries removed).")
+                    logger.info { "CLI --clear-memory: episodic logbook cleared, $deleted entries removed." }
+                    instrumentation.emit(
+                        psyke.instrumentation.AgentEvents.warning(
+                            "Memory cleared via CLI: episodic logbook ($deleted entries removed)."
+                        )
+                    )
+                } catch (ex: Exception) {
+                    output.error("Failed to clear episodic logbook: ${ex.message}")
+                    logger.warn(ex) { "CLI --clear-memory: episodic logbook clear failed." }
+                }
+            } else {
+                output.info("Episodic logbook is not enabled; skipping --clear-memory-episodic.")
+            }
+        }
     }
 
     private fun closeQuietly(value: Any?) {
