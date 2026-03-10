@@ -25,7 +25,7 @@ class SqliteMetricsRuntime(
     apiKey: String,
     egoModel: String,
     superegoModel: String,
-) : MetricsRuntime {
+) : MetricsRuntime, MetricsQueryProvider {
     private val dbPath = resolveDbPath()
     private val metricsDir = dbPath.toAbsolutePath().parent ?: Paths.get(System.getProperty("user.dir"))
     private val connection: Connection
@@ -592,7 +592,7 @@ class SqliteMetricsRuntime(
 
             val runTokenRows = queryTokenRows(
                 query = """
-                SELECT provider, actor, call_site, action_type,
+                SELECT provider, model, actor, call_site, action_type,
                        prompt_tokens, completion_tokens, total_tokens
                 FROM llm_calls
                 WHERE run_id = ?
@@ -604,7 +604,7 @@ class SqliteMetricsRuntime(
             val persistentTokenRows = if (provider == "multi") {
                 queryTokenRows(
                     query = """
-                    SELECT provider, actor, call_site, action_type,
+                    SELECT provider, model, actor, call_site, action_type,
                            prompt_tokens, completion_tokens, total_tokens
                     FROM llm_calls
                     WHERE key_fingerprint = ?
@@ -615,7 +615,7 @@ class SqliteMetricsRuntime(
             } else {
                 queryTokenRows(
                     query = """
-                    SELECT provider, actor, call_site, action_type,
+                    SELECT provider, model, actor, call_site, action_type,
                            prompt_tokens, completion_tokens, total_tokens
                     FROM llm_calls
                     WHERE key_fingerprint = ? AND provider = ?
@@ -641,7 +641,141 @@ class SqliteMetricsRuntime(
                 runTokensByProvider = aggregateTokensByProvider(runTokenRows),
                 persistentTokensByProvider = aggregateTokensByProvider(persistentTokenRows),
                 runTokensByRole = aggregateTokensByRole(runTokenRows),
-                persistentTokensByRole = aggregateTokensByRole(persistentTokenRows)
+                persistentTokensByRole = aggregateTokensByRole(persistentTokenRows),
+                runTokensByModel = aggregateTokensByModel(runTokenRows),
+                persistentTokensByModel = aggregateTokensByModel(persistentTokenRows),
+                runModelsByRole = aggregateModelsByRole(runTokenRows),
+                persistentModelsByRole = aggregateModelsByRole(persistentTokenRows)
+            )
+        }
+    }
+
+    override fun llmCallStats(runOnly: Boolean, timeframeMs: Long?): LlmCallStatsReport {
+        synchronized(connection) {
+            val timeCutoff = if (timeframeMs != null && timeframeMs > 0) {
+                Instant.now().minusMillis(timeframeMs).toString()
+            } else null
+
+            val scopeClause: String
+            val bindScope: (java.sql.PreparedStatement, Int) -> Int
+            if (runOnly) {
+                scopeClause = "run_id = ?"
+                bindScope = { stmt, startIdx ->
+                    stmt.setString(startIdx, runId)
+                    startIdx + 1
+                }
+            } else {
+                scopeClause = "key_fingerprint = ? AND provider = ?"
+                bindScope = { stmt, startIdx ->
+                    stmt.setString(startIdx, keyFingerprint)
+                    stmt.setString(startIdx + 1, provider)
+                    startIdx + 2
+                }
+            }
+
+            val timeClause = if (timeCutoff != null) " AND ts >= ?" else ""
+            fun bindTime(stmt: java.sql.PreparedStatement, nextIdx: Int): Int {
+                if (timeCutoff != null) {
+                    stmt.setString(nextIdx, timeCutoff)
+                    return nextIdx + 1
+                }
+                return nextIdx
+            }
+
+            val whereClause = "$scopeClause$timeClause"
+
+            // Fetch all rows for model stats + percentile computation
+            data class CallRow(
+                val model: String,
+                val actor: String?,
+                val callSite: String?,
+                val actionType: String?,
+                val latencyMs: Long,
+                val status: String,
+                val errorCode: String?,
+                val promptTokens: Long,
+                val completionTokens: Long,
+                val totalTokens: Long,
+            )
+
+            val rows = connection.prepareStatement(
+                """
+                SELECT model, actor, call_site, action_type, latency_ms, status, error_code,
+                       COALESCE(prompt_tokens, 0) AS prompt_tokens,
+                       COALESCE(completion_tokens, 0) AS completion_tokens,
+                       COALESCE(total_tokens, COALESCE(prompt_tokens, 0) + COALESCE(completion_tokens, 0)) AS total_tokens
+                FROM llm_calls
+                WHERE $whereClause
+                """.trimIndent()
+            ).use { stmt ->
+                var idx = 1
+                idx = bindScope(stmt, idx)
+                bindTime(stmt, idx)
+                stmt.executeQuery().use { rs ->
+                    buildList {
+                        while (rs.next()) {
+                            add(CallRow(
+                                model = rs.getString("model").orEmpty().ifBlank { "unknown" },
+                                actor = rs.getString("actor"),
+                                callSite = rs.getString("call_site"),
+                                actionType = rs.getString("action_type"),
+                                latencyMs = rs.getLong("latency_ms"),
+                                status = rs.getString("status").orEmpty(),
+                                errorCode = rs.getString("error_code"),
+                                promptTokens = rs.getLong("prompt_tokens"),
+                                completionTokens = rs.getLong("completion_tokens"),
+                                totalTokens = rs.getLong("total_tokens"),
+                            ))
+                        }
+                    }
+                }
+            }
+
+            // By model
+            val byModel = rows.groupBy { it.model }.mapValues { (_, modelRows) ->
+                val latencies = modelRows.map { it.latencyMs }.sorted()
+                ModelStats(
+                    callCount = modelRows.size.toLong(),
+                    avgLatencyMs = if (latencies.isNotEmpty()) latencies.average().toLong() else 0L,
+                    p50LatencyMs = percentile(latencies, 50.0),
+                    p95LatencyMs = percentile(latencies, 95.0),
+                    errorCount = modelRows.count { it.status == "error" }.toLong(),
+                    totalTokens = modelRows.sumOf { it.totalTokens },
+                    promptTokens = modelRows.sumOf { it.promptTokens },
+                    completionTokens = modelRows.sumOf { it.completionTokens },
+                )
+            }
+
+            // By role
+            val byRole = rows.groupBy { row ->
+                LlmRoleLabels.classify(
+                    actor = row.actor,
+                    callSite = row.callSite,
+                    actionType = row.actionType,
+                )
+            }.mapValues { (_, roleRows) ->
+                val latencies = roleRows.map { it.latencyMs }
+                RoleStats(
+                    callCount = roleRows.size.toLong(),
+                    totalTokens = roleRows.sumOf { it.totalTokens },
+                    avgLatencyMs = if (latencies.isNotEmpty()) latencies.average().toLong() else 0L,
+                )
+            }
+
+            // Error breakdown: model -> error_code -> count
+            val errorBreakdown = rows
+                .filter { it.status == "error" }
+                .groupBy { it.model }
+                .mapValues { (_, modelRows) ->
+                    modelRows
+                        .groupBy { it.errorCode ?: "unknown" }
+                        .mapValues { (_, codeRows) -> codeRows.size.toLong() }
+                }
+
+            return LlmCallStatsReport(
+                byModel = byModel,
+                byRole = byRole,
+                errorBreakdown = errorBreakdown,
             )
         }
     }
@@ -658,6 +792,7 @@ class SqliteMetricsRuntime(
                         add(
                             CallTokenRow(
                                 provider = rs.getString("provider").orEmpty().ifBlank { "unknown" },
+                                model = rs.getString("model").orEmpty().ifBlank { "unknown" },
                                 actor = rs.getString("actor"),
                                 callSite = rs.getString("call_site"),
                                 actionType = rs.getString("action_type"),
@@ -692,6 +827,21 @@ class SqliteMetricsRuntime(
                 actionType = row.actionType
             )
         }.fold(0L) { acc, row -> acc + row.totalTokens }
+            .toSortedMap()
+
+    private fun aggregateTokensByModel(rows: List<CallTokenRow>): Map<String, Long> =
+        rows.groupingBy { it.model }
+            .fold(0L) { acc, row -> acc + row.totalTokens }
+            .toSortedMap()
+
+    private fun aggregateModelsByRole(rows: List<CallTokenRow>): Map<String, Set<String>> =
+        rows.groupBy { row ->
+            LlmRoleLabels.classify(
+                actor = row.actor,
+                callSite = row.callSite,
+                actionType = row.actionType
+            )
+        }.mapValues { (_, roleRows) -> roleRows.map { it.model }.toSortedSet() }
             .toSortedMap()
 
     private fun startRun(egoModel: String, superegoModel: String) {
@@ -779,6 +929,7 @@ class SqliteMetricsRuntime(
 
     private data class CallTokenRow(
         val provider: String,
+        val model: String,
         val actor: String?,
         val callSite: String?,
         val actionType: String?,
@@ -813,6 +964,12 @@ class SqliteMetricsRuntime(
             } else {
                 (sorted[mid - 1].toDouble() + sorted[mid].toDouble()) / 2.0
             }
+        }
+
+        private fun percentile(sortedValues: List<Long>, pct: Double): Long {
+            if (sortedValues.isEmpty()) return 0L
+            val idx = ((pct / 100.0) * (sortedValues.size - 1)).toInt().coerceIn(0, sortedValues.size - 1)
+            return sortedValues[idx]
         }
 
         private fun resolveDbPath(): Path {

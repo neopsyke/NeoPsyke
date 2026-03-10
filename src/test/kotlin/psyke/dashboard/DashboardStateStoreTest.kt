@@ -225,4 +225,71 @@ class DashboardStateStoreTest {
 
         store.close()
     }
+
+    @Test
+    fun `phase timings events are accumulated in ring buffer with max limit`() {
+        val store = DashboardStateStore(maxEvents = 300)
+        repeat(210) { i ->
+            store.onEvent(
+                AgentEvent(
+                    id = (i + 1).toLong(),
+                    type = "phase_timings",
+                    data = mapOf(
+                        "task_type" to "input",
+                        "root_input_id" to "root-$i",
+                        "total_duration_ms" to 100L,
+                        "phases" to listOf(mapOf("name" to "alpha", "duration_ms" to 100L)),
+                        "timestamp_ms" to System.currentTimeMillis(),
+                    )
+                )
+            )
+        }
+        val snapshot: DashboardSnapshot = mapper.readValue(store.snapshotJson())
+        assertEquals(200, snapshot.phaseTimings.size)
+        // oldest entries should have been dropped; most recent kept
+        assertEquals("root-10", snapshot.phaseTimings.first()["root_input_id"])
+        assertEquals("root-209", snapshot.phaseTimings.last()["root_input_id"])
+    }
+
+    @Test
+    fun `heap snapshot event replaces previous snapshot`() {
+        val store = DashboardStateStore(maxEvents = 10)
+        store.onEvent(
+            AgentEvent(
+                id = 1,
+                type = "heap_snapshot",
+                data = mapOf(
+                    "jvm_total_bytes" to 1_000_000L,
+                    "jvm_used_bytes" to 500_000L,
+                    "jvm_max_bytes" to 2_000_000L,
+                    "jvm_used_percent" to 50.0,
+                )
+            )
+        )
+        store.onEvent(
+            AgentEvent(
+                id = 2,
+                type = "heap_snapshot",
+                data = mapOf(
+                    "jvm_total_bytes" to 1_200_000L,
+                    "jvm_used_bytes" to 700_000L,
+                    "jvm_max_bytes" to 2_000_000L,
+                    "jvm_used_percent" to 58.3,
+                )
+            )
+        )
+        val snapshot: DashboardSnapshot = mapper.readValue(store.snapshotJson())
+        assertNotNull(snapshot.heapMetrics)
+        assertEquals(700_000L, (snapshot.heapMetrics!!["jvm_used_bytes"] as Number).toLong())
+    }
+
+    @Test
+    fun `snapshot includes store stats`() {
+        val store = DashboardStateStore(maxEvents = 50)
+        store.onEvent(AgentEvent(id = 1, type = "loop_step", data = mapOf("step" to 1)))
+        val snapshot: DashboardSnapshot = mapper.readValue(store.snapshotJson())
+        assertTrue(snapshot.storeStats.containsKey("event_count"))
+        assertTrue(snapshot.storeStats.containsKey("max_events"))
+        assertEquals(50, (snapshot.storeStats["max_events"] as Number).toInt())
+    }
 }

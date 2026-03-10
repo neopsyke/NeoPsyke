@@ -89,6 +89,7 @@ import psyke.integrations.mistral.websearch.MistralConversationsWebSearchEngine
 import psyke.integrations.mistral.websearch.MistralWebSearchMode
 import psyke.integrations.mistral.websearch.MistralWebSearchProfile
 import psyke.integrations.mistral.websearch.MistralWebSearchAgentSession
+import psyke.metrics.MetricsQueryProvider
 import psyke.metrics.MetricsRuntimeFactory
 import psyke.agent.tools.mcp.FetchTool
 import psyke.agent.tools.mcp.McpTimeTool
@@ -677,6 +678,9 @@ internal object AppModeRunners {
                     )
                     instrumentation.addSink(metricsEventSink)
                     metricsEventSink.setInstrumentation(instrumentation)
+                    if (metrics is MetricsQueryProvider) {
+                        dashboardServer?.metricsQueryProvider = metrics
+                    }
                     instrumentation.setDroppedEventsObserver { delta, total ->
                         metrics.recordDroppedEvents(delta)
                         dashboardStore.recordDroppedEvents(total)
@@ -985,6 +989,7 @@ internal object AppModeRunners {
                             }
                         }
                     }
+                    dumpEndOfRunMetrics(metrics)
                 }
             }
             }
@@ -1517,5 +1522,81 @@ internal object AppModeRunners {
             )
 
         override fun close() {}
+    }
+
+    private fun dumpEndOfRunMetrics(metrics: psyke.metrics.MetricsRuntime) {
+        if (!logger.isTraceEnabled) return
+        try {
+            val snapshot = metrics.snapshot() ?: return
+            val run = snapshot.runTotals
+            val all = snapshot.persistentTotals
+            val sb = StringBuilder(2048)
+            sb.appendLine()
+            sb.appendLine("=== PSYKE END-OF-RUN METRICS ===")
+            sb.appendLine("run_id=${snapshot.runId}")
+            sb.appendLine("provider=${snapshot.provider}")
+            sb.appendLine("key_fingerprint=${snapshot.keyFingerprint}")
+            sb.appendLine("run_count_for_scope=${snapshot.runCountForScope}")
+            sb.appendLine()
+            sb.appendLine("-- Run Totals --")
+            sb.appendLine("calls=${run.calls} tokens=${run.totalTokens} denied=${run.deniedActions} errors=${run.errorCount}")
+            sb.appendLine("queue_saturation=${run.queueSaturationEvents} dropped=${run.droppedEvents}")
+            sb.appendLine("planner_noops=${run.plannerNoopCount} planner_repaired=${run.plannerOutputRepairedCount}")
+            sb.appendLine("memory_recall: attempts=${run.memoryRecallAttempts} hits=${run.memoryRecallHits} failures=${run.memoryRecallFailures} skipped=${run.longTermMemoryRecallSkipped}")
+            sb.appendLine("memory_imprint: attempts=${run.memoryImprintAttempts} saved=${run.memoryImprintSaved} failures=${run.memoryImprintFailures}")
+            sb.appendLine("ltm_assessments=${run.memoryConsolidationAssessments} save_recommended=${run.memoryConsolidationSaveRecommended} parse_failures=${run.memoryConsolidationParseFailures}")
+            if (run.responseLatencyCount > 0) {
+                val avgLatency = run.responseLatencySumMs / run.responseLatencyCount
+                sb.appendLine("response_latency: count=${run.responseLatencyCount} avg=${avgLatency}ms median=${run.medianEndToEndResponseLatencyMs ?: "-"}ms")
+            }
+            sb.appendLine()
+            sb.appendLine("-- Persistent Totals --")
+            sb.appendLine("calls=${all.calls} tokens=${all.totalTokens} denied=${all.deniedActions} errors=${all.errorCount}")
+            sb.appendLine()
+            sb.appendLine("-- Tokens by Role (run) --")
+            snapshot.runTokensByRole.entries.sortedByDescending { it.value }.forEach { (role, tokens) ->
+                val models = snapshot.runModelsByRole[role]?.joinToString(", ") ?: ""
+                sb.appendLine("  $role: $tokens tokens${if (models.isNotEmpty()) "  models=[$models]" else ""}")
+            }
+            sb.appendLine()
+            sb.appendLine("-- Tokens by Model (run) --")
+            snapshot.runTokensByModel.entries.sortedByDescending { it.value }.forEach { (model, tokens) ->
+                sb.appendLine("  $model: $tokens tokens")
+            }
+            sb.appendLine()
+            sb.appendLine("-- Action Calls (run) --")
+            snapshot.runActionCallsByType.entries.sortedByDescending { it.value }.forEach { (type, count) ->
+                sb.appendLine("  $type: $count")
+            }
+
+            if (metrics is MetricsQueryProvider) {
+                try {
+                    val llmStats = metrics.llmCallStats(runOnly = true)
+                    if (llmStats.byModel.isNotEmpty()) {
+                        sb.appendLine()
+                        sb.appendLine("-- LLM Call Stats (run) --")
+                        llmStats.byModel.entries.sortedByDescending { it.value.callCount }.forEach { (model, stats) ->
+                            sb.appendLine("  $model: calls=${stats.callCount} avg_latency=${stats.avgLatencyMs}ms p50=${stats.p50LatencyMs}ms p95=${stats.p95LatencyMs}ms errors=${stats.errorCount} tokens=${stats.totalTokens} (prompt=${stats.promptTokens} completion=${stats.completionTokens})")
+                        }
+                    }
+                    if (llmStats.errorBreakdown.isNotEmpty()) {
+                        sb.appendLine()
+                        sb.appendLine("-- Error Breakdown (run) --")
+                        llmStats.errorBreakdown.forEach { (model, errors) ->
+                            errors.forEach { (code, count) ->
+                                sb.appendLine("  $model: $code=$count")
+                            }
+                        }
+                    }
+                } catch (ex: Exception) {
+                    sb.appendLine("  (llm stats query failed: ${ex.message})")
+                }
+            }
+
+            sb.appendLine("=== END METRICS ===")
+            logger.trace { sb.toString() }
+        } catch (ex: Exception) {
+            logger.trace { "Failed to dump end-of-run metrics: ${ex.message}" }
+        }
     }
 }

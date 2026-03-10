@@ -6,6 +6,7 @@ import psyke.llm.ChatCallStatus
 import java.nio.file.Files
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 class SqliteMetricsRuntimeTest {
     @Test
@@ -243,6 +244,153 @@ class SqliteMetricsRuntimeTest {
                 assertEquals(40L, snapshot.persistentTokensByRole["planner"])
                 assertEquals(20L, snapshot.persistentTokensByRole["superego"])
                 assertEquals(10L, snapshot.persistentTokensByRole["meta_reasoner"])
+            }
+        } finally {
+            if (previous == null) {
+                System.clearProperty("psyke.metrics.db")
+            } else {
+                System.setProperty("psyke.metrics.db", previous)
+            }
+            Files.deleteIfExists(dbPath)
+            Files.deleteIfExists(dbPath.resolveSibling("metrics.salt"))
+        }
+    }
+
+    @Test
+    fun `llmCallStats returns model stats with latency percentiles`() {
+        val dbPath = Files.createTempFile("psyke-metrics-llm-stats-test", ".db")
+        val previous = System.getProperty("psyke.metrics.db")
+        System.setProperty("psyke.metrics.db", dbPath.toString())
+        try {
+            SqliteMetricsRuntime(
+                provider = "groq",
+                apiKey = "same-key",
+                egoModel = "ego-model",
+                superegoModel = "superego-model"
+            ).use { metrics ->
+                val observer = metrics.chatCallObserver("groq")
+                observer.onChatCall(
+                    ChatCallRecord(
+                        model = "ego-model",
+                        metadata = ChatCallMetadata(actor = "ego", callSite = "input"),
+                        latencyMs = 100,
+                        promptTokens = 20,
+                        completionTokens = 10,
+                        totalTokens = 30,
+                        status = ChatCallStatus.OK
+                    )
+                )
+                observer.onChatCall(
+                    ChatCallRecord(
+                        model = "ego-model",
+                        metadata = ChatCallMetadata(actor = "ego", callSite = "input"),
+                        latencyMs = 200,
+                        promptTokens = 25,
+                        completionTokens = 15,
+                        totalTokens = 40,
+                        status = ChatCallStatus.OK
+                    )
+                )
+                observer.onChatCall(
+                    ChatCallRecord(
+                        model = "superego-model",
+                        metadata = ChatCallMetadata(actor = "superego", callSite = "action_review"),
+                        latencyMs = 50,
+                        promptTokens = 10,
+                        completionTokens = 5,
+                        totalTokens = 15,
+                        status = ChatCallStatus.OK
+                    )
+                )
+                observer.onChatCall(
+                    ChatCallRecord(
+                        model = "ego-model",
+                        metadata = ChatCallMetadata(actor = "ego", callSite = "input"),
+                        latencyMs = 300,
+                        totalTokens = 20,
+                        status = ChatCallStatus.ERROR,
+                        errorCode = "rate_limit"
+                    )
+                )
+
+                val report = metrics.llmCallStats(runOnly = true)
+                assertEquals(2, report.byModel.size)
+
+                val egoStats = report.byModel["ego-model"]!!
+                assertEquals(3, egoStats.callCount)
+                assertEquals(1, egoStats.errorCount)
+                assertEquals(90, egoStats.totalTokens)
+                assertTrue(egoStats.p50LatencyMs in 100..300)
+                assertTrue(egoStats.p95LatencyMs >= egoStats.p50LatencyMs)
+
+                val superegoStats = report.byModel["superego-model"]!!
+                assertEquals(1, superegoStats.callCount)
+                assertEquals(0, superegoStats.errorCount)
+                assertEquals(15, superegoStats.totalTokens)
+                assertEquals(50, superegoStats.p50LatencyMs)
+
+                assertTrue(report.byRole.containsKey("planner"))
+                assertTrue(report.byRole.containsKey("superego"))
+
+                assertEquals(1, report.errorBreakdown.size)
+                assertEquals(1L, report.errorBreakdown["ego-model"]!!["rate_limit"])
+            }
+        } finally {
+            if (previous == null) {
+                System.clearProperty("psyke.metrics.db")
+            } else {
+                System.setProperty("psyke.metrics.db", previous)
+            }
+            Files.deleteIfExists(dbPath)
+            Files.deleteIfExists(dbPath.resolveSibling("metrics.salt"))
+        }
+    }
+
+    @Test
+    fun `llmCallStats all-time scope aggregates across runs`() {
+        val dbPath = Files.createTempFile("psyke-metrics-llm-stats-alltime-test", ".db")
+        val previous = System.getProperty("psyke.metrics.db")
+        System.setProperty("psyke.metrics.db", dbPath.toString())
+        try {
+            SqliteMetricsRuntime(
+                provider = "groq",
+                apiKey = "same-key",
+                egoModel = "ego-model",
+                superegoModel = "superego-model"
+            ).use { metrics ->
+                metrics.chatCallObserver("groq").onChatCall(
+                    ChatCallRecord(
+                        model = "ego-model",
+                        metadata = ChatCallMetadata(actor = "ego", callSite = "input"),
+                        latencyMs = 100,
+                        totalTokens = 30,
+                        status = ChatCallStatus.OK
+                    )
+                )
+            }
+
+            SqliteMetricsRuntime(
+                provider = "groq",
+                apiKey = "same-key",
+                egoModel = "ego-model",
+                superegoModel = "superego-model"
+            ).use { metrics ->
+                metrics.chatCallObserver("groq").onChatCall(
+                    ChatCallRecord(
+                        model = "ego-model",
+                        metadata = ChatCallMetadata(actor = "ego", callSite = "input"),
+                        latencyMs = 200,
+                        totalTokens = 40,
+                        status = ChatCallStatus.OK
+                    )
+                )
+
+                val runReport = metrics.llmCallStats(runOnly = true)
+                assertEquals(1, runReport.byModel["ego-model"]!!.callCount)
+
+                val allReport = metrics.llmCallStats(runOnly = false)
+                assertEquals(2, allReport.byModel["ego-model"]!!.callCount)
+                assertEquals(70, allReport.byModel["ego-model"]!!.totalTokens)
             }
         } finally {
             if (previous == null) {
