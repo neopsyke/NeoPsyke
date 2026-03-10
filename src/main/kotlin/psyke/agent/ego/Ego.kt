@@ -366,21 +366,47 @@ class Ego(
             return
         }
         timing.startPhase("task_verifier")
+        val recentDialogue = dialogueFor(sessionId).takeLast(12)
+        val latestUserTurn = recentDialogue
+            .asReversed()
+            .firstOrNull { it.role == DialogueRole.USER }
+            ?.content
+            .orEmpty()
+        val disabledForScope = deliberation.disabledActionTypes(resolvedAction.rootInputId, sessionId)
+        val availableActionsForScope = motorCortex.availableActionTypes() - disabledForScope
+        val dispatchableActionsForScope = motorCortex.dispatchableActionTypes() - disabledForScope
         val taskVerificationDecision = taskVerifier.review(
             action = resolvedAction,
             context = TaskVerifierContext(
-                recentDialogue = dialogueFor(sessionId).takeLast(12),
-                externalEvidence = deliberation.evidenceFor(resolvedAction.rootInputId, sessionId)
+                recentDialogue = recentDialogue,
+                externalEvidence = deliberation.evidenceFor(resolvedAction.rootInputId, sessionId),
+                availableActions = availableActionsForScope,
+                dispatchableActions = dispatchableActionsForScope,
+                latestUserTurn = latestUserTurn
             )
         )
+        val assessment = taskVerificationDecision.assessment
         instrumentation.emit(
             AgentEvent(
                 type = "task_verifier_review",
                 data = mapOf(
                     "action_id" to resolvedAction.id,
+                    "root_input_id" to resolvedAction.rootInputId,
+                    "root_input_received_at_ms" to resolvedAction.rootInputReceivedAtMs,
+                    "session_id" to sessionId,
+                    "action_type" to resolvedAction.type.id,
                     "allow" to taskVerificationDecision.allow,
                     "reason" to taskVerificationDecision.reason,
-                    "reason_code" to taskVerificationDecision.reasonCode
+                    "reason_code" to taskVerificationDecision.reasonCode,
+                    "intent_category" to assessment?.intentCategory?.name?.lowercase(),
+                    "volatility_level" to assessment?.volatilityLevel?.name?.lowercase(),
+                    "volatility_score" to assessment?.volatilityScore,
+                    "requires_external_evidence" to assessment?.requiresExternalEvidence,
+                    "evidence_actions_available" to assessment?.evidenceActionsAvailable,
+                    "evidence_actions_dispatchable" to assessment?.evidenceActionsDispatchable,
+                    "had_successful_evidence" to assessment?.hadSuccessfulEvidence,
+                    "had_external_failures" to assessment?.hadExternalFailures,
+                    "latest_user_turn_preview" to TextSecurity.preview(latestUserTurn, 140)
                 )
             )
         )

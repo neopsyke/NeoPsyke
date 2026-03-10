@@ -89,10 +89,51 @@ class DashboardStateStoreTest {
         assertEquals(metrics, snapshot.metrics)
         assertEquals(3L, (snapshot.instrumentationHealth["dropped_events"] as Number).toLong())
         assertEquals(1L, (snapshot.instrumentationHealth["queue_saturation_events"] as Number).toLong())
+        assertEquals(0L, (snapshot.taskVerifierStats["total_reviews"] as Number).toLong())
         @Suppress("UNCHECKED_CAST")
         val saturationByType = snapshot.instrumentationHealth["queue_saturation_by_type"] as Map<String, Any?>
         assertEquals(1L, (saturationByType["thought"] as Number).toLong())
         assertEquals(listOf(1L, 2L, 3L, 4L, 5L, 6L, 7L, 8L, 9L, 10L), snapshot.recentEvents.map { it.id })
+    }
+
+    @Test
+    fun `snapshot aggregates task verifier stats`() {
+        val store = DashboardStateStore(maxEvents = 30)
+        store.onEvent(
+            AgentEvent(
+                id = 1,
+                type = "task_verifier_review",
+                data = mapOf(
+                    "allow" to false,
+                    "reason_code" to "TASK_EVIDENCE_REQUIRED",
+                    "intent_category" to "volatile_fact",
+                    "volatility_level" to "high",
+                    "requires_external_evidence" to true
+                )
+            )
+        )
+        store.onEvent(
+            AgentEvent(
+                id = 2,
+                type = "task_verifier_review",
+                data = mapOf(
+                    "allow" to true,
+                    "reason_code" to "TASK_EVIDENCE_UNAVAILABLE_GRACEFUL",
+                    "intent_category" to "volatile_fact",
+                    "volatility_level" to "high",
+                    "requires_external_evidence" to true
+                )
+            )
+        )
+
+        val snapshot: DashboardSnapshot = mapper.readValue(store.snapshotJson())
+        assertEquals(2L, (snapshot.taskVerifierStats["total_reviews"] as Number).toLong())
+        assertEquals(1L, (snapshot.taskVerifierStats["deny_count"] as Number).toLong())
+        assertEquals(1L, (snapshot.taskVerifierStats["graceful_allow_count"] as Number).toLong())
+        @Suppress("UNCHECKED_CAST")
+        val byReason = snapshot.taskVerifierStats["by_reason_code"] as Map<String, Any?>
+        assertEquals(1L, (byReason["TASK_EVIDENCE_REQUIRED"] as Number).toLong())
+        assertEquals(1L, (byReason["TASK_EVIDENCE_UNAVAILABLE_GRACEFUL"] as Number).toLong())
     }
 
     @Test

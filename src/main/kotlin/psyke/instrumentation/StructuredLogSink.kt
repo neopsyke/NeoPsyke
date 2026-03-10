@@ -70,6 +70,19 @@ class StructuredLogSink : InstrumentationSink {
                 }
             }
 
+            "task_verifier_review" -> {
+                logger.info {
+                    "task_verifier.review action_id=${event.data["action_id"]} allow=${event.data["allow"]} " +
+                        "reason_code=${event.data["reason_code"]} intent=${event.data["intent_category"]} " +
+                        "volatility=${event.data["volatility_level"]}/${event.data["volatility_score"]} " +
+                        "requires_external_evidence=${event.data["requires_external_evidence"]} " +
+                        "evidence_available=${event.data["evidence_actions_available"]} " +
+                        "evidence_dispatchable=${event.data["evidence_actions_dispatchable"]} " +
+                        "had_successful_evidence=${event.data["had_successful_evidence"]} " +
+                        "had_external_failures=${event.data["had_external_failures"]}"
+                }
+            }
+
             "memory_recall_start" -> {
                 logger.trace {
                     "memory.recall.start provider=${event.data["provider"]} trigger=${event.data["trigger"]} cue=${event.data["cue_preview"]}"

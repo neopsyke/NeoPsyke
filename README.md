@@ -350,7 +350,7 @@ control> exit
 - `MemoryStore` keeps bounded rolling memory and compacts older turns into a summary as it nears capacity.
 - Memory summary included in Ego/Superego prompts is token-capped to stay within LLM context budgets.
 - Optional Task Workspace (`EGO_TASK_WORKSPACE_ENABLED=true`) keeps an ephemeral per-request notebook (index + summaries + evidence).
-- Task Workspace is independent from short-term and long-term memory and is destroyed when the root request resolves (or when queues drain).
+- Task Workspace is independent from short-term and long-term memory and is destroyed when the root request resolves; when queues drain, active workspaces are cleared but per-session workspace digests are preserved for subsequent turns.
 - Terminal `answer` actions can run an optional LLM final-pass rewrite from the workspace compilation; rewrite is gated by workspace confidence and finalizer model confidence.
 - When memory capability is enabled/configured (via `mcp-runtime.yaml` or env override), Ego also runs internal `Hippocampus` memory recall per thought/input planning step (not a MotorCortex action).
 - Ego tracks a `decision_pressure` signal to detect circular thought chains and increase convergence pressure.
@@ -383,6 +383,19 @@ control> exit
 - Instrumentation health is persisted per run, including dropped instrumentation events and queue-saturation hits.
 - Superego token usage is tracked separately for both current run and persistent totals (still included in overall totals).
 - Memory metrics are persisted per run and as persistent totals: recall attempts/hits/failures/truncation/latency/chars, consolidation assessments/save recommendations, and imprint attempts/success/failures/latency/chars.
+
+## Task Verifier Telemetry And Tuning
+- `task_verifier_review` events now include:
+  - `intent_category`, `volatility_level`, `volatility_score`
+  - `requires_external_evidence`
+  - `evidence_actions_available`, `evidence_actions_dispatchable`
+  - `had_successful_evidence`, `had_external_failures`
+  - `reason_code` (`TASK_EVIDENCE_REQUIRED`, `TECH_EXTERNAL_EVIDENCE_FAILURE`, `TASK_EVIDENCE_UNAVAILABLE_GRACEFUL`)
+- Dashboard snapshot (`/api/obs/snapshot`) exposes aggregated `taskVerifierStats` counters and rates.
+- For run-log aggregation from sidecar JSONL:
+  - `freud/scripts/task-verifier-telemetry.sh`
+  - default input: `.psyke/logs/latest-events.jsonl`
+  - example: `freud/scripts/task-verifier-telemetry.sh .psyke/logs/runs/<run-id>.events.jsonl`
 
 ## Provider status checks
 - Before interactive mode, Psyke runs provider health checks for each configured cognitive role endpoint.

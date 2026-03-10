@@ -209,6 +209,51 @@ class EgoAgentTest {
     }
 
     @Test
+    fun `task verifier allows graceful volatile answer when evidence actions are unavailable`() {
+        val plannerLlm = StubChatModelClient().apply {
+            enqueueRawResponse(
+                """
+                {"decision":"action","urgency":"high","action_type":"answer","action_payload":"Current price appears to be 20.","action_summary":"answer directly"}
+                """.trimIndent()
+            )
+        }
+        val superegoLlm = StubChatModelClient().apply {
+            enqueueRawResponse("""{"allow":true}""")
+        }
+        val instrumentation = RecordingInstrumentation()
+        val outputs = mutableListOf<String>()
+        val unavailableSearchEngine = object : WebSearchEngine {
+            override fun search(query: String, maxResults: Int): WebSearchResult =
+                WebSearchResult(summary = "offline", snippets = emptyList())
+
+            override fun healthCheck(): psyke.agent.actions.websearch.WebSearchEngineHealth =
+                psyke.agent.actions.websearch.WebSearchEngineHealth(
+                    available = false,
+                    detail = "search offline"
+                )
+        }
+        val config = AgentConfig(planner = PlannerConfig(maxLoopStepsPerInput = 6, maxThoughtPasses = 3))
+        val agent = Ego(
+            planner = LlmEgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
+            superego = Superego(modelClient = superegoLlm, config = config, instrumentation = instrumentation),
+            motorCortex = buildMotorCortex(output = { outputs.add(it) }, webSearchEngine = unavailableSearchEngine),
+            config = config,
+            instrumentation = instrumentation
+        )
+
+        runAgentWithInput(agent, "What is the latest price today?\nexit\n")
+
+        assertEquals(listOf("ego> Current price appears to be 20."), outputs)
+        assertTrue(
+            instrumentation.events.any {
+                it.type == "task_verifier_review" &&
+                    it.data["allow"] == true &&
+                    it.data["reason_code"] == "TASK_EVIDENCE_UNAVAILABLE_GRACEFUL"
+            }
+        )
+    }
+
+    @Test
     fun `session workspace digest persists across turns when queues drain`() {
         val plannerLlm = StubChatModelClient().apply {
             enqueueRawResponse(
