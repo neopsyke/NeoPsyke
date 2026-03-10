@@ -87,7 +87,14 @@ class Superego(
             )
         )
 
-        val messages = buildMessages(action, context, resolvedDirectives)
+        val promptAllocation = buildMessages(action, context, resolvedDirectives)
+        instrumentation.emit(
+            AgentEvent(
+                type = "prompt_budget_allocation",
+                data = promptAllocation.diagnostics.toTelemetryData(callSite = "superego_prompt"),
+            )
+        )
+        val messages = promptAllocation.messages
         val effectiveEngine = when {
             action.type == ActionType.ANSWER && config.superego.twoStageSkipForAnswerActions -> primaryEngine
             action.type == ActionType.WEB_SEARCH && config.superego.twoStageSkipForWebSearchActions -> primaryEngine
@@ -153,17 +160,18 @@ class Superego(
         action: PendingAction,
         context: SuperegoContext,
         directives: List<String>,
-    ): List<ChatMessage> {
+    ): PromptBudgetAllocator.AllocationResult {
         val directivesBlock = directives.joinToString(separator = "\n") { "- $it" }
         val lastUserTurn = context.recentDialogue.lastOrNull { it.role == DialogueRole.USER }?.content ?: "none"
         val shortTermContextSummary = context.shortTermContextSummary.ifBlank { "none" }
         return PromptBudgetAllocator.allocate(
             sections = listOf(
                 PromptBudgetAllocator.Section(
+                    key = "superego_system_instructions",
                     role = ChatRole.SYSTEM,
-                    priority = PromptBudgetAllocator.Priority.MANDATORY,
-                    required = true,
-                    minTokens = 30,
+                    band = PromptBudgetAllocator.Band.REQUIRED_CORE,
+                    importance = PromptBudgetAllocator.Importance.HIGH,
+                    floorTokens = 30,
                     content = """
                         You are Superego, a strict gatekeeper for actions.
                         Return only data that matches the response format schema.
@@ -172,19 +180,22 @@ class Superego(
                     """.trimIndent()
                 ),
                 PromptBudgetAllocator.Section(
+                    key = "superego_directives",
                     role = ChatRole.SYSTEM,
-                    priority = PromptBudgetAllocator.Priority.IMPORTANT,
-                    minTokens = 26,
+                    band = PromptBudgetAllocator.Band.REQUIRED_CONTEXT,
+                    importance = PromptBudgetAllocator.Importance.HIGH,
+                    floorTokens = 26,
                     content = """
                         Directives:
                         $directivesBlock
                     """.trimIndent()
                 ),
                 PromptBudgetAllocator.Section(
+                    key = "superego_candidate_action",
                     role = ChatRole.USER,
-                    priority = PromptBudgetAllocator.Priority.MANDATORY,
-                    required = true,
-                    minTokens = 24,
+                    band = PromptBudgetAllocator.Band.REQUIRED_CORE,
+                    importance = PromptBudgetAllocator.Importance.HIGH,
+                    floorTokens = 24,
                     content = """
                         Candidate action:
                         type=${action.type.name.lowercase()}
@@ -194,19 +205,20 @@ class Superego(
                     """.trimIndent()
                 ),
                 PromptBudgetAllocator.Section(
+                    key = "superego_last_user_message",
                     role = ChatRole.USER,
-                    priority = PromptBudgetAllocator.Priority.MANDATORY,
-                    required = true,
-                    minTokens = 10,
+                    band = PromptBudgetAllocator.Band.REQUIRED_CORE,
+                    floorTokens = 10,
                     content = """
                         Last user message:
                         $lastUserTurn
                     """.trimIndent()
                 ),
                 PromptBudgetAllocator.Section(
+                    key = "superego_short_term_summary",
                     role = ChatRole.USER,
-                    priority = PromptBudgetAllocator.Priority.IMPORTANT,
-                    minTokens = 12,
+                    band = PromptBudgetAllocator.Band.REQUIRED_CONTEXT,
+                    floorTokens = 12,
                     content = """
                         Short-term context summary:
                         $shortTermContextSummary

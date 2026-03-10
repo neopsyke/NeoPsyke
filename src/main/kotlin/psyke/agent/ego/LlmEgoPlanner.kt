@@ -71,7 +71,12 @@ class LlmEgoPlanner(
             )
         )
 
-        val messages = buildMessages(trigger, context)
+        val promptAllocation = buildMessages(trigger, context)
+        emitPromptBudgetAllocation(
+            callSite = PLANNER_PROMPT_CALL_SITE,
+            diagnostics = promptAllocation.diagnostics
+        )
+        val messages = promptAllocation.messages
         var response = null as psyke.llm.ChatCompletion?
         var lastError: Exception? = null
         val retryAttempts = RetryPolicy.boundedLlmRetryAttempts(config.planner.llmRetryAttempts)
@@ -297,11 +302,16 @@ class LlmEgoPlanner(
             )
             return decision
         }
-        val messages = buildActionVerifierMessages(
+        val promptAllocation = buildActionVerifierMessages(
             trigger = trigger,
             context = context,
             decision = decision
         )
+        emitPromptBudgetAllocation(
+            callSite = ACTION_VERIFIER_PROMPT_CALL_SITE,
+            diagnostics = promptAllocation.diagnostics
+        )
+        val messages = promptAllocation.messages
         val verifierOutcome = callActionVerifier(
             messages = messages,
             actionType = decision.actionType.name.lowercase(),
@@ -825,7 +835,10 @@ class LlmEgoPlanner(
         }
     }
 
-    private fun buildMessages(trigger: EgoTrigger, context: PlannerContext): List<ChatMessage> {
+    private fun buildMessages(
+        trigger: EgoTrigger,
+        context: PlannerContext,
+    ): PromptBudgetAllocator.AllocationResult {
         val triggerText = formatTriggerText(trigger)
 
         val dialogue = if (context.recentDialogue.isEmpty()) {
@@ -877,10 +890,11 @@ class LlmEgoPlanner(
         return PromptBudgetAllocator.allocate(
             sections = listOf(
                 PromptBudgetAllocator.Section(
+                    key = "planner_system_instructions",
                     role = ChatRole.SYSTEM,
-                    priority = PromptBudgetAllocator.Priority.MANDATORY,
-                    required = true,
-                    minTokens = 48,
+                    band = PromptBudgetAllocator.Band.REQUIRED_CORE,
+                    importance = PromptBudgetAllocator.Importance.MEDIUM,
+                    floorTokens = 48,
                     content = """
                     You are Ego, an action planner in a loop.
                     Return STRICT JSON only.
@@ -910,9 +924,11 @@ class LlmEgoPlanner(
                     """.trimIndent()
                 ),
                 PromptBudgetAllocator.Section(
+                    key = "planner_json_schema",
                     role = ChatRole.SYSTEM,
-                    priority = PromptBudgetAllocator.Priority.IMPORTANT,
-                    minTokens = 36,
+                    band = PromptBudgetAllocator.Band.REQUIRED_CORE,
+                    importance = PromptBudgetAllocator.Importance.MEDIUM,
+                    floorTokens = 36,
                     content = """
                     JSON schema:
                     {
@@ -941,8 +957,9 @@ class LlmEgoPlanner(
                     """.trimIndent()
                 ),
                 PromptBudgetAllocator.Section(
+                    key = "planner_queue_snapshot",
                     role = ChatRole.USER,
-                    priority = PromptBudgetAllocator.Priority.OPTIONAL,
+                    band = PromptBudgetAllocator.Band.OPTIONAL,
                     content = """
                     Queue snapshot:
                     pending_inputs=${context.queue.pendingInputCount}
@@ -951,9 +968,11 @@ class LlmEgoPlanner(
                     """.trimIndent()
                 ),
                 PromptBudgetAllocator.Section(
+                    key = "planner_action_availability",
                     role = ChatRole.USER,
-                    priority = PromptBudgetAllocator.Priority.IMPORTANT,
-                    minTokens = 20,
+                    band = PromptBudgetAllocator.Band.REQUIRED_CONTEXT,
+                    importance = PromptBudgetAllocator.Importance.HIGH,
+                    floorTokens = 20,
                     content = """
                     Runtime action availability:
                     available_action_types=$availableActionList
@@ -962,55 +981,65 @@ class LlmEgoPlanner(
                     """.trimIndent()
                 ),
                 PromptBudgetAllocator.Section(
+                    key = "planner_recent_dialogue",
                     role = ChatRole.USER,
-                    priority = PromptBudgetAllocator.Priority.OPTIONAL,
+                    band = PromptBudgetAllocator.Band.OPTIONAL,
                     content = "Recent dialogue:\n$dialogue"
                 ),
                 PromptBudgetAllocator.Section(
+                    key = "planner_short_term_summary",
                     role = ChatRole.USER,
-                    priority = PromptBudgetAllocator.Priority.IMPORTANT,
-                    minTokens = 24,
+                    band = PromptBudgetAllocator.Band.REQUIRED_CONTEXT,
+                    importance = PromptBudgetAllocator.Importance.HIGH,
+                    floorTokens = 24,
                     content = "Short-term context summary:\n$shortTermContextSummary"
                 ),
                 PromptBudgetAllocator.Section(
+                    key = "planner_long_term_recall",
                     role = ChatRole.USER,
-                    priority = PromptBudgetAllocator.Priority.IMPORTANT,
-                    minTokens = 24,
+                    band = PromptBudgetAllocator.Band.REQUIRED_CONTEXT,
+                    floorTokens = 24,
                     content = "Long-term memory recall:\n$longTermMemoryRecall"
                 ),
                 PromptBudgetAllocator.Section(
+                    key = "planner_reflection_lessons",
                     role = ChatRole.USER,
-                    priority = PromptBudgetAllocator.Priority.IMPORTANT,
-                    minTokens = 20,
+                    band = PromptBudgetAllocator.Band.REQUIRED_CONTEXT,
+                    floorTokens = 20,
                     content = "Reflection lessons (avoid repeated failed strategies):\n$reflectionLessons"
                 ),
                 PromptBudgetAllocator.Section(
+                    key = "planner_episodic_recall",
                     role = ChatRole.USER,
-                    priority = PromptBudgetAllocator.Priority.IMPORTANT,
-                    minTokens = 24,
+                    band = PromptBudgetAllocator.Band.REQUIRED_CONTEXT,
+                    floorTokens = 24,
                     content = "Episodic memory timeline:\n$episodicRecall"
                 ),
                 PromptBudgetAllocator.Section(
+                    key = "planner_task_workspace_summary",
                     role = ChatRole.USER,
-                    priority = PromptBudgetAllocator.Priority.IMPORTANT,
-                    minTokens = 20,
+                    band = PromptBudgetAllocator.Band.REQUIRED_CONTEXT,
+                    floorTokens = 20,
                     content = "Task workspace summary:\n$taskWorkspaceSummary"
                 ),
                 PromptBudgetAllocator.Section(
+                    key = "planner_session_digest",
                     role = ChatRole.USER,
-                    priority = PromptBudgetAllocator.Priority.OPTIONAL,
+                    band = PromptBudgetAllocator.Band.OPTIONAL,
                     content = "Prior workspace digests (resolved requests in this session):\n$sessionWorkspaceDigest"
                 ),
                 PromptBudgetAllocator.Section(
+                    key = "planner_evidence_hints",
                     role = ChatRole.USER,
-                    priority = PromptBudgetAllocator.Priority.IMPORTANT,
-                    minTokens = 18,
+                    band = PromptBudgetAllocator.Band.REQUIRED_CONTEXT,
+                    floorTokens = 18,
                     content = "External evidence hints:\n$evidenceHints"
                 ),
                 PromptBudgetAllocator.Section(
+                    key = "planner_deliberation_pressure",
                     role = ChatRole.USER,
-                    priority = PromptBudgetAllocator.Priority.IMPORTANT,
-                    minTokens = 24,
+                    band = PromptBudgetAllocator.Band.REQUIRED_CONTEXT,
+                    floorTokens = 24,
                     content = """
                     Deliberation pressure:
                     step_index=${deliberation.stepIndex}
@@ -1028,16 +1057,18 @@ class LlmEgoPlanner(
                     """.trimIndent()
                 ),
                 PromptBudgetAllocator.Section(
+                    key = "planner_meta_guidance",
                     role = ChatRole.USER,
-                    priority = PromptBudgetAllocator.Priority.IMPORTANT,
-                    minTokens = 16,
+                    band = PromptBudgetAllocator.Band.REQUIRED_CONTEXT,
+                    floorTokens = 16,
                     content = "Meta reasoning guidance:\n$metaGuidance"
                 ),
                 PromptBudgetAllocator.Section(
+                    key = "planner_trigger",
                     role = ChatRole.USER,
-                    priority = PromptBudgetAllocator.Priority.MANDATORY,
-                    required = true,
-                    minTokens = 30,
+                    band = PromptBudgetAllocator.Band.REQUIRED_CORE,
+                    importance = PromptBudgetAllocator.Importance.HIGH,
+                    floorTokens = 30,
                     content = "Trigger:\n$triggerText"
                 )
             ),
@@ -1049,7 +1080,7 @@ class LlmEgoPlanner(
         trigger: EgoTrigger,
         context: PlannerContext,
         decision: EgoDecision.ProposeAction,
-    ): List<ChatMessage> {
+    ): PromptBudgetAllocator.AllocationResult {
         val triggerText = formatTriggerText(trigger)
         val dialogue = if (context.recentDialogue.isEmpty()) {
             "none"
@@ -1073,10 +1104,11 @@ class LlmEgoPlanner(
         return PromptBudgetAllocator.allocate(
             sections = listOf(
                 PromptBudgetAllocator.Section(
+                    key = "action_verifier_system_instructions",
                     role = ChatRole.SYSTEM,
-                    priority = PromptBudgetAllocator.Priority.MANDATORY,
-                    required = true,
-                    minTokens = 36,
+                    band = PromptBudgetAllocator.Band.REQUIRED_CORE,
+                    importance = PromptBudgetAllocator.Importance.MEDIUM,
+                    floorTokens = 36,
                     content = """
                     You are an action verifier.
                     Return STRICT JSON only.
@@ -1100,52 +1132,62 @@ class LlmEgoPlanner(
                     """.trimIndent()
                 ),
                 PromptBudgetAllocator.Section(
+                    key = "action_verifier_available_actions",
                     role = ChatRole.USER,
-                    priority = PromptBudgetAllocator.Priority.IMPORTANT,
-                    minTokens = 18,
+                    band = PromptBudgetAllocator.Band.REQUIRED_CONTEXT,
+                    importance = PromptBudgetAllocator.Importance.HIGH,
+                    floorTokens = 18,
                     content = "available_action_types=$availableActionList"
                 ),
                 PromptBudgetAllocator.Section(
+                    key = "action_verifier_recent_dialogue",
                     role = ChatRole.USER,
-                    priority = PromptBudgetAllocator.Priority.OPTIONAL,
+                    band = PromptBudgetAllocator.Band.OPTIONAL,
                     content = "Recent dialogue:\n$dialogue"
                 ),
                 PromptBudgetAllocator.Section(
+                    key = "action_verifier_short_term_summary",
                     role = ChatRole.USER,
-                    priority = PromptBudgetAllocator.Priority.IMPORTANT,
-                    minTokens = 24,
+                    band = PromptBudgetAllocator.Band.REQUIRED_CONTEXT,
+                    floorTokens = 24,
                     content = "Short-term context summary:\n$shortTermContextSummary"
                 ),
                 PromptBudgetAllocator.Section(
+                    key = "action_verifier_long_term_recall",
                     role = ChatRole.USER,
-                    priority = PromptBudgetAllocator.Priority.OPTIONAL,
+                    band = PromptBudgetAllocator.Band.OPTIONAL,
                     content = "Long-term memory recall:\n$longTermMemoryRecall"
                 ),
                 PromptBudgetAllocator.Section(
+                    key = "action_verifier_reflection_lessons",
                     role = ChatRole.USER,
-                    priority = PromptBudgetAllocator.Priority.OPTIONAL,
+                    band = PromptBudgetAllocator.Band.OPTIONAL,
                     content = "Reflection lessons:\n$reflectionLessons"
                 ),
                 PromptBudgetAllocator.Section(
+                    key = "action_verifier_workspace_summary",
                     role = ChatRole.USER,
-                    priority = PromptBudgetAllocator.Priority.OPTIONAL,
+                    band = PromptBudgetAllocator.Band.OPTIONAL,
                     content = "Task workspace summary:\n$taskWorkspaceSummary"
                 ),
                 PromptBudgetAllocator.Section(
+                    key = "action_verifier_session_digest",
                     role = ChatRole.USER,
-                    priority = PromptBudgetAllocator.Priority.OPTIONAL,
+                    band = PromptBudgetAllocator.Band.OPTIONAL,
                     content = "Prior workspace digests:\n$sessionWorkspaceDigest"
                 ),
                 PromptBudgetAllocator.Section(
+                    key = "action_verifier_evidence_hints",
                     role = ChatRole.USER,
-                    priority = PromptBudgetAllocator.Priority.OPTIONAL,
+                    band = PromptBudgetAllocator.Band.OPTIONAL,
                     content = "External evidence hints:\n$evidenceHints"
                 ),
                 PromptBudgetAllocator.Section(
+                    key = "action_verifier_trigger_candidate",
                     role = ChatRole.USER,
-                    priority = PromptBudgetAllocator.Priority.MANDATORY,
-                    required = true,
-                    minTokens = 30,
+                    band = PromptBudgetAllocator.Band.REQUIRED_CORE,
+                    importance = PromptBudgetAllocator.Importance.HIGH,
+                    floorTokens = 30,
                     content = """
                     Trigger:
                     $triggerText
@@ -1269,6 +1311,18 @@ class LlmEgoPlanner(
         return resolution.budget
     }
 
+    private fun emitPromptBudgetAllocation(
+        callSite: String,
+        diagnostics: PromptBudgetAllocator.Diagnostics,
+    ) {
+        instrumentation.emit(
+            AgentEvent(
+                type = "prompt_budget_allocation",
+                data = diagnostics.toTelemetryData(callSite = callSite),
+            )
+        )
+    }
+
     override fun resetForInput(rootInputId: String) {
         plannerCircuitBreaker.reset()
         actionVerifierCircuitBreakers.keys.removeAll { it.rootInputId == rootInputId }
@@ -1286,6 +1340,8 @@ class LlmEgoPlanner(
         const val ACTION_VERIFIER_MAX_TOKENS: Int = 220
         const val ACTION_VERIFIER_PARSE_FAILURE_TRIP_THRESHOLD: Int = 2
         const val PLANNER_PARSE_FAILURE_TRIP_THRESHOLD: Int = 3
+        const val PLANNER_PROMPT_CALL_SITE: String = "planner_prompt"
+        const val ACTION_VERIFIER_PROMPT_CALL_SITE: String = "action_verifier_prompt"
         val mapper = jacksonObjectMapper()
             .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
         val invalidJsonEscapeRegex = Regex("""\\(?!["\\/bfnrtu])""")

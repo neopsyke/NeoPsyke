@@ -90,6 +90,7 @@ class DashboardStateStoreTest {
         assertEquals(3L, (snapshot.instrumentationHealth["dropped_events"] as Number).toLong())
         assertEquals(1L, (snapshot.instrumentationHealth["queue_saturation_events"] as Number).toLong())
         assertEquals(0L, (snapshot.taskVerifierStats["total_reviews"] as Number).toLong())
+        assertEquals(0L, (snapshot.promptBudgetStats["total_allocations"] as Number).toLong())
         @Suppress("UNCHECKED_CAST")
         val saturationByType = snapshot.instrumentationHealth["queue_saturation_by_type"] as Map<String, Any?>
         assertEquals(1L, (saturationByType["thought"] as Number).toLong())
@@ -134,6 +135,47 @@ class DashboardStateStoreTest {
         val byReason = snapshot.taskVerifierStats["by_reason_code"] as Map<String, Any?>
         assertEquals(1L, (byReason["TASK_EVIDENCE_REQUIRED"] as Number).toLong())
         assertEquals(1L, (byReason["TASK_EVIDENCE_UNAVAILABLE_GRACEFUL"] as Number).toLong())
+    }
+
+    @Test
+    fun `snapshot aggregates prompt budget stats`() {
+        val store = DashboardStateStore(maxEvents = 30)
+        store.onEvent(
+            AgentEvent(
+                id = 1,
+                type = "prompt_budget_allocation",
+                data = mapOf(
+                    "call_site" to "planner_prompt",
+                    "single_message_fallback" to false,
+                    "degradation_path" to "trim_optional",
+                    "floor_violation_count" to 0,
+                    "dropped_section_count" to 3
+                )
+            )
+        )
+        store.onEvent(
+            AgentEvent(
+                id = 2,
+                type = "prompt_budget_allocation",
+                data = mapOf(
+                    "call_site" to "action_verifier_prompt",
+                    "single_message_fallback" to true,
+                    "degradation_path" to "single_message_fallback",
+                    "floor_violation_count" to 2,
+                    "dropped_section_count" to 8
+                )
+            )
+        )
+
+        val snapshot: DashboardSnapshot = mapper.readValue(store.snapshotJson())
+        assertEquals(2L, (snapshot.promptBudgetStats["total_allocations"] as Number).toLong())
+        assertEquals(1L, (snapshot.promptBudgetStats["single_message_fallback_count"] as Number).toLong())
+        assertEquals(1L, (snapshot.promptBudgetStats["floor_violation_events"] as Number).toLong())
+        assertEquals(11L, (snapshot.promptBudgetStats["dropped_sections_total"] as Number).toLong())
+        @Suppress("UNCHECKED_CAST")
+        val byCallSite = snapshot.promptBudgetStats["by_call_site"] as Map<String, Any?>
+        assertEquals(1L, (byCallSite["planner_prompt"] as Number).toLong())
+        assertEquals(1L, (byCallSite["action_verifier_prompt"] as Number).toLong())
     }
 
     @Test

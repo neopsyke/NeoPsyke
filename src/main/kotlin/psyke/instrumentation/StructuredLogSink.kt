@@ -83,6 +83,20 @@ class StructuredLogSink : InstrumentationSink {
                 }
             }
 
+            "prompt_budget_allocation" -> {
+                logger.info {
+                    "prompt_budget.allocation call_site=${event.data["call_site"]} " +
+                        "max_tokens=${event.data["max_tokens"]} " +
+                        "estimated_total_cost=${event.data["estimated_total_cost"]} " +
+                        "allocated_total_cost=${event.data["allocated_total_cost"]} " +
+                        "reserved_floor_cost=${event.data["reserved_floor_cost"]} " +
+                        "single_message_fallback=${event.data["single_message_fallback"]} " +
+                        "degradation_path=${event.data["degradation_path"]} " +
+                        "dropped_sections=${event.data["dropped_section_count"]} " +
+                        "floor_violations=${event.data["floor_violation_count"]}"
+                }
+            }
+
             "memory_recall_start" -> {
                 logger.trace {
                     "memory.recall.start provider=${event.data["provider"]} trigger=${event.data["trigger"]} cue=${event.data["cue_preview"]}"
