@@ -1500,6 +1500,7 @@ class Ego(
                 "label" to "Short-term memory",
                 "item_count" to memStats.recentTurns,
                 "chars_or_bytes" to memStats.totalChars.toLong(),
+                "summary_chars" to memStats.summaryChars.toLong(),
                 "unit" to "chars",
             ))
             put("task_workspaces", mapOf(

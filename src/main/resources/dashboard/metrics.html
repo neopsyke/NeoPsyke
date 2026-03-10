@@ -185,6 +185,15 @@
       <div class="grid3" id="heap-modules"></div>
     </div>
 
+    <!-- Section 1b: Short-term Memory Over Time -->
+    <div class="panel">
+      <div class="panel-head">
+        <h3>Short-term Memory</h3>
+        <div id="stm-stats" style="font-size:11px;color:var(--muted)"></div>
+      </div>
+      <canvas id="stm-chart" height="60" style="width:100%;"></canvas>
+    </div>
+
     <!-- Section 2: Processing Phase Timing -->
     <div class="panel">
       <div class="panel-head">
@@ -277,6 +286,7 @@
       limits: {},
       storeStats: {},
       llmStats: null,
+      stmHistory: [],  // { ts, totalChars, summaryChars, recentTurns }
     };
 
     const phaseColors = {
@@ -324,8 +334,21 @@
 
       const modules = h.module_estimates || {};
       const ss = state.storeStats || {};
+
+      // Push memory_store data to the chart history
+      const memMod = modules.memory_store;
+      if (memMod) {
+        const totalChars = Number(memMod.chars_or_bytes || 0);
+        const summaryChars = Number(memMod.summary_chars || 0);
+        const recentTurns = Number(memMod.item_count || 0);
+        state.stmHistory.push({ ts: Date.now(), totalChars, summaryChars, recentTurns });
+        if (state.stmHistory.length > 300) state.stmHistory.shift();
+        renderStmChart();
+      }
+
       let cards = "";
       for (const [key, mod] of Object.entries(modules)) {
+        if (key === "memory_store") continue; // rendered as dedicated chart
         cards += "<div class='card'><div class='label'>" + escapeHtml(mod.label || key) + "</div>" +
           "<div class='value'>" + fmtNum(mod.item_count) + " <span style='font-size:12px;color:var(--muted)'>" + escapeHtml(mod.unit) + "</span></div>";
         if (mod.chars_or_bytes > 0 && mod.unit === "chars") {
@@ -343,6 +366,147 @@
         cards += "<div class='card'><div class='label'>Chat Sessions</div><div class='value'>" + ss.chat_session_count + "</div></div>";
       }
       modEl.innerHTML = cards;
+    }
+
+    function renderStmChart() {
+      const statsEl = document.getElementById("stm-stats");
+      const canvas = document.getElementById("stm-chart");
+      const history = state.stmHistory;
+
+      if (history.length === 0) {
+        statsEl.textContent = "Waiting for data...";
+        const ctx = canvas.getContext("2d");
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        return;
+      }
+
+      const last = history[history.length - 1];
+      const recentChars = last.totalChars - last.summaryChars;
+      statsEl.textContent = fmtNum(last.totalChars) + " total chars (" +
+        fmtNum(last.summaryChars) + " summary + " + fmtNum(recentChars) + " recent) \u00b7 " +
+        last.recentTurns + " turns";
+
+      // Canvas setup
+      const dpr = window.devicePixelRatio || 1;
+      const rect = canvas.getBoundingClientRect();
+      canvas.width = rect.width * dpr;
+      canvas.height = rect.height * dpr;
+      const ctx = canvas.getContext("2d");
+      ctx.scale(dpr, dpr);
+      const W = rect.width;
+      const H = rect.height;
+      const pad = { top: 10, right: 10, bottom: 20, left: 50 };
+      const cw = W - pad.left - pad.right;
+      const ch = H - pad.top - pad.bottom;
+
+      ctx.clearRect(0, 0, W, H);
+
+      if (history.length < 2) {
+        ctx.fillStyle = "#98b0b9";
+        ctx.font = "11px ui-monospace, monospace";
+        ctx.textAlign = "center";
+        ctx.fillText("Collecting data\u2026", W / 2, H / 2);
+        return;
+      }
+
+      const maxChars = Math.max(...history.map(d => d.totalChars), 100);
+      const minTs = history[0].ts;
+      const maxTs = history[history.length - 1].ts;
+      const tsRange = Math.max(maxTs - minTs, 1);
+
+      function x(ts) { return pad.left + ((ts - minTs) / tsRange) * cw; }
+      function y(val) { return pad.top + ch - (val / maxChars) * ch; }
+
+      // Grid lines
+      ctx.strokeStyle = "rgba(39, 65, 77, 0.5)";
+      ctx.lineWidth = 0.5;
+      const gridSteps = 4;
+      for (let i = 0; i <= gridSteps; i++) {
+        const gy = pad.top + (ch / gridSteps) * i;
+        ctx.beginPath();
+        ctx.moveTo(pad.left, gy);
+        ctx.lineTo(pad.left + cw, gy);
+        ctx.stroke();
+        // Y-axis labels
+        const val = Math.round(maxChars * (1 - i / gridSteps));
+        ctx.fillStyle = "#98b0b9";
+        ctx.font = "10px ui-monospace, monospace";
+        ctx.textAlign = "right";
+        ctx.fillText(fmtNum(val), pad.left - 6, gy + 3);
+      }
+
+      // Summary area (bottom layer)
+      ctx.beginPath();
+      ctx.moveTo(x(history[0].ts), y(0));
+      for (const d of history) {
+        ctx.lineTo(x(d.ts), y(d.summaryChars));
+      }
+      ctx.lineTo(x(history[history.length - 1].ts), y(0));
+      ctx.closePath();
+      ctx.fillStyle = "rgba(179, 127, 235, 0.25)";
+      ctx.fill();
+
+      // Total area (top layer = recent turns portion)
+      ctx.beginPath();
+      ctx.moveTo(x(history[0].ts), y(history[0].summaryChars));
+      for (const d of history) {
+        ctx.lineTo(x(d.ts), y(d.totalChars));
+      }
+      for (let i = history.length - 1; i >= 0; i--) {
+        ctx.lineTo(x(history[i].ts), y(history[i].summaryChars));
+      }
+      ctx.closePath();
+      ctx.fillStyle = "rgba(54, 195, 167, 0.25)";
+      ctx.fill();
+
+      // Total line
+      ctx.beginPath();
+      ctx.moveTo(x(history[0].ts), y(history[0].totalChars));
+      for (const d of history) {
+        ctx.lineTo(x(d.ts), y(d.totalChars));
+      }
+      ctx.strokeStyle = "#36c3a7";
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      // Summary line
+      ctx.beginPath();
+      ctx.moveTo(x(history[0].ts), y(history[0].summaryChars));
+      for (const d of history) {
+        ctx.lineTo(x(d.ts), y(d.summaryChars));
+      }
+      ctx.strokeStyle = "#b37feb";
+      ctx.lineWidth = 1;
+      ctx.stroke();
+
+      // X-axis time labels
+      ctx.fillStyle = "#98b0b9";
+      ctx.font = "10px ui-monospace, monospace";
+      ctx.textAlign = "center";
+      const tSteps = Math.min(5, history.length);
+      for (let i = 0; i < tSteps; i++) {
+        const idx = Math.round((i / (tSteps - 1)) * (history.length - 1));
+        const d = history[idx];
+        const t = new Date(d.ts);
+        const label = t.getHours().toString().padStart(2, "0") + ":" +
+          t.getMinutes().toString().padStart(2, "0") + ":" +
+          t.getSeconds().toString().padStart(2, "0");
+        ctx.fillText(label, x(d.ts), H - 4);
+      }
+
+      // Legend
+      ctx.font = "10px ui-monospace, monospace";
+      ctx.textAlign = "left";
+      const lx = pad.left + 6;
+      const ly = pad.top + 12;
+      ctx.fillStyle = "#36c3a7";
+      ctx.fillRect(lx, ly - 6, 10, 3);
+      ctx.fillStyle = "#98b0b9";
+      ctx.fillText("total", lx + 14, ly);
+      ctx.fillStyle = "#b37feb";
+      ctx.fillRect(lx + 50, ly - 6, 10, 3);
+      ctx.fillStyle = "#98b0b9";
+      ctx.fillText("summary", lx + 64, ly);
     }
 
     function filteredTimings() {
@@ -584,6 +748,7 @@
 
     function render() {
       renderHeap();
+      renderStmChart();
       renderPhaseTimings();
       renderTokenUsage();
       renderLlmStats();
@@ -668,6 +833,7 @@
       });
     }
 
+    window.addEventListener("resize", () => renderStmChart());
     boot();
   </script>
 </body>
