@@ -39,6 +39,14 @@ class DashboardStateStore(
     private var droppedEvents: Long = 0
     private var queueSaturationEvents: Long = 0
     private val queueSaturationByType = mutableMapOf<String, Long>()
+    private var taskVerifierTotal: Long = 0
+    private var taskVerifierAllow: Long = 0
+    private var taskVerifierDeny: Long = 0
+    private var taskVerifierRequiresEvidence: Long = 0
+    private var taskVerifierGracefulAllow: Long = 0
+    private val taskVerifierByReasonCode = mutableMapOf<String, Long>()
+    private val taskVerifierByIntent = mutableMapOf<String, Long>()
+    private val taskVerifierByVolatility = mutableMapOf<String, Long>()
     private val workspaceSnapshots = ArrayDeque<WorkspaceSnapshotRecord>()
     private val latestWorkspaceSnapshotByRoot = mutableMapOf<String, WorkspaceSnapshotRecord>()
     private val phaseTimings = ArrayDeque<Map<String, Any?>>()
@@ -191,6 +199,35 @@ class DashboardStateStore(
                     }
                 }
 
+                "task_verifier_review" -> {
+                    taskVerifierTotal += 1
+                    val allow = (event.data["allow"] as? Boolean) ?: true
+                    if (allow) {
+                        taskVerifierAllow += 1
+                    } else {
+                        taskVerifierDeny += 1
+                    }
+                    val requiresEvidence = (event.data["requires_external_evidence"] as? Boolean) ?: false
+                    if (requiresEvidence) {
+                        taskVerifierRequiresEvidence += 1
+                    }
+                    val reasonCode = event.data["reason_code"]?.toString()?.ifBlank { null }
+                    if (reasonCode != null) {
+                        taskVerifierByReasonCode[reasonCode] = (taskVerifierByReasonCode[reasonCode] ?: 0L) + 1L
+                        if (allow && reasonCode == "TASK_EVIDENCE_UNAVAILABLE_GRACEFUL") {
+                            taskVerifierGracefulAllow += 1
+                        }
+                    }
+                    val intentCategory = event.data["intent_category"]?.toString()?.ifBlank { null }
+                    if (intentCategory != null) {
+                        taskVerifierByIntent[intentCategory] = (taskVerifierByIntent[intentCategory] ?: 0L) + 1L
+                    }
+                    val volatilityLevel = event.data["volatility_level"]?.toString()?.ifBlank { null }
+                    if (volatilityLevel != null) {
+                        taskVerifierByVolatility[volatilityLevel] = (taskVerifierByVolatility[volatilityLevel] ?: 0L) + 1L
+                    }
+                }
+
                 "phase_timings" -> {
                     if (phaseTimings.size >= MAX_PHASE_TIMINGS) {
                         phaseTimings.removeFirst()
@@ -234,6 +271,7 @@ class DashboardStateStore(
                 limits = limits,
                 metrics = metrics,
                 instrumentationHealth = instrumentationHealthMap(),
+                taskVerifierStats = taskVerifierStatsMap(),
                 recentEvents = events.toList().sortedBy { it.id },
                 phaseTimings = phaseTimings.toList(),
                 heapMetrics = heapMetrics,
@@ -450,6 +488,31 @@ class DashboardStateStore(
             put("queue_saturation_events", queueSaturationEvents)
             put("queue_saturation_by_type", queueSaturationByType.toMap())
         }
+
+    private fun taskVerifierStatsMap(): Map<String, Any?> {
+        val denyRate = if (taskVerifierTotal > 0) {
+            taskVerifierDeny.toDouble() / taskVerifierTotal.toDouble()
+        } else {
+            0.0
+        }
+        val gracefulAllowRate = if (taskVerifierTotal > 0) {
+            taskVerifierGracefulAllow.toDouble() / taskVerifierTotal.toDouble()
+        } else {
+            0.0
+        }
+        return buildMap {
+            put("total_reviews", taskVerifierTotal)
+            put("allow_count", taskVerifierAllow)
+            put("deny_count", taskVerifierDeny)
+            put("deny_rate", denyRate)
+            put("requires_evidence_count", taskVerifierRequiresEvidence)
+            put("graceful_allow_count", taskVerifierGracefulAllow)
+            put("graceful_allow_rate", gracefulAllowRate)
+            put("by_reason_code", taskVerifierByReasonCode.toMap())
+            put("by_intent_category", taskVerifierByIntent.toMap())
+            put("by_volatility_level", taskVerifierByVolatility.toMap())
+        }
+    }
 
     private fun broadcastToSubscribers(payloadJson: String) {
         val staleSubscribers = mutableListOf<Channel<String>>()
@@ -821,6 +884,7 @@ data class DashboardSnapshot(
     val limits: Map<String, Any?>,
     val metrics: MetricsSnapshot?,
     val instrumentationHealth: Map<String, Any?> = emptyMap(),
+    val taskVerifierStats: Map<String, Any?> = emptyMap(),
     val recentEvents: List<AgentEvent>,
     val phaseTimings: List<Map<String, Any?>> = emptyList(),
     val heapMetrics: Map<String, Any?>? = null,

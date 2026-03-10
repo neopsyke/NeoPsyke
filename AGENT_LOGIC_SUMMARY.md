@@ -127,7 +127,9 @@ It is intentionally high-level and should stay aligned with the code.
   - When `TaskWorkspaceConfig.debugCaptureEnabled` is on, emits full debug snapshots (`task_workspace_debug_snapshot`) for dashboard-only inspection.
   - Fallback explanation actions bypass policy gate.
   - Normal actions pass through deterministic `TaskVerifier` first (task-truth/sufficiency gate), then `Superego.review`.
-    - Current deterministic checks focus on verification-sensitive final answers (for example latest/current/price/news/schedule/weather/law/rates/version) and require at least one successful evidence action before allowing terminal answer.
+    - Deterministic checks classify task intent + volatility for terminal answers.
+    - External evidence is required only for volatile/unknown factual intents; transformation/personal-memory/subjective/static-reasoning intents bypass evidence requirement.
+    - When volatile evidence is required but evidence actions are unavailable, verifier uses a graceful allow path (`TASK_EVIDENCE_UNAVAILABLE_GRACEFUL`) to avoid dead-loop retries.
     - Forced-terminal system answers (decision-pressure safety path) are exempt from TaskVerifier evidence requirement.
   - If denied:
     - Record denial metrics/evidence.
@@ -175,10 +177,12 @@ It is intentionally high-level and should stay aligned with the code.
 ## Task Verifier Gate
 - File: `src/main/kotlin/psyke/agent/ego/TaskVerifier.kt`
 - Deterministic pre-policy gate for task-level correctness/sufficiency.
-- Returns `TaskVerifierDecision(allow, reason, reasonCode)` and emits `task_verifier_review`.
-- Current deny paths:
-  - `TASK_EVIDENCE_REQUIRED`: verification-sensitive terminal answer proposed without successful evidence.
-  - `TECH_EXTERNAL_EVIDENCE_FAILURE`: verification-sensitive terminal answer proposed after only failed evidence attempts.
+- Uses intent classification (`volatile_fact`, `stable_fact`, `transformation`, `personal_memory`, `subjective_advice`, `static_reasoning`, `unknown`) plus volatility scoring.
+- Returns `TaskVerifierDecision(allow, reason, reasonCode, assessment)` and emits enriched `task_verifier_review` telemetry.
+- Decision outcomes:
+  - `TASK_EVIDENCE_REQUIRED`: volatile/unknown intent without successful evidence and evidence actions are available.
+  - `TECH_EXTERNAL_EVIDENCE_FAILURE`: volatile/unknown intent with failed evidence attempts and no success.
+  - `TASK_EVIDENCE_UNAVAILABLE_GRACEFUL`: volatile/unknown intent but runtime evidence actions are unavailable/undispatchable (allow path).
 - Gate runs before Superego and reuses the same denied-action recovery loop in `Ego`.
 
 ## Policy Gate (Superego)

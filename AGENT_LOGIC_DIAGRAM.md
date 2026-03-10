@@ -112,11 +112,13 @@ sequenceDiagram
                 Ego->>Motor: execute (bypass Superego)
             else Normal action
                 Ego->>TV: review(action, evidence/recent dialogue)
+                Note over Ego,TV: TaskVerifier classifies intent + volatility; evidence required only for volatile/unknown factual intents
                 alt task verifier deny
                     TV-->>Ego: deny (with reason_code)
                     Ego->>Sched: enqueue safe-alternative thought
                     Ego->>Mem: maybeRecordReflectionLesson(filtered)
                 else task verifier allow
+                    Note over Ego,TV: If volatile evidence is required but tools are unavailable, verifier returns graceful allow (TASK_EVIDENCE_UNAVAILABLE_GRACEFUL)
                     Ego->>Sup: deterministic checks
                     alt deterministic deny
                         Sup-->>Ego: deny (hard deny)
