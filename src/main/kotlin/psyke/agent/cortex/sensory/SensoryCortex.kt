@@ -14,6 +14,7 @@ import psyke.agent.core.AgentConfig
 import psyke.agent.core.ConversationContext
 import psyke.agent.core.DefaultInterlocutorResolver
 import psyke.agent.core.InputPriority
+import psyke.agent.core.Interlocutor
 import psyke.agent.core.InterlocutorResolver
 import psyke.agent.support.TextSecurity
 import java.io.Closeable
@@ -182,16 +183,20 @@ class SensoryCortex(
             return SensorySignal.NoInput
         }
 
-        val resolvedContext = signal.input.conversationContext
+        val providedContext = signal.input.conversationContext
+        val resolvedSessionId = if (providedContext.sessionId == ConversationContext.DEFAULT_SESSION_ID) {
+            resolveSessionId(signal.input.source)
+        } else {
+            providedContext.sessionId
+        }
+        val resolvedInterlocutor = if (providedContext.interlocutor == Interlocutor.UNKNOWN) {
+            interlocutorResolver.resolve(signal.input.source)
+        } else {
+            providedContext.interlocutor
+        }
         val enrichedInput = signal.input.copy(
             content = sanitized,
-            conversationContext = if (resolvedContext.sessionId.isNotBlank()) {
-                resolvedContext
-            } else {
-                val sessionId = resolveSessionId(signal.input.source)
-                val interlocutor = interlocutorResolver.resolve(signal.input.source)
-                ConversationContext(sessionId, interlocutor)
-            }
+            conversationContext = ConversationContext(resolvedSessionId, resolvedInterlocutor)
         )
 
         return SensorySignal.InputReceived(enrichedInput)

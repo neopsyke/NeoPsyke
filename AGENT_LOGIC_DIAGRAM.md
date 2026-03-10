@@ -9,7 +9,7 @@ Keep diagrams high signal: small, readable, and updated as runtime logic evolves
 flowchart LR
     U["User / Web UI + Terminal Control"] --> SC["SensoryCortex (Async Web Chat Input + Stdin Control)"]
     SC --> E["Ego Orchestrator"]
-    NoteCtx["ConversationContext(sessionId required)"] --> SC
+    NoteCtx["ConversationContext(sessionId required, unknown interlocutor resolved at sensory boundary)"] --> SC
 
     E --> AS["AttentionScheduler"]
     AS --> E
@@ -140,6 +140,7 @@ sequenceDiagram
                             Ego->>Ego: PromptInjectionDefense sanitize untrusted tool output
                             alt action = answer
                                 Ego->>Sched: clear pending thought and action work for same root-session scope
+                                Ego->>TWS: capture session digest for resolved input
                                 Ego->>TWS: destroy workspace for resolved input
                                 Note over Ego,Dash: Workspace telemetry carries root_input_id(identity) and root_input_received_at_ms(timing)
                                 Ego->>Dash: drawer reads full snapshots via /api/obs/workspace/{rootId}

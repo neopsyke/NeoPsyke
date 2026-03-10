@@ -9,40 +9,114 @@ eval:
   # max_raw_response_chars: 4000
 
 agent:
-  max_loop_steps_per_input: 180
-  loop_delay_ms: 0
-  max_thought_passes: 5
-  max_prompt_tokens: 2400
-  max_completion_tokens: 900
-  # Optional hard run caps (0 disables each cap).
-  max_run_total_tokens: 0
-  max_run_tokens_per_provider: 0
-  max_run_tokens_per_role: 0
-  llm_retry_attempts: 2
-  superego_max_completion_tokens: 384
-  superego_dynamic_completion_enabled: true
-  superego_dynamic_completion_hard_max_tokens: 640
-  superego_dynamic_prompt_to_completion_ratio: 0.10
-  superego_dynamic_completion_min_prompt_tokens: 160
-  superego_two_stage_review_enabled: true
-  superego_two_stage_low_confidence_threshold: 0.60
-  superego_two_stage_escalate_on_medium_policy_risk: true
-  superego_two_stage_skip_for_web_search_actions: true
-  long_term_memory_max_tokens: 320
-  long_term_memory_prompt_compression_enabled: true
-  long_term_memory_prompt_dialogue_max_chars: 900
-  long_term_memory_prompt_recall_max_chars: 760
-  long_term_memory_dynamic_completion_enabled: true
-  long_term_memory_dynamic_completion_hard_max_tokens: 512
-  long_term_memory_dynamic_prompt_to_completion_ratio: 0.08
-  long_term_memory_dynamic_completion_min_prompt_tokens: 160
-  deliberation_pressure_assessment_min_step: 16
-  deliberation_pressure_assessment_every_steps: 8
-  deliberation_pressure_assessment_threshold: 0.68
-  meta_reasoner_max_tokens: 384
-  meta_reasoner_dynamic_completion_enabled: true
-  meta_reasoner_dynamic_completion_hard_max_tokens: 640
-  meta_reasoner_dynamic_prompt_to_completion_ratio: 0.10
-  meta_reasoner_dynamic_completion_min_prompt_tokens: 160
-  forced_terminal_pressure_threshold: 0.98
-  forced_terminal_stale_streak_threshold: 8
+  planner:
+    max_loop_steps_per_input: 180
+    max_thought_passes: 5
+    max_thought_chars: 600
+    max_input_chars: 2000
+    max_action_payload_chars: 4000
+    max_action_summary_chars: 180
+    max_prompt_tokens: 2400
+    max_completion_tokens: 900
+    llm_retry_attempts: 2
+    max_run_total_tokens: 0
+    max_run_tokens_per_provider: 0
+    max_run_tokens_per_role: 0
+    max_plan_steps: 6
+    max_plan_step_description_chars: 120
+    max_plans_per_input: 2
+    action_retry_budget_non_retryable_failures: 3
+    action_retry_cooldown_steps: 10
+
+  superego:
+    max_completion_tokens: 192
+    dynamic_completion_enabled: true
+    dynamic_completion_hard_max_tokens: 640
+    dynamic_prompt_to_completion_ratio: 0.10
+    dynamic_completion_min_prompt_tokens: 160
+    two_stage_review_enabled: false
+    two_stage_low_confidence_threshold: 0.60
+    two_stage_escalate_on_medium_policy_risk: true
+    two_stage_skip_for_answer_actions: true
+    two_stage_skip_for_web_search_actions: true
+
+  memory:
+    max_short_term_context_chars: 20000
+    max_short_term_context_prompt_tokens: 384
+    long_term_memory_recall_max_items: 4
+    long_term_memory_recall_max_chars: 1200
+    long_term_memory_prompt_compression_enabled: true
+    long_term_memory_prompt_dialogue_max_chars: 1100
+    long_term_memory_prompt_recall_max_chars: 900
+    long_term_memory_assess_every_steps: 16
+    long_term_memory_assess_cooldown_steps: 8
+    long_term_memory_min_confidence: 0.65
+    long_term_memory_max_tokens: 320
+    long_term_memory_dynamic_completion_enabled: true
+    long_term_memory_dynamic_completion_hard_max_tokens: 512
+    long_term_memory_dynamic_prompt_to_completion_ratio: 0.08
+    long_term_memory_dynamic_completion_min_prompt_tokens: 160
+    long_term_memory_max_summary_chars: 320
+    long_term_memory_force_assess_on_allowed_action: false
+    long_term_memory_force_assess_on_terminal_answer: true
+    long_term_memory_parse_fallback_disable_after: 2
+    long_term_memory_recall_echo_min_summary_chars: 16
+    long_term_memory_recall_echo_min_token_length: 3
+    long_term_memory_recall_echo_min_token_count: 4
+    long_term_memory_recall_echo_token_overlap_threshold: 0.85
+    # Optional. Falls back to runtime.mcp_call_timeout_ms when omitted.
+    # mcp_memory_call_timeout_ms: 8000
+
+    task_workspace:
+      enabled: false
+      activation_min_plan_steps: 3
+      max_prompt_tokens: 220
+      max_sections: 10
+      max_section_chars: 1200
+      max_section_summary_chars: 180
+      max_evidence_items: 8
+      max_evidence_chars: 220
+      final_compilation_max_chars: 2800
+      final_pass_rewrite_enabled: true
+      final_pass_max_tokens: 260
+      final_pass_min_workspace_confidence: 0.35
+      final_pass_min_model_confidence: 0.55
+      debug_capture_enabled: false
+      max_active_tasks: 32
+      digest_max_entries: 4
+      digest_max_chars: 800
+      digest_max_prompt_tokens: 160
+
+  meta_reasoner:
+    deliberation_pressure_assessment_min_step: 16
+    deliberation_pressure_assessment_every_steps: 8
+    deliberation_pressure_assessment_threshold: 0.68
+    cooldown_steps: 6
+    max_tokens: 384
+    dynamic_completion_enabled: true
+    dynamic_completion_hard_max_tokens: 640
+    dynamic_prompt_to_completion_ratio: 0.10
+    dynamic_completion_min_prompt_tokens: 160
+    forced_terminal_pressure_threshold: 0.98
+    forced_terminal_stale_streak_threshold: 8
+
+  logbook:
+    enabled: true
+    max_summary_chars: 200
+    max_keywords_per_entry: 12
+    max_entries_per_query: 20
+    retention_days: 90
+    # Optional. If blank, sqlite logbook uses its internal default path.
+    # db_path: ".psyke/logbook.db"
+    episodic_recall_max_chars: 1200
+    episodic_recall_max_results: 15
+    use_llm_summarizer: false
+
+  runtime:
+    loop_delay_ms: 0
+    max_pending_thoughts: 64
+    max_pending_actions: 32
+    max_pending_inputs: 32
+    search_result_count: 5
+    mcp_call_timeout_ms: 8000
+    fetch_max_chars: 4000

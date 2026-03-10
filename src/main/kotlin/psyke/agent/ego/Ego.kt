@@ -187,7 +187,7 @@ class Ego(
             planCountByInput.clear()
             emittedPlanHashes.clear()
             externalActionSignatureHitsByInput.clear()
-            val clearedWorkspaces = taskWorkspaceStore.clearAll()
+            val clearedWorkspaces = taskWorkspaceStore.clearActiveWorkspaces()
             if (clearedWorkspaces > 0) {
                 instrumentation.emit(
                     AgentEvent(

@@ -94,7 +94,14 @@ Standalone Kotlin JVM app using Gradle with:
   - `MS_GRAPH_BASE_URL` (optional, default `https://graph.microsoft.com/v1.0`)
 - Agent/app/eval runtime settings are centralized in `agent-runtime.yaml` (repository root).
   - Optional override file path: `PSYKE_AGENT_CONFIG_FILE=/path/to/agent-runtime.yaml`.
-  - `agent` section covers loop/token/pressure/runtime knobs.
+  - `agent` is domain-grouped and mirrors `AgentConfig` ownership:
+    - `agent.planner.*`
+    - `agent.superego.*`
+    - `agent.memory.*` and `agent.memory.task_workspace.*`
+    - `agent.meta_reasoner.*`
+    - `agent.logbook.*`
+    - `agent.runtime.*` (loop/pending queues/search/mcp timeout/fetch cap)
+  - Legacy flat `agent.*` runtime keys are not supported.
   - `app` section covers UI/runtime flags (for example dashboard enablement and port).
   - `eval` section covers eval defaults (for example stage default and raw-response cap).
   - Precedence is `CLI > env > YAML > code defaults`.
@@ -137,7 +144,7 @@ Standalone Kotlin JVM app using Gradle with:
   - `EGO_TASK_WORKSPACE_FINAL_PASS_MAX_TOKENS` (default: `260`)
   - `EGO_TASK_WORKSPACE_FINAL_PASS_MIN_WORKSPACE_CONFIDENCE` (default: `0.35`)
   - `EGO_TASK_WORKSPACE_FINAL_PASS_MIN_MODEL_CONFIDENCE` (default: `0.55`)
-  - `EGO_TASK_WORKSPACE_DEBUG_CAPTURE_ENABLED` (default: `true`, temporary development default)
+  - `EGO_TASK_WORKSPACE_DEBUG_CAPTURE_ENABLED` (default: `false`; forced to `true` by `./run-psyke.sh`, Gradle tests, and Freud scripts)
   - `EGO_TASK_WORKSPACE_MAX_ACTIVE_TASKS` (default: `32`)
   - `EGO_MAX_ACTION_PAYLOAD_CHARS` (default: `4000`)
   - `EGO_SEARCH_RESULT_COUNT` (default: `5`)

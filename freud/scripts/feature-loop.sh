@@ -96,6 +96,9 @@ if [[ -f "$config_path" ]]; then
   source "$config_path"
 fi
 
+# Keep full workspace debug dumps enabled in Freud workflow runs.
+export EGO_TASK_WORKSPACE_DEBUG_CAPTURE_ENABLED="true"
+
 # Ensure summarizer adapter receives config values from sourced env files.
 for summarizer_env_var in \
   FREUD_SUMMARIZER_PROVIDER \
