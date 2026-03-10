@@ -186,6 +186,56 @@
       font-size: 11px;
       padding: 0 10px 10px;
     }
+    .modal-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.55);
+      z-index: 100;
+      align-items: center;
+      justify-content: center;
+    }
+    .modal-overlay.open { display: flex; }
+    .modal {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 20px;
+      width: 360px;
+      max-width: 90vw;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+    }
+    .modal h3 {
+      margin: 0 0 14px;
+      font-size: 14px;
+      font-weight: 600;
+    }
+    .modal input {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: rgba(14, 23, 28, 0.7);
+      color: var(--text);
+      font: inherit;
+      font-size: 13px;
+      padding: 8px 10px;
+      outline: none;
+    }
+    .modal input:focus { border-color: var(--accent); }
+    .modal-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      margin-top: 14px;
+    }
+    .modal-actions .btn { font-size: 12px; padding: 7px 14px; }
+    .modal-actions .btn-primary {
+      background: var(--accent);
+      color: var(--bg);
+      border-color: var(--accent);
+      font-weight: 600;
+    }
+    .modal-actions .btn-primary:hover { opacity: 0.85; }
     @media (max-width: 960px) {
       .layout {
         grid-template-columns: 1fr;
@@ -227,12 +277,24 @@
     </section>
   </div>
 
+  <div class="modal-overlay" id="modal-overlay">
+    <div class="modal">
+      <h3>New Conversation</h3>
+      <input id="modal-title-input" type="text" placeholder="Conversation title" />
+      <div class="modal-actions">
+        <button class="btn" id="modal-cancel" type="button">Cancel</button>
+        <button class="btn btn-primary" id="modal-create" type="button">Create</button>
+      </div>
+    </div>
+  </div>
+
   <script>
     const state = {
       sessions: [],
       selectedSessionId: null,
       selectedSessionMessages: [],
-      eventSource: null
+      eventSource: null,
+      drafts: {}
     };
 
     function setStatus(text) {
@@ -376,7 +438,12 @@
 
     async function selectSession(sessionId) {
       if (!sessionId) return;
+      const textarea = document.getElementById("composer");
+      if (state.selectedSessionId) {
+        state.drafts[state.selectedSessionId] = textarea.value;
+      }
       state.selectedSessionId = sessionId;
+      textarea.value = state.drafts[sessionId] || "";
       renderSessions();
       refreshSessionHeader();
       const payload = await fetchJson("/api/chat/sessions/" + encodeURIComponent(sessionId));
@@ -386,15 +453,44 @@
       setStatus("Connected");
     }
 
+    function promptTitle(defaultTitle) {
+      return new Promise((resolve, reject) => {
+        const overlay = document.getElementById("modal-overlay");
+        const input = document.getElementById("modal-title-input");
+        const createBtn = document.getElementById("modal-create");
+        const cancelBtn = document.getElementById("modal-cancel");
+        input.value = defaultTitle || "";
+        overlay.classList.add("open");
+        input.focus();
+        input.select();
+
+        function cleanup() {
+          overlay.classList.remove("open");
+          createBtn.removeEventListener("click", onConfirm);
+          cancelBtn.removeEventListener("click", onCancel);
+          input.removeEventListener("keydown", onKey);
+          overlay.removeEventListener("click", onBackdrop);
+        }
+        function onConfirm() { cleanup(); resolve(input.value.trim() || "Conversation"); }
+        function onCancel() { cleanup(); reject(new Error("cancelled")); }
+        function onKey(e) {
+          if (e.key === "Enter") { e.preventDefault(); onConfirm(); }
+          if (e.key === "Escape") { onCancel(); }
+        }
+        function onBackdrop(e) { if (e.target === overlay) onCancel(); }
+        createBtn.addEventListener("click", onConfirm);
+        cancelBtn.addEventListener("click", onCancel);
+        input.addEventListener("keydown", onKey);
+        overlay.addEventListener("click", onBackdrop);
+      });
+    }
+
     async function createSession(defaultTitle) {
-      const maybeTitle = window.prompt("Conversation title:", defaultTitle || "");
-      if (maybeTitle === null) {
-        throw new Error("cancelled");
-      }
+      const title = await promptTitle(defaultTitle);
       const payload = await fetchJson("/api/chat/sessions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: maybeTitle || "Conversation" })
+        body: JSON.stringify({ title: title })
       });
       return payload;
     }
@@ -418,6 +514,7 @@
       const content = textarea.value.trim();
       if (!content || !state.selectedSessionId) return;
       textarea.value = "";
+      delete state.drafts[state.selectedSessionId];
       try {
         await fetchJson("/api/chat/sessions/" + encodeURIComponent(state.selectedSessionId) + "/messages", {
           method: "POST",

@@ -847,15 +847,26 @@
         case "episodic_recall_intent_detected":
           return "pattern: " + (d.pattern_label || "unknown") +
             (d.keyword_search ? ", keyword: " + d.keyword_search : "");
-        case "episodic_recall_result":
-          return (d.entries_returned || 0) + " entries recalled" +
+        case "episodic_recall_result": {
+          const epHeader = (d.entries_returned || 0) + " entries recalled" +
             " (" + (d.total_matched || 0) + " matched" +
             (d.truncated ? ", truncated" : "") + ")";
+          const epPreview = d.recall_text_preview || "";
+          return epPreview ? epHeader + "\n" + epPreview : epHeader;
+        }
         case "memory_imprint_result":
           return (d.saved ? "saved" : "not saved") +
             (d.confidence != null ? ", confidence=" + d.confidence : "") +
             (d.tags && d.tags.length ? " [" + d.tags.join(", ") + "]" : "") +
             (d.latency_ms != null ? " " + d.latency_ms + "ms" : "");
+        case "reflection_lesson_recall": {
+          const rlHeader = (d.hit_count || 0) + " hits, " +
+            (d.recall_chars || 0) + " chars" +
+            (d.truncated ? " (truncated)" : "") +
+            " in " + (d.latency_ms || 0) + "ms";
+          const rlPreview = d.recall_text_preview || "";
+          return rlPreview ? rlHeader + "\n" + rlPreview : rlHeader;
+        }
         case "memory_recall_start":
           return (d.provider || "") + " — " + (d.cue_preview || "");
         case "memory_recall_result": {

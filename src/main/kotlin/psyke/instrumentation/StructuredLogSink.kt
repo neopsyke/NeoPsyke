@@ -119,6 +119,16 @@ class StructuredLogSink : InstrumentationSink {
                 }
             }
 
+            "reflection_lesson_recall" -> {
+                logger.trace {
+                    "reflection.lesson.recall hits=${event.data["hit_count"]} latency_ms=${event.data["latency_ms"]} chars=${event.data["recall_chars"]} truncated=${event.data["truncated"]}"
+                }
+                val recallPreview = event.data["recall_text_preview"]
+                if (recallPreview is String && recallPreview.isNotBlank()) {
+                    logger.debug { "reflection.lesson.recall.text\n$recallPreview" }
+                }
+            }
+
             "planner_output_repaired" -> {
                 logger.trace {
                     "planner.output.repaired action=${event.data["action_type"]} repair=${event.data["repair"]}"
@@ -232,6 +242,10 @@ class StructuredLogSink : InstrumentationSink {
             "episodic_recall_result" -> {
                 logger.trace {
                     "episodic.recall.result pattern=${event.data["pattern_label"]} entries=${event.data["entries_returned"]} total=${event.data["total_matched"]} truncated=${event.data["truncated"]}"
+                }
+                val recallPreview = event.data["recall_text_preview"]
+                if (recallPreview is String && recallPreview.isNotBlank()) {
+                    logger.debug { "episodic.recall.text pattern=${event.data["pattern_label"]}\n$recallPreview" }
                 }
             }
 

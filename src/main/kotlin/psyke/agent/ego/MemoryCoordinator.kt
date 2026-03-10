@@ -166,7 +166,8 @@ internal class MemoryCoordinator(
                         "hit_count" to recall.hitCount,
                         "latency_ms" to (System.nanoTime() - startedAt) / 1_000_000L,
                         "recall_chars" to reflectionText.length,
-                        "truncated" to recall.truncated
+                        "truncated" to recall.truncated,
+                        "recall_text_preview" to reflectionText,
                     )
                 )
             )
@@ -586,6 +587,7 @@ internal class MemoryCoordinator(
                     "total_matched" to recall.totalMatched,
                     "truncated" to recall.truncated,
                     "formatted_chars" to formatted.length,
+                    "recall_text_preview" to formatted,
                 )
             )
         )
