@@ -112,6 +112,11 @@ agent:
     episodic_recall_max_results: 15
     use_llm_summarizer: false
 
+  inner_voice:
+    enabled: true
+    max_content_chars: 500
+    max_events_per_session: 100
+
   runtime:
     loop_delay_ms: 0
     max_pending_thoughts: 64

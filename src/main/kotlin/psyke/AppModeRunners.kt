@@ -37,6 +37,8 @@ import psyke.config.McpRuntimeConfig
 import psyke.dashboard.DashboardServer
 import psyke.dashboard.DashboardStateStore
 import psyke.dashboard.ChatRuntimeBridge
+import psyke.dashboard.InnerVoiceSink
+import psyke.dashboard.InnerVoiceStore
 import psyke.eval.MemoryLiveEvalOptions
 import psyke.eval.MemoryLiveEvalReporter
 import psyke.eval.MemoryLiveEvalRunner
@@ -554,12 +556,27 @@ internal object AppModeRunners {
                 null
             }
         }
+        val innerVoiceStore = if (config.innerVoice.enabled) {
+            InnerVoiceStore(maxEventsPerSession = config.innerVoice.maxEventsPerSession)
+        } else {
+            null
+        }
+        val innerVoiceSink = if (innerVoiceStore != null) {
+            InnerVoiceSink(
+                dashboardStore = dashboardStore,
+                innerVoiceStore = innerVoiceStore,
+                config = config.innerVoice
+            )
+        } else {
+            null
+        }
         try {
             InstrumentationBus(
                 sinks = listOfNotNull(
                     StructuredLogSink(),
                     dashboardStore,
-                    TaskWorkspaceDumpSink(scope = agentScope)
+                    TaskWorkspaceDumpSink(scope = agentScope),
+                    innerVoiceSink
                 ),
                 criticalSinks = listOfNotNull(sidecarSink),
                 scope = agentScope
@@ -569,6 +586,7 @@ internal object AppModeRunners {
                         DashboardServer(
                             store = dashboardStore,
                             chatBridge = chatBridge,
+                            innerVoiceStore = innerVoiceStore,
                             port = dashboardPort
                         ).also { it.start() }
                     } catch (ex: Exception) {
@@ -1004,6 +1022,7 @@ internal object AppModeRunners {
             }
             }
         } finally {
+            innerVoiceStore?.close()
             sensoryInput.close()
             agentScope.cancel()
         }

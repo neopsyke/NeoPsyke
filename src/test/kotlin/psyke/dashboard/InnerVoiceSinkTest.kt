@@ -1,0 +1,517 @@
+package psyke.dashboard
+
+import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+import com.fasterxml.jackson.module.kotlin.readValue
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeoutOrNull
+import psyke.agent.core.ActionType
+import psyke.agent.core.ConversationContext
+import psyke.agent.core.PendingAction
+import psyke.agent.core.PendingInput
+import psyke.agent.core.Urgency
+import psyke.instrumentation.AgentEvent
+import psyke.instrumentation.AgentEvents
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
+import kotlin.test.assertNull
+
+class InnerVoiceSinkTest {
+    private val mapper = jacksonObjectMapper()
+
+    private fun buildStack(
+        config: InnerVoiceConfig = InnerVoiceConfig()
+    ): Triple<DashboardStateStore, InnerVoiceStore, InnerVoiceSink> {
+        val dashboardStore = DashboardStateStore()
+        val innerVoiceStore = InnerVoiceStore(maxEventsPerSession = config.maxEventsPerSession)
+        val sink = InnerVoiceSink(
+            dashboardStore = dashboardStore,
+            innerVoiceStore = innerVoiceStore,
+            config = config
+        )
+        return Triple(dashboardStore, innerVoiceStore, sink)
+    }
+
+    private fun seedSession(
+        dashboardStore: DashboardStateStore,
+        sessionId: String = "default",
+        rootInputId: String = "root-1"
+    ) {
+        val input = PendingInput(
+            id = 1,
+            content = "test input",
+            rootInputId = rootInputId,
+            conversationContext = ConversationContext(
+                sessionId = sessionId,
+                interlocutor = psyke.agent.core.Interlocutor("user-1")
+            )
+        )
+        dashboardStore.onEvent(AgentEvents.inputQueued(input))
+    }
+
+    @Test
+    fun `thought planner decision produces DELIBERATION event`() {
+        val (dashboardStore, innerVoiceStore, sink) = buildStack()
+        seedSession(dashboardStore)
+        val sub = innerVoiceStore.subscribe("default")!!
+
+        // First decision is a thought → activates inner voice
+        sink.onEvent(
+            AgentEvents.plannerDecision(
+                trigger = "input",
+                decisionType = "thought",
+                thought = "I need to search for recent information about this topic.",
+            ).copy(data = AgentEvents.plannerDecision(
+                trigger = "input",
+                decisionType = "thought",
+                thought = "I need to search for recent information about this topic.",
+            ).data + ("root_input_id" to "root-1"))
+        )
+
+        runBlocking {
+            val payload = withTimeoutOrNull(1000) { sub.receive() }
+            assertNotNull(payload)
+            val parsed = mapper.readValue<Map<String, Any?>>(payload)
+            assertEquals("thinking", parsed["type"])
+            @Suppress("UNCHECKED_CAST")
+            val event = parsed["event"] as Map<String, Any?>
+            assertEquals("DELIBERATION", event["type"])
+            assertEquals("I need to search for recent information about this topic.", event["content"])
+        }
+
+        sub.close()
+        sink.close()
+        innerVoiceStore.close()
+    }
+
+    @Test
+    fun `single-step direct answer produces no events`() {
+        val (dashboardStore, innerVoiceStore, sink) = buildStack()
+        seedSession(dashboardStore)
+        val sub = innerVoiceStore.subscribe("default")!!
+
+        // First and only decision is action=answer → no activation
+        sink.onEvent(
+            AgentEvent(
+                type = "planner_decision",
+                data = mapOf(
+                    "trigger" to "input",
+                    "decision_type" to "action",
+                    "action_type" to "answer",
+                    "summary" to "Direct answer",
+                    "root_input_id" to "root-1"
+                )
+            )
+        )
+
+        runBlocking {
+            val payload = withTimeoutOrNull(300) { sub.receive() }
+            assertNull(payload, "Single-step answer should not produce inner voice events")
+        }
+
+        sub.close()
+        sink.close()
+        innerVoiceStore.close()
+    }
+
+    @Test
+    fun `non-answer action produces INTENTION event`() {
+        val (dashboardStore, innerVoiceStore, sink) = buildStack()
+        seedSession(dashboardStore)
+        val sub = innerVoiceStore.subscribe("default")!!
+
+        sink.onEvent(
+            AgentEvent(
+                type = "planner_decision",
+                data = mapOf(
+                    "trigger" to "input",
+                    "decision_type" to "action",
+                    "action_type" to "web_search",
+                    "summary" to "Searching for latest news",
+                    "payload" to "latest news",
+                    "root_input_id" to "root-1"
+                )
+            )
+        )
+
+        runBlocking {
+            val payload = withTimeoutOrNull(1000) { sub.receive() }
+            assertNotNull(payload)
+            val parsed = mapper.readValue<Map<String, Any?>>(payload)
+            @Suppress("UNCHECKED_CAST")
+            val event = parsed["event"] as Map<String, Any?>
+            assertEquals("INTENTION", event["type"])
+            assertEquals("Searching for latest news", event["content"])
+        }
+
+        sub.close()
+        sink.close()
+        innerVoiceStore.close()
+    }
+
+    @Test
+    fun `plan_created produces PLAN event and activates voice`() {
+        val (dashboardStore, innerVoiceStore, sink) = buildStack()
+        seedSession(dashboardStore)
+        val sub = innerVoiceStore.subscribe("default")!!
+
+        sink.onEvent(
+            AgentEvent(
+                type = "plan_created",
+                data = mapOf(
+                    "plan_id" to "plan-1",
+                    "goal" to "Find and summarize recent AI developments",
+                    "step_count" to 3,
+                    "steps" to listOf("Search", "Fetch", "Summarize"),
+                    "root_input_id" to "root-1"
+                )
+            )
+        )
+
+        runBlocking {
+            val payload = withTimeoutOrNull(1000) { sub.receive() }
+            assertNotNull(payload)
+            val parsed = mapper.readValue<Map<String, Any?>>(payload)
+            @Suppress("UNCHECKED_CAST")
+            val event = parsed["event"] as Map<String, Any?>
+            assertEquals("PLAN", event["type"])
+            assertEquals("Find and summarize recent AI developments", event["content"])
+            @Suppress("UNCHECKED_CAST")
+            val meta = event["metadata"] as Map<String, Any?>
+            assertEquals(3, meta["step_count"])
+        }
+
+        sub.close()
+        sink.close()
+        innerVoiceStore.close()
+    }
+
+    @Test
+    fun `action_denied produces REFLECTION event when root is activated`() {
+        val (dashboardStore, innerVoiceStore, sink) = buildStack()
+        seedSession(dashboardStore)
+        val sub = innerVoiceStore.subscribe("default")!!
+
+        // Activate by sending a thought first
+        sink.onEvent(
+            AgentEvent(
+                type = "planner_decision",
+                data = mapOf(
+                    "trigger" to "input",
+                    "decision_type" to "thought",
+                    "thought" to "Let me think...",
+                    "root_input_id" to "root-1"
+                )
+            )
+        )
+
+        val action = PendingAction(
+            id = 1,
+            urgency = Urgency.HIGH,
+            type = ActionType.WEBSITE_FETCH,
+            payload = "https://example.com",
+            summary = "Fetch page",
+            rootInputId = "root-1"
+        )
+        sink.onEvent(AgentEvents.actionDenied(action, "External API calls restricted", "POLICY_EXTERNAL_CALLS"))
+
+        runBlocking {
+            // Skip the DELIBERATION event
+            withTimeoutOrNull(1000) { sub.receive() }
+            val payload = withTimeoutOrNull(1000) { sub.receive() }
+            assertNotNull(payload)
+            val parsed = mapper.readValue<Map<String, Any?>>(payload)
+            @Suppress("UNCHECKED_CAST")
+            val event = parsed["event"] as Map<String, Any?>
+            assertEquals("REFLECTION", event["type"])
+            assertEquals("Reconsidering: External API calls restricted", event["content"])
+        }
+
+        sub.close()
+        sink.close()
+        innerVoiceStore.close()
+    }
+
+    @Test
+    fun `memory_recall_result with hits produces RECALL event when rootInputId known`() {
+        val (dashboardStore, innerVoiceStore, sink) = buildStack()
+        seedSession(dashboardStore)
+        val sub = innerVoiceStore.subscribe("default")!!
+
+        // Use an event that includes root_input_id so the session can be resolved
+        sink.onEvent(
+            AgentEvent(
+                type = "memory_recall_result",
+                data = mapOf(
+                    "trigger" to "input",
+                    "provider" to "hippocampus",
+                    "hit_count" to 3,
+                    "latency_ms" to 42L,
+                    "recall_chars" to 200,
+                    "truncated" to false,
+                    "recall_text_preview" to "User previously asked about...",
+                    "root_input_id" to "root-1"
+                )
+            )
+        )
+
+        runBlocking {
+            val payload = withTimeoutOrNull(1000) { sub.receive() }
+            assertNotNull(payload)
+            val parsed = mapper.readValue<Map<String, Any?>>(payload)
+            @Suppress("UNCHECKED_CAST")
+            val event = parsed["event"] as Map<String, Any?>
+            assertEquals("RECALL", event["type"])
+            assertEquals("Recalled 3 memories (hippocampus)", event["content"])
+        }
+
+        sub.close()
+        sink.close()
+        innerVoiceStore.close()
+    }
+
+    @Test
+    fun `memory_recall_result without rootInputId is silently dropped`() {
+        val (dashboardStore, innerVoiceStore, sink) = buildStack()
+        seedSession(dashboardStore)
+        val sub = innerVoiceStore.subscribe("default")!!
+
+        // Standard factory event has no root_input_id
+        sink.onEvent(
+            AgentEvents.memoryRecallResult(
+                trigger = "input",
+                provider = "hippocampus",
+                hitCount = 3,
+                latencyMs = 42,
+                recallChars = 200,
+                truncated = false,
+                recallTextPreview = "User previously asked about..."
+            )
+        )
+
+        runBlocking {
+            val payload = withTimeoutOrNull(300) { sub.receive() }
+            // No rootInputId → no sessionId → emit drops it
+            assertNull(payload)
+        }
+
+        sub.close()
+        sink.close()
+        innerVoiceStore.close()
+    }
+
+    @Test
+    fun `memory_recall_result with zero hits is ignored`() {
+        val (dashboardStore, innerVoiceStore, sink) = buildStack()
+        seedSession(dashboardStore)
+        val sub = innerVoiceStore.subscribe("default")!!
+
+        sink.onEvent(
+            AgentEvents.memoryRecallResult(
+                trigger = "input",
+                provider = "hippocampus",
+                hitCount = 0,
+                latencyMs = 10,
+                recallChars = 0,
+                truncated = false
+            )
+        )
+
+        runBlocking {
+            val payload = withTimeoutOrNull(300) { sub.receive() }
+            assertNull(payload)
+        }
+
+        sub.close()
+        sink.close()
+        innerVoiceStore.close()
+    }
+
+    @Test
+    fun `action_executed for non-answer produces OBSERVATION when activated`() {
+        val (dashboardStore, innerVoiceStore, sink) = buildStack()
+        seedSession(dashboardStore)
+        val sub = innerVoiceStore.subscribe("default")!!
+
+        // Activate by sending a thought
+        sink.onEvent(
+            AgentEvent(
+                type = "planner_decision",
+                data = mapOf(
+                    "trigger" to "input",
+                    "decision_type" to "thought",
+                    "thought" to "Let me search...",
+                    "root_input_id" to "root-1"
+                )
+            )
+        )
+
+        val action = PendingAction(
+            id = 2,
+            urgency = Urgency.HIGH,
+            type = ActionType.WEB_SEARCH,
+            payload = "AI news",
+            summary = "Search for AI news",
+            rootInputId = "root-1"
+        )
+        sink.onEvent(AgentEvents.actionExecuted(action, "Found 5 results for 'AI news'."))
+
+        runBlocking {
+            // Skip DELIBERATION
+            withTimeoutOrNull(1000) { sub.receive() }
+            val payload = withTimeoutOrNull(1000) { sub.receive() }
+            assertNotNull(payload)
+            val parsed = mapper.readValue<Map<String, Any?>>(payload)
+            @Suppress("UNCHECKED_CAST")
+            val event = parsed["event"] as Map<String, Any?>
+            assertEquals("OBSERVATION", event["type"])
+            assertEquals("Found 5 results for 'AI news'.", event["content"])
+        }
+
+        sub.close()
+        sink.close()
+        innerVoiceStore.close()
+    }
+
+    @Test
+    fun `content is trimmed at maxContentChars boundary`() {
+        val config = InnerVoiceConfig(maxContentChars = 20)
+        val (dashboardStore, innerVoiceStore, sink) = buildStack(config)
+        seedSession(dashboardStore)
+        val sub = innerVoiceStore.subscribe("default")!!
+
+        sink.onEvent(
+            AgentEvent(
+                type = "planner_decision",
+                data = mapOf(
+                    "trigger" to "input",
+                    "decision_type" to "thought",
+                    "thought" to "This is a very long thought that exceeds the maximum content character limit.",
+                    "root_input_id" to "root-1"
+                )
+            )
+        )
+
+        runBlocking {
+            val payload = withTimeoutOrNull(1000) { sub.receive() }
+            assertNotNull(payload)
+            val parsed = mapper.readValue<Map<String, Any?>>(payload)
+            @Suppress("UNCHECKED_CAST")
+            val event = parsed["event"] as Map<String, Any?>
+            val content = event["content"] as String
+            assertEquals("This is a very long ...", content)
+            assertEquals(23, content.length) // 20 chars + "..."
+        }
+
+        sub.close()
+        sink.close()
+        innerVoiceStore.close()
+    }
+
+    @Test
+    fun `disabled config prevents all events`() {
+        val config = InnerVoiceConfig(enabled = false)
+        val (dashboardStore, innerVoiceStore, sink) = buildStack(config)
+        seedSession(dashboardStore)
+        val sub = innerVoiceStore.subscribe("default")!!
+
+        sink.onEvent(
+            AgentEvent(
+                type = "planner_decision",
+                data = mapOf(
+                    "trigger" to "input",
+                    "decision_type" to "thought",
+                    "thought" to "Should not appear",
+                    "root_input_id" to "root-1"
+                )
+            )
+        )
+
+        runBlocking {
+            val payload = withTimeoutOrNull(300) { sub.receive() }
+            assertNull(payload)
+        }
+
+        sub.close()
+        sink.close()
+        innerVoiceStore.close()
+    }
+
+    @Test
+    fun `irrelevant event types are ignored`() {
+        val (dashboardStore, innerVoiceStore, sink) = buildStack()
+        seedSession(dashboardStore)
+        val sub = innerVoiceStore.subscribe("default")!!
+
+        sink.onEvent(AgentEvent(type = "loop_status", data = mapOf("status" to "running")))
+        sink.onEvent(AgentEvent(type = "queue_snapshot", data = emptyMap()))
+        sink.onEvent(AgentEvent(type = "heap_snapshot", data = emptyMap()))
+
+        runBlocking {
+            val payload = withTimeoutOrNull(300) { sub.receive() }
+            assertNull(payload)
+        }
+
+        sub.close()
+        sink.close()
+        innerVoiceStore.close()
+    }
+
+    @Test
+    fun `workspace destroyed cleans up root tracking`() {
+        val (dashboardStore, innerVoiceStore, sink) = buildStack()
+        seedSession(dashboardStore)
+        val sub = innerVoiceStore.subscribe("default")!!
+
+        // Activate
+        sink.onEvent(
+            AgentEvent(
+                type = "planner_decision",
+                data = mapOf(
+                    "trigger" to "input",
+                    "decision_type" to "thought",
+                    "thought" to "thinking...",
+                    "root_input_id" to "root-1"
+                )
+            )
+        )
+
+        // Destroy
+        sink.onEvent(
+            AgentEvent(
+                type = "task_workspace_destroyed",
+                data = mapOf("root_input_id" to "root-1")
+            )
+        )
+
+        // New event for same root after cleanup should not be activated
+        sink.onEvent(
+            AgentEvent(
+                type = "action_executed",
+                data = mapOf(
+                    "action" to PendingAction(
+                        id = 3,
+                        urgency = Urgency.HIGH,
+                        type = ActionType.WEB_SEARCH,
+                        payload = "test",
+                        summary = "test",
+                        rootInputId = "root-1"
+                    ),
+                    "outcome_summary" to "Result"
+                )
+            )
+        )
+
+        runBlocking {
+            // Only the first DELIBERATION event should arrive
+            val p1 = withTimeoutOrNull(1000) { sub.receive() }
+            assertNotNull(p1)
+            val p2 = withTimeoutOrNull(300) { sub.receive() }
+            assertNull(p2)
+        }
+
+        sub.close()
+        sink.close()
+        innerVoiceStore.close()
+    }
+}

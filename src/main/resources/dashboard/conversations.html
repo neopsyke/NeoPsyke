@@ -150,6 +150,51 @@
       background: rgba(43, 68, 48, 0.5);
       border-color: rgba(90, 164, 104, 0.45);
     }
+    .msg.thinking {
+      background: rgba(20, 38, 45, 0.35);
+      border-color: rgba(143, 170, 180, 0.2);
+      border-left: 2px solid rgba(143, 170, 180, 0.35);
+      padding: 5px 10px;
+      font-size: 11px;
+      color: var(--muted);
+      opacity: 0.85;
+    }
+    .msg.thinking .msg-meta {
+      font-size: 9px;
+      letter-spacing: .05em;
+    }
+    .msg.thinking .thinking-type {
+      display: inline-block;
+      font-size: 9px;
+      font-weight: 600;
+      color: rgba(143, 170, 180, 0.7);
+      border: 1px solid rgba(143, 170, 180, 0.2);
+      border-radius: 3px;
+      padding: 0 4px;
+      margin-right: 4px;
+      text-transform: uppercase;
+      letter-spacing: .04em;
+    }
+    .thinking-hidden .msg.thinking {
+      display: none;
+    }
+    .thinking-toggle {
+      font-size: 10px;
+      color: var(--muted);
+      cursor: pointer;
+      padding: 2px 6px;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      background: transparent;
+      font-family: inherit;
+    }
+    .thinking-toggle:hover {
+      border-color: var(--muted);
+    }
+    .thinking-toggle.active {
+      color: var(--accent);
+      border-color: rgba(53, 195, 168, 0.3);
+    }
     .msg-meta {
       font-size: 10px;
       color: var(--muted);
@@ -266,7 +311,10 @@
     <section class="panel">
       <div class="panel-head">
         <span id="active-session-title">Select a conversation</span>
-        <span id="active-session-id"></span>
+        <span style="display:flex;align-items:center;gap:6px">
+          <button id="thinking-toggle" class="thinking-toggle active" type="button" title="Toggle inner voice">inner voice</button>
+          <span id="active-session-id"></span>
+        </span>
       </div>
       <div id="messages" class="messages"></div>
       <div class="composer">
@@ -294,6 +342,8 @@
       selectedSessionId: null,
       selectedSessionMessages: [],
       eventSource: null,
+      thinkingSource: null,
+      thinkingVisible: true,
       drafts: {}
     };
 
@@ -353,9 +403,32 @@
       });
     }
 
+    const THINKING_TYPE_LABELS = {
+      DELIBERATION: "thought",
+      INTENTION: "intent",
+      PLAN: "plan",
+      REFLECTION: "reflect",
+      RECALL: "recall",
+      OBSERVATION: "observed"
+    };
+
     function renderMessages() {
       const root = document.getElementById("messages");
+      if (!state.thinkingVisible) {
+        root.classList.add("thinking-hidden");
+      } else {
+        root.classList.remove("thinking-hidden");
+      }
       root.innerHTML = state.selectedSessionMessages.map((m) => {
+        if (m._thinking) {
+          const label = THINKING_TYPE_LABELS[m._thinkingType] || m._thinkingType;
+          return (
+            "<div class=\"msg thinking\" data-ts=\"" + esc(m.created_at_ms) + "\">" +
+            "<div class=\"msg-meta\"><span class=\"thinking-type\">" + esc(label) + "</span>" + esc(fmtTime(m.created_at_ms)) + "</div>" +
+            "<div>" + esc(m.content) + "</div>" +
+            "</div>"
+          );
+        }
         const role = m.role === "assistant" ? "assistant" : "user";
         const interlocutorLabel = (role === "user" && m.interlocutor)
           ? "<span class=\"msg-interlocutor\">" + esc(m.interlocutor) + "</span> • "
@@ -389,6 +462,19 @@
         state.eventSource.close();
         state.eventSource = null;
       }
+      if (state.thinkingSource) {
+        state.thinkingSource.close();
+        state.thinkingSource = null;
+      }
+    }
+
+    function insertThinkingEvent(thinkingMsg) {
+      const ts = thinkingMsg.created_at_ms;
+      let idx = state.selectedSessionMessages.length;
+      while (idx > 0 && state.selectedSessionMessages[idx - 1].created_at_ms > ts) {
+        idx--;
+      }
+      state.selectedSessionMessages.splice(idx, 0, thinkingMsg);
     }
 
     function connectSessionEvents(sessionId) {
@@ -402,21 +488,40 @@
         try { payload = JSON.parse(event.data); } catch (_) { return; }
         if (!payload || payload.type !== "message" || !payload.message) return;
         const incoming = payload.message;
-        const exists = state.selectedSessionMessages.some((m) => Number(m.id) === Number(incoming.id));
+        const exists = state.selectedSessionMessages.some((m) => !m._thinking && Number(m.id) === Number(incoming.id));
         if (!exists) {
           state.selectedSessionMessages.push(incoming);
           renderMessages();
           refreshSessionSnapshotCounts();
         }
       });
+
+      const ts = new EventSource("/api/chat/sessions/" + encodeURIComponent(sessionId) + "/thinking");
+      state.thinkingSource = ts;
+      ts.addEventListener("thinking", (event) => {
+        let payload = null;
+        try { payload = JSON.parse(event.data); } catch (_) { return; }
+        if (!payload || payload.type !== "thinking" || !payload.event) return;
+        const ev = payload.event;
+        const thinkingMsg = {
+          _thinking: true,
+          _thinkingType: ev.type,
+          _thinkingId: ev.id,
+          content: ev.content || "",
+          created_at_ms: ev.ts
+        };
+        insertThinkingEvent(thinkingMsg);
+        renderMessages();
+      });
     }
 
     function refreshSessionSnapshotCounts() {
       const current = state.sessions.find((s) => s.session_id === state.selectedSessionId);
       if (!current) return;
-      current.message_count = state.selectedSessionMessages.length;
-      current.last_message_preview = state.selectedSessionMessages.length
-        ? state.selectedSessionMessages[state.selectedSessionMessages.length - 1].content
+      const chatMessages = state.selectedSessionMessages.filter(function(m) { return !m._thinking; });
+      current.message_count = chatMessages.length;
+      current.last_message_preview = chatMessages.length
+        ? chatMessages[chatMessages.length - 1].content
         : "";
       current.updated_at_ms = Date.now();
       renderSessions();
@@ -447,7 +552,7 @@
       renderSessions();
       refreshSessionHeader();
       const payload = await fetchJson("/api/chat/sessions/" + encodeURIComponent(sessionId));
-      state.selectedSessionMessages = Array.isArray(payload && payload.messages) ? payload.messages.slice() : [];
+      state.selectedSessionMessages = Array.isArray(payload && payload.messages) ? payload.messages.filter(function(m) { return !m._thinking; }).slice() : [];
       renderMessages();
       connectSessionEvents(sessionId);
       setStatus("Connected");
@@ -533,6 +638,16 @@
         event.preventDefault();
         onSend();
       }
+    });
+    document.getElementById("thinking-toggle").addEventListener("click", () => {
+      state.thinkingVisible = !state.thinkingVisible;
+      const btn = document.getElementById("thinking-toggle");
+      if (state.thinkingVisible) {
+        btn.classList.add("active");
+      } else {
+        btn.classList.remove("active");
+      }
+      renderMessages();
     });
 
     loadSessions()

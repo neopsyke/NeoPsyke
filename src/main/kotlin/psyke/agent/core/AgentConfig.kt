@@ -1,11 +1,14 @@
 package psyke.agent.core
 
+import psyke.dashboard.InnerVoiceConfig
+
 data class AgentConfig(
     val planner: PlannerConfig = PlannerConfig(),
     val superego: SuperegoConfig = SuperegoConfig(),
     val memory: MemoryConfig = MemoryConfig(),
     val metaReasoner: MetaReasonerConfig = MetaReasonerConfig(),
     val logbook: LogbookConfig = LogbookConfig(),
+    val innerVoice: InnerVoiceConfig = InnerVoiceConfig(),
     val loopDelayMs: Int = 0,
     val maxPendingThoughts: Int = 64,
     val maxPendingActions: Int = 32,

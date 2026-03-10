@@ -21,6 +21,7 @@ private const val SSE_HEARTBEAT_TIMEOUT_MS: Long = 30_000L
 class DashboardServer(
     private val store: DashboardStateStore,
     private val chatBridge: ChatRuntimeBridge? = null,
+    private val innerVoiceStore: InnerVoiceStore? = null,
     @Volatile var metricsQueryProvider: MetricsQueryProvider? = null,
     port: Int,
     host: String = "127.0.0.1",
@@ -226,6 +227,13 @@ class DashboardServer(
                 }
                 handleChatSse(exchange, chatBridge, sessionId)
             }
+            "thinking" -> {
+                if (exchange.requestMethod.uppercase() != "GET") {
+                    respondText(exchange, 405, "Method not allowed", "text/plain; charset=utf-8")
+                    return
+                }
+                handleThinkingSse(exchange, sessionId)
+            }
             else -> respondText(exchange, 404, "Not found", "text/plain; charset=utf-8")
         }
     }
@@ -299,6 +307,51 @@ class DashboardServer(
                     }
                     if (payload != null) {
                         output.write("event: chat\n")
+                        output.write("data: $payload\n\n")
+                        output.flush()
+                    } else {
+                        output.write(": heartbeat\n\n")
+                        output.flush()
+                    }
+                }
+            }
+        } catch (_: Exception) {
+            // client disconnected
+        } finally {
+            subscription.close()
+            output.close()
+        }
+    }
+
+    private fun handleThinkingSse(exchange: HttpExchange, sessionId: String) {
+        val voiceStore = innerVoiceStore
+        if (voiceStore == null) {
+            respondText(exchange, 503, "Inner voice not available", "text/plain; charset=utf-8")
+            return
+        }
+        val subscription = voiceStore.subscribe(sessionId)
+        if (subscription == null) {
+            respondText(exchange, 404, "Session not found", "text/plain; charset=utf-8")
+            return
+        }
+
+        exchange.responseHeaders.add("Content-Type", "text/event-stream")
+        exchange.responseHeaders.add("Cache-Control", "no-cache")
+        exchange.responseHeaders.add("Connection", "keep-alive")
+        exchange.sendResponseHeaders(200, 0)
+
+        val output = exchange.responseBody.bufferedWriter(StandardCharsets.UTF_8)
+        try {
+            output.write("event: ready\n")
+            output.write("data: {\"status\":\"connected\",\"session_id\":\"$sessionId\"}\n\n")
+            output.flush()
+            runBlocking {
+                while (true) {
+                    val payload = withTimeoutOrNull(SSE_HEARTBEAT_TIMEOUT_MS) {
+                        subscription.receive()
+                    }
+                    if (payload != null) {
+                        output.write("event: thinking\n")
                         output.write("data: $payload\n\n")
                         output.flush()
                     } else {
