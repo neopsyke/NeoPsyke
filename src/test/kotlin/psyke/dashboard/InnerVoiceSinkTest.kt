@@ -61,11 +61,8 @@ class InnerVoiceSinkTest {
                 trigger = "input",
                 decisionType = "thought",
                 thought = "I need to search for recent information about this topic.",
-            ).copy(data = AgentEvents.plannerDecision(
-                trigger = "input",
-                decisionType = "thought",
-                thought = "I need to search for recent information about this topic.",
-            ).data + ("root_input_id" to "root-1"))
+                rootInputId = "root-1",
+            )
         )
 
         runBlocking {
@@ -92,15 +89,12 @@ class InnerVoiceSinkTest {
 
         // First and only decision is action=answer → no activation
         sink.onEvent(
-            AgentEvent(
-                type = "planner_decision",
-                data = mapOf(
-                    "trigger" to "input",
-                    "decision_type" to "action",
-                    "action_type" to "answer",
-                    "summary" to "Direct answer",
-                    "root_input_id" to "root-1"
-                )
+            AgentEvents.plannerDecision(
+                trigger = "input",
+                decisionType = "action",
+                actionType = "answer",
+                summary = "Direct answer",
+                rootInputId = "root-1",
             )
         )
 
@@ -121,16 +115,13 @@ class InnerVoiceSinkTest {
         val sub = innerVoiceStore.subscribe("default")!!
 
         sink.onEvent(
-            AgentEvent(
-                type = "planner_decision",
-                data = mapOf(
-                    "trigger" to "input",
-                    "decision_type" to "action",
-                    "action_type" to "web_search",
-                    "summary" to "Searching for latest news",
-                    "payload" to "latest news",
-                    "root_input_id" to "root-1"
-                )
+            AgentEvents.plannerDecision(
+                trigger = "input",
+                decisionType = "action",
+                actionType = "web_search",
+                summary = "Searching for latest news",
+                payload = "latest news",
+                rootInputId = "root-1",
             )
         )
 
@@ -156,15 +147,13 @@ class InnerVoiceSinkTest {
         val sub = innerVoiceStore.subscribe("default")!!
 
         sink.onEvent(
-            AgentEvent(
-                type = "plan_created",
-                data = mapOf(
-                    "plan_id" to "plan-1",
-                    "goal" to "Find and summarize recent AI developments",
-                    "step_count" to 3,
-                    "steps" to listOf("Search", "Fetch", "Summarize"),
-                    "root_input_id" to "root-1"
-                )
+            AgentEvents.planCreated(
+                planId = "plan-1",
+                goal = "Find and summarize recent AI developments",
+                stepCount = 3,
+                urgency = "high",
+                steps = listOf("Search", "Fetch", "Summarize"),
+                rootInputId = "root-1",
             )
         )
 
@@ -194,14 +183,11 @@ class InnerVoiceSinkTest {
 
         // Activate by sending a thought first
         sink.onEvent(
-            AgentEvent(
-                type = "planner_decision",
-                data = mapOf(
-                    "trigger" to "input",
-                    "decision_type" to "thought",
-                    "thought" to "Let me think...",
-                    "root_input_id" to "root-1"
-                )
+            AgentEvents.plannerDecision(
+                trigger = "input",
+                decisionType = "thought",
+                thought = "Let me think...",
+                rootInputId = "root-1",
             )
         )
 
@@ -238,20 +224,17 @@ class InnerVoiceSinkTest {
         seedSession(dashboardStore)
         val sub = innerVoiceStore.subscribe("default")!!
 
-        // Use an event that includes root_input_id so the session can be resolved
+        // Factory method now carries rootInputId
         sink.onEvent(
-            AgentEvent(
-                type = "memory_recall_result",
-                data = mapOf(
-                    "trigger" to "input",
-                    "provider" to "hippocampus",
-                    "hit_count" to 3,
-                    "latency_ms" to 42L,
-                    "recall_chars" to 200,
-                    "truncated" to false,
-                    "recall_text_preview" to "User previously asked about...",
-                    "root_input_id" to "root-1"
-                )
+            AgentEvents.memoryRecallResult(
+                trigger = "input",
+                provider = "hippocampus",
+                hitCount = 3,
+                latencyMs = 42,
+                recallChars = 200,
+                truncated = false,
+                recallTextPreview = "User previously asked about...",
+                rootInputId = "root-1",
             )
         )
 
@@ -335,14 +318,11 @@ class InnerVoiceSinkTest {
 
         // Activate by sending a thought
         sink.onEvent(
-            AgentEvent(
-                type = "planner_decision",
-                data = mapOf(
-                    "trigger" to "input",
-                    "decision_type" to "thought",
-                    "thought" to "Let me search...",
-                    "root_input_id" to "root-1"
-                )
+            AgentEvents.plannerDecision(
+                trigger = "input",
+                decisionType = "thought",
+                thought = "Let me search...",
+                rootInputId = "root-1",
             )
         )
 
@@ -381,14 +361,11 @@ class InnerVoiceSinkTest {
         val sub = innerVoiceStore.subscribe("default")!!
 
         sink.onEvent(
-            AgentEvent(
-                type = "planner_decision",
-                data = mapOf(
-                    "trigger" to "input",
-                    "decision_type" to "thought",
-                    "thought" to "This is a very long thought that exceeds the maximum content character limit.",
-                    "root_input_id" to "root-1"
-                )
+            AgentEvents.plannerDecision(
+                trigger = "input",
+                decisionType = "thought",
+                thought = "This is a very long thought that exceeds the maximum content character limit.",
+                rootInputId = "root-1",
             )
         )
 
@@ -416,14 +393,11 @@ class InnerVoiceSinkTest {
         val sub = innerVoiceStore.subscribe("default")!!
 
         sink.onEvent(
-            AgentEvent(
-                type = "planner_decision",
-                data = mapOf(
-                    "trigger" to "input",
-                    "decision_type" to "thought",
-                    "thought" to "Should not appear",
-                    "root_input_id" to "root-1"
-                )
+            AgentEvents.plannerDecision(
+                trigger = "input",
+                decisionType = "thought",
+                thought = "Should not appear",
+                rootInputId = "root-1",
             )
         )
 
@@ -465,14 +439,11 @@ class InnerVoiceSinkTest {
 
         // Activate
         sink.onEvent(
-            AgentEvent(
-                type = "planner_decision",
-                data = mapOf(
-                    "trigger" to "input",
-                    "decision_type" to "thought",
-                    "thought" to "thinking...",
-                    "root_input_id" to "root-1"
-                )
+            AgentEvents.plannerDecision(
+                trigger = "input",
+                decisionType = "thought",
+                thought = "thinking...",
+                rootInputId = "root-1",
             )
         )
 

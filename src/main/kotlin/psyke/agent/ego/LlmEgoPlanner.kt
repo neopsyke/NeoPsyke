@@ -48,6 +48,10 @@ class LlmEgoPlanner(
             is EgoTrigger.IncomingInput -> "input"
             is EgoTrigger.PendingThoughtInput -> "thought"
         }
+        val rootInputId = when (trigger) {
+            is EgoTrigger.IncomingInput -> trigger.input.rootInputId
+            is EgoTrigger.PendingThoughtInput -> trigger.thought.rootInputId
+        }
 
         if (plannerCircuitBreaker.isTripped()) {
             val shortCircuit = EgoDecision.Noop(
@@ -55,7 +59,7 @@ class LlmEgoPlanner(
                 parseFailureShortCircuit = true,
             )
             instrumentation.emit(AgentEvents.warning("Planner circuit breaker tripped; short-circuiting to fallback."))
-            emitDecision(triggerLabel, shortCircuit)
+            emitDecision(triggerLabel, shortCircuit, rootInputId)
             return shortCircuit
         }
 
@@ -109,7 +113,7 @@ class LlmEgoPlanner(
             logger.warn(lastError) { "Planner call failed for trigger=$triggerLabel." }
             instrumentation.emit(AgentEvents.warning("Planner call failed; falling back to noop."))
             val fallback = EgoDecision.Noop("Planner unavailable due to model error.")
-            emitDecision(triggerLabel, fallback)
+            emitDecision(triggerLabel, fallback, rootInputId)
             return fallback
         }
         val resolvedResponse = response
@@ -149,7 +153,7 @@ class LlmEgoPlanner(
             context = context,
             decision = decision
         )
-        emitDecision(triggerLabel, verifiedDecision)
+        emitDecision(triggerLabel, verifiedDecision, rootInputId)
         return verifiedDecision
     }
 
@@ -784,7 +788,7 @@ class LlmEgoPlanner(
         }
     }
 
-    private fun emitDecision(triggerLabel: String, decision: EgoDecision) {
+    private fun emitDecision(triggerLabel: String, decision: EgoDecision, rootInputId: String? = null) {
         when (decision) {
             is EgoDecision.EnqueueThought -> {
                 instrumentation.emit(
@@ -792,7 +796,8 @@ class LlmEgoPlanner(
                         trigger = triggerLabel,
                         decisionType = "thought",
                         urgency = decision.urgency.name.lowercase(),
-                        thought = decision.content
+                        thought = decision.content,
+                        rootInputId = rootInputId,
                     )
                 )
             }
@@ -805,7 +810,8 @@ class LlmEgoPlanner(
                         urgency = decision.urgency.name.lowercase(),
                         actionType = decision.actionType.name.lowercase(),
                         payload = decision.payload,
-                        summary = decision.summary
+                        summary = decision.summary,
+                        rootInputId = rootInputId,
                     )
                 )
             }
@@ -817,7 +823,8 @@ class LlmEgoPlanner(
                         decisionType = "plan",
                         urgency = decision.urgency.name.lowercase(),
                         thought = decision.goal,
-                        reason = "steps=${decision.steps.size}"
+                        reason = "steps=${decision.steps.size}",
+                        rootInputId = rootInputId,
                     )
                 )
             }
@@ -828,7 +835,8 @@ class LlmEgoPlanner(
                     AgentEvents.plannerDecision(
                         trigger = triggerLabel,
                         decisionType = "noop",
-                        reason = decision.reason
+                        reason = decision.reason,
+                        rootInputId = rootInputId,
                     )
                 )
             }

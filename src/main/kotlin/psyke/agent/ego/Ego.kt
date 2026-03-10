@@ -853,7 +853,8 @@ class Ego(
                         goal = decision.goal,
                         stepCount = decision.steps.size,
                         urgency = decision.urgency.name.lowercase(),
-                        steps = decision.steps
+                        steps = decision.steps,
+                        rootInputId = rootInputId,
                     )
                 )
                 var allQueued = true

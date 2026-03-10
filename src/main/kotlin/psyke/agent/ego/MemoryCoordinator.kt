@@ -726,6 +726,10 @@ internal class MemoryCoordinator(
             )
             val recallScan = PromptInjectionDefense.scan(recall.text)
             val latencyMs = (System.nanoTime() - startedAt) / 1_000_000L
+            val recallRootInputId = when (trigger) {
+                is EgoTrigger.IncomingInput -> trigger.input.rootInputId
+                is EgoTrigger.PendingThoughtInput -> trigger.thought.rootInputId
+            }
             instrumentation.emit(
                 AgentEvents.memoryRecallResult(
                     trigger = triggerLabel,
@@ -734,7 +738,8 @@ internal class MemoryCoordinator(
                     latencyMs = latencyMs,
                     recallChars = recallText.length,
                     truncated = recall.truncated,
-                    recallTextPreview = recallText
+                    recallTextPreview = recallText,
+                    rootInputId = recallRootInputId,
                 )
             )
             if (recallScan.suspicious) {
