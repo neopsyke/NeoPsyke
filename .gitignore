@@ -14,5 +14,9 @@ freud/logs/latest
 .idea/
 *.iml
 
+# Claude Code
+.claude/
+!.claude/settings.json
+
 # OS files
 .DS_Store
