@@ -68,8 +68,8 @@ agent:
     # mcp_memory_call_timeout_ms: 8000
 
     task_workspace:
-      enabled: false
-      activation_min_plan_steps: 3
+      enabled: true
+      activation_min_plan_steps: 2
       max_prompt_tokens: 220
       max_sections: 10
       max_section_chars: 1200
@@ -78,7 +78,7 @@ agent:
       max_evidence_chars: 220
       final_compilation_max_chars: 2800
       final_pass_rewrite_enabled: true
-      final_pass_max_tokens: 260
+      final_pass_max_tokens: 480
       final_pass_min_workspace_confidence: 0.35
       final_pass_min_model_confidence: 0.55
       debug_capture_enabled: false

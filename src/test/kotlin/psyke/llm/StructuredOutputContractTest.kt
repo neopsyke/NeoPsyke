@@ -94,7 +94,6 @@ class StructuredOutputContractTest {
     @Test
     fun `strict-json prompt call sites without provider response_format stay on explicit allowlist`() {
         val expectedUnstructuredCallsites = setOf(
-            "src/main/kotlin/psyke/agent/ego/LlmEgoPlanner.kt",
             "src/main/kotlin/psyke/agent/ego/TaskWorkspaceFinalizer.kt",
             "src/main/kotlin/psyke/agent/memory/longterm/LongTermMemoryAdvisor.kt"
         )
@@ -180,4 +179,3 @@ class StructuredOutputContractTest {
         return issues
     }
 }
-

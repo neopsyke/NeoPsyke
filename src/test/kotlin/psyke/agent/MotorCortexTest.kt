@@ -250,7 +250,7 @@ class MotorCortexTest {
         assertEquals(false, byType[ActionType.MCP_TIME]?.available)
         assertEquals(true, byType[ActionType.WEBSITE_FETCH]?.available)
         assertEquals(
-            setOf(ActionType.ANSWER, ActionType.WEBSITE_FETCH),
+            setOf(ActionType.ANSWER, ActionType.ANSWER_DRAFT, ActionType.WEBSITE_FETCH),
             cortex.availableActionTypes()
         )
     }

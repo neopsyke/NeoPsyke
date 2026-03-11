@@ -31,6 +31,10 @@ object SuperegoPolicy {
             ActionType.ANSWER -> listOf(
                 "Allow ANSWER by default when it does not violate the general directives.",
             )
+            ActionType.ANSWER_DRAFT -> listOf(
+                "Allow ANSWER_DRAFT for internal, non-terminal synthesis steps.",
+                "Deny using ANSWER_DRAFT as a final user-visible response.",
+            )
             ActionType.WEB_SEARCH -> listOf(
                 "Allow WEB_SEARCH for general-information queries by default.",
                 "Deny WEB_SEARCH when payload includes or seeks credentials, API keys, tokens, cookies, private keys, or other secrets.",

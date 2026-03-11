@@ -20,6 +20,7 @@ data class TaskWorkspaceFinalPassInput(
     val workspaceConfidence: Double,
     val sectionCount: Int,
     val evidenceCount: Int,
+    val answerDraftCount: Int,
 )
 
 data class TaskWorkspaceDebugHead(
@@ -136,7 +137,7 @@ class TaskWorkspaceStore(
         observedEvidence: Boolean,
     ) {
         val workspace = lookup(rootInputId) ?: return
-        if (action.type == ActionType.ANSWER) {
+        if (action.type == ActionType.ANSWER || action.type == ActionType.ANSWER_DRAFT) {
             return
         }
         val actionLabel = action.type.name.lowercase()
@@ -240,7 +241,8 @@ class TaskWorkspaceStore(
             compilation = compilation,
             workspaceConfidence = confidence,
             sectionCount = workspace.sections.size,
-            evidenceCount = workspace.evidence.size
+            evidenceCount = workspace.evidence.size,
+            answerDraftCount = workspace.answerDraftCount()
         )
     }
 
@@ -480,6 +482,9 @@ class TaskWorkspaceStore(
                 (evidenceSignal * EVIDENCE_SIGNAL_WEIGHT) +
                 (goalSignal * GOAL_SIGNAL_WEIGHT)
         }
+
+        fun answerDraftCount(): Int =
+            sections.count { section -> section.source == SOURCE_ANSWER_DRAFT }
 
         fun debugHead(): TaskWorkspaceDebugHead =
             TaskWorkspaceDebugHead(

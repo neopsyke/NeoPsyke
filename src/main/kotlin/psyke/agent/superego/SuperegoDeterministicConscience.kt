@@ -38,6 +38,7 @@ internal class SuperegoDeterministicConscience(
                 }
             when (action.type) {
                 ActionType.ANSWER -> validateAnswer(action)
+                ActionType.ANSWER_DRAFT -> validateAnswer(action)
                 ActionType.WEB_SEARCH -> validateWebSearch(action, context)
                 ActionType.MCP_TIME -> validateMcpTime(action)
                 ActionType.WEBSITE_FETCH -> validateWebsiteFetch(action, context)
