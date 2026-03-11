@@ -116,9 +116,11 @@ It is intentionally high-level and should stay aligned with the code.
 
 ## Action Path
 - `processAction`:
+- For `answer_draft` actions, records an internal draft section in task workspace and does not emit a user-visible assistant turn.
 - For terminal `answer` actions, runs task-workspace final-pass processing before action execution:
     - records candidate answer draft into workspace
     - builds final compilation from workspace sections/evidence
+    - skips final-pass only when both `evidenceCount == 0` and `answerDraftCount < max(2, activationMinPlanSteps)`
     - applies workspace-confidence gate (`finalPassMinWorkspaceConfidence`)
     - runs `TaskWorkspaceFinalizer` rewrite when enabled
     - applies model-confidence gate (`finalPassMinModelConfidence`)
@@ -138,7 +140,7 @@ It is intentionally high-level and should stay aligned with the code.
   - If allowed:
     - Execute via `MotorCortex.execute`.
     - Record outcome + deliberation evidence.
-    - Record non-answer action outcomes into the task workspace (when enabled).
+    - Record non-answer/non-answer_draft action outcomes into the task workspace (when enabled).
     - Store assistant output in dialogue and short-term memory when applicable.
     - For `answer`, optionally force a post-terminal-answer long-term memory assessment.
     - Follow-up thought behavior is action-descriptor-driven (`requiresFollowUpThought` + `followUpPrefix`).
@@ -155,8 +157,9 @@ It is intentionally high-level and should stay aligned with the code.
   - Prompt assembly with contract-based budget allocation (`required_core` > `required_context` > `optional`).
   - Overhead-aware floor reservation per section, tiered degradation, and single-message fallback under extreme prompt pressure.
   - Emits `prompt_budget_allocation` telemetry for planner and action-verifier prompt builds (cost estimates, degradation path, fallback/floor-violation signals).
+  - Planner + action verifier calls use schema-enforced `response_format=json_schema` (strict schema first, then one relaxed-schema retry on provider schema-validation failure).
   - Strict JSON parse + minimal repair for invalid escapes.
-  - One strict-JSON retry when initial planner output is non-parseable.
+  - On planner parse failure: one truncation retry with increased completion budget when output appears truncated, then one strict-JSON retry.
   - Normalizes `action_payload` from either JSON string or structured JSON (object/array) into a string payload.
   - Decision types:
     - `thought`
@@ -169,10 +172,13 @@ It is intentionally high-level and should stay aligned with the code.
     - action verifier can reject low-value repeated external calls when evidence hints already contain usable signal
     - `Ego` emits `external_action_redundancy_signal` telemetry (soft signal, not policy deny) with repeated signature hit count and evidence state
   - Secondary action verifier pass (`approve|repair|reject`) with:
+    - strict-schema-first call with relaxed-schema fallback on provider schema-validation failure
+    - one truncation retry with increased completion budget on likely-truncated output
     - one strict-JSON retry on parse failure
     - parse-failure circuit breaker (scoped by `root_input + action_type`) that bypasses verifier for one decision after repeated malformed verifier outputs
     - structured follow-up lineage guard: follow-up thoughts carry origin action metadata (`originActionType`, `originActionObservedEvidence`), and verifier `repair` back to the same evidence action is ignored when the candidate is `answer`, prior evidence succeeded, and user did not explicitly request refresh/retry
     - no-op repair collapse: if verifier returns `repair` but action type/payload/summary are materially unchanged, planner treats it as `approve` instead of recording a repair
+  - `answer_draft` action proposals are allowed only inside active plan-context thoughts; out-of-context proposals are coerced to `noop`.
   - Retry policy and safe fallback to `Noop` on model/parse failures.
   - Planner and action-verifier prompts now include "reflection lessons" context to avoid repeated failed strategies.
 
@@ -290,9 +296,11 @@ It is intentionally high-level and should stay aligned with the code.
     - Explicitly skipped for technical/system failures (external tool failures, LLM client failures, parse/JSON failures, transport/timeouts, `TECH_*`/`SYSTEM_*` reason codes).
 - Task workspace (ephemeral, per request):
   - File: `src/main/kotlin/psyke/agent/memory/workspace/TaskWorkspaceStore.kt`
-  - Optional (disabled by default) via `MemoryConfig.taskWorkspace.enabled`.
+  - Enabled by default via `MemoryConfig.taskWorkspace.enabled=true`.
+  - Activation remains plan-gated with `MemoryConfig.taskWorkspace.activationMinPlanSteps=2`.
   - Scoped to root input; independent from short-term and long-term memory pipelines.
   - Stores compact sections/evidence for the active request only.
+  - `answer_draft` sections are stored separately and counted for final-pass gating.
   - Planner receives only prompt-capped workspace index/summaries, not full workspace content.
   - Provides final-pass compilation input with workspace confidence estimate (sections/evidence/goal weighted signal).
   - Exposes debug head/snapshot views (versioned) for development-time observability.
@@ -325,6 +333,7 @@ It is intentionally high-level and should stay aligned with the code.
     - follow-up-thought behavior
 - Built-in discovered action plugins:
   - `answer`
+  - `answer_draft` (internal chunked synthesis, non-user-visible)
   - `web_search`
   - `mcp_time` (payload timezone is required by current MCP time server contract)
   - `website_fetch`

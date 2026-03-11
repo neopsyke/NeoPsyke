@@ -482,6 +482,9 @@ class DashboardStateStore(
         }
     }
 
+    fun resolveSessionForRootInput(rootInputId: String): String? =
+        synchronized(lock) { rootInputSessionMap[rootInputId] }
+
     fun subscribeChat(sessionId: String): DashboardFlowSubscription? {
         val sanitizedSessionId = sanitizeSessionId(sessionId)
         val channel = Channel<String>(SUBSCRIBER_CHANNEL_CAPACITY)

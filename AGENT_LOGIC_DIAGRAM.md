@@ -100,13 +100,13 @@ sequenceDiagram
             Ego->>Dash: emit task_workspace_head (with optional debug snapshot)
             Ego->>Planner: decide(context)
             Note over Ego,Planner: PromptBudgetAllocator reserves required-core/context floors with message-overhead accounting, trims optional first, and emits prompt_budget_allocation
-            Note over Ego,Planner: On non-parseable planner JSON, planner issues one strict-JSON retry before noop fallback
+            Note over Ego,Planner: Planner calls use schema-enforced strict json_schema with one relaxed-schema fallback on provider schema-validation errors parse failures do truncation-budget retry then strict-JSON retry before noop fallback
             Planner-->>Ego: thought/action/plan/noop
             Ego->>Delib: maybeApplyPressureOverride
             Ego->>Sched: enqueue thought/action/plan steps
             Note over Ego,Sched: Plans gated by budget → pressure → hash dedup → pending-plan check
             Note over Ego,Planner: Redundancy is planner-side soft cost control (prompt and verifier), with telemetry event external_action_redundancy_signal
-            Note over Ego,Planner: Action verifier runs after action decisions parse failures trigger one strict retry and may trip temporary verifier bypass (scoped per root_input and action_type)
+            Note over Ego,Planner: Action verifier uses strict json_schema with relaxed-schema fallback parse failures do truncation-budget retry then strict retry and may trip temporary verifier bypass (scoped per root_input and action_type)
             Note over Ego,Planner: Follow-up thoughts carry structured origin metadata (originActionType + observedEvidence) verifier repairs back to the same evidence action are ignored for evidence-backed answers unless user asked refresh/retry no-op verifier repairs collapse to approve
         else Task = action
             alt Fallback explanation action
@@ -135,9 +135,13 @@ sequenceDiagram
                         Note over Ego,Sup: Stage parse failures trigger one schema-enforced retry before default deny
                         Sup-->>Ego: allow or deny (with reason_code on deny)
                         alt allow
-                            alt action = answer
+                            alt action = answer_draft
+                                Ego->>TWS: record answer_draft section (internal chunk)
+                                Note over Ego,TWS: Draft chunks are internal only no user-visible assistant turn
+                            else action = answer
                                 Ego->>TWS: final-pass compilation from workspace index/evidence
                                 Ego->>TWF: rewrite candidate payload (if enabled)
+                                Note over Ego,TWS: Final-pass skip requires both no evidence and insufficient drafts (< max(2, activation_min_plan_steps))
                                 Note over Ego,TWF: Apply workspace-confidence gate first, then model-confidence gate
                             end
                             Ego->>Motor: execute(action)
@@ -150,7 +154,7 @@ sequenceDiagram
                                 Ego->>Dash: drawer reads full snapshots via /api/obs/workspace/{rootId}
                                 Ego->>Mem: maybeAssessLongTermMemory(post_terminal_answer, forced)
                             end
-                            Ego->>TWS: record non-answer action outcomes/evidence
+                            Ego->>TWS: record non-answer/non-answer_draft action outcomes/evidence
                             Ego->>Sched: enqueue follow-up thought (for evidence actions)
                             Ego->>Mem: maybeAssessLongTermMemory(post_allowed_action, optional force)
                             Note over Ego,Mem: Blocked imprints emit long_term_memory_persistence_skipped (reason_code, reason_detail) for timeline visibility
@@ -221,6 +225,7 @@ stateDiagram-v2
     Note right of ThoughtQueued: Repeat-denied payload block is skipped for technical or transient denial reasons (prefer reason_code classification) reflection lessons persist only for non-technical and non-system denials
 
     PolicyReview --> Executing: superego allow
+    Executing --> ThoughtQueued: action=answer_draft (plan continues)
     Executing --> EvidenceObserved: external action succeeded
     Executing --> EvidenceMissing: tool/provider failure
     Executing --> WebSearchUnavailable: web search init/config failure

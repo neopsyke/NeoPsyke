@@ -3,12 +3,14 @@ package psyke.agent
 import psyke.llm.ChatMessage
 import psyke.llm.ChatModelClient
 import psyke.llm.ChatRole
+import psyke.llm.ChatResponseFormat
 import psyke.support.RecordingInstrumentation
 import psyke.support.StubChatModelClient
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 class EgoPlannerTest {
@@ -41,6 +43,8 @@ class EgoPlannerTest {
         assertEquals("ego", llm.lastOptions.metadata.actor)
         assertEquals("input", llm.lastOptions.metadata.callSite)
         assertEquals(88, llm.lastOptions.maxTokens)
+        val plannerFormat = assertIs<ChatResponseFormat.JsonSchema>(llm.lastOptions.responseFormat)
+        assertTrue(plannerFormat.strict)
         assertTrue(instrumentation.events.any { it.type == "planner_start" })
         assertTrue(
             instrumentation.events.any {
@@ -211,6 +215,111 @@ class EgoPlannerTest {
         val noop = assertIs<psyke.agent.core.EgoDecision.Noop>(decision)
         assertEquals("recovered", noop.reason)
         assertTrue(llm.calls.any { it.options.metadata.callSite == "input_json_retry" })
+    }
+
+    @Test
+    fun `planner retries with relaxed response schema when strict schema validation fails`() {
+        val observedOptions = mutableListOf<psyke.llm.ChatRequestOptions>()
+        val llm = object : ChatModelClient {
+            override val modelName: String = "schema-flaky"
+            private var calls = 0
+
+            override fun chat(messages: List<ChatMessage>, options: psyke.llm.ChatRequestOptions): psyke.llm.ChatCompletion {
+                calls += 1
+                observedOptions += options
+                if (calls == 1) {
+                    throw IllegalStateException("generated JSON does not match the expected schema")
+                }
+                return psyke.llm.ChatCompletion(
+                    content = """{"decision":"noop","reason":"relaxed schema recovered"}""",
+                    model = modelName
+                )
+            }
+        }
+        val planner = LlmEgoPlanner(
+            modelClient = llm,
+            config = AgentConfig(planner = PlannerConfig(llmRetryAttempts = 2))
+        )
+
+        val decision = planner.decide(
+            trigger = psyke.agent.core.EgoTrigger.IncomingInput(PendingInput(1, "hello")),
+            context = PlannerContext(
+                recentDialogue = emptyList(),
+                queue = QueueSnapshot(0, 0, 0)
+            )
+        )
+
+        val noop = assertIs<psyke.agent.core.EgoDecision.Noop>(decision)
+        assertTrue(noop.reason.contains("recovered", ignoreCase = true))
+        assertEquals(2, observedOptions.size)
+        val strictFormat = assertIs<ChatResponseFormat.JsonSchema>(observedOptions[0].responseFormat)
+        val relaxedFormat = assertIs<ChatResponseFormat.JsonSchema>(observedOptions[1].responseFormat)
+        assertTrue(strictFormat.schemaJson.contains("maxLength"))
+        assertFalse(relaxedFormat.schemaJson.contains("maxLength"))
+    }
+
+    @Test
+    fun `planner retries truncated completion with larger budget before strict json retry`() {
+        val calls = mutableListOf<psyke.llm.ChatRequestOptions>()
+        val llm = object : ChatModelClient {
+            override val modelName: String = "truncation-model"
+
+            override fun chat(messages: List<ChatMessage>, options: psyke.llm.ChatRequestOptions): psyke.llm.ChatCompletion {
+                calls += options
+                return when (options.metadata.callSite) {
+                    "input" -> psyke.llm.ChatCompletion(
+                        content = """{"decision":"noop","reason":"truncated""",
+                        model = modelName,
+                        finishReason = "length"
+                    )
+                    "input_truncation_retry" -> psyke.llm.ChatCompletion(
+                        content = """{"decision":"noop","reason":"truncation recovered"}""",
+                        model = modelName
+                    )
+                    else -> throw IllegalStateException("unexpected call site ${options.metadata.callSite}")
+                }
+            }
+        }
+        val planner = LlmEgoPlanner(modelClient = llm, config = AgentConfig())
+
+        val decision = planner.decide(
+            trigger = psyke.agent.core.EgoTrigger.IncomingInput(PendingInput(1, "hello")),
+            context = PlannerContext(
+                recentDialogue = emptyList(),
+                queue = QueueSnapshot(0, 0, 0)
+            )
+        )
+
+        val noop = assertIs<psyke.agent.core.EgoDecision.Noop>(decision)
+        assertTrue(noop.reason.contains("truncation recovered", ignoreCase = true))
+        val initialCall = calls.first { it.metadata.callSite == "input" }
+        val truncationRetry = calls.first { it.metadata.callSite == "input_truncation_retry" }
+        assertTrue((truncationRetry.maxTokens ?: 0) > (initialCall.maxTokens ?: 0))
+        assertFalse(calls.any { it.metadata.callSite == "input_json_retry" })
+    }
+
+    @Test
+    fun `planner blocks answer_draft proposals outside active plan context`() {
+        val llm = StubChatModelClient().apply {
+            enqueueRawResponse(
+                """
+                {"decision":"action","urgency":"medium","action_type":"answer_draft","action_payload":"chunk","action_summary":"draft chunk"}
+                """.trimIndent()
+            )
+        }
+        val planner = LlmEgoPlanner(modelClient = llm, config = AgentConfig())
+
+        val decision = planner.decide(
+            trigger = psyke.agent.core.EgoTrigger.IncomingInput(PendingInput(1, "long answer")),
+            context = PlannerContext(
+                recentDialogue = emptyList(),
+                queue = QueueSnapshot(0, 0, 0),
+                availableActions = setOf(ActionType.ANSWER, ActionType.ANSWER_DRAFT)
+            )
+        )
+
+        val noop = assertIs<psyke.agent.core.EgoDecision.Noop>(decision)
+        assertTrue(noop.reason.contains("outside active plan context", ignoreCase = true))
     }
 
     @Test
@@ -591,6 +700,10 @@ class EgoPlannerTest {
         val noop = assertIs<psyke.agent.core.EgoDecision.Noop>(decision)
         assertTrue(noop.reason.contains("rejected", ignoreCase = true))
         assertTrue(llm.calls.any { it.options.metadata.callSite == "action_verifier_json_retry" })
+        val verifierCall = llm.calls.firstOrNull { it.options.metadata.callSite == "action_verifier" }
+        assertNotNull(verifierCall)
+        val verifierFormat = assertIs<ChatResponseFormat.JsonSchema>(verifierCall.options.responseFormat)
+        assertTrue(verifierFormat.strict)
     }
 
     @Test

@@ -1108,9 +1108,84 @@ class EgoAgentTest {
         assertTrue(
             instrumentation.events.any {
                 it.type == "task_workspace_final_pass_skipped" &&
-                    it.data["reason"] == "no_evidence"
+                    it.data["reason"] == "no_evidence_or_insufficient_drafts"
             }
         )
+    }
+
+    @Test
+    fun `task workspace final pass can finalize from answer drafts without external evidence`() {
+        val plannerLlm = StubChatModelClient().apply {
+            enqueueRawResponse(
+                """
+                {"decision":"plan","urgency":"medium","plan_goal":"Build final response in chunks","plan_steps":["Synthesize chunk one","Synthesize chunk two","Finalize answer"]}
+                """.trimIndent()
+            )
+            enqueueRawResponse(
+                """
+                {"decision":"action","urgency":"medium","action_type":"answer_draft","action_payload":"Draft chunk one","action_summary":"capture chunk one"}
+                """.trimIndent()
+            )
+            enqueueRawResponse(
+                """
+                {"decision":"action","urgency":"medium","action_type":"answer_draft","action_payload":"Draft chunk two","action_summary":"capture chunk two"}
+                """.trimIndent()
+            )
+            enqueueRawResponse(
+                """
+                {"decision":"action","urgency":"medium","action_type":"answer","action_payload":"Final draft answer","action_summary":"deliver final answer"}
+                """.trimIndent()
+            )
+        }
+        val superegoLlm = StubChatModelClient().apply {
+            enqueueRawResponse("""{"allow":true}""")
+            enqueueRawResponse("""{"allow":true}""")
+            enqueueRawResponse("""{"allow":true}""")
+        }
+        val instrumentation = RecordingInstrumentation()
+        val outputs = mutableListOf<String>()
+        var finalizerCalls = 0
+        val finalizer = object : TaskWorkspaceFinalizer {
+            override fun finalize(request: TaskWorkspaceFinalizerRequest): TaskWorkspaceFinalizerResult {
+                finalizerCalls += 1
+                return TaskWorkspaceFinalizerResult(
+                    rewrittenPayload = "Final answer synthesized from drafts",
+                    confidence = 0.91,
+                    reason = "direct_answer"
+                )
+            }
+        }
+        val config = AgentConfig(
+            planner = PlannerConfig(maxLoopStepsPerInput = 10, maxThoughtPasses = 3),
+            memory = MemoryConfig(
+                taskWorkspace = TaskWorkspaceConfig(
+                    enabled = true,
+                    activationMinPlanSteps = 2,
+                    finalPassMinWorkspaceConfidence = 0.30,
+                    finalPassMinModelConfidence = 0.60
+                )
+            )
+        )
+        val agent = Ego(
+            planner = LlmEgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
+            superego = Superego(modelClient = superegoLlm, config = config, instrumentation = instrumentation),
+            motorCortex = buildMotorCortex(output = { outputs.add(it) }),
+            config = config,
+            taskWorkspaceFinalizer = finalizer,
+            instrumentation = instrumentation
+        )
+
+        runAgentWithInput(agent, "compose long answer\nexit\n")
+
+        assertEquals(listOf("ego> Final answer synthesized from drafts"), outputs)
+        assertEquals(1, finalizerCalls)
+        assertTrue(
+            instrumentation.events.count {
+                it.type == "task_workspace_updated" &&
+                    it.data["update_type"] == "answer_draft_recorded"
+            } >= 2
+        )
+        assertTrue(instrumentation.events.any { it.type == "task_workspace_final_pass_applied" })
     }
 
     @Test

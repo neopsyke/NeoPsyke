@@ -115,6 +115,46 @@ class TaskWorkspaceStoreTest {
         assertTrue(input != null)
         assertTrue((input?.workspaceConfidence ?: 0.0) > 0.30)
         assertTrue((input?.sectionCount ?: 0) >= 2)
+        assertEquals(0, input?.answerDraftCount)
+    }
+
+    @Test
+    fun `final pass input counts answer draft sections`() {
+        val store = TaskWorkspaceStore(TaskWorkspaceConfig(enabled = true, activationMinPlanSteps = 1))
+        val root = "root-answer-draft"
+        store.ensureForInput(
+            PendingInput(
+                id = 1,
+                content = "prepare final response",
+                rootInputId = root,
+                receivedAtMs = 111L
+            )
+        )
+        store.recordAnswerDraft(root, "Draft chunk one")
+        store.recordActionOutcome(
+            rootInputId = root,
+            action = PendingAction(
+                id = 2,
+                urgency = Urgency.MEDIUM,
+                type = ActionType.ANSWER_DRAFT,
+                payload = "Draft chunk two",
+                summary = "draft chunk"
+            ),
+            outcome = ActionOutcome(
+                statusSummary = "Internal answer draft chunk captured.",
+                plannerSignal = "answer_draft chunk captured: Draft chunk two"
+            ),
+            observedEvidence = false
+        )
+        store.recordAnswerDraft(root, "Draft chunk two")
+
+        val input = store.buildFinalPassInput(
+            rootInputId = root,
+            candidateAnswer = "final",
+            maxChars = 1200
+        )
+
+        assertEquals(2, input?.answerDraftCount)
     }
 
     @Test

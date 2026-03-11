@@ -96,6 +96,7 @@ object AgentEvents {
         payload: String? = null,
         summary: String? = null,
         reason: String? = null,
+        rootInputId: String? = null,
     ): AgentEvent =
         AgentEvent(
             type = "planner_decision",
@@ -107,7 +108,8 @@ object AgentEvents {
                 "action_type" to actionType,
                 "payload" to payload,
                 "summary" to summary,
-                "reason" to reason
+                "reason" to reason,
+                "root_input_id" to rootInputId,
             )
         )
 
@@ -239,6 +241,7 @@ object AgentEvents {
         recallChars: Int,
         truncated: Boolean,
         recallTextPreview: String = "",
+        rootInputId: String? = null,
     ): AgentEvent =
         AgentEvent(
             type = "memory_recall_result",
@@ -250,6 +253,7 @@ object AgentEvents {
                 "recall_chars" to recallChars,
                 "truncated" to truncated,
                 "recall_text_preview" to recallTextPreview,
+                "root_input_id" to rootInputId,
             )
         )
 
@@ -409,7 +413,7 @@ object AgentEvents {
             )
         )
 
-    fun planCreated(planId: String, goal: String, stepCount: Int, urgency: String, steps: List<String> = emptyList()): AgentEvent =
+    fun planCreated(planId: String, goal: String, stepCount: Int, urgency: String, steps: List<String> = emptyList(), rootInputId: String? = null): AgentEvent =
         AgentEvent(
             type = "plan_created",
             data = mapOf(
@@ -418,6 +422,7 @@ object AgentEvents {
                 "step_count" to stepCount,
                 "urgency" to urgency,
                 "steps" to steps,
+                "root_input_id" to rootInputId,
             )
         )
 

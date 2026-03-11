@@ -10,6 +10,7 @@ import psyke.agent.core.AgentConfig
 import psyke.agent.core.LogbookConfig
 import psyke.agent.core.MemoryConfig
 import psyke.agent.core.MetaReasonerConfig
+import psyke.dashboard.InnerVoiceConfig
 import psyke.agent.core.PlannerConfig
 import psyke.agent.core.SuperegoConfig
 import psyke.agent.core.TaskWorkspaceConfig
@@ -47,6 +48,7 @@ private data class AgentRuntimeYamlAgent(
     val memory: AgentRuntimeYamlMemory? = AgentRuntimeYamlMemory(),
     val metaReasoner: AgentRuntimeYamlMetaReasoner? = AgentRuntimeYamlMetaReasoner(),
     val logbook: AgentRuntimeYamlLogbook? = AgentRuntimeYamlLogbook(),
+    val innerVoice: AgentRuntimeYamlInnerVoice? = AgentRuntimeYamlInnerVoice(),
     val runtime: AgentRuntimeYamlRuntime? = AgentRuntimeYamlRuntime(),
 )
 
@@ -158,6 +160,12 @@ private data class AgentRuntimeYamlLogbook(
     val useLlmSummarizer: Boolean? = null,
 )
 
+private data class AgentRuntimeYamlInnerVoice(
+    val enabled: Boolean? = null,
+    val maxContentChars: Int? = null,
+    val maxEventsPerSession: Int? = null,
+)
+
 private data class AgentRuntimeYamlRuntime(
     val loopDelayMs: Int? = null,
     val maxPendingThoughts: Int? = null,
@@ -191,6 +199,7 @@ object AgentRuntimeSettingsLoader {
         val taskWorkspaceYaml = memoryYaml.taskWorkspace ?: AgentRuntimeYamlTaskWorkspace()
         val metaReasonerYaml = agentYaml.metaReasoner ?: AgentRuntimeYamlMetaReasoner()
         val logbookYaml = agentYaml.logbook ?: AgentRuntimeYamlLogbook()
+        val innerVoiceYaml = agentYaml.innerVoice ?: AgentRuntimeYamlInnerVoice()
         val runtimeYaml = agentYaml.runtime ?: AgentRuntimeYamlRuntime()
 
         val mcpCallTimeoutMs = readPositiveLong(
@@ -656,6 +665,23 @@ object AgentRuntimeSettingsLoader {
                     logbookYaml.useLlmSummarizer,
                     defaults.logbook.useLlmSummarizer
                 )
+            ),
+            innerVoice = InnerVoiceConfig(
+                enabled = readBoolean(
+                    env["PSYKE_INNER_VOICE_ENABLED"],
+                    innerVoiceYaml.enabled,
+                    defaults.innerVoice.enabled
+                ),
+                maxContentChars = readPositiveInt(
+                    env["PSYKE_INNER_VOICE_MAX_CONTENT_CHARS"],
+                    innerVoiceYaml.maxContentChars,
+                    defaults.innerVoice.maxContentChars
+                ),
+                maxEventsPerSession = readPositiveInt(
+                    env["PSYKE_INNER_VOICE_MAX_EVENTS_PER_SESSION"],
+                    innerVoiceYaml.maxEventsPerSession,
+                    defaults.innerVoice.maxEventsPerSession
+                ),
             ),
             loopDelayMs = readNonNegativeInt(
                 env["EGO_LOOP_DELAY_MS"],

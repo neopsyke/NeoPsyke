@@ -37,6 +37,7 @@ data class ActionType(
     companion object {
         val WEB_SEARCH: ActionType = ActionType("web_search")
         val ANSWER: ActionType = ActionType("answer")
+        val ANSWER_DRAFT: ActionType = ActionType("answer_draft")
         val MCP_TIME: ActionType = ActionType("mcp_time")
         val WEBSITE_FETCH: ActionType = ActionType("website_fetch")
         val MEMORY: ActionType = ActionType("memory")
@@ -45,6 +46,7 @@ data class ActionType(
         val entries: Set<ActionType> = setOf(
             WEB_SEARCH,
             ANSWER,
+            ANSWER_DRAFT,
             MCP_TIME,
             WEBSITE_FETCH,
             MEMORY

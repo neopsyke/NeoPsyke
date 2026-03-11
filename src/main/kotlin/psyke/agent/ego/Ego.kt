@@ -853,7 +853,8 @@ class Ego(
                         goal = decision.goal,
                         stepCount = decision.steps.size,
                         urgency = decision.urgency.name.lowercase(),
-                        steps = decision.steps
+                        steps = decision.steps,
+                        rootInputId = rootInputId,
                     )
                 )
                 var allQueued = true
@@ -1199,6 +1200,31 @@ class Ego(
     }
 
     private fun maybeRecordTaskWorkspaceOutcome(action: PendingAction, outcome: ActionOutcome, observedEvidence: Boolean) {
+        if (action.type == ActionType.ANSWER_DRAFT) {
+            taskWorkspaceStore.recordAnswerDraft(
+                rootInputId = action.rootInputId,
+                payload = action.payload
+            )
+            instrumentation.emit(
+                AgentEvent(
+                    type = "task_workspace_updated",
+                    data = mapOf(
+                        "root_input_id" to action.rootInputId,
+                        "root_input_received_at_ms" to action.rootInputReceivedAtMs,
+                        "update_type" to "answer_draft_recorded",
+                        "action_type" to action.type.name.lowercase(),
+                        "draft_preview" to TextSecurity.preview(action.payload, 140),
+                        "active_tasks" to taskWorkspaceStore.activeTaskCount()
+                    )
+                )
+            )
+            emitTaskWorkspaceTelemetry(
+                rootInputId = action.rootInputId,
+                rootInputReceivedAtMs = action.rootInputReceivedAtMs,
+                updateType = "answer_draft_recorded"
+            )
+            return
+        }
         taskWorkspaceStore.recordActionOutcome(
             rootInputId = action.rootInputId,
             action = action,
@@ -1263,14 +1289,17 @@ class Ego(
             candidateAnswer = action.payload,
             maxChars = config.memory.taskWorkspace.finalCompilationMaxChars
         ) ?: return action
-        if (finalPassInput.evidenceCount == 0) {
+        val answerDraftThreshold = maxOf(2, config.memory.taskWorkspace.activationMinPlanSteps)
+        if (finalPassInput.evidenceCount == 0 && finalPassInput.answerDraftCount < answerDraftThreshold) {
             instrumentation.emit(
                 AgentEvent(
                     type = "task_workspace_final_pass_skipped",
                     data = mapOf(
                         "root_input_id" to action.rootInputId,
                         "action_id" to action.id,
-                        "reason" to "no_evidence",
+                        "reason" to "no_evidence_or_insufficient_drafts",
+                        "answer_draft_count" to finalPassInput.answerDraftCount,
+                        "answer_draft_threshold" to answerDraftThreshold,
                     )
                 )
             )
@@ -1286,6 +1315,7 @@ class Ego(
                     "workspace_confidence" to finalPassInput.workspaceConfidence,
                     "section_count" to finalPassInput.sectionCount,
                     "evidence_count" to finalPassInput.evidenceCount,
+                    "answer_draft_count" to finalPassInput.answerDraftCount,
                     "compilation_preview" to TextSecurity.preview(finalPassInput.compilation, 220)
                 )
             )
@@ -1367,6 +1397,7 @@ class Ego(
                     "action_id" to action.id,
                     "workspace_confidence" to finalPassInput.workspaceConfidence,
                     "model_confidence" to finalizerResult.confidence,
+                    "answer_draft_count" to finalPassInput.answerDraftCount,
                     "rewrite_reason" to finalizerResult.reason,
                     "payload_before_preview" to TextSecurity.preview(action.payload, 180),
                     "payload_after_preview" to TextSecurity.preview(rewrittenPayload, 180)

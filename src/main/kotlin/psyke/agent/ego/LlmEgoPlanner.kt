@@ -10,6 +10,7 @@ import psyke.agent.core.*
 import psyke.agent.support.AdaptiveCompletionBudget
 import psyke.agent.support.DenialReasonClassifier
 import psyke.agent.support.LlmCallCircuitBreaker
+import psyke.agent.support.LlmFailureClassifier
 import psyke.agent.support.OnTripBehavior
 import psyke.agent.support.PromptBudgetAllocator
 import psyke.agent.support.RetryPolicy
@@ -20,8 +21,10 @@ import psyke.instrumentation.AgentInstrumentation
 import psyke.instrumentation.NoopAgentInstrumentation
 import psyke.llm.ChatMessage
 import psyke.llm.ChatCallMetadata
+import psyke.llm.ChatCompletion
 import psyke.llm.ChatModelClient
 import psyke.llm.ChatRequestOptions
+import psyke.llm.ChatResponseFormat
 import psyke.llm.ChatRole
 import java.util.Locale
 
@@ -48,6 +51,10 @@ class LlmEgoPlanner(
             is EgoTrigger.IncomingInput -> "input"
             is EgoTrigger.PendingThoughtInput -> "thought"
         }
+        val rootInputId = when (trigger) {
+            is EgoTrigger.IncomingInput -> trigger.input.rootInputId
+            is EgoTrigger.PendingThoughtInput -> trigger.thought.rootInputId
+        }
 
         if (plannerCircuitBreaker.isTripped()) {
             val shortCircuit = EgoDecision.Noop(
@@ -55,7 +62,7 @@ class LlmEgoPlanner(
                 parseFailureShortCircuit = true,
             )
             instrumentation.emit(AgentEvents.warning("Planner circuit breaker tripped; short-circuiting to fallback."))
-            emitDecision(triggerLabel, shortCircuit)
+            emitDecision(triggerLabel, shortCircuit, rootInputId)
             return shortCircuit
         }
 
@@ -77,39 +84,20 @@ class LlmEgoPlanner(
             diagnostics = promptAllocation.diagnostics
         )
         val messages = promptAllocation.messages
-        var response = null as psyke.llm.ChatCompletion?
-        var lastError: Exception? = null
-        val retryAttempts = RetryPolicy.boundedLlmRetryAttempts(config.planner.llmRetryAttempts)
-        for (attempt in 1..retryAttempts) {
-            try {
-                response = modelClient.chat(
-                    messages = messages,
-                    options = ChatRequestOptions(
-                        temperature = 0.2,
-                        maxTokens = config.planner.maxCompletionTokens,
-                        metadata = ChatCallMetadata(
-                            actor = "ego",
-                            callSite = triggerLabel
-                        )
-                    )
-                )
-                break
-            } catch (ex: Exception) {
-                lastError = ex
-                if (attempt < retryAttempts) {
-                    instrumentation.emit(
-                        AgentEvents.warning(
-                            "Planner call failed (attempt $attempt/$retryAttempts); retrying."
-                        )
-                    )
-                }
-            }
-        }
+        val allowAnswerDraft = isAnswerDraftAllowed(trigger)
+        val plannerFormats = resolvePlannerResponseFormats()
+        val response = callPlanner(
+            messages = messages,
+            callSite = triggerLabel,
+            maxTokens = config.planner.maxCompletionTokens,
+            temperature = 0.2,
+            strictFormat = plannerFormats.strict,
+            relaxedFormat = plannerFormats.relaxed,
+        )
         if (response == null) {
-            logger.warn(lastError) { "Planner call failed for trigger=$triggerLabel." }
             instrumentation.emit(AgentEvents.warning("Planner call failed; falling back to noop."))
             val fallback = EgoDecision.Noop("Planner unavailable due to model error.")
-            emitDecision(triggerLabel, fallback)
+            emitDecision(triggerLabel, fallback, rootInputId)
             return fallback
         }
         val resolvedResponse = response
@@ -117,28 +105,55 @@ class LlmEgoPlanner(
         val decision = parseResponse(
             raw = resolvedResponse.content,
             availableActions = context.availableActions,
-            emitParseWarning = false
+            emitParseWarning = false,
+            allowAnswerDraft = allowAnswerDraft
         ) ?: run {
-            instrumentation.emit(AgentEvents.warning("Planner response was non-parseable; requesting strict JSON retry."))
-            val recovered = requestStrictJsonRetry(
-                baseMessages = messages,
-                callSite = triggerLabel,
-                actionSchemaEnum = actionSchemaEnum(context.dispatchableActions)
-            )
-            val repairedDecision = recovered?.let {
-                parseResponse(
-                    raw = it.content,
-                    availableActions = context.availableActions,
-                    emitParseWarning = true
+            val actionSchema = actionSchemaEnum(context.dispatchableActions)
+            val truncatedRecoveredDecision = if (isLikelyTruncatedCompletion(resolvedResponse)) {
+                instrumentation.emit(
+                    AgentEvents.warning("Planner response appears truncated; retrying with increased completion budget.")
                 )
+                val truncationRetryResponse = requestPlannerTruncationRetry(
+                    baseMessages = messages,
+                    callSite = triggerLabel,
+                    actionSchemaEnum = actionSchema
+                )
+                truncationRetryResponse?.let {
+                    parseResponse(
+                        raw = it.content,
+                        availableActions = context.availableActions,
+                        emitParseWarning = true,
+                        allowAnswerDraft = allowAnswerDraft
+                    )
+                }
+            } else {
+                null
             }
-            repairedDecision ?: run {
-                plannerCircuitBreaker.recordParseFailure()
-                instrumentation.emit(AgentEvents.warning("Planner response remained non-parseable after strict JSON retry (streak=${plannerCircuitBreaker.streak()})."))
-                EgoDecision.Noop(
-                    reason = "Planner produced non-parseable output.",
-                    parseFailureShortCircuit = plannerCircuitBreaker.isTripped(),
+            if (truncatedRecoveredDecision != null) {
+                truncatedRecoveredDecision
+            } else {
+                instrumentation.emit(AgentEvents.warning("Planner response was non-parseable; requesting strict JSON retry."))
+                val recovered = requestStrictJsonRetry(
+                    baseMessages = messages,
+                    callSite = triggerLabel,
+                    actionSchemaEnum = actionSchema
                 )
+                val repairedDecision = recovered?.let {
+                    parseResponse(
+                        raw = it.content,
+                        availableActions = context.availableActions,
+                        emitParseWarning = true,
+                        allowAnswerDraft = allowAnswerDraft
+                    )
+                }
+                repairedDecision ?: run {
+                    plannerCircuitBreaker.recordParseFailure()
+                    instrumentation.emit(AgentEvents.warning("Planner response remained non-parseable after strict JSON retry (streak=${plannerCircuitBreaker.streak()})."))
+                    EgoDecision.Noop(
+                        reason = "Planner produced non-parseable output.",
+                        parseFailureShortCircuit = plannerCircuitBreaker.isTripped(),
+                    )
+                }
             }
         }
         if (decision !is EgoDecision.Noop || !decision.parseFailureShortCircuit) {
@@ -149,7 +164,7 @@ class LlmEgoPlanner(
             context = context,
             decision = decision
         )
-        emitDecision(triggerLabel, verifiedDecision)
+        emitDecision(triggerLabel, verifiedDecision, rootInputId)
         return verifiedDecision
     }
 
@@ -157,6 +172,7 @@ class LlmEgoPlanner(
         raw: String,
         availableActions: Set<ActionType>,
         emitParseWarning: Boolean,
+        allowAnswerDraft: Boolean,
     ): EgoDecision? {
         return try {
             val payload = parsePayloadWithRepair(raw)
@@ -198,7 +214,9 @@ class LlmEgoPlanner(
                         actionSummary
                     }
 
-                    if (actionType == null || actionPayload.isBlank() || resolvedSummary.isBlank()) {
+                    if (actionType == ActionType.ANSWER_DRAFT && !allowAnswerDraft) {
+                        EgoDecision.Noop("Planner proposed answer_draft outside active plan context.")
+                    } else if (actionType == null || actionPayload.isBlank() || resolvedSummary.isBlank()) {
                         EgoDecision.Noop("Planner returned invalid action payload.")
                     } else if (!availableActions.contains(actionType)) {
                         EgoDecision.Noop(
@@ -273,6 +291,159 @@ class LlmEgoPlanner(
 
     private fun repairInvalidJsonEscapes(json: String): String =
         json.replace(invalidJsonEscapeRegex, "")
+
+    private fun isAnswerDraftAllowed(trigger: EgoTrigger): Boolean =
+        trigger is EgoTrigger.PendingThoughtInput && trigger.thought.planContext != null
+
+    private fun resolvePlannerResponseFormats(): SchemaFormatPair =
+        SchemaFormatPair(
+            strict = PLANNER_DECISION_RESPONSE_FORMAT_STRICT,
+            relaxed = PLANNER_DECISION_RESPONSE_FORMAT_RELAXED
+        )
+
+    private fun resolveActionVerifierResponseFormats(): SchemaFormatPair =
+        SchemaFormatPair(
+            strict = ACTION_VERIFIER_RESPONSE_FORMAT_STRICT,
+            relaxed = ACTION_VERIFIER_RESPONSE_FORMAT_RELAXED
+        )
+
+    private fun callPlanner(
+        messages: List<ChatMessage>,
+        callSite: String,
+        maxTokens: Int,
+        temperature: Double,
+        strictFormat: ChatResponseFormat.JsonSchema,
+        relaxedFormat: ChatResponseFormat.JsonSchema,
+    ): ChatCompletion? {
+        var response: ChatCompletion? = null
+        var lastError: Exception? = null
+        var responseFormat: ChatResponseFormat.JsonSchema = strictFormat
+        var relaxedSchemaAttempted = false
+        val retryAttempts = RetryPolicy.boundedLlmRetryAttempts(config.planner.llmRetryAttempts)
+        for (attempt in 1..retryAttempts) {
+            try {
+                response = modelClient.chat(
+                    messages = messages,
+                    options = ChatRequestOptions(
+                        temperature = temperature,
+                        maxTokens = maxTokens,
+                        responseFormat = responseFormat,
+                        metadata = ChatCallMetadata(
+                            actor = "ego",
+                            callSite = callSite
+                        )
+                    )
+                )
+                break
+            } catch (ex: Exception) {
+                lastError = ex
+                if (!relaxedSchemaAttempted && LlmFailureClassifier.isStructuredOutputSchemaValidationFailure(ex)) {
+                    responseFormat = relaxedFormat
+                    relaxedSchemaAttempted = true
+                    instrumentation.emit(
+                        AgentEvents.warning("Planner schema validation failed for call_site=$callSite; retrying with relaxed schema.")
+                    )
+                    continue
+                }
+                if (attempt < retryAttempts) {
+                    instrumentation.emit(
+                        AgentEvents.warning(
+                            "Planner call failed (attempt $attempt/$retryAttempts); retrying."
+                        )
+                    )
+                }
+            }
+        }
+        if (response == null) {
+            logger.warn(lastError) { "Planner call failed for call_site=$callSite." }
+        }
+        return response
+    }
+
+    private fun callActionVerifierModel(
+        messages: List<ChatMessage>,
+        actionType: String,
+        callSite: String,
+        maxTokens: Int,
+        temperature: Double,
+        strictFormat: ChatResponseFormat.JsonSchema,
+        relaxedFormat: ChatResponseFormat.JsonSchema,
+    ): ChatCompletion? {
+        var response: ChatCompletion? = null
+        var lastError: Exception? = null
+        var responseFormat: ChatResponseFormat.JsonSchema = strictFormat
+        var relaxedSchemaAttempted = false
+        val retryAttempts = RetryPolicy.boundedLlmRetryAttempts(config.planner.llmRetryAttempts)
+        for (attempt in 1..retryAttempts) {
+            try {
+                response = actionVerifierModelClient.chat(
+                    messages = messages,
+                    options = ChatRequestOptions(
+                        temperature = temperature,
+                        maxTokens = maxTokens,
+                        responseFormat = responseFormat,
+                        metadata = ChatCallMetadata(
+                            actor = "ego",
+                            callSite = callSite,
+                            actionType = actionType
+                        )
+                    )
+                )
+                break
+            } catch (ex: Exception) {
+                lastError = ex
+                if (!relaxedSchemaAttempted && LlmFailureClassifier.isStructuredOutputSchemaValidationFailure(ex)) {
+                    responseFormat = relaxedFormat
+                    relaxedSchemaAttempted = true
+                    instrumentation.emit(
+                        AgentEvents.warning(
+                            "Action verifier schema validation failed for action_type=$actionType; retrying with relaxed schema."
+                        )
+                    )
+                    continue
+                }
+                if (attempt < retryAttempts) {
+                    instrumentation.emit(
+                        AgentEvents.warning(
+                            "Action verifier call failed (attempt $attempt/$retryAttempts); retrying."
+                        )
+                    )
+                }
+            }
+        }
+        if (response == null) {
+            logger.warn(lastError) { "Action verifier call failed for action_type=$actionType." }
+        }
+        return response
+    }
+
+    private fun isLikelyTruncatedCompletion(response: ChatCompletion): Boolean {
+        val finishReason = response.finishReason?.trim()?.lowercase().orEmpty()
+        if (finishReason == "length" || finishReason == "max_tokens") {
+            return true
+        }
+        val trimmed = response.content.trim()
+        if (trimmed.isBlank()) return false
+        return trimmed.startsWith("{") && !trimmed.endsWith("}")
+    }
+
+    private fun bumpPlannerCompletionBudget(baseMaxTokens: Int): Int =
+        minOf(
+            PLANNER_TRUNCATION_RETRY_HARD_MAX_TOKENS,
+            baseMaxTokens + maxOf(
+                TRUNCATION_RETRY_MIN_TOKEN_BUMP,
+                baseMaxTokens / TRUNCATION_RETRY_DIVISOR
+            )
+        )
+
+    private fun bumpActionVerifierCompletionBudget(baseMaxTokens: Int): Int =
+        minOf(
+            ACTION_VERIFIER_MAX_TOKENS,
+            baseMaxTokens + maxOf(
+                ACTION_VERIFIER_TRUNCATION_RETRY_MIN_TOKEN_BUMP,
+                baseMaxTokens / TRUNCATION_RETRY_DIVISOR
+            )
+        )
 
     private fun verifyActionDecision(
         trigger: EgoTrigger,
@@ -350,37 +521,18 @@ class LlmEgoPlanner(
         actionType: String,
         circuitKey: ActionVerifierCircuitKey,
     ): ActionVerifierOutcome {
-        var response = null as psyke.llm.ChatCompletion?
-        var lastError: Exception? = null
-        val retryAttempts = RetryPolicy.boundedLlmRetryAttempts(config.planner.llmRetryAttempts)
-        for (attempt in 1..retryAttempts) {
-            try {
-                response = actionVerifierModelClient.chat(
-                    messages = messages,
-                    options = ChatRequestOptions(
-                        temperature = 0.1,
-                        maxTokens = resolveActionVerifierBudget(messages),
-                        metadata = ChatCallMetadata(
-                            actor = "ego",
-                            callSite = "action_verifier",
-                            actionType = actionType
-                        )
-                    )
-                )
-                break
-            } catch (ex: Exception) {
-                lastError = ex
-                if (attempt < retryAttempts) {
-                    instrumentation.emit(
-                        AgentEvents.warning(
-                            "Action verifier call failed (attempt $attempt/$retryAttempts); retrying."
-                        )
-                    )
-                }
-            }
-        }
+        val initialBudget = resolveActionVerifierBudget(messages)
+        val formats = resolveActionVerifierResponseFormats()
+        val response = callActionVerifierModel(
+            messages = messages,
+            actionType = actionType,
+            callSite = "action_verifier",
+            maxTokens = initialBudget,
+            temperature = 0.1,
+            strictFormat = formats.strict,
+            relaxedFormat = formats.relaxed,
+        )
         if (response == null) {
-            logger.warn(lastError) { "Action verifier call failed for action_type=$actionType." }
             instrumentation.emit(AgentEvents.warning("Action verifier unavailable; keeping original action proposal."))
             return ActionVerifierOutcome(payload = null, parseFailed = false)
         }
@@ -395,10 +547,32 @@ class LlmEgoPlanner(
             cb.recordSuccess()
             return initialParse
         }
+        val truncationRecovered = if (isLikelyTruncatedCompletion(response)) {
+            instrumentation.emit(
+                AgentEvents.warning("Action verifier response appears truncated; retrying with increased completion budget.")
+            )
+            requestActionVerifierTruncationRetry(
+                messages = messages,
+                actionType = actionType,
+                baseMaxTokens = initialBudget
+            )?.let { retry ->
+                tryParseActionVerifierPayload(retry.content, actionType, emitParseWarning = true)
+            }
+        } else {
+            null
+        }
+        if (truncationRecovered != null && !truncationRecovered.parseFailed) {
+            cb.recordSuccess()
+            return truncationRecovered
+        }
         instrumentation.emit(
             AgentEvents.warning("Action verifier response was non-parseable; requesting strict JSON retry.")
         )
-        val retryResponse = requestActionVerifierStrictJsonRetry(messages = messages, actionType = actionType)
+        val retryResponse = requestActionVerifierStrictJsonRetry(
+            messages = messages,
+            actionType = actionType,
+            baseMaxTokens = initialBudget
+        )
         val parseResult = if (retryResponse == null) {
             ActionVerifierOutcome(payload = null, parseFailed = true)
         } else {
@@ -484,7 +658,7 @@ class LlmEgoPlanner(
         baseMessages: List<ChatMessage>,
         callSite: String,
         actionSchemaEnum: String,
-    ): psyke.llm.ChatCompletion? {
+    ): ChatCompletion? {
         val retryMessages = baseMessages + ChatMessage(
             role = ChatRole.USER,
             content = """
@@ -505,28 +679,62 @@ class LlmEgoPlanner(
                 }
             """.trimIndent()
         )
-        return try {
-            modelClient.chat(
-                messages = retryMessages,
-                options = ChatRequestOptions(
-                    temperature = 0.0,
-                    maxTokens = config.planner.maxCompletionTokens,
-                    metadata = ChatCallMetadata(
-                        actor = "ego",
-                        callSite = "${callSite}_json_retry"
-                    )
-                )
-            )
-        } catch (ex: Exception) {
-            logger.warn(ex) { "Planner strict JSON retry call failed for call_site=$callSite." }
-            null
+        val formats = resolvePlannerResponseFormats()
+        return callPlanner(
+            messages = retryMessages,
+            callSite = "${callSite}_json_retry",
+            maxTokens = config.planner.maxCompletionTokens,
+            temperature = 0.0,
+            strictFormat = formats.strict,
+            relaxedFormat = formats.relaxed,
+        )
+    }
+
+    private fun requestPlannerTruncationRetry(
+        baseMessages: List<ChatMessage>,
+        callSite: String,
+        actionSchemaEnum: String,
+    ): ChatCompletion? {
+        val bumpedBudget = bumpPlannerCompletionBudget(config.planner.maxCompletionTokens)
+        if (bumpedBudget <= config.planner.maxCompletionTokens) {
+            return null
         }
+        val retryMessages = baseMessages + ChatMessage(
+            role = ChatRole.USER,
+            content = """
+                Your previous output appears truncated.
+                Return one complete JSON object only and finish the response.
+                Use this exact schema:
+                {
+                  "decision":"thought|action|plan|noop",
+                  "urgency":"low|medium|high",
+                  "thought":"optional when decision=thought",
+                  "long_term_memory_recall_query":"optional query string",
+                  "action_type":"$actionSchemaEnum",
+                  "action_payload":"optional when decision=action",
+                  "action_summary":"required when decision=action",
+                  "plan_goal":"required when decision=plan",
+                  "plan_steps":["step 1","step 2"],
+                  "reason":"optional short reason"
+                }
+            """.trimIndent()
+        )
+        val formats = resolvePlannerResponseFormats()
+        return callPlanner(
+            messages = retryMessages,
+            callSite = "${callSite}_truncation_retry",
+            maxTokens = bumpedBudget,
+            temperature = 0.0,
+            strictFormat = formats.strict,
+            relaxedFormat = formats.relaxed,
+        )
     }
 
     private fun requestActionVerifierStrictJsonRetry(
         messages: List<ChatMessage>,
         actionType: String,
-    ): psyke.llm.ChatCompletion? {
+        baseMaxTokens: Int,
+    ): ChatCompletion? {
         val retryMessages = messages + ChatMessage(
             role = ChatRole.USER,
             content = """
@@ -542,23 +750,52 @@ class LlmEgoPlanner(
                 }
             """.trimIndent()
         )
-        return try {
-            actionVerifierModelClient.chat(
-                messages = retryMessages,
-                options = ChatRequestOptions(
-                    temperature = 0.0,
-                    maxTokens = resolveActionVerifierBudget(retryMessages),
-                    metadata = ChatCallMetadata(
-                        actor = "ego",
-                        callSite = "action_verifier_json_retry",
-                        actionType = actionType
-                    )
-                )
-            )
-        } catch (ex: Exception) {
-            logger.warn(ex) { "Action verifier strict JSON retry call failed for action_type=$actionType." }
-            null
+        val formats = resolveActionVerifierResponseFormats()
+        return callActionVerifierModel(
+            messages = retryMessages,
+            actionType = actionType,
+            callSite = "action_verifier_json_retry",
+            maxTokens = baseMaxTokens,
+            temperature = 0.0,
+            strictFormat = formats.strict,
+            relaxedFormat = formats.relaxed,
+        )
+    }
+
+    private fun requestActionVerifierTruncationRetry(
+        messages: List<ChatMessage>,
+        actionType: String,
+        baseMaxTokens: Int,
+    ): ChatCompletion? {
+        val bumpedBudget = bumpActionVerifierCompletionBudget(baseMaxTokens)
+        if (bumpedBudget <= baseMaxTokens) {
+            return null
         }
+        val retryMessages = messages + ChatMessage(
+            role = ChatRole.USER,
+            content = """
+                Your previous output appears truncated.
+                Return one complete JSON object only.
+                Use exactly this schema:
+                {
+                  "verdict":"approve|repair|reject",
+                  "action_type":"required when verdict=repair",
+                  "action_payload":"required when verdict=repair",
+                  "action_summary":"required when verdict=repair",
+                  "reason":"optional short reason"
+                }
+            """.trimIndent()
+        )
+        val formats = resolveActionVerifierResponseFormats()
+        return callActionVerifierModel(
+            messages = retryMessages,
+            actionType = actionType,
+            callSite = "action_verifier_truncation_retry",
+            maxTokens = bumpedBudget,
+            temperature = 0.0,
+            strictFormat = formats.strict,
+            relaxedFormat = formats.relaxed,
+        )
     }
 
     private fun parseActionVerifierPayloadWithRepair(raw: String): ActionVerifierPayload {
@@ -784,7 +1021,7 @@ class LlmEgoPlanner(
         }
     }
 
-    private fun emitDecision(triggerLabel: String, decision: EgoDecision) {
+    private fun emitDecision(triggerLabel: String, decision: EgoDecision, rootInputId: String? = null) {
         when (decision) {
             is EgoDecision.EnqueueThought -> {
                 instrumentation.emit(
@@ -792,7 +1029,8 @@ class LlmEgoPlanner(
                         trigger = triggerLabel,
                         decisionType = "thought",
                         urgency = decision.urgency.name.lowercase(),
-                        thought = decision.content
+                        thought = decision.content,
+                        rootInputId = rootInputId,
                     )
                 )
             }
@@ -805,7 +1043,8 @@ class LlmEgoPlanner(
                         urgency = decision.urgency.name.lowercase(),
                         actionType = decision.actionType.name.lowercase(),
                         payload = decision.payload,
-                        summary = decision.summary
+                        summary = decision.summary,
+                        rootInputId = rootInputId,
                     )
                 )
             }
@@ -817,7 +1056,8 @@ class LlmEgoPlanner(
                         decisionType = "plan",
                         urgency = decision.urgency.name.lowercase(),
                         thought = decision.goal,
-                        reason = "steps=${decision.steps.size}"
+                        reason = "steps=${decision.steps.size}",
+                        rootInputId = rootInputId,
                     )
                 )
             }
@@ -828,7 +1068,8 @@ class LlmEgoPlanner(
                     AgentEvents.plannerDecision(
                         trigger = triggerLabel,
                         decisionType = "noop",
-                        reason = decision.reason
+                        reason = decision.reason,
+                        rootInputId = rootInputId,
                     )
                 )
             }
@@ -905,6 +1146,8 @@ class LlmEgoPlanner(
                     - noop: when no safe next step exists.
                     Use plan when the task requires multiple sequential stages (e.g. search, then verify, then answer).
                     Each plan_step is a concise directive (<=120 chars). The planner re-evaluates each step.
+                    Use action=answer_draft only for intermediate synthesis while executing active plan steps.
+                    The final user-visible response must use action=answer.
                     Do not use plan for simple tasks solvable in one or two steps.
                     Allowed actions:
                     $actionGuidanceBlock
@@ -949,6 +1192,8 @@ class LlmEgoPlanner(
                     {"decision":"plan","urgency":"medium","plan_goal":"Find and verify current pricing","plan_steps":["Search for official pricing page","Fetch the pricing page content","Synthesize and answer with verified pricing"]}
                     Do not return decision=action without both action_payload and action_summary.
                     action_payload must always be a JSON string value; never return object/array directly.
+                    Use action_type=answer_draft only for intermediate plan-step synthesis.
+                    Do not use answer_draft for terminal delivery; terminal user response must use action_type=answer.
                     Do not return decision=plan without both plan_goal and plan_steps.
                     Keep thought concise.
                     Prefer concise answer payloads by default.
@@ -1285,6 +1530,11 @@ class LlmEgoPlanner(
         val actionType: ActionType,
     )
 
+    private data class SchemaFormatPair(
+        val strict: ChatResponseFormat.JsonSchema,
+        val relaxed: ChatResponseFormat.JsonSchema,
+    )
+
     private data class FollowUpOrigin(
         val actionType: ActionType,
         val observedEvidence: Boolean,
@@ -1338,12 +1588,211 @@ class LlmEgoPlanner(
     private companion object {
         const val ACTION_VERIFIER_BASE_TOKENS: Int = 80
         const val ACTION_VERIFIER_MAX_TOKENS: Int = 220
+        const val ACTION_VERIFIER_TRUNCATION_RETRY_MIN_TOKEN_BUMP: Int = 32
         const val ACTION_VERIFIER_PARSE_FAILURE_TRIP_THRESHOLD: Int = 2
         const val PLANNER_PARSE_FAILURE_TRIP_THRESHOLD: Int = 3
+        const val TRUNCATION_RETRY_MIN_TOKEN_BUMP: Int = 96
+        const val TRUNCATION_RETRY_DIVISOR: Int = 2
+        const val PLANNER_TRUNCATION_RETRY_HARD_MAX_TOKENS: Int = 1_600
         const val PLANNER_PROMPT_CALL_SITE: String = "planner_prompt"
         const val ACTION_VERIFIER_PROMPT_CALL_SITE: String = "action_verifier_prompt"
+        private const val PLANNER_DECISION_RESPONSE_SCHEMA_STRICT: String = """
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "decision",
+                "urgency",
+                "thought",
+                "long_term_memory_recall_query",
+                "action_type",
+                "action_payload",
+                "action_summary",
+                "plan_goal",
+                "plan_steps",
+                "reason"
+              ],
+              "properties": {
+                "decision": {
+                  "type": "string",
+                  "enum": ["thought", "action", "plan", "noop"]
+                },
+                "urgency": {
+                  "type": ["string", "null"],
+                  "enum": ["low", "medium", "high", null]
+                },
+                "thought": {
+                  "type": ["string", "null"],
+                  "maxLength": 600
+                },
+                "long_term_memory_recall_query": {
+                  "type": ["string", "null"],
+                  "maxLength": 600
+                },
+                "action_type": {
+                  "type": ["string", "null"]
+                },
+                "action_payload": {
+                  "type": ["string", "null"],
+                  "maxLength": 4000
+                },
+                "action_summary": {
+                  "type": ["string", "null"],
+                  "maxLength": 180
+                },
+                "plan_goal": {
+                  "type": ["string", "null"],
+                  "maxLength": 600
+                },
+                "plan_steps": {
+                  "type": ["array", "null"],
+                  "items": {
+                    "type": "string",
+                    "maxLength": 120
+                  },
+                  "maxItems": 6
+                },
+                "reason": {
+                  "type": ["string", "null"],
+                  "maxLength": 160
+                }
+              }
+            }
+        """
+        private const val PLANNER_DECISION_RESPONSE_SCHEMA_RELAXED: String = """
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "decision",
+                "urgency",
+                "thought",
+                "long_term_memory_recall_query",
+                "action_type",
+                "action_payload",
+                "action_summary",
+                "plan_goal",
+                "plan_steps",
+                "reason"
+              ],
+              "properties": {
+                "decision": {
+                  "type": "string",
+                  "enum": ["thought", "action", "plan", "noop"]
+                },
+                "urgency": {
+                  "type": ["string", "null"],
+                  "enum": ["low", "medium", "high", null]
+                },
+                "thought": {
+                  "type": ["string", "null"]
+                },
+                "long_term_memory_recall_query": {
+                  "type": ["string", "null"]
+                },
+                "action_type": {
+                  "type": ["string", "null"]
+                },
+                "action_payload": {
+                  "type": ["string", "null"]
+                },
+                "action_summary": {
+                  "type": ["string", "null"]
+                },
+                "plan_goal": {
+                  "type": ["string", "null"]
+                },
+                "plan_steps": {
+                  "type": ["array", "null"],
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "reason": {
+                  "type": ["string", "null"]
+                }
+              }
+            }
+        """
+        private const val ACTION_VERIFIER_RESPONSE_SCHEMA_STRICT: String = """
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["verdict", "action_type", "action_payload", "action_summary", "reason"],
+              "properties": {
+                "verdict": {
+                  "type": "string",
+                  "enum": ["approve", "repair", "reject"]
+                },
+                "action_type": {
+                  "type": ["string", "null"]
+                },
+                "action_payload": {
+                  "type": ["string", "null"],
+                  "maxLength": 4000
+                },
+                "action_summary": {
+                  "type": ["string", "null"],
+                  "maxLength": 180
+                },
+                "reason": {
+                  "type": ["string", "null"],
+                  "maxLength": 160
+                }
+              }
+            }
+        """
+        private const val ACTION_VERIFIER_RESPONSE_SCHEMA_RELAXED: String = """
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["verdict", "action_type", "action_payload", "action_summary", "reason"],
+              "properties": {
+                "verdict": {
+                  "type": "string",
+                  "enum": ["approve", "repair", "reject"]
+                },
+                "action_type": {
+                  "type": ["string", "null"]
+                },
+                "action_payload": {
+                  "type": ["string", "null"]
+                },
+                "action_summary": {
+                  "type": ["string", "null"]
+                },
+                "reason": {
+                  "type": ["string", "null"]
+                }
+              }
+            }
+        """
         val mapper = jacksonObjectMapper()
             .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
+        val PLANNER_DECISION_RESPONSE_FORMAT_STRICT: ChatResponseFormat.JsonSchema =
+            ChatResponseFormat.JsonSchema(
+                name = "ego_planner_decision",
+                schemaJson = PLANNER_DECISION_RESPONSE_SCHEMA_STRICT,
+                strict = true
+            )
+        val PLANNER_DECISION_RESPONSE_FORMAT_RELAXED: ChatResponseFormat.JsonSchema =
+            ChatResponseFormat.JsonSchema(
+                name = "ego_planner_decision",
+                schemaJson = PLANNER_DECISION_RESPONSE_SCHEMA_RELAXED,
+                strict = true
+            )
+        val ACTION_VERIFIER_RESPONSE_FORMAT_STRICT: ChatResponseFormat.JsonSchema =
+            ChatResponseFormat.JsonSchema(
+                name = "ego_action_verifier_decision",
+                schemaJson = ACTION_VERIFIER_RESPONSE_SCHEMA_STRICT,
+                strict = true
+            )
+        val ACTION_VERIFIER_RESPONSE_FORMAT_RELAXED: ChatResponseFormat.JsonSchema =
+            ChatResponseFormat.JsonSchema(
+                name = "ego_action_verifier_decision",
+                schemaJson = ACTION_VERIFIER_RESPONSE_SCHEMA_RELAXED,
+                strict = true
+            )
         val invalidJsonEscapeRegex = Regex("""\\(?!["\\/bfnrtu])""")
         val refreshIntentRegex = Regex(
             pattern = """(?i)\b(refresh|recheck|check\s+again|retry|try\s+again|update[sd]?|latest\s+again)\b"""
