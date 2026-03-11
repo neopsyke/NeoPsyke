@@ -55,7 +55,10 @@ class Ego(
             override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, ArrayDeque<DialogueTurn>>): Boolean =
                 size > MAX_TRACKED_SESSIONS
         }
-    private val deliberation = DeliberationEngine(config, instrumentation, metaReasoner)
+    private val deliberation = DeliberationEngine(
+        config, instrumentation, metaReasoner,
+        isEvidenceActionType = { motorCortex.hasCapability(it, psyke.agent.actions.ActionCapability.GATHERS_EVIDENCE) }
+    )
     private val memory = MemoryCoordinator(
         hippocampus, longTermMemoryAdvisor, config, instrumentation,
         initialMemoryStore = memoryStore,
@@ -329,7 +332,7 @@ class Ego(
                     reasonCode = "SYSTEM_FALLBACK_BYPASS"
                 )
             )
-            val outcome = executeActionSafely(resolvedAction) ?: return
+            val outcome = executeActionSafely(resolvedAction)
             instrumentation.emit(AgentEvents.actionExecuted(resolvedAction, outcome.statusSummary))
             if (resolvedAction.type == ActionType.ANSWER) {
                 memory.journal(
@@ -382,6 +385,7 @@ class Ego(
                 externalEvidence = deliberation.evidenceFor(resolvedAction.rootInputId, sessionId),
                 availableActions = availableActionsForScope,
                 dispatchableActions = dispatchableActionsForScope,
+                evidenceActionTypes = motorCortex.actionTypesWithCapability(psyke.agent.actions.ActionCapability.GATHERS_EVIDENCE),
                 latestUserTurn = latestUserTurn
             )
         )
@@ -454,7 +458,7 @@ class Ego(
         }
 
         timing.startPhase("action_execute")
-        val outcome = executeActionSafely(resolvedAction) ?: return
+        val outcome = executeActionSafely(resolvedAction)
         instrumentation.emit(AgentEvents.actionExecuted(resolvedAction, outcome.statusSummary))
         if (resolvedAction.type == ActionType.ANSWER) {
             memory.journal(
@@ -1056,7 +1060,7 @@ class Ego(
         }
         val queued = scheduler.enqueueAction(
             type = ActionType.ANSWER,
-            payload = TextSecurity.clamp(payload, config.planner.maxActionPayloadChars),
+            payload = TextSecurity.clamp(payload, config.maxActionPayloadChars),
             summary = summary,
             urgency = thought.urgency,
             attempts = thought.passes,
@@ -1108,7 +1112,7 @@ class Ego(
         val summary = "Fallback answer after planner circuit breaker trip."
         val queued = scheduler.enqueueAction(
             type = ActionType.ANSWER,
-            payload = TextSecurity.clamp(payload, config.planner.maxActionPayloadChars),
+            payload = TextSecurity.clamp(payload, config.maxActionPayloadChars),
             summary = summary,
             urgency = Urgency.HIGH,
             isFallbackExplanation = true,
@@ -1225,13 +1229,14 @@ class Ego(
             )
             return
         }
+        // ANSWER is a terminal user-visible action; it doesn't contribute evidence to the workspace.
+        if (action.type == ActionType.ANSWER) return
         taskWorkspaceStore.recordActionOutcome(
             rootInputId = action.rootInputId,
             action = action,
             outcome = outcome,
             observedEvidence = observedEvidence
         )
-        if (action.type == ActionType.ANSWER) return
         instrumentation.emit(
             AgentEvent(
                 type = "task_workspace_updated",
@@ -1373,7 +1378,7 @@ class Ego(
             )
             return action
         }
-        val rewrittenPayload = TextSecurity.clamp(finalizerResult.rewrittenPayload, config.planner.maxActionPayloadChars)
+        val rewrittenPayload = TextSecurity.clamp(finalizerResult.rewrittenPayload, config.maxActionPayloadChars)
         if (rewrittenPayload.isBlank() || rewrittenPayload == action.payload) {
             instrumentation.emit(
                 AgentEvent(
@@ -1721,14 +1726,17 @@ class Ego(
         )
     }
 
-    private suspend fun executeActionSafely(action: PendingAction): ActionOutcome? {
+    private suspend fun executeActionSafely(action: PendingAction): ActionOutcome {
         return try {
             motorCortex.execute(action, config.searchResultCount)
         } catch (ex: Exception) {
             deliberation.markEvidenceFailure(action)
             logger.warn(ex) { "Action execution failed for action_id=${action.id} type=${action.type}." }
             instrumentation.emit(AgentEvents.warning("Action execution failed; action dropped."))
-            null
+            ActionOutcome(
+                statusSummary = "Action execution failed: ${ex.message?.take(120) ?: "unknown error"}",
+                observedEvidence = false,
+            )
         }
     }
 

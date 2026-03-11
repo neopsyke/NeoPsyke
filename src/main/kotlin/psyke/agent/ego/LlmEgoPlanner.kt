@@ -226,8 +226,8 @@ class LlmEgoPlanner(
                         EgoDecision.ProposeAction(
                             urgency = Urgency.fromRaw(payload.urgency),
                             actionType = actionType,
-                            payload = TextSecurity.clamp(actionPayload, config.planner.maxActionPayloadChars),
-                            summary = TextSecurity.clamp(resolvedSummary, config.planner.maxActionSummaryChars)
+                            payload = TextSecurity.clamp(actionPayload, config.maxActionPayloadChars),
+                            summary = TextSecurity.clamp(resolvedSummary, config.maxActionSummaryChars)
                         )
                     }
                 }
@@ -319,7 +319,7 @@ class LlmEgoPlanner(
         var lastError: Exception? = null
         var responseFormat: ChatResponseFormat.JsonSchema = strictFormat
         var relaxedSchemaAttempted = false
-        val retryAttempts = RetryPolicy.boundedLlmRetryAttempts(config.planner.llmRetryAttempts)
+        val retryAttempts = RetryPolicy.boundedLlmRetryAttempts(config.llmRetryAttempts)
         for (attempt in 1..retryAttempts) {
             try {
                 response = modelClient.chat(
@@ -373,7 +373,7 @@ class LlmEgoPlanner(
         var lastError: Exception? = null
         var responseFormat: ChatResponseFormat.JsonSchema = strictFormat
         var relaxedSchemaAttempted = false
-        val retryAttempts = RetryPolicy.boundedLlmRetryAttempts(config.planner.llmRetryAttempts)
+        val retryAttempts = RetryPolicy.boundedLlmRetryAttempts(config.llmRetryAttempts)
         for (attempt in 1..retryAttempts) {
             try {
                 response = actionVerifierModelClient.chat(
@@ -943,8 +943,8 @@ class LlmEgoPlanner(
                 EgoDecision.ProposeAction(
                     urgency = original.urgency,
                     actionType = repairedActionType,
-                    payload = TextSecurity.clamp(repairedPayload, config.planner.maxActionPayloadChars),
-                    summary = TextSecurity.clamp(resolvedSummary, config.planner.maxActionSummaryChars)
+                    payload = TextSecurity.clamp(repairedPayload, config.maxActionPayloadChars),
+                    summary = TextSecurity.clamp(resolvedSummary, config.maxActionSummaryChars)
                 )
             }
 
@@ -1317,7 +1317,7 @@ class LlmEgoPlanner(
                     content = "Trigger:\n$triggerText"
                 )
             ),
-            maxTokens = config.planner.maxPromptTokens
+            maxTokens = config.maxLlmPromptTokens
         )
     }
 
@@ -1445,7 +1445,7 @@ class LlmEgoPlanner(
                     """.trimIndent()
                 )
             ),
-            maxTokens = minOf(config.planner.maxPromptTokens, 1_200)
+            maxTokens = minOf(config.maxLlmPromptTokens, 1_200)
         )
     }
 
@@ -1841,6 +1841,6 @@ class LlmEgoPlanner(
         if (normalized.isBlank()) {
             return "Generated action summary."
         }
-        return TextSecurity.clamp(normalized, config.planner.maxActionSummaryChars)
+        return TextSecurity.clamp(normalized, config.maxActionSummaryChars)
     }
 }

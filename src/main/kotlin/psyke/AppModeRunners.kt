@@ -610,7 +610,7 @@ internal object AppModeRunners {
                                 "max_loop_steps" to config.planner.maxLoopStepsPerInput,
                                 "loop_delay_ms" to config.loopDelayMs,
                                 "max_thought_passes" to config.planner.maxThoughtPasses,
-                                "max_prompt_tokens" to config.planner.maxPromptTokens,
+                                "max_prompt_tokens" to config.maxLlmPromptTokens,
                                 "max_completion_tokens" to config.planner.maxCompletionTokens,
                                 "max_run_total_tokens" to config.planner.maxRunTotalTokens,
                                 "max_run_tokens_per_provider" to config.planner.maxRunTokensPerProvider,
@@ -622,8 +622,8 @@ internal object AppModeRunners {
                                 "short_term_context_max_chars" to config.memory.maxShortTermContextChars,
                                 "short_term_context_max_prompt_tokens" to config.memory.maxShortTermContextPromptTokens,
                                 "max_thought_chars" to config.planner.maxThoughtChars,
-                                "max_action_payload_chars" to config.planner.maxActionPayloadChars,
-                                "max_action_summary_chars" to config.planner.maxActionSummaryChars,
+                                "max_action_payload_chars" to config.maxActionPayloadChars,
+                                "max_action_summary_chars" to config.maxActionSummaryChars,
                                 "mcp_call_timeout_ms" to config.mcpCallTimeoutMs,
                                 "fetch_max_chars" to config.fetchMaxChars,
                                 "mcp_memory_call_timeout_ms" to config.memory.mcpMemoryCallTimeoutMs,
@@ -733,7 +733,7 @@ internal object AppModeRunners {
                     val webSearchCallObserver = callObserverForProvider(llm.webSearch.providerLabel)
                     val rawResponseHook = LlmRawResponseEventHook(
                         instrumentation = instrumentation,
-                        maxRawResponseChars = config.planner.maxActionPayloadChars
+                        maxRawResponseChars = config.maxActionPayloadChars
                     )
     
                     InstrumentedChatModelClient(
@@ -847,7 +847,7 @@ internal object AppModeRunners {
                                                 llm = llm,
                                                 callObserver = webSearchCallObserver,
                                                 instrumentation = instrumentation,
-                                                maxRawResponseChars = config.planner.maxActionPayloadChars,
+                                                maxRawResponseChars = config.maxActionPayloadChars,
                                                 tokenBudgetGate = tokenBudgetGate
                                             )
 
@@ -960,13 +960,16 @@ internal object AppModeRunners {
                                                             resolveInteractiveMemoryStartup(config, mcpRuntimeConfig.memory)
                                                         val hippocampus = interactiveMemoryStartup.hippocampus
                                                         val memoryProviderDetail = interactiveMemoryStartup.detail
-                                                        val allStatuses = actionStatuses + ActionImplementationStatus(
-                                                            actionType = ActionType.MEMORY,
-                                                            dispatchable = false,
-                                                            available = hippocampus.enabled,
-                                                            detail = memoryProviderDetail,
+                                                        instrumentation.emit(AgentEvents.actionCapabilities(actionStatuses))
+                                                        instrumentation.emit(
+                                                            AgentEvent(
+                                                                type = "memory_status",
+                                                                data = mapOf(
+                                                                    "available" to hippocampus.enabled,
+                                                                    "detail" to memoryProviderDetail
+                                                                )
+                                                            )
                                                         )
-                                                        instrumentation.emit(AgentEvents.actionCapabilities(allStatuses))
                                                         if (!hippocampus.enabled) {
                                                             instrumentation.emit(
                                                                 AgentEvents.warning("Long-term memory is unavailable: $memoryProviderDetail")

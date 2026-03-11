@@ -9,6 +9,21 @@ import psyke.agent.core.SuperegoContext
 import psyke.agent.tools.mcp.FetchTool
 import psyke.agent.tools.mcp.McpTimeTool
 
+/**
+ * Declares a broad behavioural trait of an action plugin.
+ *
+ * Capabilities are queried by cross-cutting subsystems (evidence tracking,
+ * task verification, workspace management) instead of hard-coding
+ * [ActionType] checks.
+ */
+enum class ActionCapability {
+    /** Action produces output visible to the end user (e.g. ANSWER). */
+    PRODUCES_USER_OUTPUT,
+
+    /** Action gathers external evidence for workspace synthesis (e.g. WEB_SEARCH, WEBSITE_FETCH, MCP_TIME). */
+    GATHERS_EVIDENCE,
+}
+
 data class ActionDescriptor(
     val actionType: ActionType,
     val dispatchable: Boolean = true,
@@ -18,6 +33,7 @@ data class ActionDescriptor(
     val requiresFollowUpThought: Boolean = false,
     val followUpPrefix: String = "Action completed.",
     val superegoDirectives: List<String> = emptyList(),
+    val capabilities: Set<ActionCapability> = emptySet(),
 )
 
 data class ActionPluginHealth(
@@ -25,6 +41,17 @@ data class ActionPluginHealth(
     val detail: String,
 )
 
+/**
+ * A plugin's conscious-level validity check on an action payload.
+ *
+ * This represents the plugin's own assessment of whether the payload is
+ * well-formed and safe to execute ("is this a valid request?"). The superego
+ * maps it into a [psyke.agent.superego.SuperegoDeterministicDecision] which
+ * frames the same verdict in ethical/moral terms ("should the agent be
+ * *allowed* to do this?"). The two types are intentionally distinct to
+ * preserve the psychoanalytic metaphor: the plugin validates, the superego
+ * judges.
+ */
 data class ActionDeterministicReview(
     val allow: Boolean,
     val reason: String = "",

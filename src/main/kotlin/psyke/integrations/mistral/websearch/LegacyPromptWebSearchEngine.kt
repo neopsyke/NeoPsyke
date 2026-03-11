@@ -69,7 +69,7 @@ class LegacyPromptWebSearchEngine(
                     content = "Search query: $query"
                 )
             ),
-            maxTokens = config.planner.maxPromptTokens
+            maxTokens = config.maxLlmPromptTokens
         )
         instrumentation.emit(
             AgentEvent(
@@ -81,7 +81,7 @@ class LegacyPromptWebSearchEngine(
 
         var response = null as psyke.llm.ChatCompletion?
         var lastError: Exception? = null
-        val retryAttempts = RetryPolicy.boundedLlmRetryAttempts(config.planner.llmRetryAttempts)
+        val retryAttempts = RetryPolicy.boundedLlmRetryAttempts(config.llmRetryAttempts)
         for (attempt in 1..retryAttempts) {
             try {
                 response = modelClient.chat(

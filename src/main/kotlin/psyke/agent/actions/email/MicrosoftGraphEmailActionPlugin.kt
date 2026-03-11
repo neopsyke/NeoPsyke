@@ -10,6 +10,8 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import psyke.agent.actions.ActionCapability
+import psyke.agent.support.ActionPayloadSecurity
 import psyke.agent.actions.ActionDescriptor
 import psyke.agent.actions.ActionDeterministicReview
 import psyke.agent.actions.ActionExecutionContext
@@ -54,7 +56,8 @@ class MicrosoftGraphEmailActionPlugin(
             "Deny EMAIL_SEND when payload includes inline secrets, credentials, or key material.",
             "Deny EMAIL_SEND to out-of-policy recipient domains when domain restrictions are configured.",
             "Allow EMAIL_SEND only when sender identity is explicit or a configured default sender exists."
-        )
+        ),
+        capabilities = setOf(ActionCapability.PRODUCES_USER_OUTPUT)
     )
 
     override suspend fun healthCheck(): ActionPluginHealth {
@@ -129,7 +132,7 @@ class MicrosoftGraphEmailActionPlugin(
             )
         }
         val combined = listOfNotNull(parsed.subject, parsed.bodyText, parsed.bodyHtml).joinToString("\n")
-        if (inlineSecretMaterialRegex.containsMatchIn(combined)) {
+        if (ActionPayloadSecurity.containsInlineSecretMaterial(combined)) {
             return ActionDeterministicReview(
                 allow = false,
                 ruleId = "email_send_inline_secret_material",
@@ -331,9 +334,6 @@ class MicrosoftGraphEmailActionPlugin(
         private const val DEFAULT_TIMEOUT_SEC: Long = 20
         private val mapper = jacksonObjectMapper()
             .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
-        private val inlineSecretMaterialRegex = Regex(
-            pattern = """(?is)(AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY-----|\b(api[ _-]?key|token|password|secret)\s*[:=]\s*[A-Za-z0-9_\-]{8,})"""
-        )
         private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
     }
 }

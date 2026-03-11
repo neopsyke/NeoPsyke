@@ -50,7 +50,7 @@ class LlmTaskWorkspaceFinalizer(
     override fun finalize(request: TaskWorkspaceFinalizerRequest): TaskWorkspaceFinalizerResult? {
         val mode = resolveMode(request.action)
         val messages = buildMessages(request, mode)
-        val attempts = RetryPolicy.boundedLlmRetryAttempts(config.planner.llmRetryAttempts)
+        val attempts = RetryPolicy.boundedLlmRetryAttempts(config.llmRetryAttempts)
         var response: String? = null
         var lastError: Exception? = null
         for (attempt in 1..attempts) {
@@ -176,11 +176,7 @@ class LlmTaskWorkspaceFinalizer(
     private fun resolveMode(action: PendingAction): String =
         when (action.type) {
             ActionType.ANSWER -> if (action.isFallbackExplanation) MODE_FALLBACK_EXPLANATION else MODE_DIRECT_ANSWER
-            ActionType.WEB_SEARCH -> "web_search_summary"
-            ActionType.MCP_TIME -> "mcp_time_summary"
-            ActionType.WEBSITE_FETCH -> "website_fetch_summary"
-            ActionType.MEMORY -> "memory_summary"
-            else -> "generic_action_summary"
+            else -> "${action.type.id}_summary"
         }
 
     private data class FinalizerPayload(

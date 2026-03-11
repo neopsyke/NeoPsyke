@@ -10,7 +10,7 @@ class AgentModelsTest {
         val config = AgentConfig()
         assertEquals(0, config.loopDelayMs)
         assertEquals(180, config.planner.maxLoopStepsPerInput)
-        assertEquals(2, config.planner.llmRetryAttempts)
+        assertEquals(2, config.llmRetryAttempts)
         assertEquals(0, config.planner.maxRunTotalTokens)
         assertEquals(0, config.planner.maxRunTokensPerProvider)
         assertEquals(0, config.planner.maxRunTokensPerRole)

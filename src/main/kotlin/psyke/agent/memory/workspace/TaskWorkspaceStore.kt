@@ -1,7 +1,6 @@
 package psyke.agent.memory.workspace
 
 import psyke.agent.core.ActionOutcome
-import psyke.agent.core.ActionType
 import psyke.agent.core.PendingAction
 import psyke.agent.core.PendingInput
 import psyke.agent.core.TaskWorkspaceConfig
@@ -137,9 +136,6 @@ class TaskWorkspaceStore(
         observedEvidence: Boolean,
     ) {
         val workspace = lookup(rootInputId) ?: return
-        if (action.type == ActionType.ANSWER || action.type == ActionType.ANSWER_DRAFT) {
-            return
-        }
         val actionLabel = action.type.name.lowercase()
         workspace.addSection(
             title = "${actionLabel}_result",

@@ -75,7 +75,7 @@ class EgoPlannerTest {
         )
         val planner = LlmEgoPlanner(
             modelClient = llm,
-            config = AgentConfig(planner = PlannerConfig(maxActionPayloadChars = 7, maxActionSummaryChars = 8))
+            config = AgentConfig(maxActionPayloadChars = 7, maxActionSummaryChars = 8)
         )
 
         val decision = planner.decide(
@@ -238,7 +238,7 @@ class EgoPlannerTest {
         }
         val planner = LlmEgoPlanner(
             modelClient = llm,
-            config = AgentConfig(planner = PlannerConfig(llmRetryAttempts = 2))
+            config = AgentConfig(llmRetryAttempts = 2)
         )
 
         val decision = planner.decide(
@@ -378,7 +378,7 @@ class EgoPlannerTest {
         var repairCount = 0
         val planner = LlmEgoPlanner(
             modelClient = llm,
-            config = AgentConfig(planner = PlannerConfig(maxActionSummaryChars = 180)),
+            config = AgentConfig(maxActionSummaryChars = 180),
             instrumentation = instrumentation,
             onPlannerOutputRepaired = { repairCount += 1 }
         )
@@ -781,7 +781,7 @@ class EgoPlannerTest {
         llm.enqueueRawResponse("""{"decision":"noop","reason":"done"}""")
         val planner = LlmEgoPlanner(
             modelClient = llm,
-            config = AgentConfig(planner = PlannerConfig(maxPromptTokens = 180))
+            config = AgentConfig(maxLlmPromptTokens = 180)
         )
 
         val context = PlannerContext(
@@ -991,7 +991,7 @@ class EgoPlannerTest {
         }
         val planner = LlmEgoPlanner(
             modelClient = flakyClient,
-            config = AgentConfig(planner = PlannerConfig(llmRetryAttempts = 3))
+            config = AgentConfig(llmRetryAttempts = 3)
         )
 
         val decision = planner.decide(
@@ -1022,7 +1022,7 @@ class EgoPlannerTest {
         }
         val planner = LlmEgoPlanner(
             modelClient = failingClient,
-            config = AgentConfig(planner = PlannerConfig(llmRetryAttempts = 10))
+            config = AgentConfig(llmRetryAttempts = 10)
         )
 
         val decision = planner.decide(

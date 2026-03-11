@@ -1,5 +1,6 @@
 package psyke.agent.cortex.motor
 
+import psyke.agent.actions.ActionCapability
 import psyke.agent.actions.ActionRegistry
 import psyke.agent.actions.ActionPluginFactoryContext
 import psyke.agent.actions.websearch.WebSearchActionHandler
@@ -76,6 +77,12 @@ class MotorCortex(
 
     fun repairPlannerPayload(actionType: ActionType, raw: String): String =
         actionRegistry.repairPlannerPayload(actionType, raw)
+
+    fun hasCapability(actionType: ActionType, capability: ActionCapability): Boolean =
+        actionRegistry.hasCapability(actionType, capability)
+
+    fun actionTypesWithCapability(capability: ActionCapability): Set<ActionType> =
+        actionRegistry.actionTypesWithCapability(capability)
 
     suspend fun execute(action: PendingAction, searchResultCount: Int): ActionOutcome {
         return actionRegistry.execute(action, searchResultCount)

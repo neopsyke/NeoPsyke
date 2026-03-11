@@ -228,7 +228,7 @@ class MetaReasonerTest {
         val reasoner = LlmMetaReasoner(
             modelClient = failing,
             config = AgentConfig(
-                planner = PlannerConfig(llmRetryAttempts = 1),
+                llmRetryAttempts = 1,
                 metaReasoner = MetaReasonerConfig(dynamicCompletionEnabled = false)
             )
         )
@@ -261,7 +261,7 @@ class MetaReasonerTest {
         val reasoner = LlmMetaReasoner(
             modelClient = primary,
             config = AgentConfig(
-                planner = PlannerConfig(llmRetryAttempts = 1),
+                llmRetryAttempts = 1,
                 metaReasoner = MetaReasonerConfig(dynamicCompletionEnabled = false)
             ),
             fallbackModelClient = fallback
@@ -303,7 +303,7 @@ class MetaReasonerTest {
         val reasoner = LlmMetaReasoner(
             modelClient = client,
             config = AgentConfig(
-                planner = PlannerConfig(llmRetryAttempts = 2),
+                llmRetryAttempts = 2,
                 metaReasoner = MetaReasonerConfig(dynamicCompletionEnabled = false)
             )
         )
@@ -339,7 +339,7 @@ class MetaReasonerTest {
         val reasoner = LlmMetaReasoner(
             modelClient = client,
             config = AgentConfig(
-                planner = PlannerConfig(llmRetryAttempts = 2),
+                llmRetryAttempts = 2,
                 metaReasoner = MetaReasonerConfig(maxTokens = 512, dynamicCompletionEnabled = false)
             )
         )
@@ -369,7 +369,7 @@ class MetaReasonerTest {
         val reasoner = LlmMetaReasoner(
             modelClient = primary,
             config = AgentConfig(
-                planner = PlannerConfig(llmRetryAttempts = 1),
+                llmRetryAttempts = 1,
                 metaReasoner = MetaReasonerConfig(dynamicCompletionEnabled = false)
             ),
             fallbackModelClient = fallback

@@ -116,7 +116,7 @@ internal class MemoryCoordinator(
     fun currentShortTermSummary(): String {
         val memoryTokenBudget = minOf(
             config.memory.maxShortTermContextPromptTokens,
-            maxOf(64, config.planner.maxPromptTokens / 3)
+            maxOf(64, config.maxLlmPromptTokens / 3)
         )
         return activeMemoryStore().summaryForPrompt(memoryTokenBudget)
     }

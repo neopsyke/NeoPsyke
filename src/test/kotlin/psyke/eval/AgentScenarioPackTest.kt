@@ -235,9 +235,9 @@ class AgentScenarioPackTest {
         val config = AgentConfig(
             planner = PlannerConfig(
                 maxLoopStepsPerInput = 24,
-                maxThoughtPasses = 20,
-                llmRetryAttempts = 1
+                maxThoughtPasses = 20
             ),
+            llmRetryAttempts = 1,
             metaReasoner = MetaReasonerConfig(
                 deliberationPressureAssessmentMinStep = 1,
                 forcedTerminalPressureThreshold = 0.55,

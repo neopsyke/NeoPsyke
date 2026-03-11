@@ -225,7 +225,7 @@ class Superego(
                     """.trimIndent()
                 )
             ),
-            maxTokens = config.planner.maxPromptTokens
+            maxTokens = config.maxLlmPromptTokens
         )
     }
 

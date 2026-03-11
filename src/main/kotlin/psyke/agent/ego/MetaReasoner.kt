@@ -175,7 +175,7 @@ class LlmMetaReasoner(
         }
         var relaxedSchemaAttempted = false
         var adaptiveTokenRetryAttempted = false
-        val retryAttempts = RetryPolicy.boundedLlmRetryAttempts(config.planner.llmRetryAttempts)
+        val retryAttempts = RetryPolicy.boundedLlmRetryAttempts(config.llmRetryAttempts)
         for (attempt in 1..retryAttempts) {
             try {
                 response = client.chat(
