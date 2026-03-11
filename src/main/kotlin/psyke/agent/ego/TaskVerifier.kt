@@ -11,7 +11,7 @@ internal data class TaskVerifierContext(
     val externalEvidence: DeliberationEngine.ExternalEvidenceProgress? = null,
     val availableActions: Set<ActionType> = emptySet(),
     val dispatchableActions: Set<ActionType> = emptySet(),
-    val evidenceActionTypes: Set<ActionType> = DEFAULT_EVIDENCE_ACTION_TYPES,
+    val evidenceActionTypes: Set<ActionType> = emptySet(),
     val latestUserTurn: String = "",
 )
 
@@ -348,8 +348,3 @@ internal class DeterministicTaskVerifier : TaskVerifier {
     }
 }
 
-private val DEFAULT_EVIDENCE_ACTION_TYPES: Set<ActionType> = setOf(
-    ActionType.WEB_SEARCH,
-    ActionType.MCP_TIME,
-    ActionType.WEBSITE_FETCH,
-)

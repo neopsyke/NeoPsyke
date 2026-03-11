@@ -26,6 +26,7 @@ internal class DeliberationEngine(
     private val config: AgentConfig,
     private val instrumentation: AgentInstrumentation,
     private val metaReasoner: MetaReasoner,
+    private val isEvidenceActionType: (ActionType) -> Boolean = { false },
 ) {
     private data class SessionDeliberationState(
         val monitor: DeliberationProgressMonitor = DeliberationProgressMonitor(),
@@ -153,7 +154,7 @@ internal class DeliberationEngine(
             payload = TextSecurity.clamp(
                 "I have reached diminishing returns in internal reasoning. " +
                     "Here is the best concise answer I can provide now with current evidence.",
-                config.planner.maxActionPayloadChars
+                config.maxActionPayloadChars
             ),
             summary = "Forced terminal answer due to high decision pressure.",
             urgency = Urgency.HIGH,
@@ -174,25 +175,13 @@ internal class DeliberationEngine(
     fun observedEvidence(action: PendingAction, outcome: ActionOutcome): Boolean {
         if (!isEvidenceAction(action)) return true
         outcome.observedEvidence?.let { return it }
+        // Generic fallback: check plannerSignal for common failure keywords.
         val summary = outcome.plannerSignal.lowercase(java.util.Locale.ROOT)
-        return when (action.type) {
-            ActionType.WEB_SEARCH -> {
-                !summary.contains("unavailable") &&
-                    !summary.contains("timeout") &&
-                    !summary.contains("sources: none") &&
-                    !summary.contains("snippets: no snippets")
-            }
-            ActionType.WEBSITE_FETCH, ActionType.MCP_TIME -> {
-                !summary.contains("not configured") &&
-                    !summary.contains("unavailable") &&
-                    !summary.contains("failed") &&
-                    !summary.contains("error") &&
-                    !summary.contains("timeout")
-            }
-            ActionType.ANSWER -> true
-            ActionType.MEMORY -> true // Memory ops are internal; treat as observed.
-            else -> true
-        }
+        return !summary.contains("unavailable") &&
+            !summary.contains("timeout") &&
+            !summary.contains("not configured") &&
+            !summary.contains("failed") &&
+            !summary.contains("error")
     }
 
     fun recordEvidenceProgress(action: PendingAction, outcome: ActionOutcome, observed: Boolean) {
@@ -413,8 +402,5 @@ internal class DeliberationEngine(
     }
 
     private fun isEvidenceAction(action: PendingAction): Boolean =
-        action.requiresFollowUpThought ||
-            action.type == ActionType.WEB_SEARCH ||
-            action.type == ActionType.MCP_TIME ||
-            action.type == ActionType.WEBSITE_FETCH
+        action.requiresFollowUpThought || isEvidenceActionType(action.type)
 }

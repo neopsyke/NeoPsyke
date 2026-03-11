@@ -143,11 +143,11 @@ class AgentRuntimeSettingsLoaderTest {
         assertEquals("local", settings.evalDefaultStage)
 
         assertEquals(21, settings.agentConfig.planner.maxLoopStepsPerInput)
-        assertEquals(999, settings.agentConfig.planner.maxPromptTokens)
+        assertEquals(999, settings.agentConfig.maxLlmPromptTokens)
         assertEquals(5000, settings.agentConfig.planner.maxRunTotalTokens)
         assertEquals(3200, settings.agentConfig.planner.maxRunTokensPerProvider)
         assertEquals(1800, settings.agentConfig.planner.maxRunTokensPerRole)
-        assertEquals(4, settings.agentConfig.planner.llmRetryAttempts)
+        assertEquals(4, settings.agentConfig.llmRetryAttempts)
         assertEquals(9, settings.agentConfig.planner.maxPlanSteps)
         assertEquals(140, settings.agentConfig.planner.maxPlanStepDescriptionChars)
         assertEquals(3, settings.agentConfig.planner.maxPlansPerInput)
@@ -246,7 +246,7 @@ class AgentRuntimeSettingsLoaderTest {
         )
 
         assertEquals(77, settings.agentConfig.planner.maxLoopStepsPerInput)
-        assertEquals(3, settings.agentConfig.planner.llmRetryAttempts)
+        assertEquals(3, settings.agentConfig.llmRetryAttempts)
         assertEquals(7000, settings.agentConfig.planner.maxRunTotalTokens)
         assertEquals(true, settings.agentConfig.memory.taskWorkspace.enabled)
         assertEquals(false, settings.agentConfig.memory.taskWorkspace.finalPassRewriteEnabled)

@@ -38,7 +38,7 @@ class LlmLogbookSummarizer(
     }
 
     private fun callLlm(messages: List<ChatMessage>): String? {
-        val retryAttempts = RetryPolicy.boundedLlmRetryAttempts(config.planner.llmRetryAttempts)
+        val retryAttempts = RetryPolicy.boundedLlmRetryAttempts(config.llmRetryAttempts)
         var lastError: Exception? = null
         for (attempt in 1..retryAttempts) {
             try {

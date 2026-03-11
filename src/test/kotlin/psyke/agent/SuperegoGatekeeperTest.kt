@@ -1,5 +1,7 @@
 package psyke.agent
 
+import psyke.agent.actions.ActionPluginFactoryContext
+import psyke.agent.actions.ActionRegistry
 import psyke.llm.ChatRole
 import psyke.llm.ChatModelClient
 import psyke.llm.ChatRequestOptions
@@ -13,6 +15,19 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 class SuperegoGatekeeperTest {
+
+    /** Shared registry for tests that exercise plugin deterministic review. */
+    private fun testRegistry(config: AgentConfig = AgentConfig()): ActionRegistry =
+        ActionRegistry.discover(
+            ActionPluginFactoryContext(
+                config = config,
+                webSearchActionHandler = null,
+                mcpTimeTool = null,
+                fetchTool = null,
+                output = {},
+            )
+        )
+
     private val action = PendingAction(
         id = 42,
         urgency = Urgency.HIGH,
@@ -31,7 +46,7 @@ class SuperegoGatekeeperTest {
         val instrumentation = RecordingInstrumentation()
         val gatekeeper = Superego(
             modelClient = llm,
-            config = AgentConfig(planner = PlannerConfig(maxPromptTokens = 160)),
+            config = AgentConfig(maxLlmPromptTokens = 160),
             instrumentation = instrumentation
         )
 
@@ -200,7 +215,7 @@ class SuperegoGatekeeperTest {
         val instrumentation = RecordingInstrumentation()
         val gatekeeper = Superego(
             modelClient = failingClient,
-            config = AgentConfig(planner = PlannerConfig(llmRetryAttempts = 1)),
+            config = AgentConfig(llmRetryAttempts = 1),
             instrumentation = instrumentation
         )
 
@@ -221,7 +236,8 @@ class SuperegoGatekeeperTest {
         }
         val gatekeeper = Superego(
             modelClient = llm,
-            config = AgentConfig()
+            config = AgentConfig(),
+            actionRegistry = testRegistry()
         )
         val fetchAction = PendingAction(
             id = 99,
@@ -245,7 +261,8 @@ class SuperegoGatekeeperTest {
         }
         val gatekeeper = Superego(
             modelClient = llm,
-            config = AgentConfig()
+            config = AgentConfig(),
+            actionRegistry = testRegistry()
         )
         val mcpTimeAction = PendingAction(
             id = 101,
@@ -269,7 +286,8 @@ class SuperegoGatekeeperTest {
         }
         val gatekeeper = Superego(
             modelClient = llm,
-            config = AgentConfig()
+            config = AgentConfig(),
+            actionRegistry = testRegistry()
         )
         val webSearchAction = PendingAction(
             id = 100,
@@ -293,7 +311,8 @@ class SuperegoGatekeeperTest {
         }
         val gatekeeper = Superego(
             modelClient = llm,
-            config = AgentConfig()
+            config = AgentConfig(),
+            actionRegistry = testRegistry()
         )
         val fetchAction = PendingAction(
             id = 101,
@@ -390,7 +409,7 @@ class SuperegoGatekeeperTest {
             modelClient = primary,
             escalationModelClient = failingEscalation,
             config = AgentConfig(
-                planner = PlannerConfig(llmRetryAttempts = 1),
+                llmRetryAttempts = 1,
                 superego = SuperegoConfig(
                     twoStageReviewEnabled = true,
                     twoStageLowConfidenceThreshold = 0.70,

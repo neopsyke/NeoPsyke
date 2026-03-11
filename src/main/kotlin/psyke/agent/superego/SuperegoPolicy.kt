@@ -23,36 +23,14 @@ object SuperegoPolicy {
             actionSpecific = actionSpecificDirectives(actionType, actionRegistry)
         )
 
+    /**
+     * Resolves action-specific superego directives.
+     *
+     * The plugin's [ActionDescriptor.superegoDirectives] is the single source
+     * of truth for all action directives.
+     */
     private fun actionSpecificDirectives(actionType: ActionType, actionRegistry: ActionRegistry): List<String> =
-        actionRegistry.superegoDirectives(actionType).ifEmpty { builtinDirectives(actionType) }
-
-    private fun builtinDirectives(actionType: ActionType): List<String> =
-        when (actionType) {
-            ActionType.ANSWER -> listOf(
-                "Allow ANSWER by default when it does not violate the general directives.",
-            )
-            ActionType.ANSWER_DRAFT -> listOf(
-                "Allow ANSWER_DRAFT for internal, non-terminal synthesis steps.",
-                "Deny using ANSWER_DRAFT as a final user-visible response.",
-            )
-            ActionType.WEB_SEARCH -> listOf(
-                "Allow WEB_SEARCH for general-information queries by default.",
-                "Deny WEB_SEARCH when payload includes or seeks credentials, API keys, tokens, cookies, private keys, or other secrets.",
-                "Deny WEB_SEARCH when payload includes or seeks personal/sensitive data unless the user explicitly provided it for this task.",
-            )
-            ActionType.WEBSITE_FETCH -> listOf(
-                "Deny WEBSITE_FETCH when payload includes or seeks credentials, API keys, tokens, cookies, private keys, or other secrets.",
-                "Deny WEBSITE_FETCH when payload includes or seeks personal/sensitive data unless the user explicitly provided it for this task.",
-                "For WEBSITE_FETCH, allow only public informational HTTPS pages; deny auth/account/payment/admin/metadata endpoints and URLs with obvious secret query params.",
-            )
-            ActionType.MCP_TIME -> listOf(
-                "Allow MCP_TIME for benign time/date lookup payloads.",
-            )
-            ActionType.MEMORY -> listOf(
-                "Allow MEMORY operations by default; memory is an internal subsystem capability.",
-            )
-            else -> emptyList()
-        }
+        actionRegistry.superegoDirectives(actionType)
 
     fun allDirectives(actionRegistry: ActionRegistry = ActionRegistry.empty()): List<String> =
         (actionRegistry.actionTypes() + ActionType.entries)

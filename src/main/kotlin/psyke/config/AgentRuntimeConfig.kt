@@ -230,30 +230,10 @@ object AgentRuntimeSettingsLoader {
                     plannerYaml.maxInputChars,
                     defaults.planner.maxInputChars
                 ),
-                maxActionPayloadChars = readPositiveInt(
-                    env["EGO_MAX_ACTION_PAYLOAD_CHARS"],
-                    plannerYaml.maxActionPayloadChars,
-                    defaults.planner.maxActionPayloadChars
-                ),
-                maxActionSummaryChars = readPositiveInt(
-                    env["EGO_MAX_ACTION_SUMMARY_CHARS"],
-                    plannerYaml.maxActionSummaryChars,
-                    defaults.planner.maxActionSummaryChars
-                ),
-                maxPromptTokens = readPositiveInt(
-                    env["EGO_MAX_PROMPT_TOKENS"],
-                    plannerYaml.maxPromptTokens,
-                    defaults.planner.maxPromptTokens
-                ),
                 maxCompletionTokens = readPositiveInt(
                     env["EGO_MAX_COMPLETION_TOKENS"],
                     plannerYaml.maxCompletionTokens,
                     defaults.planner.maxCompletionTokens
-                ),
-                llmRetryAttempts = readPositiveInt(
-                    env["EGO_LLM_RETRY_ATTEMPTS"],
-                    plannerYaml.llmRetryAttempts,
-                    defaults.planner.llmRetryAttempts
                 ),
                 maxRunTotalTokens = readNonNegativeInt(
                     env["EGO_MAX_RUN_TOTAL_TOKENS"],
@@ -713,6 +693,26 @@ object AgentRuntimeSettingsLoader {
                 env["WEBSITE_FETCH_MAX_CHARS"],
                 runtimeYaml.fetchMaxChars,
                 defaults.fetchMaxChars
+            ),
+            maxActionPayloadChars = readPositiveInt(
+                env["EGO_MAX_ACTION_PAYLOAD_CHARS"],
+                plannerYaml.maxActionPayloadChars,
+                defaults.maxActionPayloadChars
+            ),
+            maxActionSummaryChars = readPositiveInt(
+                env["EGO_MAX_ACTION_SUMMARY_CHARS"],
+                plannerYaml.maxActionSummaryChars,
+                defaults.maxActionSummaryChars
+            ),
+            maxLlmPromptTokens = readPositiveInt(
+                env["EGO_MAX_PROMPT_TOKENS"],
+                plannerYaml.maxPromptTokens,
+                defaults.maxLlmPromptTokens
+            ),
+            llmRetryAttempts = readPositiveInt(
+                env["EGO_LLM_RETRY_ATTEMPTS"],
+                plannerYaml.llmRetryAttempts,
+                defaults.llmRetryAttempts
             ),
         )
 

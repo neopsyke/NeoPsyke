@@ -11,6 +11,7 @@ import kotlin.test.assertTrue
 
 class TaskVerifierTest {
     private val verifier = DeterministicTaskVerifier()
+    private val evidenceActionTypes = setOf(ActionType.WEB_SEARCH, ActionType.MCP_TIME, ActionType.WEBSITE_FETCH)
 
     @Test
     fun `volatile factual answer requires evidence when tools are available`() {
@@ -20,6 +21,7 @@ class TaskVerifierTest {
                 latestUserTurn = "What is the latest price today?",
                 availableActions = setOf(ActionType.WEB_SEARCH, ActionType.ANSWER),
                 dispatchableActions = setOf(ActionType.WEB_SEARCH, ActionType.ANSWER),
+                evidenceActionTypes = evidenceActionTypes,
                 externalEvidence = DeliberationEngine.ExternalEvidenceProgress()
             )
         )
@@ -38,6 +40,7 @@ class TaskVerifierTest {
                 latestUserTurn = "What is the current score right now?",
                 availableActions = setOf(ActionType.ANSWER),
                 dispatchableActions = setOf(ActionType.ANSWER),
+                evidenceActionTypes = evidenceActionTypes,
                 externalEvidence = DeliberationEngine.ExternalEvidenceProgress()
             )
         )
@@ -56,6 +59,7 @@ class TaskVerifierTest {
                 latestUserTurn = "Rewrite this sentence in formal tone: current policy is strict.",
                 availableActions = setOf(ActionType.WEB_SEARCH, ActionType.ANSWER),
                 dispatchableActions = setOf(ActionType.WEB_SEARCH, ActionType.ANSWER),
+                evidenceActionTypes = evidenceActionTypes,
                 externalEvidence = DeliberationEngine.ExternalEvidenceProgress()
             )
         )
@@ -73,6 +77,7 @@ class TaskVerifierTest {
                 latestUserTurn = "xqzv",
                 availableActions = setOf(ActionType.WEB_SEARCH, ActionType.ANSWER),
                 dispatchableActions = setOf(ActionType.WEB_SEARCH, ActionType.ANSWER),
+                evidenceActionTypes = evidenceActionTypes,
                 externalEvidence = DeliberationEngine.ExternalEvidenceProgress()
             )
         )
@@ -90,6 +95,7 @@ class TaskVerifierTest {
                 latestUserTurn = "What is the latest release version?",
                 availableActions = setOf(ActionType.WEB_SEARCH, ActionType.ANSWER),
                 dispatchableActions = setOf(ActionType.WEB_SEARCH, ActionType.ANSWER),
+                evidenceActionTypes = evidenceActionTypes,
                 externalEvidence = DeliberationEngine.ExternalEvidenceProgress(
                     hadSuccessfulEvidence = true,
                     latestPlannerSignal = "official changelog"

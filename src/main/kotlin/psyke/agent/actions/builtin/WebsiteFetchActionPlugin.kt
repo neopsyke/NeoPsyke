@@ -1,8 +1,13 @@
 package psyke.agent.actions.builtin
 
+import com.fasterxml.jackson.annotation.JsonProperty
+import com.fasterxml.jackson.databind.DeserializationFeature
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+import com.fasterxml.jackson.module.kotlin.readValue
+import psyke.agent.actions.ActionCapability
 import psyke.agent.actions.ActionDescriptor
+import psyke.agent.actions.ActionDeterministicReview
 import psyke.agent.actions.ActionExecutionContext
 import psyke.agent.actions.ActionPluginHealth
 import psyke.agent.actions.AgentActionPlugin
@@ -10,7 +15,10 @@ import psyke.agent.actions.AgentActionPluginFactory
 import psyke.agent.actions.ActionPluginFactoryContext
 import psyke.agent.core.ActionOutcome
 import psyke.agent.core.ActionType
+import psyke.agent.core.AgentConfig
 import psyke.agent.core.PendingAction
+import psyke.agent.core.SuperegoContext
+import psyke.agent.support.ActionPayloadSecurity
 
 class WebsiteFetchActionPlugin(
     private val tool: psyke.agent.tools.mcp.FetchTool?,
@@ -27,8 +35,70 @@ class WebsiteFetchActionPlugin(
             "Deny WEBSITE_FETCH when payload includes or seeks credentials, API keys, tokens, cookies, private keys, or other secrets.",
             "Deny WEBSITE_FETCH when payload includes or seeks personal/sensitive data unless the user explicitly provided it for this task.",
             "For WEBSITE_FETCH, allow only public informational HTTPS pages; deny auth/account/payment/admin/metadata endpoints and URLs with obvious secret query params."
-        )
+        ),
+        capabilities = setOf(ActionCapability.GATHERS_EVIDENCE)
     )
+
+    override fun deterministicReview(
+        action: PendingAction,
+        context: SuperegoContext,
+        config: AgentConfig,
+    ): ActionDeterministicReview {
+        val parsed = try {
+            strictMapper.readValue<FetchValidationPayload>(action.payload)
+        } catch (_: Exception) {
+            return ActionDeterministicReview(
+                allow = false,
+                ruleId = "website_fetch_payload_invalid_json",
+                reason = "WEBSITE_FETCH payload must be JSON like {\"url\":\"https://example.com\",\"max_chars\":1200}."
+            )
+        }
+        val url = parsed.url?.trim().orEmpty()
+        if (url.isBlank()) {
+            return ActionDeterministicReview(
+                allow = false,
+                ruleId = "website_fetch_url_missing",
+                reason = "WEBSITE_FETCH payload is missing required url."
+            )
+        }
+        if (!ActionPayloadSecurity.isPublicHttpsUrl(url)) {
+            return ActionDeterministicReview(
+                allow = false,
+                ruleId = "website_fetch_url_blocked",
+                reason = "WEBSITE_FETCH URL must be a public HTTPS URL and must not target private/local hosts."
+            )
+        }
+        if (ActionPayloadSecurity.hasSensitiveEndpoint(url)) {
+            return ActionDeterministicReview(
+                allow = false,
+                ruleId = "website_fetch_sensitive_endpoint",
+                reason = "WEBSITE_FETCH URL targets a sensitive endpoint (auth/account/payment/admin/metadata)."
+            )
+        }
+        if (ActionPayloadSecurity.hasSensitiveQueryParams(url)) {
+            return ActionDeterministicReview(
+                allow = false,
+                ruleId = "website_fetch_sensitive_query_params",
+                reason = "WEBSITE_FETCH URL contains sensitive query parameters."
+            )
+        }
+        val requestedMaxChars = parsed.maxChars
+        if (requestedMaxChars != null && requestedMaxChars !in ActionPayloadSecurity.WEBSITE_FETCH_MIN_MAX_CHARS..config.fetchMaxChars) {
+            return ActionDeterministicReview(
+                allow = false,
+                ruleId = "website_fetch_max_chars_out_of_bounds",
+                reason = "WEBSITE_FETCH max_chars must be between ${ActionPayloadSecurity.WEBSITE_FETCH_MIN_MAX_CHARS} and ${config.fetchMaxChars}."
+            )
+        }
+        if (ActionPayloadSecurity.containsSecretExfilIntent(action.payload) || ActionPayloadSecurity.containsInlineSecretMaterial(action.payload)) {
+            return ActionDeterministicReview(
+                allow = false,
+                ruleId = "website_fetch_secret_exfil",
+                reason = "WEBSITE_FETCH payload appears to request credential or secret exfiltration."
+            )
+        }
+        return ActionDeterministicReview(allow = true)
+    }
 
     override suspend fun healthCheck(): ActionPluginHealth {
         val active = tool
@@ -73,8 +143,16 @@ class WebsiteFetchActionPlugin(
         return raw
     }
 
+    private data class FetchValidationPayload(
+        val url: String? = null,
+        @field:JsonProperty("max_chars")
+        val maxChars: Int? = null,
+    )
+
     private companion object {
         val mapper: ObjectMapper = jacksonObjectMapper()
+        val strictMapper: ObjectMapper = jacksonObjectMapper()
+            .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
     }
 }
 

@@ -67,6 +67,15 @@ class ActionRegistry private constructor(
     fun followUpPrefix(actionType: ActionType): String =
         pluginByType[actionType]?.descriptor?.followUpPrefix ?: "Action completed."
 
+    fun hasCapability(actionType: ActionType, capability: ActionCapability): Boolean =
+        pluginByType[actionType]?.descriptor?.capabilities?.contains(capability) == true
+
+    fun actionTypesWithCapability(capability: ActionCapability): Set<ActionType> =
+        pluginByType.values
+            .filter { it.descriptor.capabilities.contains(capability) }
+            .map { it.descriptor.actionType }
+            .toSet()
+
     override fun close() {
         pluginByType.values.forEach { plugin ->
             try {

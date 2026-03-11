@@ -23,6 +23,9 @@ enum class Urgency(val priority: Int) {
  *
  * Built-in action constants are exposed in [companion object], but any valid action
  * id can be instantiated to support plugin-discovered actions.
+ *
+ * Whether an action is dispatchable (i.e. the planner may propose it) is determined
+ * by [psyke.agent.actions.ActionDescriptor.dispatchable], not by the type itself.
  */
 data class ActionType(
     val id: String,
@@ -30,9 +33,6 @@ data class ActionType(
     @get:JsonIgnore
     val name: String
         get() = id.uppercase(Locale.ROOT)
-    @get:JsonIgnore
-    val dispatchable: Boolean
-        get() = this != MEMORY
 
     companion object {
         val WEB_SEARCH: ActionType = ActionType("web_search")
@@ -40,7 +40,6 @@ data class ActionType(
         val ANSWER_DRAFT: ActionType = ActionType("answer_draft")
         val MCP_TIME: ActionType = ActionType("mcp_time")
         val WEBSITE_FETCH: ActionType = ActionType("website_fetch")
-        val MEMORY: ActionType = ActionType("memory")
 
         /** Built-in action set for compatibility with existing loops/tests. */
         val entries: Set<ActionType> = setOf(
@@ -49,10 +48,7 @@ data class ActionType(
             ANSWER_DRAFT,
             MCP_TIME,
             WEBSITE_FETCH,
-            MEMORY
         )
-        /** Built-in subset the planner is allowed to propose by default. */
-        val DISPATCHABLE: Set<ActionType> = entries.filter { it.dispatchable }.toSet()
 
         fun fromRaw(value: String?): ActionType? =
             value

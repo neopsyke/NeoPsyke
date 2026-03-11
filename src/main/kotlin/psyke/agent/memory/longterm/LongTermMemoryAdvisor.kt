@@ -77,7 +77,7 @@ class LlmLongTermMemoryAdvisor(
         val completionTokenBudget = resolveCompletionTokenBudget(messages)
         var response: psyke.llm.ChatCompletion? = null
         var lastError: Exception? = null
-        val retryAttempts = RetryPolicy.boundedLlmRetryAttempts(config.planner.llmRetryAttempts)
+        val retryAttempts = RetryPolicy.boundedLlmRetryAttempts(config.llmRetryAttempts)
         for (attempt in 1..retryAttempts) {
             try {
                 response = modelClient.chat(
