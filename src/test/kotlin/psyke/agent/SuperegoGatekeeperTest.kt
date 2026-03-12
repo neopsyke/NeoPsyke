@@ -2,6 +2,8 @@ package psyke.agent
 
 import psyke.agent.actions.ActionPluginFactoryContext
 import psyke.agent.actions.ActionRegistry
+import psyke.agent.core.ActionOrigin
+import psyke.agent.core.OriginSource
 import psyke.llm.ChatRole
 import psyke.llm.ChatModelClient
 import psyke.llm.ChatRequestOptions
@@ -302,6 +304,62 @@ class SuperegoGatekeeperTest {
         assertFalse(decision.allow)
         assertTrue(decision.reason.contains("secret_exfil", ignoreCase = true))
         assertEquals(0, llm.calls.size)
+    }
+
+    @Test
+    fun `gatekeeper hard denies id-origin direct answer before llm review`() {
+        val llm = StubChatModelClient().apply {
+            enqueueRawResponse("""{"allow":true}""")
+        }
+        val gatekeeper = Superego(
+            modelClient = llm,
+            config = AgentConfig(),
+            actionRegistry = testRegistry()
+        )
+        val idContext = snapshot.copy(
+            origin = ActionOrigin(
+                source = OriginSource.ID,
+                needId = "be-useful",
+                rootImpulseId = "imp-1"
+            )
+        )
+
+        val decision = gatekeeper.review(action, idContext)
+
+        assertFalse(decision.allow)
+        assertTrue(decision.reason.contains("id_origin_direct_answer_denied", ignoreCase = true))
+        assertEquals(0, llm.calls.size)
+    }
+
+    @Test
+    fun `gatekeeper allows id-origin evidence gathering actions to proceed`() {
+        val llm = StubChatModelClient().apply {
+            enqueueRawResponse("""{"allow":true}""")
+        }
+        val gatekeeper = Superego(
+            modelClient = llm,
+            config = AgentConfig(),
+            actionRegistry = testRegistry()
+        )
+        val idContext = snapshot.copy(
+            origin = ActionOrigin(
+                source = OriginSource.ID,
+                needId = "learn-something",
+                rootImpulseId = "imp-2"
+            )
+        )
+        val webSearchAction = PendingAction(
+            id = 700,
+            urgency = Urgency.MEDIUM,
+            type = ActionType.WEB_SEARCH,
+            payload = "official pricing",
+            summary = "gather evidence"
+        )
+
+        val decision = gatekeeper.review(webSearchAction, idContext)
+
+        assertTrue(decision.allow)
+        assertEquals(1, llm.calls.size)
     }
 
     @Test

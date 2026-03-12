@@ -30,6 +30,7 @@ It is intentionally high-level and should stay aligned with the code.
   - `Hippocampus` (MCP memory adapter or noop)
   - `TaskWorkspaceStore` (ephemeral per-request notebook/workspace)
   - `TaskWorkspaceFinalizer` (noop or `LlmTaskWorkspaceFinalizer`)
+  - `Id` (autonomous internal drive module; optional, loaded from `id-runtime.yaml`)
   - `Ego` orchestrator
 - Interactive startup now performs an MCP memory health probe before enabling memory:
   - if probe passes, memory is exposed as available and `McpHippocampus` is wired
@@ -58,6 +59,7 @@ It is intentionally high-level and should stay aligned with the code.
 - `runLoop()` (bounded by `config.planner.maxLoopStepsPerInput`):
   - Scheduler priority:
     - Inputs first
+    - Then Id impulses (when queued)
     - Then highest-urgency between pending action and thought
   - Per task:
     - Activate session context for the task (`sessionId` + interlocutor) before deliberation/memory updates.
@@ -71,10 +73,35 @@ It is intentionally high-level and should stay aligned with the code.
     - Optionally run long-term memory assessment (interval trigger, plus explicit remember-intent fast path).
   - If step limit is reached with pending work:
     - Try to execute one fallback explanation action.
+    - Any active Id impulse lifecycles are force-denied to avoid stale pending Id state.
   - If queues drain:
+    - Finalize any idle Id impulse lifecycles (accepted or denied).
     - Reset deliberation state.
     - Reset per-input memory coordinator state.
     - Clear active task workspaces and pending workspace gates, while preserving per-session workspace digests.
+
+## Id Module and Impulse Lifecycle
+- Files:
+  - `src/main/kotlin/psyke/agent/id/Id.kt`
+  - `src/main/kotlin/psyke/agent/id/NeedState.kt`
+  - `src/main/kotlin/psyke/config/IdRuntimeConfig.kt`
+  - `id-runtime.yaml`
+- Id pulse loop:
+  - Grows each configured need and decrements cooldown/backoff/in-flight timers.
+  - Emits `id_pulse` telemetry with need snapshots.
+  - Enforces a global pending-impulse gate: while one impulse lifecycle is pending, no new impulse is emitted.
+  - Requires Ego idle (`hasPendingWork == false`) before firing a new impulse.
+  - Selects one winner need (max urgency above threshold), enqueues exactly one impulse, and marks it in-flight.
+- Ego impulse lifecycle tracking:
+  - Each impulse root (`root_impulse_id`) gets a lifecycle record.
+  - Id-origin is propagated on every downstream thought/action enqueue path (follow-up, denial recovery, suppression recovery, fallback).
+  - Lifecycle result is aggregated across parallel branches:
+    - accepted: at least one Id-origin action executed
+    - denied: all branches finished without any executed Id-origin action
+  - Final callback to Id is emitted only when no pending scheduler work remains for that root.
+- Denial dynamics:
+  - `IdConfig.maxConsecutiveDenials` is now authoritative for backoff thresholding.
+  - Backoff escalation remains exponential and capped (`MAX_BACKOFF_ESCALATION`).
 
 ## Input Path
 - `SensoryCortex` sanitizes and clamps input to configured limits.
@@ -198,6 +225,10 @@ It is intentionally high-level and should stay aligned with the code.
 - Reviews each non-fallback action with layered checks:
   - deterministic hard-deny checks first (`SuperegoDeterministicConscience`)
   - LLM semantic review second (only if deterministic checks pass)
+- Id-origin deterministic policy is enforced inside Superego (not plugins):
+  - Direct `answer` from Id origin is hard-denied by default.
+  - Id-origin actions are allowlisted for internal/evidence-gathering types (`web_search`, `website_fetch`, `mcp_time`, `answer_draft`).
+  - Non-allowlisted Id-origin actions are denied before LLM review.
 - Superego LLM review is separated into dedicated engines:
   - `SingleStageSuperegoReviewEngine` handles one model (retry, strict-JSON retry, parse validation, safe deny fallback).
   - `TwoStageSuperegoReviewEngine` runs cheap primary review first and escalates only on:

@@ -13,6 +13,8 @@ flowchart LR
 
     E --> AS["AttentionScheduler"]
     AS --> E
+    ID["Id (Autonomous Drives)"] --> AS
+    E --> ID
 
     E --> P["LlmEgoPlanner"]
     P --> AV["Action Verifier LLM Call"]
@@ -89,11 +91,16 @@ sequenceDiagram
 
     loop While pending work and step limit not reached
         Ego->>Sched: nextTask()
-        Sched-->>Ego: input/thought/action
+        Sched-->>Ego: input/impulse/thought/action
         Ego->>Ego: activateSession(task.conversationContext)
         Ego->>Delib: startStep()
 
-        alt Task = input or thought
+        alt Task = impulse
+            Ego->>Planner: decide(context + idState)
+            Planner-->>Ego: thought/action/plan/noop
+            Ego->>Sched: enqueue impulse-derived work with origin=ID
+            Note over Ego,Sched: Impulse final result is deferred until all work for root_impulse_id drains
+        else Task = input or thought
             Ego->>Mem: recall and short-term summary
             Note over Ego,Mem: Planner context now includes targeted reflection-lesson recall
             Ego->>TWS: create or update request workspace and index summary
@@ -241,6 +248,7 @@ stateDiagram-v2
 
     Processing --> StepLimit: max loop steps with pending work
     StepLimit --> FallbackAttempt: dequeue fallback explanation action
+    StepLimit --> Complete: force-deny active impulse lifecycles
     FallbackAttempt --> Executing
 
     Executing --> CleanupResolvedInput: action=answer clears same-input queued work + destroys task workspace

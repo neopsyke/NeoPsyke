@@ -40,6 +40,11 @@
       "id": "plan_decomposition",
       "selector": "psyke.eval.AgentScenarioPackTest.scenario_plan_decomposition_then_execute",
       "description": "Plan decision decomposes into step-thoughts that execute through normal Ego loop."
+    },
+    {
+      "id": "id_impulse_parallel_lifecycle",
+      "selector": "psyke.eval.AgentScenarioPackTest.scenario_id_impulse_parallel_lifecycle",
+      "description": "Id impulse lifecycle finalizes only after all parallel branches complete and accepts when any branch executes valid work."
     }
   ]
 }

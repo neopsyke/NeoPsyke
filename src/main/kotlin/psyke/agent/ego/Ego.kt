@@ -83,7 +83,7 @@ class Ego(
     private val emittedPlanHashes = mutableMapOf<InputScope, MutableSet<String>>()
     private val externalActionSignatureHitsByInput = mutableMapOf<InputScope, MutableMap<String, Int>>()
     private val taskVerifier: TaskVerifier = DeterministicTaskVerifier()
-    private var currentImpulseOrigin: ActionOrigin? = null
+    private val impulseLifecyclesByRoot = mutableMapOf<String, ImpulseLifecycle>()
 
     private fun dialogueFor(sessionId: String): ArrayDeque<DialogueTurn> =
         dialogueBySession.getOrPut(sessionId) { ArrayDeque() }
@@ -184,6 +184,7 @@ class Ego(
                 trigger = "interval",
                 sessionId = resolveSessionId(taskConversationContext)
             )
+            maybeFinalizeImpulseLifecycle(taskRootInputId(task))
             emitQueueSnapshot("task_processed")
             if (steps == 1 || steps % HEAP_SNAPSHOT_INTERVAL == 0) {
                 emitHeapSnapshot()
@@ -194,11 +195,7 @@ class Ego(
             logger.warn { "Reached loop step limit with pending work still in queues." }
             instrumentation.emit(AgentEvents.warning("Loop step limit reached with pending work."))
             emitQueueSnapshot("step_limit_reached")
-            val impOriginAtLimit = currentImpulseOrigin
-            if (impOriginAtLimit != null) {
-                id?.onImpulseCompleted(impOriginAtLimit.needId!!, success = false)
-                currentImpulseOrigin = null
-            }
+            forceDenyAllActiveImpulses(reason = "step_limit_reached")
             val fallbackAction = scheduler.dequeueFallbackExplanationAction()
             if (fallbackAction != null) {
                 steps += 1
@@ -209,11 +206,7 @@ class Ego(
         }
 
         if (!scheduler.hasPendingWork()) {
-            val impOriginAtDrain = currentImpulseOrigin
-            if (impOriginAtDrain != null) {
-                id?.onImpulseCompleted(impOriginAtDrain.needId!!, success = true)
-                currentImpulseOrigin = null
-            }
+            finalizeAllIdleImpulseLifecycles()
             deliberation.reset()
             memory.resetForNewInput()
             planCountByInput.clear()
@@ -334,7 +327,8 @@ class Ego(
             originThought = thought,
             rootInputId = thought.rootInputId,
             rootInputReceivedAtMs = thought.rootInputReceivedAtMs,
-            conversationContext = convCtx
+            conversationContext = convCtx,
+            origin = thought.origin,
         )
 
         instrumentation.emit(AgentEvents.phaseTimings(timing.build()))
@@ -345,6 +339,7 @@ class Ego(
         val convCtx = impulse.conversationContext
         val sessionId = resolveSessionId(convCtx)
         activateSession(convCtx)
+        impulseLifecyclesByRoot[impulse.rootImpulseId] = ImpulseLifecycle(needId = impulse.needId)
 
         timing.startPhase("impulse_processing")
         instrumentation.emit(
@@ -394,11 +389,9 @@ class Ego(
 
         timing.startPhase("apply_decision")
         val origin = ActionOrigin.id(needId = impulse.needId, rootImpulseId = impulse.rootImpulseId)
-        currentImpulseOrigin = origin
 
         when (decision) {
             is EgoDecision.Noop -> {
-                id?.onImpulseDenied(impulse.needId)
                 instrumentation.emit(
                     AgentEvent(
                         type = "impulse_noop",
@@ -442,6 +435,7 @@ class Ego(
                 )
             )
             val outcome = executeActionSafely(resolvedAction)
+            markImpulseActionExecuted(resolvedAction)
             instrumentation.emit(AgentEvents.actionExecuted(resolvedAction, outcome.statusSummary))
             if (resolvedAction.type == ActionType.ANSWER) {
                 memory.journal(
@@ -552,7 +546,7 @@ class Ego(
             return
         }
         timing.startPhase("superego_review")
-        val gateDecision = superego.review(resolvedAction, superegoContext(sessionId, origin = action.origin))
+        val gateDecision = superego.review(resolvedAction, superegoContext(sessionId, origin = resolvedAction.origin))
         instrumentation.emit(
             AgentEvents.actionReviewResult(
                 actionId = resolvedAction.id,
@@ -576,6 +570,7 @@ class Ego(
 
         timing.startPhase("action_execute")
         val outcome = executeActionSafely(resolvedAction)
+        markImpulseActionExecuted(resolvedAction)
         instrumentation.emit(AgentEvents.actionExecuted(resolvedAction, outcome.statusSummary))
         id?.onActivity("action_executed", resolvedAction.type.id)
         if (resolvedAction.type == ActionType.ANSWER) {
@@ -657,7 +652,8 @@ class Ego(
                 allowFallbackExplanation = true,
                 originActionType = resolvedAction.type,
                 originActionObservedEvidence = observed,
-                conversationContext = convCtx
+                conversationContext = convCtx,
+                origin = resolvedAction.origin,
             )
             if (!queued) {
                 instrumentation.emit(AgentEvents.warning("Failed to enqueue follow-up thought after action."))
@@ -699,7 +695,8 @@ class Ego(
             denialReason = reason,
             denialReasonCode = reasonCode,
             allowFallbackExplanation = true,
-            conversationContext = conversationContext
+            conversationContext = conversationContext,
+            origin = action.origin,
         )
         instrumentation.emit(AgentEvents.actionDenied(action, reason, reasonCode))
         memory.journal(
@@ -729,6 +726,70 @@ class Ego(
             )
         }
         emitQueueSnapshot("action_denied")
+    }
+
+    private fun markImpulseActionExecuted(action: PendingAction) {
+        if (action.origin.source != OriginSource.ID) return
+        val rootImpulseId = action.origin.rootImpulseId ?: action.rootInputId ?: return
+        val lifecycle = impulseLifecyclesByRoot[rootImpulseId] ?: return
+        lifecycle.hadExecutedAction = true
+    }
+
+    private fun maybeFinalizeImpulseLifecycle(rootInputId: String?) {
+        val rootImpulseId = rootInputId ?: return
+        val lifecycle = impulseLifecyclesByRoot[rootImpulseId] ?: return
+        if (scheduler.hasPendingWorkForRoot(rootImpulseId)) return
+
+        if (lifecycle.hadExecutedAction) {
+            id?.onImpulseCompleted(lifecycle.needId, success = true)
+            instrumentation.emit(
+                AgentEvent(
+                    type = "impulse_lifecycle_finalized",
+                    data = mapOf(
+                        "root_impulse_id" to rootImpulseId,
+                        "need_id" to lifecycle.needId,
+                        "result" to "accepted",
+                    )
+                )
+            )
+        } else {
+            id?.onImpulseDenied(lifecycle.needId)
+            instrumentation.emit(
+                AgentEvent(
+                    type = "impulse_lifecycle_finalized",
+                    data = mapOf(
+                        "root_impulse_id" to rootImpulseId,
+                        "need_id" to lifecycle.needId,
+                        "result" to "denied",
+                    )
+                )
+            )
+        }
+        impulseLifecyclesByRoot.remove(rootImpulseId)
+    }
+
+    private fun finalizeAllIdleImpulseLifecycles() {
+        val roots = impulseLifecyclesByRoot.keys.toList()
+        roots.forEach { rootImpulseId -> maybeFinalizeImpulseLifecycle(rootImpulseId) }
+    }
+
+    private fun forceDenyAllActiveImpulses(reason: String) {
+        val lifecycles = impulseLifecyclesByRoot.toMap()
+        impulseLifecyclesByRoot.clear()
+        lifecycles.forEach { (rootImpulseId, lifecycle) ->
+            id?.onImpulseDenied(lifecycle.needId)
+            instrumentation.emit(
+                AgentEvent(
+                    type = "impulse_lifecycle_finalized",
+                    data = mapOf(
+                        "root_impulse_id" to rootImpulseId,
+                        "need_id" to lifecycle.needId,
+                        "result" to "denied",
+                        "reason" to reason,
+                    )
+                )
+            )
+        }
     }
 
     private suspend fun applyDecision(
@@ -824,7 +885,8 @@ class Ego(
                         allowFallbackExplanation = originThought.allowFallbackExplanation,
                         originActionType = originThought.originActionType,
                         originActionObservedEvidence = originThought.originActionObservedEvidence,
-                        conversationContext = conversationContext
+                        conversationContext = conversationContext,
+                        origin = origin,
                     )
                     if (!queuedRetry) {
                         instrumentation.emit(AgentEvents.warning("Failed to enqueue retry thought after repeated denied action."))
@@ -901,7 +963,8 @@ class Ego(
                         originThought = originThought,
                         rootInputId = rootInputId,
                         rootInputReceivedAtMs = rootInputReceivedAtMs,
-                        conversationContext = conversationContext
+                        conversationContext = conversationContext,
+                        origin = origin,
                     )
                     emitQueueSnapshot("decision_plan_suppressed_budget")
                     return
@@ -930,7 +993,8 @@ class Ego(
                         originThought = originThought,
                         rootInputId = rootInputId,
                         rootInputReceivedAtMs = rootInputReceivedAtMs,
-                        conversationContext = conversationContext
+                        conversationContext = conversationContext,
+                        origin = origin,
                     )
                     emitQueueSnapshot("decision_plan_suppressed_hash")
                     return
@@ -1048,7 +1112,8 @@ class Ego(
                         rootInputId = rootInputId,
                         rootInputReceivedAtMs = rootInputReceivedAtMs,
                         reason = decision.reason,
-                        conversationContext = conversationContext
+                        conversationContext = conversationContext,
+                        origin = origin,
                     )
                     emitQueueSnapshot("decision_noop_short_circuit")
                 } else {
@@ -1097,6 +1162,7 @@ class Ego(
         rootInputId: String?,
         rootInputReceivedAtMs: Long?,
         conversationContext: ConversationContext,
+        origin: ActionOrigin,
     ) {
         val sessionId = resolveSessionId(conversationContext)
         if (scheduler.hasPendingPlanThoughtsForInput(rootInputId, sessionId)) {
@@ -1121,7 +1187,8 @@ class Ego(
             allowFallbackExplanation = originThought?.allowFallbackExplanation ?: true,
             originActionType = originThought?.originActionType,
             originActionObservedEvidence = originThought?.originActionObservedEvidence,
-            conversationContext = conversationContext
+            conversationContext = conversationContext,
+            origin = origin,
         )
         if (queued) {
             instrumentation.emit(
@@ -1201,7 +1268,8 @@ class Ego(
             isFallbackExplanation = true,
             rootInputId = thought.rootInputId,
             rootInputReceivedAtMs = thought.rootInputReceivedAtMs,
-            conversationContext = thought.conversationContext
+            conversationContext = thought.conversationContext,
+            origin = thought.origin,
         )
         if (!queued) {
             logger.warn { "Fallback explanation enqueue failed; executing immediate fallback action." }
@@ -1222,7 +1290,8 @@ class Ego(
                     isFallbackExplanation = true,
                     rootInputId = thought.rootInputId,
                     rootInputReceivedAtMs = thought.rootInputReceivedAtMs,
-                    conversationContext = thought.conversationContext
+                    conversationContext = thought.conversationContext,
+                    origin = thought.origin,
                 )
             )
             emitQueueSnapshot("fallback_explanation_executed_immediate")
@@ -1236,6 +1305,7 @@ class Ego(
         rootInputReceivedAtMs: Long?,
         reason: String,
         conversationContext: ConversationContext,
+        origin: ActionOrigin = ActionOrigin.USER,
     ) {
         val sessionId = resolveSessionId(conversationContext)
         if (scheduler.hasPendingFallbackExplanationAction(rootInputId, sessionId)) {
@@ -1252,7 +1322,8 @@ class Ego(
             isFallbackExplanation = true,
             rootInputId = rootInputId,
             rootInputReceivedAtMs = rootInputReceivedAtMs,
-            conversationContext = conversationContext
+            conversationContext = conversationContext,
+            origin = origin,
         )
         if (!queued) {
             instrumentation.emit(AgentEvents.warning("Failed to enqueue circuit-breaker fallback."))
@@ -1933,6 +2004,11 @@ class Ego(
     private data class InputScope(
         val rootInputId: String?,
         val sessionId: String,
+    )
+
+    private data class ImpulseLifecycle(
+        val needId: String,
+        var hadExecutedAction: Boolean = false,
     )
 
     private companion object {

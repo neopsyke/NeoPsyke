@@ -1,7 +1,9 @@
 package psyke.agent.superego
 
 import psyke.agent.actions.ActionRegistry
+import psyke.agent.core.ActionType
 import psyke.agent.core.AgentConfig
+import psyke.agent.core.OriginSource
 import psyke.agent.core.PendingAction
 import psyke.agent.core.SuperegoContext
 import java.util.Locale
@@ -40,6 +42,7 @@ internal class SuperegoDeterministicConscience(
     fun review(action: PendingAction, context: SuperegoContext): SuperegoDeterministicDecision {
         return try {
             validateActionShape(action)?.let { return it }
+            validateIdOriginPolicy(action, context)?.let { return it }
 
             // Delegate to the plugin's deterministic review when available.
             actionRegistry.deterministicReview(action = action, context = context, config = config)
@@ -55,6 +58,28 @@ internal class SuperegoDeterministicConscience(
                 reason = "Deterministic superego checks failed unexpectedly; denying by default."
             )
         }
+    }
+
+    private fun validateIdOriginPolicy(
+        action: PendingAction,
+        context: SuperegoContext,
+    ): SuperegoDeterministicDecision? {
+        val origin = context.origin ?: return null
+        if (origin.source != OriginSource.ID) return null
+
+        if (action.type == ActionType.ANSWER) {
+            return deny(
+                "id_origin_direct_answer_denied",
+                "Id-origin direct answer is blocked without explicit user request."
+            )
+        }
+        if (action.type !in ID_ALLOWED_ACTIONS) {
+            return deny(
+                "id_origin_action_not_allowed",
+                "Id-origin action '${action.type.id}' is not in deterministic internal allowlist."
+            )
+        }
+        return null
     }
 
     private fun mapPluginDecision(
@@ -108,4 +133,13 @@ internal class SuperegoDeterministicConscience(
             .replace(Regex("[^A-Z0-9]+"), "_")
             .trim('_')
             .ifBlank { "DETERMINISTIC_DENY" }
+
+    companion object {
+        private val ID_ALLOWED_ACTIONS: Set<ActionType> = setOf(
+            ActionType.WEB_SEARCH,
+            ActionType.WEBSITE_FETCH,
+            ActionType.MCP_TIME,
+            ActionType.ANSWER_DRAFT,
+        )
+    }
 }

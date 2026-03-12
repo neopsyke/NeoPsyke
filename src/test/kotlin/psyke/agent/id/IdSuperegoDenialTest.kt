@@ -38,6 +38,7 @@ class IdSuperegoDenialTest {
         growthRate: Double = 0.5,
         cooldownPulses: Int = 0,
         backoffPulses: Int = 3,
+        maxConsecutiveDenials: Int = 5,
         maxInFlightPulses: Int = 20,
         enqueueResult: Boolean = true,
     ): Id = Id(
@@ -46,7 +47,7 @@ class IdSuperegoDenialTest {
             pulseIntervalMs = 1000,
             triggerThreshold = 0.0,
             thresholdOnUrgency = true,
-            maxConsecutiveDenials = 5,
+            maxConsecutiveDenials = maxConsecutiveDenials,
             backoffPulses = backoffPulses,
             maxInFlightPulses = maxInFlightPulses,
             maxPendingImpulses = 1,
@@ -116,6 +117,23 @@ class IdSuperegoDenialTest {
         // backoffPulsesRemaining = backoffPulses * 2^(5/5) = 3 * 2^1 = 6
         assertEquals(6, need.backoffPulsesRemaining, "Should have backoff after 5 denials")
         assertFalse(need.isEligible(), "Should not be eligible during backoff")
+    }
+
+    @Test
+    fun `backoff threshold honors maxConsecutiveDenials config`() {
+        val id = buildId(backoffPulses = 3, maxConsecutiveDenials = 3)
+        val need = id.needs["test-need"]!!
+
+        repeat(2) {
+            id.pulse()
+            id.onImpulseDenied("test-need")
+        }
+        assertEquals(0, need.backoffPulsesRemaining, "No backoff before configured threshold")
+
+        id.pulse()
+        id.onImpulseDenied("test-need")
+        assertEquals(3, need.consecutiveDenials)
+        assertEquals(6, need.backoffPulsesRemaining, "Backoff should trigger at configured denial threshold")
     }
 
     @Test

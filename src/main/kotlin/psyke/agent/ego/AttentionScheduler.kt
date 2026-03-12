@@ -256,6 +256,15 @@ class AttentionScheduler(
     fun hasPendingWork(): Boolean =
         inputs.isNotEmpty() || impulses.isNotEmpty() || thoughts.isNotEmpty() || actions.isNotEmpty()
 
+    /**
+     * Returns true when there is queued work (thought/action/impulse) for a specific root.
+     * Used by Ego to close Id impulse lifecycles only after all derived work is drained.
+     */
+    fun hasPendingWorkForRoot(rootInputId: String): Boolean =
+        impulses.any { it.rootImpulseId == rootInputId } ||
+            thoughts.any { it.rootInputId == rootInputId } ||
+            actions.any { it.rootInputId == rootInputId }
+
     fun queueSnapshot(): QueueSnapshot =
         QueueSnapshot(
             pendingInputCount = inputs.size,

@@ -5,14 +5,24 @@ import psyke.agent.actions.websearch.WebSearchEngine
 import psyke.agent.actions.websearch.WebSearchResult
 import psyke.agent.actions.websearch.WebSearchSource
 import psyke.agent.core.AgentConfig
+import psyke.agent.core.EgoDecision
+import psyke.agent.core.EgoTrigger
 import psyke.agent.core.MemoryConfig
+import psyke.agent.core.PendingImpulse
 import psyke.agent.core.PendingAction
+import psyke.agent.core.PendingThought
 import psyke.agent.core.MetaReasonerConfig
 import psyke.agent.core.PlannerConfig
+import psyke.agent.core.PlannerContext
 import psyke.agent.core.TaskWorkspaceConfig
+import psyke.agent.core.Urgency
 import psyke.agent.cortex.motor.MotorCortex
 import psyke.agent.ego.Ego
 import psyke.agent.ego.LlmEgoPlanner
+import psyke.agent.id.Id
+import psyke.agent.id.IdConfig
+import psyke.agent.id.NeedConfig
+import psyke.agent.id.ResponseCurveConfig
 import psyke.agent.memory.longterm.Hippocampus
 import psyke.agent.memory.longterm.MemoryImprint
 import psyke.agent.memory.longterm.MemoryRecall
@@ -25,6 +35,8 @@ import psyke.llm.ChatRequestOptions
 import psyke.support.RecordingInstrumentation
 import psyke.support.StubChatModelClient
 import java.io.ByteArrayInputStream
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -434,6 +446,100 @@ class AgentScenarioPackTest {
         assertTrue(
             instrumentation.events.any {
                 it.type == "planner_decision" && it.data["decision_type"] == "plan"
+            }
+        )
+    }
+
+    @Test
+    fun scenario_id_impulse_parallel_lifecycle() {
+        val instrumentation = RecordingInstrumentation()
+        val planner = object : Ego.Planner {
+            override fun decide(trigger: EgoTrigger, context: PlannerContext): EgoDecision =
+                when (trigger) {
+                    is EgoTrigger.IncomingInput -> EgoDecision.Noop("ignore user test input")
+                    is EgoTrigger.IncomingImpulse -> EgoDecision.EnqueuePlan(
+                        urgency = Urgency.HIGH,
+                        goal = "Evaluate impulse branches",
+                        steps = listOf("discard branch", "execute branch")
+                    )
+                    is EgoTrigger.PendingThoughtInput -> decideThought(trigger.thought)
+                }
+
+            private fun decideThought(thought: PendingThought): EgoDecision =
+                when {
+                    thought.planContext?.stepIndex == 0 -> EgoDecision.Noop("discard this branch")
+                    thought.planContext?.stepIndex == 1 -> EgoDecision.ProposeAction(
+                        urgency = Urgency.HIGH,
+                        actionType = psyke.agent.core.ActionType.WEB_SEARCH,
+                        payload = "official pricing",
+                        summary = "gather evidence"
+                    )
+                    else -> EgoDecision.Noop("done")
+                }
+        }
+        val config = AgentConfig(
+            planner = PlannerConfig(maxLoopStepsPerInput = 24, maxThoughtPasses = 1)
+        )
+        val superegoLlm = StubChatModelClient().apply {
+            enqueueRawResponse("""{"allow":true}""")
+        }
+        val agent = Ego(
+            planner = planner,
+            superego = Superego(modelClient = superegoLlm, config = config, instrumentation = instrumentation),
+            motorCortex = buildMotorCortex(output = {}),
+            config = config,
+            instrumentation = instrumentation
+        )
+        val idModule = Id(
+            config = IdConfig(
+                enabled = true,
+                pulseIntervalMs = 1000,
+                triggerThreshold = 0.0,
+                maxConsecutiveDenials = 5,
+                backoffPulses = 10,
+                maxInFlightPulses = 20,
+                maxPendingImpulses = 1,
+                needs = mapOf(
+                    "be-useful" to NeedConfig(
+                        description = "test",
+                        growthRate = 0.1,
+                        cooldownPulses = 0,
+                        prompt = "be useful",
+                        responseCurve = ResponseCurveConfig(type = "linear")
+                    )
+                )
+            ),
+            instrumentation = instrumentation,
+            scope = CoroutineScope(Dispatchers.Unconfined),
+            enqueueImpulse = { false },
+            hasPendingWork = { false },
+        )
+        agent.setId(idModule)
+        val rootImpulseId = "scenario-id-lifecycle-root"
+        val queued = agent.enqueueImpulse(
+            PendingImpulse(
+                id = 1,
+                needId = "be-useful",
+                prompt = "Try something useful.",
+                urgency = 0.9,
+                rawValue = 0.9,
+                rootImpulseId = rootImpulseId,
+                conversationContext = idModule.conversationContext,
+            ),
+            maxPendingImpulses = 1
+        )
+        assertTrue(queued)
+
+        runAgentWithInput(agent, "hello\nexit\n")
+
+        assertEquals(1, instrumentation.events.count { it.type == "id_impulse_accepted" })
+        assertEquals(1, instrumentation.events.count { it.type == "id_impulse_completed" && it.data["success"] == true })
+        assertEquals(0, instrumentation.events.count { it.type == "id_impulse_denied" })
+        assertTrue(
+            instrumentation.events.any {
+                it.type == "impulse_lifecycle_finalized" &&
+                    it.data["root_impulse_id"] == rootImpulseId &&
+                    it.data["result"] == "accepted"
             }
         )
     }

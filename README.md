@@ -105,10 +105,20 @@ Standalone Kotlin JVM app using Gradle with:
   - `app` section covers UI/runtime flags (for example dashboard enablement and port).
   - `eval` section covers eval defaults (for example stage default and raw-response cap).
   - Precedence is `CLI > env > YAML > code defaults`.
+- Id runtime settings are centralized in `id-runtime.yaml` (repository root).
+  - Optional override file path: `PSYKE_ID_CONFIG_FILE=/path/to/id-runtime.yaml`.
+  - `id.enabled` toggles autonomous internal drive impulses.
+  - `id.max_consecutive_denials` controls when denial backoff is applied.
+  - Id emits at most one pending impulse lifecycle at a time; a new impulse is not fired until the prior lifecycle is finalized.
+  - Id-origin deterministic policy is enforced in Superego (not action plugins):
+    - direct Id-origin `answer` is denied by default
+    - internal/evidence actions (`web_search`, `website_fetch`, `mcp_time`, `answer_draft`) are allowed to proceed to normal review/execution flow.
 - Optional:
   - `PSYKE_LLM_CONFIG_FILE` (optional; path to LLM runtime YAML, default: `./llm-runtime.yaml`)
   - `PSYKE_MCP_CONFIG_FILE` (optional; path to MCP runtime YAML, default: `./mcp-runtime.yaml`)
   - `PSYKE_AGENT_CONFIG_FILE` (optional; path to agent/app/eval runtime YAML, default: `./agent-runtime.yaml`)
+  - `PSYKE_ID_CONFIG_FILE` (optional; path to Id runtime YAML, default: `./id-runtime.yaml`)
+  - `PSYKE_ID_ENABLED` (default from `id-runtime.yaml`)
   - `PSYKE_DASHBOARD_ENABLED` (default: `true`)
   - `PSYKE_DASHBOARD_PORT` (default: `8787`)
   - `EGO_MAX_LOOP_STEPS` (default: `180`)

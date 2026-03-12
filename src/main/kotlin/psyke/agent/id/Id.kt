@@ -27,10 +27,8 @@ private val logger = KotlinLogging.logger {}
  * The Id itself is primitive: it only grows needs, selects candidates, and
  * reacts to binary outcomes. All intelligence lives in the Ego.
  *
- * Thread safety: the pulse loop runs in a single coroutine. Callbacks from
- * the Ego ([onActivity], [onImpulseCompleted], [onImpulseDenied]) may be
- * called from the Ego's coroutine — these are short, non-blocking mutations
- * guarded by the effectively single-threaded agent scope.
+ * Thread safety: pulse updates and Ego callbacks can run on different threads.
+ * All mutable Id state is guarded by [stateLock].
  */
 class Id(
     private val config: IdConfig,
@@ -52,11 +50,14 @@ class Id(
             name = name,
             config = needConfig,
             curve = ResponseCurve.fromConfig(needConfig.responseCurve),
+            maxConsecutiveDenials = config.maxConsecutiveDenials,
         )
     }
 
+    private val stateLock = Any()
     private var pulseJob: Job? = null
     private var pulseCount: Long = 0
+    private var pendingImpulse: PendingImpulseLifecycle? = null
 
     /** The conversation context used for all Id-initiated sessions. */
     val conversationContext: ConversationContext = ConversationContext(
@@ -94,7 +95,7 @@ class Id(
 
     // ── Pulse loop ───────────────────────────────────────────────────
 
-    internal fun pulse() {
+    internal fun pulse() = synchronized(stateLock) {
         pulseCount++
 
         // 1. Grow all needs and decrement cooldowns.
@@ -102,26 +103,42 @@ class Id(
             need.grow()
             need.decrementCooldowns(config.maxInFlightPulses)
         }
+        // If an in-flight impulse timed out during cooldown decrement, release pending lock.
+        pendingImpulse?.let { active ->
+            val pendingNeed = needs[active.needId]
+            if (pendingNeed == null || !pendingNeed.inFlight) {
+                pendingImpulse = null
+                if (pendingNeed != null) {
+                    emitImpulseDenied(active.needId, pendingNeed.consecutiveDenials)
+                }
+            }
+        }
 
         // 2. Emit pulse instrumentation event.
         emitPulseEvent()
 
-        // 3. Idle gate: don't fire impulses if the Ego is busy.
+        // 3. Do not fire new impulses while one lifecycle is still pending.
+        pendingImpulse?.let { active ->
+            emitPreGateBlocked(active.needId, "impulse_pending")
+            return
+        }
+
+        // 4. Idle gate: don't fire impulses if the Ego is busy.
         if (hasPendingWork()) {
             return
         }
 
-        // 4. Collect eligible candidates above threshold.
+        // 5. Collect eligible candidates above threshold.
         val threshold = config.triggerThreshold
         val candidates = needs.values.filter { need ->
             need.isEligible() && effectiveValue(need) > threshold
         }
         if (candidates.isEmpty()) return
 
-        // 5. Winner = highest effective urgency.
+        // 6. Winner = highest effective urgency.
         val winner = candidates.maxBy { it.urgency }
 
-        // 6. Enqueue impulse.
+        // 7. Enqueue impulse.
         val impulse = PendingImpulse(
             id = pulseCount,
             needId = winner.name,
@@ -134,6 +151,10 @@ class Id(
         val accepted = enqueueImpulse(impulse)
         if (accepted) {
             winner.markInFlight(config.maxInFlightPulses)
+            pendingImpulse = PendingImpulseLifecycle(
+                needId = winner.name,
+                rootImpulseId = impulse.rootImpulseId
+            )
             emitImpulseFired(winner, impulse)
             logger.debug { "Id impulse fired: need='${winner.name}' urgency=${winner.urgency}" }
         } else {
@@ -156,14 +177,16 @@ class Id(
      * @param actionType optional action type (e.g., "web_search") for compound keys
      */
     fun onActivity(eventType: String, actionType: String? = null) {
-        val compoundKey = if (actionType != null) "${eventType}_$actionType" else null
-        needs.values.forEach { need ->
-            val decay = need.config.activityDecay[eventType]
-                ?: (compoundKey?.let { need.config.activityDecay[it] })
-            if (decay != null && decay > 0.0) {
-                val before = need.value
-                need.decayOnActivity(decay)
-                emitActivityDecay(need.name, eventType, decay, before, need.value)
+        synchronized(stateLock) {
+            val compoundKey = if (actionType != null) "${eventType}_$actionType" else null
+            needs.values.forEach { need ->
+                val decay = need.config.activityDecay[eventType]
+                    ?: (compoundKey?.let { need.config.activityDecay[it] })
+                if (decay != null && decay > 0.0) {
+                    val before = need.value
+                    need.decayOnActivity(decay)
+                    emitActivityDecay(need.name, eventType, decay, before, need.value)
+                }
             }
         }
     }
@@ -175,10 +198,15 @@ class Id(
      * @param success true if at least one action was executed successfully
      */
     fun onImpulseCompleted(needId: String, success: Boolean) {
-        val need = needs[needId] ?: return
-        need.clearInFlight(success, config.backoffPulses)
-        emitImpulseCompleted(needId, success, need.value)
-        logger.debug { "Id impulse completed: need='$needId' success=$success newValue=${need.value}" }
+        synchronized(stateLock) {
+            val need = needs[needId] ?: return
+            need.clearInFlight(success, config.backoffPulses)
+            if (pendingImpulse?.needId == needId) {
+                pendingImpulse = null
+            }
+            emitImpulseCompleted(needId, success, need.value)
+            logger.debug { "Id impulse completed: need='$needId' success=$success newValue=${need.value}" }
+        }
     }
 
     /**
@@ -186,10 +214,15 @@ class Id(
      * (planner noop or superego denial).
      */
     fun onImpulseDenied(needId: String) {
-        val need = needs[needId] ?: return
-        need.onDenied(config.backoffPulses)
-        emitImpulseDenied(needId, need.consecutiveDenials)
-        logger.debug { "Id impulse denied: need='$needId' denials=${need.consecutiveDenials}" }
+        synchronized(stateLock) {
+            val need = needs[needId] ?: return
+            need.onDenied(config.backoffPulses)
+            if (pendingImpulse?.needId == needId) {
+                pendingImpulse = null
+            }
+            emitImpulseDenied(needId, need.consecutiveDenials)
+            logger.debug { "Id impulse denied: need='$needId' denials=${need.consecutiveDenials}" }
+        }
     }
 
     /**
@@ -198,13 +231,17 @@ class Id(
      * confirmation point for instrumentation.
      */
     fun onImpulseAccepted(needId: String) {
-        emitImpulseAccepted(needId)
-        logger.debug { "Id impulse accepted: need='$needId'" }
+        synchronized(stateLock) {
+            emitImpulseAccepted(needId)
+            logger.debug { "Id impulse accepted: need='$needId'" }
+        }
     }
 
     /** Read-only snapshot of all need urgencies for planner context. */
     fun needUrgencies(): Map<String, Double> =
-        needs.mapValues { (_, state) -> state.urgency }
+        synchronized(stateLock) {
+            needs.mapValues { (_, state) -> state.urgency }
+        }
 
     // ── Instrumentation ──────────────────────────────────────────────
 
@@ -289,4 +326,9 @@ class Id(
         const val SESSION_ID = "id:internal"
         val INTERLOCUTOR = Interlocutor(id = "id", label = "Id")
     }
+
+    private data class PendingImpulseLifecycle(
+        val needId: String,
+        val rootImpulseId: String,
+    )
 }

@@ -10,6 +10,7 @@ class NeedState(
     val name: String,
     val config: NeedConfig,
     val curve: ResponseCurve = ResponseCurve.fromConfig(config.responseCurve),
+    private val maxConsecutiveDenials: Int = DEFAULT_MAX_CONSECUTIVE_DENIALS,
 ) {
     /** Raw need value in [0.0, 1.0]. */
     var value: Double = 0.0
@@ -134,8 +135,9 @@ class NeedState(
     // ── Internal ─────────────────────────────────────────────────────
 
     private fun applyBackoffIfNeeded(backoffPulses: Int) {
-        if (backoffPulses > 0 && consecutiveDenials > 0 && consecutiveDenials % MAX_DENIALS_BEFORE_BACKOFF == 0) {
-            val escalation = (consecutiveDenials / MAX_DENIALS_BEFORE_BACKOFF).coerceAtMost(MAX_BACKOFF_ESCALATION)
+        if (maxConsecutiveDenials <= 0) return
+        if (backoffPulses > 0 && consecutiveDenials > 0 && consecutiveDenials % maxConsecutiveDenials == 0) {
+            val escalation = (consecutiveDenials / maxConsecutiveDenials).coerceAtMost(MAX_BACKOFF_ESCALATION)
             backoffPulsesRemaining = backoffPulses * (1 shl escalation)
         }
     }
@@ -158,8 +160,10 @@ class NeedState(
     )
 
     companion object {
-        /** After this many consecutive denials, apply backoff. */
-        internal const val MAX_DENIALS_BEFORE_BACKOFF = 5
+        /** Default denial threshold before backoff when config does not override it. */
+        internal const val DEFAULT_MAX_CONSECUTIVE_DENIALS = 5
+        /** Backward-compatible alias used by existing tests/docs. */
+        internal const val MAX_DENIALS_BEFORE_BACKOFF = DEFAULT_MAX_CONSECUTIVE_DENIALS
         /** Cap the exponential backoff escalation factor (2^N). */
         internal const val MAX_BACKOFF_ESCALATION = 4
     }

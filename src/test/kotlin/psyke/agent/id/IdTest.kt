@@ -312,6 +312,41 @@ class IdTest {
         assertEquals(1, enqueuedImpulses.size, "Should not fire while in-flight")
     }
 
+    @Test
+    fun `Id does not emit a second impulse while one is pending globally`() {
+        val config = defaultConfig(
+            triggerThreshold = 0.0,
+            needs = mapOf(
+                "first" to NeedConfig(
+                    description = "first",
+                    growthRate = 0.4,
+                    cooldownPulses = 0,
+                    prompt = "first!",
+                    responseCurve = ResponseCurveConfig(type = "linear"),
+                ),
+                "second" to NeedConfig(
+                    description = "second",
+                    growthRate = 0.3,
+                    cooldownPulses = 0,
+                    prompt = "second!",
+                    responseCurve = ResponseCurveConfig(type = "linear"),
+                ),
+            ),
+        )
+        val id = buildId(config = config)
+
+        id.pulse() // fires one impulse
+        assertEquals(1, enqueuedImpulses.size)
+
+        // Without lifecycle completion callback, no additional impulse can be emitted.
+        repeat(4) { id.pulse() }
+        assertEquals(1, enqueuedImpulses.size, "Global pending impulse gate should block additional impulses")
+
+        id.onImpulseDenied(enqueuedImpulses.first().needId)
+        id.pulse()
+        assertEquals(2, enqueuedImpulses.size, "A new impulse can fire after pending lifecycle is resolved")
+    }
+
     // ── Queue full rejection ────────────────────────────────────────────
 
     @Test
