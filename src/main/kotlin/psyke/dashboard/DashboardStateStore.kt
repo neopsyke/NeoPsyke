@@ -128,6 +128,19 @@ class DashboardStateStore(
                     }
                 }
 
+                "impulse_processing" -> {
+                    currentProcessing = mapOf(
+                        "kind" to "impulse",
+                        "item" to (event.data["need_id"] ?: "")
+                    )
+                    // Route Id-originated answers to the default session so the user sees them.
+                    val rootImpulseId = event.data["root_impulse_id"]?.toString()
+                    if (rootImpulseId != null) {
+                        ensureChatSessionLocked(sessionId = DEFAULT_SESSION_ID, title = "Default")
+                        rootInputSessionMap[rootImpulseId] = DEFAULT_SESSION_ID
+                    }
+                }
+
                 "thought_processing" -> {
                     currentProcessing = mapOf(
                         "kind" to "thought",
@@ -656,6 +669,7 @@ class DashboardStateStore(
             "interlocutor" to session.interlocutor?.let {
                 mapOf("id" to it.id, "label" to it.label, "display_name" to it.displayName())
             },
+            "is_read_only" to session.sessionId.startsWith("id:"),
             "created_at_ms" to session.createdAtMs,
             "updated_at_ms" to session.updatedAtMs,
             "message_count" to session.messages.size,

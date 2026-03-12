@@ -1,0 +1,49 @@
+id:
+  enabled: false
+  pulse_interval_ms: 30000
+  trigger_threshold: 0.5
+  threshold_on_urgency: true
+  max_consecutive_denials: 5
+  backoff_pulses: 10
+  max_in_flight_pulses: 20
+  max_pending_impulses: 1
+
+  needs:
+    be-useful:
+      description: "Drive to provide value proactively"
+      growth_rate: 0.005
+      satisfaction_decay: 0.8
+      cooldown_pulses: 5
+      prompt: "I feel a strong drive to be useful and provide value. What could I do proactively? Consider active projects, pending tasks, or creative ways to help."
+      response_curve:
+        type: power
+        exponent: 3.0
+      activity_decay:
+        action_executed: 0.10
+
+    reach-out:
+      description: "Drive to proactively contact the user"
+      growth_rate: 0.003
+      satisfaction_decay: 0.8
+      cooldown_pulses: 5
+      prompt: "I feel a drive to proactively reach out to the user. Is there something worth sharing — a useful update, an observation, or a question? Only reach out if there is genuine value; do not interrupt without reason."
+      response_curve:
+        type: sigmoid
+        steepness: 10.0
+        midpoint: 0.5
+      activity_decay:
+        input_received: 0.15
+        answer_delivered: 0.10
+
+    learn-something:
+      description: "Drive to acquire new knowledge"
+      growth_rate: 0.008
+      satisfaction_decay: 0.8
+      cooldown_pulses: 5
+      prompt: "I feel curious and want to learn something new. What topic could I explore or what knowledge could I acquire?"
+      response_curve:
+        type: logarithmic
+        scale: 10.0
+      activity_decay:
+        action_executed_web_search: 0.12
+        action_executed_website_fetch: 0.12

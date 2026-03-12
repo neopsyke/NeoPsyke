@@ -10,6 +10,7 @@ class AttentionScheduler(
     private val inputs = PriorityQueue<PendingInput>(inputComparator)
     private val thoughts = PriorityQueue<PendingThought>(thoughtComparator)
     private val actions = PriorityQueue<PendingAction>(actionComparator)
+    private val impulses = ArrayDeque<PendingImpulse>()
     private var latestQueuedInput: PendingInput? = null
 
     fun enqueueInput(
@@ -51,6 +52,7 @@ class AttentionScheduler(
         originActionType: ActionType? = null,
         originActionObservedEvidence: Boolean? = null,
         conversationContext: ConversationContext = ConversationContext.default(),
+        origin: ActionOrigin = ActionOrigin.USER,
     ): Boolean {
         if (thoughts.size >= config.maxPendingThoughts) {
             return false
@@ -73,6 +75,7 @@ class AttentionScheduler(
                 originActionType = originActionType,
                 originActionObservedEvidence = originActionObservedEvidence,
                 conversationContext = conversationContext,
+                origin = origin,
             )
         )
         return true
@@ -90,6 +93,7 @@ class AttentionScheduler(
         rootInputId: String? = null,
         rootInputReceivedAtMs: Long? = null,
         conversationContext: ConversationContext = ConversationContext.default(),
+        origin: ActionOrigin = ActionOrigin.USER,
     ): Boolean {
         if (actions.size >= config.maxPendingActions) {
             return false
@@ -107,10 +111,30 @@ class AttentionScheduler(
                 isFallbackExplanation = isFallbackExplanation,
                 rootInputId = rootInputId,
                 rootInputReceivedAtMs = rootInputReceivedAtMs,
-                conversationContext = conversationContext
+                conversationContext = conversationContext,
+                origin = origin,
             )
         )
         return true
+    }
+
+    /**
+     * Enqueue an impulse from the Id module.
+     * Impulses are processed after inputs but before actions/thoughts (Ego idle).
+     *
+     * @param impulse the impulse to enqueue
+     * @param maxPendingImpulses maximum impulse queue depth (from [IdConfig])
+     * @return true if enqueued, false if at capacity
+     */
+    fun enqueueImpulse(impulse: PendingImpulse, maxPendingImpulses: Int): Boolean {
+        if (impulses.size >= maxPendingImpulses) return false
+        impulses.addLast(impulse)
+        return true
+    }
+
+    /** Remove all pending impulses. */
+    fun clearPendingImpulses() {
+        impulses.clear()
     }
 
     fun dequeueFallbackExplanationAction(): PendingAction? {
@@ -197,11 +221,19 @@ class AttentionScheduler(
     }
 
     fun nextTask(): LoopTask? {
+        // 1. User inputs always take top priority.
         val input = inputs.poll()
         if (input != null) {
             return LoopTask.ProcessInput(input)
         }
 
+        // 2. Id impulses come second (when Ego is otherwise idle).
+        val impulse = impulses.removeFirstOrNull()
+        if (impulse != null) {
+            return LoopTask.ProcessImpulse(impulse)
+        }
+
+        // 3. Actions and thoughts by urgency priority.
         val topAction = actions.peek()
         val topThought = thoughts.peek()
         if (topAction == null && topThought == null) {
@@ -221,13 +253,15 @@ class AttentionScheduler(
         }
     }
 
-    fun hasPendingWork(): Boolean = inputs.isNotEmpty() || thoughts.isNotEmpty() || actions.isNotEmpty()
+    fun hasPendingWork(): Boolean =
+        inputs.isNotEmpty() || impulses.isNotEmpty() || thoughts.isNotEmpty() || actions.isNotEmpty()
 
     fun queueSnapshot(): QueueSnapshot =
         QueueSnapshot(
             pendingInputCount = inputs.size,
             pendingThoughtCount = thoughts.size,
-            pendingActionCount = actions.size
+            pendingActionCount = actions.size,
+            pendingImpulseCount = impulses.size,
         )
 
     fun queueState(): QueueState =

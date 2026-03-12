@@ -37,6 +37,37 @@ data class PendingThought(
     val originActionType: ActionType? = null,
     val originActionObservedEvidence: Boolean? = null,
     val conversationContext: ConversationContext = ConversationContext.default(),
+    val origin: ActionOrigin = ActionOrigin.USER,
+)
+
+/**
+ * Tracks the origin of a pending thought or action, distinguishing
+ * user-initiated work from Id-driven (internal drive) work.
+ */
+data class ActionOrigin(
+    val source: OriginSource = OriginSource.USER,
+    val needId: String? = null,
+    val rootImpulseId: String? = null,
+) {
+    companion object {
+        val USER = ActionOrigin(OriginSource.USER)
+        val SYSTEM = ActionOrigin(OriginSource.SYSTEM)
+        fun id(needId: String, rootImpulseId: String) =
+            ActionOrigin(OriginSource.ID, needId, rootImpulseId)
+    }
+}
+
+enum class OriginSource { USER, ID, SYSTEM }
+
+data class PendingImpulse(
+    val id: Long,
+    val needId: String,
+    val prompt: String,
+    val urgency: Double,
+    val rawValue: Double,
+    val rootImpulseId: String = RootInputIds.next(),
+    val receivedAtMs: Long = System.currentTimeMillis(),
+    val conversationContext: ConversationContext,
 )
 
 data class PendingAction(
@@ -52,12 +83,14 @@ data class PendingAction(
     val conversationContext: ConversationContext = ConversationContext.default(),
     val requiresFollowUpThought: Boolean = false,
     val followUpPrefix: String = "Action completed.",
+    val origin: ActionOrigin = ActionOrigin.USER,
 )
 
 data class QueueSnapshot(
     val pendingInputCount: Int,
     val pendingThoughtCount: Int,
     val pendingActionCount: Int,
+    val pendingImpulseCount: Int = 0,
 )
 
 data class ClearedPendingWork(
@@ -75,6 +108,7 @@ sealed interface LoopTask {
     data class ProcessInput(val item: PendingInput) : LoopTask
     data class ProcessThought(val item: PendingThought) : LoopTask
     data class PerformAction(val item: PendingAction) : LoopTask
+    data class ProcessImpulse(val item: PendingImpulse) : LoopTask
 }
 
 object RootInputIds {

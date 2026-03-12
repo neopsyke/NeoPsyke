@@ -1,5 +1,15 @@
 package psyke.agent.core
 
+/**
+ * Snapshot of the Id's drive state, injected into [PlannerContext] when the
+ * planner is responding to an Id impulse. Enables drive-modulated reasoning.
+ */
+data class IdStateSnapshot(
+    val triggeringNeed: String,
+    val triggeringUrgency: Double,
+    val allNeeds: Map<String, Double>,
+)
+
 data class PlannerContext(
     val recentDialogue: List<DialogueTurn>,
     val queue: QueueSnapshot,
@@ -16,6 +26,7 @@ data class PlannerContext(
     val dispatchableActions: Set<ActionType> = availableActions,
     val actionDefinitions: List<ActionPlanningDefinition> = emptyList(),
     val conversationContext: ConversationContext = ConversationContext.default(),
+    val idState: IdStateSnapshot? = null,
 )
 
 data class ActionPlanningDefinition(
@@ -28,11 +39,13 @@ data class ActionPlanningDefinition(
 data class SuperegoContext(
     val recentDialogue: List<DialogueTurn>,
     val shortTermContextSummary: String = "",
+    val origin: ActionOrigin? = null,
 )
 
 sealed interface EgoTrigger {
     data class IncomingInput(val input: PendingInput) : EgoTrigger
     data class PendingThoughtInput(val thought: PendingThought) : EgoTrigger
+    data class IncomingImpulse(val impulse: PendingImpulse) : EgoTrigger
 }
 
 sealed interface EgoDecision {

@@ -679,9 +679,11 @@ internal class MemoryCoordinator(
         val triggerLabel = when (trigger) {
             is EgoTrigger.IncomingInput -> "input"
             is EgoTrigger.PendingThoughtInput -> "thought"
+            is EgoTrigger.IncomingImpulse -> "impulse"
         }
         val cue = when (trigger) {
             is EgoTrigger.IncomingInput -> buildRecallCue(trigger, recentDialogue, episodicCues).trim()
+            is EgoTrigger.IncomingImpulse -> trigger.impulse.prompt.trim()
             is EgoTrigger.PendingThoughtInput -> {
                 val query = trigger.thought.longTermMemoryRecallQuery?.trim().orEmpty()
                 if (query.isBlank()) {
@@ -729,6 +731,7 @@ internal class MemoryCoordinator(
             val recallRootInputId = when (trigger) {
                 is EgoTrigger.IncomingInput -> trigger.input.rootInputId
                 is EgoTrigger.PendingThoughtInput -> trigger.thought.rootInputId
+                is EgoTrigger.IncomingImpulse -> trigger.impulse.rootImpulseId
             }
             instrumentation.emit(
                 AgentEvents.memoryRecallResult(
@@ -775,6 +778,7 @@ internal class MemoryCoordinator(
         val triggerCue = when (trigger) {
             is EgoTrigger.IncomingInput -> trigger.input.content.trim()
             is EgoTrigger.PendingThoughtInput -> ""
+            is EgoTrigger.IncomingImpulse -> trigger.impulse.prompt.trim()
         }
         val recentUserTurn = recentDialogue
             .asReversed()
@@ -798,6 +802,7 @@ internal class MemoryCoordinator(
             .orEmpty()
         val deniedContext = when (trigger) {
             is EgoTrigger.IncomingInput -> null
+            is EgoTrigger.IncomingImpulse -> null
             is EgoTrigger.PendingThoughtInput -> {
                 val thought = trigger.thought
                 if (thought.deniedActionType == null && thought.denialReasonCode.isNullOrBlank()) {
