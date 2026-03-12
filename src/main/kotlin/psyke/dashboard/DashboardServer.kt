@@ -7,16 +7,25 @@ import com.fasterxml.jackson.module.kotlin.readValue
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
 import mu.KotlinLogging
+import psyke.metrics.LlmCallStatsReport
 import psyke.metrics.MetricsQueryProvider
 import java.io.Closeable
+import java.io.IOException
 import java.net.InetSocketAddress
 import java.nio.charset.StandardCharsets
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import java.util.concurrent.Semaphore
 import java.util.concurrent.TimeUnit
 
 private val logger = KotlinLogging.logger {}
-private const val SSE_HEARTBEAT_TIMEOUT_MS: Long = 30_000L
+private const val SSE_HEARTBEAT_TIMEOUT_MS: Long = 5_000L
+private const val LLM_STATS_CACHE_TTL_MS: Long = 10_000L
+private const val LLM_STATS_WARMUP_STATUS: Int = 202
+private const val LLM_STATS_MAX_PARALLEL_REFRESH: Int = 1
+private const val SNAPSHOT_DEFAULT_EVENTS_LIMIT: Int = 300
+private const val SNAPSHOT_MAX_EVENTS_LIMIT: Int = 1_000
 
 class DashboardServer(
     private val store: DashboardStateStore,
@@ -27,66 +36,99 @@ class DashboardServer(
     host: String = "127.0.0.1",
 ) : Closeable {
     private val server: HttpServer = HttpServer.create(InetSocketAddress(host, port), 0)
-    private val executor: ExecutorService = Executors.newCachedThreadPool()
+    private val executor: ExecutorService = Executors.newVirtualThreadPerTaskExecutor()
+    private val llmStatsRefreshExecutor: ExecutorService = Executors.newSingleThreadExecutor()
+    private val llmStatsRefreshSemaphore = Semaphore(LLM_STATS_MAX_PARALLEL_REFRESH)
+    private val llmStatsCache = ConcurrentHashMap<String, LlmStatsCacheEntry>()
+    private val llmStatsRefreshInFlight = ConcurrentHashMap.newKeySet<String>()
     private val mapper = jacksonObjectMapper()
     val url: String = "http://$host:$port/"
 
     init {
         server.executor = executor
         server.createContext("/") { exchange ->
-            if (exchange.requestURI.path != "/") {
-                respondText(exchange, 404, "Not found", "text/plain; charset=utf-8")
-                return@createContext
+            withRequestGuard(exchange, "root_page") {
+                if (exchange.requestURI.path != "/") {
+                    respondText(exchange, 404, "Not found", "text/plain; charset=utf-8")
+                    return@withRequestGuard
+                }
+                respondText(exchange, 200, DashboardAssets.conversationsHtml, "text/html; charset=utf-8")
             }
-            respondText(exchange, 200, DashboardAssets.conversationsHtml, "text/html; charset=utf-8")
         }
         server.createContext("/dashboard") { exchange ->
-            if (exchange.requestURI.path != "/dashboard") {
-                respondText(exchange, 404, "Not found", "text/plain; charset=utf-8")
-                return@createContext
+            withRequestGuard(exchange, "observability_page") {
+                if (exchange.requestURI.path != "/dashboard") {
+                    respondText(exchange, 404, "Not found", "text/plain; charset=utf-8")
+                    return@withRequestGuard
+                }
+                respondText(exchange, 200, DashboardAssets.observabilityHtml, "text/html; charset=utf-8")
             }
-            respondText(exchange, 200, DashboardAssets.observabilityHtml, "text/html; charset=utf-8")
         }
         server.createContext("/metrics") { exchange ->
-            if (exchange.requestURI.path != "/metrics") {
-                respondText(exchange, 404, "Not found", "text/plain; charset=utf-8")
-                return@createContext
+            withRequestGuard(exchange, "metrics_page") {
+                if (exchange.requestURI.path != "/metrics") {
+                    respondText(exchange, 404, "Not found", "text/plain; charset=utf-8")
+                    return@withRequestGuard
+                }
+                respondText(exchange, 200, DashboardAssets.metricsHtml, "text/html; charset=utf-8")
             }
-            respondText(exchange, 200, DashboardAssets.metricsHtml, "text/html; charset=utf-8")
         }
         server.createContext("/api/obs/llm-stats") { exchange ->
-            if (exchange.requestMethod != "GET") {
-                respondText(exchange, 405, "Method not allowed", "text/plain; charset=utf-8")
-                return@createContext
+            withRequestGuard(exchange, "obs_llm_stats") {
+                if (exchange.requestMethod != "GET") {
+                    respondText(exchange, 405, "Method not allowed", "text/plain; charset=utf-8")
+                    return@withRequestGuard
+                }
+                handleLlmStatsApi(exchange)
             }
-            handleLlmStatsApi(exchange)
         }
         server.createContext("/api/obs/snapshot") { exchange ->
-            if (exchange.requestMethod != "GET") {
-                respondText(exchange, 405, "Method not allowed", "text/plain; charset=utf-8")
-                return@createContext
+            withRequestGuard(exchange, "obs_snapshot") {
+                if (exchange.requestMethod != "GET") {
+                    respondText(exchange, 405, "Method not allowed", "text/plain; charset=utf-8")
+                    return@withRequestGuard
+                }
+                val query = exchange.requestURI.query
+                val eventsLimit = parseQueryParam(query, "events_limit")
+                    ?.toIntOrNull()
+                    ?.coerceIn(0, SNAPSHOT_MAX_EVENTS_LIMIT)
+                    ?: SNAPSHOT_DEFAULT_EVENTS_LIMIT
+                val includeHeavyEvents = parseBooleanQueryParam(query, "include_heavy_events") ?: false
+                respondText(
+                    exchange,
+                    200,
+                    store.snapshotJson(eventsLimit = eventsLimit, includeHeavyEvents = includeHeavyEvents),
+                    "application/json; charset=utf-8"
+                )
             }
-            respondText(exchange, 200, store.snapshotJson(), "application/json; charset=utf-8")
         }
         server.createContext("/api/obs/events") { exchange ->
-            if (exchange.requestMethod != "GET") {
-                respondText(exchange, 405, "Method not allowed", "text/plain; charset=utf-8")
-                return@createContext
+            withRequestGuard(exchange, "obs_events_sse") {
+                if (exchange.requestMethod != "GET") {
+                    respondText(exchange, 405, "Method not allowed", "text/plain; charset=utf-8")
+                    return@withRequestGuard
+                }
+                handleSse(exchange)
             }
-            handleSse(exchange)
         }
         server.createContext("/api/obs/workspace") { exchange ->
-            if (exchange.requestMethod != "GET") {
-                respondText(exchange, 405, "Method not allowed", "text/plain; charset=utf-8")
-                return@createContext
+            withRequestGuard(exchange, "obs_workspace") {
+                if (exchange.requestMethod != "GET") {
+                    respondText(exchange, 405, "Method not allowed", "text/plain; charset=utf-8")
+                    return@withRequestGuard
+                }
+                handleWorkspaceApi(exchange)
             }
-            handleWorkspaceApi(exchange)
         }
         server.createContext("/api/chat/sessions") { exchange ->
-            handleChatApi(exchange)
+            withRequestGuard(exchange, "chat_api") {
+                handleChatApi(exchange)
+            }
         }
         server.createContext("/health") { exchange ->
-            respondText(exchange, 200, "ok", "text/plain; charset=utf-8")
+            withRequestGuard(exchange, "health") {
+                respondText(exchange, 200, "ok", "text/plain; charset=utf-8")
+            }
         }
     }
 
@@ -99,6 +141,12 @@ class DashboardServer(
         try {
             server.stop(0)
         } finally {
+            llmStatsRefreshExecutor.shutdownNow()
+            try {
+                llmStatsRefreshExecutor.awaitTermination(1, TimeUnit.SECONDS)
+            } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+            }
             executor.shutdownNow()
             try {
                 executor.awaitTermination(1, TimeUnit.SECONDS)
@@ -136,11 +184,15 @@ class DashboardServer(
                     }
                 }
             }
-        } catch (_: Exception) {
-            // client disconnected
+        } catch (ex: Exception) {
+            if (isExpectedClientDisconnect(ex)) {
+                logger.debug { "Observability SSE client disconnected." }
+            } else {
+                logger.warn(ex) { "Observability SSE stream terminated unexpectedly." }
+            }
         } finally {
             subscription.close()
-            output.close()
+            closeStreamQuietly(output, streamName = "obs_events_sse")
         }
     }
 
@@ -315,11 +367,15 @@ class DashboardServer(
                     }
                 }
             }
-        } catch (_: Exception) {
-            // client disconnected
+        } catch (ex: Exception) {
+            if (isExpectedClientDisconnect(ex)) {
+                logger.debug { "Chat SSE client disconnected for session=$sessionId." }
+            } else {
+                logger.warn(ex) { "Chat SSE stream terminated unexpectedly for session=$sessionId." }
+            }
         } finally {
             subscription.close()
-            output.close()
+            closeStreamQuietly(output, streamName = "chat_events_sse", context = "session=$sessionId")
         }
     }
 
@@ -360,11 +416,15 @@ class DashboardServer(
                     }
                 }
             }
-        } catch (_: Exception) {
-            // client disconnected
+        } catch (ex: Exception) {
+            if (isExpectedClientDisconnect(ex)) {
+                logger.debug { "Thinking SSE client disconnected for session=$sessionId." }
+            } else {
+                logger.warn(ex) { "Thinking SSE stream terminated unexpectedly for session=$sessionId." }
+            }
         } finally {
             subscription.close()
-            output.close()
+            closeStreamQuietly(output, streamName = "thinking_sse", context = "session=$sessionId")
         }
     }
 
@@ -374,12 +434,109 @@ class DashboardServer(
             respondText(exchange, 503, """{"error":"Metrics query not available"}""", "application/json; charset=utf-8")
             return
         }
-        val query = exchange.requestURI.query
-        val scope = parseQueryParam(query, "scope") ?: "run"
-        val runOnly = scope != "all"
-        val timeframeMs = parseQueryParam(query, "timeframe")?.toLongOrNull()
-        val report = provider.llmCallStats(runOnly = runOnly, timeframeMs = timeframeMs)
-        respondText(exchange, 200, mapper.writeValueAsString(report), "application/json; charset=utf-8")
+        try {
+            val query = parseLlmStatsQuery(exchange.requestURI.query)
+            val cached = llmStatsCache[query.cacheKey]
+            val nowMs = System.currentTimeMillis()
+            val cacheAgeMs = cached?.let { nowMs - it.generatedAtMs } ?: Long.MAX_VALUE
+            val isFresh = cached != null && cacheAgeMs <= LLM_STATS_CACHE_TTL_MS
+
+            if (!isFresh) {
+                triggerLlmStatsRefresh(provider = provider, query = query)
+            }
+            val refreshInFlight = llmStatsRefreshInFlight.contains(query.cacheKey)
+            if (cached != null) {
+                val payload = llmStatsPayload(
+                    report = cached.report,
+                    query = query,
+                    generatedAtMs = cached.generatedAtMs,
+                    stale = !isFresh,
+                    refreshInFlight = refreshInFlight,
+                    warmup = false
+                )
+                respondText(exchange, 200, payload, "application/json; charset=utf-8")
+                return
+            }
+
+            val payload = llmStatsPayload(
+                report = EMPTY_LLM_STATS_REPORT,
+                query = query,
+                generatedAtMs = nowMs,
+                stale = true,
+                refreshInFlight = refreshInFlight,
+                warmup = true
+            )
+            respondText(exchange, LLM_STATS_WARMUP_STATUS, payload, "application/json; charset=utf-8")
+        } catch (ex: Exception) {
+            logger.error(ex) {
+                "Failed to build LLM stats response for request=${exchange.requestMethod} ${exchange.requestURI.path}?${exchange.requestURI.query.orEmpty()}"
+            }
+            respondText(exchange, 500, """{"error":"Failed to query LLM stats"}""", "application/json; charset=utf-8")
+        }
+    }
+
+    private fun triggerLlmStatsRefresh(provider: MetricsQueryProvider, query: LlmStatsQuery) {
+        if (!llmStatsRefreshInFlight.add(query.cacheKey)) {
+            return
+        }
+        if (!llmStatsRefreshSemaphore.tryAcquire()) {
+            llmStatsRefreshInFlight.remove(query.cacheKey)
+            logger.debug {
+                "Skipping LLM stats refresh because refresh gate is saturated query=${query.cacheKey}"
+            }
+            return
+        }
+        llmStatsRefreshExecutor.execute {
+            try {
+                val report = provider.llmCallStats(runOnly = query.runOnly, timeframeMs = query.timeframeMs)
+                llmStatsCache[query.cacheKey] = LlmStatsCacheEntry(
+                    report = report,
+                    generatedAtMs = System.currentTimeMillis()
+                )
+            } catch (ex: Exception) {
+                logger.warn(ex) {
+                    "LLM stats refresh failed for scope=${query.scope} timeframeMs=${query.timeframeMs}"
+                }
+            } finally {
+                llmStatsRefreshSemaphore.release()
+                llmStatsRefreshInFlight.remove(query.cacheKey)
+            }
+        }
+    }
+
+    private fun parseLlmStatsQuery(queryString: String?): LlmStatsQuery {
+        val requestedScope = parseQueryParam(queryString, "scope")?.lowercase()
+        val scope = if (requestedScope == "all") "all" else "run"
+        val timeframeMs = parseQueryParam(queryString, "timeframe")?.toLongOrNull()
+        val normalizedTimeframeMs = timeframeMs?.takeIf { it > 0L }
+        return LlmStatsQuery(
+            scope = scope,
+            runOnly = scope != "all",
+            timeframeMs = normalizedTimeframeMs,
+            cacheKey = "$scope:${normalizedTimeframeMs ?: 0L}"
+        )
+    }
+
+    private fun llmStatsPayload(
+        report: LlmCallStatsReport,
+        query: LlmStatsQuery,
+        generatedAtMs: Long,
+        stale: Boolean,
+        refreshInFlight: Boolean,
+        warmup: Boolean,
+    ): String {
+        val payload = mapOf(
+            "byModel" to report.byModel,
+            "byRole" to report.byRole,
+            "errorBreakdown" to report.errorBreakdown,
+            "generated_at_ms" to generatedAtMs,
+            "scope" to query.scope,
+            "timeframe_ms" to query.timeframeMs,
+            "stale" to stale,
+            "refresh_in_flight" to refreshInFlight,
+            "warmup" to warmup
+        )
+        return mapper.writeValueAsString(payload)
     }
 
     private fun parseQueryParam(query: String?, key: String): String? {
@@ -399,6 +556,15 @@ class DashboardServer(
             .firstOrNull()
     }
 
+    private fun parseBooleanQueryParam(query: String?, key: String): Boolean? {
+        val raw = parseQueryParam(query, key)?.trim()?.lowercase() ?: return null
+        return when (raw) {
+            "1", "true", "yes", "on" -> true
+            "0", "false", "no", "off" -> false
+            else -> null
+        }
+    }
+
     private fun readJsonBody(exchange: HttpExchange): Map<String, Any?>? {
         return try {
             val bytes = exchange.requestBody.readBytes()
@@ -407,9 +573,109 @@ class DashboardServer(
             } else {
                 mapper.readValue<Map<String, Any?>>(bytes)
             }
-        } catch (_: Exception) {
+        } catch (ex: Exception) {
+            logger.warn(ex) {
+                "Failed to parse JSON request body for request=${exchange.requestMethod} ${exchange.requestURI.path}"
+            }
             null
         }
+    }
+
+    private inline fun withRequestGuard(
+        exchange: HttpExchange,
+        handlerName: String,
+        block: () -> Unit,
+    ) {
+        try {
+            block()
+        } catch (ex: Exception) {
+            val requestSummary = "${exchange.requestMethod} ${exchange.requestURI.path}?${exchange.requestURI.query.orEmpty()}"
+            if (isExpectedClientDisconnect(ex)) {
+                logger.debug {
+                    "Dashboard request terminated after client disconnect handler=$handlerName request=$requestSummary"
+                }
+                closeResponseBodyQuietly(exchange, handlerName)
+                return
+            }
+            logger.error(ex) {
+                "Dashboard request handler failed handler=$handlerName request=$requestSummary"
+            }
+            writeFallbackInternalError(exchange, handlerName)
+        }
+    }
+
+    private fun writeFallbackInternalError(exchange: HttpExchange, handlerName: String) {
+        if (exchange.responseCode != -1) {
+            logger.debug {
+                "Skipping fallback error response because headers were already sent handler=$handlerName request=${exchange.requestMethod} ${exchange.requestURI.path}"
+            }
+            closeResponseBodyQuietly(exchange, handlerName)
+            return
+        }
+        runCatching {
+            respondText(
+                exchange = exchange,
+                status = 500,
+                body = """{"error":"Internal dashboard error","handler":"$handlerName"}""",
+                contentType = "application/json; charset=utf-8"
+            )
+        }.onFailure { writeEx ->
+            logger.warn(writeEx) {
+                "Failed to write fallback error response for handler=$handlerName request=${exchange.requestMethod} ${exchange.requestURI.path}"
+            }
+            closeResponseBodyQuietly(exchange, handlerName)
+        }
+    }
+
+    private fun closeResponseBodyQuietly(exchange: HttpExchange, handlerName: String) {
+        runCatching { exchange.responseBody.close() }
+            .onFailure { closeEx ->
+                if (isExpectedClientDisconnect(closeEx)) {
+                    logger.debug {
+                        "Response stream already disconnected during cleanup for handler=$handlerName request=${exchange.requestMethod} ${exchange.requestURI.path}"
+                    }
+                } else {
+                    logger.warn(closeEx) {
+                        "Failed to close response body during cleanup for handler=$handlerName request=${exchange.requestMethod} ${exchange.requestURI.path}"
+                    }
+                }
+            }
+    }
+
+    private fun closeStreamQuietly(
+        closeable: Closeable,
+        streamName: String,
+        context: String? = null,
+    ) {
+        runCatching { closeable.close() }
+            .onFailure { closeEx ->
+                val contextSuffix = if (context.isNullOrBlank()) "" else " $context"
+                if (isExpectedClientDisconnect(closeEx)) {
+                    logger.debug { "Client disconnect detected while closing $streamName stream.$contextSuffix" }
+                } else {
+                    logger.warn(closeEx) { "Failed to close $streamName stream.$contextSuffix" }
+                }
+            }
+    }
+
+    private fun isExpectedClientDisconnect(ex: Throwable?): Boolean {
+        var current = ex
+        while (current != null) {
+            if (current is IOException) {
+                val message = current.message?.lowercase().orEmpty()
+                if (
+                    message.contains("broken pipe") ||
+                    message.contains("connection reset") ||
+                    message.contains("stream closed") ||
+                    message.contains("forcibly closed") ||
+                    message.contains("insufficient bytes written")
+                ) {
+                    return true
+                }
+            }
+            current = current.cause
+        }
+        return false
     }
 
     private fun respondText(
@@ -426,5 +692,25 @@ class DashboardServer(
         exchange.responseBody.use { output ->
             output.write(bytes)
         }
+    }
+
+    private data class LlmStatsQuery(
+        val scope: String,
+        val runOnly: Boolean,
+        val timeframeMs: Long?,
+        val cacheKey: String,
+    )
+
+    private data class LlmStatsCacheEntry(
+        val report: LlmCallStatsReport,
+        val generatedAtMs: Long,
+    )
+
+    private companion object {
+        val EMPTY_LLM_STATS_REPORT = LlmCallStatsReport(
+            byModel = emptyMap(),
+            byRole = emptyMap(),
+            errorBreakdown = emptyMap(),
+        )
     }
 }

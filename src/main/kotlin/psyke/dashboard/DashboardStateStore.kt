@@ -279,13 +279,17 @@ class DashboardStateStore(
             if (!isDebugWorkspaceSnapshot) {
                 payloadJson = mapper.writeValueAsString(event)
             }
-            payloadJson?.let { broadcastToSubscribers(it) }
         }
+        payloadJson?.let { broadcastToSubscribers(it) }
     }
 
-    fun snapshotJson(): String {
+    fun snapshotJson(
+        eventsLimit: Int = DEFAULT_SNAPSHOT_EVENTS_LIMIT,
+        includeHeavyEvents: Boolean = false,
+    ): String {
         val snapshot = synchronized(lock) {
             pruneWorkspaceSnapshotsLocked()
+            val boundedEventLimit = eventsLimit.coerceIn(0, maxEvents.coerceAtLeast(0))
             DashboardSnapshot(
                 generatedAt = System.currentTimeMillis(),
                 loopStatus = loopStatus,
@@ -302,7 +306,10 @@ class DashboardStateStore(
                 instrumentationHealth = instrumentationHealthMap(),
                 taskVerifierStats = taskVerifierStatsMap(),
                 promptBudgetStats = promptBudgetStatsMap(),
-                recentEvents = events.toList().sortedBy { it.id },
+                recentEvents = snapshotRecentEventsLocked(
+                    eventsLimit = boundedEventLimit,
+                    includeHeavyEvents = includeHeavyEvents
+                ),
                 phaseTimings = phaseTimings.toList(),
                 heapMetrics = heapMetrics,
                 storeStats = mapOf(
@@ -315,6 +322,21 @@ class DashboardStateStore(
             )
         }
         return mapper.writeValueAsString(snapshot)
+    }
+
+    private fun snapshotRecentEventsLocked(eventsLimit: Int, includeHeavyEvents: Boolean): List<AgentEvent> {
+        if (eventsLimit <= 0) {
+            return emptyList()
+        }
+        val filtered = if (includeHeavyEvents) {
+            events.toList()
+        } else {
+            events.asSequence()
+                .filterNot { SNAPSHOT_HEAVY_EVENT_TYPES.contains(it.type) }
+                .toList()
+        }
+        val ordered = filtered.sortedBy { it.id }
+        return if (ordered.size <= eventsLimit) ordered else ordered.takeLast(eventsLimit)
     }
 
     fun workspaceIndexJson(): String {
@@ -391,7 +413,7 @@ class DashboardStateStore(
         if (totalDroppedEvents < 0) {
             return
         }
-        val payloadJson: String
+        var payloadJson: String? = null
         synchronized(lock) {
             droppedEvents = max(droppedEvents, totalDroppedEvents)
             val nextId = (events.maxOfOrNull { it.id } ?: 0L) + 1L
@@ -405,8 +427,8 @@ class DashboardStateStore(
             }
             events.addLast(healthEvent)
             payloadJson = mapper.writeValueAsString(healthEvent)
-            broadcastToSubscribers(payloadJson)
         }
+        payloadJson?.let { broadcastToSubscribers(it) }
     }
 
     fun subscribe(): DashboardFlowSubscription {
@@ -565,18 +587,29 @@ class DashboardStateStore(
     }
 
     private fun broadcastToSubscribers(payloadJson: String) {
+        val subscriberSnapshot = synchronized(lock) { subscribers.toList() }
+        if (subscriberSnapshot.isEmpty()) {
+            return
+        }
         val staleSubscribers = mutableListOf<Channel<String>>()
-        subscribers.forEach { channel ->
+        subscriberSnapshot.forEach { channel ->
             val result = channel.trySend(payloadJson)
             if (result.isFailure && result.isClosed) {
                 staleSubscribers.add(channel)
             } else if (result.isFailure) {
                 // Buffer full — drop oldest and retry
                 channel.tryReceive()
-                channel.trySend(payloadJson)
+                val retryResult = channel.trySend(payloadJson)
+                if (retryResult.isFailure && retryResult.isClosed) {
+                    staleSubscribers.add(channel)
+                }
             }
         }
-        subscribers.removeAll(staleSubscribers.toSet())
+        if (staleSubscribers.isNotEmpty()) {
+            synchronized(lock) {
+                subscribers.removeAll(staleSubscribers.toSet())
+            }
+        }
     }
 
     private fun ensureChatSessionLocked(
@@ -884,12 +917,16 @@ class DashboardStateStore(
         const val WORKSPACE_VERSION_LIST_LIMIT: Int = 25
         const val DEFAULT_SESSION_ID: String = "default"
         const val CHAT_SOURCE_PREFIX: String = "chat:"
+        const val DEFAULT_SNAPSHOT_EVENTS_LIMIT: Int = 300
         const val MAX_CHAT_MESSAGES_PER_SESSION: Int = 400
         const val MAX_SESSION_ID_CHARS: Int = 64
         const val MAX_SESSION_TITLE_CHARS: Int = 80
         const val MAX_SESSION_ID_GENERATION_ATTEMPTS: Int = 4
         const val SUBSCRIBER_CHANNEL_CAPACITY: Int = 1_000
         const val MAX_PHASE_TIMINGS: Int = 200
+        val SNAPSHOT_HEAVY_EVENT_TYPES: Set<String> = setOf(
+            "llm_raw_response",
+        )
     }
 }
 

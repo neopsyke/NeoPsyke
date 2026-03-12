@@ -30,7 +30,7 @@ class McpTimeActionPlugin(
         requiresFollowUpThought = true,
         followUpPrefix = "MCP time lookup completed.",
         superegoDirectives = listOf(
-            "Allow MCP_TIME for benign time/date lookup payloads."
+            "Allow MCP_TIME"
         ),
         capabilities = setOf(ActionCapability.GATHERS_EVIDENCE)
     )

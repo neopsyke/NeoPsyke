@@ -250,11 +250,13 @@
           </select>
           <label>Timeframe</label>
           <select id="llm-timeframe">
-            <option value="0" selected>Full</option>
             <option value="300000">Last 5 min</option>
-            <option value="900000">Last 15 min</option>
+            <option value="900000" selected>Last 15 min</option>
             <option value="3600000">Last 1 hour</option>
+            <option value="0">Full</option>
           </select>
+          <span id="llm-fetch-status" style="font-size:11px;color:var(--muted)">live</span>
+          <button id="llm-retry-btn" class="ghost-btn" type="button" style="display:none">Retry stats</button>
         </div>
       </div>
 
@@ -309,6 +311,7 @@
       llmStats: null,
       stmHistory: [],  // { ts, totalChars, summaryChars, recentTurns }
     };
+    const REQUEST_TIMEOUT_MS = 8000;
 
     const phaseColors = {
       input_processing: "#409eff",
@@ -336,6 +339,19 @@
     function fmtMs(ms) { return ms >= 1000 ? (ms / 1000).toFixed(2) + "s" : ms + "ms"; }
     function fmtNum(n) { return Number(n || 0).toLocaleString(); }
     function pct(a, b) { return b > 0 ? ((a / b) * 100).toFixed(1) : "0.0"; }
+
+    async function fetchWithTimeout(url, init) {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+      try {
+        return await fetch(
+          url,
+          Object.assign({ cache: "no-store", signal: controller.signal }, init || {})
+        );
+      } finally {
+        clearTimeout(timeout);
+      }
+    }
 
     /* ── Rendering ── */
     function renderHeap() {
@@ -925,26 +941,131 @@
     }
 
     /* ── LLM Stats Fetch ── */
+    const LLM_STATS_BASE_POLL_MS = 10000;
+    const LLM_STATS_MAX_BACKOFF_MS = 120000;
+    const LLM_STATS_FAILURE_LIMIT = 6;
     let llmStatsFetchTimer = null;
+    let llmStatsFetchInFlight = false;
+    let llmStatsFailureCount = 0;
+    let llmStatsPollingPaused = false;
+    let llmStatsStatus = "live";
+
+    function updateLlmStatsPollingStatus() {
+      const statusEl = document.getElementById("llm-fetch-status");
+      const retryBtn = document.getElementById("llm-retry-btn");
+      if (statusEl) {
+        if (llmStatsPollingPaused) {
+          statusEl.textContent = "paused (errors)";
+          statusEl.style.color = "var(--amber)";
+        } else if (document.visibilityState === "hidden") {
+          statusEl.textContent = "paused (hidden tab)";
+          statusEl.style.color = "var(--muted)";
+        } else {
+          statusEl.textContent = llmStatsStatus;
+          statusEl.style.color = llmStatsStatus === "live" ? "var(--green)" : "var(--amber)";
+        }
+      }
+      if (retryBtn) {
+        retryBtn.style.display = llmStatsPollingPaused ? "inline-block" : "none";
+      }
+    }
+
+    function clearLlmStatsTimer() {
+      if (llmStatsFetchTimer) {
+        clearTimeout(llmStatsFetchTimer);
+        llmStatsFetchTimer = null;
+      }
+    }
+
+    function nextLlmStatsDelayMs(success) {
+      if (success) return LLM_STATS_BASE_POLL_MS;
+      const exponent = Math.max(0, llmStatsFailureCount - 1);
+      const baseDelay = Math.min(LLM_STATS_BASE_POLL_MS * Math.pow(2, exponent), LLM_STATS_MAX_BACKOFF_MS);
+      const jitter = Math.floor(Math.random() * 1500);
+      return baseDelay + jitter;
+    }
+
+    function scheduleNextLlmStatsPoll(delayMs) {
+      clearLlmStatsTimer();
+      llmStatsFetchTimer = setTimeout(() => { pollLlmStats(); }, delayMs);
+    }
+
     async function fetchLlmStats() {
+      if (llmStatsFetchInFlight || llmStatsPollingPaused) return false;
+      llmStatsFetchInFlight = true;
       const scope = document.getElementById("llm-scope").value;
       const tf = document.getElementById("llm-timeframe").value;
       let url = "/api/obs/llm-stats?scope=" + scope;
       if (tf && tf !== "0") url += "&timeframe=" + tf;
       try {
-        const resp = await fetch(url, { cache: "no-store" });
+        const resp = await fetchWithTimeout(url);
         if (resp.ok) {
           state.llmStats = await resp.json();
           renderLlmStats();
           renderErrorsReliability();
+          const stale = Boolean(state.llmStats && state.llmStats.stale);
+          const warmup = Boolean(state.llmStats && state.llmStats.warmup);
+          llmStatsStatus = stale || warmup ? "warming cache" : "live";
+          llmStatsFailureCount = 0;
+          updateLlmStatsPollingStatus();
+          return true;
+        } else {
+          const body = await resp.text().catch(() => "");
+          state.llmStats = null;
+          renderLlmStats();
+          renderErrorsReliability();
+          llmStatsStatus = "error";
+          console.error("[metrics] llm-stats request failed", {
+            url: url,
+            status: resp.status,
+            body: body
+          });
+          updateLlmStatsPollingStatus();
+          return false;
         }
-      } catch (_) {}
+      } catch (err) {
+        state.llmStats = null;
+        renderLlmStats();
+        renderErrorsReliability();
+        llmStatsStatus = "error";
+        console.error("[metrics] llm-stats request threw", err);
+        updateLlmStatsPollingStatus();
+        return false;
+      } finally {
+        llmStatsFetchInFlight = false;
+      }
     }
 
-    function scheduleLlmStatsFetch() {
-      if (llmStatsFetchTimer) clearInterval(llmStatsFetchTimer);
-      fetchLlmStats();
-      llmStatsFetchTimer = setInterval(fetchLlmStats, 10000);
+    async function pollLlmStats(force = false) {
+      if (document.visibilityState === "hidden" && !force) {
+        llmStatsStatus = "paused";
+        updateLlmStatsPollingStatus();
+        clearLlmStatsTimer();
+        return;
+      }
+      const success = await fetchLlmStats();
+      if (!success) {
+        llmStatsFailureCount += 1;
+        if (llmStatsFailureCount >= LLM_STATS_FAILURE_LIMIT) {
+          llmStatsPollingPaused = true;
+          updateLlmStatsPollingStatus();
+          clearLlmStatsTimer();
+          return;
+        }
+      }
+      const delayMs = nextLlmStatsDelayMs(success);
+      scheduleNextLlmStatsPoll(delayMs);
+    }
+
+    function scheduleLlmStatsFetch(immediate = true) {
+      llmStatsPollingPaused = false;
+      updateLlmStatsPollingStatus();
+      clearLlmStatsTimer();
+      if (immediate) {
+        pollLlmStats();
+      } else {
+        scheduleNextLlmStatsPoll(LLM_STATS_BASE_POLL_MS);
+      }
     }
 
     /* ── Boot ── */
@@ -953,13 +1074,20 @@
 
       // Load initial snapshot
       try {
-        const snapshot = await fetch("/api/obs/snapshot", { cache: "no-store" }).then(r => r.json());
+        const snapshotResp = await fetchWithTimeout("/api/obs/snapshot?events_limit=0&include_heavy_events=false");
+        if (!snapshotResp.ok) {
+          const snapshotBody = await snapshotResp.text().catch(() => "");
+          throw new Error("snapshot HTTP " + snapshotResp.status + (snapshotBody ? ": " + snapshotBody : ""));
+        }
+        const snapshot = await snapshotResp.json();
         state.heapMetrics = snapshot.heapMetrics || null;
         state.phaseTimings = snapshot.phaseTimings || [];
         state.metrics = snapshot.metrics || null;
         state.limits = snapshot.limits || {};
         state.storeStats = snapshot.storeStats || {};
-      } catch (_) {}
+      } catch (err) {
+        console.error("[metrics] failed to load initial snapshot", err);
+      }
 
       render();
       scheduleLlmStatsFetch();
@@ -967,16 +1095,49 @@
       // Event listeners for controls
       document.getElementById("timing-timeframe").addEventListener("change", renderPhaseTimings);
       document.getElementById("mem-scope").addEventListener("change", renderLongTermMemory);
-      document.getElementById("llm-scope").addEventListener("change", () => { renderTokenUsage(); scheduleLlmStatsFetch(); });
-      document.getElementById("llm-timeframe").addEventListener("change", scheduleLlmStatsFetch);
+      document.getElementById("llm-scope").addEventListener("change", () => {
+        renderTokenUsage();
+        llmStatsFailureCount = 0;
+        scheduleLlmStatsFetch();
+      });
+      document.getElementById("llm-timeframe").addEventListener("change", () => {
+        llmStatsFailureCount = 0;
+        scheduleLlmStatsFetch();
+      });
+      document.getElementById("llm-retry-btn").addEventListener("click", () => {
+        llmStatsFailureCount = 0;
+        llmStatsPollingPaused = false;
+        llmStatsStatus = "retrying";
+        updateLlmStatsPollingStatus();
+        scheduleLlmStatsFetch(true);
+      });
+      document.addEventListener("visibilitychange", () => {
+        if (document.visibilityState === "hidden") {
+          clearLlmStatsTimer();
+          llmStatsStatus = "paused";
+          updateLlmStatsPollingStatus();
+          return;
+        }
+        if (!llmStatsPollingPaused) {
+          scheduleLlmStatsFetch(true);
+        } else {
+          updateLlmStatsPollingStatus();
+        }
+      });
 
       // SSE connection
       const es = new EventSource("/api/obs/events");
       es.addEventListener("open", () => { statusEl.textContent = "connected"; });
       es.addEventListener("error", () => { statusEl.textContent = "reconnecting..."; });
       es.addEventListener("agent", (msg) => {
-        try { applyEvent(JSON.parse(msg.data)); } catch (_) {}
+        try {
+          applyEvent(JSON.parse(msg.data));
+        } catch (err) {
+          console.error("[metrics] failed to parse SSE payload", err, msg && msg.data);
+        }
       });
+      window.addEventListener("beforeunload", () => { es.close(); });
+      window.addEventListener("pagehide", () => { es.close(); });
     }
 
     window.addEventListener("resize", () => renderStmChart());

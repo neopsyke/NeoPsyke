@@ -29,6 +29,7 @@ class SqliteMetricsRuntime(
     private val dbPath = resolveDbPath()
     private val metricsDir = dbPath.toAbsolutePath().parent ?: Paths.get(System.getProperty("user.dir"))
     private val connection: Connection
+    private val readConnection: Connection
     private val runId = UUID.randomUUID().toString()
     private val keyFingerprint = fingerprintKey(apiKey, metricsDir.resolve("metrics.salt"))
     private val responseLatenciesMs = mutableListOf<Long>()
@@ -39,6 +40,7 @@ class SqliteMetricsRuntime(
         connection.createStatement().use { statement ->
             statement.execute("PRAGMA journal_mode=WAL;")
             statement.execute("PRAGMA synchronous=NORMAL;")
+            statement.execute("PRAGMA busy_timeout=1500;")
             statement.execute(
                 """
                 CREATE TABLE IF NOT EXISTS runs (
@@ -144,11 +146,17 @@ class SqliteMetricsRuntime(
                 """.trimIndent()
             )
             statement.execute("CREATE INDEX IF NOT EXISTS idx_llm_calls_run_id ON llm_calls(run_id);")
+            statement.execute("CREATE INDEX IF NOT EXISTS idx_llm_calls_run_ts ON llm_calls(run_id, ts);")
             statement.execute("CREATE INDEX IF NOT EXISTS idx_llm_calls_key_ts ON llm_calls(key_fingerprint, ts);")
             statement.execute("CREATE INDEX IF NOT EXISTS idx_runs_scope ON runs(provider, key_fingerprint, started_at);")
             statement.execute("CREATE INDEX IF NOT EXISTS idx_llm_calls_scope ON llm_calls(provider, key_fingerprint, ts);")
             statement.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_action_calls_run_type ON action_calls(run_id, action_type);")
             statement.execute("CREATE INDEX IF NOT EXISTS idx_action_calls_scope_type ON action_calls(key_fingerprint, provider, action_type);")
+        }
+        readConnection = DriverManager.getConnection("jdbc:sqlite:${dbPath.toAbsolutePath()}")
+        readConnection.createStatement().use { statement ->
+            statement.execute("PRAGMA query_only=ON;")
+            statement.execute("PRAGMA busy_timeout=100;")
         }
         startRun(egoModel, superegoModel)
     }
@@ -415,6 +423,8 @@ class SqliteMetricsRuntime(
         } catch (ex: Exception) {
             logger.warn(ex) { "Failed to finalize metrics run." }
         } finally {
+            runCatching { readConnection.close() }
+                .onFailure { closeEx -> logger.warn(closeEx) { "Failed to close metrics read connection." } }
             connection.close()
         }
     }
@@ -719,7 +729,7 @@ class SqliteMetricsRuntime(
     }
 
     override fun llmCallStats(runOnly: Boolean, timeframeMs: Long?): LlmCallStatsReport {
-        synchronized(connection) {
+        synchronized(readConnection) {
             val timeCutoff = if (timeframeMs != null && timeframeMs > 0) {
                 Instant.now().minusMillis(timeframeMs).toString()
             } else null
@@ -751,6 +761,7 @@ class SqliteMetricsRuntime(
             }
 
             val whereClause = "$scopeClause$timeClause"
+            val rowLimit = if (runOnly) RUN_SCOPE_LLM_STATS_MAX_ROWS else ALL_SCOPE_LLM_STATS_MAX_ROWS
 
             // Fetch all rows for model stats + percentile computation
             data class CallRow(
@@ -766,7 +777,7 @@ class SqliteMetricsRuntime(
                 val totalTokens: Long,
             )
 
-            val rows = connection.prepareStatement(
+            val rows = readConnection.prepareStatement(
                 """
                 SELECT model, actor, call_site, action_type, latency_ms, status, error_code,
                        COALESCE(prompt_tokens, 0) AS prompt_tokens,
@@ -774,11 +785,15 @@ class SqliteMetricsRuntime(
                        COALESCE(total_tokens, COALESCE(prompt_tokens, 0) + COALESCE(completion_tokens, 0)) AS total_tokens
                 FROM llm_calls
                 WHERE $whereClause
+                ORDER BY id DESC
+                LIMIT ?
                 """.trimIndent()
             ).use { stmt ->
+                stmt.queryTimeout = LLM_STATS_QUERY_TIMEOUT_SECONDS
                 var idx = 1
                 idx = bindScope(stmt, idx)
-                bindTime(stmt, idx)
+                idx = bindTime(stmt, idx)
+                stmt.setInt(idx, rowLimit)
                 stmt.executeQuery().use { rs ->
                     buildList {
                         while (rs.next()) {
@@ -1005,6 +1020,10 @@ class SqliteMetricsRuntime(
     )
 
     private companion object {
+        private const val RUN_SCOPE_LLM_STATS_MAX_ROWS: Int = 8_000
+        private const val ALL_SCOPE_LLM_STATS_MAX_ROWS: Int = 12_000
+        private const val LLM_STATS_QUERY_TIMEOUT_SECONDS: Int = 2
+
         private class SqlitePersistingChatCallObserver(
             private val sink: (ChatCallRecord) -> Unit,
         ) : PersistentMetricsChatCallObserver {

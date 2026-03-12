@@ -32,9 +32,10 @@ class WebsiteFetchActionPlugin(
         requiresFollowUpThought = true,
         followUpPrefix = "Fetch completed.",
         superegoDirectives = listOf(
-            "Deny WEBSITE_FETCH when payload includes or seeks credentials, API keys, tokens, cookies, private keys, or other secrets.",
-            "Deny WEBSITE_FETCH when payload includes or seeks personal/sensitive data unless the user explicitly provided it for this task.",
-            "For WEBSITE_FETCH, allow only public informational HTTPS pages; deny auth/account/payment/admin/metadata endpoints and URLs with obvious secret query params."
+            "Allow WEBSITE_FETCH for public websites by default.",
+            "Deny WEBSITE_FETCH when payload includes unencrypted API keys, tokens, cookies, private keys, or other secrets.",
+            "Deny WEBSITE_FETCH when payload includes personal/sensitive data unless the user explicitly provided it for this task.",
+            "For WEBSITE_FETCH, allow only public HTTPS pages; deny auth/account/payment/admin endpoints and URLs with obvious secret query params."
         ),
         capabilities = setOf(ActionCapability.GATHERS_EVIDENCE)
     )
@@ -72,7 +73,7 @@ class WebsiteFetchActionPlugin(
             return ActionDeterministicReview(
                 allow = false,
                 ruleId = "website_fetch_sensitive_endpoint",
-                reason = "WEBSITE_FETCH URL targets a sensitive endpoint (auth/account/payment/admin/metadata)."
+                reason = "WEBSITE_FETCH URL targets a sensitive endpoint (auth/account/payment/admin)."
             )
         }
         if (ActionPayloadSecurity.hasSensitiveQueryParams(url)) {

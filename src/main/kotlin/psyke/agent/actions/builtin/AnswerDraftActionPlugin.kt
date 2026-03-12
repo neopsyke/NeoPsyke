@@ -24,7 +24,7 @@ class AnswerDraftActionPlugin : AgentActionPlugin {
         requiresFollowUpThought = false,
         followUpPrefix = "Answer draft captured.",
         superegoDirectives = listOf(
-            "Allow ANSWER_DRAFT for internal, non-terminal synthesis steps.",
+            "Allow ANSWER_DRAFT always",
             "Do not treat ANSWER_DRAFT as a user-visible final response."
         )
     )

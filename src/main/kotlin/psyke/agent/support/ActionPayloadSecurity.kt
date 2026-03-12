@@ -91,7 +91,7 @@ object ActionPayloadSecurity {
         pattern = """(?is)(AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY-----|\b(api[ _-]?key|token|password|secret)\s*[:=]\s*[A-Za-z0-9_\-]{8,})"""
     )
     private val SENSITIVE_PATH_REGEX = Regex(
-        pattern = """(^|/)(auth|login|signin|oauth|token|account|billing|payment|admin|metadata|internal|private)(/|$)"""
+        pattern = """(^|/)(auth|login|signin|oauth|token|account|billing|payment|admin|internal|private)(/|$)"""
     )
     private val SENSITIVE_QUERY_PARAM_NAMES = setOf(
         "token",

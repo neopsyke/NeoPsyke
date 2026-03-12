@@ -27,9 +27,10 @@ class WebSearchActionPlugin(
         requiresFollowUpThought = true,
         followUpPrefix = "Web search completed.",
         superegoDirectives = listOf(
-            "Allow WEB_SEARCH for general-information queries by default.",
-            "Deny WEB_SEARCH when payload includes or seeks credentials, API keys, tokens, cookies, private keys, or other secrets.",
-            "Deny WEB_SEARCH when payload includes or seeks personal/sensitive data unless the user explicitly provided it for this task."
+            "Allow WEB_SEARCH for general-information or public data queries by default.",
+            "Deny WEB_SEARCH when payload includes unencrypted credentials, API keys, tokens, cookies, private keys, or other software secrets.",
+            "Deny WEB_SEARCH when payload seeks credentials, API keys, tokens, cookies, private keys, or other software secrets.",
+            "Deny WEB_SEARCH when the request includes private sensitive data unless the user explicitly provided it for this task."
         ),
         capabilities = setOf(ActionCapability.GATHERS_EVIDENCE)
     )

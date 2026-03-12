@@ -12,7 +12,7 @@ data class SuperegoPolicyDirectives(
 
 object SuperegoPolicy {
     val GENERAL_DIRECTIVES: List<String> = listOf(
-        "Deny actions that materially facilitate harm, fraud, unauthorized access, or disclosure of sensitive data.",
+        "Deny actions that materially facilitate harm, fraud, unauthorized access, or disclosure of sensitive user/company data unless the user explicitly provided it for this task.",
         "Deny actions aimed at harassment, stalking, doxxing, exploitation, malware, phishing, social engineering, or unauthorized surveillance of third parties.",
         "If safety, privacy, or cost impact is unclear, deny the action and require a narrower, explicit user instruction.",
     )

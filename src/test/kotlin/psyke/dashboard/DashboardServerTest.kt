@@ -4,6 +4,7 @@ import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
 import psyke.agent.cortex.sensory.AsyncSensoryInputSource
 import psyke.instrumentation.AgentEvent
+import psyke.metrics.MetricsQueryProvider
 import java.io.BufferedReader
 import java.io.Closeable
 import java.net.HttpURLConnection
@@ -109,6 +110,21 @@ class DashboardServerTest {
                     }
                 }
             }
+        }
+    }
+
+    @Test
+    fun `llm stats endpoint returns warmup payload immediately when provider throws`() {
+        startServer().use { started ->
+            started.server.metricsQueryProvider = object : MetricsQueryProvider {
+                override fun llmCallStats(runOnly: Boolean, timeframeMs: Long?) =
+                    throw IllegalStateException("boom")
+            }
+
+            val response = get("http://127.0.0.1:${started.port}/api/obs/llm-stats")
+            assertEquals(202, response.statusCode())
+            assertTrue(response.body().contains("\"warmup\":true"))
+            assertTrue(response.body().contains("\"stale\":true"))
         }
     }
 

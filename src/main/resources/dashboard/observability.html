@@ -673,6 +673,8 @@
   <div class="status-bar" id="status-bar"></div>
 
   <script>
+    const REQUEST_TIMEOUT_MS = 8000;
+
     const state = {
       loopStatus: "idle",
       loopStep: 0,
@@ -716,6 +718,19 @@
         .replace(/>/g, "&gt;")
         .replace(/\"/g, "&quot;")
         .replace(/'/g, "&#39;");
+
+    async function fetchWithTimeout(url, init) {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+      try {
+        return await fetch(
+          url,
+          Object.assign({ cache: "no-store", signal: controller.signal }, init || {})
+        );
+      } finally {
+        clearTimeout(timeout);
+      }
+    }
 
     /* ── Timeline configuration ── */
     const timelineExcluded = new Set([
@@ -1662,7 +1677,12 @@
     async function boot() {
       const status = document.getElementById("status");
       try {
-        const snapshot = await fetch("/api/obs/snapshot", { cache: "no-store" }).then(r => r.json());
+        const snapshotResp = await fetchWithTimeout("/api/obs/snapshot?events_limit=300&include_heavy_events=false");
+        if (!snapshotResp.ok) {
+          const body = await snapshotResp.text().catch(() => "");
+          throw new Error("snapshot HTTP " + snapshotResp.status + (body ? ": " + body : ""));
+        }
+        const snapshot = await snapshotResp.json();
         Object.assign(state, snapshot);
         if (!Array.isArray(state.actionCapabilities)) state.actionCapabilities = [];
         state.lastLlmCall = latestLlmCallFromEvents(state.recentEvents);
@@ -1671,7 +1691,9 @@
           taskType: state.currentTaskType || null,
           detail: processingDetail(state.currentProcessing)
         };
-      } catch (_) {}
+      } catch (err) {
+        console.error("[dashboard] failed to load initial snapshot", err);
+      }
 
       enableResize();
       document.getElementById("workspace-open-btn").addEventListener("click", () => openWorkspaceDrawer());
@@ -1694,8 +1716,12 @@
       es.addEventListener("agent", (msg) => {
         try {
           applyEvent(JSON.parse(msg.data));
-        } catch (_) {}
+        } catch (err) {
+          console.error("[dashboard] failed to parse SSE payload", err, msg && msg.data);
+        }
       });
+      window.addEventListener("beforeunload", () => { es.close(); });
+      window.addEventListener("pagehide", () => { es.close(); });
     }
 
     boot();
