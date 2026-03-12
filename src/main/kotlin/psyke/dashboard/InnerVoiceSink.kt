@@ -197,6 +197,7 @@ class InnerVoiceSink(
         metadata: Map<String, Any?>,
     ) {
         val sessionId = rootInputId?.let { dashboardStore.resolveSessionForRootInput(it) }
+        val sequence = if (sessionId != null) dashboardStore.nextSequenceNumber(sessionId) else 0L
         val trimmedContent = if (content.length > config.maxContentChars) {
             content.take(config.maxContentChars) + "..."
         } else {
@@ -210,6 +211,7 @@ class InnerVoiceSink(
                 rootInputId = rootInputId,
                 sessionId = sessionId,
                 ts = ts,
+                sequence = sequence,
                 metadata = metadata
             )
         )

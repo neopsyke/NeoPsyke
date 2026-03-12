@@ -16,6 +16,7 @@ data class InnerVoiceEvent(
     val rootInputId: String?,
     val sessionId: String?,
     val ts: Long,
+    val sequence: Long = 0,
     val metadata: Map<String, Any?> = emptyMap(),
 )
 

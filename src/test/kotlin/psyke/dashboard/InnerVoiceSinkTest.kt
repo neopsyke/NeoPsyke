@@ -15,6 +15,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 class InnerVoiceSinkTest {
     private val mapper = jacksonObjectMapper()
@@ -424,6 +425,40 @@ class InnerVoiceSinkTest {
         runBlocking {
             val payload = withTimeoutOrNull(300) { sub.receive() }
             assertNull(payload)
+        }
+
+        sub.close()
+        sink.close()
+        innerVoiceStore.close()
+    }
+
+    @Test
+    fun `inner voice events carry positive sequence from shared session counter`() {
+        val (dashboardStore, innerVoiceStore, sink) = buildStack()
+        seedSession(dashboardStore)
+        val sub = innerVoiceStore.subscribe("default")!!
+
+        // Add a chat message first so it gets sequence=1
+        dashboardStore.addUserMessage(sessionId = "default", content = "hello")
+
+        // Now emit a thinking event; it should get sequence=2 from the same counter
+        sink.onEvent(
+            AgentEvents.plannerDecision(
+                trigger = "input",
+                decisionType = "thought",
+                thought = "Let me think about this.",
+                rootInputId = "root-1",
+            )
+        )
+
+        runBlocking {
+            val payload = withTimeoutOrNull(1000) { sub.receive() }
+            assertNotNull(payload)
+            val parsed = mapper.readValue<Map<String, Any?>>(payload)
+            @Suppress("UNCHECKED_CAST")
+            val event = parsed["event"] as Map<String, Any?>
+            val sequence = (event["sequence"] as Number).toLong()
+            assertTrue(sequence > 1L, "Inner voice sequence ($sequence) should be > 1 (after chat message)")
         }
 
         sub.close()
