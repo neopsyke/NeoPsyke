@@ -36,7 +36,7 @@ class Superego(
     private val reviewEngine: SuperegoReviewEngine = buildReviewEngine(primaryEngine)
 
     fun review(action: PendingAction, context: SuperegoContext): GateDecision {
-        val resolvedDirectives = policy.forAction(action.type, actionRegistry).all
+        val resolvedDirectives = policy.forAction(action.type, actionRegistry, origin = context.origin).all
         val lastUserTurn = context.recentDialogue.lastOrNull { it.role == DialogueRole.USER }?.content ?: "none"
         instrumentation.emit(
             AgentEvents.superegoReviewInput(

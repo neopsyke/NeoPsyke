@@ -19,8 +19,8 @@ class AnswerActionPlugin(
     override val descriptor: ActionDescriptor = ActionDescriptor(
         actionType = ActionType.ANSWER,
         dispatchable = true,
-        plannerDescription = "answer: payload is the exact answer text for the interlocutor.",
-        payloadGuidance = "Plain text answer; concise unless user asks for detail.",
+        plannerDescription = "answer: payload is text to deliver to the interlocutor (responses, proactive messages, or any direct communication).",
+        payloadGuidance = "Plain text; concise unless detail is warranted.",
         payloadSchemaExample = """Thanks for the context. Here's the result...""",
         requiresFollowUpThought = false,
         followUpPrefix = "Answer delivered.",

@@ -985,22 +985,41 @@ internal object AppModeRunners {
                                                                 instrumentation = instrumentation
                                                             )
                                                         }
-                                                        try {
-                                                            Ego(
-                                                                planner = planner,
-                                                                superego = gatekeeper,
-                                                                motorCortex = motorCortex,
-                                                                config = config,
-                                                                hippocampus = hippocampus,
-                                                                metaReasoner = metaReasoner,
-                                                                longTermMemoryAdvisor = longTermMemoryAdvisor,
-                                                                sensoryCortex = sensoryCortex,
-                                                                taskWorkspaceFinalizer = taskWorkspaceFinalizer,
+                                                        val idConfig = psyke.config.IdRuntimeConfigLoader.load()
+                                                        val ego = Ego(
+                                                            planner = planner,
+                                                            superego = gatekeeper,
+                                                            motorCortex = motorCortex,
+                                                            config = config,
+                                                            hippocampus = hippocampus,
+                                                            metaReasoner = metaReasoner,
+                                                            longTermMemoryAdvisor = longTermMemoryAdvisor,
+                                                            sensoryCortex = sensoryCortex,
+                                                            taskWorkspaceFinalizer = taskWorkspaceFinalizer,
+                                                            instrumentation = instrumentation,
+                                                            logbook = logbook,
+                                                            logbookSummarizer = logbookSummarizer,
+                                                        )
+                                                        val idModule = if (idConfig.enabled) {
+                                                            psyke.agent.id.Id(
+                                                                config = idConfig,
                                                                 instrumentation = instrumentation,
-                                                                logbook = logbook,
-                                                                logbookSummarizer = logbookSummarizer,
-                                                            ).runInteractive()
+                                                                scope = agentScope,
+                                                                enqueueImpulse = { impulse ->
+                                                                    ego.enqueueImpulse(impulse, idConfig.maxPendingImpulses)
+                                                                },
+                                                                hasPendingWork = { ego.hasPendingWork() },
+                                                            ).also { id ->
+                                                                ego.setId(id)
+                                                                id.start()
+                                                            }
+                                                        } else {
+                                                            null
+                                                        }
+                                                        try {
+                                                            ego.runInteractive()
                                                         } finally {
+                                                            idModule?.close()
                                                             hippocampus.close()
                                                             closeQuietly(logbook)
                                                         }

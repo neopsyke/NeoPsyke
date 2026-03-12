@@ -41,6 +41,12 @@ class ChatRuntimeBridge(
                 detail = "Unknown session id."
             )
         }
+        if (sessionId.startsWith("id:")) {
+            return ChatSubmitResult(
+                accepted = false,
+                detail = "This is a read-only internal session."
+            )
+        }
         val message = store.addUserMessage(
             sessionId = sessionId,
             content = sanitizedContent,

@@ -50,10 +50,12 @@ class LlmEgoPlanner(
         val triggerLabel = when (trigger) {
             is EgoTrigger.IncomingInput -> "input"
             is EgoTrigger.PendingThoughtInput -> "thought"
+            is EgoTrigger.IncomingImpulse -> "impulse"
         }
         val rootInputId = when (trigger) {
             is EgoTrigger.IncomingInput -> trigger.input.rootInputId
             is EgoTrigger.PendingThoughtInput -> trigger.thought.rootInputId
+            is EgoTrigger.IncomingImpulse -> trigger.impulse.rootImpulseId
         }
 
         if (plannerCircuitBreaker.isTripped()) {
@@ -608,6 +610,7 @@ class LlmEgoPlanner(
         val rootInputId = when (trigger) {
             is EgoTrigger.IncomingInput -> trigger.input.rootInputId
             is EgoTrigger.PendingThoughtInput -> trigger.thought.rootInputId
+            is EgoTrigger.IncomingImpulse -> trigger.impulse.rootImpulseId
         }
         return ActionVerifierCircuitKey(
             rootInputId = rootInputId,
@@ -1129,7 +1132,7 @@ class LlmEgoPlanner(
             .ifBlank { "- answer: payload is plain answer text." }
 
         return PromptBudgetAllocator.allocate(
-            sections = listOf(
+            sections = listOfNotNull(
                 PromptBudgetAllocator.Section(
                     key = "planner_system_instructions",
                     role = ChatRole.SYSTEM,
@@ -1308,6 +1311,29 @@ class LlmEgoPlanner(
                     floorTokens = 16,
                     content = "Meta reasoning guidance:\n$metaGuidance"
                 ),
+                context.idState?.let { idState ->
+                    val needsSummary = idState.allNeeds.entries
+                        .sortedByDescending { it.value }
+                        .joinToString(", ") { "${it.key}=${String.format(Locale.ROOT, "%.3f", it.value)}" }
+                    PromptBudgetAllocator.Section(
+                        key = "planner_id_impulse_context",
+                        role = ChatRole.USER,
+                        band = PromptBudgetAllocator.Band.REQUIRED_CONTEXT,
+                        importance = PromptBudgetAllocator.Importance.HIGH,
+                        floorTokens = 40,
+                        content = """
+                        Id impulse context:
+                        This trigger originates from an internal drive, not a user request.
+                        triggering_need=${idState.triggeringNeed}
+                        triggering_urgency=${String.format(Locale.ROOT, "%.3f", idState.triggeringUrgency)}
+                        all_drive_states: $needsSummary
+                        To communicate with the user (share observations, ask questions, offer help), use action=answer.
+                        The answer action is the only channel for delivering text to the user.
+                        Plan ambitiously proportional to urgency level.
+                        Only act if there is genuine value to add; prefer noop otherwise.
+                        """.trimIndent()
+                    )
+                },
                 PromptBudgetAllocator.Section(
                     key = "planner_trigger",
                     role = ChatRole.USER,
@@ -1452,6 +1478,7 @@ class LlmEgoPlanner(
     private fun formatTriggerText(trigger: EgoTrigger): String =
         when (trigger) {
             is EgoTrigger.IncomingInput -> "INPUT: ${trigger.input.content}"
+            is EgoTrigger.IncomingImpulse -> "IMPULSE(need=${trigger.impulse.needId}): ${trigger.impulse.prompt}"
             is EgoTrigger.PendingThoughtInput -> {
                 val thought = trigger.thought
                 val planInfo = thought.planContext?.let { ctx ->

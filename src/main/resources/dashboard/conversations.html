@@ -544,15 +544,29 @@
     async function selectSession(sessionId) {
       if (!sessionId) return;
       const textarea = document.getElementById("composer");
+      const sendBtn = document.getElementById("send-btn");
       if (state.selectedSessionId) {
         state.drafts[state.selectedSessionId] = textarea.value;
       }
       state.selectedSessionId = sessionId;
-      textarea.value = state.drafts[sessionId] || "";
       renderSessions();
       refreshSessionHeader();
       const payload = await fetchJson("/api/chat/sessions/" + encodeURIComponent(sessionId));
+      const isReadOnly = payload && payload.is_read_only;
       state.selectedSessionMessages = Array.isArray(payload && payload.messages) ? payload.messages.filter(function(m) { return !m._thinking; }).slice() : [];
+      if (isReadOnly) {
+        textarea.value = "";
+        textarea.placeholder = "Internal Id Session (read-only)";
+        textarea.disabled = true;
+        sendBtn.disabled = true;
+        sendBtn.style.opacity = "0.4";
+      } else {
+        textarea.value = state.drafts[sessionId] || "";
+        textarea.placeholder = "Type a message...";
+        textarea.disabled = false;
+        sendBtn.disabled = false;
+        sendBtn.style.opacity = "1";
+      }
       renderMessages();
       connectSessionEvents(sessionId);
       setStatus("Connected");

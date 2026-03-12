@@ -8,6 +8,7 @@ LOG_LEVEL="${PSYKE_LOG_LEVEL:-warning}"
 LOG_LEVEL_EXPLICIT=0
 LOG_LEVEL_FROM_ENV=0
 EVAL_MODE=0
+DISABLE_ID=0
 LOOP_DELAY_MS="${EGO_LOOP_DELAY_MS:0}"
 LOG_DIR="${PSYKE_LOG_DIR:-$ROOT_DIR/.psyke/logs}"
 LOG_RETENTION="${PSYKE_LOG_RETENTION:-30}"
@@ -106,18 +107,23 @@ while [[ $# -gt 0 ]]; do
       APP_ARGS+=("$1")
       shift
       ;;
+    --no-id)
+      DISABLE_ID=1
+      shift
+      ;;
     --clear-memory-all|--clear-memory-vector|--clear-memory-episodic|--clear-memory-reflection)
       APP_ARGS+=("$1")
       shift
       ;;
     -h|--help)
       cat <<'EOF'
-Usage: ./run-psyke.sh [--log-level LEVEL] [--loop-delay-ms MS|--no-delay] [--clear-memory-*] [--] [app-args...]
+Usage: ./run-psyke.sh [--log-level LEVEL] [--loop-delay-ms MS|--no-delay] [--no-id] [--clear-memory-*] [--] [app-args...]
 
 Options:
   -l, --log-level LEVEL   SLF4J simple logger level (default: warning)
       --loop-delay-ms MS  Delay between interactive loop cycles (default: 1000)
       --no-delay          Alias for --loop-delay-ms 0
+      --no-id             Disable the Id module (autonomous drives) for this run
   -h, --help              Show this help message
 
 Memory clearing (applied before agent startup):
@@ -146,6 +152,8 @@ Environment:
   PSYKE_EVENT_LOG_FILE    Optional path override for instrumentation sidecar JSONL
   PSYKE_METRICS_DB        SQLite path for persisted local metrics
   EGO_LOOP_DELAY_MS       Delay between loop cycles in ms (default via launcher: 1000)
+  PSYKE_ID_CONFIG_FILE       Optional path to Id runtime YAML (default: ./id-runtime.yaml)
+  PSYKE_ID_ENABLED            Override Id module enabled state (true/false, overrides YAML)
   PSYKE_EVAL_TRANSPORT_DEBUG  Set to true to keep low-level LLM transport debug lines in eval mode
   PSYKE_EVAL_MAX_RAW_RESPONSE_CHARS  Max chars stored per raw eval thought (default: unlimited)
 
@@ -224,6 +232,10 @@ export PSYKE_LOG_FILE="$RUN_LOG_FILE"
 export PSYKE_EVENT_LOG_FILE="$RUN_EVENT_FILE"
 export MEMORY_DEFAULT_NAMESPACE="${MEMORY_DEFAULT_NAMESPACE:-psyke}"
 export EGO_TASK_WORKSPACE_DEBUG_CAPTURE_ENABLED="true"
+
+if [[ "$DISABLE_ID" -eq 1 ]]; then
+  export PSYKE_ID_ENABLED="false"
+fi
 
 JAVA_OPTS_APPEND=" -Dorg.slf4j.simpleLogger.defaultLogLevel=${LOG_LEVEL} -Dorg.slf4j.simpleLogger.logFile=${RUN_LOG_FILE} -Dorg.slf4j.simpleLogger.showDateTime=true -Dorg.slf4j.simpleLogger.dateTimeFormat=yyyy-MM-dd_HH:mm:ss.SSSZ"
 if [[ "$EVAL_MODE" -eq 1 ]] && [[ "${PSYKE_EVAL_TRANSPORT_DEBUG:-false}" != "true" ]]; then
