@@ -30,6 +30,7 @@ class InnerVoiceSink(
             "loop_step" -> trackStep(event)
             "planner_decision" -> handlePlannerDecision(event)
             "plan_created" -> handlePlanCreated(event)
+            "plan_step_started" -> handlePlanStepStarted(event)
             "action_denied" -> handleActionDenied(event)
             "memory_recall_result" -> handleMemoryRecall(event)
             "action_executed" -> handleActionExecuted(event)
@@ -128,6 +129,21 @@ class InnerVoiceSink(
                 event.data["steps"]?.let { put("steps", it) }
                 event.data["step_count"]?.let { put("step_count", it) }
             }
+        )
+    }
+
+    private fun handlePlanStepStarted(event: AgentEvent) {
+        val rootInputId = extractRootInputId(event) ?: return
+        if (!isActivated(rootInputId)) return
+        val stepDescription = event.data["step_description"]?.toString() ?: return
+        val stepIndex = (event.data["step_index"] as? Number)?.toInt() ?: return
+        val totalSteps = (event.data["total_steps"] as? Number)?.toInt() ?: return
+        emitEvent(
+            type = InnerVoiceEventType.PLAN_STEP,
+            content = stepDescription,
+            rootInputId = rootInputId,
+            ts = event.ts,
+            metadata = mapOf("step_index" to stepIndex, "total_steps" to totalSteps)
         )
     }
 

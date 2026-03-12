@@ -193,6 +193,23 @@
       word-break: break-word;
       line-height: 1.45;
     }
+    .thinking-row-flat {
+      cursor: default;
+    }
+    .thinking-row-flat .thinking-summary {
+      padding: 3px 0;
+      line-height: 1.4;
+    }
+    .thinking-plan-steps {
+      margin: 4px 0 0 0;
+      padding-left: 20px;
+      font-size: 11px;
+      color: rgba(143, 170, 180, 0.7);
+      line-height: 1.5;
+    }
+    .thinking-plan-steps li {
+      margin-bottom: 2px;
+    }
     .thinking-hidden .thinking-row {
       display: none;
     }
@@ -425,6 +442,7 @@
       DELIBERATION: "thought",
       INTENTION: "intent",
       PLAN: "plan",
+      PLAN_STEP: "step",
       REFLECTION: "reflect",
       RECALL: "recall",
       OBSERVATION: "observed"
@@ -439,11 +457,49 @@
       }
       root.innerHTML = state.selectedSessionMessages.map((m) => {
         if (m._thinking) {
-          const label = THINKING_TYPE_LABELS[m._thinkingType] || m._thinkingType;
-          var preview = m.content.length > 100 ? m.content.slice(0, 100) + "..." : m.content;
+          var label = THINKING_TYPE_LABELS[m._thinkingType] || m._thinkingType;
+          var capitalLabel = label.charAt(0).toUpperCase() + label.slice(1);
+          var meta = m._metadata;
+
+          // PLAN: auto-expanded with numbered steps
+          if (m._thinkingType === "PLAN") {
+            var stepsHtml = "";
+            if (meta && Array.isArray(meta.steps) && meta.steps.length > 0) {
+              stepsHtml = "<ol class=\"thinking-plan-steps\">" +
+                meta.steps.map(function(s) { return "<li>" + esc(s) + "</li>"; }).join("") +
+                "</ol>";
+            }
+            return (
+              "<details class=\"thinking-row\" open data-ts=\"" + esc(m.created_at_ms) + "\">" +
+              "<summary><span class=\"thinking-summary\">" + esc(capitalLabel) + ": " + esc(m.content) + "</span></summary>" +
+              "<div class=\"thinking-detail\">" + stepsHtml + "</div>" +
+              "</details>"
+            );
+          }
+
+          // PLAN_STEP: non-expandable step execution indicator
+          if (m._thinkingType === "PLAN_STEP") {
+            var stepNum = (meta && meta.step_index != null) ? (meta.step_index + 1) : "?";
+            var totalSteps = (meta && meta.total_steps != null) ? meta.total_steps : "?";
+            return (
+              "<div class=\"thinking-row thinking-row-flat\" data-ts=\"" + esc(m.created_at_ms) + "\">" +
+              "<span class=\"thinking-summary\">" + esc(capitalLabel) + " " + stepNum + "/" + totalSteps + ": " + esc(m.content) + "</span>" +
+              "</div>"
+            );
+          }
+
+          // Other events: expandable only if content > 100 chars
+          if (m.content.length <= 100) {
+            return (
+              "<div class=\"thinking-row thinking-row-flat\" data-ts=\"" + esc(m.created_at_ms) + "\">" +
+              "<span class=\"thinking-summary\">" + esc(capitalLabel) + ": " + esc(m.content) + "</span>" +
+              "</div>"
+            );
+          }
+          var preview = m.content.slice(0, 100) + "...";
           return (
             "<details class=\"thinking-row\" data-ts=\"" + esc(m.created_at_ms) + "\">" +
-            "<summary><span class=\"thinking-summary\">" + esc(label.charAt(0).toUpperCase() + label.slice(1)) + ": " + esc(preview) + "</span></summary>" +
+            "<summary><span class=\"thinking-summary\">" + esc(capitalLabel) + ": " + esc(preview) + "</span></summary>" +
             "<div class=\"thinking-detail\">" + esc(m.content) + "</div>" +
             "</details>"
           );
@@ -535,7 +591,8 @@
           _thinkingId: ev.id,
           content: ev.content || "",
           created_at_ms: ev.ts,
-          sequence: ev.sequence || 0
+          sequence: ev.sequence || 0,
+          _metadata: ev.metadata || null
         };
         insertBySequence(thinkingMsg);
         renderMessages();
