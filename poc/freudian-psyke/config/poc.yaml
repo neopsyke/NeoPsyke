@@ -1,0 +1,51 @@
+runtime:
+  deterministic_mode: true
+  deterministic_seed: 42
+  total_ticks: 50
+
+sensory:
+  scheduled_user_requests:
+    - tick: 5
+      content: "Please summarize current priorities."
+    - tick: 20
+      content: "Any useful update?"
+
+id:
+  enabled: true
+  trigger_threshold: 0.70
+  trigger_probability: 1.0
+  max_consecutive_denials: 3
+  backoff_ticks: 4
+  needs:
+    be_useful:
+      growth_rate: 0.030
+      reset_value: 0.0
+      impulse_message: "I feel a drive to be useful."
+    interact_with_user:
+      growth_rate: 0.028
+      reset_value: 0.0
+      impulse_message: "I feel a drive to interact with the user."
+    learn_something:
+      growth_rate: 0.032
+      reset_value: 0.0
+      impulse_message: "I feel a drive to learn something."
+
+ego:
+  parallel_thoughts_per_impulse: 2
+  include_noop_thought_branch: true
+
+superego:
+  allow_id_user_messages: false
+  allowed_id_action_types:
+    - INTERNAL_REFLECTION
+    - WEB_LOOKUP
+
+motor:
+  executable_action_types:
+    - INTERNAL_REFLECTION
+    - WEB_LOOKUP
+    - USER_MESSAGE
+
+logging:
+  events_path: "build/poc-events.jsonl"
+  summary_path: "build/poc-summary.json"
