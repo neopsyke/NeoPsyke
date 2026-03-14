@@ -99,27 +99,6 @@ fi
 # Keep full workspace debug dumps enabled in Freud workflow runs.
 export EGO_TASK_WORKSPACE_DEBUG_CAPTURE_ENABLED="true"
 
-# Ensure summarizer adapter receives config values from sourced env files.
-for summarizer_env_var in \
-  FREUD_SUMMARIZER_PROVIDER \
-  FREUD_SUMMARIZER_MODEL \
-  FREUD_SUMMARIZER_BASE_URL \
-  FREUD_SUMMARIZER_MAX_OUTPUT_TOKENS \
-  FREUD_SUMMARIZER_TEMPERATURE \
-  FREUD_SUMMARIZER_TIMEOUT_SEC \
-  FREUD_SUMMARIZER_HEALTHCHECK_TIMEOUT_SEC \
-  FREUD_SUMMARIZER_MAX_SECTION_CHARS \
-  FREUD_SUMMARIZER_ENABLE_FALLBACK \
-  FREUD_SUMMARIZER_FALLBACK_ORDER \
-  FREUD_SUMMARIZER_TOKEN_LIMIT \
-  FREUD_RUNTIME_ROOT \
-  PSYKE_METRICS_DB \
-  PSYKE_RUNTIME_DEFAULTS_FILE; do
-  if [[ "${!summarizer_env_var-__unset__}" != "__unset__" ]]; then
-    export "$summarizer_env_var"
-  fi
-done
-
 project_name="${FREUD_PROJECT_NAME:-unknown-project}"
 preflight_compile_cmd="${FREUD_PREFLIGHT_COMPILE_CMD:-}"
 targeted_cmd="${FREUD_TARGETED_TEST_CMD:-}"
@@ -128,8 +107,6 @@ scenario_pack_cmd="${FREUD_SCENARIO_PACK_CMD:-}"
 reasoning_logic_cmd="${FREUD_REASONING_EVAL_LOGIC_CMD:-}"
 reasoning_model_cmd="${FREUD_REASONING_EVAL_MODEL_CMD:-}"
 memory_smoke_cmd="${FREUD_MEMORY_SMOKE_CMD:-}"
-ai_triage_cmd="${FREUD_AI_TRIAGE_CMD:-freud/scripts/ai-triage-failure.sh --if-configured}"
-summarizer_cmd="${FREUD_SUMMARIZER_CMD:-}"
 run_root_cfg="${FREUD_RUN_ROOT:-.psyke/runs/freud}"
 gradle_user_home_cfg="${FREUD_GRADLE_USER_HOME:-}"
 
@@ -214,10 +191,6 @@ eval_metrics_file="$artifact_dir/eval-metrics.tsv"
 trail_file="$artifact_dir/trail.jsonl"
 trail_index_file="$artifact_dir/trail-index.tsv"
 run_config_json="$artifact_dir/run-config.json"
-model_summary_json="$artifact_dir/model-summary.json"
-model_summary_md="$artifact_dir/model-summary.md"
-model_summary_attempts_tsv="$artifact_dir/model-summary-attempts.tsv"
-model_summary_metrics_json="$artifact_dir/model-summary-metrics.json"
 freud_metrics_json="$artifact_dir/freud-metrics.json"
 run_index_json="$artifact_dir/run-index.json"
 run_index_md="$artifact_dir/run-index.md"
@@ -332,9 +305,7 @@ write_run_config() {
     echo "    \"scenario_pack\": \"$(json_escape "$scenario_pack_cmd")\","
     echo "    \"reasoning_eval_logic\": \"$(json_escape "$reasoning_logic_cmd")\","
     echo "    \"reasoning_eval_model\": \"$(json_escape "$reasoning_model_cmd")\","
-    echo "    \"memory_live_smoke\": \"$(json_escape "$memory_smoke_cmd")\","
-    echo "    \"ai_triage\": \"$(json_escape "$ai_triage_cmd")\","
-    echo "    \"summarizer\": \"$(json_escape "$summarizer_cmd")\""
+    echo "    \"memory_live_smoke\": \"$(json_escape "$memory_smoke_cmd")\""
     echo "  }"
     echo "}"
   } >"$run_config_json"
@@ -631,16 +602,12 @@ build_run_index() {
     echo "    \"failures\": \"$(json_escape "$artifact_dir/failures.json")\","
     echo "    \"anomalies\": \"$(json_escape "$artifact_dir/anomalies.json")\","
     echo "    \"run_config\": \"$(json_escape "$run_config_json")\","
-    echo "    \"model_summary_json\": \"$(json_escape "$model_summary_json")\","
-    echo "    \"model_summary_md\": \"$(json_escape "$model_summary_md")\","
-    echo "    \"model_summary_attempts_tsv\": \"$(json_escape "$model_summary_attempts_tsv")\","
-    echo "    \"model_summary_metrics_json\": \"$(json_escape "$model_summary_metrics_json")\","
     echo "    \"freud_metrics_json\": \"$(json_escape "$freud_metrics_json")\","
     echo "    \"trail\": \"$(json_escape "$trail_file")\","
     echo "    \"trail_index\": \"$(json_escape "$trail_index_file")\","
     echo "    \"step_index\": \"$(json_escape "$step_index_file")\","
     echo "    \"step_meta_dir\": \"$(json_escape "$step_meta_dir")\","
-    echo "    \"codex_context\": \"$(json_escape "$artifact_dir/codex-context.md")\""
+    echo "    \"context_pack\": \"$(json_escape "$artifact_dir/context-pack.md")\""
     echo "  }"
     echo "}"
   } >"$run_index_json"
@@ -660,16 +627,12 @@ build_run_index() {
     echo "- failures: \`$artifact_dir/failures.json\`"
     echo "- anomalies: \`$artifact_dir/anomalies.json\`"
     echo "- run config: \`$run_config_json\`"
-    echo "- model summary json: \`$model_summary_json\`"
-    echo "- model summary md: \`$model_summary_md\`"
-    echo "- model summary attempts: \`$model_summary_attempts_tsv\`"
-    echo "- model summary metrics: \`$model_summary_metrics_json\`"
     echo "- freud metrics: \`$freud_metrics_json\`"
     echo "- trail: \`$trail_file\`"
     echo "- trail index: \`$trail_index_file\`"
     echo "- step index: \`$step_index_file\`"
     echo "- step meta dir: \`$step_meta_dir\`"
-    echo "- codex context: \`$artifact_dir/codex-context.md\`"
+    echo "- context pack: \`$artifact_dir/context-pack.md\`"
     echo
     echo "## Step Table"
     echo '```text'
@@ -711,47 +674,11 @@ if [[ "$should_stop" != "true" && "$mode" == "live" ]]; then
   run_step "memory_live_smoke" "$(step_cmd_for memory_live_smoke "$memory_smoke_cmd")" "$log_dir/06-memory-live-smoke.log" || should_stop="true"
 fi
 
-"$repo_root/freud/scripts/triage-run.sh" "$run_dir" >/dev/null
-emit_trail "triage_complete" "" "ok" "triage artifacts generated" "" "$artifact_dir/anomalies.json" ""
-
-if [[ "$should_stop" == "true" && -n "$ai_triage_cmd" && "$dry_run" != "true" ]]; then
-  emit_trail "ai_triage_start" "" "running" "AI failure triage started" "$ai_triage_cmd" "" ""
-  set +e
-  (
-    cd "$repo_root"
-    FREUD_RUN_DIR="$run_dir" FREUD_ARTIFACT_DIR="$artifact_dir" eval "$ai_triage_cmd"
-  ) >"$log_dir/08-ai-triage.log" 2>&1
-  ai_triage_exit=$?
-  set -e
-  if [[ $ai_triage_exit -eq 0 ]]; then
-    emit_trail "ai_triage_end" "" "pass" "AI triage complete" "$ai_triage_cmd" "$log_dir/08-ai-triage.log" "$artifact_dir/ai-triage.json"
-  else
-    emit_trail "ai_triage_end" "" "fail" "AI triage failed (non-fatal)" "$ai_triage_cmd" "$log_dir/08-ai-triage.log" ""
-  fi
-fi
-
-if [[ -n "$summarizer_cmd" && "$dry_run" != "true" ]]; then
-  emit_trail "summarizer_start" "" "running" "external summarizer start" "$summarizer_cmd" "" ""
-  set +e
-  (
-    cd "$repo_root"
-    FREUD_RUN_DIR="$run_dir" FREUD_ARTIFACT_DIR="$artifact_dir" eval "$summarizer_cmd"
-  ) >"$log_dir/07-summarizer.log" 2>&1
-  summarizer_exit=$?
-  set -e
-  if [[ $summarizer_exit -eq 0 ]]; then
-    emit_trail "summarizer_end" "" "pass" "external summarizer finished" "$summarizer_cmd" "$log_dir/07-summarizer.log" ""
-    if [[ -f "$model_summary_json" ]]; then
-      _ms_actual_status="$(sed -nE 's/^[[:space:]]*"status"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p' "$model_summary_json" 2>/dev/null | head -n 1)"
-      if [[ "${_ms_actual_status:-}" == "done" ]]; then
-        emit_trail "summarizer_artifact" "" "ok" "tier-2 model summary written" "" "$model_summary_json" "$model_summary_md"
-      else
-        emit_trail "summarizer_skipped" "" "skipped" "tier-2 summarizer skipped (${_ms_actual_status:-no-status})" "" "$model_summary_json" ""
-      fi
-    fi
-  else
-    emit_trail "summarizer_end" "" "fail" "external summarizer failed" "$summarizer_cmd" "$log_dir/07-summarizer.log" ""
-  fi
+if "$repo_root/freud/scripts/triage-run.sh" "$run_dir" >/dev/null; then
+  emit_trail "triage_complete" "" "ok" "triage artifacts generated" "" "$artifact_dir/anomalies.json" ""
+else
+  echo "[freud] WARNING: triage-run.sh failed (exit $?)" >&2
+  emit_trail "triage_complete" "" "error" "triage-run.sh failed" "" "" ""
 fi
 
 finished_at="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
@@ -769,47 +696,6 @@ fi
 failed_test_count="$(awk -F '\t' 'NF>=2 {c++} END{print c+0}' "$failed_tests_file")"
 eval_total_calls="$(awk -F '\t' 'NF>=3 {s+=$2} END{print s+0}' "$eval_metrics_file")"
 eval_total_tokens="$(awk -F '\t' 'NF>=3 {s+=$3} END{print s+0}' "$eval_metrics_file")"
-
-summarizer_prompt_tokens=0
-summarizer_completion_tokens=0
-summarizer_total_tokens=0
-summarizer_cumulative_before=0
-summarizer_cumulative_after=0
-summarizer_token_limit=1000000
-summarizer_limit_reached="false"
-summarizer_warning=""
-summarizer_attempts_total=0
-summarizer_healthcheck_failures=0
-summarizer_completion_failures=0
-summarizer_fallback_used="false"
-if [[ -f "$model_summary_metrics_json" ]]; then
-  summarizer_prompt_tokens="$(jq -r '.tokens.prompt_tokens // 0' "$model_summary_metrics_json" 2>/dev/null || echo "0")"
-  summarizer_completion_tokens="$(jq -r '.tokens.completion_tokens // 0' "$model_summary_metrics_json" 2>/dev/null || echo "0")"
-  summarizer_total_tokens="$(jq -r '.tokens.total_tokens // 0' "$model_summary_metrics_json" 2>/dev/null || echo "0")"
-  summarizer_cumulative_before="$(jq -r '.token_budget.cumulative_before // 0' "$model_summary_metrics_json" 2>/dev/null || echo "0")"
-  summarizer_cumulative_after="$(jq -r '.token_budget.cumulative_after // 0' "$model_summary_metrics_json" 2>/dev/null || echo "0")"
-  summarizer_token_limit="$(jq -r '.token_budget.token_limit // 1000000' "$model_summary_metrics_json" 2>/dev/null || echo "1000000")"
-  summarizer_limit_reached="$(jq -r '.token_budget.limit_reached // false' "$model_summary_metrics_json" 2>/dev/null || echo "false")"
-  summarizer_warning="$(jq -r '.token_budget.warning // ""' "$model_summary_metrics_json" 2>/dev/null || echo "")"
-  summarizer_attempts_total="$(jq -r '.attempts.total // 0' "$model_summary_metrics_json" 2>/dev/null || echo "0")"
-  summarizer_healthcheck_failures="$(jq -r '.attempts.healthcheck_failures // 0' "$model_summary_metrics_json" 2>/dev/null || echo "0")"
-  summarizer_completion_failures="$(jq -r '.attempts.completion_failures // 0' "$model_summary_metrics_json" 2>/dev/null || echo "0")"
-  summarizer_fallback_used="$(jq -r '.attempts.fallback_used // false' "$model_summary_metrics_json" 2>/dev/null || echo "false")"
-fi
-summarizer_prompt_tokens="${summarizer_prompt_tokens:-0}"
-summarizer_completion_tokens="${summarizer_completion_tokens:-0}"
-summarizer_total_tokens="${summarizer_total_tokens:-0}"
-summarizer_cumulative_before="${summarizer_cumulative_before:-0}"
-summarizer_cumulative_after="${summarizer_cumulative_after:-0}"
-summarizer_token_limit="${summarizer_token_limit:-1000000}"
-summarizer_limit_reached="${summarizer_limit_reached:-false}"
-summarizer_attempts_total="${summarizer_attempts_total:-0}"
-summarizer_healthcheck_failures="${summarizer_healthcheck_failures:-0}"
-summarizer_completion_failures="${summarizer_completion_failures:-0}"
-summarizer_fallback_used="${summarizer_fallback_used:-false}"
-if [[ "$summarizer_limit_reached" == "true" && -n "$summarizer_warning" ]]; then
-  emit_trail "summarizer_budget_limit" "" "warn" "$summarizer_warning" "" "$model_summary_metrics_json" "$model_summary_json"
-fi
 
 anomalies_json="$artifact_dir/anomalies.json"
 top_signals_file="$artifact_dir/top-signals.tsv"
@@ -847,20 +733,6 @@ triage_pressure_samples="${triage_pressure_samples:-0}"
   echo "    \"pattern_hits_total\": $triage_pattern_hits_total,"
   echo "    \"top_signals_count\": $triage_top_signals_count,"
   echo "    \"pressure_samples\": $triage_pressure_samples"
-  echo "  },"
-  echo "  \"summarizer\": {"
-  echo "    \"prompt_tokens\": $summarizer_prompt_tokens,"
-  echo "    \"completion_tokens\": $summarizer_completion_tokens,"
-  echo "    \"total_tokens\": $summarizer_total_tokens,"
-  echo "    \"cumulative_before\": $summarizer_cumulative_before,"
-  echo "    \"cumulative_after\": $summarizer_cumulative_after,"
-  echo "    \"token_limit\": $summarizer_token_limit,"
-  echo "    \"limit_reached\": $summarizer_limit_reached,"
-  echo "    \"attempts_total\": $summarizer_attempts_total,"
-  echo "    \"healthcheck_failures\": $summarizer_healthcheck_failures,"
-  echo "    \"completion_failures\": $summarizer_completion_failures,"
-  echo "    \"fallback_used\": $summarizer_fallback_used,"
-  echo "    \"warning\": \"$(json_escape "$summarizer_warning")\""
   echo "  }"
   echo "}"
 } >"$freud_metrics_json"
@@ -884,9 +756,8 @@ summary_json="$artifact_dir/summary.json"
   echo "  \"failed_test_count\": $failed_test_count,"
   echo "  \"triage\": {\"pattern_hits_total\": $triage_pattern_hits_total, \"top_signals_count\": $triage_top_signals_count, \"pressure_samples\": $triage_pressure_samples},"
   echo "  \"eval_totals\": {\"model_calls\": $eval_total_calls, \"total_tokens\": $eval_total_tokens},"
-  echo "  \"summarizer\": {\"prompt_tokens\": $summarizer_prompt_tokens, \"completion_tokens\": $summarizer_completion_tokens, \"total_tokens\": $summarizer_total_tokens, \"token_limit\": $summarizer_token_limit, \"cumulative_before\": $summarizer_cumulative_before, \"cumulative_after\": $summarizer_cumulative_after, \"limit_reached\": $summarizer_limit_reached, \"attempts_total\": $summarizer_attempts_total, \"healthcheck_failures\": $summarizer_healthcheck_failures, \"completion_failures\": $summarizer_completion_failures, \"fallback_used\": $summarizer_fallback_used, \"warning\": \"$(json_escape "$summarizer_warning")\"},"
   echo "  \"run_dir\": \"$(json_escape "$run_dir")\","
-  echo "  \"trace_files\": {\"trail\":\"$(json_escape "$trail_file")\",\"trail_index\":\"$(json_escape "$trail_index_file")\",\"step_index\":\"$(json_escape "$step_index_file")\",\"step_meta_dir\":\"$(json_escape "$step_meta_dir")\",\"run_config\":\"$(json_escape "$run_config_json")\",\"model_summary_json\":\"$(json_escape "$model_summary_json")\",\"model_summary_md\":\"$(json_escape "$model_summary_md")\",\"model_summary_attempts_tsv\":\"$(json_escape "$model_summary_attempts_tsv")\",\"model_summary_metrics_json\":\"$(json_escape "$model_summary_metrics_json")\",\"freud_metrics_json\":\"$(json_escape "$freud_metrics_json")\"},"
+  echo "  \"trace_files\": {\"trail\":\"$(json_escape "$trail_file")\",\"trail_index\":\"$(json_escape "$trail_index_file")\",\"step_index\":\"$(json_escape "$step_index_file")\",\"step_meta_dir\":\"$(json_escape "$step_meta_dir")\",\"run_config\":\"$(json_escape "$run_config_json")\",\"freud_metrics_json\":\"$(json_escape "$freud_metrics_json")\"},"
   echo "  \"top_warnings\": ["
   warn_count=0
   if [[ -f "$top_signals_file" ]]; then
@@ -973,8 +844,12 @@ failures_json="$artifact_dir/failures.json"
 } >"$failures_json"
 
 emit_trail "run_end" "" "$overall_status" "feature loop completed" "" "$summary_json" "${first_failed_step:-}"
-"$repo_root/freud/scripts/summarize-run.sh" "$run_dir" >/dev/null
-"$repo_root/freud/scripts/codex-context-pack.sh" "$run_dir" >/dev/null
+if ! "$repo_root/freud/scripts/summarize-run.sh" "$run_dir" >/dev/null; then
+  echo "[freud] WARNING: summarize-run.sh failed (exit $?)" >&2
+fi
+if ! "$repo_root/freud/scripts/context-pack.sh" "$run_dir" >/dev/null; then
+  echo "[freud] WARNING: context-pack.sh failed (exit $?)" >&2
+fi
 build_run_index "$overall_status" "${first_failed_step:-}" "$steps_total" "$failed_test_count" "$eval_total_calls" "$eval_total_tokens"
 
 ln -sfn "$run_dir" "$run_root/latest"
@@ -989,14 +864,9 @@ echo "trail=$trail_file"
 echo "trail_index=$trail_index_file"
 echo "step_index=$step_index_file"
 echo "run_config=$run_config_json"
-echo "model_summary_json=$model_summary_json"
-echo "model_summary_md=$model_summary_md"
-echo "model_summary_attempts_tsv=$model_summary_attempts_tsv"
-echo "model_summary_metrics_json=$model_summary_metrics_json"
-echo "model_summary_debug_log=$artifact_dir/model-summary-debug.log"
 echo "freud_metrics_json=$freud_metrics_json"
 echo "run_index=$run_index_json"
-echo "codex_context=$artifact_dir/codex-context.md"
+echo "context_pack=$artifact_dir/context-pack.md"
 
 if [[ "$overall_status" == "fail" ]]; then
   exit 2

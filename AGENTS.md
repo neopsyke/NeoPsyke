@@ -79,18 +79,12 @@ Instructions for coding agents working in this repository (Codex, Claude, Gemini
   - `.psyke/runs/freud/<timestamp>-<feature-id>/`
 - Fast-entry artifacts (read these first):
   - `artifacts/summary-compact.md`
-  - `artifacts/summary.json` (includes triage + summarizer counters)
-  - `artifacts/ai-triage.md` (AI root-cause + fix suggestion; present only on failure)
-  - `artifacts/ai-triage.json` (structured: `root_cause`, `fix_suggestion`, `confidence`, `relevant_lines`)
-  - `artifacts/model-summary.json` (Tier-2 optional)
-  - `artifacts/model-summary.md` (Tier-2 optional)
-  - `artifacts/model-summary-attempts.tsv` (Tier-2 provider health/fallback trace)
-  - `artifacts/model-summary-metrics.json` (Tier-2 token and attempt counters)
-  - `artifacts/freud-metrics.json` (run-level + triage + summarizer counters)
+  - `artifacts/summary.json` (includes triage counters)
+  - `artifacts/freud-metrics.json` (run-level + triage counters)
   - `artifacts/trail-index.tsv`
   - `artifacts/step-index.tsv`
   - `artifacts/anomalies.md`
-  - `artifacts/codex-context.md`
+  - `artifacts/context-pack.md`
 - Deep-dive artifacts:
   - `artifacts/step-meta/<step>.json`
   - `artifacts/log-index/<step>.tsv`
@@ -113,6 +107,12 @@ Instructions for coding agents working in this repository (Codex, Claude, Gemini
 - Add/update deterministic scenarios whenever behavior changes in agent loop policies, fallback, memory recall, or convergence behavior.
 - Keep scenario selectors aligned with `src/test/kotlin/psyke/eval/AgentScenarioPackTest.kt`.
 
+### Architecture
+- Orchestration (feature-loop.sh, run-scenarios.sh) remains in Bash.
+- Data-processing scripts (triage, summarize, context-pack, telemetry) are implemented in Python (`freud/py/`) and invoked via thin shell wrappers.
+- Python modules use stdlib only (no external dependencies). Tests use pytest.
+- Shell wrappers set `PYTHONPATH` and `exec python3 -m freud.py.<module>`.
+
 ### Configuration Rules
 - Keep project-specific commands in `freud/config/*.env`.
 - Do not hardcode Psyke-specific commands in generic `freud/scripts/*.sh`.
@@ -120,29 +120,8 @@ Instructions for coding agents working in this repository (Codex, Claude, Gemini
   - `freud/config/default.env`
 - Optional override:
   - `FREUD_CONFIG=/path/to/adapter.env`
-- AI failure triage knobs (optional, runs automatically on step failure):
-  - `FREUD_AI_TRIAGE_CMD` — override or disable (`=''`) the triage command.
-  - `FREUD_TRIAGE_PROVIDER` — same provider values as summarizer (default `auto`).
-  - `FREUD_TRIAGE_MODEL`, `FREUD_TRIAGE_BASE_URL`, `FREUD_TRIAGE_MAX_OUTPUT_TOKENS` (default `500`).
-  - `FREUD_TRIAGE_LOG_TAIL_LINES` (default `60`), `FREUD_TRIAGE_TIMEOUT_SEC` (default `30`).
-  - Reuses `OPENAI_API_KEY` / `MISTRAL_API_KEY` / `GROQ_API_KEY`; silently skips if none available.
-- Tier-2 summarizer knobs (optional):
-  - `FREUD_SUMMARIZER_PROVIDER`, `FREUD_SUMMARIZER_MODEL`, `FREUD_SUMMARIZER_BASE_URL`
-  - Default is `FREUD_SUMMARIZER_PROVIDER=auto` (uses first available key/provider).
-  - Fallback and healthcheck knobs:
-    - `FREUD_SUMMARIZER_ENABLE_FALLBACK`
-    - `FREUD_SUMMARIZER_FALLBACK_ORDER`
-    - `FREUD_SUMMARIZER_HEALTHCHECK_TIMEOUT_SEC`
-    - `FREUD_SUMMARIZER_TOKEN_LIMIT` (default `1000000`)
-
-### Token and Summarization Policy
-- Use cost-tiered summarization:
-  1. Indexed heuristics first (`summary-compact.md`, `trail-index.tsv`, `step-index.tsv`, `anomalies.json`).
-  2. Optional cheap-model summarization via `FREUD_SUMMARIZER_CMD` (default adapter: `freud/scripts/cheap-summarizer-adapter.sh --if-configured`).
-  3. Codex deep analysis and code edits last.
-- Tier-2 adapter uses provider healthcheck + failover by default; review `artifacts/model-summary-attempts.tsv` when summarization fails.
-- Tier-2 token usage ledger lives at `.freud/metrics/summarizer-usage.json`; once token limit is reached, Tier-2 emits warning and skips model calls.
-- Token-limit hits are indexed in `artifacts/trail-index.tsv` as event `summarizer_budget_limit`.
+### Summarization Policy
+- Use heuristic summarization: indexed artifacts first (`summary-compact.md`, `trail-index.tsv`, `step-index.tsv`, `anomalies.json`), then Codex deep analysis and code edits last.
 - Avoid pasting full logs in prompts unless strictly needed.
 - When handing off to another agent, provide artifact paths first, not raw log dumps.
 - For standardized agent instructions, start from:

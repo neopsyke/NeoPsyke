@@ -12,11 +12,15 @@
 This directory is intentionally separated from Psyke runtime code (`src/main/kotlin/psyke`).
 
 ## Layout
-- `freud/scripts/feature-loop.sh`: End-to-end workflow runner.
-- `freud/scripts/run-scenarios.sh`: Runs versioned scenario packs.
-- `freud/scripts/triage-run.sh`: Summarize anomalies from run logs.
-- `freud/scripts/codex-context-pack.sh`: Build compact context for follow-up agent work.
-- `freud/scripts/cheap-summarizer-adapter.sh`: Tier-2 optional cheap-model run summarizer.
+- `freud/scripts/feature-loop.sh`: End-to-end workflow runner (Bash orchestration).
+- `freud/scripts/run-scenarios.sh`: Runs versioned scenario packs (Bash).
+- `freud/scripts/helpers.sh`: Shared Bash helper functions (json_escape, extract_json_*, etc.).
+- `freud/scripts/triage-run.sh`: Thin wrapper → `freud/py/triage.py`.
+- `freud/scripts/summarize-run.sh`: Thin wrapper → `freud/py/summarize.py`.
+- `freud/scripts/context-pack.sh`: Thin wrapper → `freud/py/context_pack.py`.
+- `freud/scripts/prompt-budget-telemetry.sh`: Thin wrapper → `freud/py/telemetry/prompt_budget.py`.
+- `freud/scripts/task-verifier-telemetry.sh`: Thin wrapper → `freud/py/telemetry/task_verifier.py`.
+- `freud/py/`: Python implementations of data-processing scripts (stdlib only).
 - `freud/config/default.env`: Project adapter defaults for this repository.
 - `freud/config/adapter.example.env`: Template for reuse in other projects.
 - `freud/templates/feature-brief.md`: Small, reusable feature brief template.
@@ -41,16 +45,12 @@ Artifacts are saved under `.psyke/runs/freud/<timestamp>-<feature_id>/` by defau
 - `artifacts/anomalies.json`
 - `artifacts/anomalies.md`
 - `artifacts/run-config.json`
-- `artifacts/model-summary.json` (Tier-2, optional)
-- `artifacts/model-summary.md` (Tier-2, optional)
-- `artifacts/model-summary-attempts.tsv` (Tier-2 provider attempts)
-- `artifacts/model-summary-metrics.json` (Tier-2 usage metrics)
-- `artifacts/freud-metrics.json` (run-level counters, triage counters, summarizer counters)
+- `artifacts/freud-metrics.json` (run-level counters, triage counters)
 - `artifacts/trail.jsonl`
 - `artifacts/trail-index.tsv`
 - `artifacts/step-index.tsv`
 - `artifacts/step-meta/*.json`
-- `artifacts/codex-context.md`
+- `artifacts/context-pack.md`
 - `logs/*.log`
 
 ## Configuration
@@ -65,14 +65,6 @@ You can override any command via environment variables before running:
 - `FREUD_REASONING_EVAL_LOGIC_CMD`
 - `FREUD_REASONING_EVAL_MODEL_CMD`
 - `FREUD_MEMORY_SMOKE_CMD`
-- `FREUD_SUMMARIZER_CMD` (optional external model summarizer)
-- `FREUD_SUMMARIZER_PROVIDER` (`auto|openai|groq|mistral|mock|none`)
-- `FREUD_SUMMARIZER_MODEL`
-- `FREUD_SUMMARIZER_BASE_URL` (optional override)
-- `FREUD_SUMMARIZER_ENABLE_FALLBACK` (`true|false`)
-- `FREUD_SUMMARIZER_FALLBACK_ORDER` (default: `openai,mistral,groq`)
-- `FREUD_SUMMARIZER_HEALTHCHECK_TIMEOUT_SEC` (default: `6`)
-- `FREUD_SUMMARIZER_TOKEN_LIMIT` (default: `1000000`)
 - `FREUD_RUN_ROOT`
 - `FREUD_GRADLE_USER_HOME` (optional; isolated Gradle cache)
 
@@ -82,45 +74,37 @@ You can override any command via environment variables before running:
 - Keep artifacts compact and machine-readable.
 - Keep project-specific commands in `freud/config/*.env`, not hardcoded in scripts.
 
-## Summarization Policy
-- Default path is non-LLM summarization (`freud/scripts/summarize-run.sh`) over indexed artifacts.
-- If LLM summarization is needed, use a cheaper model adapter via `FREUD_SUMMARIZER_CMD` and feed it compact files first (`summary.json`, `step-index.tsv`, `trail-index.tsv`, `anomalies.json`), not full logs.
-- Reserve Codex for implementation/debug decisions, not first-pass log condensation.
+## Testing
 
-### Tier-2 Adapter Quick Setup
+### BATS (shell wrapper integration tests)
 ```bash
-# Example: OpenAI cheap summarizer
-export OPENAI_API_KEY=...
-export FREUD_SUMMARIZER_PROVIDER=openai
-export FREUD_SUMMARIZER_MODEL=gpt-5-nano
+# Install bats (one-time)
+brew install bats-core
 
-# Example: Groq cheap summarizer
-export GROQ_API_KEY=...
-export FREUD_SUMMARIZER_PROVIDER=groq
-export FREUD_SUMMARIZER_MODEL=openai/gpt-oss-20b
+# Run all BATS tests
+bats freud/tests/
 
-# Example: Mistral cheap summarizer
-export MISTRAL_API_KEY=...
-export FREUD_SUMMARIZER_PROVIDER=mistral
-export FREUD_SUMMARIZER_MODEL=mistral-small-latest
+# Run a specific test file
+bats freud/tests/test_helpers.bats
 ```
 
-The default `FREUD_SUMMARIZER_CMD` in this repo is:
-- `freud/scripts/cheap-summarizer-adapter.sh --if-configured`
+### pytest (Python module unit tests)
+```bash
+# Create venv and install pytest (one-time)
+python3 -m venv freud/.venv
+freud/.venv/bin/pip install pytest
 
-Default provider is `auto`, with this selection order when keys exist:
-1. `openai` (`gpt-5-nano`)
-2. `mistral` (`mistral-small-latest`)
-3. `groq` (`openai/gpt-oss-20b`)
+# Run all Python tests
+PYTHONPATH=. freud/.venv/bin/pytest freud/tests/test_*_py.py freud/tests/test_common.py -v
+```
 
-Tier-2 runs automatically and safely skips only when no supported API key is configured.
-Before each provider call, Freud runs a lightweight healthcheck (`/models`) and falls back to the next provider on timeout/unavailability.
-Fallback attempts are recorded in:
-- `artifacts/model-summary-attempts.tsv`
-Summarizer usage counters are recorded in:
-- `artifacts/model-summary-metrics.json` (per run)
-- `.freud/metrics/summarizer-usage.json` (cumulative ledger)
-- `artifacts/freud-metrics.json` and `artifacts/summary.json` (surfaced per run for low-token triage)
+Test structure:
+- `freud/tests/helpers/` — shared BATS setup, function sourcing utilities
+- `freud/tests/fixtures/` — sample artifacts, logs, JSONL events for BATS integration tests
+- `freud/tests/conftest.py` — shared pytest fixtures (run directories)
+- `freud/tests/test_*.bats` — BATS tests for shell wrappers and Bash-only logic
+- `freud/tests/test_*_py.py` — pytest tests for Python modules
 
-When cumulative usage reaches the token limit (default: `1,000,000`), Freud emits a warning and skips further Tier-2 model calls.
-Freud also emits a `summarizer_budget_limit` event in `artifacts/trail-index.tsv` to make limit hits easy to trace.
+## Summarization Policy
+- Summarization uses non-LLM heuristics (`freud/scripts/summarize-run.sh`) over indexed artifacts.
+- Reserve Codex for implementation/debug decisions, not first-pass log condensation.

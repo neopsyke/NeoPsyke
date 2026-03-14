@@ -36,17 +36,13 @@ Execution Plan:
 3. If run fails, triage in this order:
    a) .psyke/runs/freud/latest-run.txt
    b) artifacts/summary.json
-   c) artifacts/model-summary.json (if present)
-   d) artifacts/model-summary.md (if present)
-   e) artifacts/model-summary-attempts.tsv (if present)
-   f) artifacts/model-summary-metrics.json (if present)
-   g) artifacts/freud-metrics.json (if present)
-   h) artifacts/trail-index.tsv
-   i) artifacts/step-index.tsv
-   j) artifacts/step-meta/<failing-step>.json
-   k) artifacts/anomalies.md
-   l) artifacts/codex-context.md
-   m) logs/<step>.log only if needed
+   c) artifacts/freud-metrics.json (if present)
+   d) artifacts/trail-index.tsv
+   e) artifacts/step-index.tsv
+   f) artifacts/step-meta/<failing-step>.json
+   g) artifacts/anomalies.md
+   h) artifacts/context-pack.md
+   i) logs/<step>.log only if needed
 4. Apply minimal fixes.
 5. Re-run Freud with the same feature id.
 6. Repeat until all acceptance checks pass.
