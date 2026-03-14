@@ -1,0 +1,4 @@
+# This is a comment
+test_scenario_a	psyke.eval.TestA.scenarioA	First test scenario
+# Another comment
+test_scenario_b	psyke.eval.TestB.scenarioB	Second test scenario

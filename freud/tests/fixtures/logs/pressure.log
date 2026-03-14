@@ -1,0 +1,7 @@
+Step started
+decision_pressure=0.45 step=plan
+decision_pressure=0.72 step=act
+decision_pressure=0.78 step=reflect
+decision_pressure=0.91 step=converge
+decision_pressure=0.85 step=finalize
+Step completed

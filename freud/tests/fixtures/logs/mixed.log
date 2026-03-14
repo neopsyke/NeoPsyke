@@ -1,0 +1,12 @@
+Starting agent loop
+WARNING: high latency detected
+decision_pressure=0.55 step=plan
+planner_output_repaired: fixed missing field
+error in parsing response
+non-parseable output from model
+decision_pressure=0.82 step=act
+forced_terminal_answer triggered
+queue_saturation: step limit reached
+action denied by superego
+timeout waiting for provider
+Test completed

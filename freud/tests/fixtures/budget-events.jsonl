@@ -1,0 +1,4 @@
+{"type":"prompt_budget_allocation","data":{"call_site":"planner","single_message_fallback":false,"floor_violation_count":0,"dropped_section_count":0,"allocated_total_cost":1200,"reserved_floor_cost":400,"degradation_path":"none"}}
+{"type":"prompt_budget_allocation","data":{"call_site":"planner","single_message_fallback":true,"floor_violation_count":1,"dropped_section_count":2,"allocated_total_cost":800,"reserved_floor_cost":600,"degradation_path":"single_message"}}
+{"type":"prompt_budget_allocation","data":{"call_site":"action_executor","single_message_fallback":false,"floor_violation_count":0,"dropped_section_count":0,"allocated_total_cost":1000,"reserved_floor_cost":300,"degradation_path":"none"}}
+{"type":"other_event","data":{"unrelated":"data"}}

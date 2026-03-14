@@ -1,0 +1,5 @@
+Starting test suite
+WARNING: deprecated API usage in SomeClass
+Test running
+warning: unused variable in line 42
+All tests passed with warnings
