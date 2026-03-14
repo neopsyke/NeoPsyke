@@ -502,4 +502,52 @@ object AgentEvents {
                 "timestamp_ms" to System.currentTimeMillis(),
             )
         )
+
+    fun llmCacheHit(
+        sequenceIndex: Int,
+        actor: String,
+        callSite: String,
+    ): AgentEvent =
+        AgentEvent(
+            type = "llm_cache_hit",
+            data = mapOf(
+                "sequence_index" to sequenceIndex,
+                "actor" to actor,
+                "call_site" to callSite,
+            )
+        )
+
+    fun llmCacheMiss(
+        sequenceIndex: Int,
+        actor: String,
+        callSite: String,
+        reason: String,
+    ): AgentEvent =
+        AgentEvent(
+            type = "llm_cache_miss",
+            data = mapOf(
+                "sequence_index" to sequenceIndex,
+                "actor" to actor,
+                "call_site" to callSite,
+                "reason" to reason,
+            )
+        )
+
+    fun llmCacheDivergence(
+        sequenceIndex: Int,
+        actor: String,
+        callSite: String,
+        expectedHash: String,
+        actualHash: String,
+    ): AgentEvent =
+        AgentEvent(
+            type = "llm_cache_divergence",
+            data = mapOf(
+                "sequence_index" to sequenceIndex,
+                "actor" to actor,
+                "call_site" to callSite,
+                "expected_hash" to expectedHash,
+                "actual_hash" to actualHash,
+            )
+        )
 }

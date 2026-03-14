@@ -1,7 +1,5 @@
 # CLAUDE.md
 
-ç
-
 ## Claude Code Specifics
 - Use `./gradlew test` for full verification.
 - When Freud is needed, use `freud/scripts/feature-loop.sh <feature-id>`.

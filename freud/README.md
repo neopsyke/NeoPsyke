@@ -1,6 +1,6 @@
 # freud
 
-`freud` is a workflow meta-project for faster feature iteration loops:
+`freud` is a workflow meta-project for faster feature iteration loops, specially useful for coding agents:
 
 1. Add a feature.
 2. Run deterministic verification first.
@@ -20,7 +20,9 @@ This directory is intentionally separated from Psyke runtime code (`src/main/kot
 - `freud/scripts/context-pack.sh`: Thin wrapper → `freud/py/context_pack.py`.
 - `freud/scripts/prompt-budget-telemetry.sh`: Thin wrapper → `freud/py/telemetry/prompt_budget.py`.
 - `freud/scripts/task-verifier-telemetry.sh`: Thin wrapper → `freud/py/telemetry/task_verifier.py`.
+- `freud/scripts/live-eval.sh`: Single-input live eval with LLM caching and memory isolation.
 - `freud/py/`: Python implementations of data-processing scripts (stdlib only).
+- `freud/py/telemetry/llm_cache.py`: LLM cache hit/miss/divergence telemetry analyzer.
 - `freud/config/default.env`: Project adapter defaults for this repository.
 - `freud/config/adapter.example.env`: Template for reuse in other projects.
 - `freud/templates/feature-brief.md`: Small, reusable feature brief template.
@@ -37,6 +39,16 @@ freud/scripts/feature-loop.sh add-verifier --live
 
 # Dry run to inspect planned commands only
 freud/scripts/feature-loop.sh add-verifier --dry-run
+
+# Single-input live eval (record LLM responses)
+freud/scripts/live-eval.sh --input test-input.txt --timeout 120
+
+# Replay with cached LLM responses
+freud/scripts/live-eval.sh --input test-input.txt \
+  --cache-replay .psyke/runs/freud/latest/artifacts/llm-cache.jsonl
+
+# With expected answer validation
+freud/scripts/live-eval.sh --input test-input.txt --expected expected-answer.txt
 ```
 
 Artifacts are saved under `.psyke/runs/freud/<timestamp>-<feature_id>/` by default:
@@ -52,6 +64,41 @@ Artifacts are saved under `.psyke/runs/freud/<timestamp>-<feature_id>/` by defau
 - `artifacts/step-meta/*.json`
 - `artifacts/context-pack.md`
 - `logs/*.log`
+
+## Live Eval
+
+`live-eval.sh` pipes a single input to Psyke via `--freud-live` mode, captures the answer on stdout, and runs triage/telemetry on the result.
+
+### LLM Response Caching
+- First run (no `--cache-replay`): sets `PSYKE_LLM_CACHE_MODE=record` and saves all LLM responses to `artifacts/llm-cache.jsonl`.
+- Replay run (`--cache-replay <file>`): sets `PSYKE_LLM_CACHE_MODE=replay`. Cached responses are matched by sequence position and verified by SHA-256 hash of the message list. On mismatch (divergence), all subsequent calls use real LLM.
+- Cache telemetry is written to `artifacts/cache-stats.json` (hit rate, divergence point, per-actor breakdown).
+
+### Memory Isolation
+Live eval runs use an isolated memory environment so user data is never touched:
+
+| Resource | Freud live eval | User default |
+|---|---|---|
+| pgvector namespace | `freud-eval` | `psyke` |
+| Episodic logbook | `.psyke/freud-logbook.db` | `.psyke/logbook.db` |
+| Metrics DB | `.psyke/freud-metrics.db` | `.psyke/metrics.db` |
+
+All freud memory is cleared automatically before each run via `--clear-memory-all`.
+
+### Artifacts
+Live eval runs are saved under `.psyke/runs/freud/<timestamp>-live-eval/`:
+- `artifacts/answer.txt` — agent's answer
+- `artifacts/verdict.json` — pass/fail/timeout with timing
+- `artifacts/llm-cache.jsonl` — recorded LLM responses (record mode)
+- `artifacts/cache-stats.json` — cache hit/miss/divergence stats
+- `artifacts/input.txt` — copy of the input
+- `logs/events.jsonl` — full instrumentation event stream
+- `logs/psyke.log` — application log
+
+### Exit Codes
+- `0` — answer delivered (and accepted if `--expected` provided)
+- `1` — answer delivered but rejected, or error
+- `2` — timeout
 
 ## Configuration
 `feature-loop.sh` reads config from:

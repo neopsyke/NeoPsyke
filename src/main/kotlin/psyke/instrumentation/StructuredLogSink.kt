@@ -422,6 +422,24 @@ class StructuredLogSink : InstrumentationSink {
             "warning" -> {
                 logger.warn { event.data["message"] }
             }
+
+            "llm_cache_hit" -> {
+                logger.trace {
+                    "llm.cache.hit seq=${event.data["sequence_index"]} actor=${event.data["actor"]} call_site=${event.data["call_site"]}"
+                }
+            }
+
+            "llm_cache_miss" -> {
+                logger.info {
+                    "llm.cache.miss seq=${event.data["sequence_index"]} actor=${event.data["actor"]} call_site=${event.data["call_site"]} reason=${event.data["reason"]}"
+                }
+            }
+
+            "llm_cache_divergence" -> {
+                logger.info {
+                    "llm.cache.divergence seq=${event.data["sequence_index"]} actor=${event.data["actor"]} call_site=${event.data["call_site"]} expected_hash=${event.data["expected_hash"]} actual_hash=${event.data["actual_hash"]}"
+                }
+            }
         }
     }
 }
