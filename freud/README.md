@@ -1,6 +1,6 @@
 # freud
 
-`freud` is a workflow meta-project for faster feature iteration loops:
+`freud` is a workflow meta-project for faster feature iteration loops, specially useful for coding agents:
 
 1. Add a feature.
 2. Run deterministic verification first.
