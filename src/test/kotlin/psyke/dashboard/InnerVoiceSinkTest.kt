@@ -15,6 +15,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 class InnerVoiceSinkTest {
     private val mapper = jacksonObjectMapper()
@@ -424,6 +425,117 @@ class InnerVoiceSinkTest {
         runBlocking {
             val payload = withTimeoutOrNull(300) { sub.receive() }
             assertNull(payload)
+        }
+
+        sub.close()
+        sink.close()
+        innerVoiceStore.close()
+    }
+
+    @Test
+    fun `inner voice events carry positive sequence from shared session counter`() {
+        val (dashboardStore, innerVoiceStore, sink) = buildStack()
+        seedSession(dashboardStore)
+        val sub = innerVoiceStore.subscribe("default")!!
+
+        // Add a chat message first so it gets sequence=1
+        dashboardStore.addUserMessage(sessionId = "default", content = "hello")
+
+        // Now emit a thinking event; it should get sequence=2 from the same counter
+        sink.onEvent(
+            AgentEvents.plannerDecision(
+                trigger = "input",
+                decisionType = "thought",
+                thought = "Let me think about this.",
+                rootInputId = "root-1",
+            )
+        )
+
+        runBlocking {
+            val payload = withTimeoutOrNull(1000) { sub.receive() }
+            assertNotNull(payload)
+            val parsed = mapper.readValue<Map<String, Any?>>(payload)
+            @Suppress("UNCHECKED_CAST")
+            val event = parsed["event"] as Map<String, Any?>
+            val sequence = (event["sequence"] as Number).toLong()
+            assertTrue(sequence > 1L, "Inner voice sequence ($sequence) should be > 1 (after chat message)")
+        }
+
+        sub.close()
+        sink.close()
+        innerVoiceStore.close()
+    }
+
+    @Test
+    fun `plan_step_started produces PLAN_STEP event when root is activated`() {
+        val (dashboardStore, innerVoiceStore, sink) = buildStack()
+        seedSession(dashboardStore)
+        val sub = innerVoiceStore.subscribe("default")!!
+
+        // Activate by creating a plan first
+        sink.onEvent(
+            AgentEvents.planCreated(
+                planId = "plan-1",
+                goal = "Research AI developments",
+                stepCount = 3,
+                urgency = "high",
+                steps = listOf("Search", "Fetch", "Summarize"),
+                rootInputId = "root-1",
+            )
+        )
+
+        // Emit plan step started
+        sink.onEvent(
+            AgentEvents.planStepStarted(
+                planId = "plan-1",
+                stepIndex = 0,
+                totalSteps = 3,
+                stepDescription = "Search for latest AI news articles",
+                rootInputId = "root-1",
+            )
+        )
+
+        runBlocking {
+            // Skip the PLAN event
+            withTimeoutOrNull(1000) { sub.receive() }
+            val payload = withTimeoutOrNull(1000) { sub.receive() }
+            assertNotNull(payload)
+            val parsed = mapper.readValue<Map<String, Any?>>(payload)
+            @Suppress("UNCHECKED_CAST")
+            val event = parsed["event"] as Map<String, Any?>
+            assertEquals("PLAN_STEP", event["type"])
+            assertEquals("Search for latest AI news articles", event["content"])
+            @Suppress("UNCHECKED_CAST")
+            val meta = event["metadata"] as Map<String, Any?>
+            assertEquals(0, meta["step_index"])
+            assertEquals(3, meta["total_steps"])
+        }
+
+        sub.close()
+        sink.close()
+        innerVoiceStore.close()
+    }
+
+    @Test
+    fun `plan_step_started is ignored when root is not activated`() {
+        val (dashboardStore, innerVoiceStore, sink) = buildStack()
+        seedSession(dashboardStore)
+        val sub = innerVoiceStore.subscribe("default")!!
+
+        // Emit plan step without prior activation
+        sink.onEvent(
+            AgentEvents.planStepStarted(
+                planId = "plan-1",
+                stepIndex = 0,
+                totalSteps = 3,
+                stepDescription = "Should not appear",
+                rootInputId = "root-1",
+            )
+        )
+
+        runBlocking {
+            val payload = withTimeoutOrNull(300) { sub.receive() }
+            assertNull(payload, "Plan step for non-activated root should not produce events")
         }
 
         sub.close()

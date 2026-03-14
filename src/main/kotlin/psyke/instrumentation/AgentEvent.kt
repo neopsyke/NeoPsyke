@@ -436,6 +436,24 @@ object AgentEvents {
             )
         )
 
+    fun planStepStarted(
+        planId: String,
+        stepIndex: Int,
+        totalSteps: Int,
+        stepDescription: String,
+        rootInputId: String? = null,
+    ): AgentEvent =
+        AgentEvent(
+            type = "plan_step_started",
+            data = mapOf(
+                "plan_id" to planId,
+                "step_index" to stepIndex,
+                "total_steps" to totalSteps,
+                "step_description" to stepDescription,
+                "root_input_id" to rootInputId,
+            )
+        )
+
     fun llmRawResponse(
         actor: String,
         callSite: String,

@@ -15,6 +15,7 @@ import psyke.instrumentation.AgentEvent
 import psyke.instrumentation.InstrumentationSink
 import psyke.metrics.MetricsSnapshot
 import java.io.Closeable
+import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.max
 
 class DashboardStateStore(
@@ -62,6 +63,7 @@ class DashboardStateStore(
     private val rootInputSessionMap = mutableMapOf<String, String>()
     private val chatSubscribers = mutableMapOf<String, MutableSet<Channel<String>>>()
     private var nextChatMessageId: Long = 1L
+    private val sessionSequenceCounters = mutableMapOf<String, AtomicLong>()
 
     override fun onEvent(event: AgentEvent) {
         var payloadJson: String? = null
@@ -520,6 +522,14 @@ class DashboardStateStore(
     fun resolveSessionForRootInput(rootInputId: String): String? =
         synchronized(lock) { rootInputSessionMap[rootInputId] }
 
+    fun nextSequenceNumber(sessionId: String): Long {
+        synchronized(lock) {
+            return sessionSequenceCounters
+                .getOrPut(sanitizeSessionId(sessionId)) { AtomicLong(0) }
+                .incrementAndGet()
+        }
+    }
+
     fun subscribeChat(sessionId: String): DashboardFlowSubscription? {
         val sanitizedSessionId = sanitizeSessionId(sessionId)
         val channel = Channel<String>(SUBSCRIBER_CHANNEL_CAPACITY)
@@ -661,6 +671,9 @@ class DashboardStateStore(
     ): ChatMessage {
         val session = ensureChatSessionLocked(sessionId, title = null)
         val now = System.currentTimeMillis()
+        val sequence = sessionSequenceCounters
+            .getOrPut(sessionId) { AtomicLong(0) }
+            .incrementAndGet()
         val message = ChatMessage(
             id = nextChatMessageId++,
             sessionId = sessionId,
@@ -668,7 +681,8 @@ class DashboardStateStore(
             content = content,
             source = source,
             createdAtMs = now,
-            interlocutor = interlocutorName
+            interlocutor = interlocutorName,
+            sequence = sequence
         )
         if (session.messages.size >= MAX_CHAT_MESSAGES_PER_SESSION) {
             session.messages.removeFirst()
@@ -687,7 +701,8 @@ class DashboardStateStore(
                         "content" to message.content,
                         "source" to message.source,
                         "created_at_ms" to message.createdAtMs,
-                        "interlocutor" to message.interlocutor
+                        "interlocutor" to message.interlocutor,
+                        "sequence" to message.sequence
                     )
                 )
             )
@@ -715,7 +730,8 @@ class DashboardStateStore(
                         "content" to message.content,
                         "source" to message.source,
                         "created_at_ms" to message.createdAtMs,
-                        "interlocutor" to message.interlocutor
+                        "interlocutor" to message.interlocutor,
+                        "sequence" to message.sequence
                     )
                 }
             } else {
@@ -960,6 +976,7 @@ data class ChatMessage(
     val source: String,
     val createdAtMs: Long,
     val interlocutor: String? = null,
+    val sequence: Long = 0,
 )
 
 private data class ChatSessionRecord(

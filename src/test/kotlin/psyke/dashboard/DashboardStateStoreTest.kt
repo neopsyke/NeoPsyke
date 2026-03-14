@@ -367,6 +367,45 @@ class DashboardStateStoreTest {
     }
 
     @Test
+    fun `chat messages receive monotonically increasing per-session sequence numbers`() {
+        val store = DashboardStateStore(maxEvents = 20)
+        val session = store.createChatSession(title = "Sequence Test")
+        val sessionId = session.sessionId
+
+        val m1 = store.addUserMessage(sessionId = sessionId, content = "first")
+        val m2 = store.addUserMessage(sessionId = sessionId, content = "second")
+        val m3 = store.addUserMessage(sessionId = sessionId, content = "third")
+        assertNotNull(m1)
+        assertNotNull(m2)
+        assertNotNull(m3)
+
+        assertTrue(m1.sequence > 0, "sequence should be positive")
+        assertTrue(m2.sequence > m1.sequence, "second message should have higher sequence")
+        assertTrue(m3.sequence > m2.sequence, "third message should have higher sequence")
+
+        // Verify it appears in the JSON output
+        val sessionPayload = store.chatSessionJson(sessionId)
+        assertNotNull(sessionPayload)
+        assertTrue(sessionPayload.contains("\"sequence\""))
+    }
+
+    @Test
+    fun `sequence numbers are independent per session`() {
+        val store = DashboardStateStore(maxEvents = 20)
+        val s1 = store.createChatSession(title = "S1").sessionId
+        val s2 = store.createChatSession(title = "S2").sessionId
+
+        val m1a = store.addUserMessage(sessionId = s1, content = "s1-msg1")!!
+        val m2a = store.addUserMessage(sessionId = s2, content = "s2-msg1")!!
+        val m1b = store.addUserMessage(sessionId = s1, content = "s1-msg2")!!
+
+        // Each session has its own sequence counter
+        assertEquals(1L, m1a.sequence)
+        assertEquals(1L, m2a.sequence)
+        assertEquals(2L, m1b.sequence)
+    }
+
+    @Test
     fun `snapshot includes store stats`() {
         val store = DashboardStateStore(maxEvents = 50)
         store.onEvent(AgentEvent(id = 1, type = "loop_step", data = mapOf("step" to 1)))

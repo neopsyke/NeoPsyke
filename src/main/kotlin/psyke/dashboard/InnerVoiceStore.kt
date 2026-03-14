@@ -31,6 +31,7 @@ class InnerVoiceStore(
                         "root_input_id" to event.rootInputId,
                         "session_id" to event.sessionId,
                         "ts" to event.ts,
+                        "sequence" to event.sequence,
                         "metadata" to event.metadata
                     )
                 )

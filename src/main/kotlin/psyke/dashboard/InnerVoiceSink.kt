@@ -30,6 +30,7 @@ class InnerVoiceSink(
             "loop_step" -> trackStep(event)
             "planner_decision" -> handlePlannerDecision(event)
             "plan_created" -> handlePlanCreated(event)
+            "plan_step_started" -> handlePlanStepStarted(event)
             "action_denied" -> handleActionDenied(event)
             "memory_recall_result" -> handleMemoryRecall(event)
             "action_executed" -> handleActionExecuted(event)
@@ -131,6 +132,21 @@ class InnerVoiceSink(
         )
     }
 
+    private fun handlePlanStepStarted(event: AgentEvent) {
+        val rootInputId = extractRootInputId(event) ?: return
+        if (!isActivated(rootInputId)) return
+        val stepDescription = event.data["step_description"]?.toString() ?: return
+        val stepIndex = (event.data["step_index"] as? Number)?.toInt() ?: return
+        val totalSteps = (event.data["total_steps"] as? Number)?.toInt() ?: return
+        emitEvent(
+            type = InnerVoiceEventType.PLAN_STEP,
+            content = stepDescription,
+            rootInputId = rootInputId,
+            ts = event.ts,
+            metadata = mapOf("step_index" to stepIndex, "total_steps" to totalSteps)
+        )
+    }
+
     private fun handleActionDenied(event: AgentEvent) {
         val action = event.data["action"] as? PendingAction
         val rootInputId = action?.rootInputId ?: extractRootInputId(event) ?: return
@@ -197,6 +213,7 @@ class InnerVoiceSink(
         metadata: Map<String, Any?>,
     ) {
         val sessionId = rootInputId?.let { dashboardStore.resolveSessionForRootInput(it) }
+        val sequence = if (sessionId != null) dashboardStore.nextSequenceNumber(sessionId) else 0L
         val trimmedContent = if (content.length > config.maxContentChars) {
             content.take(config.maxContentChars) + "..."
         } else {
@@ -210,6 +227,7 @@ class InnerVoiceSink(
                 rootInputId = rootInputId,
                 sessionId = sessionId,
                 ts = ts,
+                sequence = sequence,
                 metadata = metadata
             )
         )

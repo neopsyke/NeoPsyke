@@ -303,6 +303,17 @@ class Ego(
 
         timing.startPhase("thought_processing")
         instrumentation.emit(AgentEvents.thoughtProcessing(thought))
+        thought.planContext?.let { planContext ->
+            instrumentation.emit(
+                AgentEvents.planStepStarted(
+                    planId = planContext.planId,
+                    stepIndex = planContext.stepIndex,
+                    totalSteps = planContext.totalSteps,
+                    stepDescription = planContext.stepDescription,
+                    rootInputId = thought.rootInputId,
+                )
+            )
+        }
 
         timing.startPhase("planner_context")
         val trigger = EgoTrigger.PendingThoughtInput(thought)

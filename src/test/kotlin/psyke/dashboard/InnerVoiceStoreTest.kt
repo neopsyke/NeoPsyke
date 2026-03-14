@@ -46,6 +46,36 @@ class InnerVoiceStoreTest {
     }
 
     @Test
+    fun `emit broadcasts sequence field in payload`() {
+        val store = InnerVoiceStore()
+        val subscription = store.subscribe("session-1")
+        assertNotNull(subscription)
+
+        val event = InnerVoiceEvent(
+            id = 1,
+            type = InnerVoiceEventType.DELIBERATION,
+            content = "Thinking...",
+            rootInputId = "root-1",
+            sessionId = "session-1",
+            ts = System.currentTimeMillis(),
+            sequence = 42
+        )
+        store.emit(event)
+
+        runBlocking {
+            val payload = withTimeoutOrNull(1000) { subscription.receive() }
+            assertNotNull(payload)
+            val parsed = mapper.readValue<Map<String, Any?>>(payload)
+            @Suppress("UNCHECKED_CAST")
+            val inner = parsed["event"] as Map<String, Any?>
+            assertEquals(42L, (inner["sequence"] as Number).toLong())
+        }
+
+        subscription.close()
+        store.close()
+    }
+
+    @Test
     fun `events for different sessions are isolated`() {
         val store = InnerVoiceStore()
         val sub1 = store.subscribe("session-1")!!
