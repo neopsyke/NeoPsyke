@@ -20,3 +20,4 @@ freud/logs/latest
 
 # OS files
 .DS_Store
+__pycache__/
