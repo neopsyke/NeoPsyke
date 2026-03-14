@@ -206,6 +206,9 @@ Standalone Kotlin JVM app using Gradle with:
   - `MEMORY_SEMANTIC_DEDUPE_MIN_CONFIDENCE` (memory server; default: `0.65`)
   - `MEMORY_FACT_DEFAULT_SUBJECT` (memory server; default: `user`)
   - `PSYKE_EVAL_MAX_RAW_RESPONSE_CHARS` (reasoning eval raw-thought capture cap; default: unlimited)
+  - `PSYKE_LLM_CACHE_MODE` (optional; `record`, `replay`, or `off`; default: `off`)
+  - `PSYKE_LLM_CACHE_FILE` (optional; path to JSONL cache file for LLM response caching)
+  - `PSYKE_LOGBOOK_DB_PATH` (optional; override episodic logbook SQLite path; default: `.psyke/logbook.db`)
 
 ## Run
 ```bash
@@ -257,6 +260,27 @@ Reasoning eval output:
 - If `--eval-stage` is omitted, stage defaults to current UTC date.
 - Main run log focuses on eval flow (`[eval.reasoning] ...`) and full model thought text blocks (`thought.begin`/`thought.end`).
 - Metadata-rich instrumentation events (including `llm.call`) are written to a per-run sidecar JSONL file.
+
+Freud live eval (single-input, STDIN/STDOUT, with LLM response caching):
+```bash
+# First run: records LLM responses to cache
+echo "What time is it?" | PSYKE_LLM_CACHE_MODE=record PSYKE_LLM_CACHE_FILE=.psyke/cache.jsonl \
+  ./run-psyke.sh --freud-live --freud-live-timeout 120
+
+# Replay run: uses cached responses until divergence, then real LLM
+echo "What time is it?" | PSYKE_LLM_CACHE_MODE=replay PSYKE_LLM_CACHE_FILE=.psyke/cache.jsonl \
+  ./run-psyke.sh --freud-live
+
+# Via orchestration script (handles caching, memory isolation, triage automatically):
+freud/scripts/live-eval.sh --input input.txt --expected expected.txt --timeout 120
+freud/scripts/live-eval.sh --input input.txt --cache-replay .psyke/runs/freud/latest/artifacts/llm-cache.jsonl
+```
+
+Freud live eval notes:
+- `--freud-live` reads all stdin upfront, submits as a single input, outputs the answer to stdout, then exits.
+- `--freud-live-timeout N` sets a timeout in seconds (default: 120). Exit code 2 on timeout.
+- `live-eval.sh` automatically uses isolated memory (`freud-eval` pgvector namespace, `.psyke/freud-logbook.db`, `.psyke/freud-metrics.db`) and clears it before each run.
+- LLM cache uses sequential matching with SHA-256 hash validation: the Nth LLM call is matched to the Nth cache entry, verified by message hash. On mismatch, replay stops and real LLM is used for all subsequent calls.
 
 Memory live eval (real-world, no mocks):
 ```bash

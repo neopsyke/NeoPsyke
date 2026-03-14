@@ -268,6 +268,10 @@ class SqliteLogbook(
             if (!fromProperty.isNullOrBlank()) {
                 return expandUserPath(fromProperty)
             }
+            val fromEnv = System.getenv("PSYKE_LOGBOOK_DB_PATH")
+            if (!fromEnv.isNullOrBlank()) {
+                return expandUserPath(fromEnv)
+            }
             val cwd = Paths.get(System.getProperty("user.dir")).toAbsolutePath()
             return cwd.resolve(DEFAULT_DB_RELATIVE_PATH).normalize().toAbsolutePath()
         }

@@ -33,6 +33,7 @@ PATTERNS: list[tuple[str, str]] = [
     ("queue_saturation", "queue full|queue_saturation|step limit reached"),
     ("policy_denials", "action denied|denied by superego|policy denied"),
     ("provider_failures", "timeout|unavailable|provider check failed"),
+    ("cache_divergence", "llm_cache_divergence"),
 ]
 
 

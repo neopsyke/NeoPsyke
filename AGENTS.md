@@ -11,7 +11,8 @@ Instructions for coding agents working in this repository (Codex, Claude, Gemini
 - Then follow this file.
 - If instructions conflict, use the highest-priority source.
 - Before adding a new feature or fixing a problem with a new heuristic make sure that tuning or adjusting 
-  an existing one does not achieve the same purpose. Tuning/adjusting is prefered.
+  an existing one does not achieve the same purpose. Tuning/adjusting is preferred.
+- When adding fixes/heuristics, review if a refactor would resolve the same issue in a cleaner way. We like refactors and don't worry about backwards compatibility yet, but ask the user first for approval.
 
 ## Project Snapshot
 - Language: Kotlin (JVM), Gradle Kotlin DSL.
@@ -63,8 +64,20 @@ Instructions for coding agents working in this repository (Codex, Claude, Gemini
   - Valid step names: `preflight_compile targeted_tests full_tests scenario_pack reasoning_eval_logic reasoning_eval_model memory_live_smoke`
 - Scenario-only run:
   - `freud/scripts/run-scenarios.sh --file freud/scenarios/v1/psyke-agent-scenarios.json`
+- Single-input live eval (pipe one input, get one answer):
+  - `freud/scripts/live-eval.sh --input <file> [--expected <file>] [--timeout <seconds>]`
+  - Replay a cached run: `freud/scripts/live-eval.sh --input <file> --cache-replay <cache.jsonl>`
 - Dry-run inspection:
   - `freud/scripts/feature-loop.sh <feature-id> --dry-run`
+
+### Live Eval Memory Isolation
+- `live-eval.sh` uses an isolated memory environment to avoid polluting user data:
+  - pgvector namespace: `freud-eval` (user default: `psyke`)
+  - Episodic logbook: `.psyke/freud-logbook.db` (user default: `.psyke/logbook.db`)
+  - Metrics DB: `.psyke/freud-metrics.db` (user default: `.psyke/metrics.db`)
+- All freud memory is cleared automatically before each run (`--clear-memory-all`).
+- LLM response caching: first run records all LLM responses to a JSONL cache file; subsequent runs with `--cache-replay` replay cached responses until a hash mismatch (divergence), then switch to real LLM calls.
+- Cache env vars: `PSYKE_LLM_CACHE_MODE` (`record`/`replay`/`off`), `PSYKE_LLM_CACHE_FILE`.
 
 ### Failure Semantics (Important)
 - `feature-loop.sh` runs one pass per invocation; it does not auto-fix or auto-iterate code.
@@ -75,8 +88,11 @@ Instructions for coding agents working in this repository (Codex, Claude, Gemini
 - `run-scenarios.sh` executes all listed scenarios in one run and reports aggregate pass/fail; it does not retry failing scenarios automatically.
 
 ### Artifact Locations
-- All run outputs are isolated per run under:
+- Feature-loop run outputs are isolated per run under:
   - `.psyke/runs/freud/<timestamp>-<feature-id>/`
+- Live-eval run outputs under:
+  - `.psyke/runs/freud/<timestamp>-live-eval/`
+  - Includes: `artifacts/answer.txt`, `artifacts/verdict.json`, `artifacts/cache-stats.json`, `artifacts/llm-cache.jsonl` (record mode)
 - Fast-entry artifacts (read these first):
   - `artifacts/summary-compact.md`
   - `artifacts/summary.json` (includes triage counters)
@@ -121,7 +137,7 @@ Instructions for coding agents working in this repository (Codex, Claude, Gemini
 - Optional override:
   - `FREUD_CONFIG=/path/to/adapter.env`
 ### Summarization Policy
-- Use heuristic summarization: indexed artifacts first (`summary-compact.md`, `trail-index.tsv`, `step-index.tsv`, `anomalies.json`), then Codex deep analysis and code edits last.
+- Use heuristic summarization: indexed artifacts first (`summary-compact.md`, `trail-index.tsv`, `step-index.tsv`, `anomalies.json`), then AI deep analysis and code edits last.
 - Avoid pasting full logs in prompts unless strictly needed.
 - When handing off to another agent, provide artifact paths first, not raw log dumps.
 - For standardized agent instructions, start from:

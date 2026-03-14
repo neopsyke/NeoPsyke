@@ -51,9 +51,12 @@ import psyke.eval.ReasoningLogicEvalTasks
 import psyke.eval.ReasoningLogicHarnessClient
 import psyke.eval.ReasoningSelfEvalRunner
 import psyke.eval.UsageTrackingChatClient
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeoutOrNull
 import psyke.async.agentScope
 import psyke.instrumentation.AgentEvent
 import psyke.instrumentation.AgentEvents
@@ -84,6 +87,8 @@ import psyke.llm.OpenAiProviderStatusChecker
 import psyke.llm.ProviderHealthState
 import psyke.llm.ProviderStatus
 import psyke.llm.TokenBudgetGuardedChatClient
+import psyke.llm.LlmCacheMode
+import psyke.llm.LlmCacheManager
 import psyke.llm.combineChatCallObservers
 import psyke.llm.reportProviderStatusAndDecide
 import psyke.integrations.groq.websearch.GroqConversationsWebSearchEngine
@@ -96,6 +101,7 @@ import psyke.metrics.MetricsRuntimeFactory
 import psyke.agent.tools.mcp.FetchTool
 import psyke.agent.tools.mcp.McpTimeTool
 import psyke.agent.tools.mcp.ToolHealthStatus
+import kotlin.system.exitProcess
 import java.net.InetSocketAddress
 import java.util.concurrent.Executors
 import java.net.Socket
@@ -735,13 +741,25 @@ internal object AppModeRunners {
                         instrumentation = instrumentation,
                         maxRawResponseChars = config.maxActionPayloadChars
                     )
-    
+                    val (llmCacheMode, llmCacheFile) = resolveLlmCacheConfig()
+                    val llmCacheManager = if (llmCacheMode != LlmCacheMode.OFF && llmCacheFile != null) {
+                        LlmCacheManager(
+                            mode = llmCacheMode,
+                            cacheFile = llmCacheFile,
+                            instrumentation = instrumentation
+                        )
+                    } else {
+                        null
+                    }
+                    fun maybeCacheWrap(client: ChatModelClient): ChatModelClient =
+                        llmCacheManager?.wrapClient(client) ?: client
+
                     InstrumentedChatModelClient(
                         delegate = TokenBudgetGuardedChatClient(
-                            delegate = createChatClient(
+                            delegate = maybeCacheWrap(createChatClient(
                                 endpoint = llm.planner,
                                 callObserver = callObserverForProvider(llm.planner.providerLabel)
-                            ),
+                            )),
                             budgetGate = tokenBudgetGate,
                             provider = llm.planner.providerLabel,
                             role = LlmRoleLabels.PLANNER
@@ -750,10 +768,10 @@ internal object AppModeRunners {
                     ).use { plannerClient ->
                         InstrumentedChatModelClient(
                             delegate = TokenBudgetGuardedChatClient(
-                                delegate = createChatClient(
+                                delegate = maybeCacheWrap(createChatClient(
                                     endpoint = llm.actionVerifier,
                                     callObserver = callObserverForProvider(llm.actionVerifier.providerLabel)
-                                ),
+                                )),
                                 budgetGate = tokenBudgetGate,
                                 provider = llm.actionVerifier.providerLabel,
                                 role = LlmRoleLabels.ACTION_VERIFIER
@@ -767,10 +785,10 @@ internal object AppModeRunners {
                             )
                             InstrumentedChatModelClient(
                                 delegate = TokenBudgetGuardedChatClient(
-                                    delegate = createChatClient(
+                                    delegate = maybeCacheWrap(createChatClient(
                                         endpoint = superegoReviewRouting.primaryEndpoint,
                                         callObserver = callObserverForProvider(superegoReviewRouting.primaryEndpoint.providerLabel)
-                                    ),
+                                    )),
                                     budgetGate = tokenBudgetGate,
                                     provider = superegoReviewRouting.primaryEndpoint.providerLabel,
                                     role = LlmRoleLabels.SUPEREGO
@@ -780,10 +798,10 @@ internal object AppModeRunners {
                                 val superegoEscalationClient = superegoReviewRouting.escalationEndpoint?.let { escalationEndpoint ->
                                     InstrumentedChatModelClient(
                                         delegate = TokenBudgetGuardedChatClient(
-                                            delegate = createChatClient(
+                                            delegate = maybeCacheWrap(createChatClient(
                                                 endpoint = escalationEndpoint,
                                                 callObserver = callObserverForProvider(escalationEndpoint.providerLabel)
-                                            ),
+                                            )),
                                             budgetGate = tokenBudgetGate,
                                             provider = escalationEndpoint.providerLabel,
                                             role = LlmRoleLabels.SUPEREGO
@@ -794,10 +812,10 @@ internal object AppModeRunners {
                                 val metaReasonerFallbackClient = llm.metaReasonerFallback?.let { fallbackEndpoint ->
                                     InstrumentedChatModelClient(
                                         delegate = TokenBudgetGuardedChatClient(
-                                            delegate = createChatClient(
+                                            delegate = maybeCacheWrap(createChatClient(
                                                 endpoint = fallbackEndpoint,
                                                 callObserver = callObserverForProvider(fallbackEndpoint.providerLabel)
-                                            ),
+                                            )),
                                             budgetGate = tokenBudgetGate,
                                             provider = fallbackEndpoint.providerLabel,
                                             role = LlmRoleLabels.META_REASONER
@@ -807,10 +825,10 @@ internal object AppModeRunners {
                                 }
                                 InstrumentedChatModelClient(
                                     delegate = TokenBudgetGuardedChatClient(
-                                        delegate = createChatClient(
+                                        delegate = maybeCacheWrap(createChatClient(
                                             endpoint = llm.metaReasoner,
                                             callObserver = callObserverForProvider(llm.metaReasoner.providerLabel)
-                                        ),
+                                        )),
                                         budgetGate = tokenBudgetGate,
                                         provider = llm.metaReasoner.providerLabel,
                                         role = LlmRoleLabels.META_REASONER
@@ -819,10 +837,10 @@ internal object AppModeRunners {
                                 ).use { metaReasonerClient ->
                                     InstrumentedChatModelClient(
                                         delegate = TokenBudgetGuardedChatClient(
-                                            delegate = createChatClient(
+                                            delegate = maybeCacheWrap(createChatClient(
                                                 endpoint = llm.memoryAdvisor,
                                                 callObserver = callObserverForProvider(llm.memoryAdvisor.providerLabel)
-                                            ),
+                                            )),
                                             budgetGate = tokenBudgetGate,
                                             provider = llm.memoryAdvisor.providerLabel,
                                             role = LlmRoleLabels.MEMORY_ADVISOR
@@ -1039,12 +1057,423 @@ internal object AppModeRunners {
                             }
                         }
                     }
+                    llmCacheManager?.close()
                     dumpEndOfRunMetrics(metrics)
                 }
             }
             }
         } finally {
             innerVoiceStore?.close()
+            sensoryInput.close()
+            agentScope.cancel()
+        }
+    }
+
+    internal fun runFreudLiveMode(
+        llm: LlmRuntimeConfig,
+        config: AgentConfig,
+        mcpRuntimeConfig: McpRuntimeConfig,
+        runtimeSettings: AgentRuntimeSettings,
+        cliOptions: AppCliOptions,
+    ) {
+        if (!checkInteractiveLlmHealth(llm = llm, modeLabel = "freud-live")) {
+            exitProcess(1)
+        }
+
+        val stdinContent = System.`in`.bufferedReader().readText().trim()
+        if (stdinContent.isBlank()) {
+            logger.warn { "No input provided on stdin for freud-live mode." }
+            output.error("freud-live: no input on stdin.")
+            exitProcess(1)
+        }
+        logger.info { "freud-live: read ${stdinContent.length} chars from stdin" }
+
+        val answerDeferred = CompletableDeferred<String>()
+        val liveOutput: (String) -> Unit = { msg ->
+            println(msg)
+            System.out.flush()
+            val answer = msg.removePrefix("ego> ")
+            answerDeferred.complete(answer)
+        }
+
+        val agentScope = agentScope("psyke-freud-live")
+        val sensoryInput = AsyncSensoryInputSource(
+            includeStdin = false,
+            emitStdinClosedSignal = false,
+            scope = agentScope
+        )
+        val interlocutorResolver = psyke.agent.core.DefaultInterlocutorResolver()
+        val sensoryCortex = SensoryCortex(
+            config = config,
+            source = sensoryInput,
+            interlocutorResolver = interlocutorResolver
+        )
+        val sidecarPath = resolveEvalEventSidecarPath()
+        val sidecarSink = if (sidecarPath == null) {
+            null
+        } else {
+            try {
+                JsonlEventSink(sidecarPath).also {
+                    logger.info { "Event sidecar enabled at $sidecarPath" }
+                }
+            } catch (ex: Exception) {
+                logger.warn(ex) { "Failed to initialize event sidecar at $sidecarPath; continuing without sidecar." }
+                null
+            }
+        }
+
+        try {
+            InstrumentationBus(
+                sinks = listOfNotNull(
+                    StructuredLogSink(),
+                    TaskWorkspaceDumpSink(scope = agentScope),
+                ),
+                criticalSinks = listOfNotNull(sidecarSink),
+                scope = agentScope
+            ).use { instrumentation ->
+                instrumentation.emit(AgentEvents.loopStatus(status = "booting", message = "freud_live_start"))
+
+                val metricsProvider = resolveMetricsProviderLabel(llm)
+                MetricsRuntimeFactory.create(
+                    provider = metricsProvider,
+                    apiKey = llm.planner.apiKey.ifBlank { metricsProvider },
+                    egoModel = llm.planner.model,
+                    superegoModel = llm.superego.model
+                ).use { metrics ->
+                    val metricsEventSink = MetricsEventSink(
+                        metrics = metrics,
+                        longTermMemoryParseFailureAnomalyThreshold = config.memory.longTermMemoryParseFallbackDisableAfter
+                    )
+                    instrumentation.addSink(metricsEventSink)
+                    metricsEventSink.setInstrumentation(instrumentation)
+                    instrumentation.setDroppedEventsObserver { delta, _ ->
+                        metrics.recordDroppedEvents(delta)
+                    }
+                    val metricsSnapshotObserver = MetricsSnapshotObserver(
+                        metricsRuntime = metrics,
+                        instrumentation = instrumentation
+                    )
+                    val tokenBudgetGate = LlmTokenBudgetGate(
+                        metricsRuntime = metrics,
+                        config = LlmTokenBudgetConfig(
+                            maxRunTotalTokens = config.planner.maxRunTotalTokens,
+                            maxRunTokensPerProvider = config.planner.maxRunTokensPerProvider,
+                            maxRunTokensPerRole = config.planner.maxRunTokensPerRole
+                        )
+                    )
+
+                    val callObserversByProvider = mutableMapOf<String, psyke.llm.ChatCallObserver?>()
+                    fun callObserverForProvider(provider: String): psyke.llm.ChatCallObserver? {
+                        return callObserversByProvider.getOrPut(provider) {
+                            val instrumentationObserver = LlmCallEventObserver(
+                                provider = provider,
+                                instrumentation = instrumentation
+                            )
+                            combineChatCallObservers(
+                                metrics.chatCallObserver(provider = provider),
+                                instrumentationObserver,
+                                metricsSnapshotObserver
+                            )
+                        }
+                    }
+                    val rawResponseHook = LlmRawResponseEventHook(
+                        instrumentation = instrumentation,
+                        maxRawResponseChars = config.maxActionPayloadChars
+                    )
+                    val (llmCacheMode, llmCacheFile) = resolveLlmCacheConfig()
+                    val llmCacheManager = if (llmCacheMode != LlmCacheMode.OFF && llmCacheFile != null) {
+                        LlmCacheManager(
+                            mode = llmCacheMode,
+                            cacheFile = llmCacheFile,
+                            instrumentation = instrumentation
+                        )
+                    } else {
+                        null
+                    }
+                    fun maybeCacheWrap(client: ChatModelClient): ChatModelClient =
+                        llmCacheManager?.wrapClient(client) ?: client
+
+                    InstrumentedChatModelClient(
+                        delegate = TokenBudgetGuardedChatClient(
+                            delegate = maybeCacheWrap(createChatClient(
+                                endpoint = llm.planner,
+                                callObserver = callObserverForProvider(llm.planner.providerLabel)
+                            )),
+                            budgetGate = tokenBudgetGate,
+                            provider = llm.planner.providerLabel,
+                            role = LlmRoleLabels.PLANNER
+                        ),
+                        hooks = listOf(rawResponseHook)
+                    ).use { plannerClient ->
+                        InstrumentedChatModelClient(
+                            delegate = TokenBudgetGuardedChatClient(
+                                delegate = maybeCacheWrap(createChatClient(
+                                    endpoint = llm.actionVerifier,
+                                    callObserver = callObserverForProvider(llm.actionVerifier.providerLabel)
+                                )),
+                                budgetGate = tokenBudgetGate,
+                                provider = llm.actionVerifier.providerLabel,
+                                role = LlmRoleLabels.ACTION_VERIFIER
+                            ),
+                            hooks = listOf(rawResponseHook)
+                        ).use { actionVerifierClient ->
+                            val superegoReviewRouting = resolveSuperegoReviewRouting(
+                                llm = llm,
+                                config = config,
+                                instrumentation = instrumentation
+                            )
+                            InstrumentedChatModelClient(
+                                delegate = TokenBudgetGuardedChatClient(
+                                    delegate = maybeCacheWrap(createChatClient(
+                                        endpoint = superegoReviewRouting.primaryEndpoint,
+                                        callObserver = callObserverForProvider(superegoReviewRouting.primaryEndpoint.providerLabel)
+                                    )),
+                                    budgetGate = tokenBudgetGate,
+                                    provider = superegoReviewRouting.primaryEndpoint.providerLabel,
+                                    role = LlmRoleLabels.SUPEREGO
+                                ),
+                                hooks = listOf(rawResponseHook)
+                            ).use { superegoClient ->
+                                val superegoEscalationClient = superegoReviewRouting.escalationEndpoint?.let { escalationEndpoint ->
+                                    InstrumentedChatModelClient(
+                                        delegate = TokenBudgetGuardedChatClient(
+                                            delegate = maybeCacheWrap(createChatClient(
+                                                endpoint = escalationEndpoint,
+                                                callObserver = callObserverForProvider(escalationEndpoint.providerLabel)
+                                            )),
+                                            budgetGate = tokenBudgetGate,
+                                            provider = escalationEndpoint.providerLabel,
+                                            role = LlmRoleLabels.SUPEREGO
+                                        ),
+                                        hooks = listOf(rawResponseHook)
+                                    )
+                                }
+                                val metaReasonerFallbackClient = llm.metaReasonerFallback?.let { fallbackEndpoint ->
+                                    InstrumentedChatModelClient(
+                                        delegate = TokenBudgetGuardedChatClient(
+                                            delegate = maybeCacheWrap(createChatClient(
+                                                endpoint = fallbackEndpoint,
+                                                callObserver = callObserverForProvider(fallbackEndpoint.providerLabel)
+                                            )),
+                                            budgetGate = tokenBudgetGate,
+                                            provider = fallbackEndpoint.providerLabel,
+                                            role = LlmRoleLabels.META_REASONER
+                                        ),
+                                        hooks = listOf(rawResponseHook)
+                                    )
+                                }
+                                InstrumentedChatModelClient(
+                                    delegate = TokenBudgetGuardedChatClient(
+                                        delegate = maybeCacheWrap(createChatClient(
+                                            endpoint = llm.metaReasoner,
+                                            callObserver = callObserverForProvider(llm.metaReasoner.providerLabel)
+                                        )),
+                                        budgetGate = tokenBudgetGate,
+                                        provider = llm.metaReasoner.providerLabel,
+                                        role = LlmRoleLabels.META_REASONER
+                                    ),
+                                    hooks = listOf(rawResponseHook)
+                                ).use { metaReasonerClient ->
+                                    InstrumentedChatModelClient(
+                                        delegate = TokenBudgetGuardedChatClient(
+                                            delegate = maybeCacheWrap(createChatClient(
+                                                endpoint = llm.memoryAdvisor,
+                                                callObserver = callObserverForProvider(llm.memoryAdvisor.providerLabel)
+                                            )),
+                                            budgetGate = tokenBudgetGate,
+                                            provider = llm.memoryAdvisor.providerLabel,
+                                            role = LlmRoleLabels.MEMORY_ADVISOR
+                                        ),
+                                        hooks = listOf(rawResponseHook)
+                                    ).use { longTermMemoryClient ->
+                                        logger.info {
+                                            "freud-live cognitive role routing: " +
+                                                "planner=${llm.planner.providerLabel}/${llm.planner.model}, " +
+                                                "superego=${superegoReviewRouting.primaryEndpoint.providerLabel}/${superegoReviewRouting.primaryEndpoint.model}, " +
+                                                "meta_reasoner=${llm.metaReasoner.providerLabel}/${llm.metaReasoner.model}, " +
+                                                "memory_advisor=${llm.memoryAdvisor.providerLabel}/${llm.memoryAdvisor.model}"
+                                        }
+                                        try {
+                                        val mcpTimeTool = createMcpTimeTool(config, mcpRuntimeConfig.time, agentScope)
+                                        val fetchTool = createFetchTool(config, mcpRuntimeConfig.fetch)
+                                        val webSearchRuntime = createWebSearchRuntime(
+                                            llm = llm,
+                                            callObserver = callObserverForProvider(llm.webSearch.providerLabel),
+                                            instrumentation = instrumentation,
+                                            maxRawResponseChars = config.maxActionPayloadChars,
+                                            tokenBudgetGate = tokenBudgetGate
+                                        )
+
+                                        webSearchRuntime.use { runtime ->
+                                            val timeTool = mcpTimeTool
+                                            val activeFetchTool = fetchTool
+                                            try {
+                                                val webSearchActionHandler = WebSearchActionHandler(runtime.engine)
+                                                val actionRegistry = ActionRegistry.discover(
+                                                    ActionPluginFactoryContext(
+                                                        config = config,
+                                                        webSearchActionHandler = webSearchActionHandler,
+                                                        mcpTimeTool = timeTool,
+                                                        fetchTool = activeFetchTool,
+                                                        output = liveOutput
+                                                    )
+                                                )
+                                                actionRegistry.loadWarnings.forEach { warning ->
+                                                    instrumentation.emit(AgentEvents.warning(warning))
+                                                }
+                                                actionRegistry.use { registry ->
+                                                    val egoDispatcher = Executors.newSingleThreadExecutor { Thread(it, "psyke-freud-live-ego") }.asCoroutineDispatcher()
+                                                    try { runBlocking(egoDispatcher) {
+                                                    val motorCortex = MotorCortex(
+                                                        actionRegistry = registry
+                                                    )
+                                                    val actionStatuses = motorCortex.startupSmokeTest()
+                                                    instrumentation.emit(AgentEvents.actionCapabilities(actionStatuses))
+
+                                                    val planner = LlmEgoPlanner(
+                                                        modelClient = plannerClient,
+                                                        actionVerifierModelClient = actionVerifierClient,
+                                                        actionVerifierContextWindow = llm.modelCatalog.contextWindowFor(llm.actionVerifier),
+                                                        config = config,
+                                                        actionPayloadRepair = motorCortex::repairPlannerPayload,
+                                                        instrumentation = instrumentation,
+                                                        onPlannerNoop = { metrics.recordPlannerNoop() },
+                                                        onPlannerOutputRepaired = { metrics.recordPlannerOutputRepaired() }
+                                                    )
+                                                    val gatekeeper = Superego(
+                                                        modelClient = superegoClient,
+                                                        config = config,
+                                                        actionRegistry = registry,
+                                                        modelTokenWeight = superegoReviewRouting.primaryTokenWeight,
+                                                        modelContextWindow = superegoReviewRouting.primaryContextWindow,
+                                                        modelReasoningOverhead = superegoReviewRouting.primaryReasoningOverhead,
+                                                        escalationModelClient = superegoEscalationClient,
+                                                        escalationModelTokenWeight = superegoReviewRouting.escalationTokenWeight
+                                                            ?: superegoReviewRouting.primaryTokenWeight,
+                                                        escalationModelContextWindow = superegoReviewRouting.escalationContextWindow,
+                                                        escalationModelReasoningOverhead = superegoReviewRouting.escalationReasoningOverhead,
+                                                        instrumentation = instrumentation
+                                                    )
+                                                    val metaReasoner = LlmMetaReasoner(
+                                                        modelClient = metaReasonerClient,
+                                                        config = config,
+                                                        modelTokenWeight = llm.modelCatalog.tokenWeightFor(llm.metaReasoner),
+                                                        modelContextWindow = llm.modelCatalog.contextWindowFor(llm.metaReasoner),
+                                                        fallbackModelClient = metaReasonerFallbackClient,
+                                                        instrumentation = instrumentation
+                                                    )
+                                                    val longTermMemoryAdvisor = LlmLongTermMemoryAdvisor(
+                                                        modelClient = longTermMemoryClient,
+                                                        config = config,
+                                                        modelTokenWeight = llm.modelCatalog.tokenWeightFor(llm.memoryAdvisor),
+                                                        modelContextWindow = llm.modelCatalog.contextWindowFor(llm.memoryAdvisor),
+                                                        instrumentation = instrumentation
+                                                    )
+                                                    val taskWorkspaceFinalizer =
+                                                        if (config.memory.taskWorkspace.enabled &&
+                                                            config.memory.taskWorkspace.finalPassRewriteEnabled
+                                                        ) {
+                                                            LlmTaskWorkspaceFinalizer(
+                                                                modelClient = plannerClient,
+                                                                config = config,
+                                                                instrumentation = instrumentation
+                                                            )
+                                                        } else {
+                                                            NoopTaskWorkspaceFinalizer
+                                                        }
+                                                    val interactiveMemoryStartup =
+                                                        resolveInteractiveMemoryStartup(config, mcpRuntimeConfig.memory)
+                                                    val hippocampus = interactiveMemoryStartup.hippocampus
+                                                    instrumentation.emit(
+                                                        AgentEvent(
+                                                            type = "memory_status",
+                                                            data = mapOf(
+                                                                "available" to hippocampus.enabled,
+                                                                "detail" to interactiveMemoryStartup.detail
+                                                            )
+                                                        )
+                                                    )
+                                                    val logbook = createLogbookIfEnabled(config)
+                                                    val logbookSummarizer = createLogbookSummarizer(config, longTermMemoryClient)
+                                                    val ego = Ego(
+                                                        planner = planner,
+                                                        superego = gatekeeper,
+                                                        motorCortex = motorCortex,
+                                                        config = config,
+                                                        hippocampus = hippocampus,
+                                                        metaReasoner = metaReasoner,
+                                                        longTermMemoryAdvisor = longTermMemoryAdvisor,
+                                                        sensoryCortex = sensoryCortex,
+                                                        taskWorkspaceFinalizer = taskWorkspaceFinalizer,
+                                                        instrumentation = instrumentation,
+                                                        logbook = logbook,
+                                                        logbookSummarizer = logbookSummarizer,
+                                                    )
+
+                                                    sensoryInput.submitInput(
+                                                        content = stdinContent,
+                                                        source = "freud-live"
+                                                    )
+
+                                                    val watchdog = launch {
+                                                        answerDeferred.await()
+                                                        kotlinx.coroutines.delay(500)
+                                                        sensoryInput.close()
+                                                    }
+
+                                                    try {
+                                                        val completed = withTimeoutOrNull(
+                                                            cliOptions.freudLiveTimeoutSeconds * 1000L
+                                                        ) {
+                                                            ego.runInteractive()
+                                                        }
+                                                        if (completed == null) {
+                                                            instrumentation.emit(
+                                                                AgentEvents.loopStatus(
+                                                                    status = "timeout",
+                                                                    message = "freud-live timed out after ${cliOptions.freudLiveTimeoutSeconds}s"
+                                                                )
+                                                            )
+                                                        }
+                                                    } finally {
+                                                        watchdog.cancel()
+                                                        hippocampus.close()
+                                                        closeQuietly(logbook)
+                                                    }
+
+                                                    val exitCode = when {
+                                                        answerDeferred.isCompleted -> 0
+                                                        else -> 2
+                                                    }
+                                                    llmCacheManager?.close()
+                                                    dumpEndOfRunMetrics(metrics)
+                                                    instrumentation.emit(
+                                                        AgentEvents.loopStatus(
+                                                            status = if (exitCode == 0) "completed" else "timeout",
+                                                            message = "freud_live_exit code=$exitCode"
+                                                        )
+                                                    )
+                                                    exitProcess(exitCode)
+
+                                                    } } finally { egoDispatcher.close() }
+                                                }
+                                            } finally {
+                                                closeQuietly(activeFetchTool)
+                                                closeQuietly(timeTool)
+                                            }
+                                        }
+                                    } finally {
+                                        superegoEscalationClient?.close()
+                                        metaReasonerFallbackClient?.close()
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    }
+                }
+            }
+        } finally {
             sensoryInput.close()
             agentScope.cancel()
         }
@@ -1336,6 +1765,13 @@ internal object AppModeRunners {
         }
     }
     
+    private fun resolveLlmCacheConfig(): Pair<LlmCacheMode, java.nio.file.Path?> {
+        val mode = LlmCacheMode.parse(System.getenv("PSYKE_LLM_CACHE_MODE"))
+        val file = System.getenv("PSYKE_LLM_CACHE_FILE")?.trim()?.ifBlank { null }
+            ?.let { java.nio.file.Path.of(it) }
+        return mode to file
+    }
+
     private fun createMcpTimeTool(
         config: AgentConfig,
         capability: McpCapabilityConfig,

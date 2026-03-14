@@ -107,6 +107,23 @@ while [[ $# -gt 0 ]]; do
       APP_ARGS+=("$1")
       shift
       ;;
+    --freud-live)
+      EVAL_MODE=1
+      APP_ARGS+=("$1")
+      shift
+      ;;
+    --freud-live-timeout)
+      if [[ $# -lt 2 ]]; then
+        log_error "Missing value for $1"
+        exit 1
+      fi
+      APP_ARGS+=("$1" "$2")
+      shift 2
+      ;;
+    --freud-live-timeout=*)
+      APP_ARGS+=("--freud-live-timeout" "${1#*=}")
+      shift
+      ;;
     --no-id)
       DISABLE_ID=1
       shift
@@ -154,8 +171,14 @@ Environment:
   EGO_LOOP_DELAY_MS       Delay between loop cycles in ms (default via launcher: 1000)
   PSYKE_ID_CONFIG_FILE       Optional path to Id runtime YAML (default: ./id-runtime.yaml)
   PSYKE_ID_ENABLED            Override Id module enabled state (true/false, overrides YAML)
+  PSYKE_LLM_CACHE_MODE       LLM response cache mode: record, replay, or off (default: off)
+  PSYKE_LLM_CACHE_FILE       Path to LLM cache JSONL file (required when cache mode is record or replay)
   PSYKE_EVAL_TRANSPORT_DEBUG  Set to true to keep low-level LLM transport debug lines in eval mode
   PSYKE_EVAL_MAX_RAW_RESPONSE_CHARS  Max chars stored per raw eval thought (default: unlimited)
+
+Freud live eval mode (forwarded to app):
+  --freud-live                Run single-input live eval (reads stdin, writes answer to stdout)
+  --freud-live-timeout N      Timeout in seconds for freud-live mode (default: 120)
 
 Eval mode (forwarded to app):
   --eval-reasoning-only           Run deterministic reasoning self-eval (no tools/actions)

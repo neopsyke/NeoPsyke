@@ -23,6 +23,8 @@ internal data class AppCliOptions(
     val clearMemoryVector: Boolean = false,
     val clearMemoryEpisodic: Boolean = false,
     val clearMemoryReflection: Boolean = false,
+    val freudLive: Boolean = false,
+    val freudLiveTimeoutSeconds: Int = 120,
     val unknownArgs: List<String>,
     val parseErrors: List<String>,
 ) {
@@ -76,6 +78,17 @@ fun main(args: Array<String>) {
         return
     }
 
+    if (cliOptions.freudLive) {
+        AppModeRunners.runFreudLiveMode(
+            llm = llmRuntimeConfig,
+            config = config,
+            mcpRuntimeConfig = mcpRuntimeConfig,
+            runtimeSettings = runtimeSettings,
+            cliOptions = cliOptions
+        )
+        return
+    }
+
     AppModeRunners.runInteractiveMode(
         llm = llmRuntimeConfig,
         config = config,
@@ -101,6 +114,8 @@ private fun printAppHelp() {
           --clear-memory-vector           Clear vector/hippocampus memory before starting
           --clear-memory-episodic         Clear episodic logbook memory before starting
           --clear-memory-reflection       Clear reflection lessons from vector memory before starting
+          --freud-live                    Run single-input live eval (reads stdin, writes answer to stdout)
+          --freud-live-timeout N          Timeout in seconds for freud-live mode (default: 120)
           -h, --help                      Show this help message
         """.trimIndent()
     )
@@ -120,6 +135,8 @@ private fun parseCliOptions(args: Array<String>): AppCliOptions {
     var clearMemoryVector = false
     var clearMemoryEpisodic = false
     var clearMemoryReflection = false
+    var freudLive = false
+    var freudLiveTimeoutSeconds = 120
     val unknownArgs = mutableListOf<String>()
     val parseErrors = mutableListOf<String>()
 
@@ -251,6 +268,31 @@ private fun parseCliOptions(args: Array<String>): AppCliOptions {
                 index += 1
             }
 
+            arg == "--freud-live" -> {
+                freudLive = true
+                index += 1
+            }
+            arg == "--freud-live-timeout" -> {
+                val next = args.getOrNull(index + 1)
+                val parsed = next?.toIntOrNull()
+                if (parsed == null || parsed < 1) {
+                    parseErrors += "Invalid value for --freud-live-timeout: '${next ?: "<missing>"}'. Expected positive integer (seconds)."
+                } else {
+                    freudLiveTimeoutSeconds = parsed
+                }
+                index += 2
+            }
+            arg.startsWith("--freud-live-timeout=") -> {
+                val raw = arg.substringAfter('=')
+                val parsed = raw.toIntOrNull()
+                if (parsed == null || parsed < 1) {
+                    parseErrors += "Invalid value for --freud-live-timeout: '$raw'. Expected positive integer (seconds)."
+                } else {
+                    freudLiveTimeoutSeconds = parsed
+                }
+                index += 1
+            }
+
             arg == "--clear-memory-all" -> {
                 clearMemoryAll = true
                 index += 1
@@ -275,8 +317,9 @@ private fun parseCliOptions(args: Array<String>): AppCliOptions {
         }
     }
 
-    if (evalReasoningOnly && evalMemoryLiveOnly) {
-        parseErrors += "Choose only one eval mode: --eval-reasoning-only or --eval-memory-live."
+    val evalModeCount = listOf(evalReasoningOnly, evalMemoryLiveOnly, freudLive).count { it }
+    if (evalModeCount > 1) {
+        parseErrors += "Choose only one mode: --eval-reasoning-only, --eval-memory-live, or --freud-live."
     }
 
     return AppCliOptions(
@@ -293,6 +336,8 @@ private fun parseCliOptions(args: Array<String>): AppCliOptions {
         clearMemoryVector = clearMemoryVector,
         clearMemoryEpisodic = clearMemoryEpisodic,
         clearMemoryReflection = clearMemoryReflection,
+        freudLive = freudLive,
+        freudLiveTimeoutSeconds = freudLiveTimeoutSeconds,
         unknownArgs = unknownArgs,
         parseErrors = parseErrors
     )
