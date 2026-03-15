@@ -2,13 +2,13 @@ package psyke.agent.id
 
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import psyke.agent.core.ActionOrigin
-import psyke.agent.core.ActionType
-import psyke.agent.core.LoopTask
-import psyke.agent.core.OriginSource
-import psyke.agent.core.PendingImpulse
+import psyke.agent.model.ActionOrigin
+import psyke.agent.model.ActionType
+import psyke.agent.model.LoopTask
+import psyke.agent.model.OriginSource
+import psyke.agent.model.PendingImpulse
 import psyke.agent.ego.AttentionScheduler
-import psyke.agent.core.AgentConfig
+import psyke.agent.config.AgentConfig
 import psyke.instrumentation.AgentEvent
 import psyke.instrumentation.AgentInstrumentation
 import kotlin.test.Test
@@ -142,13 +142,13 @@ class IdEgoIntegrationTest {
         // Enqueue a thought and action first
         scheduler.enqueueThought(
             content = "thinking...",
-            urgency = psyke.agent.core.Urgency.MEDIUM,
+            urgency = psyke.agent.model.Urgency.MEDIUM,
         )
         scheduler.enqueueAction(
             type = ActionType.ANSWER,
             payload = "hello",
             summary = "answer",
-            urgency = psyke.agent.core.Urgency.MEDIUM,
+            urgency = psyke.agent.model.Urgency.MEDIUM,
         )
 
         // Manually enqueue an impulse (Id.pulse() won't fire because hasPendingWork=true)
@@ -158,7 +158,7 @@ class IdEgoIntegrationTest {
             prompt = "test",
             urgency = 0.8,
             rawValue = 0.8,
-            conversationContext = psyke.agent.core.ConversationContext(
+            conversationContext = psyke.agent.model.ConversationContext(
                 sessionId = Id.SESSION_ID,
                 interlocutor = Id.INTERLOCUTOR,
             ),
@@ -177,7 +177,7 @@ class IdEgoIntegrationTest {
         // Put work in the scheduler to make it "busy"
         scheduler.enqueueThought(
             content = "pending thought",
-            urgency = psyke.agent.core.Urgency.LOW,
+            urgency = psyke.agent.model.Urgency.LOW,
         )
 
         id.pulse()

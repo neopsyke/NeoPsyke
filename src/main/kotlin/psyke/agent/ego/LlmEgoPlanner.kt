@@ -6,7 +6,8 @@ import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
 import mu.KotlinLogging
-import psyke.agent.core.*
+import psyke.agent.config.*
+import psyke.agent.model.*
 import psyke.agent.support.AdaptiveCompletionBudget
 import psyke.agent.support.DenialReasonClassifier
 import psyke.agent.support.LlmCallCircuitBreaker

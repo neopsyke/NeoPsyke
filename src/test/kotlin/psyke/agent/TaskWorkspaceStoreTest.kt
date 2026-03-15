@@ -1,11 +1,11 @@
 package psyke.agent
 
-import psyke.agent.core.ActionOutcome
-import psyke.agent.core.ActionType
-import psyke.agent.core.PendingAction
-import psyke.agent.core.PendingInput
-import psyke.agent.core.TaskWorkspaceConfig
-import psyke.agent.core.Urgency
+import psyke.agent.model.ActionOutcome
+import psyke.agent.model.ActionType
+import psyke.agent.model.PendingAction
+import psyke.agent.model.PendingInput
+import psyke.agent.config.TaskWorkspaceConfig
+import psyke.agent.model.Urgency
 import psyke.agent.memory.workspace.TaskWorkspaceStore
 import kotlin.test.Test
 import kotlin.test.assertEquals

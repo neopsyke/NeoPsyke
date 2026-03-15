@@ -4,18 +4,18 @@ import psyke.agent.actions.websearch.WebSearchActionHandler
 import psyke.agent.actions.websearch.WebSearchEngine
 import psyke.agent.actions.websearch.WebSearchResult
 import psyke.agent.actions.websearch.WebSearchSource
-import psyke.agent.core.AgentConfig
-import psyke.agent.core.EgoDecision
-import psyke.agent.core.EgoTrigger
-import psyke.agent.core.MemoryConfig
-import psyke.agent.core.PendingImpulse
-import psyke.agent.core.PendingAction
-import psyke.agent.core.PendingThought
-import psyke.agent.core.MetaReasonerConfig
-import psyke.agent.core.PlannerConfig
-import psyke.agent.core.PlannerContext
-import psyke.agent.core.TaskWorkspaceConfig
-import psyke.agent.core.Urgency
+import psyke.agent.config.AgentConfig
+import psyke.agent.model.EgoDecision
+import psyke.agent.model.EgoTrigger
+import psyke.agent.config.MemoryConfig
+import psyke.agent.model.PendingImpulse
+import psyke.agent.model.PendingAction
+import psyke.agent.model.PendingThought
+import psyke.agent.config.MetaReasonerConfig
+import psyke.agent.config.PlannerConfig
+import psyke.agent.model.PlannerContext
+import psyke.agent.config.TaskWorkspaceConfig
+import psyke.agent.model.Urgency
 import psyke.agent.cortex.motor.MotorCortex
 import psyke.agent.ego.Ego
 import psyke.agent.ego.LlmEgoPlanner
@@ -470,7 +470,7 @@ class AgentScenarioPackTest {
                     thought.planContext?.stepIndex == 0 -> EgoDecision.Noop("discard this branch")
                     thought.planContext?.stepIndex == 1 -> EgoDecision.ProposeAction(
                         urgency = Urgency.HIGH,
-                        actionType = psyke.agent.core.ActionType.WEB_SEARCH,
+                        actionType = psyke.agent.model.ActionType.WEB_SEARCH,
                         payload = "official pricing",
                         summary = "gather evidence"
                     )

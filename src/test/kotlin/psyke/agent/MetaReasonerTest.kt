@@ -40,11 +40,11 @@ class MetaReasonerTest {
         )
     )
 
-    private fun thoughtTrigger() = psyke.agent.core.EgoTrigger.PendingThoughtInput(
+    private fun thoughtTrigger() = psyke.agent.model.EgoTrigger.PendingThoughtInput(
         PendingThought(id = 1, urgency = Urgency.MEDIUM, content = "keep thinking")
     )
 
-    private fun inputTrigger() = psyke.agent.core.EgoTrigger.IncomingInput(
+    private fun inputTrigger() = psyke.agent.model.EgoTrigger.IncomingInput(
         PendingInput(id = 1, content = "what is 2+2?")
     )
 

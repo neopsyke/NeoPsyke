@@ -1,6 +1,6 @@
 package psyke.agent.memory.episodic
 
-import psyke.agent.core.LogbookConfig
+import psyke.agent.config.LogbookConfig
 import java.nio.file.Files
 import java.time.Instant
 import java.time.temporal.ChronoUnit

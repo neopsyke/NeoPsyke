@@ -1,9 +1,9 @@
 package psyke.agent.ego
 
-import psyke.agent.core.ActionType
-import psyke.agent.core.DeliberationState
-import psyke.agent.core.EgoDecision
-import psyke.agent.core.PendingAction
+import psyke.agent.model.ActionType
+import psyke.agent.model.DeliberationState
+import psyke.agent.model.EgoDecision
+import psyke.agent.model.PendingAction
 import kotlin.math.max
 import kotlin.math.min
 

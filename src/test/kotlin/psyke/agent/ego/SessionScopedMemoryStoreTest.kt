@@ -1,12 +1,12 @@
 package psyke.agent.ego
 
-import psyke.agent.core.AgentConfig
-import psyke.agent.core.ConversationContext
-import psyke.agent.core.DialogueRole
-import psyke.agent.core.DialogueTurn
-import psyke.agent.core.Interlocutor
-import psyke.agent.core.MemoryConfig
-import psyke.agent.core.DeliberationState
+import psyke.agent.config.AgentConfig
+import psyke.agent.model.ConversationContext
+import psyke.agent.model.DialogueRole
+import psyke.agent.model.DialogueTurn
+import psyke.agent.model.Interlocutor
+import psyke.agent.config.MemoryConfig
+import psyke.agent.model.DeliberationState
 import psyke.agent.memory.longterm.NoopHippocampus
 import psyke.agent.memory.longterm.NoopLongTermMemoryAdvisor
 import psyke.agent.memory.longterm.Hippocampus

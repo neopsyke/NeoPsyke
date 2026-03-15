@@ -7,9 +7,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import mu.KotlinLogging
-import psyke.agent.core.ConversationContext
-import psyke.agent.core.Interlocutor
-import psyke.agent.core.PendingImpulse
+import psyke.agent.model.ConversationContext
+import psyke.agent.model.Interlocutor
+import psyke.agent.model.PendingImpulse
 import psyke.instrumentation.AgentEvent
 import psyke.instrumentation.AgentInstrumentation
 import java.io.Closeable

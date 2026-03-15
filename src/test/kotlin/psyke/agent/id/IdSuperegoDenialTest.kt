@@ -2,10 +2,10 @@ package psyke.agent.id
 
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import psyke.agent.core.ActionOrigin
-import psyke.agent.core.ActionType
-import psyke.agent.core.OriginSource
-import psyke.agent.core.PendingImpulse
+import psyke.agent.model.ActionOrigin
+import psyke.agent.model.ActionType
+import psyke.agent.model.OriginSource
+import psyke.agent.model.PendingImpulse
 import psyke.agent.superego.SuperegoPolicy
 import psyke.instrumentation.AgentEvent
 import psyke.instrumentation.AgentInstrumentation

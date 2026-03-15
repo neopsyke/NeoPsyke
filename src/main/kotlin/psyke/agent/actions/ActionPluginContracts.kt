@@ -1,11 +1,11 @@
 package psyke.agent.actions
 
 import psyke.agent.actions.websearch.WebSearchActionHandler
-import psyke.agent.core.ActionOutcome
-import psyke.agent.core.ActionType
-import psyke.agent.core.AgentConfig
-import psyke.agent.core.PendingAction
-import psyke.agent.core.SuperegoContext
+import psyke.agent.model.ActionOutcome
+import psyke.agent.model.ActionType
+import psyke.agent.config.AgentConfig
+import psyke.agent.model.PendingAction
+import psyke.agent.model.SuperegoContext
 import psyke.agent.tools.mcp.FetchTool
 import psyke.agent.tools.mcp.McpTimeTool
 

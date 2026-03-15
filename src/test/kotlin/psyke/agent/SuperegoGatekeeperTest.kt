@@ -2,8 +2,8 @@ package psyke.agent
 
 import psyke.agent.actions.ActionPluginFactoryContext
 import psyke.agent.actions.ActionRegistry
-import psyke.agent.core.ActionOrigin
-import psyke.agent.core.OriginSource
+import psyke.agent.model.ActionOrigin
+import psyke.agent.model.OriginSource
 import psyke.llm.ChatRole
 import psyke.llm.ChatModelClient
 import psyke.llm.ChatRequestOptions

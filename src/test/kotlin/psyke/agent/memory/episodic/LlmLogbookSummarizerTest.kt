@@ -1,6 +1,6 @@
 package psyke.agent.memory.episodic
 
-import psyke.agent.core.AgentConfig
+import psyke.agent.config.AgentConfig
 import psyke.llm.ChatCompletion
 import psyke.llm.ChatMessage
 import psyke.llm.ChatModelClient

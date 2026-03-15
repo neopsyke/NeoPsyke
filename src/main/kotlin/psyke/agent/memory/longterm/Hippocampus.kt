@@ -1,6 +1,6 @@
 package psyke.agent.memory.longterm
 
-import psyke.agent.core.DialogueTurn
+import psyke.agent.model.DialogueTurn
 
 data class MemoryRecallQuery(
     val cue: String,

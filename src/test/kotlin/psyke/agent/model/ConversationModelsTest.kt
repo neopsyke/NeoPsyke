@@ -1,5 +1,6 @@
-package psyke.agent.core
+package psyke.agent.model
 
+import psyke.agent.config.DefaultInterlocutorResolver
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith

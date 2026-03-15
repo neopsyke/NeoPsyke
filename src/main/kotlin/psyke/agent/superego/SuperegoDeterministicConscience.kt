@@ -1,11 +1,11 @@
 package psyke.agent.superego
 
 import psyke.agent.actions.ActionRegistry
-import psyke.agent.core.ActionType
-import psyke.agent.core.AgentConfig
-import psyke.agent.core.OriginSource
-import psyke.agent.core.PendingAction
-import psyke.agent.core.SuperegoContext
+import psyke.agent.model.ActionType
+import psyke.agent.config.AgentConfig
+import psyke.agent.model.OriginSource
+import psyke.agent.model.PendingAction
+import psyke.agent.model.SuperegoContext
 import java.util.Locale
 
 /**

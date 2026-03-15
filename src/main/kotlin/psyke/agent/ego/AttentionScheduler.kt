@@ -1,6 +1,7 @@
 package psyke.agent.ego
 
-import psyke.agent.core.*
+import psyke.agent.config.*
+import psyke.agent.model.*
 import java.util.PriorityQueue
 
 class AttentionScheduler(

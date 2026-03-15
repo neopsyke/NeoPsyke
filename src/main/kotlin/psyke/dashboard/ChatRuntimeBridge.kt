@@ -1,9 +1,9 @@
 package psyke.dashboard
 
-import psyke.agent.core.ConversationContext
-import psyke.agent.core.DefaultInterlocutorResolver
-import psyke.agent.core.InputPriority
-import psyke.agent.core.InterlocutorResolver
+import psyke.agent.model.ConversationContext
+import psyke.agent.config.DefaultInterlocutorResolver
+import psyke.agent.model.InputPriority
+import psyke.agent.config.InterlocutorResolver
 import psyke.agent.cortex.sensory.AsyncSensoryInputSource
 
 data class ChatSubmitResult(

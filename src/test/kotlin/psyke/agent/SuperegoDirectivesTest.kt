@@ -2,7 +2,7 @@ package psyke.agent
 
 import psyke.agent.actions.ActionPluginFactoryContext
 import psyke.agent.actions.ActionRegistry
-import psyke.agent.core.AgentConfig
+import psyke.agent.config.AgentConfig
 import kotlin.test.Test
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue

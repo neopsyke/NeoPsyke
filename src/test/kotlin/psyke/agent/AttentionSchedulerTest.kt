@@ -22,7 +22,7 @@ class AttentionSchedulerTest {
         scheduler.enqueueInput("new input")
 
         val task = scheduler.nextTask()
-        assertIs<psyke.agent.core.LoopTask.ProcessInput>(task)
+        assertIs<psyke.agent.model.LoopTask.ProcessInput>(task)
         assertEquals("new input", task.item.content)
     }
 
@@ -37,10 +37,10 @@ class AttentionSchedulerTest {
         val second = scheduler.nextTask()
         val third = scheduler.nextTask()
 
-        assertIs<psyke.agent.core.LoopTask.PerformAction>(first)
-        assertIs<psyke.agent.core.LoopTask.ProcessThought>(second)
+        assertIs<psyke.agent.model.LoopTask.PerformAction>(first)
+        assertIs<psyke.agent.model.LoopTask.ProcessThought>(second)
         assertEquals("high", second.item.content)
-        assertIs<psyke.agent.core.LoopTask.ProcessThought>(third)
+        assertIs<psyke.agent.model.LoopTask.ProcessThought>(third)
         assertEquals("low", third.item.content)
     }
 
@@ -53,8 +53,8 @@ class AttentionSchedulerTest {
         val first = scheduler.nextTask()
         val second = scheduler.nextTask()
 
-        assertIs<psyke.agent.core.LoopTask.ProcessInput>(first)
-        assertIs<psyke.agent.core.LoopTask.ProcessInput>(second)
+        assertIs<psyke.agent.model.LoopTask.ProcessInput>(first)
+        assertIs<psyke.agent.model.LoopTask.ProcessInput>(second)
         assertEquals("high-second", first.item.content)
         assertEquals(InputPriority.HIGH, first.item.priority)
         assertEquals("medium-first", second.item.content)
@@ -144,8 +144,8 @@ class AttentionSchedulerTest {
         val root = "root-shared"
         val sessionA = "session-a"
         val sessionB = "session-b"
-        val ctxA = psyke.agent.core.ConversationContext(sessionA, psyke.agent.core.Interlocutor.named("a"))
-        val ctxB = psyke.agent.core.ConversationContext(sessionB, psyke.agent.core.Interlocutor.named("b"))
+        val ctxA = psyke.agent.model.ConversationContext(sessionA, psyke.agent.model.Interlocutor.named("a"))
+        val ctxB = psyke.agent.model.ConversationContext(sessionB, psyke.agent.model.Interlocutor.named("b"))
         scheduler.enqueueThought(
             content = "a-thought",
             urgency = Urgency.HIGH,
@@ -192,7 +192,7 @@ class AttentionSchedulerTest {
             content = "step 1",
             urgency = Urgency.MEDIUM,
             rootInputId = root,
-            planContext = psyke.agent.core.PlanContext(
+            planContext = psyke.agent.model.PlanContext(
                 planId = "p1",
                 planGoal = "goal",
                 stepIndex = 0,
@@ -219,13 +219,13 @@ class AttentionSchedulerTest {
     fun `scheduler pending checks are scoped by session for same root input`() {
         val scheduler = AttentionScheduler(config.copy(maxPendingThoughts = 8, maxPendingActions = 8))
         val root = "root-shared-2"
-        val ctxA = psyke.agent.core.ConversationContext("session-a", psyke.agent.core.Interlocutor.named("a"))
-        val ctxB = psyke.agent.core.ConversationContext("session-b", psyke.agent.core.Interlocutor.named("b"))
+        val ctxA = psyke.agent.model.ConversationContext("session-a", psyke.agent.model.Interlocutor.named("a"))
+        val ctxB = psyke.agent.model.ConversationContext("session-b", psyke.agent.model.Interlocutor.named("b"))
         scheduler.enqueueThought(
             content = "step one",
             urgency = Urgency.MEDIUM,
             rootInputId = root,
-            planContext = psyke.agent.core.PlanContext(
+            planContext = psyke.agent.model.PlanContext(
                 planId = "p1",
                 planGoal = "goal-a",
                 stepIndex = 0,

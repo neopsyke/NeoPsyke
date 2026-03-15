@@ -4,9 +4,9 @@ import com.fasterxml.jackson.annotation.JsonInclude
 import com.fasterxml.jackson.databind.DeserializationFeature
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
-import psyke.agent.core.DeliberationState
-import psyke.agent.core.DialogueRole
-import psyke.agent.core.DialogueTurn
+import psyke.agent.model.DeliberationState
+import psyke.agent.model.DialogueRole
+import psyke.agent.model.DialogueTurn
 import psyke.agent.memory.longterm.Hippocampus
 import psyke.agent.memory.longterm.LongTermMemoryAdvisor
 import psyke.agent.memory.longterm.LongTermMemoryAssessmentContext

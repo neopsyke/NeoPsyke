@@ -1,8 +1,8 @@
 package psyke.agent.ego
 
-import psyke.agent.core.ActionType
-import psyke.agent.core.PendingAction
-import psyke.agent.core.Urgency
+import psyke.agent.model.ActionType
+import psyke.agent.model.PendingAction
+import psyke.agent.model.Urgency
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse

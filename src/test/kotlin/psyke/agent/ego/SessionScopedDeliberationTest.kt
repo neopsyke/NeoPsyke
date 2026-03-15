@@ -1,7 +1,7 @@
 package psyke.agent.ego
 
-import psyke.agent.core.AgentConfig
-import psyke.agent.core.ConversationContext
+import psyke.agent.config.AgentConfig
+import psyke.agent.model.ConversationContext
 import psyke.instrumentation.NoopAgentInstrumentation
 import kotlin.test.Test
 import kotlin.test.assertEquals

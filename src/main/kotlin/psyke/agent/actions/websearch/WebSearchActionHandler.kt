@@ -1,6 +1,6 @@
 package psyke.agent.actions.websearch
 
-import psyke.agent.core.ActionOutcome
+import psyke.agent.model.ActionOutcome
 import psyke.agent.support.PromptInjectionDefense
 import psyke.agent.support.TextSecurity
 import java.net.URI

@@ -1,4 +1,4 @@
-package psyke.agent.core
+package psyke.agent.model
 
 import java.util.UUID
 

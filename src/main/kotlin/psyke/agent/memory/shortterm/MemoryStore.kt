@@ -1,6 +1,6 @@
 package psyke.agent.memory.shortterm
 
-import psyke.agent.core.DialogueTurn
+import psyke.agent.model.DialogueTurn
 import psyke.agent.support.TextSecurity
 import kotlin.math.max
 

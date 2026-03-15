@@ -1,9 +1,9 @@
 package psyke.agent.superego
 
 import psyke.agent.actions.ActionRegistry
-import psyke.agent.core.ActionOrigin
-import psyke.agent.core.ActionType
-import psyke.agent.core.OriginSource
+import psyke.agent.model.ActionOrigin
+import psyke.agent.model.ActionType
+import psyke.agent.model.OriginSource
 
 data class SuperegoPolicyDirectives(
     val general: List<String>,

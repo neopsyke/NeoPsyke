@@ -1,7 +1,7 @@
 package psyke.dashboard
 
-import psyke.agent.core.ActionType
-import psyke.agent.core.PendingAction
+import psyke.agent.model.ActionType
+import psyke.agent.model.PendingAction
 import psyke.instrumentation.AgentEvent
 import psyke.instrumentation.InstrumentationSink
 import java.util.concurrent.atomic.AtomicLong
@@ -241,8 +241,8 @@ class InnerVoiceSink(
         event.data["root_input_id"]?.toString()?.takeIf { it.isNotBlank() }?.let { return it }
         // Some events carry rootInputId inside nested objects
         (event.data["action"] as? PendingAction)?.rootInputId?.let { return it }
-        (event.data["input"] as? psyke.agent.core.PendingInput)?.rootInputId?.let { return it }
-        (event.data["thought"] as? psyke.agent.core.PendingThought)?.rootInputId?.let { return it }
+        (event.data["input"] as? psyke.agent.model.PendingInput)?.rootInputId?.let { return it }
+        (event.data["thought"] as? psyke.agent.model.PendingThought)?.rootInputId?.let { return it }
         return null
     }
 

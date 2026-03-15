@@ -1,4 +1,4 @@
-package psyke.agent.core
+package psyke.agent.model
 
 /**
  * Represents the identity of a conversation partner.
@@ -49,25 +49,4 @@ data class ConversationContext(
         fun default(interlocutor: Interlocutor = Interlocutor.UNKNOWN) =
             ConversationContext(DEFAULT_SESSION_ID, interlocutor)
     }
-}
-
-/**
- * Resolves the [Interlocutor] for an incoming input.
- *
- * Implementations are injected at the sensory cortex boundary.
- * The default implementation returns a fixed identity; future implementations
- * may inspect HTTP headers, JWT tokens, API keys, or external identity services.
- */
-interface InterlocutorResolver {
-    fun resolve(source: String, metadata: Map<String, Any>? = null): Interlocutor
-}
-
-/**
- * Default resolver that maps all sources to a single interlocutor.
- */
-class DefaultInterlocutorResolver(
-    private val defaultInterlocutor: Interlocutor = Interlocutor.named("Victor"),
-) : InterlocutorResolver {
-    override fun resolve(source: String, metadata: Map<String, Any>?): Interlocutor =
-        defaultInterlocutor
 }

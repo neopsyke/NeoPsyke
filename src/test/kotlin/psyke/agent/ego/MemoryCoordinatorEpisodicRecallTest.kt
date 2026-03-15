@@ -1,12 +1,12 @@
 package psyke.agent.ego
 
-import psyke.agent.core.AgentConfig
-import psyke.agent.core.DialogueRole
-import psyke.agent.core.DialogueTurn
-import psyke.agent.core.EgoTrigger
-import psyke.agent.core.Interlocutor
-import psyke.agent.core.LogbookConfig
-import psyke.agent.core.PendingInput
+import psyke.agent.config.AgentConfig
+import psyke.agent.model.DialogueRole
+import psyke.agent.model.DialogueTurn
+import psyke.agent.model.EgoTrigger
+import psyke.agent.model.Interlocutor
+import psyke.agent.config.LogbookConfig
+import psyke.agent.model.PendingInput
 import psyke.agent.memory.episodic.EpisodicEventType
 import psyke.agent.memory.episodic.Logbook
 import psyke.agent.memory.episodic.LogbookEntry

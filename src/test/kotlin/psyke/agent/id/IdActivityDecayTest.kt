@@ -2,7 +2,7 @@ package psyke.agent.id
 
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import psyke.agent.core.PendingImpulse
+import psyke.agent.model.PendingImpulse
 import psyke.instrumentation.AgentEvent
 import psyke.instrumentation.AgentInstrumentation
 import kotlin.test.Test

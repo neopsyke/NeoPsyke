@@ -4,11 +4,11 @@ import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
-import psyke.agent.core.ActionType
-import psyke.agent.core.ConversationContext
-import psyke.agent.core.PendingAction
-import psyke.agent.core.PendingInput
-import psyke.agent.core.Urgency
+import psyke.agent.model.ActionType
+import psyke.agent.model.ConversationContext
+import psyke.agent.model.PendingAction
+import psyke.agent.model.PendingInput
+import psyke.agent.model.Urgency
 import psyke.instrumentation.AgentEvent
 import psyke.instrumentation.AgentEvents
 import kotlin.test.Test
@@ -44,7 +44,7 @@ class InnerVoiceSinkTest {
             rootInputId = rootInputId,
             conversationContext = ConversationContext(
                 sessionId = sessionId,
-                interlocutor = psyke.agent.core.Interlocutor("user-1")
+                interlocutor = psyke.agent.model.Interlocutor("user-1")
             )
         )
         dashboardStore.onEvent(AgentEvents.inputQueued(input))
