@@ -99,6 +99,27 @@ teardown() {
   grep -q "# Anomaly Triage" "$TEST_RUN_DIR/artifacts/anomalies.md"
 }
 
+@test "triage: passing scenario output does not create fake failure signals" {
+  cp "$FIXTURES_DIR/logs/scenario-pass.log" "$TEST_RUN_DIR/logs/00-scenario-pass.log"
+  run "$SCRIPTS_DIR/triage-run.sh" "$TEST_RUN_DIR"
+  [[ "$status" -eq 0 ]]
+
+  [[ ! -s "$TEST_RUN_DIR/artifacts/top-signals.tsv" ]]
+
+  first_failing_trace="$(cat "$TEST_RUN_DIR/artifacts/first-failing-trace.txt")"
+  [[ -z "$first_failing_trace" ]]
+}
+
+@test "triage: real failing scenario lines still surface as failure signals" {
+  cp "$FIXTURES_DIR/logs/scenario-fail.log" "$TEST_RUN_DIR/logs/00-scenario-fail.log"
+  run "$SCRIPTS_DIR/triage-run.sh" "$TEST_RUN_DIR"
+  [[ "$status" -eq 0 ]]
+
+  grep -q "status=fail description=Forced terminal failed unexpectedly." "$TEST_RUN_DIR/artifacts/top-signals.tsv"
+  grep -q "AssertionError" "$TEST_RUN_DIR/artifacts/top-signals.tsv"
+  grep -q "status=fail description=Forced terminal failed unexpectedly." "$TEST_RUN_DIR/artifacts/first-failing-trace.txt"
+}
+
 @test "triage: empty logs dir handled gracefully" {
   # logs dir exists but is empty
   run "$SCRIPTS_DIR/triage-run.sh" "$TEST_RUN_DIR"

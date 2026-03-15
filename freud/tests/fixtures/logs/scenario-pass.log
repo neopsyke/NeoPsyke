@@ -1,0 +1,7 @@
+status=pass description=Per-request task workspace is injected into prompt context and destroyed after terminal answer.
+scenario_id=forced_terminal_model_errors selector=psyke.eval.AgentScenarioPackTest.scenario_forced_terminal_after_repeated_model_errors
+BUILD SUCCESSFUL in 1s
+5 actionable tasks: 1 executed, 4 up-to-date
+status=pass description=Repeated planner model errors trigger forced terminal answer path.
+scenario_id=unavailable_action_recovery selector=psyke.eval.AgentScenarioPackTest.scenario_unavailable_action_then_recover_with_answer
+scenarios_total=9 scenarios_passed=9 scenarios_failed=0

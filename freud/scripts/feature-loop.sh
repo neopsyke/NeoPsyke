@@ -278,6 +278,14 @@ filter_gradle_task_noise() {
   fi
 }
 
+filter_pass_signal_noise() {
+  if command -v rg >/dev/null 2>&1; then
+    rg -v 'scenario_id=\S+\s+selector=\S+$|status=pass\b|scenarios_total=.*scenarios_failed=0$|BUILD SUCCESSFUL|actionable tasks:' || true
+  else
+    grep -Ev 'scenario_id=[^[:space:]]+[[:space:]]+selector=[^[:space:]]+$|status=pass\b|scenarios_total=.*scenarios_failed=0$|BUILD SUCCESSFUL|actionable tasks:' || true
+  fi
+}
+
 trail_seq=0
 
 emit_trail() {
@@ -406,7 +414,7 @@ index_step_log() {
   local cat regex matches
   while IFS='|' read -r cat regex; do
     set +e
-    matches="$(search_with_fallback "$regex" "$step_log" | filter_gradle_task_noise)"
+    matches="$(search_with_fallback "$regex" "$step_log" | filter_gradle_task_noise | filter_pass_signal_noise)"
     set -e
     if [[ -z "$matches" ]]; then
       continue
@@ -439,10 +447,10 @@ summarize_step_log_counts() {
   set +e
   # Filter out Gradle task-header lines (e.g. "> Task :checkKotlinGradlePluginConfigurationErrors SKIPPED")
   # to avoid false-positive error/warning counts on every passing Gradle build.
-  warning_count="$(search_with_fallback "warning" "$step_log" | filter_gradle_task_noise | wc -l | tr -d ' ')"
-  error_count="$(search_with_fallback "error|exception|failed|assert" "$step_log" | filter_gradle_task_noise | wc -l | tr -d ' ')"
-  first_warning="$(search_with_fallback "warning" "$step_log" | filter_gradle_task_noise | head -n 1)"
-  first_error="$(search_with_fallback "error|exception|failed|assert" "$step_log" | filter_gradle_task_noise | head -n 1)"
+  warning_count="$(search_with_fallback "warning" "$step_log" | filter_gradle_task_noise | filter_pass_signal_noise | wc -l | tr -d ' ')"
+  error_count="$(search_with_fallback "error|exception|failed|assert" "$step_log" | filter_gradle_task_noise | filter_pass_signal_noise | wc -l | tr -d ' ')"
+  first_warning="$(search_with_fallback "warning" "$step_log" | filter_gradle_task_noise | filter_pass_signal_noise | head -n 1)"
+  first_error="$(search_with_fallback "error|exception|failed|assert" "$step_log" | filter_gradle_task_noise | filter_pass_signal_noise | head -n 1)"
   first_pressure="$(search_with_fallback "decision_pressure=[0-9]+\\.[0-9]+" "$step_log" | head -n 1)"
   set -e
 

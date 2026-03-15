@@ -36,6 +36,13 @@ PATTERNS: list[tuple[str, str]] = [
     ("cache_divergence", "llm_cache_divergence"),
 ]
 
+IGNORED_SIGNAL_REGEXES: tuple[str, ...] = (
+    r"scenario_id=\S+\s+selector=\S+$",
+    r"status=pass\b",
+    r"scenarios_total=.*scenarios_failed=0$",
+    r"BUILD SUCCESSFUL",
+    r"actionable tasks:",
+)
 
 
 def _record_pattern(pattern_id: str, regex: str, logs_dir: Path) -> tuple[str, int, str]:
@@ -47,6 +54,16 @@ def _record_pattern(pattern_id: str, regex: str, logs_dir: Path) -> tuple[str, i
     count = len(lines)
     sample = lines[0] if lines else ""
     return (pattern_id, count, sample)
+
+
+def _filter_ignored_signal_lines(lines: list[str]) -> list[str]:
+    """Drop lines that mention signal keywords inside clearly passing scenario output."""
+    filtered: list[str] = []
+    for line in lines:
+        if any(re.search(pattern, line, flags=re.IGNORECASE) for pattern in IGNORED_SIGNAL_REGEXES):
+            continue
+        filtered.append(line)
+    return filtered
 
 
 def _extract_pressure_value(line: str) -> str | None:
@@ -115,7 +132,7 @@ def triage(run_dir: str, *, top_n: int = 20) -> str:
     if logs_dir.is_dir():
         raw_top = rg_search("error|exception|failed|warning", logs_dir, case_insensitive=True,
                             invert_match=":> Task :")
-        top_lines = non_empty_lines(raw_top)[:top_n]
+        top_lines = _filter_ignored_signal_lines(non_empty_lines(raw_top))[:top_n]
 
         raw_pressure = rg_search(r"decision_pressure=[0-9]+\.[0-9]+", logs_dir,
                                  case_insensitive=False)
@@ -123,7 +140,7 @@ def triage(run_dir: str, *, top_n: int = 20) -> str:
 
         raw_fail = rg_search("error|exception|failed|traceback|assert", logs_dir,
                              case_insensitive=True, invert_match=":> Task :")
-        fail_lines = non_empty_lines(raw_fail)
+        fail_lines = _filter_ignored_signal_lines(non_empty_lines(raw_fail))
         first_fail_line = fail_lines[0] if fail_lines else ""
 
     with open(top_signals_file, "w", encoding="utf-8") as f:
