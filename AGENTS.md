@@ -104,6 +104,8 @@ Instructions for coding agents working in this repository (Codex, Claude, Gemini
 - BBH smoke aggregate artifacts are written under the active Freud run:
   - `artifacts/bbh-smoke-<lane>-summary.json`
   - `artifacts/bbh-smoke-<lane>-summary.md`
+  - `artifacts/bbh-smoke-<lane>-progress.json`
+  - `artifacts/bbh-smoke-<lane>-progress.md`
   - `artifacts/bbh-smoke-<lane>-results.tsv`
 - Fast-entry artifacts (read these first):
   - `artifacts/summary-compact.md`

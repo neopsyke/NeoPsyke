@@ -76,11 +76,14 @@ CASES_ROOT="$RUN_DIR/bbh-cases/$lane"
 RESULTS_TSV="$ARTIFACT_DIR/bbh-smoke-${lane}-results.tsv"
 SUMMARY_JSON="$ARTIFACT_DIR/bbh-smoke-${lane}-summary.json"
 SUMMARY_MD="$ARTIFACT_DIR/bbh-smoke-${lane}-summary.md"
+PROGRESS_JSON="$ARTIFACT_DIR/bbh-smoke-${lane}-progress.json"
+PROGRESS_MD="$ARTIFACT_DIR/bbh-smoke-${lane}-progress.md"
 ANSWERS_TSV="$ARTIFACT_DIR/bbh-smoke-${lane}-answers.tsv"
 
 mkdir -p "$ARTIFACT_DIR" "$CASES_ROOT"
 
 jq -r '[.id, .answer] | @tsv' "$ANSWERS_FILE" >"$ANSWERS_TSV"
+TOTAL_CASES="$(wc -l <"$PROMPTS_FILE" | tr -d ' ')"
 
 normalize_answer() {
   local raw="$1"
@@ -153,6 +156,56 @@ EOF
   } >"$SUMMARY_MD"
 }
 
+write_progress() {
+  local phase="$1"
+  local current_id="$2"
+  local current_category="$3"
+  local completed="$4"
+  local passed_count="$5"
+  local failed_count="$6"
+  local timeout_total="$7"
+  local schema_total="$8"
+
+  cat >"$PROGRESS_JSON" <<EOF
+{
+  "lane": "$lane",
+  "phase": "$phase",
+  "total_cases": $TOTAL_CASES,
+  "completed_cases": $completed,
+  "remaining_cases": $((TOTAL_CASES - completed)),
+  "passed_cases": $passed_count,
+  "failed_cases": $failed_count,
+  "timeout_count": $timeout_total,
+  "schema_downgrade_count": $schema_total,
+  "current_case_id": "$current_id",
+  "current_category": "$current_category",
+  "results_tsv": "$RESULTS_TSV",
+  "summary_json": "$SUMMARY_JSON",
+  "cases_root": "$CASES_ROOT"
+}
+EOF
+
+  {
+    echo "# BBH Smoke Progress"
+    echo
+    echo "- lane: \`$lane\`"
+    echo "- phase: \`$phase\`"
+    echo "- completed_cases: \`$completed / $TOTAL_CASES\`"
+    echo "- remaining_cases: \`$((TOTAL_CASES - completed))\`"
+    echo "- passed_cases: \`$passed_count\`"
+    echo "- failed_cases: \`$failed_count\`"
+    echo "- timeout_count: \`$timeout_total\`"
+    echo "- schema_downgrade_count: \`$schema_total\`"
+    echo "- current_case_id: \`${current_id:-none}\`"
+    echo "- current_category: \`${current_category:-none}\`"
+    echo
+    echo "## Recent Results"
+    echo '```text'
+    sed -n '1,20p' "$RESULTS_TSV"
+    echo '```'
+  } >"$PROGRESS_MD"
+}
+
 printf "id\tcategory\tstatus\texpected\tactual\ttimeout\tschema_downgrade\trun_dir\n" >"$RESULTS_TSV"
 
 total=0
@@ -160,10 +213,12 @@ passed=0
 failed=0
 timeout_count=0
 schema_downgrade_count=0
+write_progress "starting" "" "" 0 "$passed" "$failed" "$timeout_count" "$schema_downgrade_count"
 
 while IFS=$'\t' read -r id category prompt; do
   [[ -z "${id:-}" ]] && continue
   total=$((total + 1))
+  write_progress "running" "$id" "$category" $((total - 1)) "$passed" "$failed" "$timeout_count" "$schema_downgrade_count"
   case_dir="$CASES_ROOT/$id"
   mkdir -p "$case_dir"
   input_file="$case_dir/input.txt"
@@ -224,6 +279,7 @@ while IFS=$'\t' read -r id category prompt; do
     "$timeout_flag" \
     "$schema_flag" \
     "$case_dir" >>"$RESULTS_TSV"
+  write_progress "running" "$id" "$category" "$total" "$passed" "$failed" "$timeout_count" "$schema_downgrade_count"
 done < <(jq -r '[.id, .category, .prompt] | @tsv' "$PROMPTS_FILE")
 
 exact_match_rate="$(awk -v p="$passed" -v t="$total" 'BEGIN { if (t == 0) print "0.00"; else printf "%.2f", (p * 100.0) / t }')"
@@ -237,6 +293,7 @@ if [[ -n "$BASELINE_FILE" && -f "$BASELINE_FILE" ]]; then
 fi
 
 write_summary "$total" "$passed" "$failed" "$timeout_count" "$schema_downgrade_count" "$exact_match_rate" "$regression_fail"
+write_progress "completed" "" "" "$total" "$passed" "$failed" "$timeout_count" "$schema_downgrade_count"
 
 if awk -v current="$exact_match_rate" -v min="$MIN_PASS_RATE_PERCENT" 'BEGIN { exit !(current < min) }'; then
   echo "BBH smoke exact-match rate $exact_match_rate is below minimum $MIN_PASS_RATE_PERCENT."

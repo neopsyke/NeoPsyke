@@ -80,6 +80,7 @@ Artifacts are saved under `.psyke/runs/freud/<timestamp>-<feature_id>/` by defau
 - `artifacts/step-meta/*.json`
 - `artifacts/context-pack.md`
 - `logs/*.log`
+- `artifacts/bbh-smoke-<lane>-progress.json` / `artifacts/bbh-smoke-<lane>-progress.md` while BBH smoke lanes are running
 
 ## Live Eval
 

@@ -76,8 +76,10 @@ EOF
     "$SCRIPTS_DIR/run-bbh-smoke.sh" --lane weak-structure
   [[ "$status" -eq 0 ]]
   [[ -f "$TEST_ARTIFACT_DIR/bbh-smoke-weak-structure-summary.json" ]]
+  [[ -f "$TEST_ARTIFACT_DIR/bbh-smoke-weak-structure-progress.json" ]]
   grep -q '"total_cases": 2' "$TEST_ARTIFACT_DIR/bbh-smoke-weak-structure-summary.json"
   grep -q '"passed_cases": 2' "$TEST_ARTIFACT_DIR/bbh-smoke-weak-structure-summary.json"
+  grep -q '"phase": "completed"' "$TEST_ARTIFACT_DIR/bbh-smoke-weak-structure-progress.json"
 }
 
 @test "run-bbh-smoke fails when one case answer mismatches" {
@@ -100,6 +102,28 @@ EOF
     "$SCRIPTS_DIR/run-bbh-smoke.sh" --lane weak-structure
   [[ "$status" -eq 2 ]]
   grep -q '"failed_cases": 1' "$TEST_ARTIFACT_DIR/bbh-smoke-weak-structure-summary.json"
+}
+
+@test "run-bbh-smoke writes progress artifacts during execution" {
+  cat >"$PROMPTS_FILE" <<'EOF'
+{"id":"case_a","category":"boolean_expressions","prompt":"case a"}
+{"id":"case_b","category":"logical_deduction","prompt":"case b"}
+EOF
+  cat >"$ANSWERS_FILE" <<'EOF'
+{"id":"case_a","answer":"case_a"}
+{"id":"case_b","answer":"case_b"}
+EOF
+
+  run env \
+    FREUD_BBH_LIVE_EVAL_CMD="$LIVE_EVAL_STUB" \
+    FREUD_BBH_PROMPTS_FILE="$PROMPTS_FILE" \
+    FREUD_BBH_ANSWERS_FILE="$ANSWERS_FILE" \
+    FREUD_RUN_DIR="$TEST_RUN_DIR" \
+    FREUD_ARTIFACT_DIR="$TEST_ARTIFACT_DIR" \
+    "$SCRIPTS_DIR/run-bbh-smoke.sh" --lane prod-acceptance
+  [[ "$status" -eq 0 ]]
+  grep -q '"completed_cases": 2' "$TEST_ARTIFACT_DIR/bbh-smoke-prod-acceptance-progress.json"
+  grep -q '"remaining_cases": 0' "$TEST_ARTIFACT_DIR/bbh-smoke-prod-acceptance-progress.json"
 }
 
 @test "run-bbh-smoke normalizes exact-match answers" {
