@@ -2,7 +2,13 @@ name: CI
 
 on:
   push:
+    branches:
+      - dev
   pull_request:
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build-and-test:
@@ -19,8 +25,36 @@ jobs:
           java-version: "23"
           cache: gradle
 
+      - name: Set up Python 3
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install BATS
+        run: sudo apt-get update && sudo apt-get install -y bats
+
       - name: Build
         run: ./gradlew --no-daemon build -x test
 
-      - name: Unit tests
-        run: ./gradlew --no-daemon test
+      - name: Freud deterministic PR gate
+        run: freud/scripts/feature-loop.sh ci-pr
+
+      - name: Freud shell tests
+        run: |
+          bats freud/tests/test_live_eval.bats \
+            freud/tests/test_feature_loop_env.bats \
+            freud/tests/test_reasoning_pr_gate.bats \
+            freud/tests/test_step_filtering.bats \
+            freud/tests/test_scenarios.bats \
+            freud/tests/test_context_pack.bats \
+            freud/tests/test_triage.bats \
+            freud/tests/test_summarize.bats \
+            freud/tests/test_telemetry.bats \
+            freud/tests/test_helpers.bats \
+            freud/tests/test_bbh_smoke.bats
+
+      - name: Freud Python tests
+        run: |
+          python3 -m venv freud/.venv
+          freud/.venv/bin/pip install pytest
+          PYTHONPATH=. freud/.venv/bin/pytest freud/tests/test_*_py.py freud/tests/test_common.py -v

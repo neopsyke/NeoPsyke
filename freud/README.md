@@ -70,6 +70,11 @@ freud/scripts/feature-loop.sh my-change --live --config freud/config/live-prod-a
 
 ### 1. Feature Loop
 `freud/scripts/feature-loop.sh` is the main orchestrator. It runs named steps such as compile, tests, scenarios, deterministic reasoning evals, and optional live evals.
+GitHub PR CI uses the deterministic path only:
+```bash
+freud/scripts/feature-loop.sh ci-pr
+```
+alongside Freud's own BATS and pytest workflow tests.
 
 ### 2. Single-Input Live Eval
 `freud/scripts/live-eval.sh` is the preferred wrapper for one-shot live/provider-backed checks. It uses Psyke's lower-level `--freud-live` mode but adds:

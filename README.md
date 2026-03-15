@@ -305,6 +305,7 @@ Freud reasoning lane notes:
 - The live reasoning lane always routes through `freud/scripts/live-eval.sh`, which invokes the lower-level `./run-psyke.sh --freud-live` path for each case.
 - `FREUD_BBH_PRESERVE_MEMORY=true` is available if a future live reasoning sequence needs shared isolated memory across cases. The current BBH slice should keep the default isolated-per-case behavior.
 - The live lane configs intentionally do not hardcode local machine paths. They resolve repo-local YAML snapshots relative to the config directory so the committed setup stays portable across machines.
+- GitHub pull requests run only the fast non-live path: `freud/scripts/feature-loop.sh ci-pr`, plus Freud's own BATS and pytest suites. Live lanes remain manual-only.
 
 Memory live eval (real-world, no mocks):
 ```bash
