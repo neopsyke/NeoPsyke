@@ -20,6 +20,7 @@ import sys
 from pathlib import Path
 
 from freud.py.common import (
+    extract_json_string,
     json_escape,
     non_empty_lines,
     rg_search,
@@ -109,6 +110,7 @@ def triage(run_dir: str, *, top_n: int = 20) -> str:
     logs_dir = run_path / "logs"
     artifact_dir = run_path / "artifacts"
     artifact_dir.mkdir(parents=True, exist_ok=True)
+    summary_json = artifact_dir / "summary.json"
 
     patterns_file = artifact_dir / "pattern-counts.tsv"
     top_signals_file = artifact_dir / "top-signals.tsv"
@@ -220,14 +222,31 @@ def triage(run_dir: str, *, top_n: int = 20) -> str:
 
     # --- anomalies.md ---
     anomalies_md_path = artifact_dir / "anomalies.md"
+    run_status = extract_json_string(summary_json, "status")
     md_lines = [
         "# Anomaly Triage",
         "",
         f"- Run dir: `{run_dir}`",
         f"- Generated at: `{generated_at}`",
         "",
-        "## Pattern Counts",
+        "## Signal Counts",
     ]
+    if run_status == "pass":
+        md_lines.extend([
+            "",
+            "Interpretation for pass runs:",
+            "- These counts are informational signal hits, not failures by themselves.",
+            "- On deterministic scenario packs, some hits can reflect exercised behaviors described in passing scenario output.",
+            "",
+        ])
+    elif run_status == "fail":
+        md_lines.extend([
+            "",
+            "Interpretation for fail runs:",
+            "- These counts are heuristic signal hits to guide triage, not a final diagnosis on their own.",
+            "- Prioritize the first failed step and failing log references above these aggregate counts.",
+            "",
+        ])
     for pid, count, sample in pattern_results:
         md_lines.append(f"- `{pid}`: {count}")
         if sample:

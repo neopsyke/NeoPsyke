@@ -50,6 +50,32 @@ class TestTriageBasics:
             triage("/nonexistent/path")
         assert exc.value.code == 1
 
+    def test_pass_run_md_explains_signal_counts_are_informational(self, triage_run_dir: Path):
+        (triage_run_dir / "artifacts" / "summary.json").write_text('{\n  "status": "pass"\n}\n')
+        _write_log(
+            triage_run_dir / "logs",
+            "scenario.log",
+            "status=pass description=Repeated planner model errors trigger forced terminal answer path.\n",
+        )
+        triage(str(triage_run_dir))
+        md = (triage_run_dir / "artifacts" / "anomalies.md").read_text()
+        assert "## Signal Counts" in md
+        assert "Interpretation for pass runs:" in md
+        assert "informational signal hits" in md
+
+    def test_fail_run_md_explains_signal_counts_are_heuristic(self, triage_run_dir: Path):
+        (triage_run_dir / "artifacts" / "summary.json").write_text('{\n  "status": "fail"\n}\n')
+        _write_log(
+            triage_run_dir / "logs",
+            "scenario.log",
+            "status=fail description=Forced terminal failed unexpectedly.\n",
+        )
+        triage(str(triage_run_dir))
+        md = (triage_run_dir / "artifacts" / "anomalies.md").read_text()
+        assert "## Signal Counts" in md
+        assert "Interpretation for fail runs:" in md
+        assert "heuristic signal hits" in md
+
 
 class TestTriageCleanLogs:
     def test_zero_pattern_counts(self, triage_run_dir: Path):

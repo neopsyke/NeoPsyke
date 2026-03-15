@@ -99,6 +99,34 @@ teardown() {
   grep -q "# Anomaly Triage" "$TEST_RUN_DIR/artifacts/anomalies.md"
 }
 
+@test "triage: pass runs explain that signal counts are informational" {
+  cat >"$TEST_RUN_DIR/artifacts/summary.json" <<'EOF'
+{
+  "status": "pass"
+}
+EOF
+  cp "$FIXTURES_DIR/logs/scenario-pass.log" "$TEST_RUN_DIR/logs/00-scenario-pass.log"
+  run "$SCRIPTS_DIR/triage-run.sh" "$TEST_RUN_DIR"
+  [[ "$status" -eq 0 ]]
+  grep -q "## Signal Counts" "$TEST_RUN_DIR/artifacts/anomalies.md"
+  grep -q "Interpretation for pass runs:" "$TEST_RUN_DIR/artifacts/anomalies.md"
+  grep -q "informational signal hits" "$TEST_RUN_DIR/artifacts/anomalies.md"
+}
+
+@test "triage: fail runs explain that signal counts are heuristic" {
+  cat >"$TEST_RUN_DIR/artifacts/summary.json" <<'EOF'
+{
+  "status": "fail"
+}
+EOF
+  cp "$FIXTURES_DIR/logs/scenario-fail.log" "$TEST_RUN_DIR/logs/00-scenario-fail.log"
+  run "$SCRIPTS_DIR/triage-run.sh" "$TEST_RUN_DIR"
+  [[ "$status" -eq 0 ]]
+  grep -q "## Signal Counts" "$TEST_RUN_DIR/artifacts/anomalies.md"
+  grep -q "Interpretation for fail runs:" "$TEST_RUN_DIR/artifacts/anomalies.md"
+  grep -q "heuristic signal hits" "$TEST_RUN_DIR/artifacts/anomalies.md"
+}
+
 @test "triage: passing scenario output does not create fake failure signals" {
   cp "$FIXTURES_DIR/logs/scenario-pass.log" "$TEST_RUN_DIR/logs/00-scenario-pass.log"
   run "$SCRIPTS_DIR/triage-run.sh" "$TEST_RUN_DIR"
