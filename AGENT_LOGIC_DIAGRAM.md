@@ -209,6 +209,13 @@ flowchart LR
     D -->|yes| E["Fallback probe: GET /v1beta/models (native Gemini endpoint)"]
     D -->|no| F["Report initial probe status"]
     E --> G["Report fallback status"]
+    F --> H{"Unavailable and retryable?"}
+    G --> H
+    H -->|yes| I["Retry health probe once"]
+    H -->|no| J{"Role is optional meta_reasoner_fallback?"}
+    I --> J
+    J -->|yes + still unavailable| K["Warn and disable fallback for this run"]
+    J -->|no| L["Required role unavailable -> abort startup"]
 ```
 
 ## 3) Convergence and Fallback States

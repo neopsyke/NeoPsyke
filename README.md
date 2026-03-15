@@ -479,6 +479,8 @@ control> exit
 - Before interactive mode, Psyke runs provider health checks for each configured cognitive role endpoint.
 - Before live/model eval modes, Psyke runs a provider health check for the planner endpoint.
 - Checks include DNS resolution for the provider host and a short authenticated HTTP probe (`GET /models`).
-- If provider is unavailable, Psyke prints a clear error to both stderr/stdout-facing output and logs, then exits early.
+- Transient unavailable probe results such as timeouts are retried once before Psyke decides the final provider state.
+- If a required provider is unavailable, Psyke prints a clear error to both stderr/stdout-facing output and logs, then exits early.
 - If provider is degraded (for example, rate limiting), Psyke logs and prints a warning but continues.
+- In interactive and `--freud-live` startup, `meta_reasoner_fallback` is treated as optional: if its health check still fails after retry, Psyke logs a warning, disables that fallback for the run, and continues with the primary meta-reasoner.
 - For `--eval-memory-live`, Psyke also preflights the memory MCP provider (connect + tool listing) and fails early if required recall/write-like tools are missing or startup fails.

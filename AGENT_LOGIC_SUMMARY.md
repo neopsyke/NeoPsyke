@@ -39,6 +39,8 @@ It is intentionally high-level and should stay aligned with the code.
 - Interactive startup runs LLM provider health probes per configured cognitive role endpoint:
   - probes use normalized URL joining (`base_url` + `/models`) so trailing slashes do not produce `//models`
   - for Google `v1beta/openai` routes, an `HTTP 404` probe on `/openai/models` falls back to native `/v1beta/models` before reporting status
+  - transient unavailable probe results (for example, timeout) are retried once before startup decides the endpoint state
+  - `meta_reasoner_fallback` is treated as optional during startup: if it remains unavailable after retry, startup logs a warning and disables that fallback for the run instead of aborting
 - Instrumentation and metrics are wired before loop start and receive lifecycle events throughout.
 - Interactive startup wires a pre-call LLM token budget gate (`LlmTokenBudgetGate`) across all cognitive-role clients and web search:
   - optional hard caps are configurable via `PlannerConfig` / `agent-runtime.yaml` (`max_run_total_tokens`, `max_run_tokens_per_provider`, `max_run_tokens_per_role`)

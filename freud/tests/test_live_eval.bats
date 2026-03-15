@@ -16,6 +16,7 @@ setup() {
 set -euo pipefail
 printf '%s\n' "$*" >"${FREUD_TEST_ARGS_LOG:-/dev/null}"
 printf 'GRADLE_USER_HOME=%s\n' "${GRADLE_USER_HOME:-}" >"${FREUD_TEST_ENV_LOG:-/dev/null}"
+printf 'PSYKE_LLM_CONFIG_FILE=%s\n' "${PSYKE_LLM_CONFIG_FILE:-}" >>"${FREUD_TEST_ENV_LOG:-/dev/null}"
 cat >/dev/null
 mkdir -p "$(dirname "$PSYKE_LOG_FILE")" "$(dirname "$PSYKE_EVENT_LOG_FILE")"
 printf '%s\n' "stub log" >"$PSYKE_LOG_FILE"
@@ -76,8 +77,8 @@ teardown() {
     FREUD_TEST_ENV_LOG="$ENV_LOG" \
     "$SCRIPTS_DIR/live-eval.sh" --input "$INPUT_FILE" --cache-replay "$cache_file"
   [[ "$status" -eq 0 ]]
-  replay_dir="$(find "$REPO_ROOT/$RUN_ROOT_REL" -mindepth 1 -maxdepth 1 -type d | sort | tail -n 1)"
-  grep -q '"cache_mode": "replay"' "$replay_dir/artifacts/verdict.json"
+  replay_verdict="$(rg -l '"cache_mode": "replay"' "$REPO_ROOT/$RUN_ROOT_REL" -g verdict.json | head -n 1)"
+  [[ -n "$replay_verdict" ]]
 }
 
 @test "live-eval writes stable verdict artifact fields" {
@@ -134,6 +135,23 @@ EOF
     "$SCRIPTS_DIR/live-eval.sh" --input "$INPUT_FILE"
   [[ "$status" -eq 0 ]]
   grep -q "GRADLE_USER_HOME=$REPO_ROOT/.freud/test-gradle-home" "$ENV_LOG"
+}
+
+@test "live-eval exports PSYKE_LLM_CONFIG_FILE from Freud config to child process" {
+  CONFIG_FILE="$TEST_TMPDIR/freud-live.env"
+  cat >"$CONFIG_FILE" <<EOF
+PSYKE_LLM_CONFIG_FILE="$TEST_TMPDIR/llm-routing.yaml"
+EOF
+
+  run env \
+    FREUD_CONFIG="$CONFIG_FILE" \
+    FREUD_LIVE_EVAL_PSYKE_CMD="$PSYKE_STUB" \
+    FREUD_RUN_ROOT="$RUN_ROOT_REL" \
+    FREUD_TEST_ARGS_LOG="$ARGS_LOG" \
+    FREUD_TEST_ENV_LOG="$ENV_LOG" \
+    "$SCRIPTS_DIR/live-eval.sh" --input "$INPUT_FILE"
+  [[ "$status" -eq 0 ]]
+  grep -q "PSYKE_LLM_CONFIG_FILE=$TEST_TMPDIR/llm-routing.yaml" "$ENV_LOG"
 }
 
 @test "live-eval extracts the final ego answer from noisy stdout" {
