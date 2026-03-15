@@ -1,0 +1,174 @@
+providers:
+  groq:
+    api_key_env: GROQ_API_KEY
+    base_url: https://api.groq.com/openai/v1
+  google:
+    api_key_env: GOOGLE_API_KEY
+    base_url: https://generativelanguage.googleapis.com/v1beta/openai/
+  mistral:
+    api_key_env: MISTRAL_API_KEY
+    base_url: https://api.mistral.ai/v1
+  openai:
+    api_key_env: OPENAI_API_KEY
+    base_url: https://api.openai.com/v1
+
+cognitive_roles:
+  planner:
+    provider: groq
+    model: openai/gpt-oss-20b
+  action_verifier:
+    provider: openai
+    model: gpt-4o-mini
+  superego_primary:
+    provider: openai
+    model: gpt-4o-mini
+  superego_escalation:
+    provider: openai
+    model: gpt-4.1-mini
+  meta_reasoner:
+    provider: groq
+    model: openai/gpt-oss-20b
+  meta_reasoner_fallback:
+    provider: openai
+    model: gpt-5-mini
+  memory_advisor:
+    provider: openai
+    model: gpt-4.1-mini
+
+web_search:
+  provider: groq
+  model: groq/compound-mini
+
+model_catalog:
+  openai:
+    - model: gpt-5
+      tier: medium_high
+      token_weight: 2.60
+      context_window: 128000
+      input_cost_per_million_tokens_usd: 1.25
+      output_cost_per_million_tokens_usd: 10.0
+      reasoning_overhead_multiplier: 3.0
+    - model: gpt-5-mini
+      tier: medium
+      token_weight: 1.35
+      context_window: 128000
+      input_cost_per_million_tokens_usd: 0.25
+      output_cost_per_million_tokens_usd: 2.0
+      reasoning_overhead_multiplier: 3.0
+    - model: gpt-5-nano
+      tier: light
+      token_weight: 0.85
+      context_window: 8192
+      input_cost_per_million_tokens_usd: 0.05
+      output_cost_per_million_tokens_usd: 0.4
+    - model: gpt-4.1-mini
+      tier: medium
+      token_weight: 1.20
+      context_window: 1048576
+      input_cost_per_million_tokens_usd: 0.40
+      output_cost_per_million_tokens_usd: 1.60
+    - model: gpt-4o-mini
+      tier: light
+      token_weight: 1.00
+      context_window: 128000
+      input_cost_per_million_tokens_usd: 0.15
+      output_cost_per_million_tokens_usd: 0.60
+  google:
+    - model: gemini-2.5-pro
+      tier: medium_high
+      token_weight: 2.30
+      context_window: 1048576
+      input_cost_per_million_tokens_usd: 1.25
+      output_cost_per_million_tokens_usd: 10.0
+    - model: gemini-2.5-flash
+      tier: medium
+      token_weight: 1.20
+      context_window: 1048576
+      input_cost_per_million_tokens_usd: 0.30
+      output_cost_per_million_tokens_usd: 2.50
+    - model: gemini-3.1-flash-lite-preview
+      tier: light
+      token_weight: 1.00
+      context_window: 1048576
+      input_cost_per_million_tokens_usd: 0.25
+      output_cost_per_million_tokens_usd: 1.50
+    - model: gemini-2.5-flash-lite
+      tier: light
+      token_weight: 0.90
+      context_window: 1048576
+      input_cost_per_million_tokens_usd: 0.10
+      output_cost_per_million_tokens_usd: 0.40
+    - model: gemini-2.0-flash
+      tier: medium
+      token_weight: 1.05
+      context_window: 1048576
+      input_cost_per_million_tokens_usd: 0.10
+      output_cost_per_million_tokens_usd: 0.40
+    - model: gemini-2.0-flash-lite
+      tier: light
+      token_weight: 0.80
+      context_window: 1048576
+      input_cost_per_million_tokens_usd: 0.075
+      output_cost_per_million_tokens_usd: 0.30
+  groq:
+    - model: openai/gpt-oss-120b
+      tier: medium_high
+      token_weight: 1.15
+      context_window: 131072
+      input_cost_per_million_tokens_usd: 0.15
+      output_cost_per_million_tokens_usd: 0.75
+    - model: openai/gpt-oss-20b
+      tier: medium
+      token_weight: 0.75
+      context_window: 131072
+      input_cost_per_million_tokens_usd: 0.10
+      output_cost_per_million_tokens_usd: 0.50
+    - model: llama-3.3-70b-versatile
+      tier: medium
+      token_weight: 1.45
+      context_window: 32768
+      input_cost_per_million_tokens_usd: 0.59
+      output_cost_per_million_tokens_usd: 0.79
+    - model: qwen/qwen3-32b
+      tier: medium
+      token_weight: 0.95
+      context_window: 32768
+      input_cost_per_million_tokens_usd: 0.29
+      output_cost_per_million_tokens_usd: 0.59
+    - model: llama-3.1-8b-instant
+      tier: light
+      token_weight: 0.60
+      context_window: 131072
+      input_cost_per_million_tokens_usd: 0.05
+      output_cost_per_million_tokens_usd: 0.08
+  mistral:
+    - model: mistral-large-2512
+      tier: medium_high
+      token_weight: 1.45
+      context_window: 131072
+      input_cost_per_million_tokens_usd: 0.5
+      output_cost_per_million_tokens_usd: 1.5
+    - model: mistral-medium-2508
+      tier: medium
+      token_weight: 1.30
+      context_window: 131072
+      input_cost_per_million_tokens_usd: 0.4
+      output_cost_per_million_tokens_usd: 2.0
+    - model: mistral-small-2506
+      tier: light
+      token_weight: 1.00
+      context_window: 131072
+      input_cost_per_million_tokens_usd: 0.1
+      output_cost_per_million_tokens_usd: 0.3
+    - model: ministral-14b-2512
+      tier: light
+      token_weight: 0.95
+      context_window: 131072
+      input_cost_per_million_tokens_usd: 0.2
+      output_cost_per_million_tokens_usd: 0.2
+    - model: ministral-8b-2512
+      tier: light
+      token_weight: 0.85
+      context_window: 131072
+      input_cost_per_million_tokens_usd: 0.15
+      output_cost_per_million_tokens_usd: 0.15

@@ -566,6 +566,383 @@ object ReasoningLogicEvalTasks {
         }
 }
 
+object ReasoningBehavioralLogicEvalTasks {
+    private const val PARAPHRASE_VARIANTS: Int = 5
+    private const val NOISE_VARIANTS: Int = 4
+    private const val REORDER_VARIANTS: Int = 3
+    private const val REPAIR_VARIANTS: Int = 3
+
+    fun defaults(): List<ReasoningEvalTask> = buildList {
+        addAll(ledgerTasks())
+        addAll(assignmentTasks())
+        addAll(stateMachineTasks())
+    }
+
+    private fun ledgerTasks(): List<ReasoningEvalTask> =
+        buildFamilyTasks(
+            familyPrefix = "ledger",
+            titlePrefix = "Ledger",
+            paraphrasePrompts = listOf(
+                ledgerPrompt("Track the balances after all transactions complete."),
+                ledgerPrompt("Compute the ending balances after applying every transaction in order."),
+                ledgerPrompt("Work through the transfer/deposit/withdrawal sequence and report the final balances."),
+                ledgerPrompt("Resolve the account state after the ordered money movements below."),
+                ledgerPrompt("Calculate the final ledger positions after processing the full transaction list.")
+            ),
+            noisePrompts = listOf(
+                ledgerPrompt(
+                    lead = "Compute the final balances exactly.",
+                    note = "Ignore this irrelevant note: balances are whole numbers, so no decimal rounding is needed."
+                ),
+                ledgerPrompt(
+                    lead = "Process the ledger updates and return the ending balances.",
+                    note = "Distractor: the finance team labels this batch 'north-17', but that label does not affect the math."
+                ),
+                ledgerPrompt(
+                    lead = "Apply the ordered transactions and produce the final state.",
+                    note = "Noise: A, B, and C are just account names. Do not infer any extra business rules beyond the listed operations."
+                ),
+                ledgerPrompt(
+                    lead = "Solve the balance tracking task below.",
+                    note = "Extra context: the checksum is only a reporting field; it does not change any balances."
+                )
+            ),
+            reorderPrompts = listOf(
+                ledgerPromptReordered(
+                    lead = "Read the required JSON shape first, then solve the transaction sequence."
+                ),
+                ledgerPromptReordered(
+                    lead = "The output contract comes first; the account setup and operations follow afterward."
+                ),
+                ledgerPromptReordered(
+                    lead = "Use the schema below, then evaluate the balances from the later sections."
+                )
+            ),
+            repairPrompts = listOf(
+                ledgerPrompt(
+                    lead = "This response is auto-validated. Return one JSON object and keep every field internally consistent."
+                ),
+                ledgerPrompt(
+                    lead = "You may be asked to revise this answer. If so, fix only what is wrong and preserve already-correct fields."
+                ),
+                ledgerPrompt(
+                    lead = "Answer with strict JSON only. The validator checks both balances and checksum, so ensure they agree."
+                )
+            ),
+            validator = ::validateLedgerAnswer
+        )
+
+    private fun assignmentTasks(): List<ReasoningEvalTask> =
+        buildFamilyTasks(
+            familyPrefix = "assignment",
+            titlePrefix = "Assignment",
+            paraphrasePrompts = listOf(
+                assignmentPrompt("Assign each job to the correct worker while satisfying every rule."),
+                assignmentPrompt("Work out the only valid job allocation from the constraints below."),
+                assignmentPrompt("Solve the worker-to-job mapping using all listed restrictions."),
+                assignmentPrompt("Determine a valid assignment for J1 through J4 that matches every constraint."),
+                assignmentPrompt("Compute the final staffing plan from the rules below.")
+            ),
+            noisePrompts = listOf(
+                assignmentPrompt(
+                    lead = "Find the valid assignment.",
+                    note = "Ignore this note: Ada, Ben, and Cy are only names; seniority does not matter unless stated."
+                ),
+                assignmentPrompt(
+                    lead = "Resolve the constrained assignment problem.",
+                    note = "Distractor: J1 through J4 happen on the same day, but timing has no effect on the rules."
+                ),
+                assignmentPrompt(
+                    lead = "Use the constraints to assign every job.",
+                    note = "Noise: the team prefers short meetings, but that preference is unrelated to the assignment."
+                ),
+                assignmentPrompt(
+                    lead = "Return the worker for each job.",
+                    note = "Extra context: output order matters only for JSON field names, not for solving the puzzle."
+                )
+            ),
+            reorderPrompts = listOf(
+                assignmentPromptReordered("The JSON contract is shown first; the rules appear afterward."),
+                assignmentPromptReordered("Read the output shape, then process the constraints in the later section."),
+                assignmentPromptReordered("Start with the required JSON, then solve the constraint list below it.")
+            ),
+            repairPrompts = listOf(
+                assignmentPrompt("This answer is auto-validated, so keep every assignment field correct in the same response."),
+                assignmentPrompt("Return strict JSON only. If revised later, preserve correct job assignments while fixing wrong ones."),
+                assignmentPrompt("The validator checks every job independently. Ensure J1, J2, J3, and J4 are all correct.")
+            ),
+            validator = ::validateAssignmentAnswer
+        )
+
+    private fun stateMachineTasks(): List<ReasoningEvalTask> =
+        buildFamilyTasks(
+            familyPrefix = "state_machine",
+            titlePrefix = "State Machine",
+            paraphrasePrompts = listOf(
+                stateMachinePrompt("Apply the operations in order and report the final state."),
+                stateMachinePrompt("Execute the transition sequence exactly and compute the ending x and y."),
+                stateMachinePrompt("Follow the update rules step by step, then return the final state."),
+                stateMachinePrompt("Evaluate the ordered state-machine operations and emit the resulting values."),
+                stateMachinePrompt("Work through the sequence carefully and report the final checksum.")
+            ),
+            noisePrompts = listOf(
+                stateMachinePrompt(
+                    lead = "Solve the state update task below.",
+                    note = "Ignore this irrelevant detail: the variables could have been named left and right instead of x and y."
+                ),
+                stateMachinePrompt(
+                    lead = "Run the ordered operations and return the final state.",
+                    note = "Distractor: all values remain integers throughout; no rounding is ever needed."
+                ),
+                stateMachinePrompt(
+                    lead = "Process the sequence exactly as written.",
+                    note = "Noise: the checksum is a reporting string and should be derived from the final values only."
+                ),
+                stateMachinePrompt(
+                    lead = "Compute the terminal x and y values.",
+                    note = "Extra context: the listed rules are exhaustive; do not assume any hidden transitions."
+                )
+            ),
+            reorderPrompts = listOf(
+                stateMachinePromptReordered("Read the output contract first, then evaluate the rules and sequence."),
+                stateMachinePromptReordered("The schema comes first; the rule definitions and ordered steps follow."),
+                stateMachinePromptReordered("Use the JSON shape below, then solve the later state-transition description.")
+            ),
+            repairPrompts = listOf(
+                stateMachinePrompt("This answer is auto-validated. Keep x, y, and checksum mutually consistent."),
+                stateMachinePrompt("Return strict JSON only. If you revise later, fix incorrect fields without regressing correct ones."),
+                stateMachinePrompt("The validator checks both numeric fields and checksum, so ensure the final tuple is coherent.")
+            ),
+            validator = ::validateStateMachineAnswer
+        )
+
+    private fun buildFamilyTasks(
+        familyPrefix: String,
+        titlePrefix: String,
+        paraphrasePrompts: List<String>,
+        noisePrompts: List<String>,
+        reorderPrompts: List<String>,
+        repairPrompts: List<String>,
+        validator: (JsonNode) -> List<String>,
+    ): List<ReasoningEvalTask> {
+        require(paraphrasePrompts.size == PARAPHRASE_VARIANTS) { "Expected $PARAPHRASE_VARIANTS paraphrase prompts." }
+        require(noisePrompts.size == NOISE_VARIANTS) { "Expected $NOISE_VARIANTS noise prompts." }
+        require(reorderPrompts.size == REORDER_VARIANTS) { "Expected $REORDER_VARIANTS reorder prompts." }
+        require(repairPrompts.size == REPAIR_VARIANTS) { "Expected $REPAIR_VARIANTS repair prompts." }
+        return buildList {
+            addAll(buildVariantTasks(familyPrefix, titlePrefix, "paraphrase", paraphrasePrompts, validator))
+            addAll(buildVariantTasks(familyPrefix, titlePrefix, "noise", noisePrompts, validator))
+            addAll(buildVariantTasks(familyPrefix, titlePrefix, "reorder", reorderPrompts, validator))
+            addAll(buildVariantTasks(familyPrefix, titlePrefix, "repair", repairPrompts, validator))
+        }
+    }
+
+    private fun buildVariantTasks(
+        familyPrefix: String,
+        titlePrefix: String,
+        variantLabel: String,
+        prompts: List<String>,
+        validator: (JsonNode) -> List<String>,
+    ): List<ReasoningEvalTask> =
+        prompts.mapIndexed { index, prompt ->
+            val ordinal = index + 1
+            ReasoningEvalTask(
+                id = "${familyPrefix}_${variantLabel}_${ordinal.toString().padStart(2, '0')}",
+                title = "$titlePrefix ${variantLabel.replaceFirstChar { it.uppercase() }} $ordinal",
+                prompt = prompt,
+                validator = validator
+            )
+        }
+
+    private fun ledgerPrompt(lead: String, note: String? = null): String =
+        composePrompt(
+            lead,
+            """
+            Initial balances: A=10, B=5, C=0
+            Operations in order:
+            1) transfer A->B amount 3
+            2) transfer B->C amount 4
+            3) deposit A amount 6
+            4) transfer A->C amount 8
+            5) withdraw C amount 5
+            """.trimIndent(),
+            """
+            Output STRICT JSON exactly with this shape:
+            {"balances":{"A":<int>,"B":<int>,"C":<int>},"checksum":<int>}
+
+            checksum must be A+B+C.
+            """.trimIndent(),
+            note
+        )
+
+    private fun ledgerPromptReordered(lead: String): String =
+        composePrompt(
+            lead,
+            """
+            Output STRICT JSON exactly with this shape:
+            {"balances":{"A":<int>,"B":<int>,"C":<int>},"checksum":<int>}
+
+            checksum must be A+B+C.
+            """.trimIndent(),
+            """
+            Initial balances: A=10, B=5, C=0
+            Operations in order:
+            1) transfer A->B amount 3
+            2) transfer B->C amount 4
+            3) deposit A amount 6
+            4) transfer A->C amount 8
+            5) withdraw C amount 5
+            """.trimIndent()
+        )
+
+    private fun assignmentPrompt(lead: String, note: String? = null): String =
+        composePrompt(
+            lead,
+            """
+            Assign jobs J1,J2,J3,J4 to workers Ada,Ben,Cy.
+            Constraints:
+            - each job has exactly one worker
+            - Cy must do J2
+            - Ben must do exactly one job
+            - J3 must be Ben
+            - J4 cannot be Cy
+            - Ada must do more jobs than Ben
+            - J1 must be Ada
+            """.trimIndent(),
+            """
+            Output STRICT JSON:
+            {"assignment":{"J1":"<name>","J2":"<name>","J3":"<name>","J4":"<name>"}}
+            """.trimIndent(),
+            note
+        )
+
+    private fun assignmentPromptReordered(lead: String): String =
+        composePrompt(
+            lead,
+            """
+            Output STRICT JSON:
+            {"assignment":{"J1":"<name>","J2":"<name>","J3":"<name>","J4":"<name>"}}
+            """.trimIndent(),
+            """
+            Assign jobs J1,J2,J3,J4 to workers Ada,Ben,Cy.
+            Constraints:
+            - each job has exactly one worker
+            - Cy must do J2
+            - Ben must do exactly one job
+            - J3 must be Ben
+            - J4 cannot be Cy
+            - Ada must do more jobs than Ben
+            - J1 must be Ada
+            """.trimIndent()
+        )
+
+    private fun stateMachinePrompt(lead: String, note: String? = null): String =
+        composePrompt(
+            lead,
+            """
+            Apply operations in order on state x,y.
+            Initial: x=2, y=1
+            Rules:
+            - mulx N => x = x * N
+            - addy N => y = y + N
+            - swap => swap x and y
+            - mix => x = x + y
+
+            Sequence:
+            1) mulx 3
+            2) addy 4
+            3) swap
+            4) mix
+            5) addy 2
+            6) mulx 2
+            """.trimIndent(),
+            """
+            Output STRICT JSON:
+            {"x":<int>,"y":<int>,"checksum":"<x>-<y>-<x+y>"}
+            """.trimIndent(),
+            note
+        )
+
+    private fun stateMachinePromptReordered(lead: String): String =
+        composePrompt(
+            lead,
+            """
+            Output STRICT JSON:
+            {"x":<int>,"y":<int>,"checksum":"<x>-<y>-<x+y>"}
+            """.trimIndent(),
+            """
+            Apply operations in order on state x,y.
+            Initial: x=2, y=1
+            Rules:
+            - mulx N => x = x * N
+            - addy N => y = y + N
+            - swap => swap x and y
+            - mix => x = x + y
+
+            Sequence:
+            1) mulx 3
+            2) addy 4
+            3) swap
+            4) mix
+            5) addy 2
+            6) mulx 2
+            """.trimIndent()
+        )
+
+    private fun composePrompt(vararg sections: String?): String =
+        sections.filterNotNull().filter { it.isNotBlank() }.joinToString("\n\n")
+}
+
+private fun validateLedgerAnswer(json: JsonNode): List<String> {
+    val errors = mutableListOf<String>()
+    val balances = json["balances"]
+    if (balances == null || !balances.isObject) {
+        return listOf("Missing object field balances.")
+    }
+    val a = balances["A"]?.asInt(Int.MIN_VALUE) ?: Int.MIN_VALUE
+    val b = balances["B"]?.asInt(Int.MIN_VALUE) ?: Int.MIN_VALUE
+    val c = balances["C"]?.asInt(Int.MIN_VALUE) ?: Int.MIN_VALUE
+    val checksum = json["checksum"]?.asInt(Int.MIN_VALUE) ?: Int.MIN_VALUE
+
+    if (a != 5) errors += "balances.A must be 5."
+    if (b != 4) errors += "balances.B must be 4."
+    if (c != 7) errors += "balances.C must be 7."
+    if (checksum != 16) errors += "checksum must be 16."
+    return errors
+}
+
+private fun validateAssignmentAnswer(json: JsonNode): List<String> {
+    val errors = mutableListOf<String>()
+    val assign = json["assignment"]
+    if (assign == null || !assign.isObject) {
+        return listOf("Missing object field assignment.")
+    }
+    val expected = mapOf(
+        "J1" to "Ada",
+        "J2" to "Cy",
+        "J3" to "Ben",
+        "J4" to "Ada"
+    )
+    expected.forEach { (job, worker) ->
+        val actual = assign[job]?.asText()
+        if (actual != worker) {
+            errors += "assignment.$job must be $worker."
+        }
+    }
+    return errors
+}
+
+private fun validateStateMachineAnswer(json: JsonNode): List<String> {
+    val errors = mutableListOf<String>()
+    val x = json["x"]?.asInt(Int.MIN_VALUE) ?: Int.MIN_VALUE
+    val y = json["y"]?.asInt(Int.MIN_VALUE) ?: Int.MIN_VALUE
+    val checksum = json["checksum"]?.asText()
+    if (x != 22) errors += "x must be 22."
+    if (y != 8) errors += "y must be 8."
+    if (checksum != "22-8-30") errors += "checksum must be 22-8-30."
+    return errors
+}
+
 private fun elapsedMillis(startedAtNanos: Long): Long =
     max(1L, (System.nanoTime() - startedAtNanos) / 1_000_000L)
 

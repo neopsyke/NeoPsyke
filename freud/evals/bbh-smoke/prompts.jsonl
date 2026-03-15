@@ -1,0 +1,24 @@
+{"id":"boolean_01","category":"boolean_expressions","prompt":"You are graded by exact match. Evaluate: (true and false) or true. Respond with EXACTLY true or false, lowercase, and nothing else."}
+{"id":"boolean_02","category":"boolean_expressions","prompt":"You are graded by exact match. Evaluate: not (true and false). Respond with EXACTLY true or false, lowercase, and nothing else."}
+{"id":"boolean_03","category":"boolean_expressions","prompt":"You are graded by exact match. Evaluate: (false or false) and true. Respond with EXACTLY true or false, lowercase, and nothing else."}
+{"id":"boolean_04","category":"boolean_expressions","prompt":"You are graded by exact match. Evaluate: not false and (true or false). Respond with EXACTLY true or false, lowercase, and nothing else."}
+{"id":"counting_01","category":"object_counting","prompt":"You are graded by exact match. Count the vowels in the word 'reasoning'. Respond with EXACTLY the integer only."}
+{"id":"counting_02","category":"object_counting","prompt":"You are graded by exact match. How many odd numbers are in this list: 2, 7, 8, 11, 14, 19? Respond with EXACTLY the integer only."}
+{"id":"counting_03","category":"object_counting","prompt":"You are graded by exact match. Count the letter 'a' in the string 'bananas'. Respond with EXACTLY the integer only."}
+{"id":"counting_04","category":"object_counting","prompt":"You are graded by exact match. How many shapes are listed here: square, triangle, circle, square, hexagon? Respond with EXACTLY the integer only."}
+{"id":"date_01","category":"date_understanding","prompt":"You are graded by exact match. If today is 2026-03-15, what is the date 10 days later? Respond with EXACTLY one date in YYYY-MM-DD format."}
+{"id":"date_02","category":"date_understanding","prompt":"You are graded by exact match. If today is 2024-02-27, what is the date 2 days later? Respond with EXACTLY one date in YYYY-MM-DD format."}
+{"id":"date_03","category":"date_understanding","prompt":"You are graded by exact match. If a meeting is on 2025-01-01 and moves back 1 day, what is the new date? Respond with EXACTLY one date in YYYY-MM-DD format."}
+{"id":"date_04","category":"date_understanding","prompt":"You are graded by exact match. If a deadline is 2026-12-31 and shifts forward 1 day, what is the new date? Respond with EXACTLY one date in YYYY-MM-DD format."}
+{"id":"shuffle_01","category":"tracking_shuffled_objects","prompt":"You are graded by exact match. A red ball starts in box A. Swap the contents of box A and box B. Then swap the contents of box B and box C. Which box contains the red ball now? Respond with EXACTLY one capital letter: A, B, or C."}
+{"id":"shuffle_02","category":"tracking_shuffled_objects","prompt":"You are graded by exact match. A coin starts in cup C. Swap cup A with cup C. Then swap cup B with cup C. Which cup has the coin now? Respond with EXACTLY one capital letter: A, B, or C."}
+{"id":"shuffle_03","category":"tracking_shuffled_objects","prompt":"You are graded by exact match. A key starts in drawer B. Swap drawers A and B. Then swap drawers A and C. Which drawer has the key now? Respond with EXACTLY one capital letter: A, B, or C."}
+{"id":"shuffle_04","category":"tracking_shuffled_objects","prompt":"You are graded by exact match. A card starts in slot A. Swap slots A and C. Then swap slots B and C. Which slot has the card now? Respond with EXACTLY one capital letter: A, B, or C."}
+{"id":"deduction_01","category":"logical_deduction","prompt":"You are graded by exact match. If all glibs are mips and all mips are zorps, are all glibs zorps? Respond with EXACTLY yes or no, lowercase, and nothing else."}
+{"id":"deduction_02","category":"logical_deduction","prompt":"You are graded by exact match. Ava is taller than Ben. Ben is taller than Cy. Who is tallest? Respond with EXACTLY one name: Ava, Ben, or Cy."}
+{"id":"deduction_03","category":"logical_deduction","prompt":"You are graded by exact match. Every blue cube is metal. This object is a blue cube. Is it metal? Respond with EXACTLY yes or no, lowercase, and nothing else."}
+{"id":"deduction_04","category":"logical_deduction","prompt":"You are graded by exact match. Mira arrived before Noah. Noah arrived before Omar. Who arrived last? Respond with EXACTLY one name: Mira, Noah, or Omar."}
+{"id":"arithmetic_01","category":"multistep_arithmetic","prompt":"You are graded by exact match. Compute: ((3 + 5) * 2) - 6. Respond with EXACTLY the integer only."}
+{"id":"arithmetic_02","category":"multistep_arithmetic","prompt":"You are graded by exact match. Compute: 18 / 3 + 7. Respond with EXACTLY the integer only."}
+{"id":"arithmetic_03","category":"multistep_arithmetic","prompt":"You are graded by exact match. Compute: (14 - 5) * (2 + 1). Respond with EXACTLY the integer only."}
+{"id":"arithmetic_04","category":"multistep_arithmetic","prompt":"You are graded by exact match. Compute: 9 + 4 - 3 + 8. Respond with EXACTLY the integer only."}

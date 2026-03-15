@@ -86,6 +86,44 @@ class ReasoningSelfEvalRunnerTest {
     }
 
     @Test
+    fun `behavioral logic task pack exposes 45 stable task ids`() {
+        val tasks = ReasoningBehavioralLogicEvalTasks.defaults()
+
+        assertEquals(45, tasks.size)
+        assertEquals(45, tasks.map { it.id }.toSet().size)
+        assertTrue(tasks.any { it.id == "ledger_paraphrase_01" })
+        assertTrue(tasks.any { it.id == "assignment_noise_04" })
+        assertTrue(tasks.any { it.id == "state_machine_repair_03" })
+    }
+
+    @Test
+    fun `logic harness mode supports representative behavioral tasks`() {
+        val selectedTasks = ReasoningBehavioralLogicEvalTasks.defaults().filter {
+            it.id in setOf(
+                "ledger_paraphrase_01",
+                "assignment_noise_02",
+                "state_machine_reorder_03"
+            )
+        }
+
+        val report = ReasoningSelfEvalRunner(
+            client = UsageTrackingChatClient(ReasoningLogicHarnessClient()),
+            tasks = selectedTasks
+        ).run(
+            ReasoningEvalOptions(
+                maxAttemptsPerTask = 3,
+                mode = ReasoningEvalMode.LOGIC.id,
+                stage = "logic-behavioral"
+            )
+        )
+
+        assertEquals(3, report.summary.totalTasks)
+        assertEquals(3, report.summary.passedTasks)
+        assertTrue(report.taskResults.all { it.attemptsUsed == 2 })
+        assertTrue(report.taskResults.all { it.validationErrors.isEmpty() })
+    }
+
+    @Test
     fun `runner fails fast on unknown task filters`() {
         assertFailsWith<IllegalArgumentException> {
             ReasoningSelfEvalRunner(
