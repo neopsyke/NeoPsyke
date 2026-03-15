@@ -216,6 +216,17 @@ fun reportProviderStatusAndDecide(
     }
 }
 
+internal fun isRetryableProviderHealthFailure(status: ProviderStatus): Boolean {
+    if (status.state != ProviderHealthState.UNAVAILABLE) {
+        return false
+    }
+    val detail = status.detail.lowercase()
+    return detail.contains("timeout") ||
+        detail.contains("timed out") ||
+        detail.contains("temporarily unavailable") ||
+        detail.contains("connection reset")
+}
+
 private fun persistProviderStatusLine(message: String) {
     val path = resolveProviderStatusLogPath()
     try {

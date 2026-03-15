@@ -14,6 +14,10 @@ if [[ -f "$CONFIG_PATH" ]]; then
   source "$CONFIG_PATH"
 fi
 
+if [[ -n "${PSYKE_LLM_CONFIG_FILE:-}" ]]; then
+  export PSYKE_LLM_CONFIG_FILE
+fi
+
 TIMEOUT="${FREUD_LIVE_EVAL_TIMEOUT:-120}"
 RUN_ROOT="${FREUD_RUN_ROOT:-.psyke/runs/freud}"
 GRADLE_USER_HOME_CFG="${FREUD_GRADLE_USER_HOME:-.freud/gradle-home}"

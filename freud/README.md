@@ -77,6 +77,7 @@ freud/scripts/feature-loop.sh my-change --live --config freud/config/live-prod-a
 - cache record/replay
 - stable artifacts
 - triage and summary generation
+- startup provider preflight, including one retry for transient health-check failures and soft-disable of optional `meta_reasoner_fallback` if it is unavailable
 
 ### 3. Reasoning Matrix
 For Psyke, Freud currently owns a 3-lane reasoning setup:

@@ -2,6 +2,8 @@ package psyke.llm
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 import kotlin.test.assertNull
 
 class ProviderStatusTest {
@@ -41,5 +43,38 @@ class ProviderStatusTest {
         )
 
         assertNull(nativeBaseUrl)
+    }
+
+    @Test
+    fun `isRetryableProviderHealthFailure returns true for unavailable timeout`() {
+        val status = ProviderStatus(
+            provider = "openai",
+            state = ProviderHealthState.UNAVAILABLE,
+            detail = "openai API check failed: timeout"
+        )
+
+        assertTrue(isRetryableProviderHealthFailure(status))
+    }
+
+    @Test
+    fun `isRetryableProviderHealthFailure returns false for degraded rate limit`() {
+        val status = ProviderStatus(
+            provider = "openai",
+            state = ProviderHealthState.DEGRADED,
+            detail = "openai API rate limited (HTTP 429)."
+        )
+
+        assertFalse(isRetryableProviderHealthFailure(status))
+    }
+
+    @Test
+    fun `isRetryableProviderHealthFailure returns false for unavailable auth failure`() {
+        val status = ProviderStatus(
+            provider = "openai",
+            state = ProviderHealthState.UNAVAILABLE,
+            detail = "openai API reachable but authentication failed (HTTP 401)."
+        )
+
+        assertFalse(isRetryableProviderHealthFailure(status))
     }
 }

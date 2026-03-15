@@ -92,6 +92,7 @@ import psyke.llm.TokenBudgetGuardedChatClient
 import psyke.llm.LlmCacheMode
 import psyke.llm.LlmCacheManager
 import psyke.llm.combineChatCallObservers
+import psyke.llm.isRetryableProviderHealthFailure
 import psyke.llm.reportProviderStatusAndDecide
 import psyke.integrations.groq.websearch.GroqConversationsWebSearchEngine
 import psyke.integrations.mistral.websearch.MistralConversationsWebSearchEngine
@@ -113,8 +114,14 @@ import java.nio.file.Paths
 
 private val logger = KotlinLogging.logger {}
 private val output: ConsoleReporter = StdConsoleReporter
+private const val PROVIDER_HEALTH_CHECK_MAX_ATTEMPTS: Int = 2
+private const val PROVIDER_HEALTH_CHECK_RETRY_DELAY_MS: Long = 250L
 
 internal object AppModeRunners {
+    private data class InteractiveLlmStartupConfig(
+        val metaReasonerFallback: LlmEndpointConfig?,
+    )
+
     internal fun runReasoningOnlyEval(
         llm: LlmRuntimeConfig,
         cliOptions: AppCliOptions,
@@ -383,19 +390,16 @@ internal object AppModeRunners {
         return logPath.resolveSibling(sidecarName)
     }
     
-    private fun checkProviderHealth(
+    private fun resolveProviderHealthStatus(
         endpoint: LlmEndpointConfig,
         modeLabel: String,
         roleLabel: String,
-    ): Boolean {
+    ): ProviderStatus {
         if (endpoint.apiKey.isBlank()) {
-            return reportProviderStatusAndDecide(
-                modeLabel = "$modeLabel:$roleLabel",
-                status = ProviderStatus(
-                    provider = endpoint.providerLabel,
-                    state = ProviderHealthState.UNAVAILABLE,
-                    detail = "${endpoint.apiKeyEnvVar} is missing."
-                )
+            return ProviderStatus(
+                provider = endpoint.providerLabel,
+                state = ProviderHealthState.UNAVAILABLE,
+                detail = "${endpoint.apiKeyEnvVar} is missing."
             )
         }
         val checker = when (endpoint.provider) {
@@ -419,30 +423,86 @@ internal object AppModeRunners {
                 baseUrl = endpoint.baseUrl
             )
         }
-        val status = checker.check()
+        var status = checker.check()
+        for (attempt in 1 until PROVIDER_HEALTH_CHECK_MAX_ATTEMPTS) {
+            if (!isRetryableProviderHealthFailure(status)) {
+                break
+            }
+            logger.warn {
+                "Provider health check failed for role=$roleLabel mode=$modeLabel " +
+                    "(attempt $attempt/$PROVIDER_HEALTH_CHECK_MAX_ATTEMPTS); retrying. detail=${status.detail}"
+            }
+            try {
+                Thread.sleep(PROVIDER_HEALTH_CHECK_RETRY_DELAY_MS)
+            } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+                break
+            }
+            status = checker.check()
+        }
+        return status
+    }
+
+    private fun checkProviderHealth(
+        endpoint: LlmEndpointConfig,
+        modeLabel: String,
+        roleLabel: String,
+    ): Boolean {
         return reportProviderStatusAndDecide(
             modeLabel = "$modeLabel:$roleLabel",
-            status = status
+            status = resolveProviderHealthStatus(
+                endpoint = endpoint,
+                modeLabel = modeLabel,
+                roleLabel = roleLabel
+            )
         )
     }
 
-    private fun checkInteractiveLlmHealth(
+    private fun prepareInteractiveLlmStartup(
         llm: LlmRuntimeConfig,
         modeLabel: String,
-    ): Boolean {
-        val endpoints = listOf(
+    ): InteractiveLlmStartupConfig? {
+        val requiredEndpoints = listOf(
             "planner" to llm.planner,
             "action_verifier" to llm.actionVerifier,
             "superego" to llm.superego,
             "meta_reasoner" to llm.metaReasoner,
             "memory_advisor" to llm.memoryAdvisor
-        ) + llm.metaReasonerFallback?.let { listOf("meta_reasoner_fallback" to it) }.orEmpty()
-        for ((roleLabel, endpoint) in endpoints) {
-            if (!checkProviderHealth(endpoint = endpoint, modeLabel = modeLabel, roleLabel = roleLabel)) {
-                return false
+        )
+        for ((roleLabel, endpoint) in requiredEndpoints) {
+            val status = resolveProviderHealthStatus(
+                endpoint = endpoint,
+                modeLabel = modeLabel,
+                roleLabel = roleLabel
+            )
+            if (!reportProviderStatusAndDecide(modeLabel = "$modeLabel:$roleLabel", status = status)) {
+                return null
             }
         }
-        return true
+        val optionalFallback = llm.metaReasonerFallback?.let { fallbackEndpoint ->
+            val status = resolveProviderHealthStatus(
+                endpoint = fallbackEndpoint,
+                modeLabel = modeLabel,
+                roleLabel = "meta_reasoner_fallback"
+            )
+            if (status.state == ProviderHealthState.UNAVAILABLE) {
+                reportProviderStatusAndDecide(
+                    modeLabel = "$modeLabel:meta_reasoner_fallback",
+                    status = status.copy(
+                        state = ProviderHealthState.DEGRADED,
+                        detail = "${status.detail} Optional role disabled for this run."
+                    )
+                )
+                null
+            } else {
+                reportProviderStatusAndDecide(
+                    modeLabel = "$modeLabel:meta_reasoner_fallback",
+                    status = status
+                )
+                fallbackEndpoint
+            }
+        }
+        return InteractiveLlmStartupConfig(metaReasonerFallback = optionalFallback)
     }
 
     private fun resolveMetricsProviderLabel(llm: LlmRuntimeConfig): String {
@@ -526,9 +586,8 @@ internal object AppModeRunners {
         runtimeSettings: AgentRuntimeSettings,
         cliOptions: AppCliOptions? = null,
     ) {
-        if (!checkInteractiveLlmHealth(llm = llm, modeLabel = "interactive")) {
-            return
-        }
+        val startupConfig = prepareInteractiveLlmStartup(llm = llm, modeLabel = "interactive") ?: return
+        val metaReasonerFallbackEndpoint = startupConfig.metaReasonerFallback
         val dashboardPort = runtimeSettings.dashboardPort
         val dashboardEnabled = runtimeSettings.dashboardEnabled
         if (!dashboardEnabled) {
@@ -818,7 +877,7 @@ internal object AppModeRunners {
                                         hooks = listOf(rawResponseHook)
                                     )
                                 }
-                                val metaReasonerFallbackClient = llm.metaReasonerFallback?.let { fallbackEndpoint ->
+                                val metaReasonerFallbackClient = metaReasonerFallbackEndpoint?.let { fallbackEndpoint ->
                                     InstrumentedChatModelClient(
                                         delegate = TokenBudgetGuardedChatClient(
                                             delegate = maybeCacheWrap(createChatClient(
@@ -863,7 +922,7 @@ internal object AppModeRunners {
                                                 "superego_primary=${superegoReviewRouting.primaryEndpoint.providerLabel}/${superegoReviewRouting.primaryEndpoint.model}, " +
                                                 "superego_escalation=${superegoReviewRouting.escalationEndpoint?.let { "${it.providerLabel}/${it.model}" } ?: "disabled"}, " +
                                                 "meta_reasoner=${llm.metaReasoner.providerLabel}/${llm.metaReasoner.model}, " +
-                                                "meta_reasoner_fallback=${llm.metaReasonerFallback?.let { "${it.providerLabel}/${it.model}" } ?: "disabled"}, " +
+                                                "meta_reasoner_fallback=${metaReasonerFallbackEndpoint?.let { "${it.providerLabel}/${it.model}" } ?: "disabled"}, " +
                                                 "memory_advisor=${llm.memoryAdvisor.providerLabel}/${llm.memoryAdvisor.model}, " +
                                                 "web_search=${llm.webSearch.providerLabel}/${llm.webSearch.model}"
                                         }
@@ -1085,9 +1144,10 @@ internal object AppModeRunners {
         runtimeSettings: AgentRuntimeSettings,
         cliOptions: AppCliOptions,
     ) {
-        if (!checkInteractiveLlmHealth(llm = llm, modeLabel = "freud-live")) {
+        val startupConfig = prepareInteractiveLlmStartup(llm = llm, modeLabel = "freud-live") ?: run {
             exitProcess(1)
         }
+        val metaReasonerFallbackEndpoint = startupConfig.metaReasonerFallback
 
         val stdinContent = System.`in`.bufferedReader().readText().trim()
         if (stdinContent.isBlank()) {
@@ -1257,7 +1317,7 @@ internal object AppModeRunners {
                                         hooks = listOf(rawResponseHook)
                                     )
                                 }
-                                val metaReasonerFallbackClient = llm.metaReasonerFallback?.let { fallbackEndpoint ->
+                                val metaReasonerFallbackClient = metaReasonerFallbackEndpoint?.let { fallbackEndpoint ->
                                     InstrumentedChatModelClient(
                                         delegate = TokenBudgetGuardedChatClient(
                                             delegate = maybeCacheWrap(createChatClient(
@@ -1300,6 +1360,7 @@ internal object AppModeRunners {
                                                 "planner=${llm.planner.providerLabel}/${llm.planner.model}, " +
                                                 "superego=${superegoReviewRouting.primaryEndpoint.providerLabel}/${superegoReviewRouting.primaryEndpoint.model}, " +
                                                 "meta_reasoner=${llm.metaReasoner.providerLabel}/${llm.metaReasoner.model}, " +
+                                                "meta_reasoner_fallback=${metaReasonerFallbackEndpoint?.let { "${it.providerLabel}/${it.model}" } ?: "disabled"}, " +
                                                 "memory_advisor=${llm.memoryAdvisor.providerLabel}/${llm.memoryAdvisor.model}"
                                         }
                                         try {

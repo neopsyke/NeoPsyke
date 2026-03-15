@@ -96,6 +96,10 @@ if [[ -f "$config_path" ]]; then
   source "$config_path"
 fi
 
+if [[ -n "${PSYKE_LLM_CONFIG_FILE:-}" ]]; then
+  export PSYKE_LLM_CONFIG_FILE
+fi
+
 # Keep full workspace debug dumps enabled in Freud workflow runs.
 export EGO_TASK_WORKSPACE_DEBUG_CAPTURE_ENABLED="true"
 
