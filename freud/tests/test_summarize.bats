@@ -65,9 +65,15 @@ teardown() {
 
 @test "summarize: pass status run" {
   # Overwrite summary.json to be a pass
-  sed -i '' 's/"status": "fail"/"status": "pass"/; s/"steps_failed": 1/"steps_failed": 0/' "$TEST_RUN_DIR/artifacts/summary.json"
+  tmp_summary="$TEST_RUN_DIR/artifacts/summary.json.tmp"
+  sed 's/"status": "fail"/"status": "pass"/; s/"steps_failed": 1/"steps_failed": 0/' \
+    "$TEST_RUN_DIR/artifacts/summary.json" >"$tmp_summary"
+  mv "$tmp_summary" "$TEST_RUN_DIR/artifacts/summary.json"
   # Fix step-index to have no fails
-  sed -i '' 's/full_tests\tfail/full_tests\tpass/' "$TEST_RUN_DIR/artifacts/step-index.tsv"
+  tmp_step_index="$TEST_RUN_DIR/artifacts/step-index.tsv.tmp"
+  sed 's/full_tests\tfail/full_tests\tpass/' \
+    "$TEST_RUN_DIR/artifacts/step-index.tsv" >"$tmp_step_index"
+  mv "$tmp_step_index" "$TEST_RUN_DIR/artifacts/step-index.tsv"
   "$SCRIPTS_DIR/summarize-run.sh" "$TEST_RUN_DIR" >/dev/null
   status_val="$(jq -r '.status' "$TEST_RUN_DIR/artifacts/summary-compact.json")"
   [[ "$status_val" == "pass" ]]
