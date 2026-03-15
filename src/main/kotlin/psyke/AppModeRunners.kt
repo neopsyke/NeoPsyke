@@ -55,6 +55,7 @@ import psyke.eval.UsageTrackingChatClient
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.channels.ClosedReceiveChannelException
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
@@ -1433,7 +1434,24 @@ internal object AppModeRunners {
                                                         val completed = withTimeoutOrNull(
                                                             cliOptions.freudLiveTimeoutSeconds * 1000L
                                                         ) {
-                                                            ego.runInteractive()
+                                                            try {
+                                                                ego.runInteractive()
+                                                            } catch (ex: ClosedReceiveChannelException) {
+                                                                if (answerDeferred.isCompleted) {
+                                                                    logger.info {
+                                                                        "freud-live sensory channel closed after answer delivery; treating as normal shutdown."
+                                                                    }
+                                                                    instrumentation.emit(
+                                                                        AgentEvents.loopStatus(
+                                                                            status = "stopped",
+                                                                            message = "freud_live_answer_delivered_input_closed"
+                                                                        )
+                                                                    )
+                                                                    Unit
+                                                                } else {
+                                                                    throw ex
+                                                                }
+                                                            }
                                                         }
                                                         if (completed == null) {
                                                             instrumentation.emit(

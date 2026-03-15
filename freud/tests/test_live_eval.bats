@@ -8,12 +8,14 @@ setup() {
   RUN_ROOT_REL=".freud/live-eval-test-$$"
   PSYKE_STUB="$TEST_TMPDIR/fake-psyke.sh"
   ARGS_LOG="$TEST_TMPDIR/psyke-args.log"
+  ENV_LOG="$TEST_TMPDIR/psyke-env.log"
   printf 'hello\n' >"$INPUT_FILE"
   printf 'synthetic-answer\n' >"$EXPECTED_FILE"
   cat >"$PSYKE_STUB" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 printf '%s\n' "$*" >"${FREUD_TEST_ARGS_LOG:-/dev/null}"
+printf 'GRADLE_USER_HOME=%s\n' "${GRADLE_USER_HOME:-}" >"${FREUD_TEST_ENV_LOG:-/dev/null}"
 cat >/dev/null
 mkdir -p "$(dirname "$PSYKE_LOG_FILE")" "$(dirname "$PSYKE_EVENT_LOG_FILE")"
 printf '%s\n' "stub log" >"$PSYKE_LOG_FILE"
@@ -36,12 +38,14 @@ teardown() {
     FREUD_LIVE_EVAL_PSYKE_CMD="$PSYKE_STUB" \
     FREUD_RUN_ROOT="$RUN_ROOT_REL" \
     FREUD_TEST_ARGS_LOG="$ARGS_LOG" \
+    FREUD_TEST_ENV_LOG="$ENV_LOG" \
     "$SCRIPTS_DIR/live-eval.sh" --input "$INPUT_FILE"
   [[ "$status" -eq 0 ]]
   run env \
     FREUD_LIVE_EVAL_PSYKE_CMD="$PSYKE_STUB" \
     FREUD_RUN_ROOT="$RUN_ROOT_REL" \
     FREUD_TEST_ARGS_LOG="$ARGS_LOG" \
+    FREUD_TEST_ENV_LOG="$ENV_LOG" \
     "$SCRIPTS_DIR/live-eval.sh" --input "$INPUT_FILE"
   [[ "$status" -eq 0 ]]
   dir_count="$(find "$REPO_ROOT/$RUN_ROOT_REL" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')"
@@ -53,6 +57,7 @@ teardown() {
     FREUD_LIVE_EVAL_PSYKE_CMD="$PSYKE_STUB" \
     FREUD_RUN_ROOT="$RUN_ROOT_REL" \
     FREUD_TEST_ARGS_LOG="$ARGS_LOG" \
+    FREUD_TEST_ENV_LOG="$ENV_LOG" \
     "$SCRIPTS_DIR/live-eval.sh" --input "$INPUT_FILE"
   [[ "$status" -eq 0 ]]
   latest_dir="$(find "$REPO_ROOT/$RUN_ROOT_REL" -mindepth 1 -maxdepth 1 -type d | sort | tail -n 1)"
@@ -64,6 +69,7 @@ teardown() {
     FREUD_LIVE_EVAL_PSYKE_CMD="$PSYKE_STUB" \
     FREUD_RUN_ROOT="$RUN_ROOT_REL" \
     FREUD_TEST_ARGS_LOG="$ARGS_LOG" \
+    FREUD_TEST_ENV_LOG="$ENV_LOG" \
     "$SCRIPTS_DIR/live-eval.sh" --input "$INPUT_FILE" --cache-replay "$cache_file"
   [[ "$status" -eq 0 ]]
   replay_dir="$(find "$REPO_ROOT/$RUN_ROOT_REL" -mindepth 1 -maxdepth 1 -type d | sort | tail -n 1)"
@@ -75,6 +81,7 @@ teardown() {
     FREUD_LIVE_EVAL_PSYKE_CMD="$PSYKE_STUB" \
     FREUD_RUN_ROOT="$RUN_ROOT_REL" \
     FREUD_TEST_ARGS_LOG="$ARGS_LOG" \
+    FREUD_TEST_ENV_LOG="$ENV_LOG" \
     "$SCRIPTS_DIR/live-eval.sh" --input "$INPUT_FILE" --expected "$EXPECTED_FILE"
   [[ "$status" -eq 0 ]]
   latest_dir="$(find "$REPO_ROOT/$RUN_ROOT_REL" -mindepth 1 -maxdepth 1 -type d | sort | tail -n 1)"
@@ -91,6 +98,7 @@ teardown() {
     FREUD_LIVE_EVAL_PSYKE_CMD="$PSYKE_STUB" \
     FREUD_RUN_ROOT="$RUN_ROOT_REL" \
     FREUD_TEST_ARGS_LOG="$ARGS_LOG" \
+    FREUD_TEST_ENV_LOG="$ENV_LOG" \
     "$SCRIPTS_DIR/live-eval.sh" --input "$INPUT_FILE" --expected "$EXPECTED_FILE"
   [[ "$status" -eq 0 ]]
 }
@@ -100,8 +108,26 @@ teardown() {
     FREUD_LIVE_EVAL_PSYKE_CMD="$PSYKE_STUB" \
     FREUD_RUN_ROOT="$RUN_ROOT_REL" \
     FREUD_TEST_ARGS_LOG="$ARGS_LOG" \
+    FREUD_TEST_ENV_LOG="$ENV_LOG" \
     "$SCRIPTS_DIR/live-eval.sh" --input "$INPUT_FILE" --preserve-memory
   [[ "$status" -eq 0 ]]
   ! grep -q -- '--clear-memory-all' "$ARGS_LOG"
   grep -q -- '--freud-live' "$ARGS_LOG"
+}
+
+@test "live-eval sources Freud config and exports isolated GRADLE_USER_HOME" {
+  CONFIG_FILE="$TEST_TMPDIR/freud-live.env"
+  cat >"$CONFIG_FILE" <<EOF
+FREUD_RUN_ROOT="$RUN_ROOT_REL"
+FREUD_GRADLE_USER_HOME=".freud/test-gradle-home"
+EOF
+
+  run env \
+    FREUD_CONFIG="$CONFIG_FILE" \
+    FREUD_LIVE_EVAL_PSYKE_CMD="$PSYKE_STUB" \
+    FREUD_TEST_ARGS_LOG="$ARGS_LOG" \
+    FREUD_TEST_ENV_LOG="$ENV_LOG" \
+    "$SCRIPTS_DIR/live-eval.sh" --input "$INPUT_FILE"
+  [[ "$status" -eq 0 ]]
+  grep -q "GRADLE_USER_HOME=$REPO_ROOT/.freud/test-gradle-home" "$ENV_LOG"
 }

@@ -291,12 +291,12 @@ fi
 
 if [[ "$NEEDS_BUILD" -eq 1 ]]; then
   log_info "Building local app distribution..."
-  "$ROOT_DIR/gradlew" --no-problems-report installDist
+  "$ROOT_DIR/gradlew" --no-daemon --no-problems-report installDist
 fi
 
 if [[ "$NEEDS_MEMORY_FAT_JAR" -eq 1 ]]; then
   log_info "Building memory MCP fat jar..."
-  "$ROOT_DIR/gradlew" --no-problems-report :mcp-memory-pgvector:fatJar
+  "$ROOT_DIR/gradlew" --no-daemon --no-problems-report :mcp-memory-pgvector:fatJar
 fi
 
 maybe_start_pgvector

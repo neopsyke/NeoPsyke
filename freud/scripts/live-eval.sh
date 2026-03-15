@@ -4,12 +4,19 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
-# Defaults
 INPUT_FILE=""
 EXPECTED_FILE=""
 CACHE_REPLAY_FILE=""
+CONFIG_PATH="${FREUD_CONFIG:-$REPO_ROOT/freud/config/default.env}"
+
+if [[ -f "$CONFIG_PATH" ]]; then
+  # shellcheck disable=SC1090
+  source "$CONFIG_PATH"
+fi
+
 TIMEOUT="${FREUD_LIVE_EVAL_TIMEOUT:-120}"
 RUN_ROOT="${FREUD_RUN_ROOT:-.psyke/runs/freud}"
+GRADLE_USER_HOME_CFG="${FREUD_GRADLE_USER_HOME:-.freud/gradle-home}"
 PSYKE_CMD="${FREUD_LIVE_EVAL_PSYKE_CMD:-$REPO_ROOT/run-psyke.sh}"
 RUN_DIR_OVERRIDE="${FREUD_LIVE_EVAL_RUN_DIR:-}"
 PRESERVE_MEMORY="${FREUD_LIVE_EVAL_PRESERVE_MEMORY:-false}"
@@ -62,6 +69,28 @@ Exit codes:
 EOF
 }
 
+prime_gradle_wrapper_cache() {
+  [[ -z "${GRADLE_USER_HOME:-}" ]] && return 0
+  local local_dists="$GRADLE_USER_HOME/wrapper/dists"
+  local home_dists="$HOME/.gradle/wrapper/dists"
+  if compgen -G "$local_dists/gradle-*-bin/*" >/dev/null; then
+    return 0
+  fi
+  if [[ -d "$home_dists" ]]; then
+    mkdir -p "$local_dists"
+    cp -R "$home_dists"/gradle-*-bin "$local_dists"/ 2>/dev/null || true
+  fi
+}
+
+write_local_freud_pointers() {
+  local local_root="$REPO_ROOT/freud"
+  mkdir -p "$local_root/logs"
+  ln -sfn "$RUN_DIR" "$local_root/latest"
+  ln -sfn "$RUN_DIR/logs" "$local_root/logs/latest"
+  ln -sfn "$RUN_DIR/artifacts" "$local_root/artifacts-latest"
+  printf '%s\n' "$RUN_DIR" >"$local_root/latest-run.txt"
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --input)
@@ -102,12 +131,24 @@ if [[ -n "$CACHE_REPLAY_FILE" && ! -f "$CACHE_REPLAY_FILE" ]]; then
   exit 1
 fi
 
-# Create run directory
+# Resolve paths from config/env the same way feature-loop.sh does.
 if [[ "$RUN_ROOT" = /* ]]; then
   RUN_ROOT_ABS="$RUN_ROOT"
 else
   RUN_ROOT_ABS="$REPO_ROOT/$RUN_ROOT"
 fi
+
+if [[ -n "$GRADLE_USER_HOME_CFG" ]]; then
+  if [[ "$GRADLE_USER_HOME_CFG" = /* ]]; then
+    GRADLE_USER_HOME="$GRADLE_USER_HOME_CFG"
+  else
+    GRADLE_USER_HOME="$REPO_ROOT/$GRADLE_USER_HOME_CFG"
+  fi
+  mkdir -p "$GRADLE_USER_HOME"
+  export GRADLE_USER_HOME
+  prime_gradle_wrapper_cache
+fi
+
 mkdir -p "$RUN_ROOT_ABS"
 if [[ -n "$RUN_DIR_OVERRIDE" ]]; then
   if [[ "$RUN_DIR_OVERRIDE" = /* ]]; then
@@ -120,6 +161,9 @@ else
   RUN_DIR="$(mktemp -d "$RUN_ROOT_ABS/${TIMESTAMP}-live-eval-XXXXXX")"
 fi
 mkdir -p "$RUN_DIR/logs" "$RUN_DIR/artifacts"
+export FREUD_RUN_DIR="$RUN_DIR"
+export FREUD_ARTIFACT_DIR="$RUN_DIR/artifacts"
+write_local_freud_pointers
 
 # Determine cache mode
 if [[ -n "$CACHE_REPLAY_FILE" ]]; then
@@ -139,6 +183,9 @@ log_info "Cache mode: $CACHE_MODE"
 log_info "Cache file: $CACHE_FILE"
 log_info "Timeout: ${TIMEOUT}s"
 log_info "Preserve memory: ${PRESERVE_MEMORY}"
+if [[ -n "${GRADLE_USER_HOME:-}" ]]; then
+  log_info "Gradle user home: ${GRADLE_USER_HOME}"
+fi
 log_info ""
 
 # Set environment for the run
