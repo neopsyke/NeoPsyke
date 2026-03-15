@@ -4,10 +4,10 @@ import com.fasterxml.jackson.databind.DeserializationFeature
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
 import mu.KotlinLogging
-import psyke.agent.core.ActionType
-import psyke.agent.core.AgentConfig
-import psyke.agent.core.DialogueTurn
-import psyke.agent.core.PendingAction
+import psyke.agent.model.ActionType
+import psyke.agent.config.AgentConfig
+import psyke.agent.model.DialogueTurn
+import psyke.agent.model.PendingAction
 import psyke.agent.support.RetryPolicy
 import psyke.agent.support.TextSecurity
 import psyke.instrumentation.AgentEvents

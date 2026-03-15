@@ -1,7 +1,7 @@
 package psyke.agent.memory.episodic
 
 import mu.KotlinLogging
-import psyke.agent.core.LogbookConfig
+import psyke.agent.config.LogbookConfig
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths

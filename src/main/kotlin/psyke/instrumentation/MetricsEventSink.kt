@@ -1,7 +1,7 @@
 package psyke.instrumentation
 
 import mu.KotlinLogging
-import psyke.agent.core.PendingAction
+import psyke.agent.model.PendingAction
 import psyke.metrics.MetricsRuntime
 
 private val logger = KotlinLogging.logger {}

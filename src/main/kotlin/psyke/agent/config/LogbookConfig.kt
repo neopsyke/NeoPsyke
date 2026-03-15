@@ -1,4 +1,4 @@
-package psyke.agent.core
+package psyke.agent.config
 
 data class LogbookConfig(
     val enabled: Boolean = true,

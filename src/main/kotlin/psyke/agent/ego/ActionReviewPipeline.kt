@@ -1,0 +1,603 @@
+package psyke.agent.ego
+
+import mu.KotlinLogging
+import psyke.agent.config.*
+import psyke.agent.model.*
+import psyke.agent.cortex.motor.MotorCortex
+import psyke.agent.memory.episodic.EpisodicEventType
+import psyke.agent.memory.workspace.TaskWorkspaceStore
+import psyke.agent.support.PromptInjectionDefense
+import psyke.agent.support.TextSecurity
+import psyke.agent.superego.Superego
+import psyke.instrumentation.AgentEvent
+import psyke.instrumentation.AgentEvents
+import psyke.instrumentation.AgentInstrumentation
+import psyke.instrumentation.PhaseTimingCollector
+
+private val logger = KotlinLogging.logger {}
+
+internal class ActionReviewPipeline(
+    private val superego: Superego,
+    private val motorCortex: MotorCortex,
+    private val config: AgentConfig,
+    private val instrumentation: AgentInstrumentation,
+    private val scheduler: AttentionScheduler,
+    private val taskVerifier: TaskVerifier,
+    private val taskWorkspaceStore: TaskWorkspaceStore,
+    private val taskWorkspaceFinalizer: TaskWorkspaceFinalizer,
+    private val deliberation: DeliberationEngine,
+    private val memory: MemoryCoordinator,
+    private val telemetry: EgoTelemetry,
+    private val fallbackHandler: FallbackHandler,
+    private val impulseTracker: ImpulseLifecycleTracker,
+    private val dialogueFor: (String) -> ArrayDeque<DialogueTurn>,
+    private val resolveSessionId: (ConversationContext) -> String,
+    private val superegoContext: (String, ActionOrigin) -> SuperegoContext,
+    private val cleanupResolvedInputAfterAnswer: (PendingAction) -> Unit,
+    private val getId: () -> psyke.agent.id.Id?,
+) {
+    suspend fun reviewAndExecute(action: PendingAction) {
+        val timing = PhaseTimingCollector("action", action.rootInputId)
+        val convCtx = action.conversationContext
+        val sessionId = resolveSessionId(convCtx)
+        memory.setActiveSession(sessionId, convCtx.interlocutor)
+        deliberation.setActiveSession(sessionId)
+
+        timing.startPhase("workspace_final_pass")
+        val resolvedAction = applyTaskWorkspaceFinalPass(action, sessionId)
+        instrumentation.emit(AgentEvents.actionReviewRequested(resolvedAction))
+        if (resolvedAction.isFallbackExplanation) {
+            executeFallbackBypass(resolvedAction, sessionId, convCtx, timing)
+            return
+        }
+        timing.startPhase("task_verifier")
+        if (!passesTaskVerifier(resolvedAction, sessionId, convCtx)) {
+            instrumentation.emit(AgentEvents.phaseTimings(timing.build()))
+            return
+        }
+        timing.startPhase("superego_review")
+        if (!passesSuperego(resolvedAction, sessionId, convCtx)) {
+            instrumentation.emit(AgentEvents.phaseTimings(timing.build()))
+            return
+        }
+
+        timing.startPhase("action_execute")
+        val outcome = executeActionSafely(resolvedAction)
+        impulseTracker.markActionExecuted(resolvedAction)
+        instrumentation.emit(AgentEvents.actionExecuted(resolvedAction, outcome.statusSummary))
+        getId()?.onActivity("action_executed", resolvedAction.type.id)
+        journalActionExecution(resolvedAction, outcome)
+        timing.startPhase("post_execute")
+        val observed = deliberation.observedEvidence(resolvedAction, outcome)
+        deliberation.recordEvidenceProgress(resolvedAction, outcome, observed)
+        deliberation.onActionExecuted(resolvedAction, observed)
+        maybeRecordTaskWorkspaceOutcome(resolvedAction, outcome, observed)
+        deliberation.recordActionOutcome(resolvedAction, outcome, observed)
+        if (resolvedAction.type == ActionType.ANSWER) {
+            recordAnswerLatency(resolvedAction)
+            deliberation.clearEvidenceForInput(resolvedAction.rootInputId, sessionId)
+            cleanupResolvedInputAfterAnswer(resolvedAction)
+        }
+        maybeRecordDialogueTurn(resolvedAction, outcome, sessionId, convCtx)
+        maybeRunTerminalAnswerMemoryAssessment(resolvedAction, outcome, sessionId)
+        maybeRunLongTermMemoryAssessment(
+            trigger = "post_allowed_action",
+            force = config.memory.longTermMemoryForceAssessOnAllowedAction,
+            latestActionType = resolvedAction.type,
+            latestActionOutcome = outcome.plannerSignal,
+            sessionId = sessionId
+        )
+
+        timing.startPhase("follow_up")
+        maybeEnqueueFollowUp(resolvedAction, outcome, observed, convCtx)
+
+        instrumentation.emit(AgentEvents.phaseTimings(timing.build()))
+    }
+
+    // ── Fallback bypass path ──
+
+    private suspend fun executeFallbackBypass(
+        resolvedAction: PendingAction,
+        sessionId: String,
+        convCtx: ConversationContext,
+        timing: PhaseTimingCollector,
+    ) {
+        instrumentation.emit(
+            AgentEvents.actionReviewResult(
+                actionId = resolvedAction.id,
+                allow = true,
+                reason = "fallback_explanation_bypass",
+                reasonCode = "SYSTEM_FALLBACK_BYPASS"
+            )
+        )
+        val outcome = executeActionSafely(resolvedAction)
+        impulseTracker.markActionExecuted(resolvedAction)
+        instrumentation.emit(AgentEvents.actionExecuted(resolvedAction, outcome.statusSummary))
+        if (resolvedAction.type == ActionType.ANSWER) {
+            memory.journal(
+                EpisodicEventType.ANSWER_DELIVERED,
+                "Answered (fallback): ${TextSecurity.preview(resolvedAction.summary, JOURNAL_SUMMARY_PREVIEW_CHARS)}",
+                actionType = "answer",
+            )
+            recordAnswerLatency(resolvedAction)
+            deliberation.clearEvidenceForInput(resolvedAction.rootInputId, sessionId)
+            cleanupResolvedInputAfterAnswer(resolvedAction)
+        }
+        maybeRecordDialogueTurn(resolvedAction, outcome, sessionId, convCtx)
+        val observed = deliberation.observedEvidence(resolvedAction, outcome)
+        deliberation.recordEvidenceProgress(resolvedAction, outcome, observed)
+        deliberation.onActionExecuted(resolvedAction, observed)
+        maybeRecordTaskWorkspaceOutcome(resolvedAction, outcome, observed)
+        maybeRunTerminalAnswerMemoryAssessment(resolvedAction, outcome, sessionId)
+        instrumentation.emit(AgentEvents.phaseTimings(timing.build()))
+    }
+
+    // ── Review gates ──
+
+    private suspend fun passesTaskVerifier(
+        resolvedAction: PendingAction,
+        sessionId: String,
+        convCtx: ConversationContext,
+    ): Boolean {
+        val recentDialogue = dialogueFor(sessionId).takeLast(12)
+        val latestUserTurn = recentDialogue
+            .asReversed()
+            .firstOrNull { it.role == DialogueRole.USER }
+            ?.content
+            .orEmpty()
+        val disabledForScope = deliberation.disabledActionTypes(resolvedAction.rootInputId, sessionId)
+        val availableActionsForScope = motorCortex.availableActionTypes() - disabledForScope
+        val dispatchableActionsForScope = motorCortex.dispatchableActionTypes() - disabledForScope
+        val taskVerificationDecision = taskVerifier.review(
+            action = resolvedAction,
+            context = TaskVerifierContext(
+                recentDialogue = recentDialogue,
+                externalEvidence = deliberation.evidenceFor(resolvedAction.rootInputId, sessionId),
+                availableActions = availableActionsForScope,
+                dispatchableActions = dispatchableActionsForScope,
+                evidenceActionTypes = motorCortex.actionTypesWithCapability(psyke.agent.actions.ActionCapability.GATHERS_EVIDENCE),
+                latestUserTurn = latestUserTurn
+            )
+        )
+        val assessment = taskVerificationDecision.assessment
+        instrumentation.emit(
+            AgentEvent(
+                type = "task_verifier_review",
+                data = mapOf(
+                    "action_id" to resolvedAction.id,
+                    "root_input_id" to resolvedAction.rootInputId,
+                    "root_input_received_at_ms" to resolvedAction.rootInputReceivedAtMs,
+                    "session_id" to sessionId,
+                    "action_type" to resolvedAction.type.id,
+                    "allow" to taskVerificationDecision.allow,
+                    "reason" to taskVerificationDecision.reason,
+                    "reason_code" to taskVerificationDecision.reasonCode,
+                    "intent_category" to assessment?.intentCategory?.name?.lowercase(),
+                    "volatility_level" to assessment?.volatilityLevel?.name?.lowercase(),
+                    "volatility_score" to assessment?.volatilityScore,
+                    "requires_external_evidence" to assessment?.requiresExternalEvidence,
+                    "evidence_actions_available" to assessment?.evidenceActionsAvailable,
+                    "evidence_actions_dispatchable" to assessment?.evidenceActionsDispatchable,
+                    "had_successful_evidence" to assessment?.hadSuccessfulEvidence,
+                    "had_external_failures" to assessment?.hadExternalFailures,
+                    "latest_user_turn_preview" to TextSecurity.preview(latestUserTurn, 140)
+                )
+            )
+        )
+        if (!taskVerificationDecision.allow) {
+            instrumentation.emit(
+                AgentEvents.actionReviewResult(
+                    actionId = resolvedAction.id,
+                    allow = false,
+                    reason = taskVerificationDecision.reason,
+                    reasonCode = taskVerificationDecision.reasonCode
+                )
+            )
+            fallbackHandler.handleDeniedAction(
+                action = resolvedAction,
+                reason = taskVerificationDecision.reason,
+                reasonCode = taskVerificationDecision.reasonCode,
+                conversationContext = convCtx,
+                sessionId = sessionId,
+                source = "task_verifier"
+            )
+            return false
+        }
+        return true
+    }
+
+    private fun passesSuperego(
+        resolvedAction: PendingAction,
+        sessionId: String,
+        convCtx: ConversationContext,
+    ): Boolean {
+        val gateDecision = superego.review(resolvedAction, superegoContext(sessionId, resolvedAction.origin))
+        instrumentation.emit(
+            AgentEvents.actionReviewResult(
+                actionId = resolvedAction.id,
+                allow = gateDecision.allow,
+                reason = gateDecision.reason,
+                reasonCode = gateDecision.reasonCode
+            )
+        )
+        if (!gateDecision.allow) {
+            fallbackHandler.handleDeniedAction(
+                action = resolvedAction,
+                reason = gateDecision.reason,
+                reasonCode = gateDecision.reasonCode,
+                conversationContext = convCtx,
+                sessionId = sessionId,
+                source = "superego"
+            )
+            return false
+        }
+        return true
+    }
+
+    // ── Execution ──
+
+    private suspend fun executeActionSafely(action: PendingAction): ActionOutcome {
+        return try {
+            motorCortex.execute(action, config.searchResultCount)
+        } catch (ex: Exception) {
+            deliberation.markEvidenceFailure(action)
+            logger.warn(ex) { "Action execution failed for action_id=${action.id} type=${action.type}." }
+            instrumentation.emit(AgentEvents.warning("Action execution failed; action dropped."))
+            ActionOutcome(
+                statusSummary = "Action execution failed: ${ex.message?.take(120) ?: "unknown error"}",
+                observedEvidence = false,
+            )
+        }
+    }
+
+    // ── Post-execute bookkeeping ──
+
+    private fun journalActionExecution(resolvedAction: PendingAction, outcome: ActionOutcome) {
+        if (resolvedAction.type == ActionType.ANSWER) {
+            memory.journal(
+                EpisodicEventType.ANSWER_DELIVERED,
+                "Answered: ${TextSecurity.preview(resolvedAction.summary, JOURNAL_SUMMARY_PREVIEW_CHARS)}",
+                actionType = "answer",
+            )
+        } else {
+            memory.journal(
+                EpisodicEventType.ACTION_EXECUTED,
+                "Executed ${resolvedAction.type.name.lowercase()}: ${TextSecurity.preview(outcome.statusSummary, JOURNAL_SUMMARY_PREVIEW_CHARS)}",
+                actionType = resolvedAction.type.name.lowercase(),
+            )
+        }
+    }
+
+    private fun recordAnswerLatency(resolvedAction: PendingAction) {
+        val receivedAtMs = resolvedAction.rootInputReceivedAtMs ?: return
+        val latencyMs = (System.currentTimeMillis() - receivedAtMs).coerceAtLeast(0L)
+        instrumentation.emit(AgentEvents.responseLatencyRecorded(latencyMs = latencyMs, actionId = resolvedAction.id))
+    }
+
+    private fun maybeRecordDialogueTurn(
+        resolvedAction: PendingAction,
+        outcome: ActionOutcome,
+        sessionId: String,
+        convCtx: ConversationContext,
+    ) {
+        val assistantOutput = outcome.assistantOutput ?: return
+        val assistantTurn = DialogueTurn(
+            role = DialogueRole.ASSISTANT,
+            content = assistantOutput,
+            sessionId = sessionId,
+            interlocutor = convCtx.interlocutor,
+            timestamp = java.time.Instant.now()
+        )
+        dialogueFor(sessionId).addLast(assistantTurn)
+        memory.remember(assistantTurn)
+        trimDialogue(sessionId)
+        if (resolvedAction.type == ActionType.ANSWER) {
+            getId()?.onActivity("answer_delivered")
+        }
+
+        // Mirror Id-originated turns to default session for context continuity.
+        if (resolvedAction.origin.source == OriginSource.ID &&
+            sessionId != ConversationContext.DEFAULT_SESSION_ID
+        ) {
+            val defaultTurn = assistantTurn.copy(sessionId = ConversationContext.DEFAULT_SESSION_ID)
+            dialogueFor(ConversationContext.DEFAULT_SESSION_ID).addLast(defaultTurn)
+            trimDialogue(ConversationContext.DEFAULT_SESSION_ID)
+        }
+    }
+
+    private fun maybeRecordTaskWorkspaceOutcome(action: PendingAction, outcome: ActionOutcome, observedEvidence: Boolean) {
+        if (action.type == ActionType.ANSWER_DRAFT) {
+            taskWorkspaceStore.recordAnswerDraft(
+                rootInputId = action.rootInputId,
+                payload = action.payload
+            )
+            instrumentation.emit(
+                AgentEvent(
+                    type = "task_workspace_updated",
+                    data = mapOf(
+                        "root_input_id" to action.rootInputId,
+                        "root_input_received_at_ms" to action.rootInputReceivedAtMs,
+                        "update_type" to "answer_draft_recorded",
+                        "action_type" to action.type.name.lowercase(),
+                        "draft_preview" to TextSecurity.preview(action.payload, 140),
+                        "active_tasks" to taskWorkspaceStore.activeTaskCount()
+                    )
+                )
+            )
+            telemetry.emitTaskWorkspaceTelemetry(
+                rootInputId = action.rootInputId,
+                rootInputReceivedAtMs = action.rootInputReceivedAtMs,
+                updateType = "answer_draft_recorded"
+            )
+            return
+        }
+        if (action.type == ActionType.ANSWER) return
+        taskWorkspaceStore.recordActionOutcome(
+            rootInputId = action.rootInputId,
+            action = action,
+            outcome = outcome,
+            observedEvidence = observedEvidence
+        )
+        instrumentation.emit(
+            AgentEvent(
+                type = "task_workspace_updated",
+                data = mapOf(
+                    "root_input_id" to action.rootInputId,
+                    "root_input_received_at_ms" to action.rootInputReceivedAtMs,
+                    "update_type" to "action_outcome_recorded",
+                    "action_type" to action.type.name.lowercase(),
+                    "observed_evidence" to observedEvidence,
+                    "status_preview" to TextSecurity.preview(outcome.statusSummary, 140),
+                    "active_tasks" to taskWorkspaceStore.activeTaskCount()
+                )
+            )
+        )
+        telemetry.emitTaskWorkspaceTelemetry(
+            rootInputId = action.rootInputId,
+            rootInputReceivedAtMs = action.rootInputReceivedAtMs,
+            updateType = "action_outcome_recorded"
+        )
+    }
+
+    private fun maybeRunTerminalAnswerMemoryAssessment(
+        action: PendingAction,
+        outcome: ActionOutcome,
+        sessionId: String,
+    ) {
+        if (action.type != ActionType.ANSWER) return
+        maybeRunLongTermMemoryAssessment(
+            trigger = "post_terminal_answer",
+            force = config.memory.longTermMemoryForceAssessOnTerminalAnswer,
+            latestActionType = action.type,
+            latestActionOutcome = outcome.plannerSignal,
+            sessionId = sessionId
+        )
+    }
+
+    private fun maybeRunLongTermMemoryAssessment(
+        trigger: String,
+        force: Boolean = false,
+        latestActionType: ActionType? = null,
+        latestActionOutcome: String? = null,
+        sessionId: String = ConversationContext.DEFAULT_SESSION_ID,
+    ) {
+        memory.maybeAssessLongTermMemory(
+            trigger = trigger,
+            force = force,
+            latestActionType = latestActionType,
+            latestActionOutcome = latestActionOutcome,
+            deliberation = deliberation.snapshot(),
+            recentDialogue = dialogueFor(sessionId).takeLast(12)
+        )
+    }
+
+    // ── Workspace final pass ──
+
+    private fun applyTaskWorkspaceFinalPass(action: PendingAction, sessionId: String): PendingAction {
+        if (action.type != ActionType.ANSWER) {
+            return action
+        }
+        if (!config.memory.taskWorkspace.enabled || !config.memory.taskWorkspace.finalPassRewriteEnabled) {
+            return action
+        }
+        val preFinalSnapshot = taskWorkspaceStore.debugSnapshot(action.rootInputId)
+        if (preFinalSnapshot != null) {
+            instrumentation.emit(
+                AgentEvent(
+                    type = "task_workspace_pre_final_dump",
+                    data = mapOf(
+                        "session_id" to sessionId,
+                        "root_input_id" to action.rootInputId,
+                        "candidate_answer" to action.payload,
+                        "snapshot" to preFinalSnapshot
+                    )
+                )
+            )
+        }
+        taskWorkspaceStore.recordAnswerDraft(
+            rootInputId = action.rootInputId,
+            payload = action.payload
+        )
+        telemetry.emitTaskWorkspaceTelemetry(
+            rootInputId = action.rootInputId,
+            rootInputReceivedAtMs = action.rootInputReceivedAtMs,
+            updateType = "answer_draft_recorded"
+        )
+        val finalPassInput = taskWorkspaceStore.buildFinalPassInput(
+            rootInputId = action.rootInputId,
+            candidateAnswer = action.payload,
+            maxChars = config.memory.taskWorkspace.finalCompilationMaxChars
+        ) ?: return action
+        val answerDraftThreshold = maxOf(2, config.memory.taskWorkspace.activationMinPlanSteps)
+        if (finalPassInput.evidenceCount == 0 && finalPassInput.answerDraftCount < answerDraftThreshold) {
+            instrumentation.emit(
+                AgentEvent(
+                    type = "task_workspace_final_pass_skipped",
+                    data = mapOf(
+                        "root_input_id" to action.rootInputId,
+                        "action_id" to action.id,
+                        "reason" to "no_evidence_or_insufficient_drafts",
+                        "answer_draft_count" to finalPassInput.answerDraftCount,
+                        "answer_draft_threshold" to answerDraftThreshold,
+                    )
+                )
+            )
+            return action
+        }
+        instrumentation.emit(
+            AgentEvent(
+                type = "task_workspace_final_pass",
+                data = mapOf(
+                    "root_input_id" to action.rootInputId,
+                    "root_input_received_at_ms" to action.rootInputReceivedAtMs,
+                    "action_id" to action.id,
+                    "workspace_confidence" to finalPassInput.workspaceConfidence,
+                    "section_count" to finalPassInput.sectionCount,
+                    "evidence_count" to finalPassInput.evidenceCount,
+                    "answer_draft_count" to finalPassInput.answerDraftCount,
+                    "compilation_preview" to TextSecurity.preview(finalPassInput.compilation, 220)
+                )
+            )
+        )
+        if (finalPassInput.workspaceConfidence < config.memory.taskWorkspace.finalPassMinWorkspaceConfidence) {
+            instrumentation.emit(
+                AgentEvent(
+                    type = "task_workspace_final_pass_skipped",
+                    data = mapOf(
+                        "root_input_id" to action.rootInputId,
+                        "root_input_received_at_ms" to action.rootInputReceivedAtMs,
+                        "action_id" to action.id,
+                        "reason" to "workspace_confidence_gate",
+                        "workspace_confidence" to finalPassInput.workspaceConfidence,
+                        "min_workspace_confidence" to config.memory.taskWorkspace.finalPassMinWorkspaceConfidence
+                    )
+                )
+            )
+            return action
+        }
+        val finalizerResult = taskWorkspaceFinalizer.finalize(
+            TaskWorkspaceFinalizerRequest(
+                action = action,
+                workspaceCompilation = finalPassInput.compilation,
+                workspaceConfidence = finalPassInput.workspaceConfidence,
+                recentDialogue = dialogueFor(sessionId).takeLast(12)
+            )
+        ) ?: run {
+            instrumentation.emit(
+                AgentEvent(
+                    type = "task_workspace_final_pass_skipped",
+                    data = mapOf(
+                        "root_input_id" to action.rootInputId,
+                        "root_input_received_at_ms" to action.rootInputReceivedAtMs,
+                        "action_id" to action.id,
+                        "reason" to "finalizer_unavailable_or_parse"
+                    )
+                )
+            )
+            return action
+        }
+        if (finalizerResult.confidence < config.memory.taskWorkspace.finalPassMinModelConfidence) {
+            instrumentation.emit(
+                AgentEvent(
+                    type = "task_workspace_final_pass_skipped",
+                    data = mapOf(
+                        "root_input_id" to action.rootInputId,
+                        "root_input_received_at_ms" to action.rootInputReceivedAtMs,
+                        "action_id" to action.id,
+                        "reason" to "model_confidence_gate",
+                        "model_confidence" to finalizerResult.confidence,
+                        "min_model_confidence" to config.memory.taskWorkspace.finalPassMinModelConfidence
+                    )
+                )
+            )
+            return action
+        }
+        val rewrittenPayload = TextSecurity.clamp(finalizerResult.rewrittenPayload, config.maxActionPayloadChars)
+        if (rewrittenPayload.isBlank() || rewrittenPayload == action.payload) {
+            instrumentation.emit(
+                AgentEvent(
+                    type = "task_workspace_final_pass_skipped",
+                    data = mapOf(
+                        "root_input_id" to action.rootInputId,
+                        "root_input_received_at_ms" to action.rootInputReceivedAtMs,
+                        "action_id" to action.id,
+                        "reason" to "rewrite_empty_or_unchanged"
+                    )
+                )
+            )
+            return action
+        }
+        instrumentation.emit(
+            AgentEvent(
+                type = "task_workspace_final_pass_applied",
+                data = mapOf(
+                    "root_input_id" to action.rootInputId,
+                    "root_input_received_at_ms" to action.rootInputReceivedAtMs,
+                    "action_id" to action.id,
+                    "workspace_confidence" to finalPassInput.workspaceConfidence,
+                    "model_confidence" to finalizerResult.confidence,
+                    "answer_draft_count" to finalPassInput.answerDraftCount,
+                    "rewrite_reason" to finalizerResult.reason,
+                    "payload_before_preview" to TextSecurity.preview(action.payload, 180),
+                    "payload_after_preview" to TextSecurity.preview(rewrittenPayload, 180)
+                )
+            )
+        )
+        return action.copy(payload = rewrittenPayload)
+    }
+
+    // ── Follow-up ──
+
+    private fun maybeEnqueueFollowUp(
+        resolvedAction: PendingAction,
+        outcome: ActionOutcome,
+        observed: Boolean,
+        convCtx: ConversationContext,
+    ) {
+        if (!resolvedAction.requiresFollowUpThought) return
+        val safePlannerSignal = PromptInjectionDefense.asUntrustedDataBlock(
+            text = outcome.plannerSignal,
+            maxChars = FOLLOW_UP_SIGNAL_MAX_CHARS
+        )
+        val followUpThought = TextSecurity.clamp(
+            "${resolvedAction.followUpPrefix}\n$safePlannerSignal\nDecide if an answer should be sent.",
+            config.planner.maxThoughtChars
+        )
+        val queued = scheduler.enqueueThought(
+            content = followUpThought,
+            urgency = resolvedAction.urgency,
+            passes = resolvedAction.attempts,
+            rootInputId = resolvedAction.rootInputId,
+            rootInputReceivedAtMs = resolvedAction.rootInputReceivedAtMs,
+            allowFallbackExplanation = true,
+            originActionType = resolvedAction.type,
+            originActionObservedEvidence = observed,
+            conversationContext = convCtx,
+            origin = resolvedAction.origin,
+        )
+        if (!queued) {
+            instrumentation.emit(AgentEvents.warning("Failed to enqueue follow-up thought after action."))
+            telemetry.recordQueueSaturation(
+                queueType = "thought",
+                capacity = config.maxPendingThoughts,
+                reason = "enqueue_followup_thought_failed_full"
+            )
+        }
+        telemetry.emitQueueSnapshot("follow_up_thought_enqueued")
+    }
+
+    // ── Dialogue trim ──
+
+    private fun trimDialogue(sessionId: String) {
+        val deque = dialogueFor(sessionId)
+        while (deque.size > MAX_DIALOGUE_SIZE) {
+            deque.removeFirst()
+        }
+    }
+
+    private companion object {
+        const val FOLLOW_UP_SIGNAL_MAX_CHARS: Int = 420
+        const val JOURNAL_SUMMARY_PREVIEW_CHARS: Int = 160
+        const val MAX_DIALOGUE_SIZE: Int = 20
+    }
+}

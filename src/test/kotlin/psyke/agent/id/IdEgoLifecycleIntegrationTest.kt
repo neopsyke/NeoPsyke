@@ -6,17 +6,17 @@ import kotlinx.coroutines.runBlocking
 import psyke.agent.actions.websearch.WebSearchActionHandler
 import psyke.agent.actions.websearch.WebSearchEngine
 import psyke.agent.actions.websearch.WebSearchResult
-import psyke.agent.core.ActionType
-import psyke.agent.core.AgentConfig
-import psyke.agent.core.ConversationContext
-import psyke.agent.core.EgoDecision
-import psyke.agent.core.EgoTrigger
-import psyke.agent.core.OriginSource
-import psyke.agent.core.PendingImpulse
-import psyke.agent.core.PendingThought
-import psyke.agent.core.PlannerConfig
-import psyke.agent.core.PlannerContext
-import psyke.agent.core.Urgency
+import psyke.agent.model.ActionType
+import psyke.agent.config.AgentConfig
+import psyke.agent.model.ConversationContext
+import psyke.agent.model.EgoDecision
+import psyke.agent.model.EgoTrigger
+import psyke.agent.model.OriginSource
+import psyke.agent.model.PendingImpulse
+import psyke.agent.model.PendingThought
+import psyke.agent.config.PlannerConfig
+import psyke.agent.model.PlannerContext
+import psyke.agent.model.Urgency
 import psyke.agent.cortex.motor.MotorCortex
 import psyke.agent.ego.Ego
 import psyke.agent.superego.Superego
@@ -109,7 +109,7 @@ class IdEgoLifecycleIntegrationTest {
         assertEquals("accepted", lifecycleFinalized.data["result"])
 
         val idOriginAction = instrumentation.events
-            .mapNotNull { it.data["action"] as? psyke.agent.core.PendingAction }
+            .mapNotNull { it.data["action"] as? psyke.agent.model.PendingAction }
             .firstOrNull { it.rootInputId == rootImpulseId && it.type == ActionType.WEB_SEARCH }
         assertNotNull(idOriginAction, "Expected a WEB_SEARCH action for the impulse root")
         assertEquals(OriginSource.ID, idOriginAction.origin.source)

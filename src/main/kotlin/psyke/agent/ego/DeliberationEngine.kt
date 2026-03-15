@@ -1,16 +1,16 @@
 package psyke.agent.ego
 
 import mu.KotlinLogging
-import psyke.agent.core.ActionOutcome
-import psyke.agent.core.ActionType
-import psyke.agent.core.AgentConfig
-import psyke.agent.core.ConversationContext
-import psyke.agent.core.DeliberationState
-import psyke.agent.core.EgoDecision
-import psyke.agent.core.EgoTrigger
-import psyke.agent.core.PendingAction
-import psyke.agent.core.PlannerContext
-import psyke.agent.core.Urgency
+import psyke.agent.model.ActionOutcome
+import psyke.agent.model.ActionType
+import psyke.agent.config.AgentConfig
+import psyke.agent.model.ConversationContext
+import psyke.agent.model.DeliberationState
+import psyke.agent.model.EgoDecision
+import psyke.agent.model.EgoTrigger
+import psyke.agent.model.PendingAction
+import psyke.agent.model.PlannerContext
+import psyke.agent.model.Urgency
 import psyke.agent.support.TextSecurity
 import psyke.instrumentation.AgentEvent
 import psyke.instrumentation.AgentEvents

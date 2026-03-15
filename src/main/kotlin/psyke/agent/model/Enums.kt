@@ -1,4 +1,4 @@
-package psyke.agent.core
+package psyke.agent.model
 
 import com.fasterxml.jackson.annotation.JsonIgnore
 import java.util.Locale

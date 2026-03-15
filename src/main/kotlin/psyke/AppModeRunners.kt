@@ -1,7 +1,7 @@
 package psyke
 
 import mu.KotlinLogging
-import psyke.agent.core.AgentConfig
+import psyke.agent.config.AgentConfig
 import psyke.agent.ego.Ego
 import psyke.agent.ego.LlmEgoPlanner
 import psyke.agent.memory.episodic.Logbook
@@ -13,7 +13,7 @@ import psyke.agent.ego.NoopTaskWorkspaceFinalizer
 import psyke.agent.memory.longterm.LlmLongTermMemoryAdvisor
 import psyke.agent.memory.longterm.McpHippocampus
 import psyke.agent.tools.mcp.McpStdioClient
-import psyke.agent.core.ActionType
+import psyke.agent.model.ActionType
 import psyke.agent.actions.ActionPluginFactoryContext
 import psyke.agent.actions.ActionRegistry
 import psyke.agent.cortex.sensory.AsyncSensoryInputSource
@@ -540,7 +540,7 @@ internal object AppModeRunners {
     
         val agentScope = agentScope("psyke-agent")
         val dashboardStore = DashboardStateStore()
-        val interlocutorResolver = psyke.agent.core.DefaultInterlocutorResolver()
+        val interlocutorResolver = psyke.agent.config.DefaultInterlocutorResolver()
         val sensoryInput = AsyncSensoryInputSource(
             includeStdin = true,
             emitStdinClosedSignal = false,
@@ -1111,7 +1111,7 @@ internal object AppModeRunners {
             emitStdinClosedSignal = false,
             scope = agentScope
         )
-        val interlocutorResolver = psyke.agent.core.DefaultInterlocutorResolver()
+        val interlocutorResolver = psyke.agent.config.DefaultInterlocutorResolver()
         val sensoryCortex = SensoryCortex(
             config = config,
             source = sensoryInput,

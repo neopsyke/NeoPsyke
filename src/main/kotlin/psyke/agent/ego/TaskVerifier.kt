@@ -1,9 +1,9 @@
 package psyke.agent.ego
 
-import psyke.agent.core.ActionType
-import psyke.agent.core.DialogueRole
-import psyke.agent.core.DialogueTurn
-import psyke.agent.core.PendingAction
+import psyke.agent.model.ActionType
+import psyke.agent.model.DialogueRole
+import psyke.agent.model.DialogueTurn
+import psyke.agent.model.PendingAction
 import java.util.Locale
 
 internal data class TaskVerifierContext(

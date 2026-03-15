@@ -1,10 +1,10 @@
 package psyke.instrumentation
 
 import mu.KotlinLogging
-import psyke.agent.core.PendingInput
-import psyke.agent.core.PendingThought
-import psyke.agent.core.PendingAction
-import psyke.agent.core.QueueState
+import psyke.agent.model.PendingInput
+import psyke.agent.model.PendingThought
+import psyke.agent.model.PendingAction
+import psyke.agent.model.QueueState
 
 private val logger = KotlinLogging.logger {}
 

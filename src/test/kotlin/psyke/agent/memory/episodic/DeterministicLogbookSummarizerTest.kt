@@ -1,6 +1,6 @@
 package psyke.agent.memory.episodic
 
-import psyke.agent.core.LogbookConfig
+import psyke.agent.config.LogbookConfig
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue

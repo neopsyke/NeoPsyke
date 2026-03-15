@@ -4,7 +4,7 @@ import com.fasterxml.jackson.databind.DeserializationFeature
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
 import mu.KotlinLogging
-import psyke.agent.core.AgentConfig
+import psyke.agent.config.AgentConfig
 import psyke.agent.support.RetryPolicy
 import psyke.agent.support.TextSecurity
 import psyke.llm.ChatCallMetadata

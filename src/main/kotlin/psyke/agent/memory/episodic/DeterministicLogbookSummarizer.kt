@@ -1,6 +1,6 @@
 package psyke.agent.memory.episodic
 
-import psyke.agent.core.LogbookConfig
+import psyke.agent.config.LogbookConfig
 
 /**
  * Deterministic keyword extraction and input summarization for logbook entries.

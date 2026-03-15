@@ -10,12 +10,12 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.ReceiveChannel
-import psyke.agent.core.AgentConfig
-import psyke.agent.core.ConversationContext
-import psyke.agent.core.DefaultInterlocutorResolver
-import psyke.agent.core.InputPriority
-import psyke.agent.core.Interlocutor
-import psyke.agent.core.InterlocutorResolver
+import psyke.agent.config.AgentConfig
+import psyke.agent.model.ConversationContext
+import psyke.agent.config.DefaultInterlocutorResolver
+import psyke.agent.model.InputPriority
+import psyke.agent.model.Interlocutor
+import psyke.agent.config.InterlocutorResolver
 import psyke.agent.support.TextSecurity
 import java.io.Closeable
 

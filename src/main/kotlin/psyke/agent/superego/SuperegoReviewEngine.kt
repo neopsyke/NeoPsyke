@@ -5,9 +5,9 @@ import com.fasterxml.jackson.databind.DeserializationFeature
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
 import mu.KotlinLogging
-import psyke.agent.core.AgentConfig
-import psyke.agent.core.GateDecision
-import psyke.agent.core.PendingAction
+import psyke.agent.config.AgentConfig
+import psyke.agent.model.GateDecision
+import psyke.agent.model.PendingAction
 import psyke.agent.support.AdaptiveCompletionBudget
 import psyke.agent.support.LlmCallCircuitBreaker
 import psyke.agent.support.LlmFailureClassifier

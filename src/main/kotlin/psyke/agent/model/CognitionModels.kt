@@ -1,4 +1,4 @@
-package psyke.agent.core
+package psyke.agent.model
 
 /**
  * Snapshot of the Id's drive state, injected into [PlannerContext] when the

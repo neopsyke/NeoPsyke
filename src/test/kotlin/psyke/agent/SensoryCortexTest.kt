@@ -3,9 +3,9 @@ package psyke.agent
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.runBlocking
-import psyke.agent.core.ConversationContext
-import psyke.agent.core.Interlocutor
-import psyke.agent.core.InterlocutorResolver
+import psyke.agent.model.ConversationContext
+import psyke.agent.model.Interlocutor
+import psyke.agent.config.InterlocutorResolver
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs

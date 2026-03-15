@@ -9,7 +9,7 @@ class DeliberationProgressMonitorTest {
         val monitor = DeliberationProgressMonitor()
         repeat(12) {
             monitor.startStep()
-            monitor.onPlannerDecision(psyke.agent.core.EgoDecision.Noop("no progress"))
+            monitor.onPlannerDecision(psyke.agent.model.EgoDecision.Noop("no progress"))
         }
 
         val state = monitor.snapshot()
@@ -23,13 +23,13 @@ class DeliberationProgressMonitorTest {
         val monitor = DeliberationProgressMonitor()
         repeat(8) {
             monitor.startStep()
-            monitor.onPlannerDecision(psyke.agent.core.EgoDecision.Noop("loop"))
+            monitor.onPlannerDecision(psyke.agent.model.EgoDecision.Noop("loop"))
         }
         val before = monitor.snapshot()
 
         monitor.startStep()
         monitor.onPlannerDecision(
-            psyke.agent.core.EgoDecision.ProposeAction(
+            psyke.agent.model.EgoDecision.ProposeAction(
                 urgency = Urgency.HIGH,
                 actionType = ActionType.WEB_SEARCH,
                 payload = "query",
@@ -59,7 +59,7 @@ class DeliberationProgressMonitorTest {
         repeat(50) {
             monitor.startStep()
             monitor.onPlannerDecision(
-                psyke.agent.core.EgoDecision.EnqueueThought(
+                psyke.agent.model.EgoDecision.EnqueueThought(
                     urgency = Urgency.MEDIUM,
                     content = "thinking step $it"
                 )
@@ -80,13 +80,13 @@ class DeliberationProgressMonitorTest {
         val monitor = DeliberationProgressMonitor()
         repeat(4) {
             monitor.startStep()
-            monitor.onPlannerDecision(psyke.agent.core.EgoDecision.Noop("Planner unavailable due to model error."))
+            monitor.onPlannerDecision(psyke.agent.model.EgoDecision.Noop("Planner unavailable due to model error."))
         }
         val before = monitor.snapshot()
 
         monitor.startStep()
         monitor.onPlannerDecision(
-            psyke.agent.core.EgoDecision.ProposeAction(
+            psyke.agent.model.EgoDecision.ProposeAction(
                 urgency = Urgency.MEDIUM,
                 actionType = ActionType.WEB_SEARCH,
                 payload = "query",

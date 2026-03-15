@@ -1,9 +1,9 @@
 package psyke.agent.memory.workspace
 
-import psyke.agent.core.ActionOutcome
-import psyke.agent.core.PendingAction
-import psyke.agent.core.PendingInput
-import psyke.agent.core.TaskWorkspaceConfig
+import psyke.agent.model.ActionOutcome
+import psyke.agent.model.PendingAction
+import psyke.agent.model.PendingInput
+import psyke.agent.config.TaskWorkspaceConfig
 import psyke.agent.support.TextSecurity
 import kotlin.math.max
 
