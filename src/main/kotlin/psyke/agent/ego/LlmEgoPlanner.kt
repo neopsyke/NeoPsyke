@@ -493,6 +493,7 @@ class LlmEgoPlanner(
         )
         val verifierPayload = verifierOutcome.payload ?: return decision
         return resolveVerifierDecision(
+            trigger = trigger,
             original = decision,
             payload = verifierPayload,
             availableActions = context.availableActions,
@@ -531,7 +532,7 @@ class LlmEgoPlanner(
             actionType = actionType,
             callSite = "action_verifier",
             maxTokens = initialBudget,
-            temperature = 0.1,
+            temperature = ACTION_VERIFIER_TEMPERATURE,
             strictFormat = formats.strict,
             relaxedFormat = formats.relaxed,
         )
@@ -828,6 +829,7 @@ class LlmEgoPlanner(
     }
 
     private fun resolveVerifierDecision(
+        trigger: EgoTrigger,
         original: EgoDecision.ProposeAction,
         payload: ActionVerifierPayload,
         availableActions: Set<ActionType>,
@@ -850,6 +852,26 @@ class LlmEgoPlanner(
                 val reason = payload.reason?.trim().orEmpty().ifBlank {
                     "Action verifier rejected candidate action."
                 }
+                if (shouldOverrideRepeatedAnswerReject(
+                        trigger = trigger,
+                        original = original,
+                        reason = reason
+                    )
+                ) {
+                    emitVerifierResult(
+                        verdict = "approve",
+                        originalActionType = original.actionType.name.lowercase(),
+                        resultingActionType = original.actionType.name.lowercase(),
+                        repaired = false,
+                        reason = "Repeated identical answer reject overridden: $reason"
+                    )
+                    instrumentation.emit(
+                        AgentEvents.warning(
+                            "Action verifier repeated a non-technical reject for the same answer payload; keeping original answer proposal."
+                        )
+                    )
+                    return original
+                }
                 emitVerifierResult(
                     verdict = "reject",
                     originalActionType = original.actionType.name.lowercase(),
@@ -857,7 +879,12 @@ class LlmEgoPlanner(
                     repaired = false,
                     reason = reason
                 )
-                EgoDecision.Noop(TextSecurity.clamp(reason, 160))
+                EgoDecision.Noop(
+                    reason = TextSecurity.clamp(reason, 160),
+                    deniedActionType = original.actionType,
+                    deniedActionPayload = TextSecurity.clamp(original.payload, 240),
+                    denialReasonCode = ACTION_VERIFIER_REJECT_REASON_CODE
+                )
             }
 
             "repair" -> {
@@ -871,7 +898,7 @@ class LlmEgoPlanner(
                         repaired = false,
                         reason = reason
                     )
-                    return EgoDecision.Noop(reason)
+                    return EgoDecision.Noop(reason = reason)
                 }
                 if (shouldIgnoreRepairForEvidenceBackedFollowUp(
                         original = original,
@@ -959,6 +986,33 @@ class LlmEgoPlanner(
                 original
             }
         }
+    }
+
+    private fun shouldOverrideRepeatedAnswerReject(
+        trigger: EgoTrigger,
+        original: EgoDecision.ProposeAction,
+        reason: String,
+    ): Boolean {
+        if (original.actionType != ActionType.ANSWER) return false
+        val priorThought = (trigger as? EgoTrigger.PendingThoughtInput)?.thought ?: return false
+        if (priorThought.deniedActionType != ActionType.ANSWER) return false
+        if (priorThought.denialReasonCode != ACTION_VERIFIER_REJECT_REASON_CODE) return false
+        if (DenialReasonClassifier.isLikelyTechnical(
+                reasonCode = priorThought.denialReasonCode,
+                reason = priorThought.denialReason
+            )
+        ) {
+            return false
+        }
+        if (DenialReasonClassifier.isLikelyTechnical(
+                reasonCode = ACTION_VERIFIER_REJECT_REASON_CODE,
+                reason = reason
+            )
+        ) {
+            return false
+        }
+        return normalizeComparableActionPayload(priorThought.deniedActionPayload) ==
+            normalizeComparableActionPayload(original.payload)
     }
 
     private fun emitVerifierResult(
@@ -1398,6 +1452,8 @@ class LlmEgoPlanner(
                     - repair: one-shot correction to make action coherent.
                     - reject: action cannot be repaired safely/coherently.
                     - Use repair only for material action changes; if action_type/payload/summary are effectively unchanged, use approve.
+                    - For answer actions, approve when the candidate answer is directly entailed by the trigger/context and there is no contradictory evidence.
+                    - Do not reject an answer action solely because it is short, simple, or a direct exact-match response to the trigger.
                     - Never use action types outside available_action_types.
                     - If candidate action is answer after a successful evidence action in the same request, avoid repairing it back to the same evidence action unless user explicitly asked for refresh/retry.
                     - Treat redundancy as a cost signal: reject low-value repeated external calls when external evidence hints already contain usable signals and trigger does not explicitly request refresh/retry.
@@ -1624,6 +1680,7 @@ class LlmEgoPlanner(
         const val PLANNER_TRUNCATION_RETRY_HARD_MAX_TOKENS: Int = 1_600
         const val PLANNER_PROMPT_CALL_SITE: String = "planner_prompt"
         const val ACTION_VERIFIER_PROMPT_CALL_SITE: String = "action_verifier_prompt"
+        const val ACTION_VERIFIER_TEMPERATURE: Double = 0.0
         private const val PLANNER_DECISION_RESPONSE_SCHEMA_STRICT: String = """
             {
               "type": "object",
@@ -1856,6 +1913,9 @@ class LlmEgoPlanner(
             else -> node.asText()
         }
     }
+
+    private fun normalizeComparableActionPayload(payload: String?): String? =
+        payload?.lowercase()?.replace(Regex("\\s+"), " ")?.trim()
 
     private fun synthesizeActionSummary(actionPayload: String): String {
         val firstLine = actionPayload

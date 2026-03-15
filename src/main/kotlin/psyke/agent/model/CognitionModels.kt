@@ -65,6 +65,9 @@ sealed interface EgoDecision {
     data class Noop(
         val reason: String,
         val parseFailureShortCircuit: Boolean = false,
+        val deniedActionType: ActionType? = null,
+        val deniedActionPayload: String? = null,
+        val denialReasonCode: String? = null,
     ) : EgoDecision
 
     data class EnqueuePlan(

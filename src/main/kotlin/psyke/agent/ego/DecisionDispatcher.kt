@@ -107,7 +107,9 @@ internal class DecisionDispatcher(
                     reasonCode = originThought?.denialReasonCode,
                     reason = originThought?.denialReason
                 )
-                if (repeatedDeniedAction && !technicalDenial) {
+                val repeatedVerifierDisagreement =
+                    repeatedDeniedAction && shouldAllowRepeatedVerifierDisagreement(originThought, decision)
+                if (repeatedDeniedAction && !technicalDenial && !repeatedVerifierDisagreement) {
                     instrumentation.emit(AgentEvents.warning("Planner repeated a denied action; requesting an alternative."))
                     deliberation.onRepeatedDeniedAction()
                     memory.maybeRecordReflectionLesson(
@@ -368,6 +370,14 @@ internal class DecisionDispatcher(
                     )
                     telemetry.emitQueueSnapshot("decision_noop_short_circuit")
                 } else {
+                    val deniedActionType = decision.deniedActionType ?: originThought?.deniedActionType
+                    val deniedActionPayload = decision.deniedActionPayload ?: originThought?.deniedActionPayload
+                    val denialReason = if (decision.deniedActionType != null) {
+                        decision.reason
+                    } else {
+                        originThought?.denialReason
+                    }
+                    val denialReasonCode = decision.denialReasonCode ?: originThought?.denialReasonCode
                     val noopThought = TextSecurity.clamp("Noop decision: ${decision.reason}", config.planner.maxThoughtChars)
                     val queued = scheduler.enqueueThought(
                         content = noopThought,
@@ -375,10 +385,10 @@ internal class DecisionDispatcher(
                         passes = nextPassCount,
                         rootInputId = rootInputId,
                         rootInputReceivedAtMs = rootInputReceivedAtMs,
-                        deniedActionType = originThought?.deniedActionType,
-                        deniedActionPayload = originThought?.deniedActionPayload,
-                        denialReason = originThought?.denialReason,
-                        denialReasonCode = originThought?.denialReasonCode,
+                        deniedActionType = deniedActionType,
+                        deniedActionPayload = deniedActionPayload,
+                        denialReason = denialReason,
+                        denialReasonCode = denialReasonCode,
                         allowFallbackExplanation = originThought?.allowFallbackExplanation ?: false,
                         originActionType = originThought?.originActionType,
                         originActionObservedEvidence = originThought?.originActionObservedEvidence,
@@ -403,6 +413,16 @@ internal class DecisionDispatcher(
                 }
             }
         }
+    }
+
+    private fun shouldAllowRepeatedVerifierDisagreement(
+        originThought: PendingThought?,
+        decision: EgoDecision.ProposeAction,
+    ): Boolean {
+        val thought = originThought ?: return false
+        if (thought.denialReasonCode != ACTION_VERIFIER_REJECT_REASON_CODE) return false
+        if (thought.deniedActionType != ActionType.ANSWER) return false
+        return decision.actionType == ActionType.ANSWER
     }
 
     private suspend fun recoverFromSuppressedPlan(

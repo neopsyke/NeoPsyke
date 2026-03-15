@@ -1,6 +1,6 @@
-# freud
+# Freud
 
-`freud` is Psyke's developer workflow layer. It sits on top of the app and gives you repeatable test runs, compact artifacts, fast failure triage, and optional live/provider-backed evals without turning every check into an ad hoc shell session.
+`Freud` is Psyke's developer workflow layer. It sits on top of the app and gives you repeatable test runs, compact artifacts, fast failure triage, and optional live/provider-backed evals without turning every check into an ad hoc shell session.
 
 If you're new to the project, the short version is:
 - Psyke runtime code lives in `src/main/kotlin/psyke`

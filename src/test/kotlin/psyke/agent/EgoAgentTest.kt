@@ -150,6 +150,64 @@ class EgoAgentTest {
     }
 
     @Test
+    fun `verifier style denied action context is preserved through noop and next thought`() {
+        var sawVerifierDeniedThought = false
+        val planner = object : psyke.agent.ego.Ego.Planner {
+            override fun decide(
+                trigger: psyke.agent.model.EgoTrigger,
+                context: PlannerContext
+            ): psyke.agent.model.EgoDecision =
+                when (trigger) {
+                    is psyke.agent.model.EgoTrigger.IncomingInput -> psyke.agent.model.EgoDecision.Noop(
+                        reason = "The answer 'Omar' is incorrect based on the provided information.",
+                        deniedActionType = ActionType.ANSWER,
+                        deniedActionPayload = "Omar",
+                        denialReasonCode = "ACTION_VERIFIER_REJECT"
+                    )
+
+                    is psyke.agent.model.EgoTrigger.PendingThoughtInput -> {
+                        val thought = trigger.thought
+                        sawVerifierDeniedThought =
+                            thought.deniedActionType == ActionType.ANSWER &&
+                                thought.deniedActionPayload == "Omar" &&
+                                thought.denialReasonCode == "ACTION_VERIFIER_REJECT"
+                        psyke.agent.model.EgoDecision.ProposeAction(
+                            urgency = Urgency.HIGH,
+                            actionType = ActionType.ANSWER,
+                            payload = "Omar",
+                            summary = "deliver answer"
+                        )
+                    }
+
+                    is psyke.agent.model.EgoTrigger.IncomingImpulse ->
+                        psyke.agent.model.EgoDecision.Noop("unexpected impulse")
+                }
+        }
+        val superegoLlm = StubChatModelClient().apply {
+            enqueueRawResponse("""{"allow":true}""")
+        }
+        val instrumentation = RecordingInstrumentation()
+        val outputs = mutableListOf<String>()
+        val config = AgentConfig(planner = PlannerConfig(maxLoopStepsPerInput = 8, maxThoughtPasses = 4))
+        val agent = Ego(
+            planner = planner,
+            superego = Superego(
+                modelClient = superegoLlm,
+                config = config,
+                instrumentation = instrumentation
+            ),
+            motorCortex = buildMotorCortex(output = { outputs.add(it) }),
+            config = config,
+            instrumentation = instrumentation
+        )
+
+        runAgentWithInput(agent, "Who arrived last?\nexit\n")
+
+        assertTrue(sawVerifierDeniedThought)
+        assertEquals(listOf("ego> Omar"), outputs)
+    }
+
+    @Test
     fun `task verifier blocks verification-sensitive answer until evidence exists`() {
         val plannerLlm = StubChatModelClient().apply {
             enqueueRawResponse(

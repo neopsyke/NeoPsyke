@@ -665,10 +665,62 @@ class EgoPlannerTest {
 
         val noop = assertIs<psyke.agent.model.EgoDecision.Noop>(decision)
         assertTrue(noop.reason.contains("inconsistent", ignoreCase = true))
+        assertEquals(ActionType.ANSWER, noop.deniedActionType)
+        assertEquals("unsafe", noop.deniedActionPayload)
+        assertEquals("ACTION_VERIFIER_REJECT", noop.denialReasonCode)
         assertTrue(
             instrumentation.events.any {
                 it.type == "action_verifier_result" &&
                     it.data["verdict"] == "reject"
+            }
+        )
+    }
+
+    @Test
+    fun `planner overrides repeated identical answer reject from action verifier`() {
+        val llm = StubChatModelClient().apply {
+            enqueueRawResponse(
+                """
+                {"decision":"action","urgency":"medium","action_type":"answer","action_payload":"Omar","action_summary":"respond"}
+                """.trimIndent()
+            )
+            enqueueRawResponseForCallSite(
+                callSite = "action_verifier",
+                content = """{"verdict":"reject","reason":"The answer 'Omar' is incorrect based on the provided information."}"""
+            )
+        }
+        val instrumentation = RecordingInstrumentation()
+        val planner = LlmEgoPlanner(
+            modelClient = llm,
+            config = AgentConfig(),
+            instrumentation = instrumentation
+        )
+
+        val decision = planner.decide(
+            trigger = psyke.agent.model.EgoTrigger.PendingThoughtInput(
+                PendingThought(
+                    id = 1,
+                    urgency = Urgency.LOW,
+                    content = "Retry previous answer",
+                    deniedActionType = ActionType.ANSWER,
+                    deniedActionPayload = "Omar",
+                    denialReason = "The answer 'Omar' is incorrect based on the provided information.",
+                    denialReasonCode = "ACTION_VERIFIER_REJECT"
+                )
+            ),
+            context = PlannerContext(
+                recentDialogue = emptyList(),
+                queue = QueueSnapshot(0, 0, 0)
+            )
+        )
+
+        val action = assertIs<psyke.agent.model.EgoDecision.ProposeAction>(decision)
+        assertEquals(ActionType.ANSWER, action.actionType)
+        assertEquals("Omar", action.payload)
+        assertTrue(
+            instrumentation.events.any {
+                it.type == "warning" &&
+                    (it.data["message"] as? String)?.contains("repeated a non-technical reject", ignoreCase = true) == true
             }
         )
     }

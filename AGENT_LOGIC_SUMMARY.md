@@ -205,8 +205,11 @@ It is intentionally high-level and should stay aligned with the code.
     - one truncation retry with increased completion budget on likely-truncated output
     - one strict-JSON retry on parse failure
     - parse-failure circuit breaker (scoped by `root_input + action_type`) that bypasses verifier for one decision after repeated malformed verifier outputs
+    - reject propagation into noop-thoughts: verifier `reject` preserves denied action type/payload metadata so follow-up planning can see exactly which candidate was blocked
+    - repeated-answer disagreement override: if a follow-up thought repeats the same `answer` payload after a prior non-technical verifier reject and the verifier rejects it again, planner keeps the original answer and the dispatcher lets that answer through instead of re-blocking it as an ordinary repeated denied action
     - structured follow-up lineage guard: follow-up thoughts carry origin action metadata (`originActionType`, `originActionObservedEvidence`), and verifier `repair` back to the same evidence action is ignored when the candidate is `answer`, prior evidence succeeded, and user did not explicitly request refresh/retry
     - no-op repair collapse: if verifier returns `repair` but action type/payload/summary are materially unchanged, planner treats it as `approve` instead of recording a repair
+    - answer-action tuning: verifier instructions explicitly approve directly entailed exact-match answers when there is no contradictory evidence, and verifier sampling temperature is fixed at `0.0`
   - `answer_draft` action proposals are allowed only inside active plan-context thoughts; out-of-context proposals are coerced to `noop`.
   - Retry policy and safe fallback to `Noop` on model/parse failures.
   - Planner and action-verifier prompts now include "reflection lessons" context to avoid repeated failed strategies.
