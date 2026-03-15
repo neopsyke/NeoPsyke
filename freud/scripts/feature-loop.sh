@@ -200,6 +200,9 @@ if [[ -n "$gradle_user_home" ]]; then
   mkdir -p "$gradle_user_home"
 fi
 
+export FREUD_RUN_DIR="$run_dir"
+export FREUD_ARTIFACT_DIR="$artifact_dir"
+
 write_local_freud_pointers() {
   local local_root="$repo_root/freud"
   mkdir -p "$local_root/logs"

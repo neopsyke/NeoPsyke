@@ -21,9 +21,13 @@ This directory is intentionally separated from Psyke runtime code (`src/main/kot
 - `freud/scripts/prompt-budget-telemetry.sh`: Thin wrapper → `freud/py/telemetry/prompt_budget.py`.
 - `freud/scripts/task-verifier-telemetry.sh`: Thin wrapper → `freud/py/telemetry/task_verifier.py`.
 - `freud/scripts/live-eval.sh`: Single-input live eval with LLM caching and memory isolation.
+- `freud/scripts/run-reasoning-pr-gate.sh`: Deterministic reasoning PR gate (core + behavioral packs).
+- `freud/scripts/run-bbh-smoke.sh`: Live BBH-style smoke lane runner.
 - `freud/py/`: Python implementations of data-processing scripts (stdlib only).
 - `freud/py/telemetry/llm_cache.py`: LLM cache hit/miss/divergence telemetry analyzer.
 - `freud/config/default.env`: Project adapter defaults for this repository.
+- `freud/config/live-weak-structure.env`: Weak live lane config (weaker planner/meta-reasoner).
+- `freud/config/live-prod-acceptance.env`: Production live lane config.
 - `freud/config/adapter.example.env`: Template for reuse in other projects.
 - `freud/templates/feature-brief.md`: Small, reusable feature brief template.
 - `freud/templates/agent-operator-template.md`: Standard prompt template for any coding agent.
@@ -34,8 +38,17 @@ This directory is intentionally separated from Psyke runtime code (`src/main/kot
 # Deterministic/stub-first loop
 freud/scripts/feature-loop.sh add-verifier
 
+# Deterministic PR reasoning gate only
+freud/scripts/run-reasoning-pr-gate.sh
+
 # Live steps enabled (if configured)
 freud/scripts/feature-loop.sh add-verifier --live
+
+# Weak-structure live lane
+freud/scripts/feature-loop.sh add-verifier --live --config freud/config/live-weak-structure.env
+
+# Production-routing live lane
+freud/scripts/feature-loop.sh add-verifier --live --config freud/config/live-prod-acceptance.env
 
 # Dry run to inspect planned commands only
 freud/scripts/feature-loop.sh add-verifier --dry-run
@@ -46,6 +59,9 @@ freud/scripts/live-eval.sh --input test-input.txt --timeout 120
 # Replay with cached LLM responses
 freud/scripts/live-eval.sh --input test-input.txt \
   --cache-replay .psyke/runs/freud/latest/artifacts/llm-cache.jsonl
+
+# Preserve isolated Freud memory across a sequence when needed
+freud/scripts/live-eval.sh --input test-input.txt --preserve-memory
 
 # With expected answer validation
 freud/scripts/live-eval.sh --input test-input.txt --expected expected-answer.txt
@@ -67,7 +83,7 @@ Artifacts are saved under `.psyke/runs/freud/<timestamp>-<feature_id>/` by defau
 
 ## Live Eval
 
-`live-eval.sh` pipes a single input to Psyke via `--freud-live` mode, captures the answer on stdout, and runs triage/telemetry on the result.
+Prefer `live-eval.sh` for any single-input Freud live/provider-backed check. It pipes a single input to Psyke via `--freud-live` mode, captures the answer on stdout, and runs triage/telemetry on the result.
 
 ### LLM Response Caching
 - First run (no `--cache-replay`): sets `PSYKE_LLM_CACHE_MODE=record` and saves all LLM responses to `artifacts/llm-cache.jsonl`.
@@ -83,7 +99,9 @@ Live eval runs use an isolated memory environment so user data is never touched:
 | Episodic logbook | `.psyke/freud-logbook.db` | `.psyke/logbook.db` |
 | Metrics DB | `.psyke/freud-metrics.db` | `.psyke/metrics.db` |
 
-All freud memory is cleared automatically before each run via `--clear-memory-all`.
+By default, all Freud-isolated memory is cleared automatically before each run via `--clear-memory-all`.
+Use `--preserve-memory` or `FREUD_LIVE_EVAL_PRESERVE_MEMORY=true` only when a sequence intentionally depends on prior isolated Freud memory.
+`--expected` uses normalized exact matching, not substring containment.
 
 ### Artifacts
 Live eval runs are saved under `.psyke/runs/freud/<timestamp>-live-eval/`:
@@ -112,6 +130,11 @@ You can override any command via environment variables before running:
 - `FREUD_REASONING_EVAL_LOGIC_CMD`
 - `FREUD_REASONING_EVAL_MODEL_CMD`
 - `FREUD_MEMORY_SMOKE_CMD`
+- `FREUD_LIVE_EVAL_TIMEOUT`
+- `FREUD_LIVE_EVAL_PRESERVE_MEMORY`
+- `FREUD_BBH_MIN_PASS_RATE_PERCENT`
+- `FREUD_BBH_MAX_TIMEOUTS`
+- `FREUD_BBH_PRESERVE_MEMORY`
 - `FREUD_RUN_ROOT`
 - `FREUD_GRADLE_USER_HOME` (optional; isolated Gradle cache)
 
@@ -120,6 +143,7 @@ You can override any command via environment variables before running:
 - Keep live/provider checks optional and explicit.
 - Keep artifacts compact and machine-readable.
 - Keep project-specific commands in `freud/config/*.env`, not hardcoded in scripts.
+- Prefer `freud/scripts/live-eval.sh` over raw `./run-psyke.sh --freud-live` for Freud-managed live checks. Use raw `--freud-live` only when debugging the wrapper or the underlying CLI mode.
 
 ## Testing
 

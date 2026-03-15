@@ -47,6 +47,7 @@ import psyke.eval.ReasoningEvalOptions
 import psyke.eval.ReasoningEvalReporter
 import psyke.eval.ReasoningEvalMode
 import psyke.eval.ReasoningEvalTasks
+import psyke.eval.ReasoningBehavioralLogicEvalTasks
 import psyke.eval.ReasoningLogicEvalTasks
 import psyke.eval.ReasoningLogicHarnessClient
 import psyke.eval.ReasoningSelfEvalRunner
@@ -193,7 +194,14 @@ internal object AppModeRunners {
                     }
                 }
                 val evalTasks = when (cliOptions.evalReasoningMode) {
-                    ReasoningEvalMode.LOGIC -> ReasoningLogicEvalTasks.defaults()
+                    ReasoningEvalMode.LOGIC -> {
+                        val coreTasks = ReasoningLogicEvalTasks.defaults()
+                        if (cliOptions.evalReasoningTaskFilter.isEmpty()) {
+                            coreTasks
+                        } else {
+                            coreTasks + ReasoningBehavioralLogicEvalTasks.defaults()
+                        }
+                    }
                     ReasoningEvalMode.MODEL -> ReasoningEvalTasks.defaults()
                 }
                 UsageTrackingChatClient(

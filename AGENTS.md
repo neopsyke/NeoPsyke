@@ -57,16 +57,23 @@ Instructions for coding agents working in this repository (Codex, Claude, Gemini
 ### Required Commands
 - Stub/deterministic-first run:
   - `freud/scripts/feature-loop.sh <feature-id>`
+- Deterministic reasoning PR gate only:
+  - `freud/scripts/run-reasoning-pr-gate.sh`
 - Live-inclusive run (only when explicitly required):
   - `freud/scripts/feature-loop.sh <feature-id> --live`
+- Weak-structure live reasoning lane:
+  - `freud/scripts/feature-loop.sh <feature-id> --live --config freud/config/live-weak-structure.env`
+- Production-routing live reasoning lane:
+  - `freud/scripts/feature-loop.sh <feature-id> --live --config freud/config/live-prod-acceptance.env`
 - Resume from a specific step (skips earlier steps, preserves artifact record):
   - `freud/scripts/feature-loop.sh <feature-id> --from-step <step>`
   - Valid step names: `preflight_compile targeted_tests full_tests scenario_pack reasoning_eval_logic reasoning_eval_model memory_live_smoke`
 - Scenario-only run:
   - `freud/scripts/run-scenarios.sh --file freud/scenarios/v1/psyke-agent-scenarios.json`
 - Single-input live eval (pipe one input, get one answer):
-  - `freud/scripts/live-eval.sh --input <file> [--expected <file>] [--timeout <seconds>]`
+  - Preferred wrapper: `freud/scripts/live-eval.sh --input <file> [--expected <file>] [--timeout <seconds>]`
   - Replay a cached run: `freud/scripts/live-eval.sh --input <file> --cache-replay <cache.jsonl>`
+  - Preserve isolated Freud memory for multi-step sequences: `freud/scripts/live-eval.sh --input <file> --preserve-memory`
 - Dry-run inspection:
   - `freud/scripts/feature-loop.sh <feature-id> --dry-run`
 
@@ -75,7 +82,8 @@ Instructions for coding agents working in this repository (Codex, Claude, Gemini
   - pgvector namespace: `freud-eval` (user default: `psyke`)
   - Episodic logbook: `.psyke/freud-logbook.db` (user default: `.psyke/logbook.db`)
   - Metrics DB: `.psyke/freud-metrics.db` (user default: `.psyke/metrics.db`)
-- All freud memory is cleared automatically before each run (`--clear-memory-all`).
+- By default, all Freud-isolated memory is cleared before each run (`--clear-memory-all`).
+- Use `--preserve-memory` or `FREUD_LIVE_EVAL_PRESERVE_MEMORY=true` only when a live eval intentionally depends on prior isolated Freud memory.
 - LLM response caching: first run records all LLM responses to a JSONL cache file; subsequent runs with `--cache-replay` replay cached responses until a hash mismatch (divergence), then switch to real LLM calls.
 - Cache env vars: `PSYKE_LLM_CACHE_MODE` (`record`/`replay`/`off`), `PSYKE_LLM_CACHE_FILE`.
 
@@ -93,6 +101,10 @@ Instructions for coding agents working in this repository (Codex, Claude, Gemini
 - Live-eval run outputs under:
   - `.psyke/runs/freud/<timestamp>-live-eval/`
   - Includes: `artifacts/answer.txt`, `artifacts/verdict.json`, `artifacts/cache-stats.json`, `artifacts/llm-cache.jsonl` (record mode)
+- BBH smoke aggregate artifacts are written under the active Freud run:
+  - `artifacts/bbh-smoke-<lane>-summary.json`
+  - `artifacts/bbh-smoke-<lane>-summary.md`
+  - `artifacts/bbh-smoke-<lane>-results.tsv`
 - Fast-entry artifacts (read these first):
   - `artifacts/summary-compact.md`
   - `artifacts/summary.json` (includes triage counters)
@@ -132,10 +144,30 @@ Instructions for coding agents working in this repository (Codex, Claude, Gemini
 ### Configuration Rules
 - Keep project-specific commands in `freud/config/*.env`.
 - Do not hardcode Psyke-specific commands in generic `freud/scripts/*.sh`.
+- Do not commit local machine paths in Freud configs or docs. Resolve repo-local files relative to the config/script location or repo root.
+- Prefer `freud/scripts/live-eval.sh` for any single-input live/provider-backed Freud check. Treat raw `./run-psyke.sh --freud-live` as a lower-level debugging path or implementation primitive.
 - Default adapter file:
   - `freud/config/default.env`
 - Optional override:
   - `FREUD_CONFIG=/path/to/adapter.env`
+- Live reasoning lane configs:
+  - `freud/config/live-weak-structure.env`
+  - `freud/config/live-prod-acceptance.env`
+- Frozen LLM routing snapshots for live lanes:
+  - `freud/config/llm-weak-structure.yaml`
+  - `freud/config/llm-prod-acceptance.yaml`
+
+### Reasoning Eval Matrix
+- Freud owns the reasoning eval matrix for Psyke:
+  - `logic-gate`: deterministic PR gate via `run-reasoning-pr-gate.sh`
+  - `weak-structure-live`: manual live lane using weaker planner/meta-reasoner routing
+  - `prod-acceptance-live`: manual live lane using frozen production routing
+- `reasoning_eval_logic` in the default feature loop runs two deterministic passes:
+  - logic core (`shape-lock`, `feedback-carry`, `multi-fix`)
+  - logic behavioral pack (45 deterministic perturbation tasks)
+- `reasoning_eval_model` remains the live/manual lane and runs the BBH-style smoke suite through `freud/scripts/run-bbh-smoke.sh`.
+- BBH/live reasoning wrappers should call `freud/scripts/live-eval.sh`, which in turn uses `./run-psyke.sh --freud-live`.
+- Strict JSON support for planner/meta-reasoner is a hard requirement in live lanes; any structured-output downgrade is treated as a lane failure.
 ### Summarization Policy
 - Use heuristic summarization: indexed artifacts first (`summary-compact.md`, `trail-index.tsv`, `step-index.tsv`, `anomalies.json`), then AI deep analysis and code edits last.
 - Avoid pasting full logs in prompts unless strictly needed.

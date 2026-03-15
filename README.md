@@ -263,24 +263,48 @@ Reasoning eval output:
 
 Freud live eval (single-input, STDIN/STDOUT, with LLM response caching):
 ```bash
-# First run: records LLM responses to cache
-echo "What time is it?" | PSYKE_LLM_CACHE_MODE=record PSYKE_LLM_CACHE_FILE=.psyke/cache.jsonl \
-  ./run-psyke.sh --freud-live --freud-live-timeout 120
-
-# Replay run: uses cached responses until divergence, then real LLM
-echo "What time is it?" | PSYKE_LLM_CACHE_MODE=replay PSYKE_LLM_CACHE_FILE=.psyke/cache.jsonl \
-  ./run-psyke.sh --freud-live
-
-# Via orchestration script (handles caching, memory isolation, triage automatically):
+# Preferred wrapper for one-shot live/provider-backed evals:
 freud/scripts/live-eval.sh --input input.txt --expected expected.txt --timeout 120
 freud/scripts/live-eval.sh --input input.txt --cache-replay .psyke/runs/freud/latest/artifacts/llm-cache.jsonl
+freud/scripts/live-eval.sh --input input.txt --preserve-memory
+
+# Lower-level debugging path if you are working on the wrapper itself:
+echo "What time is it?" | PSYKE_LLM_CACHE_MODE=record PSYKE_LLM_CACHE_FILE=.psyke/cache.jsonl \
+  ./run-psyke.sh --freud-live --freud-live-timeout 120
+echo "What time is it?" | PSYKE_LLM_CACHE_MODE=replay PSYKE_LLM_CACHE_FILE=.psyke/cache.jsonl \
+  ./run-psyke.sh --freud-live
 ```
 
 Freud live eval notes:
+- Prefer `freud/scripts/live-eval.sh` for Freud-managed live checks. It wraps the raw `--freud-live` mode, sets isolated memory paths, captures artifacts, and handles record/replay.
 - `--freud-live` reads all stdin upfront, submits as a single input, outputs the answer to stdout, then exits.
 - `--freud-live-timeout N` sets a timeout in seconds (default: 120). Exit code 2 on timeout.
-- `live-eval.sh` automatically uses isolated memory (`freud-eval` pgvector namespace, `.psyke/freud-logbook.db`, `.psyke/freud-metrics.db`) and clears it before each run.
+- `live-eval.sh` automatically uses isolated memory (`freud-eval` pgvector namespace, `.psyke/freud-logbook.db`, `.psyke/freud-metrics.db`) and clears it before each run by default.
+- Use `--preserve-memory` or `FREUD_LIVE_EVAL_PRESERVE_MEMORY=true` only when an eval sequence intentionally depends on prior isolated Freud memory.
+- `live-eval.sh --expected` uses normalized exact matching, not substring containment.
 - LLM cache uses sequential matching with SHA-256 hash validation: the Nth LLM call is matched to the Nth cache entry, verified by message hash. On mismatch, replay stops and real LLM is used for all subsequent calls.
+
+Freud reasoning eval matrix:
+```bash
+# Default deterministic feature loop (includes logic-core + logic-behavioral reasoning gate)
+freud/scripts/feature-loop.sh reasoning-matrix
+
+# Deterministic reasoning PR gate only
+freud/scripts/run-reasoning-pr-gate.sh
+
+# Manual weak-structure live lane
+freud/scripts/feature-loop.sh reasoning-matrix --live --config freud/config/live-weak-structure.env
+
+# Manual production-routing live lane
+freud/scripts/feature-loop.sh reasoning-matrix --live --config freud/config/live-prod-acceptance.env
+```
+
+Freud reasoning lane notes:
+- `reasoning_eval_logic` now runs two deterministic passes: the existing logic core and a 45-case behavioral/perturbation logic pack.
+- `reasoning_eval_model` is reserved for manual live reasoning checks and currently runs a frozen 24-case BBH-style smoke slice.
+- The live reasoning lane always routes through `freud/scripts/live-eval.sh`, which invokes the lower-level `./run-psyke.sh --freud-live` path for each case.
+- `FREUD_BBH_PRESERVE_MEMORY=true` is available if a future live reasoning sequence needs shared isolated memory across cases. The current BBH slice should keep the default isolated-per-case behavior.
+- The live lane configs intentionally do not hardcode local machine paths. They resolve repo-local YAML snapshots relative to the config directory so the committed setup stays portable across machines.
 
 Memory live eval (real-world, no mocks):
 ```bash
