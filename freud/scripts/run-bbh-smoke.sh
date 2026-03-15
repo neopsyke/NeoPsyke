@@ -87,11 +87,17 @@ TOTAL_CASES="$(wc -l <"$PROMPTS_FILE" | tr -d ' ')"
 
 normalize_answer() {
   local raw="$1"
-  printf '%s' "$raw" \
+  local normalized
+  normalized="$(printf '%s' "$raw" \
     | sed -E 's/^ego> //g' \
     | tr '[:upper:]' '[:lower:]' \
     | tr '\n' ' ' \
-    | sed -E 's/[[:space:]]+/ /g; s/^ //; s/ $//'
+    | sed -E 's/[[:space:]]+/ /g; s/^ //; s/ $//')"
+  if printf '%s\n' "$normalized" | grep -Eq '^"[-[:alnum:]_]+([[:space:]][-[:alnum:]_]+)*"$'; then
+    normalized="${normalized#\"}"
+    normalized="${normalized%\"}"
+  fi
+  printf '%s' "$normalized"
 }
 
 schema_downgrade_count_for_case() {

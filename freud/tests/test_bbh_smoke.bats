@@ -156,6 +156,36 @@ EOF
   [[ "$status" -eq 0 ]]
 }
 
+@test "run-bbh-smoke accepts a single surrounding quote pair for atomic answers" {
+  cat >"$PROMPTS_FILE" <<'EOF'
+{"id":"case_a","category":"logical_deduction","prompt":"case a"}
+EOF
+  cat >"$ANSWERS_FILE" <<'EOF'
+{"id":"case_a","answer":"Ava"}
+EOF
+  cat >"$LIVE_EVAL_STUB" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+RUN_DIR="$FREUD_LIVE_EVAL_RUN_DIR"
+mkdir -p "$RUN_DIR/artifacts" "$RUN_DIR/logs"
+printf 'ego> "Ava"\n' >"$RUN_DIR/artifacts/answer.txt"
+cat >"$RUN_DIR/artifacts/verdict.json" <<JSON
+{"verdict":"pass","detail":"ok","exit_code":0,"run_dir":"$RUN_DIR","answer_file":"$RUN_DIR/artifacts/answer.txt"}
+JSON
+: >"$RUN_DIR/logs/psyke.log"
+EOF
+  chmod +x "$LIVE_EVAL_STUB"
+
+  run env \
+    FREUD_BBH_LIVE_EVAL_CMD="$LIVE_EVAL_STUB" \
+    FREUD_BBH_PROMPTS_FILE="$PROMPTS_FILE" \
+    FREUD_BBH_ANSWERS_FILE="$ANSWERS_FILE" \
+    FREUD_RUN_DIR="$TEST_RUN_DIR" \
+    FREUD_ARTIFACT_DIR="$TEST_ARTIFACT_DIR" \
+    "$SCRIPTS_DIR/run-bbh-smoke.sh" --lane weak-structure
+  [[ "$status" -eq 0 ]]
+}
+
 @test "run-bbh-smoke fails hard on strict-schema downgrade" {
   cat >"$PROMPTS_FILE" <<'EOF'
 {"id":"case_a","category":"boolean_expressions","prompt":"case a"}
