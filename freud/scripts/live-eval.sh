@@ -40,7 +40,7 @@ extract_answer_line() {
   if [[ ! -f "$raw_file" ]]; then
     return 0
   fi
-  if rg -n '^ego> ' "$raw_file" >/dev/null 2>&1; then
+  if grep -Eq '^ego> ' "$raw_file" 2>/dev/null; then
     grep '^ego> ' "$raw_file" | tail -n 1
   else
     cat "$raw_file"

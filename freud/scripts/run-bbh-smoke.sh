@@ -100,13 +100,23 @@ normalize_answer() {
   printf '%s' "$normalized"
 }
 
+search_logs_with_fallback() {
+  local regex="$1"
+  local path="$2"
+  if command -v rg >/dev/null 2>&1; then
+    rg -n "$regex" "$path" 2>/dev/null || true
+  else
+    grep -ERn -- "$regex" "$path" 2>/dev/null || true
+  fi
+}
+
 schema_downgrade_count_for_case() {
   local case_dir="$1"
   local matches
   set +e
-  matches="$(rg -n \
+  matches="$(search_logs_with_fallback \
     'Structured-output schema adapted.*schema=(ego_planner_decision|meta_reasoner_assessment).*(strict downgraded to false|JSON schema output disabled)' \
-    "$case_dir/logs" 2>/dev/null)"
+    "$case_dir/logs")"
   set -e
   printf '%s\n' "$matches" | sed '/^$/d' | wc -l | tr -d ' '
 }
