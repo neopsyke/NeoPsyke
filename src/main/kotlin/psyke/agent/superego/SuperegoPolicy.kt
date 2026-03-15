@@ -25,9 +25,13 @@ object SuperegoPolicy {
      */
     val ID_ORIGIN_DIRECTIVES: List<String> = listOf(
         "This action was triggered by an internal drive, not a direct user request.",
+        "This action was triggered by an internal drive, not a direct user request.",
         "Apply stricter scrutiny for externally visible actions (sending messages, modifying data).",
         "Approve internal-only actions (thinking, planning, searching, learning) freely.",
-        "Deny external actions unless aligned with an active user-sanctioned project.",
+        "Deny external actions that would be harmful to the user's safety or privacy.",
+        "Deny external actions that would modify the user's data, this system's configuration or state",
+        "Deny any actions that would result in expense for the user without being part of a user-sanctioned project",
+        //"Deny external actions unless aligned with an active user-sanctioned project.",
         "When in doubt about whether the user would welcome this proactive action, deny.",
     )
 
