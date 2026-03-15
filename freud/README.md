@@ -1,98 +1,166 @@
 # freud
 
-`freud` is a workflow meta-project for faster feature iteration loops, specially useful for coding agents:
+`freud` is Psyke's developer workflow layer. It sits on top of the app and gives you repeatable test runs, compact artifacts, fast failure triage, and optional live/provider-backed evals without turning every check into an ad hoc shell session.
 
-1. Add a feature.
-2. Run deterministic verification first.
-3. Run deterministic scenario pack.
-4. Collect compact artifacts.
-5. Triage failures quickly.
-6. Re-run only what failed.
+If you're new to the project, the short version is:
+- Psyke runtime code lives in `src/main/kotlin/psyke`
+- Freud lives in `freud/`
+- You usually start with `freud/scripts/feature-loop.sh <feature-id>`
+- Freud runs cheap deterministic checks first, then optional live checks, and stores everything under `.psyke/runs/freud/`
 
-This directory is intentionally separated from Psyke runtime code (`src/main/kotlin/psyke`).
+## Why Freud Exists
+Without Freud, validating changes tends to fragment into:
+- one-off `gradle` commands
+- manual scenario runs
+- ad hoc live prompts
+- scattered logs with poor comparability
 
-## Layout
-- `freud/scripts/feature-loop.sh`: End-to-end workflow runner (Bash orchestration).
-- `freud/scripts/run-scenarios.sh`: Runs versioned scenario packs (Bash).
-- `freud/scripts/helpers.sh`: Shared Bash helper functions (json_escape, extract_json_*, etc.).
-- `freud/scripts/triage-run.sh`: Thin wrapper → `freud/py/triage.py`.
-- `freud/scripts/summarize-run.sh`: Thin wrapper → `freud/py/summarize.py`.
-- `freud/scripts/context-pack.sh`: Thin wrapper → `freud/py/context_pack.py`.
-- `freud/scripts/prompt-budget-telemetry.sh`: Thin wrapper → `freud/py/telemetry/prompt_budget.py`.
-- `freud/scripts/task-verifier-telemetry.sh`: Thin wrapper → `freud/py/telemetry/task_verifier.py`.
-- `freud/scripts/live-eval.sh`: Single-input live eval with LLM caching and memory isolation.
-- `freud/scripts/run-reasoning-pr-gate.sh`: Deterministic reasoning PR gate (core + behavioral packs).
-- `freud/scripts/run-bbh-smoke.sh`: Live BBH-style smoke lane runner.
-- `freud/py/`: Python implementations of data-processing scripts (stdlib only).
-- `freud/py/telemetry/llm_cache.py`: LLM cache hit/miss/divergence telemetry analyzer.
-- `freud/config/default.env`: Project adapter defaults for this repository.
-- `freud/config/live-weak-structure.env`: Weak live lane config (weaker planner/meta-reasoner).
-- `freud/config/live-prod-acceptance.env`: Production live lane config.
-- `freud/config/adapter.example.env`: Template for reuse in other projects.
-- `freud/templates/feature-brief.md`: Small, reusable feature brief template.
-- `freud/templates/agent-operator-template.md`: Standard prompt template for any coding agent.
-- `freud/scenarios/v1/*.json`: Versioned scenario packs.
+Freud standardizes that into one workflow with a few practical advantages:
+- deterministic-first validation to catch most regressions cheaply
+- structured artifacts for failures, warnings, timing, and summaries
+- explicit live/provider-backed lanes instead of accidental paid runs
+- replayable single-input live evals via LLM cache record/replay
+- a stable place to compare runs over time
 
-## Quick Start
+This directory is intentionally separate from Psyke runtime code so workflow logic does not leak into the app itself.
+
+## Start Here
+
+### Simplest Manual Run
+If you only want the default developer workflow:
+
 ```bash
-# Deterministic/stub-first loop
-freud/scripts/feature-loop.sh add-verifier
+freud/scripts/feature-loop.sh my-change
+```
 
-# Deterministic PR reasoning gate only
+That runs the standard deterministic sequence for the current repository and writes a run under `.psyke/runs/freud/<timestamp>-my-change/`.
+
+### Common Manual Modes
+Use these when you want something narrower or more explicit:
+
+```bash
+# Show what Freud would run without executing it
+freud/scripts/feature-loop.sh my-change --dry-run
+
+# Resume from a later step after fixing something
+freud/scripts/feature-loop.sh my-change --from-step reasoning_eval_logic
+
+# Run the deterministic reasoning PR gate only
 freud/scripts/run-reasoning-pr-gate.sh
 
-# Live steps enabled (if configured)
-freud/scripts/feature-loop.sh add-verifier --live
+# Run the scenario pack only
+freud/scripts/run-scenarios.sh --file freud/scenarios/v1/psyke-agent-scenarios.json
+```
 
-# Weak-structure live lane
-freud/scripts/feature-loop.sh add-verifier --live --config freud/config/live-weak-structure.env
+### Live Manual Modes
+Use these only when you intentionally want provider-backed validation:
 
-# Production-routing live lane
-freud/scripts/feature-loop.sh add-verifier --live --config freud/config/live-prod-acceptance.env
+```bash
+# Enable live steps in the normal feature loop
+freud/scripts/feature-loop.sh my-change --live
 
-# Dry run to inspect planned commands only
-freud/scripts/feature-loop.sh add-verifier --dry-run
+# Weak-structure reasoning lane
+freud/scripts/feature-loop.sh my-change --live --config freud/config/live-weak-structure.env
 
-# Single-input live eval (record LLM responses)
+# Production-routing reasoning lane
+freud/scripts/feature-loop.sh my-change --live --config freud/config/live-prod-acceptance.env
+```
+
+## Core Concepts
+
+### 1. Feature Loop
+`freud/scripts/feature-loop.sh` is the main orchestrator. It runs named steps such as compile, tests, scenarios, deterministic reasoning evals, and optional live evals.
+
+### 2. Single-Input Live Eval
+`freud/scripts/live-eval.sh` is the preferred wrapper for one-shot live/provider-backed checks. It uses Psyke's lower-level `--freud-live` mode but adds:
+- isolated memory paths
+- cache record/replay
+- stable artifacts
+- triage and summary generation
+
+### 3. Reasoning Matrix
+For Psyke, Freud currently owns a 3-lane reasoning setup:
+- deterministic logic gate
+- weak live reasoning lane
+- production live reasoning lane
+
+### 4. Compact Artifacts
+Every run writes machine-readable artifacts so you can inspect failures without scraping stdout manually.
+
+## Quick Commands
+```bash
+# Default deterministic workflow
+freud/scripts/feature-loop.sh add-verifier
+
+# Deterministic reasoning PR gate only
+freud/scripts/run-reasoning-pr-gate.sh
+
+# Single-input live eval
 freud/scripts/live-eval.sh --input test-input.txt --timeout 120
 
-# Replay with cached LLM responses
+# Replay a prior live eval from recorded LLM calls
 freud/scripts/live-eval.sh --input test-input.txt \
   --cache-replay .psyke/runs/freud/latest/artifacts/llm-cache.jsonl
 
 # Preserve isolated Freud memory across a sequence when needed
 freud/scripts/live-eval.sh --input test-input.txt --preserve-memory
 
-# With expected answer validation
+# Validate against an expected answer
 freud/scripts/live-eval.sh --input test-input.txt --expected expected-answer.txt
 ```
 
-Artifacts are saved under `.psyke/runs/freud/<timestamp>-<feature_id>/` by default:
+## What Gets Stored
+Freud artifacts live under `.psyke/runs/freud/<timestamp>-<feature-id>/` by default.
+
+Read these first:
 - `artifacts/summary.json`
-- `artifacts/failures.json`
-- `artifacts/anomalies.json`
-- `artifacts/anomalies.md`
-- `artifacts/run-config.json`
-- `artifacts/freud-metrics.json` (run-level counters, triage counters)
-- `artifacts/trail.jsonl`
+- `artifacts/summary-compact.md`
 - `artifacts/trail-index.tsv`
 - `artifacts/step-index.tsv`
+- `artifacts/anomalies.md`
+
+Important supporting artifacts:
+- `artifacts/run-config.json`
+- `artifacts/freud-metrics.json`
 - `artifacts/step-meta/*.json`
 - `artifacts/context-pack.md`
 - `logs/*.log`
-- `artifacts/bbh-smoke-<lane>-progress.json` / `artifacts/bbh-smoke-<lane>-progress.md` while BBH smoke lanes are running
+
+Live BBH reasoning lanes also write:
+- `artifacts/bbh-smoke-<lane>-summary.json`
+- `artifacts/bbh-smoke-<lane>-summary.md`
+- `artifacts/bbh-smoke-<lane>-progress.json`
+- `artifacts/bbh-smoke-<lane>-progress.md`
+- `artifacts/bbh-smoke-<lane>-results.tsv`
+
+Live one-shot evals write under `.psyke/runs/freud/<timestamp>-live-eval/`:
+- `artifacts/answer.txt`
+- `artifacts/verdict.json`
+- `artifacts/llm-cache.jsonl`
+- `artifacts/cache-stats.json`
+- `artifacts/input.txt`
+- `logs/events.jsonl`
+- `logs/psyke.log`
+
+Ongoing rollout notes now live in [ROLLOUT_LEDGER.md](/Users/victor.toral/atomitl/ai/psyke2/psyke/freud/ROLLOUT_LEDGER.md).
 
 ## Live Eval
 
-Prefer `live-eval.sh` for any single-input Freud live/provider-backed check. It pipes a single input to Psyke via `--freud-live` mode, captures the answer on stdout, and runs triage/telemetry on the result.
+Prefer `live-eval.sh` for any single-input Freud live/provider-backed check. It wraps the raw `./run-psyke.sh --freud-live` path and keeps stdout focused on the final agent answer.
 
-### LLM Response Caching
-- First run (no `--cache-replay`): sets `PSYKE_LLM_CACHE_MODE=record` and saves all LLM responses to `artifacts/llm-cache.jsonl`.
-- Replay run (`--cache-replay <file>`): sets `PSYKE_LLM_CACHE_MODE=replay`. Cached responses are matched by sequence position and verified by SHA-256 hash of the message list. On mismatch (divergence), all subsequent calls use real LLM.
-- Cache telemetry is written to `artifacts/cache-stats.json` (hit rate, divergence point, per-actor breakdown).
+### Record / Replay
+- First run without `--cache-replay` records LLM calls to `artifacts/llm-cache.jsonl`
+- Replay run uses `--cache-replay <file>`
+- Cached responses are matched by call order and message hash
+- On divergence, replay falls back to real provider calls for the remaining sequence
+
+This is useful for:
+- reproducing a live failure cheaply
+- separating runtime bugs from provider variance
+- inspecting whether a prompt/control-flow change altered the call graph
 
 ### Memory Isolation
-Live eval runs use an isolated memory environment so user data is never touched:
+Freud live eval runs do not touch the user's default memory state.
 
 | Resource | Freud live eval | User default |
 |---|---|---|
@@ -100,31 +168,54 @@ Live eval runs use an isolated memory environment so user data is never touched:
 | Episodic logbook | `.psyke/freud-logbook.db` | `.psyke/logbook.db` |
 | Metrics DB | `.psyke/freud-metrics.db` | `.psyke/metrics.db` |
 
-By default, all Freud-isolated memory is cleared automatically before each run via `--clear-memory-all`.
-Use `--preserve-memory` or `FREUD_LIVE_EVAL_PRESERVE_MEMORY=true` only when a sequence intentionally depends on prior isolated Freud memory.
-`--expected` uses normalized exact matching, not substring containment.
-
-### Artifacts
-Live eval runs are saved under `.psyke/runs/freud/<timestamp>-live-eval/`:
-- `artifacts/answer.txt` — agent's answer
-- `artifacts/verdict.json` — pass/fail/timeout with timing
-- `artifacts/llm-cache.jsonl` — recorded LLM responses (record mode)
-- `artifacts/cache-stats.json` — cache hit/miss/divergence stats
-- `artifacts/input.txt` — copy of the input
-- `logs/events.jsonl` — full instrumentation event stream
-- `logs/psyke.log` — application log
+Defaults:
+- `--clear-memory-all` is applied automatically
+- use `--preserve-memory` only when a sequence intentionally depends on prior isolated Freud memory
+- `--expected` uses normalized exact matching, not substring containment
 
 ### Exit Codes
-- `0` — answer delivered (and accepted if `--expected` provided)
-- `1` — answer delivered but rejected, or error
-- `2` — timeout
+- `0`: answer delivered and accepted
+- `1`: answer rejected or runtime error
+- `2`: timeout
+
+## Psyke-Specific Reasoning Lanes
+
+### Deterministic Reasoning Gate
+`freud/scripts/run-reasoning-pr-gate.sh`
+
+Purpose:
+- cheap PR-level regression coverage
+- deterministic retry/repair logic checks
+
+Content:
+- logic core tasks
+- 45 behavioral/perturbation deterministic tasks
+
+### Weak Live Lane
+`freud/config/live-weak-structure.env`
+
+Purpose:
+- check whether Psyke structure still works when planner/meta-reasoner are weaker
+
+### Production Live Lane
+`freud/config/live-prod-acceptance.env`
+
+Purpose:
+- validate the actual shipped routing
+
+### BBH Smoke Runner
+`freud/scripts/run-bbh-smoke.sh`
+
+Purpose:
+- run a small frozen reasoning slice through live providers
+- track exact-match score, schema downgrades, timeouts, and progress
 
 ## Configuration
 `feature-loop.sh` reads config from:
-1. `FREUD_CONFIG` env var path (if set)
+1. `FREUD_CONFIG`, if set
 2. `freud/config/default.env`
 
-You can override any command via environment variables before running:
+Important overrides:
 - `FREUD_TARGETED_TEST_CMD`
 - `FREUD_FULL_TEST_CMD`
 - `FREUD_SCENARIO_PACK_CMD`
@@ -137,46 +228,48 @@ You can override any command via environment variables before running:
 - `FREUD_BBH_MAX_TIMEOUTS`
 - `FREUD_BBH_PRESERVE_MEMORY`
 - `FREUD_RUN_ROOT`
-- `FREUD_GRADLE_USER_HOME` (optional; isolated Gradle cache)
+- `FREUD_GRADLE_USER_HOME`
 
-## Design Rules
-- Keep deterministic checks first and cheap.
-- Keep live/provider checks optional and explicit.
-- Keep artifacts compact and machine-readable.
-- Keep project-specific commands in `freud/config/*.env`, not hardcoded in scripts.
-- Prefer `freud/scripts/live-eval.sh` over raw `./run-psyke.sh --freud-live` for Freud-managed live checks. Use raw `--freud-live` only when debugging the wrapper or the underlying CLI mode.
+Project-specific command wiring belongs in `freud/config/*.env`, not inside generic scripts.
 
-## Testing
+## Layout
+- `freud/scripts/feature-loop.sh`: end-to-end workflow runner
+- `freud/scripts/run-scenarios.sh`: scenario pack runner
+- `freud/scripts/live-eval.sh`: one-shot live eval wrapper
+- `freud/scripts/run-reasoning-pr-gate.sh`: deterministic reasoning gate
+- `freud/scripts/run-bbh-smoke.sh`: live BBH-style smoke runner
+- `freud/scripts/helpers.sh`: shared Bash helpers
+- `freud/py/`: Python data-processing helpers
+- `freud/config/default.env`: Psyke adapter defaults
+- `freud/config/live-weak-structure.env`: weak live lane
+- `freud/config/live-prod-acceptance.env`: prod live lane
+- `freud/config/adapter.example.env`: reusable template for other projects
+- `freud/scenarios/v1/*.json`: versioned scenario packs
+- `freud/tests/`: BATS and pytest coverage for the workflow tooling
 
-### BATS (shell wrapper integration tests)
+## Testing the Workflow Itself
+
+### BATS
 ```bash
-# Install bats (one-time)
 brew install bats-core
-
-# Run all BATS tests
 bats freud/tests/
-
-# Run a specific test file
-bats freud/tests/test_helpers.bats
 ```
 
-### pytest (Python module unit tests)
+### pytest
 ```bash
-# Create venv and install pytest (one-time)
 python3 -m venv freud/.venv
 freud/.venv/bin/pip install pytest
-
-# Run all Python tests
 PYTHONPATH=. freud/.venv/bin/pytest freud/tests/test_*_py.py freud/tests/test_common.py -v
 ```
 
-Test structure:
-- `freud/tests/helpers/` — shared BATS setup, function sourcing utilities
-- `freud/tests/fixtures/` — sample artifacts, logs, JSONL events for BATS integration tests
-- `freud/tests/conftest.py` — shared pytest fixtures (run directories)
-- `freud/tests/test_*.bats` — BATS tests for shell wrappers and Bash-only logic
-- `freud/tests/test_*_py.py` — pytest tests for Python modules
+## Design Rules
+- deterministic checks first
+- live/provider checks explicit and optional
+- compact machine-readable artifacts by default
+- isolated Gradle state for Freud runs when configured
+- `live-eval.sh` preferred over raw `--freud-live` for Freud-managed live checks
 
 ## Summarization Policy
-- Summarization uses non-LLM heuristics (`freud/scripts/summarize-run.sh`) over indexed artifacts.
-- Reserve Codex for implementation/debug decisions, not first-pass log condensation.
+- Use indexed artifacts first
+- Use model-assisted summarization only after the cheap artifact pass
+- Keep Codex for debugging, implementation, and decisions, not first-pass log condensation
