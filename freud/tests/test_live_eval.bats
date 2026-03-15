@@ -23,6 +23,10 @@ printf '%s\n' '{"type":"noop","data":{}}' >"$PSYKE_EVENT_LOG_FILE"
 if [[ "${PSYKE_LLM_CACHE_MODE:-off}" == "record" ]]; then
   printf '%s\n' '{"cached":true}' >"$PSYKE_LLM_CACHE_FILE"
 fi
+if [[ "${FREUD_TEST_NOISY_STDOUT:-false}" == "true" ]]; then
+  printf '%s\n' 'Psyke logs for this run: /tmp/fake.log'
+  printf '%s\n' 'Latest run log pointer: /tmp/latest.log'
+fi
 printf 'ego> synthetic-answer\n'
 EOF
   chmod +x "$PSYKE_STUB"
@@ -130,4 +134,17 @@ EOF
     "$SCRIPTS_DIR/live-eval.sh" --input "$INPUT_FILE"
   [[ "$status" -eq 0 ]]
   grep -q "GRADLE_USER_HOME=$REPO_ROOT/.freud/test-gradle-home" "$ENV_LOG"
+}
+
+@test "live-eval extracts the final ego answer from noisy stdout" {
+  run env \
+    FREUD_LIVE_EVAL_PSYKE_CMD="$PSYKE_STUB" \
+    FREUD_RUN_ROOT="$RUN_ROOT_REL" \
+    FREUD_TEST_ARGS_LOG="$ARGS_LOG" \
+    FREUD_TEST_ENV_LOG="$ENV_LOG" \
+    FREUD_TEST_NOISY_STDOUT="true" \
+    "$SCRIPTS_DIR/live-eval.sh" --input "$INPUT_FILE" --expected "$EXPECTED_FILE"
+  [[ "$status" -eq 0 ]]
+  latest_dir="$(find "$REPO_ROOT/$RUN_ROOT_REL" -mindepth 1 -maxdepth 1 -type d | sort | tail -n 1)"
+  grep -qx 'ego> synthetic-answer' "$latest_dir/artifacts/answer.txt"
 }

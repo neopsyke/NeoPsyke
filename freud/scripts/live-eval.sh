@@ -31,6 +31,17 @@ normalize_answer() {
     | tr '\n' ' ' \
     | sed -E 's/[[:space:]]+/ /g; s/^ //; s/ $//'
 }
+extract_answer_line() {
+  local raw_file="$1"
+  if [[ ! -f "$raw_file" ]]; then
+    return 0
+  fi
+  if rg -n '^ego> ' "$raw_file" >/dev/null 2>&1; then
+    grep '^ego> ' "$raw_file" | tail -n 1
+  else
+    cat "$raw_file"
+  fi
+}
 
 usage() {
   cat <<'EOF'
@@ -201,6 +212,7 @@ export PSYKE_METRICS_DB="$REPO_ROOT/.psyke/freud-metrics.db"
 # Run Psyke in freud-live mode
 RUN_START="$(date +%s)"
 clear_memory_arg="--clear-memory-all"
+RAW_STDOUT_FILE="$RUN_DIR/logs/stdout.log"
 if [[ "$PRESERVE_MEMORY" == "true" ]]; then
   clear_memory_arg=""
 fi
@@ -208,9 +220,14 @@ set +e
 cat "$INPUT_FILE" \
   | "$PSYKE_CMD" --freud-live --freud-live-timeout "$TIMEOUT" ${clear_memory_arg:+"$clear_memory_arg"} --no-id \
   2>"$RUN_DIR/logs/stderr.log" \
-  | tee "$RUN_DIR/artifacts/answer.txt"
+  | tee "$RAW_STDOUT_FILE"
 EXIT_CODE="${PIPESTATUS[1]:-$?}"
 set -e
+ANSWER_OUTPUT="$(extract_answer_line "$RAW_STDOUT_FILE")"
+printf '%s\n' "$ANSWER_OUTPUT" >"$RUN_DIR/artifacts/answer.txt"
+if [[ -n "$ANSWER_OUTPUT" ]]; then
+  printf '%s\n' "$ANSWER_OUTPUT"
+fi
 RUN_END="$(date +%s)"
 DURATION=$((RUN_END - RUN_START))
 

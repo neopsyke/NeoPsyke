@@ -8,6 +8,7 @@ LOG_LEVEL="${PSYKE_LOG_LEVEL:-warning}"
 LOG_LEVEL_EXPLICIT=0
 LOG_LEVEL_FROM_ENV=0
 EVAL_MODE=0
+FREUD_LIVE_MODE=0
 DISABLE_ID=0
 LOOP_DELAY_MS="${EGO_LOOP_DELAY_MS:0}"
 LOG_DIR="${PSYKE_LOG_DIR:-$ROOT_DIR/.psyke/logs}"
@@ -16,7 +17,11 @@ AUTO_START_PGVECTOR="${PSYKE_AUTO_START_PGVECTOR:-false}"
 APP_ARGS=()
 
 log_info() {
-  printf '%s\n' "$*"
+  if [[ "$FREUD_LIVE_MODE" -eq 1 ]]; then
+    printf '%s\n' "$*" >&2
+  else
+    printf '%s\n' "$*"
+  fi
 }
 
 log_error() {
@@ -109,6 +114,7 @@ while [[ $# -gt 0 ]]; do
       ;;
     --freud-live)
       EVAL_MODE=1
+      FREUD_LIVE_MODE=1
       APP_ARGS+=("$1")
       shift
       ;;
