@@ -43,7 +43,7 @@ id:
       growth_rate: 0.02
       satisfaction_decay: 0.8
       cooldown_pulses: 5
-      prompt: "I feel curious and want to learn something new. What topic could I explore or what knowledge could I acquire?"
+      prompt: "I, the agent, feel curious and want to learn something new. What topic could I explore or what knowledge could I acquire?"
       response_curve:
         type: logarithmic
         scale: 10.0

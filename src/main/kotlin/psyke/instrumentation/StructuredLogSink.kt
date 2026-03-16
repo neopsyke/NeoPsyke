@@ -441,6 +441,25 @@ class StructuredLogSink : InstrumentationSink {
                 }
             }
 
+            // ── Impulse processing (Ego side) ─────────────────────────
+            "impulse_processing" -> {
+                logger.info {
+                    "impulse.processing need=${event.data["need_id"]} urgency=${event.data["urgency"]} raw_value=${event.data["raw_value"]} root_impulse_id=${event.data["root_impulse_id"]} prompt=${event.data["prompt"]}"
+                }
+            }
+
+            "impulse_noop" -> {
+                logger.info {
+                    "impulse.noop need=${event.data["need_id"]} root_impulse_id=${event.data["root_impulse_id"]}"
+                }
+            }
+
+            "impulse_lifecycle_finalized" -> {
+                logger.info {
+                    "impulse.lifecycle.finalized need=${event.data["need_id"]} root_impulse_id=${event.data["root_impulse_id"]} result=${event.data["result"]}"
+                }
+            }
+
             // ── Id (autonomous drive) events ──────────────────────────
             "id_pulse" -> {
                 val needs = event.data["needs"]

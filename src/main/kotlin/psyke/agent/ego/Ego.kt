@@ -382,6 +382,7 @@ class Ego(
                     "urgency" to impulse.urgency,
                     "raw_value" to impulse.rawValue,
                     "root_impulse_id" to impulse.rootImpulseId,
+                    "prompt" to impulse.prompt,
                 ),
             )
         )

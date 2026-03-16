@@ -397,6 +397,8 @@
     .tl-cat-meta.tl-primary { border-left-color: #b37feb; }
     .tl-cat-memory .tl-type { color: #67c23a; }
     .tl-cat-memory.tl-primary { border-left-color: #67c23a; }
+    .tl-cat-id .tl-type { color: #e8a735; }
+    .tl-cat-id.tl-primary { border-left-color: #e8a735; }
     .tl-critical {
       border-left-color: #f56c6c !important;
       background: rgba(245, 108, 108, 0.08);
@@ -905,7 +907,10 @@
       "memory_consolidation_assessment", "long_term_memory_assessment",
       "convergence_thought_enqueued", "warning",
       "long_term_memory_explicit_intent_detected",
-      "memory_recall_failure"
+      "memory_recall_failure",
+      "impulse_processing", "impulse_noop", "impulse_lifecycle_finalized",
+      "id_impulse_fired", "id_impulse_accepted", "id_impulse_completed",
+      "id_impulse_denied", "id_pregate_blocked"
     ]);
 
     const reasoningImpactingLlmCallSites = new Set([
@@ -953,6 +958,7 @@
 
     function eventCategory(event) {
       const type = String(event?.type || "");
+      if (type.startsWith("id_") || type.startsWith("impulse_")) return "id";
       if (type.startsWith("planner") || type === "plan_created" || type === "plan_steps_enqueued" || type === "duplicate_plan_suppressed") return "planner";
       if (type.startsWith("superego") || type === "action_review_result" || type === "action_denied") return "superego";
       if (type.startsWith("action_")) return "action";
@@ -1066,6 +1072,27 @@
           const errorMessage = d.error_message ? String(d.error_message) : "";
           return actor + "/" + callSite + (errorCode ? " [" + errorCode + "]" : "") + (errorMessage ? " — " + errorMessage : "");
         }
+        // ── Id / Impulse events ──────────────────────────
+        case "impulse_processing":
+          return (d.need_id || "impulse") + " (urg " + (d.urgency != null ? Number(d.urgency).toFixed(3) : "?") + ")" +
+            (d.prompt ? "\n" + d.prompt : "");
+        case "impulse_noop":
+          return "noop — " + (d.need_id || "?");
+        case "impulse_lifecycle_finalized":
+          return (d.need_id || "?") + " — " + (d.result || "?");
+        case "id_impulse_fired":
+          return (d.need_id || "?") + " urg=" + (d.urgency != null ? Number(d.urgency).toFixed(3) : "?") +
+            " raw=" + (d.raw_value != null ? Number(d.raw_value).toFixed(3) : "?");
+        case "id_impulse_accepted":
+          return d.need_id || "?";
+        case "id_impulse_completed":
+          return (d.need_id || "?") + " success=" + d.success;
+        case "id_impulse_denied":
+          return (d.need_id || "?") + " denials=" + (d.consecutive_denials || 0);
+        case "id_pregate_blocked":
+          return (d.need_id || "?") + " — " + (d.reason || "?");
+        case "id_activity_decay":
+          return (d.need_id || "?") + " " + (d.event_type || "") + " -" + (d.decay || 0) + " (" + (d.before != null ? Number(d.before).toFixed(3) : "?") + "→" + (d.after != null ? Number(d.after).toFixed(3) : "?") + ")";
         default:
           return null;
       }
@@ -1668,9 +1695,13 @@
 
     function formatEtaSec(sec) {
       if (sec <= 0) return "<span class=\"eta-val\">ready</span>";
-      if (sec < 60) return "<span class=\"eta-val\">" + Math.round(sec) + "s</span>";
-      if (sec < 3600) return "<span class=\"eta-val\">" + (sec / 60).toFixed(1) + "m</span>";
-      return "<span class=\"eta-val\">" + (sec / 3600).toFixed(1) + "h</span>";
+      const s = Math.round(sec);
+      const ss = String(s % 60).padStart(2, "0");
+      const m = Math.floor(s / 60);
+      if (m < 60) return "<span class=\"eta-val\">" + m + ":" + ss + "</span>";
+      const mm = String(m % 60).padStart(2, "0");
+      const h = Math.floor(m / 60);
+      return "<span class=\"eta-val\">" + h + ":" + mm + ":" + ss + "</span>";
     }
 
     /** Compute ETA seconds for a need, accounting for elapsed wall-clock time since last pulse. */
@@ -1827,6 +1858,42 @@
       }
     }
 
+    /** Apply Id-prefixed events to state.id. Shared by live applyEvent and boot hydration. */
+    function applyIdEvent(event) {
+      switch (event.type) {
+        case "id_pulse": {
+          const d = event.data || {};
+          state.id.pulse = d.pulse || state.id.pulse;
+          state.id.egoBusy = !!d.ego_busy;
+          if (Array.isArray(d.needs)) state.id.needs = d.needs;
+          if (d.trigger_threshold != null) state.id.triggerThreshold = d.trigger_threshold;
+          if (d.pulse_interval_ms != null) state.id.pulseIntervalMs = d.pulse_interval_ms;
+          if (d.threshold_on_urgency != null) state.id.thresholdOnUrgency = d.threshold_on_urgency;
+          state.id.lastPulseAt = Date.now();
+          break;
+        }
+        case "id_impulse_fired":
+          state.id.pendingImpulse = { needId: event.data.need_id, status: "fired", urgency: event.data.urgency };
+          state.id.lastImpulseEvent = { type: "fired", needId: event.data.need_id, ts: event.ts };
+          break;
+        case "id_impulse_accepted":
+          if (state.id.pendingImpulse) state.id.pendingImpulse.status = "accepted";
+          state.id.lastImpulseEvent = { type: "accepted", needId: event.data.need_id, ts: event.ts };
+          break;
+        case "id_impulse_completed":
+          state.id.pendingImpulse = null;
+          state.id.lastImpulseEvent = { type: event.data.success ? "completed" : "failed", needId: event.data.need_id, ts: event.ts };
+          break;
+        case "id_impulse_denied":
+          state.id.pendingImpulse = null;
+          state.id.lastImpulseEvent = { type: "denied", needId: event.data.need_id, denials: event.data.consecutive_denials, ts: event.ts };
+          break;
+        case "id_pregate_blocked":
+          state.id.lastImpulseEvent = { type: "blocked", needId: event.data.need_id, reason: event.data.reason, ts: event.ts };
+          break;
+      }
+    }
+
     function applyEvent(event) {
       state.recentEvents.push(event);
       if (state.recentEvents.length > 2000) state.recentEvents.shift();
@@ -1934,46 +2001,11 @@
           break;
         }
 
-        // ── Id (autonomous drive) events ──────────────────
-        case "id_pulse": {
-          const d = event.data || {};
-          state.id.pulse = d.pulse || state.id.pulse;
-          state.id.egoBusy = !!d.ego_busy;
-          if (Array.isArray(d.needs)) state.id.needs = d.needs;
-          if (d.trigger_threshold != null) state.id.triggerThreshold = d.trigger_threshold;
-          if (d.pulse_interval_ms != null) state.id.pulseIntervalMs = d.pulse_interval_ms;
-          if (d.threshold_on_urgency != null) state.id.thresholdOnUrgency = d.threshold_on_urgency;
-          state.id.lastPulseAt = Date.now();
-          break;
-        }
-        case "id_impulse_fired": {
-          state.id.pendingImpulse = { needId: event.data.need_id, status: "fired", urgency: event.data.urgency };
-          state.id.lastImpulseEvent = { type: "fired", needId: event.data.need_id, ts: event.ts };
-          break;
-        }
-        case "id_impulse_accepted": {
-          if (state.id.pendingImpulse) state.id.pendingImpulse.status = "accepted";
-          state.id.lastImpulseEvent = { type: "accepted", needId: event.data.need_id, ts: event.ts };
-          break;
-        }
-        case "id_impulse_completed": {
-          state.id.pendingImpulse = null;
-          state.id.lastImpulseEvent = { type: event.data.success ? "completed" : "failed", needId: event.data.need_id, ts: event.ts };
-          break;
-        }
-        case "id_impulse_denied": {
-          state.id.pendingImpulse = null;
-          state.id.lastImpulseEvent = { type: "denied", needId: event.data.need_id, denials: event.data.consecutive_denials, ts: event.ts };
-          break;
-        }
-        case "id_pregate_blocked": {
-          state.id.lastImpulseEvent = { type: "blocked", needId: event.data.need_id, reason: event.data.reason, ts: event.ts };
-          break;
-        }
-        case "id_activity_decay": {
-          // No persistent state needed, just update needs on next pulse
-          break;
-        }
+      }
+
+      // Id events handled by shared helper (also used for boot hydration)
+      if (typeof event.type === "string" && event.type.startsWith("id_")) {
+        applyIdEvent(event);
       }
 
       if (String(event.type || "").startsWith("task_workspace_")) {
@@ -2014,7 +2046,12 @@
           throw new Error("snapshot HTTP " + snapshotResp.status + (body ? ": " + body : ""));
         }
         const snapshot = await snapshotResp.json();
+        // Preserve client-only id state across Object.assign
+        const idDefaults = state.id;
         Object.assign(state, snapshot);
+        if (!state.id || typeof state.id !== "object" || !Array.isArray(state.id.needs)) {
+          state.id = idDefaults;
+        }
         if (!Array.isArray(state.actionCapabilities)) state.actionCapabilities = [];
         state.lastLlmCall = latestLlmCallFromEvents(state.recentEvents);
         state.inFlight = {
@@ -2022,6 +2059,17 @@
           taskType: state.currentTaskType || null,
           detail: processingDetail(state.currentProcessing)
         };
+        // Hydrate Id state from snapshot events (they aren't replayed through applyEvent).
+        // We replay all id_ events so needs/impulse state is current, then anchor
+        // lastPulseAt to now so the countdown starts from the freshest pulse data.
+        var hadIdPulse = false;
+        (state.recentEvents || []).forEach(function(evt) {
+          if (typeof evt.type === "string" && evt.type.startsWith("id_")) {
+            applyIdEvent(evt);
+            if (evt.type === "id_pulse") hadIdPulse = true;
+          }
+        });
+        if (hadIdPulse) state.id.lastPulseAt = Date.now();
       } catch (err) {
         console.error("[dashboard] failed to load initial snapshot", err);
       }
