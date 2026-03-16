@@ -1367,26 +1367,13 @@ class LlmEgoPlanner(
                     content = "Meta reasoning guidance:\n$metaGuidance"
                 ),
                 context.idState?.let { idState ->
-                    val needsSummary = idState.allNeeds.entries
-                        .sortedByDescending { it.value }
-                        .joinToString(", ") { "${it.key}=${String.format(Locale.ROOT, "%.3f", it.value)}" }
                     PromptBudgetAllocator.Section(
                         key = "planner_id_impulse_context",
                         role = ChatRole.USER,
                         band = PromptBudgetAllocator.Band.REQUIRED_CONTEXT,
                         importance = PromptBudgetAllocator.Importance.HIGH,
                         floorTokens = 40,
-                        content = """
-                        Id impulse context:
-                        This trigger originates from an internal drive, not a user request.
-                        triggering_need=${idState.triggeringNeed}
-                        triggering_urgency=${String.format(Locale.ROOT, "%.3f", idState.triggeringUrgency)}
-                        all_drive_states: $needsSummary
-                        To communicate with the user (share observations, ask questions, offer help), use action=answer.
-                        The answer action is the only channel for delivering text to the user.
-                        Plan ambitiously proportional to urgency level.
-                        Only act if there is genuine value to add; prefer noop otherwise.
-                        """.trimIndent()
+                        content = buildSelfMotivatedContext(idState),
                     )
                 },
                 PromptBudgetAllocator.Section(
@@ -1400,6 +1387,48 @@ class LlmEgoPlanner(
             ),
             maxTokens = config.maxLlmPromptTokens
         )
+    }
+
+    /**
+     * Builds a first-person motivational context for the planner when processing
+     * an Id impulse. The Ego never sees "Id", "impulse", or "drive" — only a
+     * natural motivation framed in terms of the convergence mode.
+     */
+    private fun buildSelfMotivatedContext(idState: IdStateSnapshot): String {
+        val motivation = String.format(Locale.ROOT, "%.3f", idState.triggeringUrgency)
+        return when (idState.convergence) {
+            psyke.agent.id.ConvergenceMode.INTERNALIZE -> {
+                if (idState.allowEscalation) {
+                    """
+                    Self-motivated context:
+                    This trigger is self-initiated, not a user request.
+                    Prefer researching and reflecting internally using action=reflect.
+                    Only address the user (action=answer) if you discover something immediately valuable or actionable.
+                    Act proportionally to your motivation level ($motivation).
+                    Only act if there is genuine value; prefer noop otherwise.
+                    """.trimIndent()
+                } else {
+                    """
+                    Self-motivated context:
+                    This trigger is self-initiated, not a user request.
+                    Research using available tools, then use action=reflect to record what you learned.
+                    Do not address the user directly.
+                    Act proportionally to your motivation level ($motivation).
+                    Only act if there is genuine value; prefer noop otherwise.
+                    """.trimIndent()
+                }
+            }
+            psyke.agent.id.ConvergenceMode.ANSWER -> {
+                """
+                Self-motivated context:
+                This trigger is self-initiated, not a user request.
+                Use action=answer to share observations, ask questions, or offer help.
+                The answer action is the only channel for delivering text to the user.
+                Act proportionally to your motivation level ($motivation).
+                Only act if there is genuine value; prefer noop otherwise.
+                """.trimIndent()
+            }
+        }
     }
 
     private fun buildActionVerifierMessages(

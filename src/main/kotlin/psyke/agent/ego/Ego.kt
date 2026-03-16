@@ -400,20 +400,42 @@ class Ego(
 
         timing.startPhase("planner_context")
         val trigger = EgoTrigger.IncomingImpulse(impulse)
+        val needCfg = id?.needConfig(impulse.needId)
+        val convergence = needCfg?.convergence ?: psyke.agent.id.ConvergenceMode.ANSWER
+        val allowEscalation = needCfg?.allowEscalation ?: false
         val idState = IdStateSnapshot(
             triggeringNeed = impulse.needId,
             triggeringUrgency = impulse.urgency,
             allNeeds = id?.needUrgencies() ?: emptyMap(),
+            convergence = convergence,
+            allowEscalation = allowEscalation,
         )
-        val context = plannerContext(
+        val baseContext = plannerContext(
             trigger = trigger,
             rootInputId = impulse.rootImpulseId,
             sessionId = sessionId,
             conversationContext = convCtx,
-        ).copy(
+        )
+        // Filter actions for internalize convergence without escalation:
+        // remove ANSWER and ANSWER_DRAFT so the planner cannot propose user-facing output.
+        val filteredDispatchable = if (convergence == psyke.agent.id.ConvergenceMode.INTERNALIZE && !allowEscalation) {
+            baseContext.dispatchableActions - setOf(ActionType.ANSWER, ActionType.ANSWER_DRAFT)
+        } else {
+            baseContext.dispatchableActions
+        }
+        val filteredDefinitions = if (convergence == psyke.agent.id.ConvergenceMode.INTERNALIZE && !allowEscalation) {
+            baseContext.actionDefinitions.filter {
+                it.actionType != ActionType.ANSWER && it.actionType != ActionType.ANSWER_DRAFT
+            }
+        } else {
+            baseContext.actionDefinitions
+        }
+        val context = baseContext.copy(
             // Override: no short-term memory from other sessions
             shortTermContextSummary = "",
             idState = idState,
+            dispatchableActions = filteredDispatchable,
+            actionDefinitions = filteredDefinitions,
         )
 
         timing.startPhase("planner_decide")

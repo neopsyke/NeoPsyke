@@ -252,6 +252,9 @@ class Id(
             needs.mapValues { (_, state) -> state.urgency }
         }
 
+    /** Look up the config for a specific need. */
+    fun needConfig(needId: String): NeedConfig? = config.needs[needId]
+
     // ── Instrumentation ──────────────────────────────────────────────
 
     private fun emitPulseEvent() {

@@ -1,5 +1,7 @@
 package psyke.agent.model
 
+import psyke.agent.id.ConvergenceMode
+
 /**
  * Snapshot of the Id's drive state, injected into [PlannerContext] when the
  * planner is responding to an Id impulse. Enables drive-modulated reasoning.
@@ -8,6 +10,8 @@ data class IdStateSnapshot(
     val triggeringNeed: String,
     val triggeringUrgency: Double,
     val allNeeds: Map<String, Double>,
+    val convergence: ConvergenceMode = ConvergenceMode.ANSWER,
+    val allowEscalation: Boolean = false,
 )
 
 data class PlannerContext(

@@ -15,6 +15,8 @@ id:
       growth_rate: 0.005
       satisfaction_decay: 0.8
       cooldown_pulses: 5
+      convergence: internalize
+      allow_escalation: true
       prompt: "I feel a strong drive to be useful and provide value. What could I do proactively? Consider active projects, pending tasks, or creative ways to help."
       response_curve:
         type: power
@@ -28,6 +30,7 @@ id:
       growth_rate: 0.01
       satisfaction_decay: 0.8
       cooldown_pulses: 5
+      convergence: answer
       prompt: "I feel a drive to proactively reach out to the user. Is there something worth sharing — a useful update, an observation, or a question?."
       response_curve:
         type: sigmoid
@@ -43,7 +46,8 @@ id:
       growth_rate: 0.02
       satisfaction_decay: 0.8
       cooldown_pulses: 5
-      prompt: "I, the agent, feel curious and want to learn something new. What topic could I explore or what knowledge could I acquire?"
+      convergence: internalize
+      prompt: "I feel curious and want to learn something new. What topic could I explore or what knowledge could I acquire?"
       response_curve:
         type: logarithmic
         scale: 10.0

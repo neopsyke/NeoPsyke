@@ -941,6 +941,10 @@ internal object AppModeRunners {
                                                 val timeTool = mcpTimeTool
                                                 val activeFetchTool = fetchTool
                                                 try {
+                                                    val earlyMemoryStartup =
+                                                        resolveInteractiveMemoryStartup(config, mcpRuntimeConfig.memory)
+                                                    val earlyHippocampus = earlyMemoryStartup.hippocampus
+                                                    val earlyLogbook = createLogbookIfEnabled(config)
                                                     val webSearchActionHandler = WebSearchActionHandler(runtime.engine)
                                                     val actionRegistry = ActionRegistry.discover(
                                                         ActionPluginFactoryContext(
@@ -948,7 +952,9 @@ internal object AppModeRunners {
                                                             webSearchActionHandler = webSearchActionHandler,
                                                             mcpTimeTool = timeTool,
                                                             fetchTool = activeFetchTool,
-                                                            output = {}
+                                                            output = {},
+                                                            hippocampus = earlyHippocampus,
+                                                            logbook = earlyLogbook,
                                                         )
                                                     )
                                                     actionRegistry.loadWarnings.forEach { warning ->
@@ -1042,10 +1048,8 @@ internal object AppModeRunners {
                                                             } else {
                                                                 NoopTaskWorkspaceFinalizer
                                                             }
-                                                        val interactiveMemoryStartup =
-                                                            resolveInteractiveMemoryStartup(config, mcpRuntimeConfig.memory)
-                                                        val hippocampus = interactiveMemoryStartup.hippocampus
-                                                        val memoryProviderDetail = interactiveMemoryStartup.detail
+                                                        val hippocampus = earlyHippocampus
+                                                        val memoryProviderDetail = earlyMemoryStartup.detail
                                                         instrumentation.emit(AgentEvents.actionCapabilities(actionStatuses))
                                                         instrumentation.emit(
                                                             AgentEvent(
@@ -1061,7 +1065,7 @@ internal object AppModeRunners {
                                                                 AgentEvents.warning("Long-term memory is unavailable: $memoryProviderDetail")
                                                             )
                                                         }
-                                                        val logbook = createLogbookIfEnabled(config)
+                                                        val logbook = earlyLogbook
                                                         val logbookSummarizer = createLogbookSummarizer(config, longTermMemoryClient)
                                                         if (cliOptions?.hasClearMemoryRequest == true) {
                                                             executeLongTermMemoryClear(
@@ -1379,6 +1383,10 @@ internal object AppModeRunners {
                                             val timeTool = mcpTimeTool
                                             val activeFetchTool = fetchTool
                                             try {
+                                                val earlyMemoryStartup2 =
+                                                    resolveInteractiveMemoryStartup(config, mcpRuntimeConfig.memory)
+                                                val earlyHippocampus2 = earlyMemoryStartup2.hippocampus
+                                                val earlyLogbook2 = createLogbookIfEnabled(config)
                                                 val webSearchActionHandler = WebSearchActionHandler(runtime.engine)
                                                 val actionRegistry = ActionRegistry.discover(
                                                     ActionPluginFactoryContext(
@@ -1386,7 +1394,9 @@ internal object AppModeRunners {
                                                         webSearchActionHandler = webSearchActionHandler,
                                                         mcpTimeTool = timeTool,
                                                         fetchTool = activeFetchTool,
-                                                        output = liveOutput
+                                                        output = liveOutput,
+                                                        hippocampus = earlyHippocampus2,
+                                                        logbook = earlyLogbook2,
                                                     )
                                                 )
                                                 actionRegistry.loadWarnings.forEach { warning ->
@@ -1452,19 +1462,17 @@ internal object AppModeRunners {
                                                         } else {
                                                             NoopTaskWorkspaceFinalizer
                                                         }
-                                                    val interactiveMemoryStartup =
-                                                        resolveInteractiveMemoryStartup(config, mcpRuntimeConfig.memory)
-                                                    val hippocampus = interactiveMemoryStartup.hippocampus
+                                                    val hippocampus = earlyHippocampus2
                                                     instrumentation.emit(
                                                         AgentEvent(
                                                             type = "memory_status",
                                                             data = mapOf(
                                                                 "available" to hippocampus.enabled,
-                                                                "detail" to interactiveMemoryStartup.detail
+                                                                "detail" to earlyMemoryStartup2.detail
                                                             )
                                                         )
                                                     )
-                                                    val logbook = createLogbookIfEnabled(config)
+                                                    val logbook = earlyLogbook2
                                                     val logbookSummarizer = createLogbookSummarizer(config, longTermMemoryClient)
                                                     val ego = Ego(
                                                         planner = planner,

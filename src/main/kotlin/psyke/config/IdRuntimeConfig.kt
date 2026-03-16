@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.PropertyNamingStrategies
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory
 import com.fasterxml.jackson.module.kotlin.readValue
 import com.fasterxml.jackson.module.kotlin.registerKotlinModule
+import psyke.agent.id.ConvergenceMode
 import psyke.agent.id.IdConfig
 import psyke.agent.id.NeedConfig
 import psyke.agent.id.ResponseCurveConfig
@@ -41,6 +42,8 @@ private data class IdRuntimeYamlNeed(
     val resetFloor: Double? = null,
     val cooldownPulses: Int? = null,
     val prompt: String? = null,
+    val convergence: String? = null,
+    val allowEscalation: Boolean? = null,
     val responseCurve: IdRuntimeYamlResponseCurve? = null,
     val activityDecay: Map<String, Double>? = null,
 )
@@ -78,6 +81,8 @@ object IdRuntimeConfigLoader {
                 resetFloor = yamlNeed.resetFloor?.takeIf { it in 0.0..1.0 } ?: defaultNeed.resetFloor,
                 cooldownPulses = yamlNeed.cooldownPulses?.takeIf { it >= 0 } ?: defaultNeed.cooldownPulses,
                 prompt = yamlNeed.prompt ?: defaultNeed.prompt,
+                convergence = ConvergenceMode.fromYaml(yamlNeed.convergence),
+                allowEscalation = yamlNeed.allowEscalation ?: defaultNeed.allowEscalation,
                 responseCurve = if (curveYaml != null) {
                     ResponseCurveConfig(
                         type = curveYaml.type ?: "linear",
