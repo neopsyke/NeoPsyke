@@ -67,12 +67,6 @@ internal class SuperegoDeterministicConscience(
         val origin = context.origin ?: return null
         if (origin.source != OriginSource.ID) return null
 
-        if (action.type == ActionType.ANSWER) {
-            return deny(
-                "id_origin_direct_answer_denied",
-                "Id-origin direct answer is blocked without explicit user request."
-            )
-        }
         if (action.type !in ID_ALLOWED_ACTIONS) {
             return deny(
                 "id_origin_action_not_allowed",
@@ -140,6 +134,7 @@ internal class SuperegoDeterministicConscience(
             ActionType.WEBSITE_FETCH,
             ActionType.MCP_TIME,
             ActionType.ANSWER_DRAFT,
+            ActionType.ANSWER,
         )
     }
 }

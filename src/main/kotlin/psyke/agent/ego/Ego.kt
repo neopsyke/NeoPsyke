@@ -133,6 +133,8 @@ class Ego(
             when (val signal = sensoryCortex.nextSignal()) {
                 SensorySignal.NoInput -> continue
 
+                SensorySignal.ImpulseReady -> runLoop()
+
                 is SensorySignal.SourceClosed -> {
                     val message = if (signal.source == "stdin") "stdin_closed" else "${signal.source}_closed"
                     instrumentation.emit(AgentEvents.loopStatus(status = "stopped", message = message))

@@ -1095,6 +1095,7 @@ internal object AppModeRunners {
                                                                     ego.enqueueImpulse(impulse, idConfig.maxPendingImpulses)
                                                                 },
                                                                 hasPendingWork = { ego.hasPendingWork() },
+                                                                notifyEgo = { sensoryInput.notifyImpulseReady() },
                                                             ).also { id ->
                                                                 ego.setId(id)
                                                                 id.start()

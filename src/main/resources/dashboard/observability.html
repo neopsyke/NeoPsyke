@@ -34,6 +34,136 @@
     }
     .status { font-size: 12px; color: var(--muted); }
 
+    /* Header loop pills */
+    .header-pill {
+      font-size: 11px;
+      padding: 2px 8px;
+      border-radius: 10px;
+      border: 1px solid var(--line);
+      color: var(--muted);
+      font-variant-numeric: tabular-nums;
+    }
+    .header-pill.running {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
+    /* Id Drives panel */
+    .id-meta {
+      font-size: 10px;
+      color: var(--muted);
+      font-variant-numeric: tabular-nums;
+    }
+    .id-empty {
+      font-size: 11px;
+      color: var(--muted);
+      text-align: center;
+      padding: 8px;
+    }
+    .id-impulse-bar {
+      font-size: 10px;
+      padding: 4px 8px;
+      margin-bottom: 6px;
+      border-radius: 4px;
+      border: 1px solid var(--line);
+      background: rgba(15, 26, 31, 0.7);
+    }
+    .id-impulse-bar.fired {
+      border-color: #e8a735;
+      color: #e8a735;
+    }
+    .id-impulse-bar.denied {
+      border-color: #c34848;
+      color: #c34848;
+    }
+    .id-impulse-bar.completed {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+    .id-need-row {
+      display: grid;
+      grid-template-columns: 100px 1fr 70px;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 0;
+      font-size: 11px;
+      font-variant-numeric: tabular-nums;
+    }
+    .id-need-row + .id-need-row {
+      border-top: 1px solid rgba(39, 65, 77, 0.4);
+    }
+    .id-need-name {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      color: var(--text);
+      font-weight: 600;
+      font-size: 10px;
+    }
+    .id-need-name .id-state-tag {
+      font-weight: 400;
+      font-size: 9px;
+      color: var(--muted);
+      margin-left: 2px;
+    }
+    .id-need-name .id-state-tag.in-flight { color: #e8a735; }
+    .id-need-name .id-state-tag.cooldown { color: #6b8a95; }
+    .id-need-name .id-state-tag.backoff { color: #c34848; }
+    .id-bar-track {
+      height: 12px;
+      background: rgba(15, 26, 31, 0.8);
+      border: 1px solid var(--line);
+      border-radius: 3px;
+      position: relative;
+      overflow: hidden;
+    }
+    .id-bar-fill {
+      position: absolute;
+      left: 0; top: 0; bottom: 0;
+      border-radius: 2px;
+      transition: width 0.4s ease;
+    }
+    .id-bar-fill.raw {
+      background: rgba(54, 195, 167, 0.25);
+      z-index: 1;
+    }
+    .id-bar-fill.urg {
+      background: var(--accent);
+      opacity: 0.7;
+      z-index: 2;
+    }
+    .id-bar-threshold {
+      position: absolute;
+      top: 0; bottom: 0;
+      width: 1px;
+      background: #e8a735;
+      z-index: 3;
+    }
+    .id-bar-threshold::after {
+      content: "";
+      position: absolute;
+      top: -2px;
+      left: -2px;
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+      background: #e8a735;
+    }
+    .id-need-eta {
+      text-align: right;
+      font-size: 10px;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+    .id-need-eta .eta-val { color: var(--text); }
+    .id-legend {
+      display: flex; gap: 8px; font-size: 9px; color: var(--muted);
+      align-items: center; margin-bottom: 4px;
+    }
+    .id-legend-swatch {
+      display: inline-block; width: 10px; height: 6px; border-radius: 2px; vertical-align: middle;
+    }
+
     .layout {
       min-height: 0;
       display: flex;
@@ -584,7 +714,12 @@
 </head>
 <body>
   <header>
-    <div><strong>Psyke Realtime Dashboard</strong></div>
+    <div style="display:flex;align-items:center;gap:12px;">
+      <strong>Psyke Realtime Dashboard</strong>
+      <span class="header-pill" id="hdr-loop-status">idle</span>
+      <span class="header-pill" id="hdr-loop-step" style="display:none"></span>
+      <span class="header-pill" id="hdr-loop-task" style="display:none"></span>
+    </div>
     <div style="display:flex;align-items:center;gap:10px;">
       <a class="ghost-btn" href="/" target="_blank" rel="noopener noreferrer">Conversations</a>
       <a class="ghost-btn" href="/metrics" target="_blank" rel="noopener noreferrer">Metrics</a>
@@ -594,9 +729,14 @@
 
   <div class="layout" id="layout">
     <section class="left-col" id="left-col">
-      <div class="panel">
-        <h3>Main Loop</h3>
-        <div id="loop-state"></div>
+      <div class="panel" id="id-panel">
+        <div class="panel-head">
+          <h3>Id Drives</h3>
+          <span class="id-meta" id="id-meta"></span>
+        </div>
+        <div id="id-impulse-bar" class="id-impulse-bar" style="display:none"></div>
+        <div id="id-needs"></div>
+        <div id="id-empty" class="id-empty">No Id pulse data yet</div>
       </div>
       <div class="panel">
         <h3>Queues</h3>
@@ -703,6 +843,17 @@
         activeTab: "summary",
         status: "idle",
         refreshTimer: null
+      },
+      id: {
+        pulse: 0,
+        egoBusy: false,
+        needs: [],
+        pendingImpulse: null,
+        lastImpulseEvent: null,
+        triggerThreshold: 0.5,
+        pulseIntervalMs: 30000,
+        thresholdOnUrgency: true,
+        lastPulseAt: 0
       }
     };
 
@@ -1492,14 +1643,153 @@
       el.innerHTML = parts.join("");
     }
 
+    function renderHeaderLoopPills() {
+      const statusEl = document.getElementById("hdr-loop-status");
+      const stepEl = document.getElementById("hdr-loop-step");
+      const taskEl = document.getElementById("hdr-loop-task");
+      const isRunning = state.loopStatus === "running";
+      statusEl.textContent = state.loopMessage || state.loopStatus || "idle";
+      statusEl.className = "header-pill" + (isRunning ? " running" : "");
+      if (state.loopStep > 0) {
+        stepEl.textContent = "step " + state.loopStep;
+        stepEl.style.display = "";
+        stepEl.className = "header-pill" + (isRunning ? " running" : "");
+      } else {
+        stepEl.style.display = "none";
+      }
+      if (state.currentTaskType) {
+        taskEl.textContent = state.currentTaskType;
+        taskEl.style.display = "";
+        taskEl.className = "header-pill" + (isRunning ? " running" : "");
+      } else {
+        taskEl.style.display = "none";
+      }
+    }
+
+    function formatEtaSec(sec) {
+      if (sec <= 0) return "<span class=\"eta-val\">ready</span>";
+      if (sec < 60) return "<span class=\"eta-val\">" + Math.round(sec) + "s</span>";
+      if (sec < 3600) return "<span class=\"eta-val\">" + (sec / 60).toFixed(1) + "m</span>";
+      return "<span class=\"eta-val\">" + (sec / 3600).toFixed(1) + "h</span>";
+    }
+
+    /** Compute ETA seconds for a need, accounting for elapsed wall-clock time since last pulse. */
+    function needEtaSec(n, elapsedMs) {
+      const id = state.id;
+      const threshold = id.triggerThreshold;
+      const pulseMs = id.pulseIntervalMs;
+      const useUrgency = id.thresholdOnUrgency;
+      const raw = n.rawValue || 0;
+      const urg = n.urgency || 0;
+      const growthRate = n.growthRate || 0;
+      const effectiveVal = useUrgency ? urg : raw;
+      if (effectiveVal >= threshold) return 0;
+      if (growthRate <= 0) return Infinity;
+      const pulsesNeeded = Math.ceil((threshold - raw) / growthRate);
+      const totalSec = pulsesNeeded * (pulseMs / 1000);
+      return Math.max(0, totalSec - (elapsedMs / 1000));
+    }
+
+    /** Update only the ETA elements without a full re-render. */
+    function tickIdCountdowns() {
+      const id = state.id;
+      if (id.needs.length === 0 || id.lastPulseAt === 0) return;
+      const elapsed = Date.now() - id.lastPulseAt;
+      const etaEls = document.querySelectorAll(".id-need-eta[data-need]");
+      etaEls.forEach(function(el) {
+        const name = el.getAttribute("data-need");
+        const n = id.needs.find(function(x) { return x.name === name; });
+        if (!n) return;
+        const sec = needEtaSec(n, elapsed);
+        el.innerHTML = "~" + (sec === Infinity ? "\u221e" : formatEtaSec(sec));
+      });
+    }
+
+    function renderIdDrives() {
+      const id = state.id;
+      const needsEl = document.getElementById("id-needs");
+      const emptyEl = document.getElementById("id-empty");
+      const metaEl = document.getElementById("id-meta");
+      const impulseBar = document.getElementById("id-impulse-bar");
+
+      if (id.needs.length === 0) {
+        emptyEl.style.display = "";
+        needsEl.innerHTML = "";
+        impulseBar.style.display = "none";
+        metaEl.textContent = "";
+        return;
+      }
+      emptyEl.style.display = "none";
+
+      // Meta line: pulse count, threshold, interval
+      const intervalSec = (id.pulseIntervalMs / 1000).toFixed(0);
+      const threshLabel = id.thresholdOnUrgency ? "urgency" : "raw";
+      metaEl.textContent = "pulse #" + id.pulse + " | thr " + id.triggerThreshold.toFixed(2) + " (" + threshLabel + ") | " + intervalSec + "s interval" + (id.egoBusy ? " | ego busy" : "");
+
+      // Pending impulse bar
+      const imp = id.pendingImpulse;
+      const lastImp = id.lastImpulseEvent;
+      if (imp) {
+        impulseBar.style.display = "";
+        impulseBar.className = "id-impulse-bar " + (imp.status === "fired" ? "fired" : "fired");
+        impulseBar.innerHTML = "IMPULSE " + escapeHtml(imp.status.toUpperCase()) + " \u2014 " + escapeHtml(imp.needId) + " (urg " + (imp.urgency != null ? imp.urgency.toFixed(3) : "?") + ")";
+      } else if (lastImp && lastImp.type) {
+        impulseBar.style.display = "";
+        const cls = lastImp.type === "denied" || lastImp.type === "failed" ? "denied"
+          : lastImp.type === "completed" ? "completed"
+          : lastImp.type === "blocked" ? "denied"
+          : "";
+        const label = lastImp.type === "blocked"
+          ? "BLOCKED: " + (lastImp.reason || "?")
+          : "LAST: " + lastImp.type.toUpperCase();
+        impulseBar.className = "id-impulse-bar " + cls;
+        impulseBar.innerHTML = label + " \u2014 " + escapeHtml(lastImp.needId || "?");
+      } else {
+        impulseBar.style.display = "none";
+      }
+
+      // Legend + render each need
+      const legendHtml = "<div class=\"id-legend\">"
+        + "<span class=\"id-legend-swatch\" style=\"background:rgba(54,195,167,0.25)\"></span>raw"
+        + "<span class=\"id-legend-swatch\" style=\"background:var(--accent);opacity:0.7\"></span>urgency"
+        + "<span class=\"id-legend-swatch\" style=\"background:#e8a735;width:4px;height:8px;border-radius:50%\"></span>threshold"
+        + "</div>";
+      const threshold = id.triggerThreshold;
+      const pulseMs = id.pulseIntervalMs;
+      const useUrgency = id.thresholdOnUrgency;
+      const rows = id.needs.map(function(n) {
+        const raw = n.rawValue || 0;
+        const urg = n.urgency || 0;
+        const growthRate = n.growthRate || 0;
+        const thresholdPct = (threshold * 100).toFixed(1);
+        const effectiveVal = useUrgency ? urg : raw;
+
+        // State tag
+        let stateTag = "";
+        if (n.inFlight) stateTag = "<span class=\"id-state-tag in-flight\">in-flight</span>";
+        else if (n.backoffPulsesRemaining > 0) stateTag = "<span class=\"id-state-tag backoff\">backoff " + n.backoffPulsesRemaining + "</span>";
+        else if (n.cooldownRemaining > 0) stateTag = "<span class=\"id-state-tag cooldown\">cd " + n.cooldownRemaining + "</span>";
+
+        // Denials
+        const denialStr = n.consecutiveDenials > 0 ? " d" + n.consecutiveDenials : "";
+
+        return "<div class=\"id-need-row\">"
+          + "<div class=\"id-need-name\" title=\"" + escapeHtml(n.name) + "\">" + escapeHtml(n.name) + denialStr + " " + stateTag + "</div>"
+          + "<div class=\"id-bar-track\">"
+            + "<div class=\"id-bar-fill raw\" style=\"width:" + (raw * 100).toFixed(1) + "%\"></div>"
+            + "<div class=\"id-bar-fill urg\" style=\"width:" + (urg * 100).toFixed(1) + "%\"></div>"
+            + "<div class=\"id-bar-threshold\" style=\"left:" + thresholdPct + "%\" title=\"threshold " + threshold.toFixed(2) + "\"></div>"
+          + "</div>"
+          + "<div class=\"id-need-eta\" data-need=\"" + escapeHtml(n.name) + "\"></div>"
+        + "</div>";
+      });
+      needsEl.innerHTML = legendHtml + rows.join("");
+      tickIdCountdowns();
+    }
+
     function render() {
-      document.getElementById("loop-state").innerHTML =
-        "<pre>" + fmt({
-          status: state.loopStatus,
-          step: state.loopStep,
-          task: state.currentTaskType,
-          message: state.loopMessage || null
-        }) + "</pre>";
+      renderHeaderLoopPills();
+      renderIdDrives();
 
       renderQueue("q-inputs", state.queues.inputs, (i) => "#" + i.id + " [" + (i.priority || "MEDIUM") + "] " + short(i.content, 100));
       renderQueue("q-thoughts", state.queues.thoughts, (i) => "#" + i.id + " [" + i.urgency + "] p" + i.passes + " " + short(i.content, 90));
@@ -1643,6 +1933,47 @@
           };
           break;
         }
+
+        // ── Id (autonomous drive) events ──────────────────
+        case "id_pulse": {
+          const d = event.data || {};
+          state.id.pulse = d.pulse || state.id.pulse;
+          state.id.egoBusy = !!d.ego_busy;
+          if (Array.isArray(d.needs)) state.id.needs = d.needs;
+          if (d.trigger_threshold != null) state.id.triggerThreshold = d.trigger_threshold;
+          if (d.pulse_interval_ms != null) state.id.pulseIntervalMs = d.pulse_interval_ms;
+          if (d.threshold_on_urgency != null) state.id.thresholdOnUrgency = d.threshold_on_urgency;
+          state.id.lastPulseAt = Date.now();
+          break;
+        }
+        case "id_impulse_fired": {
+          state.id.pendingImpulse = { needId: event.data.need_id, status: "fired", urgency: event.data.urgency };
+          state.id.lastImpulseEvent = { type: "fired", needId: event.data.need_id, ts: event.ts };
+          break;
+        }
+        case "id_impulse_accepted": {
+          if (state.id.pendingImpulse) state.id.pendingImpulse.status = "accepted";
+          state.id.lastImpulseEvent = { type: "accepted", needId: event.data.need_id, ts: event.ts };
+          break;
+        }
+        case "id_impulse_completed": {
+          state.id.pendingImpulse = null;
+          state.id.lastImpulseEvent = { type: event.data.success ? "completed" : "failed", needId: event.data.need_id, ts: event.ts };
+          break;
+        }
+        case "id_impulse_denied": {
+          state.id.pendingImpulse = null;
+          state.id.lastImpulseEvent = { type: "denied", needId: event.data.need_id, denials: event.data.consecutive_denials, ts: event.ts };
+          break;
+        }
+        case "id_pregate_blocked": {
+          state.id.lastImpulseEvent = { type: "blocked", needId: event.data.need_id, reason: event.data.reason, ts: event.ts };
+          break;
+        }
+        case "id_activity_decay": {
+          // No persistent state needed, just update needs on next pulse
+          break;
+        }
       }
 
       if (String(event.type || "").startsWith("task_workspace_")) {
@@ -1709,6 +2040,7 @@
         renderWorkspaceDrawer();
       });
       render();
+      setInterval(tickIdCountdowns, 1000);
 
       const es = new EventSource("/api/obs/events");
       es.addEventListener("open", () => { status.textContent = "connected"; });

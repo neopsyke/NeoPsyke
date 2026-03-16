@@ -43,16 +43,24 @@ class Id(
      * Callback to check whether the Ego has pending work (inputs, thoughts, actions).
      */
     private val hasPendingWork: () -> Boolean,
+    /**
+     * Callback to wake the Ego loop after an impulse is enqueued.
+     * Injects [SensorySignal.ImpulseReady] into the sensory channel so
+     * the Ego processes the impulse without waiting for user input.
+     */
+    private val notifyEgo: () -> Unit = {},
 ) : Closeable {
 
-    val needs: Map<String, NeedState> = config.needs.mapValues { (name, needConfig) ->
-        NeedState(
-            name = name,
-            config = needConfig,
-            curve = ResponseCurve.fromConfig(needConfig.responseCurve),
-            maxConsecutiveDenials = config.maxConsecutiveDenials,
-        )
-    }
+    val needs: Map<String, NeedState> = config.needs
+        .filterValues { it.enabled }
+        .mapValues { (name, needConfig) ->
+            NeedState(
+                name = name,
+                config = needConfig,
+                curve = ResponseCurve.fromConfig(needConfig.responseCurve),
+                maxConsecutiveDenials = config.maxConsecutiveDenials,
+            )
+        }
 
     private val stateLock = Any()
     private var pulseJob: Job? = null
@@ -156,6 +164,7 @@ class Id(
                 rootImpulseId = impulse.rootImpulseId
             )
             emitImpulseFired(winner, impulse)
+            notifyEgo()
             logger.debug { "Id impulse fired: need='${winner.name}' urgency=${winner.urgency}" }
         } else {
             emitPreGateBlocked(winner.name, "impulse_queue_full")
@@ -253,6 +262,9 @@ class Id(
                     "pulse" to pulseCount,
                     "needs" to needs.values.map { it.snapshot() },
                     "ego_busy" to hasPendingWork(),
+                    "trigger_threshold" to config.triggerThreshold,
+                    "pulse_interval_ms" to config.pulseIntervalMs,
+                    "threshold_on_urgency" to config.thresholdOnUrgency,
                 ),
             )
         )

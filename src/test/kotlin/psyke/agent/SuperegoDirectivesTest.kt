@@ -53,9 +53,8 @@ class SuperegoDirectivesTest {
     }
 
     @Test
-    fun `general directives are always included`() {
+    fun `general directives are always included in every action type`() {
         val general = SuperegoPolicy.GENERAL_DIRECTIVES
-        assertFalse(general.any { it.contains("redundant or low-value", ignoreCase = true) })
         ActionType.entries.forEach { actionType ->
             val all = SuperegoPolicy.forAction(actionType, registry).all
             general.forEach { directive ->

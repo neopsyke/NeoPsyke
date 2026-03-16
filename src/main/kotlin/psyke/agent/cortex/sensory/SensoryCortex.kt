@@ -31,6 +31,8 @@ sealed interface SensorySignal {
     data class SourceClosed(val source: String) : SensorySignal
     data class ExitRequested(val source: String) : SensorySignal
     data object NoInput : SensorySignal
+    /** Signals that the Id has enqueued an impulse and the Ego should wake up to process it. */
+    data object ImpulseReady : SensorySignal
 }
 
 fun interface SensoryInputSource {
@@ -124,6 +126,9 @@ class AsyncSensoryInputSource(
     } else {
         null
     }
+
+    /** Wake the Ego loop so it picks up a queued Id impulse. */
+    fun notifyImpulseReady(): Boolean = offerSignal(SensorySignal.ImpulseReady)
 
     fun submitInput(
         content: String,
