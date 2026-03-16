@@ -24,13 +24,13 @@ id:
       activity_decay:
         action_executed: 0.10
 
-    reach-out:
+    user-interaction:
       enabled: true
       description: "Drive to proactively contact the user"
       growth_rate: 0.01
       satisfaction_decay: 0.8
       cooldown_pulses: 5
-      convergence: answer
+      convergence: contact_user
       prompt: "I feel a drive to proactively reach out to the user. Is there something worth sharing — a useful update, an observation, or a question?."
       response_curve:
         type: sigmoid
@@ -38,7 +38,7 @@ id:
         midpoint: 0.5
       activity_decay:
         input_received: 0.15
-        answer_delivered: 0.10
+        contact_delivered: 0.10
 
     learn-something:
       enabled: true

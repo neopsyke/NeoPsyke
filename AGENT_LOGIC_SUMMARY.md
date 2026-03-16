@@ -431,7 +431,7 @@ It is intentionally high-level and should stay aligned with the code.
 - SQLite + FTS5 append-only log of timestamped interaction summaries and keywords.
 - Storage: separate DB file (default `.psyke/logbook.db`), WAL mode, synchronized access.
 - Schema: `entries` table (id, ts, ts_epoch_ms, event_type, summary, keywords, action_type, run_id, metadata) with FTS5 virtual table `entries_fts` auto-synced via triggers.
-- Event types recorded: `INPUT_RECEIVED`, `PLANNER_DECISION`, `ACTION_EXECUTED`, `ACTION_DENIED`, `ANSWER_DELIVERED`, `MEMORY_IMPRINT`.
+- Event types recorded: `INPUT_RECEIVED`, `PLANNER_DECISION`, `ACTION_EXECUTED`, `ACTION_DENIED`, `CONTACT_DELIVERED`, `MEMORY_IMPRINT`, `SELF_INITIATED`.
 - Integration through `MemoryCoordinator`:
   - `remember()` auto-journals `INPUT_RECEIVED` for user turns.
   - `maybeAssessLongTermMemory()` auto-journals `MEMORY_IMPRINT` on successful saves.

@@ -86,10 +86,10 @@ class MemoryCoordinatorEpisodicRecallTest {
                 ),
                 LogbookEntry(
                     ts = now.minus(45, ChronoUnit.MINUTES),
-                    eventType = EpisodicEventType.ANSWER_DELIVERED,
+                    eventType = EpisodicEventType.CONTACT_DELIVERED,
                     summary = "Berlin: 12C, partly cloudy",
                     keywords = listOf("berlin", "weather", "answer"),
-                    actionType = "answer",
+                    actionType = "contact_user",
                 ),
             ))
 
@@ -104,7 +104,7 @@ class MemoryCoordinatorEpisodicRecallTest {
             assertTrue(result.isNotBlank(), "Expected non-empty episodic recall")
             assertTrue(result.startsWith("Episodic timeline"), "Expected timeline header")
             assertTrue(result.contains("input_received"), "Expected input_received event")
-            assertTrue(result.contains("answer_delivered"), "Expected answer_delivered event")
+            assertTrue(result.contains("contact_delivered"), "Expected contact_delivered event")
         }
     }
 

@@ -128,7 +128,7 @@ internal class FallbackHandler(
             }
         }
         val queued = scheduler.enqueueAction(
-            type = ActionType.ANSWER,
+            type = ActionType.CONTACT_USER,
             payload = TextSecurity.clamp(payload, config.maxActionPayloadChars),
             summary = summary,
             urgency = thought.urgency,
@@ -151,7 +151,7 @@ internal class FallbackHandler(
                 PendingAction(
                     id = -1,
                     urgency = thought.urgency,
-                    type = ActionType.ANSWER,
+                    type = ActionType.CONTACT_USER,
                     payload = payload,
                     summary = summary,
                     attempts = thought.passes,
@@ -183,7 +183,7 @@ internal class FallbackHandler(
             "Reason: $reason"
         val summary = "Fallback answer after planner circuit breaker trip."
         val queued = scheduler.enqueueAction(
-            type = ActionType.ANSWER,
+            type = ActionType.CONTACT_USER,
             payload = TextSecurity.clamp(payload, config.maxActionPayloadChars),
             summary = summary,
             urgency = Urgency.HIGH,

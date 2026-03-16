@@ -19,7 +19,7 @@ data class TaskWorkspaceFinalPassInput(
     val workspaceConfidence: Double,
     val sectionCount: Int,
     val evidenceCount: Int,
-    val answerDraftCount: Int,
+    val resolutionDraftCount: Int,
 )
 
 data class TaskWorkspaceDebugHead(
@@ -154,15 +154,15 @@ class TaskWorkspaceStore(
     }
 
     @Synchronized
-    fun recordAnswerDraft(rootInputId: String?, payload: String) {
+    fun recordResolutionDraft(rootInputId: String?, payload: String) {
         val workspace = lookup(rootInputId) ?: return
         val normalized = TextSecurity.preview(payload, config.maxSectionChars)
         if (normalized.isBlank()) return
         workspace.addSection(
-            title = "Candidate answer",
+            title = "Resolution draft",
             summary = TextSecurity.preview(normalized, config.maxSectionSummaryChars),
             content = normalized,
-            source = SOURCE_ANSWER_DRAFT
+            source = SOURCE_RESOLUTION_DRAFT
         )
     }
 
@@ -238,7 +238,7 @@ class TaskWorkspaceStore(
             workspaceConfidence = confidence,
             sectionCount = workspace.sections.size,
             evidenceCount = workspace.evidence.size,
-            answerDraftCount = workspace.answerDraftCount()
+            resolutionDraftCount = workspace.resolutionDraftCount()
         )
     }
 
@@ -479,8 +479,8 @@ class TaskWorkspaceStore(
                 (goalSignal * GOAL_SIGNAL_WEIGHT)
         }
 
-        fun answerDraftCount(): Int =
-            sections.count { section -> section.source == SOURCE_ANSWER_DRAFT }
+        fun resolutionDraftCount(): Int =
+            sections.count { section -> section.source == SOURCE_RESOLUTION_DRAFT }
 
         fun debugHead(): TaskWorkspaceDebugHead =
             TaskWorkspaceDebugHead(
@@ -533,7 +533,7 @@ class TaskWorkspaceStore(
         const val SOURCE_INPUT: String = "input"
         const val SOURCE_PLAN: String = "plan"
         const val SOURCE_ACTION: String = "action_outcome"
-        const val SOURCE_ANSWER_DRAFT: String = "answer_draft"
+        const val SOURCE_RESOLUTION_DRAFT: String = "resolution_draft"
         const val SECTION_SIGNAL_WEIGHT: Double = 0.45
         const val EVIDENCE_SIGNAL_WEIGHT: Double = 0.45
         const val GOAL_SIGNAL_WEIGHT: Double = 0.10

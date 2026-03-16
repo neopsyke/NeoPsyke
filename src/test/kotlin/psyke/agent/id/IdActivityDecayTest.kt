@@ -50,7 +50,7 @@ class IdActivityDecayTest {
                         "action_executed" to 0.10,
                     ),
                 ),
-                "reach-out" to NeedConfig(
+                "user-interaction" to NeedConfig(
                     description = "Drive to proactively contact the user",
                     growthRate = growthRate,
                     cooldownPulses = 5,
@@ -58,7 +58,7 @@ class IdActivityDecayTest {
                     responseCurve = ResponseCurveConfig(type = "sigmoid", steepness = 10.0, midpoint = 0.5),
                     activityDecay = mapOf(
                         "input_received" to 0.15,
-                        "answer_delivered" to 0.10,
+                        "contact_delivered" to 0.10,
                     ),
                 ),
                 "learn-something" to NeedConfig(
@@ -86,18 +86,18 @@ class IdActivityDecayTest {
     // ── Selective decay on different activity types ──────────────────────
 
     @Test
-    fun `user input decays reach-out but not others`() {
+    fun `user input decays user-interaction but not others`() {
         val id = buildMultiNeedId()
         id.pulse() // all needs grow to 0.5
 
-        val reachOutBefore = id.needs["reach-out"]!!.value
+        val reachOutBefore = id.needs["user-interaction"]!!.value
         val usefulBefore = id.needs["be-useful"]!!.value
         val learnBefore = id.needs["learn-something"]!!.value
 
         id.onActivity("input_received")
 
-        assertEquals(reachOutBefore - 0.15, id.needs["reach-out"]!!.value, 1e-9,
-            "reach-out should decay by 0.15")
+        assertEquals(reachOutBefore - 0.15, id.needs["user-interaction"]!!.value, 1e-9,
+            "user-interaction should decay by 0.15")
         assertEquals(usefulBefore, id.needs["be-useful"]!!.value, 1e-9,
             "be-useful should not be affected by input_received")
         assertEquals(learnBefore, id.needs["learn-something"]!!.value, 1e-9,
@@ -110,15 +110,15 @@ class IdActivityDecayTest {
         id.pulse()
 
         val usefulBefore = id.needs["be-useful"]!!.value
-        val reachOutBefore = id.needs["reach-out"]!!.value
+        val reachOutBefore = id.needs["user-interaction"]!!.value
         val learnBefore = id.needs["learn-something"]!!.value
 
         id.onActivity("action_executed")
 
         assertEquals(usefulBefore - 0.10, id.needs["be-useful"]!!.value, 1e-9,
             "be-useful should decay by 0.10")
-        assertEquals(reachOutBefore, id.needs["reach-out"]!!.value, 1e-9,
-            "reach-out should not be affected by action_executed")
+        assertEquals(reachOutBefore, id.needs["user-interaction"]!!.value, 1e-9,
+            "user-interaction should not be affected by action_executed")
         assertEquals(learnBefore, id.needs["learn-something"]!!.value, 1e-9,
             "learn-something should not be affected by generic action_executed")
     }
@@ -130,7 +130,7 @@ class IdActivityDecayTest {
 
         val learnBefore = id.needs["learn-something"]!!.value
         val usefulBefore = id.needs["be-useful"]!!.value
-        val reachOutBefore = id.needs["reach-out"]!!.value
+        val reachOutBefore = id.needs["user-interaction"]!!.value
 
         id.onActivity("action_executed", "web_search")
 
@@ -138,8 +138,8 @@ class IdActivityDecayTest {
             "learn-something should decay by 0.12 via compound key action_executed_web_search")
         assertEquals(usefulBefore - 0.10, id.needs["be-useful"]!!.value, 1e-9,
             "be-useful should also decay (matches simple key 'action_executed')")
-        assertEquals(reachOutBefore, id.needs["reach-out"]!!.value, 1e-9,
-            "reach-out should not be affected")
+        assertEquals(reachOutBefore, id.needs["user-interaction"]!!.value, 1e-9,
+            "user-interaction should not be affected")
     }
 
     @Test
@@ -156,16 +156,16 @@ class IdActivityDecayTest {
     }
 
     @Test
-    fun `answer delivery decays reach-out`() {
+    fun `contact delivery decays user-interaction`() {
         val id = buildMultiNeedId()
         id.pulse()
 
-        val reachOutBefore = id.needs["reach-out"]!!.value
+        val reachOutBefore = id.needs["user-interaction"]!!.value
 
-        id.onActivity("answer_delivered")
+        id.onActivity("contact_delivered")
 
-        assertEquals(reachOutBefore - 0.10, id.needs["reach-out"]!!.value, 1e-9,
-            "reach-out should decay by 0.10 on answer_delivered")
+        assertEquals(reachOutBefore - 0.10, id.needs["user-interaction"]!!.value, 1e-9,
+            "user-interaction should decay by 0.10 on contact_delivered")
     }
 
     // ── Cumulative decay ────────────────────────────────────────────────
@@ -175,11 +175,11 @@ class IdActivityDecayTest {
         val id = buildMultiNeedId()
         id.pulse() // all at 0.5
 
-        val reachOutNeed = id.needs["reach-out"]!!
+        val reachOutNeed = id.needs["user-interaction"]!!
         assertEquals(0.5, reachOutNeed.value, 1e-9)
 
         id.onActivity("input_received")  // -0.15 -> 0.35
-        id.onActivity("answer_delivered") // -0.10 -> 0.25
+        id.onActivity("contact_delivered") // -0.10 -> 0.25
 
         assertEquals(0.25, reachOutNeed.value, 1e-9,
             "Multiple decays should accumulate")
@@ -190,7 +190,7 @@ class IdActivityDecayTest {
         val id = buildMultiNeedId(growthRate = 0.1)
         id.pulse() // all at 0.1
 
-        val reachOutNeed = id.needs["reach-out"]!!
+        val reachOutNeed = id.needs["user-interaction"]!!
         assertEquals(0.1, reachOutNeed.value, 1e-9)
 
         // Decay 0.15 from a value of 0.1 -> should floor at 0.0
@@ -205,13 +205,13 @@ class IdActivityDecayTest {
         id.pulse()
 
         val usefulBefore = id.needs["be-useful"]!!.value
-        val reachOutBefore = id.needs["reach-out"]!!.value
+        val reachOutBefore = id.needs["user-interaction"]!!.value
         val learnBefore = id.needs["learn-something"]!!.value
 
         id.onActivity("some_unknown_event")
 
         assertEquals(usefulBefore, id.needs["be-useful"]!!.value, 1e-9)
-        assertEquals(reachOutBefore, id.needs["reach-out"]!!.value, 1e-9)
+        assertEquals(reachOutBefore, id.needs["user-interaction"]!!.value, 1e-9)
         assertEquals(learnBefore, id.needs["learn-something"]!!.value, 1e-9)
     }
 

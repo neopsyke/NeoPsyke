@@ -60,7 +60,7 @@ internal object NoopTaskVerifier : TaskVerifier {
 
 internal class DeterministicTaskVerifier : TaskVerifier {
     override fun review(action: PendingAction, context: TaskVerifierContext): TaskVerifierDecision {
-        if (action.type != ActionType.ANSWER || action.isFallbackExplanation) {
+        if (action.type != ActionType.CONTACT_USER || action.isFallbackExplanation) {
             return TaskVerifierDecision(allow = true)
         }
         if (isForcedTerminalAnswer(action.summary)) {

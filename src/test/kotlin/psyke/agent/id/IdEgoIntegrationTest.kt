@@ -145,7 +145,7 @@ class IdEgoIntegrationTest {
             urgency = psyke.agent.model.Urgency.MEDIUM,
         )
         scheduler.enqueueAction(
-            type = ActionType.ANSWER,
+            type = ActionType.CONTACT_USER,
             payload = "hello",
             summary = "answer",
             urgency = psyke.agent.model.Urgency.MEDIUM,

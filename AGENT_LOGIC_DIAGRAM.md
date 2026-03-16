@@ -143,10 +143,10 @@ sequenceDiagram
                         Note over Ego,Sup: Stage parse failures trigger one schema-enforced retry before default deny
                         Sup-->>Ego: allow or deny (with reason_code on deny)
                         alt allow
-                            alt action = answer_draft
-                                Ego->>TWS: record answer_draft section (internal chunk)
+                            alt action = resolution_draft
+                                Ego->>TWS: record resolution_draft section (internal chunk)
                                 Note over Ego,TWS: Draft chunks are internal only no user-visible assistant turn
-                            else action = answer
+                            else action = contact_user
                                 Ego->>TWS: final-pass compilation from workspace index/evidence
                                 Ego->>TWF: rewrite candidate payload (if enabled)
                                 Note over Ego,TWS: Final-pass skip requires both no evidence and insufficient drafts (< max(2, activation_min_plan_steps))
@@ -154,7 +154,7 @@ sequenceDiagram
                             end
                             Ego->>Motor: execute(action)
                             Ego->>Ego: PromptInjectionDefense sanitize untrusted tool output
-                            alt action = answer
+                            alt action = contact_user
                                 Ego->>Sched: clear pending thought and action work for same root-session scope
                                 Ego->>TWS: capture session digest for resolved input
                                 Ego->>TWS: destroy workspace for resolved input
@@ -162,7 +162,7 @@ sequenceDiagram
                                 Ego->>Dash: drawer reads full snapshots via /api/obs/workspace/{rootId}
                                 Ego->>Mem: maybeAssessLongTermMemory(post_terminal_answer, forced)
                             end
-                            Ego->>TWS: record non-answer/non-answer_draft action outcomes/evidence
+                            Ego->>TWS: record non-contact_user/non-resolution_draft action outcomes/evidence
                             Ego->>Sched: enqueue follow-up thought (for evidence actions)
                             Ego->>Mem: maybeAssessLongTermMemory(post_allowed_action, optional force)
                             Note over Ego,Mem: Blocked imprints emit long_term_memory_persistence_skipped (reason_code, reason_detail) for timeline visibility
@@ -240,7 +240,7 @@ stateDiagram-v2
     Note right of ThoughtQueued: Repeat-denied payload block is skipped for technical or transient denial reasons (prefer reason_code classification) reflection lessons persist only for non-technical and non-system denials
 
     PolicyReview --> Executing: superego allow
-    Executing --> ThoughtQueued: action=answer_draft (plan continues)
+    Executing --> ThoughtQueued: action=resolution_draft (plan continues)
     Executing --> EvidenceObserved: external action succeeded
     Executing --> EvidenceMissing: tool/provider failure
     Executing --> WebSearchUnavailable: web search init/config failure

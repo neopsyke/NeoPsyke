@@ -190,7 +190,7 @@ class InnerVoiceSink(
 
     private fun handleActionExecuted(event: AgentEvent) {
         val action = event.data["action"] as? PendingAction ?: return
-        if (action.type == ActionType.ANSWER) return
+        if (action.type == ActionType.CONTACT_USER) return
 
         val rootInputId = action.rootInputId ?: return
         if (!isActivated(rootInputId)) return

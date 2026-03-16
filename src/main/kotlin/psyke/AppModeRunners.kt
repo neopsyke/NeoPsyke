@@ -1514,7 +1514,7 @@ internal object AppModeRunners {
                                                                     instrumentation.emit(
                                                                         AgentEvents.loopStatus(
                                                                             status = "stopped",
-                                                                            message = "freud_live_answer_delivered_input_closed"
+                                                                            message = "freud_live_contact_delivered_input_closed"
                                                                         )
                                                                     )
                                                                     Unit

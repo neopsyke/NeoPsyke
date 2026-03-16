@@ -1,5 +1,5 @@
-psyke.agent.actions.builtin.AnswerActionPluginFactory
-psyke.agent.actions.builtin.AnswerDraftActionPluginFactory
+psyke.agent.actions.builtin.ContactUserActionPluginFactory
+psyke.agent.actions.builtin.ResolutionDraftActionPluginFactory
 psyke.agent.actions.builtin.WebSearchActionPluginFactory
 psyke.agent.actions.builtin.McpTimeActionPluginFactory
 psyke.agent.actions.builtin.WebsiteFetchActionPluginFactory

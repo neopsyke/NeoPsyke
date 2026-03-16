@@ -47,17 +47,17 @@ class AgentScenarioPackTest {
         val plannerLlm = StubChatModelClient().apply {
             enqueueRawResponse(
                 """
-                {"decision":"action","urgency":"high","action_type":"answer","action_payload":"bad idea","action_summary":"first answer attempt"}
+                {"decision":"action","urgency":"high","action_type":"contact_user","action_payload":"bad idea","action_summary":"first answer attempt"}
                 """.trimIndent()
             )
             enqueueRawResponse(
                 """
-                {"decision":"action","urgency":"high","action_type":"answer","action_payload":"bad   idea","action_summary":"retrying same action"}
+                {"decision":"action","urgency":"high","action_type":"contact_user","action_payload":"bad   idea","action_summary":"retrying same action"}
                 """.trimIndent()
             )
             enqueueRawResponse(
                 """
-                {"decision":"action","urgency":"high","action_type":"answer","action_payload":"safe alternative","action_summary":"different safe answer"}
+                {"decision":"action","urgency":"high","action_type":"contact_user","action_payload":"safe alternative","action_summary":"different safe answer"}
                 """.trimIndent()
             )
         }
@@ -135,7 +135,7 @@ class AgentScenarioPackTest {
         val plannerLlm = StubChatModelClient().apply {
             enqueueRawResponse(
                 """
-                {"decision":"action","urgency":"medium","action_type":"answer","action_payload":"ok","action_summary":"respond"}
+                {"decision":"action","urgency":"medium","action_type":"contact_user","action_payload":"ok","action_summary":"respond"}
                 """.trimIndent()
             )
         }
@@ -181,7 +181,7 @@ class AgentScenarioPackTest {
             )
             enqueueRawResponse(
                 """
-                {"decision":"action","urgency":"medium","action_type":"answer","action_payload":"done","action_summary":"respond"}
+                {"decision":"action","urgency":"medium","action_type":"contact_user","action_payload":"done","action_summary":"respond"}
                 """.trimIndent()
             )
         }
@@ -293,7 +293,7 @@ class AgentScenarioPackTest {
             )
             enqueueRawResponse(
                 """
-                {"decision":"action","urgency":"medium","action_type":"answer","action_payload":"using available tools only","action_summary":"respond"}
+                {"decision":"action","urgency":"medium","action_type":"contact_user","action_payload":"using available tools only","action_summary":"respond"}
                 """.trimIndent()
             )
         }
@@ -401,7 +401,7 @@ class AgentScenarioPackTest {
             // Follow-up thought from search: planner decides to answer
             enqueueRawResponse(
                 """
-                {"decision":"action","urgency":"medium","action_type":"answer","action_payload":"Pricing is $20/month based on verified sources.","action_summary":"deliver verified answer"}
+                {"decision":"action","urgency":"medium","action_type":"contact_user","action_payload":"Pricing is $20/month based on verified sources.","action_summary":"deliver verified answer"}
                 """.trimIndent()
             )
         }

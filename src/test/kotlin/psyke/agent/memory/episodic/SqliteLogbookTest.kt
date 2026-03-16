@@ -51,7 +51,7 @@ class SqliteLogbookTest {
                 LogbookEntry(ts = old, eventType = EpisodicEventType.INPUT_RECEIVED, summary = "Old entry")
             )
             logbook.record(
-                LogbookEntry(ts = recent, eventType = EpisodicEventType.ANSWER_DELIVERED, summary = "Recent entry")
+                LogbookEntry(ts = recent, eventType = EpisodicEventType.CONTACT_DELIVERED, summary = "Recent entry")
             )
 
             val result = logbook.query(
@@ -73,14 +73,14 @@ class SqliteLogbookTest {
                 LogbookEntry(ts = now, eventType = EpisodicEventType.INPUT_RECEIVED, summary = "Input")
             )
             logbook.record(
-                LogbookEntry(ts = now, eventType = EpisodicEventType.ANSWER_DELIVERED, summary = "Answer")
+                LogbookEntry(ts = now, eventType = EpisodicEventType.CONTACT_DELIVERED, summary = "Answer")
             )
             logbook.record(
                 LogbookEntry(ts = now, eventType = EpisodicEventType.ACTION_EXECUTED, summary = "Action")
             )
 
             val result = logbook.query(
-                LogbookQuery(eventTypes = setOf(EpisodicEventType.ANSWER_DELIVERED))
+                LogbookQuery(eventTypes = setOf(EpisodicEventType.CONTACT_DELIVERED))
             )
             assertEquals(1, result.totalMatched)
             assertEquals("Answer", result.entries.first().summary)
@@ -184,8 +184,8 @@ class SqliteLogbookTest {
             )
             logbook.record(
                 LogbookEntry(
-                    ts = now, eventType = EpisodicEventType.ANSWER_DELIVERED,
-                    summary = "Answer", actionType = "answer"
+                    ts = now, eventType = EpisodicEventType.CONTACT_DELIVERED,
+                    summary = "Answer", actionType = "contact_user"
                 )
             )
 

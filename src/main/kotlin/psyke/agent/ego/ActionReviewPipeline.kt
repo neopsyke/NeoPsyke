@@ -73,7 +73,7 @@ internal class ActionReviewPipeline(
         deliberation.onActionExecuted(resolvedAction, observed)
         maybeRecordTaskWorkspaceOutcome(resolvedAction, outcome, observed)
         deliberation.recordActionOutcome(resolvedAction, outcome, observed)
-        if (resolvedAction.type == ActionType.ANSWER) {
+        if (resolvedAction.type == ActionType.CONTACT_USER) {
             recordAnswerLatency(resolvedAction)
             deliberation.clearEvidenceForInput(resolvedAction.rootInputId, sessionId)
             cleanupResolvedInputAfterAnswer(resolvedAction)
@@ -113,11 +113,11 @@ internal class ActionReviewPipeline(
         val outcome = executeActionSafely(resolvedAction)
         impulseTracker.markActionExecuted(resolvedAction)
         instrumentation.emit(AgentEvents.actionExecuted(resolvedAction, outcome.statusSummary))
-        if (resolvedAction.type == ActionType.ANSWER) {
+        if (resolvedAction.type == ActionType.CONTACT_USER) {
             memory.journal(
-                EpisodicEventType.ANSWER_DELIVERED,
-                "Answered (fallback): ${TextSecurity.preview(resolvedAction.summary, JOURNAL_SUMMARY_PREVIEW_CHARS)}",
-                actionType = "answer",
+                EpisodicEventType.CONTACT_DELIVERED,
+                "Contacted user (fallback): ${TextSecurity.preview(resolvedAction.summary, JOURNAL_SUMMARY_PREVIEW_CHARS)}",
+                actionType = "contact_user",
             )
             recordAnswerLatency(resolvedAction)
             deliberation.clearEvidenceForInput(resolvedAction.rootInputId, sessionId)
@@ -253,11 +253,11 @@ internal class ActionReviewPipeline(
     // ── Post-execute bookkeeping ──
 
     private fun journalActionExecution(resolvedAction: PendingAction, outcome: ActionOutcome) {
-        if (resolvedAction.type == ActionType.ANSWER) {
+        if (resolvedAction.type == ActionType.CONTACT_USER) {
             memory.journal(
-                EpisodicEventType.ANSWER_DELIVERED,
-                "Answered: ${TextSecurity.preview(resolvedAction.summary, JOURNAL_SUMMARY_PREVIEW_CHARS)}",
-                actionType = "answer",
+                EpisodicEventType.CONTACT_DELIVERED,
+                "Contacted user: ${TextSecurity.preview(resolvedAction.summary, JOURNAL_SUMMARY_PREVIEW_CHARS)}",
+                actionType = "contact_user",
             )
         } else {
             memory.journal(
@@ -291,8 +291,8 @@ internal class ActionReviewPipeline(
         dialogueFor(sessionId).addLast(assistantTurn)
         memory.remember(assistantTurn)
         trimDialogue(sessionId)
-        if (resolvedAction.type == ActionType.ANSWER) {
-            getId()?.onActivity("answer_delivered")
+        if (resolvedAction.type == ActionType.CONTACT_USER) {
+            getId()?.onActivity("contact_delivered")
         }
 
         // Mirror Id-originated turns to default session for context continuity.
@@ -306,8 +306,8 @@ internal class ActionReviewPipeline(
     }
 
     private fun maybeRecordTaskWorkspaceOutcome(action: PendingAction, outcome: ActionOutcome, observedEvidence: Boolean) {
-        if (action.type == ActionType.ANSWER_DRAFT) {
-            taskWorkspaceStore.recordAnswerDraft(
+        if (action.type == ActionType.RESOLUTION_DRAFT) {
+            taskWorkspaceStore.recordResolutionDraft(
                 rootInputId = action.rootInputId,
                 payload = action.payload
             )
@@ -317,7 +317,7 @@ internal class ActionReviewPipeline(
                     data = mapOf(
                         "root_input_id" to action.rootInputId,
                         "root_input_received_at_ms" to action.rootInputReceivedAtMs,
-                        "update_type" to "answer_draft_recorded",
+                        "update_type" to "resolution_draft_recorded",
                         "action_type" to action.type.name.lowercase(),
                         "draft_preview" to TextSecurity.preview(action.payload, 140),
                         "active_tasks" to taskWorkspaceStore.activeTaskCount()
@@ -327,11 +327,11 @@ internal class ActionReviewPipeline(
             telemetry.emitTaskWorkspaceTelemetry(
                 rootInputId = action.rootInputId,
                 rootInputReceivedAtMs = action.rootInputReceivedAtMs,
-                updateType = "answer_draft_recorded"
+                updateType = "resolution_draft_recorded"
             )
             return
         }
-        if (action.type == ActionType.ANSWER) return
+        if (action.type == ActionType.CONTACT_USER) return
         taskWorkspaceStore.recordActionOutcome(
             rootInputId = action.rootInputId,
             action = action,
@@ -364,7 +364,7 @@ internal class ActionReviewPipeline(
         outcome: ActionOutcome,
         sessionId: String,
     ) {
-        if (action.type != ActionType.ANSWER) return
+        if (action.type != ActionType.CONTACT_USER) return
         maybeRunLongTermMemoryAssessment(
             trigger = "post_terminal_answer",
             force = config.memory.longTermMemoryForceAssessOnTerminalAnswer,
@@ -394,7 +394,7 @@ internal class ActionReviewPipeline(
     // ── Workspace final pass ──
 
     private fun applyTaskWorkspaceFinalPass(action: PendingAction, sessionId: String): PendingAction {
-        if (action.type != ActionType.ANSWER) {
+        if (action.type != ActionType.CONTACT_USER) {
             return action
         }
         if (!config.memory.taskWorkspace.enabled || !config.memory.taskWorkspace.finalPassRewriteEnabled) {
@@ -414,22 +414,22 @@ internal class ActionReviewPipeline(
                 )
             )
         }
-        taskWorkspaceStore.recordAnswerDraft(
+        taskWorkspaceStore.recordResolutionDraft(
             rootInputId = action.rootInputId,
             payload = action.payload
         )
         telemetry.emitTaskWorkspaceTelemetry(
             rootInputId = action.rootInputId,
             rootInputReceivedAtMs = action.rootInputReceivedAtMs,
-            updateType = "answer_draft_recorded"
+            updateType = "resolution_draft_recorded"
         )
         val finalPassInput = taskWorkspaceStore.buildFinalPassInput(
             rootInputId = action.rootInputId,
             candidateAnswer = action.payload,
             maxChars = config.memory.taskWorkspace.finalCompilationMaxChars
         ) ?: return action
-        val answerDraftThreshold = maxOf(2, config.memory.taskWorkspace.activationMinPlanSteps)
-        if (finalPassInput.evidenceCount == 0 && finalPassInput.answerDraftCount < answerDraftThreshold) {
+        val draftThreshold = maxOf(2, config.memory.taskWorkspace.activationMinPlanSteps)
+        if (finalPassInput.evidenceCount == 0 && finalPassInput.resolutionDraftCount < draftThreshold) {
             instrumentation.emit(
                 AgentEvent(
                     type = "task_workspace_final_pass_skipped",
@@ -437,8 +437,8 @@ internal class ActionReviewPipeline(
                         "root_input_id" to action.rootInputId,
                         "action_id" to action.id,
                         "reason" to "no_evidence_or_insufficient_drafts",
-                        "answer_draft_count" to finalPassInput.answerDraftCount,
-                        "answer_draft_threshold" to answerDraftThreshold,
+                        "resolution_draft_count" to finalPassInput.resolutionDraftCount,
+                        "draft_threshold" to draftThreshold,
                     )
                 )
             )
@@ -454,7 +454,7 @@ internal class ActionReviewPipeline(
                     "workspace_confidence" to finalPassInput.workspaceConfidence,
                     "section_count" to finalPassInput.sectionCount,
                     "evidence_count" to finalPassInput.evidenceCount,
-                    "answer_draft_count" to finalPassInput.answerDraftCount,
+                    "resolution_draft_count" to finalPassInput.resolutionDraftCount,
                     "compilation_preview" to TextSecurity.preview(finalPassInput.compilation, 220)
                 )
             )
@@ -536,7 +536,7 @@ internal class ActionReviewPipeline(
                     "action_id" to action.id,
                     "workspace_confidence" to finalPassInput.workspaceConfidence,
                     "model_confidence" to finalizerResult.confidence,
-                    "answer_draft_count" to finalPassInput.answerDraftCount,
+                    "resolution_draft_count" to finalPassInput.resolutionDraftCount,
                     "rewrite_reason" to finalizerResult.reason,
                     "payload_before_preview" to TextSecurity.preview(action.payload, 180),
                     "payload_after_preview" to TextSecurity.preview(rewrittenPayload, 180)

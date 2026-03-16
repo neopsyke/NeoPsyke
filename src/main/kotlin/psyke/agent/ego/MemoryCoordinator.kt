@@ -597,7 +597,7 @@ internal class MemoryCoordinator(
 
     /**
      * Extracts episodic summaries as vector recall cues when temporal intent is detected.
-     * Returns summaries from INPUT_RECEIVED and ANSWER_DELIVERED entries, suitable as
+     * Returns summaries from INPUT_RECEIVED and CONTACT_DELIVERED entries, suitable as
      * cues for [Hippocampus.recall].
      */
     fun recallEpisodicAsVectorCues(recentDialogue: List<DialogueTurn>): List<String> {
@@ -1199,7 +1199,7 @@ internal class MemoryCoordinator(
 
         val VECTOR_CUE_EVENT_TYPES: Set<EpisodicEventType> = setOf(
             EpisodicEventType.INPUT_RECEIVED,
-            EpisodicEventType.ANSWER_DELIVERED,
+            EpisodicEventType.CONTACT_DELIVERED,
         )
 
         val EXPLICIT_REMEMBER_INTENT_PATTERNS: List<IntentPattern> = listOf(

@@ -29,14 +29,14 @@ class MotorCortexTest {
             PendingAction(
                 id = 1,
                 urgency = Urgency.MEDIUM,
-                type = ActionType.ANSWER,
+                type = ActionType.CONTACT_USER,
                 payload = "Hello there",
                 summary = "reply"
             ),
             searchResultCount = 3
         )
 
-        assertEquals("Answer delivered to interlocutor.", outcome.statusSummary)
+        assertEquals("Message delivered to interlocutor.", outcome.statusSummary)
         assertEquals("Hello there", outcome.assistantOutput)
         assertEquals(listOf("ego> Hello there"), captured)
     }
@@ -245,12 +245,12 @@ class MotorCortexTest {
         val statuses = cortex.startupSmokeTest()
         val byType = statuses.associateBy { it.actionType }
 
-        assertEquals(true, byType[ActionType.ANSWER]?.available)
+        assertEquals(true, byType[ActionType.CONTACT_USER]?.available)
         assertEquals(false, byType[ActionType.WEB_SEARCH]?.available)
         assertEquals(false, byType[ActionType.MCP_TIME]?.available)
         assertEquals(true, byType[ActionType.WEBSITE_FETCH]?.available)
         assertEquals(
-            setOf(ActionType.ANSWER, ActionType.ANSWER_DRAFT, ActionType.WEBSITE_FETCH, ActionType.REFLECT),
+            setOf(ActionType.CONTACT_USER, ActionType.RESOLUTION_DRAFT, ActionType.WEBSITE_FETCH, ActionType.REFLECT),
             cortex.availableActionTypes()
         )
     }

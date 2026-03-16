@@ -401,7 +401,7 @@ class Ego(
         timing.startPhase("planner_context")
         val trigger = EgoTrigger.IncomingImpulse(impulse)
         val needCfg = id?.needConfig(impulse.needId)
-        val convergence = needCfg?.convergence ?: psyke.agent.id.ConvergenceMode.ANSWER
+        val convergence = needCfg?.convergence ?: psyke.agent.id.ConvergenceMode.CONTACT_USER
         val allowEscalation = needCfg?.allowEscalation ?: false
         val idState = IdStateSnapshot(
             triggeringNeed = impulse.needId,
@@ -417,15 +417,16 @@ class Ego(
             conversationContext = convCtx,
         )
         // Filter actions for internalize convergence without escalation:
-        // remove ANSWER and ANSWER_DRAFT so the planner cannot propose user-facing output.
+        // remove CONTACT_USER so the planner cannot propose user-facing output.
+        // RESOLUTION_DRAFT remains available for intermediate synthesis in all convergence modes.
         val filteredDispatchable = if (convergence == psyke.agent.id.ConvergenceMode.INTERNALIZE && !allowEscalation) {
-            baseContext.dispatchableActions - setOf(ActionType.ANSWER, ActionType.ANSWER_DRAFT)
+            baseContext.dispatchableActions - setOf(ActionType.CONTACT_USER)
         } else {
             baseContext.dispatchableActions
         }
         val filteredDefinitions = if (convergence == psyke.agent.id.ConvergenceMode.INTERNALIZE && !allowEscalation) {
             baseContext.actionDefinitions.filter {
-                it.actionType != ActionType.ANSWER && it.actionType != ActionType.ANSWER_DRAFT
+                it.actionType != ActionType.CONTACT_USER
             }
         } else {
             baseContext.actionDefinitions

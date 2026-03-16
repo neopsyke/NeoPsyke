@@ -8,9 +8,9 @@ import kotlin.test.assertEquals
 class ConvergenceModeTest {
 
     @Test
-    fun `NeedConfig defaults to ANSWER convergence`() {
+    fun `NeedConfig defaults to CONTACT_USER convergence`() {
         val config = NeedConfig()
-        assertEquals(ConvergenceMode.ANSWER, config.convergence)
+        assertEquals(ConvergenceMode.CONTACT_USER, config.convergence)
         assertEquals(false, config.allowEscalation)
     }
 
@@ -19,15 +19,15 @@ class ConvergenceModeTest {
         assertEquals(ConvergenceMode.INTERNALIZE, ConvergenceMode.fromYaml("internalize"))
         assertEquals(ConvergenceMode.INTERNALIZE, ConvergenceMode.fromYaml("INTERNALIZE"))
         assertEquals(ConvergenceMode.INTERNALIZE, ConvergenceMode.fromYaml(" Internalize "))
-        assertEquals(ConvergenceMode.ANSWER, ConvergenceMode.fromYaml("answer"))
-        assertEquals(ConvergenceMode.ANSWER, ConvergenceMode.fromYaml("ANSWER"))
+        assertEquals(ConvergenceMode.CONTACT_USER, ConvergenceMode.fromYaml("contact_user"))
+        assertEquals(ConvergenceMode.CONTACT_USER, ConvergenceMode.fromYaml("CONTACT_USER"))
     }
 
     @Test
-    fun `ConvergenceMode fromYaml defaults to ANSWER for unknown values`() {
-        assertEquals(ConvergenceMode.ANSWER, ConvergenceMode.fromYaml(null))
-        assertEquals(ConvergenceMode.ANSWER, ConvergenceMode.fromYaml(""))
-        assertEquals(ConvergenceMode.ANSWER, ConvergenceMode.fromYaml("unknown"))
+    fun `ConvergenceMode fromYaml defaults to CONTACT_USER for unknown values`() {
+        assertEquals(ConvergenceMode.CONTACT_USER, ConvergenceMode.fromYaml(null))
+        assertEquals(ConvergenceMode.CONTACT_USER, ConvergenceMode.fromYaml(""))
+        assertEquals(ConvergenceMode.CONTACT_USER, ConvergenceMode.fromYaml("unknown"))
     }
 
     @Test
@@ -58,7 +58,7 @@ class ConvergenceModeTest {
             assertEquals(true, testNeed.allowEscalation)
 
             val defaultNeed = config.needs["default-need"]!!
-            assertEquals(ConvergenceMode.ANSWER, defaultNeed.convergence)
+            assertEquals(ConvergenceMode.CONTACT_USER, defaultNeed.convergence)
             assertEquals(false, defaultNeed.allowEscalation)
         } finally {
             Files.deleteIfExists(tmpFile)

@@ -16,12 +16,12 @@ class MemoryRoundTripIntegrationTest {
         val plannerLlm = StubChatModelClient().apply {
             enqueueRawResponse(
                 """
-                {"decision":"action","urgency":"medium","action_type":"answer","action_payload":"Noted. I will remember your preference.","action_summary":"ack preference"}
+                {"decision":"action","urgency":"medium","action_type":"contact_user","action_payload":"Noted. I will remember your preference.","action_summary":"ack preference"}
                 """.trimIndent()
             )
             enqueueRawResponse(
                 """
-                {"decision":"action","urgency":"medium","action_type":"answer","action_payload":"Your favorite color is teal.","action_summary":"answer from memory"}
+                {"decision":"action","urgency":"medium","action_type":"contact_user","action_payload":"Your favorite color is teal.","action_summary":"answer from memory"}
                 """.trimIndent()
             )
         }

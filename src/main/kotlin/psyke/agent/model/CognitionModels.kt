@@ -10,7 +10,7 @@ data class IdStateSnapshot(
     val triggeringNeed: String,
     val triggeringUrgency: Double,
     val allNeeds: Map<String, Double>,
-    val convergence: ConvergenceMode = ConvergenceMode.ANSWER,
+    val convergence: ConvergenceMode = ConvergenceMode.CONTACT_USER,
     val allowEscalation: Boolean = false,
 )
 

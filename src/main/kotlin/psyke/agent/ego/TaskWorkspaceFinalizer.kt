@@ -175,7 +175,7 @@ class LlmTaskWorkspaceFinalizer(
 
     private fun resolveMode(action: PendingAction): String =
         when (action.type) {
-            ActionType.ANSWER -> if (action.isFallbackExplanation) MODE_FALLBACK_EXPLANATION else MODE_DIRECT_ANSWER
+            ActionType.CONTACT_USER -> if (action.isFallbackExplanation) MODE_FALLBACK_EXPLANATION else MODE_DIRECT_ANSWER
             else -> "${action.type.id}_summary"
         }
 

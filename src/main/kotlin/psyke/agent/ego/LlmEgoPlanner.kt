@@ -87,7 +87,7 @@ class LlmEgoPlanner(
             diagnostics = promptAllocation.diagnostics
         )
         val messages = promptAllocation.messages
-        val allowAnswerDraft = isAnswerDraftAllowed(trigger)
+        val allowResolutionDraft = isResolutionDraftAllowed(trigger)
         val plannerFormats = resolvePlannerResponseFormats()
         val response = callPlanner(
             messages = messages,
@@ -109,7 +109,7 @@ class LlmEgoPlanner(
             raw = resolvedResponse.content,
             availableActions = context.availableActions,
             emitParseWarning = false,
-            allowAnswerDraft = allowAnswerDraft
+            allowResolutionDraft = allowResolutionDraft
         ) ?: run {
             val actionSchema = actionSchemaEnum(context.dispatchableActions)
             val truncatedRecoveredDecision = if (isLikelyTruncatedCompletion(resolvedResponse)) {
@@ -126,7 +126,7 @@ class LlmEgoPlanner(
                         raw = it.content,
                         availableActions = context.availableActions,
                         emitParseWarning = true,
-                        allowAnswerDraft = allowAnswerDraft
+                        allowResolutionDraft = allowResolutionDraft
                     )
                 }
             } else {
@@ -146,7 +146,7 @@ class LlmEgoPlanner(
                         raw = it.content,
                         availableActions = context.availableActions,
                         emitParseWarning = true,
-                        allowAnswerDraft = allowAnswerDraft
+                        allowResolutionDraft = allowResolutionDraft
                     )
                 }
                 repairedDecision ?: run {
@@ -175,7 +175,7 @@ class LlmEgoPlanner(
         raw: String,
         availableActions: Set<ActionType>,
         emitParseWarning: Boolean,
-        allowAnswerDraft: Boolean,
+        allowResolutionDraft: Boolean,
     ): EgoDecision? {
         return try {
             val payload = parsePayloadWithRepair(raw)
@@ -217,8 +217,8 @@ class LlmEgoPlanner(
                         actionSummary
                     }
 
-                    if (actionType == ActionType.ANSWER_DRAFT && !allowAnswerDraft) {
-                        EgoDecision.Noop("Planner proposed answer_draft outside active plan context.")
+                    if (actionType == ActionType.RESOLUTION_DRAFT && !allowResolutionDraft) {
+                        EgoDecision.Noop("Planner proposed resolution_draft outside active plan context.")
                     } else if (actionType == null || actionPayload.isBlank() || resolvedSummary.isBlank()) {
                         EgoDecision.Noop("Planner returned invalid action payload.")
                     } else if (!availableActions.contains(actionType)) {
@@ -295,7 +295,7 @@ class LlmEgoPlanner(
     private fun repairInvalidJsonEscapes(json: String): String =
         json.replace(invalidJsonEscapeRegex, "")
 
-    private fun isAnswerDraftAllowed(trigger: EgoTrigger): Boolean =
+    private fun isResolutionDraftAllowed(trigger: EgoTrigger): Boolean =
         trigger is EgoTrigger.PendingThoughtInput && trigger.thought.planContext != null
 
     private fun resolvePlannerResponseFormats(): SchemaFormatPair =
@@ -993,9 +993,9 @@ class LlmEgoPlanner(
         original: EgoDecision.ProposeAction,
         reason: String,
     ): Boolean {
-        if (original.actionType != ActionType.ANSWER) return false
+        if (original.actionType != ActionType.CONTACT_USER) return false
         val priorThought = (trigger as? EgoTrigger.PendingThoughtInput)?.thought ?: return false
-        if (priorThought.deniedActionType != ActionType.ANSWER) return false
+        if (priorThought.deniedActionType != ActionType.CONTACT_USER) return false
         if (priorThought.denialReasonCode != ACTION_VERIFIER_REJECT_REASON_CODE) return false
         if (DenialReasonClassifier.isLikelyTechnical(
                 reasonCode = priorThought.denialReasonCode,
@@ -1042,7 +1042,7 @@ class LlmEgoPlanner(
         followUpOrigin: FollowUpOrigin?,
         userRequestedRefresh: Boolean,
     ): Boolean {
-        if (original.actionType != ActionType.ANSWER) {
+        if (original.actionType != ActionType.CONTACT_USER) {
             return false
         }
         val origin = followUpOrigin ?: return false
@@ -1176,7 +1176,7 @@ class LlmEgoPlanner(
             .map { it.id }
             .sorted()
             .joinToString("|")
-            .ifBlank { "answer" }
+            .ifBlank { "contact_user" }
         val actionGuidanceBlock = context.actionDefinitions
             .sortedBy { it.actionType.id }
             .joinToString("\n") { definition ->
@@ -1184,7 +1184,7 @@ class LlmEgoPlanner(
                 val exampleSuffix = if (example.isBlank()) "" else " Example: $example"
                 "- ${definition.description} Payload: ${definition.payloadGuidance}.$exampleSuffix"
             }
-            .ifBlank { "- answer: payload is plain answer text." }
+            .ifBlank { "- contact_user: payload is plain text to deliver to the interlocutor." }
 
         return PromptBudgetAllocator.allocate(
             sections = listOfNotNull(
@@ -1202,10 +1202,10 @@ class LlmEgoPlanner(
                     - action: propose one action.
                     - plan: decompose into ordered steps when the task needs multiple stages.
                     - noop: when no safe next step exists.
-                    Use plan when the task requires multiple sequential stages (e.g. search, then verify, then answer).
+                    Use plan when the task requires multiple sequential stages (e.g. search, then verify, then respond).
                     Each plan_step is a concise directive (<=120 chars). The planner re-evaluates each step.
-                    Use action=answer_draft only for intermediate synthesis while executing active plan steps.
-                    The final user-visible response must use action=answer.
+                    Use action=resolution_draft only for intermediate synthesis while executing active plan steps.
+                    The final user-visible response must use action=contact_user.
                     Do not use plan for simple tasks solvable in one or two steps.
                     Allowed actions:
                     $actionGuidanceBlock
@@ -1218,10 +1218,10 @@ class LlmEgoPlanner(
                     You may receive a Task workspace summary scoped to the current request.
                     Treat Task workspace as ephemeral working notes, not durable long-term memory.
                     External actions have real latency/cost and must be value-add.
-                    Treat redundancy as a soft cost signal: if recent evidence already answers the trigger
-                    and the trigger does not explicitly ask to refresh/retry, prefer action=answer or noop.
+                    Treat redundancy as a soft cost signal: if recent evidence already covers the trigger
+                    and the trigger does not explicitly ask to refresh/retry, prefer action=contact_user or noop.
                     You may also receive Decision pressure metadata.
-                    As pressure rises, reduce exploratory loops and converge on a final answer.
+                    As pressure rises, reduce exploratory loops and converge on a final response.
                     """.trimIndent()
                 ),
                 PromptBudgetAllocator.Section(
@@ -1245,13 +1245,13 @@ class LlmEgoPlanner(
                       "reason":"... optional short reason"
                     }
                     Valid action example:
-                    {"decision":"action","urgency":"medium","action_type":"answer","action_payload":"...","action_summary":"Deliver concise recommendation"}
+                    {"decision":"action","urgency":"medium","action_type":"contact_user","action_payload":"...","action_summary":"Deliver concise recommendation"}
                     Valid plan example:
-                    {"decision":"plan","urgency":"medium","plan_goal":"Find and verify current pricing","plan_steps":["Search for official pricing page","Fetch the pricing page content","Synthesize and answer with verified pricing"]}
+                    {"decision":"plan","urgency":"medium","plan_goal":"Find and verify current pricing","plan_steps":["Search for official pricing page","Fetch the pricing page content","Synthesize and respond with verified pricing"]}
                     Do not return decision=action without both action_payload and action_summary.
                     action_payload must always be a JSON string value; never return object/array directly.
-                    Use action_type=answer_draft only for intermediate plan-step synthesis.
-                    Do not use answer_draft for terminal delivery; terminal user response must use action_type=answer.
+                    Use action_type=resolution_draft only for intermediate plan-step synthesis.
+                    Do not use resolution_draft for terminal delivery; terminal user response must use action_type=contact_user.
                     Do not return decision=plan without both plan_goal and plan_steps.
                     Keep thought concise.
                     Prefer concise answer payloads by default.
@@ -1403,7 +1403,7 @@ class LlmEgoPlanner(
                     Self-motivated context:
                     This trigger is self-initiated, not a user request.
                     Prefer researching and reflecting internally using action=reflect.
-                    Only address the user (action=answer) if you discover something immediately valuable or actionable.
+                    Only address the user (action=contact_user) if you discover something immediately valuable or actionable.
                     Act proportionally to your motivation level ($motivation).
                     Only act if there is genuine value; prefer noop otherwise.
                     """.trimIndent()
@@ -1418,12 +1418,12 @@ class LlmEgoPlanner(
                     """.trimIndent()
                 }
             }
-            psyke.agent.id.ConvergenceMode.ANSWER -> {
+            psyke.agent.id.ConvergenceMode.CONTACT_USER -> {
                 """
                 Self-motivated context:
                 This trigger is self-initiated, not a user request.
-                Use action=answer to share observations, ask questions, or offer help.
-                The answer action is the only channel for delivering text to the user.
+                Use action=contact_user to share observations, ask questions, or offer help.
+                The contact_user action is the only channel for delivering text to the user.
                 Act proportionally to your motivation level ($motivation).
                 Only act if there is genuine value; prefer noop otherwise.
                 """.trimIndent()
@@ -1696,7 +1696,7 @@ class LlmEgoPlanner(
             .map { it.id }
             .sorted()
             .joinToString("|")
-            .ifBlank { "answer" }
+            .ifBlank { "contact_user" }
 
     private companion object {
         const val ACTION_VERIFIER_BASE_TOKENS: Int = 80

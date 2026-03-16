@@ -25,7 +25,7 @@ class AgentRuntimeSettingsLoaderTest {
 
         assertEquals(192, settings.agentConfig.superego.maxCompletionTokens)
         assertEquals(true, settings.agentConfig.superego.dynamicCompletionEnabled)
-        assertEquals(true, settings.agentConfig.superego.twoStageSkipForAnswerActions)
+        assertEquals(true, settings.agentConfig.superego.twoStageSkipForContactUserActions)
         assertEquals(true, settings.agentConfig.superego.twoStageSkipForWebSearchActions)
 
         assertEquals(false, settings.agentConfig.memory.taskWorkspace.enabled)
@@ -88,7 +88,7 @@ class AgentRuntimeSettingsLoaderTest {
                 two_stage_review_enabled: true
                 two_stage_low_confidence_threshold: 0.74
                 two_stage_escalate_on_medium_policy_risk: false
-                two_stage_skip_for_answer_actions: false
+                two_stage_skip_for_contact_user_actions: false
                 two_stage_skip_for_web_search_actions: false
               memory:
                 long_term_memory_prompt_compression_enabled: true
@@ -161,7 +161,7 @@ class AgentRuntimeSettingsLoaderTest {
         assertEquals(true, settings.agentConfig.superego.twoStageReviewEnabled)
         assertEquals(0.74, settings.agentConfig.superego.twoStageLowConfidenceThreshold)
         assertEquals(false, settings.agentConfig.superego.twoStageEscalateOnMediumPolicyRisk)
-        assertEquals(false, settings.agentConfig.superego.twoStageSkipForAnswerActions)
+        assertEquals(false, settings.agentConfig.superego.twoStageSkipForContactUserActions)
         assertEquals(false, settings.agentConfig.superego.twoStageSkipForWebSearchActions)
 
         assertEquals(true, settings.agentConfig.memory.taskWorkspace.enabled)
