@@ -6,37 +6,38 @@ import java.io.Closeable
 
 class InnerVoiceStore(
     private val maxEventsPerSession: Int = 100,
+    private val maxIdGlobalEvents: Int = 500,
 ) : Closeable {
     private val mapper = jacksonObjectMapper()
     private val lock = Any()
     private val subscribers = mutableMapOf<String, MutableSet<Channel<String>>>()
     private val eventBuffers = mutableMapOf<String, ArrayDeque<InnerVoiceEvent>>()
 
+    // Global (session-independent) Id inner-voice stream
+    private val idGlobalSubscribers = mutableSetOf<Channel<String>>()
+    private val idGlobalBuffer = ArrayDeque<InnerVoiceEvent>()
+
     fun emit(event: InnerVoiceEvent) {
         val sessionId = event.sessionId ?: return
         val payloadJson: String
         synchronized(lock) {
-            val buffer = eventBuffers.getOrPut(sessionId) { ArrayDeque() }
-            if (buffer.size >= maxEventsPerSession) {
-                buffer.removeFirst()
+            payloadJson = buildPayloadJson(event)
+            if (event.origin == "id") {
+                // Route to global Id stream
+                if (idGlobalBuffer.size >= maxIdGlobalEvents) {
+                    idGlobalBuffer.removeFirst()
+                }
+                idGlobalBuffer.addLast(event)
+                broadcastToIdGlobal(payloadJson)
+            } else {
+                // Route to per-session conversation stream
+                val buffer = eventBuffers.getOrPut(sessionId) { ArrayDeque() }
+                if (buffer.size >= maxEventsPerSession) {
+                    buffer.removeFirst()
+                }
+                buffer.addLast(event)
+                broadcastToSession(sessionId, payloadJson)
             }
-            buffer.addLast(event)
-            payloadJson = mapper.writeValueAsString(
-                mapOf(
-                    "type" to "thinking",
-                    "event" to mapOf(
-                        "id" to event.id,
-                        "type" to event.type.name,
-                        "content" to event.content,
-                        "root_input_id" to event.rootInputId,
-                        "session_id" to event.sessionId,
-                        "ts" to event.ts,
-                        "sequence" to event.sequence,
-                        "metadata" to event.metadata
-                    )
-                )
-            )
-            broadcastToSession(sessionId, payloadJson)
         }
     }
 
@@ -57,13 +58,50 @@ class InnerVoiceStore(
         }
     }
 
+    fun subscribeIdGlobal(): DashboardFlowSubscription {
+        val channel = Channel<String>(SUBSCRIBER_CHANNEL_CAPACITY)
+        synchronized(lock) {
+            idGlobalSubscribers.add(channel)
+        }
+        return DashboardFlowSubscription(channel) {
+            synchronized(lock) {
+                idGlobalSubscribers.remove(channel)
+            }
+            channel.close()
+        }
+    }
+
+    fun getRecentIdGlobal(): List<InnerVoiceEvent> =
+        synchronized(lock) { idGlobalBuffer.toList() }
+
     override fun close() {
         synchronized(lock) {
             subscribers.values.forEach { set -> set.forEach { it.close() } }
             subscribers.clear()
             eventBuffers.clear()
+            idGlobalSubscribers.forEach { it.close() }
+            idGlobalSubscribers.clear()
+            idGlobalBuffer.clear()
         }
     }
+
+    private fun buildPayloadJson(event: InnerVoiceEvent): String =
+        mapper.writeValueAsString(
+            mapOf(
+                "type" to "thinking",
+                "event" to mapOf(
+                    "id" to event.id,
+                    "type" to event.type.name,
+                    "content" to event.content,
+                    "root_input_id" to event.rootInputId,
+                    "session_id" to event.sessionId,
+                    "ts" to event.ts,
+                    "sequence" to event.sequence,
+                    "metadata" to event.metadata,
+                    "origin" to event.origin
+                )
+            )
+        )
 
     private fun broadcastToSession(sessionId: String, payloadJson: String) {
         val sessionSubscribers = subscribers[sessionId] ?: return
@@ -81,6 +119,20 @@ class InnerVoiceStore(
         if (sessionSubscribers.isEmpty()) {
             subscribers.remove(sessionId)
         }
+    }
+
+    private fun broadcastToIdGlobal(payloadJson: String) {
+        val staleSubscribers = mutableListOf<Channel<String>>()
+        idGlobalSubscribers.forEach { channel ->
+            val result = channel.trySend(payloadJson)
+            if (result.isFailure && result.isClosed) {
+                staleSubscribers.add(channel)
+            } else if (result.isFailure) {
+                channel.tryReceive()
+                channel.trySend(payloadJson)
+            }
+        }
+        idGlobalSubscribers.removeAll(staleSubscribers.toSet())
     }
 
     private companion object {

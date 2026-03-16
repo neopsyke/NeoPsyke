@@ -37,6 +37,7 @@ import psyke.config.McpRuntimeConfig
 import psyke.dashboard.DashboardServer
 import psyke.dashboard.DashboardStateStore
 import psyke.dashboard.ChatRuntimeBridge
+import psyke.dashboard.IdInnerVoiceFileSink
 import psyke.dashboard.InnerVoiceSink
 import psyke.dashboard.InnerVoiceStore
 import psyke.eval.MemoryLiveEvalOptions
@@ -389,7 +390,17 @@ internal object AppModeRunners {
         }
         return logPath.resolveSibling(sidecarName)
     }
-    
+
+    private fun resolveIdInnerVoiceFilePath(): Path? {
+        val runLogFile = System.getenv("PSYKE_LOG_FILE")?.trim().orEmpty()
+        if (runLogFile.isBlank()) return null
+        val logPath = Path.of(runLogFile)
+        val logName = logPath.fileName?.toString().orEmpty()
+        if (logName.isBlank()) return null
+        val baseName = if (logName.endsWith(".log")) logName.removeSuffix(".log") else logName
+        return logPath.resolveSibling("$baseName.id-inner-voice-${System.currentTimeMillis()}.jsonl")
+    }
+
     private fun resolveProviderHealthStatus(
         endpoint: LlmEndpointConfig,
         modeLabel: String,
@@ -635,11 +646,26 @@ internal object AppModeRunners {
         } else {
             null
         }
+        val idInnerVoiceFileSink = if (innerVoiceStore != null) {
+            resolveIdInnerVoiceFilePath()?.let { path ->
+                try {
+                    IdInnerVoiceFileSink(path).also {
+                        logger.info { "Id inner-voice file sink enabled at ${it.path}" }
+                    }
+                } catch (ex: Exception) {
+                    logger.warn(ex) { "Failed to initialize Id inner-voice file sink at $path; continuing without it." }
+                    null
+                }
+            }
+        } else {
+            null
+        }
         val innerVoiceSink = if (innerVoiceStore != null) {
             InnerVoiceSink(
                 dashboardStore = dashboardStore,
                 innerVoiceStore = innerVoiceStore,
-                config = config.innerVoice
+                config = config.innerVoice,
+                idFileSink = idInnerVoiceFileSink
             )
         } else {
             null
@@ -661,6 +687,7 @@ internal object AppModeRunners {
                             store = dashboardStore,
                             chatBridge = chatBridge,
                             innerVoiceStore = innerVoiceStore,
+                            idInnerVoiceFilePath = idInnerVoiceFileSink?.path,
                             port = dashboardPort
                         ).also { it.start() }
                     } catch (ex: Exception) {
@@ -1136,6 +1163,7 @@ internal object AppModeRunners {
             }
             }
         } finally {
+            idInnerVoiceFileSink?.close()
             innerVoiceStore?.close()
             sensoryInput.close()
             agentScope.cancel()

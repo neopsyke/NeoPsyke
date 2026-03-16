@@ -8,6 +8,8 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
 import mu.KotlinLogging
 import psyke.metrics.LlmCallStatsReport
+import java.nio.file.Files
+import java.nio.file.Path
 import psyke.metrics.MetricsQueryProvider
 import java.io.Closeable
 import java.io.IOException
@@ -31,6 +33,7 @@ class DashboardServer(
     private val store: DashboardStateStore,
     private val chatBridge: ChatRuntimeBridge? = null,
     private val innerVoiceStore: InnerVoiceStore? = null,
+    private val idInnerVoiceFilePath: Path? = null,
     @Volatile var metricsQueryProvider: MetricsQueryProvider? = null,
     port: Int,
     host: String = "127.0.0.1",
@@ -123,6 +126,29 @@ class DashboardServer(
         server.createContext("/api/chat/sessions") { exchange ->
             withRequestGuard(exchange, "chat_api") {
                 handleChatApi(exchange)
+            }
+        }
+        server.createContext("/api/id-thinking/history") { exchange ->
+            withRequestGuard(exchange, "id_thinking_history") {
+                if (exchange.requestMethod != "GET") {
+                    respondText(exchange, 405, "Method not allowed", "text/plain; charset=utf-8")
+                    return@withRequestGuard
+                }
+                handleIdThinkingHistory(exchange)
+            }
+        }
+        server.createContext("/api/id-thinking") { exchange ->
+            withRequestGuard(exchange, "id_thinking_sse") {
+                val path = exchange.requestURI.path
+                if (path == "/api/id-thinking/history") {
+                    // Already handled by more specific context above
+                    return@withRequestGuard
+                }
+                if (exchange.requestMethod != "GET") {
+                    respondText(exchange, 405, "Method not allowed", "text/plain; charset=utf-8")
+                    return@withRequestGuard
+                }
+                handleIdThinkingSse(exchange)
             }
         }
         server.createContext("/health") { exchange ->
@@ -425,6 +451,71 @@ class DashboardServer(
         } finally {
             subscription.close()
             closeStreamQuietly(output, streamName = "thinking_sse", context = "session=$sessionId")
+        }
+    }
+
+    private fun handleIdThinkingSse(exchange: HttpExchange) {
+        val voiceStore = innerVoiceStore
+        if (voiceStore == null) {
+            respondText(exchange, 503, "Id inner voice not available", "text/plain; charset=utf-8")
+            return
+        }
+        val subscription = voiceStore.subscribeIdGlobal()
+
+        exchange.responseHeaders.add("Content-Type", "text/event-stream")
+        exchange.responseHeaders.add("Cache-Control", "no-cache")
+        exchange.responseHeaders.add("Connection", "keep-alive")
+        exchange.sendResponseHeaders(200, 0)
+
+        val output = exchange.responseBody.bufferedWriter(StandardCharsets.UTF_8)
+        try {
+            output.write("event: ready\n")
+            output.write("data: {\"status\":\"connected\"}\n\n")
+            output.flush()
+            runBlocking {
+                while (true) {
+                    val payload = withTimeoutOrNull(SSE_HEARTBEAT_TIMEOUT_MS) {
+                        subscription.receive()
+                    }
+                    if (payload != null) {
+                        output.write("event: id-thinking\n")
+                        output.write("data: $payload\n\n")
+                        output.flush()
+                    } else {
+                        output.write(": heartbeat\n\n")
+                        output.flush()
+                    }
+                }
+            }
+        } catch (ex: Exception) {
+            if (isExpectedClientDisconnect(ex)) {
+                logger.debug { "Id thinking SSE client disconnected." }
+            } else {
+                logger.warn(ex) { "Id thinking SSE stream terminated unexpectedly." }
+            }
+        } finally {
+            subscription.close()
+            closeStreamQuietly(output, streamName = "id_thinking_sse")
+        }
+    }
+
+    private fun handleIdThinkingHistory(exchange: HttpExchange) {
+        val filePath = idInnerVoiceFilePath
+        if (filePath == null || !Files.exists(filePath)) {
+            respondText(exchange, 200, "[]", "application/json; charset=utf-8")
+            return
+        }
+        try {
+            val events = Files.readAllLines(filePath, StandardCharsets.UTF_8)
+                .filter { it.isNotBlank() }
+                .map { line ->
+                    // Parse and re-serialize to ensure consistent JSON format
+                    mapper.readValue<Map<String, Any?>>(line)
+                }
+            respondText(exchange, 200, mapper.writeValueAsString(events), "application/json; charset=utf-8")
+        } catch (ex: Exception) {
+            logger.warn(ex) { "Failed to read Id inner-voice history from $filePath" }
+            respondText(exchange, 200, "[]", "application/json; charset=utf-8")
         }
     }
 

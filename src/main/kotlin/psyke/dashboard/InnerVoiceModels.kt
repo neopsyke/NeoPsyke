@@ -8,6 +8,7 @@ enum class InnerVoiceEventType {
     RECONSIDERATION,
     RECALL,
     OBSERVATION,
+    REFLECTION,
 }
 
 data class InnerVoiceEvent(
@@ -19,6 +20,7 @@ data class InnerVoiceEvent(
     val ts: Long,
     val sequence: Long = 0,
     val metadata: Map<String, Any?> = emptyMap(),
+    val origin: String = "user",
 )
 
 data class InnerVoiceConfig(
