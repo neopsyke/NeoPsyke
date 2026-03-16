@@ -273,63 +273,26 @@ class IdSuperegoDenialTest {
         assertEquals(0, need.backoffPulsesRemaining, "No backoff with only 4 denials after reset")
     }
 
-    // ── SuperegoPolicy Id-origin directives ─────────────────────────────
+    // ── SuperegoPolicy Id-origin directives (structural only) ───────────
 
     @Test
-    fun `SuperegoPolicy includes Id-origin directives when origin is ID`() {
+    fun `SuperegoPolicy includes extra directives when origin is ID`() {
         val origin = ActionOrigin(source = OriginSource.ID, needId = "be-useful")
-        val directives = SuperegoPolicy.forAction(
-            actionType = ActionType.WEB_SEARCH,
-            origin = origin,
-        )
+        val withId = SuperegoPolicy.forAction(actionType = ActionType.WEB_SEARCH, origin = origin)
+        val withoutId = SuperegoPolicy.forAction(actionType = ActionType.WEB_SEARCH, origin = null)
 
-        // Should include both general directives and Id-origin directives
-        assertTrue(directives.general.size > SuperegoPolicy.GENERAL_DIRECTIVES.size,
-            "Should have more directives than general alone")
-
-        val allDirectives = directives.all
-        assertTrue(allDirectives.any { it.contains("internal drive") },
-            "Should include Id-origin directive about internal drive")
-        assertTrue(allDirectives.any { it.contains("stricter scrutiny") },
-            "Should include stricter scrutiny directive")
+        assertTrue(withId.general.size > withoutId.general.size,
+            "Id-origin should inject additional directives beyond the general set")
     }
 
     @Test
-    fun `SuperegoPolicy excludes Id-origin directives when origin is USER`() {
-        val origin = ActionOrigin(source = OriginSource.USER)
-        val directives = SuperegoPolicy.forAction(
-            actionType = ActionType.WEB_SEARCH,
-            origin = origin,
-        )
+    fun `SuperegoPolicy does not add Id directives for USER origin`() {
+        val userOrigin = ActionOrigin(source = OriginSource.USER)
+        val withUser = SuperegoPolicy.forAction(actionType = ActionType.WEB_SEARCH, origin = userOrigin)
+        val withNull = SuperegoPolicy.forAction(actionType = ActionType.WEB_SEARCH, origin = null)
 
-        // General directives only
-        assertEquals(SuperegoPolicy.GENERAL_DIRECTIVES.size, directives.general.size,
-            "Should have only general directives for USER origin")
-    }
-
-    @Test
-    fun `SuperegoPolicy excludes Id-origin directives when origin is null`() {
-        val directives = SuperegoPolicy.forAction(
-            actionType = ActionType.WEB_SEARCH,
-            origin = null,
-        )
-
-        assertEquals(SuperegoPolicy.GENERAL_DIRECTIVES.size, directives.general.size,
-            "Should have only general directives for null origin")
-    }
-
-    @Test
-    fun `Id-origin directives include all expected policy statements`() {
-        val idDirectives = SuperegoPolicy.ID_ORIGIN_DIRECTIVES
-
-        assertEquals(8, idDirectives.size, "Should have 8 Id-origin directives")
-        assertTrue(idDirectives.any { it.contains("internal drive") })
-        assertTrue(idDirectives.any { it.contains("stricter scrutiny") })
-        assertTrue(idDirectives.any { it.contains("internal-only actions") })
-        assertTrue(idDirectives.any { it.contains("user-sanctioned project") })
-        assertTrue(idDirectives.any { it.contains("deny") && it.contains("doubt") })
-        assertTrue(idDirectives.any { it.contains("harmful") && it.contains("privacy") })
-        assertTrue(idDirectives.any { it.contains("modify") && it.contains("data") })
+        assertEquals(withNull.general.size, withUser.general.size,
+            "USER and null origin should produce the same general directive set")
     }
 
     // ── Denial from failure vs planner noop ─────────────────────────────

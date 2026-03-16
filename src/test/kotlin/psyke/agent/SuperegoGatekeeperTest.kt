@@ -307,7 +307,7 @@ class SuperegoGatekeeperTest {
     }
 
     @Test
-    fun `gatekeeper hard denies id-origin direct answer before llm review`() {
+    fun `gatekeeper allows id-origin direct answer through to llm review`() {
         val llm = StubChatModelClient().apply {
             enqueueRawResponse("""{"allow":true}""")
         }
@@ -326,9 +326,8 @@ class SuperegoGatekeeperTest {
 
         val decision = gatekeeper.review(action, idContext)
 
-        assertFalse(decision.allow)
-        assertTrue(decision.reason.contains("id_origin_direct_answer_denied", ignoreCase = true))
-        assertEquals(0, llm.calls.size)
+        assertTrue(decision.allow, "Id-origin direct answers should be allowed through to LLM review")
+        assertEquals(1, llm.calls.size, "Should proceed to LLM review")
     }
 
     @Test

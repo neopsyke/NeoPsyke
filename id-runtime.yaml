@@ -25,7 +25,7 @@ id:
     reach-out:
       enabled: true
       description: "Drive to proactively contact the user"
-      growth_rate: 0.3
+      growth_rate: 0.01
       satisfaction_decay: 0.8
       cooldown_pulses: 5
       prompt: "I feel a drive to proactively reach out to the user. Is there something worth sharing — a useful update, an observation, or a question?."

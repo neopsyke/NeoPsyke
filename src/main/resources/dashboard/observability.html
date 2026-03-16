@@ -123,11 +123,11 @@
       border-radius: 2px;
       transition: width 0.4s ease;
     }
-    .id-bar-fill.value {
+    .id-bar-fill.raw {
       background: rgba(54, 195, 167, 0.25);
       z-index: 1;
     }
-    .id-bar-fill.urgency {
+    .id-bar-fill.urg {
       background: var(--accent);
       opacity: 0.7;
       z-index: 2;
@@ -156,6 +156,13 @@
       white-space: nowrap;
     }
     .id-need-eta .eta-val { color: var(--text); }
+    .id-legend {
+      display: flex; gap: 8px; font-size: 9px; color: var(--muted);
+      align-items: center; margin-bottom: 4px;
+    }
+    .id-legend-swatch {
+      display: inline-block; width: 10px; height: 6px; border-radius: 2px; vertical-align: middle;
+    }
 
     .layout {
       min-height: 0;
@@ -845,7 +852,8 @@
         lastImpulseEvent: null,
         triggerThreshold: 0.5,
         pulseIntervalMs: 30000,
-        thresholdOnUrgency: true
+        thresholdOnUrgency: true,
+        lastPulseAt: 0
       }
     };
 
@@ -1658,6 +1666,45 @@
       }
     }
 
+    function formatEtaSec(sec) {
+      if (sec <= 0) return "<span class=\"eta-val\">ready</span>";
+      if (sec < 60) return "<span class=\"eta-val\">" + Math.round(sec) + "s</span>";
+      if (sec < 3600) return "<span class=\"eta-val\">" + (sec / 60).toFixed(1) + "m</span>";
+      return "<span class=\"eta-val\">" + (sec / 3600).toFixed(1) + "h</span>";
+    }
+
+    /** Compute ETA seconds for a need, accounting for elapsed wall-clock time since last pulse. */
+    function needEtaSec(n, elapsedMs) {
+      const id = state.id;
+      const threshold = id.triggerThreshold;
+      const pulseMs = id.pulseIntervalMs;
+      const useUrgency = id.thresholdOnUrgency;
+      const raw = n.rawValue || 0;
+      const urg = n.urgency || 0;
+      const growthRate = n.growthRate || 0;
+      const effectiveVal = useUrgency ? urg : raw;
+      if (effectiveVal >= threshold) return 0;
+      if (growthRate <= 0) return Infinity;
+      const pulsesNeeded = Math.ceil((threshold - raw) / growthRate);
+      const totalSec = pulsesNeeded * (pulseMs / 1000);
+      return Math.max(0, totalSec - (elapsedMs / 1000));
+    }
+
+    /** Update only the ETA elements without a full re-render. */
+    function tickIdCountdowns() {
+      const id = state.id;
+      if (id.needs.length === 0 || id.lastPulseAt === 0) return;
+      const elapsed = Date.now() - id.lastPulseAt;
+      const etaEls = document.querySelectorAll(".id-need-eta[data-need]");
+      etaEls.forEach(function(el) {
+        const name = el.getAttribute("data-need");
+        const n = id.needs.find(function(x) { return x.name === name; });
+        if (!n) return;
+        const sec = needEtaSec(n, elapsed);
+        el.innerHTML = "~" + (sec === Infinity ? "\u221e" : formatEtaSec(sec));
+      });
+    }
+
     function renderIdDrives() {
       const id = state.id;
       const needsEl = document.getElementById("id-needs");
@@ -1701,7 +1748,12 @@
         impulseBar.style.display = "none";
       }
 
-      // Render each need
+      // Legend + render each need
+      const legendHtml = "<div class=\"id-legend\">"
+        + "<span class=\"id-legend-swatch\" style=\"background:rgba(54,195,167,0.25)\"></span>raw"
+        + "<span class=\"id-legend-swatch\" style=\"background:var(--accent);opacity:0.7\"></span>urgency"
+        + "<span class=\"id-legend-swatch\" style=\"background:#e8a735;width:4px;height:8px;border-radius:50%\"></span>threshold"
+        + "</div>";
       const threshold = id.triggerThreshold;
       const pulseMs = id.pulseIntervalMs;
       const useUrgency = id.thresholdOnUrgency;
@@ -1718,34 +1770,21 @@
         else if (n.backoffPulsesRemaining > 0) stateTag = "<span class=\"id-state-tag backoff\">backoff " + n.backoffPulsesRemaining + "</span>";
         else if (n.cooldownRemaining > 0) stateTag = "<span class=\"id-state-tag cooldown\">cd " + n.cooldownRemaining + "</span>";
 
-        // ETA to threshold (approximate: pulses until raw value reaches a level where effective > threshold)
-        let etaText = "";
-        if (effectiveVal >= threshold) {
-          etaText = "<span class=\"eta-val\">ready</span>";
-        } else if (growthRate > 0) {
-          const pulsesNeeded = Math.ceil((threshold - raw) / growthRate);
-          const etaSec = pulsesNeeded * (pulseMs / 1000);
-          if (etaSec < 60) etaText = "<span class=\"eta-val\">" + Math.round(etaSec) + "s</span>";
-          else if (etaSec < 3600) etaText = "<span class=\"eta-val\">" + (etaSec / 60).toFixed(1) + "m</span>";
-          else etaText = "<span class=\"eta-val\">" + (etaSec / 3600).toFixed(1) + "h</span>";
-        } else {
-          etaText = "\u221e";
-        }
-
         // Denials
         const denialStr = n.consecutiveDenials > 0 ? " d" + n.consecutiveDenials : "";
 
         return "<div class=\"id-need-row\">"
           + "<div class=\"id-need-name\" title=\"" + escapeHtml(n.name) + "\">" + escapeHtml(n.name) + denialStr + " " + stateTag + "</div>"
           + "<div class=\"id-bar-track\">"
-            + "<div class=\"id-bar-fill value\" style=\"width:" + (raw * 100).toFixed(1) + "%\"></div>"
-            + "<div class=\"id-bar-fill urgency\" style=\"width:" + (urg * 100).toFixed(1) + "%\"></div>"
+            + "<div class=\"id-bar-fill raw\" style=\"width:" + (raw * 100).toFixed(1) + "%\"></div>"
+            + "<div class=\"id-bar-fill urg\" style=\"width:" + (urg * 100).toFixed(1) + "%\"></div>"
             + "<div class=\"id-bar-threshold\" style=\"left:" + thresholdPct + "%\" title=\"threshold " + threshold.toFixed(2) + "\"></div>"
           + "</div>"
-          + "<div class=\"id-need-eta\">~" + etaText + "</div>"
+          + "<div class=\"id-need-eta\" data-need=\"" + escapeHtml(n.name) + "\"></div>"
         + "</div>";
       });
-      needsEl.innerHTML = rows.join("");
+      needsEl.innerHTML = legendHtml + rows.join("");
+      tickIdCountdowns();
     }
 
     function render() {
@@ -1904,6 +1943,7 @@
           if (d.trigger_threshold != null) state.id.triggerThreshold = d.trigger_threshold;
           if (d.pulse_interval_ms != null) state.id.pulseIntervalMs = d.pulse_interval_ms;
           if (d.threshold_on_urgency != null) state.id.thresholdOnUrgency = d.threshold_on_urgency;
+          state.id.lastPulseAt = Date.now();
           break;
         }
         case "id_impulse_fired": {
@@ -2000,6 +2040,7 @@
         renderWorkspaceDrawer();
       });
       render();
+      setInterval(tickIdCountdowns, 1000);
 
       const es = new EventSource("/api/obs/events");
       es.addEventListener("open", () => { status.textContent = "connected"; });
