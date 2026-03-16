@@ -116,6 +116,48 @@ class SensoryCortexTest {
     }
 
     @Test
+    fun `notifyImpulseReady injects ImpulseReady signal into the channel`() = runBlocking {
+        val scope = testScope()
+        val source = psyke.agent.cortex.sensory.AsyncSensoryInputSource(
+            includeStdin = false,
+            emitStdinClosedSignal = false,
+            pollTimeoutMs = 10L,
+            scope = scope
+        )
+        try {
+            val offered = source.notifyImpulseReady()
+            assertTrue(offered, "notifyImpulseReady should succeed on an empty channel")
+
+            val signal = source.nextSignal()
+            assertIs<psyke.agent.cortex.sensory.SensorySignal.ImpulseReady>(signal)
+        } finally {
+            source.close()
+        }
+    }
+
+    @Test
+    fun `ImpulseReady passes through SensoryCortex untouched`() = runBlocking {
+        val scope = testScope()
+        val source = psyke.agent.cortex.sensory.AsyncSensoryInputSource(
+            includeStdin = false,
+            emitStdinClosedSignal = false,
+            pollTimeoutMs = 10L,
+            scope = scope
+        )
+        val cortex = SensoryCortex(
+            config = AgentConfig(),
+            source = source
+        )
+        try {
+            source.notifyImpulseReady()
+            val signal = cortex.nextSignal()
+            assertIs<psyke.agent.cortex.sensory.SensorySignal.ImpulseReady>(signal)
+        } finally {
+            source.close()
+        }
+    }
+
+    @Test
     fun `async stdin control-only mode ignores text input and only emits exit`() = runBlocking {
         val scope = testScope()
         val scriptedInputs = ArrayDeque(listOf("hello from terminal", "exit"))

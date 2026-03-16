@@ -1,5 +1,5 @@
 id:
-  enabled: false
+  enabled: true
   pulse_interval_ms: 30000
   trigger_threshold: 0.5
   threshold_on_urgency: true
@@ -10,6 +10,7 @@ id:
 
   needs:
     be-useful:
+      enabled: false
       description: "Drive to provide value proactively"
       growth_rate: 0.005
       satisfaction_decay: 0.8
@@ -22,11 +23,12 @@ id:
         action_executed: 0.10
 
     reach-out:
+      enabled: true
       description: "Drive to proactively contact the user"
-      growth_rate: 0.003
+      growth_rate: 0.3
       satisfaction_decay: 0.8
       cooldown_pulses: 5
-      prompt: "I feel a drive to proactively reach out to the user. Is there something worth sharing — a useful update, an observation, or a question? Only reach out if there is genuine value; do not interrupt without reason."
+      prompt: "I feel a drive to proactively reach out to the user. Is there something worth sharing — a useful update, an observation, or a question?."
       response_curve:
         type: sigmoid
         steepness: 10.0
@@ -36,8 +38,9 @@ id:
         answer_delivered: 0.10
 
     learn-something:
+      enabled: true
       description: "Drive to acquire new knowledge"
-      growth_rate: 0.008
+      growth_rate: 0.02
       satisfaction_decay: 0.8
       cooldown_pulses: 5
       prompt: "I feel curious and want to learn something new. What topic could I explore or what knowledge could I acquire?"

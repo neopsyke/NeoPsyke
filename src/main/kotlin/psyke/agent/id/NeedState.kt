@@ -152,6 +152,7 @@ class NeedState(
         "rawValue" to value,
         "urgency" to urgency,
         "delta" to delta,
+        "growthRate" to config.growthRate,
         "cooldownRemaining" to cooldownRemaining,
         "inFlight" to inFlight,
         "inFlightPulsesRemaining" to inFlightPulsesRemaining,

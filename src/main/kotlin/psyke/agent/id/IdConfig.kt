@@ -28,6 +28,7 @@ data class IdConfig(
  * Configuration for a single need (drive).
  */
 data class NeedConfig(
+    val enabled: Boolean = true,
     val description: String = "",
     val growthRate: Double = 0.005,
     val satisfactionDecay: Double = 0.8,

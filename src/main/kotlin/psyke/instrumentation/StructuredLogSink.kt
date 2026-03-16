@@ -440,6 +440,50 @@ class StructuredLogSink : InstrumentationSink {
                     "llm.cache.divergence seq=${event.data["sequence_index"]} actor=${event.data["actor"]} call_site=${event.data["call_site"]} expected_hash=${event.data["expected_hash"]} actual_hash=${event.data["actual_hash"]}"
                 }
             }
+
+            // ── Id (autonomous drive) events ──────────────────────────
+            "id_pulse" -> {
+                val needs = event.data["needs"]
+                logger.trace {
+                    "id.pulse pulse=${event.data["pulse"]} ego_busy=${event.data["ego_busy"]} needs=$needs"
+                }
+            }
+
+            "id_impulse_fired" -> {
+                logger.info {
+                    "id.impulse.fired need=${event.data["need_id"]} urgency=${event.data["urgency"]} raw_value=${event.data["raw_value"]} root_impulse_id=${event.data["root_impulse_id"]}"
+                }
+            }
+
+            "id_impulse_accepted" -> {
+                logger.info {
+                    "id.impulse.accepted need=${event.data["need_id"]}"
+                }
+            }
+
+            "id_impulse_completed" -> {
+                logger.info {
+                    "id.impulse.completed need=${event.data["need_id"]} success=${event.data["success"]} new_value=${event.data["new_value"]}"
+                }
+            }
+
+            "id_impulse_denied" -> {
+                logger.info {
+                    "id.impulse.denied need=${event.data["need_id"]} consecutive_denials=${event.data["consecutive_denials"]}"
+                }
+            }
+
+            "id_activity_decay" -> {
+                logger.trace {
+                    "id.activity.decay need=${event.data["need_id"]} event=${event.data["event_type"]} decay=${event.data["decay"]} before=${event.data["before"]} after=${event.data["after"]}"
+                }
+            }
+
+            "id_pregate_blocked" -> {
+                logger.trace {
+                    "id.pregate.blocked need=${event.data["need_id"]} reason=${event.data["reason"]}"
+                }
+            }
         }
     }
 }

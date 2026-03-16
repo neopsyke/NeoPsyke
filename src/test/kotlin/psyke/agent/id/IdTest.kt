@@ -620,4 +620,73 @@ class IdTest {
         // No exception, pulse loop not started
         id.close()
     }
+
+    // ── notifyEgo callback ────────────────────────────────────────────
+
+    @Test
+    fun `notifyEgo is called when impulse is enqueued successfully`() {
+        var notifyCalls = 0
+        val id = Id(
+            config = defaultConfig(triggerThreshold = 0.0),
+            instrumentation = recordingInstrumentation,
+            scope = CoroutineScope(Dispatchers.Unconfined),
+            enqueueImpulse = { impulse ->
+                enqueuedImpulses.add(impulse)
+                true
+            },
+            hasPendingWork = { false },
+            notifyEgo = { notifyCalls++ },
+        )
+
+        id.pulse()
+        assertEquals(1, enqueuedImpulses.size, "Impulse should be enqueued")
+        assertEquals(1, notifyCalls, "notifyEgo should be called exactly once")
+    }
+
+    @Test
+    fun `notifyEgo is NOT called when impulse enqueue is rejected`() {
+        var notifyCalls = 0
+        val id = Id(
+            config = defaultConfig(triggerThreshold = 0.0),
+            instrumentation = recordingInstrumentation,
+            scope = CoroutineScope(Dispatchers.Unconfined),
+            enqueueImpulse = { false }, // simulate queue full
+            hasPendingWork = { false },
+            notifyEgo = { notifyCalls++ },
+        )
+
+        id.pulse()
+        assertEquals(0, notifyCalls, "notifyEgo should NOT be called when enqueue fails")
+        val blocked = events.filter { it.type == "id_pregate_blocked" }
+        assertEquals(1, blocked.size, "Should emit pregate_blocked event")
+    }
+
+    @Test
+    fun `notifyEgo is NOT called when Ego is busy`() {
+        var notifyCalls = 0
+        val id = Id(
+            config = defaultConfig(triggerThreshold = 0.0),
+            instrumentation = recordingInstrumentation,
+            scope = CoroutineScope(Dispatchers.Unconfined),
+            enqueueImpulse = { true },
+            hasPendingWork = { true }, // Ego is busy
+            notifyEgo = { notifyCalls++ },
+        )
+
+        id.pulse()
+        assertEquals(0, notifyCalls, "notifyEgo should NOT be called when Ego is busy")
+    }
+
+    // ── id_pulse event includes config fields ─────────────────────────
+
+    @Test
+    fun `id_pulse event includes trigger_threshold and pulse_interval_ms and threshold_on_urgency`() {
+        val id = buildId(config = defaultConfig(triggerThreshold = 0.42, thresholdOnUrgency = false))
+        id.pulse()
+
+        val pulseEvent = events.first { it.type == "id_pulse" }
+        assertEquals(0.42, pulseEvent.data["trigger_threshold"])
+        assertEquals(1000L, pulseEvent.data["pulse_interval_ms"])
+        assertEquals(false, pulseEvent.data["threshold_on_urgency"])
+    }
 }

@@ -34,6 +34,7 @@ private data class IdRuntimeYamlId(
 )
 
 private data class IdRuntimeYamlNeed(
+    val enabled: Boolean? = null,
     val description: String? = null,
     val growthRate: Double? = null,
     val satisfactionDecay: Double? = null,
@@ -69,6 +70,7 @@ object IdRuntimeConfigLoader {
         val needs = (yaml.needs ?: emptyMap()).mapValues { (_, yamlNeed) ->
             val curveYaml = yamlNeed.responseCurve
             NeedConfig(
+                enabled = yamlNeed.enabled ?: defaultNeed.enabled,
                 description = yamlNeed.description ?: defaultNeed.description,
                 growthRate = yamlNeed.growthRate?.takeIf { it >= 0.0 } ?: defaultNeed.growthRate,
                 satisfactionDecay = yamlNeed.satisfactionDecay?.takeIf { it in 0.0..1.0 }

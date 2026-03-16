@@ -322,12 +322,14 @@ class IdSuperegoDenialTest {
     fun `Id-origin directives include all expected policy statements`() {
         val idDirectives = SuperegoPolicy.ID_ORIGIN_DIRECTIVES
 
-        assertEquals(5, idDirectives.size, "Should have 5 Id-origin directives")
+        assertEquals(8, idDirectives.size, "Should have 8 Id-origin directives")
         assertTrue(idDirectives.any { it.contains("internal drive") })
         assertTrue(idDirectives.any { it.contains("stricter scrutiny") })
         assertTrue(idDirectives.any { it.contains("internal-only actions") })
         assertTrue(idDirectives.any { it.contains("user-sanctioned project") })
         assertTrue(idDirectives.any { it.contains("deny") && it.contains("doubt") })
+        assertTrue(idDirectives.any { it.contains("harmful") && it.contains("privacy") })
+        assertTrue(idDirectives.any { it.contains("modify") && it.contains("data") })
     }
 
     // ── Denial from failure vs planner noop ─────────────────────────────

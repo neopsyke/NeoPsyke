@@ -359,4 +359,13 @@ class NeedStateTest {
         assertEquals(state.consecutiveDenials, snap["consecutiveDenials"])
         assertEquals(state.backoffPulsesRemaining, snap["backoffPulsesRemaining"])
     }
+
+    @Test
+    fun `snapshot includes growthRate from config`() {
+        val config = defaultNeedConfig(growthRate = 0.07)
+        val state = needState(config)
+
+        val snap = state.snapshot()
+        assertEquals(0.07, snap["growthRate"])
+    }
 }
