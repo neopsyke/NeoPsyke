@@ -5,7 +5,7 @@ enum class InnerVoiceEventType {
     INTENTION,
     PLAN,
     PLAN_STEP,
-    REFLECTION,
+    RECONSIDERATION,
     RECALL,
     OBSERVATION,
 }

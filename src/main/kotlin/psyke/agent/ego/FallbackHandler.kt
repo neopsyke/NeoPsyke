@@ -30,6 +30,33 @@ internal class FallbackHandler(
         source: String,
     ) {
         deliberation.onActionDenied()
+        instrumentation.emit(AgentEvents.actionDenied(action, reason, reasonCode))
+        memory.journal(
+            EpisodicEventType.ACTION_DENIED,
+            "Denied ${action.type.name.lowercase()} by $source: $reason",
+            actionType = action.type.name.lowercase(),
+            metadata = mapOf(
+                "source" to source,
+                "reason_code" to reasonCode
+            )
+        )
+        memory.maybeRecordLesson(
+            trigger = "action_denied_$source",
+            actionType = action.type,
+            reasonCode = reasonCode,
+            reason = reason,
+            deniedPayload = action.payload,
+            recentDialogue = dialogueFor(sessionId).takeLast(12),
+            stepIndex = deliberation.snapshot().stepIndex
+        )
+
+        // Id-origin denials are silently absorbed: the lesson is recorded above,
+        // and the Id's own backoff mechanism handles future impulses.
+        if (action.origin?.source == OriginSource.ID) {
+            telemetry.emitQueueSnapshot("action_denied_id_silent")
+            return
+        }
+
         val denialThought = TextSecurity.clamp(
             "Action denied by $source ($reason). " +
                 "Try a different safe action than the denied one. " +
@@ -49,25 +76,6 @@ internal class FallbackHandler(
             allowFallbackExplanation = true,
             conversationContext = conversationContext,
             origin = action.origin,
-        )
-        instrumentation.emit(AgentEvents.actionDenied(action, reason, reasonCode))
-        memory.journal(
-            EpisodicEventType.ACTION_DENIED,
-            "Denied ${action.type.name.lowercase()} by $source: $reason",
-            actionType = action.type.name.lowercase(),
-            metadata = mapOf(
-                "source" to source,
-                "reason_code" to reasonCode
-            )
-        )
-        memory.maybeRecordReflectionLesson(
-            trigger = "action_denied_$source",
-            actionType = action.type,
-            reasonCode = reasonCode,
-            reason = reason,
-            deniedPayload = action.payload,
-            recentDialogue = dialogueFor(sessionId).takeLast(12),
-            stepIndex = deliberation.snapshot().stepIndex
         )
         if (!queued) {
             instrumentation.emit(AgentEvents.warning("Failed to enqueue denial thought."))

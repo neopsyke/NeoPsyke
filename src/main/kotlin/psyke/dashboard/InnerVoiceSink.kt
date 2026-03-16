@@ -156,7 +156,7 @@ class InnerVoiceSink(
         val reason = event.data["reason"]?.toString() ?: "unknown reason"
         val reasonCode = event.data["reason_code"]?.toString()
         emitEvent(
-            type = InnerVoiceEventType.REFLECTION,
+            type = InnerVoiceEventType.RECONSIDERATION,
             content = "Reconsidering: $reason",
             rootInputId = rootInputId,
             ts = event.ts,

@@ -112,7 +112,7 @@ internal class DecisionDispatcher(
                 if (repeatedDeniedAction && !technicalDenial && !repeatedVerifierDisagreement) {
                     instrumentation.emit(AgentEvents.warning("Planner repeated a denied action; requesting an alternative."))
                     deliberation.onRepeatedDeniedAction()
-                    memory.maybeRecordReflectionLesson(
+                    memory.maybeRecordLesson(
                         trigger = "repeated_denied_action",
                         actionType = decision.actionType,
                         reasonCode = originThought.denialReasonCode,

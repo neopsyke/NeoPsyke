@@ -1,6 +1,6 @@
 id:
   enabled: true
-  pulse_interval_ms: 30000
+  pulse_interval_ms: 10000
   trigger_threshold: 0.5
   threshold_on_urgency: true
   max_consecutive_denials: 5

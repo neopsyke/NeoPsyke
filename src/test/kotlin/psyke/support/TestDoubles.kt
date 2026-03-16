@@ -108,7 +108,7 @@ class StubMetricsRuntime(
 
     override fun recordEpisodicRecall(hitCount: Int, recallChars: Int) {}
 
-    override fun recordReflectionRecall(hitCount: Int, recallChars: Int) {}
+    override fun recordLessonRecall(hitCount: Int, recallChars: Int) {}
 
     override fun recordEndToEndResponseLatency(latencyMs: Long) {}
 

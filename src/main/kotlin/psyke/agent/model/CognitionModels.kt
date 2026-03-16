@@ -19,7 +19,7 @@ data class PlannerContext(
     val queue: QueueSnapshot,
     val shortTermContextSummary: String = "",
     val longTermMemoryRecall: String = "",
-    val reflectionLessons: String = "",
+    val lessons: String = "",
     val episodicRecall: String = "",
     val taskWorkspaceSummary: String = "",
     val sessionWorkspaceDigest: String = "",

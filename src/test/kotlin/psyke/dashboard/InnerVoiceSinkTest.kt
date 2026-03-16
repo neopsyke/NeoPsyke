@@ -177,7 +177,7 @@ class InnerVoiceSinkTest {
     }
 
     @Test
-    fun `action_denied produces REFLECTION event when root is activated`() {
+    fun `action_denied produces RECONSIDERATION event when root is activated`() {
         val (dashboardStore, innerVoiceStore, sink) = buildStack()
         seedSession(dashboardStore)
         val sub = innerVoiceStore.subscribe("default")!!
@@ -210,7 +210,7 @@ class InnerVoiceSinkTest {
             val parsed = mapper.readValue<Map<String, Any?>>(payload)
             @Suppress("UNCHECKED_CAST")
             val event = parsed["event"] as Map<String, Any?>
-            assertEquals("REFLECTION", event["type"])
+            assertEquals("RECONSIDERATION", event["type"])
             assertEquals("Reconsidering: External API calls restricted", event["content"])
         }
 

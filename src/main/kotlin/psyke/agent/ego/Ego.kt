@@ -515,7 +515,7 @@ class Ego(
         val shortTermSummary = memory.currentShortTermSummary()
         val episodicCues = memory.recallEpisodicAsVectorCues(recentDialogue)
         val longTermRecall = memory.recall(trigger, shortTermSummary, recentDialogue, episodicCues)
-        val reflectionLessons = memory.recallReflectionLessons(trigger, recentDialogue)
+        val lessons = memory.recallLessons(trigger, recentDialogue)
         val episodicRecall = memory.recallEpisodic(trigger, recentDialogue)
         val taskWorkspaceSummary = taskWorkspaceStore.promptSummary(
             rootInputId = rootInputId,
@@ -542,7 +542,7 @@ class Ego(
             queue = scheduler.queueSnapshot(),
             shortTermContextSummary = shortTermSummary,
             longTermMemoryRecall = longTermRecall,
-            reflectionLessons = reflectionLessons,
+            lessons = lessons,
             episodicRecall = episodicRecall,
             taskWorkspaceSummary = taskWorkspaceSummary,
             sessionWorkspaceDigest = sessionWorkspaceDigest,

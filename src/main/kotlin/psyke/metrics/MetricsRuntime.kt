@@ -30,7 +30,7 @@ interface MetricsRuntime : Closeable {
     fun recordLongTermMemoryAssessmentParseFailure()
     fun recordMemoryImprint(saved: Boolean, summaryChars: Int, latencyMs: Long)
     fun recordEpisodicRecall(hitCount: Int, recallChars: Int)
-    fun recordReflectionRecall(hitCount: Int, recallChars: Int)
+    fun recordLessonRecall(hitCount: Int, recallChars: Int)
     fun recordEndToEndResponseLatency(latencyMs: Long)
     fun snapshot(): MetricsSnapshot?
 
@@ -52,7 +52,7 @@ class NoopMetricsRuntime : MetricsRuntime {
     override fun recordLongTermMemoryAssessmentParseFailure() {}
     override fun recordMemoryImprint(saved: Boolean, summaryChars: Int, latencyMs: Long) {}
     override fun recordEpisodicRecall(hitCount: Int, recallChars: Int) {}
-    override fun recordReflectionRecall(hitCount: Int, recallChars: Int) {}
+    override fun recordLessonRecall(hitCount: Int, recallChars: Int) {}
     override fun recordEndToEndResponseLatency(latencyMs: Long) {}
     override fun snapshot(): MetricsSnapshot? = null
 }
@@ -276,12 +276,12 @@ private class JsonlFallbackMetricsRuntime(
         )
     }
 
-    override fun recordReflectionRecall(hitCount: Int, recallChars: Int) {
+    override fun recordLessonRecall(hitCount: Int, recallChars: Int) {
         appendLine(
             mapOf(
                 "ts" to Instant.now().toString(),
                 "provider" to provider,
-                "event" to "reflection_recall",
+                "event" to "lesson_recall",
                 "hit_count" to hitCount,
                 "recall_chars" to recallChars
             )
@@ -348,9 +348,9 @@ data class MetricsTotals(
     val episodicRecallAttempts: Long = 0,
     val episodicRecallHits: Long = 0,
     val episodicRecallCharsTotal: Long = 0,
-    val reflectionRecallAttempts: Long = 0,
-    val reflectionRecallHits: Long = 0,
-    val reflectionRecallCharsTotal: Long = 0,
+    val lessonRecallAttempts: Long = 0,
+    val lessonRecallHits: Long = 0,
+    val lessonRecallCharsTotal: Long = 0,
     val responseLatencyCount: Long = 0,
     val responseLatencySumMs: Long = 0,
     val medianEndToEndResponseLatencyMs: Double? = null,

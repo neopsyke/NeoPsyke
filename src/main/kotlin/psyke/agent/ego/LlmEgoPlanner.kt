@@ -1149,7 +1149,7 @@ class LlmEgoPlanner(
         }
         val shortTermContextSummary = context.shortTermContextSummary.ifBlank { "none" }
         val longTermMemoryRecall = context.longTermMemoryRecall.ifBlank { "none" }
-        val reflectionLessons = context.reflectionLessons.ifBlank { "none" }
+        val lessons =context.lessons.ifBlank { "none" }
         val episodicRecall = context.episodicRecall.ifBlank { "none" }
         val taskWorkspaceSummary = context.taskWorkspaceSummary.ifBlank { "none" }
         val sessionWorkspaceDigest = context.sessionWorkspaceDigest.ifBlank { "none" }
@@ -1305,11 +1305,11 @@ class LlmEgoPlanner(
                     content = "Long-term memory recall:\n$longTermMemoryRecall"
                 ),
                 PromptBudgetAllocator.Section(
-                    key = "planner_reflection_lessons",
+                    key = "planner_lessons",
                     role = ChatRole.USER,
                     band = PromptBudgetAllocator.Band.REQUIRED_CONTEXT,
                     floorTokens = 20,
-                    content = "Reflection lessons (avoid repeated failed strategies):\n$reflectionLessons"
+                    content = "Lessons learned (avoid repeated failed strategies):\n$lessons"
                 ),
                 PromptBudgetAllocator.Section(
                     key = "planner_episodic_recall",
@@ -1451,7 +1451,7 @@ class LlmEgoPlanner(
             .ifBlank { "none" }
         val shortTermContextSummary = context.shortTermContextSummary.ifBlank { "none" }
         val longTermMemoryRecall = context.longTermMemoryRecall.ifBlank { "none" }
-        val reflectionLessons = context.reflectionLessons.ifBlank { "none" }
+        val lessons =context.lessons.ifBlank { "none" }
         val taskWorkspaceSummary = context.taskWorkspaceSummary.ifBlank { "none" }
         val sessionWorkspaceDigest = context.sessionWorkspaceDigest.ifBlank { "none" }
         val evidenceHints = context.evidenceHints.ifBlank { "none" }
@@ -1516,10 +1516,10 @@ class LlmEgoPlanner(
                     content = "Long-term memory recall:\n$longTermMemoryRecall"
                 ),
                 PromptBudgetAllocator.Section(
-                    key = "action_verifier_reflection_lessons",
+                    key = "action_verifier_lessons",
                     role = ChatRole.USER,
                     band = PromptBudgetAllocator.Band.OPTIONAL,
-                    content = "Reflection lessons:\n$reflectionLessons"
+                    content = "Lessons learned:\n$lessons"
                 ),
                 PromptBudgetAllocator.Section(
                     key = "action_verifier_workspace_summary",

@@ -2057,7 +2057,7 @@ internal object AppModeRunners {
     ) {
         val clearVector = cliOptions.clearMemoryAll || cliOptions.clearMemoryVector
         val clearEpisodic = cliOptions.clearMemoryAll || cliOptions.clearMemoryEpisodic
-        val clearReflection = cliOptions.clearMemoryReflection && !clearVector
+        val clearLessons = cliOptions.clearMemoryLessons && !clearVector
 
         if (clearVector) {
             if (hippocampus.enabled) {
@@ -2080,24 +2080,24 @@ internal object AppModeRunners {
             }
         }
 
-        if (clearReflection) {
+        if (clearLessons) {
             if (hippocampus.enabled) {
-                output.info("Clearing reflection lessons from vector memory...")
+                output.info("Clearing lessons from vector memory...")
                 try {
-                    val deleted = hippocampus.purgeTaggedObservations(listOf("kind:reflection_lesson"))
-                    output.info("Reflection lessons cleared ($deleted observations removed).")
-                    logger.info { "CLI --clear-memory: reflection lessons cleared, $deleted observations removed." }
+                    val deleted = hippocampus.purgeTaggedObservations(listOf("kind:lesson"))
+                    output.info("Lessons cleared ($deleted observations removed).")
+                    logger.info { "CLI --clear-memory: lessons cleared, $deleted observations removed." }
                     instrumentation.emit(
                         psyke.instrumentation.AgentEvents.warning(
-                            "Memory cleared via CLI: reflection lessons ($deleted observations removed)."
+                            "Memory cleared via CLI: lessons ($deleted observations removed)."
                         )
                     )
                 } catch (ex: Exception) {
-                    output.error("Failed to clear reflection lessons: ${ex.message}")
-                    logger.warn(ex) { "CLI --clear-memory: reflection lessons clear failed." }
+                    output.error("Failed to clear lessons: ${ex.message}")
+                    logger.warn(ex) { "CLI --clear-memory: lessons clear failed." }
                 }
             } else {
-                output.info("Vector memory is not enabled; skipping --clear-memory-reflection.")
+                output.info("Vector memory is not enabled; skipping --clear-memory-lessons.")
             }
         }
 

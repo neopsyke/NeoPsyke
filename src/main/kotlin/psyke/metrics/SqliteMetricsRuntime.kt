@@ -108,6 +108,9 @@ class SqliteMetricsRuntime(
             addRunsColumnIfMissing(statement, "reflection_recall_attempts", "INTEGER NOT NULL DEFAULT 0")
             addRunsColumnIfMissing(statement, "reflection_recall_hits", "INTEGER NOT NULL DEFAULT 0")
             addRunsColumnIfMissing(statement, "reflection_recall_chars_total", "INTEGER NOT NULL DEFAULT 0")
+            addRunsColumnIfMissing(statement, "lesson_recall_attempts", "INTEGER NOT NULL DEFAULT 0")
+            addRunsColumnIfMissing(statement, "lesson_recall_hits", "INTEGER NOT NULL DEFAULT 0")
+            addRunsColumnIfMissing(statement, "lesson_recall_chars_total", "INTEGER NOT NULL DEFAULT 0")
             addRunsColumnIfMissing(statement, "response_latency_count", "INTEGER NOT NULL DEFAULT 0")
             addRunsColumnIfMissing(statement, "response_latency_sum_ms", "INTEGER NOT NULL DEFAULT 0")
             addRunsColumnIfMissing(statement, "response_latency_p50_ms", "REAL")
@@ -368,14 +371,14 @@ class SqliteMetricsRuntime(
         }
     }
 
-    override fun recordReflectionRecall(hitCount: Int, recallChars: Int) {
+    override fun recordLessonRecall(hitCount: Int, recallChars: Int) {
         synchronized(connection) {
             connection.prepareStatement(
                 """
                 UPDATE runs
-                SET reflection_recall_attempts = reflection_recall_attempts + 1,
-                    reflection_recall_hits = reflection_recall_hits + ?,
-                    reflection_recall_chars_total = reflection_recall_chars_total + ?
+                SET lesson_recall_attempts = lesson_recall_attempts + 1,
+                    lesson_recall_hits = lesson_recall_hits + ?,
+                    lesson_recall_chars_total = lesson_recall_chars_total + ?
                 WHERE run_id = ?
                 """.trimIndent()
             ).use { statement ->
@@ -461,9 +464,9 @@ class SqliteMetricsRuntime(
                        episodic_recall_attempts,
                        episodic_recall_hits,
                        episodic_recall_chars_total,
-                       reflection_recall_attempts,
-                       reflection_recall_hits,
-                       reflection_recall_chars_total,
+                       lesson_recall_attempts,
+                       lesson_recall_hits,
+                       lesson_recall_chars_total,
                        response_latency_count,
                        response_latency_sum_ms,
                        response_latency_p50_ms
@@ -504,9 +507,9 @@ class SqliteMetricsRuntime(
                             episodicRecallAttempts = rs.getLong("episodic_recall_attempts"),
                             episodicRecallHits = rs.getLong("episodic_recall_hits"),
                             episodicRecallCharsTotal = rs.getLong("episodic_recall_chars_total"),
-                            reflectionRecallAttempts = rs.getLong("reflection_recall_attempts"),
-                            reflectionRecallHits = rs.getLong("reflection_recall_hits"),
-                            reflectionRecallCharsTotal = rs.getLong("reflection_recall_chars_total"),
+                            lessonRecallAttempts = rs.getLong("lesson_recall_attempts"),
+                            lessonRecallHits = rs.getLong("lesson_recall_hits"),
+                            lessonRecallCharsTotal = rs.getLong("lesson_recall_chars_total"),
                             responseLatencyCount = rs.getLong("response_latency_count"),
                             responseLatencySumMs = rs.getLong("response_latency_sum_ms"),
                             medianEndToEndResponseLatencyMs = rs.getDouble("response_latency_p50_ms").let {
@@ -548,9 +551,9 @@ class SqliteMetricsRuntime(
                        COALESCE(SUM(episodic_recall_attempts), 0) AS episodic_recall_attempts,
                        COALESCE(SUM(episodic_recall_hits), 0) AS episodic_recall_hits,
                        COALESCE(SUM(episodic_recall_chars_total), 0) AS episodic_recall_chars_total,
-                       COALESCE(SUM(reflection_recall_attempts), 0) AS reflection_recall_attempts,
-                       COALESCE(SUM(reflection_recall_hits), 0) AS reflection_recall_hits,
-                       COALESCE(SUM(reflection_recall_chars_total), 0) AS reflection_recall_chars_total,
+                       COALESCE(SUM(lesson_recall_attempts), 0) AS lesson_recall_attempts,
+                       COALESCE(SUM(lesson_recall_hits), 0) AS lesson_recall_hits,
+                       COALESCE(SUM(lesson_recall_chars_total), 0) AS lesson_recall_chars_total,
                        COALESCE(SUM(response_latency_count), 0) AS response_latency_count,
                        COALESCE(SUM(response_latency_sum_ms), 0) AS response_latency_sum_ms
                 FROM runs
@@ -590,9 +593,9 @@ class SqliteMetricsRuntime(
                         episodicRecallAttempts = rs.getLong("episodic_recall_attempts"),
                         episodicRecallHits = rs.getLong("episodic_recall_hits"),
                         episodicRecallCharsTotal = rs.getLong("episodic_recall_chars_total"),
-                        reflectionRecallAttempts = rs.getLong("reflection_recall_attempts"),
-                        reflectionRecallHits = rs.getLong("reflection_recall_hits"),
-                        reflectionRecallCharsTotal = rs.getLong("reflection_recall_chars_total"),
+                        lessonRecallAttempts = rs.getLong("lesson_recall_attempts"),
+                        lessonRecallHits = rs.getLong("lesson_recall_hits"),
+                        lessonRecallCharsTotal = rs.getLong("lesson_recall_chars_total"),
                         responseLatencyCount = rs.getLong("response_latency_count"),
                         responseLatencySumMs = rs.getLong("response_latency_sum_ms"),
                         medianEndToEndResponseLatencyMs = null

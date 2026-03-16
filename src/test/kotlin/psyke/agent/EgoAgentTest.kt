@@ -360,7 +360,7 @@ class EgoAgentTest {
     }
 
     @Test
-    fun `non technical denial stores reflection lesson in long term memory`() {
+    fun `non technical denial stores lesson in long term memory`() {
         val plannerLlm = StubChatModelClient().apply {
             enqueueRawResponse(
                 """
@@ -391,13 +391,13 @@ class EgoAgentTest {
 
         assertTrue(
             hippocampus.imprints.any {
-                it.source == "ego_reflection_lesson" && it.summary.startsWith("REFLECTION_LESSON:")
+                it.source == "ego_lesson" && it.summary.startsWith("LESSON:")
             }
         )
     }
 
     @Test
-    fun `technical denial does not store reflection lesson`() {
+    fun `technical denial does not store lesson`() {
         val plannerLlm = StubChatModelClient().apply {
             enqueueRawResponse(
                 """
@@ -426,7 +426,7 @@ class EgoAgentTest {
 
         runAgentWithInput(agent, "hello\nexit\n")
 
-        assertTrue(hippocampus.imprints.none { it.source == "ego_reflection_lesson" })
+        assertTrue(hippocampus.imprints.none { it.source == "ego_lesson" })
     }
 
     @Test
