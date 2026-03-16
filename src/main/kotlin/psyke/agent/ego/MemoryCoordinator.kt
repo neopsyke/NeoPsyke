@@ -74,7 +74,7 @@ internal class MemoryCoordinator(
     private fun activeMemoryStore(): MemoryStore =
         sessionMemoryStores.getOrPut(activeSessionId) { memoryStoreFactory() }
 
-    private val recentReflectionFingerprints = ArrayDeque<String>()
+    private val recentLessonFingerprints = ArrayDeque<String>()
     private data class SessionMemoryState(
         var latestShortTermSummary: String = "",
         var latestLongTermRecall: String = "",
@@ -140,9 +140,9 @@ internal class MemoryCoordinator(
         return text
     }
 
-    fun recallReflectionLessons(trigger: EgoTrigger, recentDialogue: List<DialogueTurn>): String {
+    fun recallLessons(trigger: EgoTrigger, recentDialogue: List<DialogueTurn>): String {
         if (!hippocampus.enabled) return ""
-        val cue = buildReflectionCue(trigger, recentDialogue)
+        val cue = buildLessonCue(trigger, recentDialogue)
         if (cue.isBlank()) return ""
         val startedAt = System.nanoTime()
         return try {
@@ -151,29 +151,29 @@ internal class MemoryCoordinator(
                     cue = cue,
                     recentDialogue = recentDialogue,
                     shortTermContextSummary = currentShortTermSummary(),
-                    maxItems = REFLECTION_RECALL_MAX_ITEMS,
-                    maxChars = REFLECTION_RECALL_MAX_CHARS
+                    maxItems = LESSON_RECALL_MAX_ITEMS,
+                    maxChars = LESSON_RECALL_MAX_CHARS
                 )
             )
-            val reflectionText = PromptInjectionDefense.asUntrustedDataBlock(
+            val lessonText = PromptInjectionDefense.asUntrustedDataBlock(
                 text = recall.text,
-                maxChars = REFLECTION_RECALL_MAX_CHARS
+                maxChars = LESSON_RECALL_MAX_CHARS
             )
             instrumentation.emit(
                 AgentEvent(
-                    type = "reflection_lesson_recall",
+                    type = "lesson_recall",
                     data = mapOf(
                         "hit_count" to recall.hitCount,
                         "latency_ms" to (System.nanoTime() - startedAt) / 1_000_000L,
-                        "recall_chars" to reflectionText.length,
+                        "recall_chars" to lessonText.length,
                         "truncated" to recall.truncated,
-                        "recall_text_preview" to reflectionText,
+                        "recall_text_preview" to lessonText,
                     )
                 )
             )
-            reflectionText
+            lessonText
         } catch (ex: Exception) {
-            logger.debug(ex) { "Reflection lesson recall failed for cue='${TextSecurity.preview(cue, 120)}'." }
+            logger.debug(ex) { "Lesson recall failed for cue='${TextSecurity.preview(cue, 120)}'." }
             ""
         }
     }
@@ -433,7 +433,7 @@ internal class MemoryCoordinator(
         )
     }
 
-    fun maybeRecordReflectionLesson(
+    fun maybeRecordLesson(
         trigger: String,
         actionType: ActionType?,
         reasonCode: String?,
@@ -445,10 +445,10 @@ internal class MemoryCoordinator(
         if (!hippocampus.enabled) return
         val normalizedReason = reason?.trim().orEmpty()
         if (normalizedReason.isBlank()) return
-        if (shouldSkipReflectionLesson(reasonCode, normalizedReason)) {
+        if (shouldSkipLesson(reasonCode, normalizedReason)) {
             instrumentation.emit(
                 AgentEvent(
-                    type = "reflection_lesson_skipped",
+                    type = "lesson_skipped",
                     data = mapOf(
                         "trigger" to trigger,
                         "step_index" to stepIndex,
@@ -467,7 +467,7 @@ internal class MemoryCoordinator(
             .orEmpty()
         if (latestUserTurn.isBlank()) return
 
-        val lesson = buildReflectionLesson(
+        val lesson = buildLesson(
             latestUserTurn = latestUserTurn,
             actionType = actionType,
             reasonCode = reasonCode,
@@ -475,10 +475,10 @@ internal class MemoryCoordinator(
             deniedPayload = deniedPayload
         )
         val fingerprint = normalizePayload(lesson)
-        if (recentReflectionFingerprints.contains(fingerprint)) {
+        if (recentLessonFingerprints.contains(fingerprint)) {
             instrumentation.emit(
                 AgentEvent(
-                    type = "reflection_lesson_skipped",
+                    type = "lesson_skipped",
                     data = mapOf(
                         "trigger" to trigger,
                         "step_index" to stepIndex,
@@ -492,7 +492,7 @@ internal class MemoryCoordinator(
         val contextTags = listOfNotNull(
             "session:$activeSessionId",
             "interlocutor:${activeInterlocutor.id}",
-            "kind:reflection_lesson",
+            "kind:lesson",
             actionType?.name?.lowercase()?.let { "action:$it" },
             reasonCode?.trim()?.takeIf { it.isNotBlank() }?.let { "reason_code:${it.lowercase(Locale.ROOT)}" }
         )
@@ -500,18 +500,18 @@ internal class MemoryCoordinator(
             hippocampus.imprint(
                 MemoryImprint(
                     summary = lesson,
-                    source = "ego_reflection_lesson",
-                    confidence = REFLECTION_DEFAULT_CONFIDENCE,
+                    source = "ego_lesson",
+                    confidence = LESSON_DEFAULT_CONFIDENCE,
                     tags = contextTags
                 )
             )
         } catch (ex: Exception) {
-            logger.debug(ex) { "Reflection lesson imprint failed." }
+            logger.debug(ex) { "Lesson imprint failed." }
             false
         }
         instrumentation.emit(
             AgentEvent(
-                type = "reflection_lesson_result",
+                type = "lesson_result",
                 data = mapOf(
                     "trigger" to trigger,
                     "step_index" to stepIndex,
@@ -523,13 +523,13 @@ internal class MemoryCoordinator(
             )
         )
         if (!saved) return
-        recentReflectionFingerprints.addLast(fingerprint)
-        while (recentReflectionFingerprints.size > MAX_RECENT_REFLECTION_FINGERPRINTS) {
-            recentReflectionFingerprints.removeFirst()
+        recentLessonFingerprints.addLast(fingerprint)
+        while (recentLessonFingerprints.size > MAX_RECENT_LESSON_FINGERPRINTS) {
+            recentLessonFingerprints.removeFirst()
         }
         journalSafe(
             eventType = EpisodicEventType.MEMORY_IMPRINT,
-            summary = "Reflection lesson: ${TextSecurity.preview(lesson, LOGBOOK_IMPRINT_PREVIEW_CHARS)}",
+            summary = "Lesson: ${TextSecurity.preview(lesson, LOGBOOK_IMPRINT_PREVIEW_CHARS)}",
             keywords = contextTags,
             actionType = actionType?.name?.lowercase()
         )
@@ -597,7 +597,7 @@ internal class MemoryCoordinator(
 
     /**
      * Extracts episodic summaries as vector recall cues when temporal intent is detected.
-     * Returns summaries from INPUT_RECEIVED and ANSWER_DELIVERED entries, suitable as
+     * Returns summaries from INPUT_RECEIVED and CONTACT_DELIVERED entries, suitable as
      * cues for [Hippocampus.recall].
      */
     fun recallEpisodicAsVectorCues(recentDialogue: List<DialogueTurn>): List<String> {
@@ -793,7 +793,7 @@ internal class MemoryCoordinator(
         ).joinToString(separator = "\n")
     }
 
-    private fun buildReflectionCue(trigger: EgoTrigger, recentDialogue: List<DialogueTurn>): String {
+    private fun buildLessonCue(trigger: EgoTrigger, recentDialogue: List<DialogueTurn>): String {
         val latestUserTurn = recentDialogue
             .asReversed()
             .firstOrNull { it.role == DialogueRole.USER }
@@ -817,14 +817,14 @@ internal class MemoryCoordinator(
             }
         }
         val cueParts = listOfNotNull(
-            "REFLECTION_LESSON retrieval",
+            "LESSON retrieval",
             latestUserTurn.takeIf { it.isNotBlank() }?.let { "latest_user_message: ${TextSecurity.preview(it, 220)}" },
             deniedContext
         )
         return cueParts.joinToString(separator = "\n")
     }
 
-    private fun shouldSkipReflectionLesson(reasonCode: String?, reason: String): Boolean {
+    private fun shouldSkipLesson(reasonCode: String?, reason: String): Boolean {
         val normalizedCode = reasonCode?.trim()?.uppercase(Locale.ROOT).orEmpty()
         if (normalizedCode.startsWith("SYSTEM_")) {
             return true
@@ -833,10 +833,10 @@ internal class MemoryCoordinator(
             return true
         }
         val normalizedReason = reason.lowercase(Locale.ROOT)
-        return REFLECTION_TECHNICAL_TEXT_SIGNALS.any { normalizedReason.contains(it) }
+        return LESSON_TECHNICAL_TEXT_SIGNALS.any { normalizedReason.contains(it) }
     }
 
-    private fun buildReflectionLesson(
+    private fun buildLesson(
         latestUserTurn: String,
         actionType: ActionType?,
         reasonCode: String?,
@@ -848,13 +848,13 @@ internal class MemoryCoordinator(
         val payloadPreview = deniedPayload
             ?.trim()
             ?.takeIf { it.isNotBlank() }
-            ?.let { TextSecurity.preview(it, REFLECTION_DENIED_PAYLOAD_PREVIEW_CHARS) }
+            ?.let { TextSecurity.preview(it, LESSON_DENIED_PAYLOAD_PREVIEW_CHARS) }
             ?: "n/a"
         return TextSecurity.clamp(
-            "REFLECTION_LESSON: For requests like '${TextSecurity.preview(latestUserTurn, REFLECTION_USER_TURN_PREVIEW_CHARS)}', " +
+            "LESSON: For requests like '${TextSecurity.preview(latestUserTurn, LESSON_USER_TURN_PREVIEW_CHARS)}', " +
                 "avoid repeating denied $actionLabel actions (reason_code=$codeLabel, reason='${TextSecurity.preview(reason, 140)}', " +
                 "payload='$payloadPreview'). Choose a materially different safe step with explicit evidence when needed.",
-            REFLECTION_LESSON_MAX_CHARS
+            LESSON_MAX_CHARS
         )
     }
 
@@ -1149,14 +1149,14 @@ internal class MemoryCoordinator(
         const val LOGBOOK_IMPRINT_PREVIEW_CHARS: Int = 160
         const val MAX_RECENT_IMPRINT_FINGERPRINTS: Int = 24
         const val MAX_TRACKED_SESSIONS: Int = 128
-        const val REFLECTION_RECALL_MAX_ITEMS: Int = 3
-        const val REFLECTION_RECALL_MAX_CHARS: Int = 800
-        const val REFLECTION_LESSON_MAX_CHARS: Int = 420
-        const val REFLECTION_USER_TURN_PREVIEW_CHARS: Int = 140
-        const val REFLECTION_DENIED_PAYLOAD_PREVIEW_CHARS: Int = 120
-        const val MAX_RECENT_REFLECTION_FINGERPRINTS: Int = 24
-        const val REFLECTION_DEFAULT_CONFIDENCE: Double = 0.72
-        val REFLECTION_TECHNICAL_TEXT_SIGNALS: Set<String> = setOf(
+        const val LESSON_RECALL_MAX_ITEMS: Int = 3
+        const val LESSON_RECALL_MAX_CHARS: Int = 800
+        const val LESSON_MAX_CHARS: Int = 420
+        const val LESSON_USER_TURN_PREVIEW_CHARS: Int = 140
+        const val LESSON_DENIED_PAYLOAD_PREVIEW_CHARS: Int = 120
+        const val MAX_RECENT_LESSON_FINGERPRINTS: Int = 24
+        const val LESSON_DEFAULT_CONFIDENCE: Double = 0.72
+        val LESSON_TECHNICAL_TEXT_SIGNALS: Set<String> = setOf(
             "tool error",
             "tool failed",
             "external tool",
@@ -1199,7 +1199,7 @@ internal class MemoryCoordinator(
 
         val VECTOR_CUE_EVENT_TYPES: Set<EpisodicEventType> = setOf(
             EpisodicEventType.INPUT_RECEIVED,
-            EpisodicEventType.ANSWER_DELIVERED,
+            EpisodicEventType.CONTACT_DELIVERED,
         )
 
         val EXPLICIT_REMEMBER_INTENT_PATTERNS: List<IntentPattern> = listOf(

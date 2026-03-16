@@ -9,6 +9,6 @@ data class SuperegoConfig(
     val twoStageReviewEnabled: Boolean = false,
     val twoStageLowConfidenceThreshold: Double = 0.60,
     val twoStageEscalateOnMediumPolicyRisk: Boolean = true,
-    val twoStageSkipForAnswerActions: Boolean = true,
+    val twoStageSkipForContactUserActions: Boolean = true,
     val twoStageSkipForWebSearchActions: Boolean = true,
 )

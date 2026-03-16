@@ -4,8 +4,10 @@ import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
+import psyke.agent.model.ActionOrigin
 import psyke.agent.model.ActionType
 import psyke.agent.model.ConversationContext
+import psyke.agent.model.OriginSource
 import psyke.agent.model.PendingAction
 import psyke.agent.model.PendingInput
 import psyke.agent.model.Urgency
@@ -177,7 +179,7 @@ class InnerVoiceSinkTest {
     }
 
     @Test
-    fun `action_denied produces REFLECTION event when root is activated`() {
+    fun `action_denied produces RECONSIDERATION event when root is activated`() {
         val (dashboardStore, innerVoiceStore, sink) = buildStack()
         seedSession(dashboardStore)
         val sub = innerVoiceStore.subscribe("default")!!
@@ -210,7 +212,7 @@ class InnerVoiceSinkTest {
             val parsed = mapper.readValue<Map<String, Any?>>(payload)
             @Suppress("UNCHECKED_CAST")
             val event = parsed["event"] as Map<String, Any?>
-            assertEquals("REFLECTION", event["type"])
+            assertEquals("RECONSIDERATION", event["type"])
             assertEquals("Reconsidering: External API calls restricted", event["content"])
         }
 
@@ -536,6 +538,148 @@ class InnerVoiceSinkTest {
         runBlocking {
             val payload = withTimeoutOrNull(300) { sub.receive() }
             assertNull(payload, "Plan step for non-activated root should not produce events")
+        }
+
+        sub.close()
+        sink.close()
+        innerVoiceStore.close()
+    }
+
+    @Test
+    fun `impulse_processing registers rootInputId as Id-origin and auto-activates`() {
+        val (dashboardStore, innerVoiceStore, sink) = buildStack()
+        seedSession(dashboardStore)
+
+        // Register impulse origin
+        sink.onEvent(
+            AgentEvent(
+                type = "impulse_processing",
+                data = mapOf("root_impulse_id" to "impulse-1")
+            )
+        )
+
+        // Map the impulse rootInputId to default session
+        dashboardStore.onEvent(
+            AgentEvent(
+                type = "impulse_processing",
+                data = mapOf("root_impulse_id" to "impulse-1")
+            )
+        )
+
+        // Subscribe to Id global stream
+        val idSub = innerVoiceStore.subscribeIdGlobal()
+
+        // Now a planner decision with the impulse rootInputId should be auto-activated and Id-origin
+        sink.onEvent(
+            AgentEvents.plannerDecision(
+                trigger = "impulse",
+                decisionType = "thought",
+                thought = "Id-driven thought about a need.",
+                rootInputId = "impulse-1",
+            )
+        )
+
+        runBlocking {
+            val payload = withTimeoutOrNull(1000) { idSub.receive() }
+            assertNotNull(payload, "Id-origin event should arrive on global Id channel")
+            val parsed = mapper.readValue<Map<String, Any?>>(payload)
+            @Suppress("UNCHECKED_CAST")
+            val event = parsed["event"] as Map<String, Any?>
+            assertEquals("DELIBERATION", event["type"])
+            assertEquals("id", event["origin"])
+        }
+
+        idSub.close()
+        sink.close()
+        innerVoiceStore.close()
+    }
+
+    @Test
+    fun `Id-origin events do NOT appear on per-session conversation stream`() {
+        val (dashboardStore, innerVoiceStore, sink) = buildStack()
+        seedSession(dashboardStore)
+
+        // Register impulse
+        sink.onEvent(AgentEvent(type = "impulse_processing", data = mapOf("root_impulse_id" to "impulse-2")))
+        dashboardStore.onEvent(AgentEvent(type = "impulse_processing", data = mapOf("root_impulse_id" to "impulse-2")))
+
+        val sessionSub = innerVoiceStore.subscribe("default")!!
+
+        sink.onEvent(
+            AgentEvents.plannerDecision(
+                trigger = "impulse",
+                decisionType = "thought",
+                thought = "Id thought that should not be in conversation.",
+                rootInputId = "impulse-2",
+            )
+        )
+
+        runBlocking {
+            val payload = withTimeoutOrNull(300) { sessionSub.receive() }
+            assertNull(payload, "Id-origin events should not appear on per-session conversation stream")
+        }
+
+        sessionSub.close()
+        sink.close()
+        innerVoiceStore.close()
+    }
+
+    @Test
+    fun `user-origin events have origin=user and appear on session stream`() {
+        val (dashboardStore, innerVoiceStore, sink) = buildStack()
+        seedSession(dashboardStore)
+        val sub = innerVoiceStore.subscribe("default")!!
+
+        sink.onEvent(
+            AgentEvents.plannerDecision(
+                trigger = "input",
+                decisionType = "thought",
+                thought = "User-driven thought.",
+                rootInputId = "root-1",
+            )
+        )
+
+        runBlocking {
+            val payload = withTimeoutOrNull(1000) { sub.receive() }
+            assertNotNull(payload)
+            val parsed = mapper.readValue<Map<String, Any?>>(payload)
+            @Suppress("UNCHECKED_CAST")
+            val event = parsed["event"] as Map<String, Any?>
+            assertEquals("user", event["origin"])
+        }
+
+        sub.close()
+        sink.close()
+        innerVoiceStore.close()
+    }
+
+    @Test
+    fun `reflect action_executed produces REFLECTION event`() {
+        val (dashboardStore, innerVoiceStore, sink) = buildStack()
+        seedSession(dashboardStore)
+        val sub = innerVoiceStore.subscribe("default")!!
+
+        val action = PendingAction(
+            id = 10,
+            urgency = Urgency.MEDIUM,
+            type = ActionType.REFLECT,
+            payload = """{"summary":"Learned that X is important","keywords":["X","important"]}""",
+            summary = "Record insight about X",
+            rootInputId = "root-1"
+        )
+        sink.onEvent(AgentEvents.actionExecuted(action, "Insight recorded: X is important"))
+
+        runBlocking {
+            val payload = withTimeoutOrNull(1000) { sub.receive() }
+            assertNotNull(payload, "Reflect action should produce REFLECTION event")
+            val parsed = mapper.readValue<Map<String, Any?>>(payload)
+            @Suppress("UNCHECKED_CAST")
+            val event = parsed["event"] as Map<String, Any?>
+            assertEquals("REFLECTION", event["type"])
+            assertEquals("Insight recorded: X is important", event["content"])
+            @Suppress("UNCHECKED_CAST")
+            val meta = event["metadata"] as Map<String, Any?>
+            assertEquals("reflect", meta["action_type"])
         }
 
         sub.close()

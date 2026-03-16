@@ -73,10 +73,10 @@ class MemoryCoordinatorTemporalVectorTest {
             ))
             logbook.record(LogbookEntry(
                 ts = now.minus(45, ChronoUnit.MINUTES),
-                eventType = EpisodicEventType.ANSWER_DELIVERED,
+                eventType = EpisodicEventType.CONTACT_DELIVERED,
                 summary = "Berlin: 12C, partly cloudy",
                 keywords = listOf("berlin", "weather"),
-                actionType = "answer",
+                actionType = "contact_user",
             ))
 
             val mc = createCoordinator(logbook = logbook)
@@ -84,7 +84,7 @@ class MemoryCoordinatorTemporalVectorTest {
             val cues = mc.recallEpisodicAsVectorCues(dialogue)
 
             assertTrue(cues.isNotEmpty(), "Expected non-empty vector cues")
-            // Should only include INPUT_RECEIVED and ANSWER_DELIVERED, not PLANNER_DECISION
+            // Should only include INPUT_RECEIVED and CONTACT_DELIVERED, not PLANNER_DECISION
             assertTrue(cues.any { it.contains("weather") }, "Expected weather-related cue")
             assertTrue(cues.none { it.contains("Decision: thought") }, "Should exclude PLANNER_DECISION events")
         }

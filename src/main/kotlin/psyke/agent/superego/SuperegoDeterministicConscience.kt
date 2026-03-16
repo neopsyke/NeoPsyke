@@ -133,8 +133,9 @@ internal class SuperegoDeterministicConscience(
             ActionType.WEB_SEARCH,
             ActionType.WEBSITE_FETCH,
             ActionType.MCP_TIME,
-            ActionType.ANSWER_DRAFT,
-            ActionType.ANSWER,
+            ActionType.RESOLUTION_DRAFT,
+            ActionType.CONTACT_USER,
+            ActionType.REFLECT,
         )
     }
 }

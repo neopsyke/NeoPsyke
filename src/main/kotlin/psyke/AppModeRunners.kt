@@ -37,6 +37,7 @@ import psyke.config.McpRuntimeConfig
 import psyke.dashboard.DashboardServer
 import psyke.dashboard.DashboardStateStore
 import psyke.dashboard.ChatRuntimeBridge
+import psyke.dashboard.IdInnerVoiceFileSink
 import psyke.dashboard.InnerVoiceSink
 import psyke.dashboard.InnerVoiceStore
 import psyke.eval.MemoryLiveEvalOptions
@@ -389,7 +390,17 @@ internal object AppModeRunners {
         }
         return logPath.resolveSibling(sidecarName)
     }
-    
+
+    private fun resolveIdInnerVoiceFilePath(): Path? {
+        val runLogFile = System.getenv("PSYKE_LOG_FILE")?.trim().orEmpty()
+        if (runLogFile.isBlank()) return null
+        val logPath = Path.of(runLogFile)
+        val logName = logPath.fileName?.toString().orEmpty()
+        if (logName.isBlank()) return null
+        val baseName = if (logName.endsWith(".log")) logName.removeSuffix(".log") else logName
+        return logPath.resolveSibling("$baseName.id-inner-voice-${System.currentTimeMillis()}.jsonl")
+    }
+
     private fun resolveProviderHealthStatus(
         endpoint: LlmEndpointConfig,
         modeLabel: String,
@@ -635,11 +646,26 @@ internal object AppModeRunners {
         } else {
             null
         }
+        val idInnerVoiceFileSink = if (innerVoiceStore != null) {
+            resolveIdInnerVoiceFilePath()?.let { path ->
+                try {
+                    IdInnerVoiceFileSink(path).also {
+                        logger.info { "Id inner-voice file sink enabled at ${it.path}" }
+                    }
+                } catch (ex: Exception) {
+                    logger.warn(ex) { "Failed to initialize Id inner-voice file sink at $path; continuing without it." }
+                    null
+                }
+            }
+        } else {
+            null
+        }
         val innerVoiceSink = if (innerVoiceStore != null) {
             InnerVoiceSink(
                 dashboardStore = dashboardStore,
                 innerVoiceStore = innerVoiceStore,
-                config = config.innerVoice
+                config = config.innerVoice,
+                idFileSink = idInnerVoiceFileSink
             )
         } else {
             null
@@ -661,6 +687,7 @@ internal object AppModeRunners {
                             store = dashboardStore,
                             chatBridge = chatBridge,
                             innerVoiceStore = innerVoiceStore,
+                            idInnerVoiceFilePath = idInnerVoiceFileSink?.path,
                             port = dashboardPort
                         ).also { it.start() }
                     } catch (ex: Exception) {
@@ -941,6 +968,10 @@ internal object AppModeRunners {
                                                 val timeTool = mcpTimeTool
                                                 val activeFetchTool = fetchTool
                                                 try {
+                                                    val earlyMemoryStartup =
+                                                        resolveInteractiveMemoryStartup(config, mcpRuntimeConfig.memory)
+                                                    val earlyHippocampus = earlyMemoryStartup.hippocampus
+                                                    val earlyLogbook = createLogbookIfEnabled(config)
                                                     val webSearchActionHandler = WebSearchActionHandler(runtime.engine)
                                                     val actionRegistry = ActionRegistry.discover(
                                                         ActionPluginFactoryContext(
@@ -948,7 +979,9 @@ internal object AppModeRunners {
                                                             webSearchActionHandler = webSearchActionHandler,
                                                             mcpTimeTool = timeTool,
                                                             fetchTool = activeFetchTool,
-                                                            output = {}
+                                                            output = {},
+                                                            hippocampus = earlyHippocampus,
+                                                            logbook = earlyLogbook,
                                                         )
                                                     )
                                                     actionRegistry.loadWarnings.forEach { warning ->
@@ -1042,10 +1075,8 @@ internal object AppModeRunners {
                                                             } else {
                                                                 NoopTaskWorkspaceFinalizer
                                                             }
-                                                        val interactiveMemoryStartup =
-                                                            resolveInteractiveMemoryStartup(config, mcpRuntimeConfig.memory)
-                                                        val hippocampus = interactiveMemoryStartup.hippocampus
-                                                        val memoryProviderDetail = interactiveMemoryStartup.detail
+                                                        val hippocampus = earlyHippocampus
+                                                        val memoryProviderDetail = earlyMemoryStartup.detail
                                                         instrumentation.emit(AgentEvents.actionCapabilities(actionStatuses))
                                                         instrumentation.emit(
                                                             AgentEvent(
@@ -1061,7 +1092,7 @@ internal object AppModeRunners {
                                                                 AgentEvents.warning("Long-term memory is unavailable: $memoryProviderDetail")
                                                             )
                                                         }
-                                                        val logbook = createLogbookIfEnabled(config)
+                                                        val logbook = earlyLogbook
                                                         val logbookSummarizer = createLogbookSummarizer(config, longTermMemoryClient)
                                                         if (cliOptions?.hasClearMemoryRequest == true) {
                                                             executeLongTermMemoryClear(
@@ -1132,6 +1163,7 @@ internal object AppModeRunners {
             }
             }
         } finally {
+            idInnerVoiceFileSink?.close()
             innerVoiceStore?.close()
             sensoryInput.close()
             agentScope.cancel()
@@ -1379,6 +1411,10 @@ internal object AppModeRunners {
                                             val timeTool = mcpTimeTool
                                             val activeFetchTool = fetchTool
                                             try {
+                                                val earlyMemoryStartup2 =
+                                                    resolveInteractiveMemoryStartup(config, mcpRuntimeConfig.memory)
+                                                val earlyHippocampus2 = earlyMemoryStartup2.hippocampus
+                                                val earlyLogbook2 = createLogbookIfEnabled(config)
                                                 val webSearchActionHandler = WebSearchActionHandler(runtime.engine)
                                                 val actionRegistry = ActionRegistry.discover(
                                                     ActionPluginFactoryContext(
@@ -1386,7 +1422,9 @@ internal object AppModeRunners {
                                                         webSearchActionHandler = webSearchActionHandler,
                                                         mcpTimeTool = timeTool,
                                                         fetchTool = activeFetchTool,
-                                                        output = liveOutput
+                                                        output = liveOutput,
+                                                        hippocampus = earlyHippocampus2,
+                                                        logbook = earlyLogbook2,
                                                     )
                                                 )
                                                 actionRegistry.loadWarnings.forEach { warning ->
@@ -1452,19 +1490,17 @@ internal object AppModeRunners {
                                                         } else {
                                                             NoopTaskWorkspaceFinalizer
                                                         }
-                                                    val interactiveMemoryStartup =
-                                                        resolveInteractiveMemoryStartup(config, mcpRuntimeConfig.memory)
-                                                    val hippocampus = interactiveMemoryStartup.hippocampus
+                                                    val hippocampus = earlyHippocampus2
                                                     instrumentation.emit(
                                                         AgentEvent(
                                                             type = "memory_status",
                                                             data = mapOf(
                                                                 "available" to hippocampus.enabled,
-                                                                "detail" to interactiveMemoryStartup.detail
+                                                                "detail" to earlyMemoryStartup2.detail
                                                             )
                                                         )
                                                     )
-                                                    val logbook = createLogbookIfEnabled(config)
+                                                    val logbook = earlyLogbook2
                                                     val logbookSummarizer = createLogbookSummarizer(config, longTermMemoryClient)
                                                     val ego = Ego(
                                                         planner = planner,
@@ -1506,7 +1542,7 @@ internal object AppModeRunners {
                                                                     instrumentation.emit(
                                                                         AgentEvents.loopStatus(
                                                                             status = "stopped",
-                                                                            message = "freud_live_answer_delivered_input_closed"
+                                                                            message = "freud_live_contact_delivered_input_closed"
                                                                         )
                                                                     )
                                                                     Unit
@@ -2049,7 +2085,7 @@ internal object AppModeRunners {
     ) {
         val clearVector = cliOptions.clearMemoryAll || cliOptions.clearMemoryVector
         val clearEpisodic = cliOptions.clearMemoryAll || cliOptions.clearMemoryEpisodic
-        val clearReflection = cliOptions.clearMemoryReflection && !clearVector
+        val clearLessons = cliOptions.clearMemoryLessons && !clearVector
 
         if (clearVector) {
             if (hippocampus.enabled) {
@@ -2072,24 +2108,24 @@ internal object AppModeRunners {
             }
         }
 
-        if (clearReflection) {
+        if (clearLessons) {
             if (hippocampus.enabled) {
-                output.info("Clearing reflection lessons from vector memory...")
+                output.info("Clearing lessons from vector memory...")
                 try {
-                    val deleted = hippocampus.purgeTaggedObservations(listOf("kind:reflection_lesson"))
-                    output.info("Reflection lessons cleared ($deleted observations removed).")
-                    logger.info { "CLI --clear-memory: reflection lessons cleared, $deleted observations removed." }
+                    val deleted = hippocampus.purgeTaggedObservations(listOf("kind:lesson"))
+                    output.info("Lessons cleared ($deleted observations removed).")
+                    logger.info { "CLI --clear-memory: lessons cleared, $deleted observations removed." }
                     instrumentation.emit(
                         psyke.instrumentation.AgentEvents.warning(
-                            "Memory cleared via CLI: reflection lessons ($deleted observations removed)."
+                            "Memory cleared via CLI: lessons ($deleted observations removed)."
                         )
                     )
                 } catch (ex: Exception) {
-                    output.error("Failed to clear reflection lessons: ${ex.message}")
-                    logger.warn(ex) { "CLI --clear-memory: reflection lessons clear failed." }
+                    output.error("Failed to clear lessons: ${ex.message}")
+                    logger.warn(ex) { "CLI --clear-memory: lessons clear failed." }
                 }
             } else {
-                output.info("Vector memory is not enabled; skipping --clear-memory-reflection.")
+                output.info("Vector memory is not enabled; skipping --clear-memory-lessons.")
             }
         }
 

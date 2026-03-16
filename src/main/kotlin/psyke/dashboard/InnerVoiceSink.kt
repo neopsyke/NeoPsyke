@@ -12,22 +12,30 @@ import java.util.concurrent.atomic.AtomicLong
  *
  * Adaptive gating: tracks planner step count per rootInputId. Single-step direct answers
  * produce no inner voice events. Multi-step deliberation chains surface curated events.
+ *
+ * Origin-aware: tracks Id-origin rootInputIds (from impulse_processing events) and
+ * auto-activates inner voice for them. Id events are tagged with origin="id" so the
+ * InnerVoiceStore can route them to the global Id stream instead of the per-session
+ * conversation stream.
  */
 class InnerVoiceSink(
     private val dashboardStore: DashboardStateStore,
     private val innerVoiceStore: InnerVoiceStore,
     private val config: InnerVoiceConfig = InnerVoiceConfig(),
+    private val idFileSink: IdInnerVoiceFileSink? = null,
 ) : InstrumentationSink {
     private val lock = Any()
     private val nextId = AtomicLong(1)
     private val stepCountByRoot = mutableMapOf<String, Int>()
     private val activatedRoots = mutableSetOf<String>()
+    private val idRootInputIds = mutableSetOf<String>()
 
     override fun onEvent(event: AgentEvent) {
         if (!config.enabled) return
 
         when (event.type) {
             "loop_step" -> trackStep(event)
+            "impulse_processing" -> trackImpulseOrigin(event)
             "planner_decision" -> handlePlannerDecision(event)
             "plan_created" -> handlePlanCreated(event)
             "plan_step_started" -> handlePlanStepStarted(event)
@@ -42,12 +50,23 @@ class InnerVoiceSink(
         synchronized(lock) {
             stepCountByRoot.clear()
             activatedRoots.clear()
+            idRootInputIds.clear()
         }
     }
 
     private fun trackStep(event: AgentEvent) {
         // We don't have rootInputId in loop_step, so we just note progress.
         // Activation is driven by planner_decision events instead.
+    }
+
+    private fun trackImpulseOrigin(event: AgentEvent) {
+        val rootImpulseId = event.data["root_impulse_id"]?.toString()?.takeIf { it.isNotBlank() } ?: return
+        synchronized(lock) {
+            idRootInputIds.add(rootImpulseId)
+            // Auto-activate inner voice for Id impulses — the user always wants to
+            // observe the Id's thought process.
+            activatedRoots.add(rootImpulseId)
+        }
     }
 
     private fun handlePlannerDecision(event: AgentEvent) {
@@ -58,25 +77,28 @@ class InnerVoiceSink(
             val steps = (stepCountByRoot[rootInputId] ?: 0) + 1
             stepCountByRoot[rootInputId] = steps
 
-            when (decisionType) {
-                "thought", "plan" -> {
-                    // Multi-step reasoning detected: activate inner voice for this root
-                    activatedRoots.add(rootInputId)
-                }
-                "action" -> {
-                    val actionType = event.data["action_type"]?.toString()
-                    if (steps == 1 && actionType == "answer") {
-                        // Simple single-step answer: don't activate
-                        return
-                    }
-                    if (actionType != "answer") {
-                        // Non-answer action implies multi-step: activate
+            // Id-origin roots are already activated in trackImpulseOrigin
+            if (rootInputId !in activatedRoots) {
+                when (decisionType) {
+                    "thought", "plan" -> {
+                        // Multi-step reasoning detected: activate inner voice for this root
                         activatedRoots.add(rootInputId)
                     }
+                    "action" -> {
+                        val actionType = event.data["action_type"]?.toString()
+                        if (steps == 1 && actionType == "answer") {
+                            // Simple single-step answer: don't activate
+                            return
+                        }
+                        if (actionType != "answer") {
+                            // Non-answer action implies multi-step: activate
+                            activatedRoots.add(rootInputId)
+                        }
+                    }
                 }
-            }
 
-            if (rootInputId !in activatedRoots) return
+                if (rootInputId !in activatedRoots) return
+            }
         }
 
         when (decisionType) {
@@ -156,7 +178,7 @@ class InnerVoiceSink(
         val reason = event.data["reason"]?.toString() ?: "unknown reason"
         val reasonCode = event.data["reason_code"]?.toString()
         emitEvent(
-            type = InnerVoiceEventType.REFLECTION,
+            type = InnerVoiceEventType.RECONSIDERATION,
             content = "Reconsidering: $reason",
             rootInputId = rootInputId,
             ts = event.ts,
@@ -190,9 +212,30 @@ class InnerVoiceSink(
 
     private fun handleActionExecuted(event: AgentEvent) {
         val action = event.data["action"] as? PendingAction ?: return
-        if (action.type == ActionType.ANSWER) return
+        if (action.type == ActionType.CONTACT_USER) return
 
         val rootInputId = action.rootInputId ?: return
+
+        // Reflect actions always produce inner voice events (proactive insights)
+        if (action.type == ActionType.REFLECT) {
+            synchronized(lock) { activatedRoots.add(rootInputId) }
+            val outcomeSummary = event.data["outcome_summary"]?.toString()
+            val payload = action.payload
+            val content = outcomeSummary ?: payload.take(400)
+            emitEvent(
+                type = InnerVoiceEventType.REFLECTION,
+                content = content,
+                rootInputId = rootInputId,
+                ts = event.ts,
+                metadata = buildMap {
+                    put("action_type", action.type.id)
+                    event.data["keywords"]?.let { put("keywords", it) }
+                    event.data["summary"]?.let { put("summary", it) }
+                }
+            )
+            return
+        }
+
         if (!isActivated(rootInputId)) return
 
         val outcomeSummary = event.data["outcome_summary"]?.toString() ?: return
@@ -212,6 +255,7 @@ class InnerVoiceSink(
         ts: Long,
         metadata: Map<String, Any?>,
     ) {
+        val origin = if (rootInputId != null && isIdOrigin(rootInputId)) "id" else "user"
         val sessionId = rootInputId?.let { dashboardStore.resolveSessionForRootInput(it) }
         val sequence = if (sessionId != null) dashboardStore.nextSequenceNumber(sessionId) else 0L
         val trimmedContent = if (content.length > config.maxContentChars) {
@@ -219,22 +263,28 @@ class InnerVoiceSink(
         } else {
             content
         }
-        innerVoiceStore.emit(
-            InnerVoiceEvent(
-                id = nextId.getAndIncrement(),
-                type = type,
-                content = trimmedContent,
-                rootInputId = rootInputId,
-                sessionId = sessionId,
-                ts = ts,
-                sequence = sequence,
-                metadata = metadata
-            )
+        val event = InnerVoiceEvent(
+            id = nextId.getAndIncrement(),
+            type = type,
+            content = trimmedContent,
+            rootInputId = rootInputId,
+            sessionId = sessionId,
+            ts = ts,
+            sequence = sequence,
+            metadata = metadata,
+            origin = origin
         )
+        innerVoiceStore.emit(event)
+        if (origin == "id") {
+            idFileSink?.write(event)
+        }
     }
 
     private fun isActivated(rootInputId: String): Boolean =
         synchronized(lock) { rootInputId in activatedRoots }
+
+    private fun isIdOrigin(rootInputId: String): Boolean =
+        synchronized(lock) { rootInputId in idRootInputIds }
 
     private fun extractRootInputId(event: AgentEvent): String? {
         // Try common locations for rootInputId in event data
@@ -251,6 +301,7 @@ class InnerVoiceSink(
         synchronized(lock) {
             stepCountByRoot.remove(rootInputId)
             activatedRoots.remove(rootInputId)
+            idRootInputIds.remove(rootInputId)
         }
     }
 }

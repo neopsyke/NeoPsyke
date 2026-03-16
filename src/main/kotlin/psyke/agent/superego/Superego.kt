@@ -96,7 +96,7 @@ class Superego(
         )
         val messages = promptAllocation.messages
         val effectiveEngine = when {
-            action.type == ActionType.ANSWER && config.superego.twoStageSkipForAnswerActions -> primaryEngine
+            action.type == ActionType.CONTACT_USER && config.superego.twoStageSkipForContactUserActions -> primaryEngine
             action.type == ActionType.WEB_SEARCH && config.superego.twoStageSkipForWebSearchActions -> primaryEngine
             else -> reviewEngine
         }

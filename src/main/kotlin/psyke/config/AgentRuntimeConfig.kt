@@ -81,7 +81,7 @@ private data class AgentRuntimeYamlSuperego(
     val twoStageReviewEnabled: Boolean? = null,
     val twoStageLowConfidenceThreshold: Double? = null,
     val twoStageEscalateOnMediumPolicyRisk: Boolean? = null,
-    val twoStageSkipForAnswerActions: Boolean? = null,
+    val twoStageSkipForContactUserActions: Boolean? = null,
     val twoStageSkipForWebSearchActions: Boolean? = null,
 )
 
@@ -317,10 +317,10 @@ object AgentRuntimeSettingsLoader {
                     superegoYaml.twoStageEscalateOnMediumPolicyRisk,
                     defaults.superego.twoStageEscalateOnMediumPolicyRisk
                 ),
-                twoStageSkipForAnswerActions = readBoolean(
+                twoStageSkipForContactUserActions = readBoolean(
                     env["EGO_SUPEREGO_TWO_STAGE_SKIP_FOR_ANSWER_ACTIONS"],
-                    superegoYaml.twoStageSkipForAnswerActions,
-                    defaults.superego.twoStageSkipForAnswerActions
+                    superegoYaml.twoStageSkipForContactUserActions,
+                    defaults.superego.twoStageSkipForContactUserActions
                 ),
                 twoStageSkipForWebSearchActions = readBoolean(
                     env["EGO_SUPEREGO_TWO_STAGE_SKIP_FOR_WEB_SEARCH_ACTIONS"],

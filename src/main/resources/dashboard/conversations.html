@@ -14,6 +14,7 @@
       --accent: #35c3a8;
       --user: #245e73;
       --assistant: #2b4430;
+      --id-accent: #d4a843;
     }
     * { box-sizing: border-box; }
     html, body { height: 100%; }
@@ -62,6 +63,10 @@
       grid-template-columns: 320px minmax(0, 1fr);
       gap: 12px;
       padding: 12px;
+      transition: grid-template-columns 0.3s ease;
+    }
+    .layout.id-panel-open {
+      grid-template-columns: 320px minmax(0, 1fr) 300px;
     }
     .panel {
       border: 1px solid var(--line);
@@ -266,6 +271,65 @@
       font-size: 11px;
       padding: 0 10px 10px;
     }
+    /* Id inner-voice panel */
+    #id-voice-panel {
+      display: none;
+    }
+    #id-voice-panel.visible {
+      display: flex;
+    }
+    .id-voice-row {
+      padding: 6px 10px;
+      font-size: 11px;
+      border-bottom: 1px solid rgba(37, 66, 79, 0.5);
+      line-height: 1.4;
+    }
+    .id-voice-row .id-voice-label {
+      font-size: 10px;
+      font-weight: 600;
+      color: var(--id-accent);
+      text-transform: uppercase;
+      letter-spacing: .03em;
+      margin-right: 6px;
+    }
+    .id-voice-row .id-voice-time {
+      font-size: 10px;
+      color: var(--muted);
+      margin-left: 4px;
+    }
+    .id-voice-row .id-voice-content {
+      color: rgba(214, 230, 235, 0.85);
+      margin-top: 2px;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .id-voice-row .id-voice-meta {
+      font-size: 10px;
+      color: rgba(212, 168, 67, 0.6);
+      margin-top: 2px;
+    }
+    .id-voice-empty {
+      padding: 20px 10px;
+      text-align: center;
+      font-size: 11px;
+      color: var(--muted);
+    }
+    .id-toggle-btn {
+      font-size: 10px;
+      color: var(--id-accent);
+      cursor: pointer;
+      padding: 2px 6px;
+      border: 1px solid rgba(212, 168, 67, 0.3);
+      border-radius: 4px;
+      background: transparent;
+      font-family: inherit;
+    }
+    .id-toggle-btn:hover {
+      border-color: var(--id-accent);
+    }
+    .id-toggle-btn.active {
+      background: rgba(212, 168, 67, 0.1);
+    }
     .modal-overlay {
       display: none;
       position: fixed;
@@ -316,10 +380,19 @@
       font-weight: 600;
     }
     .modal-actions .btn-primary:hover { opacity: 0.85; }
+    @media (max-width: 1200px) {
+      .layout.id-panel-open {
+        grid-template-columns: 280px minmax(0, 1fr) 260px;
+      }
+    }
     @media (max-width: 960px) {
       .layout {
         grid-template-columns: 1fr;
         grid-template-rows: 220px minmax(0, 1fr);
+      }
+      .layout.id-panel-open {
+        grid-template-columns: 1fr;
+        grid-template-rows: 180px minmax(0, 1fr) 200px;
       }
     }
   </style>
@@ -328,13 +401,14 @@
   <header>
     <div><strong>Psyke Conversations</strong></div>
     <div class="actions">
+      <button id="id-voice-toggle" class="id-toggle-btn" type="button" title="Toggle Id inner voice panel">Id Voice</button>
       <button id="new-session-btn" class="btn" type="button">New Conversation</button>
       <a class="btn" href="/dashboard" target="_blank" rel="noopener noreferrer">Observability</a>
       <a class="btn" href="/metrics" target="_blank" rel="noopener noreferrer">Metrics</a>
     </div>
   </header>
 
-  <div class="layout">
+  <div class="layout" id="main-layout">
     <section class="panel">
       <div class="panel-head">
         <span>Conversations</span>
@@ -358,6 +432,14 @@
       </div>
       <div id="status" class="status">Loading sessions...</div>
     </section>
+
+    <section class="panel" id="id-voice-panel">
+      <div class="panel-head">
+        <span style="color:var(--id-accent)">Id Inner Voice</span>
+        <span id="id-voice-status" style="font-size:10px">disconnected</span>
+      </div>
+      <div id="id-voice-events" class="messages" style="padding:6px"></div>
+    </section>
   </div>
 
   <div class="modal-overlay" id="modal-overlay">
@@ -379,7 +461,11 @@
       eventSource: null,
       thinkingSource: null,
       thinkingVisible: true,
-      drafts: {}
+      drafts: {},
+      idThinkingSource: null,
+      idVoiceEvents: [],
+      idPanelVisible: false,
+      idPanelManuallyToggled: false
     };
 
     function setStatus(text) {
@@ -443,6 +529,7 @@
       INTENTION: "intent",
       PLAN: "plan",
       PLAN_STEP: "step",
+      RECONSIDERATION: "reconsider",
       REFLECTION: "reflect",
       RECALL: "recall",
       OBSERVATION: "observed"
@@ -518,6 +605,106 @@
       root.scrollTop = root.scrollHeight;
     }
 
+    // --- Id Inner Voice ---
+
+    function showIdPanel() {
+      if (state.idPanelVisible) return;
+      state.idPanelVisible = true;
+      document.getElementById("id-voice-panel").classList.add("visible");
+      document.getElementById("main-layout").classList.add("id-panel-open");
+      document.getElementById("id-voice-toggle").classList.add("active");
+    }
+
+    function hideIdPanel() {
+      if (!state.idPanelVisible) return;
+      state.idPanelVisible = false;
+      document.getElementById("id-voice-panel").classList.remove("visible");
+      document.getElementById("main-layout").classList.remove("id-panel-open");
+      document.getElementById("id-voice-toggle").classList.remove("active");
+    }
+
+    function renderIdVoiceEvents() {
+      var root = document.getElementById("id-voice-events");
+      if (state.idVoiceEvents.length === 0) {
+        root.innerHTML = "<div class=\"id-voice-empty\">No Id inner-voice events yet</div>";
+        return;
+      }
+      root.innerHTML = state.idVoiceEvents.map(function(ev) {
+        var label = THINKING_TYPE_LABELS[ev.type] || ev.type;
+        var time = fmtTime(ev.ts);
+        var content = ev.content || "";
+        var truncated = content.length > 300 ? content.slice(0, 300) + "..." : content;
+        var metaHtml = "";
+        if (ev.metadata) {
+          var metaParts = [];
+          if (ev.metadata.need_id) metaParts.push("need:" + ev.metadata.need_id);
+          if (ev.metadata.action_type) metaParts.push(ev.metadata.action_type);
+          if (ev.metadata.keywords) metaParts.push("keywords:" + ev.metadata.keywords);
+          if (metaParts.length > 0) {
+            metaHtml = "<div class=\"id-voice-meta\">" + esc(metaParts.join(" | ")) + "</div>";
+          }
+        }
+        return (
+          "<div class=\"id-voice-row\">" +
+          "<span class=\"id-voice-label\">" + esc(label) + "</span>" +
+          "<span class=\"id-voice-time\">" + esc(time) + "</span>" +
+          "<div class=\"id-voice-content\">" + esc(truncated) + "</div>" +
+          metaHtml +
+          "</div>"
+        );
+      }).join("");
+      root.scrollTop = root.scrollHeight;
+    }
+
+    function handleIdThinkingEvent(ev) {
+      var dup = state.idVoiceEvents.some(function(e) { return e.id === ev.id; });
+      if (dup) return;
+      state.idVoiceEvents.push(ev);
+      // Auto-expand panel on first event if not manually toggled off
+      if (!state.idPanelManuallyToggled && state.idVoiceEvents.length === 1) {
+        showIdPanel();
+      }
+      renderIdVoiceEvents();
+    }
+
+    function connectIdThinking() {
+      if (state.idThinkingSource) {
+        state.idThinkingSource.close();
+        state.idThinkingSource = null;
+      }
+      var es = new EventSource("/api/id-thinking");
+      state.idThinkingSource = es;
+      es.addEventListener("ready", function() {
+        document.getElementById("id-voice-status").textContent = "connected";
+      });
+      es.addEventListener("id-thinking", function(event) {
+        var payload = null;
+        try { payload = JSON.parse(event.data); } catch (_) { return; }
+        if (!payload || payload.type !== "thinking" || !payload.event) return;
+        handleIdThinkingEvent(payload.event);
+      });
+      es.addEventListener("error", function() {
+        document.getElementById("id-voice-status").textContent = "reconnecting...";
+      });
+    }
+
+    async function loadIdThinkingHistory() {
+      try {
+        var events = await fetchJson("/api/id-thinking/history");
+        if (Array.isArray(events) && events.length > 0) {
+          state.idVoiceEvents = events;
+          if (!state.idPanelManuallyToggled) {
+            showIdPanel();
+          }
+          renderIdVoiceEvents();
+        }
+      } catch (err) {
+        // History not available — not critical
+      }
+    }
+
+    // --- End Id Inner Voice ---
+
     function refreshSessionHeader() {
       const title = document.getElementById("active-session-title");
       const id = document.getElementById("active-session-id");
@@ -541,6 +728,10 @@
         state.thinkingSource.close();
         state.thinkingSource = null;
       }
+      if (state.idThinkingSource) {
+        state.idThinkingSource.close();
+        state.idThinkingSource = null;
+      }
     }
 
     function insertBySequence(msg) {
@@ -556,7 +747,15 @@
     }
 
     function connectSessionEvents(sessionId) {
-      closeEventSource();
+      // Close per-session sources only (Id SSE is global)
+      if (state.eventSource) {
+        state.eventSource.close();
+        state.eventSource = null;
+      }
+      if (state.thinkingSource) {
+        state.thinkingSource.close();
+        state.thinkingSource = null;
+      }
       const es = new EventSource("/api/chat/sessions/" + encodeURIComponent(sessionId) + "/events");
       state.eventSource = es;
       es.addEventListener("open", () => setStatus("Connected"));
@@ -747,10 +946,23 @@
       }
       renderMessages();
     });
+    document.getElementById("id-voice-toggle").addEventListener("click", () => {
+      state.idPanelManuallyToggled = true;
+      if (state.idPanelVisible) {
+        hideIdPanel();
+      } else {
+        showIdPanel();
+      }
+    });
 
-    loadSessions()
-      .then(() => setStatus("Connected"))
-      .catch((err) => setStatus("Failed to load sessions: " + (err && err.message ? err.message : "unknown")));
+    // Initialize: load sessions + Id inner-voice (in parallel)
+    Promise.all([
+      loadSessions().then(() => setStatus("Connected")),
+      loadIdThinkingHistory()
+    ]).catch((err) => setStatus("Failed to load: " + (err && err.message ? err.message : "unknown")));
+
+    // Connect global Id thinking SSE
+    connectIdThinking();
 
     window.addEventListener("beforeunload", () => closeEventSource());
   </script>

@@ -119,13 +119,13 @@ class StructuredLogSink : InstrumentationSink {
                 }
             }
 
-            "reflection_lesson_recall" -> {
+            "lesson_recall" -> {
                 logger.trace {
-                    "reflection.lesson.recall hits=${event.data["hit_count"]} latency_ms=${event.data["latency_ms"]} chars=${event.data["recall_chars"]} truncated=${event.data["truncated"]}"
+                    "lesson.recall hits=${event.data["hit_count"]} latency_ms=${event.data["latency_ms"]} chars=${event.data["recall_chars"]} truncated=${event.data["truncated"]}"
                 }
                 val recallPreview = event.data["recall_text_preview"]
                 if (recallPreview is String && recallPreview.isNotBlank()) {
-                    logger.debug { "reflection.lesson.recall.text\n$recallPreview" }
+                    logger.debug { "lesson.recall.text\n$recallPreview" }
                 }
             }
 
@@ -438,6 +438,25 @@ class StructuredLogSink : InstrumentationSink {
             "llm_cache_divergence" -> {
                 logger.info {
                     "llm.cache.divergence seq=${event.data["sequence_index"]} actor=${event.data["actor"]} call_site=${event.data["call_site"]} expected_hash=${event.data["expected_hash"]} actual_hash=${event.data["actual_hash"]}"
+                }
+            }
+
+            // ── Impulse processing (Ego side) ─────────────────────────
+            "impulse_processing" -> {
+                logger.info {
+                    "impulse.processing need=${event.data["need_id"]} urgency=${event.data["urgency"]} raw_value=${event.data["raw_value"]} root_impulse_id=${event.data["root_impulse_id"]} prompt=${event.data["prompt"]}"
+                }
+            }
+
+            "impulse_noop" -> {
+                logger.info {
+                    "impulse.noop need=${event.data["need_id"]} root_impulse_id=${event.data["root_impulse_id"]}"
+                }
+            }
+
+            "impulse_lifecycle_finalized" -> {
+                logger.info {
+                    "impulse.lifecycle.finalized need=${event.data["need_id"]} root_impulse_id=${event.data["root_impulse_id"]} result=${event.data["result"]}"
                 }
             }
 

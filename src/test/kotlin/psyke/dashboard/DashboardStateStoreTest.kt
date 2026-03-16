@@ -31,7 +31,7 @@ class DashboardStateStoreTest {
         val queues = QueueState(
             inputs = listOf(PendingInput(1, "hello")),
             thoughts = listOf(PendingThought(2, Urgency.HIGH, "think", 1)),
-            actions = listOf(PendingAction(3, Urgency.MEDIUM, ActionType.ANSWER, "payload", "sum", 0))
+            actions = listOf(PendingAction(3, Urgency.MEDIUM, ActionType.CONTACT_USER, "payload", "sum", 0))
         )
         val metrics = MetricsSnapshot(
             runId = "run-1",
@@ -56,7 +56,7 @@ class DashboardStateStoreTest {
                 type = "action_capabilities",
                 data = mapOf(
                     "statuses" to listOf(
-                        mapOf("action_type" to "answer", "available" to true, "detail" to "ok"),
+                        mapOf("action_type" to "contact_user", "available" to true, "detail" to "ok"),
                         mapOf("action_type" to "website_fetch", "available" to false, "detail" to "offline")
                     )
                 )
@@ -284,7 +284,7 @@ class DashboardStateStoreTest {
                     "action" to PendingAction(
                         id = 11L,
                         urgency = Urgency.HIGH,
-                        type = ActionType.ANSWER,
+                        type = ActionType.CONTACT_USER,
                         payload = "assistant reply",
                         summary = "summary",
                         rootInputId = rootInputId,

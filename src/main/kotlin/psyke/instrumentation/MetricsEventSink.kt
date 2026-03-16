@@ -101,10 +101,10 @@ class MetricsEventSink(
                 emitSnapshot()
             }
 
-            "reflection_lesson_recall" -> {
+            "lesson_recall" -> {
                 val hitCount = (event.data["hit_count"] as? Int) ?: return
                 val recallChars = (event.data["recall_chars"] as? Int) ?: return
-                metrics.recordReflectionRecall(hitCount = hitCount, recallChars = recallChars)
+                metrics.recordLessonRecall(hitCount = hitCount, recallChars = recallChars)
                 emitSnapshot()
             }
 

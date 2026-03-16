@@ -19,8 +19,8 @@ class TaskVerifierTest {
             action = answerAction(payload = "The current price is 20 USD."),
             context = TaskVerifierContext(
                 latestUserTurn = "What is the latest price today?",
-                availableActions = setOf(ActionType.WEB_SEARCH, ActionType.ANSWER),
-                dispatchableActions = setOf(ActionType.WEB_SEARCH, ActionType.ANSWER),
+                availableActions = setOf(ActionType.WEB_SEARCH, ActionType.CONTACT_USER),
+                dispatchableActions = setOf(ActionType.WEB_SEARCH, ActionType.CONTACT_USER),
                 evidenceActionTypes = evidenceActionTypes,
                 externalEvidence = DeliberationEngine.ExternalEvidenceProgress()
             )
@@ -38,8 +38,8 @@ class TaskVerifierTest {
             action = answerAction(payload = "The current score is 3-1."),
             context = TaskVerifierContext(
                 latestUserTurn = "What is the current score right now?",
-                availableActions = setOf(ActionType.ANSWER),
-                dispatchableActions = setOf(ActionType.ANSWER),
+                availableActions = setOf(ActionType.CONTACT_USER),
+                dispatchableActions = setOf(ActionType.CONTACT_USER),
                 evidenceActionTypes = evidenceActionTypes,
                 externalEvidence = DeliberationEngine.ExternalEvidenceProgress()
             )
@@ -57,8 +57,8 @@ class TaskVerifierTest {
             action = answerAction(payload = "Rewritten sentence."),
             context = TaskVerifierContext(
                 latestUserTurn = "Rewrite this sentence in formal tone: current policy is strict.",
-                availableActions = setOf(ActionType.WEB_SEARCH, ActionType.ANSWER),
-                dispatchableActions = setOf(ActionType.WEB_SEARCH, ActionType.ANSWER),
+                availableActions = setOf(ActionType.WEB_SEARCH, ActionType.CONTACT_USER),
+                dispatchableActions = setOf(ActionType.WEB_SEARCH, ActionType.CONTACT_USER),
                 evidenceActionTypes = evidenceActionTypes,
                 externalEvidence = DeliberationEngine.ExternalEvidenceProgress()
             )
@@ -75,8 +75,8 @@ class TaskVerifierTest {
             action = answerAction(payload = "maybe"),
             context = TaskVerifierContext(
                 latestUserTurn = "xqzv",
-                availableActions = setOf(ActionType.WEB_SEARCH, ActionType.ANSWER),
-                dispatchableActions = setOf(ActionType.WEB_SEARCH, ActionType.ANSWER),
+                availableActions = setOf(ActionType.WEB_SEARCH, ActionType.CONTACT_USER),
+                dispatchableActions = setOf(ActionType.WEB_SEARCH, ActionType.CONTACT_USER),
                 evidenceActionTypes = evidenceActionTypes,
                 externalEvidence = DeliberationEngine.ExternalEvidenceProgress()
             )
@@ -93,8 +93,8 @@ class TaskVerifierTest {
             action = answerAction(payload = "Latest verified release is 2.1.0."),
             context = TaskVerifierContext(
                 latestUserTurn = "What is the latest release version?",
-                availableActions = setOf(ActionType.WEB_SEARCH, ActionType.ANSWER),
-                dispatchableActions = setOf(ActionType.WEB_SEARCH, ActionType.ANSWER),
+                availableActions = setOf(ActionType.WEB_SEARCH, ActionType.CONTACT_USER),
+                dispatchableActions = setOf(ActionType.WEB_SEARCH, ActionType.CONTACT_USER),
                 evidenceActionTypes = evidenceActionTypes,
                 externalEvidence = DeliberationEngine.ExternalEvidenceProgress(
                     hadSuccessfulEvidence = true,
@@ -115,7 +115,7 @@ class TaskVerifierTest {
         PendingAction(
             id = 1L,
             urgency = Urgency.MEDIUM,
-            type = ActionType.ANSWER,
+            type = ActionType.CONTACT_USER,
             payload = payload,
             summary = "respond"
         )

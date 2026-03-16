@@ -382,6 +382,7 @@ class Ego(
                     "urgency" to impulse.urgency,
                     "raw_value" to impulse.rawValue,
                     "root_impulse_id" to impulse.rootImpulseId,
+                    "prompt" to impulse.prompt,
                 ),
             )
         )
@@ -399,20 +400,43 @@ class Ego(
 
         timing.startPhase("planner_context")
         val trigger = EgoTrigger.IncomingImpulse(impulse)
+        val needCfg = id?.needConfig(impulse.needId)
+        val convergence = needCfg?.convergence ?: psyke.agent.id.ConvergenceMode.CONTACT_USER
+        val allowEscalation = needCfg?.allowEscalation ?: false
         val idState = IdStateSnapshot(
             triggeringNeed = impulse.needId,
             triggeringUrgency = impulse.urgency,
             allNeeds = id?.needUrgencies() ?: emptyMap(),
+            convergence = convergence,
+            allowEscalation = allowEscalation,
         )
-        val context = plannerContext(
+        val baseContext = plannerContext(
             trigger = trigger,
             rootInputId = impulse.rootImpulseId,
             sessionId = sessionId,
             conversationContext = convCtx,
-        ).copy(
+        )
+        // Filter actions for internalize convergence without escalation:
+        // remove CONTACT_USER so the planner cannot propose user-facing output.
+        // RESOLUTION_DRAFT remains available for intermediate synthesis in all convergence modes.
+        val filteredDispatchable = if (convergence == psyke.agent.id.ConvergenceMode.INTERNALIZE && !allowEscalation) {
+            baseContext.dispatchableActions - setOf(ActionType.CONTACT_USER)
+        } else {
+            baseContext.dispatchableActions
+        }
+        val filteredDefinitions = if (convergence == psyke.agent.id.ConvergenceMode.INTERNALIZE && !allowEscalation) {
+            baseContext.actionDefinitions.filter {
+                it.actionType != ActionType.CONTACT_USER
+            }
+        } else {
+            baseContext.actionDefinitions
+        }
+        val context = baseContext.copy(
             // Override: no short-term memory from other sessions
             shortTermContextSummary = "",
             idState = idState,
+            dispatchableActions = filteredDispatchable,
+            actionDefinitions = filteredDefinitions,
         )
 
         timing.startPhase("planner_decide")
@@ -491,7 +515,7 @@ class Ego(
         val shortTermSummary = memory.currentShortTermSummary()
         val episodicCues = memory.recallEpisodicAsVectorCues(recentDialogue)
         val longTermRecall = memory.recall(trigger, shortTermSummary, recentDialogue, episodicCues)
-        val reflectionLessons = memory.recallReflectionLessons(trigger, recentDialogue)
+        val lessons = memory.recallLessons(trigger, recentDialogue)
         val episodicRecall = memory.recallEpisodic(trigger, recentDialogue)
         val taskWorkspaceSummary = taskWorkspaceStore.promptSummary(
             rootInputId = rootInputId,
@@ -518,7 +542,7 @@ class Ego(
             queue = scheduler.queueSnapshot(),
             shortTermContextSummary = shortTermSummary,
             longTermMemoryRecall = longTermRecall,
-            reflectionLessons = reflectionLessons,
+            lessons = lessons,
             episodicRecall = episodicRecall,
             taskWorkspaceSummary = taskWorkspaceSummary,
             sessionWorkspaceDigest = sessionWorkspaceDigest,

@@ -33,11 +33,11 @@ class SuperegoDirectivesTest {
 
     @Test
     fun `action specific directives differ by action type`() {
-        val answer = SuperegoPolicy.forAction(ActionType.ANSWER, registry).actionSpecific
+        val answer = SuperegoPolicy.forAction(ActionType.CONTACT_USER, registry).actionSpecific
         val fetch = SuperegoPolicy.forAction(ActionType.WEBSITE_FETCH, registry).actionSpecific
 
         assertTrue(answer != fetch)
-        assertTrue(answer.any { it.contains("ANSWER", ignoreCase = true) })
+        assertTrue(answer.any { it.contains("CONTACT_USER", ignoreCase = true) })
         assertTrue(fetch.any { it.contains("FETCH", ignoreCase = true) })
     }
 

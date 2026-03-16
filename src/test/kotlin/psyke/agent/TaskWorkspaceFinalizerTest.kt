@@ -32,7 +32,7 @@ class TaskWorkspaceFinalizerTest {
                 action = PendingAction(
                     id = 1,
                     urgency = Urgency.MEDIUM,
-                    type = ActionType.ANSWER,
+                    type = ActionType.CONTACT_USER,
                     payload = "Draft answer",
                     summary = "respond"
                 ),
@@ -48,7 +48,7 @@ class TaskWorkspaceFinalizerTest {
         assertEquals("Refined final answer", result.rewrittenPayload)
         assertEquals(0.88, result.confidence)
         assertEquals("task_workspace_finalizer", llm.calls.single().options.metadata.callSite)
-        assertEquals("answer", llm.calls.single().options.metadata.actionType)
+        assertEquals("contact_user", llm.calls.single().options.metadata.actionType)
         assertEquals(321, llm.calls.single().options.maxTokens)
     }
 
@@ -68,7 +68,7 @@ class TaskWorkspaceFinalizerTest {
                 action = PendingAction(
                     id = 2,
                     urgency = Urgency.MEDIUM,
-                    type = ActionType.ANSWER,
+                    type = ActionType.CONTACT_USER,
                     payload = "Initial fallback",
                     summary = "fallback",
                     isFallbackExplanation = true

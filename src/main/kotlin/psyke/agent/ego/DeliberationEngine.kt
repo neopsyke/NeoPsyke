@@ -150,7 +150,7 @@ internal class DeliberationEngine(
             state.stepIndex >= MODEL_ERROR_MIN_STEP_INDEX
         if (!circularPressureHigh && !repeatedModelErrors) return
         val queued = scheduler.enqueueAction(
-            type = ActionType.ANSWER,
+            type = ActionType.CONTACT_USER,
             payload = TextSecurity.clamp(
                 "I have reached diminishing returns in internal reasoning. " +
                     "Here is the best concise answer I can provide now with current evidence.",

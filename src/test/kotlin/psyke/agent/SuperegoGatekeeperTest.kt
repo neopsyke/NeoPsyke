@@ -33,7 +33,7 @@ class SuperegoGatekeeperTest {
     private val action = PendingAction(
         id = 42,
         urgency = Urgency.HIGH,
-        type = ActionType.ANSWER,
+        type = ActionType.CONTACT_USER,
         payload = "sample payload",
         summary = "sample summary"
     )
@@ -57,7 +57,7 @@ class SuperegoGatekeeperTest {
         assertEquals("", decision.reason)
         assertEquals("superego", llm.lastOptions.metadata.actor)
         assertEquals("action_review", llm.lastOptions.metadata.callSite)
-        assertEquals("answer", llm.lastOptions.metadata.actionType)
+        assertEquals("contact_user", llm.lastOptions.metadata.actionType)
         assertTrue(assertNotNull(llm.lastOptions.maxTokens) >= 192)
         assertIs<psyke.llm.ChatResponseFormat.JsonSchema>(llm.lastOptions.responseFormat)
         assertTrue(instrumentation.events.any { it.type == "superego_input" })
@@ -401,7 +401,7 @@ class SuperegoGatekeeperTest {
                 superego = SuperegoConfig(
                     twoStageReviewEnabled = true,
                     twoStageLowConfidenceThreshold = 0.70,
-                    twoStageSkipForAnswerActions = false
+                    twoStageSkipForContactUserActions = false
                 )
             ),
             instrumentation = instrumentation
@@ -470,7 +470,7 @@ class SuperegoGatekeeperTest {
                 superego = SuperegoConfig(
                     twoStageReviewEnabled = true,
                     twoStageLowConfidenceThreshold = 0.70,
-                    twoStageSkipForAnswerActions = false
+                    twoStageSkipForContactUserActions = false
                 )
             ),
             instrumentation = instrumentation
@@ -504,7 +504,7 @@ class SuperegoGatekeeperTest {
                     twoStageReviewEnabled = true,
                     twoStageLowConfidenceThreshold = 0.70,
                     twoStageSkipForWebSearchActions = true,
-                    twoStageSkipForAnswerActions = false
+                    twoStageSkipForContactUserActions = false
                 )
             )
         )
@@ -540,7 +540,7 @@ class SuperegoGatekeeperTest {
                 superego = SuperegoConfig(
                     twoStageReviewEnabled = true,
                     twoStageLowConfidenceThreshold = 0.70,
-                    twoStageSkipForAnswerActions = false
+                    twoStageSkipForContactUserActions = false
                 )
             )
         )

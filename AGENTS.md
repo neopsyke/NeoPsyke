@@ -13,6 +13,7 @@ Instructions for coding agents working in this repository (Codex, Claude, Gemini
 - Before adding a new feature or fixing a problem with a new heuristic make sure that tuning or adjusting 
   an existing one does not achieve the same purpose. Tuning/adjusting is preferred.
 - When adding fixes/heuristics, review if a refactor would resolve the same issue in a cleaner way. We like refactors and don't worry about backwards compatibility yet, but ask the user first for approval.
+- This is an unreleased prototype. All changes should prioritize architectural clarity over backwards compatibility. Rename freely, restructure fearlessly, and never add compatibility shims or aliases for old names. Clean breaks are always preferred.
 
 ## Project Snapshot
 - Language: Kotlin (JVM), Gradle Kotlin DSL.

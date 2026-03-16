@@ -166,7 +166,7 @@ class DashboardStateStore(
                     val action = event.data["action"] as? PendingAction
                     if (
                         action != null &&
-                        action.type == ActionType.ANSWER &&
+                        action.type == ActionType.CONTACT_USER &&
                         action.rootInputId != null
                     ) {
                         val rootInputId = action.rootInputId ?: return

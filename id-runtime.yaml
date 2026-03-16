@@ -1,6 +1,6 @@
 id:
   enabled: true
-  pulse_interval_ms: 30000
+  pulse_interval_ms: 10000
   trigger_threshold: 0.5
   threshold_on_urgency: true
   max_consecutive_denials: 5
@@ -15,6 +15,8 @@ id:
       growth_rate: 0.005
       satisfaction_decay: 0.8
       cooldown_pulses: 5
+      convergence: internalize
+      allow_escalation: true
       prompt: "I feel a strong drive to be useful and provide value. What could I do proactively? Consider active projects, pending tasks, or creative ways to help."
       response_curve:
         type: power
@@ -22,12 +24,13 @@ id:
       activity_decay:
         action_executed: 0.10
 
-    reach-out:
+    user-interaction:
       enabled: true
       description: "Drive to proactively contact the user"
       growth_rate: 0.01
       satisfaction_decay: 0.8
       cooldown_pulses: 5
+      convergence: contact_user
       prompt: "I feel a drive to proactively reach out to the user. Is there something worth sharing — a useful update, an observation, or a question?."
       response_curve:
         type: sigmoid
@@ -35,7 +38,7 @@ id:
         midpoint: 0.5
       activity_decay:
         input_received: 0.15
-        answer_delivered: 0.10
+        contact_delivered: 0.10
 
     learn-something:
       enabled: true
@@ -43,6 +46,7 @@ id:
       growth_rate: 0.02
       satisfaction_decay: 0.8
       cooldown_pulses: 5
+      convergence: internalize
       prompt: "I feel curious and want to learn something new. What topic could I explore or what knowledge could I acquire?"
       response_curve:
         type: logarithmic

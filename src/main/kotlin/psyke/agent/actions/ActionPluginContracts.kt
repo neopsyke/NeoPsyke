@@ -1,6 +1,8 @@
 package psyke.agent.actions
 
 import psyke.agent.actions.websearch.WebSearchActionHandler
+import psyke.agent.memory.episodic.Logbook
+import psyke.agent.memory.longterm.Hippocampus
 import psyke.agent.model.ActionOutcome
 import psyke.agent.model.ActionType
 import psyke.agent.config.AgentConfig
@@ -70,6 +72,8 @@ data class ActionPluginFactoryContext(
     val fetchTool: FetchTool?,
     val output: (String) -> Unit,
     val env: Map<String, String> = System.getenv(),
+    val hippocampus: Hippocampus? = null,
+    val logbook: Logbook? = null,
 )
 
 interface AgentActionPlugin : AutoCloseable {

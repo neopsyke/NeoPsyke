@@ -1,6 +1,27 @@
 package psyke.agent.id
 
 /**
+ * How an Id impulse should converge once the Ego processes it.
+ *
+ * - [CONTACT_USER] – the planner may address the user directly (e.g. user-interaction).
+ * - [INTERNALIZE]  – the planner should research/reflect internally; user output
+ *                    is only permitted when [NeedConfig.allowEscalation] is true.
+ */
+enum class ConvergenceMode {
+    CONTACT_USER,
+    INTERNALIZE;
+
+    companion object {
+        fun fromYaml(raw: String?): ConvergenceMode =
+            when (raw?.trim()?.lowercase()) {
+                "internalize" -> INTERNALIZE
+                "contact_user" -> CONTACT_USER
+                else -> CONTACT_USER
+            }
+    }
+}
+
+/**
  * Top-level Id module configuration, loaded from `id-runtime.yaml`.
  */
 data class IdConfig(
@@ -35,6 +56,8 @@ data class NeedConfig(
     val resetFloor: Double = 0.0,
     val cooldownPulses: Int = 5,
     val prompt: String = "",
+    val convergence: ConvergenceMode = ConvergenceMode.CONTACT_USER,
+    val allowEscalation: Boolean = false,
     val responseCurve: ResponseCurveConfig = ResponseCurveConfig(),
     val activityDecay: Map<String, Double> = emptyMap(),
 ) {

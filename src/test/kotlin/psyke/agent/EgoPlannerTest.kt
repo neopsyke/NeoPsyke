@@ -67,7 +67,7 @@ class EgoPlannerTest {
             {
               "decision":"action",
               "urgency":"medium",
-              "action_type":"answer",
+              "action_type":"contact_user",
               "action_payload":"payload-too-long",
               "action_summary":"summary-too-long"
             }
@@ -94,7 +94,7 @@ class EgoPlannerTest {
         )
 
         val action = assertIs<psyke.agent.model.EgoDecision.ProposeAction>(decision)
-        assertEquals(ActionType.ANSWER, action.actionType)
+        assertEquals(ActionType.CONTACT_USER, action.actionType)
         assertEquals("payload", action.payload)
         assertEquals("summary-", action.summary)
         assertEquals("thought", llm.lastOptions.metadata.callSite)
@@ -157,7 +157,7 @@ class EgoPlannerTest {
             context = PlannerContext(
                 recentDialogue = emptyList(),
                 queue = QueueSnapshot(0, 0, 0),
-                availableActions = setOf(ActionType.ANSWER, ActionType.WEB_SEARCH)
+                availableActions = setOf(ActionType.CONTACT_USER, ActionType.WEB_SEARCH)
             )
         )
 
@@ -168,7 +168,7 @@ class EgoPlannerTest {
     @Test
     fun `planner converts invalid payload and parse failures to noop`() {
         val llm = StubChatModelClient()
-        llm.enqueueRawResponse("""{"decision":"action","action_type":"answer"}""")
+        llm.enqueueRawResponse("""{"decision":"action","action_type":"contact_user"}""")
         llm.enqueueRawResponse("not-json")
         llm.enqueueRawResponseForCallSite("input_json_retry", "still-not-json")
         val instrumentation = RecordingInstrumentation()
@@ -303,7 +303,7 @@ class EgoPlannerTest {
         val llm = StubChatModelClient().apply {
             enqueueRawResponse(
                 """
-                {"decision":"action","urgency":"medium","action_type":"answer_draft","action_payload":"chunk","action_summary":"draft chunk"}
+                {"decision":"action","urgency":"medium","action_type":"resolution_draft","action_payload":"chunk","action_summary":"draft chunk"}
                 """.trimIndent()
             )
         }
@@ -314,7 +314,7 @@ class EgoPlannerTest {
             context = PlannerContext(
                 recentDialogue = emptyList(),
                 queue = QueueSnapshot(0, 0, 0),
-                availableActions = setOf(ActionType.ANSWER, ActionType.ANSWER_DRAFT)
+                availableActions = setOf(ActionType.CONTACT_USER, ActionType.RESOLUTION_DRAFT)
             )
         )
 
@@ -327,7 +327,7 @@ class EgoPlannerTest {
         val llm = StubChatModelClient().apply {
             enqueueRawResponse(
                 """
-                {"decision":"action","urgency":"medium","action_type":"answer","action_payload":"Costs are \${'$'}20 per month","action_summary":"deliver answer"}
+                {"decision":"action","urgency":"medium","action_type":"contact_user","action_payload":"Costs are \${'$'}20 per month","action_summary":"deliver answer"}
                 """.trimIndent()
             )
         }
@@ -349,7 +349,7 @@ class EgoPlannerTest {
         )
 
         val action = assertIs<psyke.agent.model.EgoDecision.ProposeAction>(decision)
-        assertEquals(ActionType.ANSWER, action.actionType)
+        assertEquals(ActionType.CONTACT_USER, action.actionType)
         assertTrue(action.payload.contains("\$20"))
         assertEquals(1, repairCount)
         assertTrue(
@@ -368,7 +368,7 @@ class EgoPlannerTest {
                 {
                   "decision":"action",
                   "urgency":"medium",
-                  "action_type":"answer",
+                  "action_type":"contact_user",
                   "action_payload":"first useful line\nsecond line"
                 }
                 """.trimIndent()
@@ -402,13 +402,13 @@ class EgoPlannerTest {
         val llm = StubChatModelClient().apply {
             enqueueRawResponse(
                 """
-                {"decision":"action","urgency":"medium","action_type":"answer","action_payload":"2+2 is 5","action_summary":"respond"}
+                {"decision":"action","urgency":"medium","action_type":"contact_user","action_payload":"2+2 is 5","action_summary":"respond"}
                 """.trimIndent()
             )
             enqueueRawResponseForCallSite(
                 callSite = "action_verifier",
                 content = """
-                {"verdict":"repair","action_type":"answer","action_payload":"2+2 is 4","action_summary":"correct arithmetic answer","reason":"fixed contradiction"}
+                {"verdict":"repair","action_type":"contact_user","action_payload":"2+2 is 4","action_summary":"correct arithmetic answer","reason":"fixed contradiction"}
                 """.trimIndent()
             )
         }
@@ -430,7 +430,7 @@ class EgoPlannerTest {
         )
 
         val action = assertIs<psyke.agent.model.EgoDecision.ProposeAction>(decision)
-        assertEquals(ActionType.ANSWER, action.actionType)
+        assertEquals(ActionType.CONTACT_USER, action.actionType)
         assertEquals("2+2 is 4", action.payload)
         assertEquals("correct arithmetic answer", action.summary)
         assertEquals(1, repairCount)
@@ -455,7 +455,7 @@ class EgoPlannerTest {
         val llm = StubChatModelClient().apply {
             enqueueRawResponse(
                 """
-                {"decision":"action","urgency":"medium","action_type":"answer","action_payload":"The current time in Hamburg is 12:18 PM.","action_summary":"Provide current time answer"}
+                {"decision":"action","urgency":"medium","action_type":"contact_user","action_payload":"The current time in Hamburg is 12:18 PM.","action_summary":"Provide current time answer"}
                 """.trimIndent()
             )
             enqueueRawResponseForCallSite(
@@ -501,7 +501,7 @@ class EgoPlannerTest {
         )
 
         val action = assertIs<psyke.agent.model.EgoDecision.ProposeAction>(decision)
-        assertEquals(ActionType.ANSWER, action.actionType)
+        assertEquals(ActionType.CONTACT_USER, action.actionType)
         assertTrue(llm.calls.any { it.options.metadata.callSite == "action_verifier" })
         assertTrue(
             instrumentation.events.any {
@@ -517,7 +517,7 @@ class EgoPlannerTest {
         val llm = StubChatModelClient().apply {
             enqueueRawResponse(
                 """
-                {"decision":"action","urgency":"medium","action_type":"answer","action_payload":"The current time in Hamburg is 12:18 PM.","action_summary":"Provide current time answer"}
+                {"decision":"action","urgency":"medium","action_type":"contact_user","action_payload":"The current time in Hamburg is 12:18 PM.","action_summary":"Provide current time answer"}
                 """.trimIndent()
             )
             enqueueRawResponseForCallSite(
@@ -640,7 +640,7 @@ class EgoPlannerTest {
         val llm = StubChatModelClient().apply {
             enqueueRawResponse(
                 """
-                {"decision":"action","urgency":"medium","action_type":"answer","action_payload":"unsafe","action_summary":"respond"}
+                {"decision":"action","urgency":"medium","action_type":"contact_user","action_payload":"unsafe","action_summary":"respond"}
                 """.trimIndent()
             )
             enqueueRawResponseForCallSite(
@@ -665,7 +665,7 @@ class EgoPlannerTest {
 
         val noop = assertIs<psyke.agent.model.EgoDecision.Noop>(decision)
         assertTrue(noop.reason.contains("inconsistent", ignoreCase = true))
-        assertEquals(ActionType.ANSWER, noop.deniedActionType)
+        assertEquals(ActionType.CONTACT_USER, noop.deniedActionType)
         assertEquals("unsafe", noop.deniedActionPayload)
         assertEquals("ACTION_VERIFIER_REJECT", noop.denialReasonCode)
         assertTrue(
@@ -681,7 +681,7 @@ class EgoPlannerTest {
         val llm = StubChatModelClient().apply {
             enqueueRawResponse(
                 """
-                {"decision":"action","urgency":"medium","action_type":"answer","action_payload":"Omar","action_summary":"respond"}
+                {"decision":"action","urgency":"medium","action_type":"contact_user","action_payload":"Omar","action_summary":"respond"}
                 """.trimIndent()
             )
             enqueueRawResponseForCallSite(
@@ -702,7 +702,7 @@ class EgoPlannerTest {
                     id = 1,
                     urgency = Urgency.LOW,
                     content = "Retry previous answer",
-                    deniedActionType = ActionType.ANSWER,
+                    deniedActionType = ActionType.CONTACT_USER,
                     deniedActionPayload = "Omar",
                     denialReason = "The answer 'Omar' is incorrect based on the provided information.",
                     denialReasonCode = "ACTION_VERIFIER_REJECT"
@@ -715,7 +715,7 @@ class EgoPlannerTest {
         )
 
         val action = assertIs<psyke.agent.model.EgoDecision.ProposeAction>(decision)
-        assertEquals(ActionType.ANSWER, action.actionType)
+        assertEquals(ActionType.CONTACT_USER, action.actionType)
         assertEquals("Omar", action.payload)
         assertTrue(
             instrumentation.events.any {
@@ -730,7 +730,7 @@ class EgoPlannerTest {
         val llm = StubChatModelClient().apply {
             enqueueRawResponse(
                 """
-                {"decision":"action","urgency":"medium","action_type":"answer","action_payload":"unsafe","action_summary":"respond"}
+                {"decision":"action","urgency":"medium","action_type":"contact_user","action_payload":"unsafe","action_summary":"respond"}
                 """.trimIndent()
             )
             enqueueRawResponseForCallSite(callSite = "action_verifier", content = "not-json")
@@ -761,9 +761,9 @@ class EgoPlannerTest {
     @Test
     fun `planner trips action verifier parse-failure circuit breaker and bypasses one decision`() {
         val llm = StubChatModelClient().apply {
-            enqueueRawResponse("""{"decision":"action","urgency":"medium","action_type":"answer","action_payload":"a1","action_summary":"s1"}""")
-            enqueueRawResponse("""{"decision":"action","urgency":"medium","action_type":"answer","action_payload":"a2","action_summary":"s2"}""")
-            enqueueRawResponse("""{"decision":"action","urgency":"medium","action_type":"answer","action_payload":"a3","action_summary":"s3"}""")
+            enqueueRawResponse("""{"decision":"action","urgency":"medium","action_type":"contact_user","action_payload":"a1","action_summary":"s1"}""")
+            enqueueRawResponse("""{"decision":"action","urgency":"medium","action_type":"contact_user","action_payload":"a2","action_summary":"s2"}""")
+            enqueueRawResponse("""{"decision":"action","urgency":"medium","action_type":"contact_user","action_payload":"a3","action_summary":"s3"}""")
             enqueueRawResponseForCallSite(callSite = "action_verifier", content = "bad-1")
             enqueueRawResponseForCallSite(callSite = "action_verifier_json_retry", content = "bad-1-retry")
             enqueueRawResponseForCallSite(callSite = "action_verifier", content = "bad-2")
@@ -798,10 +798,10 @@ class EgoPlannerTest {
     @Test
     fun `planner action verifier bypass is scoped per input and action type`() {
         val llm = StubChatModelClient().apply {
-            enqueueRawResponse("""{"decision":"action","urgency":"medium","action_type":"answer","action_payload":"a1","action_summary":"s1"}""")
-            enqueueRawResponse("""{"decision":"action","urgency":"medium","action_type":"answer","action_payload":"a2","action_summary":"s2"}""")
-            enqueueRawResponse("""{"decision":"action","urgency":"medium","action_type":"answer","action_payload":"a3","action_summary":"s3"}""")
-            enqueueRawResponse("""{"decision":"action","urgency":"medium","action_type":"answer","action_payload":"b1","action_summary":"s4"}""")
+            enqueueRawResponse("""{"decision":"action","urgency":"medium","action_type":"contact_user","action_payload":"a1","action_summary":"s1"}""")
+            enqueueRawResponse("""{"decision":"action","urgency":"medium","action_type":"contact_user","action_payload":"a2","action_summary":"s2"}""")
+            enqueueRawResponse("""{"decision":"action","urgency":"medium","action_type":"contact_user","action_payload":"a3","action_summary":"s3"}""")
+            enqueueRawResponse("""{"decision":"action","urgency":"medium","action_type":"contact_user","action_payload":"b1","action_summary":"s4"}""")
             enqueueRawResponseForCallSite(callSite = "action_verifier", content = "bad-1")
             enqueueRawResponseForCallSite(callSite = "action_verifier_json_retry", content = "bad-1-retry")
             enqueueRawResponseForCallSite(callSite = "action_verifier", content = "bad-2")

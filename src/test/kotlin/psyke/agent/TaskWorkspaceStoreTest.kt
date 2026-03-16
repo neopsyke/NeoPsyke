@@ -115,7 +115,7 @@ class TaskWorkspaceStoreTest {
         assertTrue(input != null)
         assertTrue((input?.workspaceConfidence ?: 0.0) > 0.30)
         assertTrue((input?.sectionCount ?: 0) >= 2)
-        assertEquals(0, input?.answerDraftCount)
+        assertEquals(0, input?.resolutionDraftCount)
     }
 
     @Test
@@ -130,13 +130,13 @@ class TaskWorkspaceStoreTest {
                 receivedAtMs = 111L
             )
         )
-        store.recordAnswerDraft(root, "Draft chunk one")
+        store.recordResolutionDraft(root, "Draft chunk one")
         store.recordActionOutcome(
             rootInputId = root,
             action = PendingAction(
                 id = 2,
                 urgency = Urgency.MEDIUM,
-                type = ActionType.ANSWER_DRAFT,
+                type = ActionType.RESOLUTION_DRAFT,
                 payload = "Draft chunk two",
                 summary = "draft chunk"
             ),
@@ -146,7 +146,7 @@ class TaskWorkspaceStoreTest {
             ),
             observedEvidence = false
         )
-        store.recordAnswerDraft(root, "Draft chunk two")
+        store.recordResolutionDraft(root, "Draft chunk two")
 
         val input = store.buildFinalPassInput(
             rootInputId = root,
@@ -154,7 +154,7 @@ class TaskWorkspaceStoreTest {
             maxChars = 1200
         )
 
-        assertEquals(2, input?.answerDraftCount)
+        assertEquals(2, input?.resolutionDraftCount)
     }
 
     @Test

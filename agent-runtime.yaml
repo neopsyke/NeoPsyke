@@ -37,7 +37,7 @@ agent:
     two_stage_review_enabled: false
     two_stage_low_confidence_threshold: 0.60
     two_stage_escalate_on_medium_policy_risk: true
-    two_stage_skip_for_answer_actions: true
+    two_stage_skip_for_contact_user_actions: true
     two_stage_skip_for_web_search_actions: true
 
   memory:

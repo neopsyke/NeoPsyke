@@ -18,7 +18,7 @@ class AttentionSchedulerTest {
     fun `inputs always take priority over thoughts and actions`() {
         val scheduler = AttentionScheduler(config)
         scheduler.enqueueThought("process this", Urgency.HIGH)
-        scheduler.enqueueAction(ActionType.ANSWER, "hello", "reply", Urgency.HIGH)
+        scheduler.enqueueAction(ActionType.CONTACT_USER, "hello", "reply", Urgency.HIGH)
         scheduler.enqueueInput("new input")
 
         val task = scheduler.nextTask()
@@ -72,9 +72,9 @@ class AttentionSchedulerTest {
         assertTrue(scheduler.enqueueThought("t2", Urgency.MEDIUM))
         assertFalse(scheduler.enqueueThought("t3", Urgency.MEDIUM))
 
-        assertTrue(scheduler.enqueueAction(ActionType.ANSWER, "a1", "s1", Urgency.MEDIUM))
-        assertTrue(scheduler.enqueueAction(ActionType.ANSWER, "a2", "s2", Urgency.MEDIUM))
-        assertFalse(scheduler.enqueueAction(ActionType.ANSWER, "a3", "s3", Urgency.MEDIUM))
+        assertTrue(scheduler.enqueueAction(ActionType.CONTACT_USER, "a1", "s1", Urgency.MEDIUM))
+        assertTrue(scheduler.enqueueAction(ActionType.CONTACT_USER, "a2", "s2", Urgency.MEDIUM))
+        assertFalse(scheduler.enqueueAction(ActionType.CONTACT_USER, "a3", "s3", Urgency.MEDIUM))
     }
 
     @Test
@@ -82,7 +82,7 @@ class AttentionSchedulerTest {
         val scheduler = AttentionScheduler(config)
         scheduler.enqueueInput("line-1")
         scheduler.enqueueThought("line-2", Urgency.HIGH)
-        scheduler.enqueueAction(ActionType.ANSWER, "line-3", "summary", Urgency.MEDIUM)
+        scheduler.enqueueAction(ActionType.CONTACT_USER, "line-3", "summary", Urgency.MEDIUM)
 
         val snapshot = scheduler.queueSnapshot()
         assertEquals(1, snapshot.pendingInputCount)
@@ -97,8 +97,8 @@ class AttentionSchedulerTest {
         scheduler.enqueueInput("high-input", InputPriority.HIGH)
         scheduler.enqueueThought("low", Urgency.LOW)
         scheduler.enqueueThought("high", Urgency.HIGH)
-        scheduler.enqueueAction(ActionType.ANSWER, "low-action", "s1", Urgency.LOW)
-        scheduler.enqueueAction(ActionType.ANSWER, "high-action", "s2", Urgency.HIGH)
+        scheduler.enqueueAction(ActionType.CONTACT_USER, "low-action", "s1", Urgency.LOW)
+        scheduler.enqueueAction(ActionType.CONTACT_USER, "high-action", "s2", Urgency.HIGH)
 
         val state = scheduler.queueState()
         assertEquals(listOf("high-input", "medium-input"), state.inputs.map { it.content })
@@ -201,7 +201,7 @@ class AttentionSchedulerTest {
             )
         )
         scheduler.enqueueAction(
-            type = ActionType.ANSWER,
+            type = ActionType.CONTACT_USER,
             payload = "fallback",
             summary = "fallback",
             urgency = Urgency.HIGH,
@@ -235,7 +235,7 @@ class AttentionSchedulerTest {
             conversationContext = ctxA
         )
         scheduler.enqueueAction(
-            type = ActionType.ANSWER,
+            type = ActionType.CONTACT_USER,
             payload = "fallback-a",
             summary = "fallback-a",
             urgency = Urgency.HIGH,

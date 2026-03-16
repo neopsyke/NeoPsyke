@@ -10,8 +10,9 @@ enum class EpisodicEventType {
     PLANNER_DECISION,
     ACTION_EXECUTED,
     ACTION_DENIED,
-    ANSWER_DELIVERED,
-    MEMORY_IMPRINT;
+    CONTACT_DELIVERED,
+    MEMORY_IMPRINT,
+    SELF_INITIATED;
 
     fun dbValue(): String = name.lowercase()
 
