@@ -3,6 +3,7 @@ package psyke.agent
 import psyke.agent.actions.websearch.WebSearchActionHandler
 import psyke.agent.actions.websearch.WebSearchEngine
 import psyke.agent.actions.websearch.WebSearchResult
+import psyke.agent.actions.NoopReflectionMemoryRecorder
 import psyke.support.RecordingInstrumentation
 import psyke.support.StubChatModelClient
 import java.io.ByteArrayInputStream
@@ -111,7 +112,8 @@ class MemoryRoundTripIntegrationTest {
         )
         return MotorCortex(
             webSearchActionHandler = webSearchHandler,
-            output = output
+            output = output,
+            reflectionMemoryRecorder = NoopReflectionMemoryRecorder,
         )
     }
 

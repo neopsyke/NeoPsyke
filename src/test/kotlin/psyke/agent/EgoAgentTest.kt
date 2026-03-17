@@ -1,5 +1,6 @@
 package psyke.agent
 
+import psyke.agent.actions.NoopReflectionMemoryRecorder
 import psyke.agent.actions.websearch.WebSearchActionHandler
 import psyke.agent.actions.websearch.WebSearchEngine
 import psyke.agent.actions.websearch.WebSearchResult
@@ -2212,7 +2213,8 @@ class EgoAgentTest {
         return MotorCortex(
             webSearchActionHandler = webSearchHandler,
             output = output,
-            fetchTool = fetchTool
+            fetchTool = fetchTool,
+            reflectionMemoryRecorder = NoopReflectionMemoryRecorder,
         )
     }
 

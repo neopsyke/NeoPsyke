@@ -3,6 +3,7 @@ package psyke.eval
 import psyke.agent.actions.websearch.WebSearchActionHandler
 import psyke.agent.actions.websearch.WebSearchEngine
 import psyke.agent.actions.websearch.WebSearchResult
+import psyke.agent.actions.NoopReflectionMemoryRecorder
 import psyke.agent.actions.websearch.WebSearchSource
 import psyke.agent.config.AgentConfig
 import psyke.agent.model.EgoDecision
@@ -564,7 +565,8 @@ class AgentScenarioPackTest {
         val webSearchHandler = WebSearchActionHandler(engine = webSearchEngine)
         return MotorCortex(
             webSearchActionHandler = webSearchHandler,
-            output = output
+            output = output,
+            reflectionMemoryRecorder = NoopReflectionMemoryRecorder,
         )
     }
 

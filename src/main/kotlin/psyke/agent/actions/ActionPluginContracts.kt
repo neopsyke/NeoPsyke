@@ -71,20 +71,6 @@ object NoopReflectionMemoryRecorder : ReflectionMemoryRecorder {
     override fun recordReflection(action: PendingAction, summary: String, keywords: List<String>) = Unit
 }
 
-class LateBindingReflectionMemoryRecorder(
-    initialDelegate: ReflectionMemoryRecorder = NoopReflectionMemoryRecorder,
-) : ReflectionMemoryRecorder {
-    @Volatile private var delegate: ReflectionMemoryRecorder = initialDelegate
-
-    fun setDelegate(delegate: ReflectionMemoryRecorder) {
-        this.delegate = delegate
-    }
-
-    override fun recordReflection(action: PendingAction, summary: String, keywords: List<String>) {
-        delegate.recordReflection(action, summary, keywords)
-    }
-}
-
 data class ActionPluginFactoryContext(
     val config: AgentConfig,
     val webSearchActionHandler: WebSearchActionHandler?,
@@ -92,7 +78,7 @@ data class ActionPluginFactoryContext(
     val fetchTool: FetchTool?,
     val output: (String) -> Unit,
     val env: Map<String, String> = System.getenv(),
-    val reflectionMemoryRecorder: ReflectionMemoryRecorder = NoopReflectionMemoryRecorder,
+    val reflectionMemoryRecorder: ReflectionMemoryRecorder,
 )
 
 interface AgentActionPlugin : AutoCloseable {

@@ -2,7 +2,6 @@ package psyke.agent.ego
 
 import kotlinx.coroutines.delay
 import mu.KotlinLogging
-import psyke.agent.actions.LateBindingReflectionMemoryRecorder
 import psyke.agent.config.*
 import psyke.agent.model.*
 import psyke.agent.cortex.motor.MotorCortex
@@ -43,7 +42,7 @@ class Ego(
     private val logbook: Logbook? = null,
     private val logbookSummarizer: LogbookSummarizer? = null,
     private val runId: String? = null,
-    private val reflectionMemoryRecorder: LateBindingReflectionMemoryRecorder? = null,
+    private val providedMemory: MemoryCoordinator? = null,
 ) {
     @Volatile private var id: psyke.agent.id.Id? = null
 
@@ -75,16 +74,13 @@ class Ego(
         config, instrumentation, metaReasoner,
         isEvidenceActionType = { motorCortex.hasCapability(it, psyke.agent.actions.ActionCapability.GATHERS_EVIDENCE) }
     )
-    private val memory = MemoryCoordinator(
+    private val memory = providedMemory ?: MemoryCoordinator(
         hippocampus, longTermMemoryAdvisor, config, instrumentation,
         initialMemoryStore = memoryStore,
         logbook = logbook,
         logbookSummarizer = logbookSummarizer ?: psyke.agent.memory.episodic.DeterministicLogbookSummarizer(config.logbook),
         runId = runId,
     )
-    init {
-        reflectionMemoryRecorder?.setDelegate(memory)
-    }
 
     private val telemetry = EgoTelemetry(instrumentation, scheduler, memoryStore, taskWorkspaceStore, config)
     private val fallbackHandler = FallbackHandler(

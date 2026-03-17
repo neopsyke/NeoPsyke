@@ -6,6 +6,7 @@ import kotlinx.coroutines.runBlocking
 import psyke.agent.actions.websearch.WebSearchActionHandler
 import psyke.agent.actions.websearch.WebSearchEngine
 import psyke.agent.actions.websearch.WebSearchResult
+import psyke.agent.actions.NoopReflectionMemoryRecorder
 import psyke.agent.model.ActionType
 import psyke.agent.config.AgentConfig
 import psyke.agent.model.ConversationContext
@@ -224,6 +225,7 @@ class IdEgoLifecycleIntegrationTest {
         return MotorCortex(
             webSearchActionHandler = WebSearchActionHandler(engine = search),
             output = {},
+            reflectionMemoryRecorder = NoopReflectionMemoryRecorder,
         )
     }
 

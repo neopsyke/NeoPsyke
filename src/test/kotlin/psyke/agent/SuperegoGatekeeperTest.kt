@@ -2,6 +2,7 @@ package psyke.agent
 
 import psyke.agent.actions.ActionPluginFactoryContext
 import psyke.agent.actions.ActionRegistry
+import psyke.agent.actions.NoopReflectionMemoryRecorder
 import psyke.agent.model.ActionOrigin
 import psyke.agent.model.OriginSource
 import psyke.llm.ChatRole
@@ -27,6 +28,7 @@ class SuperegoGatekeeperTest {
                 mcpTimeTool = null,
                 fetchTool = null,
                 output = {},
+                reflectionMemoryRecorder = NoopReflectionMemoryRecorder,
             )
         )
 

@@ -16,12 +16,13 @@ import psyke.agent.tools.mcp.McpStdioClient
 import psyke.agent.model.ActionType
 import psyke.agent.actions.ActionPluginFactoryContext
 import psyke.agent.actions.ActionRegistry
-import psyke.agent.actions.LateBindingReflectionMemoryRecorder
 import psyke.agent.cortex.sensory.AsyncSensoryInputSource
 import psyke.agent.cortex.sensory.SensoryCortex
 import psyke.agent.cortex.motor.ActionImplementationStatus
 import psyke.agent.cortex.motor.MotorCortex
+import psyke.agent.ego.MemoryCoordinator
 import psyke.agent.memory.longterm.NoopHippocampus
+import psyke.agent.memory.shortterm.MemoryStore
 import psyke.agent.tools.mcp.NativeFetchTool
 import psyke.agent.tools.mcp.SdkMcpTimeTool
 import psyke.agent.superego.Superego
@@ -975,9 +976,26 @@ internal object AppModeRunners {
                                                 try {
                                                     val earlyMemoryStartup =
                                                         resolveInteractiveMemoryStartup(config, mcpRuntimeConfig.memory)
-                                                    val earlyHippocampus = earlyMemoryStartup.hippocampus
-                                                    val earlyLogbook = createLogbookIfEnabled(config)
-                                                    val reflectionMemoryRecorder = LateBindingReflectionMemoryRecorder()
+                                                    val hippocampus = earlyMemoryStartup.hippocampus
+                                                    val logbook = createLogbookIfEnabled(config)
+                                                    val longTermMemoryAdvisor = LlmLongTermMemoryAdvisor(
+                                                        modelClient = longTermMemoryClient,
+                                                        config = config,
+                                                        modelTokenWeight = llm.modelCatalog.tokenWeightFor(llm.memoryAdvisor),
+                                                        modelContextWindow = llm.modelCatalog.contextWindowFor(llm.memoryAdvisor),
+                                                        instrumentation = instrumentation
+                                                    )
+                                                    val logbookSummarizer = createLogbookSummarizer(config, longTermMemoryClient)
+                                                    val memoryStore = MemoryStore(config.memory.maxShortTermContextChars)
+                                                    val memoryCoordinator = MemoryCoordinator(
+                                                        hippocampus = hippocampus,
+                                                        longTermMemoryAdvisor = longTermMemoryAdvisor,
+                                                        config = config,
+                                                        instrumentation = instrumentation,
+                                                        initialMemoryStore = memoryStore,
+                                                        logbook = logbook,
+                                                        logbookSummarizer = logbookSummarizer,
+                                                    )
                                                     val webSearchActionHandler = WebSearchActionHandler(runtime.engine)
                                                     val actionRegistry = ActionRegistry.discover(
                                                         ActionPluginFactoryContext(
@@ -986,7 +1004,7 @@ internal object AppModeRunners {
                                                             mcpTimeTool = timeTool,
                                                             fetchTool = activeFetchTool,
                                                             output = {},
-                                                            reflectionMemoryRecorder = reflectionMemoryRecorder,
+                                                            reflectionMemoryRecorder = memoryCoordinator,
                                                         )
                                                     )
                                                     actionRegistry.loadWarnings.forEach { warning ->
@@ -1061,13 +1079,6 @@ internal object AppModeRunners {
                                                             fallbackModelClient = metaReasonerFallbackClient,
                                                             instrumentation = instrumentation
                                                         )
-                                                        val longTermMemoryAdvisor = LlmLongTermMemoryAdvisor(
-                                                            modelClient = longTermMemoryClient,
-                                                            config = config,
-                                                            modelTokenWeight = llm.modelCatalog.tokenWeightFor(llm.memoryAdvisor),
-                                                            modelContextWindow = llm.modelCatalog.contextWindowFor(llm.memoryAdvisor),
-                                                            instrumentation = instrumentation
-                                                        )
                                                         val taskWorkspaceFinalizer =
                                                             if (config.memory.taskWorkspace.enabled &&
                                                                 config.memory.taskWorkspace.finalPassRewriteEnabled
@@ -1080,7 +1091,6 @@ internal object AppModeRunners {
                                                             } else {
                                                                 NoopTaskWorkspaceFinalizer
                                                             }
-                                                        val hippocampus = earlyHippocampus
                                                         val memoryProviderDetail = earlyMemoryStartup.detail
                                                         instrumentation.emit(AgentEvents.actionCapabilities(actionStatuses))
                                                         instrumentation.emit(
@@ -1097,8 +1107,6 @@ internal object AppModeRunners {
                                                                 AgentEvents.warning("Long-term memory is unavailable: $memoryProviderDetail")
                                                             )
                                                         }
-                                                        val logbook = earlyLogbook
-                                                        val logbookSummarizer = createLogbookSummarizer(config, longTermMemoryClient)
                                                         if (cliOptions?.hasClearMemoryRequest == true) {
                                                             executeLongTermMemoryClear(
                                                                 cliOptions = cliOptions,
@@ -1119,9 +1127,10 @@ internal object AppModeRunners {
                                                             sensoryCortex = sensoryCortex,
                                                             taskWorkspaceFinalizer = taskWorkspaceFinalizer,
                                                             instrumentation = instrumentation,
+                                                            memoryStore = memoryStore,
                                                             logbook = logbook,
                                                             logbookSummarizer = logbookSummarizer,
-                                                            reflectionMemoryRecorder = reflectionMemoryRecorder,
+                                                            providedMemory = memoryCoordinator,
                                                         )
                                                         val idModule = if (idConfig.enabled) {
                                                             psyke.agent.id.Id(
@@ -1422,9 +1431,26 @@ internal object AppModeRunners {
                                             try {
                                                 val earlyMemoryStartup2 =
                                                     resolveInteractiveMemoryStartup(config, mcpRuntimeConfig.memory)
-                                                val earlyHippocampus2 = earlyMemoryStartup2.hippocampus
-                                                val earlyLogbook2 = createLogbookIfEnabled(config)
-                                                val reflectionMemoryRecorder = LateBindingReflectionMemoryRecorder()
+                                                val hippocampus = earlyMemoryStartup2.hippocampus
+                                                val logbook = createLogbookIfEnabled(config)
+                                                val longTermMemoryAdvisor = LlmLongTermMemoryAdvisor(
+                                                    modelClient = longTermMemoryClient,
+                                                    config = config,
+                                                    modelTokenWeight = llm.modelCatalog.tokenWeightFor(llm.memoryAdvisor),
+                                                    modelContextWindow = llm.modelCatalog.contextWindowFor(llm.memoryAdvisor),
+                                                    instrumentation = instrumentation
+                                                )
+                                                val logbookSummarizer = createLogbookSummarizer(config, longTermMemoryClient)
+                                                val memoryStore = MemoryStore(config.memory.maxShortTermContextChars)
+                                                val memoryCoordinator = MemoryCoordinator(
+                                                    hippocampus = hippocampus,
+                                                    longTermMemoryAdvisor = longTermMemoryAdvisor,
+                                                    config = config,
+                                                    instrumentation = instrumentation,
+                                                    initialMemoryStore = memoryStore,
+                                                    logbook = logbook,
+                                                    logbookSummarizer = logbookSummarizer,
+                                                )
                                                 val webSearchActionHandler = WebSearchActionHandler(runtime.engine)
                                                 val actionRegistry = ActionRegistry.discover(
                                                     ActionPluginFactoryContext(
@@ -1433,7 +1459,7 @@ internal object AppModeRunners {
                                                         mcpTimeTool = timeTool,
                                                         fetchTool = activeFetchTool,
                                                         output = liveOutput,
-                                                        reflectionMemoryRecorder = reflectionMemoryRecorder,
+                                                        reflectionMemoryRecorder = memoryCoordinator,
                                                     )
                                                 )
                                                 actionRegistry.loadWarnings.forEach { warning ->
@@ -1480,13 +1506,6 @@ internal object AppModeRunners {
                                                         fallbackModelClient = metaReasonerFallbackClient,
                                                         instrumentation = instrumentation
                                                     )
-                                                    val longTermMemoryAdvisor = LlmLongTermMemoryAdvisor(
-                                                        modelClient = longTermMemoryClient,
-                                                        config = config,
-                                                        modelTokenWeight = llm.modelCatalog.tokenWeightFor(llm.memoryAdvisor),
-                                                        modelContextWindow = llm.modelCatalog.contextWindowFor(llm.memoryAdvisor),
-                                                        instrumentation = instrumentation
-                                                    )
                                                     val taskWorkspaceFinalizer =
                                                         if (config.memory.taskWorkspace.enabled &&
                                                             config.memory.taskWorkspace.finalPassRewriteEnabled
@@ -1499,7 +1518,6 @@ internal object AppModeRunners {
                                                         } else {
                                                             NoopTaskWorkspaceFinalizer
                                                         }
-                                                    val hippocampus = earlyHippocampus2
                                                     instrumentation.emit(
                                                         AgentEvent(
                                                             type = "memory_status",
@@ -1509,8 +1527,6 @@ internal object AppModeRunners {
                                                             )
                                                         )
                                                     )
-                                                    val logbook = earlyLogbook2
-                                                    val logbookSummarizer = createLogbookSummarizer(config, longTermMemoryClient)
                                                     val ego = Ego(
                                                         planner = planner,
                                                         superego = gatekeeper,
@@ -1522,9 +1538,10 @@ internal object AppModeRunners {
                                                         sensoryCortex = sensoryCortex,
                                                         taskWorkspaceFinalizer = taskWorkspaceFinalizer,
                                                         instrumentation = instrumentation,
+                                                        memoryStore = memoryStore,
                                                         logbook = logbook,
                                                         logbookSummarizer = logbookSummarizer,
-                                                        reflectionMemoryRecorder = reflectionMemoryRecorder,
+                                                        providedMemory = memoryCoordinator,
                                                     )
 
                                                     sensoryInput.submitInput(
