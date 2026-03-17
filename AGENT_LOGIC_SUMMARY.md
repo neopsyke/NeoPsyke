@@ -20,6 +20,10 @@ It is intentionally high-level and should stay aligned with the code.
     - When `SuperegoConfig.twoStageReviewEnabled` is on, runtime resolves a cheaper primary superego model from `model_catalog` (same provider) and keeps the configured superego model as escalation stage.
     - Supported cognitive-role providers are `groq`, `mistral`, `google`, and `openai`.
     - OpenAI moderation utility (`omni-moderation-latest`) exists as a standalone callable path and is not auto-wired into cognitive-role chat calls.
+    - Planner runtime wiring now inserts an LLM-layer structured-output adapter ahead of the planner client:
+      - provider/model/call-site compatibility policy lives in the LLM layer, not `LlmEgoPlanner`
+      - structured-output compatibility failures can degrade request mode (`strict json_schema` -> relaxed json_schema -> prompt-only JSON) before the planner sees a terminal model failure
+      - degraded mode can stay sticky for the lifetime of the planner client instance (run-scoped)
     - `web_search` runtime remains independently configurable.
   - `Superego`
   - `ActionRegistry` (startup plugin discovery via `ServiceLoader<AgentActionPluginFactory>`)
@@ -186,7 +190,11 @@ It is intentionally high-level and should stay aligned with the code.
   - Prompt assembly with contract-based budget allocation (`required_core` > `required_context` > `optional`).
   - Overhead-aware floor reservation per section, tiered degradation, and single-message fallback under extreme prompt pressure.
   - Emits `prompt_budget_allocation` telemetry for planner and action-verifier prompt builds (cost estimates, degradation path, fallback/floor-violation signals).
-  - Planner + action verifier calls use schema-enforced `response_format=json_schema` (strict schema first, then one relaxed-schema retry on provider schema-validation failure).
+  - Planner calls request schema-enforced structured output, but provider/model compatibility handling now lives below the planner in the LLM layer:
+    - planner requests one structured-output contract (`response_format=json_schema`) plus call-site metadata
+    - LLM adapter owns compatibility retries/degradation and may retry as relaxed schema or prompt-only JSON before surfacing a terminal failure
+    - planner no longer branches on provider/model error details
+  - Action verifier still uses schema-enforced `response_format=json_schema` with planner-local relaxed-schema retry.
   - Strict JSON parse + minimal repair for invalid escapes.
   - On planner parse failure: one truncation retry with increased completion budget when output appears truncated, then one strict-JSON retry.
   - Normalizes `action_payload` from either JSON string or structured JSON (object/array) into a string payload.
@@ -212,6 +220,7 @@ It is intentionally high-level and should stay aligned with the code.
     - answer-action tuning: verifier instructions explicitly approve directly entailed exact-match answers when there is no contradictory evidence, and verifier sampling temperature is fixed at `0.0`
   - `answer_draft` action proposals are allowed only inside active plan-context thoughts; out-of-context proposals are coerced to `noop`.
   - Retry policy and safe fallback to `Noop` on model/parse failures.
+  - Follow-up evidence thoughts now explicitly ask for the next planner decision as one raw JSON object and forbid tool/function wrappers.
   - Planner and action-verifier prompts now include "reflection lessons" context to avoid repeated failed strategies.
 
 ## Task Verifier Gate

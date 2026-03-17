@@ -107,7 +107,7 @@ sequenceDiagram
             Ego->>Dash: emit task_workspace_head (with optional debug snapshot)
             Ego->>Planner: decide(context)
             Note over Ego,Planner: PromptBudgetAllocator reserves required-core/context floors with message-overhead accounting, trims optional first, and emits prompt_budget_allocation
-            Note over Ego,Planner: Planner calls use schema-enforced strict json_schema with one relaxed-schema fallback on provider schema-validation errors parse failures do truncation-budget retry then strict-JSON retry before noop fallback
+            Note over Ego,Planner: Planner requests schema-enforced structured output the LLM layer owns compatibility degradation (strict json_schema -> relaxed json_schema -> prompt-only JSON) parse failures still do truncation-budget retry then strict-JSON retry before noop fallback
             Planner-->>Ego: thought/action/plan/noop
             Ego->>Delib: maybeApplyPressureOverride
             Ego->>Sched: enqueue thought/action/plan steps
@@ -116,6 +116,7 @@ sequenceDiagram
             Note over Ego,Planner: Action verifier uses strict json_schema with relaxed-schema fallback parse failures do truncation-budget retry then strict retry and may trip temporary verifier bypass (scoped per root_input and action_type)
             Note over Ego,Planner: Follow-up thoughts carry structured origin metadata (originActionType + observedEvidence) verifier repairs back to the same evidence action are ignored for evidence-backed answers unless user asked refresh/retry no-op verifier repairs collapse to approve
             Note over Ego,Planner: Verifier rejects now preserve denied action metadata in noop-thoughts repeated non-technical reject of the same answer payload on a follow-up thought is treated as verifier disagreement planner keeps the answer and dispatcher does not re-block it as a normal repeated denied action
+            Note over Ego,Planner: Follow-up evidence thoughts explicitly request one raw JSON planner decision and forbid tool/function wrappers
         else Task = action
             alt Fallback explanation action
                 Ego->>Motor: execute (bypass Superego)

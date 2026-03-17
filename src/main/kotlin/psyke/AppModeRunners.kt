@@ -73,6 +73,7 @@ import psyke.instrumentation.MetricsSnapshotObserver
 import psyke.instrumentation.ReasoningEvalFlowLogSink
 import psyke.instrumentation.StructuredLogSink
 import psyke.instrumentation.TaskWorkspaceDumpSink
+import psyke.llm.AdaptiveStructuredOutputChatClient
 import psyke.llm.InstrumentedChatModelClient
 import psyke.llm.ChatModelClient
 import psyke.integrations.google.websearch.GeminiWebSearchEngine
@@ -851,10 +852,13 @@ internal object AppModeRunners {
 
                     InstrumentedChatModelClient(
                         delegate = TokenBudgetGuardedChatClient(
-                            delegate = maybeCacheWrap(createChatClient(
-                                endpoint = llm.planner,
-                                callObserver = callObserverForProvider(llm.planner.providerLabel)
-                            )),
+                            delegate = AdaptiveStructuredOutputChatClient(
+                                delegate = maybeCacheWrap(createChatClient(
+                                    endpoint = llm.planner,
+                                    callObserver = callObserverForProvider(llm.planner.providerLabel)
+                                )),
+                                provider = llm.planner.providerLabel
+                            ),
                             budgetGate = tokenBudgetGate,
                             provider = llm.planner.providerLabel,
                             role = LlmRoleLabels.PLANNER
@@ -1297,10 +1301,13 @@ internal object AppModeRunners {
 
                     InstrumentedChatModelClient(
                         delegate = TokenBudgetGuardedChatClient(
-                            delegate = maybeCacheWrap(createChatClient(
-                                endpoint = llm.planner,
-                                callObserver = callObserverForProvider(llm.planner.providerLabel)
-                            )),
+                            delegate = AdaptiveStructuredOutputChatClient(
+                                delegate = maybeCacheWrap(createChatClient(
+                                    endpoint = llm.planner,
+                                    callObserver = callObserverForProvider(llm.planner.providerLabel)
+                                )),
+                                provider = llm.planner.providerLabel
+                            ),
                             budgetGate = tokenBudgetGate,
                             provider = llm.planner.providerLabel,
                             role = LlmRoleLabels.PLANNER

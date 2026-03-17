@@ -5,10 +5,13 @@ import psyke.agent.model.PendingInput
 import psyke.agent.model.PendingThought
 import psyke.agent.model.PendingAction
 import psyke.agent.model.QueueState
+import java.util.concurrent.ConcurrentHashMap
 
 private val logger = KotlinLogging.logger {}
 
 class StructuredLogSink : InstrumentationSink {
+    private val plannerStructuredOutputModes = ConcurrentHashMap<PlannerStructuredOutputScope, String>()
+
     private fun sessionPrefix(event: AgentEvent): String {
         val sessionId = event.data["session_id"]
             ?: (event.data["input"] as? PendingInput)?.conversationContext?.sessionId
@@ -46,8 +49,9 @@ class StructuredLogSink : InstrumentationSink {
             }
 
             "planner_decision" -> {
+                val jsonMode = resolvePlannerStructuredOutputMode(event) ?: "unknown"
                 logger.trace {
-                    "${sessionPrefix(event)}planner.decision trigger=${event.data["trigger"]} type=${event.data["decision_type"]} urgency=${event.data["urgency"]} action=${event.data["action_type"]}"
+                    "${sessionPrefix(event)}planner.decision trigger=${event.data["trigger"]} type=${event.data["decision_type"]} urgency=${event.data["urgency"]} action=${event.data["action_type"]} json_mode=$jsonMode"
                 }
             }
 
@@ -328,15 +332,17 @@ class StructuredLogSink : InstrumentationSink {
 
             "llm_call" -> {
                 val status = event.data["status"]?.toString().orEmpty()
+                recordPlannerStructuredOutputMode(event)
+                val structuredOutputMode = event.data["structured_output_mode"]?.toString()?.ifBlank { null }
                 if (status.equals("error", ignoreCase = true)) {
                     logger.warn {
                         "llm.call provider=${event.data["provider"]} model=${event.data["model"]} actor=${event.data["actor"]} " +
-                            "call_site=${event.data["call_site"]} status=${event.data["status"]} latency_ms=${event.data["latency_ms"]} " +
+                            "call_site=${event.data["call_site"]} status=${event.data["status"]} structured_output_mode=${structuredOutputMode ?: "-"} latency_ms=${event.data["latency_ms"]} " +
                             "error_code=${event.data["error_code"]} error_message=${event.data["error_message"]}"
                     }
                 } else {
                     logger.trace {
-                        "llm.call provider=${event.data["provider"]} model=${event.data["model"]} actor=${event.data["actor"]} call_site=${event.data["call_site"]} status=${event.data["status"]} latency_ms=${event.data["latency_ms"]} total_tokens=${event.data["total_tokens"]}"
+                        "llm.call provider=${event.data["provider"]} model=${event.data["model"]} actor=${event.data["actor"]} call_site=${event.data["call_site"]} status=${event.data["status"]} structured_output_mode=${structuredOutputMode ?: "-"} latency_ms=${event.data["latency_ms"]} total_tokens=${event.data["total_tokens"]}"
                     }
                 }
             }
@@ -505,4 +511,59 @@ class StructuredLogSink : InstrumentationSink {
             }
         }
     }
+
+    private fun recordPlannerStructuredOutputMode(event: AgentEvent) {
+        val scope = plannerScopeForLlmCall(event) ?: return
+        val mode = event.data["structured_output_mode"]?.toString()?.trim()
+        if (!mode.isNullOrBlank()) {
+            plannerStructuredOutputModes[scope] = mode
+        }
+    }
+
+    private fun resolvePlannerStructuredOutputMode(event: AgentEvent): String? {
+        val scope = plannerScopeForPlannerDecision(event) ?: return null
+        return plannerStructuredOutputModes.remove(scope)
+    }
+
+    private fun plannerScopeForLlmCall(event: AgentEvent): PlannerStructuredOutputScope? {
+        if (event.type != "llm_call") return null
+        val actor = event.data["actor"]?.toString()?.trim()?.lowercase().orEmpty()
+        if (actor != "ego") return null
+        val callSite = normalizePlannerCallSite(event.data["call_site"]?.toString()) ?: return null
+        val sessionId = event.data["session_id"]?.toString()?.trim()?.ifEmpty { null } ?: return null
+        val rootInputId = event.data["root_input_id"]?.toString()?.trim()?.ifEmpty { null }
+        return PlannerStructuredOutputScope(sessionId = sessionId, rootInputId = rootInputId, callSite = callSite)
+    }
+
+    private fun plannerScopeForPlannerDecision(event: AgentEvent): PlannerStructuredOutputScope? {
+        if (event.type != "planner_decision") return null
+        val callSite = normalizePlannerCallSite(event.data["trigger"]?.toString()) ?: return null
+        val sessionId = event.data["session_id"]?.toString()?.trim()?.ifEmpty { null } ?: return null
+        val rootInputId = event.data["root_input_id"]?.toString()?.trim()?.ifEmpty { null }
+        return PlannerStructuredOutputScope(sessionId = sessionId, rootInputId = rootInputId, callSite = callSite)
+    }
+
+    private fun normalizePlannerCallSite(raw: String?): String? {
+        val callSite = raw?.trim()?.lowercase()?.ifEmpty { return null } ?: return null
+        return when {
+            callSite in PLANNER_CALL_SITES -> callSite
+            callSite.endsWith("_json_retry") -> callSite.removeSuffix("_json_retry").takeIf { it in PLANNER_CALL_SITES }
+            callSite.endsWith("_truncation_retry") -> callSite.removeSuffix("_truncation_retry").takeIf { it in PLANNER_CALL_SITES }
+            else -> null
+        }
+    }
+
+    companion object {
+        private val PLANNER_CALL_SITES: Set<String> = setOf(
+            "input",
+            "thought",
+            "impulse",
+        )
+    }
+
+    private data class PlannerStructuredOutputScope(
+        val sessionId: String,
+        val rootInputId: String?,
+        val callSite: String,
+    )
 }

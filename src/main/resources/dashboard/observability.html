@@ -413,6 +413,31 @@
       white-space: nowrap;
       flex-shrink: 0;
     }
+    .tl-structured-chip {
+      display: inline-block;
+      font-size: 9px;
+      padding: 1px 5px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,0.15);
+      white-space: nowrap;
+      flex-shrink: 0;
+      text-transform: lowercase;
+      letter-spacing: 0.03em;
+      background: rgba(15, 26, 31, 0.72);
+    }
+    .tl-structured-chip.strict {
+      border-color: rgba(54, 195, 167, 0.45);
+      color: #7fe7d2;
+    }
+    .tl-structured-chip.relaxed {
+      border-color: rgba(232, 167, 53, 0.5);
+      color: #f2cb81;
+    }
+    .tl-structured-chip.prompt-only {
+      border-color: rgba(245, 108, 108, 0.55);
+      color: #f7b2b2;
+      background: rgba(122, 35, 35, 0.2);
+    }
 
     .cap-list {
       border: 1px solid var(--line);
@@ -927,7 +952,6 @@
       "meta_reasoner",
       "long_term_memory_assessment"
     ]);
-
     function isLlmErrorEvent(event) {
       if (!event || event.type !== "llm_call") return false;
       const status = String(event.data?.status || "").toLowerCase();
@@ -975,6 +999,16 @@
         if (callSite === "input" || callSite === "thought") return "planner";
       }
       return "";
+    }
+
+    function structuredOutputChipHtml(event) {
+      if (!event || event.type !== "planner_decision") return "";
+      const mode = String(event.data?.structured_output_mode || "").trim().toLowerCase();
+      if (!mode) return "";
+      const title = mode === "strict"
+        ? "Planner structured output running in strict JSON schema mode"
+        : "Planner structured output running in degraded " + mode + " mode";
+      return "<span class=\"tl-structured-chip " + escapeHtml(mode) + "\" title=\"" + escapeHtml(title) + "\">" + escapeHtml(mode) + "</span>";
     }
 
     function extractTimelineContent(event) {
@@ -1114,6 +1148,7 @@
       const time = formatTimeOnly(event);
       const typeLabel = event.type.replace(/_/g, " ");
       const sessionChip = sessionChipHtml(event);
+      const structuredOutputChip = structuredOutputChipHtml(event);
 
       if (isPrimary) {
         const contentHtml = content
@@ -1138,6 +1173,7 @@
           "<div class=\"tl-header\">" +
             "<span class=\"tl-type\">" + escapeHtml(typeLabel) + "</span>" +
             sessionChip +
+            structuredOutputChip +
             "<span class=\"tl-ts\">" + escapeHtml(time) + "</span>" +
           "</div>" +
           contentHtml +
@@ -1150,6 +1186,7 @@
           "<summary>" +
             "<span class=\"tl-type\">" + escapeHtml(typeLabel) + "</span> " +
             sessionChip +
+            structuredOutputChip +
             "<span class=\"tl-ts\">" + escapeHtml(time) + "</span>" +
           "</summary>" +
           (content ? "<div class=\"tl-content\">" + escapeHtml(short(content, 200)) + "</div>" : "") +

@@ -35,6 +35,7 @@ class DashboardServerTest {
             assertEquals(200, dashboard.statusCode())
             assertTrue(root.body().contains("Psyke Conversations"))
             assertTrue(dashboard.body().contains("Psyke Realtime Dashboard"))
+            assertTrue(dashboard.body().contains("tl-structured-chip"))
         }
     }
 

@@ -96,6 +96,7 @@ object AgentEvents {
         payload: String? = null,
         summary: String? = null,
         reason: String? = null,
+        sessionId: String? = null,
         rootInputId: String? = null,
     ): AgentEvent =
         AgentEvent(
@@ -109,6 +110,7 @@ object AgentEvents {
                 "payload" to payload,
                 "summary" to summary,
                 "reason" to reason,
+                "session_id" to sessionId,
                 "root_input_id" to rootInputId,
             )
         )
