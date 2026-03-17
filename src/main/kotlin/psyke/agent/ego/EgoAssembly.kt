@@ -15,6 +15,7 @@ import psyke.agent.memory.longterm.NoopHippocampus
 import psyke.agent.memory.longterm.NoopLongTermMemoryAdvisor
 import psyke.agent.memory.shortterm.MemoryStore
 import psyke.agent.memory.workspace.TaskWorkspaceStore
+import psyke.agent.project.ProjectManager
 import psyke.agent.superego.Superego
 import psyke.agent.tools.mcp.FetchTool
 import psyke.agent.tools.mcp.McpTimeTool
@@ -70,6 +71,7 @@ object EgoAssembler {
         webSearchActionHandler: WebSearchActionHandler? = null,
         mcpTimeTool: McpTimeTool? = null,
         fetchTool: FetchTool? = null,
+        projectManager: ProjectManager? = null,
         output: (String) -> Unit = {},
     ): EgoAssembly {
         val memory = buildMemoryCoordinator(
@@ -103,6 +105,7 @@ object EgoAssembler {
             taskWorkspaceStore = taskWorkspaceStore,
             taskWorkspaceFinalizer = taskWorkspaceFinalizer,
             instrumentation = instrumentation,
+            projectManager = projectManager,
         )
         return EgoAssembly(
             ego = ego,

@@ -15,7 +15,7 @@ import psyke.agent.memory.longterm.LlmLongTermMemoryAdvisor
 import psyke.agent.memory.longterm.McpHippocampus
 import psyke.agent.tools.mcp.McpStdioClient
 import psyke.agent.model.ActionType
-import psyke.agent.cortex.sensory.AsyncSensoryInputSource
+import psyke.agent.cortex.sensory.AsyncSignalSource
 import psyke.agent.cortex.sensory.SensoryCortex
 import psyke.agent.cortex.motor.ActionImplementationStatus
 import psyke.agent.cortex.motor.MotorCortex
@@ -611,10 +611,10 @@ internal object AppModeRunners {
         val agentScope = agentScope("psyke-agent")
         val dashboardStore = DashboardStateStore()
         val interlocutorResolver = psyke.agent.config.DefaultInterlocutorResolver()
-        val sensoryInput = AsyncSensoryInputSource(
+        val sensoryInput = AsyncSignalSource(
             includeStdin = true,
             emitStdinClosedSignal = false,
-            stdinMode = AsyncSensoryInputSource.StdinMode.CONTROL_ONLY,
+            stdinMode = AsyncSignalSource.StdinMode.CONTROL_ONLY,
             prompt = { print("control> ") },
             scope = agentScope
         )
@@ -1192,7 +1192,7 @@ internal object AppModeRunners {
         }
 
         val agentScope = agentScope("psyke-freud-live")
-        val sensoryInput = AsyncSensoryInputSource(
+        val sensoryInput = AsyncSignalSource(
             includeStdin = false,
             emitStdinClosedSignal = false,
             scope = agentScope

@@ -1,5 +1,6 @@
 package psyke.agent.config
 
+import psyke.agent.project.ProjectConfig
 import psyke.dashboard.InnerVoiceConfig
 
 data class AgentConfig(
@@ -9,6 +10,7 @@ data class AgentConfig(
     val metaReasoner: MetaReasonerConfig = MetaReasonerConfig(),
     val logbook: LogbookConfig = LogbookConfig(),
     val innerVoice: InnerVoiceConfig = InnerVoiceConfig(),
+    val projects: ProjectConfig = ProjectConfig(),
     val loopDelayMs: Int = 0,
     val maxPendingThoughts: Int = 64,
     val maxPendingActions: Int = 32,

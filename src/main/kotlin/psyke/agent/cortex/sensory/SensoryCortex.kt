@@ -26,24 +26,71 @@ data class SensoryInput(
     val conversationContext: ConversationContext = ConversationContext.default(),
 )
 
-sealed interface SensorySignal {
+// ── Signal hierarchy ─────────────────────────────────────────────────
+
+/**
+ * Top-level signal type consumed by the Ego loop.
+ *
+ * Sub-hierarchies:
+ * - [SensorySignal] — external perception (user input, source lifecycle)
+ * - [SystemSignal]  — internal system events (Id impulses, shutdown)
+ * - [ProjectSignal] — project subsystem events (step progress, timers)
+ */
+sealed interface Signal
+
+/** External perception signals — user input and source lifecycle. */
+sealed interface SensorySignal : Signal {
     data class InputReceived(val input: SensoryInput) : SensorySignal
     data class SourceClosed(val source: String) : SensorySignal
     data class ExitRequested(val source: String) : SensorySignal
     data object NoInput : SensorySignal
-    /** Signals that the Id has enqueued an impulse and the Ego should wake up to process it. */
-    data object ImpulseReady : SensorySignal
 }
 
-fun interface SensoryInputSource {
-    suspend fun nextSignal(): SensorySignal
+/** Internal system events — Id impulses, shutdown, config changes. */
+sealed interface SystemSignal : Signal {
+    /** The Id has enqueued an impulse and the Ego should wake up to process it. */
+    data object ImpulseReady : SystemSignal
+    /** Graceful shutdown requested (e.g., SIGTERM). */
+    data object ShutdownRequested : SystemSignal
+    /** A configuration key was hot-reloaded. */
+    data class ConfigReloaded(val key: String) : SystemSignal
 }
 
-class StdinSensoryInputSource(
+/** Project subsystem events — step completions, timer wake-ups, new projects. */
+sealed interface ProjectSignal : Signal {
+    data class StepCompleted(
+        val projectId: String,
+        val stepId: String,
+        val success: Boolean,
+    ) : ProjectSignal
+
+    data class WaitConditionMet(
+        val projectId: String,
+        val stepId: String,
+        val conditionType: String,
+    ) : ProjectSignal
+
+    data class ScheduledWakeUp(
+        val projectId: String,
+        val scheduledAtMs: Long,
+    ) : ProjectSignal
+
+    data class ProjectCreated(
+        val projectId: String,
+    ) : ProjectSignal
+}
+
+// ── Signal sources ───────────────────────────────────────────────────
+
+fun interface SignalSource {
+    suspend fun nextSignal(): Signal
+}
+
+class StdinSignalSource(
     private val readLineFn: () -> String? = { readLine() },
     private val prompt: () -> Unit = { print("you> ") },
-    ) : SensoryInputSource {
-    override suspend fun nextSignal(): SensorySignal = withContext(Dispatchers.IO) {
+) : SignalSource {
+    override suspend fun nextSignal(): Signal = withContext(Dispatchers.IO) {
         prompt()
         val rawInput = readLineFn() ?: return@withContext SensorySignal.SourceClosed(source = "stdin")
         if (rawInput.trim().equals("exit", ignoreCase = true)) {
@@ -62,7 +109,7 @@ class StdinSensoryInputSource(
     }
 }
 
-class AsyncSensoryInputSource(
+class AsyncSignalSource(
     private val includeStdin: Boolean = true,
     private val emitStdinClosedSignal: Boolean = true,
     private val pollTimeoutMs: Long = DEFAULT_POLL_TIMEOUT_MS,
@@ -71,19 +118,19 @@ class AsyncSensoryInputSource(
     private val prompt: () -> Unit = { print("you> ") },
     private val controlOutput: (String) -> Unit = ::println,
     scope: CoroutineScope? = null,
-) : SensoryInputSource, Closeable {
+) : SignalSource, Closeable {
     enum class StdinMode {
         CHAT_AND_CONTROL,
         CONTROL_ONLY,
     }
 
-    private val channel = Channel<SensorySignal>(MAX_SIGNAL_QUEUE)
+    private val channel = Channel<Signal>(MAX_SIGNAL_QUEUE)
 
     /**
      * Exposes the underlying signal channel for use with `select {}` in
-     * multiplexed sensory source compositions.
+     * multiplexed signal source compositions.
      */
-    val signalChannel: ReceiveChannel<SensorySignal> get() = channel
+    val signalChannel: ReceiveChannel<Signal> get() = channel
     private val stdinReaderJob: Job? = if (includeStdin && scope != null) {
         scope.launch(Dispatchers.IO + CoroutineName("psyke-stdin-sensory")) {
             while (isActive) {
@@ -128,7 +175,10 @@ class AsyncSensoryInputSource(
     }
 
     /** Wake the Ego loop so it picks up a queued Id impulse. */
-    fun notifyImpulseReady(): Boolean = offerSignal(SensorySignal.ImpulseReady)
+    fun notifyImpulseReady(): Boolean = offerSignal(SystemSignal.ImpulseReady)
+
+    /** Inject any [Signal] into the channel (used by ProjectManager, etc.). */
+    fun offerProjectSignal(signal: ProjectSignal): Boolean = offerSignal(signal)
 
     fun submitInput(
         content: String,
@@ -146,7 +196,7 @@ class AsyncSensoryInputSource(
         )
     )
 
-    override suspend fun nextSignal(): SensorySignal =
+    override suspend fun nextSignal(): Signal =
         withTimeoutOrNull(pollTimeoutMs) {
             channel.receive()
         } ?: SensorySignal.NoInput
@@ -156,7 +206,7 @@ class AsyncSensoryInputSource(
         channel.close()
     }
 
-    private fun offerSignal(signal: SensorySignal): Boolean {
+    private fun offerSignal(signal: Signal): Boolean {
         val result = channel.trySend(signal)
         if (result.isSuccess) {
             return true
@@ -172,12 +222,26 @@ class AsyncSensoryInputSource(
     }
 }
 
+// ── Backward-compatibility aliases ───────────────────────────────────
+// These allow existing code to compile during incremental migration.
+
+@Deprecated("Use SignalSource", replaceWith = ReplaceWith("SignalSource"))
+typealias SensoryInputSource = SignalSource
+
+@Deprecated("Use StdinSignalSource", replaceWith = ReplaceWith("StdinSignalSource"))
+typealias StdinSensoryInputSource = StdinSignalSource
+
+@Deprecated("Use AsyncSignalSource", replaceWith = ReplaceWith("AsyncSignalSource"))
+typealias AsyncSensoryInputSource = AsyncSignalSource
+
+// ── SensoryCortex ────────────────────────────────────────────────────
+
 class SensoryCortex(
     private val config: AgentConfig,
-    private val source: SensoryInputSource,
+    private val source: SignalSource,
     private val interlocutorResolver: InterlocutorResolver = DefaultInterlocutorResolver(),
 ) {
-    suspend fun nextSignal(): SensorySignal {
+    suspend fun nextSignal(): Signal {
         val signal = source.nextSignal()
         if (signal !is SensorySignal.InputReceived) {
             return signal
@@ -217,7 +281,7 @@ class SensoryCortex(
         fun stdin(config: AgentConfig): SensoryCortex =
             SensoryCortex(
                 config = config,
-                source = StdinSensoryInputSource()
+                source = StdinSignalSource()
             )
     }
 }

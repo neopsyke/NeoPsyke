@@ -52,11 +52,13 @@ class LlmEgoPlanner(
             is EgoTrigger.IncomingInput -> "input"
             is EgoTrigger.PendingThoughtInput -> "thought"
             is EgoTrigger.IncomingImpulse -> "impulse"
+            is EgoTrigger.ProjectWork -> "project-work"
         }
         val rootInputId = when (trigger) {
             is EgoTrigger.IncomingInput -> trigger.input.rootInputId
             is EgoTrigger.PendingThoughtInput -> trigger.thought.rootInputId
             is EgoTrigger.IncomingImpulse -> trigger.impulse.rootImpulseId
+            is EgoTrigger.ProjectWork -> trigger.workUnit.projectId
         }
         val sessionId = context.conversationContext.sessionId
 
@@ -605,6 +607,7 @@ class LlmEgoPlanner(
             is EgoTrigger.IncomingInput -> trigger.input.rootInputId
             is EgoTrigger.PendingThoughtInput -> trigger.thought.rootInputId
             is EgoTrigger.IncomingImpulse -> trigger.impulse.rootImpulseId
+            is EgoTrigger.ProjectWork -> trigger.workUnit.projectId
         }
         return ActionVerifierCircuitKey(
             rootInputId = rootInputId,
@@ -1617,6 +1620,10 @@ class LlmEgoPlanner(
                 val parts = listOf("THOUGHT(pass=${thought.passes}): ${thought.content}", planInfo, denialContext)
                     .filter { it.isNotBlank() }
                 parts.joinToString("\n")
+            }
+            is EgoTrigger.ProjectWork -> {
+                val wu = trigger.workUnit
+                "PROJECT_WORK(project=${wu.projectId}, step=${wu.stepId}): ${wu.stepDescription}"
             }
         }
 

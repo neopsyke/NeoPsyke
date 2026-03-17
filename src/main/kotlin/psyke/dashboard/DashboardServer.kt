@@ -7,6 +7,7 @@ import com.fasterxml.jackson.module.kotlin.readValue
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
 import mu.KotlinLogging
+import psyke.agent.project.ProjectManager
 import psyke.metrics.LlmCallStatsReport
 import java.nio.file.Files
 import java.nio.file.Path
@@ -35,6 +36,7 @@ class DashboardServer(
     private val innerVoiceStore: InnerVoiceStore? = null,
     private val idInnerVoiceFilePath: Path? = null,
     @Volatile var metricsQueryProvider: MetricsQueryProvider? = null,
+    private val projectManager: ProjectManager? = null,
     port: Int,
     host: String = "127.0.0.1",
 ) : Closeable {
@@ -74,6 +76,20 @@ class DashboardServer(
                     return@withRequestGuard
                 }
                 respondText(exchange, 200, DashboardAssets.metricsHtml, "text/html; charset=utf-8")
+            }
+        }
+        server.createContext("/projects") { exchange ->
+            withRequestGuard(exchange, "projects_page") {
+                if (exchange.requestURI.path != "/projects") {
+                    respondText(exchange, 404, "Not found", "text/plain; charset=utf-8")
+                    return@withRequestGuard
+                }
+                respondText(exchange, 200, DashboardAssets.projectsHtml, "text/html; charset=utf-8")
+            }
+        }
+        server.createContext("/api/projects") { exchange ->
+            withRequestGuard(exchange, "projects_api") {
+                handleProjectsApi(exchange)
             }
         }
         server.createContext("/api/obs/llm-stats") { exchange ->
@@ -516,6 +532,83 @@ class DashboardServer(
         } catch (ex: Exception) {
             logger.warn(ex) { "Failed to read Id inner-voice history from $filePath" }
             respondText(exchange, 200, "[]", "application/json; charset=utf-8")
+        }
+    }
+
+    private fun handleProjectsApi(exchange: HttpExchange) {
+        val pm = projectManager
+        if (pm == null) {
+            respondText(exchange, 503, "[]", "application/json; charset=utf-8")
+            return
+        }
+        val path = exchange.requestURI.path
+        val basePath = "/api/projects"
+        if (exchange.requestMethod != "GET") {
+            respondText(exchange, 405, "Method not allowed", "text/plain; charset=utf-8")
+            return
+        }
+        val suffix = path.removePrefix(basePath).removePrefix("/").trim()
+        if (suffix.isBlank()) {
+            // GET /api/projects — list all projects
+            val summaries = pm.allProjects().map { s ->
+                val state = pm.projectStatus(s.projectId)
+                val allSteps = state?.project?.plan?.steps ?: emptyList()
+                val totalSteps = allSteps.size
+                val doneSteps = allSteps.count {
+                    it.status == psyke.agent.project.StepStatus.DONE
+                }
+                val steps = allSteps.map { step ->
+                    mapOf(
+                        "id" to step.id,
+                        "description" to step.description,
+                        "status" to step.status.name,
+                    )
+                }
+                mapOf(
+                    "projectId" to s.projectId,
+                    "title" to s.title,
+                    "status" to s.status.name,
+                    "priority" to s.priority.name,
+                    "totalSteps" to totalSteps,
+                    "doneSteps" to doneSteps,
+                    "lastWorkedAt" to s.lastWorkedAt?.toString(),
+                    "createdAtMs" to (state?.project?.createdAt?.toEpochMilli() ?: 0),
+                    "steps" to steps,
+                )
+            }
+            respondText(exchange, 200, mapper.writeValueAsString(summaries), "application/json; charset=utf-8")
+        } else {
+            // GET /api/projects/{id} — single project detail
+            val state = pm.projectStatus(suffix)
+            if (state == null) {
+                respondText(exchange, 404, """{"error":"Project not found"}""", "application/json; charset=utf-8")
+                return
+            }
+            val steps = state.project.plan.steps.map { step ->
+                mapOf(
+                    "id" to step.id,
+                    "description" to step.description,
+                    "status" to step.status.name,
+                    "attempts" to step.attempts,
+                    "maxAttempts" to step.maxAttempts,
+                    "requires" to step.requires,
+                    "produces" to step.produces,
+                )
+            }
+            val detail = mapOf(
+                "projectId" to state.id,
+                "title" to state.project.title,
+                "status" to state.project.status.name,
+                "priority" to state.project.priority.name,
+                "instruction" to state.project.instruction,
+                "completionCriteria" to state.project.completionCriteria,
+                "createdAt" to state.project.createdAt.toString(),
+                "lastWorkedAt" to state.project.lastWorkedAt?.toString(),
+                "steps" to steps,
+                "producedKeys" to state.producedKeys.toList(),
+                "eventCount" to state.eventCount,
+            )
+            respondText(exchange, 200, mapper.writeValueAsString(detail), "application/json; charset=utf-8")
         }
     }
 

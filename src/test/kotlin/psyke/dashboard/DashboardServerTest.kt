@@ -2,7 +2,7 @@ package psyke.dashboard
 
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
-import psyke.agent.cortex.sensory.AsyncSensoryInputSource
+import psyke.agent.cortex.sensory.AsyncSignalSource
 import psyke.instrumentation.AgentEvent
 import psyke.metrics.MetricsQueryProvider
 import java.io.BufferedReader
@@ -193,7 +193,7 @@ class DashboardServerTest {
     private fun startServer(): StartedServer {
         val port = ServerSocket(0).use { it.localPort }
         val store = DashboardStateStore()
-        val sensory = AsyncSensoryInputSource(
+        val sensory = AsyncSignalSource(
             includeStdin = false,
             emitStdinClosedSignal = false
         )
@@ -216,7 +216,7 @@ class DashboardServerTest {
         val port: Int,
         val store: DashboardStateStore,
         val server: DashboardServer,
-        val sensory: AsyncSensoryInputSource,
+        val sensory: AsyncSignalSource,
     ) : Closeable {
         override fun close() {
             server.close()

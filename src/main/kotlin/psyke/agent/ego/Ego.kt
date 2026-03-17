@@ -5,12 +5,16 @@ import mu.KotlinLogging
 import psyke.agent.config.*
 import psyke.agent.model.*
 import psyke.agent.cortex.motor.MotorCortex
+import psyke.agent.cortex.sensory.ProjectSignal
 import psyke.agent.cortex.sensory.SensoryCortex
 import psyke.agent.cortex.sensory.SensorySignal
+import psyke.agent.cortex.sensory.Signal
+import psyke.agent.cortex.sensory.SystemSignal
 import psyke.agent.memory.episodic.EpisodicEventType
 import psyke.agent.memory.workspace.TaskWorkspaceStore
 import psyke.agent.id.EmptyProjectRegistry
 import psyke.agent.id.ProjectRegistry
+import psyke.agent.project.ProjectManager
 import psyke.agent.support.TextSecurity
 import psyke.agent.superego.Superego
 import psyke.instrumentation.AgentEvent
@@ -33,6 +37,7 @@ class Ego(
     private val taskWorkspaceFinalizer: TaskWorkspaceFinalizer = NoopTaskWorkspaceFinalizer,
     private val instrumentation: AgentInstrumentation = NoopAgentInstrumentation,
     private val projectRegistry: ProjectRegistry = EmptyProjectRegistry,
+    private val projectManager: ProjectManager? = null,
 ) {
     @Volatile private var id: psyke.agent.id.Id? = null
 
@@ -115,9 +120,8 @@ class Ego(
         telemetry.emitQueueSnapshot("loop_start")
         while (true) {
             when (val signal = sensoryCortex.nextSignal()) {
+                // ── Sensory signals (external perception) ────────────
                 SensorySignal.NoInput -> continue
-
-                SensorySignal.ImpulseReady -> runLoop()
 
                 is SensorySignal.SourceClosed -> {
                     val message = if (signal.source == "stdin") "stdin_closed" else "${signal.source}_closed"
@@ -154,6 +158,28 @@ class Ego(
                     }
                     telemetry.emitQueueSnapshot("input_enqueued")
                     runLoop()
+                }
+
+                // ── System signals (internal events) ─────────────────
+                SystemSignal.ImpulseReady -> runLoop()
+
+                SystemSignal.ShutdownRequested -> {
+                    logger.info { "Graceful shutdown requested." }
+                    instrumentation.emit(AgentEvents.loopStatus(status = "stopped", message = "shutdown_requested"))
+                    break
+                }
+
+                is SystemSignal.ConfigReloaded -> {
+                    logger.info { "Config reloaded: key=${signal.key}" }
+                }
+
+                // ── Project signals (project subsystem) ──────────────
+                is ProjectSignal -> {
+                    val work = projectManager?.pickWork(signal)
+                    if (work != null) {
+                        logger.info { "Project work picked: ${work.projectId}/${work.stepId}" }
+                        runLoop()
+                    }
                 }
             }
         }
@@ -405,9 +431,11 @@ class Ego(
             needId = impulse.needId,
             triggeringUrgency = impulse.urgency,
         )
+        val projectSummary = projectManager?.pendingWorkSummary().orEmpty()
         val context = idConstrainedContext.copy(
             // Override: no short-term memory from other sessions
             shortTermContextSummary = "",
+            projectWorkSummary = projectSummary,
         )
 
         timing.startPhase("planner_decide")
@@ -556,6 +584,7 @@ class Ego(
         when (trigger) {
             is EgoTrigger.IncomingInput -> false
             is EgoTrigger.IncomingImpulse -> true
+            is EgoTrigger.ProjectWork -> true
             is EgoTrigger.PendingThoughtInput -> trigger.thought.origin.source == OriginSource.ID
         }
 

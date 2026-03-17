@@ -1,6 +1,7 @@
 package psyke.agent.model
 
 import psyke.agent.id.ConvergenceMode
+import psyke.agent.project.ProjectWorkUnit
 
 /**
  * Snapshot of the Id's drive state, injected into [PlannerContext] when the
@@ -70,6 +71,7 @@ data class PlannerContext(
     val actionDefinitions: List<ActionPlanningDefinition> = emptyList(),
     val conversationContext: ConversationContext = ConversationContext.default(),
     val idState: IdStateSnapshot? = null,
+    val projectWorkSummary: String = "",
 )
 
 data class ActionPlanningDefinition(
@@ -89,6 +91,7 @@ sealed interface EgoTrigger {
     data class IncomingInput(val input: PendingInput) : EgoTrigger
     data class PendingThoughtInput(val thought: PendingThought) : EgoTrigger
     data class IncomingImpulse(val impulse: PendingImpulse) : EgoTrigger
+    data class ProjectWork(val workUnit: ProjectWorkUnit) : EgoTrigger
 }
 
 sealed interface EgoDecision {

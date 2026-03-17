@@ -464,6 +464,7 @@ class AgentScenarioPackTest {
                         goal = "Evaluate impulse branches",
                         steps = listOf("discard branch", "execute branch")
                     )
+                    is EgoTrigger.ProjectWork -> EgoDecision.Noop("ignore project work in test")
                     is EgoTrigger.PendingThoughtInput -> decideThought(trigger.thought)
                 }
 

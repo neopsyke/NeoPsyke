@@ -57,7 +57,7 @@ data class ActionOrigin(
     }
 }
 
-enum class OriginSource { USER, ID, SYSTEM }
+enum class OriginSource { USER, ID, SYSTEM, PROJECT }
 
 data class PendingImpulse(
     val id: Long,
