@@ -1,8 +1,10 @@
 package psyke.agent
 
+import psyke.agent.memory.longterm.MemoryImprint
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 class McpHippocampusNormalizationTest {
     private val hippocampus = McpHippocampus(
@@ -100,5 +102,44 @@ class McpHippocampusNormalizationTest {
         @Suppress("UNCHECKED_CAST")
         val observations = deletion["observations"] as List<String>
         assertEquals(listOf("[memory-eval:session-x:task-a] eval memory"), observations)
+    }
+
+    @Test
+    fun `generic imprint argument candidates stamp agent self fact subject`() {
+        val candidates = hippocampus.buildImprintArgumentCandidates(
+            toolName = "create_memory",
+            summary = "I learned: the user prefers concise answers.",
+            imprint = MemoryImprint(
+                summary = "I learned: the user prefers concise answers.",
+                source = "ego_long_term_memory_assessment",
+                confidence = 0.9,
+                tags = listOf("preference")
+            )
+        )
+
+        assertTrue(candidates.isNotEmpty())
+        candidates.forEach { candidate ->
+            assertEquals("me", candidate["fact_subject"])
+            assertEquals("me", candidate["subject"])
+        }
+    }
+
+    @Test
+    fun `remember tool imprint candidates stamp agent self fact subject`() {
+        val candidates = hippocampus.buildImprintArgumentCandidates(
+            toolName = "remember",
+            summary = "I should remember that the user's timezone is Europe-Berlin.",
+            imprint = MemoryImprint(
+                summary = "I should remember that the user's timezone is Europe-Berlin.",
+                source = "ego_long_term_memory_assessment",
+                confidence = 0.9
+            )
+        )
+
+        assertTrue(candidates.isNotEmpty())
+        candidates.forEach { candidate ->
+            assertEquals("me", candidate["fact_subject"])
+            assertEquals("me", candidate["subject"])
+        }
     }
 }

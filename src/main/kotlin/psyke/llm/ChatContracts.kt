@@ -23,6 +23,7 @@ sealed interface ChatResponseFormat {
         val name: String,
         val schemaJson: String,
         val strict: Boolean = true,
+        val relaxedSchemaJson: String? = null,
     ) : ChatResponseFormat
 }
 
@@ -30,6 +31,9 @@ data class ChatCallMetadata(
     val actor: String = "",
     val callSite: String = "",
     val actionType: String? = null,
+    val structuredOutputMode: String? = null,
+    val sessionId: String? = null,
+    val rootInputId: String? = null,
 )
 
 enum class ChatCallStatus {

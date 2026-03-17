@@ -113,7 +113,7 @@ private fun printAppHelp() {
           --clear-memory-all              Clear ALL long-term memory (vector + episodic) before starting
           --clear-memory-vector           Clear vector/hippocampus memory before starting
           --clear-memory-episodic         Clear episodic logbook memory before starting
-          --clear-memory-lessons       Clear lessons from vector memory before starting
+          --clear-memory-lessons         Clear lessons from vector memory before starting
           --freud-live                    Run single-input live eval (reads stdin, writes answer to stdout)
           --freud-live-timeout N          Timeout in seconds for freud-live mode (default: 120)
           -h, --help                      Show this help message

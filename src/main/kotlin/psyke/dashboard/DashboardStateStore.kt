@@ -64,10 +64,12 @@ class DashboardStateStore(
     private val chatSubscribers = mutableMapOf<String, MutableSet<Channel<String>>>()
     private var nextChatMessageId: Long = 1L
     private val sessionSequenceCounters = mutableMapOf<String, AtomicLong>()
+    private val plannerStructuredOutputModes = mutableMapOf<PlannerStructuredOutputScope, String>()
 
     override fun onEvent(event: AgentEvent) {
         var payloadJson: String? = null
         synchronized(lock) {
+            val effectiveEvent = enrichPlannerStructuredOutputModeLocked(event)
             val isDebugWorkspaceSnapshot = event.type == "task_workspace_debug_snapshot"
             if (isDebugWorkspaceSnapshot) {
                 captureWorkspaceSnapshot(event.data)
@@ -78,7 +80,7 @@ class DashboardStateStore(
                 if (events.size >= max(50, maxEvents)) {
                     events.removeFirst()
                 }
-                events.addLast(event)
+                events.addLast(effectiveEvent)
             }
 
             when (event.type) {
@@ -292,10 +294,55 @@ class DashboardStateStore(
             }
 
             if (!isDebugWorkspaceSnapshot) {
-                payloadJson = mapper.writeValueAsString(event)
+                payloadJson = mapper.writeValueAsString(effectiveEvent)
             }
         }
         payloadJson?.let { broadcastToSubscribers(it) }
+    }
+
+    private fun enrichPlannerStructuredOutputModeLocked(event: AgentEvent): AgentEvent {
+        recordPlannerStructuredOutputModeLocked(event)
+        if (event.type != "planner_decision") {
+            return event
+        }
+        val scope = plannerScopeForPlannerDecision(event.data) ?: return event
+        val mode = plannerStructuredOutputModes.remove(scope) ?: return event
+        return event.copy(data = event.data + ("structured_output_mode" to mode))
+    }
+
+    private fun recordPlannerStructuredOutputModeLocked(event: AgentEvent) {
+        if (event.type != "llm_call") {
+            return
+        }
+        val scope = plannerScopeForLlmCall(event.data) ?: return
+        val mode = event.data["structured_output_mode"].asString() ?: return
+        plannerStructuredOutputModes[scope] = mode
+    }
+
+    private fun plannerScopeForLlmCall(data: Map<String, Any?>): PlannerStructuredOutputScope? {
+        val actor = data["actor"].asString()?.lowercase() ?: return null
+        if (actor != "ego") return null
+        val callSite = normalizePlannerCallSite(data["call_site"].asString()) ?: return null
+        val sessionId = data["session_id"].asString() ?: return null
+        val rootInputId = data["root_input_id"].asString()
+        return PlannerStructuredOutputScope(sessionId = sessionId, rootInputId = rootInputId, callSite = callSite)
+    }
+
+    private fun plannerScopeForPlannerDecision(data: Map<String, Any?>): PlannerStructuredOutputScope? {
+        val callSite = normalizePlannerCallSite(data["trigger"].asString()) ?: return null
+        val sessionId = data["session_id"].asString() ?: return null
+        val rootInputId = data["root_input_id"].asString()
+        return PlannerStructuredOutputScope(sessionId = sessionId, rootInputId = rootInputId, callSite = callSite)
+    }
+
+    private fun normalizePlannerCallSite(raw: String?): String? {
+        val callSite = raw?.trim()?.lowercase()?.ifEmpty { return null } ?: return null
+        return when {
+            callSite in PLANNER_CALL_SITES -> callSite
+            callSite.endsWith("_json_retry") -> callSite.removeSuffix("_json_retry").takeIf { it in PLANNER_CALL_SITES }
+            callSite.endsWith("_truncation_retry") -> callSite.removeSuffix("_truncation_retry").takeIf { it in PLANNER_CALL_SITES }
+            else -> null
+        }
     }
 
     fun snapshotJson(
@@ -942,6 +989,12 @@ class DashboardStateStore(
         val evidence: List<String>,
     )
 
+    private data class PlannerStructuredOutputScope(
+        val sessionId: String,
+        val rootInputId: String?,
+        val callSite: String,
+    )
+
     private companion object {
         const val WORKSPACE_GOAL_PREVIEW_CHARS: Int = 140
         const val WORKSPACE_VERSION_LIST_LIMIT: Int = 25
@@ -954,6 +1007,7 @@ class DashboardStateStore(
         const val MAX_SESSION_ID_GENERATION_ATTEMPTS: Int = 4
         const val SUBSCRIBER_CHANNEL_CAPACITY: Int = 1_000
         const val MAX_PHASE_TIMINGS: Int = 200
+        val PLANNER_CALL_SITES: Set<String> = setOf("input", "thought", "impulse")
         val SNAPSHOT_HEAVY_EVENT_TYPES: Set<String> = setOf(
             "llm_raw_response",
         )

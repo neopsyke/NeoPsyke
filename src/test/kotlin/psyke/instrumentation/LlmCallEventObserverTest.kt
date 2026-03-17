@@ -18,7 +18,14 @@ class LlmCallEventObserverTest {
         observer.onChatCall(
             ChatCallRecord(
                 model = "mistral-small-latest",
-                metadata = ChatCallMetadata(actor = "ego", callSite = "planner", actionType = "answer"),
+                metadata = ChatCallMetadata(
+                    actor = "ego",
+                    callSite = "planner",
+                    actionType = "answer",
+                    structuredOutputMode = "relaxed",
+                    sessionId = "session-7",
+                    rootInputId = "root-7",
+                ),
                 latencyMs = 42,
                 promptTokens = 10,
                 completionTokens = 2,
@@ -33,6 +40,9 @@ class LlmCallEventObserverTest {
         assertEquals("ego", event.data["actor"])
         assertEquals("planner", event.data["call_site"])
         assertEquals("answer", event.data["action_type"])
+        assertEquals("relaxed", event.data["structured_output_mode"])
+        assertEquals("session-7", event.data["session_id"])
+        assertEquals("root-7", event.data["root_input_id"])
         assertEquals(12, event.data["total_tokens"])
         assertEquals("ok", event.data["status"])
     }

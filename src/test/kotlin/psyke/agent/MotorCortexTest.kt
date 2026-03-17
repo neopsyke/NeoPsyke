@@ -1,6 +1,7 @@
 package psyke.agent
 
 import kotlinx.coroutines.runBlocking
+import psyke.agent.actions.NoopReflectionMemoryRecorder
 import psyke.agent.actions.websearch.WebSearchActionHandler
 import psyke.agent.actions.websearch.WebSearchEngine
 import psyke.agent.actions.websearch.WebSearchEngineHealth
@@ -22,7 +23,8 @@ class MotorCortexTest {
                     WebSearchResult("unused", emptyList())
                 }
             ),
-            output = { captured.add(it) }
+            output = { captured.add(it) },
+            reflectionMemoryRecorder = NoopReflectionMemoryRecorder,
         )
 
         val outcome = cortex.execute(
@@ -58,7 +60,8 @@ class MotorCortexTest {
                         )
                     }
                 }
-            )
+            ),
+            reflectionMemoryRecorder = NoopReflectionMemoryRecorder,
         )
 
         val outcome = cortex.execute(
@@ -92,7 +95,8 @@ class MotorCortexTest {
                     assertEquals("""{"timezone":"Europe/Berlin"}""", payload)
                     return "MCP time result: 2026-02-28T10:15:00+01:00"
                 }
-            }
+            },
+            reflectionMemoryRecorder = NoopReflectionMemoryRecorder,
         )
 
         val outcome = cortex.execute(
@@ -128,7 +132,8 @@ class MotorCortexTest {
                         errorCategory = FetchErrorCategory.NONE
                     )
                 }
-            }
+            },
+            reflectionMemoryRecorder = NoopReflectionMemoryRecorder,
         )
 
         val outcome = cortex.execute(
@@ -163,7 +168,8 @@ class MotorCortexTest {
                         message = "Fetch tool returned an error: 403 Forbidden",
                         errorCategory = FetchErrorCategory.NON_RETRYABLE
                     )
-            }
+            },
+            reflectionMemoryRecorder = NoopReflectionMemoryRecorder,
         )
 
         val outcome = cortex.execute(
@@ -196,7 +202,8 @@ class MotorCortexTest {
                         message = "Fetch payload is invalid.",
                         errorCategory = FetchErrorCategory.MALFORMED_REQUEST
                     )
-            }
+            },
+            reflectionMemoryRecorder = NoopReflectionMemoryRecorder,
         )
 
         val outcome = cortex.execute(
@@ -239,7 +246,8 @@ class MotorCortexTest {
 
                 override suspend fun healthCheck(): ToolHealthStatus =
                     ToolHealthStatus(available = true, detail = "fetch ok")
-            }
+            },
+            reflectionMemoryRecorder = NoopReflectionMemoryRecorder,
         )
 
         val statuses = cortex.startupSmokeTest()

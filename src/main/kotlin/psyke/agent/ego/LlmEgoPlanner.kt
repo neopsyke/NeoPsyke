@@ -58,6 +58,7 @@ class LlmEgoPlanner(
             is EgoTrigger.PendingThoughtInput -> trigger.thought.rootInputId
             is EgoTrigger.IncomingImpulse -> trigger.impulse.rootImpulseId
         }
+        val sessionId = context.conversationContext.sessionId
 
         if (plannerCircuitBreaker.isTripped()) {
             val shortCircuit = EgoDecision.Noop(
@@ -65,7 +66,7 @@ class LlmEgoPlanner(
                 parseFailureShortCircuit = true,
             )
             instrumentation.emit(AgentEvents.warning("Planner circuit breaker tripped; short-circuiting to fallback."))
-            emitDecision(triggerLabel, shortCircuit, rootInputId)
+            emitDecision(triggerLabel, shortCircuit, sessionId, rootInputId)
             return shortCircuit
         }
 
@@ -88,19 +89,19 @@ class LlmEgoPlanner(
         )
         val messages = promptAllocation.messages
         val allowResolutionDraft = isResolutionDraftAllowed(trigger)
-        val plannerFormats = resolvePlannerResponseFormats()
         val response = callPlanner(
             messages = messages,
             callSite = triggerLabel,
+            sessionId = sessionId,
+            rootInputId = rootInputId,
             maxTokens = config.planner.maxCompletionTokens,
             temperature = 0.2,
-            strictFormat = plannerFormats.strict,
-            relaxedFormat = plannerFormats.relaxed,
+            responseFormat = PLANNER_DECISION_RESPONSE_FORMAT,
         )
         if (response == null) {
             instrumentation.emit(AgentEvents.warning("Planner call failed; falling back to noop."))
             val fallback = EgoDecision.Noop("Planner unavailable due to model error.")
-            emitDecision(triggerLabel, fallback, rootInputId)
+            emitDecision(triggerLabel, fallback, sessionId, rootInputId)
             return fallback
         }
         val resolvedResponse = response
@@ -119,7 +120,9 @@ class LlmEgoPlanner(
                 val truncationRetryResponse = requestPlannerTruncationRetry(
                     baseMessages = messages,
                     callSite = triggerLabel,
-                    actionSchemaEnum = actionSchema
+                    actionSchemaEnum = actionSchema,
+                    sessionId = sessionId,
+                    rootInputId = rootInputId,
                 )
                 truncationRetryResponse?.let {
                     parseResponse(
@@ -139,7 +142,9 @@ class LlmEgoPlanner(
                 val recovered = requestStrictJsonRetry(
                     baseMessages = messages,
                     callSite = triggerLabel,
-                    actionSchemaEnum = actionSchema
+                    actionSchemaEnum = actionSchema,
+                    sessionId = sessionId,
+                    rootInputId = rootInputId,
                 )
                 val repairedDecision = recovered?.let {
                     parseResponse(
@@ -167,7 +172,7 @@ class LlmEgoPlanner(
             context = context,
             decision = decision
         )
-        emitDecision(triggerLabel, verifiedDecision, rootInputId)
+        emitDecision(triggerLabel, verifiedDecision, sessionId, rootInputId)
         return verifiedDecision
     }
 
@@ -298,12 +303,6 @@ class LlmEgoPlanner(
     private fun isResolutionDraftAllowed(trigger: EgoTrigger): Boolean =
         trigger is EgoTrigger.PendingThoughtInput && trigger.thought.planContext != null
 
-    private fun resolvePlannerResponseFormats(): SchemaFormatPair =
-        SchemaFormatPair(
-            strict = PLANNER_DECISION_RESPONSE_FORMAT_STRICT,
-            relaxed = PLANNER_DECISION_RESPONSE_FORMAT_RELAXED
-        )
-
     private fun resolveActionVerifierResponseFormats(): SchemaFormatPair =
         SchemaFormatPair(
             strict = ACTION_VERIFIER_RESPONSE_FORMAT_STRICT,
@@ -313,15 +312,14 @@ class LlmEgoPlanner(
     private fun callPlanner(
         messages: List<ChatMessage>,
         callSite: String,
+        sessionId: String,
+        rootInputId: String?,
         maxTokens: Int,
         temperature: Double,
-        strictFormat: ChatResponseFormat.JsonSchema,
-        relaxedFormat: ChatResponseFormat.JsonSchema,
+        responseFormat: ChatResponseFormat.JsonSchema,
     ): ChatCompletion? {
         var response: ChatCompletion? = null
         var lastError: Exception? = null
-        var responseFormat: ChatResponseFormat.JsonSchema = strictFormat
-        var relaxedSchemaAttempted = false
         val retryAttempts = RetryPolicy.boundedLlmRetryAttempts(config.llmRetryAttempts)
         for (attempt in 1..retryAttempts) {
             try {
@@ -333,21 +331,15 @@ class LlmEgoPlanner(
                         responseFormat = responseFormat,
                         metadata = ChatCallMetadata(
                             actor = "ego",
-                            callSite = callSite
+                            callSite = callSite,
+                            sessionId = sessionId,
+                            rootInputId = rootInputId,
                         )
                     )
                 )
                 break
             } catch (ex: Exception) {
                 lastError = ex
-                if (!relaxedSchemaAttempted && LlmFailureClassifier.isStructuredOutputSchemaValidationFailure(ex)) {
-                    responseFormat = relaxedFormat
-                    relaxedSchemaAttempted = true
-                    instrumentation.emit(
-                        AgentEvents.warning("Planner schema validation failed for call_site=$callSite; retrying with relaxed schema.")
-                    )
-                    continue
-                }
                 if (attempt < retryAttempts) {
                     instrumentation.emit(
                         AgentEvents.warning(
@@ -663,6 +655,8 @@ class LlmEgoPlanner(
         baseMessages: List<ChatMessage>,
         callSite: String,
         actionSchemaEnum: String,
+        sessionId: String,
+        rootInputId: String?,
     ): ChatCompletion? {
         val retryMessages = baseMessages + ChatMessage(
             role = ChatRole.USER,
@@ -684,14 +678,14 @@ class LlmEgoPlanner(
                 }
             """.trimIndent()
         )
-        val formats = resolvePlannerResponseFormats()
         return callPlanner(
             messages = retryMessages,
             callSite = "${callSite}_json_retry",
+            sessionId = sessionId,
+            rootInputId = rootInputId,
             maxTokens = config.planner.maxCompletionTokens,
             temperature = 0.0,
-            strictFormat = formats.strict,
-            relaxedFormat = formats.relaxed,
+            responseFormat = PLANNER_DECISION_RESPONSE_FORMAT,
         )
     }
 
@@ -699,6 +693,8 @@ class LlmEgoPlanner(
         baseMessages: List<ChatMessage>,
         callSite: String,
         actionSchemaEnum: String,
+        sessionId: String,
+        rootInputId: String?,
     ): ChatCompletion? {
         val bumpedBudget = bumpPlannerCompletionBudget(config.planner.maxCompletionTokens)
         if (bumpedBudget <= config.planner.maxCompletionTokens) {
@@ -724,14 +720,14 @@ class LlmEgoPlanner(
                 }
             """.trimIndent()
         )
-        val formats = resolvePlannerResponseFormats()
         return callPlanner(
             messages = retryMessages,
             callSite = "${callSite}_truncation_retry",
+            sessionId = sessionId,
+            rootInputId = rootInputId,
             maxTokens = bumpedBudget,
             temperature = 0.0,
-            strictFormat = formats.strict,
-            relaxedFormat = formats.relaxed,
+            responseFormat = PLANNER_DECISION_RESPONSE_FORMAT,
         )
     }
 
@@ -1079,7 +1075,12 @@ class LlmEgoPlanner(
         }
     }
 
-    private fun emitDecision(triggerLabel: String, decision: EgoDecision, rootInputId: String? = null) {
+    private fun emitDecision(
+        triggerLabel: String,
+        decision: EgoDecision,
+        sessionId: String,
+        rootInputId: String? = null,
+    ) {
         when (decision) {
             is EgoDecision.EnqueueThought -> {
                 instrumentation.emit(
@@ -1088,6 +1089,7 @@ class LlmEgoPlanner(
                         decisionType = "thought",
                         urgency = decision.urgency.name.lowercase(),
                         thought = decision.content,
+                        sessionId = sessionId,
                         rootInputId = rootInputId,
                     )
                 )
@@ -1102,6 +1104,7 @@ class LlmEgoPlanner(
                         actionType = decision.actionType.name.lowercase(),
                         payload = decision.payload,
                         summary = decision.summary,
+                        sessionId = sessionId,
                         rootInputId = rootInputId,
                     )
                 )
@@ -1115,6 +1118,7 @@ class LlmEgoPlanner(
                         urgency = decision.urgency.name.lowercase(),
                         thought = decision.goal,
                         reason = "steps=${decision.steps.size}",
+                        sessionId = sessionId,
                         rootInputId = rootInputId,
                     )
                 )
@@ -1127,6 +1131,7 @@ class LlmEgoPlanner(
                         trigger = triggerLabel,
                         decisionType = "noop",
                         reason = decision.reason,
+                        sessionId = sessionId,
                         rootInputId = rootInputId,
                     )
                 )
@@ -1207,6 +1212,8 @@ class LlmEgoPlanner(
                     Use action=resolution_draft only for intermediate synthesis while executing active plan steps.
                     The final user-visible response must use action=contact_user.
                     Do not use plan for simple tasks solvable in one or two steps.
+                    Return one raw JSON object only.
+                    Never emit tool calls, function wrappers, named envelopes, markdown, or code fences.
                     Allowed actions:
                     $actionGuidanceBlock
                     You may receive Long-term memory recall from Hippocampus search.
@@ -1883,17 +1890,12 @@ class LlmEgoPlanner(
         """
         val mapper = jacksonObjectMapper()
             .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
-        val PLANNER_DECISION_RESPONSE_FORMAT_STRICT: ChatResponseFormat.JsonSchema =
+        val PLANNER_DECISION_RESPONSE_FORMAT: ChatResponseFormat.JsonSchema =
             ChatResponseFormat.JsonSchema(
                 name = "ego_planner_decision",
                 schemaJson = PLANNER_DECISION_RESPONSE_SCHEMA_STRICT,
-                strict = true
-            )
-        val PLANNER_DECISION_RESPONSE_FORMAT_RELAXED: ChatResponseFormat.JsonSchema =
-            ChatResponseFormat.JsonSchema(
-                name = "ego_planner_decision",
-                schemaJson = PLANNER_DECISION_RESPONSE_SCHEMA_RELAXED,
-                strict = true
+                strict = true,
+                relaxedSchemaJson = PLANNER_DECISION_RESPONSE_SCHEMA_RELAXED
             )
         val ACTION_VERIFIER_RESPONSE_FORMAT_STRICT: ChatResponseFormat.JsonSchema =
             ChatResponseFormat.JsonSchema(

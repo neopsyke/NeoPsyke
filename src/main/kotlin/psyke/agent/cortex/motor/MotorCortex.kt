@@ -3,6 +3,7 @@ package psyke.agent.cortex.motor
 import psyke.agent.actions.ActionCapability
 import psyke.agent.actions.ActionRegistry
 import psyke.agent.actions.ActionPluginFactoryContext
+import psyke.agent.actions.ReflectionMemoryRecorder
 import psyke.agent.actions.websearch.WebSearchActionHandler
 import psyke.agent.model.ActionOutcome
 import psyke.agent.model.ActionType
@@ -26,6 +27,7 @@ class MotorCortex(
         mcpTimeTool: McpTimeTool? = null,
         fetchTool: FetchTool? = null,
         output: (String) -> Unit = ::println,
+        reflectionMemoryRecorder: ReflectionMemoryRecorder,
         config: AgentConfig = AgentConfig(),
     ) : this(
         actionRegistry = ActionRegistry.discover(
@@ -34,7 +36,8 @@ class MotorCortex(
                 webSearchActionHandler = webSearchActionHandler,
                 mcpTimeTool = mcpTimeTool,
                 fetchTool = fetchTool,
-                output = output
+                output = output,
+                reflectionMemoryRecorder = reflectionMemoryRecorder,
             )
         )
     )

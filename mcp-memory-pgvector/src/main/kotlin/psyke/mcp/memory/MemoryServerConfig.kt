@@ -27,7 +27,7 @@ data class MemoryServerConfig(
         const val DEFAULT_SEARCH_LIMIT = 10
         const val DEFAULT_SEMANTIC_DEDUPE_SIMILARITY_THRESHOLD = 0.93
         const val DEFAULT_SEMANTIC_DEDUPE_MIN_CONFIDENCE = 0.65
-        const val DEFAULT_FACT_SUBJECT = "user"
+        const val DEFAULT_FACT_SUBJECT = "me"
         const val SERVER_NAME = "psyke-memory-pgvector"
         const val SERVER_VERSION = "0.1.0"
 

@@ -179,6 +179,55 @@ class DashboardStateStoreTest {
     }
 
     @Test
+    fun `planner decision is enriched with scoped structured output mode`() {
+        val store = DashboardStateStore(maxEvents = 20)
+        store.onEvent(
+            AgentEvent(
+                id = 1,
+                type = "llm_call",
+                data = mapOf(
+                    "actor" to "ego",
+                    "call_site" to "thought_json_retry",
+                    "structured_output_mode" to "relaxed",
+                    "session_id" to "session-a",
+                    "root_input_id" to "root-a",
+                    "status" to "ok"
+                )
+            )
+        )
+        store.onEvent(
+            AgentEvent(
+                id = 2,
+                type = "llm_call",
+                data = mapOf(
+                    "actor" to "ego",
+                    "call_site" to "thought",
+                    "structured_output_mode" to "strict",
+                    "session_id" to "session-b",
+                    "root_input_id" to "root-b",
+                    "status" to "ok"
+                )
+            )
+        )
+        store.onEvent(
+            AgentEvent(
+                id = 3,
+                type = "planner_decision",
+                data = mapOf(
+                    "trigger" to "thought",
+                    "decision_type" to "action",
+                    "session_id" to "session-a",
+                    "root_input_id" to "root-a"
+                )
+            )
+        )
+
+        val snapshot: DashboardSnapshot = mapper.readValue(store.snapshotJson())
+        val decision = snapshot.recentEvents.single { it.type == "planner_decision" }
+        assertEquals("relaxed", decision.data["structured_output_mode"])
+    }
+
+    @Test
     fun `subscription receives json payload for incoming events`() = runBlocking {
         val store = DashboardStateStore(maxEvents = 10)
         val subscription = store.subscribe()

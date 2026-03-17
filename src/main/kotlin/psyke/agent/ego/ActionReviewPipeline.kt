@@ -560,7 +560,9 @@ internal class ActionReviewPipeline(
             maxChars = FOLLOW_UP_SIGNAL_MAX_CHARS
         )
         val followUpThought = TextSecurity.clamp(
-            "${resolvedAction.followUpPrefix}\n$safePlannerSignal\nDecide if an answer should be sent.",
+            "${resolvedAction.followUpPrefix}\n$safePlannerSignal\n" +
+                "Produce the next planner decision as one raw JSON object only. " +
+                "Do not use tool or function wrappers.",
             config.planner.maxThoughtChars
         )
         val queued = scheduler.enqueueThought(

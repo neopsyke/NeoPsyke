@@ -2,6 +2,7 @@ package psyke.agent
 
 import psyke.agent.actions.ActionPluginFactoryContext
 import psyke.agent.actions.ActionRegistry
+import psyke.agent.actions.NoopReflectionMemoryRecorder
 import psyke.agent.config.AgentConfig
 import kotlin.test.Test
 import kotlin.test.assertFalse
@@ -19,6 +20,7 @@ class SuperegoDirectivesTest {
             mcpTimeTool = null,
             fetchTool = null,
             output = {},
+            reflectionMemoryRecorder = NoopReflectionMemoryRecorder,
         )
     )
 

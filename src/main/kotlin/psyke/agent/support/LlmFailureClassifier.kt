@@ -1,5 +1,7 @@
 package psyke.agent.support
 
+import psyke.llm.StructuredOutputCompatibilityFailureException
+
 object LlmFailureClassifier {
     fun isEmptyContentTransportFailure(error: Throwable?): Boolean {
         var current = error
@@ -19,6 +21,9 @@ object LlmFailureClassifier {
         var current = error
         var depth = 0
         while (current != null && depth < MAX_CAUSE_DEPTH) {
+            if (current is StructuredOutputCompatibilityFailureException) {
+                return true
+            }
             val normalized = current.message.orEmpty().trim().lowercase()
             if (SCHEMA_VALIDATION_MARKERS.any { normalized.contains(it) }) {
                 return true

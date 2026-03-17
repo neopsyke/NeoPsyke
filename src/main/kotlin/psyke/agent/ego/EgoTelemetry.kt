@@ -2,7 +2,6 @@ package psyke.agent.ego
 
 import psyke.agent.config.AgentConfig
 import psyke.agent.model.DeliberationState
-import psyke.agent.memory.shortterm.MemoryStore
 import psyke.agent.memory.workspace.TaskWorkspaceStore
 import psyke.agent.support.TextSecurity
 import psyke.instrumentation.AgentEvent
@@ -12,7 +11,7 @@ import psyke.instrumentation.AgentInstrumentation
 internal class EgoTelemetry(
     private val instrumentation: AgentInstrumentation,
     private val scheduler: AttentionScheduler,
-    private val memoryStore: MemoryStore,
+    private val memory: MemoryCoordinator,
     private val taskWorkspaceStore: TaskWorkspaceStore,
     private val config: AgentConfig,
 ) {
@@ -46,7 +45,7 @@ internal class EgoTelemetry(
         val rt = Runtime.getRuntime()
         val usedBytes = rt.totalMemory() - rt.freeMemory()
         val maxBytes = rt.maxMemory()
-        val memStats = memoryStore.stats()
+        val memStats = memory.activeMemoryStats()
         val queueSnap = scheduler.queueSnapshot()
         val modules = buildMap<String, Map<String, Any?>> {
             put("memory_store", mapOf(

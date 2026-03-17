@@ -20,6 +20,10 @@ It is intentionally high-level and should stay aligned with the code.
     - When `SuperegoConfig.twoStageReviewEnabled` is on, runtime resolves a cheaper primary superego model from `model_catalog` (same provider) and keeps the configured superego model as escalation stage.
     - Supported cognitive-role providers are `groq`, `mistral`, `google`, and `openai`.
     - OpenAI moderation utility (`omni-moderation-latest`) exists as a standalone callable path and is not auto-wired into cognitive-role chat calls.
+    - Planner runtime wiring now inserts an LLM-layer structured-output adapter ahead of the planner client:
+      - provider/model/call-site compatibility policy lives in the LLM layer, not `LlmEgoPlanner`
+      - structured-output compatibility failures can degrade request mode (`strict json_schema` -> relaxed json_schema -> prompt-only JSON) before the planner sees a terminal model failure
+      - degraded mode can stay sticky for the lifetime of the planner client instance (run-scoped)
     - `web_search` runtime remains independently configurable.
   - `Superego`
   - `ActionRegistry` (startup plugin discovery via `ServiceLoader<AgentActionPluginFactory>`)
@@ -97,6 +101,8 @@ It is intentionally high-level and should stay aligned with the code.
 - Ego impulse lifecycle tracking:
   - Each impulse root (`root_impulse_id`) gets a lifecycle record.
   - Id-origin is propagated on every downstream thought/action enqueue path (follow-up, denial recovery, suppression recovery, fallback).
+  - Id convergence constraints are re-applied on every Id-origin thought (including follow-up and plan-step thoughts), not only on the initial impulse planner pass.
+    - `internalize` + `allowEscalation=false` removes `contact_user` from planner dispatchable actions and planner action definitions.
   - Lifecycle result is aggregated across parallel branches:
     - accepted: at least one Id-origin action executed
     - denied: all branches finished without any executed Id-origin action
@@ -137,6 +143,7 @@ It is intentionally high-level and should stay aligned with the code.
   - Drops thought if `passes >= maxThoughtPasses`.
   - If dropped and fallback explanation is allowed, enqueue fallback answer action.
   - Duplicate fallback answer enqueues are suppressed per `(root input, sessionId)` scope so one session cannot block fallback for another.
+  - For Id-origin thoughts, planner context now rebuilds Id convergence state and applies the same convergence action filters used during impulse processing.
   - Otherwise mirrors input path:
     - build context
     - optional meta assessment/guidance
@@ -186,7 +193,11 @@ It is intentionally high-level and should stay aligned with the code.
   - Prompt assembly with contract-based budget allocation (`required_core` > `required_context` > `optional`).
   - Overhead-aware floor reservation per section, tiered degradation, and single-message fallback under extreme prompt pressure.
   - Emits `prompt_budget_allocation` telemetry for planner and action-verifier prompt builds (cost estimates, degradation path, fallback/floor-violation signals).
-  - Planner + action verifier calls use schema-enforced `response_format=json_schema` (strict schema first, then one relaxed-schema retry on provider schema-validation failure).
+  - Planner calls request schema-enforced structured output, but provider/model compatibility handling now lives below the planner in the LLM layer:
+    - planner requests one structured-output contract (`response_format=json_schema`) plus call-site metadata
+    - LLM adapter owns compatibility retries/degradation and may retry as relaxed schema or prompt-only JSON before surfacing a terminal failure
+    - planner no longer branches on provider/model error details
+  - Action verifier still uses schema-enforced `response_format=json_schema` with planner-local relaxed-schema retry.
   - Strict JSON parse + minimal repair for invalid escapes.
   - On planner parse failure: one truncation retry with increased completion budget when output appears truncated, then one strict-JSON retry.
   - Normalizes `action_payload` from either JSON string or structured JSON (object/array) into a string payload.
@@ -212,6 +223,7 @@ It is intentionally high-level and should stay aligned with the code.
     - answer-action tuning: verifier instructions explicitly approve directly entailed exact-match answers when there is no contradictory evidence, and verifier sampling temperature is fixed at `0.0`
   - `answer_draft` action proposals are allowed only inside active plan-context thoughts; out-of-context proposals are coerced to `noop`.
   - Retry policy and safe fallback to `Noop` on model/parse failures.
+  - Follow-up evidence thoughts now explicitly ask for the next planner decision as one raw JSON object and forbid tool/function wrappers.
   - Planner and action-verifier prompts now include "reflection lessons" context to avoid repeated failed strategies.
 
 ## Task Verifier Gate
@@ -300,6 +312,8 @@ It is intentionally high-level and should stay aligned with the code.
   - MCP stdio connect uses bounded startup retry (2 attempts) to absorb transient transport-close failures.
 - Long-term consolidation:
   - `LlmLongTermMemoryAdvisor` decides `save|skip` with confidence/tags/summary.
+  - Saved summaries are a first-person memory contract from the agent's perspective (for example, `I learned ...` / `I should remember ...`); common third-person outputs are normalized before persistence as a guardrail.
+  - MCP-backed durable-memory writes stamp the fact/reference subject as `me` so persisted memories are attributed to the agent rather than the user if a fact-style backend path is used.
   - Advisor compresses oversized dialogue and recall blocks before prompting (`ContextBlockCompressor`) and emits `memory_advisor_prompt_compressed` diagnostics.
   - Memory-advisor completion budget is adaptive by prompt size and bounded by `MemoryConfig`:
     - `longTermMemoryMaxTokens` is the base floor
@@ -436,6 +450,11 @@ It is intentionally high-level and should stay aligned with the code.
   - `remember()` auto-journals `INPUT_RECEIVED` for user turns.
   - `maybeAssessLongTermMemory()` auto-journals `MEMORY_IMPRINT` on successful saves.
   - `journal()` public method called from Ego for planner decisions, action outcomes, denials, and answers.
+  - `recordReflection()` owns `REFLECT` persistence, adding first-person normalization plus session/interlocutor/run and Id-origin provenance before writing logbook and long-term memory.
+- Narrative perspective is normalized by event type before logbook persistence:
+  - `INPUT_RECEIVED` stays canonical third-person timeline form as `User: ...`
+  - planner/action/answer events keep neutral timeline narration
+  - `MEMORY_IMPRINT` and `SELF_INITIATED` preserve or normalize to first-person agent wording
 - Summarization: deterministic keyword extraction (tokenize, remove stopwords, deduplicate, cap at `maxKeywordsPerEntry`). Optional LLM-based summarizer (`LlmLogbookSummarizer`, opt-in via `PSYKE_LOGBOOK_USE_LLM_SUMMARIZER=true`) with automatic fallback to deterministic on failure.
 - Episodic recall: triggered by temporal intent detection (regex patterns on the latest user turn). Detected intent maps to a time window and optional FTS keyword, producing a compact timeline injected into `PlannerContext.episodicRecall`.
 - Temporal-to-vector bridge: episodic summaries from temporal queries also serve as cues for `Hippocampus.recall()`, enriching long-term memory retrieval with temporal context.

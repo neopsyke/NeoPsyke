@@ -1,6 +1,7 @@
 package psyke.agent.ego
 
 import mu.KotlinLogging
+import psyke.agent.actions.ReflectionMemoryRecorder
 import psyke.agent.config.AgentConfig
 import psyke.agent.model.ActionType
 import psyke.agent.model.ConversationContext
@@ -9,10 +10,12 @@ import psyke.agent.model.DialogueTurn
 import psyke.agent.model.EgoTrigger
 import psyke.agent.model.DialogueRole
 import psyke.agent.model.Interlocutor
+import psyke.agent.model.PendingAction
 import psyke.agent.memory.episodic.DeterministicLogbookSummarizer
 import psyke.agent.memory.episodic.EpisodicEventType
 import psyke.agent.memory.episodic.Logbook
 import psyke.agent.memory.episodic.LogbookEntry
+import psyke.agent.memory.episodic.LogbookNarrative
 import psyke.agent.memory.episodic.LogbookQuery
 import psyke.agent.memory.episodic.LogbookRecall
 import psyke.agent.memory.episodic.LogbookSummarizer
@@ -21,6 +24,7 @@ import psyke.agent.memory.longterm.LongTermMemoryAdvisor
 import psyke.agent.memory.longterm.LongTermMemoryAssessmentContext
 import psyke.agent.memory.longterm.MemoryImprint
 import psyke.agent.memory.longterm.MemoryRecallQuery
+import psyke.agent.memory.shortterm.MemoryStats
 import psyke.agent.memory.shortterm.MemoryStore
 import psyke.agent.support.DenialReasonClassifier
 import psyke.agent.support.LlmCallCircuitBreaker
@@ -40,7 +44,7 @@ private val logger = KotlinLogging.logger {}
  * Manages short-term and long-term memory operations for the Ego agent loop.
  * Extracted from Ego to separate memory coordination concerns.
  */
-internal class MemoryCoordinator(
+class MemoryCoordinator(
     private val hippocampus: Hippocampus,
     private val longTermMemoryAdvisor: LongTermMemoryAdvisor,
     private val config: AgentConfig,
@@ -49,7 +53,7 @@ internal class MemoryCoordinator(
     private val logbook: Logbook? = null,
     private val logbookSummarizer: LogbookSummarizer = DeterministicLogbookSummarizer(config.logbook),
     private val runId: String? = null,
-) {
+) : ReflectionMemoryRecorder {
     private val memoryStoreFactory: () -> MemoryStore = { MemoryStore(config.memory.maxShortTermContextChars) }
     private val sessionMemoryStores: MutableMap<String, MemoryStore> =
         object : LinkedHashMap<String, MemoryStore>(16, 0.75f, true) {
@@ -120,6 +124,8 @@ internal class MemoryCoordinator(
         )
         return activeMemoryStore().summaryForPrompt(memoryTokenBudget)
     }
+
+    fun activeMemoryStats(): MemoryStats = activeMemoryStore().stats()
 
     // --- Long-term memory recall ---
 
@@ -405,7 +411,7 @@ internal class MemoryCoordinator(
             }
             journalSafe(
                 eventType = EpisodicEventType.MEMORY_IMPRINT,
-                summary = "Remembered: ${TextSecurity.preview(decision.summary, LOGBOOK_IMPRINT_PREVIEW_CHARS)}",
+                summary = decision.summary,
                 keywords = decision.tags,
             )
         }
@@ -430,6 +436,39 @@ internal class MemoryCoordinator(
             keywords = logbookSummarizer.extractKeywords(summary),
             actionType = actionType,
             metadata = metadata,
+        )
+    }
+
+    override fun recordReflection(action: PendingAction, summary: String, keywords: List<String>) {
+        val normalizedSummary = LogbookNarrative.normalizeSummary(EpisodicEventType.SELF_INITIATED, summary)
+        if (normalizedSummary.isBlank()) return
+
+        val normalizedKeywords = keywords
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+        val tags = buildReflectionTags(action, normalizedKeywords)
+
+        if (hippocampus.enabled) {
+            try {
+                hippocampus.imprint(
+                    MemoryImprint(
+                        summary = normalizedSummary,
+                        source = "self_initiated_reflection",
+                        confidence = REFLECTION_DEFAULT_CONFIDENCE,
+                        tags = tags,
+                    )
+                )
+            } catch (ex: Exception) {
+                logger.debug(ex) { "Reflection imprint failed for action_type=${action.type.id}." }
+            }
+        }
+
+        journalSafe(
+            eventType = EpisodicEventType.SELF_INITIATED,
+            summary = normalizedSummary,
+            keywords = normalizedKeywords,
+            actionType = action.type.id,
+            metadata = buildReflectionMetadata(action),
         )
     }
 
@@ -529,7 +568,7 @@ internal class MemoryCoordinator(
         }
         journalSafe(
             eventType = EpisodicEventType.MEMORY_IMPRINT,
-            summary = "Lesson: ${TextSecurity.preview(lesson, LOGBOOK_IMPRINT_PREVIEW_CHARS)}",
+            summary = lesson,
             keywords = contextTags,
             actionType = actionType?.name?.lowercase()
         )
@@ -635,12 +674,17 @@ internal class MemoryCoordinator(
         metadata: Map<String, Any?>? = null,
     ) {
         val lb = logbook ?: return
+        val normalizedSummary = TextSecurity.preview(
+            LogbookNarrative.normalizeSummary(eventType, summary),
+            config.logbook.maxSummaryChars
+        )
+        if (normalizedSummary.isBlank()) return
         try {
             lb.record(
                 LogbookEntry(
                     ts = Instant.now(),
                     eventType = eventType,
-                    summary = summary,
+                    summary = normalizedSummary,
                     keywords = keywords,
                     actionType = actionType,
                     runId = runId,
@@ -653,6 +697,26 @@ internal class MemoryCoordinator(
             logger.debug(ex) { "Logbook record failed for event_type=${eventType.dbValue()}." }
         }
     }
+
+    private fun buildReflectionTags(action: PendingAction, keywords: List<String>): List<String> =
+        (
+            listOfNotNull(
+                "session:$activeSessionId",
+                "interlocutor:${activeInterlocutor.id}",
+                "self_initiated",
+                action.origin.needId?.let { "need:$it" },
+                action.origin.rootImpulseId?.let { "root_impulse:$it" },
+                action.rootInputId?.let { "root_input:$it" },
+            ) + keywords
+        ).distinct()
+
+    private fun buildReflectionMetadata(action: PendingAction): Map<String, Any?> =
+        buildMap {
+            put("self_initiated", true)
+            action.origin.needId?.let { put("need_id", it) }
+            action.origin.rootImpulseId?.let { put("root_impulse_id", it) }
+            action.rootInputId?.let { put("root_input_id", it) }
+        }
 
     fun resetForNewInput() {
         sessionStates.values.forEach { state ->
@@ -1146,7 +1210,6 @@ internal class MemoryCoordinator(
         const val REASON_CODE_CONFIDENCE_BELOW_THRESHOLD: String = "confidence_below_threshold"
         const val REASON_CODE_RECALL_ECHO: String = "recall_echo_suppression"
         const val REASON_CODE_DUPLICATE_FINGERPRINT: String = "duplicate_recent_fingerprint"
-        const val LOGBOOK_IMPRINT_PREVIEW_CHARS: Int = 160
         const val MAX_RECENT_IMPRINT_FINGERPRINTS: Int = 24
         const val MAX_TRACKED_SESSIONS: Int = 128
         const val LESSON_RECALL_MAX_ITEMS: Int = 3
@@ -1156,6 +1219,7 @@ internal class MemoryCoordinator(
         const val LESSON_DENIED_PAYLOAD_PREVIEW_CHARS: Int = 120
         const val MAX_RECENT_LESSON_FINGERPRINTS: Int = 24
         const val LESSON_DEFAULT_CONFIDENCE: Double = 0.72
+        const val REFLECTION_DEFAULT_CONFIDENCE: Double = 0.6
         val LESSON_TECHNICAL_TEXT_SIGNALS: Set<String> = setOf(
             "tool error",
             "tool failed",

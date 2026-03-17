@@ -4,6 +4,7 @@ import psyke.llm.ChatMessage
 import psyke.llm.ChatModelClient
 import psyke.llm.ChatRole
 import psyke.llm.ChatResponseFormat
+import psyke.llm.AdaptiveStructuredOutputChatClient
 import psyke.support.RecordingInstrumentation
 import psyke.support.StubChatModelClient
 import kotlin.test.Test
@@ -218,9 +219,9 @@ class EgoPlannerTest {
     }
 
     @Test
-    fun `planner retries with relaxed response schema when strict schema validation fails`() {
+    fun `planner recovers compatibility failures through llm-layer structured output adaptation`() {
         val observedOptions = mutableListOf<psyke.llm.ChatRequestOptions>()
-        val llm = object : ChatModelClient {
+        val baseClient = object : ChatModelClient {
             override val modelName: String = "schema-flaky"
             private var calls = 0
 
@@ -236,6 +237,10 @@ class EgoPlannerTest {
                 )
             }
         }
+        val llm = AdaptiveStructuredOutputChatClient(
+            delegate = baseClient,
+            provider = "groq"
+        )
         val planner = LlmEgoPlanner(
             modelClient = llm,
             config = AgentConfig(llmRetryAttempts = 2)
@@ -256,6 +261,7 @@ class EgoPlannerTest {
         val relaxedFormat = assertIs<ChatResponseFormat.JsonSchema>(observedOptions[1].responseFormat)
         assertTrue(strictFormat.schemaJson.contains("maxLength"))
         assertFalse(relaxedFormat.schemaJson.contains("maxLength"))
+        assertFalse(relaxedFormat.strict)
     }
 
     @Test
@@ -487,7 +493,8 @@ class EgoPlannerTest {
                       "is_dst": false
                     }
                     UNTRUSTED_EXTERNAL_DATA_END
-                    Decide if an answer should be sent.
+                    Produce the next planner decision as one raw JSON object only.
+                    Do not use tool or function wrappers.
                     """.trimIndent(),
                     passes = 1,
                     originActionType = ActionType.MCP_TIME,
