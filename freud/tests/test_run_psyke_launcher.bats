@@ -33,3 +33,25 @@ teardown() {
   grep -q '^EGO_LOOP_DELAY_MS=1000$' "$ENV_OUT"
   grep -q 'ARGS=--freud-live' "$ENV_OUT"
 }
+
+@test "run-psyke forwards --clear-memory-lessons and no longer documents the old flag name" {
+  run env \
+    PSYKE_STUB_ENV_OUT="$ENV_OUT" \
+    "$LAUNCHER_ROOT/run-psyke.sh" --clear-memory-lessons --freud-live
+
+  [[ "$status" -eq 0 ]]
+  grep -q 'ARGS=--clear-memory-lessons --freud-live' "$ENV_OUT"
+
+  run "$LAUNCHER_ROOT/run-psyke.sh" --help
+
+  [[ "$status" -eq 0 ]]
+  [[ "$output" == *"--clear-memory-lessons"* ]]
+  [[ "$output" != *"--clear-memory-reflection"* ]]
+  [[ "$output" == *"GOOGLE_API_KEY"* ]]
+  [[ "$output" == *"OPENAI_API_KEY"* ]]
+  [[ "$output" != *"LLM_PROVIDER"* ]]
+  [[ "$output" != *"LLM_WEBSEARCH_PROVIDER"* ]]
+  [[ "$output" != *"LLM_API_KEY"* ]]
+  [[ "$output" != *"LLM_WEBSEARCH_API_KEY"* ]]
+  [[ "$output" != *"LLM_WEBSEARCH_BASE_URL"* ]]
+}

@@ -134,7 +134,7 @@ while [[ $# -gt 0 ]]; do
       DISABLE_ID=1
       shift
       ;;
-    --clear-memory-all|--clear-memory-vector|--clear-memory-episodic|--clear-memory-reflection)
+    --clear-memory-all|--clear-memory-vector|--clear-memory-episodic|--clear-memory-lessons)
       APP_ARGS+=("$1")
       shift
       ;;
@@ -153,18 +153,15 @@ Memory clearing (applied before agent startup):
       --clear-memory-all         Clear ALL long-term memory (vector + episodic) before starting
       --clear-memory-vector      Clear vector/hippocampus memory before starting
       --clear-memory-episodic    Clear episodic logbook memory before starting
-      --clear-memory-reflection  Clear reflection lessons from vector memory before starting
+      --clear-memory-lessons     Clear lessons from vector memory before starting
 
 Environment:
   PSYKE_LLM_CONFIG_FILE   Optional path to LLM runtime YAML (default: ./llm-runtime.yaml)
   PSYKE_AGENT_CONFIG_FILE Optional path to agent/app/eval runtime YAML (default: ./agent-runtime.yaml)
-  LLM_PROVIDER            Optional env override for YAML provider: groq or mistral
-  LLM_WEBSEARCH_PROVIDER  Optional env override for web_search provider: groq or mistral
-  GROQ_API_KEY            Required when provider=groq
-  MISTRAL_API_KEY         Required when provider=mistral
-  LLM_API_KEY             Optional generic API key fallback for the selected provider
-  LLM_WEBSEARCH_API_KEY   Optional explicit API key for web_search provider
-  LLM_WEBSEARCH_BASE_URL  Optional base URL override for web_search provider
+  GROQ_API_KEY            Required when a configured provider uses Groq
+  MISTRAL_API_KEY         Required when a configured provider uses Mistral
+  GOOGLE_API_KEY          Required when a configured provider uses Google
+  OPENAI_API_KEY          Required when a configured provider uses OpenAI
   PSYKE_MCP_CONFIG_FILE   Optional path to MCP runtime YAML (default: ./mcp-runtime.yaml)
   MCP_MEMORY_SERVER_CMD   Optional override for memory command (required only if YAML memory command is not set)
   PSYKE_LOG_LEVEL         Default log level if --log-level is not provided
@@ -191,11 +188,11 @@ Eval mode (forwarded to app):
                                  (defaults launcher log level to trace unless overridden)
   --eval-reasoning-mode MODE      Eval mode: logic (default) or model
   --eval-memory-live              Run live memory eval (real LLM + real MCP memory)
-  --eval-stage ID                 Label this eval run for history comparison
+  --eval-stage ID                 Label this eval run (default: UTC date, e.g. 2026-02-28)
   --eval-reasoning-max-attempts N Max retries per reasoning task (default: 4)
-  --eval-reasoning-tasks id1,id2  Restrict reasoning eval to selected tasks
+  --eval-reasoning-tasks id1,id2  Run only selected reasoning task ids
   --eval-memory-max-attempts N    Max retries per long-term memory assessment task (default: 2)
-  --eval-memory-tasks id1,id2     Restrict memory eval to selected tasks
+  --eval-memory-tasks id1,id2     Run only selected memory eval task ids
 EOF
       exit 0
       ;;
