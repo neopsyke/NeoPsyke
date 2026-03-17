@@ -98,10 +98,12 @@ enum class TimeoutAction {
 data class ProjectWorkUnit(
     val projectId: String,
     val stepId: String,
+    val rootInputId: String,
     val stepDescription: String,
     val acceptanceCriteria: String,
     val workingContext: String,
     val actionSuggestion: String = "",
+    val wakeReason: String = "",
 )
 
 /**

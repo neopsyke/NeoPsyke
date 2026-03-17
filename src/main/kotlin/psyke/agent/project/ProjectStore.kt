@@ -7,6 +7,8 @@ import com.fasterxml.jackson.module.kotlin.readValue
 import mu.KotlinLogging
 import java.nio.file.Files
 import java.nio.file.Path
+import java.nio.file.StandardCopyOption
+import java.nio.file.StandardOpenOption
 
 private val logger = KotlinLogging.logger {}
 
@@ -45,21 +47,24 @@ class ProjectStore(private val workspaceRoot: Path) {
         val dir = workspaceRoot.resolve(projectId)
         if (!Files.isDirectory(dir)) return null
 
+        val projectStatePath = dir.resolve(PROJECT_FILE)
         val snapshotPath = dir.resolve(SNAPSHOT_FILE)
         val eventsPath = dir.resolve(EVENTS_FILE)
         val eventLog = ProjectEventLog(eventsPath)
 
-        // Try loading from snapshot first, then replay remaining events.
-        val (baseState, replayFrom) = if (Files.exists(snapshotPath)) {
-            try {
-                val snapshot = mapper.readValue<ProjectSnapshot>(Files.readString(snapshotPath))
-                snapshot.toState(dir.resolve(WORKSPACE_DIR)) to snapshot.eventCount
-            } catch (e: Exception) {
-                logger.warn { "Failed to read snapshot for $projectId, falling back to full replay: ${e.message}" }
-                null to 0
+        val (baseState, replayFrom) = when {
+            Files.exists(projectStatePath) -> {
+                try {
+                    val snapshot = mapper.readValue<ProjectSnapshot>(Files.readString(projectStatePath))
+                    snapshot.toState(dir.resolve(WORKSPACE_DIR)) to snapshot.eventCount
+                } catch (e: Exception) {
+                    logger.warn { "Failed to read project.json for $projectId, falling back: ${e.message}" }
+                    loadSnapshotBase(snapshotPath, dir, projectId)
+                }
             }
-        } else {
-            null to 0
+
+            Files.exists(snapshotPath) -> loadSnapshotBase(snapshotPath, dir, projectId)
+            else -> null to 0
         }
 
         val events = eventLog.readFrom(replayFrom)
@@ -81,12 +86,19 @@ class ProjectStore(private val workspaceRoot: Path) {
         return state
     }
 
+    fun saveProjectState(projectId: String, state: ProjectState) {
+        val dir = workspaceRoot.resolve(projectId)
+        Files.createDirectories(dir)
+        val json = mapper.writerWithDefaultPrettyPrinter().writeValueAsString(ProjectSnapshot.from(state))
+        atomicWrite(dir.resolve(PROJECT_FILE), json)
+    }
+
     fun saveSnapshot(projectId: String, state: ProjectState) {
         val dir = workspaceRoot.resolve(projectId)
         Files.createDirectories(dir)
         val snapshot = ProjectSnapshot.from(state)
         val json = mapper.writerWithDefaultPrettyPrinter().writeValueAsString(snapshot)
-        Files.writeString(dir.resolve(SNAPSHOT_FILE), json)
+        atomicWrite(dir.resolve(SNAPSHOT_FILE), json)
     }
 
     fun createWorkspace(projectId: String): Path {
@@ -96,12 +108,62 @@ class ProjectStore(private val workspaceRoot: Path) {
         return dir
     }
 
+    fun appendScratchEntry(projectId: String, entry: String) {
+        val workspace = createWorkspace(projectId)
+        val scratch = workspace.resolve("scratch.md")
+        Files.writeString(
+            scratch,
+            entry.trim() + "\n\n",
+            StandardOpenOption.CREATE,
+            StandardOpenOption.APPEND,
+        )
+    }
+
+    fun writeArtifact(projectId: String, stepId: String, artifactName: String, content: String) {
+        val artifactsDir = createWorkspace(projectId).resolve("artifacts").resolve(stepId)
+        Files.createDirectories(artifactsDir)
+        atomicWrite(artifactsDir.resolve(artifactName), content)
+    }
+
+    fun deleteProject(projectId: String) {
+        val dir = workspaceRoot.resolve(projectId)
+        if (!Files.exists(dir)) return
+        Files.walk(dir)
+            .sorted(Comparator.reverseOrder())
+            .forEach { Files.deleteIfExists(it) }
+    }
+
     fun eventLog(projectId: String): ProjectEventLog =
         ProjectEventLog(workspaceRoot.resolve(projectId).resolve(EVENTS_FILE))
 
     fun projectDir(projectId: String): Path = workspaceRoot.resolve(projectId)
 
+    private fun loadSnapshotBase(snapshotPath: Path, dir: Path, projectId: String): Pair<ProjectState?, Int> =
+        if (Files.exists(snapshotPath)) {
+            try {
+                val snapshot = mapper.readValue<ProjectSnapshot>(Files.readString(snapshotPath))
+                snapshot.toState(dir.resolve(WORKSPACE_DIR)) to snapshot.eventCount
+            } catch (e: Exception) {
+                logger.warn { "Failed to read snapshot for $projectId, falling back to full replay: ${e.message}" }
+                null to 0
+            }
+        } else {
+            null to 0
+        }
+
+    private fun atomicWrite(path: Path, content: String) {
+        Files.createDirectories(path.parent)
+        val temp = Files.createTempFile(path.parent, path.fileName.toString(), ".tmp")
+        Files.writeString(temp, content, StandardOpenOption.TRUNCATE_EXISTING)
+        try {
+            Files.move(temp, path, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
+        } catch (_: Exception) {
+            Files.move(temp, path, StandardCopyOption.REPLACE_EXISTING)
+        }
+    }
+
     companion object {
+        const val PROJECT_FILE = "project.json"
         const val EVENTS_FILE = "events.jsonl"
         const val SNAPSHOT_FILE = "snapshot.json"
         const val WORKSPACE_DIR = "workspace"

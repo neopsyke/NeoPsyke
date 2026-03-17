@@ -56,27 +56,12 @@ sealed interface SystemSignal : Signal {
     data class ConfigReloaded(val key: String) : SystemSignal
 }
 
-/** Project subsystem events — step completions, timer wake-ups, new projects. */
+/** Project subsystem events consumed by the Ego loop. */
 sealed interface ProjectSignal : Signal {
-    data class StepCompleted(
+    data class WorkReady(
         val projectId: String,
         val stepId: String,
-        val success: Boolean,
-    ) : ProjectSignal
-
-    data class WaitConditionMet(
-        val projectId: String,
-        val stepId: String,
-        val conditionType: String,
-    ) : ProjectSignal
-
-    data class ScheduledWakeUp(
-        val projectId: String,
-        val scheduledAtMs: Long,
-    ) : ProjectSignal
-
-    data class ProjectCreated(
-        val projectId: String,
+        val reason: String,
     ) : ProjectSignal
 }
 

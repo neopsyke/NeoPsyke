@@ -14,9 +14,9 @@ import psyke.agent.memory.episodic.EpisodicEventType
 import psyke.agent.memory.workspace.TaskWorkspaceStore
 import psyke.agent.id.EmptyProjectRegistry
 import psyke.agent.id.ProjectRegistry
-import psyke.agent.project.ProjectEvent
-import psyke.agent.project.ProjectManager
+import psyke.agent.project.NoopProjectsGateway
 import psyke.agent.project.ProjectWorkUnit
+import psyke.agent.project.ProjectsGateway
 import psyke.agent.support.TextSecurity
 import psyke.agent.superego.Superego
 import psyke.instrumentation.AgentEvent
@@ -39,7 +39,7 @@ class Ego(
     private val taskWorkspaceFinalizer: TaskWorkspaceFinalizer = NoopTaskWorkspaceFinalizer,
     private val instrumentation: AgentInstrumentation = NoopAgentInstrumentation,
     private val projectRegistry: ProjectRegistry = EmptyProjectRegistry,
-    private val projectManager: ProjectManager? = null,
+    private val projectsGateway: ProjectsGateway = NoopProjectsGateway,
 ) {
     @Volatile private var id: psyke.agent.id.Id? = null
 
@@ -95,6 +95,7 @@ class Ego(
         superegoContext = ::superegoContext,
         cleanupResolvedInputAfterAnswer = ::cleanupResolvedInputAfterAnswer,
         getId = { id },
+        actionLifecycleObserver = projectsGateway,
     )
 
     private fun dialogueFor(sessionId: String): ArrayDeque<DialogueTurn> =
@@ -177,7 +178,7 @@ class Ego(
 
                 // ── Project signals (project subsystem) ──────────────
                 is ProjectSignal -> {
-                    val work = projectManager?.pickWork(signal)
+                    val work = projectsGateway.nextWorkFromSignal(signal)
                     if (work != null) {
                         logger.info { "Project work picked: ${work.projectId}/${work.stepId}" }
                         scheduler.enqueueProjectWork(work)
@@ -185,7 +186,7 @@ class Ego(
                         // R6: Clear Ego transient state after the project work cycle
                         // completes so there is no context bleed into subsequent tasks.
                         // Also finalizes context.md (R1) and updates the budget counter (R3).
-                        cleanupAfterProjectAdvance(work.projectId, work.stepId)
+                        cleanupAfterProjectAdvance(work.rootInputId)
                     }
                 }
             }
@@ -439,7 +440,7 @@ class Ego(
             needId = impulse.needId,
             triggeringUrgency = impulse.urgency,
         )
-        val projectSummary = projectManager?.pendingWorkSummary().orEmpty()
+        val projectSummary = projectsGateway.pendingWorkSummary()
         val context = idConstrainedContext.copy(
             // Override: no short-term memory from other sessions
             shortTermContextSummary = "",
@@ -504,17 +505,11 @@ class Ego(
             )
         )
 
-        // Mark step as started in the state machine
-        projectManager?.applyEventExternal(
-            work.projectId,
-            ProjectEvent.StepStarted(work.projectId, work.stepId)
-        )
-
         timing.startPhase("planner_context")
         val trigger = EgoTrigger.ProjectWork(work)
         val context = plannerContext(
             trigger = trigger,
-            rootInputId = "project:${work.projectId}",
+            rootInputId = work.rootInputId,
             sessionId = sessionId,
             conversationContext = convCtx,
         )
@@ -529,7 +524,7 @@ class Ego(
             decision = decision,
             nextPassCount = 0,
             originThought = null,
-            rootInputId = "project:${work.projectId}",
+            rootInputId = work.rootInputId,
             rootInputReceivedAtMs = System.currentTimeMillis(),
             conversationContext = convCtx,
             origin = origin,
@@ -833,20 +828,17 @@ class Ego(
      * Also triggers R1 (context.md write) and R3 (budget increment) via
      * [ProjectManager.finalizeWorkCycle].
      */
-    private fun cleanupAfterProjectAdvance(projectId: String, stepId: String) {
-        val projectRootId = "project:$projectId"
+    private fun cleanupAfterProjectAdvance(rootInputId: String) {
         val sessionId = ConversationContext.DEFAULT_SESSION_ID
-        planner.resetForInput(projectRootId)
-        deliberation.clearForInput(projectRootId, sessionId)
-        dispatcher.clearExternalActionSignatures(InputScope(projectRootId, sessionId))
-        projectManager?.finalizeWorkCycle(projectId, stepId)
+        planner.resetForInput(rootInputId)
+        deliberation.clearForInput(rootInputId, sessionId)
+        dispatcher.clearExternalActionSignatures(InputScope(rootInputId, sessionId))
+        projectsGateway.finalizeProjectCycle(rootInputId)
         instrumentation.emit(
             AgentEvent(
                 type = "project_advance_cleanup",
                 data = mapOf(
-                    "project_id" to projectId,
-                    "step_id" to stepId,
-                    "project_root_id" to projectRootId,
+                    "project_root_id" to rootInputId,
                 )
             )
         )
@@ -867,7 +859,7 @@ class Ego(
             is LoopTask.ProcessThought -> task.item.rootInputId
             is LoopTask.PerformAction -> task.item.rootInputId
             is LoopTask.ProcessImpulse -> task.item.rootImpulseId
-            is LoopTask.ProcessProjectWork -> "project:${task.item.projectId}"
+            is LoopTask.ProcessProjectWork -> task.item.rootInputId
         }
 
     private fun taskRootInputReceivedAtMs(task: LoopTask): Long? =

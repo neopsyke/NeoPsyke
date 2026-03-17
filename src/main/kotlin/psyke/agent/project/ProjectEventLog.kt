@@ -27,12 +27,16 @@ class ProjectEventLog(private val path: Path) {
         val wrapper = EventWrapper.from(event)
         val json = mapper.writeValueAsString(wrapper)
         Files.createDirectories(path.parent)
-        Files.writeString(
+        Files.newOutputStream(
             path,
-            json + "\n",
             StandardOpenOption.CREATE,
             StandardOpenOption.APPEND,
-        )
+            StandardOpenOption.SYNC,
+        ).bufferedWriter().use { writer ->
+            writer.append(json)
+            writer.append('\n')
+            writer.flush()
+        }
     }
 
     fun readAll(): List<ProjectEvent> {
@@ -108,6 +112,11 @@ internal data class EventWrapper(
             "Suspended" -> ProjectEvent.Suspended(projectId, reason ?: "", resumeAt?.let { java.time.Instant.parse(it) }, ts)
             "Resumed" -> ProjectEvent.Resumed(projectId, ts)
             "Completed" -> ProjectEvent.Completed(projectId, ts)
+            "PriorityChanged" -> ProjectEvent.PriorityChanged(
+                projectId = projectId,
+                priority = ProjectPriority.valueOf(priority ?: "MEDIUM"),
+                timestamp = ts,
+            )
             "Failed" -> ProjectEvent.Failed(projectId, reason ?: "", ts)
             "ContextUpdated" -> ProjectEvent.ContextUpdated(projectId, tier ?: 1, summary ?: "", ts)
             "WorkCycleCompleted" -> ProjectEvent.WorkCycleCompleted(projectId, stepId ?: "", actionsExecuted ?: 0, ts)
@@ -144,6 +153,7 @@ internal data class EventWrapper(
                 is ProjectEvent.Suspended -> base.copy(reason = event.reason, resumeAt = event.resumeAt?.toString())
                 is ProjectEvent.Resumed -> base
                 is ProjectEvent.Completed -> base
+                is ProjectEvent.PriorityChanged -> base.copy(priority = event.priority.name)
                 is ProjectEvent.Failed -> base.copy(reason = event.reason)
                 is ProjectEvent.ContextUpdated -> base.copy(tier = event.tier, summary = event.summary)
                 is ProjectEvent.WorkCycleCompleted -> base.copy(stepId = event.stepId, actionsExecuted = event.actionsExecuted)

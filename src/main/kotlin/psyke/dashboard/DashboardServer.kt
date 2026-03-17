@@ -36,7 +36,7 @@ class DashboardServer(
     private val innerVoiceStore: InnerVoiceStore? = null,
     private val idInnerVoiceFilePath: Path? = null,
     @Volatile var metricsQueryProvider: MetricsQueryProvider? = null,
-    private val projectManager: ProjectManager? = null,
+    @Volatile var projectManager: ProjectManager? = null,
     port: Int,
     host: String = "127.0.0.1",
 ) : Closeable {

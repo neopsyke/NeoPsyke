@@ -2,10 +2,18 @@ package psyke.agent.project
 
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
-import psyke.agent.cortex.sensory.Signal
+import psyke.agent.cortex.sensory.ProjectSignal
+import psyke.agent.model.ActionExecutionStatus
+import psyke.agent.model.ActionOutcome
+import psyke.agent.model.ActionType
+import psyke.agent.model.ConversationContext
+import psyke.agent.model.OriginSource
+import psyke.agent.model.PendingAction
+import psyke.agent.model.Urgency
 import java.nio.file.Files
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -23,14 +31,15 @@ class ProjectManagerTest {
     private fun testScope() = CoroutineScope(SupervisorJob())
 
     @Test
-    fun `createProject returns projectId and emits signal`() {
-        val root = Files.createTempDirectory("psyke-pm-test")
+    fun `createProject generates plan persists state and emits work-ready signal`() {
+        val root = Files.createTempDirectory("psyke-pm-create")
         try {
-            val signals = mutableListOf<Signal>()
+            val signals = mutableListOf<ProjectSignal>()
             val manager = ProjectManager(
                 config = testConfig(root),
                 store = ProjectStore(root),
-                signalEmitter = signals::add,
+                planner = DeterministicProjectPlanner(),
+                signalEmitter = { signal -> if (signal is ProjectSignal) signals += signal },
             )
             manager.start(testScope())
 
@@ -41,10 +50,12 @@ class ProjectManagerTest {
             )
 
             assertTrue(id.isNotBlank())
-            assertTrue(signals.isNotEmpty())
+            val workReady = assertIs<ProjectSignal.WorkReady>(signals.last())
+            assertEquals(id, workReady.projectId)
             val state = manager.projectStatus(id)
             assertNotNull(state)
-            assertEquals(ProjectPriority.HIGH, state.project.priority)
+            assertEquals(ProjectStatus.ACTIVE, state.project.status)
+            assertTrue(Files.exists(root.resolve(id).resolve(ProjectStore.PROJECT_FILE)))
 
             manager.stop()
         } finally {
@@ -53,20 +64,21 @@ class ProjectManagerTest {
     }
 
     @Test
-    fun `allProjects returns tier1 summaries`() {
-        val root = Files.createTempDirectory("psyke-pm-allprojects")
+    fun `nextWorkFromSignal creates project session and returns work unit`() {
+        val root = Files.createTempDirectory("psyke-pm-work")
         try {
             val manager = ProjectManager(
                 config = testConfig(root),
                 store = ProjectStore(root),
+                planner = DeterministicProjectPlanner(),
             )
             manager.start(testScope())
+            val id = manager.createProject("Persistent task")
 
-            manager.createProject("Task A", "Project A")
-            manager.createProject("Task B", "Project B")
-
-            val all = manager.allProjects()
-            assertEquals(2, all.size)
+            val work = manager.nextWorkFromSignal(ProjectSignal.WorkReady(id, "step-1", "test"))
+            assertNotNull(work)
+            assertEquals(id, work.projectId)
+            assertTrue(work.rootInputId.startsWith("project:$id"))
 
             manager.stop()
         } finally {
@@ -75,7 +87,53 @@ class ProjectManagerTest {
     }
 
     @Test
-    fun `pendingWorkSummary returns empty when no active projects`() {
+    fun `project-origin action outcome completes final step and project`() {
+        val root = Files.createTempDirectory("psyke-pm-complete")
+        try {
+            val signals = mutableListOf<ProjectSignal>()
+            val manager = ProjectManager(
+                config = testConfig(root),
+                store = ProjectStore(root),
+                planner = DeterministicProjectPlanner(),
+                verifier = DeterministicProjectStepVerifier(),
+                signalEmitter = { signal -> if (signal is ProjectSignal) signals += signal },
+            )
+            manager.start(testScope())
+            val id = manager.createProject("Ship release checklist")
+            val work = manager.nextWorkFromSignal(assertIs<ProjectSignal.WorkReady>(signals.last()))
+            assertNotNull(work)
+
+            manager.onActionExecuted(
+                action = PendingAction(
+                    id = 1L,
+                    urgency = Urgency.MEDIUM,
+                    type = ActionType.REFLECT,
+                    payload = """{"note":"done"}""",
+                    summary = "done",
+                    rootInputId = work.rootInputId,
+                    conversationContext = ConversationContext.default(),
+                    origin = psyke.agent.model.ActionOrigin(source = OriginSource.PROJECT),
+                ),
+                outcome = ActionOutcome(
+                    statusSummary = "completed",
+                    executionStatus = ActionExecutionStatus.SUCCESS,
+                ),
+                observedEvidence = true,
+            )
+            manager.finalizeProjectCycle(work.rootInputId)
+
+            val state = manager.projectStatus(id)
+            assertNotNull(state)
+            assertEquals(ProjectStatus.COMPLETED, state.project.status)
+
+            manager.stop()
+        } finally {
+            root.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `pendingWorkSummary returns empty when no projects exist`() {
         val root = Files.createTempDirectory("psyke-pm-summary")
         try {
             val manager = ProjectManager(
@@ -83,27 +141,7 @@ class ProjectManagerTest {
                 store = ProjectStore(root),
             )
             manager.start(testScope())
-
             assertEquals("", manager.pendingWorkSummary())
-
-            manager.stop()
-        } finally {
-            root.toFile().deleteRecursively()
-        }
-    }
-
-    @Test
-    fun `pickWork returns null when no active projects`() {
-        val root = Files.createTempDirectory("psyke-pm-pickwork")
-        try {
-            val manager = ProjectManager(
-                config = testConfig(root),
-                store = ProjectStore(root),
-            )
-            manager.start(testScope())
-
-            assertNull(manager.pickWork())
-
             manager.stop()
         } finally {
             root.toFile().deleteRecursively()
@@ -127,7 +165,7 @@ class ProjectManagerTest {
 
             assertTrue(id1.isNotBlank())
             assertTrue(id2.isNotBlank())
-            assertEquals("", id3) // should be rejected
+            assertEquals("", id3)
 
             manager.stop()
         } finally {
@@ -143,12 +181,12 @@ class ProjectManagerTest {
             val manager1 = ProjectManager(
                 config = testConfig(root),
                 store = store,
+                planner = DeterministicProjectPlanner(),
             )
             manager1.start(testScope())
             val id = manager1.createProject("Persistent task")
             manager1.stop()
 
-            // New manager, same store
             val manager2 = ProjectManager(
                 config = testConfig(root),
                 store = store,
@@ -158,8 +196,25 @@ class ProjectManagerTest {
             val reloaded = manager2.projectStatus(id)
             assertNotNull(reloaded)
             assertTrue(reloaded.project.instruction.contains("Persistent task"))
+            assertEquals(ProjectStatus.ACTIVE, reloaded.project.status)
 
             manager2.stop()
+        } finally {
+            root.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `nextWorkFromSignal returns null when project is missing`() {
+        val root = Files.createTempDirectory("psyke-pm-missing")
+        try {
+            val manager = ProjectManager(
+                config = testConfig(root),
+                store = ProjectStore(root),
+            )
+            manager.start(testScope())
+            assertNull(manager.nextWorkFromSignal(ProjectSignal.WorkReady("missing", "s1", "test")))
+            manager.stop()
         } finally {
             root.toFile().deleteRecursively()
         }

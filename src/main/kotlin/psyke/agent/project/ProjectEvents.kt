@@ -124,6 +124,12 @@ sealed interface ProjectEvent {
         override val timestamp: Instant = Instant.now(),
     ) : ProjectEvent
 
+    data class PriorityChanged(
+        override val projectId: String,
+        val priority: ProjectPriority,
+        override val timestamp: Instant = Instant.now(),
+    ) : ProjectEvent
+
     data class Failed(
         override val projectId: String,
         val reason: String,
@@ -152,11 +158,33 @@ sealed interface ProjectEvent {
  * The ProjectManager dispatches these as side effects.
  */
 sealed interface ProjectCommand {
-    data class EmitSignal(val signal: ProjectSignal) : ProjectCommand
-    data class ScheduleTimer(val projectId: String, val wakeAt: Instant) : ProjectCommand
-    data class CancelTimer(val projectId: String) : ProjectCommand
-    data class PersistState(val projectId: String) : ProjectCommand
-    data class RequestPlan(val projectId: String, val instruction: String) : ProjectCommand
-    data class RequestStepExecution(val projectId: String, val stepId: String) : ProjectCommand
+    data class EmitWorkReady(
+        val signal: ProjectSignal.WorkReady,
+    ) : ProjectCommand
+
+    data class ScheduleWakeTimer(
+        val projectId: String,
+        val stepId: String? = null,
+        val wakeAt: Instant,
+        val reason: String,
+    ) : ProjectCommand
+
+    data class CancelWakeTimer(
+        val projectId: String,
+        val reason: String,
+    ) : ProjectCommand
+
+    data class RegisterWaitCondition(
+        val projectId: String,
+        val stepId: String,
+        val condition: WaitCondition,
+    ) : ProjectCommand
+
+    data class ClearWaitCondition(
+        val projectId: String,
+        val stepId: String,
+    ) : ProjectCommand
+
+    data class PersistProject(val projectId: String) : ProjectCommand
     data class NotifyUser(val projectId: String, val message: String) : ProjectCommand
 }

@@ -19,7 +19,7 @@ object ProjectContextLoader {
     fun tier1Summary(state: ProjectState): ProjectTier1Summary {
         val currentStep = state.project.plan.steps.firstOrNull {
             it.status == StepStatus.IN_PROGRESS
-        } ?: state.nextReadyStep()
+        } ?: state.nextRunnableStep()
 
         val blockers = state.project.plan.steps
             .filter { it.status == StepStatus.BLOCKED }
@@ -64,14 +64,21 @@ object ProjectContextLoader {
     /**
      * Build a [ProjectWorkUnit] for the Ego to process.
      */
-    fun buildWorkUnit(state: ProjectState, step: PlanStep): ProjectWorkUnit {
+    fun buildWorkUnit(
+        state: ProjectState,
+        step: PlanStep,
+        rootInputId: String,
+        wakeReason: String,
+    ): ProjectWorkUnit {
         val tier2 = tier2Context(state.project.workspacePath)
         return ProjectWorkUnit(
             projectId = state.id,
             stepId = step.id,
+            rootInputId = rootInputId,
             stepDescription = step.description,
             acceptanceCriteria = step.acceptanceCriteria,
             workingContext = tier2,
+            wakeReason = wakeReason,
         )
     }
 
