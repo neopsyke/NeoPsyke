@@ -291,9 +291,15 @@ object ProjectStateMachine {
             ProjectSignal.WorkReady(state.id, event.stepId, "wait_condition_satisfied")
         )
         commands += ProjectCommand.PersistProject(state.id)
-        return updateStep(state, event.stepId) { step ->
+        val updated = updateStep(state, event.stepId) { step ->
             step.copy(status = StepStatus.READY, waitCondition = null)
         }
+        val projectStatus = if (updated.project.status == ProjectStatus.BLOCKED) {
+            ProjectStatus.ACTIVE
+        } else {
+            updated.project.status
+        }
+        return updated.copy(project = updated.project.copy(status = projectStatus))
     }
 
     private fun handleWaitConditionTimedOut(

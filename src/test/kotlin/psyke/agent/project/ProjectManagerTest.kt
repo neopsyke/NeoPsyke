@@ -1,6 +1,7 @@
 package psyke.agent.project
 
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import psyke.agent.cortex.sensory.ProjectSignal
 import psyke.agent.model.ActionExecutionStatus
@@ -11,6 +12,8 @@ import psyke.agent.model.OriginSource
 import psyke.agent.model.PendingAction
 import psyke.agent.model.Urgency
 import java.nio.file.Files
+import java.time.Instant
+import java.util.concurrent.CopyOnWriteArrayList
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
@@ -28,13 +31,13 @@ class ProjectManagerTest {
         conditionCheckIntervalMs = 100,
     )
 
-    private fun testScope() = CoroutineScope(SupervisorJob())
+    private fun testScope() = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     @Test
     fun `createProject generates plan persists state and emits work-ready signal`() {
         val root = Files.createTempDirectory("psyke-pm-create")
         try {
-            val signals = mutableListOf<ProjectSignal>()
+            val signals = CopyOnWriteArrayList<ProjectSignal>()
             val manager = ProjectManager(
                 config = testConfig(root),
                 store = ProjectStore(root),
@@ -90,7 +93,7 @@ class ProjectManagerTest {
     fun `project-origin action outcome completes final step and project`() {
         val root = Files.createTempDirectory("psyke-pm-complete")
         try {
-            val signals = mutableListOf<ProjectSignal>()
+            val signals = CopyOnWriteArrayList<ProjectSignal>()
             val manager = ProjectManager(
                 config = testConfig(root),
                 store = ProjectStore(root),
@@ -218,5 +221,100 @@ class ProjectManagerTest {
         } finally {
             root.toFile().deleteRecursively()
         }
+    }
+
+    @Test
+    fun `suspended project resume timer is restored on restart and emits work-ready`() {
+        val root = Files.createTempDirectory("psyke-pm-restore-suspend")
+        try {
+            val store = ProjectStore(root)
+            val manager1 = ProjectManager(
+                config = testConfig(root),
+                store = store,
+                planner = DeterministicProjectPlanner(),
+            )
+            manager1.start(testScope())
+            val id = manager1.createProject("Resume me later")
+            val resumeAt = Instant.now().plusMillis(200)
+            manager1.applyEventExternal(
+                id,
+                ProjectEvent.Suspended(id, "paused", resumeAt)
+            )
+            manager1.stop()
+
+            val signals = CopyOnWriteArrayList<ProjectSignal>()
+            val manager2 = ProjectManager(
+                config = testConfig(root),
+                store = store,
+                signalEmitter = { signal -> if (signal is ProjectSignal) signals += signal },
+            )
+            manager2.start(testScope())
+
+            waitUntil {
+                manager2.projectStatus(id)?.project?.status == ProjectStatus.ACTIVE &&
+                    signals.any { it is ProjectSignal.WorkReady && it.projectId == id }
+            }
+
+            manager2.stop()
+        } finally {
+            root.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `blocked timer wait is restored on restart and project becomes ACTIVE when timer fires`() {
+        val root = Files.createTempDirectory("psyke-pm-restore-wait")
+        try {
+            val store = ProjectStore(root)
+            val manager1 = ProjectManager(
+                config = testConfig(root),
+                store = store,
+                planner = DeterministicProjectPlanner(),
+            )
+            manager1.start(testScope())
+            val id = manager1.createProject("Wait for timer")
+            val wakeAt = Instant.now().plusMillis(200)
+            manager1.applyEventExternal(
+                id,
+                ProjectEvent.StepBlocked(
+                    projectId = id,
+                    stepId = "step-1",
+                    waitCondition = WaitCondition(
+                        type = WaitConditionType.TIMER,
+                        params = mapOf("wake_at" to wakeAt.toString()),
+                        registeredAt = Instant.now(),
+                        timeoutAt = wakeAt,
+                    )
+                )
+            )
+            manager1.stop()
+
+            val signals = CopyOnWriteArrayList<ProjectSignal>()
+            val manager2 = ProjectManager(
+                config = testConfig(root),
+                store = store,
+                signalEmitter = { signal -> if (signal is ProjectSignal) signals += signal },
+            )
+            manager2.start(testScope())
+
+            waitUntil {
+                manager2.projectStatus(id)?.project?.status == ProjectStatus.ACTIVE &&
+                    manager2.projectStatus(id)?.project?.plan?.steps?.firstOrNull()?.status == StepStatus.READY &&
+                    signals.any { it is ProjectSignal.WorkReady && it.projectId == id }
+            }
+
+            manager2.stop()
+        } finally {
+            root.toFile().deleteRecursively()
+        }
+    }
+
+    private fun waitUntil(timeoutMs: Long = 2_500, predicate: () -> Boolean) {
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (System.currentTimeMillis() < deadline) {
+            if (predicate()) return
+            Thread.sleep(25)
+        }
+        assertTrue(predicate())
     }
 }

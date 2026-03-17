@@ -16,6 +16,8 @@ import psyke.agent.memory.longterm.Hippocampus
 import psyke.agent.memory.longterm.LongTermMemoryAdvisor
 import psyke.agent.memory.longterm.NoopHippocampus
 import psyke.agent.memory.longterm.NoopLongTermMemoryAdvisor
+import psyke.agent.project.NoopProjectsGateway
+import psyke.agent.project.ProjectsGateway
 import psyke.agent.superego.Superego
 import psyke.instrumentation.AgentInstrumentation
 import psyke.instrumentation.NoopAgentInstrumentation
@@ -34,6 +36,7 @@ fun buildTestEgo(
     logbook: Logbook? = null,
     logbookSummarizer: LogbookSummarizer = DeterministicLogbookSummarizer(config.logbook),
     runId: String? = null,
+    projectsGateway: ProjectsGateway = NoopProjectsGateway,
 ): Ego {
     val memory = EgoAssembler.buildMemoryCoordinator(
         config = config,
@@ -54,5 +57,7 @@ fun buildTestEgo(
         sensoryCortex = sensoryCortex,
         taskWorkspaceFinalizer = taskWorkspaceFinalizer,
         instrumentation = instrumentation,
+        projectRegistry = projectsGateway,
+        projectsGateway = projectsGateway,
     )
 }

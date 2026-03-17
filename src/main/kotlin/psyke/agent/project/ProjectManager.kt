@@ -549,7 +549,7 @@ class ProjectManager(
         val scheduledAt = Instant.ofEpochMilli(scheduledAtMs)
         if (state.project.status == ProjectStatus.SUSPENDED) {
             val resumeAt = state.project.suspendedUntil
-            if (resumeAt != null && !resumeAt.isAfter(scheduledAt)) {
+            if (resumeAt != null && resumeAt.toEpochMilli() <= scheduledAtMs) {
                 applyEvent(projectId, ProjectEvent.Resumed(projectId, scheduledAt))
             }
         }
@@ -557,8 +557,8 @@ class ProjectManager(
         val timerSteps = state.project.plan.steps.filter { step ->
             step.status == StepStatus.BLOCKED &&
                 step.waitCondition?.type == WaitConditionType.TIMER &&
-                (step.waitCondition.timeoutAt?.let { !it.isAfter(scheduledAt) }
-                    ?: step.waitCondition.params["wake_at"]?.let { Instant.parse(it) <= scheduledAt }
+                (step.waitCondition.timeoutAt?.let { it.toEpochMilli() <= scheduledAtMs }
+                    ?: step.waitCondition.params["wake_at"]?.let { Instant.parse(it).toEpochMilli() <= scheduledAtMs }
                     ?: false)
         }
         timerSteps.forEach { step ->
