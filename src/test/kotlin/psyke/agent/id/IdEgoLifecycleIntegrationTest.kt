@@ -7,6 +7,7 @@ import psyke.agent.actions.websearch.WebSearchActionHandler
 import psyke.agent.actions.websearch.WebSearchEngine
 import psyke.agent.actions.websearch.WebSearchResult
 import psyke.agent.actions.NoopReflectionMemoryRecorder
+import psyke.support.buildTestEgo
 import psyke.agent.model.ActionType
 import psyke.agent.config.AgentConfig
 import psyke.agent.model.ConversationContext
@@ -65,7 +66,7 @@ class IdEgoLifecycleIntegrationTest {
                 maxThoughtPasses = 1
             )
         )
-        val ego = Ego(
+        val ego = buildTestEgo(
             planner = planner,
             superego = Superego(
                 modelClient = StubChatModelClient().apply { enqueueRawResponse("""{"allow":true}""") },
@@ -142,7 +143,7 @@ class IdEgoLifecycleIntegrationTest {
                 maxThoughtPasses = 1
             )
         )
-        val ego = Ego(
+        val ego = buildTestEgo(
             planner = planner,
             superego = Superego(
                 modelClient = StubChatModelClient().apply { enqueueRawResponse("""{"allow":true}""") },

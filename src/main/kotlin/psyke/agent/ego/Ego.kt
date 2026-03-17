@@ -8,13 +8,6 @@ import psyke.agent.cortex.motor.MotorCortex
 import psyke.agent.cortex.sensory.SensoryCortex
 import psyke.agent.cortex.sensory.SensorySignal
 import psyke.agent.memory.episodic.EpisodicEventType
-import psyke.agent.memory.episodic.Logbook
-import psyke.agent.memory.episodic.LogbookSummarizer
-import psyke.agent.memory.longterm.Hippocampus
-import psyke.agent.memory.longterm.LongTermMemoryAdvisor
-import psyke.agent.memory.longterm.NoopHippocampus
-import psyke.agent.memory.longterm.NoopLongTermMemoryAdvisor
-import psyke.agent.memory.shortterm.MemoryStore
 import psyke.agent.memory.workspace.TaskWorkspaceStore
 import psyke.agent.support.TextSecurity
 import psyke.agent.superego.Superego
@@ -31,18 +24,12 @@ class Ego(
     private val superego: Superego,
     private val motorCortex: MotorCortex,
     private val config: AgentConfig,
-    private val hippocampus: Hippocampus = NoopHippocampus,
+    private val memory: MemoryCoordinator,
     private val metaReasoner: MetaReasoner = NoopMetaReasoner,
-    private val longTermMemoryAdvisor: LongTermMemoryAdvisor = NoopLongTermMemoryAdvisor,
     private val sensoryCortex: SensoryCortex = SensoryCortex.stdin(config),
-    private val memoryStore: MemoryStore = MemoryStore(config.memory.maxShortTermContextChars),
     private val taskWorkspaceStore: TaskWorkspaceStore = TaskWorkspaceStore(config.memory.taskWorkspace),
     private val taskWorkspaceFinalizer: TaskWorkspaceFinalizer = NoopTaskWorkspaceFinalizer,
     private val instrumentation: AgentInstrumentation = NoopAgentInstrumentation,
-    private val logbook: Logbook? = null,
-    private val logbookSummarizer: LogbookSummarizer? = null,
-    private val runId: String? = null,
-    private val providedMemory: MemoryCoordinator? = null,
 ) {
     @Volatile private var id: psyke.agent.id.Id? = null
 
@@ -74,15 +61,7 @@ class Ego(
         config, instrumentation, metaReasoner,
         isEvidenceActionType = { motorCortex.hasCapability(it, psyke.agent.actions.ActionCapability.GATHERS_EVIDENCE) }
     )
-    private val memory = providedMemory ?: MemoryCoordinator(
-        hippocampus, longTermMemoryAdvisor, config, instrumentation,
-        initialMemoryStore = memoryStore,
-        logbook = logbook,
-        logbookSummarizer = logbookSummarizer ?: psyke.agent.memory.episodic.DeterministicLogbookSummarizer(config.logbook),
-        runId = runId,
-    )
-
-    private val telemetry = EgoTelemetry(instrumentation, scheduler, memoryStore, taskWorkspaceStore, config)
+    private val telemetry = EgoTelemetry(instrumentation, scheduler, memory, taskWorkspaceStore, config)
     private val fallbackHandler = FallbackHandler(
         scheduler, config, instrumentation, deliberation, memory, telemetry,
         dialogueFor = ::dialogueFor,

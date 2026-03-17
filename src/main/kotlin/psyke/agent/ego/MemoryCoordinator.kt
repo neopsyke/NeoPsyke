@@ -24,6 +24,7 @@ import psyke.agent.memory.longterm.LongTermMemoryAdvisor
 import psyke.agent.memory.longterm.LongTermMemoryAssessmentContext
 import psyke.agent.memory.longterm.MemoryImprint
 import psyke.agent.memory.longterm.MemoryRecallQuery
+import psyke.agent.memory.shortterm.MemoryStats
 import psyke.agent.memory.shortterm.MemoryStore
 import psyke.agent.support.DenialReasonClassifier
 import psyke.agent.support.LlmCallCircuitBreaker
@@ -123,6 +124,8 @@ class MemoryCoordinator(
         )
         return activeMemoryStore().summaryForPrompt(memoryTokenBudget)
     }
+
+    fun activeMemoryStats(): MemoryStats = activeMemoryStore().stats()
 
     // --- Long-term memory recall ---
 

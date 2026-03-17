@@ -5,6 +5,7 @@ import psyke.agent.actions.websearch.WebSearchEngine
 import psyke.agent.actions.websearch.WebSearchResult
 import psyke.agent.actions.NoopReflectionMemoryRecorder
 import psyke.agent.actions.websearch.WebSearchSource
+import psyke.support.buildTestEgo
 import psyke.agent.config.AgentConfig
 import psyke.agent.model.EgoDecision
 import psyke.agent.model.EgoTrigger
@@ -69,7 +70,7 @@ class AgentScenarioPackTest {
         val instrumentation = RecordingInstrumentation()
         val outputs = mutableListOf<String>()
         val config = AgentConfig(planner = PlannerConfig(maxLoopStepsPerInput = 8, maxThoughtPasses = 4))
-        val agent = Ego(
+        val agent = buildTestEgo(
             planner = LlmEgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
             superego = Superego(modelClient = superegoLlm, config = config, instrumentation = instrumentation),
             motorCortex = buildMotorCortex(output = { outputs.add(it) }),
@@ -117,7 +118,7 @@ class AgentScenarioPackTest {
                 )
         }
         val config = AgentConfig(planner = PlannerConfig(maxLoopStepsPerInput = 7, maxThoughtPasses = 1))
-        val agent = Ego(
+        val agent = buildTestEgo(
             planner = LlmEgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
             superego = Superego(modelClient = superegoLlm, config = config, instrumentation = instrumentation),
             motorCortex = buildMotorCortex(output = { outputs.add(it) }, webSearchEngine = timingOutSearch),
@@ -153,7 +154,7 @@ class AgentScenarioPackTest {
             )
         )
         val config = AgentConfig(planner = PlannerConfig(maxLoopStepsPerInput = 4))
-        val agent = Ego(
+        val agent = buildTestEgo(
             planner = LlmEgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
             superego = Superego(modelClient = superegoLlm, config = config, instrumentation = instrumentation),
             motorCortex = buildMotorCortex(output = { outputs.add(it) }),
@@ -211,7 +212,7 @@ class AgentScenarioPackTest {
                 taskWorkspace = TaskWorkspaceConfig(enabled = true, activationMinPlanSteps = 1, maxPromptTokens = 260)
             )
         )
-        val agent = Ego(
+        val agent = buildTestEgo(
             planner = LlmEgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
             superego = Superego(modelClient = superegoLlm, config = config, instrumentation = instrumentation),
             motorCortex = buildMotorCortex(output = { outputs.add(it) }, webSearchEngine = search),
@@ -257,7 +258,7 @@ class AgentScenarioPackTest {
                 forcedTerminalStaleStreakThreshold = 2
             )
         )
-        val agent = Ego(
+        val agent = buildTestEgo(
             planner = LlmEgoPlanner(modelClient = failingClient, config = config, instrumentation = instrumentation),
             superego = Superego(modelClient = superegoLlm, config = config, instrumentation = instrumentation),
             motorCortex = buildMotorCortex(output = { outputs.add(it) }),
@@ -304,7 +305,7 @@ class AgentScenarioPackTest {
         val instrumentation = RecordingInstrumentation()
         val outputs = mutableListOf<String>()
         val config = AgentConfig(planner = PlannerConfig(maxLoopStepsPerInput = 6, maxThoughtPasses = 2))
-        val agent = Ego(
+        val agent = buildTestEgo(
             planner = LlmEgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
             superego = Superego(modelClient = superegoLlm, config = config, instrumentation = instrumentation),
             motorCortex = buildMotorCortex(output = { outputs.add(it) }),
@@ -360,7 +361,7 @@ class AgentScenarioPackTest {
             }
         }
         val config = AgentConfig(planner = PlannerConfig(maxLoopStepsPerInput = 2, maxThoughtPasses = 2))
-        val agent = Ego(
+        val agent = buildTestEgo(
             planner = LlmEgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
             superego = Superego(modelClient = superegoLlm, config = config, instrumentation = instrumentation),
             motorCortex = buildMotorCortex(webSearchEngine = recordingSearchEngine, output = {}),
@@ -426,7 +427,7 @@ class AgentScenarioPackTest {
                     )
                 )
         }
-        val agent = Ego(
+        val agent = buildTestEgo(
             planner = LlmEgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
             superego = Superego(modelClient = superegoLlm, config = config, instrumentation = instrumentation),
             motorCortex = buildMotorCortex(output = { outputs.add(it) }, webSearchEngine = search),
@@ -484,7 +485,7 @@ class AgentScenarioPackTest {
         val superegoLlm = StubChatModelClient().apply {
             enqueueRawResponse("""{"allow":true}""")
         }
-        val agent = Ego(
+        val agent = buildTestEgo(
             planner = planner,
             superego = Superego(modelClient = superegoLlm, config = config, instrumentation = instrumentation),
             motorCortex = buildMotorCortex(output = {}),

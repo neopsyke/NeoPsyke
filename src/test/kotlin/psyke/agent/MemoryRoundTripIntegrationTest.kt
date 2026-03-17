@@ -4,6 +4,7 @@ import psyke.agent.actions.websearch.WebSearchActionHandler
 import psyke.agent.actions.websearch.WebSearchEngine
 import psyke.agent.actions.websearch.WebSearchResult
 import psyke.agent.actions.NoopReflectionMemoryRecorder
+import psyke.support.buildTestEgo
 import psyke.support.RecordingInstrumentation
 import psyke.support.StubChatModelClient
 import java.io.ByteArrayInputStream
@@ -54,7 +55,7 @@ class MemoryRoundTripIntegrationTest {
             )
         )
         val outputs = mutableListOf<String>()
-        val agent = Ego(
+        val agent = buildTestEgo(
             planner = LlmEgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
             superego = Superego(
                 modelClient = superegoLlm,
