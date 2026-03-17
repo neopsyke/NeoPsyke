@@ -109,6 +109,7 @@ sealed interface LoopTask {
     data class ProcessThought(val item: PendingThought) : LoopTask
     data class PerformAction(val item: PendingAction) : LoopTask
     data class ProcessImpulse(val item: PendingImpulse) : LoopTask
+    data class ProcessProjectWork(val item: psyke.agent.project.ProjectWorkUnit) : LoopTask
 }
 
 object RootInputIds {

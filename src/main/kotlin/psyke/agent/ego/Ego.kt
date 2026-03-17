@@ -14,7 +14,9 @@ import psyke.agent.memory.episodic.EpisodicEventType
 import psyke.agent.memory.workspace.TaskWorkspaceStore
 import psyke.agent.id.EmptyProjectRegistry
 import psyke.agent.id.ProjectRegistry
+import psyke.agent.project.ProjectEvent
 import psyke.agent.project.ProjectManager
+import psyke.agent.project.ProjectWorkUnit
 import psyke.agent.support.TextSecurity
 import psyke.agent.superego.Superego
 import psyke.instrumentation.AgentEvent
@@ -178,7 +180,12 @@ class Ego(
                     val work = projectManager?.pickWork(signal)
                     if (work != null) {
                         logger.info { "Project work picked: ${work.projectId}/${work.stepId}" }
+                        scheduler.enqueueProjectWork(work)
                         runLoop()
+                        // R6: Clear Ego transient state after the project work cycle
+                        // completes so there is no context bleed into subsequent tasks.
+                        // Also finalizes context.md (R1) and updates the budget counter (R3).
+                        cleanupAfterProjectAdvance(work.projectId, work.stepId)
                     }
                 }
             }
@@ -201,6 +208,7 @@ class Ego(
                     is LoopTask.ProcessThought -> processThought(task.item)
                     is LoopTask.PerformAction -> processAction(task.item)
                     is LoopTask.ProcessImpulse -> processImpulse(task.item)
+                    is LoopTask.ProcessProjectWork -> processProjectWork(task.item)
                 }
             } catch (ex: Exception) {
                 logger.warn(ex) { "Task processing failed for task_type=${taskType(task)}." }
@@ -467,6 +475,65 @@ class Ego(
                 )
             }
         }
+
+        instrumentation.emit(AgentEvents.phaseTimings(timing.build()))
+    }
+
+    /**
+     * Process a project work unit through the full Ego pipeline.
+     *
+     * This is the R2 fix: the ProjectWorkUnit is fed into the planner as an
+     * [EgoTrigger.ProjectWork] so the Planner decides actions in the context
+     * of the project step (description, acceptance criteria, working context).
+     */
+    private suspend fun processProjectWork(work: ProjectWorkUnit) {
+        val timing = PhaseTimingCollector("project_work", "project:${work.projectId}")
+        val convCtx = ConversationContext.default()
+        val sessionId = resolveSessionId(convCtx)
+        activateSession(convCtx)
+
+        timing.startPhase("project_work_processing")
+        instrumentation.emit(
+            AgentEvent(
+                type = "project_work_processing",
+                data = mapOf(
+                    "project_id" to work.projectId,
+                    "step_id" to work.stepId,
+                    "step_description" to work.stepDescription,
+                ),
+            )
+        )
+
+        // Mark step as started in the state machine
+        projectManager?.applyEventExternal(
+            work.projectId,
+            ProjectEvent.StepStarted(work.projectId, work.stepId)
+        )
+
+        timing.startPhase("planner_context")
+        val trigger = EgoTrigger.ProjectWork(work)
+        val context = plannerContext(
+            trigger = trigger,
+            rootInputId = "project:${work.projectId}",
+            sessionId = sessionId,
+            conversationContext = convCtx,
+        )
+
+        timing.startPhase("planner_decide")
+        val decision = planner.decide(trigger = trigger, context = context)
+        journalPlannerDecision(decision)
+
+        timing.startPhase("apply_decision")
+        val origin = ActionOrigin(OriginSource.PROJECT)
+        dispatcher.dispatch(
+            decision = decision,
+            nextPassCount = 0,
+            originThought = null,
+            rootInputId = "project:${work.projectId}",
+            rootInputReceivedAtMs = System.currentTimeMillis(),
+            conversationContext = convCtx,
+            origin = origin,
+        )
 
         instrumentation.emit(AgentEvents.phaseTimings(timing.build()))
     }
@@ -756,12 +823,42 @@ class Ego(
         telemetry.emitQueueSnapshot("input_resolution_cleanup")
     }
 
+    /**
+     * R6: Clear Ego transient state after a project work cycle completes.
+     *
+     * Unlike [cleanupResolvedInputAfterAnswer], this does NOT destroy the task workspace
+     * (project workspaces persist across sessions). It only clears the Ego's in-flight
+     * state that is scoped to this project's "root input ID" convention.
+     *
+     * Also triggers R1 (context.md write) and R3 (budget increment) via
+     * [ProjectManager.finalizeWorkCycle].
+     */
+    private fun cleanupAfterProjectAdvance(projectId: String, stepId: String) {
+        val projectRootId = "project:$projectId"
+        val sessionId = ConversationContext.DEFAULT_SESSION_ID
+        planner.resetForInput(projectRootId)
+        deliberation.clearForInput(projectRootId, sessionId)
+        dispatcher.clearExternalActionSignatures(InputScope(projectRootId, sessionId))
+        projectManager?.finalizeWorkCycle(projectId, stepId)
+        instrumentation.emit(
+            AgentEvent(
+                type = "project_advance_cleanup",
+                data = mapOf(
+                    "project_id" to projectId,
+                    "step_id" to stepId,
+                    "project_root_id" to projectRootId,
+                )
+            )
+        )
+    }
+
     private fun taskType(task: LoopTask): String =
         when (task) {
             is LoopTask.ProcessInput -> "input"
             is LoopTask.ProcessThought -> "thought"
             is LoopTask.PerformAction -> "action"
             is LoopTask.ProcessImpulse -> "impulse"
+            is LoopTask.ProcessProjectWork -> "project_work"
         }
 
     private fun taskRootInputId(task: LoopTask): String? =
@@ -770,6 +867,7 @@ class Ego(
             is LoopTask.ProcessThought -> task.item.rootInputId
             is LoopTask.PerformAction -> task.item.rootInputId
             is LoopTask.ProcessImpulse -> task.item.rootImpulseId
+            is LoopTask.ProcessProjectWork -> "project:${task.item.projectId}"
         }
 
     private fun taskRootInputReceivedAtMs(task: LoopTask): Long? =
@@ -778,6 +876,7 @@ class Ego(
             is LoopTask.ProcessThought -> task.item.rootInputReceivedAtMs
             is LoopTask.PerformAction -> task.item.rootInputReceivedAtMs
             is LoopTask.ProcessImpulse -> task.item.receivedAtMs
+            is LoopTask.ProcessProjectWork -> System.currentTimeMillis()
         }
 
     private fun taskConversationContext(task: LoopTask): ConversationContext =
@@ -786,6 +885,7 @@ class Ego(
             is LoopTask.ProcessThought -> task.item.conversationContext
             is LoopTask.PerformAction -> task.item.conversationContext
             is LoopTask.ProcessImpulse -> task.item.conversationContext
+            is LoopTask.ProcessProjectWork -> ConversationContext.default()
         }
 
     private fun journalPlannerDecision(decision: EgoDecision) {

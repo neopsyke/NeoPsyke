@@ -26,6 +26,13 @@ class ProjectManager(
     private val signalEmitter: (Signal) -> Unit = {},
 ) {
     private val states = mutableMapOf<String, ProjectState>()
+
+    /**
+     * R3: Per-project action counter for the current work cycle.
+     * Tracks how many work cycles have been dispatched since the last budget reset.
+     * Hidden from the Ego — enforced entirely inside pickWork().
+     */
+    private val cycleActionsCount = mutableMapOf<String, Int>()
     private lateinit var timerScheduler: TimerScheduler
     private lateinit var waitConditionMonitor: WaitConditionMonitor
 
@@ -58,6 +65,12 @@ class ProjectManager(
                 if (state != null && !state.isTerminal()) {
                     states[projectId] = state
                     logger.info { "Loaded project: $projectId (status=${state.project.status})" }
+                    // M1: Re-register recurring cron schedule on startup
+                    val cron = state.project.cronExpression
+                    if (!cron.isNullOrBlank()) {
+                        timerScheduler.registerCron(projectId, cron)
+                        logger.info { "Cron schedule restored: project=$projectId, expr='$cron'" }
+                    }
                 }
             } catch (e: Exception) {
                 logger.warn { "Failed to load project $projectId: ${e.message}" }
@@ -106,8 +119,52 @@ class ProjectManager(
             .firstOrNull { it.nextReadyStep() != null }
             ?: return null
 
+        // R3: Enforce action budget — hidden from the Ego.
+        // If this project has exhausted its cycle budget, reset the counter (new cycle)
+        // and yield so other work can proceed. The project re-enters via the next signal.
+        val count = cycleActionsCount[state.id] ?: 0
+        if (count >= config.actionsPerCycle) {
+            logger.debug { "Project ${state.id} hit action budget ($count/${config.actionsPerCycle}), yielding" }
+            cycleActionsCount.remove(state.id)
+            return null
+        }
+
         val step = state.nextReadyStep() ?: return null
         return ProjectContextLoader.buildWorkUnit(state, step)
+    }
+
+    /**
+     * R1 + R3: Called by the Ego at the end of a project work cycle (after runLoop drains).
+     *
+     * Writes `context.md` (Tier 2 persistence) so the agent retains inter-session state,
+     * increments the per-project cycle action counter (budget enforcement), and emits
+     * the [ProjectEvent.WorkCycleCompleted] event for observability.
+     *
+     * This is the end-of-cycle hook — not a per-action callback.
+     * The [resultSummary] is the best available description of what happened this cycle;
+     * it comes from the step's current notes (set by [onStepResult]) or a generic description.
+     */
+    fun finalizeWorkCycle(projectId: String, stepId: String) {
+        val state = states[projectId] ?: return
+        val step = state.project.plan.steps.firstOrNull { it.id == stepId }
+        val resultSummary = step?.notes?.takeIf { it.isNotBlank() } ?: "Cycle completed"
+
+        // Increment cycle counter (R3 budget tracking)
+        val newCount = (cycleActionsCount[projectId] ?: 0) + 1
+        cycleActionsCount[projectId] = newCount
+
+        // R1: Write context.md — this is the core multi-session continuity mechanism
+        try {
+            ProjectContextLoader.writeContext(state, stepId, resultSummary)
+            logger.debug { "context.md written for project $projectId after step $stepId" }
+            // M8: Emit ContextUpdated for telemetry
+            applyEvent(projectId, ProjectEvent.ContextUpdated(projectId, 2, "context.md written after cycle"))
+        } catch (e: Exception) {
+            logger.warn(e) { "Failed to write context.md for project $projectId" }
+        }
+
+        // Emit WorkCycleCompleted event
+        applyEvent(projectId, ProjectEvent.WorkCycleCompleted(projectId, stepId, newCount))
     }
 
     /**
@@ -130,6 +187,7 @@ class ProjectManager(
         title: String = instruction.take(60),
         priority: ProjectPriority = ProjectPriority.MEDIUM,
         completionCriteria: String = "User confirms the goal is met.",
+        cronExpression: String? = null,
     ): String {
         if (states.size >= config.maxActiveProjects) {
             logger.warn { "Max active projects reached (${config.maxActiveProjects}), rejecting creation" }
@@ -145,11 +203,24 @@ class ProjectManager(
             priority = priority,
             completionCriteria = completionCriteria,
         )
-        val state = ProjectStateMachine.initialState(event, store.projectDir(projectId).resolve("workspace"))
+        val baseState = ProjectStateMachine.initialState(event, store.projectDir(projectId).resolve("workspace"))
+        // Attach cronExpression to the project if provided
+        val state = if (!cronExpression.isNullOrBlank()) {
+            baseState.copy(project = baseState.project.copy(cronExpression = cronExpression))
+        } else {
+            baseState
+        }
         states[projectId] = state
         store.eventLog(projectId).append(event)
 
         applyEvent(projectId, event)
+
+        // M1: Register cron schedule if provided
+        if (!cronExpression.isNullOrBlank() && ::timerScheduler.isInitialized) {
+            timerScheduler.registerCron(projectId, cronExpression)
+            logger.info { "Cron schedule registered: project=$projectId, expr='$cronExpression'" }
+        }
+
         signalEmitter(ProjectSignal.ProjectCreated(projectId))
         instrumentation.emit(AgentEvents.projectCreated(projectId, title, priority.name))
         logger.info { "Project created: $projectId ('$title')" }
@@ -177,6 +248,14 @@ class ProjectManager(
 
     fun allProjects(): List<ProjectTier1Summary> =
         states.values.map { ProjectContextLoader.tier1Summary(it) }
+
+    /**
+     * Apply an event from outside the ProjectManager (e.g. from the Ego).
+     * Used when the Ego needs to notify the state machine about step lifecycle transitions.
+     */
+    fun applyEventExternal(projectId: String, event: ProjectEvent) {
+        applyEvent(projectId, event)
+    }
 
     // ── Internal ─────────────────────────────────────────────────────────
 
