@@ -27,6 +27,7 @@ import psyke.support.StubChatModelClient
 import java.io.ByteArrayInputStream
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
@@ -127,6 +128,167 @@ class IdEgoLifecycleIntegrationTest {
     }
 
     @Test
+    fun `id internalize constraints persist on follow-up thoughts`() {
+        val instrumentation = RecordingInstrumentation()
+        var followUpHasContactDispatchable: Boolean? = null
+        var followUpHasContactDefinition: Boolean? = null
+        var followUpConvergence: ConvergenceMode? = null
+
+        val planner = object : Ego.Planner {
+            override fun decide(trigger: EgoTrigger, context: PlannerContext): EgoDecision =
+                when (trigger) {
+                    is EgoTrigger.IncomingInput -> EgoDecision.Noop("ignore user test input")
+                    is EgoTrigger.IncomingImpulse -> EgoDecision.ProposeAction(
+                        urgency = Urgency.MEDIUM,
+                        actionType = ActionType.WEB_SEARCH,
+                        payload = "emerging learning topics",
+                        summary = "gather evidence"
+                    )
+                    is EgoTrigger.PendingThoughtInput -> {
+                        if (trigger.thought.originActionType == ActionType.WEB_SEARCH) {
+                            followUpHasContactDispatchable = ActionType.CONTACT_USER in context.dispatchableActions
+                            followUpHasContactDefinition = context.actionDefinitions.any { it.actionType == ActionType.CONTACT_USER }
+                            followUpConvergence = context.idState?.convergence
+                        }
+                        EgoDecision.Noop("done")
+                    }
+                }
+        }
+
+        val config = AgentConfig(
+            planner = PlannerConfig(
+                maxLoopStepsPerInput = 12,
+                maxThoughtPasses = 2
+            )
+        )
+        val ego = buildTestEgo(
+            planner = planner,
+            superego = Superego(
+                modelClient = StubChatModelClient().apply { enqueueRawResponse("""{"allow":true}""") },
+                config = config,
+                instrumentation = instrumentation,
+            ),
+            motorCortex = buildMotorCortex(),
+            config = config,
+            instrumentation = instrumentation,
+        )
+        val idModule = buildIdModule(
+            instrumentation = instrumentation,
+            needConfig = NeedConfig(
+                description = "test",
+                growthRate = 0.1,
+                cooldownPulses = 0,
+                prompt = "Be useful.",
+                convergence = ConvergenceMode.INTERNALIZE,
+                allowEscalation = false,
+                responseCurve = ResponseCurveConfig(type = "linear"),
+            ),
+        )
+        ego.setId(idModule)
+
+        val queued = ego.enqueueImpulse(
+            PendingImpulse(
+                id = 1,
+                needId = "be-useful",
+                prompt = "Find something useful to learn.",
+                urgency = 0.9,
+                rawValue = 0.9,
+                rootImpulseId = "impulse-root-follow-up-internalize",
+                conversationContext = idModule.conversationContext,
+            ),
+            maxPendingImpulses = 1
+        )
+        assertTrue(queued)
+
+        runAgentWithInput(ego, "kickoff\nexit\n")
+
+        assertNotNull(followUpHasContactDispatchable, "Expected a WEB_SEARCH follow-up thought to be processed")
+        assertFalse(followUpHasContactDispatchable == true, "follow-up dispatchable actions must exclude contact_user")
+        assertFalse(followUpHasContactDefinition == true, "follow-up action definitions must exclude contact_user")
+        assertEquals(ConvergenceMode.INTERNALIZE, followUpConvergence)
+    }
+
+    @Test
+    fun `id internalize constraints persist on impulse plan step thoughts`() {
+        val instrumentation = RecordingInstrumentation()
+        var planStepHasContactDispatchable: Boolean? = null
+        var planStepHasContactDefinition: Boolean? = null
+        var planStepConvergence: ConvergenceMode? = null
+
+        val planner = object : Ego.Planner {
+            override fun decide(trigger: EgoTrigger, context: PlannerContext): EgoDecision =
+                when (trigger) {
+                    is EgoTrigger.IncomingInput -> EgoDecision.Noop("ignore user test input")
+                    is EgoTrigger.IncomingImpulse -> EgoDecision.EnqueuePlan(
+                        urgency = Urgency.MEDIUM,
+                        goal = "learn",
+                        steps = listOf("collect insight")
+                    )
+                    is EgoTrigger.PendingThoughtInput -> {
+                        if (trigger.thought.planContext != null) {
+                            planStepHasContactDispatchable = ActionType.CONTACT_USER in context.dispatchableActions
+                            planStepHasContactDefinition = context.actionDefinitions.any { it.actionType == ActionType.CONTACT_USER }
+                            planStepConvergence = context.idState?.convergence
+                        }
+                        EgoDecision.Noop("done")
+                    }
+                }
+        }
+
+        val config = AgentConfig(
+            planner = PlannerConfig(
+                maxLoopStepsPerInput = 12,
+                maxThoughtPasses = 2
+            )
+        )
+        val ego = buildTestEgo(
+            planner = planner,
+            superego = Superego(
+                modelClient = StubChatModelClient().apply { enqueueRawResponse("""{"allow":true}""") },
+                config = config,
+                instrumentation = instrumentation,
+            ),
+            motorCortex = buildMotorCortex(),
+            config = config,
+            instrumentation = instrumentation,
+        )
+        val idModule = buildIdModule(
+            instrumentation = instrumentation,
+            needConfig = NeedConfig(
+                description = "test",
+                growthRate = 0.1,
+                cooldownPulses = 0,
+                prompt = "Be useful.",
+                convergence = ConvergenceMode.INTERNALIZE,
+                allowEscalation = false,
+                responseCurve = ResponseCurveConfig(type = "linear"),
+            ),
+        )
+        ego.setId(idModule)
+
+        val queued = ego.enqueueImpulse(
+            PendingImpulse(
+                id = 1,
+                needId = "be-useful",
+                prompt = "Plan a learning step.",
+                urgency = 0.9,
+                rawValue = 0.9,
+                rootImpulseId = "impulse-root-plan-internalize",
+                conversationContext = idModule.conversationContext,
+            ),
+            maxPendingImpulses = 1
+        )
+        assertTrue(queued)
+
+        runAgentWithInput(ego, "kickoff\nexit\n")
+
+        assertNotNull(planStepHasContactDispatchable, "Expected an impulse-origin plan step thought to be processed")
+        assertFalse(planStepHasContactDispatchable == true, "plan-step dispatchable actions must exclude contact_user")
+        assertFalse(planStepHasContactDefinition == true, "plan-step action definitions must exclude contact_user")
+        assertEquals(ConvergenceMode.INTERNALIZE, planStepConvergence)
+    }
+
+    @Test
     fun `impulse lifecycle returns denied when no executable work is produced`() {
         val instrumentation = RecordingInstrumentation()
         val planner = object : Ego.Planner {
@@ -188,7 +350,16 @@ class IdEgoLifecycleIntegrationTest {
         assertEquals("denied", lifecycleFinalized.data["result"])
     }
 
-    private fun buildIdModule(instrumentation: RecordingInstrumentation): Id =
+    private fun buildIdModule(
+        instrumentation: RecordingInstrumentation,
+        needConfig: NeedConfig = NeedConfig(
+            description = "test",
+            growthRate = 0.1,
+            cooldownPulses = 0,
+            prompt = "Be useful.",
+            responseCurve = ResponseCurveConfig(type = "linear"),
+        ),
+    ): Id =
         Id(
             config = IdConfig(
                 enabled = true,
@@ -200,13 +371,7 @@ class IdEgoLifecycleIntegrationTest {
                 maxInFlightPulses = 20,
                 maxPendingImpulses = 1,
                 needs = mapOf(
-                    "be-useful" to NeedConfig(
-                        description = "test",
-                        growthRate = 0.1,
-                        cooldownPulses = 0,
-                        prompt = "Be useful.",
-                        responseCurve = ResponseCurveConfig(type = "linear"),
-                    ),
+                    "be-useful" to needConfig,
                 ),
             ),
             instrumentation = instrumentation,

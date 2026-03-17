@@ -1,6 +1,6 @@
 id:
   enabled: true
-  pulse_interval_ms: 10000
+  pulse_interval_ms: 5000
   trigger_threshold: 0.5
   threshold_on_urgency: true
   max_consecutive_denials: 5
@@ -43,7 +43,7 @@ id:
     learn-something:
       enabled: true
       description: "Drive to acquire new knowledge"
-      growth_rate: 0.02
+      growth_rate: 0.01
       satisfaction_decay: 0.8
       cooldown_pulses: 5
       convergence: internalize

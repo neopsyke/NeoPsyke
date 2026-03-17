@@ -101,6 +101,8 @@ It is intentionally high-level and should stay aligned with the code.
 - Ego impulse lifecycle tracking:
   - Each impulse root (`root_impulse_id`) gets a lifecycle record.
   - Id-origin is propagated on every downstream thought/action enqueue path (follow-up, denial recovery, suppression recovery, fallback).
+  - Id convergence constraints are re-applied on every Id-origin thought (including follow-up and plan-step thoughts), not only on the initial impulse planner pass.
+    - `internalize` + `allowEscalation=false` removes `contact_user` from planner dispatchable actions and planner action definitions.
   - Lifecycle result is aggregated across parallel branches:
     - accepted: at least one Id-origin action executed
     - denied: all branches finished without any executed Id-origin action
@@ -141,6 +143,7 @@ It is intentionally high-level and should stay aligned with the code.
   - Drops thought if `passes >= maxThoughtPasses`.
   - If dropped and fallback explanation is allowed, enqueue fallback answer action.
   - Duplicate fallback answer enqueues are suppressed per `(root input, sessionId)` scope so one session cannot block fallback for another.
+  - For Id-origin thoughts, planner context now rebuilds Id convergence state and applies the same convergence action filters used during impulse processing.
   - Otherwise mirrors input path:
     - build context
     - optional meta assessment/guidance

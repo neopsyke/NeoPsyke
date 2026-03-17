@@ -319,7 +319,17 @@ class Ego(
 
         timing.startPhase("planner_context")
         val trigger = EgoTrigger.PendingThoughtInput(thought)
-        val context = plannerContext(trigger, rootInputId = thought.rootInputId, sessionId = sessionId, conversationContext = convCtx)
+        val baseContext = plannerContext(
+            trigger,
+            rootInputId = thought.rootInputId,
+            sessionId = sessionId,
+            conversationContext = convCtx
+        )
+        val context = applyIdConvergenceContextForOrigin(
+            baseContext = baseContext,
+            origin = thought.origin,
+            triggeringUrgency = idNeedUrgency(thought.origin.needId),
+        )
 
         timing.startPhase("meta_assessment")
         val assessment = deliberation.maybeAssessAndUpdateGuidance(trigger, context)
@@ -381,43 +391,20 @@ class Ego(
 
         timing.startPhase("planner_context")
         val trigger = EgoTrigger.IncomingImpulse(impulse)
-        val needCfg = id?.needConfig(impulse.needId)
-        val convergence = needCfg?.convergence ?: psyke.agent.id.ConvergenceMode.CONTACT_USER
-        val allowEscalation = needCfg?.allowEscalation ?: false
-        val idState = IdStateSnapshot(
-            triggeringNeed = impulse.needId,
-            triggeringUrgency = impulse.urgency,
-            allNeeds = id?.needUrgencies() ?: emptyMap(),
-            convergence = convergence,
-            allowEscalation = allowEscalation,
-        )
         val baseContext = plannerContext(
             trigger = trigger,
             rootInputId = impulse.rootImpulseId,
             sessionId = sessionId,
             conversationContext = convCtx,
         )
-        // Filter actions for internalize convergence without escalation:
-        // remove CONTACT_USER so the planner cannot propose user-facing output.
-        // RESOLUTION_DRAFT remains available for intermediate synthesis in all convergence modes.
-        val filteredDispatchable = if (convergence == psyke.agent.id.ConvergenceMode.INTERNALIZE && !allowEscalation) {
-            baseContext.dispatchableActions - setOf(ActionType.CONTACT_USER)
-        } else {
-            baseContext.dispatchableActions
-        }
-        val filteredDefinitions = if (convergence == psyke.agent.id.ConvergenceMode.INTERNALIZE && !allowEscalation) {
-            baseContext.actionDefinitions.filter {
-                it.actionType != ActionType.CONTACT_USER
-            }
-        } else {
-            baseContext.actionDefinitions
-        }
-        val context = baseContext.copy(
+        val idConstrainedContext = applyIdConvergenceContext(
+            baseContext = baseContext,
+            needId = impulse.needId,
+            triggeringUrgency = impulse.urgency,
+        )
+        val context = idConstrainedContext.copy(
             // Override: no short-term memory from other sessions
             shortTermContextSummary = "",
-            idState = idState,
-            dispatchableActions = filteredDispatchable,
-            actionDefinitions = filteredDefinitions,
         )
 
         timing.startPhase("planner_decide")
@@ -536,6 +523,59 @@ class Ego(
             conversationContext = conversationContext
         )
     }
+
+    private fun applyIdConvergenceContextForOrigin(
+        baseContext: PlannerContext,
+        origin: ActionOrigin,
+        triggeringUrgency: Double,
+    ): PlannerContext {
+        if (origin.source != OriginSource.ID) return baseContext
+        val needId = origin.needId?.trim().orEmpty()
+        if (needId.isBlank()) return baseContext
+        return applyIdConvergenceContext(
+            baseContext = baseContext,
+            needId = needId,
+            triggeringUrgency = triggeringUrgency,
+        )
+    }
+
+    private fun applyIdConvergenceContext(
+        baseContext: PlannerContext,
+        needId: String,
+        triggeringUrgency: Double,
+    ): PlannerContext {
+        val needCfg = id?.needConfig(needId)
+        val convergence = needCfg?.convergence ?: psyke.agent.id.ConvergenceMode.CONTACT_USER
+        val allowEscalation = needCfg?.allowEscalation ?: false
+        val allNeeds = id?.needUrgencies() ?: emptyMap()
+        val idState = IdStateSnapshot(
+            triggeringNeed = needId,
+            triggeringUrgency = triggeringUrgency,
+            allNeeds = allNeeds,
+            convergence = convergence,
+            allowEscalation = allowEscalation,
+        )
+
+        // Internalize without escalation must not offer direct user messaging.
+        val filteredDispatchable = if (convergence == psyke.agent.id.ConvergenceMode.INTERNALIZE && !allowEscalation) {
+            baseContext.dispatchableActions - setOf(ActionType.CONTACT_USER)
+        } else {
+            baseContext.dispatchableActions
+        }
+        val filteredDefinitions = if (convergence == psyke.agent.id.ConvergenceMode.INTERNALIZE && !allowEscalation) {
+            baseContext.actionDefinitions.filter { it.actionType != ActionType.CONTACT_USER }
+        } else {
+            baseContext.actionDefinitions
+        }
+        return baseContext.copy(
+            idState = idState,
+            dispatchableActions = filteredDispatchable,
+            actionDefinitions = filteredDefinitions,
+        )
+    }
+
+    private fun idNeedUrgency(needId: String?): Double =
+        needId?.let { id?.needUrgencies()?.get(it) } ?: 0.0
 
     private fun buildEvidenceHints(rootInputId: String?, sessionId: String): String {
         val evidence = deliberation.evidenceFor(rootInputId, sessionId) ?: return ""

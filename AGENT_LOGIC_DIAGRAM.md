@@ -107,6 +107,7 @@ sequenceDiagram
             Note over Ego,Mem: Planner context now includes targeted reflection-lesson recall
             Ego->>TWS: create or update request workspace and index summary
             Ego->>Dash: emit task_workspace_head (with optional debug snapshot)
+            Note over Ego,Planner: For Id-origin thoughts, Ego reapplies Id convergence state and action filtering before planner decide
             Ego->>Planner: decide(context)
             Note over Ego,Planner: PromptBudgetAllocator reserves required-core/context floors with message-overhead accounting, trims optional first, and emits prompt_budget_allocation
             Note over Ego,Planner: Planner requests schema-enforced structured output the LLM layer owns compatibility degradation (strict json_schema -> relaxed json_schema -> prompt-only JSON) parse failures still do truncation-budget retry then strict-JSON retry before noop fallback
