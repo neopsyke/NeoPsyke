@@ -36,6 +36,7 @@ flowchart LR
     MC --> H["Hippocampus (Long-term Recall/Imprint)"]
     MC --> LTM["LlmLongTermMemoryAdvisor"]
     MC --> LB["Logbook (Episodic, SQLite+FTS5)"]
+    LB -.->|"event-type narrative normalization: User timeline vs agent first-person memory/reflection"| MC
     MC --> RL["Reflection Lessons (Recall + Imprint Filters)"]
     MC -.->|"temporal intent → episodic recall + vector cues"| LB
     E --> TWS["TaskWorkspaceStore (Ephemeral Per Request)"]
@@ -43,6 +44,7 @@ flowchart LR
 
     AR --> AP["Action Plugins (self-described)"]
     AP --> M
+    AP -.->|"REFLECT delegates persistence"| MC
 
     M --> WS["Web Search Handler/Engine"]
     CfgWS["WebSearch Provider Config (provider/key/base/model)"] --> WS
@@ -183,6 +185,8 @@ sequenceDiagram
         Note over Ego,Mem: Episodic recall filters session/interlocutor only when explicitly requested by user input
         Note over Ego,Mem: Memory-advisor completion max_tokens scales with prompt estimate (bounded floor/hard-cap) and model token_weight
         Note over Ego,Mem: Long dialogue/recall blocks are compressed before advisor prompt
+        Note over Ego,Mem: Saved durable memories are normalized to first-person agent perspective before imprint
+        Note over Ego,Mem: MCP fact/reference subject is stamped as "me" for agent-authored durable memories
     end
 
     Note over User,SC: Terminal stdin is control-only in interactive mode (exit command), non-command text is not enqueued as chat input

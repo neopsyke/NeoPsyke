@@ -309,6 +309,8 @@ It is intentionally high-level and should stay aligned with the code.
   - MCP stdio connect uses bounded startup retry (2 attempts) to absorb transient transport-close failures.
 - Long-term consolidation:
   - `LlmLongTermMemoryAdvisor` decides `save|skip` with confidence/tags/summary.
+  - Saved summaries are a first-person memory contract from the agent's perspective (for example, `I learned ...` / `I should remember ...`); common third-person outputs are normalized before persistence as a guardrail.
+  - MCP-backed durable-memory writes stamp the fact/reference subject as `me` so persisted memories are attributed to the agent rather than the user if a fact-style backend path is used.
   - Advisor compresses oversized dialogue and recall blocks before prompting (`ContextBlockCompressor`) and emits `memory_advisor_prompt_compressed` diagnostics.
   - Memory-advisor completion budget is adaptive by prompt size and bounded by `MemoryConfig`:
     - `longTermMemoryMaxTokens` is the base floor
@@ -445,6 +447,11 @@ It is intentionally high-level and should stay aligned with the code.
   - `remember()` auto-journals `INPUT_RECEIVED` for user turns.
   - `maybeAssessLongTermMemory()` auto-journals `MEMORY_IMPRINT` on successful saves.
   - `journal()` public method called from Ego for planner decisions, action outcomes, denials, and answers.
+  - `recordReflection()` owns `REFLECT` persistence, adding first-person normalization plus session/interlocutor/run and Id-origin provenance before writing logbook and long-term memory.
+- Narrative perspective is normalized by event type before logbook persistence:
+  - `INPUT_RECEIVED` stays canonical third-person timeline form as `User: ...`
+  - planner/action/answer events keep neutral timeline narration
+  - `MEMORY_IMPRINT` and `SELF_INITIATED` preserve or normalize to first-person agent wording
 - Summarization: deterministic keyword extraction (tokenize, remove stopwords, deduplicate, cap at `maxKeywordsPerEntry`). Optional LLM-based summarizer (`LlmLogbookSummarizer`, opt-in via `PSYKE_LOGBOOK_USE_LLM_SUMMARIZER=true`) with automatic fallback to deterministic on failure.
 - Episodic recall: triggered by temporal intent detection (regex patterns on the latest user turn). Detected intent maps to a time window and optional FTS keyword, producing a compact timeline injected into `PlannerContext.episodicRecall`.
 - Temporal-to-vector bridge: episodic summaries from temporal queries also serve as cues for `Hippocampus.recall()`, enriching long-term memory retrieval with temporal context.

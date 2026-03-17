@@ -204,7 +204,7 @@ Standalone Kotlin JVM app using Gradle with:
   - `MEMORY_DEFAULT_NAMESPACE` (optional; memory MCP namespace/tenant default, launcher defaults to `psyke`)
   - `MEMORY_SEMANTIC_DEDUPE_SIMILARITY_THRESHOLD` (memory server; default: `0.93`)
   - `MEMORY_SEMANTIC_DEDUPE_MIN_CONFIDENCE` (memory server; default: `0.65`)
-  - `MEMORY_FACT_DEFAULT_SUBJECT` (memory server; default: `user`)
+  - `MEMORY_FACT_DEFAULT_SUBJECT` (memory server; default: `me`)
   - `PSYKE_EVAL_MAX_RAW_RESPONSE_CHARS` (reasoning eval raw-thought capture cap; default: unlimited)
   - `PSYKE_LLM_CACHE_MODE` (optional; `record`, `replay`, or `off`; default: `off`)
   - `PSYKE_LLM_CACHE_FILE` (optional; path to JSONL cache file for LLM response caching)
@@ -365,6 +365,7 @@ Notes:
 - Launcher sets `MEMORY_DEFAULT_NAMESPACE=psyke` unless already set, so Psyke memory stays isolated by default.
 - Memory MCP write tools support `write_mode`: `append`, `dedupe_if_similar`, `upsert_fact`.
 - `upsert_fact` supports `fact_subject`, `fact_key`, `fact_value`, `fact_versioned_at` and keeps only one active value per `(namespace, subject, key)`.
+- Psyke's own long-term memory writes stamp the subject/reference as `me` so durable memories are attributed to the agent rather than the user.
 - Memory MCP tools accept optional `namespace` (or `tenant`/`workspace`) argument for explicit multi-client isolation.
 - Default loop delay in `run-psyke.sh` is `1000ms` (`--no-delay` or `--loop-delay-ms 0` disables it).
 - `PSYKE_LOG_LEVEL` can still provide a default if `--log-level` is omitted.

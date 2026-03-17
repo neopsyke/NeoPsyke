@@ -38,10 +38,42 @@ class LongTermMemoryAdvisorTest {
         )
 
         assertTrue(decision.shouldSave)
-        assertEquals("User prefers concise answers.", decision.summary)
+        assertEquals("I learned: User prefers concise answers.", decision.summary)
         assertTrue(decision.confidence > 0.8)
         assertEquals("long_term_memory_assessment", llm.lastOptions.metadata.callSite)
         assertEquals(111, llm.lastOptions.maxTokens)
+    }
+
+    @Test
+    fun `advisor preserves first person memory summaries`() {
+        val llm = StubChatModelClient().apply {
+            enqueueRawResponse(
+                """
+                {"save":true,"summary":"I should remember that the user's name is Victor.","confidence":0.91,"reason":"durable identity fact","tags":["identity"]}
+                """.trimIndent()
+            )
+        }
+        val advisor = LlmLongTermMemoryAdvisor(
+            modelClient = llm,
+            config = AgentConfig(
+                memory = MemoryConfig(
+                    longTermMemoryDynamicCompletionEnabled = false
+                )
+            )
+        )
+
+        val decision = advisor.assess(
+            LongTermMemoryAssessmentContext(
+                trigger = "explicit_remember_intent",
+                deliberation = DeliberationState(stepIndex = 1, decisionPressure = 0.15),
+                recentDialogue = listOf(DialogueTurn(DialogueRole.USER, "remember my name is Victor")),
+                shortTermContextSummary = "",
+                longTermMemoryRecall = "",
+                metaGuidance = ""
+            )
+        )
+
+        assertEquals("I should remember that the user's name is Victor.", decision.summary)
     }
 
     @Test
@@ -82,5 +114,35 @@ class LongTermMemoryAdvisorTest {
         assertTrue(
             instrumentation.events.any { it.type == "memory_advisor_prompt_compressed" }
         )
+    }
+
+    @Test
+    fun `advisor prompt requires first person saved summaries`() {
+        val llm = StubChatModelClient().apply {
+            enqueueRawResponse("""{"save":false,"summary":"","confidence":0.2,"reason":"skip","tags":[]}""")
+        }
+        val advisor = LlmLongTermMemoryAdvisor(
+            modelClient = llm,
+            config = AgentConfig(
+                memory = MemoryConfig(
+                    longTermMemoryDynamicCompletionEnabled = false
+                )
+            )
+        )
+
+        advisor.assess(
+            LongTermMemoryAssessmentContext(
+                trigger = "interval",
+                deliberation = DeliberationState(stepIndex = 2, decisionPressure = 0.20),
+                recentDialogue = listOf(DialogueTurn(DialogueRole.USER, "remember that I like concise answers")),
+                shortTermContextSummary = "",
+                longTermMemoryRecall = "",
+                metaGuidance = ""
+            )
+        )
+
+        val prompt = llm.lastMessages.first().content
+        assertTrue(prompt.contains("write the summary in first person from the agent's perspective"))
+        assertTrue(prompt.contains("Bad: \"User prefers concise answers.\""))
     }
 }

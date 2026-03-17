@@ -9,18 +9,13 @@ import psyke.agent.actions.ActionExecutionContext
 import psyke.agent.actions.AgentActionPlugin
 import psyke.agent.actions.AgentActionPluginFactory
 import psyke.agent.actions.ActionPluginFactoryContext
-import psyke.agent.memory.episodic.EpisodicEventType
-import psyke.agent.memory.episodic.Logbook
-import psyke.agent.memory.episodic.LogbookEntry
-import psyke.agent.memory.longterm.Hippocampus
-import psyke.agent.memory.longterm.MemoryImprint
+import psyke.agent.actions.ReflectionMemoryRecorder
 import psyke.agent.model.ActionOutcome
 import psyke.agent.model.ActionType
 import psyke.agent.config.AgentConfig
 import psyke.agent.model.PendingAction
 import psyke.agent.model.SuperegoContext
 import mu.KotlinLogging
-import java.time.Instant
 
 private val logger = KotlinLogging.logger {}
 
@@ -28,12 +23,11 @@ private val logger = KotlinLogging.logger {}
  * Action plugin for self-initiated reflection and memory consolidation.
  *
  * Used by the planner when processing Id impulses with `INTERNALIZE` convergence.
- * Records an insight to the episodic logbook and long-term memory (Hippocampus)
- * without producing any user-visible output.
+ * Hands reflection persistence off to the memory subsystem without producing
+ * any user-visible output.
  */
 class ReflectActionPlugin(
-    private val hippocampus: Hippocampus?,
-    private val logbook: Logbook?,
+    private val reflectionMemoryRecorder: ReflectionMemoryRecorder,
 ) : AgentActionPlugin {
 
     override val descriptor: ActionDescriptor = ActionDescriptor(
@@ -94,39 +88,7 @@ class ReflectActionPlugin(
         val summary = payload.summary.trim()
         val keywords = payload.keywords.map { it.trim() }.filter { it.isNotEmpty() }
 
-        // 1. Record to episodic logbook.
-        logbook?.let { lb ->
-            try {
-                lb.record(
-                    LogbookEntry(
-                        ts = Instant.now(),
-                        eventType = EpisodicEventType.SELF_INITIATED,
-                        summary = summary,
-                        keywords = keywords,
-                        actionType = "reflect",
-                        metadata = mapOf("self_initiated" to true),
-                    )
-                )
-            } catch (ex: Exception) {
-                logger.debug(ex) { "Logbook record failed for reflect action." }
-            }
-        }
-
-        // 2. Record to long-term memory.
-        hippocampus?.let { hc ->
-            try {
-                hc.imprint(
-                    MemoryImprint(
-                        summary = summary,
-                        source = "self_initiated_reflection",
-                        confidence = 0.6,
-                        tags = listOf("self_initiated") + keywords,
-                    )
-                )
-            } catch (ex: Exception) {
-                logger.debug(ex) { "Hippocampus imprint failed for reflect action." }
-            }
-        }
+        reflectionMemoryRecorder.recordReflection(action = action, summary = summary, keywords = keywords)
 
         logger.info { "Reflect action recorded: ${summary.take(80)}" }
 
@@ -156,7 +118,6 @@ private data class ReflectPayload(
 class ReflectActionPluginFactory : AgentActionPluginFactory {
     override fun create(context: ActionPluginFactoryContext): AgentActionPlugin =
         ReflectActionPlugin(
-            hippocampus = context.hippocampus,
-            logbook = context.logbook,
+            reflectionMemoryRecorder = context.reflectionMemoryRecorder,
         )
 }

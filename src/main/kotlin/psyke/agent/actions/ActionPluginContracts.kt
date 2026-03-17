@@ -1,8 +1,6 @@
 package psyke.agent.actions
 
 import psyke.agent.actions.websearch.WebSearchActionHandler
-import psyke.agent.memory.episodic.Logbook
-import psyke.agent.memory.longterm.Hippocampus
 import psyke.agent.model.ActionOutcome
 import psyke.agent.model.ActionType
 import psyke.agent.config.AgentConfig
@@ -65,6 +63,28 @@ data class ActionExecutionContext(
     val searchResultCount: Int,
 )
 
+interface ReflectionMemoryRecorder {
+    fun recordReflection(action: PendingAction, summary: String, keywords: List<String>)
+}
+
+object NoopReflectionMemoryRecorder : ReflectionMemoryRecorder {
+    override fun recordReflection(action: PendingAction, summary: String, keywords: List<String>) = Unit
+}
+
+class LateBindingReflectionMemoryRecorder(
+    initialDelegate: ReflectionMemoryRecorder = NoopReflectionMemoryRecorder,
+) : ReflectionMemoryRecorder {
+    @Volatile private var delegate: ReflectionMemoryRecorder = initialDelegate
+
+    fun setDelegate(delegate: ReflectionMemoryRecorder) {
+        this.delegate = delegate
+    }
+
+    override fun recordReflection(action: PendingAction, summary: String, keywords: List<String>) {
+        delegate.recordReflection(action, summary, keywords)
+    }
+}
+
 data class ActionPluginFactoryContext(
     val config: AgentConfig,
     val webSearchActionHandler: WebSearchActionHandler?,
@@ -72,8 +92,7 @@ data class ActionPluginFactoryContext(
     val fetchTool: FetchTool?,
     val output: (String) -> Unit,
     val env: Map<String, String> = System.getenv(),
-    val hippocampus: Hippocampus? = null,
-    val logbook: Logbook? = null,
+    val reflectionMemoryRecorder: ReflectionMemoryRecorder = NoopReflectionMemoryRecorder,
 )
 
 interface AgentActionPlugin : AutoCloseable {
@@ -98,4 +117,3 @@ interface AgentActionPlugin : AutoCloseable {
 interface AgentActionPluginFactory {
     fun create(context: ActionPluginFactoryContext): AgentActionPlugin
 }
-

@@ -318,7 +318,7 @@ class McpHippocampus(
         }
     }
 
-    private fun buildImprintArgumentCandidates(
+    internal fun buildImprintArgumentCandidates(
         toolName: String,
         summary: String,
         imprint: MemoryImprint,
@@ -327,9 +327,24 @@ class McpHippocampus(
         val enriched = "$summary$tagsText"
         return when (toolName) {
             "remember" -> listOf(
-                mapOf("text" to enriched, "write_mode" to "dedupe_if_similar"),
-                mapOf("memory" to enriched, "write_mode" to "dedupe_if_similar"),
-                mapOf("content" to enriched, "write_mode" to "dedupe_if_similar")
+                mapOf(
+                    "text" to enriched,
+                    "write_mode" to "dedupe_if_similar",
+                    "fact_subject" to AGENT_SELF_FACT_SUBJECT,
+                    "subject" to AGENT_SELF_FACT_SUBJECT
+                ),
+                mapOf(
+                    "memory" to enriched,
+                    "write_mode" to "dedupe_if_similar",
+                    "fact_subject" to AGENT_SELF_FACT_SUBJECT,
+                    "subject" to AGENT_SELF_FACT_SUBJECT
+                ),
+                mapOf(
+                    "content" to enriched,
+                    "write_mode" to "dedupe_if_similar",
+                    "fact_subject" to AGENT_SELF_FACT_SUBJECT,
+                    "subject" to AGENT_SELF_FACT_SUBJECT
+                )
             )
 
             "create_memory", "add_memory", "write_memory", "imprint_memory" -> listOf(
@@ -337,20 +352,44 @@ class McpHippocampus(
                     "content" to enriched,
                     "source" to imprint.source,
                     "confidence" to imprint.confidence,
-                    "write_mode" to "dedupe_if_similar"
+                    "write_mode" to "dedupe_if_similar",
+                    "fact_subject" to AGENT_SELF_FACT_SUBJECT,
+                    "subject" to AGENT_SELF_FACT_SUBJECT
                 ),
                 mapOf(
                     "text" to enriched,
                     "metadata" to mapOf("source" to imprint.source, "confidence" to imprint.confidence),
-                    "write_mode" to "dedupe_if_similar"
+                    "write_mode" to "dedupe_if_similar",
+                    "fact_subject" to AGENT_SELF_FACT_SUBJECT,
+                    "subject" to AGENT_SELF_FACT_SUBJECT
                 ),
-                mapOf("memory" to enriched, "write_mode" to "dedupe_if_similar")
+                mapOf(
+                    "memory" to enriched,
+                    "write_mode" to "dedupe_if_similar",
+                    "fact_subject" to AGENT_SELF_FACT_SUBJECT,
+                    "subject" to AGENT_SELF_FACT_SUBJECT
+                )
             )
 
             else -> listOf(
-                mapOf("content" to enriched, "write_mode" to "dedupe_if_similar"),
-                mapOf("text" to enriched, "write_mode" to "dedupe_if_similar"),
-                mapOf("memory" to enriched, "write_mode" to "dedupe_if_similar")
+                mapOf(
+                    "content" to enriched,
+                    "write_mode" to "dedupe_if_similar",
+                    "fact_subject" to AGENT_SELF_FACT_SUBJECT,
+                    "subject" to AGENT_SELF_FACT_SUBJECT
+                ),
+                mapOf(
+                    "text" to enriched,
+                    "write_mode" to "dedupe_if_similar",
+                    "fact_subject" to AGENT_SELF_FACT_SUBJECT,
+                    "subject" to AGENT_SELF_FACT_SUBJECT
+                ),
+                mapOf(
+                    "memory" to enriched,
+                    "write_mode" to "dedupe_if_similar",
+                    "fact_subject" to AGENT_SELF_FACT_SUBJECT,
+                    "subject" to AGENT_SELF_FACT_SUBJECT
+                )
             )
         }
     }
@@ -730,6 +769,7 @@ class McpHippocampus(
     )
 
     private companion object {
+        private const val AGENT_SELF_FACT_SUBJECT: String = "me"
         val mapper = jacksonObjectMapper()
             .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
 

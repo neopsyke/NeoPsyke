@@ -16,6 +16,7 @@ import psyke.agent.tools.mcp.McpStdioClient
 import psyke.agent.model.ActionType
 import psyke.agent.actions.ActionPluginFactoryContext
 import psyke.agent.actions.ActionRegistry
+import psyke.agent.actions.LateBindingReflectionMemoryRecorder
 import psyke.agent.cortex.sensory.AsyncSensoryInputSource
 import psyke.agent.cortex.sensory.SensoryCortex
 import psyke.agent.cortex.motor.ActionImplementationStatus
@@ -976,6 +977,7 @@ internal object AppModeRunners {
                                                         resolveInteractiveMemoryStartup(config, mcpRuntimeConfig.memory)
                                                     val earlyHippocampus = earlyMemoryStartup.hippocampus
                                                     val earlyLogbook = createLogbookIfEnabled(config)
+                                                    val reflectionMemoryRecorder = LateBindingReflectionMemoryRecorder()
                                                     val webSearchActionHandler = WebSearchActionHandler(runtime.engine)
                                                     val actionRegistry = ActionRegistry.discover(
                                                         ActionPluginFactoryContext(
@@ -984,8 +986,7 @@ internal object AppModeRunners {
                                                             mcpTimeTool = timeTool,
                                                             fetchTool = activeFetchTool,
                                                             output = {},
-                                                            hippocampus = earlyHippocampus,
-                                                            logbook = earlyLogbook,
+                                                            reflectionMemoryRecorder = reflectionMemoryRecorder,
                                                         )
                                                     )
                                                     actionRegistry.loadWarnings.forEach { warning ->
@@ -1120,6 +1121,7 @@ internal object AppModeRunners {
                                                             instrumentation = instrumentation,
                                                             logbook = logbook,
                                                             logbookSummarizer = logbookSummarizer,
+                                                            reflectionMemoryRecorder = reflectionMemoryRecorder,
                                                         )
                                                         val idModule = if (idConfig.enabled) {
                                                             psyke.agent.id.Id(
@@ -1422,6 +1424,7 @@ internal object AppModeRunners {
                                                     resolveInteractiveMemoryStartup(config, mcpRuntimeConfig.memory)
                                                 val earlyHippocampus2 = earlyMemoryStartup2.hippocampus
                                                 val earlyLogbook2 = createLogbookIfEnabled(config)
+                                                val reflectionMemoryRecorder = LateBindingReflectionMemoryRecorder()
                                                 val webSearchActionHandler = WebSearchActionHandler(runtime.engine)
                                                 val actionRegistry = ActionRegistry.discover(
                                                     ActionPluginFactoryContext(
@@ -1430,8 +1433,7 @@ internal object AppModeRunners {
                                                         mcpTimeTool = timeTool,
                                                         fetchTool = activeFetchTool,
                                                         output = liveOutput,
-                                                        hippocampus = earlyHippocampus2,
-                                                        logbook = earlyLogbook2,
+                                                        reflectionMemoryRecorder = reflectionMemoryRecorder,
                                                     )
                                                 )
                                                 actionRegistry.loadWarnings.forEach { warning ->
@@ -1522,6 +1524,7 @@ internal object AppModeRunners {
                                                         instrumentation = instrumentation,
                                                         logbook = logbook,
                                                         logbookSummarizer = logbookSummarizer,
+                                                        reflectionMemoryRecorder = reflectionMemoryRecorder,
                                                     )
 
                                                     sensoryInput.submitInput(

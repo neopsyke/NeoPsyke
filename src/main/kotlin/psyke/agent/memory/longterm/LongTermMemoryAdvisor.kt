@@ -221,6 +221,11 @@ class LlmLongTermMemoryAdvisor(
                 content = """
                 You decide whether a durable long-term memory should be written.
                 Return STRICT JSON only.
+                If you save memory, write the summary in first person from the agent's perspective.
+                Good: "I learned that the user prefers concise answers."
+                Good: "I should remember that the user's name is Victor."
+                Bad: "User prefers concise answers."
+                Bad: "The agent learned the user's name is Victor."
                 Prefer saving:
                 - stable user preferences
                 - durable project constraints or decisions
@@ -287,7 +292,7 @@ class LlmLongTermMemoryAdvisor(
             }
             val shouldSave = payload.save == true
             val summary = if (shouldSave) {
-                TextSecurity.clamp(payload.summary?.trim().orEmpty(), config.memory.longTermMemoryMaxSummaryChars)
+                normalizeSummaryPerspective(payload.summary?.trim().orEmpty())
             } else {
                 ""
             }
@@ -313,6 +318,23 @@ class LlmLongTermMemoryAdvisor(
         }
     }
 
+    private fun normalizeSummaryPerspective(rawSummary: String): String {
+        val summary = rawSummary.trim()
+        if (summary.isBlank()) return ""
+        if (FIRST_PERSON_PREFIXES.any { summary.startsWith(it, ignoreCase = true) }) {
+            return TextSecurity.clamp(summary, config.memory.longTermMemoryMaxSummaryChars)
+        }
+        val normalizedLead = when {
+            ASSISTANT_SELF_REFERENCE_REGEX.containsMatchIn(summary) ->
+                summary.replaceFirst(ASSISTANT_SELF_REFERENCE_REGEX, "I")
+            else -> summary
+        }
+        return TextSecurity.clamp(
+            "$FIRST_PERSON_MEMORY_PREFIX$normalizedLead",
+            config.memory.longTermMemoryMaxSummaryChars
+        )
+    }
+
     private data class LongTermMemoryAssessmentPayload(
         val save: Boolean? = null,
         val summary: String? = null,
@@ -332,6 +354,17 @@ class LlmLongTermMemoryAdvisor(
 
     private companion object {
         private const val DEFAULT_MODEL_TOKEN_WEIGHT: Double = 1.0
+        private const val FIRST_PERSON_MEMORY_PREFIX: String = "I learned: "
+        private val FIRST_PERSON_PREFIXES: List<String> = listOf(
+            "I learned",
+            "I should remember",
+            "I know",
+            "I noted",
+            "I discovered",
+            "I need to remember",
+            "I'm keeping in mind",
+        )
+        private val ASSISTANT_SELF_REFERENCE_REGEX = Regex("^(assistant|the assistant|the agent|psyke)\\b[:\\s-]*", RegexOption.IGNORE_CASE)
         val mapper = jacksonObjectMapper()
             .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
     }

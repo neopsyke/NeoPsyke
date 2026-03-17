@@ -2,15 +2,8 @@ package psyke.agent.actions.builtin
 
 import kotlinx.coroutines.runBlocking
 import psyke.agent.actions.ActionExecutionContext
-import psyke.agent.memory.episodic.EpisodicEventType
-import psyke.agent.memory.episodic.Logbook
-import psyke.agent.memory.episodic.LogbookEntry
-import psyke.agent.memory.episodic.LogbookQuery
-import psyke.agent.memory.episodic.LogbookRecall
-import psyke.agent.memory.longterm.Hippocampus
-import psyke.agent.memory.longterm.MemoryImprint
-import psyke.agent.memory.longterm.MemoryRecall
-import psyke.agent.memory.longterm.MemoryRecallQuery
+import psyke.agent.actions.NoopReflectionMemoryRecorder
+import psyke.agent.actions.ReflectionMemoryRecorder
 import psyke.agent.model.ActionType
 import psyke.agent.model.PendingAction
 import psyke.agent.model.Urgency
@@ -22,36 +15,21 @@ import kotlin.test.assertTrue
 
 class ReflectActionPluginTest {
 
-    private val recordedEntries = mutableListOf<LogbookEntry>()
-    private val recordedImprints = mutableListOf<MemoryImprint>()
+    private val recordedReflections = mutableListOf<RecordedReflection>()
 
-    private val mockLogbook = object : Logbook {
-        override fun record(entry: LogbookEntry): Long {
-            recordedEntries.add(entry)
-            return recordedEntries.size.toLong()
-        }
-        override fun query(query: LogbookQuery): LogbookRecall =
-            LogbookRecall(emptyList(), 0, false)
-        override fun pruneOlderThan(retentionDays: Int): Int = 0
-        override fun clearAll(): Int = 0
-        override fun close() {}
-    }
-
-    private val mockHippocampus = object : Hippocampus {
-        override val providerName = "test"
-        override val enabled = true
-        override fun recall(query: MemoryRecallQuery): MemoryRecall =
-            MemoryRecall(provider = "test", text = "", hitCount = 0)
-        override fun imprint(imprint: MemoryImprint): Boolean {
-            recordedImprints.add(imprint)
-            return true
+    private val recordingReflectionMemoryRecorder = object : ReflectionMemoryRecorder {
+        override fun recordReflection(action: PendingAction, summary: String, keywords: List<String>) {
+            recordedReflections += RecordedReflection(
+                actionType = action.type,
+                summary = summary,
+                keywords = keywords,
+            )
         }
     }
 
     private fun plugin(
-        hippocampus: Hippocampus? = mockHippocampus,
-        logbook: Logbook? = mockLogbook,
-    ) = ReflectActionPlugin(hippocampus = hippocampus, logbook = logbook)
+        reflectionMemoryRecorder: ReflectionMemoryRecorder = recordingReflectionMemoryRecorder,
+    ) = ReflectActionPlugin(reflectionMemoryRecorder = reflectionMemoryRecorder)
 
     private fun action(payload: String) = PendingAction(
         id = 1,
@@ -70,7 +48,7 @@ class ReflectActionPluginTest {
     }
 
     @Test
-    fun `execute records to logbook and hippocampus`() = runBlocking {
+    fun `execute delegates reflection persistence to recorder`() = runBlocking {
         val p = plugin()
         val outcome = p.execute(
             action("""{"summary": "I learned about coroutines", "keywords": ["kotlin", "coroutines"]}"""),
@@ -79,34 +57,40 @@ class ReflectActionPluginTest {
 
         assertEquals("Reflection recorded to memory.", outcome.statusSummary)
         assertNull(outcome.assistantOutput)
-
-        // Logbook entry
-        assertEquals(1, recordedEntries.size)
-        val entry = recordedEntries.first()
-        assertEquals(EpisodicEventType.SELF_INITIATED, entry.eventType)
-        assertEquals("I learned about coroutines", entry.summary)
-        assertEquals(listOf("kotlin", "coroutines"), entry.keywords)
-        assertEquals("reflect", entry.actionType)
-        assertEquals(true, entry.metadata?.get("self_initiated"))
-
-        // Hippocampus imprint
-        assertEquals(1, recordedImprints.size)
-        val imprint = recordedImprints.first()
-        assertEquals("I learned about coroutines", imprint.summary)
-        assertEquals("self_initiated_reflection", imprint.source)
-        assertTrue(imprint.tags.contains("self_initiated"))
-        assertTrue(imprint.tags.contains("kotlin"))
+        assertEquals(1, recordedReflections.size)
+        assertEquals(
+            RecordedReflection(
+                actionType = ActionType.REFLECT,
+                summary = "I learned about coroutines",
+                keywords = listOf("kotlin", "coroutines"),
+            ),
+            recordedReflections.single()
+        )
     }
 
     @Test
-    fun `execute works without hippocampus and logbook`() = runBlocking {
-        val p = plugin(hippocampus = null, logbook = null)
+    fun `execute works without reflection recorder`() = runBlocking {
+        val p = plugin(reflectionMemoryRecorder = NoopReflectionMemoryRecorder)
         val outcome = p.execute(
             action("""{"summary": "Test insight", "keywords": []}"""),
             ActionExecutionContext(searchResultCount = 0),
         )
 
         assertEquals("Reflection recorded to memory.", outcome.statusSummary)
+    }
+
+    @Test
+    fun `execute preserves raw summary for recorder owned normalization`() = runBlocking {
+        val p = plugin()
+        p.execute(
+            action("""{"summary": "Kotlin coroutines use structured concurrency by default", "keywords": ["kotlin"]}"""),
+            ActionExecutionContext(searchResultCount = 0),
+        )
+
+        assertEquals(
+            "Kotlin coroutines use structured concurrency by default",
+            recordedReflections.single().summary
+        )
     }
 
     @Test
@@ -173,4 +157,10 @@ class ReflectActionPluginTest {
         val valid = """{"summary": "test", "keywords": []}"""
         assertEquals(valid, p.repairPlannerPayload(valid))
     }
+
+    private data class RecordedReflection(
+        val actionType: ActionType,
+        val summary: String,
+        val keywords: List<String>,
+    )
 }

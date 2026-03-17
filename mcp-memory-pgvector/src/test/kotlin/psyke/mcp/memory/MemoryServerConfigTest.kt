@@ -26,6 +26,7 @@ class MemoryServerConfigTest {
             config.semanticDedupeMinConfidence
         )
         assertEquals(MemoryServerConfig.DEFAULT_FACT_SUBJECT, config.factDefaultSubject)
+        assertEquals("me", config.factDefaultSubject)
     }
 
     @Test
