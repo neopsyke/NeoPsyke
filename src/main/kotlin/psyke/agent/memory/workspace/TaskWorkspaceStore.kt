@@ -298,6 +298,50 @@ class TaskWorkspaceStore(
     }
 
     @Synchronized
+    fun crossSessionPromptSummary(maxTokens: Int): String {
+        val tokenBudget = minOf(config.digestMaxPromptTokens, max(32, maxTokens))
+        val activeGoals = workspaces.values
+            .toList()
+            .takeLast(CROSS_SESSION_ACTIVE_WORKSPACE_LIMIT)
+            .map { workspace -> TextSecurity.preview(workspace.goal, MAX_GOAL_CHARS) }
+            .filter { it.isNotBlank() }
+        val digestEntries = digestsBySession.values
+            .asSequence()
+            .flatMap { it.asSequence() }
+            .sortedByDescending { it.createdAtMs }
+            .take(CROSS_SESSION_DIGEST_LIMIT)
+            .toList()
+        if (activeGoals.isEmpty() && digestEntries.isEmpty()) return ""
+        val summary = buildString {
+            append("Cross-session workspace signals:\n")
+            if (activeGoals.isNotEmpty()) {
+                append("active_goals:\n")
+                activeGoals.forEachIndexed { index, goal ->
+                    append("${index + 1}. ")
+                    append(goal)
+                    append('\n')
+                }
+            }
+            if (digestEntries.isNotEmpty()) {
+                append("recent_resolved_goals:\n")
+                digestEntries.forEachIndexed { index, entry ->
+                    append("${index + 1}. ")
+                    append(TextSecurity.preview(entry.goal, MAX_GOAL_CHARS))
+                    if (entry.keyEvidence.isNotEmpty()) {
+                        append(" | evidence=")
+                        append(entry.keyEvidence.joinToString(" | "))
+                    }
+                    append('\n')
+                }
+            }
+        }.trim()
+        return TextSecurity.clampToTokenBudget(
+            TextSecurity.clamp(summary, config.digestMaxChars),
+            tokenBudget
+        )
+    }
+
+    @Synchronized
     fun clearDigestsForSession(sessionId: String) {
         digestsBySession.remove(sessionId)
     }
@@ -539,6 +583,8 @@ class TaskWorkspaceStore(
         const val GOAL_SIGNAL_WEIGHT: Double = 0.10
         const val DIGEST_MAX_EVIDENCE_ITEMS: Int = 3
         const val MAX_DIGEST_TRACKED_SESSIONS: Int = 32
+        const val CROSS_SESSION_ACTIVE_WORKSPACE_LIMIT: Int = 4
+        const val CROSS_SESSION_DIGEST_LIMIT: Int = 6
     }
 
     private data class PendingInputRecord(

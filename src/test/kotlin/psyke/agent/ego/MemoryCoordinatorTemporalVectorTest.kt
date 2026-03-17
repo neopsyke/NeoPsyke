@@ -7,6 +7,7 @@ import psyke.agent.model.EgoTrigger
 import psyke.agent.model.Interlocutor
 import psyke.agent.config.LogbookConfig
 import psyke.agent.model.PendingInput
+import psyke.agent.model.PendingImpulse
 import psyke.agent.memory.episodic.EpisodicEventType
 import psyke.agent.memory.episodic.LogbookEntry
 import psyke.agent.memory.episodic.SqliteLogbook
@@ -190,6 +191,41 @@ class MemoryCoordinatorTemporalVectorTest {
             !capturedCue!!.contains("temporal_context"),
             "Expected no temporal_context in regular recall, got: $capturedCue"
         )
+    }
+
+    @Test
+    fun `learning impulse recall cue includes ambient learning context`() {
+        var capturedCue: String? = null
+        val recordingHippocampus = object : Hippocampus {
+            override val providerName: String = "recording"
+            override val enabled: Boolean = true
+            override fun recall(query: MemoryRecallQuery): MemoryRecall {
+                capturedCue = query.cue
+                return MemoryRecall(provider = providerName, text = "", hitCount = 0)
+            }
+        }
+
+        val mc = createCoordinator(hippocampus = recordingHippocampus)
+        mc.recall(
+            trigger = EgoTrigger.IncomingImpulse(
+                PendingImpulse(
+                    id = 1L,
+                    needId = "learn-something",
+                    prompt = "I feel curious and want to learn something new.",
+                    urgency = 0.9,
+                    rawValue = 0.9,
+                    conversationContext = psyke.agent.model.ConversationContext.default(),
+                )
+            ),
+            shortTermSummary = "",
+            recentDialogue = emptyList(),
+            ambientLearningContext = "Active projects:\n1. Build the memory subsystem"
+        )
+
+        assertTrue(capturedCue != null, "Expected hippocampus to be called")
+        assertTrue(capturedCue!!.contains("Learning recall guidance:"))
+        assertTrue(capturedCue!!.contains("Ambient learning context:"))
+        assertTrue(capturedCue!!.contains("Build the memory subsystem"))
     }
 
     @Test

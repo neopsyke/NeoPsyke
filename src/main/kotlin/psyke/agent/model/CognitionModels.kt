@@ -23,6 +23,7 @@ data class PlannerContext(
     val episodicRecall: String = "",
     val taskWorkspaceSummary: String = "",
     val sessionWorkspaceDigest: String = "",
+    val ambientLearningContext: String = "",
     val evidenceHints: String = "",
     val deliberation: DeliberationState = DeliberationState(),
     val metaGuidance: String = "",

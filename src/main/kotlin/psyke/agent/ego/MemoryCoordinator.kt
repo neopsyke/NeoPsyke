@@ -86,6 +86,12 @@ class MemoryCoordinator(
         var explicitIntentAssessmentTriggeredForInput: Boolean = false,
         var lastConsolidationStep: Int = 0,
         val recentImprintFingerprints: ArrayDeque<String> = ArrayDeque(),
+        val recentLearningTopics: ArrayDeque<LearningTopicRecord> = ArrayDeque(),
+    )
+
+    private data class LearningTopicRecord(
+        val fingerprint: String,
+        val label: String,
     )
 
     private val sessionStates: MutableMap<String, SessionMemoryState> =
@@ -138,12 +144,33 @@ class MemoryCoordinator(
         shortTermSummary: String,
         recentDialogue: List<DialogueTurn>,
         episodicCues: List<String> = emptyList(),
+        ambientLearningContext: String = "",
     ): String {
-        val text = recallMemory(trigger, shortTermSummary, recentDialogue, episodicCues)
+        val text = recallMemory(
+            trigger = trigger,
+            shortTermSummary = shortTermSummary,
+            recentDialogue = recentDialogue,
+            episodicCues = episodicCues,
+            ambientLearningContext = ambientLearningContext,
+        )
         val state = activeState()
         state.latestShortTermSummary = shortTermSummary
         state.latestLongTermRecall = text
         return text
+    }
+
+    fun recentLearningTopicsSummary(): String {
+        val topics = activeState().recentLearningTopics
+        if (topics.isEmpty()) return ""
+        return buildString {
+            append("Recently explored exact learning topics:\n")
+            topics.forEachIndexed { index, topic ->
+                append("${index + 1}. ")
+                append(topic.label)
+                append('\n')
+            }
+            append("Avoid exact topic repeats. Deeper follow-up questions on related topics are still valid.")
+        }.trim()
     }
 
     fun recallLessons(trigger: EgoTrigger, recentDialogue: List<DialogueTurn>): String {
@@ -479,6 +506,9 @@ class MemoryCoordinator(
             actionType = action.type.id,
             metadata = buildReflectionMetadata(action),
         )
+        if (savedToLongTermMemory && action.origin.needId == LEARNING_NEED_ID) {
+            rememberLearningTopic(summary = normalizedSummary, keywords = normalizedKeywords)
+        }
         return savedToLongTermMemory
     }
 
@@ -748,6 +778,7 @@ class MemoryCoordinator(
         shortTermSummary: String,
         recentDialogue: List<DialogueTurn>,
         episodicCues: List<String> = emptyList(),
+        ambientLearningContext: String = "",
     ): String {
         if (!hippocampus.enabled) return ""
         val triggerLabel = when (trigger) {
@@ -757,7 +788,14 @@ class MemoryCoordinator(
         }
         val cue = when (trigger) {
             is EgoTrigger.IncomingInput -> buildRecallCue(trigger, recentDialogue, episodicCues).trim()
-            is EgoTrigger.IncomingImpulse -> trigger.impulse.prompt.trim()
+            is EgoTrigger.IncomingImpulse -> {
+                val baseCue = trigger.impulse.prompt.trim()
+                if (trigger.impulse.needId == LEARNING_NEED_ID) {
+                    buildLearningRecallCue(baseCue, ambientLearningContext)
+                } else {
+                    baseCue
+                }
+            }
             is EgoTrigger.PendingThoughtInput -> {
                 val query = trigger.thought.longTermMemoryRecallQuery?.trim().orEmpty()
                 if (query.isBlank()) {
@@ -865,6 +903,53 @@ class MemoryCoordinator(
             recentUserTurn.takeIf { it.isNotBlank() && it != triggerCue }?.let { "latest_user_message: $it" },
             episodicCues.takeIf { it.isNotEmpty() }?.let { "temporal_context: ${it.joinToString(" | ")}" },
         ).joinToString(separator = "\n")
+    }
+
+    private fun buildLearningRecallCue(baseCue: String, ambientLearningContext: String): String =
+        listOfNotNull(
+            baseCue.takeIf { it.isNotBlank() },
+            "Learning recall guidance: recall stable user interests, recurring projects, and adjacent topics that would make this curiosity more useful.",
+            ambientLearningContext.takeIf { it.isNotBlank() }?.let { "Ambient learning context:\n$it" }
+        ).joinToString(separator = "\n")
+
+    private fun rememberLearningTopic(summary: String, keywords: List<String>) {
+        val record = buildLearningTopicRecord(summary, keywords) ?: return
+        val topics = activeState().recentLearningTopics
+        while (topics.removeAll { it.fingerprint == record.fingerprint }) {
+            // Keep the most recent occurrence at the tail.
+        }
+        topics.addLast(record)
+        while (topics.size > MAX_RECENT_LEARNING_TOPICS) {
+            topics.removeFirst()
+        }
+    }
+
+    private fun buildLearningTopicRecord(summary: String, keywords: List<String>): LearningTopicRecord? {
+        val normalizedKeywords = keywords
+            .map { normalizePayload(it) }
+            .filter { it.isNotBlank() }
+            .distinct()
+            .sorted()
+        val fingerprint = if (normalizedKeywords.isNotEmpty()) {
+            "keywords:${normalizedKeywords.joinToString("|")}"
+        } else {
+            val normalizedSummary = normalizePayload(summary)
+            if (normalizedSummary.isBlank()) return null
+            "summary:$normalizedSummary"
+        }
+        val label = if (keywords.isNotEmpty()) {
+            keywords
+                .map { it.trim() }
+                .filter { it.isNotBlank() }
+                .distinct()
+                .joinToString(", ")
+                .takeIf { it.isNotBlank() }
+                ?: TextSecurity.preview(summary, LEARNING_TOPIC_LABEL_MAX_CHARS)
+        } else {
+            TextSecurity.preview(summary, LEARNING_TOPIC_LABEL_MAX_CHARS)
+        }
+        if (label.isBlank()) return null
+        return LearningTopicRecord(fingerprint = fingerprint, label = label)
     }
 
     private fun buildLessonCue(trigger: EgoTrigger, recentDialogue: List<DialogueTurn>): String {
@@ -1228,8 +1313,11 @@ class MemoryCoordinator(
         const val LESSON_USER_TURN_PREVIEW_CHARS: Int = 140
         const val LESSON_DENIED_PAYLOAD_PREVIEW_CHARS: Int = 120
         const val MAX_RECENT_LESSON_FINGERPRINTS: Int = 24
+        const val MAX_RECENT_LEARNING_TOPICS: Int = 8
+        const val LEARNING_TOPIC_LABEL_MAX_CHARS: Int = 120
         const val LESSON_DEFAULT_CONFIDENCE: Double = 0.72
         const val REFLECTION_DEFAULT_CONFIDENCE: Double = 0.6
+        const val LEARNING_NEED_ID: String = "learn-something"
         val LESSON_TECHNICAL_TEXT_SIGNALS: Set<String> = setOf(
             "tool error",
             "tool failed",

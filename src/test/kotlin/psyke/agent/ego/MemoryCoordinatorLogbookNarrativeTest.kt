@@ -187,6 +187,70 @@ class MemoryCoordinatorLogbookNarrativeTest {
         assertEquals(1, logbook.entries.size, "Reflection should still be journaled for diagnostics")
     }
 
+    @Test
+    fun `recent learning topics keep exact topics and dedupe exact repeats`() {
+        val coordinator = MemoryCoordinator(
+            hippocampus = RecordingHippocampus(),
+            longTermMemoryAdvisor = object : LongTermMemoryAdvisor {
+                override fun assess(context: LongTermMemoryAssessmentContext): LongTermMemoryAssessmentDecision =
+                    LongTermMemoryAssessmentDecision(false, "", 0.0, "unused")
+            },
+            config = AgentConfig(),
+            instrumentation = NoopAgentInstrumentation,
+            logbook = RecordingLogbook(),
+        )
+
+        val learningOrigin = ActionOrigin(
+            source = OriginSource.ID,
+            needId = "learn-something",
+            rootImpulseId = "impulse-learn",
+        )
+        coordinator.recordReflection(
+            action = PendingAction(
+                id = 1,
+                urgency = Urgency.MEDIUM,
+                type = ActionType.REFLECT,
+                payload = """{"summary":"I learned about Kotlin coroutines"}""",
+                summary = "reflect",
+                origin = learningOrigin,
+            ),
+            summary = "I learned about Kotlin coroutines",
+            keywords = listOf("kotlin", "coroutines"),
+        )
+        coordinator.recordReflection(
+            action = PendingAction(
+                id = 2,
+                urgency = Urgency.MEDIUM,
+                type = ActionType.REFLECT,
+                payload = """{"summary":"I learned about Kotlin coroutines again"}""",
+                summary = "reflect",
+                origin = learningOrigin,
+            ),
+            summary = "I learned about Kotlin coroutines again",
+            keywords = listOf("coroutines", "kotlin"),
+        )
+        coordinator.recordReflection(
+            action = PendingAction(
+                id = 3,
+                urgency = Urgency.MEDIUM,
+                type = ActionType.REFLECT,
+                payload = """{"summary":"I dug into coroutine cancellation"}""",
+                summary = "reflect",
+                origin = learningOrigin,
+            ),
+            summary = "I dug into coroutine cancellation",
+            keywords = listOf("kotlin", "coroutine cancellation"),
+        )
+
+        val summary = coordinator.recentLearningTopicsSummary()
+
+        assertTrue(summary.contains("Recently explored exact learning topics:"))
+        assertTrue(summary.contains("coroutines, kotlin"))
+        assertTrue(summary.contains("kotlin, coroutine cancellation"))
+        assertEquals(1, "coroutines, kotlin".toRegex().findAll(summary).count())
+        assertTrue(summary.contains("Deeper follow-up questions on related topics are still valid."))
+    }
+
     private class RecordingLogbook : Logbook {
         val entries = mutableListOf<LogbookEntry>()
 

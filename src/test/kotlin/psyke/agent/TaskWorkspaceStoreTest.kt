@@ -447,4 +447,24 @@ class TaskWorkspaceStoreTest {
         assertTrue(summaryB.contains("session B task"))
         assertFalse(summaryB.contains("session A task"))
     }
+
+    @Test
+    fun `crossSessionPromptSummary includes active goals and recent digests across sessions`() {
+        val store = TaskWorkspaceStore(
+            TaskWorkspaceConfig(enabled = true, activationMinPlanSteps = 1, digestMaxEntries = 4)
+        )
+        store.ensureForInput(
+            PendingInput(id = 1, content = "active migration project", rootInputId = "root-active", receivedAtMs = 10L)
+        )
+        store.ensureForInput(
+            PendingInput(id = 2, content = "resolved docs refresh", rootInputId = "root-digest", receivedAtMs = 20L)
+        )
+        store.captureDigest("root-digest", "session-b")
+
+        val summary = store.crossSessionPromptSummary(maxTokens = 400)
+
+        assertTrue(summary.contains("Cross-session workspace signals:"))
+        assertTrue(summary.contains("active migration project"))
+        assertTrue(summary.contains("resolved docs refresh"))
+    }
 }

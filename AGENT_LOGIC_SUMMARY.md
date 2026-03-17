@@ -35,6 +35,7 @@ It is intentionally high-level and should stay aligned with the code.
   - `TaskWorkspaceStore` (ephemeral per-request notebook/workspace)
   - `TaskWorkspaceFinalizer` (noop or `LlmTaskWorkspaceFinalizer`)
   - `Id` (autonomous internal drive module; optional, loaded from `id-runtime.yaml`)
+  - `ProjectRegistry` (optional active-project signal source for self-initiated learning relevance)
   - `Ego` orchestrator
 - Interactive startup now performs an MCP memory health probe before enabling memory:
   - if probe passes, memory is exposed as available and `McpHippocampus` is wired
@@ -103,6 +104,14 @@ It is intentionally high-level and should stay aligned with the code.
   - Id-origin is propagated on every downstream thought/action enqueue path (follow-up, denial recovery, suppression recovery, fallback).
   - Id convergence constraints are re-applied on every Id-origin thought (including follow-up and plan-step thoughts), not only on the initial impulse planner pass.
     - `internalize` + `allowEscalation=false` removes `contact_user` from planner dispatchable actions and planner action definitions.
+  - Learning impulses (`needId=learn-something`) now assemble an ambient relevance context before long-term recall:
+    - optional active projects from `ProjectRegistry`
+    - cross-session task-workspace signals (active goals + recent resolved digests)
+    - recently explored exact learning topics from successful `reflect` saves
+  - The ambient learning context is advisory only:
+    - it biases recall/prompting toward user-relevant topics
+    - it does not hard-require project alignment
+    - exact topic repeats are discouraged, but deeper follow-up questions on related topics remain allowed
   - Lifecycle result is aggregated across parallel branches:
     - accepted: at least one Id-origin action executed
     - denied: all branches finished without any executed Id-origin action
@@ -131,6 +140,7 @@ It is intentionally high-level and should stay aligned with the code.
     - long-term memory recall (if available)
     - reflection-lesson recall (if available)
     - task workspace summary (index + compact section summaries, if enabled)
+    - ambient learning context for `learn-something` impulses (optional relevance signals only)
     - external evidence hints derived from prior successful/failed evidence actions for the same root input
     - deliberation state and meta-guidance
     - currently available action types from `MotorCortex`
@@ -193,6 +203,7 @@ It is intentionally high-level and should stay aligned with the code.
   - Prompt assembly with contract-based budget allocation (`required_core` > `required_context` > `optional`).
   - Overhead-aware floor reservation per section, tiered degradation, and single-message fallback under extreme prompt pressure.
   - Emits `prompt_budget_allocation` telemetry for planner and action-verifier prompt builds (cost estimates, degradation path, fallback/floor-violation signals).
+  - For learning impulses, planner prompt may include an ambient learning block containing optional project/workspace/recent-topic relevance signals.
   - Planner calls request schema-enforced structured output, but provider/model compatibility handling now lives below the planner in the LLM layer:
     - planner requests one structured-output contract (`response_format=json_schema`) plus call-site metadata
     - LLM adapter owns compatibility retries/degradation and may retry as relaxed schema or prompt-only JSON before surfacing a terminal failure
