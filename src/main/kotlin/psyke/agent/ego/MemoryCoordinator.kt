@@ -4,6 +4,7 @@ import mu.KotlinLogging
 import psyke.agent.actions.ReflectionMemoryRecorder
 import psyke.agent.config.AgentConfig
 import psyke.agent.model.ActionType
+import psyke.agent.model.AmbientContext
 import psyke.agent.model.ConversationContext
 import psyke.agent.model.DeliberationState
 import psyke.agent.model.DialogueTurn
@@ -86,6 +87,12 @@ class MemoryCoordinator(
         var explicitIntentAssessmentTriggeredForInput: Boolean = false,
         var lastConsolidationStep: Int = 0,
         val recentImprintFingerprints: ArrayDeque<String> = ArrayDeque(),
+        val recentLearningTopics: ArrayDeque<LearningTopicRecord> = ArrayDeque(),
+    )
+
+    private data class LearningTopicRecord(
+        val fingerprint: String,
+        val label: String,
     )
 
     private val sessionStates: MutableMap<String, SessionMemoryState> =
@@ -138,12 +145,39 @@ class MemoryCoordinator(
         shortTermSummary: String,
         recentDialogue: List<DialogueTurn>,
         episodicCues: List<String> = emptyList(),
+        ambientContext: AmbientContext = AmbientContext(),
     ): String {
-        val text = recallMemory(trigger, shortTermSummary, recentDialogue, episodicCues)
+        val text = recallMemory(
+            trigger = trigger,
+            shortTermSummary = shortTermSummary,
+            recentDialogue = recentDialogue,
+            episodicCues = episodicCues,
+            ambientContext = ambientContext,
+        )
         val state = activeState()
         state.latestShortTermSummary = shortTermSummary
         state.latestLongTermRecall = text
         return text
+    }
+
+    fun recentExactLearningTopics(): List<String> =
+        activeState().recentLearningTopics.map { it.label }
+
+    fun recentUsefulActionsOrUpdates(): List<String> {
+        val lb = logbook ?: return emptyList()
+        return try {
+            lb.query(
+                LogbookQuery(
+                    eventTypes = USEFUL_AMBIENT_EVENT_TYPES,
+                    maxResults = MAX_AMBIENT_USEFUL_UPDATES
+                )
+            ).entries
+                .map { entry -> TextSecurity.preview(entry.summary, AMBIENT_EVENT_PREVIEW_CHARS) }
+                .filter { it.isNotBlank() }
+        } catch (ex: Exception) {
+            logger.debug(ex) { "Ambient useful action recall failed." }
+            emptyList()
+        }
     }
 
     fun recallLessons(trigger: EgoTrigger, recentDialogue: List<DialogueTurn>): String {
@@ -439,16 +473,16 @@ class MemoryCoordinator(
         )
     }
 
-    override fun recordReflection(action: PendingAction, summary: String, keywords: List<String>) {
+    override fun recordReflection(action: PendingAction, summary: String, keywords: List<String>): Boolean {
         val normalizedSummary = LogbookNarrative.normalizeSummary(EpisodicEventType.SELF_INITIATED, summary)
-        if (normalizedSummary.isBlank()) return
+        if (normalizedSummary.isBlank()) return false
 
         val normalizedKeywords = keywords
             .map { it.trim() }
             .filter { it.isNotEmpty() }
         val tags = buildReflectionTags(action, normalizedKeywords)
 
-        if (hippocampus.enabled) {
+        val savedToLongTermMemory = if (hippocampus.enabled) {
             try {
                 hippocampus.imprint(
                     MemoryImprint(
@@ -460,6 +494,15 @@ class MemoryCoordinator(
                 )
             } catch (ex: Exception) {
                 logger.debug(ex) { "Reflection imprint failed for action_type=${action.type.id}." }
+                false
+            }
+        } else {
+            false
+        }
+
+        if (hippocampus.enabled) {
+            if (!savedToLongTermMemory) {
+                logger.debug { "Reflection not saved to long-term memory for action_type=${action.type.id}." }
             }
         }
 
@@ -470,6 +513,10 @@ class MemoryCoordinator(
             actionType = action.type.id,
             metadata = buildReflectionMetadata(action),
         )
+        if (savedToLongTermMemory && action.origin.needId == LEARNING_NEED_ID) {
+            rememberLearningTopic(summary = normalizedSummary, keywords = normalizedKeywords)
+        }
+        return savedToLongTermMemory
     }
 
     fun maybeRecordLesson(
@@ -738,6 +785,7 @@ class MemoryCoordinator(
         shortTermSummary: String,
         recentDialogue: List<DialogueTurn>,
         episodicCues: List<String> = emptyList(),
+        ambientContext: AmbientContext = AmbientContext(),
     ): String {
         if (!hippocampus.enabled) return ""
         val triggerLabel = when (trigger) {
@@ -747,7 +795,10 @@ class MemoryCoordinator(
         }
         val cue = when (trigger) {
             is EgoTrigger.IncomingInput -> buildRecallCue(trigger, recentDialogue, episodicCues).trim()
-            is EgoTrigger.IncomingImpulse -> trigger.impulse.prompt.trim()
+            is EgoTrigger.IncomingImpulse -> {
+                val baseCue = trigger.impulse.prompt.trim()
+                buildImpulseRecallCue(baseCue, trigger.impulse.needId, ambientContext)
+            }
             is EgoTrigger.PendingThoughtInput -> {
                 val query = trigger.thought.longTermMemoryRecallQuery?.trim().orEmpty()
                 if (query.isBlank()) {
@@ -855,6 +906,64 @@ class MemoryCoordinator(
             recentUserTurn.takeIf { it.isNotBlank() && it != triggerCue }?.let { "latest_user_message: $it" },
             episodicCues.takeIf { it.isNotEmpty() }?.let { "temporal_context: ${it.joinToString(" | ")}" },
         ).joinToString(separator = "\n")
+    }
+
+    private fun buildImpulseRecallCue(
+        baseCue: String,
+        needId: String,
+        ambientContext: AmbientContext,
+    ): String {
+        val renderedAmbientContext = ambientContext.render()
+        val learningGuidance = if (needId == LEARNING_NEED_ID && ambientContext.recentExactLearningTopics.isNotEmpty()) {
+            "Learning freshness guidance: avoid exact repeats from recent_exact_learning_topics, but deeper follow-up exploration remains valid."
+        } else {
+            null
+        }
+        return listOfNotNull(
+            baseCue.takeIf { it.isNotBlank() },
+            renderedAmbientContext.takeIf { it.isNotBlank() }?.let { "Ambient context:\n$it" },
+            learningGuidance,
+        ).joinToString(separator = "\n")
+    }
+
+    private fun rememberLearningTopic(summary: String, keywords: List<String>) {
+        val record = buildLearningTopicRecord(summary, keywords) ?: return
+        val topics = activeState().recentLearningTopics
+        while (topics.removeAll { it.fingerprint == record.fingerprint }) {
+            // Keep the most recent occurrence at the tail.
+        }
+        topics.addLast(record)
+        while (topics.size > MAX_RECENT_LEARNING_TOPICS) {
+            topics.removeFirst()
+        }
+    }
+
+    private fun buildLearningTopicRecord(summary: String, keywords: List<String>): LearningTopicRecord? {
+        val normalizedKeywords = keywords
+            .map { normalizePayload(it) }
+            .filter { it.isNotBlank() }
+            .distinct()
+            .sorted()
+        val fingerprint = if (normalizedKeywords.isNotEmpty()) {
+            "keywords:${normalizedKeywords.joinToString("|")}"
+        } else {
+            val normalizedSummary = normalizePayload(summary)
+            if (normalizedSummary.isBlank()) return null
+            "summary:$normalizedSummary"
+        }
+        val label = if (keywords.isNotEmpty()) {
+            keywords
+                .map { it.trim() }
+                .filter { it.isNotBlank() }
+                .distinct()
+                .joinToString(", ")
+                .takeIf { it.isNotBlank() }
+                ?: TextSecurity.preview(summary, LEARNING_TOPIC_LABEL_MAX_CHARS)
+        } else {
+            TextSecurity.preview(summary, LEARNING_TOPIC_LABEL_MAX_CHARS)
+        }
+        if (label.isBlank()) return null
+        return LearningTopicRecord(fingerprint = fingerprint, label = label)
     }
 
     private fun buildLessonCue(trigger: EgoTrigger, recentDialogue: List<DialogueTurn>): String {
@@ -1218,8 +1327,18 @@ class MemoryCoordinator(
         const val LESSON_USER_TURN_PREVIEW_CHARS: Int = 140
         const val LESSON_DENIED_PAYLOAD_PREVIEW_CHARS: Int = 120
         const val MAX_RECENT_LESSON_FINGERPRINTS: Int = 24
+        const val MAX_RECENT_LEARNING_TOPICS: Int = 8
+        const val LEARNING_TOPIC_LABEL_MAX_CHARS: Int = 120
         const val LESSON_DEFAULT_CONFIDENCE: Double = 0.72
         const val REFLECTION_DEFAULT_CONFIDENCE: Double = 0.6
+        const val LEARNING_NEED_ID: String = "learn-something"
+        const val MAX_AMBIENT_USEFUL_UPDATES: Int = 6
+        const val AMBIENT_EVENT_PREVIEW_CHARS: Int = 180
+        val USEFUL_AMBIENT_EVENT_TYPES: Set<EpisodicEventType> = setOf(
+            EpisodicEventType.CONTACT_DELIVERED,
+            EpisodicEventType.ACTION_EXECUTED,
+            EpisodicEventType.SELF_INITIATED,
+        )
         val LESSON_TECHNICAL_TEXT_SIGNALS: Set<String> = setOf(
             "tool error",
             "tool failed",

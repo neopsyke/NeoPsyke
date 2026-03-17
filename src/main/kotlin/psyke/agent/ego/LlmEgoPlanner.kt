@@ -1158,6 +1158,7 @@ class LlmEgoPlanner(
         val episodicRecall = context.episodicRecall.ifBlank { "none" }
         val taskWorkspaceSummary = context.taskWorkspaceSummary.ifBlank { "none" }
         val sessionWorkspaceDigest = context.sessionWorkspaceDigest.ifBlank { "none" }
+        val ambientContext = context.ambientContext.render().ifBlank { "none" }
         val evidenceHints = context.evidenceHints.ifBlank { "none" }
         val metaGuidance = context.metaGuidance.ifBlank { "none" }
         val deliberation = context.deliberation
@@ -1338,6 +1339,15 @@ class LlmEgoPlanner(
                     band = PromptBudgetAllocator.Band.OPTIONAL,
                     content = "Prior workspace digests (resolved requests in this session):\n$sessionWorkspaceDigest"
                 ),
+                context.ambientContext.takeIf { !it.isEmpty() }?.let {
+                    PromptBudgetAllocator.Section(
+                        key = "planner_ambient_context",
+                        role = ChatRole.USER,
+                        band = PromptBudgetAllocator.Band.REQUIRED_CONTEXT,
+                        floorTokens = 20,
+                        content = "Ambient context:\n$ambientContext"
+                    )
+                },
                 PromptBudgetAllocator.Section(
                     key = "planner_evidence_hints",
                     role = ChatRole.USER,

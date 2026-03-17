@@ -11,6 +11,8 @@ import psyke.agent.actions.ActionPluginHealth
 import psyke.agent.actions.AgentActionPlugin
 import psyke.agent.actions.AgentActionPluginFactory
 import psyke.agent.actions.ActionPluginFactoryContext
+import psyke.agent.model.ActionEffect
+import psyke.agent.model.ActionExecutionStatus
 import psyke.agent.model.ActionOutcome
 import psyke.agent.model.ActionType
 import psyke.agent.config.AgentConfig
@@ -91,7 +93,12 @@ class McpTimeActionPlugin(
     override suspend fun execute(action: PendingAction, context: ActionExecutionContext): ActionOutcome {
         val status = tool?.getCurrentTime(action.payload)
             ?: "MCP time tool is not configured."
-        return ActionOutcome(statusSummary = status)
+        val success = status.startsWith("MCP time result:", ignoreCase = true)
+        return ActionOutcome(
+            statusSummary = status,
+            executionStatus = if (success) ActionExecutionStatus.SUCCESS else ActionExecutionStatus.FAILED,
+            effects = if (success) setOf(ActionEffect.TASK_PROGRESS, ActionEffect.EVIDENCE_GATHERED) else emptySet(),
+        )
     }
 
     private data class McpTimePayload(

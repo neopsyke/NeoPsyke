@@ -447,4 +447,24 @@ class TaskWorkspaceStoreTest {
         assertTrue(summaryB.contains("session B task"))
         assertFalse(summaryB.contains("session A task"))
     }
+
+    @Test
+    fun `workspace ambient signal helpers expose active and resolved goals across sessions`() {
+        val store = TaskWorkspaceStore(
+            TaskWorkspaceConfig(enabled = true, activationMinPlanSteps = 1, digestMaxEntries = 4)
+        )
+        store.ensureForInput(
+            PendingInput(id = 1, content = "active migration project", rootInputId = "root-active", receivedAtMs = 10L)
+        )
+        store.ensureForInput(
+            PendingInput(id = 2, content = "resolved docs refresh", rootInputId = "root-digest", receivedAtMs = 20L)
+        )
+        store.captureDigest("root-digest", "session-b")
+
+        val activeGoals = store.activeGoalSignals()
+        val resolvedGoals = store.recentResolvedGoalSignals()
+
+        assertTrue(activeGoals.contains("active migration project"))
+        assertTrue(resolvedGoals.any { it.contains("resolved docs refresh") })
+    }
 }

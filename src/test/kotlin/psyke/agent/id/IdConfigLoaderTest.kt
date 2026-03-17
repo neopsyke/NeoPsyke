@@ -37,6 +37,8 @@ class IdConfigLoaderTest {
                   response_curve:
                     type: logarithmic
                     scale: 8.0
+                  satisfaction_effects_any_of:
+                    - durable_memory_saved
                   activity_decay:
                     action_executed_web_search: 0.12
         """.trimIndent()
@@ -61,6 +63,7 @@ class IdConfigLoaderTest {
         assertEquals("Learn something!", learn.prompt)
         assertEquals("logarithmic", learn.responseCurve.type)
         assertEquals(8.0, learn.responseCurve.scale)
+        assertEquals(setOf(psyke.agent.model.ActionEffect.DURABLE_MEMORY_SAVED), learn.satisfactionEffectsAnyOf)
         assertEquals(0.12, learn.activityDecay["action_executed_web_search"]!!, epsilon)
     }
 

@@ -9,6 +9,7 @@ import psyke.agent.actions.AgentActionPlugin
 import psyke.agent.actions.AgentActionPluginFactory
 import psyke.agent.actions.ActionPluginFactoryContext
 import psyke.agent.model.ActionOutcome
+import psyke.agent.model.ActionExecutionStatus
 import psyke.agent.model.ActionType
 import psyke.agent.config.AgentConfig
 import psyke.agent.model.PendingAction
@@ -89,7 +90,10 @@ class WebSearchActionPlugin(
 
     override suspend fun execute(action: PendingAction, context: ActionExecutionContext): ActionOutcome {
         val active = handler
-            ?: return ActionOutcome(statusSummary = "Web search action handler is not configured.")
+            ?: return ActionOutcome(
+                statusSummary = "Web search action handler is not configured.",
+                executionStatus = ActionExecutionStatus.FAILED,
+            )
         return active.execute(action.payload, context.searchResultCount)
     }
 }
@@ -98,4 +102,3 @@ class WebSearchActionPluginFactory : AgentActionPluginFactory {
     override fun create(context: ActionPluginFactoryContext): AgentActionPlugin =
         WebSearchActionPlugin(handler = context.webSearchActionHandler)
 }
-

@@ -298,6 +298,32 @@ class TaskWorkspaceStore(
     }
 
     @Synchronized
+    fun activeGoalSignals(limit: Int = CROSS_SESSION_ACTIVE_WORKSPACE_LIMIT): List<String> =
+        workspaces.values
+            .toList()
+            .takeLast(max(1, limit))
+            .map { workspace -> TextSecurity.preview(workspace.goal, MAX_GOAL_CHARS) }
+            .filter { it.isNotBlank() }
+
+    @Synchronized
+    fun recentResolvedGoalSignals(limit: Int = CROSS_SESSION_DIGEST_LIMIT): List<String> =
+        digestsBySession.values
+            .asSequence()
+            .flatMap { it.asSequence() }
+            .sortedByDescending { it.createdAtMs }
+            .take(max(1, limit))
+            .map { entry ->
+                buildString {
+                    append(TextSecurity.preview(entry.goal, MAX_GOAL_CHARS))
+                    if (entry.keyEvidence.isNotEmpty()) {
+                        append(" | evidence=")
+                        append(entry.keyEvidence.joinToString(" | "))
+                    }
+                }
+            }
+            .toList()
+
+    @Synchronized
     fun clearDigestsForSession(sessionId: String) {
         digestsBySession.remove(sessionId)
     }
@@ -539,6 +565,8 @@ class TaskWorkspaceStore(
         const val GOAL_SIGNAL_WEIGHT: Double = 0.10
         const val DIGEST_MAX_EVIDENCE_ITEMS: Int = 3
         const val MAX_DIGEST_TRACKED_SESSIONS: Int = 32
+        const val CROSS_SESSION_ACTIVE_WORKSPACE_LIMIT: Int = 4
+        const val CROSS_SESSION_DIGEST_LIMIT: Int = 6
     }
 
     private data class PendingInputRecord(

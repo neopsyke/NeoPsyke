@@ -1,5 +1,7 @@
 package psyke.agent.actions.websearch
 
+import psyke.agent.model.ActionEffect
+import psyke.agent.model.ActionExecutionStatus
 import psyke.agent.model.ActionOutcome
 import psyke.agent.support.PromptInjectionDefense
 import psyke.agent.support.TextSecurity
@@ -60,6 +62,12 @@ class WebSearchActionHandler(
         return ActionOutcome(
             statusSummary = "Web search summary: $summary; snippets: $snippets; sources: $sources; source_confidence: $confidence; query_injection_signals: $promptInjectionSignals",
             plannerSignal = plannerSignal,
+            executionStatus = if (observedEvidence) ActionExecutionStatus.SUCCESS else ActionExecutionStatus.NO_EFFECT,
+            effects = if (observedEvidence) {
+                setOf(ActionEffect.TASK_PROGRESS, ActionEffect.EVIDENCE_GATHERED)
+            } else {
+                emptySet()
+            },
             observedEvidence = observedEvidence
         )
     }

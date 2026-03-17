@@ -3,6 +3,7 @@ package psyke.agent.id
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
+import psyke.agent.actions.ReflectionMemoryRecorder
 import psyke.agent.actions.websearch.WebSearchActionHandler
 import psyke.agent.actions.websearch.WebSearchEngine
 import psyke.agent.actions.websearch.WebSearchResult
@@ -14,6 +15,7 @@ import psyke.agent.model.ConversationContext
 import psyke.agent.model.EgoDecision
 import psyke.agent.model.EgoTrigger
 import psyke.agent.model.OriginSource
+import psyke.agent.model.ActionEffect
 import psyke.agent.model.PendingImpulse
 import psyke.agent.model.PendingThought
 import psyke.agent.config.PlannerConfig
@@ -350,6 +352,136 @@ class IdEgoLifecycleIntegrationTest {
         assertEquals("denied", lifecycleFinalized.data["result"])
     }
 
+    @Test
+    fun `reflect impulse only satisfies id need when memory save succeeds`() {
+        val instrumentation = RecordingInstrumentation()
+        lateinit var ego: Ego
+        val planner = object : Ego.Planner {
+            override fun decide(trigger: EgoTrigger, context: PlannerContext): EgoDecision =
+                when (trigger) {
+                    is EgoTrigger.IncomingInput -> EgoDecision.Noop("ignore user test input")
+                    is EgoTrigger.IncomingImpulse -> EgoDecision.ProposeAction(
+                        urgency = Urgency.MEDIUM,
+                        actionType = ActionType.REFLECT,
+                        payload = """{"summary":"I learned something durable","keywords":["learning"]}""",
+                        summary = "persist insight"
+                    )
+                    is EgoTrigger.PendingThoughtInput -> EgoDecision.Noop("done")
+                }
+        }
+        val config = AgentConfig(
+            planner = PlannerConfig(
+                maxLoopStepsPerInput = 8,
+                maxThoughtPasses = 1
+            )
+        )
+        ego = buildTestEgo(
+            planner = planner,
+            superego = Superego(
+                modelClient = StubChatModelClient().apply { enqueueRawResponse("""{"allow":true}""") },
+                config = config,
+                instrumentation = instrumentation,
+            ),
+            motorCortex = buildMotorCortex(
+                reflectionMemoryRecorder = object : ReflectionMemoryRecorder {
+                    override fun recordReflection(
+                        action: psyke.agent.model.PendingAction,
+                        summary: String,
+                        keywords: List<String>,
+                    ): Boolean = false
+                }
+            ),
+            config = config,
+            instrumentation = instrumentation,
+        )
+        val idModule = buildIdModule(
+            instrumentation = instrumentation,
+            needConfig = NeedConfig(
+                description = "learn",
+                growthRate = 0.1,
+                satisfactionDecay = 0.8,
+                cooldownPulses = 0,
+                prompt = "Learn something worth remembering.",
+                convergence = ConvergenceMode.INTERNALIZE,
+                satisfactionEffectsAnyOf = setOf(ActionEffect.DURABLE_MEMORY_SAVED),
+                responseCurve = ResponseCurveConfig(type = "linear"),
+            ),
+            enqueueImpulse = { impulse -> ego.enqueueImpulse(impulse, maxPendingImpulses = 1) },
+        )
+        ego.setId(idModule)
+
+        val need = idModule.needs["be-useful"]!!
+        idModule.pulse()
+        assertTrue(need.inFlight)
+        assertEquals(0.1, need.value, 1e-9)
+        runAgentWithInput(ego, "kickoff\nexit\n")
+
+        assertEquals(0, instrumentation.events.count { it.type == "id_impulse_completed" })
+        assertEquals(1, instrumentation.events.count { it.type == "id_impulse_denied" })
+        assertEquals(0.1, need.value, 1e-9, "Failed reflection save must not decay the need")
+    }
+
+    @Test
+    fun `learn need is not satisfied by evidence gathering alone`() {
+        val instrumentation = RecordingInstrumentation()
+        lateinit var ego: Ego
+        val planner = object : Ego.Planner {
+            override fun decide(trigger: EgoTrigger, context: PlannerContext): EgoDecision =
+                when (trigger) {
+                    is EgoTrigger.IncomingInput -> EgoDecision.Noop("ignore user test input")
+                    is EgoTrigger.IncomingImpulse -> EgoDecision.ProposeAction(
+                        urgency = Urgency.MEDIUM,
+                        actionType = ActionType.WEB_SEARCH,
+                        payload = "interesting new topic",
+                        summary = "gather evidence"
+                    )
+                    is EgoTrigger.PendingThoughtInput -> EgoDecision.Noop("done")
+                }
+        }
+        val config = AgentConfig(
+            planner = PlannerConfig(
+                maxLoopStepsPerInput = 8,
+                maxThoughtPasses = 1
+            )
+        )
+        ego = buildTestEgo(
+            planner = planner,
+            superego = Superego(
+                modelClient = StubChatModelClient().apply { enqueueRawResponse("""{"allow":true}""") },
+                config = config,
+                instrumentation = instrumentation,
+            ),
+            motorCortex = buildMotorCortex(),
+            config = config,
+            instrumentation = instrumentation,
+        )
+        val idModule = buildIdModule(
+            instrumentation = instrumentation,
+            needConfig = NeedConfig(
+                description = "learn",
+                growthRate = 0.1,
+                satisfactionDecay = 0.8,
+                cooldownPulses = 0,
+                prompt = "Learn something worth remembering.",
+                convergence = ConvergenceMode.INTERNALIZE,
+                satisfactionEffectsAnyOf = setOf(ActionEffect.DURABLE_MEMORY_SAVED),
+                responseCurve = ResponseCurveConfig(type = "linear"),
+            ),
+            enqueueImpulse = { impulse -> ego.enqueueImpulse(impulse, maxPendingImpulses = 1) },
+        )
+        ego.setId(idModule)
+
+        val need = idModule.needs["be-useful"]!!
+        idModule.pulse()
+        assertTrue(need.inFlight)
+        assertEquals(0.1, need.value, 1e-9)
+        runAgentWithInput(ego, "kickoff\nexit\n")
+
+        assertEquals(0, instrumentation.events.count { it.type == "id_impulse_completed" })
+        assertEquals(1, instrumentation.events.count { it.type == "id_impulse_denied" })
+        assertEquals(0.1, need.value, 1e-9, "Evidence gathering alone must not decay the learn need")
+    }
+
     private fun buildIdModule(
         instrumentation: RecordingInstrumentation,
         needConfig: NeedConfig = NeedConfig(
@@ -359,6 +491,7 @@ class IdEgoLifecycleIntegrationTest {
             prompt = "Be useful.",
             responseCurve = ResponseCurveConfig(type = "linear"),
         ),
+        enqueueImpulse: (PendingImpulse) -> Boolean = { false },
     ): Id =
         Id(
             config = IdConfig(
@@ -376,11 +509,13 @@ class IdEgoLifecycleIntegrationTest {
             ),
             instrumentation = instrumentation,
             scope = CoroutineScope(Dispatchers.Unconfined),
-            enqueueImpulse = { false },
+            enqueueImpulse = enqueueImpulse,
             hasPendingWork = { false },
         )
 
-    private fun buildMotorCortex(): MotorCortex {
+    private fun buildMotorCortex(
+        reflectionMemoryRecorder: ReflectionMemoryRecorder = NoopReflectionMemoryRecorder,
+    ): MotorCortex {
         val search = object : WebSearchEngine {
             override fun search(query: String, maxResults: Int): WebSearchResult =
                 WebSearchResult(
@@ -391,7 +526,7 @@ class IdEgoLifecycleIntegrationTest {
         return MotorCortex(
             webSearchActionHandler = WebSearchActionHandler(engine = search),
             output = {},
-            reflectionMemoryRecorder = NoopReflectionMemoryRecorder,
+            reflectionMemoryRecorder = reflectionMemoryRecorder,
         )
     }
 

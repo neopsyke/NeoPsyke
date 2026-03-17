@@ -56,4 +56,11 @@ class AgentModelsTest {
         assertEquals(ActionType("search"), ActionType.fromRaw("search"))
         assertNull(ActionType.fromRaw(null))
     }
+
+    @Test
+    fun `action effect parser maps snake case values`() {
+        assertEquals(ActionEffect.TASK_PROGRESS, ActionEffect.fromRaw("task_progress"))
+        assertEquals(ActionEffect.DURABLE_MEMORY_SAVED, ActionEffect.fromRaw("durable_memory_saved"))
+        assertNull(ActionEffect.fromRaw("not_real"))
+    }
 }

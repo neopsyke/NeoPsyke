@@ -971,6 +971,41 @@ class EgoPlannerTest {
     }
 
     @Test
+    fun `planner includes ambient context for Id impulses`() {
+        val llm = StubChatModelClient().apply {
+            enqueueRawResponse("""{"decision":"noop","reason":"done"}""")
+        }
+        val planner = LlmEgoPlanner(modelClient = llm, config = AgentConfig())
+
+        planner.decide(
+            psyke.agent.model.EgoTrigger.IncomingImpulse(
+                psyke.agent.model.PendingImpulse(
+                    id = 1,
+                    needId = "learn-something",
+                    prompt = "I feel curious and want to learn something new.",
+                    urgency = 0.8,
+                    rawValue = 0.8,
+                    conversationContext = psyke.agent.model.ConversationContext.default(),
+                )
+            ),
+            PlannerContext(
+                recentDialogue = emptyList(),
+                queue = QueueSnapshot(0, 0, 0),
+                ambientContext = psyke.agent.model.AmbientContext(
+                    activeProjects = listOf("Improve the memory subsystem"),
+                    unresolvedOpenLoops = listOf("Tidy the planner retries"),
+                )
+            )
+        )
+
+        val prompt = llm.lastMessages.last().content
+        assertTrue(prompt.contains("Ambient context:"))
+        assertTrue(prompt.contains("active_projects:"))
+        assertTrue(prompt.contains("Improve the memory subsystem"))
+        assertTrue(prompt.contains("unresolved_open_loops:"))
+    }
+
+    @Test
     fun `planner prompt hardening enforces action summary contract`() {
         val llm = StubChatModelClient().apply {
             enqueueRawResponse("""{"decision":"noop","reason":"done"}""")

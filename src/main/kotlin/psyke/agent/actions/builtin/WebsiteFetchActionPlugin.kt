@@ -13,6 +13,8 @@ import psyke.agent.actions.ActionPluginHealth
 import psyke.agent.actions.AgentActionPlugin
 import psyke.agent.actions.AgentActionPluginFactory
 import psyke.agent.actions.ActionPluginFactoryContext
+import psyke.agent.model.ActionEffect
+import psyke.agent.model.ActionExecutionStatus
 import psyke.agent.model.ActionOutcome
 import psyke.agent.model.ActionType
 import psyke.agent.config.AgentConfig
@@ -116,10 +118,23 @@ class WebsiteFetchActionPlugin(
 
     override suspend fun execute(action: PendingAction, context: ActionExecutionContext): ActionOutcome {
         val active = tool
-            ?: return ActionOutcome(statusSummary = "Fetch tool is not configured.")
+            ?: return ActionOutcome(
+                statusSummary = "Fetch tool is not configured.",
+                executionStatus = ActionExecutionStatus.FAILED,
+            )
         val outcome = active.fetchWithOutcome(action.payload)
         return ActionOutcome(
             statusSummary = outcome.message,
+            executionStatus = if (outcome.errorCategory == psyke.agent.tools.mcp.FetchErrorCategory.NONE) {
+                ActionExecutionStatus.SUCCESS
+            } else {
+                ActionExecutionStatus.FAILED
+            },
+            effects = if (outcome.errorCategory == psyke.agent.tools.mcp.FetchErrorCategory.NONE) {
+                setOf(ActionEffect.TASK_PROGRESS, ActionEffect.EVIDENCE_GATHERED)
+            } else {
+                emptySet()
+            },
             actionErrorCategory = when (outcome.errorCategory) {
                 psyke.agent.tools.mcp.FetchErrorCategory.NON_RETRYABLE -> "non_retryable"
                 psyke.agent.tools.mcp.FetchErrorCategory.RETRYABLE -> "retryable"

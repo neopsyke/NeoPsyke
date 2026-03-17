@@ -64,11 +64,11 @@ data class ActionExecutionContext(
 )
 
 interface ReflectionMemoryRecorder {
-    fun recordReflection(action: PendingAction, summary: String, keywords: List<String>)
+    fun recordReflection(action: PendingAction, summary: String, keywords: List<String>): Boolean
 }
 
 object NoopReflectionMemoryRecorder : ReflectionMemoryRecorder {
-    override fun recordReflection(action: PendingAction, summary: String, keywords: List<String>) = Unit
+    override fun recordReflection(action: PendingAction, summary: String, keywords: List<String>): Boolean = false
 }
 
 data class ActionPluginFactoryContext(

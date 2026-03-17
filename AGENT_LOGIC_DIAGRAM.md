@@ -41,10 +41,11 @@ flowchart LR
     MC -.->|"temporal intent → episodic recall + vector cues"| LB
     E --> TWS["TaskWorkspaceStore (Ephemeral Per Request)"]
     E --> TWF["TaskWorkspaceFinalizer (Noop or LLM)"]
+    E --> PR["ProjectRegistry (optional active project signals)"]
 
     AR --> AP["Action Plugins (self-described)"]
     AP --> M
-    AP -.->|"REFLECT delegates persistence"| MC
+    AP -.->|"Actions emit structured effects; REFLECT emits durable-memory-save only on successful persistence"| MC
 
     M --> WS["Web Search Handler/Engine"]
     CfgWS["WebSearch Provider Config (provider/key/base/model)"] --> WS
@@ -98,6 +99,7 @@ sequenceDiagram
         Ego->>Delib: startStep()
 
         alt Task = impulse
+            Note over Ego,Mem: Id-driven recall/planning can see shared ambient context: projects, workspace themes, useful updates, open loops, and recent exact learning topics
             Ego->>Planner: decide(context + idState)
             Planner-->>Ego: thought/action/plan/noop
             Ego->>Sched: enqueue impulse-derived work with origin=ID
@@ -188,6 +190,7 @@ sequenceDiagram
         Note over Ego,Mem: Long dialogue/recall blocks are compressed before advisor prompt
         Note over Ego,Mem: Saved durable memories are normalized to first-person agent perspective before imprint
         Note over Ego,Mem: MCP fact/reference subject is stamped as "me" for agent-authored durable memories
+        Note over Ego,Mem: Successful learning reflections track exact recent topic fingerprints; only learning retrieval uses them as freshness pressure, while other needs may still reuse the same topic context
     end
 
     Note over User,SC: Terminal stdin is control-only in interactive mode (exit command), non-command text is not enqueued as chat input

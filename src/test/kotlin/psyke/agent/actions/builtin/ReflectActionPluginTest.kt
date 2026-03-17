@@ -18,12 +18,13 @@ class ReflectActionPluginTest {
     private val recordedReflections = mutableListOf<RecordedReflection>()
 
     private val recordingReflectionMemoryRecorder = object : ReflectionMemoryRecorder {
-        override fun recordReflection(action: PendingAction, summary: String, keywords: List<String>) {
+        override fun recordReflection(action: PendingAction, summary: String, keywords: List<String>): Boolean {
             recordedReflections += RecordedReflection(
                 actionType = action.type,
                 summary = summary,
                 keywords = keywords,
             )
+            return true
         }
     }
 
@@ -69,14 +70,15 @@ class ReflectActionPluginTest {
     }
 
     @Test
-    fun `execute works without reflection recorder`() = runBlocking {
+    fun `execute returns error when reflection is not saved to memory`() = runBlocking {
         val p = plugin(reflectionMemoryRecorder = NoopReflectionMemoryRecorder)
         val outcome = p.execute(
             action("""{"summary": "Test insight", "keywords": []}"""),
             ActionExecutionContext(searchResultCount = 0),
         )
 
-        assertEquals("Reflection recorded to memory.", outcome.statusSummary)
+        assertEquals("Reflection failed: memory save unsuccessful.", outcome.statusSummary)
+        assertEquals("reflect_memory_save_failed", outcome.actionErrorCategory)
     }
 
     @Test

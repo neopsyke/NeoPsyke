@@ -114,7 +114,7 @@ class MemoryCoordinatorLogbookNarrativeTest {
         )
         coordinator.setActiveSession("session-42", Interlocutor.named("Victor"))
 
-        coordinator.recordReflection(
+        val saved = coordinator.recordReflection(
             action = PendingAction(
                 id = 7,
                 urgency = Urgency.MEDIUM,
@@ -132,6 +132,7 @@ class MemoryCoordinatorLogbookNarrativeTest {
             keywords = listOf("kotlin", "learning"),
         )
 
+        assertTrue(saved)
         val entry = logbook.entries.single()
         assertEquals(EpisodicEventType.SELF_INITIATED, entry.eventType)
         assertEquals("I learned: The agent learned about Kotlin", entry.summary)
@@ -156,6 +157,133 @@ class MemoryCoordinatorLogbookNarrativeTest {
         assertTrue(imprint.tags.contains("kotlin"))
     }
 
+    @Test
+    fun `recordReflection returns false when durable memory save fails`() {
+        val logbook = RecordingLogbook()
+        val coordinator = MemoryCoordinator(
+            hippocampus = RecordingHippocampus(imprintResult = false),
+            longTermMemoryAdvisor = object : LongTermMemoryAdvisor {
+                override fun assess(context: LongTermMemoryAssessmentContext): LongTermMemoryAssessmentDecision =
+                    LongTermMemoryAssessmentDecision(false, "", 0.0, "unused")
+            },
+            config = AgentConfig(),
+            instrumentation = NoopAgentInstrumentation,
+            logbook = logbook,
+        )
+
+        val saved = coordinator.recordReflection(
+            action = PendingAction(
+                id = 8,
+                urgency = Urgency.MEDIUM,
+                type = ActionType.REFLECT,
+                payload = """{"summary":"Failed save"}""",
+                summary = "reflect",
+            ),
+            summary = "Failed save",
+            keywords = listOf("failure"),
+        )
+
+        assertFalse(saved)
+        assertEquals(1, logbook.entries.size, "Reflection should still be journaled for diagnostics")
+    }
+
+    @Test
+    fun `recent learning topics keep exact topics and dedupe exact repeats`() {
+        val coordinator = MemoryCoordinator(
+            hippocampus = RecordingHippocampus(),
+            longTermMemoryAdvisor = object : LongTermMemoryAdvisor {
+                override fun assess(context: LongTermMemoryAssessmentContext): LongTermMemoryAssessmentDecision =
+                    LongTermMemoryAssessmentDecision(false, "", 0.0, "unused")
+            },
+            config = AgentConfig(),
+            instrumentation = NoopAgentInstrumentation,
+            logbook = RecordingLogbook(),
+        )
+
+        val learningOrigin = ActionOrigin(
+            source = OriginSource.ID,
+            needId = "learn-something",
+            rootImpulseId = "impulse-learn",
+        )
+        coordinator.recordReflection(
+            action = PendingAction(
+                id = 1,
+                urgency = Urgency.MEDIUM,
+                type = ActionType.REFLECT,
+                payload = """{"summary":"I learned about Kotlin coroutines"}""",
+                summary = "reflect",
+                origin = learningOrigin,
+            ),
+            summary = "I learned about Kotlin coroutines",
+            keywords = listOf("kotlin", "coroutines"),
+        )
+        coordinator.recordReflection(
+            action = PendingAction(
+                id = 2,
+                urgency = Urgency.MEDIUM,
+                type = ActionType.REFLECT,
+                payload = """{"summary":"I learned about Kotlin coroutines again"}""",
+                summary = "reflect",
+                origin = learningOrigin,
+            ),
+            summary = "I learned about Kotlin coroutines again",
+            keywords = listOf("coroutines", "kotlin"),
+        )
+        coordinator.recordReflection(
+            action = PendingAction(
+                id = 3,
+                urgency = Urgency.MEDIUM,
+                type = ActionType.REFLECT,
+                payload = """{"summary":"I dug into coroutine cancellation"}""",
+                summary = "reflect",
+                origin = learningOrigin,
+            ),
+            summary = "I dug into coroutine cancellation",
+            keywords = listOf("kotlin", "coroutine cancellation"),
+        )
+
+        val topics = coordinator.recentExactLearningTopics()
+
+        assertTrue(topics.contains("coroutines, kotlin"))
+        assertTrue(topics.contains("kotlin, coroutine cancellation"))
+        assertEquals(1, topics.count { it == "coroutines, kotlin" })
+    }
+
+    @Test
+    fun `recent useful actions or updates reads useful episodic events`() {
+        val logbook = RecordingLogbook().apply {
+            record(
+                LogbookEntry(
+                    ts = java.time.Instant.now(),
+                    eventType = EpisodicEventType.CONTACT_DELIVERED,
+                    summary = "Shared a useful update about the memory subsystem",
+                )
+            )
+            record(
+                LogbookEntry(
+                    ts = java.time.Instant.now().minusSeconds(5),
+                    eventType = EpisodicEventType.ACTION_DENIED,
+                    summary = "Denied external action",
+                )
+            )
+        }
+        val coordinator = MemoryCoordinator(
+            hippocampus = RecordingHippocampus(),
+            longTermMemoryAdvisor = object : LongTermMemoryAdvisor {
+                override fun assess(context: LongTermMemoryAssessmentContext): LongTermMemoryAssessmentDecision =
+                    LongTermMemoryAssessmentDecision(false, "", 0.0, "unused")
+            },
+            config = AgentConfig(),
+            instrumentation = NoopAgentInstrumentation,
+            logbook = logbook,
+        )
+
+        val updates = coordinator.recentUsefulActionsOrUpdates()
+
+        assertEquals(1, updates.size)
+        assertTrue(updates.single().contains("memory subsystem"))
+    }
+
     private class RecordingLogbook : Logbook {
         val entries = mutableListOf<LogbookEntry>()
 
@@ -164,15 +292,27 @@ class MemoryCoordinatorLogbookNarrativeTest {
             return entries.size.toLong()
         }
 
-        override fun query(query: LogbookQuery): LogbookRecall =
-            LogbookRecall(entries = emptyList(), totalMatched = 0, truncated = false)
+        override fun query(query: LogbookQuery): LogbookRecall {
+            val filtered = entries
+                .asReversed()
+                .filter { entry ->
+                    (query.eventTypes.isNullOrEmpty() || query.eventTypes.contains(entry.eventType)) &&
+                        (query.actionTypes.isNullOrEmpty() || query.actionTypes.contains(entry.actionType)) &&
+                        (query.sessionId == null || query.sessionId == entry.sessionId) &&
+                        (query.interlocutorId == null || query.interlocutorId == entry.interlocutorId)
+                }
+                .take(query.maxResults)
+            return LogbookRecall(entries = filtered, totalMatched = filtered.size, truncated = false)
+        }
 
         override fun pruneOlderThan(retentionDays: Int): Int = 0
 
         override fun close() {}
     }
 
-    private class RecordingHippocampus : Hippocampus {
+    private class RecordingHippocampus(
+        private val imprintResult: Boolean = true,
+    ) : Hippocampus {
         override val providerName: String = "recording"
         override val enabled: Boolean = true
         val imprints = mutableListOf<MemoryImprint>()
@@ -182,7 +322,7 @@ class MemoryCoordinatorLogbookNarrativeTest {
 
         override fun imprint(imprint: MemoryImprint): Boolean {
             imprints += imprint
-            return true
+            return imprintResult
         }
     }
 }

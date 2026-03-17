@@ -14,6 +14,44 @@ data class IdStateSnapshot(
     val allowEscalation: Boolean = false,
 )
 
+data class AmbientContext(
+    val activeProjects: List<String> = emptyList(),
+    val recentWorkspaceThemes: List<String> = emptyList(),
+    val recentUsefulActionsOrUpdates: List<String> = emptyList(),
+    val unresolvedOpenLoops: List<String> = emptyList(),
+    val recentExactLearningTopics: List<String> = emptyList(),
+) {
+    fun isEmpty(): Boolean =
+        activeProjects.isEmpty() &&
+            recentWorkspaceThemes.isEmpty() &&
+            recentUsefulActionsOrUpdates.isEmpty() &&
+            unresolvedOpenLoops.isEmpty() &&
+            recentExactLearningTopics.isEmpty()
+
+    fun render(): String {
+        if (isEmpty()) return ""
+        return buildString {
+            append("Optional relevance signals:\n")
+            appendSection("active_projects", activeProjects)
+            appendSection("recent_workspace_themes", recentWorkspaceThemes)
+            appendSection("recent_useful_actions_updates", recentUsefulActionsOrUpdates)
+            appendSection("unresolved_open_loops", unresolvedOpenLoops)
+            appendSection("recent_exact_learning_topics", recentExactLearningTopics)
+        }.trim()
+    }
+
+    private fun StringBuilder.appendSection(title: String, items: List<String>) {
+        if (items.isEmpty()) return
+        append(title)
+        append(":\n")
+        items.forEachIndexed { index, item ->
+            append("${index + 1}. ")
+            append(item)
+            append('\n')
+        }
+    }
+}
+
 data class PlannerContext(
     val recentDialogue: List<DialogueTurn>,
     val queue: QueueSnapshot,
@@ -23,6 +61,7 @@ data class PlannerContext(
     val episodicRecall: String = "",
     val taskWorkspaceSummary: String = "",
     val sessionWorkspaceDigest: String = "",
+    val ambientContext: AmbientContext = AmbientContext(),
     val evidenceHints: String = "",
     val deliberation: DeliberationState = DeliberationState(),
     val metaGuidance: String = "",
@@ -87,14 +126,25 @@ data class GateDecision(
     val reasonCode: String? = null,
 )
 
+enum class ActionExecutionStatus {
+    SUCCESS,
+    FAILED,
+    NO_EFFECT,
+}
+
 data class ActionOutcome(
     val statusSummary: String,
     val assistantOutput: String? = null,
     val plannerSignal: String = statusSummary,
+    val executionStatus: ActionExecutionStatus = ActionExecutionStatus.SUCCESS,
+    val effects: Set<ActionEffect> = emptySet(),
     val observedEvidence: Boolean? = null,
     val actionErrorCategory: String? = null,
     val fetchErrorCategory: String? = null,
-)
+) {
+    val successful: Boolean
+        get() = executionStatus == ActionExecutionStatus.SUCCESS
+}
 
 data class DeliberationState(
     val stepIndex: Int = 0,

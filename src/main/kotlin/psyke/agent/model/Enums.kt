@@ -61,6 +61,22 @@ data class ActionType(
     }
 }
 
+enum class ActionEffect {
+    TASK_PROGRESS,
+    EVIDENCE_GATHERED,
+    DURABLE_MEMORY_SAVED,
+    USER_MESSAGE_DELIVERED;
+
+    companion object {
+        fun fromRaw(value: String?): ActionEffect? =
+            value
+                ?.trim()
+                ?.uppercase(Locale.ROOT)
+                ?.replace('-', '_')
+                ?.let { normalized -> entries.firstOrNull { it.name == normalized } }
+    }
+}
+
 enum class InputPriority(val level: Int) {
     LOW(1),
     MEDIUM(2),

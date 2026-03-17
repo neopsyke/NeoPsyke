@@ -9,6 +9,8 @@ import psyke.agent.cortex.sensory.SensoryCortex
 import psyke.agent.cortex.sensory.SensorySignal
 import psyke.agent.memory.episodic.EpisodicEventType
 import psyke.agent.memory.workspace.TaskWorkspaceStore
+import psyke.agent.id.EmptyProjectRegistry
+import psyke.agent.id.ProjectRegistry
 import psyke.agent.support.TextSecurity
 import psyke.agent.superego.Superego
 import psyke.instrumentation.AgentEvent
@@ -30,6 +32,7 @@ class Ego(
     private val taskWorkspaceStore: TaskWorkspaceStore = TaskWorkspaceStore(config.memory.taskWorkspace),
     private val taskWorkspaceFinalizer: TaskWorkspaceFinalizer = NoopTaskWorkspaceFinalizer,
     private val instrumentation: AgentInstrumentation = NoopAgentInstrumentation,
+    private val projectRegistry: ProjectRegistry = EmptyProjectRegistry,
 ) {
     @Volatile private var id: psyke.agent.id.Id? = null
 
@@ -482,7 +485,14 @@ class Ego(
         val recentDialogue = dialogueFor(sessionId).takeLast(12)
         val shortTermSummary = memory.currentShortTermSummary()
         val episodicCues = memory.recallEpisodicAsVectorCues(recentDialogue)
-        val longTermRecall = memory.recall(trigger, shortTermSummary, recentDialogue, episodicCues)
+        val ambientContext = buildAmbientContext(trigger)
+        val longTermRecall = memory.recall(
+            trigger = trigger,
+            shortTermSummary = shortTermSummary,
+            recentDialogue = recentDialogue,
+            episodicCues = episodicCues,
+            ambientContext = ambientContext,
+        )
         val lessons = memory.recallLessons(trigger, recentDialogue)
         val episodicRecall = memory.recallEpisodic(trigger, recentDialogue)
         val taskWorkspaceSummary = taskWorkspaceStore.promptSummary(
@@ -514,6 +524,7 @@ class Ego(
             episodicRecall = episodicRecall,
             taskWorkspaceSummary = taskWorkspaceSummary,
             sessionWorkspaceDigest = sessionWorkspaceDigest,
+            ambientContext = ambientContext,
             evidenceHints = evidenceHints,
             deliberation = deliberation.snapshot(),
             metaGuidance = deliberation.guidance(),
@@ -523,6 +534,30 @@ class Ego(
             conversationContext = conversationContext
         )
     }
+
+    private fun buildAmbientContext(trigger: EgoTrigger): AmbientContext {
+        if (!shouldAttachAmbientContext(trigger)) {
+            return AmbientContext()
+        }
+        val activeProjects = projectRegistry.activeProjects()
+            .map { project -> TextSecurity.preview(project.instruction, AMBIENT_PROJECT_PREVIEW_CHARS) }
+            .filter { it.isNotBlank() }
+            .take(MAX_AMBIENT_PROJECTS)
+        return AmbientContext(
+            activeProjects = activeProjects,
+            recentWorkspaceThemes = taskWorkspaceStore.recentResolvedGoalSignals(MAX_AMBIENT_WORKSPACE_SIGNALS),
+            recentUsefulActionsOrUpdates = memory.recentUsefulActionsOrUpdates(),
+            unresolvedOpenLoops = taskWorkspaceStore.activeGoalSignals(MAX_AMBIENT_OPEN_LOOPS),
+            recentExactLearningTopics = memory.recentExactLearningTopics(),
+        )
+    }
+
+    private fun shouldAttachAmbientContext(trigger: EgoTrigger): Boolean =
+        when (trigger) {
+            is EgoTrigger.IncomingInput -> false
+            is EgoTrigger.IncomingImpulse -> true
+            is EgoTrigger.PendingThoughtInput -> trigger.thought.origin.source == OriginSource.ID
+        }
 
     private fun applyIdConvergenceContextForOrigin(
         baseContext: PlannerContext,
@@ -745,6 +780,10 @@ class Ego(
     }
 
     private companion object {
+        const val MAX_AMBIENT_PROJECTS: Int = 4
+        const val AMBIENT_PROJECT_PREVIEW_CHARS: Int = 180
+        const val MAX_AMBIENT_WORKSPACE_SIGNALS: Int = 6
+        const val MAX_AMBIENT_OPEN_LOOPS: Int = 4
         const val MAX_EVIDENCE_HINT_SIGNALS: Int = 3
         const val MAX_EVIDENCE_HINT_CHARS: Int = 420
         const val JOURNAL_SUMMARY_PREVIEW_CHARS: Int = 160
