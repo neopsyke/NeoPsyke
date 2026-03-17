@@ -19,6 +19,7 @@ if [[ -n "${PSYKE_LLM_CONFIG_FILE:-}" ]]; then
 fi
 
 TIMEOUT="${FREUD_LIVE_EVAL_TIMEOUT:-120}"
+PROJECTS_OVERRIDE=""
 RUN_ROOT="${FREUD_RUN_ROOT:-.psyke/runs/freud}"
 GRADLE_USER_HOME_CFG="${FREUD_GRADLE_USER_HOME:-.freud/gradle-home}"
 PSYKE_CMD="${FREUD_LIVE_EVAL_PSYKE_CMD:-$REPO_ROOT/run-psyke.sh}"
@@ -59,6 +60,8 @@ Options:
   --cache-replay <file>   JSONL cache file to replay (enables replay mode)
   --timeout <seconds>     Timeout for the live eval run (default: 120)
   --preserve-memory       Do not clear Freud-isolated memory before the run
+  --projects              Enable the project tracking subsystem for this eval
+  --no-projects           Disable the project tracking subsystem for this eval
   -h, --help              Show this help message
 
 Environment:
@@ -125,6 +128,8 @@ while [[ $# -gt 0 ]]; do
       TIMEOUT="$2"; shift 2 ;;
     --timeout=*) TIMEOUT="${1#*=}"; shift ;;
     --preserve-memory) PRESERVE_MEMORY="true"; shift ;;
+    --projects) PROJECTS_OVERRIDE="true"; shift ;;
+    --no-projects) PROJECTS_OVERRIDE="false"; shift ;;
     -h|--help) usage; exit 0 ;;
     *) log_error "Unknown argument: $1"; usage; exit 1 ;;
   esac
@@ -212,6 +217,10 @@ export EGO_TASK_WORKSPACE_DEBUG_CAPTURE_ENABLED="true"
 export MEMORY_DEFAULT_NAMESPACE="freud-eval"
 export PSYKE_LOGBOOK_DB_PATH="$REPO_ROOT/.psyke/freud-logbook.db"
 export PSYKE_METRICS_DB="$REPO_ROOT/.psyke/freud-metrics.db"
+
+if [[ -n "$PROJECTS_OVERRIDE" ]]; then
+  export PSYKE_PROJECTS_ENABLED="$PROJECTS_OVERRIDE"
+fi
 
 # Run Psyke in freud-live mode
 RUN_START="$(date +%s)"

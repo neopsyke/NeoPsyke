@@ -10,6 +10,7 @@ import psyke.agent.config.AgentConfig
 import psyke.agent.config.LogbookConfig
 import psyke.agent.config.MemoryConfig
 import psyke.agent.config.MetaReasonerConfig
+import psyke.agent.project.ProjectConfig
 import psyke.dashboard.InnerVoiceConfig
 import psyke.agent.config.PlannerConfig
 import psyke.agent.config.SuperegoConfig
@@ -661,6 +662,13 @@ object AgentRuntimeSettingsLoader {
                     env["PSYKE_INNER_VOICE_MAX_EVENTS_PER_SESSION"],
                     innerVoiceYaml.maxEventsPerSession,
                     defaults.innerVoice.maxEventsPerSession
+                ),
+            ),
+            projects = ProjectConfig(
+                enabled = readBoolean(
+                    env["PSYKE_PROJECTS_ENABLED"],
+                    yaml = null,
+                    fallback = defaults.projects.enabled
                 ),
             ),
             loopDelayMs = readNonNegativeInt(
