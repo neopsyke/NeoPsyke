@@ -7,6 +7,8 @@ import psyke.agent.actions.ActionExecutionContext
 import psyke.agent.actions.AgentActionPlugin
 import psyke.agent.actions.AgentActionPluginFactory
 import psyke.agent.actions.ActionPluginFactoryContext
+import psyke.agent.model.ActionEffect
+import psyke.agent.model.ActionExecutionStatus
 import psyke.agent.model.ActionOutcome
 import psyke.agent.model.ActionType
 import psyke.agent.config.AgentConfig
@@ -49,7 +51,9 @@ class ContactUserActionPlugin(
         output("ego> ${action.payload}")
         return ActionOutcome(
             statusSummary = "Message delivered to interlocutor.",
-            assistantOutput = action.payload
+            assistantOutput = action.payload,
+            executionStatus = ActionExecutionStatus.SUCCESS,
+            effects = setOf(ActionEffect.TASK_PROGRESS, ActionEffect.USER_MESSAGE_DELIVERED),
         )
     }
 }

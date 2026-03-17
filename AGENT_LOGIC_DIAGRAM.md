@@ -44,7 +44,7 @@ flowchart LR
 
     AR --> AP["Action Plugins (self-described)"]
     AP --> M
-    AP -.->|"REFLECT delegates persistence"| MC
+    AP -.->|"Actions emit structured effects; REFLECT emits durable-memory-save only on successful persistence"| MC
 
     M --> WS["Web Search Handler/Engine"]
     CfgWS["WebSearch Provider Config (provider/key/base/model)"] --> WS

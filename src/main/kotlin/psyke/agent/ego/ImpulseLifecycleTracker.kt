@@ -1,6 +1,8 @@
 package psyke.agent.ego
 
-import psyke.agent.model.ActionOrigin
+import psyke.agent.id.evaluateSatisfaction
+import psyke.agent.model.ActionEffect
+import psyke.agent.model.ActionOutcome
 import psyke.agent.model.OriginSource
 import psyke.agent.model.PendingAction
 import psyke.instrumentation.AgentEvent
@@ -22,11 +24,13 @@ internal class ImpulseLifecycleTracker(
         impulseLifecyclesByRoot[rootImpulseId] = ImpulseLifecycle(needId = needId)
     }
 
-    fun markActionExecuted(action: PendingAction) {
+    fun recordActionOutcome(action: PendingAction, outcome: ActionOutcome) {
         if (action.origin.source != OriginSource.ID) return
+        if (!outcome.successful) return
         val rootImpulseId = action.origin.rootImpulseId ?: action.rootInputId ?: return
         val lifecycle = impulseLifecyclesByRoot[rootImpulseId] ?: return
-        lifecycle.hadExecutedAction = true
+        lifecycle.successfulActionCount++
+        lifecycle.observedEffects.addAll(outcome.effects)
     }
 
     fun maybeFinalizeLifecycle(rootInputId: String?) {
@@ -34,7 +38,9 @@ internal class ImpulseLifecycleTracker(
         val lifecycle = impulseLifecyclesByRoot[rootImpulseId] ?: return
         if (scheduler.hasPendingWorkForRoot(rootImpulseId)) return
 
-        if (lifecycle.hadExecutedAction) {
+        val needConfig = id?.needConfig(lifecycle.needId)
+        val verdict = needConfig?.evaluateSatisfaction(lifecycle.observedEffects)
+        if (verdict?.satisfied == true) {
             id?.onImpulseCompleted(lifecycle.needId, success = true)
             instrumentation.emit(
                 AgentEvent(
@@ -43,6 +49,10 @@ internal class ImpulseLifecycleTracker(
                         "root_impulse_id" to rootImpulseId,
                         "need_id" to lifecycle.needId,
                         "result" to "accepted",
+                        "successful_action_count" to lifecycle.successfulActionCount,
+                        "required_effects" to verdict.requiredEffects.map { it.name.lowercase() },
+                        "matched_effects" to verdict.matchedEffects.map { it.name.lowercase() },
+                        "observed_effects" to verdict.observedEffects.map { it.name.lowercase() },
                     )
                 )
             )
@@ -55,6 +65,9 @@ internal class ImpulseLifecycleTracker(
                         "root_impulse_id" to rootImpulseId,
                         "need_id" to lifecycle.needId,
                         "result" to "denied",
+                        "successful_action_count" to lifecycle.successfulActionCount,
+                        "required_effects" to needConfig?.satisfactionEffectsAnyOf?.map { it.name.lowercase() }.orEmpty(),
+                        "observed_effects" to lifecycle.observedEffects.map { it.name.lowercase() },
                     )
                 )
             )
@@ -88,6 +101,7 @@ internal class ImpulseLifecycleTracker(
 
     private data class ImpulseLifecycle(
         val needId: String,
-        var hadExecutedAction: Boolean = false,
+        var successfulActionCount: Int = 0,
+        val observedEffects: MutableSet<ActionEffect> = linkedSetOf(),
     )
 }

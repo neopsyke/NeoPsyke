@@ -21,6 +21,9 @@ id:
       response_curve:
         type: power
         exponent: 3.0
+      satisfaction_effects_any_of:
+        - task_progress
+        - user_message_delivered
       activity_decay:
         action_executed: 0.10
 
@@ -36,6 +39,8 @@ id:
         type: sigmoid
         steepness: 10.0
         midpoint: 0.5
+      satisfaction_effects_any_of:
+        - user_message_delivered
       activity_decay:
         input_received: 0.15
         contact_delivered: 0.10
@@ -51,6 +56,5 @@ id:
       response_curve:
         type: logarithmic
         scale: 10.0
-      activity_decay:
-        action_executed_web_search: 0.12
-        action_executed_website_fetch: 0.12
+      satisfaction_effects_any_of:
+        - durable_memory_saved

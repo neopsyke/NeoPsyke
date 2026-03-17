@@ -439,16 +439,16 @@ class MemoryCoordinator(
         )
     }
 
-    override fun recordReflection(action: PendingAction, summary: String, keywords: List<String>) {
+    override fun recordReflection(action: PendingAction, summary: String, keywords: List<String>): Boolean {
         val normalizedSummary = LogbookNarrative.normalizeSummary(EpisodicEventType.SELF_INITIATED, summary)
-        if (normalizedSummary.isBlank()) return
+        if (normalizedSummary.isBlank()) return false
 
         val normalizedKeywords = keywords
             .map { it.trim() }
             .filter { it.isNotEmpty() }
         val tags = buildReflectionTags(action, normalizedKeywords)
 
-        if (hippocampus.enabled) {
+        val savedToLongTermMemory = if (hippocampus.enabled) {
             try {
                 hippocampus.imprint(
                     MemoryImprint(
@@ -460,6 +460,15 @@ class MemoryCoordinator(
                 )
             } catch (ex: Exception) {
                 logger.debug(ex) { "Reflection imprint failed for action_type=${action.type.id}." }
+                false
+            }
+        } else {
+            false
+        }
+
+        if (hippocampus.enabled) {
+            if (!savedToLongTermMemory) {
+                logger.debug { "Reflection not saved to long-term memory for action_type=${action.type.id}." }
             }
         }
 
@@ -470,6 +479,7 @@ class MemoryCoordinator(
             actionType = action.type.id,
             metadata = buildReflectionMetadata(action),
         )
+        return savedToLongTermMemory
     }
 
     fun maybeRecordLesson(

@@ -10,6 +10,7 @@ import psyke.agent.id.ConvergenceMode
 import psyke.agent.id.IdConfig
 import psyke.agent.id.NeedConfig
 import psyke.agent.id.ResponseCurveConfig
+import psyke.agent.model.ActionEffect
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
@@ -45,6 +46,7 @@ private data class IdRuntimeYamlNeed(
     val convergence: String? = null,
     val allowEscalation: Boolean? = null,
     val responseCurve: IdRuntimeYamlResponseCurve? = null,
+    val satisfactionEffectsAnyOf: List<String>? = null,
     val activityDecay: Map<String, Double>? = null,
 )
 
@@ -94,6 +96,11 @@ object IdRuntimeConfigLoader {
                 } else {
                     defaultNeed.responseCurve
                 },
+                satisfactionEffectsAnyOf = yamlNeed.satisfactionEffectsAnyOf
+                    ?.mapNotNull(ActionEffect::fromRaw)
+                    ?.toSet()
+                    ?.takeIf { it.isNotEmpty() }
+                    ?: defaultNeed.satisfactionEffectsAnyOf,
                 activityDecay = yamlNeed.activityDecay ?: defaultNeed.activityDecay,
             )
         }

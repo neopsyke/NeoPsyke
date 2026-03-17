@@ -451,6 +451,17 @@ It is intentionally high-level and should stay aligned with the code.
   - `maybeAssessLongTermMemory()` auto-journals `MEMORY_IMPRINT` on successful saves.
   - `journal()` public method called from Ego for planner decisions, action outcomes, denials, and answers.
   - `recordReflection()` owns `REFLECT` persistence, adding first-person normalization plus session/interlocutor/run and Id-origin provenance before writing logbook and long-term memory.
+  - `REFLECT` only reports `DURABLE_MEMORY_SAVED` on durable long-term memory persistence success; journal-only fallback does not satisfy the originating learn need.
+
+## Id Need Satisfaction
+- Id-originated roots now resolve against structured action effects instead of the old "some action executed" heuristic.
+- Built-in action outcomes expose machine-readable execution status plus effects such as `TASK_PROGRESS`, `EVIDENCE_GATHERED`, `DURABLE_MEMORY_SAVED`, and `USER_MESSAGE_DELIVERED`.
+- `ImpulseLifecycleTracker` aggregates successful effects across the full root impulse tree and only finalizes success when the need's configured `satisfactionEffectsAnyOf` intersects those observed effects.
+- Default need contract: `TASK_PROGRESS`; runtime config now overrides the built-in needs explicitly:
+  - `be-useful` → `TASK_PROGRESS` or `USER_MESSAGE_DELIVERED`
+  - `user-interaction` → `USER_MESSAGE_DELIVERED`
+  - `learn-something` → `DURABLE_MEMORY_SAVED`
+- Generic `action_executed` / `contact_delivered` activity decay remains ambient for non-Id work only; Id-originated need satisfaction comes from root-level effect evaluation.
 - Narrative perspective is normalized by event type before logbook persistence:
   - `INPUT_RECEIVED` stays canonical third-person timeline form as `User: ...`
   - planner/action/answer events keep neutral timeline narration

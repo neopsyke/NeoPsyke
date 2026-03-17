@@ -63,9 +63,11 @@ internal class ActionReviewPipeline(
 
         timing.startPhase("action_execute")
         val outcome = executeActionSafely(resolvedAction)
-        impulseTracker.markActionExecuted(resolvedAction)
+        impulseTracker.recordActionOutcome(resolvedAction, outcome)
         instrumentation.emit(AgentEvents.actionExecuted(resolvedAction, outcome.statusSummary))
-        getId()?.onActivity("action_executed", resolvedAction.type.id)
+        if (resolvedAction.origin.source != OriginSource.ID && outcome.successful) {
+            getId()?.onActivity("action_executed", resolvedAction.type.id)
+        }
         journalActionExecution(resolvedAction, outcome)
         timing.startPhase("post_execute")
         val observed = deliberation.observedEvidence(resolvedAction, outcome)
@@ -111,7 +113,7 @@ internal class ActionReviewPipeline(
             )
         )
         val outcome = executeActionSafely(resolvedAction)
-        impulseTracker.markActionExecuted(resolvedAction)
+        impulseTracker.recordActionOutcome(resolvedAction, outcome)
         instrumentation.emit(AgentEvents.actionExecuted(resolvedAction, outcome.statusSummary))
         if (resolvedAction.type == ActionType.CONTACT_USER) {
             memory.journal(
@@ -245,6 +247,7 @@ internal class ActionReviewPipeline(
             instrumentation.emit(AgentEvents.warning("Action execution failed; action dropped."))
             ActionOutcome(
                 statusSummary = "Action execution failed: ${ex.message?.take(120) ?: "unknown error"}",
+                executionStatus = ActionExecutionStatus.FAILED,
                 observedEvidence = false,
             )
         }
@@ -291,7 +294,10 @@ internal class ActionReviewPipeline(
         dialogueFor(sessionId).addLast(assistantTurn)
         memory.remember(assistantTurn)
         trimDialogue(sessionId)
-        if (resolvedAction.type == ActionType.CONTACT_USER) {
+        if (resolvedAction.type == ActionType.CONTACT_USER &&
+            resolvedAction.origin.source != OriginSource.ID &&
+            outcome.successful
+        ) {
             getId()?.onActivity("contact_delivered")
         }
 

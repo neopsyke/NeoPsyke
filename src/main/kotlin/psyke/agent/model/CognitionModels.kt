@@ -87,14 +87,25 @@ data class GateDecision(
     val reasonCode: String? = null,
 )
 
+enum class ActionExecutionStatus {
+    SUCCESS,
+    FAILED,
+    NO_EFFECT,
+}
+
 data class ActionOutcome(
     val statusSummary: String,
     val assistantOutput: String? = null,
     val plannerSignal: String = statusSummary,
+    val executionStatus: ActionExecutionStatus = ActionExecutionStatus.SUCCESS,
+    val effects: Set<ActionEffect> = emptySet(),
     val observedEvidence: Boolean? = null,
     val actionErrorCategory: String? = null,
     val fetchErrorCategory: String? = null,
-)
+) {
+    val successful: Boolean
+        get() = executionStatus == ActionExecutionStatus.SUCCESS
+}
 
 data class DeliberationState(
     val stepIndex: Int = 0,

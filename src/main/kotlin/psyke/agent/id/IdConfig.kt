@@ -1,5 +1,7 @@
 package psyke.agent.id
 
+import psyke.agent.model.ActionEffect
+
 /**
  * How an Id impulse should converge once the Ego processes it.
  *
@@ -59,6 +61,7 @@ data class NeedConfig(
     val convergence: ConvergenceMode = ConvergenceMode.CONTACT_USER,
     val allowEscalation: Boolean = false,
     val responseCurve: ResponseCurveConfig = ResponseCurveConfig(),
+    val satisfactionEffectsAnyOf: Set<ActionEffect> = setOf(ActionEffect.TASK_PROGRESS),
     val activityDecay: Map<String, Double> = emptyMap(),
 ) {
     init {
@@ -66,6 +69,7 @@ data class NeedConfig(
         require(satisfactionDecay in 0.0..1.0) { "satisfactionDecay must be in [0, 1]" }
         require(resetFloor in 0.0..1.0) { "resetFloor must be in [0, 1]" }
         require(cooldownPulses >= 0) { "cooldownPulses must be non-negative" }
+        require(satisfactionEffectsAnyOf.isNotEmpty()) { "satisfactionEffectsAnyOf must not be empty" }
     }
 }
 

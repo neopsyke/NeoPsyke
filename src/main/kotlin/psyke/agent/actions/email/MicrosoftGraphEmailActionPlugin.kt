@@ -19,6 +19,8 @@ import psyke.agent.actions.ActionPluginFactoryContext
 import psyke.agent.actions.ActionPluginHealth
 import psyke.agent.actions.AgentActionPlugin
 import psyke.agent.actions.AgentActionPluginFactory
+import psyke.agent.model.ActionEffect
+import psyke.agent.model.ActionExecutionStatus
 import psyke.agent.model.ActionOutcome
 import psyke.agent.model.ActionType
 import psyke.agent.config.AgentConfig
@@ -158,41 +160,62 @@ class MicrosoftGraphEmailActionPlugin(
     override suspend fun execute(action: PendingAction, context: ActionExecutionContext): ActionOutcome {
         val health = healthCheck()
         if (!health.available) {
-            return ActionOutcome(statusSummary = "Email send unavailable: ${health.detail}")
+            return ActionOutcome(
+                statusSummary = "Email send unavailable: ${health.detail}",
+                executionStatus = ActionExecutionStatus.FAILED,
+            )
         }
         val payload = try {
             mapper.readValue<EmailPayload>(action.payload)
         } catch (_: Exception) {
-            return ActionOutcome(statusSummary = "Email send failed: invalid JSON payload.")
+            return ActionOutcome(
+                statusSummary = "Email send failed: invalid JSON payload.",
+                executionStatus = ActionExecutionStatus.FAILED,
+            )
         }
         val sender = resolveSender(payload)
         if (sender.isBlank()) {
-            return ActionOutcome(statusSummary = "Email send failed: missing sender.")
+            return ActionOutcome(
+                statusSummary = "Email send failed: missing sender.",
+                executionStatus = ActionExecutionStatus.FAILED,
+            )
         }
         val recipients = payload.to.orEmpty().map { it.trim() }.filter { it.isNotBlank() }
         if (recipients.isEmpty()) {
-            return ActionOutcome(statusSummary = "Email send failed: at least one 'to' recipient is required.")
+            return ActionOutcome(
+                statusSummary = "Email send failed: at least one 'to' recipient is required.",
+                executionStatus = ActionExecutionStatus.FAILED,
+            )
         }
         return withContext(Dispatchers.IO) {
             val token = try {
                 obtainAccessToken()
             } catch (ex: Exception) {
                 logger.warn(ex) { "Microsoft Graph token retrieval failed." }
-                return@withContext ActionOutcome(statusSummary = "Email send failed: unable to obtain Microsoft Graph access token.")
+                return@withContext ActionOutcome(
+                    statusSummary = "Email send failed: unable to obtain Microsoft Graph access token.",
+                    executionStatus = ActionExecutionStatus.FAILED,
+                )
             }
             val response = try {
                 sendMail(token = token, sender = sender, payload = payload)
             } catch (ex: Exception) {
                 logger.warn(ex) { "Microsoft Graph sendMail call failed." }
-                return@withContext ActionOutcome(statusSummary = "Email send failed: ${ex.message ?: "sendMail call failed"}")
+                return@withContext ActionOutcome(
+                    statusSummary = "Email send failed: ${ex.message ?: "sendMail call failed"}",
+                    executionStatus = ActionExecutionStatus.FAILED,
+                )
             }
             if (response.success) {
                 ActionOutcome(
-                    statusSummary = "Email sent via Microsoft Graph. sender=$sender recipients=${recipients.size}"
+                    statusSummary = "Email sent via Microsoft Graph. sender=$sender recipients=${recipients.size}",
+                    executionStatus = ActionExecutionStatus.SUCCESS,
+                    effects = setOf(ActionEffect.TASK_PROGRESS, ActionEffect.USER_MESSAGE_DELIVERED),
                 )
             } else {
                 ActionOutcome(
-                    statusSummary = "Email send failed: ${response.message}"
+                    statusSummary = "Email send failed: ${response.message}",
+                    executionStatus = ActionExecutionStatus.FAILED,
                 )
             }
         }

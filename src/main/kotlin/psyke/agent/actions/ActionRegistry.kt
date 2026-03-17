@@ -2,6 +2,7 @@ package psyke.agent.actions
 
 import mu.KotlinLogging
 import psyke.agent.model.ActionOutcome
+import psyke.agent.model.ActionExecutionStatus
 import psyke.agent.model.ActionType
 import psyke.agent.config.AgentConfig
 import psyke.agent.model.PendingAction
@@ -41,7 +42,10 @@ class ActionRegistry private constructor(
 
     suspend fun execute(action: PendingAction, searchResultCount: Int): ActionOutcome {
         val plugin = pluginByType[action.type]
-            ?: return ActionOutcome(statusSummary = "Action type '${action.type.id}' is not registered.")
+            ?: return ActionOutcome(
+                statusSummary = "Action type '${action.type.id}' is not registered.",
+                executionStatus = ActionExecutionStatus.FAILED,
+            )
         return plugin.execute(
             action = action,
             context = ActionExecutionContext(searchResultCount = searchResultCount)

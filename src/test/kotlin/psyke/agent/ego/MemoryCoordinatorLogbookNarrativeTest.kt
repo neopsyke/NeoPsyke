@@ -114,7 +114,7 @@ class MemoryCoordinatorLogbookNarrativeTest {
         )
         coordinator.setActiveSession("session-42", Interlocutor.named("Victor"))
 
-        coordinator.recordReflection(
+        val saved = coordinator.recordReflection(
             action = PendingAction(
                 id = 7,
                 urgency = Urgency.MEDIUM,
@@ -132,6 +132,7 @@ class MemoryCoordinatorLogbookNarrativeTest {
             keywords = listOf("kotlin", "learning"),
         )
 
+        assertTrue(saved)
         val entry = logbook.entries.single()
         assertEquals(EpisodicEventType.SELF_INITIATED, entry.eventType)
         assertEquals("I learned: The agent learned about Kotlin", entry.summary)
@@ -156,6 +157,36 @@ class MemoryCoordinatorLogbookNarrativeTest {
         assertTrue(imprint.tags.contains("kotlin"))
     }
 
+    @Test
+    fun `recordReflection returns false when durable memory save fails`() {
+        val logbook = RecordingLogbook()
+        val coordinator = MemoryCoordinator(
+            hippocampus = RecordingHippocampus(imprintResult = false),
+            longTermMemoryAdvisor = object : LongTermMemoryAdvisor {
+                override fun assess(context: LongTermMemoryAssessmentContext): LongTermMemoryAssessmentDecision =
+                    LongTermMemoryAssessmentDecision(false, "", 0.0, "unused")
+            },
+            config = AgentConfig(),
+            instrumentation = NoopAgentInstrumentation,
+            logbook = logbook,
+        )
+
+        val saved = coordinator.recordReflection(
+            action = PendingAction(
+                id = 8,
+                urgency = Urgency.MEDIUM,
+                type = ActionType.REFLECT,
+                payload = """{"summary":"Failed save"}""",
+                summary = "reflect",
+            ),
+            summary = "Failed save",
+            keywords = listOf("failure"),
+        )
+
+        assertFalse(saved)
+        assertEquals(1, logbook.entries.size, "Reflection should still be journaled for diagnostics")
+    }
+
     private class RecordingLogbook : Logbook {
         val entries = mutableListOf<LogbookEntry>()
 
@@ -172,7 +203,9 @@ class MemoryCoordinatorLogbookNarrativeTest {
         override fun close() {}
     }
 
-    private class RecordingHippocampus : Hippocampus {
+    private class RecordingHippocampus(
+        private val imprintResult: Boolean = true,
+    ) : Hippocampus {
         override val providerName: String = "recording"
         override val enabled: Boolean = true
         val imprints = mutableListOf<MemoryImprint>()
@@ -182,7 +215,7 @@ class MemoryCoordinatorLogbookNarrativeTest {
 
         override fun imprint(imprint: MemoryImprint): Boolean {
             imprints += imprint
-            return true
+            return imprintResult
         }
     }
 }

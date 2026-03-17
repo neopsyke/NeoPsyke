@@ -10,6 +10,8 @@ import psyke.agent.actions.AgentActionPlugin
 import psyke.agent.actions.AgentActionPluginFactory
 import psyke.agent.actions.ActionPluginFactoryContext
 import psyke.agent.actions.ReflectionMemoryRecorder
+import psyke.agent.model.ActionEffect
+import psyke.agent.model.ActionExecutionStatus
 import psyke.agent.model.ActionOutcome
 import psyke.agent.model.ActionType
 import psyke.agent.config.AgentConfig
@@ -82,18 +84,30 @@ class ReflectActionPlugin(
         val payload = tryParsePayload(action.payload)
             ?: return ActionOutcome(
                 statusSummary = "Reflection failed: invalid payload.",
+                executionStatus = ActionExecutionStatus.FAILED,
                 actionErrorCategory = "reflect_payload_invalid",
             )
 
         val summary = payload.summary.trim()
         val keywords = payload.keywords.map { it.trim() }.filter { it.isNotEmpty() }
 
-        reflectionMemoryRecorder.recordReflection(action = action, summary = summary, keywords = keywords)
+        val saved = reflectionMemoryRecorder.recordReflection(action = action, summary = summary, keywords = keywords)
+        if (!saved) {
+            logger.info { "Reflect action did not persist to durable memory." }
+            return ActionOutcome(
+                statusSummary = "Reflection failed: memory save unsuccessful.",
+                executionStatus = ActionExecutionStatus.FAILED,
+                actionErrorCategory = "reflect_memory_save_failed",
+                plannerSignal = "Insight not saved to memory.",
+            )
+        }
 
         logger.info { "Reflect action recorded: ${summary.take(80)}" }
 
         return ActionOutcome(
             statusSummary = "Reflection recorded to memory.",
+            executionStatus = ActionExecutionStatus.SUCCESS,
+            effects = setOf(ActionEffect.TASK_PROGRESS, ActionEffect.DURABLE_MEMORY_SAVED),
             plannerSignal = "Insight saved: $summary",
         )
     }
