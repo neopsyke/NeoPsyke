@@ -194,7 +194,7 @@ class MemoryCoordinatorTemporalVectorTest {
     }
 
     @Test
-    fun `learning impulse recall cue includes ambient learning context`() {
+    fun `learning impulse recall cue includes shared ambient context`() {
         var capturedCue: String? = null
         val recordingHippocampus = object : Hippocampus {
             override val providerName: String = "recording"
@@ -219,13 +219,55 @@ class MemoryCoordinatorTemporalVectorTest {
             ),
             shortTermSummary = "",
             recentDialogue = emptyList(),
-            ambientLearningContext = "Active projects:\n1. Build the memory subsystem"
+            ambientContext = psyke.agent.model.AmbientContext(
+                activeProjects = listOf("Build the memory subsystem"),
+                recentExactLearningTopics = listOf("kotlin, coroutines")
+            )
         )
 
         assertTrue(capturedCue != null, "Expected hippocampus to be called")
-        assertTrue(capturedCue!!.contains("Learning recall guidance:"))
-        assertTrue(capturedCue!!.contains("Ambient learning context:"))
+        assertTrue(capturedCue!!.contains("Ambient context:"))
+        assertTrue(capturedCue!!.contains("active_projects:"))
         assertTrue(capturedCue!!.contains("Build the memory subsystem"))
+        assertTrue(capturedCue!!.contains("Learning freshness guidance:"))
+    }
+
+    @Test
+    fun `non learning impulse recall cue still includes shared ambient context`() {
+        var capturedCue: String? = null
+        val recordingHippocampus = object : Hippocampus {
+            override val providerName: String = "recording"
+            override val enabled: Boolean = true
+            override fun recall(query: MemoryRecallQuery): MemoryRecall {
+                capturedCue = query.cue
+                return MemoryRecall(provider = providerName, text = "", hitCount = 0)
+            }
+        }
+
+        val mc = createCoordinator(hippocampus = recordingHippocampus)
+        mc.recall(
+            trigger = EgoTrigger.IncomingImpulse(
+                PendingImpulse(
+                    id = 2L,
+                    needId = "be-useful",
+                    prompt = "I want to do something useful.",
+                    urgency = 0.7,
+                    rawValue = 0.7,
+                    conversationContext = psyke.agent.model.ConversationContext.default(),
+                )
+            ),
+            shortTermSummary = "",
+            recentDialogue = emptyList(),
+            ambientContext = psyke.agent.model.AmbientContext(
+                unresolvedOpenLoops = listOf("Follow up on the release checklist")
+            )
+        )
+
+        assertTrue(capturedCue != null, "Expected hippocampus to be called")
+        assertTrue(capturedCue!!.contains("Ambient context:"))
+        assertTrue(capturedCue!!.contains("unresolved_open_loops:"))
+        assertTrue(capturedCue!!.contains("Follow up on the release checklist"))
+        assertFalse(capturedCue!!.contains("Learning freshness guidance:"))
     }
 
     @Test

@@ -4,6 +4,7 @@ import mu.KotlinLogging
 import psyke.agent.actions.ReflectionMemoryRecorder
 import psyke.agent.config.AgentConfig
 import psyke.agent.model.ActionType
+import psyke.agent.model.AmbientContext
 import psyke.agent.model.ConversationContext
 import psyke.agent.model.DeliberationState
 import psyke.agent.model.DialogueTurn
@@ -144,14 +145,14 @@ class MemoryCoordinator(
         shortTermSummary: String,
         recentDialogue: List<DialogueTurn>,
         episodicCues: List<String> = emptyList(),
-        ambientLearningContext: String = "",
+        ambientContext: AmbientContext = AmbientContext(),
     ): String {
         val text = recallMemory(
             trigger = trigger,
             shortTermSummary = shortTermSummary,
             recentDialogue = recentDialogue,
             episodicCues = episodicCues,
-            ambientLearningContext = ambientLearningContext,
+            ambientContext = ambientContext,
         )
         val state = activeState()
         state.latestShortTermSummary = shortTermSummary
@@ -159,18 +160,24 @@ class MemoryCoordinator(
         return text
     }
 
-    fun recentLearningTopicsSummary(): String {
-        val topics = activeState().recentLearningTopics
-        if (topics.isEmpty()) return ""
-        return buildString {
-            append("Recently explored exact learning topics:\n")
-            topics.forEachIndexed { index, topic ->
-                append("${index + 1}. ")
-                append(topic.label)
-                append('\n')
-            }
-            append("Avoid exact topic repeats. Deeper follow-up questions on related topics are still valid.")
-        }.trim()
+    fun recentExactLearningTopics(): List<String> =
+        activeState().recentLearningTopics.map { it.label }
+
+    fun recentUsefulActionsOrUpdates(): List<String> {
+        val lb = logbook ?: return emptyList()
+        return try {
+            lb.query(
+                LogbookQuery(
+                    eventTypes = USEFUL_AMBIENT_EVENT_TYPES,
+                    maxResults = MAX_AMBIENT_USEFUL_UPDATES
+                )
+            ).entries
+                .map { entry -> TextSecurity.preview(entry.summary, AMBIENT_EVENT_PREVIEW_CHARS) }
+                .filter { it.isNotBlank() }
+        } catch (ex: Exception) {
+            logger.debug(ex) { "Ambient useful action recall failed." }
+            emptyList()
+        }
     }
 
     fun recallLessons(trigger: EgoTrigger, recentDialogue: List<DialogueTurn>): String {
@@ -778,7 +785,7 @@ class MemoryCoordinator(
         shortTermSummary: String,
         recentDialogue: List<DialogueTurn>,
         episodicCues: List<String> = emptyList(),
-        ambientLearningContext: String = "",
+        ambientContext: AmbientContext = AmbientContext(),
     ): String {
         if (!hippocampus.enabled) return ""
         val triggerLabel = when (trigger) {
@@ -790,11 +797,7 @@ class MemoryCoordinator(
             is EgoTrigger.IncomingInput -> buildRecallCue(trigger, recentDialogue, episodicCues).trim()
             is EgoTrigger.IncomingImpulse -> {
                 val baseCue = trigger.impulse.prompt.trim()
-                if (trigger.impulse.needId == LEARNING_NEED_ID) {
-                    buildLearningRecallCue(baseCue, ambientLearningContext)
-                } else {
-                    baseCue
-                }
+                buildImpulseRecallCue(baseCue, trigger.impulse.needId, ambientContext)
             }
             is EgoTrigger.PendingThoughtInput -> {
                 val query = trigger.thought.longTermMemoryRecallQuery?.trim().orEmpty()
@@ -905,12 +908,23 @@ class MemoryCoordinator(
         ).joinToString(separator = "\n")
     }
 
-    private fun buildLearningRecallCue(baseCue: String, ambientLearningContext: String): String =
-        listOfNotNull(
+    private fun buildImpulseRecallCue(
+        baseCue: String,
+        needId: String,
+        ambientContext: AmbientContext,
+    ): String {
+        val renderedAmbientContext = ambientContext.render()
+        val learningGuidance = if (needId == LEARNING_NEED_ID && ambientContext.recentExactLearningTopics.isNotEmpty()) {
+            "Learning freshness guidance: avoid exact repeats from recent_exact_learning_topics, but deeper follow-up exploration remains valid."
+        } else {
+            null
+        }
+        return listOfNotNull(
             baseCue.takeIf { it.isNotBlank() },
-            "Learning recall guidance: recall stable user interests, recurring projects, and adjacent topics that would make this curiosity more useful.",
-            ambientLearningContext.takeIf { it.isNotBlank() }?.let { "Ambient learning context:\n$it" }
+            renderedAmbientContext.takeIf { it.isNotBlank() }?.let { "Ambient context:\n$it" },
+            learningGuidance,
         ).joinToString(separator = "\n")
+    }
 
     private fun rememberLearningTopic(summary: String, keywords: List<String>) {
         val record = buildLearningTopicRecord(summary, keywords) ?: return
@@ -1318,6 +1332,13 @@ class MemoryCoordinator(
         const val LESSON_DEFAULT_CONFIDENCE: Double = 0.72
         const val REFLECTION_DEFAULT_CONFIDENCE: Double = 0.6
         const val LEARNING_NEED_ID: String = "learn-something"
+        const val MAX_AMBIENT_USEFUL_UPDATES: Int = 6
+        const val AMBIENT_EVENT_PREVIEW_CHARS: Int = 180
+        val USEFUL_AMBIENT_EVENT_TYPES: Set<EpisodicEventType> = setOf(
+            EpisodicEventType.CONTACT_DELIVERED,
+            EpisodicEventType.ACTION_EXECUTED,
+            EpisodicEventType.SELF_INITIATED,
+        )
         val LESSON_TECHNICAL_TEXT_SIGNALS: Set<String> = setOf(
             "tool error",
             "tool failed",

@@ -242,13 +242,46 @@ class MemoryCoordinatorLogbookNarrativeTest {
             keywords = listOf("kotlin", "coroutine cancellation"),
         )
 
-        val summary = coordinator.recentLearningTopicsSummary()
+        val topics = coordinator.recentExactLearningTopics()
 
-        assertTrue(summary.contains("Recently explored exact learning topics:"))
-        assertTrue(summary.contains("coroutines, kotlin"))
-        assertTrue(summary.contains("kotlin, coroutine cancellation"))
-        assertEquals(1, "coroutines, kotlin".toRegex().findAll(summary).count())
-        assertTrue(summary.contains("Deeper follow-up questions on related topics are still valid."))
+        assertTrue(topics.contains("coroutines, kotlin"))
+        assertTrue(topics.contains("kotlin, coroutine cancellation"))
+        assertEquals(1, topics.count { it == "coroutines, kotlin" })
+    }
+
+    @Test
+    fun `recent useful actions or updates reads useful episodic events`() {
+        val logbook = RecordingLogbook().apply {
+            record(
+                LogbookEntry(
+                    ts = java.time.Instant.now(),
+                    eventType = EpisodicEventType.CONTACT_DELIVERED,
+                    summary = "Shared a useful update about the memory subsystem",
+                )
+            )
+            record(
+                LogbookEntry(
+                    ts = java.time.Instant.now().minusSeconds(5),
+                    eventType = EpisodicEventType.ACTION_DENIED,
+                    summary = "Denied external action",
+                )
+            )
+        }
+        val coordinator = MemoryCoordinator(
+            hippocampus = RecordingHippocampus(),
+            longTermMemoryAdvisor = object : LongTermMemoryAdvisor {
+                override fun assess(context: LongTermMemoryAssessmentContext): LongTermMemoryAssessmentDecision =
+                    LongTermMemoryAssessmentDecision(false, "", 0.0, "unused")
+            },
+            config = AgentConfig(),
+            instrumentation = NoopAgentInstrumentation,
+            logbook = logbook,
+        )
+
+        val updates = coordinator.recentUsefulActionsOrUpdates()
+
+        assertEquals(1, updates.size)
+        assertTrue(updates.single().contains("memory subsystem"))
     }
 
     private class RecordingLogbook : Logbook {
@@ -259,8 +292,18 @@ class MemoryCoordinatorLogbookNarrativeTest {
             return entries.size.toLong()
         }
 
-        override fun query(query: LogbookQuery): LogbookRecall =
-            LogbookRecall(entries = emptyList(), totalMatched = 0, truncated = false)
+        override fun query(query: LogbookQuery): LogbookRecall {
+            val filtered = entries
+                .asReversed()
+                .filter { entry ->
+                    (query.eventTypes.isNullOrEmpty() || query.eventTypes.contains(entry.eventType)) &&
+                        (query.actionTypes.isNullOrEmpty() || query.actionTypes.contains(entry.actionType)) &&
+                        (query.sessionId == null || query.sessionId == entry.sessionId) &&
+                        (query.interlocutorId == null || query.interlocutorId == entry.interlocutorId)
+                }
+                .take(query.maxResults)
+            return LogbookRecall(entries = filtered, totalMatched = filtered.size, truncated = false)
+        }
 
         override fun pruneOlderThan(retentionDays: Int): Int = 0
 

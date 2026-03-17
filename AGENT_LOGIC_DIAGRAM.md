@@ -99,7 +99,7 @@ sequenceDiagram
         Ego->>Delib: startStep()
 
         alt Task = impulse
-            Note over Ego,Mem: Learning impulses enrich long-term recall with optional project/workspace signals and recent exact learning topics
+            Note over Ego,Mem: Id-driven recall/planning can see shared ambient context: projects, workspace themes, useful updates, open loops, and recent exact learning topics
             Ego->>Planner: decide(context + idState)
             Planner-->>Ego: thought/action/plan/noop
             Ego->>Sched: enqueue impulse-derived work with origin=ID
@@ -190,7 +190,7 @@ sequenceDiagram
         Note over Ego,Mem: Long dialogue/recall blocks are compressed before advisor prompt
         Note over Ego,Mem: Saved durable memories are normalized to first-person agent perspective before imprint
         Note over Ego,Mem: MCP fact/reference subject is stamped as "me" for agent-authored durable memories
-        Note over Ego,Mem: Successful learning reflections track exact recent topic fingerprints so future learning nudges avoid exact repeats but still allow deeper follow-ups
+        Note over Ego,Mem: Successful learning reflections track exact recent topic fingerprints; only learning retrieval uses them as freshness pressure, while other needs may still reuse the same topic context
     end
 
     Note over User,SC: Terminal stdin is control-only in interactive mode (exit command), non-command text is not enqueued as chat input

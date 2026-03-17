@@ -485,13 +485,13 @@ class Ego(
         val recentDialogue = dialogueFor(sessionId).takeLast(12)
         val shortTermSummary = memory.currentShortTermSummary()
         val episodicCues = memory.recallEpisodicAsVectorCues(recentDialogue)
-        val ambientLearningContext = buildAmbientLearningContext(trigger)
+        val ambientContext = buildAmbientContext(trigger)
         val longTermRecall = memory.recall(
             trigger = trigger,
             shortTermSummary = shortTermSummary,
             recentDialogue = recentDialogue,
             episodicCues = episodicCues,
-            ambientLearningContext = ambientLearningContext,
+            ambientContext = ambientContext,
         )
         val lessons = memory.recallLessons(trigger, recentDialogue)
         val episodicRecall = memory.recallEpisodic(trigger, recentDialogue)
@@ -524,7 +524,7 @@ class Ego(
             episodicRecall = episodicRecall,
             taskWorkspaceSummary = taskWorkspaceSummary,
             sessionWorkspaceDigest = sessionWorkspaceDigest,
-            ambientLearningContext = ambientLearningContext,
+            ambientContext = ambientContext,
             evidenceHints = evidenceHints,
             deliberation = deliberation.snapshot(),
             metaGuidance = deliberation.guidance(),
@@ -535,46 +535,29 @@ class Ego(
         )
     }
 
-    private fun buildAmbientLearningContext(trigger: EgoTrigger): String {
-        if (trigger !is EgoTrigger.IncomingImpulse || trigger.impulse.needId != LEARNING_NEED_ID) {
-            return ""
+    private fun buildAmbientContext(trigger: EgoTrigger): AmbientContext {
+        if (!shouldAttachAmbientContext(trigger)) {
+            return AmbientContext()
         }
         val activeProjects = projectRegistry.activeProjects()
             .map { project -> TextSecurity.preview(project.instruction, AMBIENT_PROJECT_PREVIEW_CHARS) }
             .filter { it.isNotBlank() }
             .take(MAX_AMBIENT_PROJECTS)
-        val crossSessionWorkspaceSignals = taskWorkspaceStore.crossSessionPromptSummary(
-            maxTokens = config.memory.taskWorkspace.digestMaxPromptTokens
-        )
-        val recentLearningTopics = memory.recentLearningTopicsSummary()
-        val blocks = mutableListOf<String>()
-        if (activeProjects.isNotEmpty()) {
-            blocks += buildString {
-                append("Active projects:\n")
-                activeProjects.forEachIndexed { index, project ->
-                    append("${index + 1}. ")
-                    append(project)
-                    append('\n')
-                }
-            }.trim()
-        }
-        if (crossSessionWorkspaceSignals.isNotBlank()) {
-            blocks += crossSessionWorkspaceSignals
-        }
-        if (recentLearningTopics.isNotBlank()) {
-            blocks += recentLearningTopics
-        }
-        if (blocks.isEmpty()) {
-            return ""
-        }
-        return TextSecurity.clamp(
-            buildString {
-                append("Use these as optional relevance signals, not hard requirements.\n")
-                append(blocks.joinToString(separator = "\n"))
-            }.trim(),
-            AMBIENT_LEARNING_CONTEXT_MAX_CHARS
+        return AmbientContext(
+            activeProjects = activeProjects,
+            recentWorkspaceThemes = taskWorkspaceStore.recentResolvedGoalSignals(MAX_AMBIENT_WORKSPACE_SIGNALS),
+            recentUsefulActionsOrUpdates = memory.recentUsefulActionsOrUpdates(),
+            unresolvedOpenLoops = taskWorkspaceStore.activeGoalSignals(MAX_AMBIENT_OPEN_LOOPS),
+            recentExactLearningTopics = memory.recentExactLearningTopics(),
         )
     }
+
+    private fun shouldAttachAmbientContext(trigger: EgoTrigger): Boolean =
+        when (trigger) {
+            is EgoTrigger.IncomingInput -> false
+            is EgoTrigger.IncomingImpulse -> true
+            is EgoTrigger.PendingThoughtInput -> trigger.thought.origin.source == OriginSource.ID
+        }
 
     private fun applyIdConvergenceContextForOrigin(
         baseContext: PlannerContext,
@@ -797,10 +780,10 @@ class Ego(
     }
 
     private companion object {
-        const val LEARNING_NEED_ID: String = "learn-something"
         const val MAX_AMBIENT_PROJECTS: Int = 4
         const val AMBIENT_PROJECT_PREVIEW_CHARS: Int = 180
-        const val AMBIENT_LEARNING_CONTEXT_MAX_CHARS: Int = 1400
+        const val MAX_AMBIENT_WORKSPACE_SIGNALS: Int = 6
+        const val MAX_AMBIENT_OPEN_LOOPS: Int = 4
         const val MAX_EVIDENCE_HINT_SIGNALS: Int = 3
         const val MAX_EVIDENCE_HINT_CHARS: Int = 420
         const val JOURNAL_SUMMARY_PREVIEW_CHARS: Int = 160

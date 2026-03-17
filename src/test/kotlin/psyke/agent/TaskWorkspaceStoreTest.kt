@@ -449,7 +449,7 @@ class TaskWorkspaceStoreTest {
     }
 
     @Test
-    fun `crossSessionPromptSummary includes active goals and recent digests across sessions`() {
+    fun `workspace ambient signal helpers expose active and resolved goals across sessions`() {
         val store = TaskWorkspaceStore(
             TaskWorkspaceConfig(enabled = true, activationMinPlanSteps = 1, digestMaxEntries = 4)
         )
@@ -461,10 +461,10 @@ class TaskWorkspaceStoreTest {
         )
         store.captureDigest("root-digest", "session-b")
 
-        val summary = store.crossSessionPromptSummary(maxTokens = 400)
+        val activeGoals = store.activeGoalSignals()
+        val resolvedGoals = store.recentResolvedGoalSignals()
 
-        assertTrue(summary.contains("Cross-session workspace signals:"))
-        assertTrue(summary.contains("active migration project"))
-        assertTrue(summary.contains("resolved docs refresh"))
+        assertTrue(activeGoals.contains("active migration project"))
+        assertTrue(resolvedGoals.any { it.contains("resolved docs refresh") })
     }
 }
