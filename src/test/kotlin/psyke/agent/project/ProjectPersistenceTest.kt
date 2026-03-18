@@ -191,6 +191,76 @@ class ProjectPersistenceTest {
     }
 
     @Test
+    fun `store falls back to snapshot when project json is corrupt`() {
+        val root = Files.createTempDirectory("psyke-store-project-fallback")
+        try {
+            val store = ProjectStore(root)
+            val workspace = store.createWorkspace("proj-1")
+            val state = ProjectState(
+                project = Project(
+                    id = "proj-1",
+                    title = "Fallback Test",
+                    instruction = "recover from corrupt project json",
+                    status = ProjectStatus.ACTIVE,
+                    priority = ProjectPriority.MEDIUM,
+                    plan = ProjectPlan(
+                        steps = listOf(
+                            PlanStep("s1", "Step 1", StepStatus.READY, "verify s1"),
+                        ),
+                        generatedAt = now,
+                    ),
+                    completionCriteria = "done",
+                    createdAt = now,
+                    lastWorkedAt = now,
+                    workspacePath = workspace,
+                ),
+                eventCount = 1,
+            )
+            store.saveSnapshot("proj-1", state)
+            Files.writeString(root.resolve("proj-1").resolve(ProjectStore.PROJECT_FILE), "{not valid json")
+            store.eventLog("proj-1").append(
+                ProjectEvent.Created("proj-1", "Fallback Test", "recover from corrupt project json",
+                    ProjectPriority.MEDIUM, "done", now)
+            )
+
+            val loaded = store.loadProject("proj-1")
+            assertNotNull(loaded)
+            assertEquals(ProjectStatus.ACTIVE, loaded.project.status)
+            assertEquals(StepStatus.READY, loaded.project.plan.steps.single().status)
+            assertEquals(1, loaded.eventCount)
+        } finally {
+            root.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `store falls back to full replay when snapshot is corrupt`() {
+        val root = Files.createTempDirectory("psyke-store-snapshot-fallback")
+        try {
+            val store = ProjectStore(root)
+            store.createWorkspace("proj-1")
+            Files.writeString(root.resolve("proj-1").resolve(ProjectStore.SNAPSHOT_FILE), "{broken snapshot")
+            val eventLog = store.eventLog("proj-1")
+            eventLog.append(ProjectEvent.Created("proj-1", "Replay Fallback", "recover from corrupt snapshot",
+                ProjectPriority.HIGH, "done", now))
+            eventLog.append(ProjectEvent.PlanGenerated("proj-1", ProjectPlan(
+                steps = listOf(
+                    PlanStep("s1", "Step 1", StepStatus.PENDING, "verify s1"),
+                ),
+                generatedAt = now,
+            ), now))
+            eventLog.append(ProjectEvent.StepStarted("proj-1", "s1", now))
+
+            val loaded = store.loadProject("proj-1")
+            assertNotNull(loaded)
+            assertEquals(ProjectStatus.ACTIVE, loaded.project.status)
+            assertEquals(StepStatus.IN_PROGRESS, loaded.project.plan.steps.single().status)
+        } finally {
+            root.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
     fun `store returns null for nonexistent project`() {
         val root = Files.createTempDirectory("psyke-store-missing")
         try {

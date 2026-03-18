@@ -7,8 +7,11 @@ import psyke.agent.actions.websearch.WebSearchEngine
 import psyke.agent.actions.websearch.WebSearchEngineHealth
 import psyke.agent.actions.websearch.WebSearchResult
 import psyke.agent.actions.websearch.WebSearchSource
+import psyke.agent.config.AgentConfig
+import psyke.agent.project.ProjectConfig
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -262,4 +265,34 @@ class MotorCortexTest {
             cortex.availableActionTypes()
         )
     }
+
+    @Test
+    fun `project operation is only planner visible when projects are enabled`() = runBlocking {
+        val disabled = MotorCortex(
+            webSearchActionHandler = searchHandler(),
+            reflectionMemoryRecorder = NoopReflectionMemoryRecorder,
+            config = AgentConfig(projects = ProjectConfig(enabled = false)),
+        )
+        val enabled = MotorCortex(
+            webSearchActionHandler = searchHandler(),
+            reflectionMemoryRecorder = NoopReflectionMemoryRecorder,
+            config = AgentConfig(projects = ProjectConfig(enabled = true)),
+        )
+
+        assertFalse(ActionType.PROJECT_OPERATION in disabled.dispatchableActionTypes())
+        assertFalse(ActionType.PROJECT_OPERATION in disabled.availableActionTypes())
+        assertFalse(disabled.plannerDescriptors().any { it.actionType == ActionType.PROJECT_OPERATION })
+
+        assertTrue(ActionType.PROJECT_OPERATION in enabled.dispatchableActionTypes())
+        assertTrue(ActionType.PROJECT_OPERATION in enabled.availableActionTypes())
+        assertTrue(enabled.plannerDescriptors().any { it.actionType == ActionType.PROJECT_OPERATION })
+    }
+
+    private fun searchHandler(): WebSearchActionHandler =
+        WebSearchActionHandler(
+            engine = object : WebSearchEngine {
+                override fun search(query: String, maxResults: Int): WebSearchResult =
+                    WebSearchResult("unused", emptyList())
+            }
+        )
 }

@@ -16,6 +16,7 @@ import java.time.Instant
 import java.util.concurrent.CopyOnWriteArrayList
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
@@ -136,6 +137,70 @@ class ProjectManagerTest {
     }
 
     @Test
+    fun `finalized project cycle writes workspace context scratch and artifact`() {
+        val root = Files.createTempDirectory("psyke-pm-workspace")
+        try {
+            val signals = CopyOnWriteArrayList<ProjectSignal>()
+            val manager = ProjectManager(
+                config = testConfig(root),
+                store = ProjectStore(root),
+                planner = DeterministicProjectPlanner(),
+                verifier = DeterministicProjectStepVerifier(),
+                signalEmitter = { signal -> if (signal is ProjectSignal) signals += signal },
+            )
+            manager.start(testScope())
+            val id = manager.createProject("Document workspace artifacts")
+            val work = manager.nextWorkFromSignal(assertIs<ProjectSignal.WorkReady>(signals.last()))
+            assertNotNull(work)
+
+            manager.onActionExecuted(
+                action = PendingAction(
+                    id = 2L,
+                    urgency = Urgency.MEDIUM,
+                    type = ActionType.REFLECT,
+                    payload = """{"note":"done"}""",
+                    summary = "done",
+                    rootInputId = work.rootInputId,
+                    conversationContext = ConversationContext.default(),
+                    origin = psyke.agent.model.ActionOrigin(source = OriginSource.PROJECT),
+                ),
+                outcome = ActionOutcome(
+                    statusSummary = "completed",
+                    executionStatus = ActionExecutionStatus.SUCCESS,
+                ),
+                observedEvidence = true,
+            )
+            manager.finalizeProjectCycle(work.rootInputId)
+
+            val workspace = root.resolve(id).resolve(ProjectStore.WORKSPACE_DIR)
+            val context = workspace.resolve("context.md")
+            val scratch = workspace.resolve("scratch.md")
+            val artifacts = workspace.resolve("artifacts").resolve(work.stepId)
+
+            assertTrue(Files.exists(context))
+            assertTrue(Files.readString(context).contains("Latest Cycle"))
+            assertTrue(Files.readString(context).contains("completed"))
+
+            assertTrue(Files.exists(scratch))
+            assertTrue(Files.readString(scratch).contains("root_input_id: ${work.rootInputId}"))
+            assertTrue(Files.readString(scratch).contains("result: completed"))
+
+            val artifactFiles = Files.list(artifacts).use { stream ->
+                stream.map { it.fileName.toString() }.toList()
+            }
+            assertEquals(1, artifactFiles.size)
+            val artifactContent = Files.readString(artifacts.resolve(artifactFiles.single()))
+            assertTrue(artifactContent.contains("# Project Cycle"))
+            assertTrue(artifactContent.contains("step_id: ${work.stepId}"))
+            assertTrue(artifactContent.contains("completed"))
+
+            manager.stop()
+        } finally {
+            root.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
     fun `pendingWorkSummary returns empty when no projects exist`() {
         val root = Files.createTempDirectory("psyke-pm-summary")
         try {
@@ -202,6 +267,55 @@ class ProjectManagerTest {
             assertEquals(ProjectStatus.ACTIVE, reloaded.project.status)
 
             manager2.stop()
+        } finally {
+            root.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `startup prunes expired completed projects but keeps recent and active ones`() {
+        val root = Files.createTempDirectory("psyke-pm-prune")
+        try {
+            val store = ProjectStore(root)
+            val oldCompletion = Instant.now().minusSeconds(3 * 24 * 60 * 60)
+            val recentCompletion = Instant.now()
+
+            seedStoredProject(
+                store = store,
+                projectId = "old-completed",
+                status = ProjectStatus.COMPLETED,
+                stepStatus = StepStatus.DONE,
+                completedAt = oldCompletion,
+                lastWorkedAt = oldCompletion,
+            )
+            seedStoredProject(
+                store = store,
+                projectId = "recent-completed",
+                status = ProjectStatus.COMPLETED,
+                stepStatus = StepStatus.DONE,
+                completedAt = recentCompletion,
+                lastWorkedAt = recentCompletion,
+            )
+            seedStoredProject(
+                store = store,
+                projectId = "active-project",
+                status = ProjectStatus.ACTIVE,
+                stepStatus = StepStatus.READY,
+                completedAt = null,
+                lastWorkedAt = recentCompletion,
+            )
+
+            val manager = ProjectManager(
+                config = testConfig(root).copy(completedProjectRetentionDays = 1),
+                store = store,
+            )
+            manager.start(testScope())
+
+            assertFalse(Files.exists(root.resolve("old-completed")))
+            assertNotNull(manager.projectStatus("recent-completed"))
+            assertNotNull(manager.projectStatus("active-project"))
+
+            manager.stop()
         } finally {
             root.toFile().deleteRecursively()
         }
@@ -316,5 +430,54 @@ class ProjectManagerTest {
             Thread.sleep(25)
         }
         assertTrue(predicate())
+    }
+
+    private fun seedStoredProject(
+        store: ProjectStore,
+        projectId: String,
+        status: ProjectStatus,
+        stepStatus: StepStatus,
+        completedAt: Instant?,
+        lastWorkedAt: Instant?,
+    ) {
+        val workspace = store.createWorkspace(projectId)
+        val createdAt = completedAt ?: lastWorkedAt ?: Instant.now()
+        val state = ProjectState(
+            project = Project(
+                id = projectId,
+                title = projectId,
+                instruction = "instruction for $projectId",
+                status = status,
+                priority = ProjectPriority.MEDIUM,
+                plan = ProjectPlan(
+                    steps = listOf(
+                        PlanStep(
+                            id = "step-1",
+                            description = "Step 1",
+                            status = stepStatus,
+                            acceptanceCriteria = "done",
+                            completedAt = completedAt,
+                        )
+                    ),
+                    generatedAt = createdAt,
+                ),
+                completionCriteria = "done",
+                createdAt = createdAt,
+                lastWorkedAt = lastWorkedAt,
+                workspacePath = workspace,
+            ),
+            eventCount = 1,
+        )
+        store.saveProjectState(projectId, state)
+        store.eventLog(projectId).append(
+            ProjectEvent.Created(
+                projectId = projectId,
+                title = projectId,
+                instruction = state.project.instruction,
+                priority = ProjectPriority.MEDIUM,
+                completionCriteria = "done",
+                timestamp = createdAt,
+            )
+        )
     }
 }
