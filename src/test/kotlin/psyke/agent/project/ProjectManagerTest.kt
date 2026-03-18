@@ -21,6 +21,7 @@ import psyke.agent.model.PendingAction
 import psyke.agent.model.Urgency
 import java.nio.file.Files
 import java.time.Instant
+import java.time.ZonedDateTime
 import java.util.ArrayDeque
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
@@ -590,6 +591,136 @@ class ProjectManagerTest {
         }
     }
 
+    @Test
+    fun `condition check wait is restored on restart and retry timeout requeues the step`() {
+        val root = Files.createTempDirectory("psyke-pm-restore-condition-check")
+        try {
+            val store = ProjectStore(root)
+            val manager1 = ProjectManager(
+                config = testConfig(root).copy(conditionCheckIntervalMs = 25),
+                store = store,
+                planner = DeterministicProjectPlanner(),
+            )
+            manager1.start(testScope())
+            val id = manager1.createProject("Wait for condition check")
+            manager1.applyEventExternal(
+                id,
+                ProjectEvent.StepBlocked(
+                    projectId = id,
+                    stepId = "step-1",
+                    waitCondition = WaitCondition(
+                        type = WaitConditionType.CONDITION_CHECK,
+                        params = mapOf("check" to "mailbox_empty"),
+                        registeredAt = Instant.now(),
+                        timeoutAt = Instant.now().plusMillis(150),
+                        onTimeout = TimeoutAction.RETRY,
+                    )
+                )
+            )
+            manager1.stop()
+
+            val signals = CopyOnWriteArrayList<ProjectSignal>()
+            val manager2 = ProjectManager(
+                config = testConfig(root).copy(conditionCheckIntervalMs = 25),
+                store = store,
+                signalEmitter = { signal -> if (signal is ProjectSignal) signals += signal },
+            )
+            manager2.start(testScope())
+
+            waitUntil {
+                manager2.projectStatus(id)?.project?.plan?.steps?.firstOrNull()?.status == StepStatus.READY &&
+                    manager2.projectStatus(id)?.project?.plan?.steps?.firstOrNull()?.waitCondition == null &&
+                    signals.any { it is ProjectSignal.WorkReady && it.projectId == id && it.stepId == "step-1" }
+            }
+
+            manager2.stop()
+        } finally {
+            root.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `external event wait is restored on restart and retry timeout requeues the step`() {
+        val root = Files.createTempDirectory("psyke-pm-restore-external-event")
+        try {
+            val store = ProjectStore(root)
+            val manager1 = ProjectManager(
+                config = testConfig(root).copy(conditionCheckIntervalMs = 25),
+                store = store,
+                planner = DeterministicProjectPlanner(),
+            )
+            manager1.start(testScope())
+            val id = manager1.createProject("Wait for external event")
+            manager1.applyEventExternal(
+                id,
+                ProjectEvent.StepBlocked(
+                    projectId = id,
+                    stepId = "step-1",
+                    waitCondition = WaitCondition(
+                        type = WaitConditionType.EXTERNAL_EVENT,
+                        params = mapOf("event_key" to "calendar_update"),
+                        registeredAt = Instant.now(),
+                        timeoutAt = Instant.now().plusMillis(150),
+                        onTimeout = TimeoutAction.RETRY,
+                    )
+                )
+            )
+            manager1.stop()
+
+            val signals = CopyOnWriteArrayList<ProjectSignal>()
+            val manager2 = ProjectManager(
+                config = testConfig(root).copy(conditionCheckIntervalMs = 25),
+                store = store,
+                signalEmitter = { signal -> if (signal is ProjectSignal) signals += signal },
+            )
+            manager2.start(testScope())
+
+            waitUntil {
+                manager2.projectStatus(id)?.project?.plan?.steps?.firstOrNull()?.status == StepStatus.READY &&
+                    manager2.projectStatus(id)?.project?.plan?.steps?.firstOrNull()?.waitCondition == null &&
+                    signals.any { it is ProjectSignal.WorkReady && it.projectId == id && it.stepId == "step-1" }
+            }
+
+            manager2.stop()
+        } finally {
+            root.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `cron schedule is restored on restart`() {
+        val root = Files.createTempDirectory("psyke-pm-restore-cron")
+        try {
+            val store = ProjectStore(root)
+            val manager1 = ProjectManager(
+                config = testConfig(root),
+                store = store,
+                planner = DeterministicProjectPlanner(),
+            )
+            manager1.start(testScope())
+            val future = ZonedDateTime.now().plusMinutes(2)
+            val cronExpression = "${future.minute} ${future.hour} * * *"
+            val id = manager1.createProject(
+                instruction = "Wake me on a cron schedule",
+                cronExpression = cronExpression,
+            )
+            manager1.stop()
+
+            val manager2 = ProjectManager(
+                config = testConfig(root),
+                store = store,
+            )
+            manager2.start(testScope())
+
+            val restoredSchedules = timerSchedulerCronSchedules(manager2)
+            assertEquals(cronExpression, restoredSchedules[id])
+
+            manager2.stop()
+        } finally {
+            root.toFile().deleteRecursively()
+        }
+    }
+
     private fun waitUntil(timeoutMs: Long = 2_500, predicate: () -> Boolean) {
         val deadline = System.currentTimeMillis() + timeoutMs
         while (System.currentTimeMillis() < deadline) {
@@ -680,6 +811,16 @@ class ProjectManagerTest {
                 timestamp = createdAt,
             )
         )
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun timerSchedulerCronSchedules(manager: ProjectManager): Map<String, String> {
+        val timerField = ProjectManager::class.java.getDeclaredField("timerScheduler")
+        timerField.isAccessible = true
+        val timer = timerField.get(manager) ?: error("TimerScheduler was not initialized")
+        val cronField = timer.javaClass.getDeclaredField("cronSchedules")
+        cronField.isAccessible = true
+        return (cronField.get(timer) as ConcurrentHashMap<String, String>).toMap()
     }
 
     private class StubAsyncOperationProvider : AsyncOperationProvider {
