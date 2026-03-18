@@ -1623,7 +1623,21 @@ class LlmEgoPlanner(
             }
             is EgoTrigger.ProjectWork -> {
                 val wu = trigger.workUnit
-                "PROJECT_WORK(project=${wu.projectId}, step=${wu.stepId}): ${wu.stepDescription}"
+                buildString {
+                    append("PROJECT_WORK(project=${wu.projectId}, step=${wu.stepId}): ${wu.stepDescription}")
+                    if (wu.wakeReason.isNotBlank()) {
+                        append("\nwake_reason=")
+                        append(wu.wakeReason)
+                    }
+                    if (wu.acceptanceCriteria.isNotBlank()) {
+                        append("\nacceptance_criteria=")
+                        append(wu.acceptanceCriteria)
+                    }
+                    if (wu.workingContext.isNotBlank()) {
+                        append("\nworking_context=")
+                        append(wu.workingContext.take(PROJECT_WORKING_CONTEXT_MAX_CHARS))
+                    }
+                }
             }
         }
 
@@ -1723,6 +1737,7 @@ class LlmEgoPlanner(
             .ifBlank { "contact_user" }
 
     private companion object {
+        const val PROJECT_WORKING_CONTEXT_MAX_CHARS: Int = 1_200
         const val ACTION_VERIFIER_BASE_TOKENS: Int = 80
         const val ACTION_VERIFIER_MAX_TOKENS: Int = 220
         const val ACTION_VERIFIER_TRUNCATION_RETRY_MIN_TOKEN_BUMP: Int = 32

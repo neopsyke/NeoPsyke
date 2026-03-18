@@ -575,6 +575,7 @@ internal class ActionReviewPipeline(
         convCtx: ConversationContext,
     ) {
         if (!resolvedAction.requiresFollowUpThought) return
+        if (outcome.waiting) return
         if (!actionLifecycleObserver.allowFollowUp(resolvedAction)) return
         val safePlannerSignal = PromptInjectionDefense.asUntrustedDataBlock(
             text = outcome.plannerSignal,

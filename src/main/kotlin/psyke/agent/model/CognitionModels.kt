@@ -1,5 +1,6 @@
 package psyke.agent.model
 
+import psyke.agent.actions.async.AsyncActionWait
 import psyke.agent.id.ConvergenceMode
 import psyke.agent.project.ProjectWorkUnit
 
@@ -133,6 +134,7 @@ enum class ActionExecutionStatus {
     SUCCESS,
     FAILED,
     NO_EFFECT,
+    WAITING,
 }
 
 data class ActionOutcome(
@@ -144,9 +146,13 @@ data class ActionOutcome(
     val observedEvidence: Boolean? = null,
     val actionErrorCategory: String? = null,
     val fetchErrorCategory: String? = null,
+    val asyncWait: AsyncActionWait? = null,
 ) {
     val successful: Boolean
         get() = executionStatus == ActionExecutionStatus.SUCCESS
+
+    val waiting: Boolean
+        get() = executionStatus == ActionExecutionStatus.WAITING || asyncWait != null
 }
 
 data class DeliberationState(

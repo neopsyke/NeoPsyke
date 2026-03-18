@@ -45,6 +45,7 @@ flowchart LR
     PG --> PM["ProjectManager / Project Runtime"]
     PM --> PP["ProjectPlanner"]
     PM --> PV["ProjectStepVerifier"]
+    PM --> AOR["AsyncOperationRegistry"]
     PM --> PS["ProjectStateMachine + ProjectStore"]
 
     AR --> AP["Action Plugins (self-described)"]
@@ -163,9 +164,10 @@ sequenceDiagram
                                 Ego->>TWS: final-pass compilation from workspace index/evidence
                                 Ego->>TWF: rewrite candidate payload (if enabled)
                                 Note over Ego,TWS: Final-pass skip requires both no evidence and insufficient drafts (< max(2, activation_min_plan_steps))
-                                Note over Ego,TWF: Apply workspace-confidence gate first, then model-confidence gate
+                        Note over Ego,TWF: Apply workspace-confidence gate first, then model-confidence gate
                             end
                             Ego->>Motor: execute(action)
+                            Note over Ego,Motor: Actions may complete immediately or return WAITING + async operation handles
                             Ego->>Ego: PromptInjectionDefense sanitize untrusted tool output
                             alt action = contact_user
                                 Ego->>Sched: clear pending thought and action work for same root-session scope
@@ -209,7 +211,8 @@ sequenceDiagram
 ```mermaid
 flowchart LR
     TS["TimerScheduler"] --> PM["ProjectManager"]
-    WM["WaitConditionMonitor"] --> PM
+    WM["WaitConditionMonitor (timeouts + async poll/event restore)"] --> PM
+    AOR["AsyncOperationRegistry / Provider Adapters"] --> WM
     PM --> PSM["ProjectStateMachine"]
     PM --> PP["ProjectPlanner"]
     PM --> PV["ProjectStepVerifier"]

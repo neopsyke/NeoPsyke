@@ -140,7 +140,12 @@ object ProjectStateMachine {
         state: ProjectState,
         event: ProjectEvent.StepActionExecuted,
     ): ProjectState = updateStep(state, event.stepId) { step ->
-        step.copy(attempts = step.attempts + 1, notes = event.actionResult)
+        step.copy(
+            attempts = step.attempts + 1,
+            notes = listOf(step.notes.trim(), event.actionResult.trim())
+                .filter { it.isNotBlank() }
+                .joinToString("\n"),
+        )
     }
 
     private fun handleStepAcceptancePassed(
@@ -288,11 +293,15 @@ object ProjectStateMachine {
     ): ProjectState {
         commands += ProjectCommand.ClearWaitCondition(state.id, event.stepId)
         commands += ProjectCommand.EmitWorkReady(
-            ProjectSignal.WorkReady(state.id, event.stepId, "wait_condition_satisfied")
+            ProjectSignal.WorkReady(state.id, event.stepId, buildWaitSatisfiedReason(event))
         )
         commands += ProjectCommand.PersistProject(state.id)
         val updated = updateStep(state, event.stepId) { step ->
-            step.copy(status = StepStatus.READY, waitCondition = null)
+            step.copy(
+                status = StepStatus.READY,
+                waitCondition = null,
+                notes = appendResolutionNote(step.notes, event),
+            )
         }
         val projectStatus = if (updated.project.status == ProjectStatus.BLOCKED) {
             ProjectStatus.ACTIVE
@@ -498,5 +507,24 @@ object ProjectStateMachine {
         commands += ProjectCommand.EmitWorkReady(
             ProjectSignal.WorkReady(projectId, step.id, reason)
         )
+    }
+
+    private fun buildWaitSatisfiedReason(event: ProjectEvent.WaitConditionSatisfied): String {
+        val suffix = listOfNotNull(
+            event.resolutionStatus?.trim()?.takeIf { it.isNotBlank() },
+            event.resolutionSummary?.trim()?.takeIf { it.isNotBlank() },
+        ).joinToString(": ")
+        return if (suffix.isBlank()) "wait_condition_satisfied" else "wait_condition_satisfied: $suffix"
+    }
+
+    private fun appendResolutionNote(existing: String, event: ProjectEvent.WaitConditionSatisfied): String {
+        val note = listOfNotNull(
+            event.resolutionStatus?.trim()?.takeIf { it.isNotBlank() }?.let { "async_status=$it" },
+            event.resolutionSummary?.trim()?.takeIf { it.isNotBlank() }?.let { "async_summary=$it" },
+        ).joinToString(" | ")
+        if (note.isBlank()) return existing
+        return listOf(existing.trim(), note)
+            .filter { it.isNotBlank() }
+            .joinToString("\n")
     }
 }

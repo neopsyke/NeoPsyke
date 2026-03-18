@@ -81,6 +81,8 @@ internal data class EventWrapper(
     // Wait conditions
     val waitCondition: WaitCondition? = null,
     val conditionType: String? = null,
+    val resolutionSummary: String? = null,
+    val resolutionStatus: String? = null,
     // Suspended
     val resumeAt: String? = null,
     // ContextUpdated
@@ -107,7 +109,14 @@ internal data class EventWrapper(
             "StepUnblocked" -> ProjectEvent.StepUnblocked(projectId, stepId!!, ts)
             "StepSkipped" -> ProjectEvent.StepSkipped(projectId, stepId!!, reason ?: "", ts)
             "WaitConditionRegistered" -> ProjectEvent.WaitConditionRegistered(projectId, stepId!!, waitCondition!!, ts)
-            "WaitConditionSatisfied" -> ProjectEvent.WaitConditionSatisfied(projectId, stepId!!, conditionType ?: "", ts)
+            "WaitConditionSatisfied" -> ProjectEvent.WaitConditionSatisfied(
+                projectId = projectId,
+                stepId = stepId!!,
+                conditionType = conditionType ?: "",
+                resolutionSummary = resolutionSummary,
+                resolutionStatus = resolutionStatus,
+                timestamp = ts,
+            )
             "WaitConditionTimedOut" -> ProjectEvent.WaitConditionTimedOut(projectId, stepId!!, ts)
             "Suspended" -> ProjectEvent.Suspended(projectId, reason ?: "", resumeAt?.let { java.time.Instant.parse(it) }, ts)
             "Resumed" -> ProjectEvent.Resumed(projectId, ts)
@@ -148,7 +157,12 @@ internal data class EventWrapper(
                 is ProjectEvent.StepUnblocked -> base.copy(stepId = event.stepId)
                 is ProjectEvent.StepSkipped -> base.copy(stepId = event.stepId, reason = event.reason)
                 is ProjectEvent.WaitConditionRegistered -> base.copy(stepId = event.stepId, waitCondition = event.condition)
-                is ProjectEvent.WaitConditionSatisfied -> base.copy(stepId = event.stepId, conditionType = event.conditionType)
+                is ProjectEvent.WaitConditionSatisfied -> base.copy(
+                    stepId = event.stepId,
+                    conditionType = event.conditionType,
+                    resolutionSummary = event.resolutionSummary,
+                    resolutionStatus = event.resolutionStatus,
+                )
                 is ProjectEvent.WaitConditionTimedOut -> base.copy(stepId = event.stepId)
                 is ProjectEvent.Suspended -> base.copy(reason = event.reason, resumeAt = event.resumeAt?.toString())
                 is ProjectEvent.Resumed -> base

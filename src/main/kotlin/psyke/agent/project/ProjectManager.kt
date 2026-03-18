@@ -2,12 +2,14 @@ package psyke.agent.project
 
 import kotlinx.coroutines.CoroutineScope
 import mu.KotlinLogging
+import psyke.agent.actions.async.AsyncOperationEvent
+import psyke.agent.actions.async.AsyncOperationRegistry
 import psyke.agent.cortex.sensory.ProjectSignal
 import psyke.agent.cortex.sensory.Signal
 import psyke.agent.id.Project as IdProject
 import psyke.agent.model.ActionOutcome
-import psyke.agent.model.OriginSource
 import psyke.agent.model.PendingAction
+import psyke.agent.model.OriginSource
 import psyke.agent.model.RootInputIds
 import psyke.instrumentation.AgentEvents
 import psyke.instrumentation.AgentInstrumentation
@@ -35,6 +37,7 @@ class ProjectManager(
     private val store: ProjectStore,
     private val planner: ProjectPlanner = DeterministicProjectPlanner(),
     private val verifier: ProjectStepVerifier = DeterministicProjectStepVerifier(),
+    private val asyncOperationRegistry: AsyncOperationRegistry = AsyncOperationRegistry.empty(),
     private val instrumentation: AgentInstrumentation = NoopAgentInstrumentation,
     private val signalEmitter: (Signal) -> Unit = {},
 ) : ProjectsGateway {
@@ -54,8 +57,9 @@ class ProjectManager(
         ).also { it.start(scope) }
         waitConditionMonitor = WaitConditionMonitor(
             checkIntervalMs = config.conditionCheckIntervalMs,
-            onConditionSatisfied = { projectId, stepId ->
-                onWaitConditionSatisfied(projectId, stepId, "condition_check")
+            asyncOperationRegistry = asyncOperationRegistry,
+            onConditionSatisfied = { projectId, stepId, resolution ->
+                onWaitConditionSatisfied(projectId, stepId, resolution)
             },
             onConditionTimedOut = { projectId, stepId ->
                 applyEvent(projectId, ProjectEvent.WaitConditionTimedOut(projectId, stepId))
@@ -125,6 +129,20 @@ class ProjectManager(
             ProjectEvent.StepActionExecuted(session.projectId, session.stepId, outcome.statusSummary)
         ) ?: return
         val step = afterAction.project.plan.steps.firstOrNull { it.id == session.stepId } ?: return
+        if (outcome.waiting) {
+            sessionsByRootInputId[rootInputId] = sessionsByRootInputId[rootInputId]
+                ?.copy(allowFollowUp = false, requeueReason = null)
+                ?: return
+            applyEvent(
+                session.projectId,
+                ProjectEvent.StepBlocked(
+                    projectId = session.projectId,
+                    stepId = session.stepId,
+                    waitCondition = buildWaitConditionForAsyncOutcome(outcome),
+                )
+            )
+            return
+        }
         val verification = verifier.evaluate(afterAction.project, step, action, outcome, observedEvidence)
 
         when (verification.verdict) {
@@ -236,6 +254,9 @@ class ProjectManager(
             )
         }
     }
+
+    override fun notifyAsyncOperationEvent(event: AsyncOperationEvent): Int =
+        waitConditionMonitor?.notifyAsyncEvent(event) ?: 0
 
     override fun executeOperation(request: ProjectOperationRequest): ProjectOperationResult =
         when (request.operation) {
@@ -569,8 +590,21 @@ class ProjectManager(
         }
     }
 
-    private fun onWaitConditionSatisfied(projectId: String, stepId: String, conditionType: String) {
-        applyEvent(projectId, ProjectEvent.WaitConditionSatisfied(projectId, stepId, conditionType))
+    private fun onWaitConditionSatisfied(
+        projectId: String,
+        stepId: String,
+        resolution: WaitConditionResolution,
+    ) {
+        applyEvent(
+            projectId,
+            ProjectEvent.WaitConditionSatisfied(
+                projectId = projectId,
+                stepId = stepId,
+                conditionType = resolution.conditionType,
+                resolutionSummary = resolution.summary.ifBlank { null },
+                resolutionStatus = resolution.status,
+            )
+        )
     }
 
     private fun writeWorkspaceCycleArtifacts(state: ProjectState, session: ProjectExecutionSession) {
@@ -633,6 +667,18 @@ class ProjectManager(
 
     private fun buildProjectRootInputId(projectId: String, stepId: String): String =
         "project:$projectId:$stepId:${RootInputIds.next()}"
+
+    private fun buildWaitConditionForAsyncOutcome(outcome: ActionOutcome): WaitCondition {
+        val wait = outcome.asyncWait
+        return WaitCondition(
+            type = if (wait != null) WaitConditionType.ASYNC_OPERATION else WaitConditionType.CONDITION_CHECK,
+            params = emptyMap(),
+            registeredAt = Instant.now(),
+            timeoutAt = wait?.handles?.mapNotNull { it.timeoutAt }?.minOrNull(),
+            onTimeout = TimeoutAction.FAIL,
+            asyncWait = wait,
+        )
+    }
 
     private fun generateProjectId(title: String): String {
         val slug = title.lowercase()

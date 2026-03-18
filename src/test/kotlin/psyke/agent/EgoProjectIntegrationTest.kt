@@ -7,7 +7,18 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.SupervisorJob
+import psyke.agent.actions.ActionDescriptor
+import psyke.agent.actions.ActionExecutionContext
+import psyke.agent.actions.ActionRegistry
+import psyke.agent.actions.AgentActionPlugin
 import psyke.agent.actions.NoopReflectionMemoryRecorder
+import psyke.agent.actions.async.AsyncActionHandle
+import psyke.agent.actions.async.AsyncActionWait
+import psyke.agent.actions.async.AsyncOperationProvider
+import psyke.agent.actions.async.AsyncOperationRegistry
+import psyke.agent.actions.async.AsyncOperationStatus
+import psyke.agent.actions.async.AsyncResumeMode
+import psyke.agent.actions.builtin.ContactUserActionPlugin
 import psyke.agent.actions.websearch.WebSearchActionHandler
 import psyke.agent.actions.websearch.WebSearchEngine
 import psyke.agent.actions.websearch.WebSearchResult
@@ -21,10 +32,13 @@ import psyke.agent.cortex.sensory.Signal
 import psyke.agent.cortex.sensory.SignalSource
 import psyke.agent.ego.Ego
 import psyke.agent.model.ActionType
+import psyke.agent.model.ActionOutcome
+import psyke.agent.model.ActionExecutionStatus
 import psyke.agent.model.ConversationContext
 import psyke.agent.model.EgoDecision
 import psyke.agent.model.EgoTrigger
 import psyke.agent.model.PlannerContext
+import psyke.agent.model.PendingAction
 import psyke.agent.model.Urgency
 import psyke.agent.project.DeterministicProjectPlanner
 import psyke.agent.project.PlanStep
@@ -100,6 +114,90 @@ class EgoProjectIntegrationTest {
                     it.type == "project_step_completed" && it.data["success"] == true
                 }
             )
+        } finally {
+            manager.stop()
+            loop.cancel()
+            root.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `async project action waits through projects runtime and resumes to completion`() = runBlocking {
+        val root = Files.createTempDirectory("psyke-ego-project-async")
+        val source = QueueSignalSource()
+        val instrumentation = RecordingInstrumentation()
+        val outputs = mutableListOf<String>()
+        val config = AgentConfig(
+            planner = PlannerConfig(maxLoopStepsPerInput = 8, maxThoughtPasses = 2),
+            projects = ProjectConfig(enabled = true, workspaceRoot = root, actionsPerCycle = 2, conditionCheckIntervalMs = 25),
+        )
+        val provider = StubAsyncOperationProvider().apply {
+            enqueue(
+                operationId = "async-op-1",
+                statuses = listOf(
+                    AsyncOperationStatus.Pending("download queued", nextPollAfterMs = 25),
+                    AsyncOperationStatus.Succeeded("download finished"),
+                )
+            )
+        }
+        val manager = ProjectManager(
+            config = config.projects,
+            store = ProjectStore(root),
+            planner = DeterministicProjectPlanner(),
+            asyncOperationRegistry = AsyncOperationRegistry.fromProviders(listOf(provider)),
+            instrumentation = instrumentation,
+            signalEmitter = source::offer,
+        )
+        val scope = testScope()
+        manager.start(scope)
+        var startedAsync = false
+        val planner = object : Ego.Planner {
+            override fun decide(trigger: EgoTrigger, context: PlannerContext): EgoDecision =
+                when (trigger) {
+                    is EgoTrigger.ProjectWork -> {
+                        if (!startedAsync) {
+                            startedAsync = true
+                            EgoDecision.ProposeAction(
+                                urgency = Urgency.MEDIUM,
+                                actionType = ActionType("async_test"),
+                                payload = """{"operation_id":"async-op-1"}""",
+                                summary = "start async test operation"
+                            )
+                        } else {
+                            EgoDecision.ProposeAction(
+                                urgency = Urgency.MEDIUM,
+                                actionType = ActionType.CONTACT_USER,
+                                payload = "async project done",
+                                summary = "report completion"
+                            )
+                        }
+                    }
+
+                    else -> EgoDecision.Noop("ignore non-project work")
+                }
+        }
+        val agent = buildTestEgo(
+            planner = planner,
+            superego = allowAllSuperego(config, instrumentation),
+            motorCortex = buildAsyncMotorCortex(outputs),
+            config = config,
+            instrumentation = instrumentation,
+            sensoryCortex = SensoryCortex(config, source),
+            projectsGateway = manager,
+        )
+
+        val loop = launch { agent.runInteractive() }
+        try {
+            val projectId = manager.createProject("Use async action in project")
+            waitForStatus(manager, projectId, ProjectStatus.COMPLETED)
+            source.offer(SensorySignal.ExitRequested("test"))
+            loop.join()
+
+            val state = manager.projectStatus(projectId)
+            assertNotNull(state)
+            assertEquals(ProjectStatus.COMPLETED, state.project.status)
+            assertTrue(state.project.plan.steps.first().notes.contains("async_status=succeeded"))
+            assertEquals(listOf("ego> async project done"), outputs)
         } finally {
             manager.stop()
             loop.cancel()
@@ -385,6 +483,40 @@ class EgoProjectIntegrationTest {
             reflectionMemoryRecorder = NoopReflectionMemoryRecorder,
         )
 
+    private fun buildAsyncMotorCortex(outputs: MutableList<String>): MotorCortex {
+        val asyncPlugin = object : AgentActionPlugin {
+            override val descriptor: ActionDescriptor = ActionDescriptor(
+                actionType = ActionType("async_test"),
+                dispatchable = true,
+                plannerDescription = "async_test: start a test async operation and return a durable handle.",
+                payloadGuidance = """JSON: {"operation_id":"async-op-1"}""",
+                requiresFollowUpThought = false,
+            )
+
+            override suspend fun execute(action: PendingAction, context: ActionExecutionContext): ActionOutcome =
+                ActionOutcome(
+                    statusSummary = "Async operation started.",
+                    executionStatus = ActionExecutionStatus.WAITING,
+                    asyncWait = AsyncActionWait(
+                        handles = listOf(
+                            AsyncActionHandle(
+                                providerType = "test_async",
+                                providerId = "provider-1",
+                                operationId = "async-op-1",
+                                resumeMode = AsyncResumeMode.POLL,
+                                pollAfterMs = 25,
+                                timeoutAt = Instant.now().plusSeconds(5),
+                            )
+                        ),
+                        summary = "Waiting for async test provider.",
+                    ),
+                )
+        }
+        val contactPlugin = ContactUserActionPlugin(output = { outputs += it })
+        val registry = ActionRegistry.fromPlugins(listOf(contactPlugin, asyncPlugin))
+        return MotorCortex(registry)
+    }
+
     private suspend fun waitForStatus(
         manager: ProjectManager,
         projectId: String,
@@ -415,4 +547,25 @@ class EgoProjectIntegrationTest {
     }
 
     private fun testScope(): CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+    private class StubAsyncOperationProvider : AsyncOperationProvider {
+        override val providerType: String = "test_async"
+        private val statusesByOperation = mutableMapOf<String, ArrayDeque<AsyncOperationStatus>>()
+
+        fun enqueue(operationId: String, statuses: List<AsyncOperationStatus>) {
+            statusesByOperation[operationId] = ArrayDeque(statuses)
+        }
+
+        override suspend fun poll(handle: AsyncActionHandle): AsyncOperationStatus {
+            val queue = statusesByOperation[handle.operationId]
+            if (queue.isNullOrEmpty()) {
+                return AsyncOperationStatus.Pending("still pending", nextPollAfterMs = 25)
+            }
+            return if (queue.size > 1) {
+                queue.removeFirst()
+            } else {
+                queue.first()
+            }
+        }
+    }
 }

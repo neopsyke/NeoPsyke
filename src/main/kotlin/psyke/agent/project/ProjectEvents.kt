@@ -96,6 +96,8 @@ sealed interface ProjectEvent {
         override val projectId: String,
         val stepId: String,
         val conditionType: String,
+        val resolutionSummary: String? = null,
+        val resolutionStatus: String? = null,
         override val timestamp: Instant = Instant.now(),
     ) : ProjectEvent
 
@@ -188,3 +190,9 @@ sealed interface ProjectCommand {
     data class PersistProject(val projectId: String) : ProjectCommand
     data class NotifyUser(val projectId: String, val message: String) : ProjectCommand
 }
+
+data class WaitConditionResolution(
+    val conditionType: String,
+    val summary: String = "",
+    val status: String? = null,
+)

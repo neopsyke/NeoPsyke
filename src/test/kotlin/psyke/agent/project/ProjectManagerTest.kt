@@ -3,6 +3,14 @@ package psyke.agent.project
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import psyke.agent.actions.async.AsyncActionHandle
+import psyke.agent.actions.async.AsyncActionWait
+import psyke.agent.actions.async.AsyncOperationEvent
+import psyke.agent.actions.async.AsyncOperationEventStatus
+import psyke.agent.actions.async.AsyncOperationProvider
+import psyke.agent.actions.async.AsyncOperationRegistry
+import psyke.agent.actions.async.AsyncOperationStatus
+import psyke.agent.actions.async.AsyncResumeMode
 import psyke.agent.cortex.sensory.ProjectSignal
 import psyke.agent.model.ActionExecutionStatus
 import psyke.agent.model.ActionOutcome
@@ -13,6 +21,8 @@ import psyke.agent.model.PendingAction
 import psyke.agent.model.Urgency
 import java.nio.file.Files
 import java.time.Instant
+import java.util.ArrayDeque
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -131,6 +141,163 @@ class ProjectManagerTest {
             assertEquals(ProjectStatus.COMPLETED, state.project.status)
 
             manager.stop()
+        } finally {
+            root.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `async action outcome blocks step and poll provider restores it to READY`() {
+        val root = Files.createTempDirectory("psyke-pm-async-poll")
+        try {
+            val provider = StubAsyncOperationProvider()
+            provider.enqueue(
+                operationId = "op-1",
+                statuses = listOf(
+                    AsyncOperationStatus.Pending("still downloading", nextPollAfterMs = 25),
+                    AsyncOperationStatus.Succeeded("download complete"),
+                )
+            )
+            val signals = CopyOnWriteArrayList<ProjectSignal>()
+            val manager = ProjectManager(
+                config = testConfig(root).copy(conditionCheckIntervalMs = 25),
+                store = ProjectStore(root),
+                planner = DeterministicProjectPlanner(),
+                asyncOperationRegistry = AsyncOperationRegistry.fromProviders(listOf(provider)),
+                signalEmitter = { signal -> if (signal is ProjectSignal) signals += signal },
+            )
+            manager.start(testScope())
+            val projectId = manager.createProject("Wait for async completion")
+            val work = manager.nextWorkFromSignal(assertIs<ProjectSignal.WorkReady>(signals.last()))
+            assertNotNull(work)
+
+            manager.onActionExecuted(
+                action = projectAction(work.rootInputId),
+                outcome = asyncWaitingOutcome(operationId = "op-1"),
+                observedEvidence = false,
+            )
+            manager.finalizeProjectCycle(work.rootInputId)
+
+            waitUntil {
+                val state = manager.projectStatus(projectId)
+                state?.project?.status == ProjectStatus.ACTIVE &&
+                    state.project.plan.steps.firstOrNull()?.status == StepStatus.READY
+            }
+
+            val state = manager.projectStatus(projectId)
+            assertNotNull(state)
+            assertTrue(state.project.plan.steps.first().notes.contains("async_status=succeeded"))
+            assertTrue(signals.any { it is ProjectSignal.WorkReady && it.projectId == projectId })
+
+            manager.stop()
+        } finally {
+            root.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `async poll wait is restored on restart and unblocks step`() {
+        val root = Files.createTempDirectory("psyke-pm-async-poll-restore")
+        try {
+            val store = ProjectStore(root)
+            val provider = StubAsyncOperationProvider()
+            provider.enqueue(operationId = "op-restore", statuses = listOf(AsyncOperationStatus.Pending("queued")))
+            val manager1 = ProjectManager(
+                config = testConfig(root).copy(conditionCheckIntervalMs = 25),
+                store = store,
+                planner = DeterministicProjectPlanner(),
+                asyncOperationRegistry = AsyncOperationRegistry.fromProviders(listOf(provider)),
+            )
+            manager1.start(testScope())
+            val projectId = manager1.createProject("Restore async poll wait")
+            val work = manager1.nextWorkFromSignal(ProjectSignal.WorkReady(projectId, "step-1", "test"))
+            assertNotNull(work)
+            manager1.onActionExecuted(
+                action = projectAction(work.rootInputId),
+                outcome = asyncWaitingOutcome(operationId = "op-restore"),
+                observedEvidence = false,
+            )
+            manager1.finalizeProjectCycle(work.rootInputId)
+            manager1.stop()
+
+            provider.enqueue(operationId = "op-restore", statuses = listOf(AsyncOperationStatus.Succeeded("restored completion")))
+            val signals = CopyOnWriteArrayList<ProjectSignal>()
+            val manager2 = ProjectManager(
+                config = testConfig(root).copy(conditionCheckIntervalMs = 25),
+                store = store,
+                asyncOperationRegistry = AsyncOperationRegistry.fromProviders(listOf(provider)),
+                signalEmitter = { signal -> if (signal is ProjectSignal) signals += signal },
+            )
+            manager2.start(testScope())
+
+            waitUntil {
+                val state = manager2.projectStatus(projectId)
+                state?.project?.status == ProjectStatus.ACTIVE &&
+                    state.project.plan.steps.firstOrNull()?.status == StepStatus.READY
+            }
+
+            assertTrue(signals.any { it is ProjectSignal.WorkReady && it.projectId == projectId })
+            manager2.stop()
+        } finally {
+            root.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `async event wait is restored on restart and external event unblocks step`() {
+        val root = Files.createTempDirectory("psyke-pm-async-event-restore")
+        try {
+            val store = ProjectStore(root)
+            val provider = StubAsyncOperationProvider()
+            val manager1 = ProjectManager(
+                config = testConfig(root),
+                store = store,
+                planner = DeterministicProjectPlanner(),
+                asyncOperationRegistry = AsyncOperationRegistry.fromProviders(listOf(provider)),
+            )
+            manager1.start(testScope())
+            val projectId = manager1.createProject("Restore async event wait")
+            val work = manager1.nextWorkFromSignal(ProjectSignal.WorkReady(projectId, "step-1", "test"))
+            assertNotNull(work)
+            manager1.onActionExecuted(
+                action = projectAction(work.rootInputId),
+                outcome = asyncWaitingOutcome(operationId = "evt-1", resumeMode = AsyncResumeMode.EVENT, correlationKey = "corr-1"),
+                observedEvidence = false,
+            )
+            manager1.finalizeProjectCycle(work.rootInputId)
+            manager1.stop()
+
+            val signals = CopyOnWriteArrayList<ProjectSignal>()
+            val manager2 = ProjectManager(
+                config = testConfig(root),
+                store = store,
+                asyncOperationRegistry = AsyncOperationRegistry.fromProviders(listOf(provider)),
+                signalEmitter = { signal -> if (signal is ProjectSignal) signals += signal },
+            )
+            manager2.start(testScope())
+            val matched = manager2.notifyAsyncOperationEvent(
+                AsyncOperationEvent(
+                    providerType = "test_async",
+                    providerId = "provider-1",
+                    correlationKey = "corr-1",
+                    status = AsyncOperationEventStatus.SUCCEEDED,
+                    summary = "event completed",
+                )
+            )
+
+            assertEquals(1, matched)
+            waitUntil {
+                val state = manager2.projectStatus(projectId)
+                state?.project?.status == ProjectStatus.ACTIVE &&
+                    state.project.plan.steps.firstOrNull()?.status == StepStatus.READY
+            }
+
+            val state = manager2.projectStatus(projectId)
+            assertNotNull(state)
+            assertTrue(state.project.plan.steps.first().notes.contains("event completed"))
+            assertTrue(signals.any { it is ProjectSignal.WorkReady && it.projectId == projectId })
+
+            manager2.stop()
         } finally {
             root.toFile().deleteRecursively()
         }
@@ -432,6 +599,40 @@ class ProjectManagerTest {
         assertTrue(predicate())
     }
 
+    private fun projectAction(rootInputId: String) = PendingAction(
+        id = 99L,
+        urgency = Urgency.MEDIUM,
+        type = ActionType.REFLECT,
+        payload = """{"summary":"async start","keywords":["async"]}""",
+        summary = "start async operation",
+        rootInputId = rootInputId,
+        conversationContext = ConversationContext.default(),
+        origin = psyke.agent.model.ActionOrigin(source = OriginSource.PROJECT),
+    )
+
+    private fun asyncWaitingOutcome(
+        operationId: String,
+        resumeMode: AsyncResumeMode = AsyncResumeMode.POLL,
+        correlationKey: String? = null,
+    ) = ActionOutcome(
+        statusSummary = "Async operation started.",
+        executionStatus = ActionExecutionStatus.WAITING,
+        asyncWait = AsyncActionWait(
+            handles = listOf(
+                AsyncActionHandle(
+                    providerType = "test_async",
+                    providerId = "provider-1",
+                    operationId = operationId,
+                    resumeMode = resumeMode,
+                    pollAfterMs = 25,
+                    timeoutAt = Instant.now().plusSeconds(5),
+                    correlationKey = correlationKey,
+                )
+            ),
+            summary = "Waiting for async test provider.",
+        ),
+    )
+
     private fun seedStoredProject(
         store: ProjectStore,
         projectId: String,
@@ -479,5 +680,26 @@ class ProjectManagerTest {
                 timestamp = createdAt,
             )
         )
+    }
+
+    private class StubAsyncOperationProvider : AsyncOperationProvider {
+        override val providerType: String = "test_async"
+        private val statusesByOperation = ConcurrentHashMap<String, ArrayDeque<AsyncOperationStatus>>()
+
+        fun enqueue(operationId: String, statuses: List<AsyncOperationStatus>) {
+            statusesByOperation[operationId] = ArrayDeque(statuses)
+        }
+
+        override suspend fun poll(handle: AsyncActionHandle): AsyncOperationStatus {
+            val queue = statusesByOperation[handle.operationId]
+            if (queue.isNullOrEmpty()) {
+                return AsyncOperationStatus.Pending("still pending", nextPollAfterMs = 25)
+            }
+            return if (queue.size > 1) {
+                queue.removeFirst()
+            } else {
+                queue.first()
+            }
+        }
     }
 }

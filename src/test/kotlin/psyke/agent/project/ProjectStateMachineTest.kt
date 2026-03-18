@@ -187,6 +187,55 @@ class ProjectStateMachineTest {
     }
 
     @Test
+    fun `WaitConditionSatisfied restores READY step appends async resolution note and emits detailed wake reason`() {
+        val state = ProjectState(
+            project = initialState().project.copy(
+                status = ProjectStatus.BLOCKED,
+                plan = ProjectPlan(
+                    steps = listOf(
+                        PlanStep(
+                            "s1",
+                            "Step 1",
+                            StepStatus.BLOCKED,
+                            "verify s1",
+                            waitCondition = WaitCondition(
+                                type = WaitConditionType.ASYNC_OPERATION,
+                                params = emptyMap(),
+                                registeredAt = now,
+                            ),
+                            notes = "prior note",
+                        )
+                    ),
+                    generatedAt = now,
+                )
+            )
+        )
+
+        val (newState, commands) = ProjectStateMachine.transition(
+            state,
+            ProjectEvent.WaitConditionSatisfied(
+                projectId = "proj-1",
+                stepId = "s1",
+                conditionType = "async_operation",
+                resolutionSummary = "download complete",
+                resolutionStatus = "succeeded",
+                timestamp = now,
+            )
+        )
+
+        val updatedStep = newState.project.plan.steps.first()
+        assertEquals(StepStatus.READY, updatedStep.status)
+        assertEquals(ProjectStatus.ACTIVE, newState.project.status)
+        assertTrue(updatedStep.notes.contains("prior note"))
+        assertTrue(updatedStep.notes.contains("async_status=succeeded"))
+        assertTrue(updatedStep.notes.contains("async_summary=download complete"))
+        val workReady = assertIs<ProjectCommand.EmitWorkReady>(
+            commands.first { it is ProjectCommand.EmitWorkReady }
+        )
+        assertEquals("wait_condition_satisfied: succeeded: download complete", workReady.signal.reason)
+    }
+
+    @Test
     fun `WaitConditionTimedOut with RETRY emits work-ready for the same step`() {
         val condition = WaitCondition(
             type = WaitConditionType.CONDITION_CHECK,

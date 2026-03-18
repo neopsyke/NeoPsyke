@@ -1,5 +1,6 @@
 package psyke.agent.project
 
+import psyke.agent.actions.async.AsyncActionWait
 import java.nio.file.Path
 import java.time.Instant
 
@@ -77,6 +78,7 @@ data class WaitCondition(
     val registeredAt: Instant,
     val timeoutAt: Instant? = null,
     val onTimeout: TimeoutAction = TimeoutAction.FAIL,
+    val asyncWait: AsyncActionWait? = null,
 )
 
 enum class WaitConditionType {
@@ -84,6 +86,7 @@ enum class WaitConditionType {
     EXTERNAL_EVENT,
     CONDITION_CHECK,
     CRON,
+    ASYNC_OPERATION,
 }
 
 enum class TimeoutAction {

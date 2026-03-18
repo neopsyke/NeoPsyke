@@ -3,6 +3,7 @@ package psyke.agent.project
 import kotlinx.coroutines.CoroutineScope
 import psyke.agent.ego.ActionLifecycleObserver
 import psyke.agent.id.ProjectRegistry
+import psyke.agent.actions.async.AsyncOperationEvent
 import psyke.agent.model.ActionOutcome
 import psyke.agent.model.PendingAction
 
@@ -14,6 +15,7 @@ interface ProjectsGateway : ProjectRegistry, ActionLifecycleObserver {
     fun finalizeProjectCycle(rootInputId: String) {}
     fun executeOperation(request: ProjectOperationRequest): ProjectOperationResult =
         ProjectOperationResult(false, "Projects feature is disabled.")
+    fun notifyAsyncOperationEvent(event: AsyncOperationEvent): Int = 0
     fun allProjects(): List<ProjectTier1Summary> = emptyList()
     fun projectStatus(projectId: String): ProjectState? = null
 }

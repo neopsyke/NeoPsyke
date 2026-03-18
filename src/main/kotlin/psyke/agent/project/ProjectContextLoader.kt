@@ -138,7 +138,8 @@ object ProjectContextLoader {
                     StepStatus.BLOCKED -> "[B]"
                     else -> "[ ]"
                 }
-                appendLine("- $marker ${s.id}: ${s.description}")
+                val suffix = s.notes.trim().takeIf { it.isNotBlank() }?.let { " ($it)" }.orEmpty()
+                appendLine("- $marker ${s.id}: ${s.description}$suffix")
             }
             appendLine()
 

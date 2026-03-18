@@ -36,6 +36,7 @@ It is intentionally high-level and should stay aligned with the code.
   - `TaskWorkspaceFinalizer` (noop or `LlmTaskWorkspaceFinalizer`)
   - `Id` (autonomous internal drive module; optional, loaded from `id-runtime.yaml`)
   - `ProjectsGateway` (optional project runtime boundary; also serves ambient active-project queries)
+  - `AsyncOperationRegistry` (generic provider adapter registry for long-running action handles restored by the project runtime)
   - `Ego` orchestrator
 - Interactive startup now performs an MCP memory health probe before enabling memory:
   - if probe passes, memory is exposed as available and `McpHippocampus` is wired
@@ -194,6 +195,9 @@ It is intentionally high-level and should stay aligned with the code.
     - Notify `ActionLifecycleObserver` subscribers so project-origin actions can translate denials back into project-step state.
   - If allowed:
     - Execute via `MotorCortex.execute`.
+    - Actions may return either an immediate outcome or a generic async wait contract (`ActionOutcome.asyncWait`, typically with `executionStatus=WAITING`).
+      - Synchronous tools keep the existing immediate-completion path.
+      - Async start actions do not enqueue ordinary follow-up thoughts on the start call.
     - Record outcome + deliberation evidence.
     - Notify `ActionLifecycleObserver` subscribers after execution so project-origin actions can update step acceptance/block/retry state.
     - Record non-answer/non-answer_draft action outcomes into the task workspace (when enabled).
@@ -240,12 +244,15 @@ It is intentionally high-level and should stay aligned with the code.
 - Runtime responsibilities:
   - Create/revise plans through `ProjectPlanner`
   - Observe project-origin action outcomes through the generic action lifecycle observer hook
+  - Translate generic async action wait handles into blocked project steps
   - Apply verifier decisions (`PASS`, `RETRY`, `BLOCK`, `CONTINUE`, `FAIL`) back into the event-sourced state machine
   - Restore timers, suspended resumes, and blocked waits on startup
+  - Poll async-operation providers and accept externally-delivered async completion events for blocked steps
   - Persist `events.jsonl`, `project.json`, `snapshot.json`, `workspace/context.md`, `workspace/scratch.md`, and per-step artifacts
 - Ego-facing signal contract:
   - The runtime emits only `ProjectSignal.WorkReady(projectId, stepId, reason)`
   - Timer wakes, wait-condition satisfaction, new-project planning, and resume reconciliation stay inside the project subsystem and are translated into `WorkReady` when runnable work exists.
+  - Async wait resolution is carried back as wake metadata plus step notes so resumed project work can react to the completion state.
   - Decision types:
     - `thought`
     - `action`

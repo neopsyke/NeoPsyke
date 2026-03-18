@@ -57,7 +57,7 @@ class PlanStepDependencyTest {
 
     @Test
     fun `wait condition types cover all expected kinds`() {
-        val expected = setOf("TIMER", "EXTERNAL_EVENT", "CONDITION_CHECK", "CRON")
+        val expected = setOf("TIMER", "EXTERNAL_EVENT", "CONDITION_CHECK", "CRON", "ASYNC_OPERATION")
         assertEquals(expected, WaitConditionType.entries.map { it.name }.toSet())
     }
 
