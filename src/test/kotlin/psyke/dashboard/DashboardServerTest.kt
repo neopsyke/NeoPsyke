@@ -11,7 +11,6 @@ import java.net.HttpURLConnection
 import java.net.ServerSocket
 import java.net.SocketTimeoutException
 import java.net.URI
-import java.net.URL
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
@@ -155,7 +154,7 @@ class DashboardServerTest {
     }
 
     private fun openSse(url: String): SseConnection {
-        val connection = (URL(url).openConnection() as HttpURLConnection).apply {
+        val connection = (URI.create(url).toURL().openConnection() as HttpURLConnection).apply {
             requestMethod = "GET"
             setRequestProperty("Accept", "text/event-stream")
             connectTimeout = 2_000
