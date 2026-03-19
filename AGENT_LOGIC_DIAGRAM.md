@@ -168,6 +168,7 @@ sequenceDiagram
                             end
                             Ego->>Motor: execute(action)
                             Note over Ego,Motor: Actions may complete immediately or return WAITING + async operation handles
+                            Note over Ego,PG: Project-origin WAITING without handles is rejected as a contract violation
                             Ego->>Ego: PromptInjectionDefense sanitize untrusted tool output
                             alt action = contact_user
                                 Ego->>Sched: clear pending thought and action work for same root-session scope

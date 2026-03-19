@@ -19,6 +19,7 @@ import psyke.agent.model.ConversationContext
 import psyke.agent.model.OriginSource
 import psyke.agent.model.PendingAction
 import psyke.agent.model.Urgency
+import psyke.support.RecordingInstrumentation
 import java.nio.file.Files
 import java.time.Instant
 import java.time.ZonedDateTime
@@ -189,6 +190,60 @@ class ProjectManagerTest {
             assertNotNull(state)
             assertTrue(state.project.plan.steps.first().notes.contains("async_status=succeeded"))
             assertTrue(signals.any { it is ProjectSignal.WorkReady && it.projectId == projectId })
+
+            manager.stop()
+        } finally {
+            root.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `project WAITING outcome without async handles is rejected as contract violation`() {
+        val root = Files.createTempDirectory("psyke-pm-invalid-wait")
+        try {
+            val instrumentation = RecordingInstrumentation()
+            val signals = CopyOnWriteArrayList<ProjectSignal>()
+            val manager = ProjectManager(
+                config = testConfig(root),
+                store = ProjectStore(root),
+                planner = DeterministicProjectPlanner(),
+                instrumentation = instrumentation,
+                signalEmitter = { signal -> if (signal is ProjectSignal) signals += signal },
+            )
+            manager.start(testScope())
+            val projectId = manager.createProject("Reject invalid waiting outcome")
+            val work = manager.nextWorkFromSignal(assertIs<ProjectSignal.WorkReady>(signals.last()))
+            assertNotNull(work)
+
+            manager.onActionExecuted(
+                action = projectAction(work.rootInputId),
+                outcome = ActionOutcome(
+                    statusSummary = "Async operation allegedly started.",
+                    executionStatus = ActionExecutionStatus.WAITING,
+                ),
+                observedEvidence = false,
+            )
+            manager.finalizeProjectCycle(work.rootInputId)
+
+            val state = manager.projectStatus(projectId)
+            assertNotNull(state)
+            assertEquals(ProjectStatus.ACTIVE, state.project.status)
+            assertEquals(StepStatus.READY, state.project.plan.steps.first().status)
+            assertNull(state.project.plan.steps.first().waitCondition)
+            assertEquals(1, state.project.plan.steps.first().attempts)
+            assertTrue(
+                signals.any {
+                    it is ProjectSignal.WorkReady &&
+                        it.projectId == projectId &&
+                        it.stepId == "step-1"
+                }
+            )
+            assertTrue(
+                instrumentation.events.any {
+                    it.type == "warning" &&
+                        (it.data["message"] as? String)?.contains("WAITING without async handles") == true
+                }
+            )
 
             manager.stop()
         } finally {

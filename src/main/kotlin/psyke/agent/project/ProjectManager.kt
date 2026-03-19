@@ -129,6 +129,24 @@ class ProjectManager(
             ProjectEvent.StepActionExecuted(session.projectId, session.stepId, outcome.statusSummary)
         ) ?: return
         val step = afterAction.project.plan.steps.firstOrNull { it.id == session.stepId } ?: return
+        if (outcome.executionStatus == psyke.agent.model.ActionExecutionStatus.WAITING && outcome.asyncWait == null) {
+            val message =
+                "Project action returned WAITING without async handles; treating as retryable contract violation."
+            logger.warn { "Project async wait contract violation: project=${session.projectId}, step=${session.stepId}, action=${action.type.id}" }
+            instrumentation.emit(AgentEvents.warning(message))
+            sessionsByRootInputId[rootInputId] = sessionsByRootInputId[rootInputId]
+                ?.copy(allowFollowUp = false, requeueReason = null)
+                ?: return
+            applyEvent(
+                session.projectId,
+                ProjectEvent.StepAcceptanceFailed(
+                    projectId = session.projectId,
+                    stepId = session.stepId,
+                    reason = message,
+                )
+            )
+            return
+        }
         if (outcome.waiting) {
             sessionsByRootInputId[rootInputId] = sessionsByRootInputId[rootInputId]
                 ?.copy(allowFollowUp = false, requeueReason = null)
@@ -669,12 +687,14 @@ class ProjectManager(
         "project:$projectId:$stepId:${RootInputIds.next()}"
 
     private fun buildWaitConditionForAsyncOutcome(outcome: ActionOutcome): WaitCondition {
-        val wait = outcome.asyncWait
+        val wait = requireNotNull(outcome.asyncWait) {
+            "Project async wait outcomes must provide asyncWait handles."
+        }
         return WaitCondition(
-            type = if (wait != null) WaitConditionType.ASYNC_OPERATION else WaitConditionType.CONDITION_CHECK,
+            type = WaitConditionType.ASYNC_OPERATION,
             params = emptyMap(),
             registeredAt = Instant.now(),
-            timeoutAt = wait?.handles?.mapNotNull { it.timeoutAt }?.minOrNull(),
+            timeoutAt = wait.handles.mapNotNull { it.timeoutAt }.minOrNull(),
             onTimeout = TimeoutAction.FAIL,
             asyncWait = wait,
         )

@@ -83,7 +83,11 @@ data class WaitCondition(
 
 enum class WaitConditionType {
     TIMER,
+    // Reserved for future push-based runtime events (webhooks, approvals, connector callbacks).
+    // Persist/restore works today, but a generic event-ingestion satisfier is not implemented yet.
     EXTERNAL_EVENT,
+    // Reserved for future pull-based named predicate checks that are not naturally async handles.
+    // Persist/restore works today, but a generic checker registry/satisfier is not implemented yet.
     CONDITION_CHECK,
     CRON,
     ASYNC_OPERATION,

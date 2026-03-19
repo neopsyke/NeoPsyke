@@ -198,6 +198,7 @@ It is intentionally high-level and should stay aligned with the code.
     - Actions may return either an immediate outcome or a generic async wait contract (`ActionOutcome.asyncWait`, typically with `executionStatus=WAITING`).
       - Synchronous tools keep the existing immediate-completion path.
       - Async start actions do not enqueue ordinary follow-up thoughts on the start call.
+      - For project-origin actions, `WAITING` without async handles is treated as a contract violation and translated into a retry path instead of a fake generic wait.
     - Record outcome + deliberation evidence.
     - Notify `ActionLifecycleObserver` subscribers after execution so project-origin actions can update step acceptance/block/retry state.
     - Record non-answer/non-answer_draft action outcomes into the task workspace (when enabled).
@@ -245,6 +246,7 @@ It is intentionally high-level and should stay aligned with the code.
   - Create/revise plans through `ProjectPlanner`
   - Observe project-origin action outcomes through the generic action lifecycle observer hook
   - Translate generic async action wait handles into blocked project steps
+  - Reject project-origin `WAITING` outcomes that do not provide async handles; this is stage-1 enforcement of the async wait contract
   - Apply verifier decisions (`PASS`, `RETRY`, `BLOCK`, `CONTINUE`, `FAIL`) back into the event-sourced state machine
   - Restore timers, suspended resumes, and blocked waits on startup
   - Poll async-operation providers and accept externally-delivered async completion events for blocked steps
