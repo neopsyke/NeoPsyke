@@ -15,7 +15,7 @@ import psyke.agent.memory.longterm.LlmLongTermMemoryAdvisor
 import psyke.agent.memory.longterm.McpHippocampus
 import psyke.agent.tools.mcp.McpStdioClient
 import psyke.agent.model.ActionType
-import psyke.agent.cortex.sensory.AsyncSensoryInputSource
+import psyke.agent.cortex.sensory.AsyncSignalSource
 import psyke.agent.cortex.sensory.SensoryCortex
 import psyke.agent.cortex.motor.ActionImplementationStatus
 import psyke.agent.cortex.motor.MotorCortex
@@ -611,10 +611,10 @@ internal object AppModeRunners {
         val agentScope = agentScope("psyke-agent")
         val dashboardStore = DashboardStateStore()
         val interlocutorResolver = psyke.agent.config.DefaultInterlocutorResolver()
-        val sensoryInput = AsyncSensoryInputSource(
+        val sensoryInput = AsyncSignalSource(
             includeStdin = true,
             emitStdinClosedSignal = false,
-            stdinMode = AsyncSensoryInputSource.StdinMode.CONTROL_ONLY,
+            stdinMode = AsyncSignalSource.StdinMode.CONTROL_ONLY,
             prompt = { print("control> ") },
             scope = agentScope
         )
@@ -984,6 +984,23 @@ internal object AppModeRunners {
                                                     )
                                                     val logbookSummarizer = createLogbookSummarizer(config, longTermMemoryClient)
                                                     val webSearchActionHandler = WebSearchActionHandler(runtime.engine)
+                                                    val projectManager = if (config.projects.enabled) {
+                                                        psyke.agent.project.ProjectManager(
+                                                            config = config.projects,
+                                                            store = psyke.agent.project.ProjectStore(config.projects.workspaceRoot),
+                                                            planner = psyke.agent.project.LlmProjectPlanner(plannerClient, config),
+                                                            verifier = psyke.agent.project.LlmProjectStepVerifier(plannerClient, config),
+                                                            instrumentation = instrumentation,
+                                                            signalEmitter = { signal ->
+                                                                if (signal is psyke.agent.cortex.sensory.ProjectSignal) {
+                                                                    sensoryInput.offerProjectSignal(signal)
+                                                                }
+                                                            },
+                                                        ).also { it.start(agentScope) }
+                                                    } else {
+                                                        null
+                                                    }
+                                                    dashboardServer?.projectManager = projectManager
                                                     var plannerNoopCount = 0
                                                     var plannerOutputRepairedCount = 0
                                                     val assembly = EgoAssembler.assemble(
@@ -1065,6 +1082,8 @@ internal object AppModeRunners {
                                                         webSearchActionHandler = webSearchActionHandler,
                                                         mcpTimeTool = timeTool,
                                                         fetchTool = activeFetchTool,
+                                                        projectsGateway = projectManager
+                                                            ?: psyke.agent.project.NoopProjectsGateway,
                                                         output = {},
                                                     )
                                                     assembly.actionRegistry.loadWarnings.forEach { warning ->
@@ -1134,7 +1153,10 @@ internal object AppModeRunners {
                                                             hippocampus.close()
                                                             closeQuietly(logbook)
                                                         }
-                                                        } } finally { egoDispatcher.close() }
+                                                        } } finally {
+                                                            projectManager?.stop()
+                                                            egoDispatcher.close()
+                                                        }
                                                     }
                                                 } finally {
                                                     closeQuietly(activeFetchTool)
@@ -1192,7 +1214,7 @@ internal object AppModeRunners {
         }
 
         val agentScope = agentScope("psyke-freud-live")
-        val sensoryInput = AsyncSensoryInputSource(
+        val sensoryInput = AsyncSignalSource(
             includeStdin = false,
             emitStdinClosedSignal = false,
             scope = agentScope
@@ -1420,6 +1442,22 @@ internal object AppModeRunners {
                                                 )
                                                 val logbookSummarizer = createLogbookSummarizer(config, longTermMemoryClient)
                                                 val webSearchActionHandler = WebSearchActionHandler(runtime.engine)
+                                                val projectManager = if (config.projects.enabled) {
+                                                    psyke.agent.project.ProjectManager(
+                                                        config = config.projects,
+                                                        store = psyke.agent.project.ProjectStore(config.projects.workspaceRoot),
+                                                        planner = psyke.agent.project.LlmProjectPlanner(plannerClient, config),
+                                                        verifier = psyke.agent.project.LlmProjectStepVerifier(plannerClient, config),
+                                                        instrumentation = instrumentation,
+                                                        signalEmitter = { signal ->
+                                                            if (signal is psyke.agent.cortex.sensory.ProjectSignal) {
+                                                                sensoryInput.offerProjectSignal(signal)
+                                                            }
+                                                        },
+                                                    ).also { it.start(agentScope) }
+                                                } else {
+                                                    null
+                                                }
                                                 val assembly = EgoAssembler.assemble(
                                                     config = config,
                                                     plannerFactory = { motorCortex ->
@@ -1479,6 +1517,8 @@ internal object AppModeRunners {
                                                     webSearchActionHandler = webSearchActionHandler,
                                                     mcpTimeTool = timeTool,
                                                     fetchTool = activeFetchTool,
+                                                    projectsGateway = projectManager
+                                                        ?: psyke.agent.project.NoopProjectsGateway,
                                                     output = liveOutput,
                                                 )
                                                 assembly.actionRegistry.loadWarnings.forEach { warning ->
@@ -1564,7 +1604,10 @@ internal object AppModeRunners {
                                                     )
                                                     exitProcess(exitCode)
 
-                                                    } } finally { egoDispatcher.close() }
+                                                    } } finally {
+                                                        projectManager?.stop()
+                                                        egoDispatcher.close()
+                                                    }
                                                 }
                                             } finally {
                                                 closeQuietly(activeFetchTool)

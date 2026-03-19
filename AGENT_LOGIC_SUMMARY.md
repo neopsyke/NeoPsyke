@@ -35,7 +35,8 @@ It is intentionally high-level and should stay aligned with the code.
   - `TaskWorkspaceStore` (ephemeral per-request notebook/workspace)
   - `TaskWorkspaceFinalizer` (noop or `LlmTaskWorkspaceFinalizer`)
   - `Id` (autonomous internal drive module; optional, loaded from `id-runtime.yaml`)
-  - `ProjectRegistry` (optional active-project signal source for self-initiated ambient relevance)
+  - `ProjectsGateway` (optional project runtime boundary; also serves ambient active-project queries)
+  - `AsyncOperationRegistry` (generic provider adapter registry for long-running action handles restored by the project runtime)
   - `Ego` orchestrator
 - Interactive startup now performs an MCP memory health probe before enabling memory:
   - if probe passes, memory is exposed as available and `McpHippocampus` is wired
@@ -58,6 +59,7 @@ It is intentionally high-level and should stay aligned with the code.
   - Pulls signals from `SensoryCortex`.
   - Enqueues new user input in `AttentionScheduler`.
   - Runs `runLoop()` while there is pending work.
+  - Handles `ProjectSignal.WorkReady` by asking `ProjectsGateway.nextWorkFromSignal(...)` for a `ProjectWorkUnit`, enqueueing project work, and clearing transient Ego state for that project root after the cycle.
   - Interactive wiring uses `AsyncSensoryInputSource` with stdin enabled in control-only mode:
     - terminal `exit` emits `ExitRequested(source="stdin")` and stops the loop
     - non-command stdin text is ignored as chat input and never enqueued to the scheduler
@@ -66,6 +68,7 @@ It is intentionally high-level and should stay aligned with the code.
 - `runLoop()` (bounded by `config.planner.maxLoopStepsPerInput`):
   - Scheduler priority:
     - Inputs first
+    - Then project work already enqueued from `ProjectSignal.WorkReady`
     - Then Id impulses (when queued)
     - Then highest-urgency between pending action and thought
   - Per task:
@@ -189,9 +192,15 @@ It is intentionally high-level and should stay aligned with the code.
     - Record denial metrics/evidence.
     - Enqueue a new "find safe alternative" thought with denied-action context, including structured `reason_code`.
     - Attempt reflection-lesson persistence into long-term memory (filtered; technical/system failures are skipped).
+    - Notify `ActionLifecycleObserver` subscribers so project-origin actions can translate denials back into project-step state.
   - If allowed:
     - Execute via `MotorCortex.execute`.
+    - Actions may return either an immediate outcome or a generic async wait contract (`ActionOutcome.asyncWait`, typically with `executionStatus=WAITING`).
+      - Synchronous tools keep the existing immediate-completion path.
+      - Async start actions do not enqueue ordinary follow-up thoughts on the start call.
+      - For project-origin actions, `WAITING` without async handles is treated as a contract violation and translated into a retry path instead of a fake generic wait.
     - Record outcome + deliberation evidence.
+    - Notify `ActionLifecycleObserver` subscribers after execution so project-origin actions can update step acceptance/block/retry state.
     - Record non-answer/non-answer_draft action outcomes into the task workspace (when enabled).
     - Store assistant output in dialogue and short-term memory when applicable.
     - For `answer`, optionally force a post-terminal-answer long-term memory assessment.
@@ -218,6 +227,34 @@ It is intentionally high-level and should stay aligned with the code.
   - Strict JSON parse + minimal repair for invalid escapes.
   - On planner parse failure: one truncation retry with increased completion budget when output appears truncated, then one strict-JSON retry.
   - Normalizes `action_payload` from either JSON string or structured JSON (object/array) into a string payload.
+
+## Projects Runtime
+- Files:
+  - `src/main/kotlin/psyke/agent/project/ProjectsGateway.kt`
+  - `src/main/kotlin/psyke/agent/project/ProjectManager.kt`
+  - `src/main/kotlin/psyke/agent/project/ProjectStateMachine.kt`
+  - `src/main/kotlin/psyke/agent/project/ProjectPlanner.kt`
+  - `src/main/kotlin/psyke/agent/project/ProjectStepVerifier.kt`
+- Feature flag:
+  - When `config.projects.enabled=false`, `NoopProjectsGateway` is injected and project actions/signals are inert.
+- Boundary:
+  - Ego uses the gateway only for:
+    - `pendingWorkSummary()` during Id-driven impulses
+    - `nextWorkFromSignal(ProjectSignal.WorkReady)` when project work is ready
+    - project-origin action lifecycle callbacks plus `finalizeProjectCycle(rootInputId)`
+- Runtime responsibilities:
+  - Create/revise plans through `ProjectPlanner`
+  - Observe project-origin action outcomes through the generic action lifecycle observer hook
+  - Translate generic async action wait handles into blocked project steps
+  - Reject project-origin `WAITING` outcomes that do not provide async handles; this is stage-1 enforcement of the async wait contract
+  - Apply verifier decisions (`PASS`, `RETRY`, `BLOCK`, `CONTINUE`, `FAIL`) back into the event-sourced state machine
+  - Restore timers, suspended resumes, and blocked waits on startup
+  - Poll async-operation providers and accept externally-delivered async completion events for blocked steps
+  - Persist `events.jsonl`, `project.json`, `snapshot.json`, `workspace/context.md`, `workspace/scratch.md`, and per-step artifacts
+- Ego-facing signal contract:
+  - The runtime emits only `ProjectSignal.WorkReady(projectId, stepId, reason)`
+  - Timer wakes, wait-condition satisfaction, new-project planning, and resume reconciliation stay inside the project subsystem and are translated into `WorkReady` when runnable work exists.
+  - Async wait resolution is carried back as wake metadata plus step notes so resumed project work can react to the completion state.
   - Decision types:
     - `thought`
     - `action`

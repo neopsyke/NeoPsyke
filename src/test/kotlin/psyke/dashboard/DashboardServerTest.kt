@@ -1,8 +1,17 @@
 package psyke.dashboard
 
+import com.fasterxml.jackson.core.type.TypeReference
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
-import psyke.agent.cortex.sensory.AsyncSensoryInputSource
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import psyke.agent.project.DeterministicProjectPlanner
+import psyke.agent.project.ProjectConfig
+import psyke.agent.project.ProjectManager
+import psyke.agent.project.ProjectPriority
+import psyke.agent.project.ProjectStore
+import psyke.agent.cortex.sensory.AsyncSignalSource
 import psyke.instrumentation.AgentEvent
 import psyke.metrics.MetricsQueryProvider
 import java.io.BufferedReader
@@ -15,6 +24,7 @@ import java.net.URL
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
+import java.nio.file.Files
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
@@ -129,6 +139,86 @@ class DashboardServerTest {
         }
     }
 
+    @Test
+    fun `projects api returns structured summaries and details`() {
+        val root = Files.createTempDirectory("psyke-dashboard-projects")
+        val manager = ProjectManager(
+            config = ProjectConfig(enabled = true, workspaceRoot = root),
+            store = ProjectStore(root),
+            planner = DeterministicProjectPlanner(),
+        )
+        manager.start(testScope())
+        try {
+            val projectId = manager.createProject(
+                instruction = "Handle \"quotes\" and line\nbreaks safely",
+                title = "Project \"Alpha\" & Beta",
+                priority = ProjectPriority.HIGH,
+                completionCriteria = "Done when payload stays valid JSON.",
+            )
+
+            startServer(projectManager = manager).use { started ->
+                val listResponse = get("http://127.0.0.1:${started.port}/api/projects")
+                assertEquals(200, listResponse.statusCode())
+                val summaries: List<Map<String, Any?>> = mapper.readValue(listResponse.body())
+                assertEquals(1, summaries.size)
+                val summary = summaries.single()
+                assertEquals(projectId, summary["projectId"])
+                assertEquals("Project \"Alpha\" & Beta", summary["title"])
+                assertEquals("ACTIVE", summary["status"])
+                assertEquals("HIGH", summary["priority"])
+                assertEquals(1, (summary["totalSteps"] as Number).toInt())
+                assertEquals(0, (summary["doneSteps"] as Number).toInt())
+                val summarySteps = mapper.convertValue(summary["steps"], mapListType())
+                assertEquals(1, summarySteps.size)
+                assertEquals("Handle \"quotes\" and line\nbreaks safely", summarySteps.single()["description"])
+
+                val detailResponse = get("http://127.0.0.1:${started.port}/api/projects/$projectId")
+                assertEquals(200, detailResponse.statusCode())
+                val detail: Map<String, Any?> = mapper.readValue(detailResponse.body())
+                assertEquals(projectId, detail["projectId"])
+                assertEquals("Project \"Alpha\" & Beta", detail["title"])
+                assertEquals("Handle \"quotes\" and line\nbreaks safely", detail["instruction"])
+                assertEquals("Done when payload stays valid JSON.", detail["completionCriteria"])
+                assertEquals(2, (detail["eventCount"] as Number).toInt())
+                val detailSteps = mapper.convertValue(detail["steps"], mapListType())
+                assertEquals(1, detailSteps.size)
+                assertEquals("step-1", detailSteps.single()["id"])
+                assertEquals("READY", detailSteps.single()["status"])
+            }
+        } finally {
+            manager.stop()
+            root.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `projects api returns empty list with manager and 503 when projects are unavailable`() {
+        val root = Files.createTempDirectory("psyke-dashboard-projects-empty")
+        val manager = ProjectManager(
+            config = ProjectConfig(enabled = true, workspaceRoot = root),
+            store = ProjectStore(root),
+            planner = DeterministicProjectPlanner(),
+        )
+        manager.start(testScope())
+        try {
+            startServer(projectManager = manager).use { started ->
+                val emptyResponse = get("http://127.0.0.1:${started.port}/api/projects")
+                assertEquals(200, emptyResponse.statusCode())
+                val summaries: List<Map<String, Any?>> = mapper.readValue(emptyResponse.body())
+                assertTrue(summaries.isEmpty())
+            }
+
+            startServer().use { started ->
+                val unavailable = get("http://127.0.0.1:${started.port}/api/projects")
+                assertEquals(503, unavailable.statusCode())
+                assertEquals("[]", unavailable.body())
+            }
+        } finally {
+            manager.stop()
+            root.toFile().deleteRecursively()
+        }
+    }
+
     private fun get(url: String): HttpResponse<String> {
         val request = HttpRequest.newBuilder(URI.create(url))
             .GET()
@@ -190,10 +280,10 @@ class DashboardServerTest {
         }
     }
 
-    private fun startServer(): StartedServer {
+    private fun startServer(projectManager: ProjectManager? = null): StartedServer {
         val port = ServerSocket(0).use { it.localPort }
         val store = DashboardStateStore()
-        val sensory = AsyncSensoryInputSource(
+        val sensory = AsyncSignalSource(
             includeStdin = false,
             emitStdinClosedSignal = false
         )
@@ -203,6 +293,7 @@ class DashboardServerTest {
             chatBridge = bridge,
             port = port
         )
+        server.projectManager = projectManager
         server.start()
         return StartedServer(
             port = port,
@@ -212,11 +303,15 @@ class DashboardServerTest {
         )
     }
 
+    private fun testScope(): CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+    private fun mapListType() = object : TypeReference<List<Map<String, Any?>>>() {}
+
     private data class StartedServer(
         val port: Int,
         val store: DashboardStateStore,
         val server: DashboardServer,
-        val sensory: AsyncSensoryInputSource,
+        val sensory: AsyncSignalSource,
     ) : Closeable {
         override fun close() {
             server.close()

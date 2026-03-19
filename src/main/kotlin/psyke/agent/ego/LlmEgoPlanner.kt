@@ -52,11 +52,13 @@ class LlmEgoPlanner(
             is EgoTrigger.IncomingInput -> "input"
             is EgoTrigger.PendingThoughtInput -> "thought"
             is EgoTrigger.IncomingImpulse -> "impulse"
+            is EgoTrigger.ProjectWork -> "project-work"
         }
         val rootInputId = when (trigger) {
             is EgoTrigger.IncomingInput -> trigger.input.rootInputId
             is EgoTrigger.PendingThoughtInput -> trigger.thought.rootInputId
             is EgoTrigger.IncomingImpulse -> trigger.impulse.rootImpulseId
+            is EgoTrigger.ProjectWork -> trigger.workUnit.projectId
         }
         val sessionId = context.conversationContext.sessionId
 
@@ -605,6 +607,7 @@ class LlmEgoPlanner(
             is EgoTrigger.IncomingInput -> trigger.input.rootInputId
             is EgoTrigger.PendingThoughtInput -> trigger.thought.rootInputId
             is EgoTrigger.IncomingImpulse -> trigger.impulse.rootImpulseId
+            is EgoTrigger.ProjectWork -> trigger.workUnit.projectId
         }
         return ActionVerifierCircuitKey(
             rootInputId = rootInputId,
@@ -1618,6 +1621,24 @@ class LlmEgoPlanner(
                     .filter { it.isNotBlank() }
                 parts.joinToString("\n")
             }
+            is EgoTrigger.ProjectWork -> {
+                val wu = trigger.workUnit
+                buildString {
+                    append("PROJECT_WORK(project=${wu.projectId}, step=${wu.stepId}): ${wu.stepDescription}")
+                    if (wu.wakeReason.isNotBlank()) {
+                        append("\nwake_reason=")
+                        append(wu.wakeReason)
+                    }
+                    if (wu.acceptanceCriteria.isNotBlank()) {
+                        append("\nacceptance_criteria=")
+                        append(wu.acceptanceCriteria)
+                    }
+                    if (wu.workingContext.isNotBlank()) {
+                        append("\nworking_context=")
+                        append(wu.workingContext.take(PROJECT_WORKING_CONTEXT_MAX_CHARS))
+                    }
+                }
+            }
         }
 
     private data class EgoDecisionPayload(
@@ -1716,6 +1737,7 @@ class LlmEgoPlanner(
             .ifBlank { "contact_user" }
 
     private companion object {
+        const val PROJECT_WORKING_CONTEXT_MAX_CHARS: Int = 1_200
         const val ACTION_VERIFIER_BASE_TOKENS: Int = 80
         const val ACTION_VERIFIER_MAX_TOKENS: Int = 220
         const val ACTION_VERIFIER_TRUNCATION_RETRY_MIN_TOKEN_BUMP: Int = 32

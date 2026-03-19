@@ -2,6 +2,7 @@ package psyke.agent.ego
 
 import psyke.agent.config.*
 import psyke.agent.model.*
+import psyke.agent.project.ProjectWorkUnit
 import java.util.PriorityQueue
 
 class AttentionScheduler(
@@ -12,6 +13,7 @@ class AttentionScheduler(
     private val thoughts = PriorityQueue<PendingThought>(thoughtComparator)
     private val actions = PriorityQueue<PendingAction>(actionComparator)
     private val impulses = ArrayDeque<PendingImpulse>()
+    private val projectWork = ArrayDeque<ProjectWorkUnit>()
     private var latestQueuedInput: PendingInput? = null
 
     fun enqueueInput(
@@ -138,6 +140,15 @@ class AttentionScheduler(
         impulses.clear()
     }
 
+    fun enqueueProjectWork(workUnit: ProjectWorkUnit): Boolean {
+        projectWork.addLast(workUnit)
+        return true
+    }
+
+    fun clearProjectWork() {
+        projectWork.clear()
+    }
+
     fun dequeueFallbackExplanationAction(): PendingAction? {
         val candidate = actions.toList()
             .filter { it.isFallbackExplanation }
@@ -234,7 +245,13 @@ class AttentionScheduler(
             return LoopTask.ProcessImpulse(impulse)
         }
 
-        // 3. Actions and thoughts by urgency priority.
+        // 3. Project work comes before general thoughts/actions.
+        val pw = projectWork.removeFirstOrNull()
+        if (pw != null) {
+            return LoopTask.ProcessProjectWork(pw)
+        }
+
+        // 4. Actions and thoughts by urgency priority.
         val topAction = actions.peek()
         val topThought = thoughts.peek()
         if (topAction == null && topThought == null) {
@@ -255,7 +272,7 @@ class AttentionScheduler(
     }
 
     fun hasPendingWork(): Boolean =
-        inputs.isNotEmpty() || impulses.isNotEmpty() || thoughts.isNotEmpty() || actions.isNotEmpty()
+        inputs.isNotEmpty() || impulses.isNotEmpty() || projectWork.isNotEmpty() || thoughts.isNotEmpty() || actions.isNotEmpty()
 
     /**
      * Returns true when there is queued work (thought/action/impulse) for a specific root.

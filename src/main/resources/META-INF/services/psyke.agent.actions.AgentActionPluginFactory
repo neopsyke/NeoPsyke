@@ -4,4 +4,5 @@ psyke.agent.actions.builtin.WebSearchActionPluginFactory
 psyke.agent.actions.builtin.McpTimeActionPluginFactory
 psyke.agent.actions.builtin.WebsiteFetchActionPluginFactory
 psyke.agent.actions.builtin.ReflectActionPluginFactory
+psyke.agent.actions.builtin.ProjectOperationActionPluginFactory
 psyke.agent.actions.email.MicrosoftGraphEmailActionPluginFactory

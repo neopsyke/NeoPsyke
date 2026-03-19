@@ -6,6 +6,8 @@ import psyke.agent.model.ActionType
 import psyke.agent.config.AgentConfig
 import psyke.agent.model.PendingAction
 import psyke.agent.model.SuperegoContext
+import psyke.agent.project.NoopProjectsGateway
+import psyke.agent.project.ProjectsGateway
 import psyke.agent.tools.mcp.FetchTool
 import psyke.agent.tools.mcp.McpTimeTool
 
@@ -79,6 +81,7 @@ data class ActionPluginFactoryContext(
     val output: (String) -> Unit,
     val env: Map<String, String> = System.getenv(),
     val reflectionMemoryRecorder: ReflectionMemoryRecorder,
+    val projectsGateway: ProjectsGateway = NoopProjectsGateway,
 )
 
 interface AgentActionPlugin : AutoCloseable {

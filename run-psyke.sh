@@ -10,6 +10,7 @@ LOG_LEVEL_FROM_ENV=0
 EVAL_MODE=0
 FREUD_LIVE_MODE=0
 DISABLE_ID=0
+PROJECTS_OVERRIDE=""
 LOOP_DELAY_MS="${EGO_LOOP_DELAY_MS:-1000}"
 LOG_DIR="${PSYKE_LOG_DIR:-$ROOT_DIR/.psyke/logs}"
 LOG_RETENTION="${PSYKE_LOG_RETENTION:-30}"
@@ -134,19 +135,29 @@ while [[ $# -gt 0 ]]; do
       DISABLE_ID=1
       shift
       ;;
+    --projects)
+      PROJECTS_OVERRIDE="true"
+      shift
+      ;;
+    --no-projects)
+      PROJECTS_OVERRIDE="false"
+      shift
+      ;;
     --clear-memory-all|--clear-memory-vector|--clear-memory-episodic|--clear-memory-lessons)
       APP_ARGS+=("$1")
       shift
       ;;
     -h|--help)
       cat <<'EOF'
-Usage: ./run-psyke.sh [--log-level LEVEL] [--loop-delay-ms MS|--no-delay] [--no-id] [--clear-memory-*] [--] [app-args...]
+Usage: ./run-psyke.sh [--log-level LEVEL] [--loop-delay-ms MS|--no-delay] [--no-id] [--projects|--no-projects] [--clear-memory-*] [--] [app-args...]
 
 Options:
   -l, --log-level LEVEL   SLF4J simple logger level (default: warning)
       --loop-delay-ms MS  Delay between interactive loop cycles (default: 1000)
       --no-delay          Alias for --loop-delay-ms 0
       --no-id             Disable the Id module (autonomous drives) for this run
+      --projects          Enable the project tracking subsystem for this run
+      --no-projects       Disable the project tracking subsystem for this run
   -h, --help              Show this help message
 
 Memory clearing (applied before agent startup):
@@ -174,6 +185,7 @@ Environment:
   EGO_LOOP_DELAY_MS       Delay between loop cycles in ms (default via launcher: 1000)
   PSYKE_ID_CONFIG_FILE       Optional path to Id runtime YAML (default: ./id-runtime.yaml)
   PSYKE_ID_ENABLED            Override Id module enabled state (true/false, overrides YAML)
+  PSYKE_PROJECTS_ENABLED      Override project subsystem enabled state (true/false, default: false)
   PSYKE_LLM_CACHE_MODE       LLM response cache mode: record, replay, or off (default: off)
   PSYKE_LLM_CACHE_FILE       Path to LLM cache JSONL file (required when cache mode is record or replay)
   PSYKE_EVAL_TRANSPORT_DEBUG  Set to true to keep low-level LLM transport debug lines in eval mode
@@ -261,6 +273,10 @@ export EGO_TASK_WORKSPACE_DEBUG_CAPTURE_ENABLED="true"
 
 if [[ "$DISABLE_ID" -eq 1 ]]; then
   export PSYKE_ID_ENABLED="false"
+fi
+
+if [[ -n "$PROJECTS_OVERRIDE" ]]; then
+  export PSYKE_PROJECTS_ENABLED="$PROJECTS_OVERRIDE"
 fi
 
 JAVA_OPTS_APPEND=" -Dorg.slf4j.simpleLogger.defaultLogLevel=${LOG_LEVEL} -Dorg.slf4j.simpleLogger.logFile=${RUN_LOG_FILE} -Dorg.slf4j.simpleLogger.showDateTime=true -Dorg.slf4j.simpleLogger.dateTimeFormat=yyyy-MM-dd_HH:mm:ss.SSSZ"

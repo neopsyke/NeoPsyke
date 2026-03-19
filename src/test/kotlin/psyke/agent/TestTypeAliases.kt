@@ -43,9 +43,15 @@ typealias Superego = psyke.agent.superego.Superego
 typealias SuperegoPolicy = psyke.agent.superego.SuperegoPolicy
 
 typealias SensoryInput = psyke.agent.cortex.sensory.SensoryInput
+typealias Signal = psyke.agent.cortex.sensory.Signal
 typealias SensorySignal = psyke.agent.cortex.sensory.SensorySignal
-typealias SensoryInputSource = psyke.agent.cortex.sensory.SensoryInputSource
-typealias StdinSensoryInputSource = psyke.agent.cortex.sensory.StdinSensoryInputSource
+typealias SystemSignal = psyke.agent.cortex.sensory.SystemSignal
+typealias ProjectSignal = psyke.agent.cortex.sensory.ProjectSignal
+typealias SignalSource = psyke.agent.cortex.sensory.SignalSource
+typealias StdinSignalSource = psyke.agent.cortex.sensory.StdinSignalSource
+typealias AsyncSignalSource = psyke.agent.cortex.sensory.AsyncSignalSource
+@Suppress("DEPRECATION") typealias SensoryInputSource = psyke.agent.cortex.sensory.SensoryInputSource
+@Suppress("DEPRECATION") typealias StdinSensoryInputSource = psyke.agent.cortex.sensory.StdinSensoryInputSource
 typealias SensoryCortex = psyke.agent.cortex.sensory.SensoryCortex
 
 typealias MotorCortex = psyke.agent.cortex.motor.MotorCortex

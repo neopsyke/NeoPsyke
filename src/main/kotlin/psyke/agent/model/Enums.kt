@@ -41,6 +41,7 @@ data class ActionType(
         val MCP_TIME: ActionType = ActionType("mcp_time")
         val WEBSITE_FETCH: ActionType = ActionType("website_fetch")
         val REFLECT: ActionType = ActionType("reflect")
+        val PROJECT_OPERATION: ActionType = ActionType("project_operation")
 
         /** Built-in action set for compatibility with existing loops/tests. */
         val entries: Set<ActionType> = setOf(
@@ -50,6 +51,7 @@ data class ActionType(
             MCP_TIME,
             WEBSITE_FETCH,
             REFLECT,
+            PROJECT_OPERATION,
         )
 
         fun fromRaw(value: String?): ActionType? =

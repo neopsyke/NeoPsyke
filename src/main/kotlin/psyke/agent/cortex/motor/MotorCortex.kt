@@ -9,6 +9,8 @@ import psyke.agent.model.ActionOutcome
 import psyke.agent.model.ActionType
 import psyke.agent.config.AgentConfig
 import psyke.agent.model.PendingAction
+import psyke.agent.project.NoopProjectsGateway
+import psyke.agent.project.ProjectsGateway
 import psyke.agent.tools.mcp.FetchTool
 import psyke.agent.tools.mcp.McpTimeTool
 
@@ -29,6 +31,7 @@ class MotorCortex(
         output: (String) -> Unit = ::println,
         reflectionMemoryRecorder: ReflectionMemoryRecorder,
         config: AgentConfig = AgentConfig(),
+        projectsGateway: ProjectsGateway = NoopProjectsGateway,
     ) : this(
         actionRegistry = ActionRegistry.discover(
             ActionPluginFactoryContext(
@@ -38,6 +41,7 @@ class MotorCortex(
                 fetchTool = fetchTool,
                 output = output,
                 reflectionMemoryRecorder = reflectionMemoryRecorder,
+                projectsGateway = projectsGateway,
             )
         )
     )

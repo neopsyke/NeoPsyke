@@ -552,4 +552,60 @@ object AgentEvents {
                 "actual_hash" to actualHash,
             )
         )
+
+    // ── Project events ───────────────────────────────────────────────────
+
+    fun projectCreated(projectId: String, title: String, priority: String): AgentEvent =
+        AgentEvent(
+            type = "project_created",
+            data = mapOf("project_id" to projectId, "title" to title, "priority" to priority)
+        )
+
+    fun projectStatusChanged(projectId: String, oldStatus: String, newStatus: String): AgentEvent =
+        AgentEvent(
+            type = "project_status_changed",
+            data = mapOf("project_id" to projectId, "old_status" to oldStatus, "new_status" to newStatus)
+        )
+
+    fun projectStepStarted(projectId: String, stepId: String, description: String): AgentEvent =
+        AgentEvent(
+            type = "project_step_started",
+            data = mapOf("project_id" to projectId, "step_id" to stepId, "description" to description)
+        )
+
+    fun projectStepCompleted(projectId: String, stepId: String, success: Boolean, attempts: Int): AgentEvent =
+        AgentEvent(
+            type = "project_step_completed",
+            data = mapOf(
+                "project_id" to projectId, "step_id" to stepId,
+                "success" to success, "attempts" to attempts,
+            )
+        )
+
+    fun projectWorkCycleCompleted(projectId: String, stepId: String, actionsExecuted: Int): AgentEvent =
+        AgentEvent(
+            type = "project_work_cycle_completed",
+            data = mapOf(
+                "project_id" to projectId, "step_id" to stepId,
+                "actions_executed" to actionsExecuted,
+            )
+        )
+
+    fun projectWakeUp(projectId: String, path: String, signalType: String): AgentEvent =
+        AgentEvent(
+            type = "project_wake_up",
+            data = mapOf("project_id" to projectId, "path" to path, "signal_type" to signalType)
+        )
+
+    fun projectBlocked(projectId: String, stepId: String, conditionType: String): AgentEvent =
+        AgentEvent(
+            type = "project_blocked",
+            data = mapOf("project_id" to projectId, "step_id" to stepId, "condition_type" to conditionType)
+        )
+
+    fun projectCompleted(projectId: String): AgentEvent =
+        AgentEvent(
+            type = "project_completed",
+            data = mapOf("project_id" to projectId)
+        )
 }

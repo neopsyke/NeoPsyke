@@ -45,6 +45,11 @@
       "id": "id_impulse_parallel_lifecycle",
       "selector": "psyke.eval.AgentScenarioPackTest.scenario_id_impulse_parallel_lifecycle",
       "description": "Id impulse lifecycle finalizes only after all parallel branches complete and accepts when any branch executes valid work."
+    },
+    {
+      "id": "project_async_wait_resume",
+      "selector": "psyke.eval.AgentScenarioPackTest.scenario_project_async_wait_resume",
+      "description": "Project-origin async action blocks, resumes through the generic async provider path, and completes deterministically."
     }
   ]
 }

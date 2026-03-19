@@ -35,6 +35,7 @@ internal class ActionReviewPipeline(
     private val superegoContext: (String, ActionOrigin) -> SuperegoContext,
     private val cleanupResolvedInputAfterAnswer: (PendingAction) -> Unit,
     private val getId: () -> psyke.agent.id.Id?,
+    private val actionLifecycleObserver: ActionLifecycleObserver = NoopActionLifecycleObserver,
 ) {
     suspend fun reviewAndExecute(action: PendingAction) {
         val timing = PhaseTimingCollector("action", action.rootInputId)
@@ -75,6 +76,7 @@ internal class ActionReviewPipeline(
         deliberation.onActionExecuted(resolvedAction, observed)
         maybeRecordTaskWorkspaceOutcome(resolvedAction, outcome, observed)
         deliberation.recordActionOutcome(resolvedAction, outcome, observed)
+        actionLifecycleObserver.onActionExecuted(resolvedAction, outcome, observed)
         if (resolvedAction.type == ActionType.CONTACT_USER) {
             recordAnswerLatency(resolvedAction)
             deliberation.clearEvidenceForInput(resolvedAction.rootInputId, sessionId)
@@ -187,6 +189,12 @@ internal class ActionReviewPipeline(
             )
         )
         if (!taskVerificationDecision.allow) {
+            actionLifecycleObserver.onActionBlocked(
+                action = resolvedAction,
+                reason = taskVerificationDecision.reason,
+                reasonCode = taskVerificationDecision.reasonCode,
+                source = "task_verifier"
+            )
             instrumentation.emit(
                 AgentEvents.actionReviewResult(
                     actionId = resolvedAction.id,
@@ -223,6 +231,12 @@ internal class ActionReviewPipeline(
             )
         )
         if (!gateDecision.allow) {
+            actionLifecycleObserver.onActionBlocked(
+                action = resolvedAction,
+                reason = gateDecision.reason,
+                reasonCode = gateDecision.reasonCode,
+                source = "superego"
+            )
             fallbackHandler.handleDeniedAction(
                 action = resolvedAction,
                 reason = gateDecision.reason,
@@ -561,6 +575,8 @@ internal class ActionReviewPipeline(
         convCtx: ConversationContext,
     ) {
         if (!resolvedAction.requiresFollowUpThought) return
+        if (outcome.waiting) return
+        if (!actionLifecycleObserver.allowFollowUp(resolvedAction)) return
         val safePlannerSignal = PromptInjectionDefense.asUntrustedDataBlock(
             text = outcome.plannerSignal,
             maxChars = FOLLOW_UP_SIGNAL_MAX_CHARS

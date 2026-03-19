@@ -41,7 +41,12 @@ flowchart LR
     MC -.->|"temporal intent → episodic recall + vector cues"| LB
     E --> TWS["TaskWorkspaceStore (Ephemeral Per Request)"]
     E --> TWF["TaskWorkspaceFinalizer (Noop or LLM)"]
-    E --> PR["ProjectRegistry (optional active project signals)"]
+    E --> PG["ProjectsGateway (optional project runtime boundary)"]
+    PG --> PM["ProjectManager / Project Runtime"]
+    PM --> PP["ProjectPlanner"]
+    PM --> PV["ProjectStepVerifier"]
+    PM --> AOR["AsyncOperationRegistry"]
+    PM --> PS["ProjectStateMachine + ProjectStore"]
 
     AR --> AP["Action Plugins (self-described)"]
     AP --> M
@@ -99,11 +104,14 @@ sequenceDiagram
         Ego->>Delib: startStep()
 
         alt Task = impulse
-            Note over Ego,Mem: Id-driven recall/planning can see shared ambient context: projects, workspace themes, useful updates, open loops, and recent exact learning topics
+    Note over Ego,Mem: Id-driven recall/planning can see shared ambient context: projects, workspace themes, useful updates, open loops, and recent exact learning topics
             Ego->>Planner: decide(context + idState)
             Planner-->>Ego: thought/action/plan/noop
             Ego->>Sched: enqueue impulse-derived work with origin=ID
             Note over Ego,Sched: Impulse final result is deferred until all work for root_impulse_id drains
+        else Task = project_work
+            Ego->>PG: finalizeProjectCycle(rootInputId) after queues drain for that project root
+            Note over Ego,PG: Projects runtime writes context/scratch/artifacts and may re-emit WorkReady for resumable steps
         else Task = input or thought
             Ego->>Mem: recall and short-term summary
             Note over Ego,Mem: Planner context now includes targeted reflection-lesson recall
@@ -156,9 +164,11 @@ sequenceDiagram
                                 Ego->>TWS: final-pass compilation from workspace index/evidence
                                 Ego->>TWF: rewrite candidate payload (if enabled)
                                 Note over Ego,TWS: Final-pass skip requires both no evidence and insufficient drafts (< max(2, activation_min_plan_steps))
-                                Note over Ego,TWF: Apply workspace-confidence gate first, then model-confidence gate
+                        Note over Ego,TWF: Apply workspace-confidence gate first, then model-confidence gate
                             end
                             Ego->>Motor: execute(action)
+                            Note over Ego,Motor: Actions may complete immediately or return WAITING + async operation handles
+                            Note over Ego,PG: Project-origin WAITING without handles is rejected as a contract violation
                             Ego->>Ego: PromptInjectionDefense sanitize untrusted tool output
                             alt action = contact_user
                                 Ego->>Sched: clear pending thought and action work for same root-session scope
@@ -169,6 +179,7 @@ sequenceDiagram
                                 Ego->>Mem: maybeAssessLongTermMemory(post_terminal_answer, forced)
                             end
                             Ego->>TWS: record non-contact_user/non-resolution_draft action outcomes/evidence
+                            Ego->>PG: onActionExecuted / allowFollowUp (generic action lifecycle observer)
                             Ego->>Sched: enqueue follow-up thought (for evidence actions)
                             Ego->>Mem: maybeAssessLongTermMemory(post_allowed_action, optional force)
                             Note over Ego,Mem: Blocked imprints emit long_term_memory_persistence_skipped (reason_code, reason_detail) for timeline visibility
@@ -194,6 +205,24 @@ sequenceDiagram
     end
 
     Note over User,SC: Terminal stdin is control-only in interactive mode (exit command), non-command text is not enqueued as chat input
+```
+
+## 2.1) Projects Boundary
+
+```mermaid
+flowchart LR
+    TS["TimerScheduler"] --> PM["ProjectManager"]
+    WM["WaitConditionMonitor (timeouts + async poll/event restore)"] --> PM
+    AOR["AsyncOperationRegistry / Provider Adapters"] --> WM
+    PM --> PSM["ProjectStateMachine"]
+    PM --> PP["ProjectPlanner"]
+    PM --> PV["ProjectStepVerifier"]
+    PSM --> PCS["ProjectCommand stream"]
+    PCS -->|persist| Store["ProjectStore / events.jsonl + project.json + snapshot.json"]
+    PCS -->|work ready| Sig["ProjectSignal.WorkReady"]
+    Sig --> Ego["Ego"]
+    Ego -->|nextWorkFromSignal| PM
+    Ego -->|project-origin action outcomes| PM
 ```
 
 ## 2.5) Interactive Startup Memory Gate

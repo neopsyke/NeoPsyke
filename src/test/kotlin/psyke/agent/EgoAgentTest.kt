@@ -181,6 +181,8 @@ class EgoAgentTest {
                         )
                     }
 
+                    is psyke.agent.model.EgoTrigger.ProjectWork ->
+                        psyke.agent.model.EgoDecision.Noop("ignore project work in test")
                     is psyke.agent.model.EgoTrigger.IncomingImpulse ->
                         psyke.agent.model.EgoDecision.Noop("unexpected impulse")
                 }

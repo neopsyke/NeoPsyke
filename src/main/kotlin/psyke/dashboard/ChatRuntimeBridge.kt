@@ -4,7 +4,7 @@ import psyke.agent.model.ConversationContext
 import psyke.agent.config.DefaultInterlocutorResolver
 import psyke.agent.model.InputPriority
 import psyke.agent.config.InterlocutorResolver
-import psyke.agent.cortex.sensory.AsyncSensoryInputSource
+import psyke.agent.cortex.sensory.AsyncSignalSource
 
 data class ChatSubmitResult(
     val accepted: Boolean,
@@ -13,7 +13,7 @@ data class ChatSubmitResult(
 
 class ChatRuntimeBridge(
     private val store: DashboardStateStore,
-    private val sensoryInput: AsyncSensoryInputSource,
+    private val sensoryInput: AsyncSignalSource,
     private val interlocutorResolver: InterlocutorResolver = DefaultInterlocutorResolver(),
 ) {
     init {
