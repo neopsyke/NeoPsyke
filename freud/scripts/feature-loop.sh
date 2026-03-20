@@ -13,7 +13,7 @@ Step names for --from-step:
 
 Description:
   Runs a deterministic-first feature workflow and writes compact artifacts under:
-  .psyke/runs/freud/<timestamp>-<feature_id>/
+  .neopsyke/runs/freud/<timestamp>-<feature_id>/
   Use --from-step to resume from a specific step, skipping earlier ones.
 EOF
 }
@@ -96,8 +96,8 @@ if [[ -f "$config_path" ]]; then
   source "$config_path"
 fi
 
-if [[ -n "${PSYKE_LLM_CONFIG_FILE:-}" ]]; then
-  export PSYKE_LLM_CONFIG_FILE
+if [[ -n "${NEOPSYKE_LLM_CONFIG_FILE:-}" ]]; then
+  export NEOPSYKE_LLM_CONFIG_FILE
 fi
 
 # Keep full workspace debug dumps enabled in Freud workflow runs.
@@ -111,7 +111,7 @@ scenario_pack_cmd="${FREUD_SCENARIO_PACK_CMD:-}"
 reasoning_logic_cmd="${FREUD_REASONING_EVAL_LOGIC_CMD:-}"
 reasoning_model_cmd="${FREUD_REASONING_EVAL_MODEL_CMD:-}"
 memory_smoke_cmd="${FREUD_MEMORY_SMOKE_CMD:-}"
-run_root_cfg="${FREUD_RUN_ROOT:-.psyke/runs/freud}"
+run_root_cfg="${FREUD_RUN_ROOT:-.neopsyke/runs/freud}"
 gradle_user_home_cfg="${FREUD_GRADLE_USER_HOME:-}"
 
 if [[ "$run_root_cfg" = /* ]]; then
@@ -346,16 +346,16 @@ write_run_config() {
 
 latest_reasoning_eval_file() {
   local latest=""
-  if compgen -G "$repo_root/.psyke/evals/reasoning/runs/reasoning-eval-*.json" >/dev/null; then
-    latest="$(ls -1t "$repo_root"/.psyke/evals/reasoning/runs/reasoning-eval-*.json 2>/dev/null | head -n 1)"
+  if compgen -G "$repo_root/.neopsyke/evals/reasoning/runs/reasoning-eval-*.json" >/dev/null; then
+    latest="$(ls -1t "$repo_root"/.neopsyke/evals/reasoning/runs/reasoning-eval-*.json 2>/dev/null | head -n 1)"
   fi
   printf '%s' "$latest"
 }
 
 latest_memory_eval_file() {
   local latest=""
-  if compgen -G "$repo_root/.psyke/evals/memory-live/runs/memory-live-eval-*.json" >/dev/null; then
-    latest="$(ls -1t "$repo_root"/.psyke/evals/memory-live/runs/memory-live-eval-*.json 2>/dev/null | head -n 1)"
+  if compgen -G "$repo_root/.neopsyke/evals/memory-live/runs/memory-live-eval-*.json" >/dev/null; then
+    latest="$(ls -1t "$repo_root"/.neopsyke/evals/memory-live/runs/memory-live-eval-*.json 2>/dev/null | head -n 1)"
   fi
   printf '%s' "$latest"
 }

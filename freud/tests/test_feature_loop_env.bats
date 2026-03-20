@@ -10,15 +10,15 @@ setup() {
   cat >"$STEP_STUB" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
-printf 'PSYKE_LLM_CONFIG_FILE=%s\n' "${PSYKE_LLM_CONFIG_FILE:-}" >"${FREUD_TEST_ENV_LOG:?}"
+printf 'NEOPSYKE_LLM_CONFIG_FILE=%s\n' "${NEOPSYKE_LLM_CONFIG_FILE:-}" >"${FREUD_TEST_ENV_LOG:?}"
 EOF
   chmod +x "$STEP_STUB"
 
   cat >"$CONFIG_FILE" <<EOF
-FREUD_PROJECT_NAME="psyke-test"
+FREUD_PROJECT_NAME="neopsyke-test"
 FREUD_RUN_ROOT=".freud/feature-loop-env-test-$$"
 FREUD_REASONING_EVAL_MODEL_CMD="$STEP_STUB"
-PSYKE_LLM_CONFIG_FILE="$TEST_TMPDIR/llm-routing.yaml"
+NEOPSYKE_LLM_CONFIG_FILE="$TEST_TMPDIR/llm-routing.yaml"
 EOF
 }
 
@@ -27,10 +27,10 @@ teardown() {
   [[ -d "$REPO_ROOT/.freud/feature-loop-env-test-$$" ]] && rm -rf "$REPO_ROOT/.freud/feature-loop-env-test-$$"
 }
 
-@test "feature-loop exports PSYKE_LLM_CONFIG_FILE to live step commands" {
+@test "feature-loop exports NEOPSYKE_LLM_CONFIG_FILE to live step commands" {
   run env \
     FREUD_TEST_ENV_LOG="$ENV_LOG" \
     "$SCRIPTS_DIR/feature-loop.sh" llm-config-export --live --from-step reasoning_eval_model --config "$CONFIG_FILE"
   [[ "$status" -eq 0 ]]
-  grep -q "PSYKE_LLM_CONFIG_FILE=$TEST_TMPDIR/llm-routing.yaml" "$ENV_LOG"
+  grep -q "NEOPSYKE_LLM_CONFIG_FILE=$TEST_TMPDIR/llm-routing.yaml" "$ENV_LOG"
 }

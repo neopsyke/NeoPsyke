@@ -3,6 +3,7 @@
 build/
 out/
 .psyke/
+.neopsyke/
 .freud/
 .kotlin/
 freud/latest

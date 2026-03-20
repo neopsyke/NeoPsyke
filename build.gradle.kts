@@ -8,7 +8,7 @@ plugins {
     application
 }
 
-group = "ai.psyke"
+group = "ai.neopsyke"
 version = "0.1.0"
 
 repositories {
@@ -53,18 +53,18 @@ tasks.withType<JavaCompile>().configureEach {
 }
 
 application {
-    mainClass.set("psyke.ApplicationKt")
+    mainClass.set("ai.neopsyke.ApplicationKt")
 }
 
 tasks.named<JavaExec>("run") {
     // Forward optional simple-logger level from Gradle JVM/env to the app JVM.
     val configuredLogLevel = System.getProperty("org.slf4j.simpleLogger.defaultLogLevel")
-        ?: System.getenv("PSYKE_LOG_LEVEL")
+        ?: System.getenv("NEOPSYKE_LOG_LEVEL")
     if (!configuredLogLevel.isNullOrBlank()) {
         systemProperty("org.slf4j.simpleLogger.defaultLogLevel", configuredLogLevel)
     }
     val configuredLogFile = System.getProperty("org.slf4j.simpleLogger.logFile")
-        ?: System.getenv("PSYKE_LOG_FILE")
+        ?: System.getenv("NEOPSYKE_LOG_FILE")
     if (!configuredLogFile.isNullOrBlank()) {
         systemProperty("org.slf4j.simpleLogger.logFile", configuredLogFile)
     }

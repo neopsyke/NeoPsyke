@@ -1,4 +1,4 @@
-# psyke Kotlin app
+# NeoPsyke Kotlin app
 
 Standalone Kotlin JVM app using Gradle with:
 - Pluggable LLM client (`ChatModelClient`)
@@ -29,9 +29,9 @@ Standalone Kotlin JVM app using Gradle with:
   - Each cognitive role can set independent `provider` and `model`.
   - Provider credentials/endpoints are set under `providers` (`api_key_env`, `base_url`).
   - `web_search` remains independently configurable (`provider`, `model`, optional `api_key_env`, `base_url`).
-  - Optional `model_catalog` can list per-provider ROI profiles (`tier`, `token_weight`, optional input/output cost metadata). Psyke uses `token_weight` to scale dynamic completion budgets for superego and memory-advisor.
-  - If a role/model is omitted, Psyke falls back to provider defaults.
-  - Optional override file path: `PSYKE_LLM_CONFIG_FILE=/path/to/llm-runtime.yaml`.
+  - Optional `model_catalog` can list per-provider ROI profiles (`tier`, `token_weight`, optional input/output cost metadata). NeoPsyke uses `token_weight` to scale dynamic completion budgets for superego and memory-advisor.
+  - If a role/model is omitted, NeoPsyke falls back to provider defaults.
+  - Optional override file path: `NEOPSYKE_LLM_CONFIG_FILE=/path/to/llm-runtime.yaml`.
   - Example:
     ```yaml
     providers:
@@ -74,7 +74,7 @@ Standalone Kotlin JVM app using Gradle with:
 - OpenAI moderation is available as a standalone utility (`moderateWithOpenAi` / `OpenAiModerationClient`) using `omni-moderation-latest`; it is not auto-wired into cognitive-role chat calls.
 - MCP/time/fetch/memory provider settings are now centralized in `mcp-runtime.yaml` (repository root).
   - Default config enables `time`, `website_fetch`, and `memory` in `stdio` mode with command/fallback lists.
-  - Optional override file path: `PSYKE_MCP_CONFIG_FILE=/path/to/mcp-runtime.yaml`.
+  - Optional override file path: `NEOPSYKE_MCP_CONFIG_FILE=/path/to/mcp-runtime.yaml`.
   - Environment variables still override YAML when present (`MCP_TIME_*`, `WEBSITE_FETCH_*`, `MCP_MEMORY_*`, plus legacy `MCP_*_SERVER_CMD`).
   - YAML schema per capability:
     - `enabled` (`true|false`)
@@ -93,7 +93,7 @@ Standalone Kotlin JVM app using Gradle with:
   - `MS_GRAPH_AUTH_BASE_URL` (optional, default `https://login.microsoftonline.com`)
   - `MS_GRAPH_BASE_URL` (optional, default `https://graph.microsoft.com/v1.0`)
 - Agent/app/eval runtime settings are centralized in `agent-runtime.yaml` (repository root).
-  - Optional override file path: `PSYKE_AGENT_CONFIG_FILE=/path/to/agent-runtime.yaml`.
+  - Optional override file path: `NEOPSYKE_AGENT_CONFIG_FILE=/path/to/agent-runtime.yaml`.
   - `agent` is domain-grouped and mirrors `AgentConfig` ownership:
     - `agent.planner.*`
     - `agent.superego.*`
@@ -106,7 +106,7 @@ Standalone Kotlin JVM app using Gradle with:
   - `eval` section covers eval defaults (for example stage default and raw-response cap).
   - Precedence is `CLI > env > YAML > code defaults`.
 - Id runtime settings are centralized in `id-runtime.yaml` (repository root).
-  - Optional override file path: `PSYKE_ID_CONFIG_FILE=/path/to/id-runtime.yaml`.
+  - Optional override file path: `NEOPSYKE_ID_CONFIG_FILE=/path/to/id-runtime.yaml`.
   - `id.enabled` toggles autonomous internal drive impulses.
   - `id.max_consecutive_denials` controls when denial backoff is applied.
   - Id emits at most one pending impulse lifecycle at a time; a new impulse is not fired until the prior lifecycle is finalized.
@@ -114,13 +114,13 @@ Standalone Kotlin JVM app using Gradle with:
     - direct Id-origin `answer` is denied by default
     - internal/evidence actions (`web_search`, `website_fetch`, `mcp_time`, `answer_draft`) are allowed to proceed to normal review/execution flow.
 - Optional:
-  - `PSYKE_LLM_CONFIG_FILE` (optional; path to LLM runtime YAML, default: `./llm-runtime.yaml`)
-  - `PSYKE_MCP_CONFIG_FILE` (optional; path to MCP runtime YAML, default: `./mcp-runtime.yaml`)
-  - `PSYKE_AGENT_CONFIG_FILE` (optional; path to agent/app/eval runtime YAML, default: `./agent-runtime.yaml`)
-  - `PSYKE_ID_CONFIG_FILE` (optional; path to Id runtime YAML, default: `./id-runtime.yaml`)
-  - `PSYKE_ID_ENABLED` (default from `id-runtime.yaml`)
-  - `PSYKE_DASHBOARD_ENABLED` (default: `true`)
-  - `PSYKE_DASHBOARD_PORT` (default: `8787`)
+  - `NEOPSYKE_LLM_CONFIG_FILE` (optional; path to LLM runtime YAML, default: `./llm-runtime.yaml`)
+  - `NEOPSYKE_MCP_CONFIG_FILE` (optional; path to MCP runtime YAML, default: `./mcp-runtime.yaml`)
+  - `NEOPSYKE_AGENT_CONFIG_FILE` (optional; path to agent/app/eval runtime YAML, default: `./agent-runtime.yaml`)
+  - `NEOPSYKE_ID_CONFIG_FILE` (optional; path to Id runtime YAML, default: `./id-runtime.yaml`)
+  - `NEOPSYKE_ID_ENABLED` (default from `id-runtime.yaml`)
+  - `NEOPSYKE_DASHBOARD_ENABLED` (default: `true`)
+  - `NEOPSYKE_DASHBOARD_PORT` (default: `8787`)
   - `EGO_MAX_LOOP_STEPS` (default: `180`)
   - `EGO_MAX_THOUGHT_PASSES` (default: `5`)
   - `EGO_MAX_PROMPT_TOKENS` (default: `2400`)
@@ -154,7 +154,7 @@ Standalone Kotlin JVM app using Gradle with:
   - `EGO_TASK_WORKSPACE_FINAL_PASS_MAX_TOKENS` (default: `260`)
   - `EGO_TASK_WORKSPACE_FINAL_PASS_MIN_WORKSPACE_CONFIDENCE` (default: `0.35`)
   - `EGO_TASK_WORKSPACE_FINAL_PASS_MIN_MODEL_CONFIDENCE` (default: `0.55`)
-  - `EGO_TASK_WORKSPACE_DEBUG_CAPTURE_ENABLED` (default: `false`; forced to `true` by `./run-psyke.sh`, Gradle tests, and Freud scripts)
+  - `EGO_TASK_WORKSPACE_DEBUG_CAPTURE_ENABLED` (default: `false`; forced to `true` by `./run-neopsyke.sh`, Gradle tests, and Freud scripts)
   - `EGO_TASK_WORKSPACE_MAX_ACTIVE_TASKS` (default: `32`)
   - `EGO_MAX_ACTION_PAYLOAD_CHARS` (default: `4000`)
   - `EGO_SEARCH_RESULT_COUNT` (default: `5`)
@@ -164,7 +164,7 @@ Standalone Kotlin JVM app using Gradle with:
   - `MCP_TIME_MODE` / `WEBSITE_FETCH_MODE` / `MCP_MEMORY_MODE` (optional env override for YAML mode)
   - `MCP_TIME_PROVIDER` / `WEBSITE_FETCH_PROVIDER` / `MCP_MEMORY_PROVIDER` (optional env override for YAML provider)
   - `MCP_TIME_ENABLED` / `WEBSITE_FETCH_ENABLED` / `MCP_MEMORY_ENABLED` (optional env override for YAML enabled flag)
-  - `MISTRAL_WEBSEARCH_AGENT_ID` (optional when `web_search.provider=mistral`; if omitted, Psyke creates an ephemeral Mistral web-search agent per run)
+  - `MISTRAL_WEBSEARCH_AGENT_ID` (optional when `web_search.provider=mistral`; if omitted, NeoPsyke creates an ephemeral Mistral web-search agent per run)
   - `MCP_CALL_TIMEOUT_MS` (default: `8000`)
   - `MCP_MEMORY_CALL_TIMEOUT_MS` (default: same as `MCP_CALL_TIMEOUT_MS`)
   - `WEBSITE_FETCH_MAX_CHARS` (default: `4000`)
@@ -200,15 +200,15 @@ Standalone Kotlin JVM app using Gradle with:
   - `EGO_LONG_TERM_MEMORY_RECALL_ECHO_MIN_TOKEN_LENGTH` (default: `3`)
   - `EGO_LONG_TERM_MEMORY_RECALL_ECHO_MIN_TOKEN_COUNT` (default: `4`)
   - `EGO_LONG_TERM_MEMORY_RECALL_ECHO_TOKEN_OVERLAP_THRESHOLD` (default: `0.85`)
-  - `PSYKE_AUTO_START_PGVECTOR` (optional; when `true`, launcher runs `docker compose up -d pgvector` if needed)
-  - `MEMORY_DEFAULT_NAMESPACE` (optional; memory MCP namespace/tenant default, launcher defaults to `psyke`)
+  - `NEOPSYKE_AUTO_START_PGVECTOR` (optional; when `true`, launcher runs `docker compose up -d pgvector` if needed)
+  - `MEMORY_DEFAULT_NAMESPACE` (optional; memory MCP namespace/tenant default, launcher defaults to `neopsyke`)
   - `MEMORY_SEMANTIC_DEDUPE_SIMILARITY_THRESHOLD` (memory server; default: `0.93`)
   - `MEMORY_SEMANTIC_DEDUPE_MIN_CONFIDENCE` (memory server; default: `0.65`)
   - `MEMORY_FACT_DEFAULT_SUBJECT` (memory server; default: `me`)
-  - `PSYKE_EVAL_MAX_RAW_RESPONSE_CHARS` (reasoning eval raw-thought capture cap; default: unlimited)
-  - `PSYKE_LLM_CACHE_MODE` (optional; `record`, `replay`, or `off`; default: `off`)
-  - `PSYKE_LLM_CACHE_FILE` (optional; path to JSONL cache file for LLM response caching)
-  - `PSYKE_LOGBOOK_DB_PATH` (optional; override episodic logbook SQLite path; default: `.psyke/logbook.db`)
+  - `NEOPSYKE_EVAL_MAX_RAW_RESPONSE_CHARS` (reasoning eval raw-thought capture cap; default: unlimited)
+  - `NEOPSYKE_LLM_CACHE_MODE` (optional; `record`, `replay`, or `off`; default: `off`)
+  - `NEOPSYKE_LLM_CACHE_FILE` (optional; path to JSONL cache file for LLM response caching)
+  - `NEOPSYKE_LOGBOOK_DB_PATH` (optional; override episodic logbook SQLite path; default: `.neopsyke/logbook.db`)
 
 ## Run
 ```bash
@@ -224,8 +224,8 @@ Enable trace logs:
 
 Log `gradlew run` output to a file:
 ```bash
-mkdir -p .psyke/logs
-export PSYKE_LOG_FILE="$PWD/.psyke/logs/gradle-run.log"
+mkdir -p .neopsyke/logs
+export NEOPSYKE_LOG_FILE="$PWD/.neopsyke/logs/gradle-run.log"
 ./gradlew run -Dorg.slf4j.simpleLogger.defaultLogLevel=info
 ```
 
@@ -234,27 +234,27 @@ Use the local launcher:
 ```bash
 export GROQ_API_KEY=your_token
 export MISTRAL_API_KEY=your_token  # required when web_search.provider=mistral
-./run-psyke.sh
+./run-neopsyke.sh
 ```
 
 Run deterministic reasoning self-eval (no MotorCortex actions, no baseline comparison):
 ```bash
-./run-psyke.sh --eval-reasoning-only
+./run-neopsyke.sh --eval-reasoning-only
 ```
 
 Reasoning eval options:
 ```bash
-./run-psyke.sh --eval-reasoning-only --eval-reasoning-mode logic  # default; no external LLM calls
-./run-psyke.sh --eval-reasoning-only --eval-reasoning-mode model  # uses provider API key (GROQ_API_KEY by default)
-./run-psyke.sh --eval-reasoning-only --eval-stage 2026-02-28
-./run-psyke.sh --eval-reasoning-only --eval-reasoning-max-attempts 5
-./run-psyke.sh --eval-reasoning-only --eval-reasoning-tasks shape-lock,multi-fix  # logic mode tasks
-./run-psyke.sh --eval-reasoning-only --log-level trace  # explicit override (already default for this mode)
+./run-neopsyke.sh --eval-reasoning-only --eval-reasoning-mode logic  # default; no external LLM calls
+./run-neopsyke.sh --eval-reasoning-only --eval-reasoning-mode model  # uses provider API key (GROQ_API_KEY by default)
+./run-neopsyke.sh --eval-reasoning-only --eval-stage 2026-02-28
+./run-neopsyke.sh --eval-reasoning-only --eval-reasoning-max-attempts 5
+./run-neopsyke.sh --eval-reasoning-only --eval-reasoning-tasks shape-lock,multi-fix  # logic mode tasks
+./run-neopsyke.sh --eval-reasoning-only --log-level trace  # explicit override (already default for this mode)
 ```
 
 Reasoning eval output:
-- Per-run detailed JSON in `.psyke/evals/reasoning/runs/`.
-- Append-only trend history in `.psyke/evals/reasoning/history.jsonl`.
+- Per-run detailed JSON in `.neopsyke/evals/reasoning/runs/`.
+- Append-only trend history in `.neopsyke/evals/reasoning/history.jsonl`.
 - Default eval mode is `logic`, which uses a deterministic local harness to score retry/feedback loop behavior.
 - `model` mode keeps the prior real-LLM task set for optional model-inclusive checks.
 - If `--eval-stage` is omitted, stage defaults to current UTC date.
@@ -265,21 +265,21 @@ Freud live eval (single-input, STDIN/STDOUT, with LLM response caching):
 ```bash
 # Preferred wrapper for one-shot live/provider-backed evals:
 freud/scripts/live-eval.sh --input input.txt --expected expected.txt --timeout 120
-freud/scripts/live-eval.sh --input input.txt --cache-replay .psyke/runs/freud/latest/artifacts/llm-cache.jsonl
+freud/scripts/live-eval.sh --input input.txt --cache-replay .neopsyke/runs/freud/latest/artifacts/llm-cache.jsonl
 freud/scripts/live-eval.sh --input input.txt --preserve-memory
 
 # Lower-level debugging path if you are working on the wrapper itself:
-echo "What time is it?" | PSYKE_LLM_CACHE_MODE=record PSYKE_LLM_CACHE_FILE=.psyke/cache.jsonl \
-  ./run-psyke.sh --freud-live --freud-live-timeout 120
-echo "What time is it?" | PSYKE_LLM_CACHE_MODE=replay PSYKE_LLM_CACHE_FILE=.psyke/cache.jsonl \
-  ./run-psyke.sh --freud-live
+echo "What time is it?" | NEOPSYKE_LLM_CACHE_MODE=record NEOPSYKE_LLM_CACHE_FILE=.neopsyke/cache.jsonl \
+  ./run-neopsyke.sh --freud-live --freud-live-timeout 120
+echo "What time is it?" | NEOPSYKE_LLM_CACHE_MODE=replay NEOPSYKE_LLM_CACHE_FILE=.neopsyke/cache.jsonl \
+  ./run-neopsyke.sh --freud-live
 ```
 
 Freud live eval notes:
 - Prefer `freud/scripts/live-eval.sh` for Freud-managed live checks. It wraps the raw `--freud-live` mode, sets isolated memory paths, captures artifacts, and handles record/replay.
 - `--freud-live` reads all stdin upfront, submits as a single input, outputs the answer to stdout, then exits.
 - `--freud-live-timeout N` sets a timeout in seconds (default: 120). Exit code 2 on timeout.
-- `live-eval.sh` automatically uses isolated memory (`freud-eval` pgvector namespace, `.psyke/freud-logbook.db`, `.psyke/freud-metrics.db`) and clears it before each run by default.
+- `live-eval.sh` automatically uses isolated memory (`freud-eval` pgvector namespace, `.neopsyke/freud-logbook.db`, `.neopsyke/freud-metrics.db`) and clears it before each run by default.
 - Use `--preserve-memory` or `FREUD_LIVE_EVAL_PRESERVE_MEMORY=true` only when an eval sequence intentionally depends on prior isolated Freud memory.
 - `live-eval.sh --expected` uses normalized exact matching, not substring containment.
 - LLM cache uses sequential matching with SHA-256 hash validation: the Nth LLM call is matched to the Nth cache entry, verified by message hash. On mismatch, replay stops and real LLM is used for all subsequent calls.
@@ -302,7 +302,7 @@ freud/scripts/feature-loop.sh reasoning-matrix --live --config freud/config/live
 Freud reasoning lane notes:
 - `reasoning_eval_logic` now runs two deterministic passes: the existing logic core and a 45-case behavioral/perturbation logic pack.
 - `reasoning_eval_model` is reserved for manual live reasoning checks and currently runs a frozen 24-case BBH-style smoke slice.
-- The live reasoning lane always routes through `freud/scripts/live-eval.sh`, which invokes the lower-level `./run-psyke.sh --freud-live` path for each case.
+- The live reasoning lane always routes through `freud/scripts/live-eval.sh`, which invokes the lower-level `./run-neopsyke.sh --freud-live` path for each case.
 - `FREUD_BBH_PRESERVE_MEMORY=true` is available if a future live reasoning sequence needs shared isolated memory across cases. The current BBH slice should keep the default isolated-per-case behavior.
 - The live lane configs intentionally do not hardcode local machine paths. They resolve repo-local YAML snapshots relative to the config directory so the committed setup stays portable across machines.
 - GitHub pull requests run only the fast non-live path: `freud/scripts/feature-loop.sh ci-pr`, plus Freud's own BATS and pytest suites. Live lanes remain manual-only.
@@ -312,19 +312,19 @@ Memory live eval (real-world, no mocks):
 export GROQ_API_KEY=your_token
 # either set in mcp-runtime.yaml (preferred) or override here:
 export MCP_MEMORY_SERVER_CMD='your-memory-mcp-server-command'
-./run-psyke.sh --eval-memory-live
+./run-neopsyke.sh --eval-memory-live
 ```
 
 Memory live eval options:
 ```bash
-./run-psyke.sh --eval-memory-live --eval-stage 2026-02-28
-./run-psyke.sh --eval-memory-live --eval-memory-max-attempts 3
-./run-psyke.sh --eval-memory-live --eval-memory-tasks user-preference-color,project-constraint-timezone
+./run-neopsyke.sh --eval-memory-live --eval-stage 2026-02-28
+./run-neopsyke.sh --eval-memory-live --eval-memory-max-attempts 3
+./run-neopsyke.sh --eval-memory-live --eval-memory-tasks user-preference-color,project-constraint-timezone
 ```
 
 Memory live eval output:
-- Per-run detailed JSON in `.psyke/evals/memory-live/runs/`.
-- Append-only trend history in `.psyke/evals/memory-live/history.jsonl`.
+- Per-run detailed JSON in `.neopsyke/evals/memory-live/runs/`.
+- Append-only trend history in `.neopsyke/evals/memory-live/history.jsonl`.
 - Uses real `LlmLongTermMemoryAdvisor` + real `McpHippocampus` imprint/recall calls.
 - Tags each saved item with a unique run session marker to reduce cross-run collision.
 - Main run log focuses on memory eval flow (`[eval.memory] ...`).
@@ -341,41 +341,41 @@ This eval verifies:
 
 Set a specific log level via parameter:
 ```bash
-./run-psyke.sh --log-level info
+./run-neopsyke.sh --log-level info
 ```
 
 Disable the default interactive delay for faster local/manual loops:
 ```bash
-./run-psyke.sh --no-delay
+./run-neopsyke.sh --no-delay
 ```
 
 Notes:
-- `run-psyke.sh` bootstraps `installDist` once if needed.
-- `run-psyke.sh` also bootstraps `:mcp-memory-pgvector:fatJar` when the memory MCP jar is missing or stale.
-- After bootstrap, execution is direct (`build/install/psyke/bin/psyke`) without `gradle run`.
-- You do not run memory MCP separately if memory command config is set correctly (from `mcp-runtime.yaml` or `MCP_MEMORY_SERVER_CMD` override); Psyke launches it on demand.
-- Default log level in `run-psyke.sh` is `warning`.
-- Launcher logs are written to per-run files in `.psyke/logs/runs/`.
-- `.psyke/logs/latest.log` always points to the newest run log.
-- `.psyke/logs/latest-events.jsonl` always points to the newest event sidecar.
-- `.psyke/logs/latest-run.env` stores `PSYKE_LOG_RUN_ID`, `PSYKE_LOG_FILE`, `PSYKE_EVENT_LOG_FILE`, and start time for the current run.
-- Old run logs are auto-pruned; retention defaults to 30 files (`PSYKE_LOG_RETENTION`).
+- `run-neopsyke.sh` bootstraps `installDist` once if needed.
+- `run-neopsyke.sh` also bootstraps `:mcp-memory-pgvector:fatJar` when the memory MCP jar is missing or stale.
+- After bootstrap, execution is direct (`build/install/neopsyke/bin/neopsyke`) without `gradle run`.
+- You do not run memory MCP separately if memory command config is set correctly (from `mcp-runtime.yaml` or `MCP_MEMORY_SERVER_CMD` override); NeoPsyke launches it on demand.
+- Default log level in `run-neopsyke.sh` is `warning`.
+- Launcher logs are written to per-run files in `.neopsyke/logs/runs/`.
+- `.neopsyke/logs/latest.log` always points to the newest run log.
+- `.neopsyke/logs/latest-events.jsonl` always points to the newest event sidecar.
+- `.neopsyke/logs/latest-run.env` stores `NEOPSYKE_LOG_RUN_ID`, `NEOPSYKE_LOG_FILE`, `NEOPSYKE_EVENT_LOG_FILE`, and start time for the current run.
+- Old run logs are auto-pruned; retention defaults to 30 files (`NEOPSYKE_LOG_RETENTION`).
 - If pgvector is not running, launcher prints a startup tip: `docker compose up -d pgvector`.
-- Set `PSYKE_AUTO_START_PGVECTOR=true` to auto-start pgvector from the launcher when required.
-- Launcher sets `MEMORY_DEFAULT_NAMESPACE=psyke` unless already set, so Psyke memory stays isolated by default.
+- Set `NEOPSYKE_AUTO_START_PGVECTOR=true` to auto-start pgvector from the launcher when required.
+- Launcher sets `MEMORY_DEFAULT_NAMESPACE=neopsyke` unless already set, so NeoPsyke memory stays isolated by default.
 - Memory MCP write tools support `write_mode`: `append`, `dedupe_if_similar`, `upsert_fact`.
 - `upsert_fact` supports `fact_subject`, `fact_key`, `fact_value`, `fact_versioned_at` and keeps only one active value per `(namespace, subject, key)`.
-- Psyke's own long-term memory writes stamp the subject/reference as `me` so durable memories are attributed to the agent rather than the user.
+- NeoPsyke's own long-term memory writes stamp the subject/reference as `me` so durable memories are attributed to the agent rather than the user.
 - Memory MCP tools accept optional `namespace` (or `tenant`/`workspace`) argument for explicit multi-client isolation.
-- Default loop delay in `run-psyke.sh` is `1000ms` (`--no-delay` or `--loop-delay-ms 0` disables it).
-- `PSYKE_LOG_LEVEL` can still provide a default if `--log-level` is omitted.
-- `PSYKE_LOG_DIR` overrides the log directory (default: `.psyke/logs`).
-- `PSYKE_EVENT_LOG_FILE` overrides the event sidecar path (used by eval modes).
-- By default the launcher persists metrics to `.psyke/metrics.db` (override with `PSYKE_METRICS_DB`).
-  - A runtime defaults file is auto-created on first metrics use at `.psyke/runtime-defaults.yaml` (override path with `PSYKE_RUNTIME_DEFAULTS_FILE`).
-  - If `PSYKE_METRICS_DB` is not set, the app uses `metrics_db` from that defaults file.
+- Default loop delay in `run-neopsyke.sh` is `1000ms` (`--no-delay` or `--loop-delay-ms 0` disables it).
+- `NEOPSYKE_LOG_LEVEL` can still provide a default if `--log-level` is omitted.
+- `NEOPSYKE_LOG_DIR` overrides the log directory (default: `.neopsyke/logs`).
+- `NEOPSYKE_EVENT_LOG_FILE` overrides the event sidecar path (used by eval modes).
+- By default the launcher persists metrics to `.neopsyke/metrics.db` (override with `NEOPSYKE_METRICS_DB`).
+  - A runtime defaults file is auto-created on first metrics use at `.neopsyke/runtime-defaults.yaml` (override path with `NEOPSYKE_RUNTIME_DEFAULTS_FILE`).
+  - If `NEOPSYKE_METRICS_DB` is not set, the app uses `metrics_db` from that defaults file.
   - Metrics are now fail-safe at client level (LLM/web-search clients emit usage through persistent metrics observer even outside the normal app runner path).
-  - If SQLite metrics init fails, Psyke falls back to `.psyke/metrics-fallback.jsonl` so usage events are still persisted.
+  - If SQLite metrics init fails, NeoPsyke falls back to `.neopsyke/metrics-fallback.jsonl` so usage events are still persisted.
 
 Then use the terminal prompt for runtime control commands only:
 ```text
@@ -416,7 +416,7 @@ control> exit
 - Ego tracks a `decision_pressure` signal to detect circular thought chains and increase convergence pressure.
 - A separate MetaReasoner LLM call runs periodically under pressure to classify chain health (`continue`, `continue_with_constraints`, `finalize_now`, `request_tool_then_finalize`).
 - A separate `MemoryConsolidationAdvisor` LLM call can run every N steps (default 8) and after allowed actions to decide if durable memory should be persisted.
-- If consolidation says yes with enough confidence, Psyke generates a concise summary and writes it through `Hippocampus` imprint (MCP memory if configured).
+- If consolidation says yes with enough confidence, NeoPsyke generates a concise summary and writes it through `Hippocampus` imprint (MCP memory if configured).
 - If no inputs are pending, thoughts and actions are scheduled by urgency (`high`, `medium`, `low`).
 - Every proposed action includes a context summary capped at 180 chars.
 - MotorCortex runs a startup capability smoke test and emits `action_capabilities` instrumentation.
@@ -430,7 +430,7 @@ control> exit
 - If denied, denial reason (<=180 chars) is pushed back as a new thought.
 
 ## Superego directives
-- Defined in code at `psyke.agent.superego.SuperegoPolicy`.
+- Defined in code at `ai.neopsyke.agent.superego.SuperegoPolicy`.
 - Structured as:
   - general directives (always included)
   - action-specific directives selected by action type (`answer`, `web_search`, `mcp_time`, `website_fetch`)
@@ -454,8 +454,8 @@ control> exit
 - Dashboard snapshot (`/api/obs/snapshot`) exposes aggregated `taskVerifierStats` counters and rates.
 - For run-log aggregation from sidecar JSONL:
   - `freud/scripts/task-verifier-telemetry.sh`
-  - default input: `.psyke/logs/latest-events.jsonl`
-  - example: `freud/scripts/task-verifier-telemetry.sh .psyke/logs/runs/<run-id>.events.jsonl`
+  - default input: `.neopsyke/logs/latest-events.jsonl`
+  - example: `freud/scripts/task-verifier-telemetry.sh .neopsyke/logs/runs/<run-id>.events.jsonl`
 
 ## Prompt Budget Telemetry And Tuning
 - `prompt_budget_allocation` events are emitted when prompts are assembled for:
@@ -471,18 +471,18 @@ control> exit
   - per-band rollup (`bands.required_core|required_context|optional`)
 - Dashboard snapshot (`/api/obs/snapshot`) exposes aggregated `promptBudgetStats`.
 - Detailed tuning workflow: `PROMPT_BUDGET_TUNING_GUIDE.md`.
-- Runbook for live `./run-psyke.sh` diagnostics: `PROMPT_BUDGET_RUN_DIAGNOSTICS.md`.
+- Runbook for live `./run-neopsyke.sh` diagnostics: `PROMPT_BUDGET_RUN_DIAGNOSTICS.md`.
 - For run-log aggregation from sidecar JSONL:
   - `freud/scripts/prompt-budget-telemetry.sh`
-  - default input: `.psyke/logs/latest-events.jsonl`
-  - example: `freud/scripts/prompt-budget-telemetry.sh .psyke/logs/runs/<run-id>.events.jsonl`
+  - default input: `.neopsyke/logs/latest-events.jsonl`
+  - example: `freud/scripts/prompt-budget-telemetry.sh .neopsyke/logs/runs/<run-id>.events.jsonl`
 
 ## Provider status checks
-- Before interactive mode, Psyke runs provider health checks for each configured cognitive role endpoint.
-- Before live/model eval modes, Psyke runs a provider health check for the planner endpoint.
+- Before interactive mode, NeoPsyke runs provider health checks for each configured cognitive role endpoint.
+- Before live/model eval modes, NeoPsyke runs a provider health check for the planner endpoint.
 - Checks include DNS resolution for the provider host and a short authenticated HTTP probe (`GET /models`).
-- Transient unavailable probe results such as timeouts are retried once before Psyke decides the final provider state.
-- If a required provider is unavailable, Psyke prints a clear error to both stderr/stdout-facing output and logs, then exits early.
-- If provider is degraded (for example, rate limiting), Psyke logs and prints a warning but continues.
-- In interactive and `--freud-live` startup, `meta_reasoner_fallback` is treated as optional: if its health check still fails after retry, Psyke logs a warning, disables that fallback for the run, and continues with the primary meta-reasoner.
-- For `--eval-memory-live`, Psyke also preflights the memory MCP provider (connect + tool listing) and fails early if required recall/write-like tools are missing or startup fails.
+- Transient unavailable probe results such as timeouts are retried once before NeoPsyke decides the final provider state.
+- If a required provider is unavailable, NeoPsyke prints a clear error to both stderr/stdout-facing output and logs, then exits early.
+- If provider is degraded (for example, rate limiting), NeoPsyke logs and prints a warning but continues.
+- In interactive and `--freud-live` startup, `meta_reasoner_fallback` is treated as optional: if its health check still fails after retry, NeoPsyke logs a warning, disables that fallback for the run, and continues with the primary meta-reasoner.
+- For `--eval-memory-live`, NeoPsyke also preflights the memory MCP provider (connect + tool listing) and fails early if required recall/write-like tools are missing or startup fails.

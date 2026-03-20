@@ -30,7 +30,7 @@ prime_gradle_wrapper_cache() {
 
 prime_gradle_wrapper_cache
 
-scenario_file="$repo_root/freud/scenarios/v1/psyke-agent-scenarios.json"
+scenario_file="$repo_root/freud/scenarios/v1/neopsyke-agent-scenarios.json"
 dry_run="false"
 
 # Keep full workspace debug dumps enabled in direct scenario runs.

@@ -1,21 +1,21 @@
 # Prompt Budget Run Diagnostics
 
-Operational instructions for using prompt-budget diagnostics during normal user runs via `./run-psyke.sh`.
+Operational instructions for using prompt-budget diagnostics during normal user runs via `./run-neopsyke.sh`.
 
 ## Quick Commands
 Start run:
 ```bash
-./run-psyke.sh
+./run-neopsyke.sh
 ```
 
 Live prompt-budget events:
 ```bash
-tail -F .psyke/logs/latest-events.jsonl | jq -c 'select(.type=="prompt_budget_allocation") | {ts:.tsIso,call_site:.data.call_site,degradation_path:.data.degradation_path,single_message_fallback:.data.single_message_fallback,floor_violation_count:.data.floor_violation_count,dropped_section_count:.data.dropped_section_count}'
+tail -F .neopsyke/logs/latest-events.jsonl | jq -c 'select(.type=="prompt_budget_allocation") | {ts:.tsIso,call_site:.data.call_site,degradation_path:.data.degradation_path,single_message_fallback:.data.single_message_fallback,floor_violation_count:.data.floor_violation_count,dropped_section_count:.data.dropped_section_count}'
 ```
 
 Live task-verifier events:
 ```bash
-tail -F .psyke/logs/latest-events.jsonl | jq -c 'select(.type=="task_verifier_review") | {ts:.tsIso,allow:.data.allow,reason_code:.data.reason_code,intent:.data.intent_category,volatility:.data.volatility_level}'
+tail -F .neopsyke/logs/latest-events.jsonl | jq -c 'select(.type=="task_verifier_review") | {ts:.tsIso,allow:.data.allow,reason_code:.data.reason_code,intent:.data.intent_category,volatility:.data.volatility_level}'
 ```
 
 Aggregate latest run:
@@ -26,9 +26,9 @@ freud/scripts/task-verifier-telemetry.sh
 
 Aggregate exact run file:
 ```bash
-source .psyke/logs/latest-run.env
-freud/scripts/prompt-budget-telemetry.sh "$PSYKE_EVENT_LOG_FILE"
-freud/scripts/task-verifier-telemetry.sh "$PSYKE_EVENT_LOG_FILE"
+source .neopsyke/logs/latest-run.env
+freud/scripts/prompt-budget-telemetry.sh "$NEOPSYKE_EVENT_LOG_FILE"
+freud/scripts/task-verifier-telemetry.sh "$NEOPSYKE_EVENT_LOG_FILE"
 ```
 
 Dashboard snapshot:
@@ -40,23 +40,23 @@ curl -s http://127.0.0.1:8787/api/obs/snapshot | jq '.promptBudgetStats, .taskVe
 Use this guide to monitor and tune prompt-budget pressure in real runs without digging manually through raw JSONL.
 
 ## Prerequisites
-- Run the agent through `./run-psyke.sh`.
+- Run the agent through `./run-neopsyke.sh`.
 - Ensure `jq` is installed for filtering and aggregation.
 
 ## Runtime outputs created by launcher
 For each run, the launcher writes:
-- `.psyke/logs/latest-events.jsonl` (symlink to current run event sidecar)
-- `.psyke/logs/latest-run.env` (contains `PSYKE_EVENT_LOG_FILE`, `PSYKE_LOG_RUN_ID`, and related metadata)
+- `.neopsyke/logs/latest-events.jsonl` (symlink to current run event sidecar)
+- `.neopsyke/logs/latest-run.env` (contains `NEOPSYKE_EVENT_LOG_FILE`, `NEOPSYKE_LOG_RUN_ID`, and related metadata)
 
 ## 1) Start a run
 ```bash
-./run-psyke.sh
+./run-neopsyke.sh
 ```
 
 ## 2) Live monitor prompt-budget events
 In another terminal:
 ```bash
-tail -F .psyke/logs/latest-events.jsonl | jq -c '
+tail -F .neopsyke/logs/latest-events.jsonl | jq -c '
   select(.type=="prompt_budget_allocation") |
   {
     ts: .tsIso,
@@ -73,7 +73,7 @@ tail -F .psyke/logs/latest-events.jsonl | jq -c '
 
 ## 3) Live monitor task verifier (complementary)
 ```bash
-tail -F .psyke/logs/latest-events.jsonl | jq -c '
+tail -F .neopsyke/logs/latest-events.jsonl | jq -c '
   select(.type=="task_verifier_review") |
   {
     ts: .tsIso,
@@ -96,14 +96,14 @@ Task verifier summary:
 freud/scripts/task-verifier-telemetry.sh
 ```
 
-Both scripts default to `.psyke/logs/latest-events.jsonl`.
+Both scripts default to `.neopsyke/logs/latest-events.jsonl`.
 
 ## 5) Analyze an exact run file
 Use this when `latest` may have moved to another run:
 ```bash
-source .psyke/logs/latest-run.env
-freud/scripts/prompt-budget-telemetry.sh "$PSYKE_EVENT_LOG_FILE"
-freud/scripts/task-verifier-telemetry.sh "$PSYKE_EVENT_LOG_FILE"
+source .neopsyke/logs/latest-run.env
+freud/scripts/prompt-budget-telemetry.sh "$NEOPSYKE_EVENT_LOG_FILE"
+freud/scripts/task-verifier-telemetry.sh "$NEOPSYKE_EVENT_LOG_FILE"
 ```
 
 ## 6) Dashboard checks

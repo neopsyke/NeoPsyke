@@ -1,0 +1,807 @@
+package ai.neopsyke.dashboard
+
+import com.sun.net.httpserver.HttpExchange
+import com.sun.net.httpserver.HttpServer
+import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+import com.fasterxml.jackson.module.kotlin.readValue
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeoutOrNull
+import mu.KotlinLogging
+import ai.neopsyke.metrics.LlmCallStatsReport
+import java.nio.file.Files
+import java.nio.file.Path
+import ai.neopsyke.metrics.MetricsQueryProvider
+import java.io.Closeable
+import java.io.IOException
+import java.net.InetSocketAddress
+import java.nio.charset.StandardCharsets
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
+import java.util.concurrent.Semaphore
+import java.util.concurrent.TimeUnit
+
+private val logger = KotlinLogging.logger {}
+private const val SSE_HEARTBEAT_TIMEOUT_MS: Long = 5_000L
+private const val LLM_STATS_CACHE_TTL_MS: Long = 10_000L
+private const val LLM_STATS_WARMUP_STATUS: Int = 202
+private const val LLM_STATS_MAX_PARALLEL_REFRESH: Int = 1
+private const val SNAPSHOT_DEFAULT_EVENTS_LIMIT: Int = 300
+private const val SNAPSHOT_MAX_EVENTS_LIMIT: Int = 1_000
+
+class DashboardServer(
+    private val store: DashboardStateStore,
+    private val chatBridge: ChatRuntimeBridge? = null,
+    private val innerVoiceStore: InnerVoiceStore? = null,
+    private val idInnerVoiceFilePath: Path? = null,
+    @Volatile var metricsQueryProvider: MetricsQueryProvider? = null,
+    port: Int,
+    host: String = "127.0.0.1",
+) : Closeable {
+    private val server: HttpServer = HttpServer.create(InetSocketAddress(host, port), 0)
+    private val executor: ExecutorService = Executors.newVirtualThreadPerTaskExecutor()
+    private val llmStatsRefreshExecutor: ExecutorService = Executors.newSingleThreadExecutor()
+    private val llmStatsRefreshSemaphore = Semaphore(LLM_STATS_MAX_PARALLEL_REFRESH)
+    private val llmStatsCache = ConcurrentHashMap<String, LlmStatsCacheEntry>()
+    private val llmStatsRefreshInFlight = ConcurrentHashMap.newKeySet<String>()
+    private val mapper = jacksonObjectMapper()
+    val url: String = "http://$host:$port/"
+
+    init {
+        server.executor = executor
+        server.createContext("/") { exchange ->
+            withRequestGuard(exchange, "root_page") {
+                if (exchange.requestURI.path != "/") {
+                    respondText(exchange, 404, "Not found", "text/plain; charset=utf-8")
+                    return@withRequestGuard
+                }
+                respondText(exchange, 200, DashboardAssets.conversationsHtml, "text/html; charset=utf-8")
+            }
+        }
+        server.createContext("/dashboard") { exchange ->
+            withRequestGuard(exchange, "observability_page") {
+                if (exchange.requestURI.path != "/dashboard") {
+                    respondText(exchange, 404, "Not found", "text/plain; charset=utf-8")
+                    return@withRequestGuard
+                }
+                respondText(exchange, 200, DashboardAssets.observabilityHtml, "text/html; charset=utf-8")
+            }
+        }
+        server.createContext("/metrics") { exchange ->
+            withRequestGuard(exchange, "metrics_page") {
+                if (exchange.requestURI.path != "/metrics") {
+                    respondText(exchange, 404, "Not found", "text/plain; charset=utf-8")
+                    return@withRequestGuard
+                }
+                respondText(exchange, 200, DashboardAssets.metricsHtml, "text/html; charset=utf-8")
+            }
+        }
+        server.createContext("/api/obs/llm-stats") { exchange ->
+            withRequestGuard(exchange, "obs_llm_stats") {
+                if (exchange.requestMethod != "GET") {
+                    respondText(exchange, 405, "Method not allowed", "text/plain; charset=utf-8")
+                    return@withRequestGuard
+                }
+                handleLlmStatsApi(exchange)
+            }
+        }
+        server.createContext("/api/obs/snapshot") { exchange ->
+            withRequestGuard(exchange, "obs_snapshot") {
+                if (exchange.requestMethod != "GET") {
+                    respondText(exchange, 405, "Method not allowed", "text/plain; charset=utf-8")
+                    return@withRequestGuard
+                }
+                val query = exchange.requestURI.query
+                val eventsLimit = parseQueryParam(query, "events_limit")
+                    ?.toIntOrNull()
+                    ?.coerceIn(0, SNAPSHOT_MAX_EVENTS_LIMIT)
+                    ?: SNAPSHOT_DEFAULT_EVENTS_LIMIT
+                val includeHeavyEvents = parseBooleanQueryParam(query, "include_heavy_events") ?: false
+                respondText(
+                    exchange,
+                    200,
+                    store.snapshotJson(eventsLimit = eventsLimit, includeHeavyEvents = includeHeavyEvents),
+                    "application/json; charset=utf-8"
+                )
+            }
+        }
+        server.createContext("/api/obs/events") { exchange ->
+            withRequestGuard(exchange, "obs_events_sse") {
+                if (exchange.requestMethod != "GET") {
+                    respondText(exchange, 405, "Method not allowed", "text/plain; charset=utf-8")
+                    return@withRequestGuard
+                }
+                handleSse(exchange)
+            }
+        }
+        server.createContext("/api/obs/workspace") { exchange ->
+            withRequestGuard(exchange, "obs_workspace") {
+                if (exchange.requestMethod != "GET") {
+                    respondText(exchange, 405, "Method not allowed", "text/plain; charset=utf-8")
+                    return@withRequestGuard
+                }
+                handleWorkspaceApi(exchange)
+            }
+        }
+        server.createContext("/api/chat/sessions") { exchange ->
+            withRequestGuard(exchange, "chat_api") {
+                handleChatApi(exchange)
+            }
+        }
+        server.createContext("/api/id-thinking/history") { exchange ->
+            withRequestGuard(exchange, "id_thinking_history") {
+                if (exchange.requestMethod != "GET") {
+                    respondText(exchange, 405, "Method not allowed", "text/plain; charset=utf-8")
+                    return@withRequestGuard
+                }
+                handleIdThinkingHistory(exchange)
+            }
+        }
+        server.createContext("/api/id-thinking") { exchange ->
+            withRequestGuard(exchange, "id_thinking_sse") {
+                val path = exchange.requestURI.path
+                if (path == "/api/id-thinking/history") {
+                    // Already handled by more specific context above
+                    return@withRequestGuard
+                }
+                if (exchange.requestMethod != "GET") {
+                    respondText(exchange, 405, "Method not allowed", "text/plain; charset=utf-8")
+                    return@withRequestGuard
+                }
+                handleIdThinkingSse(exchange)
+            }
+        }
+        server.createContext("/health") { exchange ->
+            withRequestGuard(exchange, "health") {
+                respondText(exchange, 200, "ok", "text/plain; charset=utf-8")
+            }
+        }
+    }
+
+    fun start() {
+        server.start()
+        logger.info { "Dashboard server started at $url" }
+    }
+
+    override fun close() {
+        try {
+            server.stop(0)
+        } finally {
+            llmStatsRefreshExecutor.shutdownNow()
+            try {
+                llmStatsRefreshExecutor.awaitTermination(1, TimeUnit.SECONDS)
+            } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+            }
+            executor.shutdownNow()
+            try {
+                executor.awaitTermination(1, TimeUnit.SECONDS)
+            } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+            }
+        }
+        logger.info { "Dashboard server stopped." }
+    }
+
+    private fun handleSse(exchange: HttpExchange) {
+        exchange.responseHeaders.add("Content-Type", "text/event-stream")
+        exchange.responseHeaders.add("Cache-Control", "no-cache")
+        exchange.responseHeaders.add("Connection", "keep-alive")
+        exchange.sendResponseHeaders(200, 0)
+
+        val subscription = store.subscribe()
+        val output = exchange.responseBody.bufferedWriter(StandardCharsets.UTF_8)
+        try {
+            output.write("event: ready\n")
+            output.write("data: {\"status\":\"connected\"}\n\n")
+            output.flush()
+            runBlocking {
+                while (true) {
+                    val payload = withTimeoutOrNull(SSE_HEARTBEAT_TIMEOUT_MS) {
+                        subscription.receive()
+                    }
+                    if (payload != null) {
+                        output.write("event: agent\n")
+                        output.write("data: $payload\n\n")
+                        output.flush()
+                    } else {
+                        output.write(": heartbeat\n\n")
+                        output.flush()
+                    }
+                }
+            }
+        } catch (ex: Exception) {
+            if (isExpectedClientDisconnect(ex)) {
+                logger.debug { "Observability SSE client disconnected." }
+            } else {
+                logger.warn(ex) { "Observability SSE stream terminated unexpectedly." }
+            }
+        } finally {
+            subscription.close()
+            closeStreamQuietly(output, streamName = "obs_events_sse")
+        }
+    }
+
+    private fun handleWorkspaceApi(exchange: HttpExchange) {
+        val path = exchange.requestURI.path
+        if (path == "/api/obs/workspace") {
+            respondText(exchange, 200, store.workspaceIndexJson(), "application/json; charset=utf-8")
+            return
+        }
+        val rootIdRaw = path.removePrefix("/api/obs/workspace/").trim()
+        if (rootIdRaw.isBlank() || rootIdRaw == path) {
+            respondText(exchange, 404, "Not found", "text/plain; charset=utf-8")
+            return
+        }
+        val rootId = rootIdRaw
+        val version = parseQueryParam(exchange.requestURI.query, "version")?.toLongOrNull()
+        val snapshot = store.workspaceSnapshotJson(rootInputId = rootId, version = version)
+        if (snapshot == null) {
+            respondText(exchange, 404, "Workspace snapshot not found", "text/plain; charset=utf-8")
+            return
+        }
+        respondText(exchange, 200, snapshot, "application/json; charset=utf-8")
+    }
+
+    private fun handleChatApi(exchange: HttpExchange) {
+        val path = exchange.requestURI.path
+        val basePath = "/api/chat/sessions"
+        if (!(path == basePath || path.startsWith("$basePath/"))) {
+            respondText(exchange, 404, "Not found", "text/plain; charset=utf-8")
+            return
+        }
+        if (chatBridge == null) {
+            respondText(exchange, 503, "Chat API unavailable", "text/plain; charset=utf-8")
+            return
+        }
+        val suffix = path.removePrefix(basePath).trim()
+        if (suffix.isBlank()) {
+            when (exchange.requestMethod.uppercase()) {
+                "GET" -> respondText(exchange, 200, chatBridge.listSessionsJson(), "application/json; charset=utf-8")
+                "POST" -> handleCreateChatSession(exchange, chatBridge)
+                else -> respondText(exchange, 405, "Method not allowed", "text/plain; charset=utf-8")
+            }
+            return
+        }
+
+        val normalizedSuffix = suffix.removePrefix("/")
+        if (normalizedSuffix.isBlank()) {
+            respondText(exchange, 404, "Not found", "text/plain; charset=utf-8")
+            return
+        }
+        val parts = normalizedSuffix.split("/")
+        val sessionId = parts.first().trim()
+        if (sessionId.isBlank()) {
+            respondText(exchange, 400, "Invalid session id", "text/plain; charset=utf-8")
+            return
+        }
+        if (parts.size == 1) {
+            if (exchange.requestMethod.uppercase() != "GET") {
+                respondText(exchange, 405, "Method not allowed", "text/plain; charset=utf-8")
+                return
+            }
+            val payload = chatBridge.sessionJson(sessionId)
+            if (payload == null) {
+                respondText(exchange, 404, "Session not found", "text/plain; charset=utf-8")
+                return
+            }
+            respondText(exchange, 200, payload, "application/json; charset=utf-8")
+            return
+        }
+
+        val action = parts.getOrNull(1)?.trim().orEmpty()
+        when (action) {
+            "messages" -> {
+                if (exchange.requestMethod.uppercase() != "POST") {
+                    respondText(exchange, 405, "Method not allowed", "text/plain; charset=utf-8")
+                    return
+                }
+                handleSubmitChatMessage(exchange, chatBridge, sessionId)
+            }
+            "events" -> {
+                if (exchange.requestMethod.uppercase() != "GET") {
+                    respondText(exchange, 405, "Method not allowed", "text/plain; charset=utf-8")
+                    return
+                }
+                handleChatSse(exchange, chatBridge, sessionId)
+            }
+            "thinking" -> {
+                if (exchange.requestMethod.uppercase() != "GET") {
+                    respondText(exchange, 405, "Method not allowed", "text/plain; charset=utf-8")
+                    return
+                }
+                handleThinkingSse(exchange, sessionId)
+            }
+            else -> respondText(exchange, 404, "Not found", "text/plain; charset=utf-8")
+        }
+    }
+
+    private fun handleCreateChatSession(exchange: HttpExchange, bridge: ChatRuntimeBridge) {
+        val body = readJsonBody(exchange)
+        val title = body?.get("title")?.toString()
+        val session = bridge.createSession(title = title)
+        val payload = mapOf(
+            "session_id" to session.sessionId,
+            "title" to session.title,
+            "created_at_ms" to session.createdAtMs,
+            "updated_at_ms" to session.updatedAtMs,
+            "message_count" to session.messageCount
+        )
+        respondText(exchange, 201, mapper.writeValueAsString(payload), "application/json; charset=utf-8")
+    }
+
+    private fun handleSubmitChatMessage(
+        exchange: HttpExchange,
+        bridge: ChatRuntimeBridge,
+        sessionId: String,
+    ) {
+        val body = readJsonBody(exchange) ?: run {
+            respondText(exchange, 400, "Invalid JSON body", "text/plain; charset=utf-8")
+            return
+        }
+        val content = body["content"]?.toString().orEmpty()
+        val result = bridge.submitMessage(sessionId = sessionId, content = content)
+        if (!result.accepted) {
+            val statusCode = if (result.detail.contains("Unknown session", ignoreCase = true)) 404 else 400
+            val payload = mapOf(
+                "accepted" to false,
+                "detail" to result.detail
+            )
+            respondText(exchange, statusCode, mapper.writeValueAsString(payload), "application/json; charset=utf-8")
+            return
+        }
+        val payload = mapOf(
+            "accepted" to true,
+            "detail" to result.detail
+        )
+        respondText(exchange, 202, mapper.writeValueAsString(payload), "application/json; charset=utf-8")
+    }
+
+    private fun handleChatSse(
+        exchange: HttpExchange,
+        bridge: ChatRuntimeBridge,
+        sessionId: String,
+    ) {
+        val subscription = bridge.subscribe(sessionId)
+        if (subscription == null) {
+            respondText(exchange, 404, "Session not found", "text/plain; charset=utf-8")
+            return
+        }
+
+        exchange.responseHeaders.add("Content-Type", "text/event-stream")
+        exchange.responseHeaders.add("Cache-Control", "no-cache")
+        exchange.responseHeaders.add("Connection", "keep-alive")
+        exchange.sendResponseHeaders(200, 0)
+
+        val output = exchange.responseBody.bufferedWriter(StandardCharsets.UTF_8)
+        try {
+            output.write("event: ready\n")
+            output.write("data: {\"status\":\"connected\",\"session_id\":\"$sessionId\"}\n\n")
+            output.flush()
+            runBlocking {
+                while (true) {
+                    val payload = withTimeoutOrNull(SSE_HEARTBEAT_TIMEOUT_MS) {
+                        subscription.receive()
+                    }
+                    if (payload != null) {
+                        output.write("event: chat\n")
+                        output.write("data: $payload\n\n")
+                        output.flush()
+                    } else {
+                        output.write(": heartbeat\n\n")
+                        output.flush()
+                    }
+                }
+            }
+        } catch (ex: Exception) {
+            if (isExpectedClientDisconnect(ex)) {
+                logger.debug { "Chat SSE client disconnected for session=$sessionId." }
+            } else {
+                logger.warn(ex) { "Chat SSE stream terminated unexpectedly for session=$sessionId." }
+            }
+        } finally {
+            subscription.close()
+            closeStreamQuietly(output, streamName = "chat_events_sse", context = "session=$sessionId")
+        }
+    }
+
+    private fun handleThinkingSse(exchange: HttpExchange, sessionId: String) {
+        val voiceStore = innerVoiceStore
+        if (voiceStore == null) {
+            respondText(exchange, 503, "Inner voice not available", "text/plain; charset=utf-8")
+            return
+        }
+        val subscription = voiceStore.subscribe(sessionId)
+        if (subscription == null) {
+            respondText(exchange, 404, "Session not found", "text/plain; charset=utf-8")
+            return
+        }
+
+        exchange.responseHeaders.add("Content-Type", "text/event-stream")
+        exchange.responseHeaders.add("Cache-Control", "no-cache")
+        exchange.responseHeaders.add("Connection", "keep-alive")
+        exchange.sendResponseHeaders(200, 0)
+
+        val output = exchange.responseBody.bufferedWriter(StandardCharsets.UTF_8)
+        try {
+            output.write("event: ready\n")
+            output.write("data: {\"status\":\"connected\",\"session_id\":\"$sessionId\"}\n\n")
+            output.flush()
+            runBlocking {
+                while (true) {
+                    val payload = withTimeoutOrNull(SSE_HEARTBEAT_TIMEOUT_MS) {
+                        subscription.receive()
+                    }
+                    if (payload != null) {
+                        output.write("event: thinking\n")
+                        output.write("data: $payload\n\n")
+                        output.flush()
+                    } else {
+                        output.write(": heartbeat\n\n")
+                        output.flush()
+                    }
+                }
+            }
+        } catch (ex: Exception) {
+            if (isExpectedClientDisconnect(ex)) {
+                logger.debug { "Thinking SSE client disconnected for session=$sessionId." }
+            } else {
+                logger.warn(ex) { "Thinking SSE stream terminated unexpectedly for session=$sessionId." }
+            }
+        } finally {
+            subscription.close()
+            closeStreamQuietly(output, streamName = "thinking_sse", context = "session=$sessionId")
+        }
+    }
+
+    private fun handleIdThinkingSse(exchange: HttpExchange) {
+        val voiceStore = innerVoiceStore
+        if (voiceStore == null) {
+            respondText(exchange, 503, "Id inner voice not available", "text/plain; charset=utf-8")
+            return
+        }
+        val subscription = voiceStore.subscribeIdGlobal()
+
+        exchange.responseHeaders.add("Content-Type", "text/event-stream")
+        exchange.responseHeaders.add("Cache-Control", "no-cache")
+        exchange.responseHeaders.add("Connection", "keep-alive")
+        exchange.sendResponseHeaders(200, 0)
+
+        val output = exchange.responseBody.bufferedWriter(StandardCharsets.UTF_8)
+        try {
+            output.write("event: ready\n")
+            output.write("data: {\"status\":\"connected\"}\n\n")
+            output.flush()
+            runBlocking {
+                while (true) {
+                    val payload = withTimeoutOrNull(SSE_HEARTBEAT_TIMEOUT_MS) {
+                        subscription.receive()
+                    }
+                    if (payload != null) {
+                        output.write("event: id-thinking\n")
+                        output.write("data: $payload\n\n")
+                        output.flush()
+                    } else {
+                        output.write(": heartbeat\n\n")
+                        output.flush()
+                    }
+                }
+            }
+        } catch (ex: Exception) {
+            if (isExpectedClientDisconnect(ex)) {
+                logger.debug { "Id thinking SSE client disconnected." }
+            } else {
+                logger.warn(ex) { "Id thinking SSE stream terminated unexpectedly." }
+            }
+        } finally {
+            subscription.close()
+            closeStreamQuietly(output, streamName = "id_thinking_sse")
+        }
+    }
+
+    private fun handleIdThinkingHistory(exchange: HttpExchange) {
+        val filePath = idInnerVoiceFilePath
+        if (filePath == null || !Files.exists(filePath)) {
+            respondText(exchange, 200, "[]", "application/json; charset=utf-8")
+            return
+        }
+        try {
+            val events = Files.readAllLines(filePath, StandardCharsets.UTF_8)
+                .filter { it.isNotBlank() }
+                .map { line ->
+                    // Parse and re-serialize to ensure consistent JSON format
+                    mapper.readValue<Map<String, Any?>>(line)
+                }
+            respondText(exchange, 200, mapper.writeValueAsString(events), "application/json; charset=utf-8")
+        } catch (ex: Exception) {
+            logger.warn(ex) { "Failed to read Id inner-voice history from $filePath" }
+            respondText(exchange, 200, "[]", "application/json; charset=utf-8")
+        }
+    }
+
+    private fun handleLlmStatsApi(exchange: HttpExchange) {
+        val provider = metricsQueryProvider
+        if (provider == null) {
+            respondText(exchange, 503, """{"error":"Metrics query not available"}""", "application/json; charset=utf-8")
+            return
+        }
+        try {
+            val query = parseLlmStatsQuery(exchange.requestURI.query)
+            val cached = llmStatsCache[query.cacheKey]
+            val nowMs = System.currentTimeMillis()
+            val cacheAgeMs = cached?.let { nowMs - it.generatedAtMs } ?: Long.MAX_VALUE
+            val isFresh = cached != null && cacheAgeMs <= LLM_STATS_CACHE_TTL_MS
+
+            if (!isFresh) {
+                triggerLlmStatsRefresh(provider = provider, query = query)
+            }
+            val refreshInFlight = llmStatsRefreshInFlight.contains(query.cacheKey)
+            if (cached != null) {
+                val payload = llmStatsPayload(
+                    report = cached.report,
+                    query = query,
+                    generatedAtMs = cached.generatedAtMs,
+                    stale = !isFresh,
+                    refreshInFlight = refreshInFlight,
+                    warmup = false
+                )
+                respondText(exchange, 200, payload, "application/json; charset=utf-8")
+                return
+            }
+
+            val payload = llmStatsPayload(
+                report = EMPTY_LLM_STATS_REPORT,
+                query = query,
+                generatedAtMs = nowMs,
+                stale = true,
+                refreshInFlight = refreshInFlight,
+                warmup = true
+            )
+            respondText(exchange, LLM_STATS_WARMUP_STATUS, payload, "application/json; charset=utf-8")
+        } catch (ex: Exception) {
+            logger.error(ex) {
+                "Failed to build LLM stats response for request=${exchange.requestMethod} ${exchange.requestURI.path}?${exchange.requestURI.query.orEmpty()}"
+            }
+            respondText(exchange, 500, """{"error":"Failed to query LLM stats"}""", "application/json; charset=utf-8")
+        }
+    }
+
+    private fun triggerLlmStatsRefresh(provider: MetricsQueryProvider, query: LlmStatsQuery) {
+        if (!llmStatsRefreshInFlight.add(query.cacheKey)) {
+            return
+        }
+        if (!llmStatsRefreshSemaphore.tryAcquire()) {
+            llmStatsRefreshInFlight.remove(query.cacheKey)
+            logger.debug {
+                "Skipping LLM stats refresh because refresh gate is saturated query=${query.cacheKey}"
+            }
+            return
+        }
+        llmStatsRefreshExecutor.execute {
+            try {
+                val report = provider.llmCallStats(runOnly = query.runOnly, timeframeMs = query.timeframeMs)
+                llmStatsCache[query.cacheKey] = LlmStatsCacheEntry(
+                    report = report,
+                    generatedAtMs = System.currentTimeMillis()
+                )
+            } catch (ex: Exception) {
+                logger.warn(ex) {
+                    "LLM stats refresh failed for scope=${query.scope} timeframeMs=${query.timeframeMs}"
+                }
+            } finally {
+                llmStatsRefreshSemaphore.release()
+                llmStatsRefreshInFlight.remove(query.cacheKey)
+            }
+        }
+    }
+
+    private fun parseLlmStatsQuery(queryString: String?): LlmStatsQuery {
+        val requestedScope = parseQueryParam(queryString, "scope")?.lowercase()
+        val scope = if (requestedScope == "all") "all" else "run"
+        val timeframeMs = parseQueryParam(queryString, "timeframe")?.toLongOrNull()
+        val normalizedTimeframeMs = timeframeMs?.takeIf { it > 0L }
+        return LlmStatsQuery(
+            scope = scope,
+            runOnly = scope != "all",
+            timeframeMs = normalizedTimeframeMs,
+            cacheKey = "$scope:${normalizedTimeframeMs ?: 0L}"
+        )
+    }
+
+    private fun llmStatsPayload(
+        report: LlmCallStatsReport,
+        query: LlmStatsQuery,
+        generatedAtMs: Long,
+        stale: Boolean,
+        refreshInFlight: Boolean,
+        warmup: Boolean,
+    ): String {
+        val payload = mapOf(
+            "byModel" to report.byModel,
+            "byRole" to report.byRole,
+            "errorBreakdown" to report.errorBreakdown,
+            "generated_at_ms" to generatedAtMs,
+            "scope" to query.scope,
+            "timeframe_ms" to query.timeframeMs,
+            "stale" to stale,
+            "refresh_in_flight" to refreshInFlight,
+            "warmup" to warmup
+        )
+        return mapper.writeValueAsString(payload)
+    }
+
+    private fun parseQueryParam(query: String?, key: String): String? {
+        if (query.isNullOrBlank()) return null
+        return query
+            .split("&")
+            .mapNotNull { part ->
+                val (k, v) = part.split("=", limit = 2).let { tokens ->
+                    when (tokens.size) {
+                        2 -> tokens[0] to tokens[1]
+                        1 -> tokens[0] to ""
+                        else -> return@mapNotNull null
+                    }
+                }
+                if (k == key) v else null
+            }
+            .firstOrNull()
+    }
+
+    private fun parseBooleanQueryParam(query: String?, key: String): Boolean? {
+        val raw = parseQueryParam(query, key)?.trim()?.lowercase() ?: return null
+        return when (raw) {
+            "1", "true", "yes", "on" -> true
+            "0", "false", "no", "off" -> false
+            else -> null
+        }
+    }
+
+    private fun readJsonBody(exchange: HttpExchange): Map<String, Any?>? {
+        return try {
+            val bytes = exchange.requestBody.readBytes()
+            if (bytes.isEmpty()) {
+                emptyMap()
+            } else {
+                mapper.readValue<Map<String, Any?>>(bytes)
+            }
+        } catch (ex: Exception) {
+            logger.warn(ex) {
+                "Failed to parse JSON request body for request=${exchange.requestMethod} ${exchange.requestURI.path}"
+            }
+            null
+        }
+    }
+
+    private inline fun withRequestGuard(
+        exchange: HttpExchange,
+        handlerName: String,
+        block: () -> Unit,
+    ) {
+        try {
+            block()
+        } catch (ex: Exception) {
+            val requestSummary = "${exchange.requestMethod} ${exchange.requestURI.path}?${exchange.requestURI.query.orEmpty()}"
+            if (isExpectedClientDisconnect(ex)) {
+                logger.debug {
+                    "Dashboard request terminated after client disconnect handler=$handlerName request=$requestSummary"
+                }
+                closeResponseBodyQuietly(exchange, handlerName)
+                return
+            }
+            logger.error(ex) {
+                "Dashboard request handler failed handler=$handlerName request=$requestSummary"
+            }
+            writeFallbackInternalError(exchange, handlerName)
+        }
+    }
+
+    private fun writeFallbackInternalError(exchange: HttpExchange, handlerName: String) {
+        if (exchange.responseCode != -1) {
+            logger.debug {
+                "Skipping fallback error response because headers were already sent handler=$handlerName request=${exchange.requestMethod} ${exchange.requestURI.path}"
+            }
+            closeResponseBodyQuietly(exchange, handlerName)
+            return
+        }
+        runCatching {
+            respondText(
+                exchange = exchange,
+                status = 500,
+                body = """{"error":"Internal dashboard error","handler":"$handlerName"}""",
+                contentType = "application/json; charset=utf-8"
+            )
+        }.onFailure { writeEx ->
+            logger.warn(writeEx) {
+                "Failed to write fallback error response for handler=$handlerName request=${exchange.requestMethod} ${exchange.requestURI.path}"
+            }
+            closeResponseBodyQuietly(exchange, handlerName)
+        }
+    }
+
+    private fun closeResponseBodyQuietly(exchange: HttpExchange, handlerName: String) {
+        runCatching { exchange.responseBody.close() }
+            .onFailure { closeEx ->
+                if (isExpectedClientDisconnect(closeEx)) {
+                    logger.debug {
+                        "Response stream already disconnected during cleanup for handler=$handlerName request=${exchange.requestMethod} ${exchange.requestURI.path}"
+                    }
+                } else {
+                    logger.warn(closeEx) {
+                        "Failed to close response body during cleanup for handler=$handlerName request=${exchange.requestMethod} ${exchange.requestURI.path}"
+                    }
+                }
+            }
+    }
+
+    private fun closeStreamQuietly(
+        closeable: Closeable,
+        streamName: String,
+        context: String? = null,
+    ) {
+        runCatching { closeable.close() }
+            .onFailure { closeEx ->
+                val contextSuffix = if (context.isNullOrBlank()) "" else " $context"
+                if (isExpectedClientDisconnect(closeEx)) {
+                    logger.debug { "Client disconnect detected while closing $streamName stream.$contextSuffix" }
+                } else {
+                    logger.warn(closeEx) { "Failed to close $streamName stream.$contextSuffix" }
+                }
+            }
+    }
+
+    private fun isExpectedClientDisconnect(ex: Throwable?): Boolean {
+        var current = ex
+        while (current != null) {
+            if (current is IOException) {
+                val message = current.message?.lowercase().orEmpty()
+                if (
+                    message.contains("broken pipe") ||
+                    message.contains("connection reset") ||
+                    message.contains("stream closed") ||
+                    message.contains("forcibly closed") ||
+                    message.contains("insufficient bytes written")
+                ) {
+                    return true
+                }
+            }
+            current = current.cause
+        }
+        return false
+    }
+
+    private fun respondText(
+        exchange: HttpExchange,
+        status: Int,
+        body: String,
+        contentType: String,
+    ) {
+        val bytes = body.toByteArray(StandardCharsets.UTF_8)
+        exchange.responseHeaders.add("Content-Type", contentType)
+        exchange.responseHeaders.add("Cache-Control", "no-store, no-cache, must-revalidate")
+        exchange.responseHeaders.add("Pragma", "no-cache")
+        exchange.sendResponseHeaders(status, bytes.size.toLong())
+        exchange.responseBody.use { output ->
+            output.write(bytes)
+        }
+    }
+
+    private data class LlmStatsQuery(
+        val scope: String,
+        val runOnly: Boolean,
+        val timeframeMs: Long?,
+        val cacheKey: String,
+    )
+
+    private data class LlmStatsCacheEntry(
+        val report: LlmCallStatsReport,
+        val generatedAtMs: Long,
+    )
+
+    private companion object {
+        val EMPTY_LLM_STATS_REPORT = LlmCallStatsReport(
+            byModel = emptyMap(),
+            byRole = emptyMap(),
+            errorBreakdown = emptyMap(),
+        )
+    }
+}

@@ -17,11 +17,11 @@ Instructions for coding agents working in this repository (Codex, Claude, Gemini
 
 ## Project Snapshot
 - Language: Kotlin (JVM), Gradle Kotlin DSL.
-- Main source: `src/main/kotlin/psyke`.
-- Tests: `src/test/kotlin/psyke`.
+- Main source: `src/main/kotlin/ai/neopsyke`.
+- Tests: `src/test/kotlin/ai/neopsyke`.
 - Entrypoints:
   - `./gradlew run`
-  - `./run-psyke.sh`
+  - `./run-neopsyke.sh`
 
 ## Environment
 - Requires JDK 21+.
@@ -52,8 +52,8 @@ Instructions for coding agents working in this repository (Codex, Claude, Gemini
 - Preferred feature-delivery path: use `freud/` for coding, validation, and triage of non-trivial changes.
 - Separation rule:
   - Freud code/config/workflow assets: `freud/**`
-  - Psyke runtime and tests: `src/main/kotlin/psyke/**`, `src/test/kotlin/psyke/**`
-  - Freud may read/run against all Psyke files, but Freud logic stays under `freud/**`.
+  - NeoPsyke runtime and tests: `src/main/kotlin/ai/neopsyke/**`, `src/test/kotlin/ai/neopsyke/**`
+  - Freud may read/run against all NeoPsyke files, but Freud logic stays under `freud/**`.
 
 ### Required Commands
 - Stub/deterministic-first run:
@@ -70,7 +70,7 @@ Instructions for coding agents working in this repository (Codex, Claude, Gemini
   - `freud/scripts/feature-loop.sh <feature-id> --from-step <step>`
   - Valid step names: `preflight_compile targeted_tests full_tests scenario_pack reasoning_eval_logic reasoning_eval_model memory_live_smoke`
 - Scenario-only run:
-  - `freud/scripts/run-scenarios.sh --file freud/scenarios/v1/psyke-agent-scenarios.json`
+  - `freud/scripts/run-scenarios.sh --file freud/scenarios/v1/neopsyke-agent-scenarios.json`
 - Single-input live eval (pipe one input, get one answer):
   - Preferred wrapper: `freud/scripts/live-eval.sh --input <file> [--expected <file>] [--timeout <seconds>]`
   - Replay a cached run: `freud/scripts/live-eval.sh --input <file> --cache-replay <cache.jsonl>`
@@ -80,13 +80,13 @@ Instructions for coding agents working in this repository (Codex, Claude, Gemini
 
 ### Live Eval Memory Isolation
 - `live-eval.sh` uses an isolated memory environment to avoid polluting user data:
-  - pgvector namespace: `freud-eval` (user default: `psyke`)
-  - Episodic logbook: `.psyke/freud-logbook.db` (user default: `.psyke/logbook.db`)
-  - Metrics DB: `.psyke/freud-metrics.db` (user default: `.psyke/metrics.db`)
+  - pgvector namespace: `freud-eval` (user default: `neopsyke`)
+  - Episodic logbook: `.neopsyke/freud-logbook.db` (user default: `.neopsyke/logbook.db`)
+  - Metrics DB: `.neopsyke/freud-metrics.db` (user default: `.neopsyke/metrics.db`)
 - By default, all Freud-isolated memory is cleared before each run (`--clear-memory-all`).
 - Use `--preserve-memory` or `FREUD_LIVE_EVAL_PRESERVE_MEMORY=true` only when a live eval intentionally depends on prior isolated Freud memory.
 - LLM response caching: first run records all LLM responses to a JSONL cache file; subsequent runs with `--cache-replay` replay cached responses until a hash mismatch (divergence), then switch to real LLM calls.
-- Cache env vars: `PSYKE_LLM_CACHE_MODE` (`record`/`replay`/`off`), `PSYKE_LLM_CACHE_FILE`.
+- Cache env vars: `NEOPSYKE_LLM_CACHE_MODE` (`record`/`replay`/`off`), `NEOPSYKE_LLM_CACHE_FILE`.
 
 ### Failure Semantics (Important)
 - `feature-loop.sh` runs one pass per invocation; it does not auto-fix or auto-iterate code.
@@ -98,9 +98,9 @@ Instructions for coding agents working in this repository (Codex, Claude, Gemini
 
 ### Artifact Locations
 - Feature-loop run outputs are isolated per run under:
-  - `.psyke/runs/freud/<timestamp>-<feature-id>/`
+  - `.neopsyke/runs/freud/<timestamp>-<feature-id>/`
 - Live-eval run outputs under:
-  - `.psyke/runs/freud/<timestamp>-live-eval/`
+  - `.neopsyke/runs/freud/<timestamp>-live-eval/`
   - Includes: `artifacts/answer.txt`, `artifacts/verdict.json`, `artifacts/cache-stats.json`, `artifacts/llm-cache.jsonl` (record mode)
 - BBH smoke aggregate artifacts are written under the active Freud run:
   - `artifacts/bbh-smoke-<lane>-summary.json`
@@ -121,8 +121,8 @@ Instructions for coding agents working in this repository (Codex, Claude, Gemini
   - `artifacts/log-index/<step>.tsv`
   - `logs/<nn-step>.log`
 - Run pointers:
-  - `.psyke/runs/freud/latest` (symlink)
-  - `.psyke/runs/freud/latest-run.txt` (absolute run dir path)
+  - `.neopsyke/runs/freud/latest` (symlink)
+  - `.neopsyke/runs/freud/latest-run.txt` (absolute run dir path)
 
 ### Standard Debug Sequence
 1. Open `artifacts/summary.json` to identify first failing step and overall status.
@@ -134,9 +134,9 @@ Instructions for coding agents working in this repository (Codex, Claude, Gemini
 
 ### Scenario Pack Rules
 - Scenario manifest is JSON:
-  - `freud/scenarios/v1/psyke-agent-scenarios.json`
+  - `freud/scenarios/v1/neopsyke-agent-scenarios.json`
 - Add/update deterministic scenarios whenever behavior changes in agent loop policies, fallback, memory recall, or convergence behavior.
-- Keep scenario selectors aligned with `src/test/kotlin/psyke/eval/AgentScenarioPackTest.kt`.
+- Keep scenario selectors aligned with `src/test/kotlin/ai/neopsyke/eval/AgentScenarioPackTest.kt`.
 
 ### Architecture
 - Orchestration (feature-loop.sh, run-scenarios.sh) remains in Bash.
@@ -146,9 +146,9 @@ Instructions for coding agents working in this repository (Codex, Claude, Gemini
 
 ### Configuration Rules
 - Keep project-specific commands in `freud/config/*.env`.
-- Do not hardcode Psyke-specific commands in generic `freud/scripts/*.sh`.
+- Do not hardcode NeoPsyke-specific commands in generic `freud/scripts/*.sh`.
 - Do not commit local machine paths in Freud configs or docs. Resolve repo-local files relative to the config/script location or repo root.
-- Prefer `freud/scripts/live-eval.sh` for any single-input live/provider-backed Freud check. Treat raw `./run-psyke.sh --freud-live` as a lower-level debugging path or implementation primitive.
+- Prefer `freud/scripts/live-eval.sh` for any single-input live/provider-backed Freud check. Treat raw `./run-neopsyke.sh --freud-live` as a lower-level debugging path or implementation primitive.
 - Default adapter file:
   - `freud/config/default.env`
 - Optional override:
@@ -161,7 +161,7 @@ Instructions for coding agents working in this repository (Codex, Claude, Gemini
   - `freud/config/llm-prod-acceptance.yaml`
 
 ### Reasoning Eval Matrix
-- Freud owns the reasoning eval matrix for Psyke:
+- Freud owns the reasoning eval matrix for NeoPsyke:
   - `logic-gate`: deterministic PR gate via `run-reasoning-pr-gate.sh`
   - `weak-structure-live`: manual live lane using weaker planner/meta-reasoner routing
   - `prod-acceptance-live`: manual live lane using frozen production routing
@@ -169,7 +169,7 @@ Instructions for coding agents working in this repository (Codex, Claude, Gemini
   - logic core (`shape-lock`, `feedback-carry`, `multi-fix`)
   - logic behavioral pack (45 deterministic perturbation tasks)
 - `reasoning_eval_model` remains the live/manual lane and runs the BBH-style smoke suite through `freud/scripts/run-bbh-smoke.sh`.
-- BBH/live reasoning wrappers should call `freud/scripts/live-eval.sh`, which in turn uses `./run-psyke.sh --freud-live`.
+- BBH/live reasoning wrappers should call `freud/scripts/live-eval.sh`, which in turn uses `./run-neopsyke.sh --freud-live`.
 - Strict JSON support for planner/meta-reasoner is a hard requirement in live lanes; any structured-output downgrade is treated as a lane failure.
 ### Summarization Policy
 - Use heuristic summarization: indexed artifacts first (`summary-compact.md`, `trail-index.tsv`, `step-index.tsv`, `anomalies.json`), then AI deep analysis and code edits last.

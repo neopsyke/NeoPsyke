@@ -14,14 +14,14 @@ if [[ -f "$CONFIG_PATH" ]]; then
   source "$CONFIG_PATH"
 fi
 
-if [[ -n "${PSYKE_LLM_CONFIG_FILE:-}" ]]; then
-  export PSYKE_LLM_CONFIG_FILE
+if [[ -n "${NEOPSYKE_LLM_CONFIG_FILE:-}" ]]; then
+  export NEOPSYKE_LLM_CONFIG_FILE
 fi
 
 TIMEOUT="${FREUD_LIVE_EVAL_TIMEOUT:-120}"
-RUN_ROOT="${FREUD_RUN_ROOT:-.psyke/runs/freud}"
+RUN_ROOT="${FREUD_RUN_ROOT:-.neopsyke/runs/freud}"
 GRADLE_USER_HOME_CFG="${FREUD_GRADLE_USER_HOME:-.freud/gradle-home}"
-PSYKE_CMD="${FREUD_LIVE_EVAL_PSYKE_CMD:-$REPO_ROOT/run-psyke.sh}"
+NEOPSYKE_CMD="${FREUD_LIVE_EVAL_NEOPSYKE_CMD:-$REPO_ROOT/run-neopsyke.sh}"
 RUN_DIR_OVERRIDE="${FREUD_LIVE_EVAL_RUN_DIR:-}"
 PRESERVE_MEMORY="${FREUD_LIVE_EVAL_PRESERVE_MEMORY:-false}"
 
@@ -51,7 +51,7 @@ usage() {
   cat <<'EOF'
 Usage: freud/scripts/live-eval.sh --input <file> [options]
 
-Runs a single-input live eval against Psyke with LLM response caching.
+Runs a single-input live eval against NeoPsyke with LLM response caching.
 
 Options:
   --input <file>          Input file containing the user message (required)
@@ -63,15 +63,15 @@ Options:
 
 Environment:
   FREUD_LIVE_EVAL_TIMEOUT   Default timeout in seconds (default: 120)
-  FREUD_RUN_ROOT            Run artifact root (default: .psyke/runs/freud)
+  FREUD_RUN_ROOT            Run artifact root (default: .neopsyke/runs/freud)
 
 Memory isolation:
-  Uses namespace "freud-eval" (pgvector), .psyke/freud-logbook.db (episodic),
-  and .psyke/freud-metrics.db (usage metrics).
+  Uses namespace "freud-eval" (pgvector), .neopsyke/freud-logbook.db (episodic),
+  and .neopsyke/freud-metrics.db (usage metrics).
   By default, all freud memory is cleared before each run (--clear-memory-all).
   Use --preserve-memory when an eval sequence intentionally depends on prior
   isolated freud memory within the same namespace/DBs.
-  User memory (namespace "psyke", .psyke/logbook.db, .psyke/metrics.db) is never touched.
+  User memory (namespace "neopsyke", .neopsyke/logbook.db, .neopsyke/metrics.db) is never touched.
 
 First run (no --cache-replay): records all LLM responses to a cache file.
 Replay run (with --cache-replay): replays cached responses until divergence,
@@ -204,16 +204,16 @@ fi
 log_info ""
 
 # Set environment for the run
-export PSYKE_LLM_CACHE_MODE="$CACHE_MODE"
-export PSYKE_LLM_CACHE_FILE="$CACHE_FILE"
-export PSYKE_LOG_FILE="$RUN_DIR/logs/psyke.log"
-export PSYKE_EVENT_LOG_FILE="$RUN_DIR/logs/events.jsonl"
+export NEOPSYKE_LLM_CACHE_MODE="$CACHE_MODE"
+export NEOPSYKE_LLM_CACHE_FILE="$CACHE_FILE"
+export NEOPSYKE_LOG_FILE="$RUN_DIR/logs/neopsyke.log"
+export NEOPSYKE_EVENT_LOG_FILE="$RUN_DIR/logs/events.jsonl"
 export EGO_TASK_WORKSPACE_DEBUG_CAPTURE_ENABLED="true"
 export MEMORY_DEFAULT_NAMESPACE="freud-eval"
-export PSYKE_LOGBOOK_DB_PATH="$REPO_ROOT/.psyke/freud-logbook.db"
-export PSYKE_METRICS_DB="$REPO_ROOT/.psyke/freud-metrics.db"
+export NEOPSYKE_LOGBOOK_DB_PATH="$REPO_ROOT/.neopsyke/freud-logbook.db"
+export NEOPSYKE_METRICS_DB="$REPO_ROOT/.neopsyke/freud-metrics.db"
 
-# Run Psyke in freud-live mode
+# Run NeoPsyke in freud-live mode
 RUN_START="$(date +%s)"
 clear_memory_arg="--clear-memory-all"
 RAW_STDOUT_FILE="$RUN_DIR/logs/stdout.log"
@@ -222,7 +222,7 @@ if [[ "$PRESERVE_MEMORY" == "true" ]]; then
 fi
 set +e
 cat "$INPUT_FILE" \
-  | "$PSYKE_CMD" --freud-live --freud-live-timeout "$TIMEOUT" ${clear_memory_arg:+"$clear_memory_arg"} --no-id \
+  | "$NEOPSYKE_CMD" --freud-live --freud-live-timeout "$TIMEOUT" ${clear_memory_arg:+"$clear_memory_arg"} --no-id \
   2>"$RUN_DIR/logs/stderr.log" \
   | tee "$RAW_STDOUT_FILE"
 EXIT_CODE="${PIPESTATUS[1]:-$?}"

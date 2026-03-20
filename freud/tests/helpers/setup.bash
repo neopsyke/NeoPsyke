@@ -29,7 +29,7 @@ populate_run_fixtures() {
   cat >"$art/summary.json" <<EOF
 {
   "workflow": "freud",
-  "project": "psyke",
+  "project": "neopsyke",
   "feature_id": "test-feature",
   "run_id": "20260314T120000Z",
   "mode": "stub",
@@ -64,7 +64,7 @@ EOF
   cat >"$art/run-config.json" <<'EOF'
 {
   "workflow": "freud",
-  "project": "psyke",
+  "project": "neopsyke",
   "run_id": "20260314T120000Z",
   "feature_id": "test-feature",
   "mode": "stub"
@@ -97,5 +97,5 @@ EOF
   # Create minimal log files
   echo "BUILD SUCCESSFUL" >"$TEST_RUN_DIR/logs/00-preflight.log"
   echo "BUILD SUCCESSFUL" >"$TEST_RUN_DIR/logs/01-targeted.log"
-  echo "Test failed: psyke.agent.SomeTest > testMethod FAILED" >"$TEST_RUN_DIR/logs/02-full.log"
+  echo "Test failed: ai.neopsyke.agent.SomeTest > testMethod FAILED" >"$TEST_RUN_DIR/logs/02-full.log"
 }

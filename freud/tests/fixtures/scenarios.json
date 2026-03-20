@@ -3,12 +3,12 @@
   "scenarios": [
     {
       "id": "test_scenario_a",
-      "selector": "psyke.eval.TestA.scenarioA",
+      "selector": "ai.neopsyke.eval.TestA.scenarioA",
       "description": "First test scenario"
     },
     {
       "id": "test_scenario_b",
-      "selector": "psyke.eval.TestB.scenarioB",
+      "selector": "ai.neopsyke.eval.TestB.scenarioB",
       "description": "Second test scenario"
     }
   ]

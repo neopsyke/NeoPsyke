@@ -49,8 +49,8 @@ Follow `task_verifier_review` events and aggregated `taskVerifierStats`.
 - Inspect `taskVerifierStats` and recent `task_verifier_review` events.
 
 2. Event sidecar JSONL:
-- Default pointer: `.psyke/logs/latest-events.jsonl`
-- Per-run path: `.psyke/logs/runs/<run-id>.events.jsonl`
+- Default pointer: `.neopsyke/logs/latest-events.jsonl`
+- Per-run path: `.neopsyke/logs/runs/<run-id>.events.jsonl`
 
 3. Structured logs:
 - `StructuredLogSink` emits `task_verifier.review ...` lines with intent and volatility details.
@@ -66,7 +66,7 @@ freud/scripts/task-verifier-telemetry.sh
 Or with explicit run file:
 
 ```bash
-freud/scripts/task-verifier-telemetry.sh .psyke/logs/runs/<run-id>.events.jsonl
+freud/scripts/task-verifier-telemetry.sh .neopsyke/logs/runs/<run-id>.events.jsonl
 ```
 
 The script prints:
@@ -130,8 +130,8 @@ Use a staged loop and change one axis at a time.
 
 ## Files Involved
 
-- Verifier logic: `src/main/kotlin/psyke/agent/ego/TaskVerifier.kt`
-- Event emission: `src/main/kotlin/psyke/agent/ego/Ego.kt`
-- Structured logs: `src/main/kotlin/psyke/instrumentation/StructuredLogSink.kt`
-- Dashboard aggregates: `src/main/kotlin/psyke/dashboard/DashboardStateStore.kt`
+- Verifier logic: `src/main/kotlin/ai/neopsyke/agent/ego/TaskVerifier.kt`
+- Event emission: `src/main/kotlin/ai/neopsyke/agent/ego/Ego.kt`
+- Structured logs: `src/main/kotlin/ai/neopsyke/instrumentation/StructuredLogSink.kt`
+- Dashboard aggregates: `src/main/kotlin/ai/neopsyke/dashboard/DashboardStateStore.kt`
 - Analyzer script: `freud/scripts/task-verifier-telemetry.sh`

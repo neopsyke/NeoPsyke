@@ -6,7 +6,7 @@ plugins {
     application
 }
 
-group = "ai.psyke"
+group = "ai.neopsyke"
 version = "0.1.0"
 
 repositories {
@@ -82,14 +82,14 @@ tasks.withType<JavaCompile>().configureEach {
 }
 
 application {
-    mainClass.set("psyke.mcp.memory.MemoryServerKt")
+    mainClass.set("ai.neopsyke.mcp.memory.MemoryServerKt")
 }
 
 tasks.register<Jar>("fatJar") {
     archiveClassifier.set("all")
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
     manifest {
-        attributes["Main-Class"] = "psyke.mcp.memory.MemoryServerKt"
+        attributes["Main-Class"] = "ai.neopsyke.mcp.memory.MemoryServerKt"
     }
     from(configurations.runtimeClasspath.get().map { if (it.isDirectory) it else zipTree(it) })
     with(tasks.jar.get())

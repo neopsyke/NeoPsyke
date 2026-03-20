@@ -1,16 +1,16 @@
 # Agent Logic Summary (Living Document)
 
-This file is a human-readable map of Psyke's main agent runtime logic.
+This file is a human-readable map of NeoPsyke's main agent runtime logic.
 It is intentionally high-level and should stay aligned with the code.
 
 ## Scope
 - Interactive runtime path only (`runInteractiveMode`), not eval harness internals.
-- Source of truth is code under `src/main/kotlin/psyke/**`.
+- Source of truth is code under `src/main/kotlin/ai/neopsyke/**`.
 
 ## Runtime Wiring
 - Entry:
-  - `src/main/kotlin/psyke/Application.kt`
-  - `src/main/kotlin/psyke/AppModeRunners.kt#runInteractiveMode`
+  - `src/main/kotlin/ai/neopsyke/Application.kt`
+  - `src/main/kotlin/ai/neopsyke/AppModeRunners.kt#runInteractiveMode`
 - `runInteractiveMode` composes:
   - LLM clients (planner, action-verifier, superego, meta-reasoner, long-term-memory advisor)
     - Each cognitive role can use an independent provider/api key/base URL/model from `llm-runtime.yaml`.
@@ -53,7 +53,7 @@ It is intentionally high-level and should stay aligned with the code.
   - default `0` keeps each cap disabled
 
 ## Main Loop (Ego)
-- File: `src/main/kotlin/psyke/agent/ego/Ego.kt`
+- File: `src/main/kotlin/ai/neopsyke/agent/ego/Ego.kt`
 - `runInteractive()`:
   - Pulls signals from `SensoryCortex`.
   - Enqueues new user input in `AttentionScheduler`.
@@ -89,9 +89,9 @@ It is intentionally high-level and should stay aligned with the code.
 
 ## Id Module and Impulse Lifecycle
 - Files:
-  - `src/main/kotlin/psyke/agent/id/Id.kt`
-  - `src/main/kotlin/psyke/agent/id/NeedState.kt`
-  - `src/main/kotlin/psyke/config/IdRuntimeConfig.kt`
+  - `src/main/kotlin/ai/neopsyke/agent/id/Id.kt`
+  - `src/main/kotlin/ai/neopsyke/agent/id/NeedState.kt`
+  - `src/main/kotlin/ai/neopsyke/config/IdRuntimeConfig.kt`
   - `id-runtime.yaml`
 - Id pulse loop:
   - Grows each configured need and decrements cooldown/backoff/in-flight timers.
@@ -204,7 +204,7 @@ It is intentionally high-level and should stay aligned with the code.
 - After `answer`, the task workspace for that root input is destroyed (`task_workspace_destroyed`).
 
 ## Planner Logic
-- File: `src/main/kotlin/psyke/agent/ego/LlmEgoPlanner.kt`
+- File: `src/main/kotlin/ai/neopsyke/agent/ego/LlmEgoPlanner.kt`
 - Responsibilities:
   - Prompt assembly with contract-based budget allocation (`required_core` > `required_context` > `optional`).
   - Overhead-aware floor reservation per section, tiered degradation, and single-message fallback under extreme prompt pressure.
@@ -244,7 +244,7 @@ It is intentionally high-level and should stay aligned with the code.
   - Planner and action-verifier prompts now include "reflection lessons" context to avoid repeated failed strategies.
 
 ## Task Verifier Gate
-- File: `src/main/kotlin/psyke/agent/ego/TaskVerifier.kt`
+- File: `src/main/kotlin/ai/neopsyke/agent/ego/TaskVerifier.kt`
 - Deterministic pre-policy gate for task-level correctness/sufficiency.
 - Uses intent classification (`volatile_fact`, `stable_fact`, `transformation`, `personal_memory`, `subjective_advice`, `static_reasoning`, `unknown`) plus volatility scoring.
 - Returns `TaskVerifierDecision(allow, reason, reasonCode, assessment)` and emits enriched `task_verifier_review` telemetry.
@@ -255,7 +255,7 @@ It is intentionally high-level and should stay aligned with the code.
 - Gate runs before Superego and reuses the same denied-action recovery loop in `Ego`.
 
 ## Policy Gate (Superego)
-- File: `src/main/kotlin/psyke/agent/superego/Superego.kt`
+- File: `src/main/kotlin/ai/neopsyke/agent/superego/Superego.kt`
 - Reviews each non-fallback action with layered checks:
   - deterministic hard-deny checks first (`SuperegoDeterministicConscience`)
   - LLM semantic review second (only if deterministic checks pass)
@@ -286,9 +286,9 @@ It is intentionally high-level and should stay aligned with the code.
 
 ## Deliberation and Convergence
 - Files:
-  - `src/main/kotlin/psyke/agent/ego/DeliberationProgressMonitor.kt`
-  - `src/main/kotlin/psyke/agent/ego/DeliberationEngine.kt`
-  - `src/main/kotlin/psyke/agent/ego/MetaReasoner.kt`
+  - `src/main/kotlin/ai/neopsyke/agent/ego/DeliberationProgressMonitor.kt`
+  - `src/main/kotlin/ai/neopsyke/agent/ego/DeliberationEngine.kt`
+  - `src/main/kotlin/ai/neopsyke/agent/ego/MetaReasoner.kt`
 - Tracks pressure signals:
   - stale streak
   - repeats
@@ -319,7 +319,7 @@ It is intentionally high-level and should stay aligned with the code.
 
 ## Memory System
 - Short-term:
-  - File: `src/main/kotlin/psyke/agent/memory/shortterm/MemoryStore.kt`
+  - File: `src/main/kotlin/ai/neopsyke/agent/memory/shortterm/MemoryStore.kt`
   - Stores recent turns + rolled summary under char budgets.
   - Produces prompt-clamped summary text.
 - Long-term recall:
@@ -362,7 +362,7 @@ It is intentionally high-level and should stay aligned with the code.
     - Deduplicated via recent fingerprint window.
     - Explicitly skipped for technical/system failures (external tool failures, LLM client failures, parse/JSON failures, transport/timeouts, `TECH_*`/`SYSTEM_*` reason codes).
 - Task workspace (ephemeral, per request):
-  - File: `src/main/kotlin/psyke/agent/memory/workspace/TaskWorkspaceStore.kt`
+  - File: `src/main/kotlin/ai/neopsyke/agent/memory/workspace/TaskWorkspaceStore.kt`
   - Enabled by default via `MemoryConfig.taskWorkspace.enabled=true`.
   - Activation remains plan-gated with `MemoryConfig.taskWorkspace.activationMinPlanSteps=2`.
   - Scoped to root input; independent from short-term and long-term memory pipelines.
@@ -371,11 +371,11 @@ It is intentionally high-level and should stay aligned with the code.
   - Planner receives only prompt-capped workspace index/summaries, not full workspace content.
   - Provides final-pass compilation input with workspace confidence estimate (sections/evidence/goal weighted signal).
   - Exposes debug head/snapshot views (versioned) for development-time observability.
-  - Workspace final-pass rewrite is handled by `TaskWorkspaceFinalizer` (`src/main/kotlin/psyke/agent/ego/TaskWorkspaceFinalizer.kt`) with strict JSON parsing, required-field validation, retry loop, and safe fallback.
+  - Workspace final-pass rewrite is handled by `TaskWorkspaceFinalizer` (`src/main/kotlin/ai/neopsyke/agent/ego/TaskWorkspaceFinalizer.kt`) with strict JSON parsing, required-field validation, retry loop, and safe fallback.
   - Workspace is destroyed on input resolution or queue drain cleanup.
 
 - Dashboard workspace observability:
-  - Files: `src/main/kotlin/psyke/dashboard/DashboardStateStore.kt`, `src/main/kotlin/psyke/dashboard/DashboardServer.kt`, `src/main/resources/dashboard/conversations.html`, `src/main/resources/dashboard/observability.html`
+  - Files: `src/main/kotlin/ai/neopsyke/dashboard/DashboardStateStore.kt`, `src/main/kotlin/ai/neopsyke/dashboard/DashboardServer.kt`, `src/main/resources/dashboard/conversations.html`, `src/main/resources/dashboard/observability.html`
   - UI routes are split:
     - Conversations page: `/`
     - Observability dashboard: `/dashboard`
@@ -389,7 +389,7 @@ It is intentionally high-level and should stay aligned with the code.
   - The dashboard drawer fetches snapshot detail on demand to avoid continuous large-payload updates in timeline/event streams.
 
 ## Action Execution Surface
-- File: `src/main/kotlin/psyke/agent/cortex/motor/MotorCortex.kt`
+- File: `src/main/kotlin/ai/neopsyke/agent/cortex/motor/MotorCortex.kt`
 - Startup discovery:
   - Action plugins are discovered at runtime through `ServiceLoader` factories (`AgentActionPluginFactory`).
   - Each plugin self-describes:
@@ -415,7 +415,7 @@ It is intentionally high-level and should stay aligned with the code.
   `website_fetch` currently maps its internal error categories into this generic field.
 
 ## Queueing Model
-- File: `src/main/kotlin/psyke/agent/ego/AttentionScheduler.kt`
+- File: `src/main/kotlin/ai/neopsyke/agent/ego/AttentionScheduler.kt`
 - Three bounded priority queues:
   - inputs (`InputPriority`)
   - thoughts (`Urgency`)
@@ -458,9 +458,9 @@ It is intentionally high-level and should stay aligned with the code.
   instead of relying only on the latest planner signal.
 
 ## Episodic Memory (Logbook)
-- File: `src/main/kotlin/psyke/agent/memory/episodic/SqliteLogbook.kt`
+- File: `src/main/kotlin/ai/neopsyke/agent/memory/episodic/SqliteLogbook.kt`
 - SQLite + FTS5 append-only log of timestamped interaction summaries and keywords.
-- Storage: separate DB file (default `.psyke/logbook.db`), WAL mode, synchronized access.
+- Storage: separate DB file (default `.neopsyke/logbook.db`), WAL mode, synchronized access.
 - Schema: `entries` table (id, ts, ts_epoch_ms, event_type, summary, keywords, action_type, run_id, metadata) with FTS5 virtual table `entries_fts` auto-synced via triggers.
 - Event types recorded: `INPUT_RECEIVED`, `PLANNER_DECISION`, `ACTION_EXECUTED`, `ACTION_DENIED`, `CONTACT_DELIVERED`, `MEMORY_IMPRINT`, `SELF_INITIATED`.
 - Integration through `MemoryCoordinator`:
@@ -483,11 +483,11 @@ It is intentionally high-level and should stay aligned with the code.
   - `INPUT_RECEIVED` stays canonical third-person timeline form as `User: ...`
   - planner/action/answer events keep neutral timeline narration
   - `MEMORY_IMPRINT` and `SELF_INITIATED` preserve or normalize to first-person agent wording
-- Summarization: deterministic keyword extraction (tokenize, remove stopwords, deduplicate, cap at `maxKeywordsPerEntry`). Optional LLM-based summarizer (`LlmLogbookSummarizer`, opt-in via `PSYKE_LOGBOOK_USE_LLM_SUMMARIZER=true`) with automatic fallback to deterministic on failure.
+- Summarization: deterministic keyword extraction (tokenize, remove stopwords, deduplicate, cap at `maxKeywordsPerEntry`). Optional LLM-based summarizer (`LlmLogbookSummarizer`, opt-in via `NEOPSYKE_LOGBOOK_USE_LLM_SUMMARIZER=true`) with automatic fallback to deterministic on failure.
 - Episodic recall: triggered by temporal intent detection (regex patterns on the latest user turn). Detected intent maps to a time window and optional FTS keyword, producing a compact timeline injected into `PlannerContext.episodicRecall`.
 - Temporal-to-vector bridge: episodic summaries from temporal queries also serve as cues for `Hippocampus.recall()`, enriching long-term memory retrieval with temporal context.
 - Graceful degradation: logbook is optional (`null`-safe); creation failure logs warning and runs without episodic memory.
-- Configuration: `LogbookConfig` (enabled, maxSummaryChars, maxKeywordsPerEntry, retentionDays, dbPath, episodicRecallMaxChars, episodicRecallMaxResults, useLlmSummarizer) with env var overrides (`PSYKE_LOGBOOK_*`).
+- Configuration: `LogbookConfig` (enabled, maxSummaryChars, maxKeywordsPerEntry, retentionDays, dbPath, episodicRecallMaxChars, episodicRecallMaxResults, useLlmSummarizer) with env var overrides (`NEOPSYKE_LOGBOOK_*`).
 
 ## Key Complexity Drivers
 - Multiple LLM actors with distinct prompts and fallback semantics.
