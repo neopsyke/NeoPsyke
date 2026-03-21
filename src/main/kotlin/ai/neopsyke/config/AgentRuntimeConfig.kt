@@ -12,6 +12,7 @@ import ai.neopsyke.agent.config.MemoryConfig
 import ai.neopsyke.agent.config.MetaReasonerConfig
 import ai.neopsyke.dashboard.InnerVoiceConfig
 import ai.neopsyke.agent.config.PlannerConfig
+import ai.neopsyke.agent.project.ProjectConfig
 import ai.neopsyke.agent.config.SuperegoConfig
 import ai.neopsyke.agent.config.TaskWorkspaceConfig
 import java.nio.file.Files
@@ -661,6 +662,13 @@ object AgentRuntimeSettingsLoader {
                     env["NEOPSYKE_INNER_VOICE_MAX_EVENTS_PER_SESSION"],
                     innerVoiceYaml.maxEventsPerSession,
                     defaults.innerVoice.maxEventsPerSession
+                ),
+            ),
+            projects = ProjectConfig(
+                enabled = readBoolean(
+                    env["NEOPSYKE_PROJECTS_ENABLED"],
+                    yaml = null,
+                    fallback = defaults.projects.enabled
                 ),
             ),
             loopDelayMs = readNonNegativeInt(

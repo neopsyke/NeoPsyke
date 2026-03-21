@@ -15,6 +15,8 @@ import ai.neopsyke.agent.memory.longterm.NoopHippocampus
 import ai.neopsyke.agent.memory.longterm.NoopLongTermMemoryAdvisor
 import ai.neopsyke.agent.memory.shortterm.MemoryStore
 import ai.neopsyke.agent.memory.workspace.TaskWorkspaceStore
+import ai.neopsyke.agent.project.NoopProjectsGateway
+import ai.neopsyke.agent.project.ProjectsGateway
 import ai.neopsyke.agent.superego.Superego
 import ai.neopsyke.agent.tools.mcp.FetchTool
 import ai.neopsyke.agent.tools.mcp.McpTimeTool
@@ -70,6 +72,7 @@ object EgoAssembler {
         webSearchActionHandler: WebSearchActionHandler? = null,
         mcpTimeTool: McpTimeTool? = null,
         fetchTool: FetchTool? = null,
+        projectsGateway: ProjectsGateway = NoopProjectsGateway,
         output: (String) -> Unit = {},
     ): EgoAssembly {
         val memory = buildMemoryCoordinator(
@@ -89,6 +92,7 @@ object EgoAssembler {
                 fetchTool = fetchTool,
                 output = output,
                 reflectionMemoryRecorder = memory,
+                projectsGateway = projectsGateway,
             )
         )
         val motorCortex = MotorCortex(actionRegistry = actionRegistry)
@@ -103,6 +107,8 @@ object EgoAssembler {
             taskWorkspaceStore = taskWorkspaceStore,
             taskWorkspaceFinalizer = taskWorkspaceFinalizer,
             instrumentation = instrumentation,
+            projectRegistry = projectsGateway,
+            projectsGateway = projectsGateway,
         )
         return EgoAssembly(
             ego = ego,

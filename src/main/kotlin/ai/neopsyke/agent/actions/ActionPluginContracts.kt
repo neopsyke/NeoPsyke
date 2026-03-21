@@ -6,6 +6,8 @@ import ai.neopsyke.agent.model.ActionType
 import ai.neopsyke.agent.config.AgentConfig
 import ai.neopsyke.agent.model.PendingAction
 import ai.neopsyke.agent.model.SuperegoContext
+import ai.neopsyke.agent.project.NoopProjectsGateway
+import ai.neopsyke.agent.project.ProjectsGateway
 import ai.neopsyke.agent.tools.mcp.FetchTool
 import ai.neopsyke.agent.tools.mcp.McpTimeTool
 
@@ -79,6 +81,7 @@ data class ActionPluginFactoryContext(
     val output: (String) -> Unit,
     val env: Map<String, String> = System.getenv(),
     val reflectionMemoryRecorder: ReflectionMemoryRecorder,
+    val projectsGateway: ProjectsGateway = NoopProjectsGateway,
 )
 
 interface AgentActionPlugin : AutoCloseable {

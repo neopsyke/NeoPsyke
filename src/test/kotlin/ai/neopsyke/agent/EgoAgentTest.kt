@@ -183,6 +183,8 @@ class EgoAgentTest {
 
                     is ai.neopsyke.agent.model.EgoTrigger.IncomingImpulse ->
                        ai.neopsyke.agent.model.EgoDecision.Noop("unexpected impulse")
+                    is ai.neopsyke.agent.model.EgoTrigger.ProjectWork ->
+                        ai.neopsyke.agent.model.EgoDecision.Noop("unexpected project work")
                 }
         }
         val superegoLlm = StubChatModelClient().apply {

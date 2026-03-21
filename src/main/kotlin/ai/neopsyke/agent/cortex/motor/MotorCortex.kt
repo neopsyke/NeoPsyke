@@ -9,6 +9,8 @@ import ai.neopsyke.agent.model.ActionOutcome
 import ai.neopsyke.agent.model.ActionType
 import ai.neopsyke.agent.config.AgentConfig
 import ai.neopsyke.agent.model.PendingAction
+import ai.neopsyke.agent.project.NoopProjectsGateway
+import ai.neopsyke.agent.project.ProjectsGateway
 import ai.neopsyke.agent.tools.mcp.FetchTool
 import ai.neopsyke.agent.tools.mcp.McpTimeTool
 
@@ -29,6 +31,7 @@ class MotorCortex(
         output: (String) -> Unit = ::println,
         reflectionMemoryRecorder: ReflectionMemoryRecorder,
         config: AgentConfig = AgentConfig(),
+        projectsGateway: ProjectsGateway = NoopProjectsGateway,
     ) : this(
         actionRegistry = ActionRegistry.discover(
             ActionPluginFactoryContext(
@@ -38,6 +41,7 @@ class MotorCortex(
                 fetchTool = fetchTool,
                 output = output,
                 reflectionMemoryRecorder = reflectionMemoryRecorder,
+                projectsGateway = projectsGateway,
             )
         )
     )

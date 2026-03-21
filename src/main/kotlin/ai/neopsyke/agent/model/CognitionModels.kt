@@ -1,6 +1,8 @@
 package ai.neopsyke.agent.model
 
+import ai.neopsyke.agent.actions.async.AsyncActionWait
 import ai.neopsyke.agent.id.ConvergenceMode
+import ai.neopsyke.agent.project.ProjectWorkUnit
 
 /**
  * Snapshot of the Id's drive state, injected into [PlannerContext] when the
@@ -70,6 +72,7 @@ data class PlannerContext(
     val actionDefinitions: List<ActionPlanningDefinition> = emptyList(),
     val conversationContext: ConversationContext = ConversationContext.default(),
     val idState: IdStateSnapshot? = null,
+    val projectWorkSummary: String = "",
 )
 
 data class ActionPlanningDefinition(
@@ -89,6 +92,7 @@ sealed interface EgoTrigger {
     data class IncomingInput(val input: PendingInput) : EgoTrigger
     data class PendingThoughtInput(val thought: PendingThought) : EgoTrigger
     data class IncomingImpulse(val impulse: PendingImpulse) : EgoTrigger
+    data class ProjectWork(val workUnit: ProjectWorkUnit) : EgoTrigger
 }
 
 sealed interface EgoDecision {
@@ -130,6 +134,7 @@ enum class ActionExecutionStatus {
     SUCCESS,
     FAILED,
     NO_EFFECT,
+    WAITING,
 }
 
 data class ActionOutcome(
@@ -141,9 +146,13 @@ data class ActionOutcome(
     val observedEvidence: Boolean? = null,
     val actionErrorCategory: String? = null,
     val fetchErrorCategory: String? = null,
+    val asyncWait: AsyncActionWait? = null,
 ) {
     val successful: Boolean
         get() = executionStatus == ActionExecutionStatus.SUCCESS
+
+    val waiting: Boolean
+        get() = executionStatus == ActionExecutionStatus.WAITING || asyncWait != null
 }
 
 data class DeliberationState(

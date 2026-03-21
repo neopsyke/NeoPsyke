@@ -57,7 +57,7 @@ data class ActionOrigin(
     }
 }
 
-enum class OriginSource { USER, ID, SYSTEM }
+enum class OriginSource { USER, ID, SYSTEM, PROJECT }
 
 data class PendingImpulse(
     val id: Long,
@@ -109,6 +109,7 @@ sealed interface LoopTask {
     data class ProcessThought(val item: PendingThought) : LoopTask
     data class PerformAction(val item: PendingAction) : LoopTask
     data class ProcessImpulse(val item: PendingImpulse) : LoopTask
+    data class ProcessProjectWork(val item: ai.neopsyke.agent.project.ProjectWorkUnit) : LoopTask
 }
 
 object RootInputIds {

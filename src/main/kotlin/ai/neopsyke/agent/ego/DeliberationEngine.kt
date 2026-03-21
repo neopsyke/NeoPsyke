@@ -174,6 +174,7 @@ internal class DeliberationEngine(
 
     fun observedEvidence(action: PendingAction, outcome: ActionOutcome): Boolean {
         if (!isEvidenceAction(action)) return true
+        if (outcome.waiting) return false
         outcome.observedEvidence?.let { return it }
         // Generic fallback: check plannerSignal for common failure keywords.
         val summary = outcome.plannerSignal.lowercase(java.util.Locale.ROOT)

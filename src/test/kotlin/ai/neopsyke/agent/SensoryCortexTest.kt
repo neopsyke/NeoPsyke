@@ -118,7 +118,7 @@ class SensoryCortexTest {
     @Test
     fun `notifyImpulseReady injects ImpulseReady signal into the channel`() = runBlocking {
         val scope = testScope()
-        val source = ai.neopsyke.agent.cortex.sensory.AsyncSensoryInputSource(
+        val source = ai.neopsyke.agent.cortex.sensory.AsyncSignalSource(
             includeStdin = false,
             emitStdinClosedSignal = false,
             pollTimeoutMs = 10L,
@@ -129,7 +129,7 @@ class SensoryCortexTest {
             assertTrue(offered, "notifyImpulseReady should succeed on an empty channel")
 
             val signal = source.nextSignal()
-            assertIs<ai.neopsyke.agent.cortex.sensory.SensorySignal.ImpulseReady>(signal)
+            assertIs<ai.neopsyke.agent.cortex.sensory.SystemSignal.ImpulseReady>(signal)
         } finally {
             source.close()
         }
@@ -138,7 +138,7 @@ class SensoryCortexTest {
     @Test
     fun `ImpulseReady passes through SensoryCortex untouched`() = runBlocking {
         val scope = testScope()
-        val source = ai.neopsyke.agent.cortex.sensory.AsyncSensoryInputSource(
+        val source = ai.neopsyke.agent.cortex.sensory.AsyncSignalSource(
             includeStdin = false,
             emitStdinClosedSignal = false,
             pollTimeoutMs = 10L,
@@ -151,7 +151,7 @@ class SensoryCortexTest {
         try {
             source.notifyImpulseReady()
             val signal = cortex.nextSignal()
-            assertIs<ai.neopsyke.agent.cortex.sensory.SensorySignal.ImpulseReady>(signal)
+            assertIs<ai.neopsyke.agent.cortex.sensory.SystemSignal.ImpulseReady>(signal)
         } finally {
             source.close()
         }
@@ -162,11 +162,11 @@ class SensoryCortexTest {
         val scope = testScope()
         val scriptedInputs = ArrayDeque(listOf("hello from terminal", "exit"))
         val controlMessages = mutableListOf<String>()
-        val source = ai.neopsyke.agent.cortex.sensory.AsyncSensoryInputSource(
+        val source = ai.neopsyke.agent.cortex.sensory.AsyncSignalSource(
             includeStdin = true,
             emitStdinClosedSignal = false,
             pollTimeoutMs = 10L,
-            stdinMode = ai.neopsyke.agent.cortex.sensory.AsyncSensoryInputSource.StdinMode.CONTROL_ONLY,
+            stdinMode = ai.neopsyke.agent.cortex.sensory.AsyncSignalSource.StdinMode.CONTROL_ONLY,
             readLineFn = {
                 synchronized(scriptedInputs) {
                     scriptedInputs.removeFirstOrNull()

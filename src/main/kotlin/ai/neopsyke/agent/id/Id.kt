@@ -45,7 +45,7 @@ class Id(
     private val hasPendingWork: () -> Boolean,
     /**
      * Callback to wake the Ego loop after an impulse is enqueued.
-     * Injects [SensorySignal.ImpulseReady] into the sensory channel so
+     * Injects [SystemSignal.ImpulseReady] into the sensory channel so
      * the Ego processes the impulse without waiting for user input.
      */
     private val notifyEgo: () -> Unit = {},

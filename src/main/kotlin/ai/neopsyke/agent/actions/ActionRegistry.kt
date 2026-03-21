@@ -93,6 +93,9 @@ class ActionRegistry private constructor(
     companion object {
         fun empty(): ActionRegistry = ActionRegistry(plugins = emptyList())
 
+        fun fromPlugins(plugins: List<AgentActionPlugin>): ActionRegistry =
+            ActionRegistry(plugins = plugins)
+
         fun discover(context: ActionPluginFactoryContext): ActionRegistry {
             val loader = ServiceLoader.load(AgentActionPluginFactory::class.java)
             val plugins = mutableListOf<AgentActionPlugin>()
