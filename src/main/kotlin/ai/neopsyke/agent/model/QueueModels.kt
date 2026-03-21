@@ -104,12 +104,34 @@ data class QueueState(
     val actions: List<PendingAction>,
 )
 
+sealed interface OpportunityWorkItem {
+    val id: Long
+    val rootInputId: String
+    val conversationContext: ConversationContext
+
+    data class InputOpportunity(val input: PendingInput) : OpportunityWorkItem {
+        override val id: Long = input.id
+        override val rootInputId: String = input.rootInputId
+        override val conversationContext: ConversationContext = input.conversationContext
+    }
+
+    data class ImpulseOpportunity(val impulse: PendingImpulse) : OpportunityWorkItem {
+        override val id: Long = impulse.id
+        override val rootInputId: String = impulse.rootImpulseId
+        override val conversationContext: ConversationContext = impulse.conversationContext
+    }
+
+    data class GoalWorkOpportunity(val workUnit: ai.neopsyke.agent.project.ProjectWorkUnit) : OpportunityWorkItem {
+        override val id: Long = workUnit.rootInputId.hashCode().toLong()
+        override val rootInputId: String = workUnit.rootInputId
+        override val conversationContext: ConversationContext = ConversationContext.default()
+    }
+}
+
 sealed interface LoopTask {
-    data class ProcessInput(val item: PendingInput) : LoopTask
+    data class AttendOpportunity(val item: OpportunityWorkItem) : LoopTask
     data class ProcessThought(val item: PendingThought) : LoopTask
     data class PerformAction(val item: PendingAction) : LoopTask
-    data class ProcessImpulse(val item: PendingImpulse) : LoopTask
-    data class ProcessProjectWork(val item: ai.neopsyke.agent.project.ProjectWorkUnit) : LoopTask
 }
 
 object RootInputIds {

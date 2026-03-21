@@ -207,11 +207,9 @@ class Ego(
             telemetry.emitDeliberationState(taskType(task), state)
             try {
                 when (task) {
-                    is LoopTask.ProcessInput -> processInput(task.item)
+                    is LoopTask.AttendOpportunity -> processOpportunity(task.item)
                     is LoopTask.ProcessThought -> processThought(task.item)
                     is LoopTask.PerformAction -> processAction(task.item)
-                    is LoopTask.ProcessImpulse -> processImpulse(task.item)
-                    is LoopTask.ProcessProjectWork -> processProjectWork(task.item)
                 }
             } catch (ex: Exception) {
                 logger.warn(ex) { "Task processing failed for task_type=${taskType(task)}." }
@@ -326,6 +324,14 @@ class Ego(
         )
 
         instrumentation.emit(AgentEvents.phaseTimings(timing.build()))
+    }
+
+    private suspend fun processOpportunity(opportunity: OpportunityWorkItem) {
+        when (opportunity) {
+            is OpportunityWorkItem.InputOpportunity -> processInput(opportunity.input)
+            is OpportunityWorkItem.ImpulseOpportunity -> processImpulse(opportunity.impulse)
+            is OpportunityWorkItem.GoalWorkOpportunity -> processProjectWork(opportunity.workUnit)
+        }
     }
 
     private suspend fun processThought(thought: PendingThought) {
@@ -830,38 +836,38 @@ class Ego(
 
     private fun taskType(task: LoopTask): String =
         when (task) {
-            is LoopTask.ProcessInput -> "input"
+            is LoopTask.AttendOpportunity -> when (task.item) {
+                is OpportunityWorkItem.InputOpportunity -> "input"
+                is OpportunityWorkItem.ImpulseOpportunity -> "impulse"
+                is OpportunityWorkItem.GoalWorkOpportunity -> "project_work"
+            }
             is LoopTask.ProcessThought -> "thought"
             is LoopTask.PerformAction -> "action"
-            is LoopTask.ProcessImpulse -> "impulse"
-            is LoopTask.ProcessProjectWork -> "project_work"
         }
 
     private fun taskRootInputId(task: LoopTask): String? =
         when (task) {
-            is LoopTask.ProcessInput -> task.item.rootInputId
+            is LoopTask.AttendOpportunity -> task.item.rootInputId
             is LoopTask.ProcessThought -> task.item.rootInputId
             is LoopTask.PerformAction -> task.item.rootInputId
-            is LoopTask.ProcessImpulse -> task.item.rootImpulseId
-            is LoopTask.ProcessProjectWork -> task.item.rootInputId
         }
 
     private fun taskRootInputReceivedAtMs(task: LoopTask): Long? =
         when (task) {
-            is LoopTask.ProcessInput -> task.item.receivedAtMs
+            is LoopTask.AttendOpportunity -> when (val item = task.item) {
+                is OpportunityWorkItem.InputOpportunity -> item.input.receivedAtMs
+                is OpportunityWorkItem.ImpulseOpportunity -> item.impulse.receivedAtMs
+                is OpportunityWorkItem.GoalWorkOpportunity -> System.currentTimeMillis()
+            }
             is LoopTask.ProcessThought -> task.item.rootInputReceivedAtMs
             is LoopTask.PerformAction -> task.item.rootInputReceivedAtMs
-            is LoopTask.ProcessImpulse -> task.item.receivedAtMs
-            is LoopTask.ProcessProjectWork -> System.currentTimeMillis()
         }
 
     private fun taskConversationContext(task: LoopTask): ConversationContext =
         when (task) {
-            is LoopTask.ProcessInput -> task.item.conversationContext
+            is LoopTask.AttendOpportunity -> task.item.conversationContext
             is LoopTask.ProcessThought -> task.item.conversationContext
             is LoopTask.PerformAction -> task.item.conversationContext
-            is LoopTask.ProcessImpulse -> task.item.conversationContext
-            is LoopTask.ProcessProjectWork -> ConversationContext.default()
         }
 
     private fun journalPlannerDecision(decision: EgoDecision) {

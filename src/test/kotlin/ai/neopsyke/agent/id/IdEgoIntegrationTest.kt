@@ -6,6 +6,7 @@ import ai.neopsyke.agent.model.ActionOrigin
 import ai.neopsyke.agent.model.ActionType
 import ai.neopsyke.agent.model.LoopTask
 import ai.neopsyke.agent.model.OriginSource
+import ai.neopsyke.agent.model.OpportunityWorkItem
 import ai.neopsyke.agent.model.PendingImpulse
 import ai.neopsyke.agent.ego.AttentionScheduler
 import ai.neopsyke.agent.config.AgentConfig
@@ -22,7 +23,7 @@ import kotlin.test.assertTrue
  * Integration tests for the Id + AttentionScheduler pipeline.
  *
  * Verifies that the Id fires impulses into the scheduler, the scheduler
- * dispatches them as [LoopTask.ProcessImpulse] tasks at the correct priority
+ * dispatches them as attended impulse opportunities at the correct priority
  * (after inputs but before actions/thoughts), and callbacks from the Ego
  * correctly close the impulse lifecycle.
  */
@@ -83,16 +84,17 @@ class IdEgoIntegrationTest {
     // ── Impulse flows from Id through scheduler ─────────────────────────
 
     @Test
-    fun `impulse fired by Id is dequeued as ProcessImpulse task`() {
+    fun `impulse fired by Id is dequeued as attended impulse opportunity`() {
         val (scheduler, id) = buildSchedulerAndId()
 
         id.pulse()
 
         val task = scheduler.nextTask()
         assertNotNull(task, "Scheduler should have a task")
-        assertIs<LoopTask.ProcessImpulse>(task)
-        assertEquals("test-need", task.item.needId)
-        assertEquals("Test impulse prompt", task.item.prompt)
+        val opportunity = assertIs<LoopTask.AttendOpportunity>(task)
+        val impulse = assertIs<OpportunityWorkItem.ImpulseOpportunity>(opportunity.item)
+        assertEquals("test-need", impulse.impulse.needId)
+        assertEquals("Test impulse prompt", impulse.impulse.prompt)
     }
 
     @Test
@@ -128,11 +130,13 @@ class IdEgoIntegrationTest {
 
         // Input should be dequeued first
         val task1 = scheduler.nextTask()
-        assertIs<LoopTask.ProcessInput>(task1, "Input should take priority over impulse")
+        assertIs<LoopTask.AttendOpportunity>(task1, "Input should take priority over impulse")
+        assertIs<OpportunityWorkItem.InputOpportunity>(task1.item)
 
         // Then impulse
         val task2 = scheduler.nextTask()
-        assertIs<LoopTask.ProcessImpulse>(task2, "Impulse should come second")
+        assertIs<LoopTask.AttendOpportunity>(task2, "Impulse should come second")
+        assertIs<OpportunityWorkItem.ImpulseOpportunity>(task2.item)
     }
 
     @Test
@@ -167,7 +171,8 @@ class IdEgoIntegrationTest {
 
         // Impulse should come before thought and action
         val task1 = scheduler.nextTask()
-        assertIs<LoopTask.ProcessImpulse>(task1, "Impulse should beat thoughts and actions")
+        assertIs<LoopTask.AttendOpportunity>(task1, "Impulse should beat thoughts and actions")
+        assertIs<OpportunityWorkItem.ImpulseOpportunity>(task1.item)
     }
 
     @Test
@@ -200,7 +205,8 @@ class IdEgoIntegrationTest {
 
         // 2. Dequeue impulse from scheduler
         val task = scheduler.nextTask()
-        assertIs<LoopTask.ProcessImpulse>(task)
+        assertIs<LoopTask.AttendOpportunity>(task)
+        assertIs<OpportunityWorkItem.ImpulseOpportunity>(task.item)
 
         // 3. Ego accepts (planner produced a plan)
         id.onImpulseAccepted("test-need")
@@ -228,7 +234,8 @@ class IdEgoIntegrationTest {
         assertTrue(need.inFlight)
 
         val task = scheduler.nextTask()
-        assertIs<LoopTask.ProcessImpulse>(task)
+        assertIs<LoopTask.AttendOpportunity>(task)
+        assertIs<OpportunityWorkItem.ImpulseOpportunity>(task.item)
 
         // Planner returns Noop -> Ego calls onImpulseDenied
         id.onImpulseDenied("test-need")
@@ -261,9 +268,10 @@ class IdEgoIntegrationTest {
         id.pulse()
 
         val task = scheduler.nextTask()
-        assertIs<LoopTask.ProcessImpulse>(task)
-        assertEquals(Id.SESSION_ID, task.item.conversationContext.sessionId)
-        assertEquals(Id.INTERLOCUTOR, task.item.conversationContext.interlocutor)
+        val opportunity = assertIs<LoopTask.AttendOpportunity>(task)
+        val impulse = assertIs<OpportunityWorkItem.ImpulseOpportunity>(opportunity.item)
+        assertEquals(Id.SESSION_ID, impulse.impulse.conversationContext.sessionId)
+        assertEquals(Id.INTERLOCUTOR, impulse.impulse.conversationContext.interlocutor)
     }
 
     @Test

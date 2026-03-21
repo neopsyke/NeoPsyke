@@ -9,11 +9,9 @@ class AttentionScheduler(
     private val config: AgentConfig,
 ) {
     private var idCounter = 0L
-    private val inputs = PriorityQueue<PendingInput>(inputComparator)
+    private val opportunities = PriorityQueue<OpportunityWorkItem>(opportunityComparator)
     private val thoughts = PriorityQueue<PendingThought>(thoughtComparator)
     private val actions = PriorityQueue<PendingAction>(actionComparator)
-    private val impulses = ArrayDeque<PendingImpulse>()
-    private val projectWork = ArrayDeque<ProjectWorkUnit>()
     private var latestQueuedInput: PendingInput? = null
 
     fun enqueueInput(
@@ -22,7 +20,7 @@ class AttentionScheduler(
         source: String = "external",
         conversationContext: ConversationContext = ConversationContext.default(),
     ): Boolean {
-        if (inputs.size >= config.maxPendingInputs) {
+        if (pendingInputCount() >= config.maxPendingInputs) {
             return false
         }
         val input = PendingInput(
@@ -32,7 +30,7 @@ class AttentionScheduler(
             source = source,
             conversationContext = conversationContext
         )
-        inputs.add(input)
+        opportunities.add(OpportunityWorkItem.InputOpportunity(input))
         latestQueuedInput = input
         return true
     }
@@ -130,23 +128,23 @@ class AttentionScheduler(
      * @return true if enqueued, false if at capacity
      */
     fun enqueueImpulse(impulse: PendingImpulse, maxPendingImpulses: Int): Boolean {
-        if (impulses.size >= maxPendingImpulses) return false
-        impulses.addLast(impulse)
+        if (pendingImpulseCount() >= maxPendingImpulses) return false
+        opportunities.add(OpportunityWorkItem.ImpulseOpportunity(impulse))
         return true
     }
 
     /** Remove all pending impulses. */
     fun clearPendingImpulses() {
-        impulses.clear()
+        opportunities.removeIf { it is OpportunityWorkItem.ImpulseOpportunity }
     }
 
     fun enqueueProjectWork(workUnit: ProjectWorkUnit): Boolean {
-        projectWork.addLast(workUnit)
+        opportunities.add(OpportunityWorkItem.GoalWorkOpportunity(workUnit))
         return true
     }
 
     fun clearProjectWork() {
-        projectWork.clear()
+        opportunities.removeIf { it is OpportunityWorkItem.GoalWorkOpportunity }
     }
 
     fun dequeueFallbackExplanationAction(): PendingAction? {
@@ -233,25 +231,11 @@ class AttentionScheduler(
     }
 
     fun nextTask(): LoopTask? {
-        // 1. User inputs always take top priority.
-        val input = inputs.poll()
-        if (input != null) {
-            return LoopTask.ProcessInput(input)
+        val opportunity = opportunities.poll()
+        if (opportunity != null) {
+            return LoopTask.AttendOpportunity(opportunity)
         }
 
-        // 2. Id impulses come second (when Ego is otherwise idle).
-        val impulse = impulses.removeFirstOrNull()
-        if (impulse != null) {
-            return LoopTask.ProcessImpulse(impulse)
-        }
-
-        // 3. Project work comes before general thoughts/actions.
-        val pw = projectWork.removeFirstOrNull()
-        if (pw != null) {
-            return LoopTask.ProcessProjectWork(pw)
-        }
-
-        // 4. Actions and thoughts by urgency priority.
         val topAction = actions.peek()
         val topThought = thoughts.peek()
         if (topAction == null && topThought == null) {
@@ -272,28 +256,31 @@ class AttentionScheduler(
     }
 
     fun hasPendingWork(): Boolean =
-        inputs.isNotEmpty() || impulses.isNotEmpty() || projectWork.isNotEmpty() || thoughts.isNotEmpty() || actions.isNotEmpty()
+        opportunities.isNotEmpty() || thoughts.isNotEmpty() || actions.isNotEmpty()
 
     /**
      * Returns true when there is queued work (thought/action/impulse) for a specific root.
      * Used by Ego to close Id impulse lifecycles only after all derived work is drained.
      */
     fun hasPendingWorkForRoot(rootInputId: String): Boolean =
-        impulses.any { it.rootImpulseId == rootInputId } ||
+        opportunities.any { it.rootInputId == rootInputId } ||
             thoughts.any { it.rootInputId == rootInputId } ||
             actions.any { it.rootInputId == rootInputId }
 
     fun queueSnapshot(): QueueSnapshot =
         QueueSnapshot(
-            pendingInputCount = inputs.size,
+            pendingInputCount = pendingInputCount(),
             pendingThoughtCount = thoughts.size,
             pendingActionCount = actions.size,
-            pendingImpulseCount = impulses.size,
+            pendingImpulseCount = pendingImpulseCount(),
         )
 
     fun queueState(): QueueState =
         QueueState(
-            inputs = inputs.toList().sortedWith(inputComparator),
+            inputs = opportunities
+                .filterIsInstance<OpportunityWorkItem.InputOpportunity>()
+                .map { it.input }
+                .sortedWith(inputComparator),
             thoughts = thoughts.toList().sortedWith(thoughtComparator),
             actions = actions.toList().sortedWith(actionComparator)
         )
@@ -326,5 +313,30 @@ class AttentionScheduler(
 
         internal val actionComparator = compareByDescending<PendingAction> { it.urgency.priority }
             .thenBy { it.id }
+
+        internal val opportunityComparator =
+            compareBy<OpportunityWorkItem> { opportunityRank(it) }
+                .thenByDescending { opportunityPriority(it) }
+                .thenBy { it.id }
+
+        private fun opportunityRank(item: OpportunityWorkItem): Int =
+            when (item) {
+                is OpportunityWorkItem.InputOpportunity -> 0
+                is OpportunityWorkItem.ImpulseOpportunity -> 1
+                is OpportunityWorkItem.GoalWorkOpportunity -> 2
+            }
+
+        private fun opportunityPriority(item: OpportunityWorkItem): Int =
+            when (item) {
+                is OpportunityWorkItem.InputOpportunity -> item.input.priority.level
+                is OpportunityWorkItem.ImpulseOpportunity -> (item.impulse.urgency * 1000).toInt()
+                is OpportunityWorkItem.GoalWorkOpportunity -> 0
+            }
     }
+
+    private fun pendingInputCount(): Int =
+        opportunities.count { it is OpportunityWorkItem.InputOpportunity }
+
+    private fun pendingImpulseCount(): Int =
+        opportunities.count { it is OpportunityWorkItem.ImpulseOpportunity }
 }

@@ -22,8 +22,9 @@ class AttentionSchedulerTest {
         scheduler.enqueueInput("new input")
 
         val task = scheduler.nextTask()
-        assertIs<ai.neopsyke.agent.model.LoopTask.ProcessInput>(task)
-        assertEquals("new input", task.item.content)
+        val opportunity = assertIs<ai.neopsyke.agent.model.LoopTask.AttendOpportunity>(task)
+        val input = assertIs<ai.neopsyke.agent.model.OpportunityWorkItem.InputOpportunity>(opportunity.item)
+        assertEquals("new input", input.input.content)
     }
 
     @Test
@@ -53,11 +54,13 @@ class AttentionSchedulerTest {
         val first = scheduler.nextTask()
         val second = scheduler.nextTask()
 
-        assertIs<ai.neopsyke.agent.model.LoopTask.ProcessInput>(first)
-        assertIs<ai.neopsyke.agent.model.LoopTask.ProcessInput>(second)
-        assertEquals("high-second", first.item.content)
-        assertEquals(InputPriority.HIGH, first.item.priority)
-        assertEquals("medium-first", second.item.content)
+        val firstOpportunity = assertIs<ai.neopsyke.agent.model.LoopTask.AttendOpportunity>(first)
+        val secondOpportunity = assertIs<ai.neopsyke.agent.model.LoopTask.AttendOpportunity>(second)
+        val firstInput = assertIs<ai.neopsyke.agent.model.OpportunityWorkItem.InputOpportunity>(firstOpportunity.item)
+        val secondInput = assertIs<ai.neopsyke.agent.model.OpportunityWorkItem.InputOpportunity>(secondOpportunity.item)
+        assertEquals("high-second", firstInput.input.content)
+        assertEquals(InputPriority.HIGH, firstInput.input.priority)
+        assertEquals("medium-first", secondInput.input.content)
     }
 
     @Test
