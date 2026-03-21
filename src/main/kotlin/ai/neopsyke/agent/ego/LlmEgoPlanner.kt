@@ -1289,6 +1289,26 @@ class LlmEgoPlanner(
                     )
                     return original
                 }
+                if (shouldIgnoreMeaningChangingRepair(
+                        original = original,
+                        repairedActionType = repairedActionType,
+                        repairedPayload = repairedPayload
+                    )
+                ) {
+                    emitVerifierResult(
+                        verdict = "approve",
+                        originalActionType = original.actionType.name.lowercase(),
+                        resultingActionType = original.actionType.name.lowercase(),
+                        repaired = false,
+                        reason = "Verifier repair ignored: proposed change would alter action meaning."
+                    )
+                    instrumentation.emit(
+                        AgentEvents.warning(
+                            "Action verifier proposed a meaning-changing repair; keeping original action."
+                        )
+                    )
+                    return original
+                }
                 val repairedSummary = payload.actionSummary?.trim().orEmpty()
                 val resolvedSummary = if (repairedSummary.isBlank()) {
                     synthesizeActionSummary(repairedPayload)
@@ -1439,6 +1459,32 @@ class LlmEgoPlanner(
         } catch (_: Exception) {
             false
         }
+    }
+
+    private fun shouldIgnoreMeaningChangingRepair(
+        original: EgoDecision.ProposeAction,
+        repairedActionType: ActionType,
+        repairedPayload: String,
+    ): Boolean {
+        if (original.actionType != repairedActionType) {
+            return true
+        }
+        return !isMeaningPreservingPayloadRepair(
+            originalPayload = original.payload,
+            repairedPayload = repairedPayload
+        )
+    }
+
+    private fun isMeaningPreservingPayloadRepair(
+        originalPayload: String,
+        repairedPayload: String,
+    ): Boolean {
+        if (normalizeComparableActionPayload(originalPayload) == normalizeComparableActionPayload(repairedPayload)) {
+            return true
+        }
+        val originalTokens = normalizeComparableContactTokens(originalPayload)
+        val repairedTokens = normalizeComparableContactTokens(repairedPayload)
+        return originalTokens.isNotEmpty() && originalTokens == repairedTokens
     }
 
     private fun emitDecision(
@@ -1861,9 +1907,13 @@ class LlmEgoPlanner(
                     }
                     Rules:
                     - approve: action is coherent and ready for policy review.
-                    - repair: one-shot correction to make action coherent.
+                    - repair: one-shot correction that preserves the original action's meaning.
                     - reject: action cannot be repaired safely/coherently.
                     - Use repair only for material action changes; if action_type/payload/summary are effectively unchanged, use approve.
+                    - Never change the action type in a repair.
+                    - Never use repair to substitute a different factual claim, number, date, boolean, named entity, answer choice, URL, query, tool argument, recipient, schedule, or other new meaning.
+                    - Repairs must stay surface-level only: whitespace, punctuation, casing, quoting/escaping, JSON formatting, or similarly meaning-preserving cleanup.
+                    - If the candidate action might be wrong but a fix would change its meaning, use reject instead of rewriting it.
                     - For answer actions, approve when the candidate answer is directly entailed by the trigger/context and there is no contradictory evidence.
                     - Do not reject an answer action solely because it is short, simple, or a direct exact-match response to the trigger.
                     - Never use action types outside available_action_types.
@@ -2442,6 +2492,15 @@ class LlmEgoPlanner(
 
     private fun normalizeComparableActionPayload(payload: String?): String? =
         payload?.lowercase()?.replace(Regex("\\s+"), " ")?.trim()
+
+    private fun normalizeComparableContactTokens(payload: String?): List<String> =
+        payload
+            ?.lowercase()
+            ?.trim()
+            ?.trim('"', '\'', '`')
+            ?.split(Regex("[^\\p{L}\\p{N}]+"))
+            ?.filter { it.isNotBlank() }
+            ?: emptyList()
 
     private fun synthesizeActionSummary(actionPayload: String): String {
         val firstLine = actionPayload

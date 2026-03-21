@@ -132,6 +132,7 @@ sequenceDiagram
             Note over Ego,Planner: Redundancy is planner-side soft cost control (prompt and verifier), with telemetry event external_action_redundancy_signal
             Note over Ego,Planner: Action verifier uses strict json_schema with relaxed-schema fallback parse failures do truncation-budget retry then strict retry and may trip temporary verifier bypass (scoped per root_input and action_type)
             Note over Ego,Planner: Follow-up thoughts carry structured origin metadata (originActionType + observedEvidence) verifier repairs back to the same evidence action are ignored for evidence-backed answers unless user asked refresh/retry no-op verifier repairs collapse to approve
+            Note over Ego,Planner: For contact_user, verifier repairs are limited to meaning-preserving surface cleanup; semantic answer rewrites are ignored and the original answer is kept
             Note over Ego,Planner: Verifier rejects now preserve denied action metadata in noop-thoughts repeated non-technical reject of the same answer payload on a follow-up thought is treated as verifier disagreement planner keeps the answer and dispatcher does not re-block it as a normal repeated denied action
             Note over Ego,Planner: Follow-up evidence thoughts explicitly request one raw JSON planner decision and forbid tool/function wrappers
         else Task = action
