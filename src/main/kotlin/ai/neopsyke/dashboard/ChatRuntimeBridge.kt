@@ -4,7 +4,7 @@ import ai.neopsyke.agent.model.ConversationContext
 import ai.neopsyke.agent.config.DefaultInterlocutorResolver
 import ai.neopsyke.agent.model.InputPriority
 import ai.neopsyke.agent.config.InterlocutorResolver
-import ai.neopsyke.agent.cortex.sensory.AsyncSensoryInputSource
+import ai.neopsyke.agent.cortex.sensory.AsyncSignalSource
 
 data class ChatSubmitResult(
     val accepted: Boolean,
@@ -13,7 +13,7 @@ data class ChatSubmitResult(
 
 class ChatRuntimeBridge(
     private val store: DashboardStateStore,
-    private val sensoryInput: AsyncSensoryInputSource,
+    private val sensoryInput: AsyncSignalSource,
     private val interlocutorResolver: InterlocutorResolver = DefaultInterlocutorResolver(),
 ) {
     init {

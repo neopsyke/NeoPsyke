@@ -6,7 +6,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.SupervisorJob
 import ai.neopsyke.agent.actions.ActionExecutionContext
 import ai.neopsyke.agent.actions.ActionPluginFactoryContext
-import ai.neopsyke.agent.actions.builtin.ProjectOperationActionPlugin
+import ai.neopsyke.agent.actions.builtin.GoalOperationActionPlugin
 import ai.neopsyke.agent.config.AgentConfig
 import ai.neopsyke.agent.model.ActionExecutionStatus
 import ai.neopsyke.agent.model.ActionType
@@ -20,11 +20,11 @@ import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
-class ProjectOperationActionPluginTest {
+class GoalOperationActionPluginTest {
 
     @Test
     fun `plugin is dispatchable only when projects are enabled`() {
-        val disabled = ProjectOperationActionPlugin(
+        val disabled = GoalOperationActionPlugin(
             ActionPluginFactoryContext(
                 config = AgentConfig(projects = ProjectConfig(enabled = false)),
                 webSearchActionHandler = null,
@@ -34,7 +34,7 @@ class ProjectOperationActionPluginTest {
                 reflectionMemoryRecorder = ai.neopsyke.agent.actions.NoopReflectionMemoryRecorder,
             )
         )
-        val enabled = ProjectOperationActionPlugin(
+        val enabled = GoalOperationActionPlugin(
             ActionPluginFactoryContext(
                 config = AgentConfig(projects = ProjectConfig(enabled = true)),
                 webSearchActionHandler = null,
@@ -51,14 +51,14 @@ class ProjectOperationActionPluginTest {
 
     @Test
     fun `plugin routes create operation through projects gateway`() = runBlocking {
-        var capturedRequest: ProjectOperationRequest? = null
+        var capturedRequest: GoalOperationRequest? = null
         val gateway = object : GoalsGateway by NoopGoalsGateway {
-            override fun executeOperation(request: ProjectOperationRequest): ProjectOperationResult {
+            override fun executeOperation(request: GoalOperationRequest): GoalOperationResult {
                 capturedRequest = request
-                return ProjectOperationResult(true, "created", "proj-1")
+                return GoalOperationResult(true, "created", "goal-1")
             }
         }
-        val plugin = ProjectOperationActionPlugin(
+        val plugin = GoalOperationActionPlugin(
             ActionPluginFactoryContext(
                 config = AgentConfig(projects = ProjectConfig(enabled = true)),
                 webSearchActionHandler = null,
@@ -74,15 +74,15 @@ class ProjectOperationActionPluginTest {
             PendingAction(
                 id = 1L,
                 urgency = Urgency.MEDIUM,
-                type = ActionType.PROJECT_OPERATION,
+                type = ActionType.GOAL_OPERATION,
                 payload = """{"operation":"create","title":"Inbox","instruction":"Keep inbox triaged","priority":"HIGH"}""",
-                summary = "create project",
+                summary = "create goal",
             ),
             ActionExecutionContext(searchResultCount = 0)
         )
 
         assertEquals(ActionExecutionStatus.SUCCESS, outcome.executionStatus)
-        assertEquals(ProjectOperation.CREATE, capturedRequest?.operation)
+        assertEquals(GoalOperation.CREATE, capturedRequest?.operation)
         assertEquals("Inbox", capturedRequest?.title)
         assertEquals(ProjectPriority.HIGH, capturedRequest?.priority)
     }
@@ -183,20 +183,20 @@ class ProjectOperationActionPluginTest {
         }
     }
 
-    private suspend fun execute(plugin: ProjectOperationActionPlugin, payload: String) =
+    private suspend fun execute(plugin: GoalOperationActionPlugin, payload: String) =
         plugin.execute(
             PendingAction(
                 id = 1L,
                 urgency = Urgency.MEDIUM,
-                type = ActionType.PROJECT_OPERATION,
+                type = ActionType.GOAL_OPERATION,
                 payload = payload,
-                summary = "project operation",
+                summary = "goal operation",
             ),
             ActionExecutionContext(searchResultCount = 0)
         )
 
     private fun projectPlugin(gateway: GoalsGateway, root: java.nio.file.Path) =
-        ProjectOperationActionPlugin(
+        GoalOperationActionPlugin(
             ActionPluginFactoryContext(
                 config = AgentConfig(projects = ProjectConfig(enabled = true, workspaceRoot = root)),
                 webSearchActionHandler = null,

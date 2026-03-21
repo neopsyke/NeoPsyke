@@ -111,7 +111,8 @@ private data class AgentRuntimeYamlMemory(
     val longTermMemoryRecallEchoMinTokenCount: Int? = null,
     val longTermMemoryRecallEchoTokenOverlapThreshold: Double? = null,
     val mcpMemoryCallTimeoutMs: Long? = null,
-    val taskWorkspace: AgentRuntimeYamlTaskWorkspace? = AgentRuntimeYamlTaskWorkspace(),
+    val scratchpad: AgentRuntimeYamlTaskWorkspace? = null,
+    val taskWorkspace: AgentRuntimeYamlTaskWorkspace? = null,
 )
 
 private data class AgentRuntimeYamlTaskWorkspace(
@@ -197,7 +198,7 @@ object AgentRuntimeSettingsLoader {
         val plannerYaml = agentYaml.planner ?: AgentRuntimeYamlPlanner()
         val superegoYaml = agentYaml.superego ?: AgentRuntimeYamlSuperego()
         val memoryYaml = agentYaml.memory ?: AgentRuntimeYamlMemory()
-        val taskWorkspaceYaml = memoryYaml.taskWorkspace ?: AgentRuntimeYamlTaskWorkspace()
+        val taskWorkspaceYaml = memoryYaml.scratchpad ?: memoryYaml.taskWorkspace ?: AgentRuntimeYamlTaskWorkspace()
         val metaReasonerYaml = agentYaml.metaReasoner ?: AgentRuntimeYamlMetaReasoner()
         val logbookYaml = agentYaml.logbook ?: AgentRuntimeYamlLogbook()
         val innerVoiceYaml = agentYaml.innerVoice ?: AgentRuntimeYamlInnerVoice()

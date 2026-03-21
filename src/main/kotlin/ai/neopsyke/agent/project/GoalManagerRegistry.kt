@@ -1,7 +1,7 @@
 package ai.neopsyke.agent.project
 
 import ai.neopsyke.agent.id.GoalRegistry
-import ai.neopsyke.agent.id.Project as IdProject
+import ai.neopsyke.agent.id.Goal as IdGoal
 import java.time.Instant
 
 /**
@@ -12,11 +12,11 @@ class GoalManagerRegistry(
     private val projectManager: GoalManager,
 ) : GoalRegistry {
 
-    override fun activeProjects(): List<IdProject> =
+    override fun activeGoals(): List<IdGoal> =
         projectManager.allProjects()
             .filter { it.status == ProjectStatus.ACTIVE || it.status == ProjectStatus.BLOCKED }
             .map { summary ->
-                IdProject(
+                IdGoal(
                     id = summary.projectId,
                     instruction = summary.title,
                     lastActedAt = summary.lastWorkedAt,

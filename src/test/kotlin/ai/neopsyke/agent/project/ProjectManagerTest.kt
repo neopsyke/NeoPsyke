@@ -136,7 +136,7 @@ class GoalManagerTest {
                 ),
                 observedEvidence = true,
             )
-            manager.finalizeProjectCycle(work.rootInputId)
+            manager.finalizeGoalCycle(work.rootInputId)
 
             val state = manager.projectStatus(id)
             assertNotNull(state)
@@ -178,7 +178,7 @@ class GoalManagerTest {
                 outcome = asyncWaitingOutcome(operationId = "op-1"),
                 observedEvidence = false,
             )
-            manager.finalizeProjectCycle(work.rootInputId)
+            manager.finalizeGoalCycle(work.rootInputId)
 
             waitUntil {
                 val state = manager.projectStatus(projectId)
@@ -223,7 +223,7 @@ class GoalManagerTest {
                 ),
                 observedEvidence = false,
             )
-            manager.finalizeProjectCycle(work.rootInputId)
+            manager.finalizeGoalCycle(work.rootInputId)
 
             val state = manager.projectStatus(projectId)
             assertNotNull(state)
@@ -272,7 +272,7 @@ class GoalManagerTest {
                 outcome = asyncWaitingOutcome(operationId = "op-restore"),
                 observedEvidence = false,
             )
-            manager1.finalizeProjectCycle(work.rootInputId)
+            manager1.finalizeGoalCycle(work.rootInputId)
             manager1.stop()
 
             provider.enqueue(operationId = "op-restore", statuses = listOf(AsyncOperationStatus.Succeeded("restored completion")))
@@ -319,7 +319,7 @@ class GoalManagerTest {
                 outcome = asyncWaitingOutcome(operationId = "evt-1", resumeMode = AsyncResumeMode.EVENT, correlationKey = "corr-1"),
                 observedEvidence = false,
             )
-            manager1.finalizeProjectCycle(work.rootInputId)
+            manager1.finalizeGoalCycle(work.rootInputId)
             manager1.stop()
 
             val signals = CopyOnWriteArrayList<GoalRuntimeCue>()
@@ -392,7 +392,7 @@ class GoalManagerTest {
                 ),
                 observedEvidence = true,
             )
-            manager.finalizeProjectCycle(work.rootInputId)
+            manager.finalizeGoalCycle(work.rootInputId)
 
             val workspace = root.resolve(id).resolve(ProjectStore.WORKSPACE_DIR)
             val context = workspace.resolve("context.md")

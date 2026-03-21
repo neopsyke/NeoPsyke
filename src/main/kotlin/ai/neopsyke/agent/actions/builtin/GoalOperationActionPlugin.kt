@@ -15,22 +15,22 @@ import ai.neopsyke.agent.model.ActionOutcome
 import ai.neopsyke.agent.model.ActionType
 import ai.neopsyke.agent.model.PendingAction
 import ai.neopsyke.agent.model.SuperegoContext
-import ai.neopsyke.agent.project.ProjectOperation
-import ai.neopsyke.agent.project.ProjectOperationRequest
+import ai.neopsyke.agent.project.GoalOperation
+import ai.neopsyke.agent.project.GoalOperationRequest
 
-class ProjectOperationActionPlugin(
+class GoalOperationActionPlugin(
     private val context: ActionPluginFactoryContext,
 ) : AgentActionPlugin {
     override val descriptor: ActionDescriptor = ActionDescriptor(
-        actionType = ActionType.PROJECT_OPERATION,
+        actionType = ActionType.GOAL_OPERATION,
         dispatchable = context.config.projects.enabled,
-        plannerDescription = "project_operation: create, inspect, pause, resume, reprioritize, complete, list, or revise persistent projects.",
-        payloadGuidance = "Strict JSON with an operation field and the required project arguments.",
+        plannerDescription = "goal_operation: create, inspect, pause, resume, reprioritize, complete, list, or revise persistent goals.",
+        payloadGuidance = "Strict JSON with an operation field and the required goal arguments.",
         payloadSchemaExample = """
             {"operation":"create","title":"Inbox cleanup","instruction":"Keep my inbox triaged daily","priority":"HIGH","completion_criteria":"Inbox is triaged and rules are documented"}
         """.trimIndent(),
         requiresFollowUpThought = false,
-        followUpPrefix = "Project operation completed.",
+        followUpPrefix = "Goal operation completed.",
     )
 
     override fun deterministicReview(
@@ -41,15 +41,15 @@ class ProjectOperationActionPlugin(
         val payload = parsePayload(action.payload)
             ?: return ActionDeterministicReview(
                 allow = false,
-                ruleId = "project_operation_invalid_payload",
-                reason = "PROJECT_OPERATION payload must be valid JSON."
+                ruleId = "goal_operation_invalid_payload",
+                reason = "GOAL_OPERATION payload must be valid JSON."
             )
         val operation = payload.operation?.trim().orEmpty()
         if (operation.isBlank()) {
             return ActionDeterministicReview(
                 allow = false,
-                ruleId = "project_operation_missing_operation",
-                reason = "PROJECT_OPERATION payload requires an operation field."
+                ruleId = "goal_operation_missing_operation",
+                reason = "GOAL_OPERATION payload requires an operation field."
             )
         }
         return ActionDeterministicReview(allow = true)
@@ -58,19 +58,19 @@ class ProjectOperationActionPlugin(
     override suspend fun execute(action: PendingAction, context: ActionExecutionContext): ActionOutcome {
         val payload = parsePayload(action.payload)
             ?: return ActionOutcome(
-                statusSummary = "Invalid project_operation payload.",
+                statusSummary = "Invalid goal_operation payload.",
                 executionStatus = ActionExecutionStatus.FAILED,
             )
         val operation = payload.operation
             ?.trim()
             ?.uppercase()
-            ?.let { runCatching { ProjectOperation.valueOf(it) }.getOrNull() }
+            ?.let { runCatching { GoalOperation.valueOf(it) }.getOrNull() }
             ?: return ActionOutcome(
-                statusSummary = "Unknown project operation '${payload.operation}'.",
+                statusSummary = "Unknown goal operation '${payload.operation}'.",
                 executionStatus = ActionExecutionStatus.FAILED,
             )
         val result = this.context.projectsGateway.executeOperation(
-            ProjectOperationRequest(
+            GoalOperationRequest(
                 operation = operation,
                 projectId = payload.projectId,
                 title = payload.title,
@@ -109,7 +109,7 @@ class ProjectOperationActionPlugin(
     }
 }
 
-class ProjectOperationActionPluginFactory : AgentActionPluginFactory {
+class GoalOperationActionPluginFactory : AgentActionPluginFactory {
     override fun create(context: ActionPluginFactoryContext): AgentActionPlugin =
-        ProjectOperationActionPlugin(context)
+        GoalOperationActionPlugin(context)
 }

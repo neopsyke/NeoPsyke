@@ -5,7 +5,7 @@ import mu.KotlinLogging
 import ai.neopsyke.agent.actions.async.AsyncOperationEvent
 import ai.neopsyke.agent.actions.async.AsyncOperationRegistry
 import ai.neopsyke.agent.cortex.sensory.GoalRuntimeCue
-import ai.neopsyke.agent.id.Project as IdProject
+import ai.neopsyke.agent.id.Goal as IdGoal
 import ai.neopsyke.agent.model.ActionOutcome
 import ai.neopsyke.agent.model.PendingAction
 import ai.neopsyke.agent.model.OriginSource
@@ -244,7 +244,7 @@ class GoalManager(
         return session.allowFollowUp && session.actionCount < config.actionsPerCycle
     }
 
-    override fun finalizeProjectCycle(rootInputId: String) {
+    override fun finalizeGoalCycle(rootInputId: String) {
         val session = sessionsByRootInputId.remove(rootInputId) ?: return
         val state = states[session.projectId] ?: return
 
@@ -274,12 +274,12 @@ class GoalManager(
     override fun notifyAsyncOperationEvent(event: AsyncOperationEvent): Int =
         waitConditionMonitor?.notifyAsyncEvent(event) ?: 0
 
-    override fun executeOperation(request: ProjectOperationRequest): ProjectOperationResult =
+    override fun executeOperation(request: GoalOperationRequest): GoalOperationResult =
         when (request.operation) {
-            ProjectOperation.CREATE -> {
+            GoalOperation.CREATE -> {
                 val instruction = request.instruction?.trim().orEmpty()
                 if (instruction.isBlank()) {
-                    ProjectOperationResult(false, "Project creation requires an instruction.")
+                    GoalOperationResult(false, "Goal creation requires an instruction.")
                 } else {
                     val projectId = createProject(
                         instruction = instruction,
@@ -288,21 +288,21 @@ class GoalManager(
                         completionCriteria = request.completionCriteria ?: "User confirms the goal is met.",
                     )
                     if (projectId.isBlank()) {
-                        ProjectOperationResult(false, "Project creation was rejected.")
+                        GoalOperationResult(false, "Goal creation was rejected.")
                     } else {
-                        ProjectOperationResult(true, "Project created.", projectId)
+                        GoalOperationResult(true, "Goal created.", projectId)
                     }
                 }
             }
 
-            ProjectOperation.STATUS -> {
+            GoalOperation.STATUS -> {
                 val projectId = request.projectId.orEmpty()
                 val state = states[projectId]
                 if (state == null) {
-                    ProjectOperationResult(false, "Project not found.")
+                    GoalOperationResult(false, "Goal not found.")
                 } else {
                     val step = state.nextRunnableStep()
-                    ProjectOperationResult(
+                    GoalOperationResult(
                         true,
                         "status=${state.project.status} next_step=${step?.description ?: "none"}",
                         projectId = projectId,
@@ -310,22 +310,22 @@ class GoalManager(
                 }
             }
 
-            ProjectOperation.LIST -> {
+            GoalOperation.LIST -> {
                 val summaries = allProjects()
                 val message = if (summaries.isEmpty()) {
-                    "No projects."
+                    "No goals."
                 } else {
                     summaries.joinToString("\n") { summary ->
                         "${summary.projectId}: ${summary.title} (${summary.status})"
                     }
                 }
-                ProjectOperationResult(true, message)
+                GoalOperationResult(true, message)
             }
 
-            ProjectOperation.PAUSE -> {
+            GoalOperation.PAUSE -> {
                 val projectId = request.projectId.orEmpty()
                 if (!states.containsKey(projectId)) {
-                    ProjectOperationResult(false, "Project not found.")
+                    GoalOperationResult(false, "Goal not found.")
                 } else {
                     applyEvent(
                         projectId,
@@ -334,47 +334,47 @@ class GoalManager(
                             reason = request.reason ?: "Paused by user",
                         )
                     )
-                    ProjectOperationResult(true, "Project paused.", projectId)
+                    GoalOperationResult(true, "Goal paused.", projectId)
                 }
             }
 
-            ProjectOperation.RESUME -> {
+            GoalOperation.RESUME -> {
                 val projectId = request.projectId.orEmpty()
                 if (!states.containsKey(projectId)) {
-                    ProjectOperationResult(false, "Project not found.")
+                    GoalOperationResult(false, "Goal not found.")
                 } else {
                     applyEvent(projectId, ProjectEvent.Resumed(projectId))
-                    ProjectOperationResult(true, "Project resumed.", projectId)
+                    GoalOperationResult(true, "Goal resumed.", projectId)
                 }
             }
 
-            ProjectOperation.REPRIORITIZE -> {
+            GoalOperation.REPRIORITIZE -> {
                 val projectId = request.projectId.orEmpty()
                 val state = states[projectId]
                 val newPriority = request.priority
                 if (state == null || newPriority == null) {
-                    ProjectOperationResult(false, "Project reprioritize requires projectId and priority.")
+                    GoalOperationResult(false, "Goal reprioritize requires projectId and priority.")
                 } else {
                     applyEvent(projectId, ProjectEvent.PriorityChanged(projectId, newPriority))
-                    ProjectOperationResult(true, "Project priority updated to $newPriority.", projectId)
+                    GoalOperationResult(true, "Goal priority updated to $newPriority.", projectId)
                 }
             }
 
-            ProjectOperation.COMPLETE -> {
+            GoalOperation.COMPLETE -> {
                 val projectId = request.projectId.orEmpty()
                 if (!states.containsKey(projectId)) {
-                    ProjectOperationResult(false, "Project not found.")
+                    GoalOperationResult(false, "Goal not found.")
                 } else {
                     applyEvent(projectId, ProjectEvent.Completed(projectId))
-                    ProjectOperationResult(true, "Project marked completed.", projectId)
+                    GoalOperationResult(true, "Goal marked completed.", projectId)
                 }
             }
 
-            ProjectOperation.REVISE_PLAN -> {
+            GoalOperation.REVISE_PLAN -> {
                 val projectId = request.projectId.orEmpty()
                 val state = states[projectId]
                 if (state == null) {
-                    ProjectOperationResult(false, "Project not found.")
+                    GoalOperationResult(false, "Goal not found.")
                 } else {
                     val plan = planner.generatePlan(state.project)
                     applyEvent(
@@ -385,7 +385,7 @@ class GoalManager(
                             reason = request.reason ?: "Revised by user request",
                         )
                     )
-                    ProjectOperationResult(true, "Project plan revised.", projectId)
+                    GoalOperationResult(true, "Goal plan revised.", projectId)
                 }
             }
         }
@@ -397,12 +397,12 @@ class GoalManager(
 
     override fun projectStatus(projectId: String): ProjectState? = states[projectId]
 
-    override fun activeProjects(): List<IdProject> =
+    override fun activeGoals(): List<IdGoal> =
         states.values
             .filter { !it.isTerminal() }
             .sortedByDescending { it.project.priority.ordinal }
             .map { state ->
-                IdProject(
+                IdGoal(
                     id = state.id,
                     instruction = state.project.instruction,
                     lastActedAt = state.project.lastWorkedAt,

@@ -629,12 +629,12 @@ class Ego(
         if (!shouldAttachAmbientContext(trigger)) {
             return AmbientContext()
         }
-        val activeProjects = projectRegistry.activeProjects()
-            .map { project -> TextSecurity.preview(project.instruction, AMBIENT_PROJECT_PREVIEW_CHARS) }
+        val activeGoals = projectRegistry.activeGoals()
+            .map { goal -> TextSecurity.preview(goal.instruction, AMBIENT_PROJECT_PREVIEW_CHARS) }
             .filter { it.isNotBlank() }
             .take(MAX_AMBIENT_PROJECTS)
         return AmbientContext(
-            activeProjects = activeProjects,
+            activeProjects = activeGoals,
             recentWorkspaceThemes = taskWorkspaceStore.recentResolvedGoalSignals(MAX_AMBIENT_WORKSPACE_SIGNALS),
             recentUsefulActionsOrUpdates = memory.recentUsefulActionsOrUpdates(),
             unresolvedOpenLoops = taskWorkspaceStore.activeGoalSignals(MAX_AMBIENT_OPEN_LOOPS),
@@ -823,7 +823,7 @@ class Ego(
         planner.resetForInput(rootInputId)
         deliberation.clearForInput(rootInputId, sessionId)
         dispatcher.clearExternalActionSignatures(InputScope(rootInputId, sessionId))
-        projectsGateway.finalizeProjectCycle(rootInputId)
+        projectsGateway.finalizeGoalCycle(rootInputId)
         instrumentation.emit(
             AgentEvent(
                 type = "project_advance_cleanup",

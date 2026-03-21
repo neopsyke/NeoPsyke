@@ -50,8 +50,6 @@ typealias GoalRuntimeCue = ai.neopsyke.agent.cortex.sensory.GoalRuntimeCue
 typealias SignalSource = ai.neopsyke.agent.cortex.sensory.SignalSource
 typealias StdinSignalSource = ai.neopsyke.agent.cortex.sensory.StdinSignalSource
 typealias AsyncSignalSource = ai.neopsyke.agent.cortex.sensory.AsyncSignalSource
-typealias SensoryInputSource = ai.neopsyke.agent.cortex.sensory.SensoryInputSource
-typealias StdinSensoryInputSource = ai.neopsyke.agent.cortex.sensory.StdinSensoryInputSource
 typealias SensoryCortex = ai.neopsyke.agent.cortex.sensory.SensoryCortex
 
 typealias MotorCortex = ai.neopsyke.agent.cortex.motor.MotorCortex

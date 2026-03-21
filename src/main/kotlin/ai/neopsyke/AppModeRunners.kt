@@ -15,7 +15,7 @@ import ai.neopsyke.agent.memory.longterm.LlmLongTermMemoryAdvisor
 import ai.neopsyke.agent.memory.longterm.McpHippocampus
 import ai.neopsyke.agent.tools.mcp.McpStdioClient
 import ai.neopsyke.agent.model.ActionType
-import ai.neopsyke.agent.cortex.sensory.AsyncSensoryInputSource
+import ai.neopsyke.agent.cortex.sensory.AsyncSignalSource
 import ai.neopsyke.agent.cortex.sensory.SensoryCortex
 import ai.neopsyke.agent.cortex.motor.ActionImplementationStatus
 import ai.neopsyke.agent.cortex.motor.MotorCortex
@@ -611,7 +611,7 @@ internal object AppModeRunners {
         val agentScope = agentScope("neopsyke-agent")
         val dashboardStore = DashboardStateStore()
         val interlocutorResolver = ai.neopsyke.agent.config.DefaultInterlocutorResolver()
-        val sensoryInput = AsyncSensoryInputSource(
+        val sensoryInput = AsyncSignalSource(
             includeStdin = true,
             emitStdinClosedSignal = false,
             stdinMode = ai.neopsyke.agent.cortex.sensory.AsyncSignalSource.StdinMode.CONTROL_ONLY,
@@ -1210,7 +1210,7 @@ internal object AppModeRunners {
         }
 
         val agentScope = agentScope("neopsyke-freud-live")
-        val sensoryInput = AsyncSensoryInputSource(
+        val sensoryInput = AsyncSignalSource(
             includeStdin = false,
             emitStdinClosedSignal = false,
             scope = agentScope

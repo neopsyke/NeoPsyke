@@ -4,5 +4,5 @@ ai.neopsyke.agent.actions.builtin.WebSearchActionPluginFactory
 ai.neopsyke.agent.actions.builtin.McpTimeActionPluginFactory
 ai.neopsyke.agent.actions.builtin.WebsiteFetchActionPluginFactory
 ai.neopsyke.agent.actions.builtin.ReflectActionPluginFactory
-ai.neopsyke.agent.actions.builtin.ProjectOperationActionPluginFactory
+ai.neopsyke.agent.actions.builtin.GoalOperationActionPluginFactory
 ai.neopsyke.agent.actions.email.MicrosoftGraphEmailActionPluginFactory

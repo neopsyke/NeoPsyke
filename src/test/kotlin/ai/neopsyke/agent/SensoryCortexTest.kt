@@ -31,7 +31,7 @@ class SensoryCortexTest {
 
     @Test
     fun `stdin source emits highest-priority input`() = runBlocking {
-        val source = StdinSensoryInputSource(
+        val source = StdinSignalSource(
             readLineFn = { "hello from stdin" },
             prompt = {}
         )
@@ -44,7 +44,7 @@ class SensoryCortexTest {
 
     @Test
     fun `sensory cortex sanitizes input content and keeps explicit priority`() = runBlocking {
-        val source = SensoryInputSource {
+        val source = SignalSource {
             CognitiveSignal.StimulusReceived(
                 StimulusEnvelope(
                     id = RootInputIds.next(),
@@ -71,7 +71,7 @@ class SensoryCortexTest {
 
     @Test
     fun `sensory cortex resolves unknown interlocutor and derives session from chat source`() = runBlocking {
-        val source = SensoryInputSource {
+        val source = SignalSource {
             CognitiveSignal.StimulusReceived(
                 StimulusEnvelope(
                     id = RootInputIds.next(),
@@ -107,7 +107,7 @@ class SensoryCortexTest {
             sessionId = "explicit-session",
             interlocutor = Interlocutor.named("Alice")
         )
-        val source = SensoryInputSource {
+        val source = SignalSource {
             CognitiveSignal.StimulusReceived(
                 StimulusEnvelope(
                     id = RootInputIds.next(),

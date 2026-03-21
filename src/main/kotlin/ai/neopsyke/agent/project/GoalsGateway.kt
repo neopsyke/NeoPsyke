@@ -13,20 +13,20 @@ interface GoalsGateway : GoalRegistry, ActionLifecycleObserver {
     fun stop() {}
     fun pendingWorkSummary(): String = ""
     fun nextWorkFromCue(cue: GoalRuntimeCue): GoalRunActivation? = null
-    fun finalizeProjectCycle(rootInputId: String) {}
-    fun executeOperation(request: ProjectOperationRequest): ProjectOperationResult =
-        ProjectOperationResult(false, "Projects feature is disabled.")
+    fun finalizeGoalCycle(rootInputId: String) {}
+    fun executeOperation(request: GoalOperationRequest): GoalOperationResult =
+        GoalOperationResult(false, "Goals feature is disabled.")
     fun notifyAsyncOperationEvent(event: AsyncOperationEvent): Int = 0
     fun allProjects(): List<ProjectTier1Summary> = emptyList()
     fun projectStatus(projectId: String): ProjectState? = null
 }
 
 object NoopGoalsGateway : GoalsGateway {
-    override fun activeProjects(): List<ai.neopsyke.agent.id.Project> = emptyList()
+    override fun activeGoals(): List<ai.neopsyke.agent.id.Goal> = emptyList()
 }
 
-data class ProjectOperationRequest(
-    val operation: ProjectOperation,
+data class GoalOperationRequest(
+    val operation: GoalOperation,
     val projectId: String? = null,
     val title: String? = null,
     val instruction: String? = null,
@@ -35,13 +35,13 @@ data class ProjectOperationRequest(
     val reason: String? = null,
 )
 
-data class ProjectOperationResult(
+data class GoalOperationResult(
     val success: Boolean,
     val message: String,
     val projectId: String? = null,
 )
 
-enum class ProjectOperation {
+enum class GoalOperation {
     CREATE,
     STATUS,
     LIST,

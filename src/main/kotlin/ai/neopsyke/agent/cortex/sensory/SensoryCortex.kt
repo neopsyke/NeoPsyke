@@ -275,15 +275,6 @@ class AsyncSignalSource(
     }
 }
 
-@Deprecated("Use SignalSource", replaceWith = ReplaceWith("SignalSource"))
-typealias SensoryInputSource = SignalSource
-
-@Deprecated("Use StdinSignalSource", replaceWith = ReplaceWith("StdinSignalSource"))
-typealias StdinSensoryInputSource = StdinSignalSource
-
-@Deprecated("Use AsyncSignalSource", replaceWith = ReplaceWith("AsyncSignalSource"))
-typealias AsyncSensoryInputSource = AsyncSignalSource
-
 class SensoryCortex(
     private val config: AgentConfig,
     private val source: SignalSource,

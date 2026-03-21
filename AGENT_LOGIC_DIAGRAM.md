@@ -7,7 +7,7 @@ Keep diagrams high signal: small, readable, and updated as runtime logic evolves
 
 ```mermaid
 flowchart LR
-    U["User / Web UI + Terminal Control"] --> SC["SensoryCortex (Async Web Chat Input + Stdin Control)"]
+    U["User / Web UI"] --> SC["SensoryCortex (typed cognitive stimuli ingress)"]
     SC --> E["Ego Orchestrator"]
     NoteCtx["ConversationContext(sessionId required, unknown interlocutor resolved at sensory boundary)"] --> SC
 
@@ -18,7 +18,7 @@ flowchart LR
 
     E --> P["LlmEgoPlanner"]
     P --> AV["Action Verifier LLM Call"]
-    E --> TV["TaskVerifier (Deterministic Task Gate)"]
+    E --> TV["DecisionVerifier (Deterministic Task Gate)"]
     E --> S["Superego"]
     S --> S1["SingleStage Review Engine"]
     S --> S2["TwoStage Escalation Engine"]
@@ -31,7 +31,7 @@ flowchart LR
     DE --> MR["LlmMetaReasoner"]
     MR -.-> MRF["MetaReasoner Fallback Model (optional, repeated technical failures: empty-content or schema-validation)"]
 
-    E --> MC["MemoryCoordinator"]
+    E --> MC["MemorySystem"]
     MC --> MS["MemoryStore (Short-term)"]
     MC --> H["Hippocampus (Long-term Recall/Imprint)"]
     MC --> LTM["LlmLongTermMemoryAdvisor"]
@@ -39,10 +39,10 @@ flowchart LR
     LB -.->|"event-type narrative normalization: User timeline vs agent first-person memory/reflection"| MC
     MC --> RL["Reflection Lessons (Recall + Imprint Filters)"]
     MC -.->|"temporal intent → episodic recall + vector cues"| LB
-    E --> TWS["TaskWorkspaceStore (Ephemeral Per Request)"]
-    E --> TWF["TaskWorkspaceFinalizer (Noop or LLM)"]
-    E --> PG["ProjectsGateway (optional project runtime boundary)"]
-    PG --> PM["ProjectManager / Project Runtime"]
+    E --> TWS["ScratchpadStore (Ephemeral Per Request)"]
+    E --> TWF["ScratchpadFinalizer (Noop or LLM)"]
+    E --> PG["GoalsGateway (optional goal runtime boundary)"]
+    PG --> PM["GoalManager / Goal Runtime"]
     PM --> PP["ProjectPlanner"]
     PM --> PV["ProjectStepVerifier"]
     PM --> AOR["AsyncOperationRegistry"]
@@ -88,34 +88,34 @@ sequenceDiagram
     participant Sup as Superego
     participant Motor as MotorCortex
     participant Delib as DeliberationEngine
-    participant Mem as MemoryCoordinator
-    participant TWS as TaskWorkspaceStore
+    participant Mem as MemorySystem
+    participant TWS as ScratchpadStore
     participant Dash as DashboardStateStore/API
 
     User->>SC: Web chat input text
-    SC->>Ego: InputReceived
-    Note over SC,Ego: Input carries ConversationContext(sessionId), rootInputId(identity), receivedAtMs(timing)
-    Ego->>Sched: enqueueInput
+    SC->>Ego: StimulusReceived (linguistic stimulus)
+    Note over SC,Ego: Stimulus carries ConversationContext(sessionId), rootInputId(identity), receivedAtMs(timing)
+    Ego->>Sched: enqueue input opportunity
 
     loop While pending work and step limit not reached
         Ego->>Sched: nextTask()
-        Sched-->>Ego: input/impulse/thought/action
+        Sched-->>Ego: opportunity/thought/action
         Ego->>Ego: activateSession(task.conversationContext)
         Ego->>Delib: startStep()
 
-        alt Task = impulse
-    Note over Ego,Mem: Id-driven recall/planning can see shared ambient context: projects, workspace themes, useful updates, open loops, and recent exact learning topics
+        alt Task = impulse opportunity
+    Note over Ego,Mem: Id-driven recall/planning can see shared ambient context: goals, scratchpad themes, useful updates, open loops, and recent exact learning topics
             Ego->>Planner: decide(context + idState)
             Planner-->>Ego: thought/action/plan/noop
             Ego->>Sched: enqueue impulse-derived work with origin=ID
             Note over Ego,Sched: Impulse final result is deferred until all work for root_impulse_id drains
-        else Task = project_work
-            Ego->>PG: finalizeProjectCycle(rootInputId) after queues drain for that project root
-            Note over Ego,PG: Projects runtime writes context/scratch/artifacts and may re-emit WorkReady for resumable steps
-        else Task = input or thought
+        else Task = goal-work opportunity
+            Ego->>PG: finalizeGoalCycle(rootInputId) after queues drain for that goal root
+            Note over Ego,PG: Goal runtime writes context/scratch/artifacts and may re-emit a goal runtime cue for resumable steps
+        else Task = input opportunity or thought
             Ego->>Mem: recall and short-term summary
             Note over Ego,Mem: Planner context now includes targeted reflection-lesson recall
-            Ego->>TWS: create or update request workspace and index summary
+            Ego->>TWS: create or update request scratchpad and index summary
             Ego->>Dash: emit task_workspace_head (with optional debug snapshot)
             Note over Ego,Planner: For Id-origin thoughts, Ego reapplies Id convergence state and action filtering before planner decide
             Ego->>Planner: decide(context)
@@ -135,12 +135,12 @@ sequenceDiagram
                 Ego->>Motor: execute (bypass Superego)
             else Normal action
                 Ego->>TV: review(action, evidence/recent dialogue)
-                Note over Ego,TV: TaskVerifier classifies intent + volatility; evidence required only for volatile/unknown factual intents
-                alt task verifier deny
+                Note over Ego,TV: DecisionVerifier classifies intent + volatility; evidence required only for volatile/unknown factual intents
+                alt decision verifier deny
                     TV-->>Ego: deny (with reason_code)
                     Ego->>Sched: enqueue safe-alternative thought
                     Ego->>Mem: maybeRecordReflectionLesson(filtered)
-                else task verifier allow
+                else decision verifier allow
                     Note over Ego,TV: If volatile evidence is required but tools are unavailable, verifier returns graceful allow (TASK_EVIDENCE_UNAVAILABLE_GRACEFUL)
                     Ego->>Sup: deterministic checks
                     alt deterministic deny
@@ -168,7 +168,7 @@ sequenceDiagram
                             end
                             Ego->>Motor: execute(action)
                             Note over Ego,Motor: Actions may complete immediately or return WAITING + async operation handles
-                            Note over Ego,PG: Project-origin WAITING without handles is rejected as a contract violation
+                            Note over Ego,PG: Goal-origin WAITING without handles is rejected as a contract violation
                             Ego->>Ego: PromptInjectionDefense sanitize untrusted tool output
                             alt action = contact_user
                                 Ego->>Sched: clear pending thought and action work for same root-session scope
@@ -207,11 +207,11 @@ sequenceDiagram
     Note over User,SC: Terminal stdin is control-only in interactive mode (exit command), non-command text is not enqueued as chat input
 ```
 
-## 2.1) Projects Boundary
+## 2.1) Goals Boundary
 
 ```mermaid
 flowchart LR
-    TS["TimerScheduler"] --> PM["ProjectManager"]
+    TS["TimerScheduler"] --> PM["GoalManager"]
     WM["WaitConditionMonitor (timeouts + async poll/event restore)"] --> PM
     AOR["AsyncOperationRegistry / Provider Adapters"] --> WM
     PM --> PSM["ProjectStateMachine"]
@@ -219,10 +219,10 @@ flowchart LR
     PM --> PV["ProjectStepVerifier"]
     PSM --> PCS["ProjectCommand stream"]
     PCS -->|persist| Store["ProjectStore / events.jsonl + project.json + snapshot.json"]
-    PCS -->|work ready| Sig["ProjectSignal.WorkReady"]
+    PCS -->|work ready| Sig["GoalRuntimeCue"]
     Sig --> Ego["Ego"]
-    Ego -->|nextWorkFromSignal| PM
-    Ego -->|project-origin action outcomes| PM
+    Ego -->|nextWorkFromCue| PM
+    Ego -->|goal-origin action outcomes| PM
 ```
 
 ## 2.5) Interactive Startup Memory Gate
@@ -297,7 +297,7 @@ stateDiagram-v2
     StepLimit --> Complete: force-deny active impulse lifecycles
     FallbackAttempt --> Executing
 
-    Executing --> CleanupResolvedInput: action=answer clears same-input queued work + destroys task workspace
+    Executing --> CleanupResolvedInput: action=answer clears same-input queued work + destroys scratchpad
     CleanupResolvedInput --> Complete
     Processing --> Complete: queues drained
     Complete --> [*]
