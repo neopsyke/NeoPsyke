@@ -76,7 +76,7 @@ class GroqChatClientTest {
     fun `chat reports observer error metadata on http failures`() {
         var observed: ChatCallRecord? = null
         val httpClient = fakeHttpClient(status = 422) {
-            """{"message":"bad request"}"""
+            """{"error":{"message":"bad request","type":"invalid_request_error","code":"bad_request"}}"""
         }
         GroqChatClient(
             apiKey = "test-key",
@@ -93,7 +93,45 @@ class GroqChatClientTest {
         val record = assertNotNull(observed)
         assertEquals(ChatCallStatus.ERROR, record.status)
         assertEquals("HTTP_422", record.errorCode)
-        assertTrue(record.errorMessage.orEmpty().contains("bad request"))
+        assertEquals("bad request", record.errorMessage)
+        assertEquals("invalid_request_error", record.providerErrorType)
+        assertEquals("bad_request", record.providerErrorCode)
+        assertTrue(record.errorBodyPreview.orEmpty().contains("bad request"))
+    }
+
+    @Test
+    fun `chat extracts failed generation preview for schema validation errors`() {
+        var observed: ChatCallRecord? = null
+        val httpClient = fakeHttpClient(status = 400) {
+            """
+            {
+              "error": {
+                "message": "Failed to validate JSON. Please adjust your prompt. See 'failed_generation' for more details.",
+                "type": "invalid_request_error",
+                "code": "json_validate_failed",
+                "failed_generation": "max completion tokens reached before generating a valid document"
+              }
+            }
+            """.trimIndent()
+        }
+        GroqChatClient(
+            apiKey = "test-key",
+            baseUrl = "https://mock.test/openai/v1",
+            httpClient = httpClient,
+            callObserver = ChatCallObserver { observed = it }
+        ).use { client ->
+            assertFailsWith<Exception> {
+                client.chat(messages = listOf(ChatMessage(ChatRole.USER, "hello")))
+            }
+        }
+
+        val record = assertNotNull(observed)
+        assertEquals("HTTP_400", record.errorCode)
+        assertEquals("json_validate_failed", record.providerErrorCode)
+        assertEquals(
+            "max completion tokens reached before generating a valid document",
+            record.failedGenerationPreview
+        )
     }
 
     @Test

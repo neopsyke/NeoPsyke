@@ -5,7 +5,7 @@ data class PlannerConfig(
     val maxThoughtPasses: Int = 5,
     val maxThoughtChars: Int = 600,
     val maxInputChars: Int = 2_000,
-    val maxCompletionTokens: Int = 900,
+    val maxCompletionTokens: Int = 1200,
     val maxRunTotalTokens: Int = 0,
     val maxRunTokensPerProvider: Int = 0,
     val maxRunTokensPerRole: Int = 0,

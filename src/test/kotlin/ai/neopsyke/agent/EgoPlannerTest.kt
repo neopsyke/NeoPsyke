@@ -102,6 +102,61 @@ class EgoPlannerTest {
     }
 
     @Test
+    fun `planner attaches thought and plan context metadata to llm calls`() {
+        val llm = StubChatModelClient()
+        llm.enqueueRawResponse("""{"decision":"noop","reason":"ok"}""")
+        val planner = LlmEgoPlanner(
+            modelClient = llm,
+            config = AgentConfig()
+        )
+        val thought = PendingThought(
+            id = 17,
+            urgency = Urgency.MEDIUM,
+            content = "Plan step 2/4: Fetch summary of top result",
+            planContext = ai.neopsyke.agent.model.PlanContext(
+                planId = "plan-42",
+                planGoal = "Identify an interesting topic",
+                stepIndex = 1,
+                totalSteps = 4,
+                stepDescription = "Fetch summary of top result"
+            ),
+            origin = ai.neopsyke.agent.model.ActionOrigin.id(
+                needId = "learn-something",
+                rootImpulseId = "impulse-42"
+            ),
+            conversationContext = ai.neopsyke.agent.model.ConversationContext(
+                sessionId = "id:internal",
+                interlocutor = ai.neopsyke.agent.model.Interlocutor.UNKNOWN
+            )
+        )
+
+        planner.decide(
+            trigger = ai.neopsyke.agent.model.EgoTrigger.PendingThoughtInput(thought),
+            context = PlannerContext(
+                recentDialogue = emptyList(),
+                queue = QueueSnapshot(0, 1, 0),
+                conversationContext = thought.conversationContext
+            )
+        )
+
+        with(llm.lastOptions.metadata) {
+            assertEquals("ego", actor)
+            assertEquals("planner", cognitiveRole)
+            assertEquals("thought", callSite)
+            assertEquals("thought", trigger)
+            assertEquals("id", originSource)
+            assertEquals("learn-something", needId)
+            assertEquals("impulse-42", rootImpulseId)
+            assertEquals(17L, thoughtId)
+            assertEquals("plan-42", planId)
+            assertEquals(1, planStepIndex)
+            assertEquals(4, planTotalSteps)
+            assertEquals("Fetch summary of top result", planStepDescription)
+            assertEquals("id:internal", sessionId)
+        }
+    }
+
+    @Test
     fun `planner accepts structured action payload object by normalizing to json string`() {
         val llm = StubChatModelClient()
         llm.enqueueRawResponse(

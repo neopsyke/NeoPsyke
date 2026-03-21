@@ -136,6 +136,7 @@ class GroqChatClient(
                 )
             }
         } catch (ex: Exception) {
+            val errorDetails = ex.toProviderErrorDetails()
             observeCall(
                 record = ChatCallRecord(
                     model = modelName,
@@ -143,7 +144,11 @@ class GroqChatClient(
                     latencyMs = elapsedMillis(startedAt),
                     status = ChatCallStatus.ERROR,
                     errorCode = ex.toErrorCode(),
-                    errorMessage = ex.toErrorMessage()
+                    errorMessage = errorDetails.summary,
+                    providerErrorType = errorDetails.providerErrorType,
+                    providerErrorCode = errorDetails.providerErrorCode,
+                    failedGenerationPreview = errorDetails.failedGenerationPreview,
+                    errorBodyPreview = errorDetails.errorBodyPreview
                 )
             )
             throw ex
@@ -202,12 +207,12 @@ private fun Exception.toErrorCode(): String =
         else -> this::class.simpleName ?: "error"
     }
 
-private fun Exception.toErrorMessage(): String {
+private fun Exception.toProviderErrorDetails(): ProviderErrorDetails {
     val raw = when (this) {
         is GroqHttpException -> responseBody ?: message.orEmpty()
         else -> message.orEmpty()
     }
-    return raw.replace(Regex("\\s+"), " ").trim().take(180)
+    return ProviderErrorDetailsExtractor.fromRaw(raw)
 }
 
 private data class GroqChatCompletionRequest(

@@ -31,6 +31,16 @@ data class ChatCallMetadata(
     val actor: String = "",
     val callSite: String = "",
     val actionType: String? = null,
+    val cognitiveRole: String? = null,
+    val trigger: String? = null,
+    val originSource: String? = null,
+    val needId: String? = null,
+    val rootImpulseId: String? = null,
+    val thoughtId: Long? = null,
+    val planId: String? = null,
+    val planStepIndex: Int? = null,
+    val planTotalSteps: Int? = null,
+    val planStepDescription: String? = null,
     val structuredOutputMode: String? = null,
     val sessionId: String? = null,
     val rootInputId: String? = null,
@@ -54,6 +64,10 @@ data class ChatCallRecord(
     val status: ChatCallStatus,
     val errorCode: String? = null,
     val errorMessage: String? = null,
+    val providerErrorType: String? = null,
+    val providerErrorCode: String? = null,
+    val failedGenerationPreview: String? = null,
+    val errorBodyPreview: String? = null,
 )
 
 fun interface ChatCallObserver {

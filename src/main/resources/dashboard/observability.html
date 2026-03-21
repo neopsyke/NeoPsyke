@@ -1103,9 +1103,24 @@
           if (status !== "error") return null;
           const actor = String(d.actor || "unknown");
           const callSite = String(d.call_site || "unknown");
+          const role = d.cognitive_role ? " " + String(d.cognitive_role) : "";
           const errorCode = d.error_code ? String(d.error_code) : "";
+          const providerCode = d.provider_error_code ? String(d.provider_error_code) : "";
+          const stepIndex = Number.isFinite(Number(d.plan_step_index)) ? Number(d.plan_step_index) + 1 : null;
+          const stepTotal = Number.isFinite(Number(d.plan_total_steps)) ? Number(d.plan_total_steps) : null;
+          const stepDescription = d.plan_step_description ? String(d.plan_step_description) : "";
+          const failedGeneration = d.failed_generation_preview ? String(d.failed_generation_preview) : "";
           const errorMessage = d.error_message ? String(d.error_message) : "";
-          return actor + "/" + callSite + (errorCode ? " [" + errorCode + "]" : "") + (errorMessage ? " — " + errorMessage : "");
+          const parts = [];
+          parts.push(actor + "/" + callSite + role);
+          if (errorCode) parts.push("[" + errorCode + "]");
+          if (providerCode) parts.push("(" + providerCode + ")");
+          if (stepIndex != null && stepTotal != null) parts.push("step " + stepIndex + "/" + stepTotal);
+          if (stepDescription) parts.push(stepDescription);
+          let line = parts.join(" ");
+          if (errorMessage) line += " — " + errorMessage;
+          if (failedGeneration) line += "\nfailed_generation: " + failedGeneration;
+          return line;
         }
         // ── Id / Impulse events ──────────────────────────
         case "impulse_processing":

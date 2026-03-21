@@ -91,11 +91,15 @@ class LlmEgoPlanner(
         )
         val messages = promptAllocation.messages
         val allowResolutionDraft = isResolutionDraftAllowed(trigger)
-        val response = callPlanner(
-            messages = messages,
+        val plannerMetadata = plannerChatMetadata(
+            trigger = trigger,
             callSite = triggerLabel,
             sessionId = sessionId,
             rootInputId = rootInputId,
+        )
+        val response = callPlanner(
+            messages = messages,
+            metadata = plannerMetadata,
             maxTokens = config.planner.maxCompletionTokens,
             temperature = 0.2,
             responseFormat = PLANNER_DECISION_RESPONSE_FORMAT,
@@ -121,10 +125,8 @@ class LlmEgoPlanner(
                 )
                 val truncationRetryResponse = requestPlannerTruncationRetry(
                     baseMessages = messages,
-                    callSite = triggerLabel,
+                    metadata = plannerMetadata,
                     actionSchemaEnum = actionSchema,
-                    sessionId = sessionId,
-                    rootInputId = rootInputId,
                 )
                 truncationRetryResponse?.let {
                     parseResponse(
@@ -143,10 +145,8 @@ class LlmEgoPlanner(
                 instrumentation.emit(AgentEvents.warning("Planner response was non-parseable; requesting strict JSON retry."))
                 val recovered = requestStrictJsonRetry(
                     baseMessages = messages,
-                    callSite = triggerLabel,
+                    metadata = plannerMetadata,
                     actionSchemaEnum = actionSchema,
-                    sessionId = sessionId,
-                    rootInputId = rootInputId,
                 )
                 val repairedDecision = recovered?.let {
                     parseResponse(
@@ -311,11 +311,48 @@ class LlmEgoPlanner(
             relaxed = ACTION_VERIFIER_RESPONSE_FORMAT_RELAXED
         )
 
-    private fun callPlanner(
-        messages: List<ChatMessage>,
+    private fun plannerChatMetadata(
+        trigger: EgoTrigger,
         callSite: String,
         sessionId: String,
         rootInputId: String?,
+    ): ChatCallMetadata {
+        val base = ChatCallMetadata(
+            actor = "ego",
+            cognitiveRole = "planner",
+            callSite = callSite,
+            trigger = callSite,
+            sessionId = sessionId,
+            rootInputId = rootInputId,
+        )
+        return when (trigger) {
+            is EgoTrigger.IncomingInput -> base.copy(originSource = OriginSource.USER.name.lowercase(Locale.ROOT))
+            is EgoTrigger.IncomingImpulse -> base.copy(
+                originSource = OriginSource.ID.name.lowercase(Locale.ROOT),
+                needId = trigger.impulse.needId,
+                rootImpulseId = trigger.impulse.rootImpulseId,
+            )
+            is EgoTrigger.PendingThoughtInput -> {
+                val thought = trigger.thought
+                val plan = thought.planContext
+                base.copy(
+                    originSource = thought.origin.source.name.lowercase(Locale.ROOT),
+                    needId = thought.origin.needId,
+                    rootImpulseId = thought.origin.rootImpulseId,
+                    thoughtId = thought.id,
+                    planId = plan?.planId,
+                    planStepIndex = plan?.stepIndex,
+                    planTotalSteps = plan?.totalSteps,
+                    planStepDescription = plan?.stepDescription,
+                )
+            }
+            is EgoTrigger.GoalWork -> base.copy(originSource = OriginSource.GOAL.name.lowercase(Locale.ROOT))
+        }
+    }
+
+    private fun callPlanner(
+        messages: List<ChatMessage>,
+        metadata: ChatCallMetadata,
         maxTokens: Int,
         temperature: Double,
         responseFormat: ChatResponseFormat.JsonSchema,
@@ -331,12 +368,7 @@ class LlmEgoPlanner(
                         temperature = temperature,
                         maxTokens = maxTokens,
                         responseFormat = responseFormat,
-                        metadata = ChatCallMetadata(
-                            actor = "ego",
-                            callSite = callSite,
-                            sessionId = sessionId,
-                            rootInputId = rootInputId,
-                        )
+                        metadata = metadata
                     )
                 )
                 break
@@ -352,7 +384,7 @@ class LlmEgoPlanner(
             }
         }
         if (response == null) {
-            logger.warn(lastError) { "Planner call failed for call_site=$callSite." }
+            logger.warn(lastError) { "Planner call failed for call_site=${metadata.callSite}." }
         }
         return response
     }
@@ -381,6 +413,7 @@ class LlmEgoPlanner(
                         responseFormat = responseFormat,
                         metadata = ChatCallMetadata(
                             actor = "ego",
+                            cognitiveRole = "action_verifier",
                             callSite = callSite,
                             actionType = actionType
                         )
@@ -656,10 +689,8 @@ class LlmEgoPlanner(
 
     private fun requestStrictJsonRetry(
         baseMessages: List<ChatMessage>,
-        callSite: String,
+        metadata: ChatCallMetadata,
         actionSchemaEnum: String,
-        sessionId: String,
-        rootInputId: String?,
     ): ChatCompletion? {
         val retryMessages = baseMessages + ChatMessage(
             role = ChatRole.USER,
@@ -683,9 +714,7 @@ class LlmEgoPlanner(
         )
         return callPlanner(
             messages = retryMessages,
-            callSite = "${callSite}_json_retry",
-            sessionId = sessionId,
-            rootInputId = rootInputId,
+            metadata = metadata.copy(callSite = "${metadata.callSite}_json_retry"),
             maxTokens = config.planner.maxCompletionTokens,
             temperature = 0.0,
             responseFormat = PLANNER_DECISION_RESPONSE_FORMAT,
@@ -694,10 +723,8 @@ class LlmEgoPlanner(
 
     private fun requestPlannerTruncationRetry(
         baseMessages: List<ChatMessage>,
-        callSite: String,
+        metadata: ChatCallMetadata,
         actionSchemaEnum: String,
-        sessionId: String,
-        rootInputId: String?,
     ): ChatCompletion? {
         val bumpedBudget = bumpPlannerCompletionBudget(config.planner.maxCompletionTokens)
         if (bumpedBudget <= config.planner.maxCompletionTokens) {
@@ -725,9 +752,7 @@ class LlmEgoPlanner(
         )
         return callPlanner(
             messages = retryMessages,
-            callSite = "${callSite}_truncation_retry",
-            sessionId = sessionId,
-            rootInputId = rootInputId,
+            metadata = metadata.copy(callSite = "${metadata.callSite}_truncation_retry"),
             maxTokens = bumpedBudget,
             temperature = 0.0,
             responseFormat = PLANNER_DECISION_RESPONSE_FORMAT,

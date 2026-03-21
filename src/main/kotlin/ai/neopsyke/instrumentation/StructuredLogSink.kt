@@ -334,15 +334,25 @@ class StructuredLogSink : InstrumentationSink {
                 val status = event.data["status"]?.toString().orEmpty()
                 recordPlannerStructuredOutputMode(event)
                 val structuredOutputMode = event.data["structured_output_mode"]?.toString()?.ifBlank { null }
+                val contextSuffix = llmContextSuffix(event)
+                val providerErrorType = event.data["provider_error_type"]?.toString()?.ifBlank { null }
+                val providerErrorCode = event.data["provider_error_code"]?.toString()?.ifBlank { null }
+                val failedGenerationPreview = event.data["failed_generation_preview"]?.toString()?.ifBlank { null }
                 if (status.equals("error", ignoreCase = true)) {
                     logger.warn {
                         "llm.call provider=${event.data["provider"]} model=${event.data["model"]} actor=${event.data["actor"]} " +
                             "call_site=${event.data["call_site"]} status=${event.data["status"]} structured_output_mode=${structuredOutputMode ?: "-"} latency_ms=${event.data["latency_ms"]} " +
-                            "error_code=${event.data["error_code"]} error_message=${event.data["error_message"]}"
+                            "error_code=${event.data["error_code"]} provider_error_type=${providerErrorType ?: "-"} " +
+                            "provider_error_code=${providerErrorCode ?: "-"}" +
+                            contextSuffix +
+                            (failedGenerationPreview?.let { " failed_generation_preview=$it" } ?: "") +
+                            " error_message=${event.data["error_message"]}"
                     }
                 } else {
                     logger.trace {
-                        "llm.call provider=${event.data["provider"]} model=${event.data["model"]} actor=${event.data["actor"]} call_site=${event.data["call_site"]} status=${event.data["status"]} structured_output_mode=${structuredOutputMode ?: "-"} latency_ms=${event.data["latency_ms"]} total_tokens=${event.data["total_tokens"]}"
+                        "llm.call provider=${event.data["provider"]} model=${event.data["model"]} actor=${event.data["actor"]} " +
+                            "call_site=${event.data["call_site"]} status=${event.data["status"]} structured_output_mode=${structuredOutputMode ?: "-"} " +
+                            "latency_ms=${event.data["latency_ms"]} total_tokens=${event.data["total_tokens"]}$contextSuffix"
                     }
                 }
             }
@@ -551,6 +561,52 @@ class StructuredLogSink : InstrumentationSink {
             callSite.endsWith("_truncation_retry") -> callSite.removeSuffix("_truncation_retry").takeIf { it in PLANNER_CALL_SITES }
             else -> null
         }
+    }
+
+    private fun llmContextSuffix(event: AgentEvent): String {
+        val parts = mutableListOf<String>()
+        event.data["cognitive_role"]?.toString()?.trim()?.takeIf { it.isNotEmpty() }?.let {
+            parts += "cognitive_role=$it"
+        }
+        event.data["trigger"]?.toString()?.trim()?.takeIf { it.isNotEmpty() }?.let {
+            parts += "trigger=$it"
+        }
+        event.data["origin_source"]?.toString()?.trim()?.takeIf { it.isNotEmpty() }?.let {
+            parts += "origin_source=$it"
+        }
+        event.data["need_id"]?.toString()?.trim()?.takeIf { it.isNotEmpty() }?.let {
+            parts += "need_id=$it"
+        }
+        event.data["root_impulse_id"]?.toString()?.trim()?.takeIf { it.isNotEmpty() }?.let {
+            parts += "root_impulse_id=$it"
+        }
+        event.data["thought_id"]?.toString()?.trim()?.takeIf { it.isNotEmpty() }?.let {
+            parts += "thought_id=$it"
+        }
+        val planStep = planStepSummary(event)
+        if (planStep != null) {
+            parts += planStep
+        }
+        return if (parts.isEmpty()) "" else " " + parts.joinToString(" ")
+    }
+
+    private fun planStepSummary(event: AgentEvent): String? {
+        val planId = event.data["plan_id"]?.toString()?.trim()?.ifEmpty { null }
+        val stepIndex = (event.data["plan_step_index"] as? Number)?.toInt()
+        val totalSteps = (event.data["plan_total_steps"] as? Number)?.toInt()
+        val stepDescription = event.data["plan_step_description"]?.toString()?.trim()?.ifEmpty { null }
+        if (planId == null && stepIndex == null && totalSteps == null && stepDescription == null) {
+            return null
+        }
+        return buildString {
+            if (planId != null) append("plan_id=").append(planId).append(' ')
+            if (stepIndex != null && totalSteps != null) {
+                append("plan_step=").append(stepIndex + 1).append('/').append(totalSteps).append(' ')
+            }
+            if (stepDescription != null) {
+                append("plan_step_description=").append(stepDescription.take(120))
+            }
+        }.trim()
     }
 
     companion object {

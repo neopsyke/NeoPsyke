@@ -22,6 +22,16 @@ class LlmCallEventObserverTest {
                     actor = "ego",
                     callSite = "planner",
                     actionType = "answer",
+                    cognitiveRole = "planner",
+                    trigger = "thought",
+                    originSource = "id",
+                    needId = "learn-something",
+                    rootImpulseId = "impulse-4",
+                    thoughtId = 19L,
+                    planId = "plan-7",
+                    planStepIndex = 1,
+                    planTotalSteps = 4,
+                    planStepDescription = "Fetch summary of top result",
                     structuredOutputMode = "relaxed",
                     sessionId = "session-7",
                     rootInputId = "root-7",
@@ -40,6 +50,16 @@ class LlmCallEventObserverTest {
         assertEquals("ego", event.data["actor"])
         assertEquals("planner", event.data["call_site"])
         assertEquals("answer", event.data["action_type"])
+        assertEquals("planner", event.data["cognitive_role"])
+        assertEquals("thought", event.data["trigger"])
+        assertEquals("id", event.data["origin_source"])
+        assertEquals("learn-something", event.data["need_id"])
+        assertEquals("impulse-4", event.data["root_impulse_id"])
+        assertEquals(19L, event.data["thought_id"])
+        assertEquals("plan-7", event.data["plan_id"])
+        assertEquals(1, event.data["plan_step_index"])
+        assertEquals(4, event.data["plan_total_steps"])
+        assertEquals("Fetch summary of top result", event.data["plan_step_description"])
         assertEquals("relaxed", event.data["structured_output_mode"])
         assertEquals("session-7", event.data["session_id"])
         assertEquals("root-7", event.data["root_input_id"])
