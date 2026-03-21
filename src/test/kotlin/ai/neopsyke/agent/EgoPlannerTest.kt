@@ -102,6 +102,77 @@ class EgoPlannerTest {
     }
 
     @Test
+    fun `planner routes recurring reminder requests to dedicated goal creation branch`() {
+        val llm = StubChatModelClient().apply {
+            enqueueRawResponse(
+                """
+                {
+                  "decision":"create_goal",
+                  "title":"Weather reminder",
+                  "instruction":"Check the current weather and send the user an update for this scheduled run.",
+                  "completion_criteria":"A weather update is delivered to the user for the current scheduled run.",
+                  "priority":"medium"
+                }
+                """.trimIndent()
+            )
+        }
+        val instrumentation = RecordingInstrumentation()
+        val planner = LlmEgoPlanner(
+            modelClient = llm,
+            config = AgentConfig(),
+            instrumentation = instrumentation
+        )
+
+        val decision = planner.decide(
+            trigger = ai.neopsyke.agent.model.EgoTrigger.IncomingInput(
+                PendingInput(8, "I would like to set a goal for you: remind me of the current weather every 5 minutes.")
+            ),
+            context = PlannerContext(
+                recentDialogue = emptyList(),
+                queue = QueueSnapshot(0, 0, 0),
+                availableActions = setOf(ActionType.CONTACT_USER, ActionType.GOAL_OPERATION),
+                dispatchableActions = setOf(ActionType.CONTACT_USER, ActionType.GOAL_OPERATION)
+            )
+        )
+
+        val action = assertIs<ai.neopsyke.agent.model.EgoDecision.ProposeAction>(decision)
+        assertEquals(ActionType.GOAL_OPERATION, action.actionType)
+        assertTrue(action.payload.contains(""""operation":"create""""))
+        assertTrue(action.payload.contains(""""cron_expression":"*/5 * * * *""""))
+        assertTrue(action.payload.contains("Weather reminder"))
+        assertEquals("input_goal_create", llm.lastOptions.metadata.callSite)
+        assertEquals(1, llm.calls.size)
+        assertTrue(
+            instrumentation.events.any {
+                it.type == "planner_branch_selected" && it.data["branch"] == "goal_creation"
+            }
+        )
+    }
+
+    @Test
+    fun `planner explains when recurring goals are unavailable for reminder requests`() {
+        val llm = StubChatModelClient()
+        val planner = LlmEgoPlanner(modelClient = llm, config = AgentConfig())
+
+        val decision = planner.decide(
+            trigger = ai.neopsyke.agent.model.EgoTrigger.IncomingInput(
+                PendingInput(9, "monitor the weather and remind me every 5 minutes")
+            ),
+            context = PlannerContext(
+                recentDialogue = emptyList(),
+                queue = QueueSnapshot(0, 0, 0),
+                availableActions = setOf(ActionType.CONTACT_USER),
+                dispatchableActions = setOf(ActionType.CONTACT_USER)
+            )
+        )
+
+        val action = assertIs<ai.neopsyke.agent.model.EgoDecision.ProposeAction>(decision)
+        assertEquals(ActionType.CONTACT_USER, action.actionType)
+        assertTrue(action.payload.contains("goals are unavailable", ignoreCase = true))
+        assertEquals(0, llm.calls.size)
+    }
+
+    @Test
     fun `planner attaches thought and plan context metadata to llm calls`() {
         val llm = StubChatModelClient()
         llm.enqueueRawResponse("""{"decision":"noop","reason":"ok"}""")

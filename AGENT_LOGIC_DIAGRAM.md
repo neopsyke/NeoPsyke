@@ -17,6 +17,7 @@ flowchart LR
     E --> ID
 
     E --> P["LlmEgoPlanner"]
+    P --> GBR["Goal-Creation Branch"]
     P --> AV["Action Verifier LLM Call"]
     E --> TV["DecisionVerifier (Deterministic Task Gate)"]
     E --> S["Superego"]
@@ -121,6 +122,8 @@ sequenceDiagram
             Note over Ego,Planner: For Id-origin thoughts, Ego reapplies Id convergence state and action filtering before planner decide
             Ego->>Planner: decide(context)
             Note over Ego,Planner: PromptBudgetAllocator reserves required-core/context floors with message-overhead accounting, trims optional first, and emits prompt_budget_allocation
+            Note over Ego,Planner: Obvious persistent reminder / monitoring / goal-creation inputs route into a dedicated goal-creation branch before the generic planner path
+            Note over Ego,Planner: Goal-creation branch uses a narrow schema prompt plus deterministic recurring schedule detection for supported forms like every N minutes / every N hours
             Note over Ego,Planner: Planner requests schema-enforced structured output the LLM layer owns compatibility degradation (strict json_schema -> relaxed json_schema -> prompt-only JSON) parse failures still do truncation-budget retry then strict-JSON retry before noop fallback
             Planner-->>Ego: thought/action/plan/noop
             Ego->>Delib: maybeApplyPressureOverride
@@ -221,6 +224,9 @@ flowchart LR
     PSM --> PCS["GoalCommand stream"]
     PCS -->|persist| Store["GoalStore / goal-events.jsonl + goal.json + goal-snapshot.json"]
     PCS -->|work ready| Sig["GoalRuntimeCue"]
+    Note over PSM,Sig: Cron-backed goals do not emit initial work-ready on creation; first execution waits for a cron wake
+    TS -->|"cron tick after completed/failed recurring goal"| PSM
+    PSM -->|"reset plan steps + clear produced keys"| PCS
     Sig --> Ego["Ego"]
     Ego -->|nextWorkFromCue| PM
     Ego -->|goal-origin action outcomes| PM

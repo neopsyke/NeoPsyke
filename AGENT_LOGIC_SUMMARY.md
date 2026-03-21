@@ -231,9 +231,12 @@ It is intentionally high-level and should stay aligned with the code.
 ## Planner Logic
 - File: `src/main/kotlin/ai/neopsyke/agent/ego/LlmEgoPlanner.kt`
 - Responsibilities:
+  - Top-level branch selection now routes obvious persistent-goal / reminder / monitoring requests away from the generic planner path before full action planning.
   - Prompt assembly with contract-based budget allocation (`required_core` > `required_context` > `optional`).
   - Overhead-aware floor reservation per section, tiered degradation, and single-message fallback under extreme prompt pressure.
   - Emits `prompt_budget_allocation` telemetry for planner and action-verifier prompt builds (cost estimates, degradation path, fallback/floor-violation signals).
+  - Dedicated goal-creation branch uses a narrow prompt to synthesize `goal_operation(create)` payloads instead of teaching recurring-goal payload generation inside the generic action-planner prompt.
+  - Goal-creation branch performs deterministic recurring-schedule detection for supported forms such as `every N minutes` and `every N hours`; unsupported recurring phrasings fall back to a user clarification message instead of silently creating a one-shot goal.
   - For Id-driven work, planner prompt may include an ambient context block containing optional goal/scratchpad/activity/open-loop/topic relevance signals.
   - Planner calls request schema-enforced structured output, but provider/model compatibility handling now lives below the planner in the LLM layer:
     - planner requests one structured-output contract (`response_format=json_schema`) plus call-site metadata
@@ -260,11 +263,14 @@ It is intentionally high-level and should stay aligned with the code.
     - goal-origin action lifecycle callbacks plus `finalizeGoalCycle(rootInputId)`
 - Runtime responsibilities:
   - Create/revise plans through `GoalPlanner`
+  - Accept `goal_operation(create)` requests with optional `cron_expression`; validate cron expressions against the runtime's supported 5-field parser before goal creation.
+  - Keep cron-backed goals idle after creation: planning can promote ready steps, but initial work-ready emission is deferred until the first cron wake.
   - Observe goal-origin action outcomes through the generic action lifecycle observer hook
   - Translate generic async action wait handles into blocked goal steps
   - Reject goal-origin `WAITING` outcomes that do not provide async handles; this is stage-1 enforcement of the async wait contract
   - Apply verifier decisions (`PASS`, `RETRY`, `BLOCK`, `CONTINUE`, `FAIL`) back into the event-sourced state machine
   - Restore timers, suspended resumes, and blocked waits on startup
+  - Treat cron-backed goals as recurring cycles: when a cron tick arrives after a cron goal reached `COMPLETED` or `FAILED`, the runtime resets plan-step execution state, clears produced keys, and re-emits work-ready for the next scheduled run.
   - Poll async-operation providers and accept externally-delivered async completion events for blocked steps
   - Persist `goal-events.jsonl`, `goal.json`, `goal-snapshot.json`, `workspace/context.md`, `workspace/scratch.md`, and per-step artifacts
   - Maintain cached best-effort summaries for ambient context (`activeGoals`, `pendingWorkSummary`) so Ego does not scan live goal state on the hot path
@@ -462,7 +468,7 @@ It is intentionally high-level and should stay aligned with the code.
   - `web_search`
   - `mcp_time` (payload timezone is required by current MCP time server contract)
   - `website_fetch`
-  - `goal_operation`
+  - `goal_operation` (persistent goal lifecycle operations; create now supports optional `cron_expression` and emits direct user-visible confirmation)
   - `email_send` (Microsoft Graph adapter; disabled unless env config is present)
 - `web_search` provider routing is independent from cognitive-role routing:
   - configured directly via `web_search.provider` in `llm-runtime.yaml`.

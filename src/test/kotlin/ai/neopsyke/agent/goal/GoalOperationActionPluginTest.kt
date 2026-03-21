@@ -75,7 +75,7 @@ class GoalOperationActionPluginTest {
                 id = 1L,
                 urgency = Urgency.MEDIUM,
                 type = ActionType.GOAL_OPERATION,
-                payload = """{"operation":"create","title":"Inbox","instruction":"Keep inbox triaged","priority":"HIGH"}""",
+                payload = """{"operation":"create","title":"Inbox","instruction":"Keep inbox triaged","priority":"HIGH","completion_criteria":"Inbox is triaged","cron_expression":"*/5 * * * *"}""",
                 summary = "create goal",
             ),
             ActionExecutionContext(searchResultCount = 0)
@@ -85,6 +85,8 @@ class GoalOperationActionPluginTest {
         assertEquals(GoalOperation.CREATE, capturedRequest?.operation)
         assertEquals("Inbox", capturedRequest?.title)
         assertEquals(GoalPriority.HIGH, capturedRequest?.priority)
+        assertEquals("Inbox is triaged", capturedRequest?.completionCriteria)
+        assertEquals("*/5 * * * *", capturedRequest?.cronExpression)
     }
 
     @Test

@@ -775,6 +775,71 @@ class GoalManagerTest {
         }
     }
 
+    @Test
+    fun `executeOperation rejects invalid cron expression on create`() {
+        val root = Files.createTempDirectory("psyke-pm-invalid-cron")
+        try {
+            val manager = GoalManager(
+                config = testConfig(root),
+                store = GoalStore(root),
+                planner = DeterministicGoalPlanner(),
+            )
+            manager.start(testScope())
+
+            val result = manager.executeOperation(
+                GoalOperationRequest(
+                    operation = GoalOperation.CREATE,
+                    title = "Bad schedule",
+                    instruction = "Run on a bad schedule",
+                    cronExpression = "bad cron",
+                )
+            )
+
+            assertFalse(result.success)
+            assertTrue(result.message.contains("valid 5-field cron_expression", ignoreCase = true))
+            assertTrue(manager.allGoals().isEmpty())
+
+            manager.stop()
+        } finally {
+            root.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `createGoal with cron schedule does not emit immediate work-ready signal`() {
+        val root = Files.createTempDirectory("psyke-pm-cron-idle-create")
+        try {
+            val signals = CopyOnWriteArrayList<GoalRuntimeCue>()
+            val manager = GoalManager(
+                config = testConfig(root),
+                store = GoalStore(root),
+                planner = DeterministicGoalPlanner(),
+                cueEmitter = { cue -> signals += cue },
+            )
+            manager.start(testScope())
+            val future = ZonedDateTime.now().plusHours(2).withSecond(0).withNano(0)
+            val cronExpression = "${future.minute} ${future.hour} * * *"
+
+            val id = manager.createGoal(
+                instruction = "Check the weather and remind me on schedule",
+                title = "Weather reminder",
+                cronExpression = cronExpression,
+            )
+
+            assertTrue(id.isNotBlank())
+            assertTrue(signals.none { it.goalId == id })
+            val state = manager.goalStatus(id)
+            assertNotNull(state)
+            assertEquals(GoalStatus.ACTIVE, state.goal.status)
+            assertEquals(cronExpression, state.goal.cronExpression)
+            assertEquals(StepStatus.READY, state.goal.plan.steps.first().status)
+
+            manager.stop()
+        } finally {
+            root.toFile().deleteRecursively()
+        }
+    }
+
     private fun waitUntil(timeoutMs: Long = 2_500, predicate: () -> Boolean) {
         val deadline = System.currentTimeMillis() + timeoutMs
         while (System.currentTimeMillis() < deadline) {

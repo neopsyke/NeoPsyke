@@ -121,6 +121,11 @@ sealed interface GoalEvent {
         override val timestamp: Instant = Instant.now(),
     ) : GoalEvent
 
+    data class CronCycleStarted(
+        override val goalId: String,
+        override val timestamp: Instant = Instant.now(),
+    ) : GoalEvent
+
     data class Completed(
         override val goalId: String,
         override val timestamp: Instant = Instant.now(),

@@ -7,6 +7,7 @@ import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
 import mu.KotlinLogging
 import ai.neopsyke.agent.config.*
+import ai.neopsyke.agent.goal.GoalPriority
 import ai.neopsyke.agent.model.*
 import ai.neopsyke.agent.support.AdaptiveCompletionBudget
 import ai.neopsyke.agent.support.DenialReasonClassifier
@@ -62,16 +63,6 @@ class LlmEgoPlanner(
         }
         val sessionId = context.conversationContext.sessionId
 
-        if (plannerCircuitBreaker.isTripped()) {
-            val shortCircuit = EgoDecision.Noop(
-                reason = "Planner circuit breaker tripped after ${plannerCircuitBreaker.streak()} consecutive parse failures.",
-                parseFailureShortCircuit = true,
-            )
-            instrumentation.emit(AgentEvents.warning("Planner circuit breaker tripped; short-circuiting to fallback."))
-            emitDecision(triggerLabel, shortCircuit, sessionId, rootInputId)
-            return shortCircuit
-        }
-
         instrumentation.emit(
             AgentEvent(
                 type = "planner_start",
@@ -83,6 +74,75 @@ class LlmEgoPlanner(
                 )
             )
         )
+
+        val branch = selectPlanningBranch(trigger)
+        instrumentation.emit(
+            AgentEvent(
+                type = "planner_branch_selected",
+                data = mapOf(
+                    "trigger" to triggerLabel,
+                    "branch" to branch.name.lowercase(),
+                    "root_input_id" to rootInputId,
+                )
+            )
+        )
+
+        val decision = when (branch) {
+            PlanningBranch.GENERAL -> decideGeneralBranch(
+                trigger = trigger,
+                context = context,
+                triggerLabel = triggerLabel,
+                sessionId = sessionId,
+                rootInputId = rootInputId,
+            )
+            PlanningBranch.GOAL_CREATION -> decideGoalCreationBranch(
+                trigger = trigger,
+                context = context,
+                sessionId = sessionId,
+                rootInputId = rootInputId,
+            )
+        }
+
+        val verifiedDecision = if (branch == PlanningBranch.GOAL_CREATION) {
+            decision
+        } else {
+            verifyActionDecision(
+                trigger = trigger,
+                context = context,
+                decision = decision
+            )
+        }
+        emitDecision(triggerLabel, verifiedDecision, sessionId, rootInputId)
+        return verifiedDecision
+    }
+
+    private fun selectPlanningBranch(trigger: EgoTrigger): PlanningBranch {
+        val input = (trigger as? EgoTrigger.IncomingInput)?.input?.content?.trim().orEmpty()
+        if (input.isBlank()) {
+            return PlanningBranch.GENERAL
+        }
+        return if (shouldUseGoalCreationBranch(input)) {
+            PlanningBranch.GOAL_CREATION
+        } else {
+            PlanningBranch.GENERAL
+        }
+    }
+
+    private fun decideGeneralBranch(
+        trigger: EgoTrigger,
+        context: PlannerContext,
+        triggerLabel: String,
+        sessionId: String,
+        rootInputId: String?,
+    ): EgoDecision {
+        if (plannerCircuitBreaker.isTripped()) {
+            return EgoDecision.Noop(
+                reason = "Planner circuit breaker tripped after ${plannerCircuitBreaker.streak()} consecutive parse failures.",
+                parseFailureShortCircuit = true,
+            ).also {
+                instrumentation.emit(AgentEvents.warning("Planner circuit breaker tripped; short-circuiting to fallback."))
+            }
+        }
 
         val promptAllocation = buildMessages(trigger, context)
         emitPromptBudgetAllocation(
@@ -106,20 +166,17 @@ class LlmEgoPlanner(
         )
         if (response == null) {
             instrumentation.emit(AgentEvents.warning("Planner call failed; falling back to noop."))
-            val fallback = EgoDecision.Noop("Planner unavailable due to model error.")
-            emitDecision(triggerLabel, fallback, sessionId, rootInputId)
-            return fallback
+            return EgoDecision.Noop("Planner unavailable due to model error.")
         }
-        val resolvedResponse = response
 
         val decision = parseResponse(
-            raw = resolvedResponse.content,
+            raw = response.content,
             availableActions = context.availableActions,
             emitParseWarning = false,
             allowResolutionDraft = allowResolutionDraft
         ) ?: run {
             val actionSchema = actionSchemaEnum(context.dispatchableActions)
-            val truncatedRecoveredDecision = if (isLikelyTruncatedCompletion(resolvedResponse)) {
+            val truncatedRecoveredDecision = if (isLikelyTruncatedCompletion(response)) {
                 instrumentation.emit(
                     AgentEvents.warning("Planner response appears truncated; retrying with increased completion budget.")
                 )
@@ -169,13 +226,71 @@ class LlmEgoPlanner(
         if (decision !is EgoDecision.Noop || !decision.parseFailureShortCircuit) {
             plannerCircuitBreaker.recordSuccess()
         }
-        val verifiedDecision = verifyActionDecision(
+        return decision
+    }
+
+    private fun decideGoalCreationBranch(
+        trigger: EgoTrigger,
+        context: PlannerContext,
+        sessionId: String,
+        rootInputId: String?,
+    ): EgoDecision {
+        val inputTrigger = trigger as? EgoTrigger.IncomingInput ?: return EgoDecision.Noop("Goal creation branch requires user input.")
+        if (ActionType.GOAL_OPERATION !in context.dispatchableActions) {
+            return unavailableGoalCreationDecision()
+        }
+
+        val recurrence = detectRecurringSchedule(inputTrigger.input.content)
+        if (recurrence.recurringIntent && recurrence.cronExpression == null) {
+            return unsupportedRecurringScheduleDecision()
+        }
+
+        val branchMetadata = plannerChatMetadata(
             trigger = trigger,
-            context = context,
-            decision = decision
+            callSite = GOAL_CREATION_CALL_SITE,
+            sessionId = sessionId,
+            rootInputId = rootInputId,
         )
-        emitDecision(triggerLabel, verifiedDecision, sessionId, rootInputId)
-        return verifiedDecision
+        val promptAllocation = buildGoalCreationMessages(
+            input = inputTrigger.input.content,
+            context = context,
+            recurrence = recurrence,
+        )
+        emitPromptBudgetAllocation(
+            callSite = GOAL_CREATION_PROMPT_CALL_SITE,
+            diagnostics = promptAllocation.diagnostics
+        )
+        val response = callPlanner(
+            messages = promptAllocation.messages,
+            metadata = branchMetadata,
+            maxTokens = GOAL_CREATION_MAX_TOKENS,
+            temperature = 0.0,
+            responseFormat = GOAL_CREATION_RESPONSE_FORMAT,
+        )
+
+        val spec = response
+            ?.let { parseGoalCreationPayload(it.content) }
+            ?.takeIf { it.decision.equals("create_goal", ignoreCase = true) }
+            ?.takeIf { !it.instruction.isNullOrBlank() }
+            ?: fallbackGoalCreationSpec(inputTrigger.input.content, recurrence)
+
+        val payload = GoalOperationPayload(
+            operation = "create",
+            title = TextSecurity.clamp(spec.title?.trim().orEmpty().ifBlank { "Persistent goal" }, GOAL_TITLE_MAX_CHARS),
+            instruction = TextSecurity.clamp(spec.instruction?.trim().orEmpty(), GOAL_INSTRUCTION_MAX_CHARS),
+            priority = spec.priority?.trim()?.uppercase()?.takeIf { it in GOAL_PRIORITY_VALUES } ?: GoalPriority.MEDIUM.name,
+            completionCriteria = TextSecurity.clamp(
+                spec.completionCriteria?.trim().orEmpty().ifBlank { DEFAULT_GOAL_COMPLETION_CRITERIA },
+                GOAL_COMPLETION_CRITERIA_MAX_CHARS
+            ),
+            cronExpression = recurrence.cronExpression,
+        )
+        return EgoDecision.ProposeAction(
+            urgency = Urgency.MEDIUM,
+            actionType = ActionType.GOAL_OPERATION,
+            payload = TextSecurity.clamp(mapper.writeValueAsString(payload), config.maxActionPayloadChars),
+            summary = buildGoalCreationSummary(payload)
+        )
     }
 
     private fun parseResponse(
@@ -304,6 +419,226 @@ class LlmEgoPlanner(
 
     private fun isResolutionDraftAllowed(trigger: EgoTrigger): Boolean =
         trigger is EgoTrigger.PendingThoughtInput && trigger.thought.planContext != null
+
+    private fun shouldUseGoalCreationBranch(input: String): Boolean {
+        val normalized = input.lowercase(Locale.ROOT)
+        return explicitGoalCreationRegex.containsMatchIn(normalized) ||
+            monitoringIntentRegex.containsMatchIn(normalized) ||
+            (reminderIntentRegex.containsMatchIn(normalized) && recurringScheduleHintRegex.containsMatchIn(normalized))
+    }
+
+    private fun detectRecurringSchedule(input: String): RecurringScheduleDetection {
+        val normalized = input.lowercase(Locale.ROOT)
+        val everyMinutes = everyNMinutesRegex.find(normalized)
+        if (everyMinutes != null) {
+            val minutes = everyMinutes.groupValues[1].toIntOrNull()
+            if (minutes != null) {
+                return when {
+                    minutes in 1..59 -> RecurringScheduleDetection(true, "*/$minutes * * * *")
+                    minutes == 60 -> RecurringScheduleDetection(true, "0 * * * *")
+                    minutes % 60 == 0 -> {
+                        val hours = minutes / 60
+                        if (hours in 1..23) {
+                            RecurringScheduleDetection(true, "0 */$hours * * *")
+                        } else {
+                            RecurringScheduleDetection(true, null)
+                        }
+                    }
+                    else -> RecurringScheduleDetection(true, null)
+                }
+            }
+        }
+        val everyHours = everyNHoursRegex.find(normalized)
+        if (everyHours != null) {
+            val hours = everyHours.groupValues[1].toIntOrNull()
+            if (hours != null) {
+                return when (hours) {
+                    in 1..23 -> RecurringScheduleDetection(true, "0 */$hours * * *")
+                    24 -> RecurringScheduleDetection(true, "0 0 * * *")
+                    else -> RecurringScheduleDetection(true, null)
+                }
+            }
+        }
+        if (hourlyRegex.containsMatchIn(normalized)) {
+            return RecurringScheduleDetection(true, "0 * * * *")
+        }
+        return RecurringScheduleDetection(
+            recurringIntent = recurringScheduleHintRegex.containsMatchIn(normalized),
+            cronExpression = null,
+        )
+    }
+
+    private fun buildGoalCreationMessages(
+        input: String,
+        context: PlannerContext,
+        recurrence: RecurringScheduleDetection,
+    ): PromptBudgetAllocator.AllocationResult {
+        val dialogue = if (context.recentDialogue.isEmpty()) {
+            "none"
+        } else {
+            context.recentDialogue.joinToString("\n") { turn ->
+                "${turn.role.name.lowercase()}: ${turn.content}"
+            }
+        }
+        val shortTermContextSummary = context.shortTermContextSummary.ifBlank { "none" }
+        val recurrenceSummary = recurrence.cronExpression ?: "none"
+        return PromptBudgetAllocator.allocate(
+            sections = listOf(
+                PromptBudgetAllocator.Section(
+                    key = "goal_creation_system_instructions",
+                    role = ChatRole.SYSTEM,
+                    band = PromptBudgetAllocator.Band.REQUIRED_CORE,
+                    importance = PromptBudgetAllocator.Importance.HIGH,
+                    floorTokens = 56,
+                    content = """
+                    You convert a user request into a persistent goal creation request.
+                    Return STRICT JSON only.
+                    Use decision=create_goal when the user is asking to create a persistent goal, reminder, or monitoring task.
+                    The instruction must describe what the goal should accomplish on each run.
+                    If detected_cron_expression is provided, assume the goal is recurring and write the instruction for one scheduled run, not for the whole lifetime.
+                    Prefer short, concrete titles.
+                    Do not mention JSON, tools, cron syntax, or internal systems in the title/instruction.
+                    Use fallback only if the request does not clearly specify a persistent goal/reminder.
+                    """.trimIndent()
+                ),
+                PromptBudgetAllocator.Section(
+                    key = "goal_creation_schema",
+                    role = ChatRole.SYSTEM,
+                    band = PromptBudgetAllocator.Band.REQUIRED_CORE,
+                    importance = PromptBudgetAllocator.Importance.HIGH,
+                    floorTokens = 36,
+                    content = """
+                    JSON schema:
+                    {
+                      "decision":"create_goal|fallback",
+                      "title":"short title",
+                      "instruction":"what the goal should do on each run",
+                      "completion_criteria":"how to tell the current run succeeded",
+                      "priority":"low|medium|high|critical",
+                      "assistant_response":"required when decision=fallback",
+                      "reason":"optional short note"
+                    }
+                    Example:
+                    {"decision":"create_goal","title":"Weather reminder","instruction":"Check the current weather and send the user an update for this scheduled run.","completion_criteria":"A weather update is delivered to the user for the current scheduled run.","priority":"medium"}
+                    """.trimIndent()
+                ),
+                PromptBudgetAllocator.Section(
+                    key = "goal_creation_recent_dialogue",
+                    role = ChatRole.USER,
+                    band = PromptBudgetAllocator.Band.OPTIONAL,
+                    content = "Recent dialogue:\n$dialogue"
+                ),
+                PromptBudgetAllocator.Section(
+                    key = "goal_creation_short_term_summary",
+                    role = ChatRole.USER,
+                    band = PromptBudgetAllocator.Band.REQUIRED_CONTEXT,
+                    floorTokens = 20,
+                    content = "Short-term context summary:\n$shortTermContextSummary"
+                ),
+                PromptBudgetAllocator.Section(
+                    key = "goal_creation_schedule_detection",
+                    role = ChatRole.USER,
+                    band = PromptBudgetAllocator.Band.REQUIRED_CONTEXT,
+                    floorTokens = 18,
+                    content = """
+                    Recurrence detection:
+                    recurring_intent=${recurrence.recurringIntent}
+                    detected_cron_expression=$recurrenceSummary
+                    """.trimIndent()
+                ),
+                PromptBudgetAllocator.Section(
+                    key = "goal_creation_trigger",
+                    role = ChatRole.USER,
+                    band = PromptBudgetAllocator.Band.REQUIRED_CORE,
+                    importance = PromptBudgetAllocator.Importance.HIGH,
+                    floorTokens = 28,
+                    content = "User request:\n$input"
+                )
+            ),
+            maxTokens = minOf(config.maxLlmPromptTokens, GOAL_CREATION_PROMPT_MAX_TOKENS)
+        )
+    }
+
+    private fun parseGoalCreationPayload(raw: String): GoalCreationPayload? {
+        val json = TextSecurity.extractJsonObject(raw)
+        return try {
+            mapper.readValue<GoalCreationPayload>(json)
+        } catch (initial: Exception) {
+            val repaired = repairInvalidJsonEscapes(json)
+            if (repaired == json) {
+                logger.warn(initial) {
+                    "Failed to parse goal creation response. preview='${TextSecurity.preview(raw, 120)}'"
+                }
+                null
+            } else {
+                runCatching { mapper.readValue<GoalCreationPayload>(repaired) }
+                    .onFailure { ex ->
+                        logger.warn(ex) {
+                            "Failed to parse repaired goal creation response. preview='${TextSecurity.preview(raw, 120)}'"
+                        }
+                    }
+                    .getOrNull()
+            }
+        }
+    }
+
+    private fun fallbackGoalCreationSpec(
+        input: String,
+        recurrence: RecurringScheduleDetection,
+    ): GoalCreationPayload {
+        val normalized = input.lowercase(Locale.ROOT)
+        val title = when {
+            "weather" in normalized -> "Weather reminder"
+            reminderIntentRegex.containsMatchIn(normalized) -> "Reminder"
+            monitoringIntentRegex.containsMatchIn(normalized) -> "Monitoring goal"
+            else -> "Persistent goal"
+        }
+        val instruction = when {
+            "weather" in normalized && recurrence.cronExpression != null ->
+                "Check the current weather and send the user an update for this scheduled run."
+            recurrence.cronExpression != null ->
+                "Carry out the requested reminder or monitoring task for this scheduled run and notify the user."
+            else ->
+                input.trim()
+        }
+        val completionCriteria = if (recurrence.cronExpression != null) {
+            "The requested reminder or update is delivered to the user for the current scheduled run."
+        } else {
+            DEFAULT_GOAL_COMPLETION_CRITERIA
+        }
+        return GoalCreationPayload(
+            decision = "create_goal",
+            title = title,
+            instruction = instruction,
+            completionCriteria = completionCriteria,
+            priority = GoalPriority.MEDIUM.name.lowercase(),
+        )
+    }
+
+    private fun buildGoalCreationSummary(payload: GoalOperationPayload): String {
+        val prefix = if (payload.cronExpression.isNullOrBlank()) {
+            "Create persistent goal"
+        } else {
+            "Create recurring goal"
+        }
+        return TextSecurity.clamp("$prefix: ${payload.title}", config.maxActionSummaryChars)
+    }
+
+    private fun unavailableGoalCreationDecision(): EgoDecision =
+        EgoDecision.ProposeAction(
+            urgency = Urgency.MEDIUM,
+            actionType = ActionType.CONTACT_USER,
+            payload = "Persistent goals are unavailable in this run. Restart with goals enabled to create recurring reminders or monitoring tasks.",
+            summary = "Explain that persistent goals are disabled"
+        )
+
+    private fun unsupportedRecurringScheduleDecision(): EgoDecision =
+        EgoDecision.ProposeAction(
+            urgency = Urgency.MEDIUM,
+            actionType = ActionType.CONTACT_USER,
+            payload = "I can create recurring goals for schedules like every N minutes or every N hours, but I could not parse that schedule. Please restate it in one of those forms.",
+            summary = "Ask user to restate unsupported recurring schedule"
+        )
 
     private fun resolveActionVerifierResponseFormats(): SchemaFormatPair =
         SchemaFormatPair(
@@ -481,6 +816,9 @@ class LlmEgoPlanner(
         decision: EgoDecision,
     ): EgoDecision {
         if (decision !is EgoDecision.ProposeAction) {
+            return decision
+        }
+        if (decision.actionType == ActionType.GOAL_OPERATION) {
             return decision
         }
         val circuitKey = resolveActionVerifierCircuitKey(trigger, decision)
@@ -1701,6 +2039,34 @@ class LlmEgoPlanner(
         val parseFailed: Boolean,
     )
 
+    private data class GoalCreationPayload(
+        val decision: String? = null,
+        val title: String? = null,
+        val instruction: String? = null,
+        @field:JsonProperty("completion_criteria")
+        val completionCriteria: String? = null,
+        val priority: String? = null,
+        @field:JsonProperty("assistant_response")
+        val assistantResponse: String? = null,
+        val reason: String? = null,
+    )
+
+    private data class GoalOperationPayload(
+        val operation: String,
+        val title: String,
+        val instruction: String,
+        val priority: String,
+        @field:JsonProperty("completion_criteria")
+        val completionCriteria: String,
+        @field:JsonProperty("cron_expression")
+        val cronExpression: String? = null,
+    )
+
+    private data class RecurringScheduleDetection(
+        val recurringIntent: Boolean,
+        val cronExpression: String? = null,
+    )
+
     private data class ActionVerifierCircuitKey(
         val rootInputId: String?,
         val actionType: ActionType,
@@ -1715,6 +2081,11 @@ class LlmEgoPlanner(
         val actionType: ActionType,
         val observedEvidence: Boolean,
     )
+
+    private enum class PlanningBranch {
+        GENERAL,
+        GOAL_CREATION,
+    }
 
     private fun resolveActionVerifierBudget(messages: List<ChatMessage>): Int {
         val resolution = AdaptiveCompletionBudget.resolveDetailed(
@@ -1763,6 +2134,11 @@ class LlmEgoPlanner(
 
     private companion object {
         const val GOAL_WORKING_CONTEXT_MAX_CHARS: Int = 1_200
+        const val GOAL_TITLE_MAX_CHARS: Int = 80
+        const val GOAL_INSTRUCTION_MAX_CHARS: Int = 400
+        const val GOAL_COMPLETION_CRITERIA_MAX_CHARS: Int = 200
+        const val GOAL_CREATION_MAX_TOKENS: Int = 220
+        const val GOAL_CREATION_PROMPT_MAX_TOKENS: Int = 900
         const val ACTION_VERIFIER_BASE_TOKENS: Int = 80
         const val ACTION_VERIFIER_MAX_TOKENS: Int = 220
         const val ACTION_VERIFIER_TRUNCATION_RETRY_MIN_TOKEN_BUMP: Int = 32
@@ -1772,8 +2148,64 @@ class LlmEgoPlanner(
         const val TRUNCATION_RETRY_DIVISOR: Int = 2
         const val PLANNER_TRUNCATION_RETRY_HARD_MAX_TOKENS: Int = 1_600
         const val PLANNER_PROMPT_CALL_SITE: String = "planner_prompt"
+        const val GOAL_CREATION_PROMPT_CALL_SITE: String = "goal_creation_prompt"
         const val ACTION_VERIFIER_PROMPT_CALL_SITE: String = "action_verifier_prompt"
+        const val GOAL_CREATION_CALL_SITE: String = "input_goal_create"
         const val ACTION_VERIFIER_TEMPERATURE: Double = 0.0
+        const val DEFAULT_GOAL_COMPLETION_CRITERIA: String = "User confirms the goal is met."
+        val GOAL_PRIORITY_VALUES: Set<String> = GoalPriority.entries.map { it.name }.toSet()
+        val explicitGoalCreationRegex: Regex = Regex("""\b(?:set|create|make|start|add)\s+(?:a\s+)?goal\b|\bgoal\s+for\s+you\b""")
+        val reminderIntentRegex: Regex = Regex("""\bremind me\b|\breminder\b""")
+        val monitoringIntentRegex: Regex = Regex("""\bkeep checking\b|\bmonitor\b|\bwatch\b""")
+        val recurringScheduleHintRegex: Regex = Regex("""\bevery\b|\bhourly\b|\bdaily\b|\bweekly\b|\beach\b""")
+        val everyNMinutesRegex: Regex = Regex("""\bevery\s+(\d+)\s+minutes?\b""")
+        val everyNHoursRegex: Regex = Regex("""\bevery\s+(\d+)\s+hours?\b""")
+        val hourlyRegex: Regex = Regex("""\bhourly\b|\bevery hour\b""")
+        private const val GOAL_CREATION_RESPONSE_SCHEMA_STRICT: String = """
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "decision",
+                "title",
+                "instruction",
+                "completion_criteria",
+                "priority",
+                "assistant_response",
+                "reason"
+              ],
+              "properties": {
+                "decision": {
+                  "type": "string",
+                  "enum": ["create_goal", "fallback"]
+                },
+                "title": {
+                  "type": ["string", "null"],
+                  "maxLength": 80
+                },
+                "instruction": {
+                  "type": ["string", "null"],
+                  "maxLength": 400
+                },
+                "completion_criteria": {
+                  "type": ["string", "null"],
+                  "maxLength": 200
+                },
+                "priority": {
+                  "type": ["string", "null"],
+                  "enum": ["low", "medium", "high", "critical", null]
+                },
+                "assistant_response": {
+                  "type": ["string", "null"],
+                  "maxLength": 220
+                },
+                "reason": {
+                  "type": ["string", "null"],
+                  "maxLength": 160
+                }
+              }
+            }
+        """
         private const val PLANNER_DECISION_RESPONSE_SCHEMA_STRICT: String = """
             {
               "type": "object",
@@ -1953,6 +2385,12 @@ class LlmEgoPlanner(
                 schemaJson = PLANNER_DECISION_RESPONSE_SCHEMA_STRICT,
                 strict = true,
                 relaxedSchemaJson = PLANNER_DECISION_RESPONSE_SCHEMA_RELAXED
+            )
+        val GOAL_CREATION_RESPONSE_FORMAT: ChatResponseFormat.JsonSchema =
+            ChatResponseFormat.JsonSchema(
+                name = "ego_goal_creation",
+                schemaJson = GOAL_CREATION_RESPONSE_SCHEMA_STRICT,
+                strict = true
             )
         val ACTION_VERIFIER_RESPONSE_FORMAT_STRICT: ChatResponseFormat.JsonSchema =
             ChatResponseFormat.JsonSchema(
