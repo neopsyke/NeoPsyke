@@ -7,7 +7,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
-class TaskWorkspaceFinalizerTest {
+class ScratchpadFinalizerTest {
     @Test
     fun `llm finalizer rewrites payload from grounded json response`() {
         val llm = StubChatModelClient().apply {
@@ -21,14 +21,14 @@ class TaskWorkspaceFinalizerTest {
                 )
             )
         )
-        val finalizer = LlmTaskWorkspaceFinalizer(
+        val finalizer = LlmScratchpadFinalizer(
             modelClient = llm,
             config = config,
             instrumentation = RecordingInstrumentation()
         )
 
         val result = finalizer.finalize(
-            TaskWorkspaceFinalizerRequest(
+            ScratchpadFinalizerRequest(
                 action = PendingAction(
                     id = 1,
                     urgency = Urgency.MEDIUM,
@@ -36,7 +36,7 @@ class TaskWorkspaceFinalizerTest {
                     payload = "Draft answer",
                     summary = "respond"
                 ),
-                workspaceCompilation = "Task workspace final compilation:\nsections:\n1. Request: summarize pricing",
+                workspaceCompilation = "Scratchpad final compilation:\nsections:\n1. Request: summarize pricing",
                 workspaceConfidence = 0.73,
                 recentDialogue = listOf(
                     DialogueTurn(DialogueRole.USER, "What is the current pricing?")
@@ -47,7 +47,7 @@ class TaskWorkspaceFinalizerTest {
         assertNotNull(result)
         assertEquals("Refined final answer", result.rewrittenPayload)
         assertEquals(0.88, result.confidence)
-        assertEquals("task_workspace_finalizer", llm.calls.single().options.metadata.callSite)
+        assertEquals("scratchpad_finalizer", llm.calls.single().options.metadata.callSite)
         assertEquals("contact_user", llm.calls.single().options.metadata.actionType)
         assertEquals(321, llm.calls.single().options.maxTokens)
     }
@@ -57,14 +57,14 @@ class TaskWorkspaceFinalizerTest {
         val llm = StubChatModelClient().apply {
             enqueueRawResponse("""{"rewrite":"Fallback explanation","confidence":0.77,"grounded":true,"reason":"fallback_explanation"}""")
         }
-        val finalizer = LlmTaskWorkspaceFinalizer(
+        val finalizer = LlmScratchpadFinalizer(
             modelClient = llm,
             config = AgentConfig(),
             instrumentation = RecordingInstrumentation()
         )
 
         finalizer.finalize(
-            TaskWorkspaceFinalizerRequest(
+            ScratchpadFinalizerRequest(
                 action = PendingAction(
                     id = 2,
                     urgency = Urgency.MEDIUM,
@@ -73,7 +73,7 @@ class TaskWorkspaceFinalizerTest {
                     summary = "fallback",
                     isFallbackExplanation = true
                 ),
-                workspaceCompilation = "Task workspace final compilation:\nsections:\n1. Request: explain constraint",
+                workspaceCompilation = "Scratchpad final compilation:\nsections:\n1. Request: explain constraint",
                 workspaceConfidence = 0.64,
                 recentDialogue = emptyList()
             )

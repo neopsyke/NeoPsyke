@@ -34,10 +34,10 @@ typealias MetaReasoner = ai.neopsyke.agent.ego.MetaReasoner
 typealias MetaReasonerVerdict = ai.neopsyke.agent.ego.MetaReasonerVerdict
 typealias MetaReasonerAssessment = ai.neopsyke.agent.ego.MetaReasonerAssessment
 typealias LlmMetaReasoner = ai.neopsyke.agent.ego.LlmMetaReasoner
-typealias TaskWorkspaceFinalizer = ai.neopsyke.agent.ego.TaskWorkspaceFinalizer
-typealias TaskWorkspaceFinalizerRequest = ai.neopsyke.agent.ego.TaskWorkspaceFinalizerRequest
-typealias TaskWorkspaceFinalizerResult = ai.neopsyke.agent.ego.TaskWorkspaceFinalizerResult
-typealias LlmTaskWorkspaceFinalizer = ai.neopsyke.agent.ego.LlmTaskWorkspaceFinalizer
+typealias ScratchpadFinalizer = ai.neopsyke.agent.ego.ScratchpadFinalizer
+typealias ScratchpadFinalizerRequest = ai.neopsyke.agent.ego.ScratchpadFinalizerRequest
+typealias ScratchpadFinalizerResult = ai.neopsyke.agent.ego.ScratchpadFinalizerResult
+typealias LlmScratchpadFinalizer = ai.neopsyke.agent.ego.LlmScratchpadFinalizer
 
 typealias Superego = ai.neopsyke.agent.superego.Superego
 typealias SuperegoPolicy = ai.neopsyke.agent.superego.SuperegoPolicy

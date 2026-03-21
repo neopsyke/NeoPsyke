@@ -358,7 +358,7 @@ class EgoAgentTest {
         assertTrue(secondPrompt.contains("Prior workspace digests"))
         assertTrue(secondPrompt.contains("digest sentinel one"))
         assertTrue(
-            instrumentation.events.any { it.type == "task_workspace_digest_captured" },
+            instrumentation.events.any { it.type == "scratchpad_digest_captured" },
             "Expected digest capture event after first resolved answer."
         )
     }
@@ -979,7 +979,7 @@ class EgoAgentTest {
     }
 
     @Test
-    fun `task workspace summary is injected and lifecycle is scoped to resolved input`() {
+    fun `scratchpad summary is injected and lifecycle is scoped to resolved input`() {
         val plannerLlm = StubChatModelClient().apply {
             enqueueRawResponse(
                 """
@@ -1039,20 +1039,20 @@ class EgoAgentTest {
         val plannerCalls = plannerLlm.calls.filter { it.options.metadata.callSite != "action_verifier" }
         assertTrue(plannerCalls.size >= 2)
         val followUpPrompt = plannerCalls[1].messages.last().content
-        assertTrue(followUpPrompt.contains("Task workspace summary:"))
+        assertTrue(followUpPrompt.contains("Scratchpad summary:"))
         assertTrue(followUpPrompt.contains("Request"))
         assertTrue(followUpPrompt.contains("web_search_result"))
         assertEquals(listOf("ego> Final answer from planner"), outputs)
-        assertTrue(instrumentation.events.any { it.type == "task_workspace_created" })
-        assertTrue(instrumentation.events.any { it.type == "task_workspace_updated" })
-        assertTrue(instrumentation.events.any { it.type == "task_workspace_head" })
-        assertTrue(instrumentation.events.any { it.type == "task_workspace_debug_snapshot" })
-        assertTrue(instrumentation.events.any { it.type == "task_workspace_final_pass" })
-        assertTrue(instrumentation.events.any { it.type == "task_workspace_destroyed" })
+        assertTrue(instrumentation.events.any { it.type == "scratchpad_created" })
+        assertTrue(instrumentation.events.any { it.type == "scratchpad_updated" })
+        assertTrue(instrumentation.events.any { it.type == "scratchpad_head" })
+        assertTrue(instrumentation.events.any { it.type == "scratchpad_debug_snapshot" })
+        assertTrue(instrumentation.events.any { it.type == "scratchpad_final_pass" })
+        assertTrue(instrumentation.events.any { it.type == "scratchpad_destroyed" })
     }
 
     @Test
-    fun `task workspace final pass applies rewritten answer when confidence gates pass`() {
+    fun `scratchpad final pass applies rewritten answer when confidence gates pass`() {
         val plannerLlm = StubChatModelClient().apply {
             enqueueRawResponse(
                 """
@@ -1072,10 +1072,10 @@ class EgoAgentTest {
         val instrumentation = RecordingInstrumentation()
         val outputs = mutableListOf<String>()
         var finalizerCalls = 0
-        val finalizer = object : TaskWorkspaceFinalizer {
-            override fun finalize(request: TaskWorkspaceFinalizerRequest): TaskWorkspaceFinalizerResult {
+        val finalizer = object : ScratchpadFinalizer {
+            override fun finalize(request: ScratchpadFinalizerRequest): ScratchpadFinalizerResult {
                 finalizerCalls += 1
-                return TaskWorkspaceFinalizerResult(
+                return ScratchpadFinalizerResult(
                     rewrittenPayload = "Rewritten grounded final answer",
                     confidence = 0.92,
                     reason = "direct_answer"
@@ -1115,11 +1115,11 @@ class EgoAgentTest {
 
         assertEquals(listOf("ego> Rewritten grounded final answer"), outputs)
         assertEquals(1, finalizerCalls)
-        assertTrue(instrumentation.events.any { it.type == "task_workspace_final_pass_applied" })
+        assertTrue(instrumentation.events.any { it.type == "scratchpad_final_pass_applied" })
     }
 
     @Test
-    fun `task workspace final pass skips rewrite when no evidence gathered`() {
+    fun `scratchpad final pass skips rewrite when no evidence gathered`() {
         val plannerLlm = StubChatModelClient().apply {
             enqueueRawResponse(
                 """
@@ -1133,10 +1133,10 @@ class EgoAgentTest {
         val instrumentation = RecordingInstrumentation()
         val outputs = mutableListOf<String>()
         var finalizerCalls = 0
-        val finalizer = object : TaskWorkspaceFinalizer {
-            override fun finalize(request: TaskWorkspaceFinalizerRequest): TaskWorkspaceFinalizerResult {
+        val finalizer = object : ScratchpadFinalizer {
+            override fun finalize(request: ScratchpadFinalizerRequest): ScratchpadFinalizerResult {
                 finalizerCalls += 1
-                return TaskWorkspaceFinalizerResult(
+                return ScratchpadFinalizerResult(
                     rewrittenPayload = "Should never apply",
                     confidence = 0.95,
                     reason = "direct_answer"
@@ -1169,14 +1169,14 @@ class EgoAgentTest {
         assertEquals(0, finalizerCalls)
         assertTrue(
             instrumentation.events.any {
-                it.type == "task_workspace_final_pass_skipped" &&
+                it.type == "scratchpad_final_pass_skipped" &&
                     it.data["reason"] == "no_evidence_or_insufficient_drafts"
             }
         )
     }
 
     @Test
-    fun `task workspace final pass can finalize from answer drafts without external evidence`() {
+    fun `scratchpad final pass can finalize from answer drafts without external evidence`() {
         val plannerLlm = StubChatModelClient().apply {
             enqueueRawResponse(
                 """
@@ -1207,10 +1207,10 @@ class EgoAgentTest {
         val instrumentation = RecordingInstrumentation()
         val outputs = mutableListOf<String>()
         var finalizerCalls = 0
-        val finalizer = object : TaskWorkspaceFinalizer {
-            override fun finalize(request: TaskWorkspaceFinalizerRequest): TaskWorkspaceFinalizerResult {
+        val finalizer = object : ScratchpadFinalizer {
+            override fun finalize(request: ScratchpadFinalizerRequest): ScratchpadFinalizerResult {
                 finalizerCalls += 1
-                return TaskWorkspaceFinalizerResult(
+                return ScratchpadFinalizerResult(
                     rewrittenPayload = "Final answer synthesized from drafts",
                     confidence = 0.91,
                     reason = "direct_answer"
@@ -1243,11 +1243,11 @@ class EgoAgentTest {
         assertEquals(1, finalizerCalls)
         assertTrue(
             instrumentation.events.count {
-                it.type == "task_workspace_updated" &&
+                it.type == "scratchpad_updated" &&
                     it.data["update_type"] == "resolution_draft_recorded"
             } >= 2
         )
-        assertTrue(instrumentation.events.any { it.type == "task_workspace_final_pass_applied" })
+        assertTrue(instrumentation.events.any { it.type == "scratchpad_final_pass_applied" })
     }
 
     @Test

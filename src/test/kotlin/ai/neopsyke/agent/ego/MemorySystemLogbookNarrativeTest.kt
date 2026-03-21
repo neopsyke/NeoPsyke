@@ -29,12 +29,12 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
-class MemoryCoordinatorLogbookNarrativeTest {
+class MemorySystemLogbookNarrativeTest {
     @Test
     fun `successful memory imprint journals first person summary`() {
         val logbook = RecordingLogbook()
         val hippocampus = RecordingHippocampus()
-        val coordinator = MemoryCoordinator(
+        val coordinator = MemorySystem(
             hippocampus = hippocampus,
             longTermMemoryAdvisor = object : LongTermMemoryAdvisor {
                 override fun assess(context: LongTermMemoryAssessmentContext): LongTermMemoryAssessmentDecision =
@@ -70,7 +70,7 @@ class MemoryCoordinatorLogbookNarrativeTest {
     @Test
     fun `lesson imprint journals first person lesson summary`() {
         val logbook = RecordingLogbook()
-        val coordinator = MemoryCoordinator(
+        val coordinator = MemorySystem(
             hippocampus = RecordingHippocampus(),
             longTermMemoryAdvisor = object : LongTermMemoryAdvisor {
                 override fun assess(context: LongTermMemoryAssessmentContext): LongTermMemoryAssessmentDecision =
@@ -101,7 +101,7 @@ class MemoryCoordinatorLogbookNarrativeTest {
     fun `recordReflection persists first person durable memory with provenance`() {
         val logbook = RecordingLogbook()
         val hippocampus = RecordingHippocampus()
-        val coordinator = MemoryCoordinator(
+        val coordinator = MemorySystem(
             hippocampus = hippocampus,
             longTermMemoryAdvisor = object : LongTermMemoryAdvisor {
                 override fun assess(context: LongTermMemoryAssessmentContext): LongTermMemoryAssessmentDecision =
@@ -160,7 +160,7 @@ class MemoryCoordinatorLogbookNarrativeTest {
     @Test
     fun `recordReflection returns false when durable memory save fails`() {
         val logbook = RecordingLogbook()
-        val coordinator = MemoryCoordinator(
+        val coordinator = MemorySystem(
             hippocampus = RecordingHippocampus(imprintResult = false),
             longTermMemoryAdvisor = object : LongTermMemoryAdvisor {
                 override fun assess(context: LongTermMemoryAssessmentContext): LongTermMemoryAssessmentDecision =
@@ -189,7 +189,7 @@ class MemoryCoordinatorLogbookNarrativeTest {
 
     @Test
     fun `recent learning topics keep exact topics and dedupe exact repeats`() {
-        val coordinator = MemoryCoordinator(
+        val coordinator = MemorySystem(
             hippocampus = RecordingHippocampus(),
             longTermMemoryAdvisor = object : LongTermMemoryAdvisor {
                 override fun assess(context: LongTermMemoryAssessmentContext): LongTermMemoryAssessmentDecision =
@@ -267,7 +267,7 @@ class MemoryCoordinatorLogbookNarrativeTest {
                 )
             )
         }
-        val coordinator = MemoryCoordinator(
+        val coordinator = MemorySystem(
             hippocampus = RecordingHippocampus(),
             longTermMemoryAdvisor = object : LongTermMemoryAdvisor {
                 override fun assess(context: LongTermMemoryAssessmentContext): LongTermMemoryAssessmentDecision =

@@ -3,7 +3,7 @@ package ai.neopsyke.agent.ego
 import ai.neopsyke.agent.config.*
 import ai.neopsyke.agent.model.*
 import ai.neopsyke.agent.cortex.motor.MotorCortex
-import ai.neopsyke.agent.memory.workspace.TaskWorkspaceStore
+import ai.neopsyke.agent.memory.scratchpad.ScratchpadStore
 import ai.neopsyke.agent.support.DenialReasonClassifier
 import ai.neopsyke.agent.support.TextSecurity
 import ai.neopsyke.instrumentation.AgentEvent
@@ -20,9 +20,9 @@ internal class DecisionDispatcher(
     private val config: AgentConfig,
     private val instrumentation: AgentInstrumentation,
     private val deliberation: DeliberationEngine,
-    private val memory: MemoryCoordinator,
+    private val memory: MemorySystem,
     private val motorCortex: MotorCortex,
-    private val taskWorkspaceStore: TaskWorkspaceStore,
+    private val taskWorkspaceStore: ScratchpadStore,
     private val telemetry: EgoTelemetry,
     private val fallbackHandler: FallbackHandler,
     private val dialogueFor: (String) -> ArrayDeque<DialogueTurn>,
@@ -263,7 +263,7 @@ internal class DecisionDispatcher(
                 if (workspaceActivated) {
                     instrumentation.emit(
                         AgentEvent(
-                            type = "task_workspace_created",
+                            type = "scratchpad_created",
                             data = mapOf(
                                 "root_input_id" to rootInputId,
                                 "root_input_received_at_ms" to rootInputReceivedAtMs,
@@ -282,7 +282,7 @@ internal class DecisionDispatcher(
                 }
                 instrumentation.emit(
                     AgentEvent(
-                        type = "task_workspace_updated",
+                        type = "scratchpad_updated",
                         data = mapOf(
                             "root_input_id" to rootInputId,
                             "root_input_received_at_ms" to rootInputReceivedAtMs,

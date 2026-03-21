@@ -42,7 +42,7 @@ class InnerVoiceSink(
             "action_denied" -> handleActionDenied(event)
             "memory_recall_result" -> handleMemoryRecall(event)
             "action_executed" -> handleActionExecuted(event)
-            "task_workspace_destroyed" -> cleanupRoot(event)
+            "scratchpad_destroyed" -> cleanupRoot(event)
         }
     }
 

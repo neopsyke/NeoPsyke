@@ -7,10 +7,10 @@ import ai.neopsyke.agent.ego.EgoAssembler
 import ai.neopsyke.agent.ego.LlmEgoPlanner
 import ai.neopsyke.agent.memory.episodic.Logbook
 import ai.neopsyke.agent.memory.episodic.SqliteLogbook
-import ai.neopsyke.agent.ego.LlmTaskWorkspaceFinalizer
+import ai.neopsyke.agent.ego.LlmScratchpadFinalizer
 import ai.neopsyke.agent.memory.longterm.Hippocampus
 import ai.neopsyke.agent.ego.LlmMetaReasoner
-import ai.neopsyke.agent.ego.NoopTaskWorkspaceFinalizer
+import ai.neopsyke.agent.ego.NoopScratchpadFinalizer
 import ai.neopsyke.agent.memory.longterm.LlmLongTermMemoryAdvisor
 import ai.neopsyke.agent.memory.longterm.McpHippocampus
 import ai.neopsyke.agent.tools.mcp.McpStdioClient
@@ -71,7 +71,7 @@ import ai.neopsyke.instrumentation.MetricsEventSink
 import ai.neopsyke.instrumentation.MetricsSnapshotObserver
 import ai.neopsyke.instrumentation.ReasoningEvalFlowLogSink
 import ai.neopsyke.instrumentation.StructuredLogSink
-import ai.neopsyke.instrumentation.TaskWorkspaceDumpSink
+import ai.neopsyke.instrumentation.ScratchpadDumpSink
 import ai.neopsyke.llm.AdaptiveStructuredOutputChatClient
 import ai.neopsyke.llm.InstrumentedChatModelClient
 import ai.neopsyke.llm.ChatModelClient
@@ -675,7 +675,7 @@ internal object AppModeRunners {
                 sinks = listOfNotNull(
                     StructuredLogSink(),
                     dashboardStore,
-                    TaskWorkspaceDumpSink(scope = agentScope),
+                    ScratchpadDumpSink(scope = agentScope),
                     innerVoiceSink
                 ),
                 criticalSinks = listOfNotNull(sidecarSink),
@@ -1069,13 +1069,13 @@ internal object AppModeRunners {
                                                             config.memory.taskWorkspace.enabled &&
                                                                 config.memory.taskWorkspace.finalPassRewriteEnabled
                                                         ) {
-                                                            LlmTaskWorkspaceFinalizer(
+                                                            LlmScratchpadFinalizer(
                                                                 modelClient = plannerClient,
                                                                 config = config,
                                                                 instrumentation = instrumentation
                                                             )
                                                         } else {
-                                                            NoopTaskWorkspaceFinalizer
+                                                            NoopScratchpadFinalizer
                                                         },
                                                         logbook = logbook,
                                                         logbookSummarizer = logbookSummarizer,
@@ -1243,7 +1243,7 @@ internal object AppModeRunners {
             InstrumentationBus(
                 sinks = listOfNotNull(
                     StructuredLogSink(),
-                    TaskWorkspaceDumpSink(scope = agentScope),
+                    ScratchpadDumpSink(scope = agentScope),
                 ),
                 criticalSinks = listOfNotNull(sidecarSink),
                 scope = agentScope
@@ -1504,13 +1504,13 @@ internal object AppModeRunners {
                                                         config.memory.taskWorkspace.enabled &&
                                                             config.memory.taskWorkspace.finalPassRewriteEnabled
                                                     ) {
-                                                        LlmTaskWorkspaceFinalizer(
+                                                        LlmScratchpadFinalizer(
                                                             modelClient = plannerClient,
                                                             config = config,
                                                             instrumentation = instrumentation
                                                         )
                                                     } else {
-                                                        NoopTaskWorkspaceFinalizer
+                                                        NoopScratchpadFinalizer
                                                     },
                                                     logbook = logbook,
                                                     logbookSummarizer = logbookSummarizer,

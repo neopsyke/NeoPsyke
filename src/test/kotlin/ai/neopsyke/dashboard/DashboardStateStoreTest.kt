@@ -248,7 +248,7 @@ class DashboardStateStoreTest {
         store.onEvent(
             AgentEvent(
                 id = 1,
-                type = "task_workspace_debug_snapshot",
+                type = "scratchpad_debug_snapshot",
                 data = mapOf(
                     "root_input_id" to "root-99",
                     "root_input_received_at_ms" to 99L,

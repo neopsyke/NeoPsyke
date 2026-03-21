@@ -28,7 +28,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
-class MemoryCoordinatorEpisodicRecallTest {
+class MemorySystemEpisodicRecallTest {
 
     private fun createTempLogbook(): SqliteLogbook {
         val tempDir = Files.createTempDirectory("mc-episodic-test")
@@ -40,8 +40,8 @@ class MemoryCoordinatorEpisodicRecallTest {
         logbook: Logbook? = null,
         config: AgentConfig = AgentConfig(),
         hippocampus: Hippocampus = NoopHippocampus,
-    ): MemoryCoordinator {
-        return MemoryCoordinator(
+    ): MemorySystem {
+        return MemorySystem(
             hippocampus = hippocampus,
             longTermMemoryAdvisor = NoopLongTermMemoryAdvisor,
             config = config,

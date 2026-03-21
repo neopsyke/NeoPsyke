@@ -14,7 +14,7 @@ import ai.neopsyke.agent.memory.longterm.LongTermMemoryAdvisor
 import ai.neopsyke.agent.memory.longterm.NoopHippocampus
 import ai.neopsyke.agent.memory.longterm.NoopLongTermMemoryAdvisor
 import ai.neopsyke.agent.memory.shortterm.MemoryStore
-import ai.neopsyke.agent.memory.workspace.TaskWorkspaceStore
+import ai.neopsyke.agent.memory.scratchpad.ScratchpadStore
 import ai.neopsyke.agent.project.NoopProjectsGateway
 import ai.neopsyke.agent.project.ProjectsGateway
 import ai.neopsyke.agent.superego.Superego
@@ -27,7 +27,7 @@ data class EgoAssembly(
     val ego: Ego,
     val motorCortex: MotorCortex,
     val actionRegistry: ActionRegistry,
-    val memory: MemoryCoordinator,
+    val memory: MemorySystem,
 ) : AutoCloseable {
     override fun close() {
         actionRegistry.close()
@@ -35,7 +35,7 @@ data class EgoAssembly(
 }
 
 object EgoAssembler {
-    fun buildMemoryCoordinator(
+    fun buildMemorySystem(
         config: AgentConfig,
         instrumentation: AgentInstrumentation = NoopAgentInstrumentation,
         hippocampus: Hippocampus = NoopHippocampus,
@@ -43,8 +43,8 @@ object EgoAssembler {
         logbook: Logbook? = null,
         logbookSummarizer: LogbookSummarizer = DeterministicLogbookSummarizer(config.logbook),
         runId: String? = null,
-    ): MemoryCoordinator =
-        MemoryCoordinator(
+    ): MemorySystem =
+        MemorySystem(
             hippocampus = hippocampus,
             longTermMemoryAdvisor = longTermMemoryAdvisor,
             config = config,
@@ -64,8 +64,8 @@ object EgoAssembler {
         hippocampus: Hippocampus = NoopHippocampus,
         metaReasoner: MetaReasoner = NoopMetaReasoner,
         longTermMemoryAdvisor: LongTermMemoryAdvisor = NoopLongTermMemoryAdvisor,
-        taskWorkspaceStore: TaskWorkspaceStore = TaskWorkspaceStore(config.memory.taskWorkspace),
-        taskWorkspaceFinalizer: TaskWorkspaceFinalizer = NoopTaskWorkspaceFinalizer,
+        taskWorkspaceStore: ScratchpadStore = ScratchpadStore(config.memory.taskWorkspace),
+        taskWorkspaceFinalizer: ScratchpadFinalizer = NoopScratchpadFinalizer,
         logbook: Logbook? = null,
         logbookSummarizer: LogbookSummarizer = DeterministicLogbookSummarizer(config.logbook),
         runId: String? = null,
@@ -75,7 +75,7 @@ object EgoAssembler {
         projectsGateway: ProjectsGateway = NoopProjectsGateway,
         output: (String) -> Unit = {},
     ): EgoAssembly {
-        val memory = buildMemoryCoordinator(
+        val memory = buildMemorySystem(
             config = config,
             instrumentation = instrumentation,
             hippocampus = hippocampus,

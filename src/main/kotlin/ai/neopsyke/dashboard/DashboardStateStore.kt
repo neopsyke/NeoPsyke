@@ -70,11 +70,11 @@ class DashboardStateStore(
         var payloadJson: String? = null
         synchronized(lock) {
             val effectiveEvent = enrichPlannerStructuredOutputModeLocked(event)
-            val isDebugWorkspaceSnapshot = event.type == "task_workspace_debug_snapshot"
+            val isDebugWorkspaceSnapshot = event.type == "scratchpad_debug_snapshot"
             if (isDebugWorkspaceSnapshot) {
                 captureWorkspaceSnapshot(event.data)
             } else {
-                if (event.type == "task_workspace_head") {
+                if (event.type == "scratchpad_head") {
                     captureWorkspaceHead(event.data)
                 }
                 if (events.size >= max(50, maxEvents)) {
@@ -285,7 +285,7 @@ class DashboardStateStore(
                     heapMetrics = event.data
                 }
 
-                "task_workspace_destroyed" -> {
+                "scratchpad_destroyed" -> {
                     val rootId = event.data["root_input_id"].asString()
                     if (rootId != null) {
                         rootInputSessionMap.remove(rootId)

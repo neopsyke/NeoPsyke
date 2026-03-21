@@ -9,15 +9,15 @@ import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
-class TaskVerifierTest {
-    private val verifier = DeterministicTaskVerifier()
+class DecisionVerifierTest {
+    private val verifier = DeterministicDecisionVerifier()
     private val evidenceActionTypes = setOf(ActionType.WEB_SEARCH, ActionType.MCP_TIME, ActionType.WEBSITE_FETCH)
 
     @Test
     fun `volatile factual answer requires evidence when tools are available`() {
         val decision = verifier.review(
             action = answerAction(payload = "The current price is 20 USD."),
-            context = TaskVerifierContext(
+            context = DecisionVerifierContext(
                 latestUserTurn = "What is the latest price today?",
                 availableActions = setOf(ActionType.WEB_SEARCH, ActionType.CONTACT_USER),
                 dispatchableActions = setOf(ActionType.WEB_SEARCH, ActionType.CONTACT_USER),
@@ -36,7 +36,7 @@ class TaskVerifierTest {
     fun `volatile factual answer degrades gracefully when evidence actions are unavailable`() {
         val decision = verifier.review(
             action = answerAction(payload = "The current score is 3-1."),
-            context = TaskVerifierContext(
+            context = DecisionVerifierContext(
                 latestUserTurn = "What is the current score right now?",
                 availableActions = setOf(ActionType.CONTACT_USER),
                 dispatchableActions = setOf(ActionType.CONTACT_USER),
@@ -55,7 +55,7 @@ class TaskVerifierTest {
     fun `transformation intent bypasses evidence requirement even with volatile words`() {
         val decision = verifier.review(
             action = answerAction(payload = "Rewritten sentence."),
-            context = TaskVerifierContext(
+            context = DecisionVerifierContext(
                 latestUserTurn = "Rewrite this sentence in formal tone: current policy is strict.",
                 availableActions = setOf(ActionType.WEB_SEARCH, ActionType.CONTACT_USER),
                 dispatchableActions = setOf(ActionType.WEB_SEARCH, ActionType.CONTACT_USER),
@@ -73,7 +73,7 @@ class TaskVerifierTest {
     fun `unknown intent with low volatility does not require evidence`() {
         val decision = verifier.review(
             action = answerAction(payload = "maybe"),
-            context = TaskVerifierContext(
+            context = DecisionVerifierContext(
                 latestUserTurn = "xqzv",
                 availableActions = setOf(ActionType.WEB_SEARCH, ActionType.CONTACT_USER),
                 dispatchableActions = setOf(ActionType.WEB_SEARCH, ActionType.CONTACT_USER),
@@ -91,7 +91,7 @@ class TaskVerifierTest {
     fun `successful evidence allows volatile factual answer`() {
         val decision = verifier.review(
             action = answerAction(payload = "Latest verified release is 2.1.0."),
-            context = TaskVerifierContext(
+            context = DecisionVerifierContext(
                 latestUserTurn = "What is the latest release version?",
                 availableActions = setOf(ActionType.WEB_SEARCH, ActionType.CONTACT_USER),
                 dispatchableActions = setOf(ActionType.WEB_SEARCH, ActionType.CONTACT_USER),

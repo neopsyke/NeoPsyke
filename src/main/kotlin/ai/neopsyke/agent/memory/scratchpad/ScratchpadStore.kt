@@ -1,4 +1,4 @@
-package ai.neopsyke.agent.memory.workspace
+package ai.neopsyke.agent.memory.scratchpad
 
 import ai.neopsyke.agent.model.ActionOutcome
 import ai.neopsyke.agent.model.PendingAction
@@ -7,14 +7,14 @@ import ai.neopsyke.agent.config.TaskWorkspaceConfig
 import ai.neopsyke.agent.support.TextSecurity
 import kotlin.math.max
 
-data class TaskWorkspaceDestroyed(
+data class ScratchpadDestroyed(
     val rootInputId: String,
     val rootInputReceivedAtMs: Long,
     val sectionCount: Int,
     val evidenceCount: Int,
 )
 
-data class TaskWorkspaceFinalPassInput(
+data class ScratchpadFinalPassInput(
     val compilation: String,
     val workspaceConfidence: Double,
     val sectionCount: Int,
@@ -22,7 +22,7 @@ data class TaskWorkspaceFinalPassInput(
     val resolutionDraftCount: Int,
 )
 
-data class TaskWorkspaceDebugHead(
+data class ScratchpadDebugHead(
     val rootInputId: String,
     val rootInputReceivedAtMs: Long,
     val version: Long,
@@ -34,16 +34,16 @@ data class TaskWorkspaceDebugHead(
     val bytesEstimate: Int,
 )
 
-data class TaskWorkspaceDebugSection(
+data class ScratchpadDebugSection(
     val title: String,
     val summary: String,
     val content: String,
     val source: String,
 )
 
-data class TaskWorkspaceDebugSnapshot(
-    val head: TaskWorkspaceDebugHead,
-    val sections: List<TaskWorkspaceDebugSection>,
+data class ScratchpadDebugSnapshot(
+    val head: ScratchpadDebugHead,
+    val sections: List<ScratchpadDebugSection>,
     val evidence: List<String>,
 )
 
@@ -55,7 +55,7 @@ data class WorkspaceDigestEntry(
     val createdAtMs: Long,
 )
 
-class TaskWorkspaceStore(
+class ScratchpadStore(
     private val config: TaskWorkspaceConfig,
 ) {
     @Synchronized
@@ -188,7 +188,7 @@ class TaskWorkspaceStore(
         val evidence = workspace.evidence.takeLast(FINAL_COMPILATION_EVIDENCE_LIMIT)
         if (sections.isEmpty() && evidence.isEmpty()) return ""
         val compiled = buildString {
-            append("Task workspace final compilation:\n")
+            append("Scratchpad final compilation:\n")
             append("goal: ")
             append(workspace.goal.ifBlank { "none" })
             append('\n')
@@ -228,12 +228,12 @@ class TaskWorkspaceStore(
         rootInputId: String?,
         candidateAnswer: String,
         maxChars: Int,
-    ): TaskWorkspaceFinalPassInput? {
+    ): ScratchpadFinalPassInput? {
         val workspace = lookup(rootInputId) ?: return null
         val compilation = buildFinalCompilation(rootInputId, candidateAnswer, maxChars)
         if (compilation.isBlank()) return null
         val confidence = workspace.estimateConfidence()
-        return TaskWorkspaceFinalPassInput(
+        return ScratchpadFinalPassInput(
             compilation = compilation,
             workspaceConfidence = confidence,
             sectionCount = workspace.sections.size,
@@ -338,19 +338,19 @@ class TaskWorkspaceStore(
     }
 
     @Synchronized
-    fun debugHead(rootInputId: String?): TaskWorkspaceDebugHead? =
+    fun debugHead(rootInputId: String?): ScratchpadDebugHead? =
         lookup(rootInputId)?.debugHead()
 
     @Synchronized
-    fun debugSnapshot(rootInputId: String?): TaskWorkspaceDebugSnapshot? =
+    fun debugSnapshot(rootInputId: String?): ScratchpadDebugSnapshot? =
         lookup(rootInputId)?.debugSnapshot()
 
     @Synchronized
-    fun destroy(rootInputId: String?): TaskWorkspaceDestroyed? {
+    fun destroy(rootInputId: String?): ScratchpadDestroyed? {
         if (!config.enabled || rootInputId.isNullOrBlank()) return null
         pendingInputs.remove(rootInputId)
         val removed = workspaces.remove(rootInputId) ?: return null
-        return TaskWorkspaceDestroyed(
+        return ScratchpadDestroyed(
             rootInputId = removed.rootInputId,
             rootInputReceivedAtMs = removed.rootInputReceivedAtMs,
             sectionCount = removed.sections.size,
@@ -463,7 +463,7 @@ class TaskWorkspaceStore(
                 return ""
             }
             return buildString {
-                append("Ephemeral task workspace (scoped to current request only):\n")
+                append("Ephemeral scratchpad (scoped to current request only):\n")
                 append("goal: ")
                 append(goal.ifBlank { "none" })
                 append('\n')
@@ -508,8 +508,8 @@ class TaskWorkspaceStore(
         fun resolutionDraftCount(): Int =
             sections.count { section -> section.source == SOURCE_RESOLUTION_DRAFT }
 
-        fun debugHead(): TaskWorkspaceDebugHead =
-            TaskWorkspaceDebugHead(
+        fun debugHead(): ScratchpadDebugHead =
+            ScratchpadDebugHead(
                 rootInputId = rootInputId,
                 rootInputReceivedAtMs = rootInputReceivedAtMs,
                 version = version,
@@ -521,11 +521,11 @@ class TaskWorkspaceStore(
                 bytesEstimate = estimateBytes()
             )
 
-        fun debugSnapshot(): TaskWorkspaceDebugSnapshot =
-            TaskWorkspaceDebugSnapshot(
+        fun debugSnapshot(): ScratchpadDebugSnapshot =
+            ScratchpadDebugSnapshot(
                 head = debugHead(),
                 sections = sections.map { section ->
-                    TaskWorkspaceDebugSection(
+                    ScratchpadDebugSection(
                         title = section.title,
                         summary = section.summary,
                         content = section.content,

@@ -24,13 +24,13 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /**
- * Verifies that MemoryCoordinator isolates short-term memory per session.
+ * Verifies that MemorySystem isolates short-term memory per session.
  * Two sessions calling `remember()` should have independent `currentShortTermSummary()`.
  */
 class SessionScopedMemoryStoreTest {
 
-    private fun createCoordinator(): MemoryCoordinator {
-        return MemoryCoordinator(
+    private fun createCoordinator(): MemorySystem {
+        return MemorySystem(
             hippocampus = NoopHippocampus,
             longTermMemoryAdvisor = NoopLongTermMemoryAdvisor,
             config = AgentConfig(),
@@ -70,7 +70,7 @@ class SessionScopedMemoryStoreTest {
         val initialStore = MemoryStore(maxChars = 20000)
         initialStore.remember(DialogueTurn(role = DialogueRole.USER, content = "preloaded content about galaxies"))
 
-        val mc = MemoryCoordinator(
+        val mc = MemorySystem(
             hippocampus = NoopHippocampus,
             longTermMemoryAdvisor = NoopLongTermMemoryAdvisor,
             config = AgentConfig(),
@@ -161,7 +161,7 @@ class SessionScopedMemoryStoreTest {
                 longTermMemoryAssessCooldownSteps = 50,
             )
         )
-        val mc = MemoryCoordinator(
+        val mc = MemorySystem(
             hippocampus = hippocampus,
             longTermMemoryAdvisor = advisor,
             config = config,

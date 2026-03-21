@@ -6,7 +6,7 @@ import ai.neopsyke.agent.model.DialogueTurn
 import ai.neopsyke.agent.model.PendingAction
 import java.util.Locale
 
-internal data class TaskVerifierContext(
+internal data class DecisionVerifierContext(
     val recentDialogue: List<DialogueTurn> = emptyList(),
     val externalEvidence: DeliberationEngine.ExternalEvidenceProgress? = null,
     val availableActions: Set<ActionType> = emptySet(),
@@ -31,7 +31,7 @@ internal enum class VolatilityLevel {
     NONE,
 }
 
-internal data class TaskVerifierAssessment(
+internal data class DecisionVerifierAssessment(
     val intentCategory: TaskIntentCategory,
     val volatilityLevel: VolatilityLevel,
     val volatilityScore: Int,
@@ -42,29 +42,29 @@ internal data class TaskVerifierAssessment(
     val hadExternalFailures: Boolean,
 )
 
-internal data class TaskVerifierDecision(
+internal data class DecisionVerifierDecision(
     val allow: Boolean,
     val reason: String = "",
     val reasonCode: String? = null,
-    val assessment: TaskVerifierAssessment? = null,
+    val assessment: DecisionVerifierAssessment? = null,
 )
 
-internal interface TaskVerifier {
-    fun review(action: PendingAction, context: TaskVerifierContext): TaskVerifierDecision
+internal interface DecisionVerifier {
+    fun review(action: PendingAction, context: DecisionVerifierContext): DecisionVerifierDecision
 }
 
-internal object NoopTaskVerifier : TaskVerifier {
-    override fun review(action: PendingAction, context: TaskVerifierContext): TaskVerifierDecision =
-        TaskVerifierDecision(allow = true)
+internal object NoopDecisionVerifier : DecisionVerifier {
+    override fun review(action: PendingAction, context: DecisionVerifierContext): DecisionVerifierDecision =
+        DecisionVerifierDecision(allow = true)
 }
 
-internal class DeterministicTaskVerifier : TaskVerifier {
-    override fun review(action: PendingAction, context: TaskVerifierContext): TaskVerifierDecision {
+internal class DeterministicDecisionVerifier : DecisionVerifier {
+    override fun review(action: PendingAction, context: DecisionVerifierContext): DecisionVerifierDecision {
         if (action.type != ActionType.CONTACT_USER || action.isFallbackExplanation) {
-            return TaskVerifierDecision(allow = true)
+            return DecisionVerifierDecision(allow = true)
         }
         if (isForcedTerminalAnswer(action.summary)) {
-            return TaskVerifierDecision(allow = true)
+            return DecisionVerifierDecision(allow = true)
         }
 
         val latestUserTurn = context.latestUserTurn.ifBlank {
@@ -81,7 +81,7 @@ internal class DeterministicTaskVerifier : TaskVerifier {
         val evidence = context.externalEvidence
         val evidenceActionsAvailable = context.evidenceActionTypes.any { it in context.availableActions }
         val evidenceActionsDispatchable = context.evidenceActionTypes.any { it in context.dispatchableActions }
-        val assessment = TaskVerifierAssessment(
+        val assessment = DecisionVerifierAssessment(
             intentCategory = classification.intentCategory,
             volatilityLevel = classification.volatilityLevel,
             volatilityScore = classification.volatilityScore,
@@ -93,16 +93,16 @@ internal class DeterministicTaskVerifier : TaskVerifier {
         )
 
         if (!assessment.requiresExternalEvidence) {
-            return TaskVerifierDecision(allow = true, assessment = assessment)
+            return DecisionVerifierDecision(allow = true, assessment = assessment)
         }
 
         if (evidence?.hadSuccessfulEvidence == true) {
-            return TaskVerifierDecision(allow = true, assessment = assessment)
+            return DecisionVerifierDecision(allow = true, assessment = assessment)
         }
 
         val evidenceUnavailable = !assessment.evidenceActionsAvailable || !assessment.evidenceActionsDispatchable
         if (evidenceUnavailable) {
-            return TaskVerifierDecision(
+            return DecisionVerifierDecision(
                 allow = true,
                 reason = "Verification-sensitive request detected, but external evidence actions are unavailable; allowing graceful answer path without enforced tool call.",
                 reasonCode = REASON_CODE_TASK_EVIDENCE_UNAVAILABLE_GRACEFUL,
@@ -110,14 +110,14 @@ internal class DeterministicTaskVerifier : TaskVerifier {
             )
         }
         if (evidence?.hadExternalFailures == true) {
-            return TaskVerifierDecision(
+            return DecisionVerifierDecision(
                 allow = false,
                 reason = "Verification-sensitive answer requires successful external evidence; only failures were observed.",
                 reasonCode = REASON_CODE_TECH_EXTERNAL_EVIDENCE_FAILURE,
                 assessment = assessment
             )
         }
-        return TaskVerifierDecision(
+        return DecisionVerifierDecision(
             allow = false,
             reason = "Verification-sensitive request requires at least one successful external evidence action before final answer.",
             reasonCode = REASON_CODE_TASK_EVIDENCE_REQUIRED,

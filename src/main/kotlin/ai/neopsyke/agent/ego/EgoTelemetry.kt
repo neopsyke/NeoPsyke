@@ -2,7 +2,7 @@ package ai.neopsyke.agent.ego
 
 import ai.neopsyke.agent.config.AgentConfig
 import ai.neopsyke.agent.model.DeliberationState
-import ai.neopsyke.agent.memory.workspace.TaskWorkspaceStore
+import ai.neopsyke.agent.memory.scratchpad.ScratchpadStore
 import ai.neopsyke.agent.support.TextSecurity
 import ai.neopsyke.instrumentation.AgentEvent
 import ai.neopsyke.instrumentation.AgentEvents
@@ -11,8 +11,8 @@ import ai.neopsyke.instrumentation.AgentInstrumentation
 internal class EgoTelemetry(
     private val instrumentation: AgentInstrumentation,
     private val scheduler: AttentionScheduler,
-    private val memory: MemoryCoordinator,
-    private val taskWorkspaceStore: TaskWorkspaceStore,
+    private val memory: MemorySystem,
+    private val taskWorkspaceStore: ScratchpadStore,
     private val config: AgentConfig,
 ) {
     fun emitDeliberationState(taskType: String, state: DeliberationState) {
@@ -55,8 +55,8 @@ internal class EgoTelemetry(
                 "summary_chars" to memStats.summaryChars.toLong(),
                 "unit" to "chars",
             ))
-            put("task_workspaces", mapOf(
-                "label" to "Task workspaces",
+            put("scratchpads", mapOf(
+                "label" to "Scratchpads",
                 "item_count" to taskWorkspaceStore.activeTaskCount(),
                 "chars_or_bytes" to 0L,
                 "unit" to "items",
@@ -88,7 +88,7 @@ internal class EgoTelemetry(
         val head = taskWorkspaceStore.debugHead(rootInputId) ?: return
         instrumentation.emit(
             AgentEvent(
-                type = "task_workspace_head",
+                type = "scratchpad_head",
                 data = mapOf(
                     "root_input_id" to head.rootInputId,
                     "root_input_received_at_ms" to head.rootInputReceivedAtMs,
@@ -107,7 +107,7 @@ internal class EgoTelemetry(
         val snapshot = taskWorkspaceStore.debugSnapshot(rootInputId) ?: return
         instrumentation.emit(
             AgentEvent(
-                type = "task_workspace_debug_snapshot",
+                type = "scratchpad_debug_snapshot",
                 data = mapOf(
                     "root_input_id" to snapshot.head.rootInputId,
                     "root_input_received_at_ms" to snapshot.head.rootInputReceivedAtMs,

@@ -5,7 +5,7 @@ import ai.neopsyke.agent.config.*
 import ai.neopsyke.agent.model.*
 import ai.neopsyke.agent.cortex.motor.MotorCortex
 import ai.neopsyke.agent.memory.episodic.EpisodicEventType
-import ai.neopsyke.agent.memory.workspace.TaskWorkspaceStore
+import ai.neopsyke.agent.memory.scratchpad.ScratchpadStore
 import ai.neopsyke.agent.support.PromptInjectionDefense
 import ai.neopsyke.agent.support.TextSecurity
 import ai.neopsyke.agent.superego.Superego
@@ -22,11 +22,11 @@ internal class ActionReviewPipeline(
     private val config: AgentConfig,
     private val instrumentation: AgentInstrumentation,
     private val scheduler: AttentionScheduler,
-    private val taskVerifier: TaskVerifier,
-    private val taskWorkspaceStore: TaskWorkspaceStore,
-    private val taskWorkspaceFinalizer: TaskWorkspaceFinalizer,
+    private val taskVerifier: DecisionVerifier,
+    private val taskWorkspaceStore: ScratchpadStore,
+    private val taskWorkspaceFinalizer: ScratchpadFinalizer,
     private val deliberation: DeliberationEngine,
-    private val memory: MemoryCoordinator,
+    private val memory: MemorySystem,
     private val telemetry: EgoTelemetry,
     private val fallbackHandler: FallbackHandler,
     private val impulseTracker: ImpulseLifecycleTracker,
@@ -52,7 +52,7 @@ internal class ActionReviewPipeline(
             return
         }
         timing.startPhase("task_verifier")
-        if (!passesTaskVerifier(resolvedAction, sessionId, convCtx)) {
+        if (!passesDecisionVerifier(resolvedAction, sessionId, convCtx)) {
             instrumentation.emit(AgentEvents.phaseTimings(timing.build()))
             return
         }
@@ -138,7 +138,7 @@ internal class ActionReviewPipeline(
 
     // ── Review gates ──
 
-    private suspend fun passesTaskVerifier(
+    private suspend fun passesDecisionVerifier(
         resolvedAction: PendingAction,
         sessionId: String,
         convCtx: ConversationContext,
@@ -154,7 +154,7 @@ internal class ActionReviewPipeline(
         val dispatchableActionsForScope = motorCortex.dispatchableActionTypes() - disabledForScope
         val taskVerificationDecision = taskVerifier.review(
             action = resolvedAction,
-            context = TaskVerifierContext(
+            context = DecisionVerifierContext(
                 recentDialogue = recentDialogue,
                 externalEvidence = deliberation.evidenceFor(resolvedAction.rootInputId, sessionId),
                 availableActions = availableActionsForScope,
@@ -333,7 +333,7 @@ internal class ActionReviewPipeline(
             )
             instrumentation.emit(
                 AgentEvent(
-                    type = "task_workspace_updated",
+                    type = "scratchpad_updated",
                     data = mapOf(
                         "root_input_id" to action.rootInputId,
                         "root_input_received_at_ms" to action.rootInputReceivedAtMs,
@@ -360,7 +360,7 @@ internal class ActionReviewPipeline(
         )
         instrumentation.emit(
             AgentEvent(
-                type = "task_workspace_updated",
+                type = "scratchpad_updated",
                 data = mapOf(
                     "root_input_id" to action.rootInputId,
                     "root_input_received_at_ms" to action.rootInputReceivedAtMs,
@@ -424,7 +424,7 @@ internal class ActionReviewPipeline(
         if (preFinalSnapshot != null) {
             instrumentation.emit(
                 AgentEvent(
-                    type = "task_workspace_pre_final_dump",
+                    type = "scratchpad_pre_final_dump",
                     data = mapOf(
                         "session_id" to sessionId,
                         "root_input_id" to action.rootInputId,
@@ -452,7 +452,7 @@ internal class ActionReviewPipeline(
         if (finalPassInput.evidenceCount == 0 && finalPassInput.resolutionDraftCount < draftThreshold) {
             instrumentation.emit(
                 AgentEvent(
-                    type = "task_workspace_final_pass_skipped",
+                    type = "scratchpad_final_pass_skipped",
                     data = mapOf(
                         "root_input_id" to action.rootInputId,
                         "action_id" to action.id,
@@ -466,7 +466,7 @@ internal class ActionReviewPipeline(
         }
         instrumentation.emit(
             AgentEvent(
-                type = "task_workspace_final_pass",
+                type = "scratchpad_final_pass",
                 data = mapOf(
                     "root_input_id" to action.rootInputId,
                     "root_input_received_at_ms" to action.rootInputReceivedAtMs,
@@ -482,7 +482,7 @@ internal class ActionReviewPipeline(
         if (finalPassInput.workspaceConfidence < config.memory.taskWorkspace.finalPassMinWorkspaceConfidence) {
             instrumentation.emit(
                 AgentEvent(
-                    type = "task_workspace_final_pass_skipped",
+                    type = "scratchpad_final_pass_skipped",
                     data = mapOf(
                         "root_input_id" to action.rootInputId,
                         "root_input_received_at_ms" to action.rootInputReceivedAtMs,
@@ -496,7 +496,7 @@ internal class ActionReviewPipeline(
             return action
         }
         val finalizerResult = taskWorkspaceFinalizer.finalize(
-            TaskWorkspaceFinalizerRequest(
+            ScratchpadFinalizerRequest(
                 action = action,
                 workspaceCompilation = finalPassInput.compilation,
                 workspaceConfidence = finalPassInput.workspaceConfidence,
@@ -505,7 +505,7 @@ internal class ActionReviewPipeline(
         ) ?: run {
             instrumentation.emit(
                 AgentEvent(
-                    type = "task_workspace_final_pass_skipped",
+                    type = "scratchpad_final_pass_skipped",
                     data = mapOf(
                         "root_input_id" to action.rootInputId,
                         "root_input_received_at_ms" to action.rootInputReceivedAtMs,
@@ -519,7 +519,7 @@ internal class ActionReviewPipeline(
         if (finalizerResult.confidence < config.memory.taskWorkspace.finalPassMinModelConfidence) {
             instrumentation.emit(
                 AgentEvent(
-                    type = "task_workspace_final_pass_skipped",
+                    type = "scratchpad_final_pass_skipped",
                     data = mapOf(
                         "root_input_id" to action.rootInputId,
                         "root_input_received_at_ms" to action.rootInputReceivedAtMs,
@@ -536,7 +536,7 @@ internal class ActionReviewPipeline(
         if (rewrittenPayload.isBlank() || rewrittenPayload == action.payload) {
             instrumentation.emit(
                 AgentEvent(
-                    type = "task_workspace_final_pass_skipped",
+                    type = "scratchpad_final_pass_skipped",
                     data = mapOf(
                         "root_input_id" to action.rootInputId,
                         "root_input_received_at_ms" to action.rootInputReceivedAtMs,
@@ -549,7 +549,7 @@ internal class ActionReviewPipeline(
         }
         instrumentation.emit(
             AgentEvent(
-                type = "task_workspace_final_pass_applied",
+                type = "scratchpad_final_pass_applied",
                 data = mapOf(
                     "root_input_id" to action.rootInputId,
                     "root_input_received_at_ms" to action.rootInputReceivedAtMs,

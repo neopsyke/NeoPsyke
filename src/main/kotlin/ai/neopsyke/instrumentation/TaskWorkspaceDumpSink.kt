@@ -6,14 +6,14 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
 import mu.KotlinLogging
-import ai.neopsyke.agent.memory.workspace.TaskWorkspaceDebugSnapshot
+import ai.neopsyke.agent.memory.scratchpad.ScratchpadDebugSnapshot
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardOpenOption
 
 private val logger = KotlinLogging.logger {}
 
-class TaskWorkspaceDumpSink(
+class ScratchpadDumpSink(
     private val outputDir: Path = Path.of(".neopsyke/workspace-dumps"),
     scope: CoroutineScope,
 ) : InstrumentationSink {
@@ -45,7 +45,7 @@ class TaskWorkspaceDumpSink(
     override fun onEvent(event: AgentEvent) {
         if (event.type != EVENT_TYPE) return
         val sessionId = event.data["session_id"] as? String ?: return
-        val snapshot = event.data["snapshot"] as? TaskWorkspaceDebugSnapshot ?: return
+        val snapshot = event.data["snapshot"] as? ScratchpadDebugSnapshot ?: return
         val candidateAnswer = event.data["candidate_answer"] as? String ?: ""
         val ts = event.tsIso
         val text = formatDump(ts, sessionId, snapshot, candidateAnswer)
@@ -58,12 +58,12 @@ class TaskWorkspaceDumpSink(
     }
 
     companion object {
-        const val EVENT_TYPE: String = "task_workspace_pre_final_dump"
+        const val EVENT_TYPE: String = "scratchpad_pre_final_dump"
 
         private fun formatDump(
             timestamp: String,
             sessionId: String,
-            snapshot: TaskWorkspaceDebugSnapshot,
+            snapshot: ScratchpadDebugSnapshot,
             candidateAnswer: String,
         ): String = buildString {
             append("================ WORKSPACE DUMP ================\n")

@@ -208,7 +208,7 @@ class AgentScenarioPackTest {
     }
 
     @Test
-    fun scenario_task_workspace_prompt_and_cleanup() {
+    fun scenario_scratchpad_prompt_and_cleanup() {
         val plannerLlm = StubChatModelClient().apply {
             enqueueRawResponse(
                 """
@@ -259,11 +259,11 @@ class AgentScenarioPackTest {
         val plannerCalls = plannerLlm.calls.filter { it.options.metadata.callSite != "action_verifier" }
         assertTrue(plannerCalls.size >= 2)
         val followUpPrompt = plannerCalls[1].messages.last().content
-        assertTrue(followUpPrompt.contains("Task workspace summary:"))
+        assertTrue(followUpPrompt.contains("Scratchpad summary:"))
         assertTrue(followUpPrompt.contains("web_search_result"))
         assertEquals(listOf("ego> done"), outputs)
-        assertTrue(instrumentation.events.any { it.type == "task_workspace_created" })
-        assertTrue(instrumentation.events.any { it.type == "task_workspace_destroyed" })
+        assertTrue(instrumentation.events.any { it.type == "scratchpad_created" })
+        assertTrue(instrumentation.events.any { it.type == "scratchpad_destroyed" })
     }
 
     @Test

@@ -7,8 +7,8 @@ import ai.neopsyke.agent.ego.Ego
 import ai.neopsyke.agent.ego.EgoAssembler
 import ai.neopsyke.agent.ego.MetaReasoner
 import ai.neopsyke.agent.ego.NoopMetaReasoner
-import ai.neopsyke.agent.ego.NoopTaskWorkspaceFinalizer
-import ai.neopsyke.agent.ego.TaskWorkspaceFinalizer
+import ai.neopsyke.agent.ego.NoopScratchpadFinalizer
+import ai.neopsyke.agent.ego.ScratchpadFinalizer
 import ai.neopsyke.agent.memory.episodic.DeterministicLogbookSummarizer
 import ai.neopsyke.agent.memory.episodic.Logbook
 import ai.neopsyke.agent.memory.episodic.LogbookSummarizer
@@ -31,14 +31,14 @@ fun buildTestEgo(
     metaReasoner: MetaReasoner = NoopMetaReasoner,
     longTermMemoryAdvisor: LongTermMemoryAdvisor = NoopLongTermMemoryAdvisor,
     sensoryCortex: SensoryCortex = SensoryCortex.stdin(config),
-    taskWorkspaceFinalizer: TaskWorkspaceFinalizer = NoopTaskWorkspaceFinalizer,
+    taskWorkspaceFinalizer: ScratchpadFinalizer = NoopScratchpadFinalizer,
     instrumentation: AgentInstrumentation = NoopAgentInstrumentation,
     logbook: Logbook? = null,
     logbookSummarizer: LogbookSummarizer = DeterministicLogbookSummarizer(config.logbook),
     runId: String? = null,
     projectsGateway: ProjectsGateway = NoopProjectsGateway,
 ): Ego {
-    val memory = EgoAssembler.buildMemoryCoordinator(
+    val memory = EgoAssembler.buildMemorySystem(
         config = config,
         instrumentation = instrumentation,
         hippocampus = hippocampus,

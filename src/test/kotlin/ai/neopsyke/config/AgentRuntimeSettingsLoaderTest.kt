@@ -98,7 +98,7 @@ class AgentRuntimeSettingsLoaderTest {
                 long_term_memory_dynamic_completion_hard_max_tokens: 480
                 long_term_memory_dynamic_prompt_to_completion_ratio: 0.12
                 long_term_memory_dynamic_completion_min_prompt_tokens: 90
-                task_workspace:
+                scratchpad:
                   enabled: true
                   max_prompt_tokens: 300
                   final_pass_rewrite_enabled: false
@@ -222,7 +222,7 @@ class AgentRuntimeSettingsLoaderTest {
                 llm_retry_attempts: 4
                 max_run_total_tokens: 5000
               memory:
-                task_workspace:
+                scratchpad:
                   enabled: false
                   final_pass_rewrite_enabled: true
                   debug_capture_enabled: false
@@ -266,8 +266,8 @@ class AgentRuntimeSettingsLoaderTest {
             """
             agent:
               max_loop_steps_per_input: 9
-              task_workspace_enabled: true
-              task_workspace_debug_capture_enabled: true
+              scratchpad_enabled: true
+              scratchpad_debug_capture_enabled: true
               superego_dynamic_completion_enabled: false
             """.trimIndent()
         )

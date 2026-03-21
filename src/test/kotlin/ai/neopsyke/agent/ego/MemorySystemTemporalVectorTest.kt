@@ -26,7 +26,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
-class MemoryCoordinatorTemporalVectorTest {
+class MemorySystemTemporalVectorTest {
 
     private fun createTempLogbook(): SqliteLogbook {
         val tempDir = Files.createTempDirectory("mc-vector-test")
@@ -37,8 +37,8 @@ class MemoryCoordinatorTemporalVectorTest {
     private fun createCoordinator(
         logbook: SqliteLogbook? = null,
         hippocampus: Hippocampus = NoopHippocampus,
-    ): MemoryCoordinator {
-        return MemoryCoordinator(
+    ): MemorySystem {
+        return MemorySystem(
             hippocampus = hippocampus,
             longTermMemoryAdvisor = NoopLongTermMemoryAdvisor,
             config = AgentConfig(),

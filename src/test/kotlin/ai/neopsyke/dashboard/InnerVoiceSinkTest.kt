@@ -706,7 +706,7 @@ class InnerVoiceSinkTest {
         // Destroy
         sink.onEvent(
             AgentEvent(
-                type = "task_workspace_destroyed",
+                type = "scratchpad_destroyed",
                 data = mapOf("root_input_id" to "root-1")
             )
         )

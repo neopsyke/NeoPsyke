@@ -15,7 +15,7 @@ internal class FallbackHandler(
     private val config: AgentConfig,
     private val instrumentation: AgentInstrumentation,
     private val deliberation: DeliberationEngine,
-    private val memory: MemoryCoordinator,
+    private val memory: MemorySystem,
     private val telemetry: EgoTelemetry,
     private val dialogueFor: (String) -> ArrayDeque<DialogueTurn>,
     private val resolveSessionId: (ConversationContext) -> String,

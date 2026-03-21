@@ -21,33 +21,33 @@ import ai.neopsyke.llm.ChatRole
 
 private val logger = KotlinLogging.logger {}
 
-data class TaskWorkspaceFinalizerRequest(
+data class ScratchpadFinalizerRequest(
     val action: PendingAction,
     val workspaceCompilation: String,
     val workspaceConfidence: Double,
     val recentDialogue: List<DialogueTurn>,
 )
 
-data class TaskWorkspaceFinalizerResult(
+data class ScratchpadFinalizerResult(
     val rewrittenPayload: String,
     val confidence: Double,
     val reason: String,
 )
 
-interface TaskWorkspaceFinalizer {
-    fun finalize(request: TaskWorkspaceFinalizerRequest): TaskWorkspaceFinalizerResult?
+interface ScratchpadFinalizer {
+    fun finalize(request: ScratchpadFinalizerRequest): ScratchpadFinalizerResult?
 }
 
-object NoopTaskWorkspaceFinalizer : TaskWorkspaceFinalizer {
-    override fun finalize(request: TaskWorkspaceFinalizerRequest): TaskWorkspaceFinalizerResult? = null
+object NoopScratchpadFinalizer : ScratchpadFinalizer {
+    override fun finalize(request: ScratchpadFinalizerRequest): ScratchpadFinalizerResult? = null
 }
 
-class LlmTaskWorkspaceFinalizer(
+class LlmScratchpadFinalizer(
     private val modelClient: ChatModelClient,
     private val config: AgentConfig,
     private val instrumentation: AgentInstrumentation = NoopAgentInstrumentation,
-) : TaskWorkspaceFinalizer {
-    override fun finalize(request: TaskWorkspaceFinalizerRequest): TaskWorkspaceFinalizerResult? {
+) : ScratchpadFinalizer {
+    override fun finalize(request: ScratchpadFinalizerRequest): ScratchpadFinalizerResult? {
         val mode = resolveMode(request.action)
         val messages = buildMessages(request, mode)
         val attempts = RetryPolicy.boundedLlmRetryAttempts(config.llmRetryAttempts)
@@ -62,7 +62,7 @@ class LlmTaskWorkspaceFinalizer(
                         maxTokens = config.memory.taskWorkspace.finalPassMaxTokens,
                         metadata = ChatCallMetadata(
                             actor = "ego",
-                            callSite = "task_workspace_finalizer",
+                            callSite = "scratchpad_finalizer",
                             actionType = request.action.type.name.lowercase()
                         )
                     )
@@ -71,19 +71,19 @@ class LlmTaskWorkspaceFinalizer(
             } catch (ex: Exception) {
                 lastError = ex
                 if (attempt < attempts) {
-                    logger.warn(ex) { "Task workspace finalizer call failed (attempt $attempt/$attempts); retrying." }
+                    logger.warn(ex) { "Scratchpad finalizer call failed (attempt $attempt/$attempts); retrying." }
                 }
             }
         }
         if (response == null) {
-            logger.warn(lastError) { "Task workspace finalizer call failed after $attempts attempts." }
-            instrumentation.emit(AgentEvents.warning("Task workspace finalizer unavailable; keeping original answer payload."))
+            logger.warn(lastError) { "Scratchpad finalizer call failed after $attempts attempts." }
+            instrumentation.emit(AgentEvents.warning("Scratchpad finalizer unavailable; keeping original answer payload."))
             return null
         }
         return parseResponse(response, mode)
     }
 
-    private fun parseResponse(raw: String, mode: String): TaskWorkspaceFinalizerResult? {
+    private fun parseResponse(raw: String, mode: String): ScratchpadFinalizerResult? {
         return try {
             val payload = mapper.readValue<FinalizerPayload>(TextSecurity.extractJsonObject(raw))
             val rewritten = payload.rewrite?.trim().orEmpty()
@@ -91,31 +91,31 @@ class LlmTaskWorkspaceFinalizer(
             val grounded = payload.grounded
             if (rewritten.isBlank() || confidence == null || grounded == null) {
                 instrumentation.emit(
-                    AgentEvents.warning("Task workspace finalizer response missing required fields; keeping original answer payload.")
+                    AgentEvents.warning("Scratchpad finalizer response missing required fields; keeping original answer payload.")
                 )
                 return null
             }
             if (!grounded) {
                 instrumentation.emit(
-                    AgentEvents.warning("Task workspace finalizer reported ungrounded output; keeping original answer payload.")
+                    AgentEvents.warning("Scratchpad finalizer reported ungrounded output; keeping original answer payload.")
                 )
                 return null
             }
-            TaskWorkspaceFinalizerResult(
+            ScratchpadFinalizerResult(
                 rewrittenPayload = rewritten,
                 confidence = confidence.coerceIn(0.0, 1.0),
                 reason = TextSecurity.clamp(payload.reason?.trim().orEmpty().ifBlank { mode }, MAX_REASON_CHARS)
             )
         } catch (ex: Exception) {
             logger.warn(ex) {
-                "Failed to parse task workspace finalizer response. response_len=${raw.length} preview='${TextSecurity.preview(raw, 120)}'"
+                "Failed to parse scratchpad finalizer response. response_len=${raw.length} preview='${TextSecurity.preview(raw, 120)}'"
             }
-            instrumentation.emit(AgentEvents.warning("Task workspace finalizer returned non-parseable output; keeping original answer payload."))
+            instrumentation.emit(AgentEvents.warning("Scratchpad finalizer returned non-parseable output; keeping original answer payload."))
             null
         }
     }
 
-    private fun buildMessages(request: TaskWorkspaceFinalizerRequest, mode: String): List<ChatMessage> {
+    private fun buildMessages(request: ScratchpadFinalizerRequest, mode: String): List<ChatMessage> {
         val recentDialogue = request.recentDialogue
             .takeLast(8)
             .joinToString("\n") { turn ->
@@ -148,7 +148,7 @@ class LlmTaskWorkspaceFinalizer(
             ChatMessage(
                 role = ChatRole.SYSTEM,
                 content = """
-                You rewrite a terminal action payload using an ephemeral task workspace.
+                You rewrite a terminal action payload using an ephemeral scratchpad.
                 Return STRICT JSON only.
                 Never invent facts not present in workspace compilation.
                 JSON schema:

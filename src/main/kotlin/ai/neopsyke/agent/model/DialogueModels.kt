@@ -5,7 +5,7 @@ import java.time.Instant
 enum class DialogueRole {
     USER,
     ASSISTANT,
-    /** Turns originating from the Id (internal drives). Visible to planner/superego, ignored by TaskVerifier's "latest user turn" heuristic. */
+    /** Turns originating from the Id (internal drives). Visible to planner/superego, ignored by DecisionVerifier's "latest user turn" heuristic. */
     INTERNAL
 }
 

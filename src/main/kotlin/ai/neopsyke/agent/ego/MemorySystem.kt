@@ -45,7 +45,7 @@ private val logger = KotlinLogging.logger {}
  * Manages short-term and long-term memory operations for the Ego agent loop.
  * Extracted from Ego to separate memory coordination concerns.
  */
-class MemoryCoordinator(
+class MemorySystem(
     private val hippocampus: Hippocampus,
     private val longTermMemoryAdvisor: LongTermMemoryAdvisor,
     private val config: AgentConfig,

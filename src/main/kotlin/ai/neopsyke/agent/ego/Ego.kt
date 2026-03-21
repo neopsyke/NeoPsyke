@@ -10,7 +10,7 @@ import ai.neopsyke.agent.cortex.sensory.SensoryCortex
 import ai.neopsyke.agent.cortex.sensory.SensorySignal
 import ai.neopsyke.agent.cortex.sensory.SystemSignal
 import ai.neopsyke.agent.memory.episodic.EpisodicEventType
-import ai.neopsyke.agent.memory.workspace.TaskWorkspaceStore
+import ai.neopsyke.agent.memory.scratchpad.ScratchpadStore
 import ai.neopsyke.agent.id.EmptyProjectRegistry
 import ai.neopsyke.agent.id.ProjectRegistry
 import ai.neopsyke.agent.project.NoopProjectsGateway
@@ -31,11 +31,11 @@ class Ego(
     private val superego: Superego,
     private val motorCortex: MotorCortex,
     private val config: AgentConfig,
-    private val memory: MemoryCoordinator,
+    private val memory: MemorySystem,
     private val metaReasoner: MetaReasoner = NoopMetaReasoner,
     private val sensoryCortex: SensoryCortex = SensoryCortex.stdin(config),
-    private val taskWorkspaceStore: TaskWorkspaceStore = TaskWorkspaceStore(config.memory.taskWorkspace),
-    private val taskWorkspaceFinalizer: TaskWorkspaceFinalizer = NoopTaskWorkspaceFinalizer,
+    private val taskWorkspaceStore: ScratchpadStore = ScratchpadStore(config.memory.taskWorkspace),
+    private val taskWorkspaceFinalizer: ScratchpadFinalizer = NoopScratchpadFinalizer,
     private val instrumentation: AgentInstrumentation = NoopAgentInstrumentation,
     private val projectRegistry: ProjectRegistry = EmptyProjectRegistry,
     private val projectsGateway: ProjectsGateway = NoopProjectsGateway,
@@ -84,7 +84,7 @@ class Ego(
         resolveSessionId = ::resolveSessionId,
         inputScope = ::inputScope,
     )
-    private val taskVerifier: TaskVerifier = DeterministicTaskVerifier()
+    private val taskVerifier: DecisionVerifier = DeterministicDecisionVerifier()
     private val actionPipeline = ActionReviewPipeline(
         superego, motorCortex, config, instrumentation, scheduler,
         taskVerifier, taskWorkspaceStore, taskWorkspaceFinalizer,
@@ -249,7 +249,7 @@ class Ego(
             if (clearedWorkspaces > 0) {
                 instrumentation.emit(
                     AgentEvent(
-                        type = "task_workspace_cleared",
+                        type = "scratchpad_cleared",
                         data = mapOf(
                             "cleared_count" to clearedWorkspaces,
                             "reason" to "queues_drained"
@@ -534,7 +534,7 @@ class Ego(
         if (!created) return
         instrumentation.emit(
             AgentEvent(
-                type = "task_workspace_created",
+                type = "scratchpad_created",
                 data = mapOf(
                     "root_input_id" to input.rootInputId,
                     "root_input_received_at_ms" to input.receivedAtMs,
@@ -757,7 +757,7 @@ class Ego(
         if (digestEntry != null) {
             instrumentation.emit(
                 AgentEvent(
-                    type = "task_workspace_digest_captured",
+                    type = "scratchpad_digest_captured",
                     data = mapOf(
                         "root_input_id" to rootInputId,
                         "session_id" to sessionId,
@@ -772,7 +772,7 @@ class Ego(
         if (destroyedWorkspace != null) {
             instrumentation.emit(
                 AgentEvent(
-                    type = "task_workspace_destroyed",
+                    type = "scratchpad_destroyed",
                     data = mapOf(
                         "root_input_id" to destroyedWorkspace.rootInputId,
                         "root_input_received_at_ms" to destroyedWorkspace.rootInputReceivedAtMs,

@@ -1226,8 +1226,8 @@ class LlmEgoPlanner(
                     You may receive Episodic memory timeline from the session logbook.
                     Use episodic memory to answer questions about past actions, events, or conversations.
                     If the user asks about past events, prefer episodic memory over other sources.
-                    You may receive a Task workspace summary scoped to the current request.
-                    Treat Task workspace as ephemeral working notes, not durable long-term memory.
+                    You may receive a Scratchpad summary scoped to the current request.
+                    Treat Scratchpad as ephemeral working notes, not durable long-term memory.
                     External actions have real latency/cost and must be value-add.
                     Treat redundancy as a soft cost signal: if recent evidence already covers the trigger
                     and the trigger does not explicitly ask to refresh/retry, prefer action=contact_user or noop.
@@ -1330,11 +1330,11 @@ class LlmEgoPlanner(
                     content = "Episodic memory timeline:\n$episodicRecall"
                 ),
                 PromptBudgetAllocator.Section(
-                    key = "planner_task_workspace_summary",
+                    key = "planner_scratchpad_summary",
                     role = ChatRole.USER,
                     band = PromptBudgetAllocator.Band.REQUIRED_CONTEXT,
                     floorTokens = 20,
-                    content = "Task workspace summary:\n$taskWorkspaceSummary"
+                    content = "Scratchpad summary:\n$taskWorkspaceSummary"
                 ),
                 PromptBudgetAllocator.Section(
                     key = "planner_session_digest",
@@ -1545,7 +1545,7 @@ class LlmEgoPlanner(
                     key = "action_verifier_workspace_summary",
                     role = ChatRole.USER,
                     band = PromptBudgetAllocator.Band.OPTIONAL,
-                    content = "Task workspace summary:\n$taskWorkspaceSummary"
+                    content = "Scratchpad summary:\n$taskWorkspaceSummary"
                 ),
                 PromptBudgetAllocator.Section(
                     key = "action_verifier_session_digest",
