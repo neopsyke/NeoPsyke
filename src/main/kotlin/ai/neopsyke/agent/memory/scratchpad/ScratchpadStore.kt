@@ -58,6 +58,12 @@ data class WorkspaceDigestEntry(
 class ScratchpadStore(
     private val config: TaskWorkspaceConfig,
 ) {
+    @Volatile
+    private var activeGoalSignalsSnapshot: List<String> = emptyList()
+
+    @Volatile
+    private var recentResolvedGoalSignalsSnapshot: List<String> = emptyList()
+
     @Synchronized
     fun ensureForInput(input: PendingInput): Boolean {
         if (!config.enabled) return false
@@ -84,6 +90,7 @@ class ScratchpadStore(
             source = SOURCE_INPUT
         )
         workspaces[rootId] = workspace
+        refreshAmbientSnapshotsLocked()
         return true
     }
 
@@ -92,12 +99,14 @@ class ScratchpadStore(
         val workspace = lookup(rootInputId)
         if (workspace != null) {
             appendPlanToWorkspace(workspace, goal, steps)
+            refreshAmbientSnapshotsLocked()
             return false
         }
         val activated = maybeActivateFromPending(rootInputId, goal, steps)
         if (activated) {
             val activatedWorkspace = lookup(rootInputId) ?: return true
             appendPlanToWorkspace(activatedWorkspace, goal, steps)
+            refreshAmbientSnapshotsLocked()
         }
         return activated
     }
@@ -269,6 +278,7 @@ class ScratchpadStore(
         while (buffer.size > max(1, config.digestMaxEntries)) {
             buffer.removeFirst()
         }
+        refreshAmbientSnapshotsLocked()
         return entry
     }
 
@@ -297,35 +307,16 @@ class ScratchpadStore(
         )
     }
 
-    @Synchronized
     fun activeGoalSignals(limit: Int = CROSS_SESSION_ACTIVE_WORKSPACE_LIMIT): List<String> =
-        workspaces.values
-            .toList()
-            .takeLast(max(1, limit))
-            .map { workspace -> TextSecurity.preview(workspace.goal, MAX_GOAL_CHARS) }
-            .filter { it.isNotBlank() }
+        activeGoalSignalsSnapshot.take(max(1, limit))
 
-    @Synchronized
     fun recentResolvedGoalSignals(limit: Int = CROSS_SESSION_DIGEST_LIMIT): List<String> =
-        digestsBySession.values
-            .asSequence()
-            .flatMap { it.asSequence() }
-            .sortedByDescending { it.createdAtMs }
-            .take(max(1, limit))
-            .map { entry ->
-                buildString {
-                    append(TextSecurity.preview(entry.goal, MAX_GOAL_CHARS))
-                    if (entry.keyEvidence.isNotEmpty()) {
-                        append(" | evidence=")
-                        append(entry.keyEvidence.joinToString(" | "))
-                    }
-                }
-            }
-            .toList()
+        recentResolvedGoalSignalsSnapshot.take(max(1, limit))
 
     @Synchronized
     fun clearDigestsForSession(sessionId: String) {
         digestsBySession.remove(sessionId)
+        refreshAmbientSnapshotsLocked()
     }
 
     @Synchronized
@@ -334,6 +325,7 @@ class ScratchpadStore(
         val cleared = workspaces.size
         workspaces.clear()
         pendingInputs.clear()
+        refreshAmbientSnapshotsLocked()
         return cleared
     }
 
@@ -350,6 +342,7 @@ class ScratchpadStore(
         if (!config.enabled || rootInputId.isNullOrBlank()) return null
         pendingInputs.remove(rootInputId)
         val removed = workspaces.remove(rootInputId) ?: return null
+        refreshAmbientSnapshotsLocked()
         return ScratchpadDestroyed(
             rootInputId = removed.rootInputId,
             rootInputReceivedAtMs = removed.rootInputReceivedAtMs,
@@ -362,6 +355,7 @@ class ScratchpadStore(
     fun clearAll(): Int {
         val cleared = clearActiveWorkspaces()
         digestsBySession.clear()
+        refreshAmbientSnapshotsLocked()
         return cleared
     }
 
@@ -405,6 +399,32 @@ class ScratchpadStore(
             val oldestKey = workspaces.entries.first().key
             workspaces.remove(oldestKey)
         }
+    }
+
+    private fun refreshAmbientSnapshotsLocked() {
+        activeGoalSignalsSnapshot =
+            workspaces.values
+                .toList()
+                .takeLast(max(1, CROSS_SESSION_ACTIVE_WORKSPACE_LIMIT))
+                .map { workspace -> TextSecurity.preview(workspace.goal, MAX_GOAL_CHARS) }
+                .filter { it.isNotBlank() }
+
+        recentResolvedGoalSignalsSnapshot =
+            digestsBySession.values
+                .asSequence()
+                .flatMap { it.asSequence() }
+                .sortedByDescending { it.createdAtMs }
+                .take(max(1, CROSS_SESSION_DIGEST_LIMIT))
+                .map { entry ->
+                    buildString {
+                        append(TextSecurity.preview(entry.goal, MAX_GOAL_CHARS))
+                        if (entry.keyEvidence.isNotEmpty()) {
+                            append(" | evidence=")
+                            append(entry.keyEvidence.joinToString(" | "))
+                        }
+                    }
+                }
+                .toList()
     }
 
     private data class TaskWorkspaceSection(

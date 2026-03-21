@@ -23,6 +23,14 @@ data class AmbientContext(
     val unresolvedOpenLoops: List<String> = emptyList(),
     val recentExactLearningTopics: List<String> = emptyList(),
 ) {
+    /**
+     * Best-effort snapshot only.
+     *
+     * Ambient context is advisory prompt context, not execution-critical state.
+     * It is intentionally allowed to be stale or incomplete so the main agent
+     * loop can read it without blocking on synchronized structures, storage, or
+     * cross-thread coordination.
+     */
     fun isEmpty(): Boolean =
         activeProjects.isEmpty() &&
             recentWorkspaceThemes.isEmpty() &&

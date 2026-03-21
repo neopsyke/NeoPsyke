@@ -105,6 +105,7 @@ sequenceDiagram
 
         alt Task = impulse opportunity
     Note over Ego,Mem: Id-driven recall/planning can see shared ambient context: goals, scratchpad themes, useful updates, open loops, and recent exact learning topics
+    Note over Ego,Mem: Ambient context is a cached best-effort snapshot, not a real-time synchronized view
             Ego->>Planner: decide(context + idState)
             Planner-->>Ego: thought/action/plan/noop
             Ego->>Sched: enqueue impulse-derived work with origin=ID

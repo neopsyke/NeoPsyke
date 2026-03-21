@@ -38,6 +38,7 @@ import ai.neopsyke.instrumentation.AgentInstrumentation
 import java.time.Duration
 import java.time.Instant
 import java.util.Locale
+import kotlin.math.max
 
 private val logger = KotlinLogging.logger {}
 
@@ -64,13 +65,6 @@ class MemorySystem(
     private var activeSessionId: String = ConversationContext.DEFAULT_SESSION_ID
     private var activeInterlocutor: Interlocutor = Interlocutor.UNKNOWN
 
-    init {
-        // Backward compatibility: inject the initial memory store into the default session.
-        if (initialMemoryStore != null) {
-            sessionMemoryStores[ConversationContext.DEFAULT_SESSION_ID] = initialMemoryStore
-        }
-    }
-
     fun setActiveSession(sessionId: String, interlocutor: Interlocutor = Interlocutor.UNKNOWN) {
         activeSessionId = sessionId
         activeInterlocutor = interlocutor
@@ -80,6 +74,22 @@ class MemorySystem(
         sessionMemoryStores.getOrPut(activeSessionId) { memoryStoreFactory() }
 
     private val recentLessonFingerprints = ArrayDeque<String>()
+    @Volatile
+    private var ambientUsefulUpdatesSnapshot: List<String> = emptyList()
+
+    @Volatile
+    private var ambientLearningTopicsSnapshot: List<String> = emptyList()
+
+    private val ambientUsefulUpdateEntries = ArrayDeque<String>()
+
+    init {
+        // Backward compatibility: inject the initial memory store into the default session.
+        if (initialMemoryStore != null) {
+            sessionMemoryStores[ConversationContext.DEFAULT_SESSION_ID] = initialMemoryStore
+        }
+        seedAmbientUsefulUpdatesFromLogbook()
+    }
+
     private data class SessionMemoryState(
         var latestShortTermSummary: String = "",
         var latestLongTermRecall: String = "",
@@ -161,24 +171,9 @@ class MemorySystem(
     }
 
     fun recentExactLearningTopics(): List<String> =
-        activeState().recentLearningTopics.map { it.label }
+        ambientLearningTopicsSnapshot
 
-    fun recentUsefulActionsOrUpdates(): List<String> {
-        val lb = logbook ?: return emptyList()
-        return try {
-            lb.query(
-                LogbookQuery(
-                    eventTypes = USEFUL_AMBIENT_EVENT_TYPES,
-                    maxResults = MAX_AMBIENT_USEFUL_UPDATES
-                )
-            ).entries
-                .map { entry -> TextSecurity.preview(entry.summary, AMBIENT_EVENT_PREVIEW_CHARS) }
-                .filter { it.isNotBlank() }
-        } catch (ex: Exception) {
-            logger.debug(ex) { "Ambient useful action recall failed." }
-            emptyList()
-        }
-    }
+    fun recentUsefulActionsOrUpdates(): List<String> = ambientUsefulUpdatesSnapshot
 
     fun recallLessons(trigger: EgoTrigger, recentDialogue: List<DialogueTurn>): String {
         if (!hippocampus.enabled) return ""
@@ -726,6 +721,7 @@ class MemorySystem(
             config.logbook.maxSummaryChars
         )
         if (normalizedSummary.isBlank()) return
+        rememberAmbientUsefulUpdate(eventType, normalizedSummary)
         try {
             lb.record(
                 LogbookEntry(
@@ -743,6 +739,27 @@ class MemorySystem(
         } catch (ex: Exception) {
             logger.debug(ex) { "Logbook record failed for event_type=${eventType.dbValue()}." }
         }
+    }
+
+    private fun seedAmbientUsefulUpdatesFromLogbook() {
+        val lb = logbook ?: return
+        val seeded = try {
+            lb.query(
+                LogbookQuery(
+                    eventTypes = USEFUL_AMBIENT_EVENT_TYPES,
+                    maxResults = MAX_AMBIENT_USEFUL_UPDATES
+                )
+            ).entries
+                .map { entry -> TextSecurity.preview(entry.summary, AMBIENT_EVENT_PREVIEW_CHARS) }
+                .filter { it.isNotBlank() }
+        } catch (ex: Exception) {
+            logger.debug(ex) { "Ambient useful action seed failed." }
+            emptyList()
+        }
+        if (seeded.isEmpty()) return
+        ambientUsefulUpdateEntries.clear()
+        seeded.asReversed().forEach { ambientUsefulUpdateEntries.addLast(it) }
+        ambientUsefulUpdatesSnapshot = ambientUsefulUpdateEntries.toList().asReversed()
     }
 
     private fun buildReflectionTags(action: PendingAction, keywords: List<String>): List<String> =
@@ -940,6 +957,22 @@ class MemorySystem(
         while (topics.size > MAX_RECENT_LEARNING_TOPICS) {
             topics.removeFirst()
         }
+        ambientLearningTopicsSnapshot = topics.map { it.label }
+    }
+
+    @Synchronized
+    private fun rememberAmbientUsefulUpdate(eventType: EpisodicEventType, summary: String) {
+        if (eventType !in USEFUL_AMBIENT_EVENT_TYPES) return
+        val preview = TextSecurity.preview(summary, AMBIENT_EVENT_PREVIEW_CHARS)
+        if (preview.isBlank()) return
+        while (ambientUsefulUpdateEntries.remove(preview)) {
+            // Keep the most recent occurrence at the tail.
+        }
+        ambientUsefulUpdateEntries.addLast(preview)
+        while (ambientUsefulUpdateEntries.size > max(1, MAX_AMBIENT_USEFUL_UPDATES)) {
+            ambientUsefulUpdateEntries.removeFirst()
+        }
+        ambientUsefulUpdatesSnapshot = ambientUsefulUpdateEntries.toList().asReversed()
     }
 
     private fun buildLearningTopicRecord(summary: String, keywords: List<String>): LearningTopicRecord? {

@@ -126,6 +126,8 @@ It is intentionally high-level and should stay aligned with the code.
     - it biases recall/prompting toward user-relevant topics
     - it does not hard-require goal alignment
     - all Id-driven needs see the same full block set and may use any part of it
+    - it is read as a best-effort cached snapshot only; Ego does not block on synchronized scans, storage queries, or cross-thread coordination to assemble it
+    - freshness is eventual rather than real-time, by design
   - Exact-repeat pressure remains learning-specific:
     - `recent_exact_learning_topics` is visible to all needs
     - only learning retrieval adds freshness guidance to avoid exact topic repeats
@@ -265,6 +267,7 @@ It is intentionally high-level and should stay aligned with the code.
   - Restore timers, suspended resumes, and blocked waits on startup
   - Poll async-operation providers and accept externally-delivered async completion events for blocked steps
   - Persist `events.jsonl`, `project.json`, `snapshot.json`, `workspace/context.md`, `workspace/scratch.md`, and per-step artifacts
+  - Maintain cached best-effort summaries for ambient context (`activeGoals`, `pendingWorkSummary`) so Ego does not scan live goal state on the hot path
 - Ego-facing signal contract:
   - The runtime emits only `GoalRuntimeCue(goalId, stepId, reason)` into the cognitive stimulus plane.
   - Timer wakes, wait-condition satisfaction, new-goal planning, and resume reconciliation stay inside the goal subsystem and are translated into a work-ready cue when runnable work exists.
@@ -378,6 +381,9 @@ It is intentionally high-level and should stay aligned with the code.
   - Input-trigger recalls are cue-based; thought-trigger recalls require explicit planner query.
   - Reflection-lesson recall is a separate targeted cue path (`REFLECTION_LESSON retrieval`) injected into planner/action-verifier prompts.
   - MCP stdio connect uses bounded startup retry (2 attempts) to absorb transient transport-close failures.
+  - Ambient-context-facing memory signals are snapshot-backed:
+    - recent useful actions/updates are seeded once from the logbook, then maintained incrementally on journal writes
+    - recent exact learning topics are maintained incrementally when learning reflections are persisted
 - Long-term consolidation:
   - `LlmLongTermMemoryAdvisor` decides `save|skip` with confidence/tags/summary.
   - Saved summaries are a first-person memory contract from the agent's perspective (for example, `I learned ...` / `I should remember ...`); common third-person outputs are normalized before persistence as a guardrail.
@@ -424,6 +430,7 @@ It is intentionally high-level and should stay aligned with the code.
   - Exposes debug head/snapshot views (versioned) for development-time observability.
   - Scratchpad final-pass rewrite is handled by `ScratchpadFinalizer` (`src/main/kotlin/ai/neopsyke/agent/ego/ScratchpadFinalizer.kt`) with strict JSON parsing, required-field validation, retry loop, and safe fallback.
   - Scratchpad is destroyed on input resolution or queue drain cleanup.
+  - Ambient-context-facing scratchpad signals (`activeGoalSignals`, `recentResolvedGoalSignals`) are maintained as cached snapshots on scratchpad mutations so Ego can read them without taking store locks.
 
 - Dashboard scratchpad observability:
   - Files: `src/main/kotlin/ai/neopsyke/dashboard/DashboardStateStore.kt`, `src/main/kotlin/ai/neopsyke/dashboard/DashboardServer.kt`, `src/main/resources/dashboard/conversations.html`, `src/main/resources/dashboard/observability.html`

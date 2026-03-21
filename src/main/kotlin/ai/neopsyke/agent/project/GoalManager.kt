@@ -44,6 +44,12 @@ class GoalManager(
     private val sessionsByRootInputId = ConcurrentHashMap<String, GoalRunSession>()
 
     @Volatile
+    private var activeGoalsSnapshot: List<IdGoal> = emptyList()
+
+    @Volatile
+    private var pendingWorkSummarySnapshot: String = ""
+
+    @Volatile
     private var timerScheduler: TimerScheduler? = null
 
     @Volatile
@@ -66,6 +72,7 @@ class GoalManager(
         ).also { it.start(scope) }
 
         restoreProjects()
+        refreshAmbientSnapshots()
     }
 
     override fun stop() {
@@ -100,15 +107,7 @@ class GoalManager(
     }
 
     override fun pendingWorkSummary(): String {
-        val active = states.values
-            .filter { !it.isTerminal() }
-            .sortedByDescending { it.project.priority.ordinal }
-        if (active.isEmpty()) return ""
-        return active.joinToString("\n") { state ->
-            val step = state.nextRunnableStep()
-            val stepInfo = step?.let { "${it.status.name.lowercase()}: ${it.description}" } ?: "no runnable steps"
-            "- [${state.project.priority}] ${state.project.title} ($stepInfo)"
-        }
+        return pendingWorkSummarySnapshot
     }
 
     override fun onActionExecuted(action: PendingAction, outcome: ActionOutcome, observedEvidence: Boolean) {
@@ -397,17 +396,7 @@ class GoalManager(
 
     override fun projectStatus(projectId: String): ProjectState? = states[projectId]
 
-    override fun activeGoals(): List<IdGoal> =
-        states.values
-            .filter { !it.isTerminal() }
-            .sortedByDescending { it.project.priority.ordinal }
-            .map { state ->
-                IdGoal(
-                    id = state.id,
-                    instruction = state.project.instruction,
-                    lastActedAt = state.project.lastWorkedAt,
-                )
-            }
+    override fun activeGoals(): List<IdGoal> = activeGoalsSnapshot
 
     fun createProject(
         instruction: String,
@@ -439,6 +428,7 @@ class GoalManager(
             }
         }
         states[projectId] = initial
+        refreshAmbientSnapshots()
         store.eventLog(projectId).append(created)
         persistState(projectId, initial)
 
@@ -466,6 +456,7 @@ class GoalManager(
         val oldStatus = state.project.status
         val (newState, commands) = ProjectStateMachine.transition(state, event)
         states[projectId] = newState
+        refreshAmbientSnapshots()
         store.eventLog(projectId).append(event)
 
         if (oldStatus != newState.project.status) {
@@ -554,6 +545,7 @@ class GoalManager(
                 logger.warn(ex) { "Failed to restore project $projectId" }
             }
         }
+        refreshAmbientSnapshots()
     }
 
     private fun restoreSchedules(state: ProjectState) {
@@ -683,6 +675,31 @@ class GoalManager(
 
     private fun buildProjectRootInputId(projectId: String, stepId: String): String =
         "project:$projectId:$stepId:${RootInputIds.next()}"
+
+    private fun refreshAmbientSnapshots() {
+        val active = states.values
+            .filter { !it.isTerminal() }
+            .sortedByDescending { it.project.priority.ordinal }
+
+        activeGoalsSnapshot =
+            active.map { state ->
+                IdGoal(
+                    id = state.id,
+                    instruction = state.project.instruction,
+                    lastActedAt = state.project.lastWorkedAt,
+                )
+            }
+
+        pendingWorkSummarySnapshot = if (active.isEmpty()) {
+            ""
+        } else {
+            active.joinToString("\n") { state ->
+                val step = state.nextRunnableStep()
+                val stepInfo = step?.let { "${it.status.name.lowercase()}: ${it.description}" } ?: "no runnable steps"
+                "- [${state.project.priority}] ${state.project.title} ($stepInfo)"
+            }
+        }
+    }
 
     private fun buildWaitConditionForAsyncOutcome(outcome: ActionOutcome): WaitCondition {
         val wait = requireNotNull(outcome.asyncWait) {
