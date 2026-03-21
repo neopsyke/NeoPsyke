@@ -641,7 +641,7 @@ enum class GoalStepStatus {
 }
 ```
 
-This preserves the useful current project machinery for planful work while
+This preserves the useful current goal machinery for planful work while
 allowing:
 
 - standing monitors with no finite plan
@@ -678,11 +678,11 @@ Layers:
 The thread-scoped layer persists across suspension/resumption. The
 intention-scoped layer is disposable and may be recreated on each new intention.
 
-## Mapping Existing Goal Runtime To Goal Runtime
+## Mapping Current Goal Runtime To Target Goal Runtime
 
-The current project runtime is a useful base. The redesign keeps the
-durable state-machine core while changing the top-level concept and where that
-subsystem connects into the cognitive flow.
+The current goal runtime is a useful base. The redesign keeps the durable
+state-machine core while changing how that subsystem connects into the
+cognitive flow.
 
 ### Keep
 
@@ -695,27 +695,27 @@ subsystem connects into the cognitive flow.
 
 ### Change
 
-- `Goal` -> `Goal`
-- `ProjectManager` -> `GoalManager`
-- `ProjectsGateway` -> `GoalsGateway`
-- `GoalState` -> `GoalState`
-- `ProjectExecutionSession` -> `GoalRun`
-- `GoalPlan` -> optional `GoalExecutionPlan`
+- current `Goal` entity remains `Goal`
+- `GoalManager` remains `GoalManager`
+- `GoalsGateway` remains `GoalsGateway`
+- current `GoalState` remains `GoalState`
+- current execution session shape becomes explicit `GoalRun`
+- current `GoalPlan` becomes optional `GoalExecutionPlan`
 - `PlanStep` -> `GoalStep`
-- `ProjectSignal.WorkReady` becomes a generalized goal/runtime
+- current goal work-ready signal becomes a generalized goal/runtime
   cue that is appraised into a `state-change percept`
-- `ProjectWorkUnit` becomes goal-run activation context rather than a
+- current goal activation work unit becomes goal-run activation context rather than a
   permanently special scheduler lane
 
 ### Existing To Future Mapping
 
-- current finite project with title/instruction/priority/completion criteria:
+- current finite goal with title/instruction/priority/completion criteria:
   becomes a `Goal` with objective, policies, lifecycle, and optional execution plan
-- current project steps:
+- current goal steps:
   stay as optional planful run steps
 - current blocked wait conditions:
   stay and become goal-run wait conditions
-- current project workspace path and artifacts:
+- current goal workspace path and artifacts:
   stay as goal workspace/artifact support
 - current cron/timer/wait concepts:
   stay, but live under goal trigger policy / run waiting state
@@ -724,7 +724,7 @@ subsystem connects into the cognitive flow.
 
 Current model:
 
-- a project is mostly a finite plan being advanced
+- a goal is mostly treated as a finite plan being advanced
 
 Target model:
 

@@ -17,9 +17,9 @@
       "description": "Memory recall is injected into planner prompt context."
     },
     {
-      "id": "task_workspace_lifecycle",
-      "selector": "ai.neopsyke.eval.AgentScenarioPackTest.scenario_task_workspace_prompt_and_cleanup",
-      "description": "Per-request task workspace is injected into prompt context and destroyed after terminal answer."
+      "id": "scratchpad_lifecycle",
+      "selector": "ai.neopsyke.eval.AgentScenarioPackTest.scenario_scratchpad_prompt_and_cleanup",
+      "description": "Per-request scratchpad is injected into prompt context and destroyed after terminal answer."
     },
     {
       "id": "forced_terminal_model_errors",
@@ -47,9 +47,9 @@
       "description": "Id impulse lifecycle finalizes only after all parallel branches complete and accepts when any branch executes valid work."
     },
     {
-      "id": "project_async_wait_resume",
-      "selector": "ai.neopsyke.eval.AgentScenarioPackTest.scenario_project_async_wait_resume",
-      "description": "Project-origin async action blocks, resumes through the generic async provider path, and completes deterministically."
+      "id": "goal_async_wait_resume",
+      "selector": "ai.neopsyke.eval.AgentScenarioPackTest.scenario_goal_async_wait_resume",
+      "description": "Goal-origin async action blocks, resumes through the generic async provider path, and completes deterministically."
     }
   ]
 }

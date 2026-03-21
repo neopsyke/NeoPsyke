@@ -6,7 +6,7 @@ usage() {
 Usage:
   freud/scripts/feature-loop.sh <feature_id> [--live] [--dry-run] [--continue-on-fail]
                                 [--config <path>] [--from-step <step>]
-                                [--projects] [--no-projects]
+                                [--goals] [--no-goals]
 
 Step names for --from-step:
   preflight_compile  targeted_tests  full_tests  scenario_pack
@@ -45,7 +45,7 @@ dry_run="false"
 continue_on_fail=""
 config_path=""
 from_step=""
-projects_override=""
+goals_override=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -77,12 +77,12 @@ while [[ $# -gt 0 ]]; do
       fi
       shift 2
       ;;
-    --projects)
-      projects_override="true"
+    --goals)
+      goals_override="true"
       shift
       ;;
-    --no-projects)
-      projects_override="false"
+    --no-goals)
+      goals_override="false"
       shift
       ;;
     *)
@@ -111,11 +111,11 @@ if [[ -n "${NEOPSYKE_LLM_CONFIG_FILE:-}" ]]; then
 fi
 
 # Keep full workspace debug dumps enabled in Freud workflow runs.
-export EGO_TASK_WORKSPACE_DEBUG_CAPTURE_ENABLED="true"
+export EGO_SCRATCHPAD_DEBUG_CAPTURE_ENABLED="true"
 
-# Projects subsystem override (--projects / --no-projects).
-if [[ -n "$projects_override" ]]; then
-  export NEOPSYKE_PROJECTS_ENABLED="$projects_override"
+# Goals subsystem override (--goals / --no-goals).
+if [[ -n "$goals_override" ]]; then
+  export NEOPSYKE_GOALS_ENABLED="$goals_override"
 fi
 
 project_name="${FREUD_PROJECT_NAME:-unknown-project}"

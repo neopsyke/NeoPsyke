@@ -10,7 +10,7 @@ LOG_LEVEL_FROM_ENV=0
 EVAL_MODE=0
 FREUD_LIVE_MODE=0
 DISABLE_ID=0
-PROJECTS_OVERRIDE=""
+GOALS_OVERRIDE=""
 LOOP_DELAY_MS="${EGO_LOOP_DELAY_MS:-1000}"
 LOG_DIR="${NEOPSYKE_LOG_DIR:-$ROOT_DIR/.neopsyke/logs}"
 LOG_RETENTION="${NEOPSYKE_LOG_RETENTION:-30}"
@@ -135,12 +135,12 @@ while [[ $# -gt 0 ]]; do
       DISABLE_ID=1
       shift
       ;;
-    --projects)
-      PROJECTS_OVERRIDE="true"
+    --goals)
+      GOALS_OVERRIDE="true"
       shift
       ;;
-    --no-projects)
-      PROJECTS_OVERRIDE="false"
+    --no-goals)
+      GOALS_OVERRIDE="false"
       shift
       ;;
     --clear-memory-all|--clear-memory-vector|--clear-memory-episodic|--clear-memory-lessons)
@@ -149,15 +149,15 @@ while [[ $# -gt 0 ]]; do
       ;;
     -h|--help)
       cat <<'EOF'
-Usage: ./run-neopsyke.sh [--log-level LEVEL] [--loop-delay-ms MS|--no-delay] [--no-id] [--projects|--no-projects] [--clear-memory-*] [--] [app-args...]
+Usage: ./run-neopsyke.sh [--log-level LEVEL] [--loop-delay-ms MS|--no-delay] [--no-id] [--goals|--no-goals] [--clear-memory-*] [--] [app-args...]
 
 Options:
   -l, --log-level LEVEL   SLF4J simple logger level (default: warning)
       --loop-delay-ms MS  Delay between interactive loop cycles (default: 1000)
       --no-delay          Alias for --loop-delay-ms 0
       --no-id             Disable the Id module (autonomous drives) for this run
-      --projects          Enable the project tracking subsystem for this run
-      --no-projects       Disable the project tracking subsystem for this run
+      --goals             Enable the goals subsystem for this run
+      --no-goals          Disable the goals subsystem for this run
   -h, --help              Show this help message
 
 Memory clearing (applied before agent startup):
@@ -185,7 +185,7 @@ Environment:
   EGO_LOOP_DELAY_MS       Delay between loop cycles in ms (default via launcher: 1000)
   NEOPSYKE_ID_CONFIG_FILE       Optional path to Id runtime YAML (default: ./id-runtime.yaml)
   NEOPSYKE_ID_ENABLED            Override Id module enabled state (true/false, overrides YAML)
-  NEOPSYKE_PROJECTS_ENABLED      Override project subsystem enabled state (true/false, default: false)
+  NEOPSYKE_GOALS_ENABLED         Override goals subsystem enabled state (true/false, default: false)
   NEOPSYKE_LLM_CACHE_MODE       LLM response cache mode: record, replay, or off (default: off)
   NEOPSYKE_LLM_CACHE_FILE       Path to LLM cache JSONL file (required when cache mode is record or replay)
   NEOPSYKE_EVAL_TRANSPORT_DEBUG  Set to true to keep low-level LLM transport debug lines in eval mode
@@ -269,14 +269,14 @@ export EGO_LOOP_DELAY_MS="${LOOP_DELAY_MS}"
 export NEOPSYKE_LOG_FILE="$RUN_LOG_FILE"
 export NEOPSYKE_EVENT_LOG_FILE="$RUN_EVENT_FILE"
 export MEMORY_DEFAULT_NAMESPACE="${MEMORY_DEFAULT_NAMESPACE:-neopsyke}"
-export EGO_TASK_WORKSPACE_DEBUG_CAPTURE_ENABLED="true"
+export EGO_SCRATCHPAD_DEBUG_CAPTURE_ENABLED="true"
 
 if [[ "$DISABLE_ID" -eq 1 ]]; then
   export NEOPSYKE_ID_ENABLED="false"
 fi
 
-if [[ -n "$PROJECTS_OVERRIDE" ]]; then
-  export NEOPSYKE_PROJECTS_ENABLED="$PROJECTS_OVERRIDE"
+if [[ -n "$GOALS_OVERRIDE" ]]; then
+  export NEOPSYKE_GOALS_ENABLED="$GOALS_OVERRIDE"
 fi
 
 JAVA_OPTS_APPEND=" -Dorg.slf4j.simpleLogger.defaultLogLevel=${LOG_LEVEL} -Dorg.slf4j.simpleLogger.logFile=${RUN_LOG_FILE} -Dorg.slf4j.simpleLogger.showDateTime=true -Dorg.slf4j.simpleLogger.dateTimeFormat=yyyy-MM-dd_HH:mm:ss.SSSZ"

@@ -666,7 +666,7 @@ object AgentRuntimeSettingsLoader {
             ),
             goals = GoalConfig(
                 enabled = readBoolean(
-                    env["NEOPSYKE_PROJECTS_ENABLED"],
+                    env["NEOPSYKE_GOALS_ENABLED"],
                     yaml = null,
                     fallback = defaults.goals.enabled
                 ),

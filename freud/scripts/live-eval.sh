@@ -19,7 +19,7 @@ if [[ -n "${NEOPSYKE_LLM_CONFIG_FILE:-}" ]]; then
 fi
 
 TIMEOUT="${FREUD_LIVE_EVAL_TIMEOUT:-120}"
-PROJECTS_OVERRIDE=""
+GOALS_OVERRIDE=""
 RUN_ROOT="${FREUD_RUN_ROOT:-.neopsyke/runs/freud}"
 GRADLE_USER_HOME_CFG="${FREUD_GRADLE_USER_HOME:-.freud/gradle-home}"
 NEOPSYKE_CMD="${FREUD_LIVE_EVAL_NEOPSYKE_CMD:-$REPO_ROOT/run-neopsyke.sh}"
@@ -60,8 +60,8 @@ Options:
   --cache-replay <file>   JSONL cache file to replay (enables replay mode)
   --timeout <seconds>     Timeout for the live eval run (default: 120)
   --preserve-memory       Do not clear Freud-isolated memory before the run
-  --projects              Enable the project tracking subsystem for this eval
-  --no-projects           Disable the project tracking subsystem for this eval
+  --goals                 Enable the goals subsystem for this eval
+  --no-goals              Disable the goals subsystem for this eval
   -h, --help              Show this help message
 
 Environment:
@@ -128,8 +128,8 @@ while [[ $# -gt 0 ]]; do
       TIMEOUT="$2"; shift 2 ;;
     --timeout=*) TIMEOUT="${1#*=}"; shift ;;
     --preserve-memory) PRESERVE_MEMORY="true"; shift ;;
-    --projects) PROJECTS_OVERRIDE="true"; shift ;;
-    --no-projects) PROJECTS_OVERRIDE="false"; shift ;;
+    --goals) GOALS_OVERRIDE="true"; shift ;;
+    --no-goals) GOALS_OVERRIDE="false"; shift ;;
     -h|--help) usage; exit 0 ;;
     *) log_error "Unknown argument: $1"; usage; exit 1 ;;
   esac
@@ -213,13 +213,13 @@ export NEOPSYKE_LLM_CACHE_MODE="$CACHE_MODE"
 export NEOPSYKE_LLM_CACHE_FILE="$CACHE_FILE"
 export NEOPSYKE_LOG_FILE="$RUN_DIR/logs/neopsyke.log"
 export NEOPSYKE_EVENT_LOG_FILE="$RUN_DIR/logs/events.jsonl"
-export EGO_TASK_WORKSPACE_DEBUG_CAPTURE_ENABLED="true"
+export EGO_SCRATCHPAD_DEBUG_CAPTURE_ENABLED="true"
 export MEMORY_DEFAULT_NAMESPACE="freud-eval"
 export NEOPSYKE_LOGBOOK_DB_PATH="$REPO_ROOT/.neopsyke/freud-logbook.db"
 export NEOPSYKE_METRICS_DB="$REPO_ROOT/.neopsyke/freud-metrics.db"
 
-if [[ -n "$PROJECTS_OVERRIDE" ]]; then
-  export NEOPSYKE_PROJECTS_ENABLED="$PROJECTS_OVERRIDE"
+if [[ -n "$GOALS_OVERRIDE" ]]; then
+  export NEOPSYKE_GOALS_ENABLED="$GOALS_OVERRIDE"
 fi
 
 # Run NeoPsyke in freud-live mode
