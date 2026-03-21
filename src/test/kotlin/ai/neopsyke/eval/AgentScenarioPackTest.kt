@@ -364,7 +364,7 @@ class AgentScenarioPackTest {
     }
 
     @Test
-    fun scenario_action_verifier_repairs_web_search_before_superego_review() {
+    fun scenario_action_verifier_does_not_semantically_rewrite_web_search_before_superego_review() {
         val plannerLlm = StubChatModelClient().apply {
             enqueueRawResponse(
                 """
@@ -409,16 +409,19 @@ class AgentScenarioPackTest {
 
         runAgentWithInput(agent, "check pricing\nexit\n")
 
-        assertEquals(listOf("official groq pricing"), observedQueries)
+        assertEquals(listOf("stale query"), observedQueries)
         assertTrue(
             instrumentation.events.any {
-                it.type == "action_verifier_result" && it.data["verdict"] == "repair"
+                it.type == "action_verifier_result" &&
+                    it.data["verdict"] == "approve" &&
+                    it.data["repaired"] == false &&
+                    (it.data["reason"] as? String)?.contains("alter action meaning", ignoreCase = true) == true
             }
         )
         assertTrue(
             instrumentation.events.any {
                 it.type == "action_review_requested" &&
-                    (it.data["action"] as? PendingAction)?.payload == "official groq pricing"
+                    (it.data["action"] as? PendingAction)?.payload == "stale query"
             }
         )
     }
