@@ -44,7 +44,7 @@ internal class ActionReviewPipeline(
         memory.setActiveSession(sessionId, convCtx.interlocutor)
         deliberation.setActiveSession(sessionId)
 
-        timing.startPhase("workspace_final_pass")
+        timing.startPhase("scratchpad_final_pass")
         val resolvedAction = applyScratchpadFinalPass(action, sessionId)
         instrumentation.emit(AgentEvents.actionReviewRequested(resolvedAction))
         if (resolvedAction.isFallbackExplanation) {
@@ -411,7 +411,7 @@ internal class ActionReviewPipeline(
         )
     }
 
-    // ── Workspace final pass ──
+    // ── Scratchpad final pass ──
 
     private fun applyScratchpadFinalPass(action: PendingAction, sessionId: String): PendingAction {
         if (action.type != ActionType.CONTACT_USER) {
@@ -471,7 +471,7 @@ internal class ActionReviewPipeline(
                     "root_input_id" to action.rootInputId,
                     "root_input_received_at_ms" to action.rootInputReceivedAtMs,
                     "action_id" to action.id,
-                    "workspace_confidence" to finalPassInput.workspaceConfidence,
+                    "scratchpad_confidence" to finalPassInput.workspaceConfidence,
                     "section_count" to finalPassInput.sectionCount,
                     "evidence_count" to finalPassInput.evidenceCount,
                     "resolution_draft_count" to finalPassInput.resolutionDraftCount,
@@ -487,9 +487,9 @@ internal class ActionReviewPipeline(
                         "root_input_id" to action.rootInputId,
                         "root_input_received_at_ms" to action.rootInputReceivedAtMs,
                         "action_id" to action.id,
-                        "reason" to "workspace_confidence_gate",
-                        "workspace_confidence" to finalPassInput.workspaceConfidence,
-                        "min_workspace_confidence" to config.memory.scratchpad.finalPassMinWorkspaceConfidence
+                        "reason" to "scratchpad_confidence_gate",
+                        "scratchpad_confidence" to finalPassInput.workspaceConfidence,
+                        "min_scratchpad_confidence" to config.memory.scratchpad.finalPassMinWorkspaceConfidence
                     )
                 )
             )
@@ -554,7 +554,7 @@ internal class ActionReviewPipeline(
                     "root_input_id" to action.rootInputId,
                     "root_input_received_at_ms" to action.rootInputReceivedAtMs,
                     "action_id" to action.id,
-                    "workspace_confidence" to finalPassInput.workspaceConfidence,
+                    "scratchpad_confidence" to finalPassInput.workspaceConfidence,
                     "model_confidence" to finalizerResult.confidence,
                     "resolution_draft_count" to finalPassInput.resolutionDraftCount,
                     "rewrite_reason" to finalizerResult.reason,

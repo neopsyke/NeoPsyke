@@ -255,12 +255,12 @@ internal class DecisionDispatcher(
 
                 // ── All gates passed: emit plan ──
                 planCountByInput[scope] = currentPlanCount + 1
-                val workspaceActivated = scratchpadStore.recordPlan(
+                val scratchpadActivated = scratchpadStore.recordPlan(
                     rootInputId = rootInputId,
                     goal = decision.goal,
                     steps = decision.steps
                 )
-                if (workspaceActivated) {
+                if (scratchpadActivated) {
                     instrumentation.emit(
                         AgentEvent(
                             type = "scratchpad_created",
@@ -277,7 +277,7 @@ internal class DecisionDispatcher(
                     telemetry.emitScratchpadTelemetry(
                         rootInputId = rootInputId,
                         rootInputReceivedAtMs = rootInputReceivedAtMs,
-                        updateType = "workspace_activated"
+                        updateType = "scratchpad_activated"
                     )
                 }
                 instrumentation.emit(

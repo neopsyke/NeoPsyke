@@ -98,7 +98,7 @@ internal class EgoTelemetry(
                     "goal_preview" to TextSecurity.preview(head.goal, 140),
                     "section_count" to head.sectionCount,
                     "evidence_count" to head.evidenceCount,
-                    "workspace_confidence" to head.workspaceConfidence,
+                    "scratchpad_confidence" to head.workspaceConfidence,
                     "bytes_estimate" to head.bytesEstimate
                 )
             )
@@ -117,7 +117,7 @@ internal class EgoTelemetry(
                     "goal" to snapshot.head.goal,
                     "section_count" to snapshot.head.sectionCount,
                     "evidence_count" to snapshot.head.evidenceCount,
-                    "workspace_confidence" to snapshot.head.workspaceConfidence,
+                    "scratchpad_confidence" to snapshot.head.workspaceConfidence,
                     "bytes_estimate" to snapshot.head.bytesEstimate,
                     "sections" to snapshot.sections.map { section ->
                         mapOf(

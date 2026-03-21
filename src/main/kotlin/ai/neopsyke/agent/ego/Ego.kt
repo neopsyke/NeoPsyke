@@ -252,13 +252,13 @@ class Ego(
             deliberation.reset()
             memory.resetForNewInput()
             dispatcher.resetForNewInput()
-            val clearedWorkspaces = scratchpadStore.clearActiveWorkspaces()
-            if (clearedWorkspaces > 0) {
+            val clearedScratchpads = scratchpadStore.clearActiveWorkspaces()
+            if (clearedScratchpads > 0) {
                 instrumentation.emit(
                     AgentEvent(
                         type = "scratchpad_cleared",
                         data = mapOf(
-                            "cleared_count" to clearedWorkspaces,
+                            "cleared_count" to clearedScratchpads,
                             "reason" to "queues_drained"
                         )
                     )
@@ -562,7 +562,7 @@ class Ego(
         telemetry.emitScratchpadTelemetry(
             rootInputId = input.rootInputId,
             rootInputReceivedAtMs = input.receivedAtMs,
-            updateType = "workspace_created"
+            updateType = "scratchpad_created"
         )
     }
 
@@ -635,7 +635,7 @@ class Ego(
             .take(MAX_AMBIENT_PROJECTS)
         return AmbientContext(
             activeGoals = activeGoals,
-            recentWorkspaceThemes = scratchpadStore.recentResolvedGoalSignals(MAX_AMBIENT_WORKSPACE_SIGNALS),
+            recentScratchpadThemes = scratchpadStore.recentResolvedGoalSignals(MAX_AMBIENT_SCRATCHPAD_SIGNALS),
             recentUsefulActionsOrUpdates = memory.recentUsefulActionsOrUpdates(),
             unresolvedOpenLoops = scratchpadStore.activeGoalSignals(MAX_AMBIENT_OPEN_LOOPS),
             recentExactLearningTopics = memory.recentExactLearningTopics(),
@@ -783,16 +783,16 @@ class Ego(
                 )
             )
         }
-        val destroyedWorkspace = scratchpadStore.destroy(rootInputId)
-        if (destroyedWorkspace != null) {
+        val destroyedScratchpad = scratchpadStore.destroy(rootInputId)
+        if (destroyedScratchpad != null) {
             instrumentation.emit(
                 AgentEvent(
                     type = "scratchpad_destroyed",
                     data = mapOf(
-                        "root_input_id" to destroyedWorkspace.rootInputId,
-                        "root_input_received_at_ms" to destroyedWorkspace.rootInputReceivedAtMs,
-                        "section_count" to destroyedWorkspace.sectionCount,
-                        "evidence_count" to destroyedWorkspace.evidenceCount,
+                        "root_input_id" to destroyedScratchpad.rootInputId,
+                        "root_input_received_at_ms" to destroyedScratchpad.rootInputReceivedAtMs,
+                        "section_count" to destroyedScratchpad.sectionCount,
+                        "evidence_count" to destroyedScratchpad.evidenceCount,
                         "reason" to "input_resolved"
                     )
                 )
@@ -893,7 +893,7 @@ class Ego(
     private companion object {
         const val MAX_AMBIENT_PROJECTS: Int = 4
         const val AMBIENT_PROJECT_PREVIEW_CHARS: Int = 180
-        const val MAX_AMBIENT_WORKSPACE_SIGNALS: Int = 6
+        const val MAX_AMBIENT_SCRATCHPAD_SIGNALS: Int = 6
         const val MAX_AMBIENT_OPEN_LOOPS: Int = 4
         const val MAX_EVIDENCE_HINT_SIGNALS: Int = 3
         const val MAX_EVIDENCE_HINT_CHARS: Int = 420

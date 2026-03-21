@@ -296,7 +296,7 @@ class StructuredLogSink : InstrumentationSink {
 
             "scratchpad_final_pass" -> {
                 logger.trace {
-                    "scratchpad.final_pass root_id=${event.data["root_input_id"]} root_received_at_ms=${event.data["root_input_received_at_ms"]} action_id=${event.data["action_id"]} workspace_confidence=${event.data["workspace_confidence"]}"
+                    "scratchpad.final_pass root_id=${event.data["root_input_id"]} root_received_at_ms=${event.data["root_input_received_at_ms"]} action_id=${event.data["action_id"]} scratchpad_confidence=${event.data["scratchpad_confidence"]}"
                 }
             }
 
@@ -308,7 +308,7 @@ class StructuredLogSink : InstrumentationSink {
 
             "scratchpad_final_pass_applied" -> {
                 logger.trace {
-                    "scratchpad.final_pass.applied root_id=${event.data["root_input_id"]} root_received_at_ms=${event.data["root_input_received_at_ms"]} action_id=${event.data["action_id"]} workspace_confidence=${event.data["workspace_confidence"]} model_confidence=${event.data["model_confidence"]}"
+                    "scratchpad.final_pass.applied root_id=${event.data["root_input_id"]} root_received_at_ms=${event.data["root_input_received_at_ms"]} action_id=${event.data["action_id"]} scratchpad_confidence=${event.data["scratchpad_confidence"]} model_confidence=${event.data["model_confidence"]}"
                 }
             }
 

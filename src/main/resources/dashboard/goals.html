@@ -166,7 +166,7 @@
     let eventLog = []; // recent goal events from SSE
 
     // ── Fetch initial data ──────────────────────────────────────
-    async function fetchProjects() {
+    async function fetchGoals() {
       try {
         const res = await fetch('/api/goals');
         if (!res.ok) return;
@@ -189,7 +189,7 @@
             eventLog.unshift(ev.event);
             if (eventLog.length > 200) eventLog.length = 200;
             // Refresh goal list on goal events
-            fetchProjects();
+            fetchGoals();
           }
         } catch (_) {}
       });
@@ -312,10 +312,10 @@
     }
 
     // ── Init ────────────────────────────────────────────────────
-    fetchProjects();
+    fetchGoals();
     connectSSE();
     // Periodic refresh fallback
-    setInterval(fetchProjects, 15000);
+    setInterval(fetchGoals, 15000);
   </script>
 </body>
 </html>

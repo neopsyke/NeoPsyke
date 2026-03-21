@@ -688,7 +688,7 @@ class InnerVoiceSinkTest {
     }
 
     @Test
-    fun `workspace destroyed cleans up root tracking`() {
+    fun `scratchpad destroyed cleans up root tracking`() {
         val (dashboardStore, innerVoiceStore, sink) = buildStack()
         seedSession(dashboardStore)
         val sub = innerVoiceStore.subscribe("default")!!

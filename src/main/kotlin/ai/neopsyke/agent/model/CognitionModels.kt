@@ -18,7 +18,7 @@ data class IdStateSnapshot(
 
 data class AmbientContext(
     val activeGoals: List<String> = emptyList(),
-    val recentWorkspaceThemes: List<String> = emptyList(),
+    val recentScratchpadThemes: List<String> = emptyList(),
     val recentUsefulActionsOrUpdates: List<String> = emptyList(),
     val unresolvedOpenLoops: List<String> = emptyList(),
     val recentExactLearningTopics: List<String> = emptyList(),
@@ -33,7 +33,7 @@ data class AmbientContext(
      */
     fun isEmpty(): Boolean =
         activeGoals.isEmpty() &&
-            recentWorkspaceThemes.isEmpty() &&
+            recentScratchpadThemes.isEmpty() &&
             recentUsefulActionsOrUpdates.isEmpty() &&
             unresolvedOpenLoops.isEmpty() &&
             recentExactLearningTopics.isEmpty()
@@ -43,7 +43,7 @@ data class AmbientContext(
         return buildString {
             append("Optional relevance signals:\n")
             appendSection("active_goals", activeGoals)
-            appendSection("recent_workspace_themes", recentWorkspaceThemes)
+            appendSection("recent_scratchpad_themes", recentScratchpadThemes)
             appendSection("recent_useful_actions_updates", recentUsefulActionsOrUpdates)
             appendSection("unresolved_open_loops", unresolvedOpenLoops)
             appendSection("recent_exact_learning_topics", recentExactLearningTopics)

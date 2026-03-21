@@ -20,8 +20,8 @@ import kotlin.math.max
 
 class DashboardStateStore(
     private val maxEvents: Int = 2000,
-    private val maxWorkspaceSnapshots: Int = 120,
-    private val workspaceSnapshotTtlMs: Long = 15 * 60 * 1000L,
+    private val maxScratchpadSnapshots: Int = 120,
+    private val scratchpadSnapshotTtlMs: Long = 15 * 60 * 1000L,
 ) : InstrumentationSink {
     private val mapper = jacksonObjectMapper()
     private val lock = Any()
@@ -54,8 +54,8 @@ class DashboardStateStore(
     private var promptBudgetDroppedSectionsTotal: Long = 0
     private val promptBudgetByCallSite = mutableMapOf<String, Long>()
     private val promptBudgetByDegradationPath = mutableMapOf<String, Long>()
-    private val workspaceSnapshots = ArrayDeque<WorkspaceSnapshotRecord>()
-    private val latestWorkspaceSnapshotByRoot = mutableMapOf<String, WorkspaceSnapshotRecord>()
+    private val scratchpadSnapshots = ArrayDeque<ScratchpadSnapshotRecord>()
+    private val latestScratchpadSnapshotByRoot = mutableMapOf<String, ScratchpadSnapshotRecord>()
     private val phaseTimings = ArrayDeque<Map<String, Any?>>()
     private var heapMetrics: Map<String, Any?>? = null
     private val subscribers = mutableSetOf<Channel<String>>()
@@ -70,12 +70,12 @@ class DashboardStateStore(
         var payloadJson: String? = null
         synchronized(lock) {
             val effectiveEvent = enrichPlannerStructuredOutputModeLocked(event)
-            val isDebugWorkspaceSnapshot = event.type == "scratchpad_debug_snapshot"
-            if (isDebugWorkspaceSnapshot) {
-                captureWorkspaceSnapshot(event.data)
+            val isDebugScratchpadSnapshot = event.type == "scratchpad_debug_snapshot"
+            if (isDebugScratchpadSnapshot) {
+                captureScratchpadSnapshot(event.data)
             } else {
                 if (event.type == "scratchpad_head") {
-                    captureWorkspaceHead(event.data)
+                    captureScratchpadHead(event.data)
                 }
                 if (events.size >= max(50, maxEvents)) {
                     events.removeFirst()
@@ -293,7 +293,7 @@ class DashboardStateStore(
                 }
             }
 
-            if (!isDebugWorkspaceSnapshot) {
+            if (!isDebugScratchpadSnapshot) {
                 payloadJson = mapper.writeValueAsString(effectiveEvent)
             }
         }
@@ -350,7 +350,7 @@ class DashboardStateStore(
         includeHeavyEvents: Boolean = false,
     ): String {
         val snapshot = synchronized(lock) {
-            pruneWorkspaceSnapshotsLocked()
+            pruneScratchpadSnapshotsLocked()
             val boundedEventLimit = eventsLimit.coerceIn(0, maxEvents.coerceAtLeast(0))
             DashboardSnapshot(
                 generatedAt = System.currentTimeMillis(),
@@ -377,7 +377,7 @@ class DashboardStateStore(
                 storeStats = mapOf(
                     "event_count" to events.size,
                     "max_events" to maxEvents,
-                    "workspace_snapshot_count" to workspaceSnapshots.size,
+                    "scratchpad_snapshot_count" to scratchpadSnapshots.size,
                     "chat_session_count" to chatSessions.size,
                     "subscriber_count" to subscribers.size,
                 ),
@@ -401,10 +401,10 @@ class DashboardStateStore(
         return if (ordered.size <= eventsLimit) ordered else ordered.takeLast(eventsLimit)
     }
 
-    fun workspaceIndexJson(): String {
+    fun scratchpadIndexJson(): String {
         val payload = synchronized(lock) {
-            pruneWorkspaceSnapshotsLocked()
-            val items = latestWorkspaceSnapshotByRoot.values
+            pruneScratchpadSnapshotsLocked()
+            val items = latestScratchpadSnapshotByRoot.values
                 .sortedByDescending { it.updatedAtMs }
                 .map { snapshot ->
                     mapOf(
@@ -413,10 +413,10 @@ class DashboardStateStore(
                         "version" to snapshot.version,
                         "updated_at_ms" to snapshot.updatedAtMs,
                         "update_type" to snapshot.updateType,
-                        "goal_preview" to snapshot.goal.take(WORKSPACE_GOAL_PREVIEW_CHARS),
+                        "goal_preview" to snapshot.goal.take(SCRATCHPAD_GOAL_PREVIEW_CHARS),
                         "section_count" to snapshot.sectionCount,
                         "evidence_count" to snapshot.evidenceCount,
-                        "workspace_confidence" to snapshot.workspaceConfidence,
+                        "scratchpad_confidence" to snapshot.scratchpadConfidence,
                         "bytes_estimate" to snapshot.bytesEstimate
                     )
                 }
@@ -429,21 +429,21 @@ class DashboardStateStore(
         return mapper.writeValueAsString(payload)
     }
 
-    fun workspaceSnapshotJson(rootInputId: String, version: Long? = null): String? {
+    fun scratchpadSnapshotJson(rootInputId: String, version: Long? = null): String? {
         val payload = synchronized(lock) {
-            pruneWorkspaceSnapshotsLocked()
+            pruneScratchpadSnapshotsLocked()
             val record = if (version == null) {
-                latestWorkspaceSnapshotByRoot[rootInputId]
+                latestScratchpadSnapshotByRoot[rootInputId]
             } else {
-                workspaceSnapshots.lastOrNull {
+                scratchpadSnapshots.lastOrNull {
                     it.rootInputId == rootInputId && it.version == version
                 }
             } ?: return null
-            val versions = workspaceSnapshots
+            val versions = scratchpadSnapshots
                 .asSequence()
                 .filter { it.rootInputId == rootInputId }
                 .sortedByDescending { it.version }
-                .take(WORKSPACE_VERSION_LIST_LIMIT)
+                .take(SCRATCHPAD_VERSION_LIST_LIMIT)
                 .map {
                     mapOf(
                         "version" to it.version,
@@ -461,7 +461,7 @@ class DashboardStateStore(
                 "goal" to record.goal,
                 "section_count" to record.sectionCount,
                 "evidence_count" to record.evidenceCount,
-                "workspace_confidence" to record.workspaceConfidence,
+                "scratchpad_confidence" to record.scratchpadConfidence,
                 "bytes_estimate" to record.bytesEstimate,
                 "sections" to record.sections,
                 "evidence" to record.evidence,
@@ -860,12 +860,12 @@ class DashboardStateStore(
         return "s-${System.nanoTime().toString(36)}"
     }
 
-    private fun captureWorkspaceSnapshot(data: Map<String, Any?>) {
+    private fun captureScratchpadSnapshot(data: Map<String, Any?>) {
         val rootInputId = data["root_input_id"].asString() ?: return
         val rootInputReceivedAtMs = data["root_input_received_at_ms"].asLong() ?: 0L
         val version = data["version"].asLong() ?: return
         val updatedAtMs = data["updated_at_ms"].asLong() ?: System.currentTimeMillis()
-        val record = WorkspaceSnapshotRecord(
+        val record = ScratchpadSnapshotRecord(
             rootInputId = rootInputId,
             rootInputReceivedAtMs = rootInputReceivedAtMs,
             version = version,
@@ -874,7 +874,7 @@ class DashboardStateStore(
             goal = data["goal"]?.toString().orEmpty(),
             sectionCount = data["section_count"].asInt(),
             evidenceCount = data["evidence_count"].asInt(),
-            workspaceConfidence = data["workspace_confidence"].asDouble(),
+            scratchpadConfidence = data["scratchpad_confidence"].asDouble(),
             bytesEstimate = data["bytes_estimate"].asInt(),
             sections = (data["sections"] as? List<*>)
                 ?.mapNotNull { item ->
@@ -886,29 +886,29 @@ class DashboardStateStore(
                 ?.mapNotNull { item -> item?.toString() }
                 .orEmpty()
         )
-        val sameVersionIndex = workspaceSnapshots.indexOfFirst {
+        val sameVersionIndex = scratchpadSnapshots.indexOfFirst {
             it.rootInputId == rootInputId && it.version == version
         }
         if (sameVersionIndex >= 0) {
-            workspaceSnapshots.removeAt(sameVersionIndex)
+            scratchpadSnapshots.removeAt(sameVersionIndex)
         }
-        workspaceSnapshots.addLast(record)
-        pruneWorkspaceSnapshotsLocked()
+        scratchpadSnapshots.addLast(record)
+        pruneScratchpadSnapshotsLocked()
     }
 
-    private fun captureWorkspaceHead(data: Map<String, Any?>) {
+    private fun captureScratchpadHead(data: Map<String, Any?>) {
         val rootInputId = data["root_input_id"].asString() ?: return
         val rootInputReceivedAtMs = data["root_input_received_at_ms"].asLong() ?: 0L
         val version = data["version"].asLong() ?: return
         val updatedAtMs = data["updated_at_ms"].asLong() ?: System.currentTimeMillis()
-        val sameVersionIndex = workspaceSnapshots.indexOfFirst {
+        val sameVersionIndex = scratchpadSnapshots.indexOfFirst {
             it.rootInputId == rootInputId && it.version == version
         }
         if (sameVersionIndex >= 0) {
             return
         }
-        workspaceSnapshots.addLast(
-            WorkspaceSnapshotRecord(
+        scratchpadSnapshots.addLast(
+            ScratchpadSnapshotRecord(
                 rootInputId = rootInputId,
                 rootInputReceivedAtMs = rootInputReceivedAtMs,
                 version = version,
@@ -917,35 +917,35 @@ class DashboardStateStore(
                 goal = data["goal_preview"]?.toString().orEmpty(),
                 sectionCount = data["section_count"].asInt(),
                 evidenceCount = data["evidence_count"].asInt(),
-                workspaceConfidence = data["workspace_confidence"].asDouble(),
+                scratchpadConfidence = data["scratchpad_confidence"].asDouble(),
                 bytesEstimate = data["bytes_estimate"].asInt(),
                 sections = emptyList(),
                 evidence = emptyList()
             )
         )
-        pruneWorkspaceSnapshotsLocked()
+        pruneScratchpadSnapshotsLocked()
     }
 
-    private fun pruneWorkspaceSnapshotsLocked() {
-        val ttlMs = workspaceSnapshotTtlMs.coerceAtLeast(0L)
+    private fun pruneScratchpadSnapshotsLocked() {
+        val ttlMs = scratchpadSnapshotTtlMs.coerceAtLeast(0L)
         val now = System.currentTimeMillis()
         if (ttlMs > 0L) {
-            while (workspaceSnapshots.isNotEmpty() && (now - workspaceSnapshots.first().updatedAtMs) > ttlMs) {
-                workspaceSnapshots.removeFirst()
+            while (scratchpadSnapshots.isNotEmpty() && (now - scratchpadSnapshots.first().updatedAtMs) > ttlMs) {
+                scratchpadSnapshots.removeFirst()
             }
         }
-        while (workspaceSnapshots.size > max(10, maxWorkspaceSnapshots)) {
-            workspaceSnapshots.removeFirst()
+        while (scratchpadSnapshots.size > max(10, maxScratchpadSnapshots)) {
+            scratchpadSnapshots.removeFirst()
         }
-        latestWorkspaceSnapshotByRoot.clear()
-        workspaceSnapshots.forEach { record ->
-            val current = latestWorkspaceSnapshotByRoot[record.rootInputId]
+        latestScratchpadSnapshotByRoot.clear()
+        scratchpadSnapshots.forEach { record ->
+            val current = latestScratchpadSnapshotByRoot[record.rootInputId]
             if (
                 current == null ||
                 record.version > current.version ||
                 (record.version == current.version && record.updatedAtMs >= current.updatedAtMs)
             ) {
-                latestWorkspaceSnapshotByRoot[record.rootInputId] = record
+                latestScratchpadSnapshotByRoot[record.rootInputId] = record
             }
         }
     }
@@ -974,7 +974,7 @@ class DashboardStateStore(
             else -> 0.0
         }
 
-    private data class WorkspaceSnapshotRecord(
+    private data class ScratchpadSnapshotRecord(
         val rootInputId: String,
         val rootInputReceivedAtMs: Long,
         val version: Long,
@@ -983,7 +983,7 @@ class DashboardStateStore(
         val goal: String,
         val sectionCount: Int,
         val evidenceCount: Int,
-        val workspaceConfidence: Double,
+        val scratchpadConfidence: Double,
         val bytesEstimate: Int,
         val sections: List<Map<String, Any?>>,
         val evidence: List<String>,
@@ -996,8 +996,8 @@ class DashboardStateStore(
     )
 
     private companion object {
-        const val WORKSPACE_GOAL_PREVIEW_CHARS: Int = 140
-        const val WORKSPACE_VERSION_LIST_LIMIT: Int = 25
+        const val SCRATCHPAD_GOAL_PREVIEW_CHARS: Int = 140
+        const val SCRATCHPAD_VERSION_LIST_LIMIT: Int = 25
         const val DEFAULT_SESSION_ID: String = "default"
         const val CHAT_SOURCE_PREFIX: String = "chat:"
         const val DEFAULT_SNAPSHOT_EVENTS_LIMIT: Int = 300

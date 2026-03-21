@@ -242,7 +242,7 @@ class DashboardStateStoreTest {
     }
 
     @Test
-    fun `workspace debug snapshot is captured for api but not broadcast over sse`() {
+    fun `scratchpad debug snapshot is captured for api but not broadcast over sse`() {
         val store = DashboardStateStore(maxEvents = 20)
         val subscription = store.subscribe()
         store.onEvent(
@@ -258,7 +258,7 @@ class DashboardStateStoreTest {
                     "goal" to "Verify pricing and summarize",
                     "section_count" to 2,
                     "evidence_count" to 1,
-                    "workspace_confidence" to 0.72,
+                    "scratchpad_confidence" to 0.72,
                     "bytes_estimate" to 222,
                     "sections" to listOf(
                         mapOf(
@@ -276,7 +276,7 @@ class DashboardStateStoreTest {
         val ssePayload = runBlocking { withTimeoutOrNull(120) { subscription.receive() } }
         assertNull(ssePayload)
 
-        val index: Map<String, Any?> = mapper.readValue(store.workspaceIndexJson())
+        val index: Map<String, Any?> = mapper.readValue(store.scratchpadIndexJson())
         val items = index["items"] as List<*>
         assertEquals(1, items.size)
         @Suppress("UNCHECKED_CAST")
@@ -284,7 +284,7 @@ class DashboardStateStoreTest {
         assertEquals("root-99", first["root_input_id"])
         assertEquals(4L, (first["version"] as Number).toLong())
 
-        val detailJson = store.workspaceSnapshotJson(rootInputId = "root-99")
+        val detailJson = store.scratchpadSnapshotJson(rootInputId = "root-99")
         assertNotNull(detailJson)
         val detail: Map<String, Any?> = mapper.readValue(detailJson)
         assertEquals("Verify pricing and summarize", detail["goal"])

@@ -14,7 +14,7 @@ import java.nio.file.StandardOpenOption
 private val logger = KotlinLogging.logger {}
 
 class ScratchpadDumpSink(
-    private val outputDir: Path = Path.of(".neopsyke/workspace-dumps"),
+    private val outputDir: Path = Path.of(".neopsyke/scratchpad-dumps"),
     scope: CoroutineScope,
 ) : InstrumentationSink {
     private data class WriteJob(val filePath: Path, val text: String)
@@ -23,7 +23,7 @@ class ScratchpadDumpSink(
     private var dirCreated = false
 
     init {
-        scope.launch(Dispatchers.IO + CoroutineName("workspace-dump-writer")) {
+        scope.launch(Dispatchers.IO + CoroutineName("scratchpad-dump-writer")) {
             for (job in writeChannel) {
                 try {
                     if (!dirCreated) {
@@ -34,9 +34,9 @@ class ScratchpadDumpSink(
                         job.filePath, job.text,
                         StandardOpenOption.CREATE, StandardOpenOption.APPEND
                     )
-                    logger.info { "Workspace dump written to: ${job.filePath}" }
+                    logger.info { "Scratchpad dump written to: ${job.filePath}" }
                 } catch (ex: Exception) {
-                    logger.warn(ex) { "Failed to write workspace dump to ${job.filePath}" }
+                    logger.warn(ex) { "Failed to write scratchpad dump to ${job.filePath}" }
                 }
             }
         }
@@ -66,7 +66,7 @@ class ScratchpadDumpSink(
             snapshot: ScratchpadDebugSnapshot,
             candidateAnswer: String,
         ): String = buildString {
-            append("================ WORKSPACE DUMP ================\n")
+            append("================ SCRATCHPAD DUMP ================\n")
             append("Timestamp:  ").append(timestamp).append('\n')
             append("Session:    ").append(sessionId).append('\n')
             append("Root Input: ").append(snapshot.head.rootInputId).append('\n')

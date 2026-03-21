@@ -130,13 +130,13 @@ class DashboardServer(
                 handleSse(exchange)
             }
         }
-        server.createContext("/api/obs/workspace") { exchange ->
-            withRequestGuard(exchange, "obs_workspace") {
+        server.createContext("/api/obs/scratchpad") { exchange ->
+            withRequestGuard(exchange, "obs_scratchpad") {
                 if (exchange.requestMethod != "GET") {
                     respondText(exchange, 405, "Method not allowed", "text/plain; charset=utf-8")
                     return@withRequestGuard
                 }
-                handleWorkspaceApi(exchange)
+                handleScratchpadApi(exchange)
             }
         }
         server.createContext("/api/chat/sessions") { exchange ->
@@ -238,22 +238,22 @@ class DashboardServer(
         }
     }
 
-    private fun handleWorkspaceApi(exchange: HttpExchange) {
+    private fun handleScratchpadApi(exchange: HttpExchange) {
         val path = exchange.requestURI.path
-        if (path == "/api/obs/workspace") {
-            respondText(exchange, 200, store.workspaceIndexJson(), "application/json; charset=utf-8")
+        if (path == "/api/obs/scratchpad") {
+            respondText(exchange, 200, store.scratchpadIndexJson(), "application/json; charset=utf-8")
             return
         }
-        val rootIdRaw = path.removePrefix("/api/obs/workspace/").trim()
+        val rootIdRaw = path.removePrefix("/api/obs/scratchpad/").trim()
         if (rootIdRaw.isBlank() || rootIdRaw == path) {
             respondText(exchange, 404, "Not found", "text/plain; charset=utf-8")
             return
         }
         val rootId = rootIdRaw
         val version = parseQueryParam(exchange.requestURI.query, "version")?.toLongOrNull()
-        val snapshot = store.workspaceSnapshotJson(rootInputId = rootId, version = version)
+        val snapshot = store.scratchpadSnapshotJson(rootInputId = rootId, version = version)
         if (snapshot == null) {
-            respondText(exchange, 404, "Workspace snapshot not found", "text/plain; charset=utf-8")
+            respondText(exchange, 404, "Scratchpad snapshot not found", "text/plain; charset=utf-8")
             return
         }
         respondText(exchange, 200, snapshot, "application/json; charset=utf-8")
