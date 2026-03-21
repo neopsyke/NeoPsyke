@@ -1,21 +1,24 @@
+name: neopsyke
+
 services:
   pgvector:
     image: pgvector/pgvector:pg17
-    container_name: psyke-pgvector
+    container_name: neopsyke-pgvector
     environment:
-      POSTGRES_DB: psyke_memory
-      POSTGRES_USER: psyke
-      POSTGRES_PASSWORD: psyke_dev
+      POSTGRES_DB: neopsyke_memory
+      POSTGRES_USER: neopsyke
+      POSTGRES_PASSWORD: neopsyke_dev
     ports:
       - "5432:5432"
     volumes:
       - pgvector-data:/var/lib/postgresql/data
       - ./mcp-memory-pgvector/docker/init.sql:/docker-entrypoint-initdb.d/01-init.sql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U psyke -d psyke_memory"]
+      test: ["CMD-SHELL", "pg_isready -U neopsyke -d neopsyke_memory"]
       interval: 5s
       timeout: 3s
       retries: 5
 
 volumes:
   pgvector-data:
+    name: neopsyke-pgvector-data

@@ -62,11 +62,11 @@ jobs:
       - name: Freud run summary
         if: always()
         run: |
-          if [[ ! -f .psyke/runs/freud/latest-run.txt ]]; then
+          if [[ ! -f .neopsyke/runs/freud/latest-run.txt ]]; then
             echo "No Freud run directory was produced."
             exit 0
           fi
-          run_dir="$(cat .psyke/runs/freud/latest-run.txt)"
+          run_dir="$(cat .neopsyke/runs/freud/latest-run.txt)"
           echo "FREUD_CI_RUN_DIR=$run_dir" >> "$GITHUB_ENV"
           echo "Freud run dir: $run_dir"
           if [[ -f "$run_dir/artifacts/summary-compact.md" ]]; then
@@ -100,7 +100,7 @@ jobs:
           fi
 
       - name: Upload Freud artifacts
-        if: always()
+        if: always() && env.FREUD_CI_RUN_DIR != ''
         uses: actions/upload-artifact@v6
         with:
           name: freud-ci-pr-${{ github.run_id }}

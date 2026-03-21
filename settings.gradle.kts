@@ -1,2 +1,2 @@
-rootProject.name = "psyke"
+rootProject.name = "neopsyke"
 include("mcp-memory-pgvector")

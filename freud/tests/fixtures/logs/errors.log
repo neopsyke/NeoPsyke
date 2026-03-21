@@ -1,7 +1,7 @@
 Starting test suite
-Test psyke.agent.FooTest > testBar FAILED
+Test ai.neopsyke.agent.FooTest > testBar FAILED
 java.lang.AssertionError: expected 1 but got 2
-  at psyke.agent.FooTest.testBar(FooTest.kt:42)
+  at ai.neopsyke.agent.FooTest.testBar(FooTest.kt:42)
 exception thrown during setup
 Another error occurred in module X
 Test completed with failures

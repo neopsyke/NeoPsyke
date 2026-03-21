@@ -1,16 +1,16 @@
 # Agent Logic Summary (Living Document)
 
-This file is a human-readable map of Psyke's main agent runtime logic.
+This file is a human-readable map of NeoPsyke's main agent runtime logic.
 It is intentionally high-level and should stay aligned with the code.
 
 ## Scope
 - Interactive runtime path only (`runInteractiveMode`), not eval harness internals.
-- Source of truth is code under `src/main/kotlin/psyke/**`.
+- Source of truth is code under `src/main/kotlin/ai/neopsyke/**`.
 
 ## Runtime Wiring
 - Entry:
-  - `src/main/kotlin/psyke/Application.kt`
-  - `src/main/kotlin/psyke/AppModeRunners.kt#runInteractiveMode`
+  - `src/main/kotlin/ai/neopsyke/Application.kt`
+  - `src/main/kotlin/ai/neopsyke/AppModeRunners.kt#runInteractiveMode`
 - `runInteractiveMode` composes:
   - LLM clients (planner, action-verifier, superego, meta-reasoner, long-term-memory advisor)
     - Each cognitive role can use an independent provider/api key/base URL/model from `llm-runtime.yaml`.
@@ -32,10 +32,11 @@ It is intentionally high-level and should stay aligned with the code.
   - `LlmMetaReasoner`
   - `LlmLongTermMemoryAdvisor`
   - `Hippocampus` (MCP memory adapter or noop)
-  - `TaskWorkspaceStore` (ephemeral per-request notebook/workspace)
-  - `TaskWorkspaceFinalizer` (noop or `LlmTaskWorkspaceFinalizer`)
+  - `ScratchpadStore` (ephemeral per-request notebook/workspace)
+  - `ScratchpadFinalizer` (noop or `LlmScratchpadFinalizer`)
   - `Id` (autonomous internal drive module; optional, loaded from `id-runtime.yaml`)
-  - `ProjectRegistry` (optional active-project signal source for self-initiated ambient relevance)
+  - `GoalsGateway` (optional goal runtime boundary; also serves ambient active-goal queries)
+  - `AsyncOperationRegistry` (generic provider adapter registry for long-running action handles restored by the goal runtime)
   - `Ego` orchestrator
 - Interactive startup now performs an MCP memory health probe before enabling memory:
   - if probe passes, memory is exposed as available and `McpHippocampus` is wired
@@ -53,26 +54,37 @@ It is intentionally high-level and should stay aligned with the code.
   - default `0` keeps each cap disabled
 
 ## Main Loop (Ego)
-- File: `src/main/kotlin/psyke/agent/ego/Ego.kt`
+- File: `src/main/kotlin/ai/neopsyke/agent/ego/Ego.kt`
 - `runInteractive()`:
   - Pulls signals from `SensoryCortex`.
-  - Enqueues new user input in `AttentionScheduler`.
+  - Accepts two signal planes:
+    - `CognitiveSignal` for typed stimuli that the agent should perceive.
+    - `RuntimeControlSignal` for runtime lifecycle/control events.
+  - Typed cognitive stimuli currently arrive as:
+    - linguistic stimuli from chat/stdin chat mode
+    - cue stimuli from Id impulse wakeups
+    - cue stimuli from goal-runtime work-ready cues
   - Runs `runLoop()` while there is pending work.
-  - Interactive wiring uses `AsyncSensoryInputSource` with stdin enabled in control-only mode:
+  - Appraises goal-runtime cue stimuli through `GoalsGateway.nextWorkFromCue(...)`, enqueueing goal work when runnable work exists.
+  - Interactive wiring uses `AsyncSignalSource` with stdin enabled in control-only mode:
     - terminal `exit` emits `ExitRequested(source="stdin")` and stops the loop
     - non-command stdin text is ignored as chat input and never enqueued to the scheduler
   - Default chat answers from web sessions are delivered via dashboard chat events, not terminal stdout.
   - Interactive startup requires dashboard mode enabled; without dashboard input path the loop does not start.
 - `runLoop()` (bounded by `config.planner.maxLoopStepsPerInput`):
   - Scheduler priority:
-    - Inputs first
-    - Then Id impulses (when queued)
+    - Input opportunities first
+    - Then Id impulse opportunities
+    - Then goal-work opportunities
     - Then highest-urgency between pending action and thought
   - Per task:
     - Activate session context for the task (`sessionId` + interlocutor) before deliberation/memory updates.
     - Advance deliberation step.
     - Dispatch one of:
-      - `processInput`
+      - `processOpportunity`:
+        - `InputOpportunity` -> `processInput`
+        - `ImpulseOpportunity` -> `processImpulse`
+        - `GoalWorkOpportunity` -> `processGoalWork` (goal-runtime execution path; method name still reflects current internal state-machine lineage)
       - `processThought`
       - `processAction`
     - Catch task errors, emit warning, continue loop.
@@ -84,14 +96,14 @@ It is intentionally high-level and should stay aligned with the code.
   - If queues drain:
     - Finalize any idle Id impulse lifecycles (accepted or denied).
     - Reset deliberation state.
-    - Reset per-input memory coordinator state.
-    - Clear active task workspaces and pending workspace gates, while preserving per-session workspace digests.
+    - Reset per-input `MemorySystem` state.
+    - Clear active scratchpads and pending scratchpad gates, while preserving per-session scratchpad digests.
 
 ## Id Module and Impulse Lifecycle
 - Files:
-  - `src/main/kotlin/psyke/agent/id/Id.kt`
-  - `src/main/kotlin/psyke/agent/id/NeedState.kt`
-  - `src/main/kotlin/psyke/config/IdRuntimeConfig.kt`
+  - `src/main/kotlin/ai/neopsyke/agent/id/Id.kt`
+  - `src/main/kotlin/ai/neopsyke/agent/id/NeedState.kt`
+  - `src/main/kotlin/ai/neopsyke/config/IdRuntimeConfig.kt`
   - `id-runtime.yaml`
 - Id pulse loop:
   - Grows each configured need and decrements cooldown/backoff/in-flight timers.
@@ -105,15 +117,17 @@ It is intentionally high-level and should stay aligned with the code.
   - Id convergence constraints are re-applied on every Id-origin thought (including follow-up and plan-step thoughts), not only on the initial impulse planner pass.
     - `internalize` + `allowEscalation=false` removes `contact_user` from planner dispatchable actions and planner action definitions.
   - Id-driven planning now assembles a shared ambient context before planner/retrieval work:
-    - optional active projects from `ProjectRegistry`
-    - recent workspace themes from task-workspace digests
+    - optional active goals from `GoalRegistry`
+    - recent scratchpad themes from scratchpad digests
     - recent useful actions/updates from episodic logbook history
-    - unresolved/open loops from active task workspaces
+    - unresolved/open loops from active scratchpads
     - recently explored exact learning topics from successful `reflect` saves
   - The ambient context is advisory only:
     - it biases recall/prompting toward user-relevant topics
-    - it does not hard-require project alignment
+    - it does not hard-require goal alignment
     - all Id-driven needs see the same full block set and may use any part of it
+    - it is read as a best-effort cached snapshot only; Ego does not block on synchronized scans, storage queries, or cross-thread coordination to assemble it
+    - freshness is eventual rather than real-time, by design
   - Exact-repeat pressure remains learning-specific:
     - `recent_exact_learning_topics` is visible to all needs
     - only learning retrieval adds freshness guidance to avoid exact topic repeats
@@ -126,11 +140,16 @@ It is intentionally high-level and should stay aligned with the code.
   - `IdConfig.maxConsecutiveDenials` is now authoritative for backoff thresholding.
   - Backoff escalation remains exponential and capped (`MAX_BACKOFF_ESCALATION`).
 
-## Input Path
-- `SensoryCortex` sanitizes and clamps input to configured limits.
+## Sensory and Input Path
+- `SensoryCortex` sanitizes and clamps linguistic stimulus content to configured limits.
 - `ConversationContext` is mandatory end-to-end and requires a non-blank `sessionId`.
-- For incoming inputs with `ConversationContext.interlocutor=UNKNOWN`, `SensoryCortex` resolves interlocutor via `InterlocutorResolver`.
+- For incoming stimuli with `ConversationContext.interlocutor=UNKNOWN`, `SensoryCortex` resolves interlocutor via `InterlocutorResolver`.
 - Session id derivation from `source` (for example `chat:<sessionId>`) only applies when incoming context uses the default session id.
+- `PerceptualAppraiser` currently maps stimulus families into percept families:
+  - `LINGUISTIC` -> `REQUEST`
+  - `OBSERVATION` -> `OBSERVATION`
+  - `FEEDBACK` -> `FEEDBACK`
+  - `CUE` -> `DRIVE_ACTIVATION` for Id impulse cues, otherwise `STATE_CHANGE`
 - `PendingInput` carries:
   - `source` metadata (for example `chat:<sessionId>`) so runtime telemetry can map root requests to conversation sessions.
   - `rootInputId` (UUID string identity for request-scoped orchestration)
@@ -138,14 +157,14 @@ It is intentionally high-level and should stay aligned with the code.
 - `processInput`:
   - Appends user turn to dialogue deque.
   - Stores turn in short-term `MemoryStore`.
-  - Creates/refreshes a task-scoped ephemeral workspace keyed by `rootInputId`; workspace telemetry also carries `root_input_received_at_ms` for latency/timing views.
+  - Creates/refreshes a task-scoped ephemeral scratchpad keyed by `rootInputId`; scratchpad telemetry also carries `root_input_received_at_ms` for latency/timing views.
   - Builds `PlannerContext`:
     - recent dialogue
     - queue snapshot
     - short-term memory summary
     - long-term memory recall (if available)
     - reflection-lesson recall (if available)
-    - task workspace summary (index + compact section summaries, if enabled)
+    - scratchpad summary (index + compact section summaries, if enabled)
     - ambient context for Id-driven work (optional relevance signals only)
     - external evidence hints derived from prior successful/failed evidence actions for the same root input
     - deliberation state and meta-guidance
@@ -168,31 +187,37 @@ It is intentionally high-level and should stay aligned with the code.
 
 ## Action Path
 - `processAction`:
-- For `answer_draft` actions, records an internal draft section in task workspace and does not emit a user-visible assistant turn.
-- For terminal `answer` actions, runs task-workspace final-pass processing before action execution:
-    - records candidate answer draft into workspace
-    - builds final compilation from workspace sections/evidence
+- For `answer_draft` actions, records an internal draft section in the scratchpad and does not emit a user-visible assistant turn.
+- For terminal `answer` actions, runs scratchpad final-pass processing before action execution:
+    - records candidate answer draft into the scratchpad
+    - builds final compilation from scratchpad sections/evidence
     - skips final-pass only when both `evidenceCount == 0` and `answerDraftCount < max(2, activationMinPlanSteps)`
-    - applies workspace-confidence gate (`finalPassMinWorkspaceConfidence`)
-    - runs `TaskWorkspaceFinalizer` rewrite when enabled
+    - applies scratchpad-confidence gate (`finalPassMinWorkspaceConfidence`)
+    - runs `ScratchpadFinalizer` rewrite when enabled
     - applies model-confidence gate (`finalPassMinModelConfidence`)
     - keeps original payload on any gate/finalizer failure path
-  - Emits lightweight workspace-head telemetry (`task_workspace_head`) on workspace mutations.
-  - When `TaskWorkspaceConfig.debugCaptureEnabled` is on, emits full debug snapshots (`task_workspace_debug_snapshot`) for dashboard-only inspection.
+  - Emits lightweight scratchpad-head telemetry (`scratchpad_head`) on scratchpad mutations.
+  - When `ScratchpadConfig.debugCaptureEnabled` is on, emits full debug snapshots (`scratchpad_debug_snapshot`) for dashboard-only inspection.
   - Fallback explanation actions bypass policy gate.
-  - Normal actions pass through deterministic `TaskVerifier` first (task-truth/sufficiency gate), then `Superego.review`.
+  - Normal actions pass through deterministic `DecisionVerifier` first (task-truth/sufficiency gate), then `Superego.review`.
     - Deterministic checks classify task intent + volatility for terminal answers.
     - External evidence is required only for volatile/unknown factual intents; transformation/personal-memory/subjective/static-reasoning intents bypass evidence requirement.
     - When volatile evidence is required but evidence actions are unavailable, verifier uses a graceful allow path (`TASK_EVIDENCE_UNAVAILABLE_GRACEFUL`) to avoid dead-loop retries.
-    - Forced-terminal system answers (decision-pressure safety path) are exempt from TaskVerifier evidence requirement.
+    - Forced-terminal system answers (decision-pressure safety path) are exempt from `DecisionVerifier` evidence requirement.
   - If denied:
     - Record denial metrics/evidence.
     - Enqueue a new "find safe alternative" thought with denied-action context, including structured `reason_code`.
     - Attempt reflection-lesson persistence into long-term memory (filtered; technical/system failures are skipped).
+    - Notify `ActionLifecycleObserver` subscribers so goal-origin actions can translate denials back into goal-step state.
   - If allowed:
     - Execute via `MotorCortex.execute`.
+    - Actions may return either an immediate outcome or a generic async wait contract (`ActionOutcome.asyncWait`, typically with `executionStatus=WAITING`).
+      - Synchronous tools keep the existing immediate-completion path.
+      - Async start actions do not enqueue ordinary follow-up thoughts on the start call.
+      - For goal-origin actions, `WAITING` without async handles is treated as a contract violation and translated into a retry path instead of a fake generic wait.
     - Record outcome + deliberation evidence.
-    - Record non-answer/non-answer_draft action outcomes into the task workspace (when enabled).
+    - Notify `ActionLifecycleObserver` subscribers after execution so goal-origin actions can update step acceptance/block/retry state.
+    - Record non-answer/non-answer_draft action outcomes into the scratchpad (when enabled).
     - Store assistant output in dialogue and short-term memory when applicable.
     - For `answer`, optionally force a post-terminal-answer long-term memory assessment.
     - Follow-up thought behavior is action-descriptor-driven (`requiresFollowUpThought` + `followUpPrefix`).
@@ -200,16 +225,16 @@ It is intentionally high-level and should stay aligned with the code.
 - For `answer`, response latency is emitted and per-input evidence cache is cleared.
 - After `answer`, pending thoughts/actions for the same `(root input, sessionId)` scope are pruned from queues
     (`input_resolution_cleanup`) so stale plan/follow-up work cannot continue cycling or leak across sessions.
-- After `answer`, task workspace digest is captured into the session digest ring before workspace destruction.
-- After `answer`, the task workspace for that root input is destroyed (`task_workspace_destroyed`).
+- After `answer`, the scratchpad digest is captured into the session digest ring before scratchpad destruction.
+- After `answer`, the scratchpad for that root input is destroyed (`scratchpad_destroyed`).
 
 ## Planner Logic
-- File: `src/main/kotlin/psyke/agent/ego/LlmEgoPlanner.kt`
+- File: `src/main/kotlin/ai/neopsyke/agent/ego/LlmEgoPlanner.kt`
 - Responsibilities:
   - Prompt assembly with contract-based budget allocation (`required_core` > `required_context` > `optional`).
   - Overhead-aware floor reservation per section, tiered degradation, and single-message fallback under extreme prompt pressure.
   - Emits `prompt_budget_allocation` telemetry for planner and action-verifier prompt builds (cost estimates, degradation path, fallback/floor-violation signals).
-  - For Id-driven work, planner prompt may include an ambient context block containing optional project/workspace/activity/open-loop/topic relevance signals.
+  - For Id-driven work, planner prompt may include an ambient context block containing optional goal/scratchpad/activity/open-loop/topic relevance signals.
   - Planner calls request schema-enforced structured output, but provider/model compatibility handling now lives below the planner in the LLM layer:
     - planner requests one structured-output contract (`response_format=json_schema`) plus call-site metadata
     - LLM adapter owns compatibility retries/degradation and may retry as relaxed schema or prompt-only JSON before surfacing a terminal failure
@@ -218,6 +243,35 @@ It is intentionally high-level and should stay aligned with the code.
   - Strict JSON parse + minimal repair for invalid escapes.
   - On planner parse failure: one truncation retry with increased completion budget when output appears truncated, then one strict-JSON retry.
   - Normalizes `action_payload` from either JSON string or structured JSON (object/array) into a string payload.
+
+## Goals Runtime
+- Files:
+  - `src/main/kotlin/ai/neopsyke/agent/goal/GoalsGateway.kt`
+  - `src/main/kotlin/ai/neopsyke/agent/goal/GoalManager.kt`
+  - `src/main/kotlin/ai/neopsyke/agent/goal/GoalStateMachine.kt`
+  - `src/main/kotlin/ai/neopsyke/agent/goal/GoalPlanner.kt`
+  - `src/main/kotlin/ai/neopsyke/agent/goal/GoalStepVerifier.kt`
+- Feature flag:
+  - When `config.goals.enabled=false`, `NoopGoalsGateway` is injected and goal actions/cues are inert.
+- Boundary:
+  - Ego uses the gateway only for:
+    - `pendingWorkSummary()` during Id-driven impulses
+    - `nextWorkFromCue(GoalRuntimeCue)` when goal work is ready
+    - goal-origin action lifecycle callbacks plus `finalizeGoalCycle(rootInputId)`
+- Runtime responsibilities:
+  - Create/revise plans through `GoalPlanner`
+  - Observe goal-origin action outcomes through the generic action lifecycle observer hook
+  - Translate generic async action wait handles into blocked goal steps
+  - Reject goal-origin `WAITING` outcomes that do not provide async handles; this is stage-1 enforcement of the async wait contract
+  - Apply verifier decisions (`PASS`, `RETRY`, `BLOCK`, `CONTINUE`, `FAIL`) back into the event-sourced state machine
+  - Restore timers, suspended resumes, and blocked waits on startup
+  - Poll async-operation providers and accept externally-delivered async completion events for blocked steps
+  - Persist `goal-events.jsonl`, `goal.json`, `goal-snapshot.json`, `workspace/context.md`, `workspace/scratch.md`, and per-step artifacts
+  - Maintain cached best-effort summaries for ambient context (`activeGoals`, `pendingWorkSummary`) so Ego does not scan live goal state on the hot path
+- Ego-facing signal contract:
+  - The runtime emits only `GoalRuntimeCue(goalId, stepId, reason)` into the cognitive stimulus plane.
+  - Timer wakes, wait-condition satisfaction, new-goal planning, and resume reconciliation stay inside the goal subsystem and are translated into a work-ready cue when runnable work exists.
+  - Async wait resolution is carried back as wake metadata plus step notes so resumed goal work can react to the completion state.
   - Decision types:
     - `thought`
     - `action`
@@ -243,8 +297,8 @@ It is intentionally high-level and should stay aligned with the code.
   - Follow-up evidence thoughts now explicitly ask for the next planner decision as one raw JSON object and forbid tool/function wrappers.
   - Planner and action-verifier prompts now include "reflection lessons" context to avoid repeated failed strategies.
 
-## Task Verifier Gate
-- File: `src/main/kotlin/psyke/agent/ego/TaskVerifier.kt`
+## Decision Verifier Gate
+- File: `src/main/kotlin/ai/neopsyke/agent/ego/DecisionVerifier.kt`
 - Deterministic pre-policy gate for task-level correctness/sufficiency.
 - Uses intent classification (`volatile_fact`, `stable_fact`, `transformation`, `personal_memory`, `subjective_advice`, `static_reasoning`, `unknown`) plus volatility scoring.
 - Returns `TaskVerifierDecision(allow, reason, reasonCode, assessment)` and emits enriched `task_verifier_review` telemetry.
@@ -255,7 +309,7 @@ It is intentionally high-level and should stay aligned with the code.
 - Gate runs before Superego and reuses the same denied-action recovery loop in `Ego`.
 
 ## Policy Gate (Superego)
-- File: `src/main/kotlin/psyke/agent/superego/Superego.kt`
+- File: `src/main/kotlin/ai/neopsyke/agent/superego/Superego.kt`
 - Reviews each non-fallback action with layered checks:
   - deterministic hard-deny checks first (`SuperegoDeterministicConscience`)
   - LLM semantic review second (only if deterministic checks pass)
@@ -286,9 +340,9 @@ It is intentionally high-level and should stay aligned with the code.
 
 ## Deliberation and Convergence
 - Files:
-  - `src/main/kotlin/psyke/agent/ego/DeliberationProgressMonitor.kt`
-  - `src/main/kotlin/psyke/agent/ego/DeliberationEngine.kt`
-  - `src/main/kotlin/psyke/agent/ego/MetaReasoner.kt`
+  - `src/main/kotlin/ai/neopsyke/agent/ego/DeliberationProgressMonitor.kt`
+  - `src/main/kotlin/ai/neopsyke/agent/ego/DeliberationEngine.kt`
+  - `src/main/kotlin/ai/neopsyke/agent/ego/MetaReasoner.kt`
 - Tracks pressure signals:
   - stale streak
   - repeats
@@ -319,14 +373,17 @@ It is intentionally high-level and should stay aligned with the code.
 
 ## Memory System
 - Short-term:
-  - File: `src/main/kotlin/psyke/agent/memory/shortterm/MemoryStore.kt`
+  - File: `src/main/kotlin/ai/neopsyke/agent/memory/shortterm/MemoryStore.kt`
   - Stores recent turns + rolled summary under char budgets.
   - Produces prompt-clamped summary text.
 - Long-term recall:
-  - Through `MemoryCoordinator` + `Hippocampus.recall`.
+  - Through `MemorySystem` + `Hippocampus.recall`.
   - Input-trigger recalls are cue-based; thought-trigger recalls require explicit planner query.
   - Reflection-lesson recall is a separate targeted cue path (`REFLECTION_LESSON retrieval`) injected into planner/action-verifier prompts.
   - MCP stdio connect uses bounded startup retry (2 attempts) to absorb transient transport-close failures.
+  - Ambient-context-facing memory signals are snapshot-backed:
+    - recent useful actions/updates are seeded once from the logbook, then maintained incrementally on journal writes
+    - recent exact learning topics are maintained incrementally when learning reflections are persisted
 - Long-term consolidation:
   - `LlmLongTermMemoryAdvisor` decides `save|skip` with confidence/tags/summary.
   - Saved summaries are a first-person memory contract from the agent's perspective (for example, `I learned ...` / `I should remember ...`); common third-person outputs are normalized before persistence as a guardrail.
@@ -337,7 +394,7 @@ It is intentionally high-level and should stay aligned with the code.
     - optional dynamic expansion uses `longTermMemoryDynamicPromptToCompletionRatio`
     - hard-capped by `longTermMemoryDynamicCompletionHardMaxTokens`
     - expansion is cost-weighted by configured model `token_weight`
-  - `MemoryCoordinator` enforces:
+  - `MemorySystem` enforces:
     - interval/cooldown gates
     - explicit remember-intent fast path (one forced assessment per input when user asks to remember)
     - optional forced assessments (post-allowed-action and post-terminal-answer)
@@ -361,21 +418,22 @@ It is intentionally high-level and should stay aligned with the code.
     - Persisted as `MemoryImprint(source=ego_reflection_lesson)` with tags (`kind:reflection_lesson`, action/reason/session metadata).
     - Deduplicated via recent fingerprint window.
     - Explicitly skipped for technical/system failures (external tool failures, LLM client failures, parse/JSON failures, transport/timeouts, `TECH_*`/`SYSTEM_*` reason codes).
-- Task workspace (ephemeral, per request):
-  - File: `src/main/kotlin/psyke/agent/memory/workspace/TaskWorkspaceStore.kt`
-  - Enabled by default via `MemoryConfig.taskWorkspace.enabled=true`.
-  - Activation remains plan-gated with `MemoryConfig.taskWorkspace.activationMinPlanSteps=2`.
+- Scratchpad (ephemeral, per request):
+  - File: `src/main/kotlin/ai/neopsyke/agent/memory/scratchpad/ScratchpadStore.kt`
+  - Enabled by default via `MemoryConfig.scratchpad.enabled=true`.
+  - Activation remains plan-gated with `MemoryConfig.scratchpad.activationMinPlanSteps=2`.
   - Scoped to root input; independent from short-term and long-term memory pipelines.
   - Stores compact sections/evidence for the active request only.
   - `answer_draft` sections are stored separately and counted for final-pass gating.
-  - Planner receives only prompt-capped workspace index/summaries, not full workspace content.
-  - Provides final-pass compilation input with workspace confidence estimate (sections/evidence/goal weighted signal).
+  - Planner receives only prompt-capped scratchpad index/summaries, not full scratchpad content.
+  - Provides final-pass compilation input with scratchpad confidence estimate (sections/evidence/goal weighted signal).
   - Exposes debug head/snapshot views (versioned) for development-time observability.
-  - Workspace final-pass rewrite is handled by `TaskWorkspaceFinalizer` (`src/main/kotlin/psyke/agent/ego/TaskWorkspaceFinalizer.kt`) with strict JSON parsing, required-field validation, retry loop, and safe fallback.
-  - Workspace is destroyed on input resolution or queue drain cleanup.
+  - Scratchpad final-pass rewrite is handled by `ScratchpadFinalizer` (`src/main/kotlin/ai/neopsyke/agent/ego/ScratchpadFinalizer.kt`) with strict JSON parsing, required-field validation, retry loop, and safe fallback.
+  - Scratchpad is destroyed on input resolution or queue drain cleanup.
+  - Ambient-context-facing scratchpad signals (`activeGoalSignals`, `recentResolvedGoalSignals`) are maintained as cached snapshots on scratchpad mutations so Ego can read them without taking store locks.
 
-- Dashboard workspace observability:
-  - Files: `src/main/kotlin/psyke/dashboard/DashboardStateStore.kt`, `src/main/kotlin/psyke/dashboard/DashboardServer.kt`, `src/main/resources/dashboard/conversations.html`, `src/main/resources/dashboard/observability.html`
+- Dashboard scratchpad observability:
+  - Files: `src/main/kotlin/ai/neopsyke/dashboard/DashboardStateStore.kt`, `src/main/kotlin/ai/neopsyke/dashboard/DashboardServer.kt`, `src/main/resources/dashboard/conversations.html`, `src/main/resources/dashboard/observability.html`
   - UI routes are split:
     - Conversations page: `/`
     - Observability dashboard: `/dashboard`
@@ -385,11 +443,11 @@ It is intentionally high-level and should stay aligned with the code.
   - Workspace identity and timing are both exposed in telemetry/event payloads:
     - `root_input_id`: stable request identity key
     - `root_input_received_at_ms`: timing anchor used for latency/timeline correlation
-  - Observability SSE lane streams lightweight events only; heavy workspace debug snapshots are captured in a bounded TTL ring and served on-demand via `/api/obs/workspace` and `/api/obs/workspace/{rootId}`.
+  - Observability SSE lane streams lightweight events only; heavy scratchpad debug snapshots are captured in a bounded TTL ring and served on-demand via `/api/obs/workspace` and `/api/obs/workspace/{rootId}`.
   - The dashboard drawer fetches snapshot detail on demand to avoid continuous large-payload updates in timeline/event streams.
 
 ## Action Execution Surface
-- File: `src/main/kotlin/psyke/agent/cortex/motor/MotorCortex.kt`
+- File: `src/main/kotlin/ai/neopsyke/agent/cortex/motor/MotorCortex.kt`
 - Startup discovery:
   - Action plugins are discovered at runtime through `ServiceLoader` factories (`AgentActionPluginFactory`).
   - Each plugin self-describes:
@@ -404,6 +462,7 @@ It is intentionally high-level and should stay aligned with the code.
   - `web_search`
   - `mcp_time` (payload timezone is required by current MCP time server contract)
   - `website_fetch`
+  - `goal_operation`
   - `email_send` (Microsoft Graph adapter; disabled unless env config is present)
 - `web_search` provider routing is independent from cognitive-role routing:
   - configured directly via `web_search.provider` in `llm-runtime.yaml`.
@@ -415,11 +474,15 @@ It is intentionally high-level and should stay aligned with the code.
   `website_fetch` currently maps its internal error categories into this generic field.
 
 ## Queueing Model
-- File: `src/main/kotlin/psyke/agent/ego/AttentionScheduler.kt`
+- File: `src/main/kotlin/ai/neopsyke/agent/ego/AttentionScheduler.kt`
 - Three bounded priority queues:
-  - inputs (`InputPriority`)
+  - opportunities
   - thoughts (`Urgency`)
   - actions (`Urgency`)
+- Opportunity ordering:
+  - input opportunity (`InputPriority`)
+  - impulse opportunity (urgency-derived priority)
+  - goal-work opportunity
 - Supports root-input scoped queue operations used by convergence logic:
   - detect pending fallback explanation actions per `(rootInputId, sessionId)` scope
   - detect pending plan-context or convergence thoughts per `(rootInputId, sessionId)` scope
@@ -458,12 +521,12 @@ It is intentionally high-level and should stay aligned with the code.
   instead of relying only on the latest planner signal.
 
 ## Episodic Memory (Logbook)
-- File: `src/main/kotlin/psyke/agent/memory/episodic/SqliteLogbook.kt`
+- File: `src/main/kotlin/ai/neopsyke/agent/memory/episodic/SqliteLogbook.kt`
 - SQLite + FTS5 append-only log of timestamped interaction summaries and keywords.
-- Storage: separate DB file (default `.psyke/logbook.db`), WAL mode, synchronized access.
+- Storage: separate DB file (default `.neopsyke/logbook.db`), WAL mode, synchronized access.
 - Schema: `entries` table (id, ts, ts_epoch_ms, event_type, summary, keywords, action_type, run_id, metadata) with FTS5 virtual table `entries_fts` auto-synced via triggers.
 - Event types recorded: `INPUT_RECEIVED`, `PLANNER_DECISION`, `ACTION_EXECUTED`, `ACTION_DENIED`, `CONTACT_DELIVERED`, `MEMORY_IMPRINT`, `SELF_INITIATED`.
-- Integration through `MemoryCoordinator`:
+- Integration through `MemorySystem`:
   - `remember()` auto-journals `INPUT_RECEIVED` for user turns.
   - `maybeAssessLongTermMemory()` auto-journals `MEMORY_IMPRINT` on successful saves.
   - `journal()` public method called from Ego for planner decisions, action outcomes, denials, and answers.
@@ -483,11 +546,11 @@ It is intentionally high-level and should stay aligned with the code.
   - `INPUT_RECEIVED` stays canonical third-person timeline form as `User: ...`
   - planner/action/answer events keep neutral timeline narration
   - `MEMORY_IMPRINT` and `SELF_INITIATED` preserve or normalize to first-person agent wording
-- Summarization: deterministic keyword extraction (tokenize, remove stopwords, deduplicate, cap at `maxKeywordsPerEntry`). Optional LLM-based summarizer (`LlmLogbookSummarizer`, opt-in via `PSYKE_LOGBOOK_USE_LLM_SUMMARIZER=true`) with automatic fallback to deterministic on failure.
+- Summarization: deterministic keyword extraction (tokenize, remove stopwords, deduplicate, cap at `maxKeywordsPerEntry`). Optional LLM-based summarizer (`LlmLogbookSummarizer`, opt-in via `NEOPSYKE_LOGBOOK_USE_LLM_SUMMARIZER=true`) with automatic fallback to deterministic on failure.
 - Episodic recall: triggered by temporal intent detection (regex patterns on the latest user turn). Detected intent maps to a time window and optional FTS keyword, producing a compact timeline injected into `PlannerContext.episodicRecall`.
 - Temporal-to-vector bridge: episodic summaries from temporal queries also serve as cues for `Hippocampus.recall()`, enriching long-term memory retrieval with temporal context.
 - Graceful degradation: logbook is optional (`null`-safe); creation failure logs warning and runs without episodic memory.
-- Configuration: `LogbookConfig` (enabled, maxSummaryChars, maxKeywordsPerEntry, retentionDays, dbPath, episodicRecallMaxChars, episodicRecallMaxResults, useLlmSummarizer) with env var overrides (`PSYKE_LOGBOOK_*`).
+- Configuration: `LogbookConfig` (enabled, maxSummaryChars, maxKeywordsPerEntry, retentionDays, dbPath, episodicRecallMaxChars, episodicRecallMaxResults, useLlmSummarizer) with env var overrides (`NEOPSYKE_LOGBOOK_*`).
 
 ## Key Complexity Drivers
 - Multiple LLM actors with distinct prompts and fallback semantics.
@@ -507,7 +570,7 @@ Update this file whenever any of these change:
 - Memory recall/consolidation triggers, thresholds, or disable semantics.
 - Reflection-lesson recall/imprint triggers, filters, or dedupe behavior.
 - Episodic memory (logbook) event types, journal call sites, or storage schema.
-- Task workspace lifecycle, scoping, prompt injection, or final-pass compilation behavior.
+- Scratchpad lifecycle, scoping, prompt injection, or final-pass compilation behavior.
 - Prompt-injection defense patterns or untrusted-content handling paths.
 - Supported action types or runtime availability logic.
 - Critical instrumentation events that materially change control flow visibility.

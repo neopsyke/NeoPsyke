@@ -68,7 +68,7 @@ if [[ -n "${FREUD_RUN_DIR:-}" ]]; then
   ARTIFACT_DIR="${FREUD_ARTIFACT_DIR:-$RUN_DIR/artifacts}"
 else
   timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
-  RUN_DIR="$REPO_ROOT/.psyke/runs/freud/${timestamp}-bbh-smoke-${lane}"
+  RUN_DIR="$REPO_ROOT/.neopsyke/runs/freud/${timestamp}-bbh-smoke-${lane}"
   ARTIFACT_DIR="$RUN_DIR/artifacts"
 fi
 

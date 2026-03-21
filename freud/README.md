@@ -1,12 +1,12 @@
 # Freud
 
-`Freud` is Psyke's developer workflow layer. It sits on top of the app and gives you repeatable test runs, compact artifacts, fast failure triage, and optional live/provider-backed evals without turning every check into an ad hoc shell session.
+`Freud` is NeoPsyke's developer workflow layer. It sits on top of the app and gives you repeatable test runs, compact artifacts, fast failure triage, and optional live/provider-backed evals without turning every check into an ad hoc shell session.
 
 If you're new to the project, the short version is:
-- Psyke runtime code lives in `src/main/kotlin/psyke`
+- NeoPsyke runtime code lives in `src/main/kotlin/ai/neopsyke`
 - Freud lives in `freud/`
 - You usually start with `freud/scripts/feature-loop.sh <feature-id>`
-- Freud runs cheap deterministic checks first, then optional live checks, and stores everything under `.psyke/runs/freud/`
+- Freud runs cheap deterministic checks first, then optional live checks, and stores everything under `.neopsyke/runs/freud/`
 
 ## Why Freud Exists
 Without Freud, validating changes tends to fragment into:
@@ -22,7 +22,7 @@ Freud standardizes that into one workflow with a few practical advantages:
 - replayable single-input live evals via LLM cache record/replay
 - a stable place to compare runs over time
 
-This directory is intentionally separate from Psyke runtime code so workflow logic does not leak into the app itself.
+This directory is intentionally separate from NeoPsyke runtime code so workflow logic does not leak into the app itself.
 
 ## Start Here
 
@@ -33,7 +33,7 @@ If you only want the default developer workflow:
 freud/scripts/feature-loop.sh my-change
 ```
 
-That runs the standard deterministic sequence for the current repository and writes a run under `.psyke/runs/freud/<timestamp>-my-change/`.
+That runs the standard deterministic sequence for the current repository and writes a run under `.neopsyke/runs/freud/<timestamp>-my-change/`.
 
 ### Common Manual Modes
 Use these when you want something narrower or more explicit:
@@ -49,7 +49,7 @@ freud/scripts/feature-loop.sh my-change --from-step reasoning_eval_logic
 freud/scripts/run-reasoning-pr-gate.sh
 
 # Run the scenario pack only
-freud/scripts/run-scenarios.sh --file freud/scenarios/v1/psyke-agent-scenarios.json
+freud/scripts/run-scenarios.sh --file freud/scenarios/v1/neopsyke-agent-scenarios.json
 ```
 
 ### Live Manual Modes
@@ -77,7 +77,7 @@ freud/scripts/feature-loop.sh ci-pr
 alongside Freud's own BATS and pytest workflow tests.
 
 ### 2. Single-Input Live Eval
-`freud/scripts/live-eval.sh` is the preferred wrapper for one-shot live/provider-backed checks. It uses Psyke's lower-level `--freud-live` mode but adds:
+`freud/scripts/live-eval.sh` is the preferred wrapper for one-shot live/provider-backed checks. It uses NeoPsyke's lower-level `--freud-live` mode but adds:
 - isolated memory paths
 - cache record/replay
 - stable artifacts
@@ -85,7 +85,7 @@ alongside Freud's own BATS and pytest workflow tests.
 - startup provider preflight, including one retry for transient health-check failures and soft-disable of optional `meta_reasoner_fallback` if it is unavailable
 
 ### 3. Reasoning Matrix
-For Psyke, Freud currently owns a 3-lane reasoning setup:
+For NeoPsyke, Freud currently owns a 3-lane reasoning setup:
 - deterministic logic gate
 - weak live reasoning lane
 - production live reasoning lane
@@ -106,7 +106,7 @@ freud/scripts/live-eval.sh --input test-input.txt --timeout 120
 
 # Replay a prior live eval from recorded LLM calls
 freud/scripts/live-eval.sh --input test-input.txt \
-  --cache-replay .psyke/runs/freud/latest/artifacts/llm-cache.jsonl
+  --cache-replay .neopsyke/runs/freud/latest/artifacts/llm-cache.jsonl
 
 # Preserve isolated Freud memory across a sequence when needed
 freud/scripts/live-eval.sh --input test-input.txt --preserve-memory
@@ -116,7 +116,7 @@ freud/scripts/live-eval.sh --input test-input.txt --expected expected-answer.txt
 ```
 
 ## What Gets Stored
-Freud artifacts live under `.psyke/runs/freud/<timestamp>-<feature-id>/` by default.
+Freud artifacts live under `.neopsyke/runs/freud/<timestamp>-<feature-id>/` by default.
 
 Read these first:
 - `artifacts/summary.json`
@@ -139,20 +139,20 @@ Live BBH reasoning lanes also write:
 - `artifacts/bbh-smoke-<lane>-progress.md`
 - `artifacts/bbh-smoke-<lane>-results.tsv`
 
-Live one-shot evals write under `.psyke/runs/freud/<timestamp>-live-eval/`:
+Live one-shot evals write under `.neopsyke/runs/freud/<timestamp>-live-eval/`:
 - `artifacts/answer.txt`
 - `artifacts/verdict.json`
 - `artifacts/llm-cache.jsonl`
 - `artifacts/cache-stats.json`
 - `artifacts/input.txt`
 - `logs/events.jsonl`
-- `logs/psyke.log`
+- `logs/neopsyke.log`
 
-Ongoing rollout notes now live in [ROLLOUT_LEDGER.md](/Users/victor.toral/atomitl/ai/psyke2/psyke/freud/ROLLOUT_LEDGER.md).
+Ongoing rollout notes now live in [ROLLOUT_LEDGER.md](ROLLOUT_LEDGER.md).
 
 ## Live Eval
 
-Prefer `live-eval.sh` for any single-input Freud live/provider-backed check. It wraps the raw `./run-psyke.sh --freud-live` path and keeps stdout focused on the final agent answer.
+Prefer `live-eval.sh` for any single-input Freud live/provider-backed check. It wraps the raw `./run-neopsyke.sh --freud-live` path and keeps stdout focused on the final agent answer.
 
 ### Record / Replay
 - First run without `--cache-replay` records LLM calls to `artifacts/llm-cache.jsonl`
@@ -170,9 +170,9 @@ Freud live eval runs do not touch the user's default memory state.
 
 | Resource | Freud live eval | User default |
 |---|---|---|
-| pgvector namespace | `freud-eval` | `psyke` |
-| Episodic logbook | `.psyke/freud-logbook.db` | `.psyke/logbook.db` |
-| Metrics DB | `.psyke/freud-metrics.db` | `.psyke/metrics.db` |
+| pgvector namespace | `freud-eval` | `neopsyke` |
+| Episodic logbook | `.neopsyke/freud-logbook.db` | `.neopsyke/logbook.db` |
+| Metrics DB | `.neopsyke/freud-metrics.db` | `.neopsyke/metrics.db` |
 
 Defaults:
 - `--clear-memory-all` is applied automatically
@@ -184,7 +184,7 @@ Defaults:
 - `1`: answer rejected or runtime error
 - `2`: timeout
 
-## Psyke-Specific Reasoning Lanes
+## NeoPsyke-Specific Reasoning Lanes
 
 ### Deterministic Reasoning Gate
 `freud/scripts/run-reasoning-pr-gate.sh`
@@ -201,7 +201,7 @@ Content:
 `freud/config/live-weak-structure.env`
 
 Purpose:
-- check whether Psyke structure still works when planner/meta-reasoner are weaker
+- check whether NeoPsyke structure still works when planner/meta-reasoner are weaker
 
 ### Production Live Lane
 `freud/config/live-prod-acceptance.env`
@@ -246,7 +246,7 @@ Project-specific command wiring belongs in `freud/config/*.env`, not inside gene
 - `freud/scripts/run-bbh-smoke.sh`: live BBH-style smoke runner
 - `freud/scripts/helpers.sh`: shared Bash helpers
 - `freud/py/`: Python data-processing helpers
-- `freud/config/default.env`: Psyke adapter defaults
+- `freud/config/default.env`: NeoPsyke adapter defaults
 - `freud/config/live-weak-structure.env`: weak live lane
 - `freud/config/live-prod-acceptance.env`: prod live lane
 - `freud/config/adapter.example.env`: reusable template for other projects

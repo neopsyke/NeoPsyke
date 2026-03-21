@@ -67,7 +67,7 @@ agent:
     # Optional. Falls back to runtime.mcp_call_timeout_ms when omitted.
     # mcp_memory_call_timeout_ms: 8000
 
-    task_workspace:
+    scratchpad:
       enabled: true
       activation_min_plan_steps: 2
       max_prompt_tokens: 220
@@ -107,7 +107,7 @@ agent:
     max_entries_per_query: 20
     retention_days: 90
     # Optional. If blank, sqlite logbook uses its internal default path.
-    # db_path: ".psyke/logbook.db"
+    # db_path: ".neopsyke/logbook.db"
     episodic_recall_max_chars: 1200
     episodic_recall_max_results: 15
     use_llm_summarizer: false

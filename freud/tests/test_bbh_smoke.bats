@@ -41,9 +41,9 @@ if [[ "${FREUD_TEST_TIMEOUT_CASE:-}" == "$id" ]]; then
 fi
 printf 'ego> %s\n' "$answer" >"$RUN_DIR/artifacts/answer.txt"
 if [[ "${FREUD_TEST_SCHEMA_CASE:-}" == "$id" ]]; then
-  printf '%s\n' 'Structured-output schema adapted for provider=groq model=openai/gpt-oss-20b actor=ego call_site=input schema=ego_planner_decision. strict downgraded to false.' >"$RUN_DIR/logs/psyke.log"
+  printf '%s\n' 'Structured-output schema adapted for provider=groq model=openai/gpt-oss-20b actor=ego call_site=input schema=ego_planner_decision. strict downgraded to false.' >"$RUN_DIR/logs/neopsyke.log"
 else
-  : >"$RUN_DIR/logs/psyke.log"
+  : >"$RUN_DIR/logs/neopsyke.log"
 fi
 cat >"$RUN_DIR/artifacts/verdict.json" <<JSON
 {"verdict":"$verdict","detail":"$detail","exit_code":$status,"run_dir":"$RUN_DIR","answer_file":"$RUN_DIR/artifacts/answer.txt"}
@@ -142,7 +142,7 @@ printf 'ego>   case_a   \n' >"$RUN_DIR/artifacts/answer.txt"
 cat >"$RUN_DIR/artifacts/verdict.json" <<JSON
 {"verdict":"pass","detail":"ok","exit_code":0,"run_dir":"$RUN_DIR","answer_file":"$RUN_DIR/artifacts/answer.txt"}
 JSON
-: >"$RUN_DIR/logs/psyke.log"
+: >"$RUN_DIR/logs/neopsyke.log"
 EOF
   chmod +x "$LIVE_EVAL_STUB"
 
@@ -172,7 +172,7 @@ printf 'ego> "Ava"\n' >"$RUN_DIR/artifacts/answer.txt"
 cat >"$RUN_DIR/artifacts/verdict.json" <<JSON
 {"verdict":"pass","detail":"ok","exit_code":0,"run_dir":"$RUN_DIR","answer_file":"$RUN_DIR/artifacts/answer.txt"}
 JSON
-: >"$RUN_DIR/logs/psyke.log"
+: >"$RUN_DIR/logs/neopsyke.log"
 EOF
   chmod +x "$LIVE_EVAL_STUB"
 

@@ -19,7 +19,7 @@
 1. Implement smallest useful slice.
 2. Run: `freud/scripts/feature-loop.sh <feature-id>`
 3. Read:
-   - `.psyke/runs/freud/<run>/artifacts/summary.json`
-   - `.psyke/runs/freud/<run>/artifacts/anomalies.md`
+   - `.neopsyke/runs/freud/<run>/artifacts/summary.json`
+   - `.neopsyke/runs/freud/<run>/artifacts/anomalies.md`
 4. Fix only failing segments.
 5. Re-run loop.

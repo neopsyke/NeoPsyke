@@ -34,7 +34,7 @@ Execution Plan:
 2. Run Freud:
    freud/scripts/feature-loop.sh <feature-id-slug>
 3. If run fails, triage in this order:
-   a) .psyke/runs/freud/latest-run.txt
+   a) .neopsyke/runs/freud/latest-run.txt
    b) artifacts/summary.json
    c) artifacts/freud-metrics.json (if present)
    d) artifacts/trail-index.tsv
@@ -49,8 +49,8 @@ Execution Plan:
 
 Scenario Coverage:
 - If behavior changes are non-trivial, update:
-  - freud/scenarios/v1/psyke-agent-scenarios.json
-  - src/test/kotlin/psyke/eval/AgentScenarioPackTest.kt
+  - freud/scenarios/v1/neopsyke-agent-scenarios.json
+  - src/test/kotlin/ai/neopsyke/eval/AgentScenarioPackTest.kt
 
 Run Modes:
 - Default: stub/deterministic only.

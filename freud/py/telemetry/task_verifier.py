@@ -129,7 +129,7 @@ def main() -> None:
         usage="freud/scripts/task-verifier-telemetry.sh [events_jsonl]",
     )
     parser.add_argument("events_jsonl", nargs="?",
-                        default=str(repo_root() / ".psyke/logs/latest-events.jsonl"),
+                        default=str(repo_root() / ".neopsyke/logs/latest-events.jsonl"),
                         help="Path to events JSONL file")
     args = parser.parse_args()
 

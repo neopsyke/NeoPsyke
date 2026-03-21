@@ -6,6 +6,7 @@ usage() {
 Usage:
   freud/scripts/feature-loop.sh <feature_id> [--live] [--dry-run] [--continue-on-fail]
                                 [--config <path>] [--from-step <step>]
+                                [--goals] [--no-goals]
 
 Step names for --from-step:
   preflight_compile  targeted_tests  full_tests  scenario_pack
@@ -13,7 +14,7 @@ Step names for --from-step:
 
 Description:
   Runs a deterministic-first feature workflow and writes compact artifacts under:
-  .psyke/runs/freud/<timestamp>-<feature_id>/
+  .neopsyke/runs/freud/<timestamp>-<feature_id>/
   Use --from-step to resume from a specific step, skipping earlier ones.
 EOF
 }
@@ -44,6 +45,7 @@ dry_run="false"
 continue_on_fail=""
 config_path=""
 from_step=""
+goals_override=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -75,6 +77,14 @@ while [[ $# -gt 0 ]]; do
       fi
       shift 2
       ;;
+    --goals)
+      goals_override="true"
+      shift
+      ;;
+    --no-goals)
+      goals_override="false"
+      shift
+      ;;
     *)
       echo "Unknown argument: $1"
       usage
@@ -96,12 +106,17 @@ if [[ -f "$config_path" ]]; then
   source "$config_path"
 fi
 
-if [[ -n "${PSYKE_LLM_CONFIG_FILE:-}" ]]; then
-  export PSYKE_LLM_CONFIG_FILE
+if [[ -n "${NEOPSYKE_LLM_CONFIG_FILE:-}" ]]; then
+  export NEOPSYKE_LLM_CONFIG_FILE
 fi
 
 # Keep full workspace debug dumps enabled in Freud workflow runs.
-export EGO_TASK_WORKSPACE_DEBUG_CAPTURE_ENABLED="true"
+export EGO_SCRATCHPAD_DEBUG_CAPTURE_ENABLED="true"
+
+# Goals subsystem override (--goals / --no-goals).
+if [[ -n "$goals_override" ]]; then
+  export NEOPSYKE_GOALS_ENABLED="$goals_override"
+fi
 
 project_name="${FREUD_PROJECT_NAME:-unknown-project}"
 preflight_compile_cmd="${FREUD_PREFLIGHT_COMPILE_CMD:-}"
@@ -111,7 +126,7 @@ scenario_pack_cmd="${FREUD_SCENARIO_PACK_CMD:-}"
 reasoning_logic_cmd="${FREUD_REASONING_EVAL_LOGIC_CMD:-}"
 reasoning_model_cmd="${FREUD_REASONING_EVAL_MODEL_CMD:-}"
 memory_smoke_cmd="${FREUD_MEMORY_SMOKE_CMD:-}"
-run_root_cfg="${FREUD_RUN_ROOT:-.psyke/runs/freud}"
+run_root_cfg="${FREUD_RUN_ROOT:-.neopsyke/runs/freud}"
 gradle_user_home_cfg="${FREUD_GRADLE_USER_HOME:-}"
 
 if [[ "$run_root_cfg" = /* ]]; then
@@ -346,16 +361,16 @@ write_run_config() {
 
 latest_reasoning_eval_file() {
   local latest=""
-  if compgen -G "$repo_root/.psyke/evals/reasoning/runs/reasoning-eval-*.json" >/dev/null; then
-    latest="$(ls -1t "$repo_root"/.psyke/evals/reasoning/runs/reasoning-eval-*.json 2>/dev/null | head -n 1)"
+  if compgen -G "$repo_root/.neopsyke/evals/reasoning/runs/reasoning-eval-*.json" >/dev/null; then
+    latest="$(ls -1t "$repo_root"/.neopsyke/evals/reasoning/runs/reasoning-eval-*.json 2>/dev/null | head -n 1)"
   fi
   printf '%s' "$latest"
 }
 
 latest_memory_eval_file() {
   local latest=""
-  if compgen -G "$repo_root/.psyke/evals/memory-live/runs/memory-live-eval-*.json" >/dev/null; then
-    latest="$(ls -1t "$repo_root"/.psyke/evals/memory-live/runs/memory-live-eval-*.json 2>/dev/null | head -n 1)"
+  if compgen -G "$repo_root/.neopsyke/evals/memory-live/runs/memory-live-eval-*.json" >/dev/null; then
+    latest="$(ls -1t "$repo_root"/.neopsyke/evals/memory-live/runs/memory-live-eval-*.json 2>/dev/null | head -n 1)"
   fi
   printf '%s' "$latest"
 }

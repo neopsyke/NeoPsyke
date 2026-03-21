@@ -35,7 +35,7 @@ Compact ledger for live-eval and live-lane rollout work. Append new entries inst
 - Memory advisor: `openai / gpt-4.1-mini`
 
 ### Weak live lane (`R8`)
-- Config: [live-weak-structure.env](/Users/victor.toral/atomitl/ai/psyke2/psyke/freud/config/live-weak-structure.env)
+- Config: [live-weak-structure.env](config/live-weak-structure.env)
 - Planner: `groq / openai/gpt-oss-20b`
 - Meta-reasoner: `groq / openai/gpt-oss-20b`
 - Action verifier: `openai / gpt-4o-mini`
@@ -46,7 +46,7 @@ Compact ledger for live-eval and live-lane rollout work. Append new entries inst
 ## Key Artifact Runs
 
 ### Direct live-eval record run
-- Run: [20260315T014540Z-live-eval-fqmuHG](/Users/victor.toral/atomitl/ai/psyke2/psyke/.psyke/runs/freud/20260315T014540Z-live-eval-fqmuHG)
+- Run: `20260315T014540Z-live-eval-fqmuHG`
 - Verdict: pass
 - Answer: `{"status":"ok","mode":"freud-live-smoke"}`
 - Notes:
@@ -54,7 +54,7 @@ Compact ledger for live-eval and live-lane rollout work. Append new entries inst
   - no structured-output downgrade warnings found
 
 ### Direct live-eval replay run
-- Run: [20260315T014707Z-live-eval-I1c0SB](/Users/victor.toral/atomitl/ai/psyke2/psyke/.psyke/runs/freud/20260315T014707Z-live-eval-I1c0SB)
+- Run: `20260315T014707Z-live-eval-I1c0SB`
 - Verdict: pass
 - Replay stats:
   - `total_calls=4`
@@ -63,14 +63,14 @@ Compact ledger for live-eval and live-lane rollout work. Append new entries inst
   - `divergence_count=0`
 
 ### Direct live-eval preserve-memory run
-- Run: [20260315T014724Z-live-eval-0ynEVn](/Users/victor.toral/atomitl/ai/psyke2/psyke/.psyke/runs/freud/20260315T014724Z-live-eval-0ynEVn)
+- Run: `20260315T014724Z-live-eval-0ynEVn`
 - Verdict: pass
 
 ### Weak live lane
-- Run: [20260315T015648Z-reasoning-matrix](/Users/victor.toral/atomitl/ai/psyke2/psyke/.psyke/runs/freud/20260315T015648Z-reasoning-matrix)
-- Summary: [bbh-smoke-weak-structure-summary.json](/Users/victor.toral/atomitl/ai/psyke2/psyke/.psyke/runs/freud/20260315T015648Z-reasoning-matrix/artifacts/bbh-smoke-weak-structure-summary.json)
+- Run: `20260315T015648Z-reasoning-matrix`
+- Summary: `bbh-smoke-weak-structure-summary.json`
 - Progress artifact shape validated via:
-  - [bbh-smoke-weak-structure-progress.json](/Users/victor.toral/atomitl/ai/psyke2/psyke/.psyke/runs/freud/20260315T015648Z-reasoning-matrix/artifacts/bbh-smoke-weak-structure-progress.json)
+  - `bbh-smoke-weak-structure-progress.json`
 - Result:
   - `24` total
   - `21` passed
@@ -83,7 +83,7 @@ Compact ledger for live-eval and live-lane rollout work. Append new entries inst
 
 ### Wrapper/runtime issues already fixed
 - `live-eval.sh` originally used user-home Gradle wrapper state and failed in sandboxed rollout runs.
-- `run-psyke.sh` bootstrap Gradle path needed `--no-daemon` for sandbox-safe live bootstrap.
+- `run-neopsyke.sh` bootstrap Gradle path needed `--no-daemon` for sandbox-safe live bootstrap.
 - `freud-live` originally crashed after answer delivery due to closed sensory channel shutdown.
 - BBH/live scoring was originally invalid because launcher chatter leaked onto stdout.
 

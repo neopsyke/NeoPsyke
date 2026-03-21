@@ -42,7 +42,7 @@ Dashboard snapshot (`/api/obs/snapshot`) includes `promptBudgetStats`:
 Offline log aggregation:
 ```bash
 freud/scripts/prompt-budget-telemetry.sh
-freud/scripts/prompt-budget-telemetry.sh .psyke/logs/runs/<run-id>.events.jsonl
+freud/scripts/prompt-budget-telemetry.sh .neopsyke/logs/runs/<run-id>.events.jsonl
 ```
 
 ## Recommended thresholds

@@ -8,7 +8,7 @@ plugins {
     application
 }
 
-group = "ai.psyke"
+group = "ai.neopsyke"
 version = "0.1.0"
 
 repositories {
@@ -29,6 +29,7 @@ dependencies {
     implementation("com.fasterxml.jackson.module:jackson-module-kotlin:2.17.0")
     implementation("com.fasterxml.jackson.core:jackson-databind:2.17.0")
     implementation("com.fasterxml.jackson.dataformat:jackson-dataformat-yaml:2.17.0")
+    implementation("com.fasterxml.jackson.datatype:jackson-datatype-jsr310:2.17.0")
     implementation("org.xerial:sqlite-jdbc:3.46.1.3")
 
     testImplementation(kotlin("test"))
@@ -36,7 +37,7 @@ dependencies {
 
 tasks.test {
     useJUnitPlatform()
-    environment("EGO_TASK_WORKSPACE_DEBUG_CAPTURE_ENABLED", "true")
+    environment("EGO_SCRATCHPAD_DEBUG_CAPTURE_ENABLED", "true")
 }
 
 tasks.withType<KotlinCompile>().configureEach {
@@ -53,18 +54,18 @@ tasks.withType<JavaCompile>().configureEach {
 }
 
 application {
-    mainClass.set("psyke.ApplicationKt")
+    mainClass.set("ai.neopsyke.ApplicationKt")
 }
 
 tasks.named<JavaExec>("run") {
     // Forward optional simple-logger level from Gradle JVM/env to the app JVM.
     val configuredLogLevel = System.getProperty("org.slf4j.simpleLogger.defaultLogLevel")
-        ?: System.getenv("PSYKE_LOG_LEVEL")
+        ?: System.getenv("NEOPSYKE_LOG_LEVEL")
     if (!configuredLogLevel.isNullOrBlank()) {
         systemProperty("org.slf4j.simpleLogger.defaultLogLevel", configuredLogLevel)
     }
     val configuredLogFile = System.getProperty("org.slf4j.simpleLogger.logFile")
-        ?: System.getenv("PSYKE_LOG_FILE")
+        ?: System.getenv("NEOPSYKE_LOG_FILE")
     if (!configuredLogFile.isNullOrBlank()) {
         systemProperty("org.slf4j.simpleLogger.logFile", configuredLogFile)
     }

@@ -1,4 +1,4 @@
 # This is a comment
-test_scenario_a	psyke.eval.TestA.scenarioA	First test scenario
+test_scenario_a	ai.neopsyke.eval.TestA.scenarioA	First test scenario
 # Another comment
-test_scenario_b	psyke.eval.TestB.scenarioB	Second test scenario
+test_scenario_b	ai.neopsyke.eval.TestB.scenarioB	Second test scenario

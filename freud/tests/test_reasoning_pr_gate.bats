@@ -4,7 +4,7 @@ setup() {
   load helpers/setup.bash
   TEST_TMPDIR="$(mktemp -d)"
   CALL_LOG="$TEST_TMPDIR/calls.log"
-  STUB="$TEST_TMPDIR/fake-psyke.sh"
+  STUB="$TEST_TMPDIR/fake-neopsyke.sh"
   cat >"$STUB" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -22,7 +22,7 @@ teardown() {
 
 @test "run-reasoning-pr-gate invokes logic-core and logic-behavioral packs" {
   run env \
-    FREUD_REASONING_PR_GATE_PSYKE_CMD="$STUB" \
+    FREUD_REASONING_PR_GATE_NEOPSYKE_CMD="$STUB" \
     FREUD_TEST_CALL_LOG="$CALL_LOG" \
     "$SCRIPTS_DIR/run-reasoning-pr-gate.sh"
   [[ "$status" -eq 0 ]]
@@ -36,7 +36,7 @@ teardown() {
 
 @test "run-reasoning-pr-gate fails when behavioral invocation fails" {
   run env \
-    FREUD_REASONING_PR_GATE_PSYKE_CMD="$STUB" \
+    FREUD_REASONING_PR_GATE_NEOPSYKE_CMD="$STUB" \
     FREUD_TEST_CALL_LOG="$CALL_LOG" \
     FREUD_TEST_FAIL_ON_BEHAVIORAL="true" \
     "$SCRIPTS_DIR/run-reasoning-pr-gate.sh"
