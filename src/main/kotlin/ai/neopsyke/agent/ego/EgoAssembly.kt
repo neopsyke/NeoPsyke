@@ -15,8 +15,8 @@ import ai.neopsyke.agent.memory.longterm.NoopHippocampus
 import ai.neopsyke.agent.memory.longterm.NoopLongTermMemoryAdvisor
 import ai.neopsyke.agent.memory.shortterm.MemoryStore
 import ai.neopsyke.agent.memory.scratchpad.ScratchpadStore
-import ai.neopsyke.agent.project.NoopGoalsGateway
-import ai.neopsyke.agent.project.GoalsGateway
+import ai.neopsyke.agent.goal.NoopGoalsGateway
+import ai.neopsyke.agent.goal.GoalsGateway
 import ai.neopsyke.agent.superego.Superego
 import ai.neopsyke.agent.tools.mcp.FetchTool
 import ai.neopsyke.agent.tools.mcp.McpTimeTool
@@ -64,15 +64,15 @@ object EgoAssembler {
         hippocampus: Hippocampus = NoopHippocampus,
         metaReasoner: MetaReasoner = NoopMetaReasoner,
         longTermMemoryAdvisor: LongTermMemoryAdvisor = NoopLongTermMemoryAdvisor,
-        taskWorkspaceStore: ScratchpadStore = ScratchpadStore(config.memory.taskWorkspace),
-        taskWorkspaceFinalizer: ScratchpadFinalizer = NoopScratchpadFinalizer,
+        scratchpadStore: ScratchpadStore = ScratchpadStore(config.memory.scratchpad),
+        scratchpadFinalizer: ScratchpadFinalizer = NoopScratchpadFinalizer,
         logbook: Logbook? = null,
         logbookSummarizer: LogbookSummarizer = DeterministicLogbookSummarizer(config.logbook),
         runId: String? = null,
         webSearchActionHandler: WebSearchActionHandler? = null,
         mcpTimeTool: McpTimeTool? = null,
         fetchTool: FetchTool? = null,
-        projectsGateway: GoalsGateway = NoopGoalsGateway,
+        goalsGateway: GoalsGateway = NoopGoalsGateway,
         output: (String) -> Unit = {},
     ): EgoAssembly {
         val memory = buildMemorySystem(
@@ -92,7 +92,7 @@ object EgoAssembler {
                 fetchTool = fetchTool,
                 output = output,
                 reflectionMemoryRecorder = memory,
-                projectsGateway = projectsGateway,
+                goalsGateway = goalsGateway,
             )
         )
         val motorCortex = MotorCortex(actionRegistry = actionRegistry)
@@ -104,11 +104,11 @@ object EgoAssembler {
             memory = memory,
             metaReasoner = metaReasoner,
             sensoryCortex = sensoryCortex,
-            taskWorkspaceStore = taskWorkspaceStore,
-            taskWorkspaceFinalizer = taskWorkspaceFinalizer,
+            scratchpadStore = scratchpadStore,
+            scratchpadFinalizer = scratchpadFinalizer,
             instrumentation = instrumentation,
-            projectRegistry = projectsGateway,
-            projectsGateway = projectsGateway,
+            goalRegistry = goalsGateway,
+            goalsGateway = goalsGateway,
         )
         return EgoAssembly(
             ego = ego,

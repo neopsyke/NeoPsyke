@@ -13,15 +13,15 @@ import java.time.Instant
  * Stub interface — returns an empty list until the goal system is implemented.
  */
 interface GoalRegistry {
-    fun activeGoals(): List<Goal>
+    fun activeGoals(): List<GoalCommitment>
 }
 
-data class Goal(
+data class GoalCommitment(
     val id: String,
     val instruction: String,
     val lastActedAt: Instant? = null,
 )
 
 object EmptyGoalRegistry : GoalRegistry {
-    override fun activeGoals(): List<Goal> = emptyList()
+    override fun activeGoals(): List<GoalCommitment> = emptyList()
 }

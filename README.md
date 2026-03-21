@@ -97,7 +97,7 @@ Standalone Kotlin JVM app using Gradle with:
   - `agent` is domain-grouped and mirrors `AgentConfig` ownership:
     - `agent.planner.*`
     - `agent.superego.*`
-    - `agent.memory.*` and `agent.memory.task_workspace.*`
+    - `agent.memory.*` and `agent.memory.scratchpad.*`
     - `agent.meta_reasoner.*`
     - `agent.logbook.*`
     - `agent.runtime.*` (loop/pending queues/search/mcp timeout/fetch cap)
@@ -142,20 +142,20 @@ Standalone Kotlin JVM app using Gradle with:
   - `EGO_LOOP_DELAY_MS` (default app value: `0`)
   - `EGO_SHORT_TERM_CONTEXT_MAX_CHARS` (default: `20000`)
   - `EGO_SHORT_TERM_CONTEXT_MAX_PROMPT_TOKENS` (default: `384`)
-  - `EGO_TASK_WORKSPACE_ENABLED` (default: `false`)
-  - `EGO_TASK_WORKSPACE_MAX_PROMPT_TOKENS` (default: `220`)
-  - `EGO_TASK_WORKSPACE_MAX_SECTIONS` (default: `10`)
-  - `EGO_TASK_WORKSPACE_MAX_SECTION_CHARS` (default: `1200`)
-  - `EGO_TASK_WORKSPACE_MAX_SECTION_SUMMARY_CHARS` (default: `180`)
-  - `EGO_TASK_WORKSPACE_MAX_EVIDENCE_ITEMS` (default: `8`)
-  - `EGO_TASK_WORKSPACE_MAX_EVIDENCE_CHARS` (default: `220`)
-  - `EGO_TASK_WORKSPACE_FINAL_COMPILATION_MAX_CHARS` (default: `2800`)
-  - `EGO_TASK_WORKSPACE_FINAL_PASS_REWRITE_ENABLED` (default: `true`)
-  - `EGO_TASK_WORKSPACE_FINAL_PASS_MAX_TOKENS` (default: `260`)
-  - `EGO_TASK_WORKSPACE_FINAL_PASS_MIN_WORKSPACE_CONFIDENCE` (default: `0.35`)
-  - `EGO_TASK_WORKSPACE_FINAL_PASS_MIN_MODEL_CONFIDENCE` (default: `0.55`)
-  - `EGO_TASK_WORKSPACE_DEBUG_CAPTURE_ENABLED` (default: `false`; forced to `true` by `./run-neopsyke.sh`, Gradle tests, and Freud scripts)
-  - `EGO_TASK_WORKSPACE_MAX_ACTIVE_TASKS` (default: `32`)
+  - `EGO_SCRATCHPAD_ENABLED` (default: `false`)
+  - `EGO_SCRATCHPAD_MAX_PROMPT_TOKENS` (default: `220`)
+  - `EGO_SCRATCHPAD_MAX_SECTIONS` (default: `10`)
+  - `EGO_SCRATCHPAD_MAX_SECTION_CHARS` (default: `1200`)
+  - `EGO_SCRATCHPAD_MAX_SECTION_SUMMARY_CHARS` (default: `180`)
+  - `EGO_SCRATCHPAD_MAX_EVIDENCE_ITEMS` (default: `8`)
+  - `EGO_SCRATCHPAD_MAX_EVIDENCE_CHARS` (default: `220`)
+  - `EGO_SCRATCHPAD_FINAL_COMPILATION_MAX_CHARS` (default: `2800`)
+  - `EGO_SCRATCHPAD_FINAL_PASS_REWRITE_ENABLED` (default: `true`)
+  - `EGO_SCRATCHPAD_FINAL_PASS_MAX_TOKENS` (default: `260`)
+  - `EGO_SCRATCHPAD_FINAL_PASS_MIN_WORKSPACE_CONFIDENCE` (default: `0.35`)
+  - `EGO_SCRATCHPAD_FINAL_PASS_MIN_MODEL_CONFIDENCE` (default: `0.55`)
+  - `EGO_SCRATCHPAD_DEBUG_CAPTURE_ENABLED` (default: `false`; forced to `true` by `./run-neopsyke.sh`, Gradle tests, and Freud scripts)
+  - `EGO_SCRATCHPAD_MAX_ACTIVE_TASKS` (default: `32`)
   - `EGO_MAX_ACTION_PAYLOAD_CHARS` (default: `4000`)
   - `EGO_SEARCH_RESULT_COUNT` (default: `5`)
   - `MCP_TIME_SERVER_CMD` (optional env override for YAML time command)
@@ -319,7 +319,7 @@ Memory live eval options:
 ```bash
 ./run-neopsyke.sh --eval-memory-live --eval-stage 2026-02-28
 ./run-neopsyke.sh --eval-memory-live --eval-memory-max-attempts 3
-./run-neopsyke.sh --eval-memory-live --eval-memory-tasks user-preference-color,project-constraint-timezone
+./run-neopsyke.sh --eval-memory-live --eval-memory-tasks user-preference-color,goal-constraint-timezone
 ```
 
 Memory live eval output:
@@ -396,8 +396,8 @@ control> exit
 - API namespaces:
   - Chat control plane: `/api/chat/*` (`sessions`, `messages`, session-scoped SSE)
   - Observability: `/api/obs/*` (`snapshot`, global `events`, `workspace`)
-- Task Workspace drawer (Action Flow -> `Workspace`) fetches full debug snapshots on demand from `/api/obs/workspace` and `/api/obs/workspace/{rootId}`.
-- Full workspace snapshots use two-lane instrumentation: lightweight `task_workspace_head` is streamed live; heavy `task_workspace_debug_snapshot` is captured server-side and excluded from SSE broadcasting.
+- Scratchpad drawer (Action Flow -> `Scratchpad`) fetches full debug snapshots on demand from `/api/obs/workspace` and `/api/obs/workspace/{rootId}`.
+- Full workspace snapshots use two-lane instrumentation: lightweight `scratchpad_head` is streamed live; heavy `scratchpad_debug_snapshot` is captured server-side and excluded from SSE broadcasting.
 - If dashboard bind fails, app continues running without the dashboard server.
 
 ## Loop behavior
@@ -409,8 +409,8 @@ control> exit
   - chat API submissions (`/api/chat/sessions/{id}/messages`) are also ingested as high-priority signals
 - `MemoryStore` keeps bounded rolling memory and compacts older turns into a summary as it nears capacity.
 - Memory summary included in Ego/Superego prompts is token-capped to stay within LLM context budgets.
-- Optional Task Workspace (`EGO_TASK_WORKSPACE_ENABLED=true`) keeps an ephemeral per-request notebook (index + summaries + evidence).
-- Task Workspace is independent from short-term and long-term memory and is destroyed when the root request resolves; when queues drain, active workspaces are cleared but per-session workspace digests are preserved for subsequent turns.
+- Optional Scratchpad (`EGO_SCRATCHPAD_ENABLED=true`) keeps an ephemeral per-request notebook (index + summaries + evidence).
+- Scratchpad is independent from short-term and long-term memory and is destroyed when the root request resolves; when queues drain, active scratchpads are cleared but per-session scratchpad digests are preserved for subsequent turns.
 - Terminal `answer` actions can run an optional LLM final-pass rewrite from the workspace compilation; rewrite is gated by workspace confidence and finalizer model confidence.
 - When memory capability is enabled/configured (via `mcp-runtime.yaml` or env override), Ego also runs internal `Hippocampus` memory recall per thought/input planning step (not a MotorCortex action).
 - Ego tracks a `decision_pressure` signal to detect circular thought chains and increase convergence pressure.

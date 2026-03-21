@@ -992,7 +992,7 @@ class EgoPlannerTest {
                 recentDialogue = emptyList(),
                 queue = QueueSnapshot(0, 0, 0),
                 ambientContext = ai.neopsyke.agent.model.AmbientContext(
-                    activeProjects = listOf("Improve the memory subsystem"),
+                    activeGoals = listOf("Improve the memory subsystem"),
                     unresolvedOpenLoops = listOf("Tidy the planner retries"),
                 )
             )
@@ -1000,7 +1000,7 @@ class EgoPlannerTest {
 
         val prompt = llm.lastMessages.last().content
         assertTrue(prompt.contains("Ambient context:"))
-        assertTrue(prompt.contains("active_projects:"))
+        assertTrue(prompt.contains("active_goals:"))
         assertTrue(prompt.contains("Improve the memory subsystem"))
         assertTrue(prompt.contains("unresolved_open_loops:"))
     }

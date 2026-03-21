@@ -220,14 +220,14 @@ class MemorySystemTemporalVectorTest {
             shortTermSummary = "",
             recentDialogue = emptyList(),
             ambientContext = ai.neopsyke.agent.model.AmbientContext(
-                activeProjects = listOf("Build the memory subsystem"),
+                activeGoals = listOf("Build the memory subsystem"),
                 recentExactLearningTopics = listOf("kotlin, coroutines")
             )
         )
 
         assertTrue(capturedCue != null, "Expected hippocampus to be called")
         assertTrue(capturedCue!!.contains("Ambient context:"))
-        assertTrue(capturedCue!!.contains("active_projects:"))
+        assertTrue(capturedCue!!.contains("active_goals:"))
         assertTrue(capturedCue!!.contains("Build the memory subsystem"))
         assertTrue(capturedCue!!.contains("Learning freshness guidance:"))
     }

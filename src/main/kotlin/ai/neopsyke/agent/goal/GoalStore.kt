@@ -1,4 +1,4 @@
-package ai.neopsyke.agent.project
+package ai.neopsyke.agent.goal
 
 import com.fasterxml.jackson.databind.SerializationFeature
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
@@ -13,27 +13,27 @@ import java.nio.file.StandardOpenOption
 private val logger = KotlinLogging.logger {}
 
 /**
- * File-backed storage for project workspaces.
+ * File-backed storage for goal workspaces.
  *
- * Directory layout per project:
+ * Directory layout per goal:
  * ```
- * {workspaceRoot}/{project-id}/
- *   project.json        # metadata snapshot
- *   events.jsonl         # append-only event log
- *   snapshot.json        # periodic state snapshot
+ * {workspaceRoot}/{goal-id}/
+ *   goal.json        # metadata snapshot
+ *   goal-events.jsonl    # append-only event log
+ *   goal-snapshot.json   # periodic state snapshot
  *   workspace/
  *     context.md         # Tier 2 working context
  *     scratch.md         # free-form notes
  *     artifacts/         # step outputs
  * ```
  */
-class ProjectStore(private val workspaceRoot: Path) {
+class GoalStore(private val workspaceRoot: Path) {
 
     private val mapper = jacksonObjectMapper()
         .registerModule(JavaTimeModule())
         .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
 
-    fun scanProjects(): List<String> {
+    fun scanGoals(): List<String> {
         if (!Files.isDirectory(workspaceRoot)) return emptyList()
         return Files.list(workspaceRoot).use { stream ->
             stream.filter { Files.isDirectory(it) }
@@ -43,27 +43,27 @@ class ProjectStore(private val workspaceRoot: Path) {
         }
     }
 
-    fun loadProject(projectId: String): ProjectState? {
-        val dir = workspaceRoot.resolve(projectId)
+    fun loadGoal(goalId: String): GoalState? {
+        val dir = workspaceRoot.resolve(goalId)
         if (!Files.isDirectory(dir)) return null
 
-        val projectStatePath = dir.resolve(PROJECT_FILE)
+        val goalStatePath = dir.resolve(GOAL_FILE)
         val snapshotPath = dir.resolve(SNAPSHOT_FILE)
         val eventsPath = dir.resolve(EVENTS_FILE)
-        val eventLog = ProjectEventLog(eventsPath)
+        val eventLog = GoalEventLog(eventsPath)
 
         val (baseState, replayFrom) = when {
-            Files.exists(projectStatePath) -> {
+            Files.exists(goalStatePath) -> {
                 try {
-                    val snapshot = mapper.readValue<ProjectSnapshot>(Files.readString(projectStatePath))
+                    val snapshot = mapper.readValue<GoalSnapshot>(Files.readString(goalStatePath))
                     snapshot.toState(dir.resolve(WORKSPACE_DIR)) to snapshot.eventCount
                 } catch (e: Exception) {
-                    logger.warn { "Failed to read project.json for $projectId, falling back: ${e.message}" }
-                    loadSnapshotBase(snapshotPath, dir, projectId)
+                    logger.warn { "Failed to read goal.json for $goalId, falling back: ${e.message}" }
+                    loadSnapshotBase(snapshotPath, dir, goalId)
                 }
             }
 
-            Files.exists(snapshotPath) -> loadSnapshotBase(snapshotPath, dir, projectId)
+            Files.exists(snapshotPath) -> loadSnapshotBase(snapshotPath, dir, goalId)
             else -> null to 0
         }
 
@@ -72,44 +72,44 @@ class ProjectStore(private val workspaceRoot: Path) {
 
         var state = baseState ?: run {
             val firstEvent = events.firstOrNull() ?: return null
-            if (firstEvent !is ProjectEvent.Created) {
-                logger.warn { "First event for $projectId is not Created, cannot reconstruct" }
+            if (firstEvent !is GoalEvent.Created) {
+                logger.warn { "First event for $goalId is not Created, cannot reconstruct" }
                 return null
             }
-            ProjectStateMachine.initialState(firstEvent, dir.resolve(WORKSPACE_DIR))
+            GoalStateMachine.initialState(firstEvent, dir.resolve(WORKSPACE_DIR))
         }
 
         val eventsToReplay = if (baseState == null) events.drop(1) else events
         for (event in eventsToReplay) {
-            state = ProjectStateMachine.transition(state, event).first
+            state = GoalStateMachine.transition(state, event).first
         }
         return state
     }
 
-    fun saveProjectState(projectId: String, state: ProjectState) {
-        val dir = workspaceRoot.resolve(projectId)
+    fun saveGoalState(goalId: String, state: GoalState) {
+        val dir = workspaceRoot.resolve(goalId)
         Files.createDirectories(dir)
-        val json = mapper.writerWithDefaultPrettyPrinter().writeValueAsString(ProjectSnapshot.from(state))
-        atomicWrite(dir.resolve(PROJECT_FILE), json)
+        val json = mapper.writerWithDefaultPrettyPrinter().writeValueAsString(GoalSnapshot.from(state))
+        atomicWrite(dir.resolve(GOAL_FILE), json)
     }
 
-    fun saveSnapshot(projectId: String, state: ProjectState) {
-        val dir = workspaceRoot.resolve(projectId)
+    fun saveSnapshot(goalId: String, state: GoalState) {
+        val dir = workspaceRoot.resolve(goalId)
         Files.createDirectories(dir)
-        val snapshot = ProjectSnapshot.from(state)
+        val snapshot = GoalSnapshot.from(state)
         val json = mapper.writerWithDefaultPrettyPrinter().writeValueAsString(snapshot)
         atomicWrite(dir.resolve(SNAPSHOT_FILE), json)
     }
 
-    fun createWorkspace(projectId: String): Path {
-        val dir = workspaceRoot.resolve(projectId).resolve(WORKSPACE_DIR)
+    fun createWorkspace(goalId: String): Path {
+        val dir = workspaceRoot.resolve(goalId).resolve(WORKSPACE_DIR)
         Files.createDirectories(dir)
         Files.createDirectories(dir.resolve("artifacts"))
         return dir
     }
 
-    fun appendScratchEntry(projectId: String, entry: String) {
-        val workspace = createWorkspace(projectId)
+    fun appendScratchEntry(goalId: String, entry: String) {
+        val workspace = createWorkspace(goalId)
         val scratch = workspace.resolve("scratch.md")
         Files.writeString(
             scratch,
@@ -119,32 +119,32 @@ class ProjectStore(private val workspaceRoot: Path) {
         )
     }
 
-    fun writeArtifact(projectId: String, stepId: String, artifactName: String, content: String) {
-        val artifactsDir = createWorkspace(projectId).resolve("artifacts").resolve(stepId)
+    fun writeArtifact(goalId: String, stepId: String, artifactName: String, content: String) {
+        val artifactsDir = createWorkspace(goalId).resolve("artifacts").resolve(stepId)
         Files.createDirectories(artifactsDir)
         atomicWrite(artifactsDir.resolve(artifactName), content)
     }
 
-    fun deleteProject(projectId: String) {
-        val dir = workspaceRoot.resolve(projectId)
+    fun deleteGoal(goalId: String) {
+        val dir = workspaceRoot.resolve(goalId)
         if (!Files.exists(dir)) return
         Files.walk(dir)
             .sorted(Comparator.reverseOrder())
             .forEach { Files.deleteIfExists(it) }
     }
 
-    fun eventLog(projectId: String): ProjectEventLog =
-        ProjectEventLog(workspaceRoot.resolve(projectId).resolve(EVENTS_FILE))
+    fun goalEventLog(goalId: String): GoalEventLog =
+        GoalEventLog(workspaceRoot.resolve(goalId).resolve(EVENTS_FILE))
 
-    fun projectDir(projectId: String): Path = workspaceRoot.resolve(projectId)
+    fun goalDir(goalId: String): Path = workspaceRoot.resolve(goalId)
 
-    private fun loadSnapshotBase(snapshotPath: Path, dir: Path, projectId: String): Pair<ProjectState?, Int> =
+    private fun loadSnapshotBase(snapshotPath: Path, dir: Path, goalId: String): Pair<GoalState?, Int> =
         if (Files.exists(snapshotPath)) {
             try {
-                val snapshot = mapper.readValue<ProjectSnapshot>(Files.readString(snapshotPath))
+                val snapshot = mapper.readValue<GoalSnapshot>(Files.readString(snapshotPath))
                 snapshot.toState(dir.resolve(WORKSPACE_DIR)) to snapshot.eventCount
             } catch (e: Exception) {
-                logger.warn { "Failed to read snapshot for $projectId, falling back to full replay: ${e.message}" }
+                logger.warn { "Failed to read snapshot for $goalId, falling back to full replay: ${e.message}" }
                 null to 0
             }
         } else {
@@ -163,9 +163,9 @@ class ProjectStore(private val workspaceRoot: Path) {
     }
 
     companion object {
-        const val PROJECT_FILE = "project.json"
-        const val EVENTS_FILE = "events.jsonl"
-        const val SNAPSHOT_FILE = "snapshot.json"
+        const val GOAL_FILE = "goal.json"
+        const val EVENTS_FILE = "goal-events.jsonl"
+        const val SNAPSHOT_FILE = "goal-snapshot.json"
         const val WORKSPACE_DIR = "workspace"
     }
 }
@@ -174,8 +174,8 @@ class ProjectStore(private val workspaceRoot: Path) {
  * Serializable snapshot for crash recovery. Stores enough state to avoid
  * replaying the full event log.
  */
-internal data class ProjectSnapshot(
-    val projectId: String = "",
+internal data class GoalSnapshot(
+    val goalId: String = "",
     val title: String = "",
     val instruction: String = "",
     val status: String = "",
@@ -186,18 +186,18 @@ internal data class ProjectSnapshot(
     val suspendedUntil: String? = null,
     val cronExpression: String? = null,
     val metadata: Map<String, String> = emptyMap(),
-    val plan: ProjectPlan? = null,
+    val plan: GoalPlan? = null,
     val producedKeys: Set<String> = emptySet(),
     val eventCount: Int = 0,
 ) {
-    fun toState(workspacePath: Path): ProjectState = ProjectState(
-        project = Project(
-            id = projectId,
+    fun toState(workspacePath: Path): GoalState = GoalState(
+        goal = Goal(
+            id = goalId,
             title = title,
             instruction = instruction,
-            status = ProjectStatus.valueOf(status),
-            priority = ProjectPriority.valueOf(priority),
-            plan = plan ?: ProjectPlan.empty(),
+            status = GoalStatus.valueOf(status),
+            priority = GoalPriority.valueOf(priority),
+            plan = plan ?: GoalPlan.empty(),
             completionCriteria = completionCriteria,
             createdAt = java.time.Instant.parse(createdAt),
             lastWorkedAt = lastWorkedAt?.let { java.time.Instant.parse(it) },
@@ -211,19 +211,19 @@ internal data class ProjectSnapshot(
     )
 
     companion object {
-        fun from(state: ProjectState): ProjectSnapshot = ProjectSnapshot(
-            projectId = state.id,
-            title = state.project.title,
-            instruction = state.project.instruction,
-            status = state.project.status.name,
-            priority = state.project.priority.name,
-            completionCriteria = state.project.completionCriteria,
-            createdAt = state.project.createdAt.toString(),
-            lastWorkedAt = state.project.lastWorkedAt?.toString(),
-            suspendedUntil = state.project.suspendedUntil?.toString(),
-            cronExpression = state.project.cronExpression,
-            metadata = state.project.metadata,
-            plan = state.project.plan,
+        fun from(state: GoalState): GoalSnapshot = GoalSnapshot(
+            goalId = state.id,
+            title = state.goal.title,
+            instruction = state.goal.instruction,
+            status = state.goal.status.name,
+            priority = state.goal.priority.name,
+            completionCriteria = state.goal.completionCriteria,
+            createdAt = state.goal.createdAt.toString(),
+            lastWorkedAt = state.goal.lastWorkedAt?.toString(),
+            suspendedUntil = state.goal.suspendedUntil?.toString(),
+            cronExpression = state.goal.cronExpression,
+            metadata = state.goal.metadata,
+            plan = state.goal.plan,
             producedKeys = state.producedKeys,
             eventCount = state.eventCount,
         )

@@ -1,4 +1,4 @@
-package ai.neopsyke.agent.project
+package ai.neopsyke.agent.goal
 
 import com.fasterxml.jackson.annotation.JsonProperty
 import com.fasterxml.jackson.databind.DeserializationFeature
@@ -17,7 +17,7 @@ import java.time.Instant
 
 private val verifierLogger = KotlinLogging.logger {}
 
-enum class ProjectStepVerdict {
+enum class GoalStepVerdict {
     PASS,
     RETRY,
     BLOCK,
@@ -25,48 +25,48 @@ enum class ProjectStepVerdict {
     FAIL,
 }
 
-data class ProjectStepVerification(
-    val verdict: ProjectStepVerdict,
+data class GoalStepVerification(
+    val verdict: GoalStepVerdict,
     val reason: String = "",
     val waitCondition: WaitCondition? = null,
 )
 
-interface ProjectStepVerifier {
+interface GoalStepVerifier {
     fun evaluate(
-        project: Project,
+        goal: Goal,
         step: PlanStep,
         action: PendingAction,
         outcome: ActionOutcome,
         observedEvidence: Boolean,
-    ): ProjectStepVerification
+    ): GoalStepVerification
 }
 
-class DeterministicProjectStepVerifier : ProjectStepVerifier {
+class DeterministicGoalStepVerifier : GoalStepVerifier {
     override fun evaluate(
-        project: Project,
+        goal: Goal,
         step: PlanStep,
         action: PendingAction,
         outcome: ActionOutcome,
         observedEvidence: Boolean,
-    ): ProjectStepVerification {
+    ): GoalStepVerification {
         if (!outcome.successful) {
-            return ProjectStepVerification(ProjectStepVerdict.RETRY, outcome.statusSummary)
+            return GoalStepVerification(GoalStepVerdict.RETRY, outcome.statusSummary)
         }
-        return ProjectStepVerification(ProjectStepVerdict.PASS, outcome.statusSummary)
+        return GoalStepVerification(GoalStepVerdict.PASS, outcome.statusSummary)
     }
 }
 
-class LlmProjectStepVerifier(
+class LlmGoalStepVerifier(
     private val modelClient: ChatModelClient,
     private val config: AgentConfig,
-) : ProjectStepVerifier {
+) : GoalStepVerifier {
     override fun evaluate(
-        project: Project,
+        goal: Goal,
         step: PlanStep,
         action: PendingAction,
         outcome: ActionOutcome,
         observedEvidence: Boolean,
-    ): ProjectStepVerification {
+    ): GoalStepVerification {
         val attempts = maxOf(1, config.llmRetryAttempts)
         var raw: String? = null
         for (attempt in 1..attempts) {
@@ -77,9 +77,9 @@ class LlmProjectStepVerifier(
                         ChatMessage(
                             ChatRole.USER,
                             """
-                            Evaluate the project step result.
-                            project_title=${project.title}
-                            project_instruction=${project.instruction}
+                            Evaluate the goal step result.
+                            goal_title=${goal.title}
+                            goal_instruction=${goal.instruction}
                             step_id=${step.id}
                             step_description=${step.description}
                             acceptance_criteria=${step.acceptanceCriteria}
@@ -94,7 +94,7 @@ class LlmProjectStepVerifier(
                     options = ChatRequestOptions(
                         maxTokens = config.planner.maxCompletionTokens,
                         responseFormat = ChatResponseFormat.JsonSchema(
-                            name = "project_step_verdict",
+                            name = "goal_step_verdict",
                             schemaJson = VERDICT_SCHEMA_JSON
                         )
                     )
@@ -102,24 +102,24 @@ class LlmProjectStepVerifier(
                 break
             } catch (ex: Exception) {
                 if (attempt < attempts) {
-                    verifierLogger.warn(ex) { "Project verifier failed; retrying (attempt $attempt/$attempts)." }
+                    verifierLogger.warn(ex) { "Goal verifier failed; retrying (attempt $attempt/$attempts)." }
                 } else {
-                    verifierLogger.warn(ex) { "Project verifier failed after $attempts attempts." }
+                    verifierLogger.warn(ex) { "Goal verifier failed after $attempts attempts." }
                 }
             }
         }
         val content = raw ?: return safeFallback(outcome)
         val payload = try {
-            mapper.readValue<ProjectVerdictPayload>(content)
+            mapper.readValue<GoalVerdictPayload>(content)
         } catch (ex: Exception) {
-            verifierLogger.warn(ex) { "Project verifier response could not be parsed; using safe fallback." }
+            verifierLogger.warn(ex) { "Goal verifier response could not be parsed; using safe fallback." }
             return safeFallback(outcome)
         }
         val verdict = payload.verdict?.trim()?.uppercase()
-            ?.let { runCatching { ProjectStepVerdict.valueOf(it) }.getOrNull() }
+            ?.let { runCatching { GoalStepVerdict.valueOf(it) }.getOrNull() }
             ?: return safeFallback(outcome)
         val reason = payload.reason?.trim().orEmpty()
-        val waitCondition = if (verdict == ProjectStepVerdict.BLOCK) {
+        val waitCondition = if (verdict == GoalStepVerdict.BLOCK) {
             val wakeAt = payload.waitWakeAt?.trim()
             WaitCondition(
                 type = WaitConditionType.TIMER,
@@ -130,17 +130,17 @@ class LlmProjectStepVerifier(
         } else {
             null
         }
-        return ProjectStepVerification(verdict = verdict, reason = reason, waitCondition = waitCondition)
+        return GoalStepVerification(verdict = verdict, reason = reason, waitCondition = waitCondition)
     }
 
-    private fun safeFallback(outcome: ActionOutcome): ProjectStepVerification =
+    private fun safeFallback(outcome: ActionOutcome): GoalStepVerification =
         if (outcome.successful) {
-            ProjectStepVerification(ProjectStepVerdict.CONTINUE, outcome.statusSummary)
+            GoalStepVerification(GoalStepVerdict.CONTINUE, outcome.statusSummary)
         } else {
-            ProjectStepVerification(ProjectStepVerdict.RETRY, outcome.statusSummary)
+            GoalStepVerification(GoalStepVerdict.RETRY, outcome.statusSummary)
         }
 
-    private data class ProjectVerdictPayload(
+    private data class GoalVerdictPayload(
         val verdict: String? = null,
         val reason: String? = null,
         @field:JsonProperty("wait_wake_at")
@@ -163,7 +163,7 @@ class LlmProjectStepVerifier(
             }
         """.trimIndent()
         val SYSTEM_PROMPT: String = """
-            You evaluate whether a project step has satisfied its acceptance criteria.
+            You evaluate whether a goal step has satisfied its acceptance criteria.
             Return strict JSON only.
             Use BLOCK only when the next action should wait until a later time.
             If uncertain, prefer CONTINUE over PASS.

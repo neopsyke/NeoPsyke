@@ -228,7 +228,7 @@ class LlmLongTermMemoryAdvisor(
                 Bad: "The agent learned the user's name is Victor."
                 Prefer saving:
                 - stable user preferences
-                - durable project constraints or decisions
+                - durable goal constraints or decisions
                 - important factual outcomes
                 Avoid saving transient chatter or redundant details.
                 Never save a fact that is already present in the "Long-term memory recall" block

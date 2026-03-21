@@ -14,9 +14,9 @@ import ai.neopsyke.agent.memory.episodic.EpisodicEventType
 import ai.neopsyke.agent.memory.scratchpad.ScratchpadStore
 import ai.neopsyke.agent.id.EmptyGoalRegistry
 import ai.neopsyke.agent.id.GoalRegistry
-import ai.neopsyke.agent.project.NoopGoalsGateway
-import ai.neopsyke.agent.project.GoalRunActivation
-import ai.neopsyke.agent.project.GoalsGateway
+import ai.neopsyke.agent.goal.NoopGoalsGateway
+import ai.neopsyke.agent.goal.GoalRunActivation
+import ai.neopsyke.agent.goal.GoalsGateway
 import ai.neopsyke.agent.support.TextSecurity
 import ai.neopsyke.agent.superego.Superego
 import ai.neopsyke.instrumentation.AgentEvent
@@ -35,11 +35,11 @@ class Ego(
     private val memory: MemorySystem,
     private val metaReasoner: MetaReasoner = NoopMetaReasoner,
     private val sensoryCortex: SensoryCortex = SensoryCortex.stdin(config),
-    private val taskWorkspaceStore: ScratchpadStore = ScratchpadStore(config.memory.taskWorkspace),
-    private val taskWorkspaceFinalizer: ScratchpadFinalizer = NoopScratchpadFinalizer,
+    private val scratchpadStore: ScratchpadStore = ScratchpadStore(config.memory.scratchpad),
+    private val scratchpadFinalizer: ScratchpadFinalizer = NoopScratchpadFinalizer,
     private val instrumentation: AgentInstrumentation = NoopAgentInstrumentation,
-    private val projectRegistry: GoalRegistry = EmptyGoalRegistry,
-    private val projectsGateway: GoalsGateway = NoopGoalsGateway,
+    private val goalRegistry: GoalRegistry = EmptyGoalRegistry,
+    private val goalsGateway: GoalsGateway = NoopGoalsGateway,
 ) {
     @Volatile private var id: ai.neopsyke.agent.id.Id? = null
 
@@ -71,7 +71,7 @@ class Ego(
         config, instrumentation, metaReasoner,
         isEvidenceActionType = { motorCortex.hasCapability(it, ai.neopsyke.agent.actions.ActionCapability.GATHERS_EVIDENCE) }
     )
-    private val telemetry = EgoTelemetry(instrumentation, scheduler, memory, taskWorkspaceStore, config)
+    private val telemetry = EgoTelemetry(instrumentation, scheduler, memory, scratchpadStore, config)
     private val fallbackHandler = FallbackHandler(
         scheduler, config, instrumentation, deliberation, memory, telemetry,
         dialogueFor = ::dialogueFor,
@@ -80,7 +80,7 @@ class Ego(
     )
     private val dispatcher = DecisionDispatcher(
         scheduler, config, instrumentation, deliberation, memory, motorCortex,
-        taskWorkspaceStore, telemetry, fallbackHandler,
+        scratchpadStore, telemetry, fallbackHandler,
         dialogueFor = ::dialogueFor,
         resolveSessionId = ::resolveSessionId,
         inputScope = ::inputScope,
@@ -88,14 +88,14 @@ class Ego(
     private val taskVerifier: DecisionVerifier = DeterministicDecisionVerifier()
     private val actionPipeline = ActionReviewPipeline(
         superego, motorCortex, config, instrumentation, scheduler,
-        taskVerifier, taskWorkspaceStore, taskWorkspaceFinalizer,
+        taskVerifier, scratchpadStore, scratchpadFinalizer,
         deliberation, memory, telemetry, fallbackHandler, impulseTracker,
         dialogueFor = ::dialogueFor,
         resolveSessionId = ::resolveSessionId,
         superegoContext = ::superegoContext,
         cleanupResolvedInputAfterAnswer = ::cleanupResolvedInputAfterAnswer,
         getId = { id },
-        actionLifecycleObserver = projectsGateway,
+        actionLifecycleObserver = goalsGateway,
     )
 
     private fun dialogueFor(sessionId: String): ArrayDeque<DialogueTurn> =
@@ -142,9 +142,9 @@ class Ego(
                     val stimulus = signal.stimulus
                     val goalCue = GoalRuntimeCue.fromStimulus(stimulus)
                     if (goalCue != null) {
-                        val work = projectsGateway.nextWorkFromCue(goalCue)
+                        val work = goalsGateway.nextWorkFromCue(goalCue)
                         if (work != null) {
-                            logger.info { "Project work picked: ${work.projectId}/${work.stepId}" }
+                            logger.info { "Goal work picked: ${work.goalId}/${work.stepId}" }
                             scheduler.enqueueProjectWork(work)
                             runLoop()
                             cleanupAfterProjectAdvance(work.rootInputId)
@@ -252,7 +252,7 @@ class Ego(
             deliberation.reset()
             memory.resetForNewInput()
             dispatcher.resetForNewInput()
-            val clearedWorkspaces = taskWorkspaceStore.clearActiveWorkspaces()
+            val clearedWorkspaces = scratchpadStore.clearActiveWorkspaces()
             if (clearedWorkspaces > 0) {
                 instrumentation.emit(
                     AgentEvent(
@@ -289,7 +289,7 @@ class Ego(
         )
         dialogueFor(sessionId).addLast(userTurn)
         memory.remember(userTurn)
-        maybeCreateTaskWorkspace(input)
+        maybeCreateScratchpad(input)
         trimDialogue(sessionId)
 
         timing.startPhase("planner_context")
@@ -330,7 +330,7 @@ class Ego(
         when (opportunity) {
             is OpportunityWorkItem.InputOpportunity -> processInput(opportunity.input)
             is OpportunityWorkItem.ImpulseOpportunity -> processImpulse(opportunity.impulse)
-            is OpportunityWorkItem.GoalWorkOpportunity -> processProjectWork(opportunity.workUnit)
+            is OpportunityWorkItem.GoalWorkOpportunity -> processGoalWork(opportunity.workUnit)
         }
     }
 
@@ -448,10 +448,10 @@ class Ego(
             needId = impulse.needId,
             triggeringUrgency = impulse.urgency,
         )
-        val projectSummary = projectsGateway.pendingWorkSummary()
+        val projectSummary = goalsGateway.pendingWorkSummary()
         val context = idConstrainedContext.copy(
             shortTermContextSummary = "",
-            projectWorkSummary = projectSummary,
+            goalWorkSummary = projectSummary,
         )
 
         timing.startPhase("planner_decide")
@@ -491,18 +491,18 @@ class Ego(
         actionPipeline.reviewAndExecute(action)
     }
 
-    private suspend fun processProjectWork(work: GoalRunActivation) {
-        val timing = PhaseTimingCollector("project_work", "project:${work.projectId}")
+    private suspend fun processGoalWork(work: GoalRunActivation) {
+        val timing = PhaseTimingCollector("goal_work", "goal:${work.goalId}")
         val convCtx = ConversationContext.default()
         val sessionId = resolveSessionId(convCtx)
         activateSession(convCtx)
 
-        timing.startPhase("project_work_processing")
+        timing.startPhase("goal_work_processing")
         instrumentation.emit(
             AgentEvent(
-                type = "project_work_processing",
+                type = "goal_work_processing",
                 data = mapOf(
-                    "project_id" to work.projectId,
+                    "goal_id" to work.goalId,
                     "step_id" to work.stepId,
                     "step_description" to work.stepDescription,
                 ),
@@ -510,7 +510,7 @@ class Ego(
         )
 
         timing.startPhase("planner_context")
-        val trigger = EgoTrigger.ProjectWork(work)
+        val trigger = EgoTrigger.GoalWork(work)
         val context = plannerContext(
             trigger = trigger,
             rootInputId = work.rootInputId,
@@ -523,7 +523,7 @@ class Ego(
         journalPlannerDecision(decision)
 
         timing.startPhase("apply_decision")
-        val origin = ActionOrigin(OriginSource.PROJECT)
+        val origin = ActionOrigin(OriginSource.GOAL)
         dispatcher.dispatch(
             decision = decision,
             nextPassCount = 0,
@@ -544,8 +544,8 @@ class Ego(
         }
     }
 
-    private fun maybeCreateTaskWorkspace(input: PendingInput) {
-        val created = taskWorkspaceStore.ensureForInput(input)
+    private fun maybeCreateScratchpad(input: PendingInput) {
+        val created = scratchpadStore.ensureForInput(input)
         if (!created) return
         instrumentation.emit(
             AgentEvent(
@@ -555,11 +555,11 @@ class Ego(
                     "root_input_received_at_ms" to input.receivedAtMs,
                     "input_id" to input.id,
                     "goal_preview" to TextSecurity.preview(input.content, 140),
-                    "active_tasks" to taskWorkspaceStore.activeTaskCount()
+                    "active_tasks" to scratchpadStore.activeTaskCount()
                 )
             )
         )
-        telemetry.emitTaskWorkspaceTelemetry(
+        telemetry.emitScratchpadTelemetry(
             rootInputId = input.rootInputId,
             rootInputReceivedAtMs = input.receivedAtMs,
             updateType = "workspace_created"
@@ -585,13 +585,13 @@ class Ego(
         )
         val lessons = memory.recallLessons(trigger, recentDialogue)
         val episodicRecall = memory.recallEpisodic(trigger, recentDialogue)
-        val taskWorkspaceSummary = taskWorkspaceStore.promptSummary(
+        val scratchpadSummary = scratchpadStore.promptSummary(
             rootInputId = rootInputId,
-            maxTokens = config.memory.taskWorkspace.maxPromptTokens
+            maxTokens = config.memory.scratchpad.maxPromptTokens
         )
-        val sessionWorkspaceDigest = taskWorkspaceStore.digestPromptSummary(
+        val sessionScratchpadDigest = scratchpadStore.digestPromptSummary(
             sessionId = sessionId,
-            maxTokens = config.memory.taskWorkspace.digestMaxPromptTokens
+            maxTokens = config.memory.scratchpad.digestMaxPromptTokens
         )
         val disabled = deliberation.disabledActionTypes(rootInputId, sessionId)
         val availableActions = motorCortex.availableActionTypes() - disabled
@@ -612,8 +612,8 @@ class Ego(
             longTermMemoryRecall = longTermRecall,
             lessons = lessons,
             episodicRecall = episodicRecall,
-            taskWorkspaceSummary = taskWorkspaceSummary,
-            sessionWorkspaceDigest = sessionWorkspaceDigest,
+            scratchpadSummary = scratchpadSummary,
+            sessionScratchpadDigest = sessionScratchpadDigest,
             ambientContext = ambientContext,
             evidenceHints = evidenceHints,
             deliberation = deliberation.snapshot(),
@@ -629,15 +629,15 @@ class Ego(
         if (!shouldAttachAmbientContext(trigger)) {
             return AmbientContext()
         }
-        val activeGoals = projectRegistry.activeGoals()
+        val activeGoals = goalRegistry.activeGoals()
             .map { goal -> TextSecurity.preview(goal.instruction, AMBIENT_PROJECT_PREVIEW_CHARS) }
             .filter { it.isNotBlank() }
             .take(MAX_AMBIENT_PROJECTS)
         return AmbientContext(
-            activeProjects = activeGoals,
-            recentWorkspaceThemes = taskWorkspaceStore.recentResolvedGoalSignals(MAX_AMBIENT_WORKSPACE_SIGNALS),
+            activeGoals = activeGoals,
+            recentWorkspaceThemes = scratchpadStore.recentResolvedGoalSignals(MAX_AMBIENT_WORKSPACE_SIGNALS),
             recentUsefulActionsOrUpdates = memory.recentUsefulActionsOrUpdates(),
-            unresolvedOpenLoops = taskWorkspaceStore.activeGoalSignals(MAX_AMBIENT_OPEN_LOOPS),
+            unresolvedOpenLoops = scratchpadStore.activeGoalSignals(MAX_AMBIENT_OPEN_LOOPS),
             recentExactLearningTopics = memory.recentExactLearningTopics(),
         )
     }
@@ -646,7 +646,7 @@ class Ego(
         when (trigger) {
             is EgoTrigger.IncomingInput -> false
             is EgoTrigger.IncomingImpulse -> true
-            is EgoTrigger.ProjectWork -> true
+            is EgoTrigger.GoalWork -> true
             is EgoTrigger.PendingThoughtInput -> trigger.thought.origin.source == OriginSource.ID
         }
 
@@ -762,13 +762,13 @@ class Ego(
         planner.resetForInput(rootInputId)
         deliberation.clearForInput(rootInputId, sessionId)
         dispatcher.clearExternalActionSignatures(scope)
-        telemetry.emitTaskWorkspaceTelemetry(
+        telemetry.emitScratchpadTelemetry(
             rootInputId = rootInputId,
             rootInputReceivedAtMs = action.rootInputReceivedAtMs,
             updateType = "before_destroy_input_resolved"
         )
         val cleared = scheduler.clearPendingWorkForInput(rootInputId, sessionId)
-        val digestEntry = taskWorkspaceStore.captureDigest(rootInputId, sessionId)
+        val digestEntry = scratchpadStore.captureDigest(rootInputId, sessionId)
         if (digestEntry != null) {
             instrumentation.emit(
                 AgentEvent(
@@ -783,7 +783,7 @@ class Ego(
                 )
             )
         }
-        val destroyedWorkspace = taskWorkspaceStore.destroy(rootInputId)
+        val destroyedWorkspace = scratchpadStore.destroy(rootInputId)
         if (destroyedWorkspace != null) {
             instrumentation.emit(
                 AgentEvent(
@@ -823,12 +823,12 @@ class Ego(
         planner.resetForInput(rootInputId)
         deliberation.clearForInput(rootInputId, sessionId)
         dispatcher.clearExternalActionSignatures(InputScope(rootInputId, sessionId))
-        projectsGateway.finalizeGoalCycle(rootInputId)
+        goalsGateway.finalizeGoalCycle(rootInputId)
         instrumentation.emit(
             AgentEvent(
-                type = "project_advance_cleanup",
+                type = "goal_advance_cleanup",
                 data = mapOf(
-                    "project_root_id" to rootInputId,
+                    "goal_root_id" to rootInputId,
                 )
             )
         )
@@ -839,7 +839,7 @@ class Ego(
             is LoopTask.AttendOpportunity -> when (task.item) {
                 is OpportunityWorkItem.InputOpportunity -> "input"
                 is OpportunityWorkItem.ImpulseOpportunity -> "impulse"
-                is OpportunityWorkItem.GoalWorkOpportunity -> "project_work"
+                is OpportunityWorkItem.GoalWorkOpportunity -> "goal_work"
             }
             is LoopTask.ProcessThought -> "thought"
             is LoopTask.PerformAction -> "action"

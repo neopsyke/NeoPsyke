@@ -12,7 +12,7 @@ internal class EgoTelemetry(
     private val instrumentation: AgentInstrumentation,
     private val scheduler: AttentionScheduler,
     private val memory: MemorySystem,
-    private val taskWorkspaceStore: ScratchpadStore,
+    private val scratchpadStore: ScratchpadStore,
     private val config: AgentConfig,
 ) {
     fun emitDeliberationState(taskType: String, state: DeliberationState) {
@@ -57,7 +57,7 @@ internal class EgoTelemetry(
             ))
             put("scratchpads", mapOf(
                 "label" to "Scratchpads",
-                "item_count" to taskWorkspaceStore.activeTaskCount(),
+                "item_count" to scratchpadStore.activeTaskCount(),
                 "chars_or_bytes" to 0L,
                 "unit" to "items",
             ))
@@ -80,12 +80,12 @@ internal class EgoTelemetry(
         )
     }
 
-    fun emitTaskWorkspaceTelemetry(
+    fun emitScratchpadTelemetry(
         rootInputId: String?,
         rootInputReceivedAtMs: Long?,
         updateType: String,
     ) {
-        val head = taskWorkspaceStore.debugHead(rootInputId) ?: return
+        val head = scratchpadStore.debugHead(rootInputId) ?: return
         instrumentation.emit(
             AgentEvent(
                 type = "scratchpad_head",
@@ -103,8 +103,8 @@ internal class EgoTelemetry(
                 )
             )
         )
-        if (!config.memory.taskWorkspace.debugCaptureEnabled) return
-        val snapshot = taskWorkspaceStore.debugSnapshot(rootInputId) ?: return
+        if (!config.memory.scratchpad.debugCaptureEnabled) return
+        val snapshot = scratchpadStore.debugSnapshot(rootInputId) ?: return
         instrumentation.emit(
             AgentEvent(
                 type = "scratchpad_debug_snapshot",

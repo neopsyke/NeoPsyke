@@ -1,4 +1,4 @@
-package ai.neopsyke.agent.project
+package ai.neopsyke.agent.goal
 
 import kotlinx.coroutines.CoroutineScope
 import ai.neopsyke.agent.ego.ActionLifecycleObserver
@@ -17,20 +17,20 @@ interface GoalsGateway : GoalRegistry, ActionLifecycleObserver {
     fun executeOperation(request: GoalOperationRequest): GoalOperationResult =
         GoalOperationResult(false, "Goals feature is disabled.")
     fun notifyAsyncOperationEvent(event: AsyncOperationEvent): Int = 0
-    fun allProjects(): List<ProjectTier1Summary> = emptyList()
-    fun projectStatus(projectId: String): ProjectState? = null
+    fun allGoals(): List<GoalTier1Summary> = emptyList()
+    fun goalStatus(goalId: String): GoalState? = null
 }
 
 object NoopGoalsGateway : GoalsGateway {
-    override fun activeGoals(): List<ai.neopsyke.agent.id.Goal> = emptyList()
+    override fun activeGoals(): List<ai.neopsyke.agent.id.GoalCommitment> = emptyList()
 }
 
 data class GoalOperationRequest(
     val operation: GoalOperation,
-    val projectId: String? = null,
+    val goalId: String? = null,
     val title: String? = null,
     val instruction: String? = null,
-    val priority: ProjectPriority? = null,
+    val priority: GoalPriority? = null,
     val completionCriteria: String? = null,
     val reason: String? = null,
 )
@@ -38,7 +38,7 @@ data class GoalOperationRequest(
 data class GoalOperationResult(
     val success: Boolean,
     val message: String,
-    val projectId: String? = null,
+    val goalId: String? = null,
 )
 
 enum class GoalOperation {

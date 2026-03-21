@@ -183,8 +183,8 @@ class EgoAgentTest {
 
                     is ai.neopsyke.agent.model.EgoTrigger.IncomingImpulse ->
                        ai.neopsyke.agent.model.EgoDecision.Noop("unexpected impulse")
-                    is ai.neopsyke.agent.model.EgoTrigger.ProjectWork ->
-                        ai.neopsyke.agent.model.EgoDecision.Noop("unexpected project work")
+                    is ai.neopsyke.agent.model.EgoTrigger.GoalWork ->
+                        ai.neopsyke.agent.model.EgoDecision.Noop("unexpected goal work")
                 }
         }
         val superegoLlm = StubChatModelClient().apply {
@@ -334,7 +334,7 @@ class EgoAgentTest {
         val config = AgentConfig(
             planner = PlannerConfig(maxLoopStepsPerInput = 8, maxThoughtPasses = 3),
             memory = MemoryConfig(
-                taskWorkspace = TaskWorkspaceConfig(
+                scratchpad = ScratchpadConfig(
                     enabled = true,
                     activationMinPlanSteps = 1,
                     digestMaxEntries = 4
@@ -1014,7 +1014,7 @@ class EgoAgentTest {
         val config = AgentConfig(
             planner = PlannerConfig(maxLoopStepsPerInput = 8, maxThoughtPasses = 3),
             memory = MemoryConfig(
-                taskWorkspace = TaskWorkspaceConfig(
+                scratchpad = ScratchpadConfig(
                     enabled = true,
                     activationMinPlanSteps = 1,
                     maxPromptTokens = 280,
@@ -1085,7 +1085,7 @@ class EgoAgentTest {
         val config = AgentConfig(
             planner = PlannerConfig(maxLoopStepsPerInput = 8, maxThoughtPasses = 3),
             memory = MemoryConfig(
-                taskWorkspace = TaskWorkspaceConfig(
+                scratchpad = ScratchpadConfig(
                     enabled = true,
                     activationMinPlanSteps = 1,
                     finalPassMinWorkspaceConfidence = 0.30,
@@ -1107,7 +1107,7 @@ class EgoAgentTest {
                 }
             ),
             config = config,
-            taskWorkspaceFinalizer = finalizer,
+            scratchpadFinalizer = finalizer,
             instrumentation = instrumentation
         )
 
@@ -1146,7 +1146,7 @@ class EgoAgentTest {
         val config = AgentConfig(
             planner = PlannerConfig(maxLoopStepsPerInput = 4, maxThoughtPasses = 2),
             memory = MemoryConfig(
-                taskWorkspace = TaskWorkspaceConfig(
+                scratchpad = ScratchpadConfig(
                     enabled = true,
                     activationMinPlanSteps = 1,
                     finalPassMinWorkspaceConfidence = 0.90,
@@ -1159,7 +1159,7 @@ class EgoAgentTest {
             superego = Superego(modelClient = superegoLlm, config = config, instrumentation = instrumentation),
             motorCortex = buildMotorCortex(output = { outputs.add(it) }),
             config = config,
-            taskWorkspaceFinalizer = finalizer,
+            scratchpadFinalizer = finalizer,
             instrumentation = instrumentation
         )
 
@@ -1220,7 +1220,7 @@ class EgoAgentTest {
         val config = AgentConfig(
             planner = PlannerConfig(maxLoopStepsPerInput = 10, maxThoughtPasses = 3),
             memory = MemoryConfig(
-                taskWorkspace = TaskWorkspaceConfig(
+                scratchpad = ScratchpadConfig(
                     enabled = true,
                     activationMinPlanSteps = 2,
                     finalPassMinWorkspaceConfidence = 0.30,
@@ -1233,7 +1233,7 @@ class EgoAgentTest {
             superego = Superego(modelClient = superegoLlm, config = config, instrumentation = instrumentation),
             motorCortex = buildMotorCortex(output = { outputs.add(it) }),
             config = config,
-            taskWorkspaceFinalizer = finalizer,
+            scratchpadFinalizer = finalizer,
             instrumentation = instrumentation
         )
 
@@ -1299,7 +1299,7 @@ class EgoAgentTest {
         val plannerLlm = StubChatModelClient().apply {
             enqueueRawResponse(
                 """
-                {"decision":"thought","urgency":"medium","thought":"check memory","long_term_memory_recall_query":"project constraints and deadlines"}
+                {"decision":"thought","urgency":"medium","thought":"check memory","long_term_memory_recall_query":"goal constraints and deadlines"}
                 """.trimIndent()
             )
             enqueueRawResponse(
@@ -1335,7 +1335,7 @@ class EgoAgentTest {
         runAgentWithInput(agent, "hello\nexit\n")
 
         assertTrue(hippocampus.queries.size >= 2)
-        assertTrue(hippocampus.queries.any { it.cue.contains("project constraints and deadlines") })
+        assertTrue(hippocampus.queries.any { it.cue.contains("goal constraints and deadlines") })
         assertTrue(instrumentation.events.any { it.type == "long_term_memory_recall_requested" })
     }
 

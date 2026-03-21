@@ -28,9 +28,9 @@ class AgentRuntimeSettingsLoaderTest {
         assertEquals(true, settings.agentConfig.superego.twoStageSkipForContactUserActions)
         assertEquals(true, settings.agentConfig.superego.twoStageSkipForWebSearchActions)
 
-        assertEquals(false, settings.agentConfig.memory.taskWorkspace.enabled)
-        assertEquals(false, settings.agentConfig.memory.taskWorkspace.debugCaptureEnabled)
-        assertEquals(4, settings.agentConfig.memory.taskWorkspace.digestMaxEntries)
+        assertEquals(false, settings.agentConfig.memory.scratchpad.enabled)
+        assertEquals(false, settings.agentConfig.memory.scratchpad.debugCaptureEnabled)
+        assertEquals(4, settings.agentConfig.memory.scratchpad.digestMaxEntries)
         assertEquals(true, settings.agentConfig.memory.longTermMemoryPromptCompressionEnabled)
 
         assertEquals(true, settings.agentConfig.metaReasoner.dynamicCompletionEnabled)
@@ -164,13 +164,13 @@ class AgentRuntimeSettingsLoaderTest {
         assertEquals(false, settings.agentConfig.superego.twoStageSkipForContactUserActions)
         assertEquals(false, settings.agentConfig.superego.twoStageSkipForWebSearchActions)
 
-        assertEquals(true, settings.agentConfig.memory.taskWorkspace.enabled)
-        assertEquals(300, settings.agentConfig.memory.taskWorkspace.maxPromptTokens)
-        assertEquals(false, settings.agentConfig.memory.taskWorkspace.finalPassRewriteEnabled)
-        assertEquals(190, settings.agentConfig.memory.taskWorkspace.finalPassMaxTokens)
-        assertEquals(0.42, settings.agentConfig.memory.taskWorkspace.finalPassMinWorkspaceConfidence)
-        assertEquals(0.61, settings.agentConfig.memory.taskWorkspace.finalPassMinModelConfidence)
-        assertEquals(false, settings.agentConfig.memory.taskWorkspace.debugCaptureEnabled)
+        assertEquals(true, settings.agentConfig.memory.scratchpad.enabled)
+        assertEquals(300, settings.agentConfig.memory.scratchpad.maxPromptTokens)
+        assertEquals(false, settings.agentConfig.memory.scratchpad.finalPassRewriteEnabled)
+        assertEquals(190, settings.agentConfig.memory.scratchpad.finalPassMaxTokens)
+        assertEquals(0.42, settings.agentConfig.memory.scratchpad.finalPassMinWorkspaceConfidence)
+        assertEquals(0.61, settings.agentConfig.memory.scratchpad.finalPassMinModelConfidence)
+        assertEquals(false, settings.agentConfig.memory.scratchpad.debugCaptureEnabled)
         assertEquals(true, settings.agentConfig.memory.longTermMemoryPromptCompressionEnabled)
         assertEquals(780, settings.agentConfig.memory.longTermMemoryPromptDialogueMaxChars)
         assertEquals(640, settings.agentConfig.memory.longTermMemoryPromptRecallMaxChars)
@@ -234,9 +234,9 @@ class AgentRuntimeSettingsLoaderTest {
                 "EGO_MAX_LOOP_STEPS" to "77",
                 "EGO_LLM_RETRY_ATTEMPTS" to "3",
                 "EGO_MAX_RUN_TOTAL_TOKENS" to "7000",
-                "EGO_TASK_WORKSPACE_ENABLED" to "true",
-                "EGO_TASK_WORKSPACE_FINAL_PASS_REWRITE_ENABLED" to "false",
-                "EGO_TASK_WORKSPACE_DEBUG_CAPTURE_ENABLED" to "true",
+                "EGO_SCRATCHPAD_ENABLED" to "true",
+                "EGO_SCRATCHPAD_FINAL_PASS_REWRITE_ENABLED" to "false",
+                "EGO_SCRATCHPAD_DEBUG_CAPTURE_ENABLED" to "true",
                 "NEOPSYKE_DASHBOARD_ENABLED" to "true",
                 "NEOPSYKE_DASHBOARD_PORT" to "9900",
                 "NEOPSYKE_EVAL_MAX_RAW_RESPONSE_CHARS" to "5555",
@@ -248,9 +248,9 @@ class AgentRuntimeSettingsLoaderTest {
         assertEquals(77, settings.agentConfig.planner.maxLoopStepsPerInput)
         assertEquals(3, settings.agentConfig.llmRetryAttempts)
         assertEquals(7000, settings.agentConfig.planner.maxRunTotalTokens)
-        assertEquals(true, settings.agentConfig.memory.taskWorkspace.enabled)
-        assertEquals(false, settings.agentConfig.memory.taskWorkspace.finalPassRewriteEnabled)
-        assertEquals(true, settings.agentConfig.memory.taskWorkspace.debugCaptureEnabled)
+        assertEquals(true, settings.agentConfig.memory.scratchpad.enabled)
+        assertEquals(false, settings.agentConfig.memory.scratchpad.finalPassRewriteEnabled)
+        assertEquals(true, settings.agentConfig.memory.scratchpad.debugCaptureEnabled)
         assertEquals(true, settings.dashboardEnabled)
         assertEquals(9900, settings.dashboardPort)
         assertEquals(5555, settings.evalMaxRawResponseChars)
@@ -278,8 +278,8 @@ class AgentRuntimeSettingsLoaderTest {
         )
 
         assertEquals(180, settings.agentConfig.planner.maxLoopStepsPerInput)
-        assertEquals(false, settings.agentConfig.memory.taskWorkspace.enabled)
-        assertEquals(false, settings.agentConfig.memory.taskWorkspace.debugCaptureEnabled)
+        assertEquals(false, settings.agentConfig.memory.scratchpad.enabled)
+        assertEquals(false, settings.agentConfig.memory.scratchpad.debugCaptureEnabled)
         assertEquals(true, settings.agentConfig.superego.dynamicCompletionEnabled)
     }
 

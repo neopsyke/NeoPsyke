@@ -3,7 +3,7 @@ package ai.neopsyke.agent.memory.scratchpad
 import ai.neopsyke.agent.model.ActionOutcome
 import ai.neopsyke.agent.model.PendingAction
 import ai.neopsyke.agent.model.PendingInput
-import ai.neopsyke.agent.config.TaskWorkspaceConfig
+import ai.neopsyke.agent.config.ScratchpadConfig
 import ai.neopsyke.agent.support.TextSecurity
 import kotlin.math.max
 
@@ -56,7 +56,7 @@ data class WorkspaceDigestEntry(
 )
 
 class ScratchpadStore(
-    private val config: TaskWorkspaceConfig,
+    private val config: ScratchpadConfig,
 ) {
     @Volatile
     private var activeGoalSignalsSnapshot: List<String> = emptyList()
@@ -78,7 +78,7 @@ class ScratchpadStore(
             return false
         }
         evictOldestIfNeeded()
-        val workspace = TaskWorkspace(
+        val workspace = Scratchpad(
             rootInputId = rootId,
             rootInputReceivedAtMs = input.receivedAtMs,
             goal = TextSecurity.preview(input.content, MAX_GOAL_CHARS)
@@ -111,7 +111,7 @@ class ScratchpadStore(
         return activated
     }
 
-    private fun appendPlanToWorkspace(workspace: TaskWorkspace, goal: String, steps: List<String>) {
+    private fun appendPlanToWorkspace(workspace: Scratchpad, goal: String, steps: List<String>) {
         val normalizedGoal = TextSecurity.preview(goal, MAX_GOAL_CHARS)
         if (normalizedGoal.isNotBlank()) {
             workspace.updateGoal(normalizedGoal)
@@ -362,7 +362,7 @@ class ScratchpadStore(
     @Synchronized
     fun activeTaskCount(): Int = workspaces.size
 
-    private fun lookup(rootInputId: String?): TaskWorkspace? {
+    private fun lookup(rootInputId: String?): Scratchpad? {
         if (!config.enabled || rootInputId.isNullOrBlank()) return null
         return workspaces[rootInputId]
     }
@@ -376,7 +376,7 @@ class ScratchpadStore(
         if (steps.size < config.activationMinPlanSteps) return false
         pendingInputs.remove(rootInputId)
         evictOldestIfNeeded()
-        val workspace = TaskWorkspace(
+        val workspace = Scratchpad(
             rootInputId = pending.rootInputId,
             rootInputReceivedAtMs = pending.receivedAtMs,
             goal = TextSecurity.preview(
@@ -427,18 +427,18 @@ class ScratchpadStore(
                 .toList()
     }
 
-    private data class TaskWorkspaceSection(
+    private data class ScratchpadSection(
         val title: String,
         val summary: String,
         val content: String,
         val source: String,
     )
 
-    private inner class TaskWorkspace(
+    private inner class Scratchpad(
         val rootInputId: String,
         val rootInputReceivedAtMs: Long,
         var goal: String,
-        val sections: ArrayDeque<TaskWorkspaceSection> = ArrayDeque(),
+        val sections: ArrayDeque<ScratchpadSection> = ArrayDeque(),
         val evidence: ArrayDeque<String> = ArrayDeque(),
     ) {
         var version: Long = 0L
@@ -455,7 +455,7 @@ class ScratchpadStore(
         fun addSection(title: String, summary: String, content: String, source: String) {
             if (summary.isBlank() && content.isBlank()) return
             sections.addLast(
-                TaskWorkspaceSection(
+                ScratchpadSection(
                     title = title,
                     summary = TextSecurity.preview(summary, sectionSummaryCap()),
                     content = TextSecurity.preview(content, sectionContentCap()),
@@ -595,7 +595,7 @@ class ScratchpadStore(
         val contentPreview: String,
     )
 
-    private val workspaces = LinkedHashMap<String, TaskWorkspace>()
+    private val workspaces = LinkedHashMap<String, Scratchpad>()
     private val pendingInputs = LinkedHashMap<String, PendingInputRecord>()
     private val digestsBySession: MutableMap<String, ArrayDeque<WorkspaceDigestEntry>> =
         object : LinkedHashMap<String, ArrayDeque<WorkspaceDigestEntry>>(16, 0.75f, true) {

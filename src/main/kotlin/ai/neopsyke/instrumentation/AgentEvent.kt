@@ -553,59 +553,59 @@ object AgentEvents {
             )
         )
 
-    // ── Project events ───────────────────────────────────────────────────
+    // ── Goal events ───────────────────────────────────────────────────
 
-    fun projectCreated(projectId: String, title: String, priority: String): AgentEvent =
+    fun goalCreated(goalId: String, title: String, priority: String): AgentEvent =
         AgentEvent(
-            type = "project_created",
-            data = mapOf("project_id" to projectId, "title" to title, "priority" to priority)
+            type = "goal_created",
+            data = mapOf("goal_id" to goalId, "title" to title, "priority" to priority)
         )
 
-    fun projectStatusChanged(projectId: String, oldStatus: String, newStatus: String): AgentEvent =
+    fun goalStatusChanged(goalId: String, oldStatus: String, newStatus: String): AgentEvent =
         AgentEvent(
-            type = "project_status_changed",
-            data = mapOf("project_id" to projectId, "old_status" to oldStatus, "new_status" to newStatus)
+            type = "goal_status_changed",
+            data = mapOf("goal_id" to goalId, "previous_status" to oldStatus, "current_status" to newStatus)
         )
 
-    fun projectStepStarted(projectId: String, stepId: String, description: String): AgentEvent =
+    fun goalStepStarted(goalId: String, stepId: String, description: String): AgentEvent =
         AgentEvent(
-            type = "project_step_started",
-            data = mapOf("project_id" to projectId, "step_id" to stepId, "description" to description)
+            type = "goal_step_started",
+            data = mapOf("goal_id" to goalId, "step_id" to stepId, "description" to description)
         )
 
-    fun projectStepCompleted(projectId: String, stepId: String, success: Boolean, attempts: Int): AgentEvent =
+    fun goalStepCompleted(goalId: String, stepId: String, success: Boolean, attempts: Int): AgentEvent =
         AgentEvent(
-            type = "project_step_completed",
+            type = "goal_step_completed",
             data = mapOf(
-                "project_id" to projectId, "step_id" to stepId,
+                "goal_id" to goalId, "step_id" to stepId,
                 "success" to success, "attempts" to attempts,
             )
         )
 
-    fun projectWorkCycleCompleted(projectId: String, stepId: String, actionsExecuted: Int): AgentEvent =
+    fun goalWorkCycleCompleted(goalId: String, stepId: String, actionsExecuted: Int): AgentEvent =
         AgentEvent(
-            type = "project_work_cycle_completed",
+            type = "goal_work_cycle_completed",
             data = mapOf(
-                "project_id" to projectId, "step_id" to stepId,
+                "goal_id" to goalId, "step_id" to stepId,
                 "actions_executed" to actionsExecuted,
             )
         )
 
-    fun projectWakeUp(projectId: String, path: String, signalType: String): AgentEvent =
+    fun goalWakeUp(goalId: String, path: String, signalType: String): AgentEvent =
         AgentEvent(
-            type = "project_wake_up",
-            data = mapOf("project_id" to projectId, "path" to path, "signal_type" to signalType)
+            type = "goal_wake_up",
+            data = mapOf("goal_id" to goalId, "path" to path, "signal_type" to signalType)
         )
 
-    fun projectBlocked(projectId: String, stepId: String, conditionType: String): AgentEvent =
+    fun goalBlocked(goalId: String, stepId: String, conditionType: String): AgentEvent =
         AgentEvent(
-            type = "project_blocked",
-            data = mapOf("project_id" to projectId, "step_id" to stepId, "condition_type" to conditionType)
+            type = "goal_blocked",
+            data = mapOf("goal_id" to goalId, "step_id" to stepId, "condition_type" to conditionType)
         )
 
-    fun projectCompleted(projectId: String): AgentEvent =
+    fun goalCompleted(goalId: String): AgentEvent =
         AgentEvent(
-            type = "project_completed",
-            data = mapOf("project_id" to projectId)
+            type = "goal_completed",
+            data = mapOf("goal_id" to goalId)
         )
 }

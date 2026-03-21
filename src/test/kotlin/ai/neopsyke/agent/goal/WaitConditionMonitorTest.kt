@@ -1,4 +1,4 @@
-package ai.neopsyke.agent.project
+package ai.neopsyke.agent.goal
 
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -40,15 +40,15 @@ class WaitConditionMonitorTest {
         val monitor = WaitConditionMonitor(
             checkIntervalMs = 10,
             asyncOperationRegistry = AsyncOperationRegistry.fromProviders(listOf(provider)),
-            onConditionSatisfied = { projectId, stepId, resolution ->
-                satisfied += Triple(projectId, stepId, resolution)
+            onConditionSatisfied = { goalId, stepId, resolution ->
+                satisfied += Triple(goalId, stepId, resolution)
             },
             onConditionTimedOut = { _, _ -> fail("did not expect timeout") },
         )
         monitor.start(testScope())
         try {
             monitor.register(
-                projectId = "proj-1",
+                goalId = "proj-1",
                 stepId = "step-1",
                 condition = asyncCondition(
                     AsyncActionWait(
@@ -80,15 +80,15 @@ class WaitConditionMonitorTest {
         val monitor = WaitConditionMonitor(
             checkIntervalMs = 10,
             asyncOperationRegistry = AsyncOperationRegistry.empty(),
-            onConditionSatisfied = { projectId, stepId, resolution ->
-                satisfied += Triple(projectId, stepId, resolution)
+            onConditionSatisfied = { goalId, stepId, resolution ->
+                satisfied += Triple(goalId, stepId, resolution)
             },
             onConditionTimedOut = { _, _ -> fail("did not expect timeout") },
         )
         monitor.start(testScope())
         try {
             monitor.register(
-                projectId = "proj-any",
+                goalId = "proj-any",
                 stepId = "step-any",
                 condition = asyncCondition(
                     AsyncActionWait(
@@ -133,15 +133,15 @@ class WaitConditionMonitorTest {
         val monitor = WaitConditionMonitor(
             checkIntervalMs = 10,
             asyncOperationRegistry = AsyncOperationRegistry.fromProviders(listOf(provider)),
-            onConditionSatisfied = { projectId, stepId, resolution ->
-                satisfied += Triple(projectId, stepId, resolution)
+            onConditionSatisfied = { goalId, stepId, resolution ->
+                satisfied += Triple(goalId, stepId, resolution)
             },
             onConditionTimedOut = { _, _ -> fail("did not expect timeout") },
         )
         monitor.start(testScope())
         try {
             monitor.register(
-                projectId = "proj-threshold",
+                goalId = "proj-threshold",
                 stepId = "step-threshold",
                 condition = asyncCondition(
                     AsyncActionWait(
@@ -174,15 +174,15 @@ class WaitConditionMonitorTest {
         val monitor = WaitConditionMonitor(
             checkIntervalMs = 10,
             asyncOperationRegistry = AsyncOperationRegistry.empty(),
-            onConditionSatisfied = { projectId, stepId, resolution ->
-                satisfied += Triple(projectId, stepId, resolution)
+            onConditionSatisfied = { goalId, stepId, resolution ->
+                satisfied += Triple(goalId, stepId, resolution)
             },
             onConditionTimedOut = { _, _ -> fail("did not expect timeout") },
         )
         monitor.start(testScope())
         try {
             monitor.register(
-                projectId = "proj-corr",
+                goalId = "proj-corr",
                 stepId = "step-corr",
                 condition = asyncCondition(
                     AsyncActionWait(

@@ -22,7 +22,7 @@ internal class DecisionDispatcher(
     private val deliberation: DeliberationEngine,
     private val memory: MemorySystem,
     private val motorCortex: MotorCortex,
-    private val taskWorkspaceStore: ScratchpadStore,
+    private val scratchpadStore: ScratchpadStore,
     private val telemetry: EgoTelemetry,
     private val fallbackHandler: FallbackHandler,
     private val dialogueFor: (String) -> ArrayDeque<DialogueTurn>,
@@ -255,7 +255,7 @@ internal class DecisionDispatcher(
 
                 // ── All gates passed: emit plan ──
                 planCountByInput[scope] = currentPlanCount + 1
-                val workspaceActivated = taskWorkspaceStore.recordPlan(
+                val workspaceActivated = scratchpadStore.recordPlan(
                     rootInputId = rootInputId,
                     goal = decision.goal,
                     steps = decision.steps
@@ -268,13 +268,13 @@ internal class DecisionDispatcher(
                                 "root_input_id" to rootInputId,
                                 "root_input_received_at_ms" to rootInputReceivedAtMs,
                                 "goal_preview" to TextSecurity.preview(decision.goal, 140),
-                                "active_tasks" to taskWorkspaceStore.activeTaskCount(),
+                                "active_tasks" to scratchpadStore.activeTaskCount(),
                                 "activation_trigger" to "plan_complexity",
                                 "plan_step_count" to decision.steps.size
                             )
                         )
                     )
-                    telemetry.emitTaskWorkspaceTelemetry(
+                    telemetry.emitScratchpadTelemetry(
                         rootInputId = rootInputId,
                         rootInputReceivedAtMs = rootInputReceivedAtMs,
                         updateType = "workspace_activated"
@@ -289,11 +289,11 @@ internal class DecisionDispatcher(
                             "update_type" to "plan_recorded",
                             "goal_preview" to TextSecurity.preview(decision.goal, 140),
                             "step_count" to decision.steps.size,
-                            "active_tasks" to taskWorkspaceStore.activeTaskCount()
+                            "active_tasks" to scratchpadStore.activeTaskCount()
                         )
                     )
                 )
-                telemetry.emitTaskWorkspaceTelemetry(
+                telemetry.emitScratchpadTelemetry(
                     rootInputId = rootInputId,
                     rootInputReceivedAtMs = rootInputReceivedAtMs,
                     updateType = "plan_recorded"

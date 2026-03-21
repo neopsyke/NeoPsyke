@@ -30,7 +30,7 @@ import ai.neopsyke.agent.model.PendingThought
 import ai.neopsyke.agent.config.MetaReasonerConfig
 import ai.neopsyke.agent.config.PlannerConfig
 import ai.neopsyke.agent.model.PlannerContext
-import ai.neopsyke.agent.config.TaskWorkspaceConfig
+import ai.neopsyke.agent.config.ScratchpadConfig
 import ai.neopsyke.agent.model.Urgency
 import ai.neopsyke.agent.cortex.motor.MotorCortex
 import ai.neopsyke.agent.cortex.sensory.CognitiveSignal
@@ -49,12 +49,12 @@ import ai.neopsyke.agent.memory.longterm.Hippocampus
 import ai.neopsyke.agent.memory.longterm.MemoryImprint
 import ai.neopsyke.agent.memory.longterm.MemoryRecall
 import ai.neopsyke.agent.memory.longterm.MemoryRecallQuery
-import ai.neopsyke.agent.project.DeterministicProjectPlanner
-import ai.neopsyke.agent.project.ProjectConfig
-import ai.neopsyke.agent.project.GoalManager
-import ai.neopsyke.agent.project.ProjectPriority
-import ai.neopsyke.agent.project.ProjectStatus
-import ai.neopsyke.agent.project.ProjectStore
+import ai.neopsyke.agent.goal.DeterministicGoalPlanner
+import ai.neopsyke.agent.goal.GoalConfig
+import ai.neopsyke.agent.goal.GoalManager
+import ai.neopsyke.agent.goal.GoalPriority
+import ai.neopsyke.agent.goal.GoalStatus
+import ai.neopsyke.agent.goal.GoalStore
 import ai.neopsyke.agent.superego.Superego
 import ai.neopsyke.llm.ChatCompletion
 import ai.neopsyke.llm.ChatMessage
@@ -245,7 +245,7 @@ class AgentScenarioPackTest {
         val config = AgentConfig(
             planner = PlannerConfig(maxLoopStepsPerInput = 8, maxThoughtPasses = 3),
             memory = MemoryConfig(
-                taskWorkspace = TaskWorkspaceConfig(enabled = true, activationMinPlanSteps = 1, maxPromptTokens = 260)
+                scratchpad = ScratchpadConfig(enabled = true, activationMinPlanSteps = 1, maxPromptTokens = 260)
             )
         )
         val agent = buildTestEgo(
@@ -501,7 +501,7 @@ class AgentScenarioPackTest {
                         steps = listOf("discard branch", "execute branch")
                     )
                     is EgoTrigger.PendingThoughtInput -> decideThought(trigger.thought)
-                    is EgoTrigger.ProjectWork -> EgoDecision.Noop("ignore project work")
+                    is EgoTrigger.GoalWork -> EgoDecision.Noop("ignore goal work")
                 }
 
             private fun decideThought(thought: PendingThought): EgoDecision =
@@ -584,14 +584,14 @@ class AgentScenarioPackTest {
     }
 
     @Test
-    fun scenario_project_async_wait_resume() = runBlocking {
-        val root = Files.createTempDirectory("neopsyke-scenario-project-async")
+    fun scenario_goal_async_wait_resume() = runBlocking {
+        val root = Files.createTempDirectory("neopsyke-scenario-goal-async")
         val source = QueueSignalSource()
         val instrumentation = RecordingInstrumentation()
         val outputs = mutableListOf<String>()
         val config = AgentConfig(
             planner = PlannerConfig(maxLoopStepsPerInput = 8, maxThoughtPasses = 2),
-            projects = ProjectConfig(
+            goals = GoalConfig(
                 enabled = true,
                 workspaceRoot = root,
                 actionsPerCycle = 2,
@@ -608,9 +608,9 @@ class AgentScenarioPackTest {
             )
         }
         val manager = GoalManager(
-            config = config.projects,
-            store = ProjectStore(root),
-            planner = DeterministicProjectPlanner(),
+            config = config.goals,
+            store = GoalStore(root),
+            planner = DeterministicGoalPlanner(),
             asyncOperationRegistry = AsyncOperationRegistry.fromProviders(listOf(provider)),
             instrumentation = instrumentation,
             cueEmitter = source::offer,
@@ -620,7 +620,7 @@ class AgentScenarioPackTest {
         val planner = object : Ego.Planner {
             override fun decide(trigger: EgoTrigger, context: PlannerContext): EgoDecision =
                 when (trigger) {
-                    is EgoTrigger.ProjectWork -> {
+                    is EgoTrigger.GoalWork -> {
                         if (!startedAsync) {
                             startedAsync = true
                             EgoDecision.ProposeAction(
@@ -633,13 +633,13 @@ class AgentScenarioPackTest {
                             EgoDecision.ProposeAction(
                                 urgency = Urgency.MEDIUM,
                                 actionType = ActionType.CONTACT_USER,
-                                payload = "scenario async project done",
+                                payload = "scenario async goal done",
                                 summary = "report scenario completion"
                             )
                         }
                     }
 
-                    else -> EgoDecision.Noop("ignore non-project work")
+                    else -> EgoDecision.Noop("ignore non-goal work")
                 }
         }
         val agent = buildTestEgo(
@@ -655,25 +655,25 @@ class AgentScenarioPackTest {
             config = config,
             instrumentation = instrumentation,
             sensoryCortex = SensoryCortex(config, source),
-            projectsGateway = manager,
+            goalsGateway = manager,
         )
 
         val loop = launch { agent.runInteractive() }
         try {
-            val projectId = manager.createProject(
-                instruction = "Complete async scenario project",
+            val goalId = manager.createGoal(
+                instruction = "Complete async scenario goal",
                 title = "Async Scenario",
-                priority = ProjectPriority.HIGH,
+                priority = GoalPriority.HIGH,
             )
-            waitForProjectStatus(manager, projectId, ProjectStatus.COMPLETED)
+            waitForGoalStatus(manager, goalId, GoalStatus.COMPLETED)
             source.offer(RuntimeControlSignal.ExitRequested("scenario test"))
             loop.join()
 
-            val state = manager.projectStatus(projectId)
+            val state = manager.goalStatus(goalId)
             assertNotNull(state)
-            assertEquals(ProjectStatus.COMPLETED, state.project.status)
-            assertTrue(state.project.plan.steps.first().notes.contains("async_status=succeeded"))
-            assertEquals(listOf("ego> scenario async project done"), outputs)
+            assertEquals(GoalStatus.COMPLETED, state.goal.status)
+            assertTrue(state.goal.plan.steps.first().notes.contains("async_status=succeeded"))
+            assertEquals(listOf("ego> scenario async goal done"), outputs)
         } finally {
             manager.stop()
             loop.cancel()
@@ -742,20 +742,20 @@ class AgentScenarioPackTest {
         )
     }
 
-    private suspend fun waitForProjectStatus(
+    private suspend fun waitForGoalStatus(
         manager: GoalManager,
-        projectId: String,
-        status: ProjectStatus,
+        goalId: String,
+        status: GoalStatus,
     ) {
         val deadline = System.currentTimeMillis() + 3_000
         while (System.currentTimeMillis() < deadline) {
-            if (manager.projectStatus(projectId)?.project?.status == status) {
+            if (manager.goalStatus(goalId)?.goal?.status == status) {
                 return
             }
             delay(10)
         }
-        val state = manager.projectStatus(projectId)
-        fail("Timed out waiting for status=$status, actual=${state?.project?.status}")
+        val state = manager.goalStatus(goalId)
+        fail("Timed out waiting for status=$status, actual=${state?.goal?.status}")
     }
 
     private class QueueSignalSource : SignalSource {

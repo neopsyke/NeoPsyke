@@ -7,7 +7,7 @@ import com.fasterxml.jackson.module.kotlin.readValue
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
 import mu.KotlinLogging
-import ai.neopsyke.agent.project.GoalManager
+import ai.neopsyke.agent.goal.GoalManager
 import ai.neopsyke.metrics.LlmCallStatsReport
 import java.nio.file.Files
 import java.nio.file.Path
@@ -36,7 +36,7 @@ class DashboardServer(
     private val innerVoiceStore: InnerVoiceStore? = null,
     private val idInnerVoiceFilePath: Path? = null,
     @Volatile var metricsQueryProvider: MetricsQueryProvider? = null,
-    @Volatile var projectManager: GoalManager? = null,
+    @Volatile var goalManager: GoalManager? = null,
     port: Int,
     host: String = "127.0.0.1",
 ) : Closeable {
@@ -78,18 +78,18 @@ class DashboardServer(
                 respondText(exchange, 200, DashboardAssets.metricsHtml, "text/html; charset=utf-8")
             }
         }
-        server.createContext("/projects") { exchange ->
-            withRequestGuard(exchange, "projects_page") {
-                if (exchange.requestURI.path != "/projects") {
+        server.createContext("/goals") { exchange ->
+            withRequestGuard(exchange, "goals_page") {
+                if (exchange.requestURI.path != "/goals") {
                     respondText(exchange, 404, "Not found", "text/plain; charset=utf-8")
                     return@withRequestGuard
                 }
-                respondText(exchange, 200, DashboardAssets.projectsHtml, "text/html; charset=utf-8")
+                respondText(exchange, 200, DashboardAssets.goalsHtml, "text/html; charset=utf-8")
             }
         }
-        server.createContext("/api/projects") { exchange ->
-            withRequestGuard(exchange, "projects_api") {
-                handleProjectsApi(exchange)
+        server.createContext("/api/goals") { exchange ->
+            withRequestGuard(exchange, "goals_api") {
+                handleGoalsApi(exchange)
             }
         }
         server.createContext("/api/obs/llm-stats") { exchange ->
@@ -535,26 +535,26 @@ class DashboardServer(
         }
     }
 
-    private fun handleProjectsApi(exchange: HttpExchange) {
-        val pm = projectManager
+    private fun handleGoalsApi(exchange: HttpExchange) {
+        val pm = goalManager
         if (pm == null) {
             respondText(exchange, 503, "[]", "application/json; charset=utf-8")
             return
         }
         val path = exchange.requestURI.path
-        val basePath = "/api/projects"
+        val basePath = "/api/goals"
         if (exchange.requestMethod != "GET") {
             respondText(exchange, 405, "Method not allowed", "text/plain; charset=utf-8")
             return
         }
         val suffix = path.removePrefix(basePath).removePrefix("/").trim()
         if (suffix.isBlank()) {
-            val summaries = pm.allProjects().map { summary ->
-                val state = pm.projectStatus(summary.projectId)
-                val allSteps = state?.project?.plan?.steps ?: emptyList()
+            val summaries = pm.allGoals().map { summary ->
+                val state = pm.goalStatus(summary.goalId)
+                val allSteps = state?.goal?.plan?.steps ?: emptyList()
                 val totalSteps = allSteps.size
                 val doneSteps = allSteps.count { step ->
-                    step.status == ai.neopsyke.agent.project.StepStatus.DONE
+                    step.status == ai.neopsyke.agent.goal.StepStatus.DONE
                 }
                 val steps = allSteps.map { step ->
                     mapOf(
@@ -564,25 +564,25 @@ class DashboardServer(
                     )
                 }
                 mapOf(
-                    "projectId" to summary.projectId,
+                    "goalId" to summary.goalId,
                     "title" to summary.title,
                     "status" to summary.status.name,
                     "priority" to summary.priority.name,
                     "totalSteps" to totalSteps,
                     "doneSteps" to doneSteps,
                     "lastWorkedAt" to summary.lastWorkedAt?.toString(),
-                    "createdAtMs" to (state?.project?.createdAt?.toEpochMilli() ?: 0),
+                    "createdAtMs" to (state?.goal?.createdAt?.toEpochMilli() ?: 0),
                     "steps" to steps,
                 )
             }
             respondText(exchange, 200, mapper.writeValueAsString(summaries), "application/json; charset=utf-8")
         } else {
-            val state = pm.projectStatus(suffix)
+            val state = pm.goalStatus(suffix)
             if (state == null) {
-                respondText(exchange, 404, """{"error":"Project not found"}""", "application/json; charset=utf-8")
+                respondText(exchange, 404, """{"error":"Goal not found"}""", "application/json; charset=utf-8")
                 return
             }
-            val steps = state.project.plan.steps.map { step ->
+            val steps = state.goal.plan.steps.map { step ->
                 mapOf(
                     "id" to step.id,
                     "description" to step.description,
@@ -594,14 +594,14 @@ class DashboardServer(
                 )
             }
             val detail = mapOf(
-                "projectId" to state.id,
-                "title" to state.project.title,
-                "status" to state.project.status.name,
-                "priority" to state.project.priority.name,
-                "instruction" to state.project.instruction,
-                "completionCriteria" to state.project.completionCriteria,
-                "createdAt" to state.project.createdAt.toString(),
-                "lastWorkedAt" to state.project.lastWorkedAt?.toString(),
+                "goalId" to state.id,
+                "title" to state.goal.title,
+                "status" to state.goal.status.name,
+                "priority" to state.goal.priority.name,
+                "instruction" to state.goal.instruction,
+                "completionCriteria" to state.goal.completionCriteria,
+                "createdAt" to state.goal.createdAt.toString(),
+                "lastWorkedAt" to state.goal.lastWorkedAt?.toString(),
                 "steps" to steps,
                 "producedKeys" to state.producedKeys.toList(),
                 "eventCount" to state.eventCount,

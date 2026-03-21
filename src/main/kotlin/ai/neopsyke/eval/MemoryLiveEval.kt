@@ -583,7 +583,7 @@ class MemoryLiveEvalRunner(
             ),
             shortTermContextSummary = "",
             longTermMemoryRecall = "",
-            metaGuidance = "Prefer storing durable user/project memory for future recall."
+            metaGuidance = "Prefer storing durable user/goal memory for future recall."
         )
     }
 
@@ -770,12 +770,12 @@ object MemoryLiveEvalTasks {
             tags = listOf("preference", "user_profile")
         ),
         MemoryLiveEvalTask(
-            id = "project-constraint-timezone",
-            title = "Project Constraint Memory",
-            userStatement = "Project policy: all schedule times must be in Europe/Berlin timezone.",
-            recallCue = "Which timezone should schedules use for this project?",
+            id = "goal-constraint-timezone",
+            title = "Goal Constraint Memory",
+            userStatement = "Goal policy: all schedule times must be in Europe/Berlin timezone.",
+            recallCue = "Which timezone should schedules use for this goal?",
             expectedFacts = listOf("europe/berlin", "timezone"),
-            tags = listOf("constraint", "project_policy")
+            tags = listOf("constraint", "goal_policy")
         ),
         MemoryLiveEvalTask(
             id = "output-style-preference",

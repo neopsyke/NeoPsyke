@@ -1,4 +1,4 @@
-package ai.neopsyke.agent.project
+package ai.neopsyke.agent.goal
 
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -36,10 +36,10 @@ import kotlin.test.assertTrue
 
 class GoalManagerTest {
 
-    private fun testConfig(root: java.nio.file.Path) = ProjectConfig(
+    private fun testConfig(root: java.nio.file.Path) = GoalConfig(
         enabled = true,
         workspaceRoot = root,
-        maxActiveProjects = 5,
+        maxActiveGoals = 5,
         timerResolutionMs = 100,
         conditionCheckIntervalMs = 100,
     )
@@ -47,31 +47,31 @@ class GoalManagerTest {
     private fun testScope() = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     @Test
-    fun `createProject generates plan persists state and emits work-ready signal`() {
+    fun `createGoal generates plan persists state and emits work-ready signal`() {
         val root = Files.createTempDirectory("psyke-pm-create")
         try {
             val signals = CopyOnWriteArrayList<GoalRuntimeCue>()
             val manager = GoalManager(
                 config = testConfig(root),
-                store = ProjectStore(root),
-                planner = DeterministicProjectPlanner(),
+                store = GoalStore(root),
+                planner = DeterministicGoalPlanner(),
                 cueEmitter = { cue -> signals += cue },
             )
             manager.start(testScope())
 
-            val id = manager.createProject(
+            val id = manager.createGoal(
                 instruction = "Monitor stock prices daily",
                 title = "Stock Monitor",
-                priority = ProjectPriority.HIGH,
+                priority = GoalPriority.HIGH,
             )
 
             assertTrue(id.isNotBlank())
             val workReady = assertIs<GoalRuntimeCue>(signals.last())
             assertEquals(id, workReady.goalId)
-            val state = manager.projectStatus(id)
+            val state = manager.goalStatus(id)
             assertNotNull(state)
-            assertEquals(ProjectStatus.ACTIVE, state.project.status)
-            assertTrue(Files.exists(root.resolve(id).resolve(ProjectStore.PROJECT_FILE)))
+            assertEquals(GoalStatus.ACTIVE, state.goal.status)
+            assertTrue(Files.exists(root.resolve(id).resolve(GoalStore.GOAL_FILE)))
 
             manager.stop()
         } finally {
@@ -80,21 +80,21 @@ class GoalManagerTest {
     }
 
     @Test
-    fun `nextWorkFromCue creates project session and returns work unit`() {
+    fun `nextWorkFromCue creates goal session and returns work unit`() {
         val root = Files.createTempDirectory("psyke-pm-work")
         try {
             val manager = GoalManager(
                 config = testConfig(root),
-                store = ProjectStore(root),
-                planner = DeterministicProjectPlanner(),
+                store = GoalStore(root),
+                planner = DeterministicGoalPlanner(),
             )
             manager.start(testScope())
-            val id = manager.createProject("Persistent task")
+            val id = manager.createGoal("Persistent task")
 
             val work = manager.nextWorkFromCue(GoalRuntimeCue(id, "step-1", "test"))
             assertNotNull(work)
-            assertEquals(id, work.projectId)
-            assertTrue(work.rootInputId.startsWith("project:$id"))
+            assertEquals(id, work.goalId)
+            assertTrue(work.rootInputId.startsWith("goal:$id"))
 
             manager.stop()
         } finally {
@@ -103,19 +103,19 @@ class GoalManagerTest {
     }
 
     @Test
-    fun `project-origin action outcome completes final step and project`() {
+    fun `goal-origin action outcome completes final step and goal`() {
         val root = Files.createTempDirectory("psyke-pm-complete")
         try {
             val signals = CopyOnWriteArrayList<GoalRuntimeCue>()
             val manager = GoalManager(
                 config = testConfig(root),
-                store = ProjectStore(root),
-                planner = DeterministicProjectPlanner(),
-                verifier = DeterministicProjectStepVerifier(),
+                store = GoalStore(root),
+                planner = DeterministicGoalPlanner(),
+                verifier = DeterministicGoalStepVerifier(),
                 cueEmitter = { cue -> signals += cue },
             )
             manager.start(testScope())
-            val id = manager.createProject("Ship release checklist")
+            val id = manager.createGoal("Ship release checklist")
             val work = manager.nextWorkFromCue(assertIs<GoalRuntimeCue>(signals.last()))
             assertNotNull(work)
 
@@ -128,7 +128,7 @@ class GoalManagerTest {
                     summary = "done",
                     rootInputId = work.rootInputId,
                     conversationContext = ConversationContext.default(),
-                    origin = ai.neopsyke.agent.model.ActionOrigin(source = OriginSource.PROJECT),
+                    origin = ai.neopsyke.agent.model.ActionOrigin(source = OriginSource.GOAL),
                 ),
                 outcome = ActionOutcome(
                     statusSummary = "completed",
@@ -138,9 +138,9 @@ class GoalManagerTest {
             )
             manager.finalizeGoalCycle(work.rootInputId)
 
-            val state = manager.projectStatus(id)
+            val state = manager.goalStatus(id)
             assertNotNull(state)
-            assertEquals(ProjectStatus.COMPLETED, state.project.status)
+            assertEquals(GoalStatus.COMPLETED, state.goal.status)
 
             manager.stop()
         } finally {
@@ -163,13 +163,13 @@ class GoalManagerTest {
             val signals = CopyOnWriteArrayList<GoalRuntimeCue>()
             val manager = GoalManager(
                 config = testConfig(root).copy(conditionCheckIntervalMs = 25),
-                store = ProjectStore(root),
-                planner = DeterministicProjectPlanner(),
+                store = GoalStore(root),
+                planner = DeterministicGoalPlanner(),
                 asyncOperationRegistry = AsyncOperationRegistry.fromProviders(listOf(provider)),
                 cueEmitter = { cue -> signals += cue },
             )
             manager.start(testScope())
-            val projectId = manager.createProject("Wait for async completion")
+            val goalId = manager.createGoal("Wait for async completion")
             val work = manager.nextWorkFromCue(assertIs<GoalRuntimeCue>(signals.last()))
             assertNotNull(work)
 
@@ -181,15 +181,15 @@ class GoalManagerTest {
             manager.finalizeGoalCycle(work.rootInputId)
 
             waitUntil {
-                val state = manager.projectStatus(projectId)
-                state?.project?.status == ProjectStatus.ACTIVE &&
-                    state.project.plan.steps.firstOrNull()?.status == StepStatus.READY
+                val state = manager.goalStatus(goalId)
+                state?.goal?.status == GoalStatus.ACTIVE &&
+                    state.goal.plan.steps.firstOrNull()?.status == StepStatus.READY
             }
 
-            val state = manager.projectStatus(projectId)
+            val state = manager.goalStatus(goalId)
             assertNotNull(state)
-            assertTrue(state.project.plan.steps.first().notes.contains("async_status=succeeded"))
-            assertTrue(signals.any { it.goalId == projectId })
+            assertTrue(state.goal.plan.steps.first().notes.contains("async_status=succeeded"))
+            assertTrue(signals.any { it.goalId == goalId })
 
             manager.stop()
         } finally {
@@ -198,20 +198,20 @@ class GoalManagerTest {
     }
 
     @Test
-    fun `project WAITING outcome without async handles is rejected as contract violation`() {
+    fun `goal WAITING outcome without async handles is rejected as contract violation`() {
         val root = Files.createTempDirectory("psyke-pm-invalid-wait")
         try {
             val instrumentation = RecordingInstrumentation()
             val signals = CopyOnWriteArrayList<GoalRuntimeCue>()
             val manager = GoalManager(
                 config = testConfig(root),
-                store = ProjectStore(root),
-                planner = DeterministicProjectPlanner(),
+                store = GoalStore(root),
+                planner = DeterministicGoalPlanner(),
                 instrumentation = instrumentation,
                 cueEmitter = { cue -> signals += cue },
             )
             manager.start(testScope())
-            val projectId = manager.createProject("Reject invalid waiting outcome")
+            val goalId = manager.createGoal("Reject invalid waiting outcome")
             val work = manager.nextWorkFromCue(assertIs<GoalRuntimeCue>(signals.last()))
             assertNotNull(work)
 
@@ -225,15 +225,15 @@ class GoalManagerTest {
             )
             manager.finalizeGoalCycle(work.rootInputId)
 
-            val state = manager.projectStatus(projectId)
+            val state = manager.goalStatus(goalId)
             assertNotNull(state)
-            assertEquals(ProjectStatus.ACTIVE, state.project.status)
-            assertEquals(StepStatus.READY, state.project.plan.steps.first().status)
-            assertNull(state.project.plan.steps.first().waitCondition)
-            assertEquals(1, state.project.plan.steps.first().attempts)
+            assertEquals(GoalStatus.ACTIVE, state.goal.status)
+            assertEquals(StepStatus.READY, state.goal.plan.steps.first().status)
+            assertNull(state.goal.plan.steps.first().waitCondition)
+            assertEquals(1, state.goal.plan.steps.first().attempts)
             assertTrue(
                 signals.any {
-                                            it.goalId == projectId &&
+                                            it.goalId == goalId &&
                         it.stepId == "step-1"
                 }
             )
@@ -254,18 +254,18 @@ class GoalManagerTest {
     fun `async poll wait is restored on restart and unblocks step`() {
         val root = Files.createTempDirectory("psyke-pm-async-poll-restore")
         try {
-            val store = ProjectStore(root)
+            val store = GoalStore(root)
             val provider = StubAsyncOperationProvider()
             provider.enqueue(operationId = "op-restore", statuses = listOf(AsyncOperationStatus.Pending("queued")))
             val manager1 = GoalManager(
                 config = testConfig(root).copy(conditionCheckIntervalMs = 25),
                 store = store,
-                planner = DeterministicProjectPlanner(),
+                planner = DeterministicGoalPlanner(),
                 asyncOperationRegistry = AsyncOperationRegistry.fromProviders(listOf(provider)),
             )
             manager1.start(testScope())
-            val projectId = manager1.createProject("Restore async poll wait")
-            val work = manager1.nextWorkFromCue(GoalRuntimeCue(projectId, "step-1", "test"))
+            val goalId = manager1.createGoal("Restore async poll wait")
+            val work = manager1.nextWorkFromCue(GoalRuntimeCue(goalId, "step-1", "test"))
             assertNotNull(work)
             manager1.onActionExecuted(
                 action = projectAction(work.rootInputId),
@@ -286,12 +286,12 @@ class GoalManagerTest {
             manager2.start(testScope())
 
             waitUntil {
-                val state = manager2.projectStatus(projectId)
-                state?.project?.status == ProjectStatus.ACTIVE &&
-                    state.project.plan.steps.firstOrNull()?.status == StepStatus.READY
+                val state = manager2.goalStatus(goalId)
+                state?.goal?.status == GoalStatus.ACTIVE &&
+                    state.goal.plan.steps.firstOrNull()?.status == StepStatus.READY
             }
 
-            assertTrue(signals.any { it.goalId == projectId })
+            assertTrue(signals.any { it.goalId == goalId })
             manager2.stop()
         } finally {
             root.toFile().deleteRecursively()
@@ -302,17 +302,17 @@ class GoalManagerTest {
     fun `async event wait is restored on restart and external event unblocks step`() {
         val root = Files.createTempDirectory("psyke-pm-async-event-restore")
         try {
-            val store = ProjectStore(root)
+            val store = GoalStore(root)
             val provider = StubAsyncOperationProvider()
             val manager1 = GoalManager(
                 config = testConfig(root),
                 store = store,
-                planner = DeterministicProjectPlanner(),
+                planner = DeterministicGoalPlanner(),
                 asyncOperationRegistry = AsyncOperationRegistry.fromProviders(listOf(provider)),
             )
             manager1.start(testScope())
-            val projectId = manager1.createProject("Restore async event wait")
-            val work = manager1.nextWorkFromCue(GoalRuntimeCue(projectId, "step-1", "test"))
+            val goalId = manager1.createGoal("Restore async event wait")
+            val work = manager1.nextWorkFromCue(GoalRuntimeCue(goalId, "step-1", "test"))
             assertNotNull(work)
             manager1.onActionExecuted(
                 action = projectAction(work.rootInputId),
@@ -342,15 +342,15 @@ class GoalManagerTest {
 
             assertEquals(1, matched)
             waitUntil {
-                val state = manager2.projectStatus(projectId)
-                state?.project?.status == ProjectStatus.ACTIVE &&
-                    state.project.plan.steps.firstOrNull()?.status == StepStatus.READY
+                val state = manager2.goalStatus(goalId)
+                state?.goal?.status == GoalStatus.ACTIVE &&
+                    state.goal.plan.steps.firstOrNull()?.status == StepStatus.READY
             }
 
-            val state = manager2.projectStatus(projectId)
+            val state = manager2.goalStatus(goalId)
             assertNotNull(state)
-            assertTrue(state.project.plan.steps.first().notes.contains("event completed"))
-            assertTrue(signals.any { it.goalId == projectId })
+            assertTrue(state.goal.plan.steps.first().notes.contains("event completed"))
+            assertTrue(signals.any { it.goalId == goalId })
 
             manager2.stop()
         } finally {
@@ -359,19 +359,19 @@ class GoalManagerTest {
     }
 
     @Test
-    fun `finalized project cycle writes workspace context scratch and artifact`() {
+    fun `finalized goal cycle writes workspace context scratch and artifact`() {
         val root = Files.createTempDirectory("psyke-pm-workspace")
         try {
             val signals = CopyOnWriteArrayList<GoalRuntimeCue>()
             val manager = GoalManager(
                 config = testConfig(root),
-                store = ProjectStore(root),
-                planner = DeterministicProjectPlanner(),
-                verifier = DeterministicProjectStepVerifier(),
+                store = GoalStore(root),
+                planner = DeterministicGoalPlanner(),
+                verifier = DeterministicGoalStepVerifier(),
                 cueEmitter = { cue -> signals += cue },
             )
             manager.start(testScope())
-            val id = manager.createProject("Document workspace artifacts")
+            val id = manager.createGoal("Document workspace artifacts")
             val work = manager.nextWorkFromCue(assertIs<GoalRuntimeCue>(signals.last()))
             assertNotNull(work)
 
@@ -384,7 +384,7 @@ class GoalManagerTest {
                     summary = "done",
                     rootInputId = work.rootInputId,
                     conversationContext = ConversationContext.default(),
-                    origin = ai.neopsyke.agent.model.ActionOrigin(source = OriginSource.PROJECT),
+                    origin = ai.neopsyke.agent.model.ActionOrigin(source = OriginSource.GOAL),
                 ),
                 outcome = ActionOutcome(
                     statusSummary = "completed",
@@ -394,7 +394,7 @@ class GoalManagerTest {
             )
             manager.finalizeGoalCycle(work.rootInputId)
 
-            val workspace = root.resolve(id).resolve(ProjectStore.WORKSPACE_DIR)
+            val workspace = root.resolve(id).resolve(GoalStore.WORKSPACE_DIR)
             val context = workspace.resolve("context.md")
             val scratch = workspace.resolve("scratch.md")
             val artifacts = workspace.resolve("artifacts").resolve(work.stepId)
@@ -412,7 +412,7 @@ class GoalManagerTest {
             }
             assertEquals(1, artifactFiles.size)
             val artifactContent = Files.readString(artifacts.resolve(artifactFiles.single()))
-            assertTrue(artifactContent.contains("# Project Cycle"))
+            assertTrue(artifactContent.contains("# Goal Cycle"))
             assertTrue(artifactContent.contains("step_id: ${work.stepId}"))
             assertTrue(artifactContent.contains("completed"))
 
@@ -423,12 +423,12 @@ class GoalManagerTest {
     }
 
     @Test
-    fun `pendingWorkSummary returns empty when no projects exist`() {
+    fun `pendingWorkSummary returns empty when no goals exist`() {
         val root = Files.createTempDirectory("psyke-pm-summary")
         try {
             val manager = GoalManager(
                 config = testConfig(root),
-                store = ProjectStore(root),
+                store = GoalStore(root),
             )
             manager.start(testScope())
             assertEquals("", manager.pendingWorkSummary())
@@ -439,19 +439,19 @@ class GoalManagerTest {
     }
 
     @Test
-    fun `max active projects enforced`() {
+    fun `max active goals enforced`() {
         val root = Files.createTempDirectory("psyke-pm-limit")
         try {
-            val config = testConfig(root).copy(maxActiveProjects = 2)
+            val config = testConfig(root).copy(maxActiveGoals = 2)
             val manager = GoalManager(
                 config = config,
-                store = ProjectStore(root),
+                store = GoalStore(root),
             )
             manager.start(testScope())
 
-            val id1 = manager.createProject("Task 1")
-            val id2 = manager.createProject("Task 2")
-            val id3 = manager.createProject("Task 3")
+            val id1 = manager.createGoal("Task 1")
+            val id2 = manager.createGoal("Task 2")
+            val id3 = manager.createGoal("Task 3")
 
             assertTrue(id1.isNotBlank())
             assertTrue(id2.isNotBlank())
@@ -464,17 +464,17 @@ class GoalManagerTest {
     }
 
     @Test
-    fun `project persists and reloads across manager restarts`() {
+    fun `goal persists and reloads across manager restarts`() {
         val root = Files.createTempDirectory("psyke-pm-restart")
         try {
-            val store = ProjectStore(root)
+            val store = GoalStore(root)
             val manager1 = GoalManager(
                 config = testConfig(root),
                 store = store,
-                planner = DeterministicProjectPlanner(),
+                planner = DeterministicGoalPlanner(),
             )
             manager1.start(testScope())
-            val id = manager1.createProject("Persistent task")
+            val id = manager1.createGoal("Persistent task")
             manager1.stop()
 
             val manager2 = GoalManager(
@@ -483,10 +483,10 @@ class GoalManagerTest {
             )
             manager2.start(testScope())
 
-            val reloaded = manager2.projectStatus(id)
+            val reloaded = manager2.goalStatus(id)
             assertNotNull(reloaded)
-            assertTrue(reloaded.project.instruction.contains("Persistent task"))
-            assertEquals(ProjectStatus.ACTIVE, reloaded.project.status)
+            assertTrue(reloaded.goal.instruction.contains("Persistent task"))
+            assertEquals(GoalStatus.ACTIVE, reloaded.goal.status)
 
             manager2.stop()
         } finally {
@@ -495,47 +495,47 @@ class GoalManagerTest {
     }
 
     @Test
-    fun `startup prunes expired completed projects but keeps recent and active ones`() {
+    fun `startup prunes expired completed goals but keeps recent and active ones`() {
         val root = Files.createTempDirectory("psyke-pm-prune")
         try {
-            val store = ProjectStore(root)
+            val store = GoalStore(root)
             val oldCompletion = Instant.now().minusSeconds(3 * 24 * 60 * 60)
             val recentCompletion = Instant.now()
 
             seedStoredProject(
                 store = store,
-                projectId = "old-completed",
-                status = ProjectStatus.COMPLETED,
+                goalId = "old-completed",
+                status = GoalStatus.COMPLETED,
                 stepStatus = StepStatus.DONE,
                 completedAt = oldCompletion,
                 lastWorkedAt = oldCompletion,
             )
             seedStoredProject(
                 store = store,
-                projectId = "recent-completed",
-                status = ProjectStatus.COMPLETED,
+                goalId = "recent-completed",
+                status = GoalStatus.COMPLETED,
                 stepStatus = StepStatus.DONE,
                 completedAt = recentCompletion,
                 lastWorkedAt = recentCompletion,
             )
             seedStoredProject(
                 store = store,
-                projectId = "active-project",
-                status = ProjectStatus.ACTIVE,
+                goalId = "active-goal",
+                status = GoalStatus.ACTIVE,
                 stepStatus = StepStatus.READY,
                 completedAt = null,
                 lastWorkedAt = recentCompletion,
             )
 
             val manager = GoalManager(
-                config = testConfig(root).copy(completedProjectRetentionDays = 1),
+                config = testConfig(root).copy(completedGoalRetentionDays = 1),
                 store = store,
             )
             manager.start(testScope())
 
             assertFalse(Files.exists(root.resolve("old-completed")))
-            assertNotNull(manager.projectStatus("recent-completed"))
-            assertNotNull(manager.projectStatus("active-project"))
+            assertNotNull(manager.goalStatus("recent-completed"))
+            assertNotNull(manager.goalStatus("active-goal"))
 
             manager.stop()
         } finally {
@@ -544,12 +544,12 @@ class GoalManagerTest {
     }
 
     @Test
-    fun `nextWorkFromCue returns null when project is missing`() {
+    fun `nextWorkFromCue returns null when goal is missing`() {
         val root = Files.createTempDirectory("psyke-pm-missing")
         try {
             val manager = GoalManager(
                 config = testConfig(root),
-                store = ProjectStore(root),
+                store = GoalStore(root),
             )
             manager.start(testScope())
             assertNull(manager.nextWorkFromCue(GoalRuntimeCue("missing", "s1", "test")))
@@ -560,21 +560,21 @@ class GoalManagerTest {
     }
 
     @Test
-    fun `suspended project resume timer is restored on restart and emits work-ready`() {
+    fun `suspended goal resume timer is restored on restart and emits work-ready`() {
         val root = Files.createTempDirectory("psyke-pm-restore-suspend")
         try {
-            val store = ProjectStore(root)
+            val store = GoalStore(root)
             val manager1 = GoalManager(
                 config = testConfig(root),
                 store = store,
-                planner = DeterministicProjectPlanner(),
+                planner = DeterministicGoalPlanner(),
             )
             manager1.start(testScope())
-            val id = manager1.createProject("Resume me later")
+            val id = manager1.createGoal("Resume me later")
             val resumeAt = Instant.now().plusMillis(200)
             manager1.applyEventExternal(
                 id,
-                ProjectEvent.Suspended(id, "paused", resumeAt)
+                GoalEvent.Suspended(id, "paused", resumeAt)
             )
             manager1.stop()
 
@@ -587,7 +587,7 @@ class GoalManagerTest {
             manager2.start(testScope())
 
             waitUntil {
-                manager2.projectStatus(id)?.project?.status == ProjectStatus.ACTIVE &&
+                manager2.goalStatus(id)?.goal?.status == GoalStatus.ACTIVE &&
                     signals.any { it.goalId == id }
             }
 
@@ -598,22 +598,22 @@ class GoalManagerTest {
     }
 
     @Test
-    fun `blocked timer wait is restored on restart and project becomes ACTIVE when timer fires`() {
+    fun `blocked timer wait is restored on restart and goal becomes ACTIVE when timer fires`() {
         val root = Files.createTempDirectory("psyke-pm-restore-wait")
         try {
-            val store = ProjectStore(root)
+            val store = GoalStore(root)
             val manager1 = GoalManager(
                 config = testConfig(root),
                 store = store,
-                planner = DeterministicProjectPlanner(),
+                planner = DeterministicGoalPlanner(),
             )
             manager1.start(testScope())
-            val id = manager1.createProject("Wait for timer")
+            val id = manager1.createGoal("Wait for timer")
             val wakeAt = Instant.now().plusMillis(200)
             manager1.applyEventExternal(
                 id,
-                ProjectEvent.StepBlocked(
-                    projectId = id,
+                GoalEvent.StepBlocked(
+                    goalId = id,
                     stepId = "step-1",
                     waitCondition = WaitCondition(
                         type = WaitConditionType.TIMER,
@@ -634,8 +634,8 @@ class GoalManagerTest {
             manager2.start(testScope())
 
             waitUntil {
-                manager2.projectStatus(id)?.project?.status == ProjectStatus.ACTIVE &&
-                    manager2.projectStatus(id)?.project?.plan?.steps?.firstOrNull()?.status == StepStatus.READY &&
+                manager2.goalStatus(id)?.goal?.status == GoalStatus.ACTIVE &&
+                    manager2.goalStatus(id)?.goal?.plan?.steps?.firstOrNull()?.status == StepStatus.READY &&
                     signals.any { it.goalId == id }
             }
 
@@ -649,18 +649,18 @@ class GoalManagerTest {
     fun `condition check wait is restored on restart and retry timeout requeues the step`() {
         val root = Files.createTempDirectory("psyke-pm-restore-condition-check")
         try {
-            val store = ProjectStore(root)
+            val store = GoalStore(root)
             val manager1 = GoalManager(
                 config = testConfig(root).copy(conditionCheckIntervalMs = 25),
                 store = store,
-                planner = DeterministicProjectPlanner(),
+                planner = DeterministicGoalPlanner(),
             )
             manager1.start(testScope())
-            val id = manager1.createProject("Wait for condition check")
+            val id = manager1.createGoal("Wait for condition check")
             manager1.applyEventExternal(
                 id,
-                ProjectEvent.StepBlocked(
-                    projectId = id,
+                GoalEvent.StepBlocked(
+                    goalId = id,
                     stepId = "step-1",
                     waitCondition = WaitCondition(
                         type = WaitConditionType.CONDITION_CHECK,
@@ -682,8 +682,8 @@ class GoalManagerTest {
             manager2.start(testScope())
 
             waitUntil {
-                manager2.projectStatus(id)?.project?.plan?.steps?.firstOrNull()?.status == StepStatus.READY &&
-                    manager2.projectStatus(id)?.project?.plan?.steps?.firstOrNull()?.waitCondition == null &&
+                manager2.goalStatus(id)?.goal?.plan?.steps?.firstOrNull()?.status == StepStatus.READY &&
+                    manager2.goalStatus(id)?.goal?.plan?.steps?.firstOrNull()?.waitCondition == null &&
                     signals.any { it.goalId == id && it.stepId == "step-1" }
             }
 
@@ -697,18 +697,18 @@ class GoalManagerTest {
     fun `external event wait is restored on restart and retry timeout requeues the step`() {
         val root = Files.createTempDirectory("psyke-pm-restore-external-event")
         try {
-            val store = ProjectStore(root)
+            val store = GoalStore(root)
             val manager1 = GoalManager(
                 config = testConfig(root).copy(conditionCheckIntervalMs = 25),
                 store = store,
-                planner = DeterministicProjectPlanner(),
+                planner = DeterministicGoalPlanner(),
             )
             manager1.start(testScope())
-            val id = manager1.createProject("Wait for external event")
+            val id = manager1.createGoal("Wait for external event")
             manager1.applyEventExternal(
                 id,
-                ProjectEvent.StepBlocked(
-                    projectId = id,
+                GoalEvent.StepBlocked(
+                    goalId = id,
                     stepId = "step-1",
                     waitCondition = WaitCondition(
                         type = WaitConditionType.EXTERNAL_EVENT,
@@ -730,8 +730,8 @@ class GoalManagerTest {
             manager2.start(testScope())
 
             waitUntil {
-                manager2.projectStatus(id)?.project?.plan?.steps?.firstOrNull()?.status == StepStatus.READY &&
-                    manager2.projectStatus(id)?.project?.plan?.steps?.firstOrNull()?.waitCondition == null &&
+                manager2.goalStatus(id)?.goal?.plan?.steps?.firstOrNull()?.status == StepStatus.READY &&
+                    manager2.goalStatus(id)?.goal?.plan?.steps?.firstOrNull()?.waitCondition == null &&
                     signals.any { it.goalId == id && it.stepId == "step-1" }
             }
 
@@ -745,16 +745,16 @@ class GoalManagerTest {
     fun `cron schedule is restored on restart`() {
         val root = Files.createTempDirectory("psyke-pm-restore-cron")
         try {
-            val store = ProjectStore(root)
+            val store = GoalStore(root)
             val manager1 = GoalManager(
                 config = testConfig(root),
                 store = store,
-                planner = DeterministicProjectPlanner(),
+                planner = DeterministicGoalPlanner(),
             )
             manager1.start(testScope())
             val future = ZonedDateTime.now().plusMinutes(2)
             val cronExpression = "${future.minute} ${future.hour} * * *"
-            val id = manager1.createProject(
+            val id = manager1.createGoal(
                 instruction = "Wake me on a cron schedule",
                 cronExpression = cronExpression,
             )
@@ -792,7 +792,7 @@ class GoalManagerTest {
         summary = "start async operation",
         rootInputId = rootInputId,
         conversationContext = ConversationContext.default(),
-        origin = ai.neopsyke.agent.model.ActionOrigin(source = OriginSource.PROJECT),
+        origin = ai.neopsyke.agent.model.ActionOrigin(source = OriginSource.GOAL),
     )
 
     private fun asyncWaitingOutcome(
@@ -819,23 +819,23 @@ class GoalManagerTest {
     )
 
     private fun seedStoredProject(
-        store: ProjectStore,
-        projectId: String,
-        status: ProjectStatus,
+        store: GoalStore,
+        goalId: String,
+        status: GoalStatus,
         stepStatus: StepStatus,
         completedAt: Instant?,
         lastWorkedAt: Instant?,
     ) {
-        val workspace = store.createWorkspace(projectId)
+        val workspace = store.createWorkspace(goalId)
         val createdAt = completedAt ?: lastWorkedAt ?: Instant.now()
-        val state = ProjectState(
-            project = Project(
-                id = projectId,
-                title = projectId,
-                instruction = "instruction for $projectId",
+        val state = GoalState(
+            goal = Goal(
+                id = goalId,
+                title = goalId,
+                instruction = "instruction for $goalId",
                 status = status,
-                priority = ProjectPriority.MEDIUM,
-                plan = ProjectPlan(
+                priority = GoalPriority.MEDIUM,
+                plan = GoalPlan(
                     steps = listOf(
                         PlanStep(
                             id = "step-1",
@@ -854,13 +854,13 @@ class GoalManagerTest {
             ),
             eventCount = 1,
         )
-        store.saveProjectState(projectId, state)
-        store.eventLog(projectId).append(
-            ProjectEvent.Created(
-                projectId = projectId,
-                title = projectId,
-                instruction = state.project.instruction,
-                priority = ProjectPriority.MEDIUM,
+        store.saveGoalState(goalId, state)
+        store.goalEventLog(goalId).append(
+            GoalEvent.Created(
+                goalId = goalId,
+                title = goalId,
+                instruction = state.goal.instruction,
+                priority = GoalPriority.MEDIUM,
                 completionCriteria = "done",
                 timestamp = createdAt,
             )

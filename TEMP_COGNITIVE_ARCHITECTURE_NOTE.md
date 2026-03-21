@@ -52,7 +52,7 @@ Terminology clarifications:
 - `DecisionVerifier` is used instead of `ConvergenceVerifier`
 - `opportunity` replaces `affordance` for readability and intuition
 - `intention` replaces earlier ideas like `executive decision`
-- `Goal` is the top-level name for durable objective/stateful background work; `Project` is too narrow
+- `Goal` is the top-level name for durable objective/stateful background work; `Goal` is too narrow
 
 ## Core Flow
 
@@ -300,7 +300,7 @@ and DOM vision without creating ontology sprawl.
 ## Concrete Goal Model
 
 `Goal` is the single top-level concept for durable objective-bearing
-background work. It replaces `Project` as the conceptual center of this
+background work. It replaces `Goal` as the conceptual center of this
 subsystem.
 
 Why `Goal`:
@@ -309,7 +309,7 @@ Why `Goal`:
 - it covers recurring scheduled behavior
 - it covers standing monitors/watchers
 - it covers long-lived maintenance loops
-- it fits the cognitive architecture better than `Project`
+- it fits the cognitive architecture better than `Goal`
 
 Examples that fit under `Goal`:
 
@@ -678,7 +678,7 @@ Layers:
 The thread-scoped layer persists across suspension/resumption. The
 intention-scoped layer is disposable and may be recreated on each new intention.
 
-## Mapping Existing Project Runtime To Goal Runtime
+## Mapping Existing Goal Runtime To Goal Runtime
 
 The current project runtime is a useful base. The redesign keeps the
 durable state-machine core while changing the top-level concept and where that
@@ -695,12 +695,12 @@ subsystem connects into the cognitive flow.
 
 ### Change
 
-- `Project` -> `Goal`
+- `Goal` -> `Goal`
 - `ProjectManager` -> `GoalManager`
 - `ProjectsGateway` -> `GoalsGateway`
-- `ProjectState` -> `GoalState`
+- `GoalState` -> `GoalState`
 - `ProjectExecutionSession` -> `GoalRun`
-- `ProjectPlan` -> optional `GoalExecutionPlan`
+- `GoalPlan` -> optional `GoalExecutionPlan`
 - `PlanStep` -> `GoalStep`
 - `ProjectSignal.WorkReady` becomes a generalized goal/runtime
   cue that is appraised into a `state-change percept`
@@ -870,7 +870,7 @@ Implementation direction:
 
 Current runtime shape, simplified:
 
-`signal -> enqueueInput / enqueueImpulse / enqueueProjectWork -> runLoop -> processInput/processImpulse/processProjectWork/processThought/processAction`
+`signal -> enqueueInput / enqueueImpulse / enqueueProjectWork -> runLoop -> processInput/processImpulse/processGoalWork/processThought/processAction`
 
 Target shape:
 
@@ -1030,7 +1030,7 @@ Confirmed:
 - use `Goal` as the single top-level durable objective term
 - rename `DecisionVerifier` -> `DecisionVerifier`
 - rename `MemorySystem` -> `MemorySystem`
-- move `TaskWorkspace*` toward `Scratchpad`
+- move `Scratchpad*` toward `Scratchpad`
 - use `cognitive thread` instead of `workflow`
 - use `opportunity` instead of `affordance`
 - use `intention` instead of `executive decision`

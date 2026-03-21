@@ -1,27 +1,27 @@
-package ai.neopsyke.agent.project
+package ai.neopsyke.agent.goal
 
 import java.nio.file.Files
 import java.nio.file.Path
 import java.time.Instant
 
 /**
- * Builds context at each tier for a project.
+ * Builds context at each tier for a goal.
  *
  * - Tier 1: compact summary (~100 tokens), always in memory
  * - Tier 2: working context from `context.md` (~1-2k tokens), loaded when Ego picks up work
  * - Tier 3: full detail from workspace files, fetched on demand
  */
-object ProjectContextLoader {
+object GoalContextLoader {
 
     /**
-     * Build a Tier 1 summary from in-memory [ProjectState].
+     * Build a Tier 1 summary from in-memory [GoalState].
      */
-    fun tier1Summary(state: ProjectState): ProjectTier1Summary {
-        val currentStep = state.project.plan.steps.firstOrNull {
+    fun tier1Summary(state: GoalState): GoalTier1Summary {
+        val currentStep = state.goal.plan.steps.firstOrNull {
             it.status == StepStatus.IN_PROGRESS
         } ?: state.nextRunnableStep()
 
-        val blockers = state.project.plan.steps
+        val blockers = state.goal.plan.steps
             .filter { it.status == StepStatus.BLOCKED }
             .mapNotNull { step ->
                 step.waitCondition?.let { wc ->
@@ -29,14 +29,14 @@ object ProjectContextLoader {
                 }
             }
 
-        return ProjectTier1Summary(
-            projectId = state.id,
-            title = state.project.title,
-            status = state.project.status,
-            priority = state.project.priority,
+        return GoalTier1Summary(
+            goalId = state.id,
+            title = state.goal.title,
+            status = state.goal.status,
+            priority = state.goal.priority,
             currentStepDescription = currentStep?.description,
             blockers = blockers,
-            lastWorkedAt = state.project.lastWorkedAt,
+            lastWorkedAt = state.goal.lastWorkedAt,
         )
     }
 
@@ -65,14 +65,14 @@ object ProjectContextLoader {
      * Build a [GoalRunActivation] for the Ego to process.
      */
     fun buildWorkUnit(
-        state: ProjectState,
+        state: GoalState,
         step: PlanStep,
         rootInputId: String,
         wakeReason: String,
     ): GoalRunActivation {
-        val tier2 = tier2Context(state.project.workspacePath)
+        val tier2 = tier2Context(state.goal.workspacePath)
         return GoalRunActivation(
-            projectId = state.id,
+            goalId = state.id,
             stepId = step.id,
             rootInputId = rootInputId,
             stepDescription = step.description,
@@ -83,38 +83,38 @@ object ProjectContextLoader {
     }
 
     /**
-     * Write Tier 2 `context.md` at the end of a project work cycle.
+     * Write Tier 2 `context.md` at the end of a goal work cycle.
      *
      * This is the handoff document that preserves inter-session continuity.
      * It captures current state, what happened this cycle, and pointers to
      * detailed content. The Ego calls this via GoalManager after each
-     * project_advance resolution.
+     * goal_advance resolution.
      *
-     * @param state the current project state (post-cycle)
+     * @param state the current goal state (post-cycle)
      * @param stepId the step that was just worked on
      * @param resultSummary what happened during this cycle
      */
-    fun writeContext(state: ProjectState, stepId: String, resultSummary: String) {
-        val workspacePath = state.project.workspacePath
+    fun writeContext(state: GoalState, stepId: String, resultSummary: String) {
+        val workspacePath = state.goal.workspacePath
         Files.createDirectories(workspacePath)
         val contextFile = workspacePath.resolve("context.md")
 
-        val project = state.project
-        val step = project.plan.steps.firstOrNull { it.id == stepId }
+        val goal = state.goal
+        val step = goal.plan.steps.firstOrNull { it.id == stepId }
         val readySteps = state.readySteps()
-        val blockedSteps = project.plan.steps.filter { it.status == StepStatus.BLOCKED }
-        val doneSteps = project.plan.steps.filter { it.status == StepStatus.DONE }
+        val blockedSteps = goal.plan.steps.filter { it.status == StepStatus.BLOCKED }
+        val doneSteps = goal.plan.steps.filter { it.status == StepStatus.DONE }
 
         val content = buildString {
-            appendLine("# ${project.title}")
+            appendLine("# ${goal.title}")
             appendLine()
-            appendLine("**Status:** ${project.status.name}")
-            appendLine("**Priority:** ${project.priority.name}")
+            appendLine("**Status:** ${goal.status.name}")
+            appendLine("**Priority:** ${goal.priority.name}")
             appendLine("**Last worked:** ${Instant.now()}")
             appendLine()
 
             appendLine("## Progress")
-            appendLine("- Done: ${doneSteps.size}/${project.plan.steps.size} steps")
+            appendLine("- Done: ${doneSteps.size}/${goal.plan.steps.size} steps")
             if (blockedSteps.isNotEmpty()) {
                 appendLine("- Blocked: ${blockedSteps.joinToString { it.id }}")
             }
@@ -129,7 +129,7 @@ object ProjectContextLoader {
             appendLine()
 
             appendLine("## Plan Overview")
-            for (s in project.plan.steps) {
+            for (s in goal.plan.steps) {
                 val marker = when (s.status) {
                     StepStatus.DONE -> "[x]"
                     StepStatus.IN_PROGRESS -> "[~]"
@@ -144,7 +144,7 @@ object ProjectContextLoader {
             appendLine()
 
             appendLine("## Completion Criteria")
-            appendLine(project.completionCriteria)
+            appendLine(goal.completionCriteria)
         }
 
         Files.writeString(contextFile, content)

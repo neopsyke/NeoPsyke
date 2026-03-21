@@ -15,15 +15,15 @@ import ai.neopsyke.agent.model.ActionOutcome
 import ai.neopsyke.agent.model.ActionType
 import ai.neopsyke.agent.model.PendingAction
 import ai.neopsyke.agent.model.SuperegoContext
-import ai.neopsyke.agent.project.GoalOperation
-import ai.neopsyke.agent.project.GoalOperationRequest
+import ai.neopsyke.agent.goal.GoalOperation
+import ai.neopsyke.agent.goal.GoalOperationRequest
 
 class GoalOperationActionPlugin(
     private val context: ActionPluginFactoryContext,
 ) : AgentActionPlugin {
     override val descriptor: ActionDescriptor = ActionDescriptor(
         actionType = ActionType.GOAL_OPERATION,
-        dispatchable = context.config.projects.enabled,
+        dispatchable = context.config.goals.enabled,
         plannerDescription = "goal_operation: create, inspect, pause, resume, reprioritize, complete, list, or revise persistent goals.",
         payloadGuidance = "Strict JSON with an operation field and the required goal arguments.",
         payloadSchemaExample = """
@@ -69,16 +69,16 @@ class GoalOperationActionPlugin(
                 statusSummary = "Unknown goal operation '${payload.operation}'.",
                 executionStatus = ActionExecutionStatus.FAILED,
             )
-        val result = this.context.projectsGateway.executeOperation(
+        val result = this.context.goalsGateway.executeOperation(
             GoalOperationRequest(
                 operation = operation,
-                projectId = payload.projectId,
+                goalId = payload.goalId,
                 title = payload.title,
                 instruction = payload.instruction,
                 priority = payload.priority
                     ?.trim()
                     ?.uppercase()
-                    ?.let { runCatching { ai.neopsyke.agent.project.ProjectPriority.valueOf(it) }.getOrNull() },
+                    ?.let { runCatching { ai.neopsyke.agent.goal.GoalPriority.valueOf(it) }.getOrNull() },
                 completionCriteria = payload.completionCriteria,
                 reason = payload.reason,
             )
@@ -95,7 +95,7 @@ class GoalOperationActionPlugin(
 
     private data class ProjectOperationPayload(
         val operation: String? = null,
-        val projectId: String? = null,
+        val goalId: String? = null,
         val title: String? = null,
         val instruction: String? = null,
         val priority: String? = null,

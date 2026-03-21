@@ -1,6 +1,6 @@
 package ai.neopsyke.agent.config
 
-import ai.neopsyke.agent.project.ProjectConfig
+import ai.neopsyke.agent.goal.GoalConfig
 import ai.neopsyke.dashboard.InnerVoiceConfig
 
 data class AgentConfig(
@@ -10,7 +10,7 @@ data class AgentConfig(
     val metaReasoner: MetaReasonerConfig = MetaReasonerConfig(),
     val logbook: LogbookConfig = LogbookConfig(),
     val innerVoice: InnerVoiceConfig = InnerVoiceConfig(),
-    val projects: ProjectConfig = ProjectConfig(),
+    val goals: GoalConfig = GoalConfig(),
     val loopDelayMs: Int = 0,
     val maxPendingThoughts: Int = 64,
     val maxPendingActions: Int = 32,

@@ -2,7 +2,7 @@ package ai.neopsyke.agent.model
 
 import ai.neopsyke.agent.actions.async.AsyncActionWait
 import ai.neopsyke.agent.id.ConvergenceMode
-import ai.neopsyke.agent.project.GoalRunActivation
+import ai.neopsyke.agent.goal.GoalRunActivation
 
 /**
  * Snapshot of the Id's drive state, injected into [PlannerContext] when the
@@ -17,7 +17,7 @@ data class IdStateSnapshot(
 )
 
 data class AmbientContext(
-    val activeProjects: List<String> = emptyList(),
+    val activeGoals: List<String> = emptyList(),
     val recentWorkspaceThemes: List<String> = emptyList(),
     val recentUsefulActionsOrUpdates: List<String> = emptyList(),
     val unresolvedOpenLoops: List<String> = emptyList(),
@@ -32,7 +32,7 @@ data class AmbientContext(
      * cross-thread coordination.
      */
     fun isEmpty(): Boolean =
-        activeProjects.isEmpty() &&
+        activeGoals.isEmpty() &&
             recentWorkspaceThemes.isEmpty() &&
             recentUsefulActionsOrUpdates.isEmpty() &&
             unresolvedOpenLoops.isEmpty() &&
@@ -42,7 +42,7 @@ data class AmbientContext(
         if (isEmpty()) return ""
         return buildString {
             append("Optional relevance signals:\n")
-            appendSection("active_projects", activeProjects)
+            appendSection("active_goals", activeGoals)
             appendSection("recent_workspace_themes", recentWorkspaceThemes)
             appendSection("recent_useful_actions_updates", recentUsefulActionsOrUpdates)
             appendSection("unresolved_open_loops", unresolvedOpenLoops)
@@ -69,8 +69,8 @@ data class PlannerContext(
     val longTermMemoryRecall: String = "",
     val lessons: String = "",
     val episodicRecall: String = "",
-    val taskWorkspaceSummary: String = "",
-    val sessionWorkspaceDigest: String = "",
+    val scratchpadSummary: String = "",
+    val sessionScratchpadDigest: String = "",
     val ambientContext: AmbientContext = AmbientContext(),
     val evidenceHints: String = "",
     val deliberation: DeliberationState = DeliberationState(),
@@ -80,7 +80,7 @@ data class PlannerContext(
     val actionDefinitions: List<ActionPlanningDefinition> = emptyList(),
     val conversationContext: ConversationContext = ConversationContext.default(),
     val idState: IdStateSnapshot? = null,
-    val projectWorkSummary: String = "",
+    val goalWorkSummary: String = "",
 )
 
 data class ActionPlanningDefinition(
@@ -100,7 +100,7 @@ sealed interface EgoTrigger {
     data class IncomingInput(val input: PendingInput) : EgoTrigger
     data class PendingThoughtInput(val thought: PendingThought) : EgoTrigger
     data class IncomingImpulse(val impulse: PendingImpulse) : EgoTrigger
-    data class ProjectWork(val workUnit: GoalRunActivation) : EgoTrigger
+    data class GoalWork(val workUnit: GoalRunActivation) : EgoTrigger
 }
 
 sealed interface EgoDecision {

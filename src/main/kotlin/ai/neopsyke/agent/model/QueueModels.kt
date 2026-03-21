@@ -57,7 +57,7 @@ data class ActionOrigin(
     }
 }
 
-enum class OriginSource { USER, ID, SYSTEM, PROJECT }
+enum class OriginSource { USER, ID, SYSTEM, GOAL }
 
 data class PendingImpulse(
     val id: Long,
@@ -121,7 +121,7 @@ sealed interface OpportunityWorkItem {
         override val conversationContext: ConversationContext = impulse.conversationContext
     }
 
-    data class GoalWorkOpportunity(val workUnit: ai.neopsyke.agent.project.GoalRunActivation) : OpportunityWorkItem {
+    data class GoalWorkOpportunity(val workUnit: ai.neopsyke.agent.goal.GoalRunActivation) : OpportunityWorkItem {
         override val id: Long = workUnit.rootInputId.hashCode().toLong()
         override val rootInputId: String = workUnit.rootInputId
         override val conversationContext: ConversationContext = ConversationContext.default()

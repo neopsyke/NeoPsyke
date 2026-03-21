@@ -1,4 +1,4 @@
-package ai.neopsyke.agent.project
+package ai.neopsyke.agent.goal
 
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -23,10 +23,10 @@ import kotlin.test.assertTrue
 class GoalOperationActionPluginTest {
 
     @Test
-    fun `plugin is dispatchable only when projects are enabled`() {
+    fun `plugin is dispatchable only when goals are enabled`() {
         val disabled = GoalOperationActionPlugin(
             ActionPluginFactoryContext(
-                config = AgentConfig(projects = ProjectConfig(enabled = false)),
+                config = AgentConfig(goals = GoalConfig(enabled = false)),
                 webSearchActionHandler = null,
                 mcpTimeTool = null,
                 fetchTool = null,
@@ -36,7 +36,7 @@ class GoalOperationActionPluginTest {
         )
         val enabled = GoalOperationActionPlugin(
             ActionPluginFactoryContext(
-                config = AgentConfig(projects = ProjectConfig(enabled = true)),
+                config = AgentConfig(goals = GoalConfig(enabled = true)),
                 webSearchActionHandler = null,
                 mcpTimeTool = null,
                 fetchTool = null,
@@ -50,7 +50,7 @@ class GoalOperationActionPluginTest {
     }
 
     @Test
-    fun `plugin routes create operation through projects gateway`() = runBlocking {
+    fun `plugin routes create operation through goals gateway`() = runBlocking {
         var capturedRequest: GoalOperationRequest? = null
         val gateway = object : GoalsGateway by NoopGoalsGateway {
             override fun executeOperation(request: GoalOperationRequest): GoalOperationResult {
@@ -60,13 +60,13 @@ class GoalOperationActionPluginTest {
         }
         val plugin = GoalOperationActionPlugin(
             ActionPluginFactoryContext(
-                config = AgentConfig(projects = ProjectConfig(enabled = true)),
+                config = AgentConfig(goals = GoalConfig(enabled = true)),
                 webSearchActionHandler = null,
                 mcpTimeTool = null,
                 fetchTool = null,
                 output = {},
                 reflectionMemoryRecorder = ai.neopsyke.agent.actions.NoopReflectionMemoryRecorder,
-                projectsGateway = gateway,
+                goalsGateway = gateway,
             )
         )
 
@@ -84,17 +84,17 @@ class GoalOperationActionPluginTest {
         assertEquals(ActionExecutionStatus.SUCCESS, outcome.executionStatus)
         assertEquals(GoalOperation.CREATE, capturedRequest?.operation)
         assertEquals("Inbox", capturedRequest?.title)
-        assertEquals(ProjectPriority.HIGH, capturedRequest?.priority)
+        assertEquals(GoalPriority.HIGH, capturedRequest?.priority)
     }
 
     @Test
-    fun `plugin executes project lifecycle operations through manager gateway`() = runBlocking {
-        val root = Files.createTempDirectory("psyke-project-op-lifecycle")
+    fun `plugin executes goal lifecycle operations through manager gateway`() = runBlocking {
+        val root = Files.createTempDirectory("psyke-goal-op-lifecycle")
         try {
             val manager = GoalManager(
-                config = ProjectConfig(enabled = true, workspaceRoot = root),
-                store = ProjectStore(root),
-                planner = DeterministicProjectPlanner(),
+                config = GoalConfig(enabled = true, workspaceRoot = root),
+                store = GoalStore(root),
+                planner = DeterministicGoalPlanner(),
             )
             manager.start(testScope())
             val plugin = projectPlugin(manager, root)
@@ -102,36 +102,36 @@ class GoalOperationActionPluginTest {
             val create = execute(plugin, """{"operation":"create","title":"Inbox","instruction":"Keep inbox triaged","priority":"HIGH"}""")
             assertEquals(ActionExecutionStatus.SUCCESS, create.executionStatus)
 
-            val projectId = manager.allProjects().single().projectId
-            val created = manager.projectStatus(projectId)
+            val goalId = manager.allGoals().single().goalId
+            val created = manager.goalStatus(goalId)
             assertNotNull(created)
-            assertEquals(ProjectPriority.HIGH, created.project.priority)
+            assertEquals(GoalPriority.HIGH, created.goal.priority)
 
-            val status = execute(plugin, """{"operation":"status","projectId":"$projectId"}""")
+            val status = execute(plugin, """{"operation":"status","goalId":"$goalId"}""")
             assertEquals(ActionExecutionStatus.SUCCESS, status.executionStatus)
             assertTrue(status.statusSummary.contains("status=ACTIVE"))
             assertTrue(status.statusSummary.contains("next_step=Keep inbox triaged"))
 
             val list = execute(plugin, """{"operation":"list"}""")
             assertEquals(ActionExecutionStatus.SUCCESS, list.executionStatus)
-            assertTrue(list.statusSummary.contains(projectId))
+            assertTrue(list.statusSummary.contains(goalId))
             assertTrue(list.statusSummary.contains("Inbox"))
 
-            val pause = execute(plugin, """{"operation":"pause","projectId":"$projectId","reason":"waiting"}""")
+            val pause = execute(plugin, """{"operation":"pause","goalId":"$goalId","reason":"waiting"}""")
             assertEquals(ActionExecutionStatus.SUCCESS, pause.executionStatus)
-            assertEquals(ProjectStatus.SUSPENDED, manager.projectStatus(projectId)?.project?.status)
+            assertEquals(GoalStatus.SUSPENDED, manager.goalStatus(goalId)?.goal?.status)
 
-            val resume = execute(plugin, """{"operation":"resume","projectId":"$projectId"}""")
+            val resume = execute(plugin, """{"operation":"resume","goalId":"$goalId"}""")
             assertEquals(ActionExecutionStatus.SUCCESS, resume.executionStatus)
-            assertEquals(ProjectStatus.ACTIVE, manager.projectStatus(projectId)?.project?.status)
+            assertEquals(GoalStatus.ACTIVE, manager.goalStatus(goalId)?.goal?.status)
 
-            val reprioritize = execute(plugin, """{"operation":"reprioritize","projectId":"$projectId","priority":"CRITICAL"}""")
+            val reprioritize = execute(plugin, """{"operation":"reprioritize","goalId":"$goalId","priority":"CRITICAL"}""")
             assertEquals(ActionExecutionStatus.SUCCESS, reprioritize.executionStatus)
-            assertEquals(ProjectPriority.CRITICAL, manager.projectStatus(projectId)?.project?.priority)
+            assertEquals(GoalPriority.CRITICAL, manager.goalStatus(goalId)?.goal?.priority)
 
-            val complete = execute(plugin, """{"operation":"complete","projectId":"$projectId"}""")
+            val complete = execute(plugin, """{"operation":"complete","goalId":"$goalId"}""")
             assertEquals(ActionExecutionStatus.SUCCESS, complete.executionStatus)
-            assertEquals(ProjectStatus.COMPLETED, manager.projectStatus(projectId)?.project?.status)
+            assertEquals(GoalStatus.COMPLETED, manager.goalStatus(goalId)?.goal?.status)
 
             manager.stop()
         } finally {
@@ -141,13 +141,13 @@ class GoalOperationActionPluginTest {
 
     @Test
     fun `plugin revise_plan operation updates stored plan`() = runBlocking {
-        val root = Files.createTempDirectory("psyke-project-op-revise")
+        val root = Files.createTempDirectory("psyke-goal-op-revise")
         try {
             var planVersion = 0
-            val planner = object : ProjectPlanner {
-                override fun generatePlan(project: Project): ProjectPlan {
+            val planner = object : GoalPlanner {
+                override fun generatePlan(goal: Goal): GoalPlan {
                     planVersion += 1
-                    return ProjectPlan(
+                    return GoalPlan(
                         steps = listOf(
                             PlanStep(
                                 id = "step-$planVersion",
@@ -161,8 +161,8 @@ class GoalOperationActionPluginTest {
                 }
             }
             val manager = GoalManager(
-                config = ProjectConfig(enabled = true, workspaceRoot = root),
-                store = ProjectStore(root),
+                config = GoalConfig(enabled = true, workspaceRoot = root),
+                store = GoalStore(root),
                 planner = planner,
             )
             manager.start(testScope())
@@ -170,12 +170,12 @@ class GoalOperationActionPluginTest {
 
             val create = execute(plugin, """{"operation":"create","title":"Revise Me","instruction":"Original instruction"}""")
             assertEquals(ActionExecutionStatus.SUCCESS, create.executionStatus)
-            val projectId = manager.allProjects().single().projectId
-            assertEquals("Initial plan", manager.projectStatus(projectId)?.project?.plan?.steps?.single()?.description)
+            val goalId = manager.allGoals().single().goalId
+            assertEquals("Initial plan", manager.goalStatus(goalId)?.goal?.plan?.steps?.single()?.description)
 
-            val revise = execute(plugin, """{"operation":"revise_plan","projectId":"$projectId","reason":"new context"}""")
+            val revise = execute(plugin, """{"operation":"revise_plan","goalId":"$goalId","reason":"new context"}""")
             assertEquals(ActionExecutionStatus.SUCCESS, revise.executionStatus)
-            assertEquals("Revised plan", manager.projectStatus(projectId)?.project?.plan?.steps?.single()?.description)
+            assertEquals("Revised plan", manager.goalStatus(goalId)?.goal?.plan?.steps?.single()?.description)
 
             manager.stop()
         } finally {
@@ -198,13 +198,13 @@ class GoalOperationActionPluginTest {
     private fun projectPlugin(gateway: GoalsGateway, root: java.nio.file.Path) =
         GoalOperationActionPlugin(
             ActionPluginFactoryContext(
-                config = AgentConfig(projects = ProjectConfig(enabled = true, workspaceRoot = root)),
+                config = AgentConfig(goals = GoalConfig(enabled = true, workspaceRoot = root)),
                 webSearchActionHandler = null,
                 mcpTimeTool = null,
                 fetchTool = null,
                 output = {},
                 reflectionMemoryRecorder = ai.neopsyke.agent.actions.NoopReflectionMemoryRecorder,
-                projectsGateway = gateway,
+                goalsGateway = gateway,
             )
         )
 

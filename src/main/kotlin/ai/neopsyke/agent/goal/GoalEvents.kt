@@ -1,194 +1,194 @@
-package ai.neopsyke.agent.project
+package ai.neopsyke.agent.goal
 
 import ai.neopsyke.agent.cortex.sensory.GoalRuntimeCue
 import java.time.Instant
 
 /**
- * Event-sourced events for project state transitions.
+ * Event-sourced events for goal state transitions.
  * Every state change is captured as an immutable event in the event log.
  */
-sealed interface ProjectEvent {
-    val projectId: String
+sealed interface GoalEvent {
+    val goalId: String
     val timestamp: Instant
 
     // ── Lifecycle ────────────────────────────────────────────────────────
 
     data class Created(
-        override val projectId: String,
+        override val goalId: String,
         val title: String,
         val instruction: String,
-        val priority: ProjectPriority,
+        val priority: GoalPriority,
         val completionCriteria: String,
         override val timestamp: Instant = Instant.now(),
-    ) : ProjectEvent
+    ) : GoalEvent
 
     data class PlanGenerated(
-        override val projectId: String,
-        val plan: ProjectPlan,
+        override val goalId: String,
+        val plan: GoalPlan,
         override val timestamp: Instant = Instant.now(),
-    ) : ProjectEvent
+    ) : GoalEvent
 
     data class PlanRevised(
-        override val projectId: String,
-        val plan: ProjectPlan,
+        override val goalId: String,
+        val plan: GoalPlan,
         val reason: String,
         override val timestamp: Instant = Instant.now(),
-    ) : ProjectEvent
+    ) : GoalEvent
 
     // ── Step progress ────────────────────────────────────────────────────
 
     data class StepStarted(
-        override val projectId: String,
+        override val goalId: String,
         val stepId: String,
         override val timestamp: Instant = Instant.now(),
-    ) : ProjectEvent
+    ) : GoalEvent
 
     data class StepActionExecuted(
-        override val projectId: String,
+        override val goalId: String,
         val stepId: String,
         val actionResult: String,
         override val timestamp: Instant = Instant.now(),
-    ) : ProjectEvent
+    ) : GoalEvent
 
     data class StepAcceptancePassed(
-        override val projectId: String,
+        override val goalId: String,
         val stepId: String,
         override val timestamp: Instant = Instant.now(),
-    ) : ProjectEvent
+    ) : GoalEvent
 
     data class StepAcceptanceFailed(
-        override val projectId: String,
+        override val goalId: String,
         val stepId: String,
         val reason: String,
         override val timestamp: Instant = Instant.now(),
-    ) : ProjectEvent
+    ) : GoalEvent
 
     data class StepBlocked(
-        override val projectId: String,
+        override val goalId: String,
         val stepId: String,
         val waitCondition: WaitCondition,
         override val timestamp: Instant = Instant.now(),
-    ) : ProjectEvent
+    ) : GoalEvent
 
     data class StepUnblocked(
-        override val projectId: String,
+        override val goalId: String,
         val stepId: String,
         override val timestamp: Instant = Instant.now(),
-    ) : ProjectEvent
+    ) : GoalEvent
 
     data class StepSkipped(
-        override val projectId: String,
+        override val goalId: String,
         val stepId: String,
         val reason: String,
         override val timestamp: Instant = Instant.now(),
-    ) : ProjectEvent
+    ) : GoalEvent
 
     // ── Wait conditions ──────────────────────────────────────────────────
 
     data class WaitConditionRegistered(
-        override val projectId: String,
+        override val goalId: String,
         val stepId: String,
         val condition: WaitCondition,
         override val timestamp: Instant = Instant.now(),
-    ) : ProjectEvent
+    ) : GoalEvent
 
     data class WaitConditionSatisfied(
-        override val projectId: String,
+        override val goalId: String,
         val stepId: String,
         val conditionType: String,
         val resolutionSummary: String? = null,
         val resolutionStatus: String? = null,
         override val timestamp: Instant = Instant.now(),
-    ) : ProjectEvent
+    ) : GoalEvent
 
     data class WaitConditionTimedOut(
-        override val projectId: String,
+        override val goalId: String,
         val stepId: String,
         override val timestamp: Instant = Instant.now(),
-    ) : ProjectEvent
+    ) : GoalEvent
 
-    // ── Project-level ────────────────────────────────────────────────────
+    // ── Goal-level ────────────────────────────────────────────────────
 
     data class Suspended(
-        override val projectId: String,
+        override val goalId: String,
         val reason: String,
         val resumeAt: Instant? = null,
         override val timestamp: Instant = Instant.now(),
-    ) : ProjectEvent
+    ) : GoalEvent
 
     data class Resumed(
-        override val projectId: String,
+        override val goalId: String,
         override val timestamp: Instant = Instant.now(),
-    ) : ProjectEvent
+    ) : GoalEvent
 
     data class Completed(
-        override val projectId: String,
+        override val goalId: String,
         override val timestamp: Instant = Instant.now(),
-    ) : ProjectEvent
+    ) : GoalEvent
 
     data class PriorityChanged(
-        override val projectId: String,
-        val priority: ProjectPriority,
+        override val goalId: String,
+        val priority: GoalPriority,
         override val timestamp: Instant = Instant.now(),
-    ) : ProjectEvent
+    ) : GoalEvent
 
     data class Failed(
-        override val projectId: String,
+        override val goalId: String,
         val reason: String,
         override val timestamp: Instant = Instant.now(),
-    ) : ProjectEvent
+    ) : GoalEvent
 
     // ── Context management ───────────────────────────────────────────────
 
     data class ContextUpdated(
-        override val projectId: String,
+        override val goalId: String,
         val tier: Int,
         val summary: String,
         override val timestamp: Instant = Instant.now(),
-    ) : ProjectEvent
+    ) : GoalEvent
 
     data class WorkCycleCompleted(
-        override val projectId: String,
+        override val goalId: String,
         val stepId: String,
         val actionsExecuted: Int,
         override val timestamp: Instant = Instant.now(),
-    ) : ProjectEvent
+    ) : GoalEvent
 }
 
 /**
  * Commands emitted by the state machine transition function.
  * The GoalManager dispatches these as side effects.
  */
-sealed interface ProjectCommand {
+sealed interface GoalCommand {
     data class EmitWorkReady(
         val cue: GoalRuntimeCue,
-    ) : ProjectCommand
+    ) : GoalCommand
 
     data class ScheduleWakeTimer(
-        val projectId: String,
+        val goalId: String,
         val stepId: String? = null,
         val wakeAt: Instant,
         val reason: String,
-    ) : ProjectCommand
+    ) : GoalCommand
 
     data class CancelWakeTimer(
-        val projectId: String,
+        val goalId: String,
         val reason: String,
-    ) : ProjectCommand
+    ) : GoalCommand
 
     data class RegisterWaitCondition(
-        val projectId: String,
+        val goalId: String,
         val stepId: String,
         val condition: WaitCondition,
-    ) : ProjectCommand
+    ) : GoalCommand
 
     data class ClearWaitCondition(
-        val projectId: String,
+        val goalId: String,
         val stepId: String,
-    ) : ProjectCommand
+    ) : GoalCommand
 
-    data class PersistProject(val projectId: String) : ProjectCommand
-    data class NotifyUser(val projectId: String, val message: String) : ProjectCommand
+    data class PersistGoal(val goalId: String) : GoalCommand
+    data class NotifyUser(val goalId: String, val message: String) : GoalCommand
 }
 
 data class WaitConditionResolution(

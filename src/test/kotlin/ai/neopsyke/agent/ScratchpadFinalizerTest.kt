@@ -15,7 +15,7 @@ class ScratchpadFinalizerTest {
         }
         val config = AgentConfig(
             memory = MemoryConfig(
-                taskWorkspace = TaskWorkspaceConfig(
+                scratchpad = ScratchpadConfig(
                     enabled = true,
                     finalPassMaxTokens = 321
                 )

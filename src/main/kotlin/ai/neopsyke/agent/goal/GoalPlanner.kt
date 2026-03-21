@@ -1,4 +1,4 @@
-package ai.neopsyke.agent.project
+package ai.neopsyke.agent.goal
 
 import com.fasterxml.jackson.annotation.JsonProperty
 import com.fasterxml.jackson.databind.DeserializationFeature
@@ -15,30 +15,30 @@ import java.time.Instant
 
 private val plannerLogger = KotlinLogging.logger {}
 
-interface ProjectPlanner {
-    fun generatePlan(project: Project): ProjectPlan
+interface GoalPlanner {
+    fun generatePlan(goal: Goal): GoalPlan
 }
 
-class DeterministicProjectPlanner : ProjectPlanner {
-    override fun generatePlan(project: Project): ProjectPlan =
-        ProjectPlan(
+class DeterministicGoalPlanner : GoalPlanner {
+    override fun generatePlan(goal: Goal): GoalPlan =
+        GoalPlan(
             steps = listOf(
                 PlanStep(
                     id = "step-1",
-                    description = project.instruction,
+                    description = goal.instruction,
                     status = StepStatus.PENDING,
-                    acceptanceCriteria = project.completionCriteria,
+                    acceptanceCriteria = goal.completionCriteria,
                 )
             ),
             generatedAt = Instant.now(),
         )
 }
 
-class LlmProjectPlanner(
+class LlmGoalPlanner(
     private val modelClient: ChatModelClient,
     private val config: AgentConfig,
-) : ProjectPlanner {
-    override fun generatePlan(project: Project): ProjectPlan {
+) : GoalPlanner {
+    override fun generatePlan(goal: Goal): GoalPlan {
         val attempts = maxOf(1, config.llmRetryAttempts)
         var raw: String? = null
         for (attempt in 1..attempts) {
@@ -49,18 +49,18 @@ class LlmProjectPlanner(
                         ChatMessage(
                             ChatRole.USER,
                             """
-                            Generate a project plan.
-                            title=${project.title}
-                            instruction=${project.instruction}
-                            completion_criteria=${project.completionCriteria}
-                            max_steps=${config.projects.maxStepsPerPlan}
+                            Generate a goal plan.
+                            title=${goal.title}
+                            instruction=${goal.instruction}
+                            completion_criteria=${goal.completionCriteria}
+                            max_steps=${config.goals.maxStepsPerPlan}
                             """.trimIndent()
                         )
                     ),
                     options = ChatRequestOptions(
                         maxTokens = config.planner.maxCompletionTokens,
                         responseFormat = ChatResponseFormat.JsonSchema(
-                            name = "project_plan",
+                            name = "goal_plan",
                             schemaJson = PLAN_SCHEMA_JSON
                         )
                     )
@@ -68,18 +68,18 @@ class LlmProjectPlanner(
                 break
             } catch (ex: Exception) {
                 if (attempt < attempts) {
-                    plannerLogger.warn(ex) { "Project planner failed; retrying (attempt $attempt/$attempts)." }
+                    plannerLogger.warn(ex) { "Goal planner failed; retrying (attempt $attempt/$attempts)." }
                 } else {
-                    plannerLogger.warn(ex) { "Project planner failed after $attempts attempts." }
+                    plannerLogger.warn(ex) { "Goal planner failed after $attempts attempts." }
                 }
             }
         }
-        val content = raw ?: return DeterministicProjectPlanner().generatePlan(project)
+        val content = raw ?: return DeterministicGoalPlanner().generatePlan(goal)
         val payload = try {
-            mapper.readValue<ProjectPlanPayload>(content)
+            mapper.readValue<GoalPlanPayload>(content)
         } catch (ex: Exception) {
-            plannerLogger.warn(ex) { "Project planner response could not be parsed; using deterministic fallback." }
-            return DeterministicProjectPlanner().generatePlan(project)
+            plannerLogger.warn(ex) { "Goal planner response could not be parsed; using deterministic fallback." }
+            return DeterministicGoalPlanner().generatePlan(goal)
         }
         val steps = payload.steps
             ?.mapIndexedNotNull { index, step ->
@@ -100,19 +100,19 @@ class LlmProjectPlanner(
                 }
             }
             .orEmpty()
-            .take(config.projects.maxStepsPerPlan)
+            .take(config.goals.maxStepsPerPlan)
         if (steps.isEmpty()) {
-            plannerLogger.warn { "Project planner returned no valid steps; using deterministic fallback." }
-            return DeterministicProjectPlanner().generatePlan(project)
+            plannerLogger.warn { "Goal planner returned no valid steps; using deterministic fallback." }
+            return DeterministicGoalPlanner().generatePlan(goal)
         }
-        return ProjectPlan(steps = steps, generatedAt = Instant.now())
+        return GoalPlan(steps = steps, generatedAt = Instant.now())
     }
 
-    private data class ProjectPlanPayload(
-        val steps: List<ProjectPlanStepPayload>? = null,
+    private data class GoalPlanPayload(
+        val steps: List<GoalPlanStepPayload>? = null,
     )
 
-    private data class ProjectPlanStepPayload(
+    private data class GoalPlanStepPayload(
         val id: String? = null,
         val description: String? = null,
         @field:JsonProperty("acceptance_criteria")
@@ -154,7 +154,7 @@ class LlmProjectPlanner(
             }
         """.trimIndent()
         val SYSTEM_PROMPT: String = """
-            You generate persistent project plans for a sequential agent.
+            You generate persistent goal plans for a sequential agent.
             Return strict JSON only.
             Use a short flat step list.
             Each step must be independently verifiable.

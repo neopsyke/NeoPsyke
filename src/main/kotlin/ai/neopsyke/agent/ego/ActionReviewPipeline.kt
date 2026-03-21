@@ -23,8 +23,8 @@ internal class ActionReviewPipeline(
     private val instrumentation: AgentInstrumentation,
     private val scheduler: AttentionScheduler,
     private val taskVerifier: DecisionVerifier,
-    private val taskWorkspaceStore: ScratchpadStore,
-    private val taskWorkspaceFinalizer: ScratchpadFinalizer,
+    private val scratchpadStore: ScratchpadStore,
+    private val scratchpadFinalizer: ScratchpadFinalizer,
     private val deliberation: DeliberationEngine,
     private val memory: MemorySystem,
     private val telemetry: EgoTelemetry,
@@ -45,7 +45,7 @@ internal class ActionReviewPipeline(
         deliberation.setActiveSession(sessionId)
 
         timing.startPhase("workspace_final_pass")
-        val resolvedAction = applyTaskWorkspaceFinalPass(action, sessionId)
+        val resolvedAction = applyScratchpadFinalPass(action, sessionId)
         instrumentation.emit(AgentEvents.actionReviewRequested(resolvedAction))
         if (resolvedAction.isFallbackExplanation) {
             executeFallbackBypass(resolvedAction, sessionId, convCtx, timing)
@@ -74,7 +74,7 @@ internal class ActionReviewPipeline(
         val observed = deliberation.observedEvidence(resolvedAction, outcome)
         deliberation.recordEvidenceProgress(resolvedAction, outcome, observed)
         deliberation.onActionExecuted(resolvedAction, observed)
-        maybeRecordTaskWorkspaceOutcome(resolvedAction, outcome, observed)
+        maybeRecordScratchpadOutcome(resolvedAction, outcome, observed)
         deliberation.recordActionOutcome(resolvedAction, outcome, observed)
         actionLifecycleObserver.onActionExecuted(resolvedAction, outcome, observed)
         if (resolvedAction.type == ActionType.CONTACT_USER) {
@@ -131,7 +131,7 @@ internal class ActionReviewPipeline(
         val observed = deliberation.observedEvidence(resolvedAction, outcome)
         deliberation.recordEvidenceProgress(resolvedAction, outcome, observed)
         deliberation.onActionExecuted(resolvedAction, observed)
-        maybeRecordTaskWorkspaceOutcome(resolvedAction, outcome, observed)
+        maybeRecordScratchpadOutcome(resolvedAction, outcome, observed)
         maybeRunTerminalAnswerMemoryAssessment(resolvedAction, outcome, sessionId)
         instrumentation.emit(AgentEvents.phaseTimings(timing.build()))
     }
@@ -325,9 +325,9 @@ internal class ActionReviewPipeline(
         }
     }
 
-    private fun maybeRecordTaskWorkspaceOutcome(action: PendingAction, outcome: ActionOutcome, observedEvidence: Boolean) {
+    private fun maybeRecordScratchpadOutcome(action: PendingAction, outcome: ActionOutcome, observedEvidence: Boolean) {
         if (action.type == ActionType.RESOLUTION_DRAFT) {
-            taskWorkspaceStore.recordResolutionDraft(
+            scratchpadStore.recordResolutionDraft(
                 rootInputId = action.rootInputId,
                 payload = action.payload
             )
@@ -340,11 +340,11 @@ internal class ActionReviewPipeline(
                         "update_type" to "resolution_draft_recorded",
                         "action_type" to action.type.name.lowercase(),
                         "draft_preview" to TextSecurity.preview(action.payload, 140),
-                        "active_tasks" to taskWorkspaceStore.activeTaskCount()
+                        "active_tasks" to scratchpadStore.activeTaskCount()
                     )
                 )
             )
-            telemetry.emitTaskWorkspaceTelemetry(
+            telemetry.emitScratchpadTelemetry(
                 rootInputId = action.rootInputId,
                 rootInputReceivedAtMs = action.rootInputReceivedAtMs,
                 updateType = "resolution_draft_recorded"
@@ -352,7 +352,7 @@ internal class ActionReviewPipeline(
             return
         }
         if (action.type == ActionType.CONTACT_USER) return
-        taskWorkspaceStore.recordActionOutcome(
+        scratchpadStore.recordActionOutcome(
             rootInputId = action.rootInputId,
             action = action,
             outcome = outcome,
@@ -368,11 +368,11 @@ internal class ActionReviewPipeline(
                     "action_type" to action.type.name.lowercase(),
                     "observed_evidence" to observedEvidence,
                     "status_preview" to TextSecurity.preview(outcome.statusSummary, 140),
-                    "active_tasks" to taskWorkspaceStore.activeTaskCount()
+                    "active_tasks" to scratchpadStore.activeTaskCount()
                 )
             )
         )
-        telemetry.emitTaskWorkspaceTelemetry(
+        telemetry.emitScratchpadTelemetry(
             rootInputId = action.rootInputId,
             rootInputReceivedAtMs = action.rootInputReceivedAtMs,
             updateType = "action_outcome_recorded"
@@ -413,14 +413,14 @@ internal class ActionReviewPipeline(
 
     // ── Workspace final pass ──
 
-    private fun applyTaskWorkspaceFinalPass(action: PendingAction, sessionId: String): PendingAction {
+    private fun applyScratchpadFinalPass(action: PendingAction, sessionId: String): PendingAction {
         if (action.type != ActionType.CONTACT_USER) {
             return action
         }
-        if (!config.memory.taskWorkspace.enabled || !config.memory.taskWorkspace.finalPassRewriteEnabled) {
+        if (!config.memory.scratchpad.enabled || !config.memory.scratchpad.finalPassRewriteEnabled) {
             return action
         }
-        val preFinalSnapshot = taskWorkspaceStore.debugSnapshot(action.rootInputId)
+        val preFinalSnapshot = scratchpadStore.debugSnapshot(action.rootInputId)
         if (preFinalSnapshot != null) {
             instrumentation.emit(
                 AgentEvent(
@@ -434,21 +434,21 @@ internal class ActionReviewPipeline(
                 )
             )
         }
-        taskWorkspaceStore.recordResolutionDraft(
+        scratchpadStore.recordResolutionDraft(
             rootInputId = action.rootInputId,
             payload = action.payload
         )
-        telemetry.emitTaskWorkspaceTelemetry(
+        telemetry.emitScratchpadTelemetry(
             rootInputId = action.rootInputId,
             rootInputReceivedAtMs = action.rootInputReceivedAtMs,
             updateType = "resolution_draft_recorded"
         )
-        val finalPassInput = taskWorkspaceStore.buildFinalPassInput(
+        val finalPassInput = scratchpadStore.buildFinalPassInput(
             rootInputId = action.rootInputId,
             candidateAnswer = action.payload,
-            maxChars = config.memory.taskWorkspace.finalCompilationMaxChars
+            maxChars = config.memory.scratchpad.finalCompilationMaxChars
         ) ?: return action
-        val draftThreshold = maxOf(2, config.memory.taskWorkspace.activationMinPlanSteps)
+        val draftThreshold = maxOf(2, config.memory.scratchpad.activationMinPlanSteps)
         if (finalPassInput.evidenceCount == 0 && finalPassInput.resolutionDraftCount < draftThreshold) {
             instrumentation.emit(
                 AgentEvent(
@@ -479,7 +479,7 @@ internal class ActionReviewPipeline(
                 )
             )
         )
-        if (finalPassInput.workspaceConfidence < config.memory.taskWorkspace.finalPassMinWorkspaceConfidence) {
+        if (finalPassInput.workspaceConfidence < config.memory.scratchpad.finalPassMinWorkspaceConfidence) {
             instrumentation.emit(
                 AgentEvent(
                     type = "scratchpad_final_pass_skipped",
@@ -489,13 +489,13 @@ internal class ActionReviewPipeline(
                         "action_id" to action.id,
                         "reason" to "workspace_confidence_gate",
                         "workspace_confidence" to finalPassInput.workspaceConfidence,
-                        "min_workspace_confidence" to config.memory.taskWorkspace.finalPassMinWorkspaceConfidence
+                        "min_workspace_confidence" to config.memory.scratchpad.finalPassMinWorkspaceConfidence
                     )
                 )
             )
             return action
         }
-        val finalizerResult = taskWorkspaceFinalizer.finalize(
+        val finalizerResult = scratchpadFinalizer.finalize(
             ScratchpadFinalizerRequest(
                 action = action,
                 workspaceCompilation = finalPassInput.compilation,
@@ -516,7 +516,7 @@ internal class ActionReviewPipeline(
             )
             return action
         }
-        if (finalizerResult.confidence < config.memory.taskWorkspace.finalPassMinModelConfidence) {
+        if (finalizerResult.confidence < config.memory.scratchpad.finalPassMinModelConfidence) {
             instrumentation.emit(
                 AgentEvent(
                     type = "scratchpad_final_pass_skipped",
@@ -526,7 +526,7 @@ internal class ActionReviewPipeline(
                         "action_id" to action.id,
                         "reason" to "model_confidence_gate",
                         "model_confidence" to finalizerResult.confidence,
-                        "min_model_confidence" to config.memory.taskWorkspace.finalPassMinModelConfidence
+                        "min_model_confidence" to config.memory.scratchpad.finalPassMinModelConfidence
                     )
                 )
             )

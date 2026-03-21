@@ -1,4 +1,4 @@
-package ai.neopsyke.agent.project
+package ai.neopsyke.agent.goal
 
 import java.time.Instant
 import kotlin.test.Test
@@ -43,16 +43,16 @@ class PlanStepDependencyTest {
     }
 
     @Test
-    fun `project plan empty factory creates valid empty plan`() {
-        val plan = ProjectPlan.empty()
+    fun `goal plan empty factory creates valid empty plan`() {
+        val plan = GoalPlan.empty()
         assertTrue(plan.steps.isEmpty())
         assertEquals(Instant.EPOCH, plan.generatedAt)
     }
 
     @Test
-    fun `project status enum covers all lifecycle states`() {
+    fun `goal status enum covers all lifecycle states`() {
         val expected = setOf("CREATED", "PLANNING", "ACTIVE", "BLOCKED", "SUSPENDED", "COMPLETED", "FAILED")
-        assertEquals(expected, ProjectStatus.entries.map { it.name }.toSet())
+        assertEquals(expected, GoalStatus.entries.map { it.name }.toSet())
     }
 
     @Test
@@ -62,18 +62,18 @@ class PlanStepDependencyTest {
     }
 
     @Test
-    fun `tier1 summary captures essential project state`() {
-        val summary = ProjectTier1Summary(
-            projectId = "proj-1",
-            title = "Test Project",
-            status = ProjectStatus.ACTIVE,
-            priority = ProjectPriority.HIGH,
+    fun `tier1 summary captures essential goal state`() {
+        val summary = GoalTier1Summary(
+            goalId = "proj-1",
+            title = "Test Goal",
+            status = GoalStatus.ACTIVE,
+            priority = GoalPriority.HIGH,
             currentStepDescription = "Running tests",
             blockers = emptyList(),
             lastWorkedAt = Instant.now(),
         )
-        assertEquals("proj-1", summary.projectId)
-        assertEquals(ProjectStatus.ACTIVE, summary.status)
+        assertEquals("proj-1", summary.goalId)
+        assertEquals(GoalStatus.ACTIVE, summary.status)
         assertTrue(summary.blockers.isEmpty())
     }
 

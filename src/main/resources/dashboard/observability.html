@@ -750,7 +750,7 @@
     <div style="display:flex;align-items:center;gap:10px;">
       <a class="ghost-btn" href="/" target="_blank" rel="noopener noreferrer">Conversations</a>
       <a class="ghost-btn" href="/metrics" target="_blank" rel="noopener noreferrer">Metrics</a>
-      <a class="ghost-btn" href="/projects" target="_blank" rel="noopener noreferrer">Projects</a>
+      <a class="ghost-btn" href="/goals" target="_blank" rel="noopener noreferrer">Goals</a>
       <div class="status" id="status">connecting...</div>
     </div>
   </header>
@@ -816,9 +816,9 @@
 
   <div class="workspace-drawer" id="workspace-drawer">
     <div class="workspace-backdrop" id="workspace-backdrop"></div>
-    <aside class="workspace-sheet" role="dialog" aria-label="Task Workspace">
+    <aside class="workspace-sheet" role="dialog" aria-label="Scratchpad">
       <div class="workspace-head">
-        <strong>Task Workspace (Debug)</strong>
+        <strong>Scratchpad (Debug)</strong>
         <button class="ghost-btn" id="workspace-close-btn" type="button">Close</button>
       </div>
       <div class="workspace-toolbar">
@@ -917,7 +917,7 @@
       "response_latency_recorded", "llm_raw_response", "llm_call",
       "action_capabilities", "limits_config", "instrumentation_health",
       "queue_saturation", "noop_recorded",
-      "task_workspace_head", "task_workspace_debug_snapshot",
+      "scratchpad_head", "scratchpad_debug_snapshot",
       "long_term_memory_assessment_parse_fallback",
       "long_term_memory_assessment_temporarily_disabled",
       "long_term_memory_persistence_skipped"
@@ -2046,7 +2046,7 @@
         applyIdEvent(event);
       }
 
-      if (String(event.type || "").startsWith("task_workspace_")) {
+      if (String(event.type || "").startsWith("scratchpad_")) {
         scheduleWorkspaceRefresh();
       }
 

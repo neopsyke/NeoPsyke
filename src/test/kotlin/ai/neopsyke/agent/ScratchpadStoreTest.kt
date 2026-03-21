@@ -4,7 +4,7 @@ import ai.neopsyke.agent.model.ActionOutcome
 import ai.neopsyke.agent.model.ActionType
 import ai.neopsyke.agent.model.PendingAction
 import ai.neopsyke.agent.model.PendingInput
-import ai.neopsyke.agent.config.TaskWorkspaceConfig
+import ai.neopsyke.agent.config.ScratchpadConfig
 import ai.neopsyke.agent.model.Urgency
 import ai.neopsyke.agent.memory.scratchpad.ScratchpadStore
 import kotlin.test.Test
@@ -17,7 +17,7 @@ class ScratchpadStoreTest {
     @Test
     fun `workspace summary is scoped per root input`() {
         val store = ScratchpadStore(
-            TaskWorkspaceConfig(
+            ScratchpadConfig(
                 enabled = true,
                 activationMinPlanSteps = 1,
                 maxPromptTokens = 400
@@ -55,7 +55,7 @@ class ScratchpadStoreTest {
 
     @Test
     fun `final compilation includes evidence and candidate answer`() {
-        val store = ScratchpadStore(TaskWorkspaceConfig(enabled = true, activationMinPlanSteps = 1))
+        val store = ScratchpadStore(ScratchpadConfig(enabled = true, activationMinPlanSteps = 1))
         val root = "root-pricing"
         store.ensureForInput(
             PendingInput(
@@ -94,7 +94,7 @@ class ScratchpadStoreTest {
 
     @Test
     fun `final pass input reports workspace confidence`() {
-        val store = ScratchpadStore(TaskWorkspaceConfig(enabled = true, activationMinPlanSteps = 1))
+        val store = ScratchpadStore(ScratchpadConfig(enabled = true, activationMinPlanSteps = 1))
         val root = "root-release"
         store.ensureForInput(
             PendingInput(
@@ -120,7 +120,7 @@ class ScratchpadStoreTest {
 
     @Test
     fun `final pass input counts answer draft sections`() {
-        val store = ScratchpadStore(TaskWorkspaceConfig(enabled = true, activationMinPlanSteps = 1))
+        val store = ScratchpadStore(ScratchpadConfig(enabled = true, activationMinPlanSteps = 1))
         val root = "root-answer-draft"
         store.ensureForInput(
             PendingInput(
@@ -159,7 +159,7 @@ class ScratchpadStoreTest {
 
     @Test
     fun `destroy removes only targeted workspace`() {
-        val store = ScratchpadStore(TaskWorkspaceConfig(enabled = true, activationMinPlanSteps = 1))
+        val store = ScratchpadStore(ScratchpadConfig(enabled = true, activationMinPlanSteps = 1))
         store.ensureForInput(PendingInput(id = 1, content = "task A", rootInputId = "root-a", receivedAtMs = 1L))
         store.ensureForInput(PendingInput(id = 2, content = "task B", rootInputId = "root-b", receivedAtMs = 2L))
 
@@ -174,7 +174,7 @@ class ScratchpadStoreTest {
 
     @Test
     fun `debug snapshot exposes full sections evidence and monotonic version`() {
-        val store = ScratchpadStore(TaskWorkspaceConfig(enabled = true, activationMinPlanSteps = 1))
+        val store = ScratchpadStore(ScratchpadConfig(enabled = true, activationMinPlanSteps = 1))
         val root = "root-debug"
         store.ensureForInput(
             PendingInput(
@@ -198,7 +198,7 @@ class ScratchpadStoreTest {
 
     @Test
     fun `gate skips workspace for simple plan`() {
-        val store = ScratchpadStore(TaskWorkspaceConfig(enabled = true, activationMinPlanSteps = 3))
+        val store = ScratchpadStore(ScratchpadConfig(enabled = true, activationMinPlanSteps = 3))
         val root = "root-simple"
         store.ensureForInput(
             PendingInput(id = 1, content = "quick question", rootInputId = root, receivedAtMs = 100L)
@@ -215,7 +215,7 @@ class ScratchpadStoreTest {
 
     @Test
     fun `gate activates workspace on complex plan`() {
-        val store = ScratchpadStore(TaskWorkspaceConfig(enabled = true, activationMinPlanSteps = 3))
+        val store = ScratchpadStore(ScratchpadConfig(enabled = true, activationMinPlanSteps = 3))
         val root = "root-complex"
         store.ensureForInput(
             PendingInput(id = 1, content = "research and compare options", rootInputId = root, receivedAtMs = 200L)
@@ -239,10 +239,10 @@ class ScratchpadStoreTest {
 
     @Test
     fun `gate allows late activation on second plan`() {
-        val store = ScratchpadStore(TaskWorkspaceConfig(enabled = true, activationMinPlanSteps = 3))
+        val store = ScratchpadStore(ScratchpadConfig(enabled = true, activationMinPlanSteps = 3))
         val root = "root-evolving"
         store.ensureForInput(
-            PendingInput(id = 1, content = "help with project", rootInputId = root, receivedAtMs = 300L)
+            PendingInput(id = 1, content = "help with goal", rootInputId = root, receivedAtMs = 300L)
         )
 
         val firstActivation = store.recordPlan(root, "Quick check", listOf("Look it up"))
@@ -263,7 +263,7 @@ class ScratchpadStoreTest {
 
     @Test
     fun `destroy cleans up pending entries`() {
-        val store = ScratchpadStore(TaskWorkspaceConfig(enabled = true, activationMinPlanSteps = 3))
+        val store = ScratchpadStore(ScratchpadConfig(enabled = true, activationMinPlanSteps = 3))
         store.ensureForInput(
             PendingInput(id = 1, content = "pending task", rootInputId = "root-pending", receivedAtMs = 400L)
         )
@@ -282,7 +282,7 @@ class ScratchpadStoreTest {
 
     @Test
     fun `gate disabled when activationMinPlanSteps is 1`() {
-        val store = ScratchpadStore(TaskWorkspaceConfig(enabled = true, activationMinPlanSteps = 1))
+        val store = ScratchpadStore(ScratchpadConfig(enabled = true, activationMinPlanSteps = 1))
         val root = "root-no-gate"
         val created = store.ensureForInput(
             PendingInput(id = 1, content = "any task", rootInputId = root, receivedAtMs = 500L)
@@ -298,7 +298,7 @@ class ScratchpadStoreTest {
     @Test
     fun `captureDigest produces entry with goal and section index`() {
         val store = ScratchpadStore(
-            TaskWorkspaceConfig(enabled = true, activationMinPlanSteps = 1, digestMaxEntries = 4)
+            ScratchpadConfig(enabled = true, activationMinPlanSteps = 1, digestMaxEntries = 4)
         )
         val root = "root-digest-1"
         store.ensureForInput(
@@ -330,7 +330,7 @@ class ScratchpadStoreTest {
     @Test
     fun `digest ring buffer evicts oldest when exceeding maxEntries`() {
         val store = ScratchpadStore(
-            TaskWorkspaceConfig(enabled = true, activationMinPlanSteps = 1, digestMaxEntries = 2)
+            ScratchpadConfig(enabled = true, activationMinPlanSteps = 1, digestMaxEntries = 2)
         )
         val sessionId = "session-evict"
         for (i in 1..3) {
@@ -349,13 +349,13 @@ class ScratchpadStoreTest {
 
     @Test
     fun `digestPromptSummary returns blank for unknown session`() {
-        val store = ScratchpadStore(TaskWorkspaceConfig(enabled = true, activationMinPlanSteps = 1))
+        val store = ScratchpadStore(ScratchpadConfig(enabled = true, activationMinPlanSteps = 1))
         assertEquals("", store.digestPromptSummary("nonexistent", maxTokens = 200))
     }
 
     @Test
     fun `captureDigest returns null when workspace not found`() {
-        val store = ScratchpadStore(TaskWorkspaceConfig(enabled = true, activationMinPlanSteps = 1))
+        val store = ScratchpadStore(ScratchpadConfig(enabled = true, activationMinPlanSteps = 1))
         val entry = store.captureDigest("no-such-root", "session-x")
         assertNull(entry)
     }
@@ -363,7 +363,7 @@ class ScratchpadStoreTest {
     @Test
     fun `digestPromptSummary respects token budget`() {
         val store = ScratchpadStore(
-            TaskWorkspaceConfig(
+            ScratchpadConfig(
                 enabled = true, activationMinPlanSteps = 1,
                 digestMaxEntries = 4, digestMaxPromptTokens = 40
             )
@@ -390,7 +390,7 @@ class ScratchpadStoreTest {
     @Test
     fun `clearAll also clears digests`() {
         val store = ScratchpadStore(
-            TaskWorkspaceConfig(enabled = true, activationMinPlanSteps = 1, digestMaxEntries = 4)
+            ScratchpadConfig(enabled = true, activationMinPlanSteps = 1, digestMaxEntries = 4)
         )
         val root = "root-clear"
         store.ensureForInput(
@@ -407,7 +407,7 @@ class ScratchpadStoreTest {
     @Test
     fun `clearActiveWorkspaces preserves session digests`() {
         val store = ScratchpadStore(
-            TaskWorkspaceConfig(enabled = true, activationMinPlanSteps = 1, digestMaxEntries = 4)
+            ScratchpadConfig(enabled = true, activationMinPlanSteps = 1, digestMaxEntries = 4)
         )
         val root = "root-active-clear"
         store.ensureForInput(
@@ -426,7 +426,7 @@ class ScratchpadStoreTest {
     @Test
     fun `digest sessions are isolated`() {
         val store = ScratchpadStore(
-            TaskWorkspaceConfig(enabled = true, activationMinPlanSteps = 1, digestMaxEntries = 4)
+            ScratchpadConfig(enabled = true, activationMinPlanSteps = 1, digestMaxEntries = 4)
         )
         store.ensureForInput(
             PendingInput(id = 1, content = "session A task", rootInputId = "root-sa", receivedAtMs = 100L)
@@ -451,10 +451,10 @@ class ScratchpadStoreTest {
     @Test
     fun `workspace ambient signal helpers expose active and resolved goals across sessions`() {
         val store = ScratchpadStore(
-            TaskWorkspaceConfig(enabled = true, activationMinPlanSteps = 1, digestMaxEntries = 4)
+            ScratchpadConfig(enabled = true, activationMinPlanSteps = 1, digestMaxEntries = 4)
         )
         store.ensureForInput(
-            PendingInput(id = 1, content = "active migration project", rootInputId = "root-active", receivedAtMs = 10L)
+            PendingInput(id = 1, content = "active migration goal", rootInputId = "root-active", receivedAtMs = 10L)
         )
         store.ensureForInput(
             PendingInput(id = 2, content = "resolved docs refresh", rootInputId = "root-digest", receivedAtMs = 20L)
@@ -464,7 +464,7 @@ class ScratchpadStoreTest {
         val activeGoals = store.activeGoalSignals()
         val resolvedGoals = store.recentResolvedGoalSignals()
 
-        assertTrue(activeGoals.contains("active migration project"))
+        assertTrue(activeGoals.contains("active migration goal"))
         assertTrue(resolvedGoals.any { it.contains("resolved docs refresh") })
     }
 }

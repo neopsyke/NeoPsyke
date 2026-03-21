@@ -2,7 +2,7 @@ package ai.neopsyke.agent.ego
 
 import ai.neopsyke.agent.config.*
 import ai.neopsyke.agent.model.*
-import ai.neopsyke.agent.project.GoalRunActivation
+import ai.neopsyke.agent.goal.GoalRunActivation
 import java.util.PriorityQueue
 
 class AttentionScheduler(

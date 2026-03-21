@@ -84,7 +84,7 @@ It is intentionally high-level and should stay aligned with the code.
       - `processOpportunity`:
         - `InputOpportunity` -> `processInput`
         - `ImpulseOpportunity` -> `processImpulse`
-        - `GoalWorkOpportunity` -> `processProjectWork` (goal-runtime execution path; method name still reflects current internal state-machine lineage)
+        - `GoalWorkOpportunity` -> `processGoalWork` (goal-runtime execution path; method name still reflects current internal state-machine lineage)
       - `processThought`
       - `processAction`
     - Catch task errors, emit warning, continue loop.
@@ -196,8 +196,8 @@ It is intentionally high-level and should stay aligned with the code.
     - runs `ScratchpadFinalizer` rewrite when enabled
     - applies model-confidence gate (`finalPassMinModelConfidence`)
     - keeps original payload on any gate/finalizer failure path
-  - Emits lightweight scratchpad-head telemetry (`task_workspace_head`) on scratchpad mutations.
-  - When `TaskWorkspaceConfig.debugCaptureEnabled` is on, emits full debug snapshots (`task_workspace_debug_snapshot`) for dashboard-only inspection.
+  - Emits lightweight scratchpad-head telemetry (`scratchpad_head`) on scratchpad mutations.
+  - When `ScratchpadConfig.debugCaptureEnabled` is on, emits full debug snapshots (`scratchpad_debug_snapshot`) for dashboard-only inspection.
   - Fallback explanation actions bypass policy gate.
   - Normal actions pass through deterministic `DecisionVerifier` first (task-truth/sufficiency gate), then `Superego.review`.
     - Deterministic checks classify task intent + volatility for terminal answers.
@@ -226,7 +226,7 @@ It is intentionally high-level and should stay aligned with the code.
 - After `answer`, pending thoughts/actions for the same `(root input, sessionId)` scope are pruned from queues
     (`input_resolution_cleanup`) so stale plan/follow-up work cannot continue cycling or leak across sessions.
 - After `answer`, the scratchpad digest is captured into the session digest ring before scratchpad destruction.
-- After `answer`, the scratchpad for that root input is destroyed (`task_workspace_destroyed`).
+- After `answer`, the scratchpad for that root input is destroyed (`scratchpad_destroyed`).
 
 ## Planner Logic
 - File: `src/main/kotlin/ai/neopsyke/agent/ego/LlmEgoPlanner.kt`
@@ -246,27 +246,27 @@ It is intentionally high-level and should stay aligned with the code.
 
 ## Goals Runtime
 - Files:
-  - `src/main/kotlin/ai/neopsyke/agent/project/GoalsGateway.kt`
-  - `src/main/kotlin/ai/neopsyke/agent/project/GoalManager.kt`
-  - `src/main/kotlin/ai/neopsyke/agent/project/ProjectStateMachine.kt`
-  - `src/main/kotlin/ai/neopsyke/agent/project/ProjectPlanner.kt`
-  - `src/main/kotlin/ai/neopsyke/agent/project/ProjectStepVerifier.kt`
+  - `src/main/kotlin/ai/neopsyke/agent/goal/GoalsGateway.kt`
+  - `src/main/kotlin/ai/neopsyke/agent/goal/GoalManager.kt`
+  - `src/main/kotlin/ai/neopsyke/agent/goal/GoalStateMachine.kt`
+  - `src/main/kotlin/ai/neopsyke/agent/goal/GoalPlanner.kt`
+  - `src/main/kotlin/ai/neopsyke/agent/goal/GoalStepVerifier.kt`
 - Feature flag:
-  - When `config.projects.enabled=false`, `NoopGoalsGateway` is injected and goal actions/cues are inert.
+  - When `config.goals.enabled=false`, `NoopGoalsGateway` is injected and goal actions/cues are inert.
 - Boundary:
   - Ego uses the gateway only for:
     - `pendingWorkSummary()` during Id-driven impulses
     - `nextWorkFromCue(GoalRuntimeCue)` when goal work is ready
     - goal-origin action lifecycle callbacks plus `finalizeGoalCycle(rootInputId)`
 - Runtime responsibilities:
-  - Create/revise plans through `ProjectPlanner`
+  - Create/revise plans through `GoalPlanner`
   - Observe goal-origin action outcomes through the generic action lifecycle observer hook
   - Translate generic async action wait handles into blocked goal steps
   - Reject goal-origin `WAITING` outcomes that do not provide async handles; this is stage-1 enforcement of the async wait contract
   - Apply verifier decisions (`PASS`, `RETRY`, `BLOCK`, `CONTINUE`, `FAIL`) back into the event-sourced state machine
   - Restore timers, suspended resumes, and blocked waits on startup
   - Poll async-operation providers and accept externally-delivered async completion events for blocked steps
-  - Persist `events.jsonl`, `project.json`, `snapshot.json`, `workspace/context.md`, `workspace/scratch.md`, and per-step artifacts
+  - Persist `goal-events.jsonl`, `goal.json`, `goal-snapshot.json`, `workspace/context.md`, `workspace/scratch.md`, and per-step artifacts
   - Maintain cached best-effort summaries for ambient context (`activeGoals`, `pendingWorkSummary`) so Ego does not scan live goal state on the hot path
 - Ego-facing signal contract:
   - The runtime emits only `GoalRuntimeCue(goalId, stepId, reason)` into the cognitive stimulus plane.
@@ -420,8 +420,8 @@ It is intentionally high-level and should stay aligned with the code.
     - Explicitly skipped for technical/system failures (external tool failures, LLM client failures, parse/JSON failures, transport/timeouts, `TECH_*`/`SYSTEM_*` reason codes).
 - Scratchpad (ephemeral, per request):
   - File: `src/main/kotlin/ai/neopsyke/agent/memory/scratchpad/ScratchpadStore.kt`
-  - Enabled by default via `MemoryConfig.taskWorkspace.enabled=true`.
-  - Activation remains plan-gated with `MemoryConfig.taskWorkspace.activationMinPlanSteps=2`.
+  - Enabled by default via `MemoryConfig.scratchpad.enabled=true`.
+  - Activation remains plan-gated with `MemoryConfig.scratchpad.activationMinPlanSteps=2`.
   - Scoped to root input; independent from short-term and long-term memory pipelines.
   - Stores compact sections/evidence for the active request only.
   - `answer_draft` sections are stored separately and counted for final-pass gating.

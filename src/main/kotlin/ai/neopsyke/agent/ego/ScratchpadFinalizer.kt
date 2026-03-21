@@ -59,7 +59,7 @@ class LlmScratchpadFinalizer(
                     messages = messages,
                     options = ChatRequestOptions(
                         temperature = 0.0,
-                        maxTokens = config.memory.taskWorkspace.finalPassMaxTokens,
+                        maxTokens = config.memory.scratchpad.finalPassMaxTokens,
                         metadata = ChatCallMetadata(
                             actor = "ego",
                             callSite = "scratchpad_finalizer",

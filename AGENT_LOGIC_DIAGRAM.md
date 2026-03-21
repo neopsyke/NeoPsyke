@@ -43,10 +43,10 @@ flowchart LR
     E --> TWF["ScratchpadFinalizer (Noop or LLM)"]
     E --> PG["GoalsGateway (optional goal runtime boundary)"]
     PG --> PM["GoalManager / Goal Runtime"]
-    PM --> PP["ProjectPlanner"]
-    PM --> PV["ProjectStepVerifier"]
+    PM --> PP["GoalPlanner"]
+    PM --> PV["GoalStepVerifier"]
     PM --> AOR["AsyncOperationRegistry"]
-    PM --> PS["ProjectStateMachine + ProjectStore"]
+    PM --> PS["GoalStateMachine + GoalStore"]
 
     AR --> AP["Action Plugins (self-described)"]
     AP --> M
@@ -117,7 +117,7 @@ sequenceDiagram
             Ego->>Mem: recall and short-term summary
             Note over Ego,Mem: Planner context now includes targeted reflection-lesson recall
             Ego->>TWS: create or update request scratchpad and index summary
-            Ego->>Dash: emit task_workspace_head (with optional debug snapshot)
+            Ego->>Dash: emit scratchpad_head (with optional debug snapshot)
             Note over Ego,Planner: For Id-origin thoughts, Ego reapplies Id convergence state and action filtering before planner decide
             Ego->>Planner: decide(context)
             Note over Ego,Planner: PromptBudgetAllocator reserves required-core/context floors with message-overhead accounting, trims optional first, and emits prompt_budget_allocation
@@ -215,11 +215,11 @@ flowchart LR
     TS["TimerScheduler"] --> PM["GoalManager"]
     WM["WaitConditionMonitor (timeouts + async poll/event restore)"] --> PM
     AOR["AsyncOperationRegistry / Provider Adapters"] --> WM
-    PM --> PSM["ProjectStateMachine"]
-    PM --> PP["ProjectPlanner"]
-    PM --> PV["ProjectStepVerifier"]
-    PSM --> PCS["ProjectCommand stream"]
-    PCS -->|persist| Store["ProjectStore / events.jsonl + project.json + snapshot.json"]
+    PM --> PSM["GoalStateMachine"]
+    PM --> PP["GoalPlanner"]
+    PM --> PV["GoalStepVerifier"]
+    PSM --> PCS["GoalCommand stream"]
+    PCS -->|persist| Store["GoalStore / goal-events.jsonl + goal.json + goal-snapshot.json"]
     PCS -->|work ready| Sig["GoalRuntimeCue"]
     Sig --> Ego["Ego"]
     Ego -->|nextWorkFromCue| PM

@@ -1,4 +1,4 @@
-package ai.neopsyke.agent.project
+package ai.neopsyke.agent.goal
 
 import java.nio.file.Paths
 import java.time.Instant
@@ -8,22 +8,22 @@ import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
 class ProjectStateMachineTest {
-    private val workspacePath = Paths.get("/tmp/test-projects/proj-1")
+    private val workspacePath = Paths.get("/tmp/test-goals/proj-1")
     private val now = Instant.parse("2026-03-17T12:00:00Z")
 
-    private fun createdEvent(projectId: String = "proj-1") = ProjectEvent.Created(
-        projectId = projectId,
-        title = "Test Project",
+    private fun createdEvent(goalId: String = "proj-1") = GoalEvent.Created(
+        goalId = goalId,
+        title = "Test Goal",
         instruction = "Do something useful",
-        priority = ProjectPriority.MEDIUM,
+        priority = GoalPriority.MEDIUM,
         completionCriteria = "All steps done",
         timestamp = now,
     )
 
-    private fun initialState(projectId: String = "proj-1"): ProjectState =
-        ProjectStateMachine.initialState(createdEvent(projectId), workspacePath)
+    private fun initialState(goalId: String = "proj-1"): GoalState =
+        GoalStateMachine.initialState(createdEvent(goalId), workspacePath)
 
-    private fun simplePlan(vararg stepSpecs: Pair<String, Set<String>>): ProjectPlan {
+    private fun simplePlan(vararg stepSpecs: Pair<String, Set<String>>): GoalPlan {
         val steps = stepSpecs.map { (id, requires) ->
             PlanStep(
                 id = id,
@@ -33,15 +33,15 @@ class ProjectStateMachineTest {
                 requires = requires,
             )
         }
-        return ProjectPlan(steps = steps, generatedAt = now)
+        return GoalPlan(steps = steps, generatedAt = now)
     }
 
     @Test
     fun `initial state is PLANNING with empty plan`() {
         val state = initialState()
         assertEquals("proj-1", state.id)
-        assertEquals(ProjectStatus.PLANNING, state.project.status)
-        assertTrue(state.project.plan.steps.isEmpty())
+        assertEquals(GoalStatus.PLANNING, state.goal.status)
+        assertTrue(state.goal.plan.steps.isEmpty())
         assertEquals(1, state.eventCount)
     }
 
@@ -50,24 +50,24 @@ class ProjectStateMachineTest {
         val state = initialState()
         val plan = simplePlan("s1" to emptySet(), "s2" to setOf("s1"))
 
-        val (newState, commands) = ProjectStateMachine.transition(
+        val (newState, commands) = GoalStateMachine.transition(
             state,
-            ProjectEvent.PlanGenerated(projectId = "proj-1", plan = plan, timestamp = now)
+            GoalEvent.PlanGenerated(goalId = "proj-1", plan = plan, timestamp = now)
         )
 
-        assertEquals(ProjectStatus.ACTIVE, newState.project.status)
-        assertEquals(StepStatus.READY, newState.project.plan.steps[0].status)
-        assertEquals(StepStatus.PENDING, newState.project.plan.steps[1].status)
-        assertTrue(commands.any { it is ProjectCommand.EmitWorkReady })
-        assertTrue(commands.any { it is ProjectCommand.PersistProject })
+        assertEquals(GoalStatus.ACTIVE, newState.goal.status)
+        assertEquals(StepStatus.READY, newState.goal.plan.steps[0].status)
+        assertEquals(StepStatus.PENDING, newState.goal.plan.steps[1].status)
+        assertTrue(commands.any { it is GoalCommand.EmitWorkReady })
+        assertTrue(commands.any { it is GoalCommand.PersistGoal })
     }
 
     @Test
     fun `nextRunnableStep prefers IN_PROGRESS over READY`() {
-        val state = ProjectState(
-            project = initialState().project.copy(
-                status = ProjectStatus.ACTIVE,
-                plan = ProjectPlan(
+        val state = GoalState(
+            goal = initialState().goal.copy(
+                status = GoalStatus.ACTIVE,
+                plan = GoalPlan(
                     steps = listOf(
                         PlanStep("s1", "Step 1", StepStatus.READY, "verify s1"),
                         PlanStep("s2", "Step 2", StepStatus.IN_PROGRESS, "verify s2"),
@@ -81,11 +81,11 @@ class ProjectStateMachineTest {
     }
 
     @Test
-    fun `StepAcceptancePassed marks final step DONE and project COMPLETED`() {
-        val state = ProjectState(
-            project = initialState().project.copy(
-                status = ProjectStatus.ACTIVE,
-                plan = ProjectPlan(
+    fun `StepAcceptancePassed marks final step DONE and goal COMPLETED`() {
+        val state = GoalState(
+            goal = initialState().goal.copy(
+                status = GoalStatus.ACTIVE,
+                plan = GoalPlan(
                     steps = listOf(
                         PlanStep("s1", "Step 1", StepStatus.IN_PROGRESS, "verify s1", attempts = 1),
                     ),
@@ -94,22 +94,22 @@ class ProjectStateMachineTest {
             )
         )
 
-        val (newState, commands) = ProjectStateMachine.transition(
+        val (newState, commands) = GoalStateMachine.transition(
             state,
-            ProjectEvent.StepAcceptancePassed("proj-1", "s1", now)
+            GoalEvent.StepAcceptancePassed("proj-1", "s1", now)
         )
 
-        assertEquals(StepStatus.DONE, newState.project.plan.steps.first().status)
-        assertEquals(ProjectStatus.COMPLETED, newState.project.status)
-        assertTrue(commands.any { it is ProjectCommand.PersistProject })
+        assertEquals(StepStatus.DONE, newState.goal.plan.steps.first().status)
+        assertEquals(GoalStatus.COMPLETED, newState.goal.status)
+        assertTrue(commands.any { it is GoalCommand.PersistGoal })
     }
 
     @Test
     fun `StepAcceptanceFailed with retries left returns step to READY and emits work-ready`() {
-        val state = ProjectState(
-            project = initialState().project.copy(
-                status = ProjectStatus.ACTIVE,
-                plan = ProjectPlan(
+        val state = GoalState(
+            goal = initialState().goal.copy(
+                status = GoalStatus.ACTIVE,
+                plan = GoalPlan(
                     steps = listOf(
                         PlanStep("s1", "Step 1", StepStatus.IN_PROGRESS, "verify s1", attempts = 1, maxAttempts = 3),
                     ),
@@ -118,21 +118,21 @@ class ProjectStateMachineTest {
             )
         )
 
-        val (newState, commands) = ProjectStateMachine.transition(
+        val (newState, commands) = GoalStateMachine.transition(
             state,
-            ProjectEvent.StepAcceptanceFailed("proj-1", "s1", "not verified", now)
+            GoalEvent.StepAcceptanceFailed("proj-1", "s1", "not verified", now)
         )
 
-        assertEquals(StepStatus.READY, newState.project.plan.steps.first().status)
-        assertTrue(commands.any { it is ProjectCommand.EmitWorkReady })
+        assertEquals(StepStatus.READY, newState.goal.plan.steps.first().status)
+        assertTrue(commands.any { it is GoalCommand.EmitWorkReady })
     }
 
     @Test
-    fun `StepBlocked transitions step and project to BLOCKED and emits explicit timer registration`() {
-        val state = ProjectState(
-            project = initialState().project.copy(
-                status = ProjectStatus.ACTIVE,
-                plan = ProjectPlan(
+    fun `StepBlocked transitions step and goal to BLOCKED and emits explicit timer registration`() {
+        val state = GoalState(
+            goal = initialState().goal.copy(
+                status = GoalStatus.ACTIVE,
+                plan = GoalPlan(
                     steps = listOf(PlanStep("s1", "Step 1", StepStatus.IN_PROGRESS, "verify s1")),
                     generatedAt = now,
                 )
@@ -145,23 +145,23 @@ class ProjectStateMachineTest {
             timeoutAt = Instant.parse("2026-03-18T12:00:00Z"),
         )
 
-        val (newState, commands) = ProjectStateMachine.transition(
+        val (newState, commands) = GoalStateMachine.transition(
             state,
-            ProjectEvent.StepBlocked("proj-1", "s1", condition, now)
+            GoalEvent.StepBlocked("proj-1", "s1", condition, now)
         )
 
-        assertEquals(StepStatus.BLOCKED, newState.project.plan.steps.first().status)
-        assertEquals(ProjectStatus.BLOCKED, newState.project.status)
-        assertTrue(commands.any { it is ProjectCommand.RegisterWaitCondition })
-        assertTrue(commands.any { it is ProjectCommand.ScheduleWakeTimer })
+        assertEquals(StepStatus.BLOCKED, newState.goal.plan.steps.first().status)
+        assertEquals(GoalStatus.BLOCKED, newState.goal.status)
+        assertTrue(commands.any { it is GoalCommand.RegisterWaitCondition })
+        assertTrue(commands.any { it is GoalCommand.ScheduleWakeTimer })
     }
 
     @Test
-    fun `StepUnblocked returns project to ACTIVE and emits work-ready`() {
-        val state = ProjectState(
-            project = initialState().project.copy(
-                status = ProjectStatus.BLOCKED,
-                plan = ProjectPlan(
+    fun `StepUnblocked returns goal to ACTIVE and emits work-ready`() {
+        val state = GoalState(
+            goal = initialState().goal.copy(
+                status = GoalStatus.BLOCKED,
+                plan = GoalPlan(
                     steps = listOf(
                         PlanStep(
                             "s1",
@@ -176,22 +176,22 @@ class ProjectStateMachineTest {
             )
         )
 
-        val (newState, commands) = ProjectStateMachine.transition(
+        val (newState, commands) = GoalStateMachine.transition(
             state,
-            ProjectEvent.StepUnblocked("proj-1", "s1", now)
+            GoalEvent.StepUnblocked("proj-1", "s1", now)
         )
 
-        assertEquals(StepStatus.READY, newState.project.plan.steps.first().status)
-        assertEquals(ProjectStatus.ACTIVE, newState.project.status)
-        assertTrue(commands.any { it is ProjectCommand.EmitWorkReady })
+        assertEquals(StepStatus.READY, newState.goal.plan.steps.first().status)
+        assertEquals(GoalStatus.ACTIVE, newState.goal.status)
+        assertTrue(commands.any { it is GoalCommand.EmitWorkReady })
     }
 
     @Test
     fun `WaitConditionSatisfied restores READY step appends async resolution note and emits detailed wake reason`() {
-        val state = ProjectState(
-            project = initialState().project.copy(
-                status = ProjectStatus.BLOCKED,
-                plan = ProjectPlan(
+        val state = GoalState(
+            goal = initialState().goal.copy(
+                status = GoalStatus.BLOCKED,
+                plan = GoalPlan(
                     steps = listOf(
                         PlanStep(
                             "s1",
@@ -211,10 +211,10 @@ class ProjectStateMachineTest {
             )
         )
 
-        val (newState, commands) = ProjectStateMachine.transition(
+        val (newState, commands) = GoalStateMachine.transition(
             state,
-            ProjectEvent.WaitConditionSatisfied(
-                projectId = "proj-1",
+            GoalEvent.WaitConditionSatisfied(
+                goalId = "proj-1",
                 stepId = "s1",
                 conditionType = "async_operation",
                 resolutionSummary = "download complete",
@@ -223,14 +223,14 @@ class ProjectStateMachineTest {
             )
         )
 
-        val updatedStep = newState.project.plan.steps.first()
+        val updatedStep = newState.goal.plan.steps.first()
         assertEquals(StepStatus.READY, updatedStep.status)
-        assertEquals(ProjectStatus.ACTIVE, newState.project.status)
+        assertEquals(GoalStatus.ACTIVE, newState.goal.status)
         assertTrue(updatedStep.notes.contains("prior note"))
         assertTrue(updatedStep.notes.contains("async_status=succeeded"))
         assertTrue(updatedStep.notes.contains("async_summary=download complete"))
-        val workReady = assertIs<ProjectCommand.EmitWorkReady>(
-            commands.first { it is ProjectCommand.EmitWorkReady }
+        val workReady = assertIs<GoalCommand.EmitWorkReady>(
+            commands.first { it is GoalCommand.EmitWorkReady }
         )
         assertEquals("wait_condition_satisfied: succeeded: download complete", workReady.cue.reason)
     }
@@ -243,10 +243,10 @@ class ProjectStateMachineTest {
             registeredAt = now,
             onTimeout = TimeoutAction.RETRY,
         )
-        val state = ProjectState(
-            project = initialState().project.copy(
-                status = ProjectStatus.BLOCKED,
-                plan = ProjectPlan(
+        val state = GoalState(
+            goal = initialState().goal.copy(
+                status = GoalStatus.BLOCKED,
+                plan = GoalPlan(
                     steps = listOf(
                         PlanStep("s1", "Step 1", StepStatus.BLOCKED, "verify s1", waitCondition = condition),
                     ),
@@ -255,34 +255,34 @@ class ProjectStateMachineTest {
             )
         )
 
-        val (newState, commands) = ProjectStateMachine.transition(
+        val (newState, commands) = GoalStateMachine.transition(
             state,
-            ProjectEvent.WaitConditionTimedOut("proj-1", "s1", now)
+            GoalEvent.WaitConditionTimedOut("proj-1", "s1", now)
         )
 
-        assertEquals(StepStatus.READY, newState.project.plan.steps.first().status)
-        val workReady = commands.filterIsInstance<ProjectCommand.EmitWorkReady>().single()
+        assertEquals(StepStatus.READY, newState.goal.plan.steps.first().status)
+        val workReady = commands.filterIsInstance<GoalCommand.EmitWorkReady>().single()
         assertEquals("s1", workReady.cue.stepId)
     }
 
     @Test
     fun `Suspended schedules explicit wake timer`() {
-        val state = ProjectState(
-            project = initialState().project.copy(status = ProjectStatus.ACTIVE)
+        val state = GoalState(
+            goal = initialState().goal.copy(status = GoalStatus.ACTIVE)
         )
         val resumeAt = Instant.parse("2026-03-18T08:00:00Z")
 
-        val (newState, commands) = ProjectStateMachine.transition(
+        val (newState, commands) = GoalStateMachine.transition(
             state,
-            ProjectEvent.Suspended("proj-1", "waiting for market open", resumeAt, now)
+            GoalEvent.Suspended("proj-1", "waiting for market open", resumeAt, now)
         )
 
-        assertEquals(ProjectStatus.SUSPENDED, newState.project.status)
-        val timer = assertIs<ProjectCommand.ScheduleWakeTimer>(
-            commands.first { it is ProjectCommand.ScheduleWakeTimer }
+        assertEquals(GoalStatus.SUSPENDED, newState.goal.status)
+        val timer = assertIs<GoalCommand.ScheduleWakeTimer>(
+            commands.first { it is GoalCommand.ScheduleWakeTimer }
         )
         assertEquals(resumeAt, timer.wakeAt)
-        assertEquals("project_suspended_resume", timer.reason)
+        assertEquals("goal_suspended_resume", timer.reason)
     }
 
     @Test
@@ -291,15 +291,15 @@ class ProjectStateMachineTest {
         assertEquals(1, state.eventCount)
 
         val plan = simplePlan("s1" to emptySet())
-        state = ProjectStateMachine.transition(
+        state = GoalStateMachine.transition(
             state,
-            ProjectEvent.PlanGenerated("proj-1", plan, now)
+            GoalEvent.PlanGenerated("proj-1", plan, now)
         ).first
         assertEquals(2, state.eventCount)
 
-        state = ProjectStateMachine.transition(
+        state = GoalStateMachine.transition(
             state,
-            ProjectEvent.StepStarted("proj-1", "s1", now)
+            GoalEvent.StepStarted("proj-1", "s1", now)
         ).first
         assertEquals(3, state.eventCount)
     }

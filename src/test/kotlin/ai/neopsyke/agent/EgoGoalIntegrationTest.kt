@@ -41,21 +41,21 @@ import ai.neopsyke.agent.model.EgoTrigger
 import ai.neopsyke.agent.model.PlannerContext
 import ai.neopsyke.agent.model.PendingAction
 import ai.neopsyke.agent.model.Urgency
-import ai.neopsyke.agent.project.DeterministicProjectPlanner
-import ai.neopsyke.agent.project.PlanStep
-import ai.neopsyke.agent.project.Project
-import ai.neopsyke.agent.project.ProjectConfig
-import ai.neopsyke.agent.project.GoalManager
-import ai.neopsyke.agent.project.ProjectPriority
-import ai.neopsyke.agent.project.ProjectState
-import ai.neopsyke.agent.project.ProjectStatus
-import ai.neopsyke.agent.project.ProjectStepVerification
-import ai.neopsyke.agent.project.ProjectStepVerdict
-import ai.neopsyke.agent.project.ProjectStepVerifier
-import ai.neopsyke.agent.project.ProjectStore
-import ai.neopsyke.agent.project.TimeoutAction
-import ai.neopsyke.agent.project.WaitCondition
-import ai.neopsyke.agent.project.WaitConditionType
+import ai.neopsyke.agent.goal.DeterministicGoalPlanner
+import ai.neopsyke.agent.goal.PlanStep
+import ai.neopsyke.agent.goal.Goal
+import ai.neopsyke.agent.goal.GoalConfig
+import ai.neopsyke.agent.goal.GoalManager
+import ai.neopsyke.agent.goal.GoalPriority
+import ai.neopsyke.agent.goal.GoalState
+import ai.neopsyke.agent.goal.GoalStatus
+import ai.neopsyke.agent.goal.GoalStepVerification
+import ai.neopsyke.agent.goal.GoalStepVerdict
+import ai.neopsyke.agent.goal.GoalStepVerifier
+import ai.neopsyke.agent.goal.GoalStore
+import ai.neopsyke.agent.goal.TimeoutAction
+import ai.neopsyke.agent.goal.WaitCondition
+import ai.neopsyke.agent.goal.WaitConditionType
 import ai.neopsyke.agent.superego.Superego
 import ai.neopsyke.support.RecordingInstrumentation
 import ai.neopsyke.support.StubChatModelClient
@@ -71,48 +71,48 @@ import kotlin.test.fail
 class EgoProjectIntegrationTest {
 
     @Test
-    fun `work-ready signal executes through ego and completes project`() = runBlocking {
-        val root = Files.createTempDirectory("psyke-ego-project-complete")
+    fun `work-ready signal executes through ego and completes goal`() = runBlocking {
+        val root = Files.createTempDirectory("psyke-ego-goal-complete")
         val source = QueueSignalSource()
         val instrumentation = RecordingInstrumentation()
         val outputs = mutableListOf<String>()
         val config = AgentConfig(
             planner = PlannerConfig(maxLoopStepsPerInput = 8, maxThoughtPasses = 2),
-            projects = ProjectConfig(enabled = true, workspaceRoot = root, actionsPerCycle = 2),
+            goals = GoalConfig(enabled = true, workspaceRoot = root, actionsPerCycle = 2),
         )
         val manager = GoalManager(
-            config = config.projects,
-            store = ProjectStore(root),
-            planner = DeterministicProjectPlanner(),
+            config = config.goals,
+            store = GoalStore(root),
+            planner = DeterministicGoalPlanner(),
             instrumentation = instrumentation,
             cueEmitter = source::offer,
         )
         val scope = testScope()
         manager.start(scope)
         val agent = buildTestEgo(
-            planner = projectOnlyPlanner("project done"),
+            planner = projectOnlyPlanner("goal done"),
             superego = allowAllSuperego(config, instrumentation),
             motorCortex = buildMotorCortex(outputs),
             config = config,
             instrumentation = instrumentation,
             sensoryCortex = SensoryCortex(config, source),
-            projectsGateway = manager,
+            goalsGateway = manager,
         )
 
         val loop = launch { agent.runInteractive() }
         try {
-            val projectId = manager.createProject("Ship the report", "Report Project", ProjectPriority.HIGH)
-            waitForStatus(manager, projectId, ProjectStatus.COMPLETED)
+            val goalId = manager.createGoal("Ship the report", "Report Goal", GoalPriority.HIGH)
+            waitForStatus(manager, goalId, GoalStatus.COMPLETED)
             source.offer(RuntimeControlSignal.ExitRequested("test"))
             loop.join()
 
-            val state = manager.projectStatus(projectId)
+            val state = manager.goalStatus(goalId)
             assertNotNull(state)
-            assertEquals(ProjectStatus.COMPLETED, state.project.status)
-            assertEquals(listOf("ego> project done"), outputs)
+            assertEquals(GoalStatus.COMPLETED, state.goal.status)
+            assertEquals(listOf("ego> goal done"), outputs)
             assertTrue(
                 instrumentation.events.any {
-                    it.type == "project_step_completed" && it.data["success"] == true
+                    it.type == "goal_step_completed" && it.data["success"] == true
                 }
             )
         } finally {
@@ -123,14 +123,14 @@ class EgoProjectIntegrationTest {
     }
 
     @Test
-    fun `async project action waits through projects runtime and resumes to completion`() = runBlocking {
-        val root = Files.createTempDirectory("psyke-ego-project-async")
+    fun `async goal action waits through goals runtime and resumes to completion`() = runBlocking {
+        val root = Files.createTempDirectory("psyke-ego-goal-async")
         val source = QueueSignalSource()
         val instrumentation = RecordingInstrumentation()
         val outputs = mutableListOf<String>()
         val config = AgentConfig(
             planner = PlannerConfig(maxLoopStepsPerInput = 8, maxThoughtPasses = 2),
-            projects = ProjectConfig(enabled = true, workspaceRoot = root, actionsPerCycle = 2, conditionCheckIntervalMs = 25),
+            goals = GoalConfig(enabled = true, workspaceRoot = root, actionsPerCycle = 2, conditionCheckIntervalMs = 25),
         )
         val provider = StubAsyncOperationProvider().apply {
             enqueue(
@@ -142,9 +142,9 @@ class EgoProjectIntegrationTest {
             )
         }
         val manager = GoalManager(
-            config = config.projects,
-            store = ProjectStore(root),
-            planner = DeterministicProjectPlanner(),
+            config = config.goals,
+            store = GoalStore(root),
+            planner = DeterministicGoalPlanner(),
             asyncOperationRegistry = AsyncOperationRegistry.fromProviders(listOf(provider)),
             instrumentation = instrumentation,
             cueEmitter = source::offer,
@@ -155,7 +155,7 @@ class EgoProjectIntegrationTest {
         val planner = object : Ego.Planner {
             override fun decide(trigger: EgoTrigger, context: PlannerContext): EgoDecision =
                 when (trigger) {
-                    is EgoTrigger.ProjectWork -> {
+                    is EgoTrigger.GoalWork -> {
                         if (!startedAsync) {
                             startedAsync = true
                             EgoDecision.ProposeAction(
@@ -168,13 +168,13 @@ class EgoProjectIntegrationTest {
                             EgoDecision.ProposeAction(
                                 urgency = Urgency.MEDIUM,
                                 actionType = ActionType.CONTACT_USER,
-                                payload = "async project done",
+                                payload = "async goal done",
                                 summary = "report completion"
                             )
                         }
                     }
 
-                    else -> EgoDecision.Noop("ignore non-project work")
+                    else -> EgoDecision.Noop("ignore non-goal work")
                 }
         }
         val agent = buildTestEgo(
@@ -184,21 +184,21 @@ class EgoProjectIntegrationTest {
             config = config,
             instrumentation = instrumentation,
             sensoryCortex = SensoryCortex(config, source),
-            projectsGateway = manager,
+            goalsGateway = manager,
         )
 
         val loop = launch { agent.runInteractive() }
         try {
-            val projectId = manager.createProject("Use async action in project")
-            waitForStatus(manager, projectId, ProjectStatus.COMPLETED)
+            val goalId = manager.createGoal("Use async action in goal")
+            waitForStatus(manager, goalId, GoalStatus.COMPLETED)
             source.offer(RuntimeControlSignal.ExitRequested("test"))
             loop.join()
 
-            val state = manager.projectStatus(projectId)
+            val state = manager.goalStatus(goalId)
             assertNotNull(state)
-            assertEquals(ProjectStatus.COMPLETED, state.project.status)
-            assertTrue(state.project.plan.steps.first().notes.contains("async_status=succeeded"))
-            assertEquals(listOf("ego> async project done"), outputs)
+            assertEquals(GoalStatus.COMPLETED, state.goal.status)
+            assertTrue(state.goal.plan.steps.first().notes.contains("async_status=succeeded"))
+            assertEquals(listOf("ego> async goal done"), outputs)
         } finally {
             manager.stop()
             loop.cancel()
@@ -207,19 +207,19 @@ class EgoProjectIntegrationTest {
     }
 
     @Test
-    fun `project action denial is routed back into retry and eventually completes`() = runBlocking {
-        val root = Files.createTempDirectory("psyke-ego-project-retry")
+    fun `goal action denial is routed back into retry and eventually completes`() = runBlocking {
+        val root = Files.createTempDirectory("psyke-ego-goal-retry")
         val source = QueueSignalSource()
         val instrumentation = RecordingInstrumentation()
         val outputs = mutableListOf<String>()
         val config = AgentConfig(
             planner = PlannerConfig(maxLoopStepsPerInput = 12, maxThoughtPasses = 2),
-            projects = ProjectConfig(enabled = true, workspaceRoot = root, actionsPerCycle = 2),
+            goals = GoalConfig(enabled = true, workspaceRoot = root, actionsPerCycle = 2),
         )
         val manager = GoalManager(
-            config = config.projects,
-            store = ProjectStore(root),
-            planner = DeterministicProjectPlanner(),
+            config = config.goals,
+            store = GoalStore(root),
+            planner = DeterministicGoalPlanner(),
             instrumentation = instrumentation,
             cueEmitter = source::offer,
         )
@@ -231,13 +231,13 @@ class EgoProjectIntegrationTest {
         val planner = object : Ego.Planner {
             override fun decide(trigger: EgoTrigger, context: PlannerContext): EgoDecision =
                 when (trigger) {
-                    is EgoTrigger.ProjectWork -> EgoDecision.ProposeAction(
+                    is EgoTrigger.GoalWork -> EgoDecision.ProposeAction(
                         urgency = Urgency.MEDIUM,
                         actionType = ActionType.CONTACT_USER,
                         payload = actionPayloads.removeFirst(),
-                        summary = "project step"
+                        summary = "goal step"
                     )
-                    else -> EgoDecision.Noop("ignore non-project work")
+                    else -> EgoDecision.Noop("ignore non-goal work")
                 }
         }
         val loop = launch {
@@ -248,14 +248,14 @@ class EgoProjectIntegrationTest {
                 config = config,
                 instrumentation = instrumentation,
                 sensoryCortex = SensoryCortex(config, source),
-                projectsGateway = manager,
+                goalsGateway = manager,
             ).runInteractive()
         }
         val scope = testScope()
         manager.start(scope)
         try {
-            val projectId = manager.createProject("Retry until approved")
-            waitForStatus(manager, projectId, ProjectStatus.COMPLETED)
+            val goalId = manager.createGoal("Retry until approved")
+            waitForStatus(manager, goalId, GoalStatus.COMPLETED)
             source.offer(RuntimeControlSignal.ExitRequested("test"))
             loop.join()
 
@@ -270,36 +270,36 @@ class EgoProjectIntegrationTest {
     }
 
     @Test
-    fun `project action budget yields and resumes same in-progress step`() = runBlocking {
-        val root = Files.createTempDirectory("psyke-ego-project-budget")
+    fun `goal action budget yields and resumes same in-progress step`() = runBlocking {
+        val root = Files.createTempDirectory("psyke-ego-goal-budget")
         val source = QueueSignalSource()
         val instrumentation = RecordingInstrumentation()
         val outputs = mutableListOf<String>()
         val config = AgentConfig(
             planner = PlannerConfig(maxLoopStepsPerInput = 12, maxThoughtPasses = 2),
-            projects = ProjectConfig(enabled = true, workspaceRoot = root, actionsPerCycle = 1),
+            goals = GoalConfig(enabled = true, workspaceRoot = root, actionsPerCycle = 1),
         )
         var verifierCalls = 0
-        val verifier = object : ProjectStepVerifier {
+        val verifier = object : GoalStepVerifier {
             override fun evaluate(
-                project: Project,
+                goal: Goal,
                 step: PlanStep,
                 action: ai.neopsyke.agent.model.PendingAction,
                 outcome: ai.neopsyke.agent.model.ActionOutcome,
                 observedEvidence: Boolean,
-            ): ProjectStepVerification {
+            ): GoalStepVerification {
                 verifierCalls += 1
                 return if (verifierCalls == 1) {
-                    ProjectStepVerification(ProjectStepVerdict.CONTINUE, "keep going")
+                    GoalStepVerification(GoalStepVerdict.CONTINUE, "keep going")
                 } else {
-                    ProjectStepVerification(ProjectStepVerdict.PASS, "done")
+                    GoalStepVerification(GoalStepVerdict.PASS, "done")
                 }
             }
         }
         val manager = GoalManager(
-            config = config.projects,
-            store = ProjectStore(root),
-            planner = DeterministicProjectPlanner(),
+            config = config.goals,
+            store = GoalStore(root),
+            planner = DeterministicGoalPlanner(),
             verifier = verifier,
             instrumentation = instrumentation,
             cueEmitter = source::offer,
@@ -308,13 +308,13 @@ class EgoProjectIntegrationTest {
         val planner = object : Ego.Planner {
             override fun decide(trigger: EgoTrigger, context: PlannerContext): EgoDecision =
                 when (trigger) {
-                    is EgoTrigger.ProjectWork -> EgoDecision.ProposeAction(
+                    is EgoTrigger.GoalWork -> EgoDecision.ProposeAction(
                         urgency = Urgency.MEDIUM,
                         actionType = ActionType.CONTACT_USER,
                         payload = actionPayloads.removeFirst(),
-                        summary = "project step"
+                        summary = "goal step"
                     )
-                    else -> EgoDecision.Noop("ignore non-project work")
+                    else -> EgoDecision.Noop("ignore non-goal work")
                 }
         }
         val loop = launch {
@@ -325,23 +325,23 @@ class EgoProjectIntegrationTest {
                 config = config,
                 instrumentation = instrumentation,
                 sensoryCortex = SensoryCortex(config, source),
-                projectsGateway = manager,
+                goalsGateway = manager,
             ).runInteractive()
         }
         val scope = testScope()
         manager.start(scope)
         try {
-            val projectId = manager.createProject("Use multiple cycles")
-            waitForStatus(manager, projectId, ProjectStatus.COMPLETED)
+            val goalId = manager.createGoal("Use multiple cycles")
+            waitForStatus(manager, goalId, GoalStatus.COMPLETED)
             source.offer(RuntimeControlSignal.ExitRequested("test"))
             loop.join()
 
             assertEquals(listOf("ego> cycle one", "ego> cycle two"), outputs)
             assertEquals(2, verifierCalls)
             assertTrue(actionPayloads.isEmpty())
-            val state = manager.projectStatus(projectId)
+            val state = manager.goalStatus(goalId)
             assertNotNull(state)
-            assertEquals(ProjectStatus.COMPLETED, state.project.status)
+            assertEquals(GoalStatus.COMPLETED, state.goal.status)
         } finally {
             manager.stop()
             loop.cancel()
@@ -350,14 +350,14 @@ class EgoProjectIntegrationTest {
     }
 
     @Test
-    fun `project blocked by timer resumes through ego and completes`() = runBlocking {
-        val root = Files.createTempDirectory("psyke-ego-project-timer-resume")
+    fun `goal blocked by timer resumes through ego and completes`() = runBlocking {
+        val root = Files.createTempDirectory("psyke-ego-goal-timer-resume")
         val source = QueueSignalSource()
         val instrumentation = RecordingInstrumentation()
         val outputs = mutableListOf<String>()
         val config = AgentConfig(
             planner = PlannerConfig(maxLoopStepsPerInput = 12, maxThoughtPasses = 2),
-            projects = ProjectConfig(
+            goals = GoalConfig(
                 enabled = true,
                 workspaceRoot = root,
                 actionsPerCycle = 1,
@@ -365,18 +365,18 @@ class EgoProjectIntegrationTest {
             ),
         )
         var verifierCalls = 0
-        val verifier = object : ProjectStepVerifier {
+        val verifier = object : GoalStepVerifier {
             override fun evaluate(
-                project: Project,
+                goal: Goal,
                 step: PlanStep,
                 action: ai.neopsyke.agent.model.PendingAction,
                 outcome: ai.neopsyke.agent.model.ActionOutcome,
                 observedEvidence: Boolean,
-            ): ProjectStepVerification {
+            ): GoalStepVerification {
                 verifierCalls += 1
                 return if (verifierCalls == 1) {
-                    ProjectStepVerification(
-                        verdict = ProjectStepVerdict.BLOCK,
+                    GoalStepVerification(
+                        verdict = GoalStepVerdict.BLOCK,
                         reason = "waiting on timer",
                         waitCondition = WaitCondition(
                             type = WaitConditionType.TIMER,
@@ -387,14 +387,14 @@ class EgoProjectIntegrationTest {
                         ),
                     )
                 } else {
-                    ProjectStepVerification(ProjectStepVerdict.PASS, "timer satisfied")
+                    GoalStepVerification(GoalStepVerdict.PASS, "timer satisfied")
                 }
             }
         }
         val manager = GoalManager(
-            config = config.projects,
-            store = ProjectStore(root),
-            planner = DeterministicProjectPlanner(),
+            config = config.goals,
+            store = GoalStore(root),
+            planner = DeterministicGoalPlanner(),
             verifier = verifier,
             instrumentation = instrumentation,
             cueEmitter = source::offer,
@@ -403,13 +403,13 @@ class EgoProjectIntegrationTest {
         val planner = object : Ego.Planner {
             override fun decide(trigger: EgoTrigger, context: PlannerContext): EgoDecision =
                 when (trigger) {
-                    is EgoTrigger.ProjectWork -> EgoDecision.ProposeAction(
+                    is EgoTrigger.GoalWork -> EgoDecision.ProposeAction(
                         urgency = Urgency.MEDIUM,
                         actionType = ActionType.CONTACT_USER,
                         payload = actionPayloads.removeFirst(),
-                        summary = "project step"
+                        summary = "goal step"
                     )
-                    else -> EgoDecision.Noop("ignore non-project work")
+                    else -> EgoDecision.Noop("ignore non-goal work")
                 }
         }
         val loop = launch {
@@ -420,23 +420,23 @@ class EgoProjectIntegrationTest {
                 config = config,
                 instrumentation = instrumentation,
                 sensoryCortex = SensoryCortex(config, source),
-                projectsGateway = manager,
+                goalsGateway = manager,
             ).runInteractive()
         }
         val scope = testScope()
         manager.start(scope)
         try {
-            val projectId = manager.createProject("Pause until timer wakes the step")
-            waitForStatus(manager, projectId, ProjectStatus.COMPLETED)
+            val goalId = manager.createGoal("Pause until timer wakes the step")
+            waitForStatus(manager, goalId, GoalStatus.COMPLETED)
             source.offer(RuntimeControlSignal.ExitRequested("test"))
             loop.join()
 
             assertEquals(listOf("ego> wait for timer", "ego> timer resumed"), outputs)
             assertEquals(2, verifierCalls)
             assertTrue(actionPayloads.isEmpty())
-            val state = manager.projectStatus(projectId)
+            val state = manager.goalStatus(goalId)
             assertNotNull(state)
-            assertEquals(ProjectStatus.COMPLETED, state.project.status)
+            assertEquals(GoalStatus.COMPLETED, state.goal.status)
         } finally {
             manager.stop()
             loop.cancel()
@@ -448,13 +448,13 @@ class EgoProjectIntegrationTest {
         object : Ego.Planner {
             override fun decide(trigger: EgoTrigger, context: PlannerContext): EgoDecision =
                 when (trigger) {
-                    is EgoTrigger.ProjectWork -> EgoDecision.ProposeAction(
+                    is EgoTrigger.GoalWork -> EgoDecision.ProposeAction(
                         urgency = Urgency.MEDIUM,
                         actionType = ActionType.CONTACT_USER,
                         payload = response,
-                        summary = "complete project"
+                        summary = "complete goal"
                     )
-                    else -> EgoDecision.Noop("ignore non-project work")
+                    else -> EgoDecision.Noop("ignore non-goal work")
                 }
         }
 
@@ -520,20 +520,20 @@ class EgoProjectIntegrationTest {
 
     private suspend fun waitForStatus(
         manager: GoalManager,
-        projectId: String,
-        status: ProjectStatus,
+        goalId: String,
+        status: GoalStatus,
     ) {
         val deadline = System.currentTimeMillis() + 3_000
         while (System.currentTimeMillis() < deadline) {
-            if (manager.projectStatus(projectId)?.project?.status == status) {
+            if (manager.goalStatus(goalId)?.goal?.status == status) {
                 return
             }
             delay(10)
         }
-        val state = manager.projectStatus(projectId)
+        val state = manager.goalStatus(goalId)
         fail(
-            "Timed out waiting for status=$status, actual=${state?.project?.status}, " +
-                "steps=${state?.project?.plan?.steps?.map { "${it.id}:${it.status}" }}"
+            "Timed out waiting for status=$status, actual=${state?.goal?.status}, " +
+                "steps=${state?.goal?.plan?.steps?.map { "${it.id}:${it.status}" }}"
         )
     }
 

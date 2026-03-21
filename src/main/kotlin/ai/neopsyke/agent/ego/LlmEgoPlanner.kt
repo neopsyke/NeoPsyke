@@ -52,13 +52,13 @@ class LlmEgoPlanner(
             is EgoTrigger.IncomingInput -> "input"
             is EgoTrigger.PendingThoughtInput -> "thought"
             is EgoTrigger.IncomingImpulse -> "impulse"
-            is EgoTrigger.ProjectWork -> "project-work"
+            is EgoTrigger.GoalWork -> "goal-work"
         }
         val rootInputId = when (trigger) {
             is EgoTrigger.IncomingInput -> trigger.input.rootInputId
             is EgoTrigger.PendingThoughtInput -> trigger.thought.rootInputId
             is EgoTrigger.IncomingImpulse -> trigger.impulse.rootImpulseId
-            is EgoTrigger.ProjectWork -> trigger.workUnit.projectId
+            is EgoTrigger.GoalWork -> trigger.workUnit.goalId
         }
         val sessionId = context.conversationContext.sessionId
 
@@ -607,7 +607,7 @@ class LlmEgoPlanner(
             is EgoTrigger.IncomingInput -> trigger.input.rootInputId
             is EgoTrigger.PendingThoughtInput -> trigger.thought.rootInputId
             is EgoTrigger.IncomingImpulse -> trigger.impulse.rootImpulseId
-            is EgoTrigger.ProjectWork -> trigger.workUnit.projectId
+            is EgoTrigger.GoalWork -> trigger.workUnit.goalId
         }
         return ActionVerifierCircuitKey(
             rootInputId = rootInputId,
@@ -1159,8 +1159,8 @@ class LlmEgoPlanner(
         val longTermMemoryRecall = context.longTermMemoryRecall.ifBlank { "none" }
         val lessons =context.lessons.ifBlank { "none" }
         val episodicRecall = context.episodicRecall.ifBlank { "none" }
-        val taskWorkspaceSummary = context.taskWorkspaceSummary.ifBlank { "none" }
-        val sessionWorkspaceDigest = context.sessionWorkspaceDigest.ifBlank { "none" }
+        val scratchpadSummary = context.scratchpadSummary.ifBlank { "none" }
+        val sessionScratchpadDigest = context.sessionScratchpadDigest.ifBlank { "none" }
         val ambientContext = context.ambientContext.render().ifBlank { "none" }
         val evidenceHints = context.evidenceHints.ifBlank { "none" }
         val metaGuidance = context.metaGuidance.ifBlank { "none" }
@@ -1334,13 +1334,13 @@ class LlmEgoPlanner(
                     role = ChatRole.USER,
                     band = PromptBudgetAllocator.Band.REQUIRED_CONTEXT,
                     floorTokens = 20,
-                    content = "Scratchpad summary:\n$taskWorkspaceSummary"
+                    content = "Scratchpad summary:\n$scratchpadSummary"
                 ),
                 PromptBudgetAllocator.Section(
                     key = "planner_session_digest",
                     role = ChatRole.USER,
                     band = PromptBudgetAllocator.Band.OPTIONAL,
-                    content = "Prior workspace digests (resolved requests in this session):\n$sessionWorkspaceDigest"
+                    content = "Prior workspace digests (resolved requests in this session):\n$sessionScratchpadDigest"
                 ),
                 context.ambientContext.takeIf { !it.isEmpty() }?.let {
                     PromptBudgetAllocator.Section(
@@ -1472,8 +1472,8 @@ class LlmEgoPlanner(
         val shortTermContextSummary = context.shortTermContextSummary.ifBlank { "none" }
         val longTermMemoryRecall = context.longTermMemoryRecall.ifBlank { "none" }
         val lessons =context.lessons.ifBlank { "none" }
-        val taskWorkspaceSummary = context.taskWorkspaceSummary.ifBlank { "none" }
-        val sessionWorkspaceDigest = context.sessionWorkspaceDigest.ifBlank { "none" }
+        val scratchpadSummary = context.scratchpadSummary.ifBlank { "none" }
+        val sessionScratchpadDigest = context.sessionScratchpadDigest.ifBlank { "none" }
         val evidenceHints = context.evidenceHints.ifBlank { "none" }
 
         return PromptBudgetAllocator.allocate(
@@ -1545,13 +1545,13 @@ class LlmEgoPlanner(
                     key = "action_verifier_workspace_summary",
                     role = ChatRole.USER,
                     band = PromptBudgetAllocator.Band.OPTIONAL,
-                    content = "Scratchpad summary:\n$taskWorkspaceSummary"
+                    content = "Scratchpad summary:\n$scratchpadSummary"
                 ),
                 PromptBudgetAllocator.Section(
                     key = "action_verifier_session_digest",
                     role = ChatRole.USER,
                     band = PromptBudgetAllocator.Band.OPTIONAL,
-                    content = "Prior workspace digests:\n$sessionWorkspaceDigest"
+                    content = "Prior workspace digests:\n$sessionScratchpadDigest"
                 ),
                 PromptBudgetAllocator.Section(
                     key = "action_verifier_evidence_hints",
@@ -1621,10 +1621,10 @@ class LlmEgoPlanner(
                     .filter { it.isNotBlank() }
                 parts.joinToString("\n")
             }
-            is EgoTrigger.ProjectWork -> {
+            is EgoTrigger.GoalWork -> {
                 val wu = trigger.workUnit
                 buildString {
-                    append("PROJECT_WORK(project=${wu.projectId}, step=${wu.stepId}): ${wu.stepDescription}")
+                    append("GOAL_WORK(goal=, step=${wu.stepId}): ${wu.stepDescription}")
                     if (wu.wakeReason.isNotBlank()) {
                         append("\nwake_reason=")
                         append(wu.wakeReason)
@@ -1635,7 +1635,7 @@ class LlmEgoPlanner(
                     }
                     if (wu.workingContext.isNotBlank()) {
                         append("\nworking_context=")
-                        append(wu.workingContext.take(PROJECT_WORKING_CONTEXT_MAX_CHARS))
+                        append(wu.workingContext.take(GOAL_WORKING_CONTEXT_MAX_CHARS))
                     }
                 }
             }
@@ -1737,7 +1737,7 @@ class LlmEgoPlanner(
             .ifBlank { "contact_user" }
 
     private companion object {
-        const val PROJECT_WORKING_CONTEXT_MAX_CHARS: Int = 1_200
+        const val GOAL_WORKING_CONTEXT_MAX_CHARS: Int = 1_200
         const val ACTION_VERIFIER_BASE_TOKENS: Int = 80
         const val ACTION_VERIFIER_MAX_TOKENS: Int = 220
         const val ACTION_VERIFIER_TRUNCATION_RETRY_MIN_TOKEN_BUMP: Int = 32

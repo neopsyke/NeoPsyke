@@ -1,4 +1,4 @@
-package ai.neopsyke.agent.project
+package ai.neopsyke.agent.goal
 
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -22,7 +22,7 @@ private val logger = KotlinLogging.logger {}
  * Periodically checks registered wait conditions and fires callbacks when
  * conditions are satisfied or timed out.
  *
- * Generic async-operation waits are restored from persisted project state and
+ * Generic async-operation waits are restored from persisted goal state and
  * resumed through provider adapters or externally-delivered completion events.
  */
 class WaitConditionMonitor(
@@ -32,13 +32,13 @@ class WaitConditionMonitor(
     private val onConditionTimedOut: (String, String) -> Unit,
 ) {
     data class Registration(
-        val projectId: String,
+        val goalId: String,
         val stepId: String,
         val condition: WaitCondition,
     )
 
     private data class RegistrationKey(
-        val projectId: String,
+        val goalId: String,
         val stepId: String,
     )
 
@@ -70,15 +70,15 @@ class WaitConditionMonitor(
         job = null
     }
 
-    fun register(projectId: String, stepId: String, condition: WaitCondition) {
-        registrations[RegistrationKey(projectId, stepId)] = RegistrationState(
-            registration = Registration(projectId, stepId, condition)
+    fun register(goalId: String, stepId: String, condition: WaitCondition) {
+        registrations[RegistrationKey(goalId, stepId)] = RegistrationState(
+            registration = Registration(goalId, stepId, condition)
         )
-        logger.debug { "Wait condition registered: project=$projectId, step=$stepId, type=${condition.type}" }
+        logger.debug { "Wait condition registered: goal=$goalId, step=$stepId, type=${condition.type}" }
     }
 
-    fun unregister(projectId: String, stepId: String) {
-        registrations.remove(RegistrationKey(projectId, stepId))
+    fun unregister(goalId: String, stepId: String) {
+        registrations.remove(RegistrationKey(goalId, stepId))
     }
 
     fun notifyAsyncEvent(event: AsyncOperationEvent): Int {
@@ -103,9 +103,9 @@ class WaitConditionMonitor(
             val condition = state.registration.condition
             val timedOut = condition.timeoutAt?.let { now.isAfter(it) } ?: false
             if (timedOut) {
-                logger.debug { "Wait condition timed out: project=${key.projectId}, step=${key.stepId}" }
+                logger.debug { "Wait condition timed out: goal=${key.goalId}, step=${key.stepId}" }
                 registrations.remove(key)
-                onConditionTimedOut(key.projectId, key.stepId)
+                onConditionTimedOut(key.goalId, key.stepId)
                 continue
             }
             if (condition.type == WaitConditionType.ASYNC_OPERATION) {
@@ -168,7 +168,7 @@ class WaitConditionMonitor(
         val resolution = resolveAsyncWait(wait, state.terminalHandleStates)
         if (resolution == null) return
         if (!registrations.remove(key, state)) return
-        onConditionSatisfied(key.projectId, key.stepId, resolution)
+        onConditionSatisfied(key.goalId, key.stepId, resolution)
     }
 
     private fun resolveAsyncWait(

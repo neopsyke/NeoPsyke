@@ -984,19 +984,19 @@ internal object AppModeRunners {
                                                     )
                                                     val logbookSummarizer = createLogbookSummarizer(config, longTermMemoryClient)
                                                     val webSearchActionHandler = WebSearchActionHandler(runtime.engine)
-                                                    val projectManager = if (config.projects.enabled) {
-                                                        ai.neopsyke.agent.project.GoalManager(
-                                                            config = config.projects,
-                                                            store = ai.neopsyke.agent.project.ProjectStore(config.projects.workspaceRoot),
-                                                            planner = ai.neopsyke.agent.project.LlmProjectPlanner(plannerClient, config),
-                                                            verifier = ai.neopsyke.agent.project.LlmProjectStepVerifier(plannerClient, config),
+                                                    val goalManager = if (config.goals.enabled) {
+                                                        ai.neopsyke.agent.goal.GoalManager(
+                                                            config = config.goals,
+                                                            store = ai.neopsyke.agent.goal.GoalStore(config.goals.workspaceRoot),
+                                                            planner = ai.neopsyke.agent.goal.LlmGoalPlanner(plannerClient, config),
+                                                            verifier = ai.neopsyke.agent.goal.LlmGoalStepVerifier(plannerClient, config),
                                                             instrumentation = instrumentation,
                                                             cueEmitter = sensoryInput::offerGoalRuntimeCue,
                                                         ).also { it.start(agentScope) }
                                                     } else {
                                                         null
                                                     }
-                                                    dashboardServer?.projectManager = projectManager
+                                                    dashboardServer?.goalManager = goalManager
                                                     var plannerNoopCount = 0
                                                     var plannerOutputRepairedCount = 0
                                                     val assembly = EgoAssembler.assemble(
@@ -1061,9 +1061,9 @@ internal object AppModeRunners {
                                                             instrumentation = instrumentation
                                                         ),
                                                         longTermMemoryAdvisor = longTermMemoryAdvisor,
-                                                        taskWorkspaceFinalizer = if (
-                                                            config.memory.taskWorkspace.enabled &&
-                                                                config.memory.taskWorkspace.finalPassRewriteEnabled
+                                                        scratchpadFinalizer = if (
+                                                            config.memory.scratchpad.enabled &&
+                                                                config.memory.scratchpad.finalPassRewriteEnabled
                                                         ) {
                                                             LlmScratchpadFinalizer(
                                                                 modelClient = plannerClient,
@@ -1078,8 +1078,8 @@ internal object AppModeRunners {
                                                         webSearchActionHandler = webSearchActionHandler,
                                                         mcpTimeTool = timeTool,
                                                         fetchTool = activeFetchTool,
-                                                        projectsGateway = projectManager
-                                                            ?: ai.neopsyke.agent.project.NoopGoalsGateway,
+                                                        goalsGateway = goalManager
+                                                            ?: ai.neopsyke.agent.goal.NoopGoalsGateway,
                                                         output = {},
                                                     )
                                                     assembly.actionRegistry.loadWarnings.forEach { warning ->
@@ -1150,7 +1150,7 @@ internal object AppModeRunners {
                                                             closeQuietly(logbook)
                                                         }
                                                         } } finally {
-                                                            projectManager?.stop()
+                                                            goalManager?.stop()
                                                             egoDispatcher.close()
                                                         }
                                                     }
@@ -1438,12 +1438,12 @@ internal object AppModeRunners {
                                                 )
                                                 val logbookSummarizer = createLogbookSummarizer(config, longTermMemoryClient)
                                                 val webSearchActionHandler = WebSearchActionHandler(runtime.engine)
-                                                val projectManager = if (config.projects.enabled) {
-                                                    ai.neopsyke.agent.project.GoalManager(
-                                                        config = config.projects,
-                                                        store = ai.neopsyke.agent.project.ProjectStore(config.projects.workspaceRoot),
-                                                        planner = ai.neopsyke.agent.project.LlmProjectPlanner(plannerClient, config),
-                                                        verifier = ai.neopsyke.agent.project.LlmProjectStepVerifier(plannerClient, config),
+                                                val goalManager = if (config.goals.enabled) {
+                                                    ai.neopsyke.agent.goal.GoalManager(
+                                                        config = config.goals,
+                                                        store = ai.neopsyke.agent.goal.GoalStore(config.goals.workspaceRoot),
+                                                        planner = ai.neopsyke.agent.goal.LlmGoalPlanner(plannerClient, config),
+                                                        verifier = ai.neopsyke.agent.goal.LlmGoalStepVerifier(plannerClient, config),
                                                         instrumentation = instrumentation,
                                                         cueEmitter = sensoryInput::offerGoalRuntimeCue,
                                                     ).also { it.start(agentScope) }
@@ -1492,9 +1492,9 @@ internal object AppModeRunners {
                                                         instrumentation = instrumentation
                                                     ),
                                                     longTermMemoryAdvisor = longTermMemoryAdvisor,
-                                                    taskWorkspaceFinalizer = if (
-                                                        config.memory.taskWorkspace.enabled &&
-                                                            config.memory.taskWorkspace.finalPassRewriteEnabled
+                                                    scratchpadFinalizer = if (
+                                                        config.memory.scratchpad.enabled &&
+                                                            config.memory.scratchpad.finalPassRewriteEnabled
                                                     ) {
                                                         LlmScratchpadFinalizer(
                                                             modelClient = plannerClient,
@@ -1509,8 +1509,8 @@ internal object AppModeRunners {
                                                     webSearchActionHandler = webSearchActionHandler,
                                                     mcpTimeTool = timeTool,
                                                     fetchTool = activeFetchTool,
-                                                    projectsGateway = projectManager
-                                                        ?: ai.neopsyke.agent.project.NoopGoalsGateway,
+                                                    goalsGateway = goalManager
+                                                        ?: ai.neopsyke.agent.goal.NoopGoalsGateway,
                                                     output = liveOutput,
                                                 )
                                                 assembly.actionRegistry.loadWarnings.forEach { warning ->
@@ -1597,7 +1597,7 @@ internal object AppModeRunners {
                                                     exitProcess(exitCode)
 
                                                     } } finally {
-                                                        projectManager?.stop()
+                                                        goalManager?.stop()
                                                         egoDispatcher.close()
                                                     }
                                                 }

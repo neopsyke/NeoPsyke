@@ -47,7 +47,7 @@ class IdEgoLifecycleIntegrationTest {
                         goal = "Evaluate two branches",
                         steps = listOf("noop branch", "search branch")
                     )
-                    is EgoTrigger.ProjectWork -> EgoDecision.Noop("ignore project work in test")
+                    is EgoTrigger.GoalWork -> EgoDecision.Noop("ignore goal work in test")
                     is EgoTrigger.PendingThoughtInput -> decisionForThought(trigger.thought)
                 }
 
@@ -147,7 +147,7 @@ class IdEgoLifecycleIntegrationTest {
                         payload = "emerging learning topics",
                         summary = "gather evidence"
                     )
-                    is EgoTrigger.ProjectWork -> EgoDecision.Noop("ignore project work in test")
+                    is EgoTrigger.GoalWork -> EgoDecision.Noop("ignore goal work in test")
                     is EgoTrigger.PendingThoughtInput -> {
                         if (trigger.thought.originActionType == ActionType.WEB_SEARCH) {
                             followUpHasContactDispatchable = ActionType.CONTACT_USER in context.dispatchableActions
@@ -228,7 +228,7 @@ class IdEgoLifecycleIntegrationTest {
                         goal = "learn",
                         steps = listOf("collect insight")
                     )
-                    is EgoTrigger.ProjectWork -> EgoDecision.Noop("ignore project work in test")
+                    is EgoTrigger.GoalWork -> EgoDecision.Noop("ignore goal work in test")
                     is EgoTrigger.PendingThoughtInput -> {
                         if (trigger.thought.planContext != null) {
                             planStepHasContactDispatchable = ActionType.CONTACT_USER in context.dispatchableActions
@@ -301,7 +301,7 @@ class IdEgoLifecycleIntegrationTest {
                 when (trigger) {
                     is EgoTrigger.IncomingInput -> EgoDecision.Noop("ignore user test input")
                     is EgoTrigger.IncomingImpulse -> EgoDecision.Noop("no useful action available")
-                    is EgoTrigger.ProjectWork -> EgoDecision.Noop("ignore project work in test")
+                    is EgoTrigger.GoalWork -> EgoDecision.Noop("ignore goal work in test")
                     is EgoTrigger.PendingThoughtInput -> EgoDecision.Noop("done")
                 }
         }
@@ -370,7 +370,7 @@ class IdEgoLifecycleIntegrationTest {
                         payload = """{"summary":"I learned something durable","keywords":["learning"]}""",
                         summary = "persist insight"
                     )
-                    is EgoTrigger.ProjectWork -> EgoDecision.Noop("ignore project work in test")
+                    is EgoTrigger.GoalWork -> EgoDecision.Noop("ignore goal work in test")
                     is EgoTrigger.PendingThoughtInput -> EgoDecision.Noop("done")
                 }
         }
@@ -440,7 +440,7 @@ class IdEgoLifecycleIntegrationTest {
                         payload = "interesting new topic",
                         summary = "gather evidence"
                     )
-                    is EgoTrigger.ProjectWork -> EgoDecision.Noop("ignore project work in test")
+                    is EgoTrigger.GoalWork -> EgoDecision.Noop("ignore goal work in test")
                     is EgoTrigger.PendingThoughtInput -> EgoDecision.Noop("done")
                 }
         }

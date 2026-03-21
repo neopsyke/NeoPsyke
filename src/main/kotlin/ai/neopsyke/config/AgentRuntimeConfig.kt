@@ -12,9 +12,9 @@ import ai.neopsyke.agent.config.MemoryConfig
 import ai.neopsyke.agent.config.MetaReasonerConfig
 import ai.neopsyke.dashboard.InnerVoiceConfig
 import ai.neopsyke.agent.config.PlannerConfig
-import ai.neopsyke.agent.project.ProjectConfig
+import ai.neopsyke.agent.goal.GoalConfig
 import ai.neopsyke.agent.config.SuperegoConfig
-import ai.neopsyke.agent.config.TaskWorkspaceConfig
+import ai.neopsyke.agent.config.ScratchpadConfig
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
@@ -111,11 +111,10 @@ private data class AgentRuntimeYamlMemory(
     val longTermMemoryRecallEchoMinTokenCount: Int? = null,
     val longTermMemoryRecallEchoTokenOverlapThreshold: Double? = null,
     val mcpMemoryCallTimeoutMs: Long? = null,
-    val scratchpad: AgentRuntimeYamlTaskWorkspace? = null,
-    val taskWorkspace: AgentRuntimeYamlTaskWorkspace? = null,
+    val scratchpad: AgentRuntimeYamlScratchpad? = null,
 )
 
-private data class AgentRuntimeYamlTaskWorkspace(
+private data class AgentRuntimeYamlScratchpad(
     val enabled: Boolean? = null,
     val activationMinPlanSteps: Int? = null,
     val maxPromptTokens: Int? = null,
@@ -198,7 +197,7 @@ object AgentRuntimeSettingsLoader {
         val plannerYaml = agentYaml.planner ?: AgentRuntimeYamlPlanner()
         val superegoYaml = agentYaml.superego ?: AgentRuntimeYamlSuperego()
         val memoryYaml = agentYaml.memory ?: AgentRuntimeYamlMemory()
-        val taskWorkspaceYaml = memoryYaml.scratchpad ?: memoryYaml.taskWorkspace ?: AgentRuntimeYamlTaskWorkspace()
+        val scratchpadYaml = memoryYaml.scratchpad ?: AgentRuntimeYamlScratchpad()
         val metaReasonerYaml = agentYaml.metaReasoner ?: AgentRuntimeYamlMetaReasoner()
         val logbookYaml = agentYaml.logbook ?: AgentRuntimeYamlLogbook()
         val innerVoiceYaml = agentYaml.innerVoice ?: AgentRuntimeYamlInnerVoice()
@@ -341,96 +340,96 @@ object AgentRuntimeSettingsLoader {
                     memoryYaml.maxShortTermContextPromptTokens,
                     defaults.memory.maxShortTermContextPromptTokens
                 ),
-                taskWorkspace = TaskWorkspaceConfig(
+                scratchpad = ScratchpadConfig(
                     enabled = readBoolean(
-                        env["EGO_TASK_WORKSPACE_ENABLED"],
-                        taskWorkspaceYaml.enabled,
-                        defaults.memory.taskWorkspace.enabled
+                        env["EGO_SCRATCHPAD_ENABLED"],
+                        scratchpadYaml.enabled,
+                        defaults.memory.scratchpad.enabled
                     ),
                     activationMinPlanSteps = readPositiveInt(
-                        env["EGO_TASK_WORKSPACE_ACTIVATION_MIN_PLAN_STEPS"],
-                        taskWorkspaceYaml.activationMinPlanSteps,
-                        defaults.memory.taskWorkspace.activationMinPlanSteps
+                        env["EGO_SCRATCHPAD_ACTIVATION_MIN_PLAN_STEPS"],
+                        scratchpadYaml.activationMinPlanSteps,
+                        defaults.memory.scratchpad.activationMinPlanSteps
                     ),
                     maxPromptTokens = readPositiveInt(
-                        env["EGO_TASK_WORKSPACE_MAX_PROMPT_TOKENS"],
-                        taskWorkspaceYaml.maxPromptTokens,
-                        defaults.memory.taskWorkspace.maxPromptTokens
+                        env["EGO_SCRATCHPAD_MAX_PROMPT_TOKENS"],
+                        scratchpadYaml.maxPromptTokens,
+                        defaults.memory.scratchpad.maxPromptTokens
                     ),
                     maxSections = readPositiveInt(
-                        env["EGO_TASK_WORKSPACE_MAX_SECTIONS"],
-                        taskWorkspaceYaml.maxSections,
-                        defaults.memory.taskWorkspace.maxSections
+                        env["EGO_SCRATCHPAD_MAX_SECTIONS"],
+                        scratchpadYaml.maxSections,
+                        defaults.memory.scratchpad.maxSections
                     ),
                     maxSectionChars = readPositiveInt(
-                        env["EGO_TASK_WORKSPACE_MAX_SECTION_CHARS"],
-                        taskWorkspaceYaml.maxSectionChars,
-                        defaults.memory.taskWorkspace.maxSectionChars
+                        env["EGO_SCRATCHPAD_MAX_SECTION_CHARS"],
+                        scratchpadYaml.maxSectionChars,
+                        defaults.memory.scratchpad.maxSectionChars
                     ),
                     maxSectionSummaryChars = readPositiveInt(
-                        env["EGO_TASK_WORKSPACE_MAX_SECTION_SUMMARY_CHARS"],
-                        taskWorkspaceYaml.maxSectionSummaryChars,
-                        defaults.memory.taskWorkspace.maxSectionSummaryChars
+                        env["EGO_SCRATCHPAD_MAX_SECTION_SUMMARY_CHARS"],
+                        scratchpadYaml.maxSectionSummaryChars,
+                        defaults.memory.scratchpad.maxSectionSummaryChars
                     ),
                     maxEvidenceItems = readPositiveInt(
-                        env["EGO_TASK_WORKSPACE_MAX_EVIDENCE_ITEMS"],
-                        taskWorkspaceYaml.maxEvidenceItems,
-                        defaults.memory.taskWorkspace.maxEvidenceItems
+                        env["EGO_SCRATCHPAD_MAX_EVIDENCE_ITEMS"],
+                        scratchpadYaml.maxEvidenceItems,
+                        defaults.memory.scratchpad.maxEvidenceItems
                     ),
                     maxEvidenceChars = readPositiveInt(
-                        env["EGO_TASK_WORKSPACE_MAX_EVIDENCE_CHARS"],
-                        taskWorkspaceYaml.maxEvidenceChars,
-                        defaults.memory.taskWorkspace.maxEvidenceChars
+                        env["EGO_SCRATCHPAD_MAX_EVIDENCE_CHARS"],
+                        scratchpadYaml.maxEvidenceChars,
+                        defaults.memory.scratchpad.maxEvidenceChars
                     ),
                     finalCompilationMaxChars = readPositiveInt(
-                        env["EGO_TASK_WORKSPACE_FINAL_COMPILATION_MAX_CHARS"],
-                        taskWorkspaceYaml.finalCompilationMaxChars,
-                        defaults.memory.taskWorkspace.finalCompilationMaxChars
+                        env["EGO_SCRATCHPAD_FINAL_COMPILATION_MAX_CHARS"],
+                        scratchpadYaml.finalCompilationMaxChars,
+                        defaults.memory.scratchpad.finalCompilationMaxChars
                     ),
                     finalPassRewriteEnabled = readBoolean(
-                        env["EGO_TASK_WORKSPACE_FINAL_PASS_REWRITE_ENABLED"],
-                        taskWorkspaceYaml.finalPassRewriteEnabled,
-                        defaults.memory.taskWorkspace.finalPassRewriteEnabled
+                        env["EGO_SCRATCHPAD_FINAL_PASS_REWRITE_ENABLED"],
+                        scratchpadYaml.finalPassRewriteEnabled,
+                        defaults.memory.scratchpad.finalPassRewriteEnabled
                     ),
                     finalPassMaxTokens = readPositiveInt(
-                        env["EGO_TASK_WORKSPACE_FINAL_PASS_MAX_TOKENS"],
-                        taskWorkspaceYaml.finalPassMaxTokens,
-                        defaults.memory.taskWorkspace.finalPassMaxTokens
+                        env["EGO_SCRATCHPAD_FINAL_PASS_MAX_TOKENS"],
+                        scratchpadYaml.finalPassMaxTokens,
+                        defaults.memory.scratchpad.finalPassMaxTokens
                     ),
                     finalPassMinWorkspaceConfidence = readProbability(
-                        env["EGO_TASK_WORKSPACE_FINAL_PASS_MIN_WORKSPACE_CONFIDENCE"],
-                        taskWorkspaceYaml.finalPassMinWorkspaceConfidence,
-                        defaults.memory.taskWorkspace.finalPassMinWorkspaceConfidence
+                        env["EGO_SCRATCHPAD_FINAL_PASS_MIN_WORKSPACE_CONFIDENCE"],
+                        scratchpadYaml.finalPassMinWorkspaceConfidence,
+                        defaults.memory.scratchpad.finalPassMinWorkspaceConfidence
                     ),
                     finalPassMinModelConfidence = readProbability(
-                        env["EGO_TASK_WORKSPACE_FINAL_PASS_MIN_MODEL_CONFIDENCE"],
-                        taskWorkspaceYaml.finalPassMinModelConfidence,
-                        defaults.memory.taskWorkspace.finalPassMinModelConfidence
+                        env["EGO_SCRATCHPAD_FINAL_PASS_MIN_MODEL_CONFIDENCE"],
+                        scratchpadYaml.finalPassMinModelConfidence,
+                        defaults.memory.scratchpad.finalPassMinModelConfidence
                     ),
                     debugCaptureEnabled = readBoolean(
-                        env["EGO_TASK_WORKSPACE_DEBUG_CAPTURE_ENABLED"],
-                        taskWorkspaceYaml.debugCaptureEnabled,
-                        defaults.memory.taskWorkspace.debugCaptureEnabled
+                        env["EGO_SCRATCHPAD_DEBUG_CAPTURE_ENABLED"],
+                        scratchpadYaml.debugCaptureEnabled,
+                        defaults.memory.scratchpad.debugCaptureEnabled
                     ),
                     maxActiveTasks = readPositiveInt(
-                        env["EGO_TASK_WORKSPACE_MAX_ACTIVE_TASKS"],
-                        taskWorkspaceYaml.maxActiveTasks,
-                        defaults.memory.taskWorkspace.maxActiveTasks
+                        env["EGO_SCRATCHPAD_MAX_ACTIVE_TASKS"],
+                        scratchpadYaml.maxActiveTasks,
+                        defaults.memory.scratchpad.maxActiveTasks
                     ),
                     digestMaxEntries = readPositiveInt(
-                        env["EGO_TASK_WORKSPACE_DIGEST_MAX_ENTRIES"],
-                        taskWorkspaceYaml.digestMaxEntries,
-                        defaults.memory.taskWorkspace.digestMaxEntries
+                        env["EGO_SCRATCHPAD_DIGEST_MAX_ENTRIES"],
+                        scratchpadYaml.digestMaxEntries,
+                        defaults.memory.scratchpad.digestMaxEntries
                     ),
                     digestMaxChars = readPositiveInt(
-                        env["EGO_TASK_WORKSPACE_DIGEST_MAX_CHARS"],
-                        taskWorkspaceYaml.digestMaxChars,
-                        defaults.memory.taskWorkspace.digestMaxChars
+                        env["EGO_SCRATCHPAD_DIGEST_MAX_CHARS"],
+                        scratchpadYaml.digestMaxChars,
+                        defaults.memory.scratchpad.digestMaxChars
                     ),
                     digestMaxPromptTokens = readPositiveInt(
-                        env["EGO_TASK_WORKSPACE_DIGEST_MAX_PROMPT_TOKENS"],
-                        taskWorkspaceYaml.digestMaxPromptTokens,
-                        defaults.memory.taskWorkspace.digestMaxPromptTokens
+                        env["EGO_SCRATCHPAD_DIGEST_MAX_PROMPT_TOKENS"],
+                        scratchpadYaml.digestMaxPromptTokens,
+                        defaults.memory.scratchpad.digestMaxPromptTokens
                     ),
                 ),
                 longTermMemoryRecallMaxItems = readPositiveInt(
@@ -665,11 +664,11 @@ object AgentRuntimeSettingsLoader {
                     defaults.innerVoice.maxEventsPerSession
                 ),
             ),
-            projects = ProjectConfig(
+            goals = GoalConfig(
                 enabled = readBoolean(
                     env["NEOPSYKE_PROJECTS_ENABLED"],
                     yaml = null,
-                    fallback = defaults.projects.enabled
+                    fallback = defaults.goals.enabled
                 ),
             ),
             loopDelayMs = readNonNegativeInt(

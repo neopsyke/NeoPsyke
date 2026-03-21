@@ -1,11 +1,11 @@
-package ai.neopsyke.agent.project
+package ai.neopsyke.agent.goal
 
 import kotlinx.coroutines.CoroutineScope
 import mu.KotlinLogging
 import ai.neopsyke.agent.actions.async.AsyncOperationEvent
 import ai.neopsyke.agent.actions.async.AsyncOperationRegistry
 import ai.neopsyke.agent.cortex.sensory.GoalRuntimeCue
-import ai.neopsyke.agent.id.Goal as IdGoal
+import ai.neopsyke.agent.id.GoalCommitment
 import ai.neopsyke.agent.model.ActionOutcome
 import ai.neopsyke.agent.model.PendingAction
 import ai.neopsyke.agent.model.OriginSource
@@ -21,7 +21,7 @@ import java.util.concurrent.ConcurrentHashMap
 private val logger = KotlinLogging.logger {}
 
 private data class GoalRunSession(
-    val projectId: String,
+    val goalId: String,
     val stepId: String,
     val rootInputId: String,
     val createdAt: Instant = Instant.now(),
@@ -32,19 +32,19 @@ private data class GoalRunSession(
 )
 
 class GoalManager(
-    private val config: ProjectConfig,
-    private val store: ProjectStore,
-    private val planner: ProjectPlanner = DeterministicProjectPlanner(),
-    private val verifier: ProjectStepVerifier = DeterministicProjectStepVerifier(),
+    private val config: GoalConfig,
+    private val store: GoalStore,
+    private val planner: GoalPlanner = DeterministicGoalPlanner(),
+    private val verifier: GoalStepVerifier = DeterministicGoalStepVerifier(),
     private val asyncOperationRegistry: AsyncOperationRegistry = AsyncOperationRegistry.empty(),
     private val instrumentation: AgentInstrumentation = NoopAgentInstrumentation,
     private val cueEmitter: (GoalRuntimeCue) -> Unit = {},
 ) : GoalsGateway {
-    private val states = ConcurrentHashMap<String, ProjectState>()
+    private val states = ConcurrentHashMap<String, GoalState>()
     private val sessionsByRootInputId = ConcurrentHashMap<String, GoalRunSession>()
 
     @Volatile
-    private var activeGoalsSnapshot: List<IdGoal> = emptyList()
+    private var activeGoalsSnapshot: List<GoalCommitment> = emptyList()
 
     @Volatile
     private var pendingWorkSummarySnapshot: String = ""
@@ -63,15 +63,15 @@ class GoalManager(
         waitConditionMonitor = WaitConditionMonitor(
             checkIntervalMs = config.conditionCheckIntervalMs,
             asyncOperationRegistry = asyncOperationRegistry,
-            onConditionSatisfied = { projectId, stepId, resolution ->
-                onWaitConditionSatisfied(projectId, stepId, resolution)
+            onConditionSatisfied = { goalId, stepId, resolution ->
+                onWaitConditionSatisfied(goalId, stepId, resolution)
             },
-            onConditionTimedOut = { projectId, stepId ->
-                applyEvent(projectId, ProjectEvent.WaitConditionTimedOut(projectId, stepId))
+            onConditionTimedOut = { goalId, stepId ->
+                applyEvent(goalId, GoalEvent.WaitConditionTimedOut(goalId, stepId))
             },
         ).also { it.start(scope) }
 
-        restoreProjects()
+        restoreGoals()
         refreshAmbientSnapshots()
     }
 
@@ -86,19 +86,19 @@ class GoalManager(
         val state = states[cue.goalId] ?: return null
         val step = state.nextRunnableStep() ?: return null
         val startedState = if (step.status == StepStatus.READY) {
-            applyEvent(state.id, ProjectEvent.StepStarted(state.id, step.id)) ?: state
+            applyEvent(state.id, GoalEvent.StepStarted(state.id, step.id)) ?: state
         } else {
             state
         }
-        val startedStep = startedState.project.plan.steps.firstOrNull { it.id == step.id } ?: step
-        val rootInputId = buildProjectRootInputId(state.id, step.id)
+        val startedStep = startedState.goal.plan.steps.firstOrNull { it.id == step.id } ?: step
+        val rootInputId = buildGoalRootInputId(state.id, step.id)
         sessionsByRootInputId[rootInputId] = GoalRunSession(
-            projectId = state.id,
+            goalId = state.id,
             stepId = step.id,
             rootInputId = rootInputId,
         )
-        instrumentation.emit(AgentEvents.projectWakeUp(state.id, "work_ready", cue.reason))
-        return ProjectContextLoader.buildWorkUnit(
+        instrumentation.emit(AgentEvents.goalWakeUp(state.id, "work_ready", cue.reason))
+        return GoalContextLoader.buildWorkUnit(
             state = startedState,
             step = startedStep,
             rootInputId = rootInputId,
@@ -111,7 +111,7 @@ class GoalManager(
     }
 
     override fun onActionExecuted(action: PendingAction, outcome: ActionOutcome, observedEvidence: Boolean) {
-        if (action.origin.source != OriginSource.PROJECT) return
+        if (action.origin.source != OriginSource.GOAL) return
         val rootInputId = action.rootInputId ?: return
         val session = sessionsByRootInputId[rootInputId] ?: return
         val actionCount = session.actionCount + 1
@@ -122,22 +122,22 @@ class GoalManager(
         )
 
         val afterAction = applyEvent(
-            session.projectId,
-            ProjectEvent.StepActionExecuted(session.projectId, session.stepId, outcome.statusSummary)
+            session.goalId,
+            GoalEvent.StepActionExecuted(session.goalId, session.stepId, outcome.statusSummary)
         ) ?: return
-        val step = afterAction.project.plan.steps.firstOrNull { it.id == session.stepId } ?: return
+        val step = afterAction.goal.plan.steps.firstOrNull { it.id == session.stepId } ?: return
         if (outcome.executionStatus == ai.neopsyke.agent.model.ActionExecutionStatus.WAITING && outcome.asyncWait == null) {
             val message =
-                "Project action returned WAITING without async handles; treating as retryable contract violation."
-            logger.warn { "Project async wait contract violation: project=${session.projectId}, step=${session.stepId}, action=${action.type.id}" }
+                "Goal action returned WAITING without async handles; treating as retryable contract violation."
+            logger.warn { "Goal async wait contract violation: goal=${session.goalId}, step=${session.stepId}, action=${action.type.id}" }
             instrumentation.emit(AgentEvents.warning(message))
             sessionsByRootInputId[rootInputId] = sessionsByRootInputId[rootInputId]
                 ?.copy(allowFollowUp = false, requeueReason = null)
                 ?: return
             applyEvent(
-                session.projectId,
-                ProjectEvent.StepAcceptanceFailed(
-                    projectId = session.projectId,
+                session.goalId,
+                GoalEvent.StepAcceptanceFailed(
+                    goalId = session.goalId,
                     stepId = session.stepId,
                     reason = message,
                 )
@@ -149,40 +149,40 @@ class GoalManager(
                 ?.copy(allowFollowUp = false, requeueReason = null)
                 ?: return
             applyEvent(
-                session.projectId,
-                ProjectEvent.StepBlocked(
-                    projectId = session.projectId,
+                session.goalId,
+                GoalEvent.StepBlocked(
+                    goalId = session.goalId,
                     stepId = session.stepId,
                     waitCondition = buildWaitConditionForAsyncOutcome(outcome),
                 )
             )
             return
         }
-        val verification = verifier.evaluate(afterAction.project, step, action, outcome, observedEvidence)
+        val verification = verifier.evaluate(afterAction.goal, step, action, outcome, observedEvidence)
 
         when (verification.verdict) {
-            ProjectStepVerdict.PASS -> {
+            GoalStepVerdict.PASS -> {
                 sessionsByRootInputId[rootInputId] = sessionsByRootInputId[rootInputId]
                     ?.copy(allowFollowUp = false, requeueReason = null)
                     ?: return
-                applyEvent(session.projectId, ProjectEvent.StepAcceptancePassed(session.projectId, session.stepId))
+                applyEvent(session.goalId, GoalEvent.StepAcceptancePassed(session.goalId, session.stepId))
             }
 
-            ProjectStepVerdict.RETRY -> {
+            GoalStepVerdict.RETRY -> {
                 sessionsByRootInputId[rootInputId] = sessionsByRootInputId[rootInputId]
                     ?.copy(allowFollowUp = false, requeueReason = null)
                     ?: return
                 applyEvent(
-                    session.projectId,
-                    ProjectEvent.StepAcceptanceFailed(
-                        session.projectId,
+                    session.goalId,
+                    GoalEvent.StepAcceptanceFailed(
+                        session.goalId,
                         session.stepId,
                         verification.reason.ifBlank { outcome.statusSummary },
                     )
                 )
             }
 
-            ProjectStepVerdict.BLOCK -> {
+            GoalStepVerdict.BLOCK -> {
                 sessionsByRootInputId[rootInputId] = sessionsByRootInputId[rootInputId]
                     ?.copy(allowFollowUp = false, requeueReason = null)
                     ?: return
@@ -192,12 +192,12 @@ class GoalManager(
                     registeredAt = Instant.now(),
                 )
                 applyEvent(
-                    session.projectId,
-                    ProjectEvent.StepBlocked(session.projectId, session.stepId, waitCondition)
+                    session.goalId,
+                    GoalEvent.StepBlocked(session.goalId, session.stepId, waitCondition)
                 )
             }
 
-            ProjectStepVerdict.CONTINUE -> {
+            GoalStepVerdict.CONTINUE -> {
                 sessionsByRootInputId[rootInputId] = sessionsByRootInputId[rootInputId]
                     ?.copy(
                         allowFollowUp = actionCount < config.actionsPerCycle,
@@ -206,14 +206,14 @@ class GoalManager(
                     ?: return
             }
 
-            ProjectStepVerdict.FAIL -> {
+            GoalStepVerdict.FAIL -> {
                 sessionsByRootInputId[rootInputId] = sessionsByRootInputId[rootInputId]
                     ?.copy(allowFollowUp = false, requeueReason = null)
                     ?: return
                 applyEvent(
-                    session.projectId,
-                    ProjectEvent.StepAcceptanceFailed(
-                        session.projectId,
+                    session.goalId,
+                    GoalEvent.StepAcceptanceFailed(
+                        session.goalId,
                         session.stepId,
                         verification.reason.ifBlank { outcome.statusSummary },
                     )
@@ -223,14 +223,14 @@ class GoalManager(
     }
 
     override fun onActionBlocked(action: PendingAction, reason: String, reasonCode: String?, source: String) {
-        if (action.origin.source != OriginSource.PROJECT) return
+        if (action.origin.source != OriginSource.GOAL) return
         val rootInputId = action.rootInputId ?: return
         val session = sessionsByRootInputId[rootInputId] ?: return
         sessionsByRootInputId[rootInputId] = session.copy(allowFollowUp = false, requeueReason = null)
         applyEvent(
-            session.projectId,
-            ProjectEvent.StepAcceptanceFailed(
-                projectId = session.projectId,
+            session.goalId,
+            GoalEvent.StepAcceptanceFailed(
+                goalId = session.goalId,
                 stepId = session.stepId,
                 reason = listOfNotNull(reasonCode, source, reason).joinToString(": "),
             )
@@ -238,27 +238,27 @@ class GoalManager(
     }
 
     override fun allowFollowUp(action: PendingAction): Boolean {
-        if (action.origin.source != OriginSource.PROJECT) return true
+        if (action.origin.source != OriginSource.GOAL) return true
         val session = action.rootInputId?.let { sessionsByRootInputId[it] } ?: return true
         return session.allowFollowUp && session.actionCount < config.actionsPerCycle
     }
 
     override fun finalizeGoalCycle(rootInputId: String) {
         val session = sessionsByRootInputId.remove(rootInputId) ?: return
-        val state = states[session.projectId] ?: return
+        val state = states[session.goalId] ?: return
 
         writeWorkspaceCycleArtifacts(state, session)
         applyEvent(
-            session.projectId,
-            ProjectEvent.WorkCycleCompleted(
-                projectId = session.projectId,
+            session.goalId,
+            GoalEvent.WorkCycleCompleted(
+                goalId = session.goalId,
                 stepId = session.stepId,
                 actionsExecuted = session.actionCount,
             )
         )
 
         if (!session.requeueReason.isNullOrBlank()) {
-            val refreshed = states[session.projectId] ?: return
+            val refreshed = states[session.goalId] ?: return
             val runnable = refreshed.nextRunnableStep() ?: return
             cueEmitter(
                 GoalRuntimeCue(
@@ -280,221 +280,221 @@ class GoalManager(
                 if (instruction.isBlank()) {
                     GoalOperationResult(false, "Goal creation requires an instruction.")
                 } else {
-                    val projectId = createProject(
+                    val goalId = createGoal(
                         instruction = instruction,
                         title = request.title?.takeIf { it.isNotBlank() } ?: instruction.take(60),
-                        priority = request.priority ?: ProjectPriority.MEDIUM,
+                        priority = request.priority ?: GoalPriority.MEDIUM,
                         completionCriteria = request.completionCriteria ?: "User confirms the goal is met.",
                     )
-                    if (projectId.isBlank()) {
+                    if (goalId.isBlank()) {
                         GoalOperationResult(false, "Goal creation was rejected.")
                     } else {
-                        GoalOperationResult(true, "Goal created.", projectId)
+                        GoalOperationResult(true, "Goal created.", goalId)
                     }
                 }
             }
 
             GoalOperation.STATUS -> {
-                val projectId = request.projectId.orEmpty()
-                val state = states[projectId]
+                val goalId = request.goalId.orEmpty()
+                val state = states[goalId]
                 if (state == null) {
                     GoalOperationResult(false, "Goal not found.")
                 } else {
                     val step = state.nextRunnableStep()
                     GoalOperationResult(
                         true,
-                        "status=${state.project.status} next_step=${step?.description ?: "none"}",
-                        projectId = projectId,
+                        "status=${state.goal.status} next_step=${step?.description ?: "none"}",
+                        goalId = goalId,
                     )
                 }
             }
 
             GoalOperation.LIST -> {
-                val summaries = allProjects()
+                val summaries = allGoals()
                 val message = if (summaries.isEmpty()) {
                     "No goals."
                 } else {
                     summaries.joinToString("\n") { summary ->
-                        "${summary.projectId}: ${summary.title} (${summary.status})"
+                        "${summary.goalId}: ${summary.title} (${summary.status})"
                     }
                 }
                 GoalOperationResult(true, message)
             }
 
             GoalOperation.PAUSE -> {
-                val projectId = request.projectId.orEmpty()
-                if (!states.containsKey(projectId)) {
+                val goalId = request.goalId.orEmpty()
+                if (!states.containsKey(goalId)) {
                     GoalOperationResult(false, "Goal not found.")
                 } else {
                     applyEvent(
-                        projectId,
-                        ProjectEvent.Suspended(
-                            projectId = projectId,
+                        goalId,
+                        GoalEvent.Suspended(
+                            goalId = goalId,
                             reason = request.reason ?: "Paused by user",
                         )
                     )
-                    GoalOperationResult(true, "Goal paused.", projectId)
+                    GoalOperationResult(true, "Goal paused.", goalId)
                 }
             }
 
             GoalOperation.RESUME -> {
-                val projectId = request.projectId.orEmpty()
-                if (!states.containsKey(projectId)) {
+                val goalId = request.goalId.orEmpty()
+                if (!states.containsKey(goalId)) {
                     GoalOperationResult(false, "Goal not found.")
                 } else {
-                    applyEvent(projectId, ProjectEvent.Resumed(projectId))
-                    GoalOperationResult(true, "Goal resumed.", projectId)
+                    applyEvent(goalId, GoalEvent.Resumed(goalId))
+                    GoalOperationResult(true, "Goal resumed.", goalId)
                 }
             }
 
             GoalOperation.REPRIORITIZE -> {
-                val projectId = request.projectId.orEmpty()
-                val state = states[projectId]
+                val goalId = request.goalId.orEmpty()
+                val state = states[goalId]
                 val newPriority = request.priority
                 if (state == null || newPriority == null) {
-                    GoalOperationResult(false, "Goal reprioritize requires projectId and priority.")
+                    GoalOperationResult(false, "Goal reprioritize requires goalId and priority.")
                 } else {
-                    applyEvent(projectId, ProjectEvent.PriorityChanged(projectId, newPriority))
-                    GoalOperationResult(true, "Goal priority updated to $newPriority.", projectId)
+                    applyEvent(goalId, GoalEvent.PriorityChanged(goalId, newPriority))
+                    GoalOperationResult(true, "Goal priority updated to $newPriority.", goalId)
                 }
             }
 
             GoalOperation.COMPLETE -> {
-                val projectId = request.projectId.orEmpty()
-                if (!states.containsKey(projectId)) {
+                val goalId = request.goalId.orEmpty()
+                if (!states.containsKey(goalId)) {
                     GoalOperationResult(false, "Goal not found.")
                 } else {
-                    applyEvent(projectId, ProjectEvent.Completed(projectId))
-                    GoalOperationResult(true, "Goal marked completed.", projectId)
+                    applyEvent(goalId, GoalEvent.Completed(goalId))
+                    GoalOperationResult(true, "Goal marked completed.", goalId)
                 }
             }
 
             GoalOperation.REVISE_PLAN -> {
-                val projectId = request.projectId.orEmpty()
-                val state = states[projectId]
+                val goalId = request.goalId.orEmpty()
+                val state = states[goalId]
                 if (state == null) {
                     GoalOperationResult(false, "Goal not found.")
                 } else {
-                    val plan = planner.generatePlan(state.project)
+                    val plan = planner.generatePlan(state.goal)
                     applyEvent(
-                        projectId,
-                        ProjectEvent.PlanRevised(
-                            projectId = projectId,
+                        goalId,
+                        GoalEvent.PlanRevised(
+                            goalId = goalId,
                             plan = plan,
                             reason = request.reason ?: "Revised by user request",
                         )
                     )
-                    GoalOperationResult(true, "Goal plan revised.", projectId)
+                    GoalOperationResult(true, "Goal plan revised.", goalId)
                 }
             }
         }
 
-    override fun allProjects(): List<ProjectTier1Summary> =
+    override fun allGoals(): List<GoalTier1Summary> =
         states.values
-            .sortedByDescending { it.project.priority.ordinal }
-            .map { ProjectContextLoader.tier1Summary(it) }
+            .sortedByDescending { it.goal.priority.ordinal }
+            .map { GoalContextLoader.tier1Summary(it) }
 
-    override fun projectStatus(projectId: String): ProjectState? = states[projectId]
+    override fun goalStatus(goalId: String): GoalState? = states[goalId]
 
-    override fun activeGoals(): List<IdGoal> = activeGoalsSnapshot
+    override fun activeGoals(): List<GoalCommitment> = activeGoalsSnapshot
 
-    fun createProject(
+    fun createGoal(
         instruction: String,
         title: String = instruction.take(60),
-        priority: ProjectPriority = ProjectPriority.MEDIUM,
+        priority: GoalPriority = GoalPriority.MEDIUM,
         completionCriteria: String = "User confirms the goal is met.",
         cronExpression: String? = null,
     ): String {
         val activeCount = states.values.count { !it.isTerminal() }
-        if (activeCount >= config.maxActiveProjects) {
-            logger.warn { "Max active projects reached (${config.maxActiveProjects}), rejecting creation" }
+        if (activeCount >= config.maxActiveGoals) {
+            logger.warn { "Max active goals reached (${config.maxActiveGoals}), rejecting creation" }
             return ""
         }
 
-        val projectId = generateProjectId(title)
-        val workspacePath = store.createWorkspace(projectId)
-        val created = ProjectEvent.Created(
-            projectId = projectId,
+        val goalId = generateGoalId(title)
+        val workspacePath = store.createWorkspace(goalId)
+        val created = GoalEvent.Created(
+            goalId = goalId,
             title = title,
             instruction = instruction,
             priority = priority,
             completionCriteria = completionCriteria,
         )
-        val initial = ProjectStateMachine.initialState(created, workspacePath).let { state ->
+        val initial = GoalStateMachine.initialState(created, workspacePath).let { state ->
             if (cronExpression.isNullOrBlank()) {
                 state
             } else {
-                state.copy(project = state.project.copy(cronExpression = cronExpression))
+                state.copy(goal = state.goal.copy(cronExpression = cronExpression))
             }
         }
-        states[projectId] = initial
+        states[goalId] = initial
         refreshAmbientSnapshots()
-        store.eventLog(projectId).append(created)
-        persistState(projectId, initial)
+        store.goalEventLog(goalId).append(created)
+        persistState(goalId, initial)
 
         if (!cronExpression.isNullOrBlank()) {
-            timerScheduler?.registerCron(projectId, cronExpression)
+            timerScheduler?.registerCron(goalId, cronExpression)
         }
-        generatePlan(projectId)
-        instrumentation.emit(AgentEvents.projectCreated(projectId, title, priority.name))
-        logger.info { "Project created: $projectId ('$title')" }
-        return projectId
+        generatePlan(goalId)
+        instrumentation.emit(AgentEvents.goalCreated(goalId, title, priority.name))
+        logger.info { "Goal created: $goalId ('$title')" }
+        return goalId
     }
 
-    fun applyEventExternal(projectId: String, event: ProjectEvent) {
-        applyEvent(projectId, event)
+    fun applyEventExternal(goalId: String, event: GoalEvent) {
+        applyEvent(goalId, event)
     }
 
-    private fun generatePlan(projectId: String) {
-        val state = states[projectId] ?: return
-        val plan = planner.generatePlan(state.project)
-        applyEvent(projectId, ProjectEvent.PlanGenerated(projectId, plan))
+    private fun generatePlan(goalId: String) {
+        val state = states[goalId] ?: return
+        val plan = planner.generatePlan(state.goal)
+        applyEvent(goalId, GoalEvent.PlanGenerated(goalId, plan))
     }
 
-    private fun applyEvent(projectId: String, event: ProjectEvent): ProjectState? {
-        val state = states[projectId] ?: return null
-        val oldStatus = state.project.status
-        val (newState, commands) = ProjectStateMachine.transition(state, event)
-        states[projectId] = newState
+    private fun applyEvent(goalId: String, event: GoalEvent): GoalState? {
+        val state = states[goalId] ?: return null
+        val oldStatus = state.goal.status
+        val (newState, commands) = GoalStateMachine.transition(state, event)
+        states[goalId] = newState
         refreshAmbientSnapshots()
-        store.eventLog(projectId).append(event)
+        store.goalEventLog(goalId).append(event)
 
-        if (oldStatus != newState.project.status) {
-            instrumentation.emit(AgentEvents.projectStatusChanged(projectId, oldStatus.name, newState.project.status.name))
+        if (oldStatus != newState.goal.status) {
+            instrumentation.emit(AgentEvents.goalStatusChanged(goalId, oldStatus.name, newState.goal.status.name))
         }
         when (event) {
-            is ProjectEvent.StepStarted -> {
-                val step = newState.project.plan.steps.firstOrNull { it.id == event.stepId }
+            is GoalEvent.StepStarted -> {
+                val step = newState.goal.plan.steps.firstOrNull { it.id == event.stepId }
                 instrumentation.emit(
-                    AgentEvents.projectStepStarted(projectId, event.stepId, step?.description.orEmpty())
+                    AgentEvents.goalStepStarted(goalId, event.stepId, step?.description.orEmpty())
                 )
             }
 
-            is ProjectEvent.StepAcceptancePassed -> {
-                val step = newState.project.plan.steps.firstOrNull { it.id == event.stepId }
+            is GoalEvent.StepAcceptancePassed -> {
+                val step = newState.goal.plan.steps.firstOrNull { it.id == event.stepId }
                 instrumentation.emit(
-                    AgentEvents.projectStepCompleted(projectId, event.stepId, true, step?.attempts ?: 1)
+                    AgentEvents.goalStepCompleted(goalId, event.stepId, true, step?.attempts ?: 1)
                 )
             }
 
-            is ProjectEvent.StepAcceptanceFailed -> {
-                val step = newState.project.plan.steps.firstOrNull { it.id == event.stepId }
+            is GoalEvent.StepAcceptanceFailed -> {
+                val step = newState.goal.plan.steps.firstOrNull { it.id == event.stepId }
                 if (step?.status == StepStatus.FAILED) {
                     instrumentation.emit(
-                        AgentEvents.projectStepCompleted(projectId, event.stepId, false, step.attempts)
+                        AgentEvents.goalStepCompleted(goalId, event.stepId, false, step.attempts)
                     )
                 }
             }
 
-            is ProjectEvent.StepBlocked -> {
+            is GoalEvent.StepBlocked -> {
                 instrumentation.emit(
-                    AgentEvents.projectBlocked(projectId, event.stepId, event.waitCondition.type.name)
+                    AgentEvents.goalBlocked(goalId, event.stepId, event.waitCondition.type.name)
                 )
             }
 
-            is ProjectEvent.WorkCycleCompleted -> {
+            is GoalEvent.WorkCycleCompleted -> {
                 instrumentation.emit(
-                    AgentEvents.projectWorkCycleCompleted(projectId, event.stepId, event.actionsExecuted)
+                    AgentEvents.goalWorkCycleCompleted(goalId, event.stepId, event.actionsExecuted)
                 )
             }
 
@@ -503,60 +503,60 @@ class GoalManager(
 
         dispatchCommands(commands)
         if (newState.isTerminal()) {
-            instrumentation.emit(AgentEvents.projectCompleted(projectId))
-            logger.info { "Project $projectId is terminal (${newState.project.status})" }
+            instrumentation.emit(AgentEvents.goalCompleted(goalId))
+            logger.info { "Goal $goalId is terminal (${newState.goal.status})" }
         }
         return newState
     }
 
-    private fun dispatchCommands(commands: List<ProjectCommand>) {
+    private fun dispatchCommands(commands: List<GoalCommand>) {
         for (cmd in commands) {
             when (cmd) {
-                is ProjectCommand.EmitWorkReady -> cueEmitter(cmd.cue)
-                is ProjectCommand.ScheduleWakeTimer -> timerScheduler?.register(cmd.projectId, cmd.wakeAt)
-                is ProjectCommand.CancelWakeTimer -> timerScheduler?.cancel(cmd.projectId)
-                is ProjectCommand.RegisterWaitCondition -> {
+                is GoalCommand.EmitWorkReady -> cueEmitter(cmd.cue)
+                is GoalCommand.ScheduleWakeTimer -> timerScheduler?.register(cmd.goalId, cmd.wakeAt)
+                is GoalCommand.CancelWakeTimer -> timerScheduler?.cancel(cmd.goalId)
+                is GoalCommand.RegisterWaitCondition -> {
                     if (cmd.condition.type != WaitConditionType.TIMER) {
-                        waitConditionMonitor?.register(cmd.projectId, cmd.stepId, cmd.condition)
+                        waitConditionMonitor?.register(cmd.goalId, cmd.stepId, cmd.condition)
                     }
                 }
 
-                is ProjectCommand.ClearWaitCondition -> waitConditionMonitor?.unregister(cmd.projectId, cmd.stepId)
-                is ProjectCommand.PersistProject -> {
-                    val state = states[cmd.projectId] ?: continue
-                    persistState(cmd.projectId, state)
+                is GoalCommand.ClearWaitCondition -> waitConditionMonitor?.unregister(cmd.goalId, cmd.stepId)
+                is GoalCommand.PersistGoal -> {
+                    val state = states[cmd.goalId] ?: continue
+                    persistState(cmd.goalId, state)
                 }
 
-                is ProjectCommand.NotifyUser -> {
-                    logger.info { "User notification (${cmd.projectId}): ${cmd.message}" }
+                is GoalCommand.NotifyUser -> {
+                    logger.info { "User notification (${cmd.goalId}): ${cmd.message}" }
                 }
             }
         }
     }
 
-    private fun restoreProjects() {
-        pruneExpiredCompletedProjects()
-        for (projectId in store.scanProjects()) {
+    private fun restoreGoals() {
+        pruneExpiredCompletedGoals()
+        for (goalId in store.scanGoals()) {
             try {
-                val state = store.loadProject(projectId) ?: continue
-                states[projectId] = state
+                val state = store.loadGoal(goalId) ?: continue
+                states[goalId] = state
                 restoreSchedules(state)
             } catch (ex: Exception) {
-                logger.warn(ex) { "Failed to restore project $projectId" }
+                logger.warn(ex) { "Failed to restore goal $goalId" }
             }
         }
         refreshAmbientSnapshots()
     }
 
-    private fun restoreSchedules(state: ProjectState) {
-        val project = state.project
-        if (!project.cronExpression.isNullOrBlank()) {
-            timerScheduler?.registerCron(state.id, project.cronExpression)
+    private fun restoreSchedules(state: GoalState) {
+        val goal = state.goal
+        if (!goal.cronExpression.isNullOrBlank()) {
+            timerScheduler?.registerCron(state.id, goal.cronExpression)
         }
-        if (project.status == ProjectStatus.SUSPENDED && project.suspendedUntil != null) {
-            timerScheduler?.register(state.id, project.suspendedUntil)
+        if (goal.status == GoalStatus.SUSPENDED && goal.suspendedUntil != null) {
+            timerScheduler?.register(state.id, goal.suspendedUntil)
         }
-        project.plan.steps
+        goal.plan.steps
             .filter { it.status == StepStatus.BLOCKED && it.waitCondition != null }
             .forEach { step ->
                 val condition = step.waitCondition ?: return@forEach
@@ -573,17 +573,17 @@ class GoalManager(
             }
     }
 
-    private fun onTimerWake(projectId: String, scheduledAtMs: Long) {
-        val state = states[projectId] ?: return
+    private fun onTimerWake(goalId: String, scheduledAtMs: Long) {
+        val state = states[goalId] ?: return
         val scheduledAt = Instant.ofEpochMilli(scheduledAtMs)
-        if (state.project.status == ProjectStatus.SUSPENDED) {
-            val resumeAt = state.project.suspendedUntil
+        if (state.goal.status == GoalStatus.SUSPENDED) {
+            val resumeAt = state.goal.suspendedUntil
             if (resumeAt != null && resumeAt.toEpochMilli() <= scheduledAtMs) {
-                applyEvent(projectId, ProjectEvent.Resumed(projectId, scheduledAt))
+                applyEvent(goalId, GoalEvent.Resumed(goalId, scheduledAt))
             }
         }
 
-        val timerSteps = state.project.plan.steps.filter { step ->
+        val timerSteps = state.goal.plan.steps.filter { step ->
             step.status == StepStatus.BLOCKED &&
                 step.waitCondition?.type == WaitConditionType.TIMER &&
                 (step.waitCondition.timeoutAt?.let { it.toEpochMilli() <= scheduledAtMs }
@@ -592,21 +592,21 @@ class GoalManager(
         }
         timerSteps.forEach { step ->
             applyEvent(
-                projectId,
-                ProjectEvent.WaitConditionSatisfied(projectId, step.id, "timer")
+                goalId,
+                GoalEvent.WaitConditionSatisfied(goalId, step.id, "timer")
             )
         }
     }
 
     private fun onWaitConditionSatisfied(
-        projectId: String,
+        goalId: String,
         stepId: String,
         resolution: WaitConditionResolution,
     ) {
         applyEvent(
-            projectId,
-            ProjectEvent.WaitConditionSatisfied(
-                projectId = projectId,
+            goalId,
+            GoalEvent.WaitConditionSatisfied(
+                goalId = goalId,
                 stepId = stepId,
                 conditionType = resolution.conditionType,
                 resolutionSummary = resolution.summary.ifBlank { null },
@@ -615,10 +615,10 @@ class GoalManager(
         )
     }
 
-    private fun writeWorkspaceCycleArtifacts(state: ProjectState, session: GoalRunSession) {
+    private fun writeWorkspaceCycleArtifacts(state: GoalState, session: GoalRunSession) {
         val summary = session.lastResultSummary.ifBlank { "Cycle completed." }
         try {
-            ProjectContextLoader.writeContext(state, session.stepId, summary)
+            GoalContextLoader.writeContext(state, session.stepId, summary)
             store.appendScratchEntry(
                 state.id,
                 buildString {
@@ -630,13 +630,13 @@ class GoalManager(
                 }.trim()
             )
             store.writeArtifact(
-                projectId = state.id,
+                goalId = state.id,
                 stepId = session.stepId,
                 artifactName = "cycle-${state.eventCount}.md",
                 content = buildString {
-                    appendLine("# Project Cycle")
+                    appendLine("# Goal Cycle")
                     appendLine()
-                    appendLine("- project_id: ${state.id}")
+                    appendLine("- goal_id: ${state.id}")
                     appendLine("- step_id: ${session.stepId}")
                     appendLine("- root_input_id: ${session.rootInputId}")
                     appendLine("- actions_executed: ${session.actionCount}")
@@ -646,47 +646,47 @@ class GoalManager(
                     appendLine(summary)
                 }
             )
-            applyEvent(state.id, ProjectEvent.ContextUpdated(state.id, 2, "workspace_cycle_written"))
+            applyEvent(state.id, GoalEvent.ContextUpdated(state.id, 2, "workspace_cycle_written"))
         } catch (ex: Exception) {
-            logger.warn(ex) { "Failed to write workspace cycle artifacts for project=${state.id}" }
+            logger.warn(ex) { "Failed to write workspace cycle artifacts for goal=${state.id}" }
         }
     }
 
-    private fun persistState(projectId: String, state: ProjectState) {
-        store.saveProjectState(projectId, state)
+    private fun persistState(goalId: String, state: GoalState) {
+        store.saveGoalState(goalId, state)
         if (state.eventCount % config.snapshotEveryNEvents == 0) {
-            store.saveSnapshot(projectId, state)
+            store.saveSnapshot(goalId, state)
         }
     }
 
-    private fun pruneExpiredCompletedProjects() {
+    private fun pruneExpiredCompletedGoals() {
         if (!Files.isDirectory(config.workspaceRoot)) return
-        val cutoff = Instant.now().minus(config.completedProjectRetentionDays.toLong(), ChronoUnit.DAYS)
-        for (projectId in store.scanProjects()) {
-            val state = runCatching { store.loadProject(projectId) }.getOrNull() ?: continue
-            if (state.project.status != ProjectStatus.COMPLETED) continue
-            val completedAt = state.project.plan.steps.mapNotNull { it.completedAt }.maxOrNull() ?: state.project.lastWorkedAt
+        val cutoff = Instant.now().minus(config.completedGoalRetentionDays.toLong(), ChronoUnit.DAYS)
+        for (goalId in store.scanGoals()) {
+            val state = runCatching { store.loadGoal(goalId) }.getOrNull() ?: continue
+            if (state.goal.status != GoalStatus.COMPLETED) continue
+            val completedAt = state.goal.plan.steps.mapNotNull { it.completedAt }.maxOrNull() ?: state.goal.lastWorkedAt
             if (completedAt != null && completedAt.isBefore(cutoff)) {
-                runCatching { store.deleteProject(projectId) }
-                    .onFailure { ex -> logger.warn(ex) { "Failed to prune completed project $projectId" } }
+                runCatching { store.deleteGoal(goalId) }
+                    .onFailure { ex -> logger.warn(ex) { "Failed to prune completed goal $goalId" } }
             }
         }
     }
 
-    private fun buildProjectRootInputId(projectId: String, stepId: String): String =
-        "project:$projectId:$stepId:${RootInputIds.next()}"
+    private fun buildGoalRootInputId(goalId: String, stepId: String): String =
+        "goal:$goalId:$stepId:${RootInputIds.next()}"
 
     private fun refreshAmbientSnapshots() {
         val active = states.values
             .filter { !it.isTerminal() }
-            .sortedByDescending { it.project.priority.ordinal }
+            .sortedByDescending { it.goal.priority.ordinal }
 
         activeGoalsSnapshot =
             active.map { state ->
-                IdGoal(
+                GoalCommitment(
                     id = state.id,
-                    instruction = state.project.instruction,
-                    lastActedAt = state.project.lastWorkedAt,
+                    instruction = state.goal.instruction,
+                    lastActedAt = state.goal.lastWorkedAt,
                 )
             }
 
@@ -696,14 +696,14 @@ class GoalManager(
             active.joinToString("\n") { state ->
                 val step = state.nextRunnableStep()
                 val stepInfo = step?.let { "${it.status.name.lowercase()}: ${it.description}" } ?: "no runnable steps"
-                "- [${state.project.priority}] ${state.project.title} ($stepInfo)"
+                "- [${state.goal.priority}] ${state.goal.title} ($stepInfo)"
             }
         }
     }
 
     private fun buildWaitConditionForAsyncOutcome(outcome: ActionOutcome): WaitCondition {
         val wait = requireNotNull(outcome.asyncWait) {
-            "Project async wait outcomes must provide asyncWait handles."
+            "Goal async wait outcomes must provide asyncWait handles."
         }
         return WaitCondition(
             type = WaitConditionType.ASYNC_OPERATION,
@@ -715,7 +715,7 @@ class GoalManager(
         )
     }
 
-    private fun generateProjectId(title: String): String {
+    private fun generateGoalId(title: String): String {
         val slug = title.lowercase()
             .replace(Regex("[^a-z0-9]+"), "-")
             .trim('-')

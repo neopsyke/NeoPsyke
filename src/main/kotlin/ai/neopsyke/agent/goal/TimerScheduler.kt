@@ -1,4 +1,4 @@
-package ai.neopsyke.agent.project
+package ai.neopsyke.agent.goal
 
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -28,7 +28,7 @@ class TimerScheduler(
     private val timers = ConcurrentSkipListMap<Long, MutableSet<String>>()
 
     /**
-     * M1: Cron registrations — projectId → cronExpression.
+     * M1: Cron registrations — goalId → cronExpression.
      * Stored separately so we can re-register the next occurrence after each fire.
      */
     private val cronSchedules = ConcurrentHashMap<String, String>()
@@ -50,10 +50,10 @@ class TimerScheduler(
     }
 
     /** Register a one-shot timer. */
-    fun register(projectId: String, wakeAt: Instant) {
+    fun register(goalId: String, wakeAt: Instant) {
         val ms = wakeAt.toEpochMilli()
-        timers.getOrPut(ms) { mutableSetOf() }.add(projectId)
-        logger.debug { "Timer registered: project=$projectId, wakeAt=$wakeAt" }
+        timers.getOrPut(ms) { mutableSetOf() }.add(goalId)
+        logger.debug { "Timer registered: goal=$goalId, wakeAt=$wakeAt" }
     }
 
     /**
@@ -71,24 +71,24 @@ class TimerScheduler(
      * - Minimum resolution is [resolutionMs] — cron expressions finer than that are imprecise.
      * - No DST awareness: times in the "lost hour" may skip or double-fire.
      *
-     * @param projectId the project to wake up
+     * @param goalId the goal to wake up
      * @param expression a standard 5-field cron string, e.g. `"0 9 * * *"` for daily at 09:00
      */
-    fun registerCron(projectId: String, expression: String) {
+    fun registerCron(goalId: String, expression: String) {
         val next = CronParser.nextAfter(expression, ZonedDateTime.now())
         if (next == null) {
-            logger.warn { "Could not compute next cron time for project=$projectId expr='$expression'" }
+            logger.warn { "Could not compute next cron time for goal=$goalId expr='$expression'" }
             return
         }
-        cronSchedules[projectId] = expression
+        cronSchedules[goalId] = expression
         val ms = next.toInstant().toEpochMilli()
-        timers.getOrPut(ms) { mutableSetOf() }.add(projectId)
-        logger.debug { "Cron registered: project=$projectId, expr='$expression', next=$next" }
+        timers.getOrPut(ms) { mutableSetOf() }.add(goalId)
+        logger.debug { "Cron registered: goal=$goalId, expr='$expression', next=$next" }
     }
 
-    fun cancel(projectId: String) {
-        cronSchedules.remove(projectId)
-        timers.values.forEach { it.remove(projectId) }
+    fun cancel(goalId: String) {
+        cronSchedules.remove(goalId)
+        timers.values.forEach { it.remove(goalId) }
         timers.entries.removeIf { it.value.isEmpty() }
     }
 
@@ -97,19 +97,19 @@ class TimerScheduler(
         val firedEntries = timers.headMap(now, true)
         val fired = firedEntries.flatMap { (ms, ids) -> ids.map { it to ms } }
         firedEntries.clear()
-        for ((projectId, scheduledAtMs) in fired) {
-            logger.debug { "Timer fired: project=$projectId" }
-            onWakeUp(projectId, scheduledAtMs)
+        for ((goalId, scheduledAtMs) in fired) {
+            logger.debug { "Timer fired: goal=$goalId" }
+            onWakeUp(goalId, scheduledAtMs)
             // M1: Re-register next occurrence for cron schedules
-            cronSchedules[projectId]?.let { expr ->
+            cronSchedules[goalId]?.let { expr ->
                 val next = CronParser.nextAfter(expr, ZonedDateTime.now())
                 if (next != null) {
                     val nextMs = next.toInstant().toEpochMilli()
-                    timers.getOrPut(nextMs) { mutableSetOf() }.add(projectId)
-                    logger.debug { "Cron rescheduled: project=$projectId, next=$next" }
+                    timers.getOrPut(nextMs) { mutableSetOf() }.add(goalId)
+                    logger.debug { "Cron rescheduled: goal=$goalId, next=$next" }
                 } else {
-                    logger.warn { "Could not reschedule cron for project=$projectId — removing" }
-                    cronSchedules.remove(projectId)
+                    logger.warn { "Could not reschedule cron for goal=$goalId — removing" }
+                    cronSchedules.remove(goalId)
                 }
             }
         }

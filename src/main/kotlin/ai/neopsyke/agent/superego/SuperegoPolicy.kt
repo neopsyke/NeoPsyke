@@ -30,8 +30,8 @@ object SuperegoPolicy {
         "Always approve internal-only actions (thinking, planning, searching, learning) freely.",
         "Deny external actions that would be harmful to the user's safety or privacy.",
         "Deny external actions that would modify the user's data, this system's configuration or state",
-        "Deny any actions that would result in expense for the user without being part of a user-sanctioned project",
-        //"Deny external actions unless aligned with an active user-sanctioned project.",
+        "Deny any actions that would result in expense for the user without being part of a user-sanctioned goal",
+        //"Deny external actions unless aligned with an active user-sanctioned goal.",
         "When in doubt about whether the user would welcome this proactive action, deny, except for proactive outreach.",
     )
 

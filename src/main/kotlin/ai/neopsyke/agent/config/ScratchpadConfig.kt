@@ -1,6 +1,6 @@
 package ai.neopsyke.agent.config
 
-data class TaskWorkspaceConfig(
+data class ScratchpadConfig(
     val enabled: Boolean = false,
     val activationMinPlanSteps: Int = 3,
     val maxPromptTokens: Int = 220,

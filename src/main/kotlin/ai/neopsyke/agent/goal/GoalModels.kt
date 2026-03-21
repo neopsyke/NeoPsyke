@@ -1,174 +1,68 @@
 package ai.neopsyke.agent.goal
 
+import ai.neopsyke.agent.actions.async.AsyncActionWait
+import java.nio.file.Path
 import java.time.Instant
 
 data class Goal(
     val id: String,
     val title: String,
-    val objective: String,
-    val kind: GoalKind,
+    val instruction: String,
+    val status: GoalStatus,
     val priority: GoalPriority,
-    val lifecycle: GoalLifecycle,
-    val triggerPolicy: GoalTriggerPolicy,
-    val sourceBindings: List<GoalSourceBinding> = emptyList(),
-    val outputPolicy: GoalOutputPolicy = GoalOutputPolicy(),
-    val autonomyPolicy: GoalAutonomyPolicy = GoalAutonomyPolicy(),
-    val memoryPolicy: GoalMemoryPolicy = GoalMemoryPolicy(),
-    val recurrencePolicy: GoalRecurrencePolicy? = null,
-    val activeRunId: String? = null,
+    val plan: GoalPlan,
+    val completionCriteria: String,
     val createdAt: Instant,
-    val lastActivatedAt: Instant? = null,
-    val lastCompletedAt: Instant? = null,
+    val lastWorkedAt: Instant? = null,
+    val suspendedUntil: Instant? = null,
+    val cronExpression: String? = null,
+    val workspacePath: Path,
     val metadata: Map<String, String> = emptyMap(),
 )
 
-enum class GoalKind {
-    SYNTHESIS,
-    MONITORING,
-    MAINTENANCE,
-    SEARCH,
-    AUDIT,
-    OPTIMIZATION,
-    EXECUTION,
-}
-
-enum class GoalPriority {
-    LOW,
-    MEDIUM,
-    HIGH,
-    CRITICAL,
-}
-
-enum class GoalLifecycle {
-    DORMANT,
+enum class GoalStatus {
+    CREATED,
+    PLANNING,
     ACTIVE,
     BLOCKED,
     SUSPENDED,
     COMPLETED,
     FAILED,
-    ARCHIVED,
 }
 
-data class GoalRecurrencePolicy(
-    val enabled: Boolean = false,
-    val scheduleSpec: String? = null,
-)
-
-data class GoalTriggerPolicy(
-    val triggers: List<GoalTrigger>,
-    val cooldown: GoalCooldownPolicy? = null,
-    val dedupe: GoalDedupePolicy? = null,
-)
-
-data class GoalCooldownPolicy(
-    val minInterval: String? = null,
-)
-
-data class GoalDedupePolicy(
-    val fingerprintScope: String = "goal",
-    val suppressWindow: String? = null,
-)
-
-sealed interface GoalTrigger {
-    data class Schedule(val spec: String) : GoalTrigger
-    data class ExternalEvent(val source: String, val filter: Map<String, String> = emptyMap()) : GoalTrigger
-    data class SourcePoll(val sourceId: String, val interval: String) : GoalTrigger
-    data class StateCondition(val condition: String) : GoalTrigger
-    data class AsyncResume(val providerType: String) : GoalTrigger
-    data class Manual(val label: String = "manual") : GoalTrigger
+enum class GoalPriority {
+    LOW, MEDIUM, HIGH, CRITICAL
 }
 
-data class GoalSourceBinding(
-    val sourceId: String,
-    val sourceType: String,
-    val accessMode: GoalSourceAccessMode,
-    val query: String? = null,
-    val metadata: Map<String, String> = emptyMap(),
-)
-
-enum class GoalSourceAccessMode {
-    READ,
-    READ_WRITE,
-}
-
-data class GoalOutputPolicy(
-    val notifyMode: GoalNotifyMode = GoalNotifyMode.BATCH,
-    val channel: String = "default",
-    val onlyIfChanged: Boolean = true,
-    val minPriorityToNotify: GoalPriority = GoalPriority.MEDIUM,
-)
-
-enum class GoalNotifyMode {
-    IMMEDIATE,
-    BATCH,
-    DIGEST,
-    SILENT,
-}
-
-data class GoalAutonomyPolicy(
-    val mayDraft: Boolean = true,
-    val mayNotify: Boolean = true,
-    val mayActWithoutApproval: Boolean = false,
-    val mayFinalizeWithoutReview: Boolean = false,
-)
-
-data class GoalMemoryPolicy(
-    val retainSeenFingerprints: Boolean = true,
-    val retainCheckpoints: Boolean = true,
-    val retainLastNotification: Boolean = true,
-    val noveltyWindow: String? = null,
-)
-
-data class GoalMemoryState(
-    val seenFingerprints: Set<String> = emptySet(),
-    val checkpoints: Map<String, String> = emptyMap(),
-    val lastNotificationFingerprint: String? = null,
-    val lastRunSummary: String? = null,
-)
-
-data class GoalRun(
-    val id: String,
-    val goalId: String,
-    val triggerCause: String,
-    val cognitiveThreadId: String,
-    val status: GoalRunStatus,
-    val plan: GoalExecutionPlan? = null,
-    val waitingOn: List<GoalWaitCondition> = emptyList(),
-    val startedAt: Instant,
-    val lastUpdatedAt: Instant,
-)
-
-enum class GoalRunStatus {
-    CREATED,
-    ACTIVE,
-    BLOCKED,
-    SUSPENDED,
-    DONE,
-    FAILED,
-}
-
-data class GoalWaitCondition(
-    val type: String,
-    val timeoutAt: Instant? = null,
-    val metadata: Map<String, String> = emptyMap(),
-)
-
-data class GoalExecutionPlan(
-    val steps: List<GoalStep>,
+data class GoalPlan(
+    val steps: List<PlanStep>,
     val generatedAt: Instant,
     val revisedAt: Instant? = null,
-)
+) {
+    companion object {
+        fun empty(): GoalPlan = GoalPlan(
+            steps = emptyList(),
+            generatedAt = Instant.EPOCH,
+        )
+    }
+}
 
-data class GoalStep(
+data class PlanStep(
     val id: String,
     val description: String,
+    val status: StepStatus,
     val acceptanceCriteria: String,
-    val status: GoalStepStatus,
     val requires: Set<String> = emptySet(),
     val produces: Set<String> = emptySet(),
+    val waitCondition: WaitCondition? = null,
+    val attempts: Int = 0,
+    val maxAttempts: Int = 3,
+    val lastAttemptAt: Instant? = null,
+    val completedAt: Instant? = null,
+    val notes: String = "",
 )
 
-enum class GoalStepStatus {
+enum class StepStatus {
     PENDING,
     READY,
     IN_PROGRESS,
@@ -177,3 +71,58 @@ enum class GoalStepStatus {
     FAILED,
     SKIPPED,
 }
+
+data class WaitCondition(
+    val type: WaitConditionType,
+    val params: Map<String, String>,
+    val registeredAt: Instant,
+    val timeoutAt: Instant? = null,
+    val onTimeout: TimeoutAction = TimeoutAction.FAIL,
+    val asyncWait: AsyncActionWait? = null,
+)
+
+enum class WaitConditionType {
+    TIMER,
+    // Reserved for future push-based runtime events (webhooks, approvals, connector callbacks).
+    // Persist/restore works today, but a generic event-ingestion satisfier is not implemented yet.
+    EXTERNAL_EVENT,
+    // Reserved for future pull-based named predicate checks that are not naturally async handles.
+    // Persist/restore works today, but a generic checker registry/satisfier is not implemented yet.
+    CONDITION_CHECK,
+    CRON,
+    ASYNC_OPERATION,
+}
+
+enum class TimeoutAction {
+    FAIL,
+    RETRY,
+    ESCALATE,
+}
+
+/**
+ * A unit of goal work selected by the GoalManager for the Ego to execute.
+ */
+data class GoalRunActivation(
+    val goalId: String,
+    val stepId: String,
+    val rootInputId: String,
+    val stepDescription: String,
+    val acceptanceCriteria: String,
+    val workingContext: String,
+    val actionSuggestion: String = "",
+    val wakeReason: String = "",
+)
+
+/**
+ * Compact summary of a goal (~100 tokens) — Tier 1 context.
+ * Always kept in memory by the GoalManager.
+ */
+data class GoalTier1Summary(
+    val goalId: String,
+    val title: String,
+    val status: GoalStatus,
+    val priority: GoalPriority,
+    val currentStepDescription: String?,
+    val blockers: List<String>,
+    val lastWorkedAt: Instant?,
+)
