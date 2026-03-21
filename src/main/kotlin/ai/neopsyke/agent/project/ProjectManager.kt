@@ -4,8 +4,7 @@ import kotlinx.coroutines.CoroutineScope
 import mu.KotlinLogging
 import ai.neopsyke.agent.actions.async.AsyncOperationEvent
 import ai.neopsyke.agent.actions.async.AsyncOperationRegistry
-import ai.neopsyke.agent.cortex.sensory.ProjectSignal
-import ai.neopsyke.agent.cortex.sensory.Signal
+import ai.neopsyke.agent.cortex.sensory.GoalRuntimeCue
 import ai.neopsyke.agent.id.Project as IdProject
 import ai.neopsyke.agent.model.ActionOutcome
 import ai.neopsyke.agent.model.PendingAction
@@ -39,7 +38,7 @@ class ProjectManager(
     private val verifier: ProjectStepVerifier = DeterministicProjectStepVerifier(),
     private val asyncOperationRegistry: AsyncOperationRegistry = AsyncOperationRegistry.empty(),
     private val instrumentation: AgentInstrumentation = NoopAgentInstrumentation,
-    private val signalEmitter: (Signal) -> Unit = {},
+    private val cueEmitter: (GoalRuntimeCue) -> Unit = {},
 ) : ProjectsGateway {
     private val states = ConcurrentHashMap<String, ProjectState>()
     private val sessionsByRootInputId = ConcurrentHashMap<String, ProjectExecutionSession>()
@@ -76,9 +75,8 @@ class ProjectManager(
         waitConditionMonitor = null
     }
 
-    override fun nextWorkFromSignal(signal: ProjectSignal): ProjectWorkUnit? {
-        val workSignal = signal as? ProjectSignal.WorkReady ?: return null
-        val state = states[workSignal.projectId] ?: return null
+    override fun nextWorkFromCue(cue: GoalRuntimeCue): ProjectWorkUnit? {
+        val state = states[cue.goalId] ?: return null
         val step = state.nextRunnableStep() ?: return null
         val startedState = if (step.status == StepStatus.READY) {
             applyEvent(state.id, ProjectEvent.StepStarted(state.id, step.id)) ?: state
@@ -92,12 +90,12 @@ class ProjectManager(
             stepId = step.id,
             rootInputId = rootInputId,
         )
-        instrumentation.emit(AgentEvents.projectWakeUp(state.id, "work_ready", workSignal.reason))
+        instrumentation.emit(AgentEvents.projectWakeUp(state.id, "work_ready", cue.reason))
         return ProjectContextLoader.buildWorkUnit(
             state = startedState,
             step = startedStep,
             rootInputId = rootInputId,
-            wakeReason = workSignal.reason,
+            wakeReason = cue.reason,
         )
     }
 
@@ -263,9 +261,9 @@ class ProjectManager(
         if (!session.requeueReason.isNullOrBlank()) {
             val refreshed = states[session.projectId] ?: return
             val runnable = refreshed.nextRunnableStep() ?: return
-            signalEmitter(
-                ProjectSignal.WorkReady(
-                    projectId = refreshed.id,
+            cueEmitter(
+                GoalRuntimeCue(
+                    goalId = refreshed.id,
                     stepId = runnable.id,
                     reason = session.requeueReason,
                 )
@@ -523,7 +521,7 @@ class ProjectManager(
     private fun dispatchCommands(commands: List<ProjectCommand>) {
         for (cmd in commands) {
             when (cmd) {
-                is ProjectCommand.EmitWorkReady -> signalEmitter(cmd.signal)
+                is ProjectCommand.EmitWorkReady -> cueEmitter(cmd.cue)
                 is ProjectCommand.ScheduleWakeTimer -> timerScheduler?.register(cmd.projectId, cmd.wakeAt)
                 is ProjectCommand.CancelWakeTimer -> timerScheduler?.cancel(cmd.projectId)
                 is ProjectCommand.RegisterWaitCondition -> {

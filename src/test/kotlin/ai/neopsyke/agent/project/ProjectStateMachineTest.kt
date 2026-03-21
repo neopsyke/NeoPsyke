@@ -232,7 +232,7 @@ class ProjectStateMachineTest {
         val workReady = assertIs<ProjectCommand.EmitWorkReady>(
             commands.first { it is ProjectCommand.EmitWorkReady }
         )
-        assertEquals("wait_condition_satisfied: succeeded: download complete", workReady.signal.reason)
+        assertEquals("wait_condition_satisfied: succeeded: download complete", workReady.cue.reason)
     }
 
     @Test
@@ -262,7 +262,7 @@ class ProjectStateMachineTest {
 
         assertEquals(StepStatus.READY, newState.project.plan.steps.first().status)
         val workReady = commands.filterIsInstance<ProjectCommand.EmitWorkReady>().single()
-        assertEquals("s1", workReady.signal.stepId)
+        assertEquals("s1", workReady.cue.stepId)
     }
 
     @Test

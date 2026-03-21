@@ -1,6 +1,6 @@
 package ai.neopsyke.agent.project
 
-import ai.neopsyke.agent.cortex.sensory.ProjectSignal
+import ai.neopsyke.agent.cortex.sensory.GoalRuntimeCue
 import java.time.Instant
 
 /**
@@ -161,7 +161,7 @@ sealed interface ProjectEvent {
  */
 sealed interface ProjectCommand {
     data class EmitWorkReady(
-        val signal: ProjectSignal.WorkReady,
+        val cue: GoalRuntimeCue,
     ) : ProjectCommand
 
     data class ScheduleWakeTimer(

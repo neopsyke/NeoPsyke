@@ -44,9 +44,9 @@ typealias SuperegoPolicy = ai.neopsyke.agent.superego.SuperegoPolicy
 
 typealias SensoryInput = ai.neopsyke.agent.cortex.sensory.SensoryInput
 typealias Signal = ai.neopsyke.agent.cortex.sensory.Signal
-typealias SensorySignal = ai.neopsyke.agent.cortex.sensory.SensorySignal
-typealias SystemSignal = ai.neopsyke.agent.cortex.sensory.SystemSignal
-typealias ProjectSignal = ai.neopsyke.agent.cortex.sensory.ProjectSignal
+typealias CognitiveSignal = ai.neopsyke.agent.cortex.sensory.CognitiveSignal
+typealias RuntimeControlSignal = ai.neopsyke.agent.cortex.sensory.RuntimeControlSignal
+typealias GoalRuntimeCue = ai.neopsyke.agent.cortex.sensory.GoalRuntimeCue
 typealias SignalSource = ai.neopsyke.agent.cortex.sensory.SignalSource
 typealias StdinSignalSource = ai.neopsyke.agent.cortex.sensory.StdinSignalSource
 typealias AsyncSignalSource = ai.neopsyke.agent.cortex.sensory.AsyncSignalSource

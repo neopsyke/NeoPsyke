@@ -1,6 +1,6 @@
 package ai.neopsyke.agent.project
 
-import ai.neopsyke.agent.cortex.sensory.ProjectSignal
+import ai.neopsyke.agent.cortex.sensory.GoalRuntimeCue
 import java.nio.file.Path
 import java.time.Instant
 
@@ -196,7 +196,7 @@ object ProjectStateMachine {
         } else {
             val retryState = updateStep(state, event.stepId) { it.copy(status = StepStatus.READY) }
             commands += ProjectCommand.EmitWorkReady(
-                ProjectSignal.WorkReady(state.id, event.stepId, "step_retry")
+                GoalRuntimeCue(state.id, event.stepId, "step_retry")
             )
             commands += ProjectCommand.PersistProject(state.id)
             retryState
@@ -244,7 +244,7 @@ object ProjectStateMachine {
         }
         commands += ProjectCommand.ClearWaitCondition(state.id, event.stepId)
         commands += ProjectCommand.EmitWorkReady(
-            ProjectSignal.WorkReady(state.id, event.stepId, "step_unblocked")
+            GoalRuntimeCue(state.id, event.stepId, "step_unblocked")
         )
         commands += ProjectCommand.PersistProject(state.id)
         return newState.copy(project = newState.project.copy(status = projectStatus))
@@ -293,7 +293,7 @@ object ProjectStateMachine {
     ): ProjectState {
         commands += ProjectCommand.ClearWaitCondition(state.id, event.stepId)
         commands += ProjectCommand.EmitWorkReady(
-            ProjectSignal.WorkReady(state.id, event.stepId, buildWaitSatisfiedReason(event))
+            GoalRuntimeCue(state.id, event.stepId, buildWaitSatisfiedReason(event))
         )
         commands += ProjectCommand.PersistProject(state.id)
         val updated = updateStep(state, event.stepId) { step ->
@@ -329,7 +329,7 @@ object ProjectStateMachine {
             TimeoutAction.RETRY -> {
                 commands += ProjectCommand.ClearWaitCondition(state.id, event.stepId)
                 commands += ProjectCommand.EmitWorkReady(
-                    ProjectSignal.WorkReady(state.id, event.stepId, "wait_condition_timeout_retry")
+                    GoalRuntimeCue(state.id, event.stepId, "wait_condition_timeout_retry")
                 )
                 commands += ProjectCommand.PersistProject(state.id)
                 updateStep(state, event.stepId) { it.copy(status = StepStatus.READY, waitCondition = null) }
@@ -376,7 +376,7 @@ object ProjectStateMachine {
         )
         resumed.nextRunnableStep()?.let { step ->
             commands += ProjectCommand.EmitWorkReady(
-                ProjectSignal.WorkReady(state.id, step.id, "project_resumed")
+                GoalRuntimeCue(state.id, step.id, "project_resumed")
             )
         }
         commands += ProjectCommand.PersistProject(state.id)
@@ -505,7 +505,7 @@ object ProjectStateMachine {
             ?: steps.firstOrNull { it.status == StepStatus.READY }
             ?: return
         commands += ProjectCommand.EmitWorkReady(
-            ProjectSignal.WorkReady(projectId, step.id, reason)
+            GoalRuntimeCue(projectId, step.id, reason)
         )
     }
 

@@ -15,7 +15,7 @@ import java.util.concurrent.ConcurrentSkipListMap
 private val logger = KotlinLogging.logger {}
 
 /**
- * Coroutine-based timer that fires [ProjectSignal.ScheduledWakeUp] signals
+ * Coroutine-based timer that fires [GoalRuntimeCue.ScheduledWakeUp] signals
  * at registered wake-up times.
  *
  * Supports both one-shot timers ([register]) and recurring cron-based schedules

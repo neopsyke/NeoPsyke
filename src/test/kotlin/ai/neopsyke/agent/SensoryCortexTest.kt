@@ -3,9 +3,17 @@ package ai.neopsyke.agent
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.runBlocking
+import ai.neopsyke.agent.cortex.sensory.CognitiveCueMetadata
+import ai.neopsyke.agent.cortex.sensory.CognitiveSignal
+import ai.neopsyke.agent.cortex.sensory.RuntimeControlSignal
 import ai.neopsyke.agent.model.ConversationContext
 import ai.neopsyke.agent.model.Interlocutor
+import ai.neopsyke.agent.model.RootInputIds
+import ai.neopsyke.agent.model.StimulusEnvelope
+import ai.neopsyke.agent.model.StimulusFamily
 import ai.neopsyke.agent.config.InterlocutorResolver
+import ai.neopsyke.agent.model.StimulusTrustLevel
+import java.time.Instant
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
@@ -29,19 +37,23 @@ class SensoryCortexTest {
         )
 
         val signal = source.nextSignal()
-        val input = assertIs<ai.neopsyke.agent.cortex.sensory.SensorySignal.InputReceived>(signal).input
-        assertEquals(InputPriority.HIGH, input.priority)
-        assertEquals("stdin", input.source)
+        val stimulus = assertIs<CognitiveSignal.StimulusReceived>(signal).stimulus
+        assertEquals(InputPriority.HIGH.name, stimulus.metadata["priority"])
+        assertEquals("stdin", stimulus.source)
     }
 
     @Test
     fun `sensory cortex sanitizes input content and keeps explicit priority`() = runBlocking {
         val source = SensoryInputSource {
-           ai.neopsyke.agent.cortex.sensory.SensorySignal.InputReceived(
-                SensoryInput(
+            CognitiveSignal.StimulusReceived(
+                StimulusEnvelope(
+                    id = RootInputIds.next(),
+                    family = StimulusFamily.LINGUISTIC,
+                    source = "webhook",
                     content = "  ${"x".repeat(50)}  ",
-                    priority = InputPriority.LOW,
-                    source = "webhook"
+                    receivedAt = Instant.now(),
+                    trustLevel = StimulusTrustLevel.DEFAULT,
+                    metadata = mapOf("priority" to InputPriority.LOW.name),
                 )
             )
         }
@@ -51,20 +63,25 @@ class SensoryCortexTest {
         )
 
         val signal = cortex.nextSignal()
-        val input = assertIs<ai.neopsyke.agent.cortex.sensory.SensorySignal.InputReceived>(signal).input
-        assertEquals("x".repeat(12), input.content)
-        assertEquals(InputPriority.LOW, input.priority)
-        assertEquals("webhook", input.source)
+        val stimulus = assertIs<CognitiveSignal.StimulusReceived>(signal).stimulus
+        assertEquals("x".repeat(12), stimulus.content)
+        assertEquals(InputPriority.LOW.name, stimulus.metadata["priority"])
+        assertEquals("webhook", stimulus.source)
     }
 
     @Test
     fun `sensory cortex resolves unknown interlocutor and derives session from chat source`() = runBlocking {
         val source = SensoryInputSource {
-           ai.neopsyke.agent.cortex.sensory.SensorySignal.InputReceived(
-                SensoryInput(
-                    content = "hello",
+            CognitiveSignal.StimulusReceived(
+                StimulusEnvelope(
+                    id = RootInputIds.next(),
+                    family = StimulusFamily.LINGUISTIC,
                     source = "chat:session-42",
-                    conversationContext = ConversationContext.default()
+                    content = "hello",
+                    receivedAt = Instant.now(),
+                    conversationContext = ConversationContext.default(),
+                    trustLevel = StimulusTrustLevel.DEFAULT,
+                    metadata = mapOf("priority" to InputPriority.MEDIUM.name),
                 )
             )
         }
@@ -79,9 +96,9 @@ class SensoryCortexTest {
         )
 
         val signal = cortex.nextSignal()
-        val input = assertIs<ai.neopsyke.agent.cortex.sensory.SensorySignal.InputReceived>(signal).input
-        assertEquals("session-42", input.conversationContext.sessionId)
-        assertEquals("Victor", input.conversationContext.interlocutor.id)
+        val stimulus = assertIs<CognitiveSignal.StimulusReceived>(signal).stimulus
+        assertEquals("session-42", stimulus.conversationContext.sessionId)
+        assertEquals("Victor", stimulus.conversationContext.interlocutor.id)
     }
 
     @Test
@@ -91,11 +108,16 @@ class SensoryCortexTest {
             interlocutor = Interlocutor.named("Alice")
         )
         val source = SensoryInputSource {
-           ai.neopsyke.agent.cortex.sensory.SensorySignal.InputReceived(
-                SensoryInput(
-                    content = "hello",
+            CognitiveSignal.StimulusReceived(
+                StimulusEnvelope(
+                    id = RootInputIds.next(),
+                    family = StimulusFamily.LINGUISTIC,
                     source = "chat:ignored-session",
-                    conversationContext = explicitContext
+                    content = "hello",
+                    receivedAt = Instant.now(),
+                    conversationContext = explicitContext,
+                    trustLevel = StimulusTrustLevel.DEFAULT,
+                    metadata = mapOf("priority" to InputPriority.MEDIUM.name),
                 )
             )
         }
@@ -110,13 +132,13 @@ class SensoryCortexTest {
         )
 
         val signal = cortex.nextSignal()
-        val input = assertIs<ai.neopsyke.agent.cortex.sensory.SensorySignal.InputReceived>(signal).input
-        assertEquals("explicit-session", input.conversationContext.sessionId)
-        assertEquals("Alice", input.conversationContext.interlocutor.id)
+        val stimulus = assertIs<CognitiveSignal.StimulusReceived>(signal).stimulus
+        assertEquals("explicit-session", stimulus.conversationContext.sessionId)
+        assertEquals("Alice", stimulus.conversationContext.interlocutor.id)
     }
 
     @Test
-    fun `notifyImpulseReady injects ImpulseReady signal into the channel`() = runBlocking {
+    fun `notifyImpulseReady injects id cue stimulus into the channel`() = runBlocking {
         val scope = testScope()
         val source = ai.neopsyke.agent.cortex.sensory.AsyncSignalSource(
             includeStdin = false,
@@ -129,14 +151,16 @@ class SensoryCortexTest {
             assertTrue(offered, "notifyImpulseReady should succeed on an empty channel")
 
             val signal = source.nextSignal()
-            assertIs<ai.neopsyke.agent.cortex.sensory.SystemSignal.ImpulseReady>(signal)
+            val stimulus = assertIs<CognitiveSignal.StimulusReceived>(signal).stimulus
+            assertEquals(StimulusFamily.CUE, stimulus.family)
+            assertEquals(CognitiveCueMetadata.CUE_TYPE_ID_IMPULSE_READY, stimulus.metadata[CognitiveCueMetadata.METADATA_CUE_TYPE])
         } finally {
             source.close()
         }
     }
 
     @Test
-    fun `ImpulseReady passes through SensoryCortex untouched`() = runBlocking {
+    fun `id cue passes through SensoryCortex as cue stimulus`() = runBlocking {
         val scope = testScope()
         val source = ai.neopsyke.agent.cortex.sensory.AsyncSignalSource(
             includeStdin = false,
@@ -151,7 +175,9 @@ class SensoryCortexTest {
         try {
             source.notifyImpulseReady()
             val signal = cortex.nextSignal()
-            assertIs<ai.neopsyke.agent.cortex.sensory.SystemSignal.ImpulseReady>(signal)
+            val stimulus = assertIs<CognitiveSignal.StimulusReceived>(signal).stimulus
+            assertEquals(StimulusFamily.CUE, stimulus.family)
+            assertEquals(CognitiveCueMetadata.CUE_TYPE_ID_IMPULSE_READY, stimulus.metadata[CognitiveCueMetadata.METADATA_CUE_TYPE])
         } finally {
             source.close()
         }
@@ -177,18 +203,18 @@ class SensoryCortexTest {
             scope = scope
         )
         try {
-            var exitSignal: ai.neopsyke.agent.cortex.sensory.SensorySignal? = null
+            var exitSignal: RuntimeControlSignal? = null
             for (@Suppress("unused") attempt in 1..100) {
                 val signal = source.nextSignal()
-                if (signal is ai.neopsyke.agent.cortex.sensory.SensorySignal.ExitRequested) {
+                if (signal is RuntimeControlSignal.ExitRequested) {
                     exitSignal = signal
                     break
                 }
-                if (signal is ai.neopsyke.agent.cortex.sensory.SensorySignal.InputReceived) {
-                    throw AssertionError("Control-only stdin must not emit InputReceived signals.")
+                if (signal is CognitiveSignal.StimulusReceived) {
+                    throw AssertionError("Control-only stdin must not emit cognitive stimuli.")
                 }
             }
-            val exit = assertIs<ai.neopsyke.agent.cortex.sensory.SensorySignal.ExitRequested>(exitSignal)
+            val exit = assertIs<RuntimeControlSignal.ExitRequested>(exitSignal)
             assertEquals("stdin", exit.source)
             assertTrue(
                 actual = controlMessages.any { it.contains("Unknown command 'hello from terminal'") },

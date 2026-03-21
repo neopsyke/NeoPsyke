@@ -1,23 +1,30 @@
 package ai.neopsyke.agent.cortex.sensory
 
+import ai.neopsyke.agent.config.AgentConfig
+import ai.neopsyke.agent.config.DefaultInterlocutorResolver
+import ai.neopsyke.agent.config.InterlocutorResolver
+import ai.neopsyke.agent.model.ConversationContext
+import ai.neopsyke.agent.model.InputPriority
+import ai.neopsyke.agent.model.Interlocutor
+import ai.neopsyke.agent.model.Percept
+import ai.neopsyke.agent.model.PerceptFamily
+import ai.neopsyke.agent.model.RootInputIds
+import ai.neopsyke.agent.model.StimulusEnvelope
+import ai.neopsyke.agent.model.StimulusFamily
+import ai.neopsyke.agent.model.StimulusTrustLevel
+import ai.neopsyke.agent.support.TextSecurity
+import java.io.Closeable
+import java.time.Instant
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
-import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.channels.ReceiveChannel
-import ai.neopsyke.agent.config.AgentConfig
-import ai.neopsyke.agent.model.ConversationContext
-import ai.neopsyke.agent.config.DefaultInterlocutorResolver
-import ai.neopsyke.agent.model.InputPriority
-import ai.neopsyke.agent.model.Interlocutor
-import ai.neopsyke.agent.config.InterlocutorResolver
-import ai.neopsyke.agent.support.TextSecurity
-import java.io.Closeable
 
 data class SensoryInput(
     val content: String,
@@ -26,49 +33,97 @@ data class SensoryInput(
     val conversationContext: ConversationContext = ConversationContext.default(),
 )
 
-// ── Signal hierarchy ─────────────────────────────────────────────────
-
-/**
- * Top-level signal type consumed by the Ego loop.
- *
- * Sub-hierarchies:
- * - [SensorySignal] — external perception (user input, source lifecycle)
- * - [SystemSignal]  — internal system events (Id impulses, shutdown)
- * - [ProjectSignal] — project subsystem events (step progress, timers)
- */
 sealed interface Signal
 
-/** External perception signals — user input and source lifecycle. */
-sealed interface SensorySignal : Signal {
-    data class InputReceived(val input: SensoryInput) : SensorySignal
-    data class SourceClosed(val source: String) : SensorySignal
-    data class ExitRequested(val source: String) : SensorySignal
-    data object NoInput : SensorySignal
+sealed interface CognitiveSignal : Signal {
+    data class StimulusReceived(val stimulus: StimulusEnvelope) : CognitiveSignal
+    data object NoStimulus : CognitiveSignal
 }
 
-/** Internal system events — Id impulses, shutdown, config changes. */
-sealed interface SystemSignal : Signal {
-    /** The Id has enqueued an impulse and the Ego should wake up to process it. */
-    data object ImpulseReady : SystemSignal
-    /** Graceful shutdown requested (e.g., SIGTERM). */
-    data object ShutdownRequested : SystemSignal
-    /** A configuration key was hot-reloaded. */
-    data class ConfigReloaded(val key: String) : SystemSignal
+sealed interface RuntimeControlSignal : Signal {
+    data class SourceClosed(val source: String) : RuntimeControlSignal
+    data class ExitRequested(val source: String) : RuntimeControlSignal
+    data object ShutdownRequested : RuntimeControlSignal
+    data class ConfigReloaded(val key: String) : RuntimeControlSignal
 }
 
-/** Project subsystem events consumed by the Ego loop. */
-sealed interface ProjectSignal : Signal {
-    data class WorkReady(
-        val projectId: String,
-        val stepId: String,
-        val reason: String,
-    ) : ProjectSignal
+data class GoalRuntimeCue(
+    val goalId: String,
+    val stepId: String,
+    val reason: String,
+) {
+    fun toStimulus(): StimulusEnvelope =
+        StimulusEnvelope(
+            id = RootInputIds.next(),
+            family = StimulusFamily.CUE,
+            source = SOURCE,
+            content = "goal_runtime_work_ready",
+            receivedAt = Instant.now(),
+            metadata = mapOf(
+                METADATA_CUE_TYPE to CUE_TYPE_WORK_READY,
+                METADATA_GOAL_ID to goalId,
+                METADATA_STEP_ID to stepId,
+                METADATA_REASON to reason,
+            ),
+        )
+
+    companion object {
+        private const val SOURCE: String = "goal-runtime"
+
+        fun fromStimulus(stimulus: StimulusEnvelope): GoalRuntimeCue? {
+            if (stimulus.family != StimulusFamily.CUE) return null
+            if (stimulus.metadata[METADATA_CUE_TYPE] != CUE_TYPE_WORK_READY) return null
+            val goalId = stimulus.metadata[METADATA_GOAL_ID] ?: return null
+            val stepId = stimulus.metadata[METADATA_STEP_ID] ?: return null
+            val reason = stimulus.metadata[METADATA_REASON].orEmpty()
+            return GoalRuntimeCue(goalId = goalId, stepId = stepId, reason = reason)
+        }
+    }
 }
 
-// ── Signal sources ───────────────────────────────────────────────────
+object CognitiveCueMetadata {
+    const val METADATA_CUE_TYPE: String = "cue_type"
+    const val METADATA_GOAL_ID: String = "goal_id"
+    const val METADATA_STEP_ID: String = "step_id"
+    const val METADATA_REASON: String = "reason"
+    const val METADATA_ROOT_IMPULSE_ID: String = "root_impulse_id"
+
+    const val CUE_TYPE_ID_IMPULSE_READY: String = "id_impulse_ready"
+    const val CUE_TYPE_WORK_READY: String = "goal_runtime_work_ready"
+}
+
+private const val METADATA_CUE_TYPE: String = CognitiveCueMetadata.METADATA_CUE_TYPE
+private const val METADATA_GOAL_ID: String = CognitiveCueMetadata.METADATA_GOAL_ID
+private const val METADATA_STEP_ID: String = CognitiveCueMetadata.METADATA_STEP_ID
+private const val METADATA_REASON: String = CognitiveCueMetadata.METADATA_REASON
+private const val METADATA_ROOT_IMPULSE_ID: String = CognitiveCueMetadata.METADATA_ROOT_IMPULSE_ID
+private const val CUE_TYPE_ID_IMPULSE_READY: String = CognitiveCueMetadata.CUE_TYPE_ID_IMPULSE_READY
+private const val CUE_TYPE_WORK_READY: String = CognitiveCueMetadata.CUE_TYPE_WORK_READY
 
 fun interface SignalSource {
     suspend fun nextSignal(): Signal
+}
+
+class PerceptualAppraiser {
+    fun appraise(stimulus: StimulusEnvelope): Percept =
+        Percept(
+            id = RootInputIds.next(),
+            family = when (stimulus.family) {
+                StimulusFamily.LINGUISTIC -> PerceptFamily.REQUEST
+                StimulusFamily.OBSERVATION -> PerceptFamily.OBSERVATION
+                StimulusFamily.FEEDBACK -> PerceptFamily.FEEDBACK
+                StimulusFamily.CUE -> when (stimulus.metadata[METADATA_CUE_TYPE]) {
+                    CUE_TYPE_ID_IMPULSE_READY -> PerceptFamily.DRIVE_ACTIVATION
+                    else -> PerceptFamily.STATE_CHANGE
+                }
+            },
+            summary = stimulus.content,
+            source = stimulus.source,
+            occurredAt = stimulus.receivedAt,
+            conversationContext = stimulus.conversationContext,
+            rootStimulusId = stimulus.id,
+            metadata = stimulus.metadata,
+        )
 }
 
 class StdinSignalSource(
@@ -77,18 +132,23 @@ class StdinSignalSource(
 ) : SignalSource {
     override suspend fun nextSignal(): Signal = withContext(Dispatchers.IO) {
         prompt()
-        val rawInput = readLineFn() ?: return@withContext SensorySignal.SourceClosed(source = "stdin")
+        val rawInput = readLineFn() ?: return@withContext RuntimeControlSignal.SourceClosed(source = "stdin")
         if (rawInput.trim().equals("exit", ignoreCase = true)) {
-            return@withContext SensorySignal.ExitRequested(source = "stdin")
+            return@withContext RuntimeControlSignal.ExitRequested(source = "stdin")
         }
         if (rawInput.isBlank()) {
-            return@withContext SensorySignal.NoInput
+            return@withContext CognitiveSignal.NoStimulus
         }
-        SensorySignal.InputReceived(
-            SensoryInput(
+        CognitiveSignal.StimulusReceived(
+            StimulusEnvelope(
+                id = RootInputIds.next(),
+                family = StimulusFamily.LINGUISTIC,
+                source = "stdin",
                 content = rawInput,
-                priority = InputPriority.HIGH,
-                source = "stdin"
+                receivedAt = Instant.now(),
+                conversationContext = ConversationContext.default(),
+                trustLevel = StimulusTrustLevel.DEFAULT,
+                metadata = mapOf("priority" to InputPriority.HIGH.name),
             )
         )
     }
@@ -110,12 +170,8 @@ class AsyncSignalSource(
     }
 
     private val channel = Channel<Signal>(MAX_SIGNAL_QUEUE)
-
-    /**
-     * Exposes the underlying signal channel for use with `select {}` in
-     * multiplexed signal source compositions.
-     */
     val signalChannel: ReceiveChannel<Signal> get() = channel
+
     private val stdinReaderJob: Job? = if (includeStdin && scope != null) {
         scope.launch(Dispatchers.IO + CoroutineName("neopsyke-stdin-sensory")) {
             while (isActive) {
@@ -123,35 +179,29 @@ class AsyncSignalSource(
                 val rawInput = readLineFn()
                 if (rawInput == null) {
                     if (emitStdinClosedSignal) {
-                        offerSignal(SensorySignal.SourceClosed(source = "stdin"))
+                        offerSignal(RuntimeControlSignal.SourceClosed(source = "stdin"))
                     }
                     break
                 }
                 val normalizedInput = rawInput.trim()
                 if (normalizedInput.equals("exit", ignoreCase = true)) {
-                    offerSignal(SensorySignal.ExitRequested(source = "stdin"))
+                    offerSignal(RuntimeControlSignal.ExitRequested(source = "stdin"))
                     break
                 }
                 if (stdinMode == StdinMode.CONTROL_ONLY) {
                     if (normalizedInput.isNotBlank()) {
-                        controlOutput(
-                            "control> Unknown command '$normalizedInput'. Available commands: exit"
-                        )
+                        controlOutput("control> Unknown command '$normalizedInput'. Available commands: exit")
                     }
                     continue
                 }
                 if (rawInput.isBlank()) {
-                    offerSignal(SensorySignal.NoInput)
+                    offerSignal(CognitiveSignal.NoStimulus)
                     continue
                 }
-                offerSignal(
-                    SensorySignal.InputReceived(
-                        SensoryInput(
-                            content = rawInput,
-                            priority = InputPriority.HIGH,
-                            source = "stdin"
-                        )
-                    )
+                submitInput(
+                    content = rawInput,
+                    source = "stdin",
+                    priority = InputPriority.HIGH,
                 )
             }
         }
@@ -159,11 +209,28 @@ class AsyncSignalSource(
         null
     }
 
-    /** Wake the Ego loop so it picks up a queued Id impulse. */
-    fun notifyImpulseReady(): Boolean = offerSignal(SystemSignal.ImpulseReady)
+    fun notifyImpulseReady(rootImpulseId: String? = null): Boolean =
+        offerSignal(
+            CognitiveSignal.StimulusReceived(
+                StimulusEnvelope(
+                    id = RootInputIds.next(),
+                    family = StimulusFamily.CUE,
+                    source = "id",
+                    content = CUE_TYPE_ID_IMPULSE_READY,
+                    receivedAt = Instant.now(),
+                    trustLevel = StimulusTrustLevel.TRUSTED_INTERNAL,
+                    metadata = buildMap {
+                        put(METADATA_CUE_TYPE, CUE_TYPE_ID_IMPULSE_READY)
+                        if (!rootImpulseId.isNullOrBlank()) {
+                            put(METADATA_ROOT_IMPULSE_ID, rootImpulseId)
+                        }
+                    },
+                )
+            )
+        )
 
-    /** Inject any [Signal] into the channel (used by ProjectManager, etc.). */
-    fun offerProjectSignal(signal: ProjectSignal): Boolean = offerSignal(signal)
+    fun offerGoalRuntimeCue(cue: GoalRuntimeCue): Boolean =
+        offerSignal(CognitiveSignal.StimulusReceived(cue.toStimulus()))
 
     fun submitInput(
         content: String,
@@ -171,12 +238,16 @@ class AsyncSignalSource(
         priority: InputPriority = InputPriority.HIGH,
         conversationContext: ConversationContext = ConversationContext.default(),
     ): Boolean = offerSignal(
-        SensorySignal.InputReceived(
-            SensoryInput(
-                content = content,
-                priority = priority,
+        CognitiveSignal.StimulusReceived(
+            StimulusEnvelope(
+                id = RootInputIds.next(),
+                family = StimulusFamily.LINGUISTIC,
                 source = source,
-                conversationContext = conversationContext
+                content = content,
+                receivedAt = Instant.now(),
+                conversationContext = conversationContext,
+                trustLevel = StimulusTrustLevel.DEFAULT,
+                metadata = mapOf("priority" to priority.name),
             )
         )
     )
@@ -184,7 +255,7 @@ class AsyncSignalSource(
     override suspend fun nextSignal(): Signal =
         withTimeoutOrNull(pollTimeoutMs) {
             channel.receive()
-        } ?: SensorySignal.NoInput
+        } ?: CognitiveSignal.NoStimulus
 
     override fun close() {
         stdinReaderJob?.cancel()
@@ -193,10 +264,7 @@ class AsyncSignalSource(
 
     private fun offerSignal(signal: Signal): Boolean {
         val result = channel.trySend(signal)
-        if (result.isSuccess) {
-            return true
-        }
-        // Drop oldest and retry (same overflow behavior as before)
+        if (result.isSuccess) return true
         channel.tryReceive()
         return channel.trySend(signal).isSuccess
     }
@@ -207,9 +275,6 @@ class AsyncSignalSource(
     }
 }
 
-// ── Backward-compatibility aliases ───────────────────────────────────
-// These allow existing code to compile during incremental migration.
-
 @Deprecated("Use SignalSource", replaceWith = ReplaceWith("SignalSource"))
 typealias SensoryInputSource = SignalSource
 
@@ -219,8 +284,6 @@ typealias StdinSensoryInputSource = StdinSignalSource
 @Deprecated("Use AsyncSignalSource", replaceWith = ReplaceWith("AsyncSignalSource"))
 typealias AsyncSensoryInputSource = AsyncSignalSource
 
-// ── SensoryCortex ────────────────────────────────────────────────────
-
 class SensoryCortex(
     private val config: AgentConfig,
     private val source: SignalSource,
@@ -228,32 +291,33 @@ class SensoryCortex(
 ) {
     suspend fun nextSignal(): Signal {
         val signal = source.nextSignal()
-        if (signal !is SensorySignal.InputReceived) {
-            return signal
-        }
+        val stimulusSignal = signal as? CognitiveSignal.StimulusReceived ?: return signal
+        val enrichedStimulus = enrichStimulus(stimulusSignal.stimulus) ?: return CognitiveSignal.NoStimulus
+        return CognitiveSignal.StimulusReceived(enrichedStimulus)
+    }
 
-        val sanitized = TextSecurity.clamp(signal.input.content.trim(), config.planner.maxInputChars)
+    private fun enrichStimulus(stimulus: StimulusEnvelope): StimulusEnvelope? {
+        val sanitized = TextSecurity.clamp(stimulus.content.trim(), config.planner.maxInputChars)
         if (sanitized.isBlank()) {
-            return SensorySignal.NoInput
+            return null
         }
 
-        val providedContext = signal.input.conversationContext
+        val providedContext = stimulus.conversationContext
         val resolvedSessionId = if (providedContext.sessionId == ConversationContext.DEFAULT_SESSION_ID) {
-            resolveSessionId(signal.input.source)
+            resolveSessionId(stimulus.source)
         } else {
             providedContext.sessionId
         }
         val resolvedInterlocutor = if (providedContext.interlocutor == Interlocutor.UNKNOWN) {
-            interlocutorResolver.resolve(signal.input.source)
+            interlocutorResolver.resolve(stimulus.source)
         } else {
             providedContext.interlocutor
         }
-        val enrichedInput = signal.input.copy(
-            content = sanitized,
-            conversationContext = ConversationContext(resolvedSessionId, resolvedInterlocutor)
-        )
 
-        return SensorySignal.InputReceived(enrichedInput)
+        return stimulus.copy(
+            content = sanitized,
+            conversationContext = ConversationContext(resolvedSessionId, resolvedInterlocutor),
+        )
     }
 
     private fun resolveSessionId(source: String): String = when {
@@ -266,7 +330,7 @@ class SensoryCortex(
         fun stdin(config: AgentConfig): SensoryCortex =
             SensoryCortex(
                 config = config,
-                source = StdinSignalSource()
+                source = StdinSignalSource(),
             )
     }
 }

@@ -25,9 +25,10 @@ import ai.neopsyke.agent.actions.websearch.WebSearchResult
 import ai.neopsyke.agent.config.AgentConfig
 import ai.neopsyke.agent.config.PlannerConfig
 import ai.neopsyke.agent.cortex.motor.MotorCortex
-import ai.neopsyke.agent.cortex.sensory.ProjectSignal
+import ai.neopsyke.agent.cortex.sensory.GoalRuntimeCue
+import ai.neopsyke.agent.cortex.sensory.CognitiveSignal
+import ai.neopsyke.agent.cortex.sensory.RuntimeControlSignal
 import ai.neopsyke.agent.cortex.sensory.SensoryCortex
-import ai.neopsyke.agent.cortex.sensory.SensorySignal
 import ai.neopsyke.agent.cortex.sensory.Signal
 import ai.neopsyke.agent.cortex.sensory.SignalSource
 import ai.neopsyke.agent.ego.Ego
@@ -84,7 +85,7 @@ class EgoProjectIntegrationTest {
             store = ProjectStore(root),
             planner = DeterministicProjectPlanner(),
             instrumentation = instrumentation,
-            signalEmitter = source::offer,
+            cueEmitter = source::offer,
         )
         val scope = testScope()
         manager.start(scope)
@@ -102,7 +103,7 @@ class EgoProjectIntegrationTest {
         try {
             val projectId = manager.createProject("Ship the report", "Report Project", ProjectPriority.HIGH)
             waitForStatus(manager, projectId, ProjectStatus.COMPLETED)
-            source.offer(SensorySignal.ExitRequested("test"))
+            source.offer(RuntimeControlSignal.ExitRequested("test"))
             loop.join()
 
             val state = manager.projectStatus(projectId)
@@ -146,7 +147,7 @@ class EgoProjectIntegrationTest {
             planner = DeterministicProjectPlanner(),
             asyncOperationRegistry = AsyncOperationRegistry.fromProviders(listOf(provider)),
             instrumentation = instrumentation,
-            signalEmitter = source::offer,
+            cueEmitter = source::offer,
         )
         val scope = testScope()
         manager.start(scope)
@@ -190,7 +191,7 @@ class EgoProjectIntegrationTest {
         try {
             val projectId = manager.createProject("Use async action in project")
             waitForStatus(manager, projectId, ProjectStatus.COMPLETED)
-            source.offer(SensorySignal.ExitRequested("test"))
+            source.offer(RuntimeControlSignal.ExitRequested("test"))
             loop.join()
 
             val state = manager.projectStatus(projectId)
@@ -220,7 +221,7 @@ class EgoProjectIntegrationTest {
             store = ProjectStore(root),
             planner = DeterministicProjectPlanner(),
             instrumentation = instrumentation,
-            signalEmitter = source::offer,
+            cueEmitter = source::offer,
         )
         val superegoLlm = StubChatModelClient().apply {
             enqueueRawResponse("""{"allow":false,"reason":"not yet","reason_code":"TEMP_RETRY"}""")
@@ -255,7 +256,7 @@ class EgoProjectIntegrationTest {
         try {
             val projectId = manager.createProject("Retry until approved")
             waitForStatus(manager, projectId, ProjectStatus.COMPLETED)
-            source.offer(SensorySignal.ExitRequested("test"))
+            source.offer(RuntimeControlSignal.ExitRequested("test"))
             loop.join()
 
             assertEquals("ego> second try", outputs.last())
@@ -301,7 +302,7 @@ class EgoProjectIntegrationTest {
             planner = DeterministicProjectPlanner(),
             verifier = verifier,
             instrumentation = instrumentation,
-            signalEmitter = source::offer,
+            cueEmitter = source::offer,
         )
         val actionPayloads = ArrayDeque(listOf("cycle one", "cycle two"))
         val planner = object : Ego.Planner {
@@ -332,7 +333,7 @@ class EgoProjectIntegrationTest {
         try {
             val projectId = manager.createProject("Use multiple cycles")
             waitForStatus(manager, projectId, ProjectStatus.COMPLETED)
-            source.offer(SensorySignal.ExitRequested("test"))
+            source.offer(RuntimeControlSignal.ExitRequested("test"))
             loop.join()
 
             assertEquals(listOf("ego> cycle one", "ego> cycle two"), outputs)
@@ -396,7 +397,7 @@ class EgoProjectIntegrationTest {
             planner = DeterministicProjectPlanner(),
             verifier = verifier,
             instrumentation = instrumentation,
-            signalEmitter = source::offer,
+            cueEmitter = source::offer,
         )
         val actionPayloads = ArrayDeque(listOf("wait for timer", "timer resumed"))
         val planner = object : Ego.Planner {
@@ -427,7 +428,7 @@ class EgoProjectIntegrationTest {
         try {
             val projectId = manager.createProject("Pause until timer wakes the step")
             waitForStatus(manager, projectId, ProjectStatus.COMPLETED)
-            source.offer(SensorySignal.ExitRequested("test"))
+            source.offer(RuntimeControlSignal.ExitRequested("test"))
             loop.join()
 
             assertEquals(listOf("ego> wait for timer", "ego> timer resumed"), outputs)
@@ -541,6 +542,10 @@ class EgoProjectIntegrationTest {
 
         fun offer(signal: Signal) {
             signals.trySend(signal).getOrThrow()
+        }
+
+        fun offer(cue: GoalRuntimeCue) {
+            signals.trySend(CognitiveSignal.StimulusReceived(cue.toStimulus())).getOrThrow()
         }
 
         override suspend fun nextSignal(): Signal = signals.receive()

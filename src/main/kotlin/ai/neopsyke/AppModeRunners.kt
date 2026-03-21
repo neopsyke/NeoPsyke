@@ -991,11 +991,7 @@ internal object AppModeRunners {
                                                             planner = ai.neopsyke.agent.project.LlmProjectPlanner(plannerClient, config),
                                                             verifier = ai.neopsyke.agent.project.LlmProjectStepVerifier(plannerClient, config),
                                                             instrumentation = instrumentation,
-                                                            signalEmitter = { signal ->
-                                                                if (signal is ai.neopsyke.agent.cortex.sensory.ProjectSignal) {
-                                                                    sensoryInput.offerProjectSignal(signal)
-                                                                }
-                                                            },
+                                                            cueEmitter = sensoryInput::offerGoalRuntimeCue,
                                                         ).also { it.start(agentScope) }
                                                     } else {
                                                         null
@@ -1449,11 +1445,7 @@ internal object AppModeRunners {
                                                         planner = ai.neopsyke.agent.project.LlmProjectPlanner(plannerClient, config),
                                                         verifier = ai.neopsyke.agent.project.LlmProjectStepVerifier(plannerClient, config),
                                                         instrumentation = instrumentation,
-                                                        signalEmitter = { signal ->
-                                                            if (signal is ai.neopsyke.agent.cortex.sensory.ProjectSignal) {
-                                                                sensoryInput.offerProjectSignal(signal)
-                                                            }
-                                                        },
+                                                        cueEmitter = sensoryInput::offerGoalRuntimeCue,
                                                     ).also { it.start(agentScope) }
                                                 } else {
                                                     null

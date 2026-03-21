@@ -11,7 +11,7 @@ import ai.neopsyke.agent.actions.async.AsyncOperationProvider
 import ai.neopsyke.agent.actions.async.AsyncOperationRegistry
 import ai.neopsyke.agent.actions.async.AsyncOperationStatus
 import ai.neopsyke.agent.actions.async.AsyncResumeMode
-import ai.neopsyke.agent.cortex.sensory.ProjectSignal
+import ai.neopsyke.agent.cortex.sensory.GoalRuntimeCue
 import ai.neopsyke.agent.model.ActionExecutionStatus
 import ai.neopsyke.agent.model.ActionOutcome
 import ai.neopsyke.agent.model.ActionType
@@ -50,12 +50,12 @@ class ProjectManagerTest {
     fun `createProject generates plan persists state and emits work-ready signal`() {
         val root = Files.createTempDirectory("psyke-pm-create")
         try {
-            val signals = CopyOnWriteArrayList<ProjectSignal>()
+            val signals = CopyOnWriteArrayList<GoalRuntimeCue>()
             val manager = ProjectManager(
                 config = testConfig(root),
                 store = ProjectStore(root),
                 planner = DeterministicProjectPlanner(),
-                signalEmitter = { signal -> if (signal is ProjectSignal) signals += signal },
+                cueEmitter = { cue -> signals += cue },
             )
             manager.start(testScope())
 
@@ -66,8 +66,8 @@ class ProjectManagerTest {
             )
 
             assertTrue(id.isNotBlank())
-            val workReady = assertIs<ProjectSignal.WorkReady>(signals.last())
-            assertEquals(id, workReady.projectId)
+            val workReady = assertIs<GoalRuntimeCue>(signals.last())
+            assertEquals(id, workReady.goalId)
             val state = manager.projectStatus(id)
             assertNotNull(state)
             assertEquals(ProjectStatus.ACTIVE, state.project.status)
@@ -80,7 +80,7 @@ class ProjectManagerTest {
     }
 
     @Test
-    fun `nextWorkFromSignal creates project session and returns work unit`() {
+    fun `nextWorkFromCue creates project session and returns work unit`() {
         val root = Files.createTempDirectory("psyke-pm-work")
         try {
             val manager = ProjectManager(
@@ -91,7 +91,7 @@ class ProjectManagerTest {
             manager.start(testScope())
             val id = manager.createProject("Persistent task")
 
-            val work = manager.nextWorkFromSignal(ProjectSignal.WorkReady(id, "step-1", "test"))
+            val work = manager.nextWorkFromCue(GoalRuntimeCue(id, "step-1", "test"))
             assertNotNull(work)
             assertEquals(id, work.projectId)
             assertTrue(work.rootInputId.startsWith("project:$id"))
@@ -106,17 +106,17 @@ class ProjectManagerTest {
     fun `project-origin action outcome completes final step and project`() {
         val root = Files.createTempDirectory("psyke-pm-complete")
         try {
-            val signals = CopyOnWriteArrayList<ProjectSignal>()
+            val signals = CopyOnWriteArrayList<GoalRuntimeCue>()
             val manager = ProjectManager(
                 config = testConfig(root),
                 store = ProjectStore(root),
                 planner = DeterministicProjectPlanner(),
                 verifier = DeterministicProjectStepVerifier(),
-                signalEmitter = { signal -> if (signal is ProjectSignal) signals += signal },
+                cueEmitter = { cue -> signals += cue },
             )
             manager.start(testScope())
             val id = manager.createProject("Ship release checklist")
-            val work = manager.nextWorkFromSignal(assertIs<ProjectSignal.WorkReady>(signals.last()))
+            val work = manager.nextWorkFromCue(assertIs<GoalRuntimeCue>(signals.last()))
             assertNotNull(work)
 
             manager.onActionExecuted(
@@ -160,17 +160,17 @@ class ProjectManagerTest {
                     AsyncOperationStatus.Succeeded("download complete"),
                 )
             )
-            val signals = CopyOnWriteArrayList<ProjectSignal>()
+            val signals = CopyOnWriteArrayList<GoalRuntimeCue>()
             val manager = ProjectManager(
                 config = testConfig(root).copy(conditionCheckIntervalMs = 25),
                 store = ProjectStore(root),
                 planner = DeterministicProjectPlanner(),
                 asyncOperationRegistry = AsyncOperationRegistry.fromProviders(listOf(provider)),
-                signalEmitter = { signal -> if (signal is ProjectSignal) signals += signal },
+                cueEmitter = { cue -> signals += cue },
             )
             manager.start(testScope())
             val projectId = manager.createProject("Wait for async completion")
-            val work = manager.nextWorkFromSignal(assertIs<ProjectSignal.WorkReady>(signals.last()))
+            val work = manager.nextWorkFromCue(assertIs<GoalRuntimeCue>(signals.last()))
             assertNotNull(work)
 
             manager.onActionExecuted(
@@ -189,7 +189,7 @@ class ProjectManagerTest {
             val state = manager.projectStatus(projectId)
             assertNotNull(state)
             assertTrue(state.project.plan.steps.first().notes.contains("async_status=succeeded"))
-            assertTrue(signals.any { it is ProjectSignal.WorkReady && it.projectId == projectId })
+            assertTrue(signals.any { it.goalId == projectId })
 
             manager.stop()
         } finally {
@@ -202,17 +202,17 @@ class ProjectManagerTest {
         val root = Files.createTempDirectory("psyke-pm-invalid-wait")
         try {
             val instrumentation = RecordingInstrumentation()
-            val signals = CopyOnWriteArrayList<ProjectSignal>()
+            val signals = CopyOnWriteArrayList<GoalRuntimeCue>()
             val manager = ProjectManager(
                 config = testConfig(root),
                 store = ProjectStore(root),
                 planner = DeterministicProjectPlanner(),
                 instrumentation = instrumentation,
-                signalEmitter = { signal -> if (signal is ProjectSignal) signals += signal },
+                cueEmitter = { cue -> signals += cue },
             )
             manager.start(testScope())
             val projectId = manager.createProject("Reject invalid waiting outcome")
-            val work = manager.nextWorkFromSignal(assertIs<ProjectSignal.WorkReady>(signals.last()))
+            val work = manager.nextWorkFromCue(assertIs<GoalRuntimeCue>(signals.last()))
             assertNotNull(work)
 
             manager.onActionExecuted(
@@ -233,8 +233,7 @@ class ProjectManagerTest {
             assertEquals(1, state.project.plan.steps.first().attempts)
             assertTrue(
                 signals.any {
-                    it is ProjectSignal.WorkReady &&
-                        it.projectId == projectId &&
+                                            it.goalId == projectId &&
                         it.stepId == "step-1"
                 }
             )
@@ -266,7 +265,7 @@ class ProjectManagerTest {
             )
             manager1.start(testScope())
             val projectId = manager1.createProject("Restore async poll wait")
-            val work = manager1.nextWorkFromSignal(ProjectSignal.WorkReady(projectId, "step-1", "test"))
+            val work = manager1.nextWorkFromCue(GoalRuntimeCue(projectId, "step-1", "test"))
             assertNotNull(work)
             manager1.onActionExecuted(
                 action = projectAction(work.rootInputId),
@@ -277,12 +276,12 @@ class ProjectManagerTest {
             manager1.stop()
 
             provider.enqueue(operationId = "op-restore", statuses = listOf(AsyncOperationStatus.Succeeded("restored completion")))
-            val signals = CopyOnWriteArrayList<ProjectSignal>()
+            val signals = CopyOnWriteArrayList<GoalRuntimeCue>()
             val manager2 = ProjectManager(
                 config = testConfig(root).copy(conditionCheckIntervalMs = 25),
                 store = store,
                 asyncOperationRegistry = AsyncOperationRegistry.fromProviders(listOf(provider)),
-                signalEmitter = { signal -> if (signal is ProjectSignal) signals += signal },
+                cueEmitter = { cue -> signals += cue },
             )
             manager2.start(testScope())
 
@@ -292,7 +291,7 @@ class ProjectManagerTest {
                     state.project.plan.steps.firstOrNull()?.status == StepStatus.READY
             }
 
-            assertTrue(signals.any { it is ProjectSignal.WorkReady && it.projectId == projectId })
+            assertTrue(signals.any { it.goalId == projectId })
             manager2.stop()
         } finally {
             root.toFile().deleteRecursively()
@@ -313,7 +312,7 @@ class ProjectManagerTest {
             )
             manager1.start(testScope())
             val projectId = manager1.createProject("Restore async event wait")
-            val work = manager1.nextWorkFromSignal(ProjectSignal.WorkReady(projectId, "step-1", "test"))
+            val work = manager1.nextWorkFromCue(GoalRuntimeCue(projectId, "step-1", "test"))
             assertNotNull(work)
             manager1.onActionExecuted(
                 action = projectAction(work.rootInputId),
@@ -323,12 +322,12 @@ class ProjectManagerTest {
             manager1.finalizeProjectCycle(work.rootInputId)
             manager1.stop()
 
-            val signals = CopyOnWriteArrayList<ProjectSignal>()
+            val signals = CopyOnWriteArrayList<GoalRuntimeCue>()
             val manager2 = ProjectManager(
                 config = testConfig(root),
                 store = store,
                 asyncOperationRegistry = AsyncOperationRegistry.fromProviders(listOf(provider)),
-                signalEmitter = { signal -> if (signal is ProjectSignal) signals += signal },
+                cueEmitter = { cue -> signals += cue },
             )
             manager2.start(testScope())
             val matched = manager2.notifyAsyncOperationEvent(
@@ -351,7 +350,7 @@ class ProjectManagerTest {
             val state = manager2.projectStatus(projectId)
             assertNotNull(state)
             assertTrue(state.project.plan.steps.first().notes.contains("event completed"))
-            assertTrue(signals.any { it is ProjectSignal.WorkReady && it.projectId == projectId })
+            assertTrue(signals.any { it.goalId == projectId })
 
             manager2.stop()
         } finally {
@@ -363,17 +362,17 @@ class ProjectManagerTest {
     fun `finalized project cycle writes workspace context scratch and artifact`() {
         val root = Files.createTempDirectory("psyke-pm-workspace")
         try {
-            val signals = CopyOnWriteArrayList<ProjectSignal>()
+            val signals = CopyOnWriteArrayList<GoalRuntimeCue>()
             val manager = ProjectManager(
                 config = testConfig(root),
                 store = ProjectStore(root),
                 planner = DeterministicProjectPlanner(),
                 verifier = DeterministicProjectStepVerifier(),
-                signalEmitter = { signal -> if (signal is ProjectSignal) signals += signal },
+                cueEmitter = { cue -> signals += cue },
             )
             manager.start(testScope())
             val id = manager.createProject("Document workspace artifacts")
-            val work = manager.nextWorkFromSignal(assertIs<ProjectSignal.WorkReady>(signals.last()))
+            val work = manager.nextWorkFromCue(assertIs<GoalRuntimeCue>(signals.last()))
             assertNotNull(work)
 
             manager.onActionExecuted(
@@ -545,7 +544,7 @@ class ProjectManagerTest {
     }
 
     @Test
-    fun `nextWorkFromSignal returns null when project is missing`() {
+    fun `nextWorkFromCue returns null when project is missing`() {
         val root = Files.createTempDirectory("psyke-pm-missing")
         try {
             val manager = ProjectManager(
@@ -553,7 +552,7 @@ class ProjectManagerTest {
                 store = ProjectStore(root),
             )
             manager.start(testScope())
-            assertNull(manager.nextWorkFromSignal(ProjectSignal.WorkReady("missing", "s1", "test")))
+            assertNull(manager.nextWorkFromCue(GoalRuntimeCue("missing", "s1", "test")))
             manager.stop()
         } finally {
             root.toFile().deleteRecursively()
@@ -579,17 +578,17 @@ class ProjectManagerTest {
             )
             manager1.stop()
 
-            val signals = CopyOnWriteArrayList<ProjectSignal>()
+            val signals = CopyOnWriteArrayList<GoalRuntimeCue>()
             val manager2 = ProjectManager(
                 config = testConfig(root),
                 store = store,
-                signalEmitter = { signal -> if (signal is ProjectSignal) signals += signal },
+                cueEmitter = { cue -> signals += cue },
             )
             manager2.start(testScope())
 
             waitUntil {
                 manager2.projectStatus(id)?.project?.status == ProjectStatus.ACTIVE &&
-                    signals.any { it is ProjectSignal.WorkReady && it.projectId == id }
+                    signals.any { it.goalId == id }
             }
 
             manager2.stop()
@@ -626,18 +625,18 @@ class ProjectManagerTest {
             )
             manager1.stop()
 
-            val signals = CopyOnWriteArrayList<ProjectSignal>()
+            val signals = CopyOnWriteArrayList<GoalRuntimeCue>()
             val manager2 = ProjectManager(
                 config = testConfig(root),
                 store = store,
-                signalEmitter = { signal -> if (signal is ProjectSignal) signals += signal },
+                cueEmitter = { cue -> signals += cue },
             )
             manager2.start(testScope())
 
             waitUntil {
                 manager2.projectStatus(id)?.project?.status == ProjectStatus.ACTIVE &&
                     manager2.projectStatus(id)?.project?.plan?.steps?.firstOrNull()?.status == StepStatus.READY &&
-                    signals.any { it is ProjectSignal.WorkReady && it.projectId == id }
+                    signals.any { it.goalId == id }
             }
 
             manager2.stop()
@@ -674,18 +673,18 @@ class ProjectManagerTest {
             )
             manager1.stop()
 
-            val signals = CopyOnWriteArrayList<ProjectSignal>()
+            val signals = CopyOnWriteArrayList<GoalRuntimeCue>()
             val manager2 = ProjectManager(
                 config = testConfig(root).copy(conditionCheckIntervalMs = 25),
                 store = store,
-                signalEmitter = { signal -> if (signal is ProjectSignal) signals += signal },
+                cueEmitter = { cue -> signals += cue },
             )
             manager2.start(testScope())
 
             waitUntil {
                 manager2.projectStatus(id)?.project?.plan?.steps?.firstOrNull()?.status == StepStatus.READY &&
                     manager2.projectStatus(id)?.project?.plan?.steps?.firstOrNull()?.waitCondition == null &&
-                    signals.any { it is ProjectSignal.WorkReady && it.projectId == id && it.stepId == "step-1" }
+                    signals.any { it.goalId == id && it.stepId == "step-1" }
             }
 
             manager2.stop()
@@ -722,18 +721,18 @@ class ProjectManagerTest {
             )
             manager1.stop()
 
-            val signals = CopyOnWriteArrayList<ProjectSignal>()
+            val signals = CopyOnWriteArrayList<GoalRuntimeCue>()
             val manager2 = ProjectManager(
                 config = testConfig(root).copy(conditionCheckIntervalMs = 25),
                 store = store,
-                signalEmitter = { signal -> if (signal is ProjectSignal) signals += signal },
+                cueEmitter = { cue -> signals += cue },
             )
             manager2.start(testScope())
 
             waitUntil {
                 manager2.projectStatus(id)?.project?.plan?.steps?.firstOrNull()?.status == StepStatus.READY &&
                     manager2.projectStatus(id)?.project?.plan?.steps?.firstOrNull()?.waitCondition == null &&
-                    signals.any { it is ProjectSignal.WorkReady && it.projectId == id && it.stepId == "step-1" }
+                    signals.any { it.goalId == id && it.stepId == "step-1" }
             }
 
             manager2.stop()

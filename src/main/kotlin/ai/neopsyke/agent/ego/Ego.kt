@@ -5,10 +5,11 @@ import mu.KotlinLogging
 import ai.neopsyke.agent.config.*
 import ai.neopsyke.agent.model.*
 import ai.neopsyke.agent.cortex.motor.MotorCortex
-import ai.neopsyke.agent.cortex.sensory.ProjectSignal
+import ai.neopsyke.agent.cortex.sensory.CognitiveCueMetadata
+import ai.neopsyke.agent.cortex.sensory.CognitiveSignal
+import ai.neopsyke.agent.cortex.sensory.GoalRuntimeCue
+import ai.neopsyke.agent.cortex.sensory.RuntimeControlSignal
 import ai.neopsyke.agent.cortex.sensory.SensoryCortex
-import ai.neopsyke.agent.cortex.sensory.SensorySignal
-import ai.neopsyke.agent.cortex.sensory.SystemSignal
 import ai.neopsyke.agent.memory.episodic.EpisodicEventType
 import ai.neopsyke.agent.memory.scratchpad.ScratchpadStore
 import ai.neopsyke.agent.id.EmptyProjectRegistry
@@ -122,27 +123,47 @@ class Ego(
         telemetry.emitQueueSnapshot("loop_start")
         while (true) {
             when (val signal = sensoryCortex.nextSignal()) {
-                SensorySignal.NoInput -> continue
+                CognitiveSignal.NoStimulus -> continue
 
-                is SensorySignal.SourceClosed -> {
+                is RuntimeControlSignal.SourceClosed -> {
                     val message = if (signal.source == "stdin") "stdin_closed" else "${signal.source}_closed"
                     instrumentation.emit(AgentEvents.loopStatus(status = "stopped", message = message))
                     break
                 }
 
-                is SensorySignal.ExitRequested -> {
+                is RuntimeControlSignal.ExitRequested -> {
                     logger.info { "Stopping Ego loop." }
                     val message = if (signal.source == "stdin") "exit_command" else "${signal.source}_exit_command"
                     instrumentation.emit(AgentEvents.loopStatus(status = "stopped", message = message))
                     break
                 }
 
-                is SensorySignal.InputReceived -> {
+                is CognitiveSignal.StimulusReceived -> {
+                    val stimulus = signal.stimulus
+                    val goalCue = GoalRuntimeCue.fromStimulus(stimulus)
+                    if (goalCue != null) {
+                        val work = projectsGateway.nextWorkFromCue(goalCue)
+                        if (work != null) {
+                            logger.info { "Project work picked: ${work.projectId}/${work.stepId}" }
+                            scheduler.enqueueProjectWork(work)
+                            runLoop()
+                            cleanupAfterProjectAdvance(work.rootInputId)
+                        }
+                        continue
+                    }
+                    if (stimulus.metadata[CognitiveCueMetadata.METADATA_CUE_TYPE] ==
+                        CognitiveCueMetadata.CUE_TYPE_ID_IMPULSE_READY
+                    ) {
+                        runLoop()
+                        continue
+                    }
                     if (!scheduler.enqueueInput(
-                            content = signal.input.content,
-                            priority = signal.input.priority,
-                            source = signal.input.source,
-                            conversationContext = signal.input.conversationContext
+                            content = stimulus.content,
+                            priority = stimulus.metadata["priority"]
+                                ?.let { runCatching { InputPriority.valueOf(it) }.getOrNull() }
+                                ?: InputPriority.HIGH,
+                            source = stimulus.source,
+                            conversationContext = stimulus.conversationContext
                         )
                     ) {
                         logger.warn { "Input queue full; dropping input." }
@@ -161,26 +182,14 @@ class Ego(
                     runLoop()
                 }
 
-                SystemSignal.ImpulseReady -> runLoop()
-
-                SystemSignal.ShutdownRequested -> {
+                RuntimeControlSignal.ShutdownRequested -> {
                     logger.info { "Graceful shutdown requested." }
                     instrumentation.emit(AgentEvents.loopStatus(status = "stopped", message = "shutdown_requested"))
                     break
                 }
 
-                is SystemSignal.ConfigReloaded -> {
+                is RuntimeControlSignal.ConfigReloaded -> {
                     logger.info { "Config reloaded: key=${signal.key}" }
-                }
-
-                is ProjectSignal -> {
-                    val work = projectsGateway.nextWorkFromSignal(signal)
-                    if (work != null) {
-                        logger.info { "Project work picked: ${work.projectId}/${work.stepId}" }
-                        scheduler.enqueueProjectWork(work)
-                        runLoop()
-                        cleanupAfterProjectAdvance(work.rootInputId)
-                    }
                 }
             }
         }

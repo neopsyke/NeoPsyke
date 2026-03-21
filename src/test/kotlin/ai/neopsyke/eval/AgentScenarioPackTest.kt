@@ -33,10 +33,12 @@ import ai.neopsyke.agent.model.PlannerContext
 import ai.neopsyke.agent.config.TaskWorkspaceConfig
 import ai.neopsyke.agent.model.Urgency
 import ai.neopsyke.agent.cortex.motor.MotorCortex
+import ai.neopsyke.agent.cortex.sensory.CognitiveSignal
+import ai.neopsyke.agent.cortex.sensory.GoalRuntimeCue
+import ai.neopsyke.agent.cortex.sensory.RuntimeControlSignal
 import ai.neopsyke.agent.cortex.sensory.SensoryCortex
 import ai.neopsyke.agent.cortex.sensory.Signal
 import ai.neopsyke.agent.cortex.sensory.SignalSource
-import ai.neopsyke.agent.cortex.sensory.SensorySignal
 import ai.neopsyke.agent.ego.Ego
 import ai.neopsyke.agent.ego.LlmEgoPlanner
 import ai.neopsyke.agent.id.Id
@@ -611,7 +613,7 @@ class AgentScenarioPackTest {
             planner = DeterministicProjectPlanner(),
             asyncOperationRegistry = AsyncOperationRegistry.fromProviders(listOf(provider)),
             instrumentation = instrumentation,
-            signalEmitter = source::offer,
+            cueEmitter = source::offer,
         )
         manager.start(CoroutineScope(SupervisorJob() + Dispatchers.Default))
         var startedAsync = false
@@ -664,7 +666,7 @@ class AgentScenarioPackTest {
                 priority = ProjectPriority.HIGH,
             )
             waitForProjectStatus(manager, projectId, ProjectStatus.COMPLETED)
-            source.offer(SensorySignal.ExitRequested("scenario test"))
+            source.offer(RuntimeControlSignal.ExitRequested("scenario test"))
             loop.join()
 
             val state = manager.projectStatus(projectId)
@@ -761,6 +763,10 @@ class AgentScenarioPackTest {
 
         fun offer(signal: Signal) {
             signals.trySend(signal).getOrThrow()
+        }
+
+        fun offer(cue: GoalRuntimeCue) {
+            signals.trySend(CognitiveSignal.StimulusReceived(cue.toStimulus())).getOrThrow()
         }
 
         override suspend fun nextSignal(): Signal = signals.receive()
