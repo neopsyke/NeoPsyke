@@ -45,7 +45,7 @@ import ai.neopsyke.agent.project.DeterministicProjectPlanner
 import ai.neopsyke.agent.project.PlanStep
 import ai.neopsyke.agent.project.Project
 import ai.neopsyke.agent.project.ProjectConfig
-import ai.neopsyke.agent.project.ProjectManager
+import ai.neopsyke.agent.project.GoalManager
 import ai.neopsyke.agent.project.ProjectPriority
 import ai.neopsyke.agent.project.ProjectState
 import ai.neopsyke.agent.project.ProjectStatus
@@ -80,7 +80,7 @@ class EgoProjectIntegrationTest {
             planner = PlannerConfig(maxLoopStepsPerInput = 8, maxThoughtPasses = 2),
             projects = ProjectConfig(enabled = true, workspaceRoot = root, actionsPerCycle = 2),
         )
-        val manager = ProjectManager(
+        val manager = GoalManager(
             config = config.projects,
             store = ProjectStore(root),
             planner = DeterministicProjectPlanner(),
@@ -141,7 +141,7 @@ class EgoProjectIntegrationTest {
                 )
             )
         }
-        val manager = ProjectManager(
+        val manager = GoalManager(
             config = config.projects,
             store = ProjectStore(root),
             planner = DeterministicProjectPlanner(),
@@ -216,7 +216,7 @@ class EgoProjectIntegrationTest {
             planner = PlannerConfig(maxLoopStepsPerInput = 12, maxThoughtPasses = 2),
             projects = ProjectConfig(enabled = true, workspaceRoot = root, actionsPerCycle = 2),
         )
-        val manager = ProjectManager(
+        val manager = GoalManager(
             config = config.projects,
             store = ProjectStore(root),
             planner = DeterministicProjectPlanner(),
@@ -296,7 +296,7 @@ class EgoProjectIntegrationTest {
                 }
             }
         }
-        val manager = ProjectManager(
+        val manager = GoalManager(
             config = config.projects,
             store = ProjectStore(root),
             planner = DeterministicProjectPlanner(),
@@ -391,7 +391,7 @@ class EgoProjectIntegrationTest {
                 }
             }
         }
-        val manager = ProjectManager(
+        val manager = GoalManager(
             config = config.projects,
             store = ProjectStore(root),
             planner = DeterministicProjectPlanner(),
@@ -519,7 +519,7 @@ class EgoProjectIntegrationTest {
     }
 
     private suspend fun waitForStatus(
-        manager: ProjectManager,
+        manager: GoalManager,
         projectId: String,
         status: ProjectStatus,
     ) {

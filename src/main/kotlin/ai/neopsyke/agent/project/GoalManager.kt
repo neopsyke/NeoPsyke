@@ -20,7 +20,7 @@ import java.util.concurrent.ConcurrentHashMap
 
 private val logger = KotlinLogging.logger {}
 
-private data class ProjectExecutionSession(
+private data class GoalRunSession(
     val projectId: String,
     val stepId: String,
     val rootInputId: String,
@@ -31,7 +31,7 @@ private data class ProjectExecutionSession(
     val requeueReason: String? = null,
 )
 
-class ProjectManager(
+class GoalManager(
     private val config: ProjectConfig,
     private val store: ProjectStore,
     private val planner: ProjectPlanner = DeterministicProjectPlanner(),
@@ -39,9 +39,9 @@ class ProjectManager(
     private val asyncOperationRegistry: AsyncOperationRegistry = AsyncOperationRegistry.empty(),
     private val instrumentation: AgentInstrumentation = NoopAgentInstrumentation,
     private val cueEmitter: (GoalRuntimeCue) -> Unit = {},
-) : ProjectsGateway {
+) : GoalsGateway {
     private val states = ConcurrentHashMap<String, ProjectState>()
-    private val sessionsByRootInputId = ConcurrentHashMap<String, ProjectExecutionSession>()
+    private val sessionsByRootInputId = ConcurrentHashMap<String, GoalRunSession>()
 
     @Volatile
     private var timerScheduler: TimerScheduler? = null
@@ -75,7 +75,7 @@ class ProjectManager(
         waitConditionMonitor = null
     }
 
-    override fun nextWorkFromCue(cue: GoalRuntimeCue): ProjectWorkUnit? {
+    override fun nextWorkFromCue(cue: GoalRuntimeCue): GoalRunActivation? {
         val state = states[cue.goalId] ?: return null
         val step = state.nextRunnableStep() ?: return null
         val startedState = if (step.status == StepStatus.READY) {
@@ -85,7 +85,7 @@ class ProjectManager(
         }
         val startedStep = startedState.project.plan.steps.firstOrNull { it.id == step.id } ?: step
         val rootInputId = buildProjectRootInputId(state.id, step.id)
-        sessionsByRootInputId[rootInputId] = ProjectExecutionSession(
+        sessionsByRootInputId[rootInputId] = GoalRunSession(
             projectId = state.id,
             stepId = step.id,
             rootInputId = rootInputId,
@@ -623,7 +623,7 @@ class ProjectManager(
         )
     }
 
-    private fun writeWorkspaceCycleArtifacts(state: ProjectState, session: ProjectExecutionSession) {
+    private fun writeWorkspaceCycleArtifacts(state: ProjectState, session: GoalRunSession) {
         val summary = session.lastResultSummary.ifBlank { "Cycle completed." }
         try {
             ProjectContextLoader.writeContext(state, session.stepId, summary)

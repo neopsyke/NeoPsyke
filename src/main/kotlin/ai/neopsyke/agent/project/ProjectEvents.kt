@@ -157,7 +157,7 @@ sealed interface ProjectEvent {
 
 /**
  * Commands emitted by the state machine transition function.
- * The ProjectManager dispatches these as side effects.
+ * The GoalManager dispatches these as side effects.
  */
 sealed interface ProjectCommand {
     data class EmitWorkReady(

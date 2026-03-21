@@ -2,17 +2,17 @@ package ai.neopsyke.agent.project
 
 import kotlinx.coroutines.CoroutineScope
 import ai.neopsyke.agent.ego.ActionLifecycleObserver
-import ai.neopsyke.agent.id.ProjectRegistry
+import ai.neopsyke.agent.id.GoalRegistry
 import ai.neopsyke.agent.actions.async.AsyncOperationEvent
 import ai.neopsyke.agent.cortex.sensory.GoalRuntimeCue
 import ai.neopsyke.agent.model.ActionOutcome
 import ai.neopsyke.agent.model.PendingAction
 
-interface ProjectsGateway : ProjectRegistry, ActionLifecycleObserver {
+interface GoalsGateway : GoalRegistry, ActionLifecycleObserver {
     fun start(scope: CoroutineScope) {}
     fun stop() {}
     fun pendingWorkSummary(): String = ""
-    fun nextWorkFromCue(cue: GoalRuntimeCue): ProjectWorkUnit? = null
+    fun nextWorkFromCue(cue: GoalRuntimeCue): GoalRunActivation? = null
     fun finalizeProjectCycle(rootInputId: String) {}
     fun executeOperation(request: ProjectOperationRequest): ProjectOperationResult =
         ProjectOperationResult(false, "Projects feature is disabled.")
@@ -21,7 +21,7 @@ interface ProjectsGateway : ProjectRegistry, ActionLifecycleObserver {
     fun projectStatus(projectId: String): ProjectState? = null
 }
 
-object NoopProjectsGateway : ProjectsGateway {
+object NoopGoalsGateway : GoalsGateway {
     override fun activeProjects(): List<ai.neopsyke.agent.id.Project> = emptyList()
 }
 

@@ -62,16 +62,16 @@ object ProjectContextLoader {
     }
 
     /**
-     * Build a [ProjectWorkUnit] for the Ego to process.
+     * Build a [GoalRunActivation] for the Ego to process.
      */
     fun buildWorkUnit(
         state: ProjectState,
         step: PlanStep,
         rootInputId: String,
         wakeReason: String,
-    ): ProjectWorkUnit {
+    ): GoalRunActivation {
         val tier2 = tier2Context(state.project.workspacePath)
-        return ProjectWorkUnit(
+        return GoalRunActivation(
             projectId = state.id,
             stepId = step.id,
             rootInputId = rootInputId,
@@ -87,7 +87,7 @@ object ProjectContextLoader {
      *
      * This is the handoff document that preserves inter-session continuity.
      * It captures current state, what happened this cycle, and pointers to
-     * detailed content. The Ego calls this via ProjectManager after each
+     * detailed content. The Ego calls this via GoalManager after each
      * project_advance resolution.
      *
      * @param state the current project state (post-cycle)

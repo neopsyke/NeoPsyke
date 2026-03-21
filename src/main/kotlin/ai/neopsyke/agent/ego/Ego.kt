@@ -12,11 +12,11 @@ import ai.neopsyke.agent.cortex.sensory.RuntimeControlSignal
 import ai.neopsyke.agent.cortex.sensory.SensoryCortex
 import ai.neopsyke.agent.memory.episodic.EpisodicEventType
 import ai.neopsyke.agent.memory.scratchpad.ScratchpadStore
-import ai.neopsyke.agent.id.EmptyProjectRegistry
-import ai.neopsyke.agent.id.ProjectRegistry
-import ai.neopsyke.agent.project.NoopProjectsGateway
-import ai.neopsyke.agent.project.ProjectWorkUnit
-import ai.neopsyke.agent.project.ProjectsGateway
+import ai.neopsyke.agent.id.EmptyGoalRegistry
+import ai.neopsyke.agent.id.GoalRegistry
+import ai.neopsyke.agent.project.NoopGoalsGateway
+import ai.neopsyke.agent.project.GoalRunActivation
+import ai.neopsyke.agent.project.GoalsGateway
 import ai.neopsyke.agent.support.TextSecurity
 import ai.neopsyke.agent.superego.Superego
 import ai.neopsyke.instrumentation.AgentEvent
@@ -38,8 +38,8 @@ class Ego(
     private val taskWorkspaceStore: ScratchpadStore = ScratchpadStore(config.memory.taskWorkspace),
     private val taskWorkspaceFinalizer: ScratchpadFinalizer = NoopScratchpadFinalizer,
     private val instrumentation: AgentInstrumentation = NoopAgentInstrumentation,
-    private val projectRegistry: ProjectRegistry = EmptyProjectRegistry,
-    private val projectsGateway: ProjectsGateway = NoopProjectsGateway,
+    private val projectRegistry: GoalRegistry = EmptyGoalRegistry,
+    private val projectsGateway: GoalsGateway = NoopGoalsGateway,
 ) {
     @Volatile private var id: ai.neopsyke.agent.id.Id? = null
 
@@ -491,7 +491,7 @@ class Ego(
         actionPipeline.reviewAndExecute(action)
     }
 
-    private suspend fun processProjectWork(work: ProjectWorkUnit) {
+    private suspend fun processProjectWork(work: GoalRunActivation) {
         val timing = PhaseTimingCollector("project_work", "project:${work.projectId}")
         val convCtx = ConversationContext.default()
         val sessionId = resolveSessionId(convCtx)

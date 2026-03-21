@@ -12,7 +12,7 @@ import java.time.Instant
  *
  * Stub interface — returns an empty list until the project system is implemented.
  */
-interface ProjectRegistry {
+interface GoalRegistry {
     fun activeProjects(): List<Project>
 }
 
@@ -22,6 +22,6 @@ data class Project(
     val lastActedAt: Instant? = null,
 )
 
-object EmptyProjectRegistry : ProjectRegistry {
+object EmptyGoalRegistry : GoalRegistry {
     override fun activeProjects(): List<Project> = emptyList()
 }

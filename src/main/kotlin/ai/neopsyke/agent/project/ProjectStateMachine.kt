@@ -27,7 +27,7 @@ data class ProjectState(
 
 /**
  * Pure state machine: no side effects, no I/O.
- * Returns the new state and a list of commands the ProjectManager should dispatch.
+ * Returns the new state and a list of commands the GoalManager should dispatch.
  */
 object ProjectStateMachine {
 

@@ -7,7 +7,7 @@ import com.fasterxml.jackson.module.kotlin.readValue
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
 import mu.KotlinLogging
-import ai.neopsyke.agent.project.ProjectManager
+import ai.neopsyke.agent.project.GoalManager
 import ai.neopsyke.metrics.LlmCallStatsReport
 import java.nio.file.Files
 import java.nio.file.Path
@@ -36,7 +36,7 @@ class DashboardServer(
     private val innerVoiceStore: InnerVoiceStore? = null,
     private val idInnerVoiceFilePath: Path? = null,
     @Volatile var metricsQueryProvider: MetricsQueryProvider? = null,
-    @Volatile var projectManager: ProjectManager? = null,
+    @Volatile var projectManager: GoalManager? = null,
     port: Int,
     host: String = "127.0.0.1",
 ) : Closeable {

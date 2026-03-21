@@ -2,7 +2,7 @@ package ai.neopsyke.agent.model
 
 import ai.neopsyke.agent.actions.async.AsyncActionWait
 import ai.neopsyke.agent.id.ConvergenceMode
-import ai.neopsyke.agent.project.ProjectWorkUnit
+import ai.neopsyke.agent.project.GoalRunActivation
 
 /**
  * Snapshot of the Id's drive state, injected into [PlannerContext] when the
@@ -92,7 +92,7 @@ sealed interface EgoTrigger {
     data class IncomingInput(val input: PendingInput) : EgoTrigger
     data class PendingThoughtInput(val thought: PendingThought) : EgoTrigger
     data class IncomingImpulse(val impulse: PendingImpulse) : EgoTrigger
-    data class ProjectWork(val workUnit: ProjectWorkUnit) : EgoTrigger
+    data class ProjectWork(val workUnit: GoalRunActivation) : EgoTrigger
 }
 
 sealed interface EgoDecision {

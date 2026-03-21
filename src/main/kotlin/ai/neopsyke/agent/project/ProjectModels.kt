@@ -100,9 +100,9 @@ enum class TimeoutAction {
 }
 
 /**
- * A unit of project work selected by the ProjectManager for the Ego to execute.
+ * A unit of project work selected by the GoalManager for the Ego to execute.
  */
-data class ProjectWorkUnit(
+data class GoalRunActivation(
     val projectId: String,
     val stepId: String,
     val rootInputId: String,
@@ -115,7 +115,7 @@ data class ProjectWorkUnit(
 
 /**
  * Compact summary of a project (~100 tokens) — Tier 1 context.
- * Always kept in memory by the ProjectManager.
+ * Always kept in memory by the GoalManager.
  */
 data class ProjectTier1Summary(
     val projectId: String,

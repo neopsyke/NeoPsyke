@@ -34,7 +34,7 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
-class ProjectManagerTest {
+class GoalManagerTest {
 
     private fun testConfig(root: java.nio.file.Path) = ProjectConfig(
         enabled = true,
@@ -51,7 +51,7 @@ class ProjectManagerTest {
         val root = Files.createTempDirectory("psyke-pm-create")
         try {
             val signals = CopyOnWriteArrayList<GoalRuntimeCue>()
-            val manager = ProjectManager(
+            val manager = GoalManager(
                 config = testConfig(root),
                 store = ProjectStore(root),
                 planner = DeterministicProjectPlanner(),
@@ -83,7 +83,7 @@ class ProjectManagerTest {
     fun `nextWorkFromCue creates project session and returns work unit`() {
         val root = Files.createTempDirectory("psyke-pm-work")
         try {
-            val manager = ProjectManager(
+            val manager = GoalManager(
                 config = testConfig(root),
                 store = ProjectStore(root),
                 planner = DeterministicProjectPlanner(),
@@ -107,7 +107,7 @@ class ProjectManagerTest {
         val root = Files.createTempDirectory("psyke-pm-complete")
         try {
             val signals = CopyOnWriteArrayList<GoalRuntimeCue>()
-            val manager = ProjectManager(
+            val manager = GoalManager(
                 config = testConfig(root),
                 store = ProjectStore(root),
                 planner = DeterministicProjectPlanner(),
@@ -161,7 +161,7 @@ class ProjectManagerTest {
                 )
             )
             val signals = CopyOnWriteArrayList<GoalRuntimeCue>()
-            val manager = ProjectManager(
+            val manager = GoalManager(
                 config = testConfig(root).copy(conditionCheckIntervalMs = 25),
                 store = ProjectStore(root),
                 planner = DeterministicProjectPlanner(),
@@ -203,7 +203,7 @@ class ProjectManagerTest {
         try {
             val instrumentation = RecordingInstrumentation()
             val signals = CopyOnWriteArrayList<GoalRuntimeCue>()
-            val manager = ProjectManager(
+            val manager = GoalManager(
                 config = testConfig(root),
                 store = ProjectStore(root),
                 planner = DeterministicProjectPlanner(),
@@ -257,7 +257,7 @@ class ProjectManagerTest {
             val store = ProjectStore(root)
             val provider = StubAsyncOperationProvider()
             provider.enqueue(operationId = "op-restore", statuses = listOf(AsyncOperationStatus.Pending("queued")))
-            val manager1 = ProjectManager(
+            val manager1 = GoalManager(
                 config = testConfig(root).copy(conditionCheckIntervalMs = 25),
                 store = store,
                 planner = DeterministicProjectPlanner(),
@@ -277,7 +277,7 @@ class ProjectManagerTest {
 
             provider.enqueue(operationId = "op-restore", statuses = listOf(AsyncOperationStatus.Succeeded("restored completion")))
             val signals = CopyOnWriteArrayList<GoalRuntimeCue>()
-            val manager2 = ProjectManager(
+            val manager2 = GoalManager(
                 config = testConfig(root).copy(conditionCheckIntervalMs = 25),
                 store = store,
                 asyncOperationRegistry = AsyncOperationRegistry.fromProviders(listOf(provider)),
@@ -304,7 +304,7 @@ class ProjectManagerTest {
         try {
             val store = ProjectStore(root)
             val provider = StubAsyncOperationProvider()
-            val manager1 = ProjectManager(
+            val manager1 = GoalManager(
                 config = testConfig(root),
                 store = store,
                 planner = DeterministicProjectPlanner(),
@@ -323,7 +323,7 @@ class ProjectManagerTest {
             manager1.stop()
 
             val signals = CopyOnWriteArrayList<GoalRuntimeCue>()
-            val manager2 = ProjectManager(
+            val manager2 = GoalManager(
                 config = testConfig(root),
                 store = store,
                 asyncOperationRegistry = AsyncOperationRegistry.fromProviders(listOf(provider)),
@@ -363,7 +363,7 @@ class ProjectManagerTest {
         val root = Files.createTempDirectory("psyke-pm-workspace")
         try {
             val signals = CopyOnWriteArrayList<GoalRuntimeCue>()
-            val manager = ProjectManager(
+            val manager = GoalManager(
                 config = testConfig(root),
                 store = ProjectStore(root),
                 planner = DeterministicProjectPlanner(),
@@ -426,7 +426,7 @@ class ProjectManagerTest {
     fun `pendingWorkSummary returns empty when no projects exist`() {
         val root = Files.createTempDirectory("psyke-pm-summary")
         try {
-            val manager = ProjectManager(
+            val manager = GoalManager(
                 config = testConfig(root),
                 store = ProjectStore(root),
             )
@@ -443,7 +443,7 @@ class ProjectManagerTest {
         val root = Files.createTempDirectory("psyke-pm-limit")
         try {
             val config = testConfig(root).copy(maxActiveProjects = 2)
-            val manager = ProjectManager(
+            val manager = GoalManager(
                 config = config,
                 store = ProjectStore(root),
             )
@@ -468,7 +468,7 @@ class ProjectManagerTest {
         val root = Files.createTempDirectory("psyke-pm-restart")
         try {
             val store = ProjectStore(root)
-            val manager1 = ProjectManager(
+            val manager1 = GoalManager(
                 config = testConfig(root),
                 store = store,
                 planner = DeterministicProjectPlanner(),
@@ -477,7 +477,7 @@ class ProjectManagerTest {
             val id = manager1.createProject("Persistent task")
             manager1.stop()
 
-            val manager2 = ProjectManager(
+            val manager2 = GoalManager(
                 config = testConfig(root),
                 store = store,
             )
@@ -527,7 +527,7 @@ class ProjectManagerTest {
                 lastWorkedAt = recentCompletion,
             )
 
-            val manager = ProjectManager(
+            val manager = GoalManager(
                 config = testConfig(root).copy(completedProjectRetentionDays = 1),
                 store = store,
             )
@@ -547,7 +547,7 @@ class ProjectManagerTest {
     fun `nextWorkFromCue returns null when project is missing`() {
         val root = Files.createTempDirectory("psyke-pm-missing")
         try {
-            val manager = ProjectManager(
+            val manager = GoalManager(
                 config = testConfig(root),
                 store = ProjectStore(root),
             )
@@ -564,7 +564,7 @@ class ProjectManagerTest {
         val root = Files.createTempDirectory("psyke-pm-restore-suspend")
         try {
             val store = ProjectStore(root)
-            val manager1 = ProjectManager(
+            val manager1 = GoalManager(
                 config = testConfig(root),
                 store = store,
                 planner = DeterministicProjectPlanner(),
@@ -579,7 +579,7 @@ class ProjectManagerTest {
             manager1.stop()
 
             val signals = CopyOnWriteArrayList<GoalRuntimeCue>()
-            val manager2 = ProjectManager(
+            val manager2 = GoalManager(
                 config = testConfig(root),
                 store = store,
                 cueEmitter = { cue -> signals += cue },
@@ -602,7 +602,7 @@ class ProjectManagerTest {
         val root = Files.createTempDirectory("psyke-pm-restore-wait")
         try {
             val store = ProjectStore(root)
-            val manager1 = ProjectManager(
+            val manager1 = GoalManager(
                 config = testConfig(root),
                 store = store,
                 planner = DeterministicProjectPlanner(),
@@ -626,7 +626,7 @@ class ProjectManagerTest {
             manager1.stop()
 
             val signals = CopyOnWriteArrayList<GoalRuntimeCue>()
-            val manager2 = ProjectManager(
+            val manager2 = GoalManager(
                 config = testConfig(root),
                 store = store,
                 cueEmitter = { cue -> signals += cue },
@@ -650,7 +650,7 @@ class ProjectManagerTest {
         val root = Files.createTempDirectory("psyke-pm-restore-condition-check")
         try {
             val store = ProjectStore(root)
-            val manager1 = ProjectManager(
+            val manager1 = GoalManager(
                 config = testConfig(root).copy(conditionCheckIntervalMs = 25),
                 store = store,
                 planner = DeterministicProjectPlanner(),
@@ -674,7 +674,7 @@ class ProjectManagerTest {
             manager1.stop()
 
             val signals = CopyOnWriteArrayList<GoalRuntimeCue>()
-            val manager2 = ProjectManager(
+            val manager2 = GoalManager(
                 config = testConfig(root).copy(conditionCheckIntervalMs = 25),
                 store = store,
                 cueEmitter = { cue -> signals += cue },
@@ -698,7 +698,7 @@ class ProjectManagerTest {
         val root = Files.createTempDirectory("psyke-pm-restore-external-event")
         try {
             val store = ProjectStore(root)
-            val manager1 = ProjectManager(
+            val manager1 = GoalManager(
                 config = testConfig(root).copy(conditionCheckIntervalMs = 25),
                 store = store,
                 planner = DeterministicProjectPlanner(),
@@ -722,7 +722,7 @@ class ProjectManagerTest {
             manager1.stop()
 
             val signals = CopyOnWriteArrayList<GoalRuntimeCue>()
-            val manager2 = ProjectManager(
+            val manager2 = GoalManager(
                 config = testConfig(root).copy(conditionCheckIntervalMs = 25),
                 store = store,
                 cueEmitter = { cue -> signals += cue },
@@ -746,7 +746,7 @@ class ProjectManagerTest {
         val root = Files.createTempDirectory("psyke-pm-restore-cron")
         try {
             val store = ProjectStore(root)
-            val manager1 = ProjectManager(
+            val manager1 = GoalManager(
                 config = testConfig(root),
                 store = store,
                 planner = DeterministicProjectPlanner(),
@@ -760,7 +760,7 @@ class ProjectManagerTest {
             )
             manager1.stop()
 
-            val manager2 = ProjectManager(
+            val manager2 = GoalManager(
                 config = testConfig(root),
                 store = store,
             )
@@ -868,8 +868,8 @@ class ProjectManagerTest {
     }
 
     @Suppress("UNCHECKED_CAST")
-    private fun timerSchedulerCronSchedules(manager: ProjectManager): Map<String, String> {
-        val timerField = ProjectManager::class.java.getDeclaredField("timerScheduler")
+    private fun timerSchedulerCronSchedules(manager: GoalManager): Map<String, String> {
+        val timerField = GoalManager::class.java.getDeclaredField("timerScheduler")
         timerField.isAccessible = true
         val timer = timerField.get(manager) ?: error("TimerScheduler was not initialized")
         val cronField = timer.javaClass.getDeclaredField("cronSchedules")

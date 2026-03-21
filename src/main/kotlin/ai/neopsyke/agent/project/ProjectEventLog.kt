@@ -15,7 +15,7 @@ private val logger = KotlinLogging.logger {}
  * Append-only JSONL event log for a single project.
  *
  * Each line is a JSON object with `"type"` discriminator + event fields.
- * Thread-safety: single-writer assumed (ProjectManager serializes writes).
+ * Thread-safety: single-writer assumed (GoalManager serializes writes).
  */
 class ProjectEventLog(private val path: Path) {
 

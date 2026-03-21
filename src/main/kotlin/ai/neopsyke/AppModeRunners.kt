@@ -985,7 +985,7 @@ internal object AppModeRunners {
                                                     val logbookSummarizer = createLogbookSummarizer(config, longTermMemoryClient)
                                                     val webSearchActionHandler = WebSearchActionHandler(runtime.engine)
                                                     val projectManager = if (config.projects.enabled) {
-                                                        ai.neopsyke.agent.project.ProjectManager(
+                                                        ai.neopsyke.agent.project.GoalManager(
                                                             config = config.projects,
                                                             store = ai.neopsyke.agent.project.ProjectStore(config.projects.workspaceRoot),
                                                             planner = ai.neopsyke.agent.project.LlmProjectPlanner(plannerClient, config),
@@ -1079,7 +1079,7 @@ internal object AppModeRunners {
                                                         mcpTimeTool = timeTool,
                                                         fetchTool = activeFetchTool,
                                                         projectsGateway = projectManager
-                                                            ?: ai.neopsyke.agent.project.NoopProjectsGateway,
+                                                            ?: ai.neopsyke.agent.project.NoopGoalsGateway,
                                                         output = {},
                                                     )
                                                     assembly.actionRegistry.loadWarnings.forEach { warning ->
@@ -1439,7 +1439,7 @@ internal object AppModeRunners {
                                                 val logbookSummarizer = createLogbookSummarizer(config, longTermMemoryClient)
                                                 val webSearchActionHandler = WebSearchActionHandler(runtime.engine)
                                                 val projectManager = if (config.projects.enabled) {
-                                                    ai.neopsyke.agent.project.ProjectManager(
+                                                    ai.neopsyke.agent.project.GoalManager(
                                                         config = config.projects,
                                                         store = ai.neopsyke.agent.project.ProjectStore(config.projects.workspaceRoot),
                                                         planner = ai.neopsyke.agent.project.LlmProjectPlanner(plannerClient, config),
@@ -1510,7 +1510,7 @@ internal object AppModeRunners {
                                                     mcpTimeTool = timeTool,
                                                     fetchTool = activeFetchTool,
                                                     projectsGateway = projectManager
-                                                        ?: ai.neopsyke.agent.project.NoopProjectsGateway,
+                                                        ?: ai.neopsyke.agent.project.NoopGoalsGateway,
                                                     output = liveOutput,
                                                 )
                                                 assembly.actionRegistry.loadWarnings.forEach { warning ->

@@ -52,7 +52,7 @@ class ProjectOperationActionPluginTest {
     @Test
     fun `plugin routes create operation through projects gateway`() = runBlocking {
         var capturedRequest: ProjectOperationRequest? = null
-        val gateway = object : ProjectsGateway by NoopProjectsGateway {
+        val gateway = object : GoalsGateway by NoopGoalsGateway {
             override fun executeOperation(request: ProjectOperationRequest): ProjectOperationResult {
                 capturedRequest = request
                 return ProjectOperationResult(true, "created", "proj-1")
@@ -91,7 +91,7 @@ class ProjectOperationActionPluginTest {
     fun `plugin executes project lifecycle operations through manager gateway`() = runBlocking {
         val root = Files.createTempDirectory("psyke-project-op-lifecycle")
         try {
-            val manager = ProjectManager(
+            val manager = GoalManager(
                 config = ProjectConfig(enabled = true, workspaceRoot = root),
                 store = ProjectStore(root),
                 planner = DeterministicProjectPlanner(),
@@ -160,7 +160,7 @@ class ProjectOperationActionPluginTest {
                     )
                 }
             }
-            val manager = ProjectManager(
+            val manager = GoalManager(
                 config = ProjectConfig(enabled = true, workspaceRoot = root),
                 store = ProjectStore(root),
                 planner = planner,
@@ -195,7 +195,7 @@ class ProjectOperationActionPluginTest {
             ActionExecutionContext(searchResultCount = 0)
         )
 
-    private fun projectPlugin(gateway: ProjectsGateway, root: java.nio.file.Path) =
+    private fun projectPlugin(gateway: GoalsGateway, root: java.nio.file.Path) =
         ProjectOperationActionPlugin(
             ActionPluginFactoryContext(
                 config = AgentConfig(projects = ProjectConfig(enabled = true, workspaceRoot = root)),

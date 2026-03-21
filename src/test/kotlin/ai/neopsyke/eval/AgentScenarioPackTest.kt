@@ -51,7 +51,7 @@ import ai.neopsyke.agent.memory.longterm.MemoryRecall
 import ai.neopsyke.agent.memory.longterm.MemoryRecallQuery
 import ai.neopsyke.agent.project.DeterministicProjectPlanner
 import ai.neopsyke.agent.project.ProjectConfig
-import ai.neopsyke.agent.project.ProjectManager
+import ai.neopsyke.agent.project.GoalManager
 import ai.neopsyke.agent.project.ProjectPriority
 import ai.neopsyke.agent.project.ProjectStatus
 import ai.neopsyke.agent.project.ProjectStore
@@ -607,7 +607,7 @@ class AgentScenarioPackTest {
                 )
             )
         }
-        val manager = ProjectManager(
+        val manager = GoalManager(
             config = config.projects,
             store = ProjectStore(root),
             planner = DeterministicProjectPlanner(),
@@ -743,7 +743,7 @@ class AgentScenarioPackTest {
     }
 
     private suspend fun waitForProjectStatus(
-        manager: ProjectManager,
+        manager: GoalManager,
         projectId: String,
         status: ProjectStatus,
     ) {

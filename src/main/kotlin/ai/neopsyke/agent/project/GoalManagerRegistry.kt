@@ -1,16 +1,16 @@
 package ai.neopsyke.agent.project
 
-import ai.neopsyke.agent.id.ProjectRegistry
+import ai.neopsyke.agent.id.GoalRegistry
 import ai.neopsyke.agent.id.Project as IdProject
 import java.time.Instant
 
 /**
- * Adapter that implements [ProjectRegistry] (used by existing Ego ambient context)
- * by delegating to [ProjectManager].
+ * Adapter that implements [GoalRegistry] (used by existing Ego ambient context)
+ * by delegating to [GoalManager].
  */
-class ProjectManagerRegistry(
-    private val projectManager: ProjectManager,
-) : ProjectRegistry {
+class GoalManagerRegistry(
+    private val projectManager: GoalManager,
+) : GoalRegistry {
 
     override fun activeProjects(): List<IdProject> =
         projectManager.allProjects()

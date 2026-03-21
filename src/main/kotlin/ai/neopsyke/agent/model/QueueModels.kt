@@ -121,7 +121,7 @@ sealed interface OpportunityWorkItem {
         override val conversationContext: ConversationContext = impulse.conversationContext
     }
 
-    data class GoalWorkOpportunity(val workUnit: ai.neopsyke.agent.project.ProjectWorkUnit) : OpportunityWorkItem {
+    data class GoalWorkOpportunity(val workUnit: ai.neopsyke.agent.project.GoalRunActivation) : OpportunityWorkItem {
         override val id: Long = workUnit.rootInputId.hashCode().toLong()
         override val rootInputId: String = workUnit.rootInputId
         override val conversationContext: ConversationContext = ConversationContext.default()

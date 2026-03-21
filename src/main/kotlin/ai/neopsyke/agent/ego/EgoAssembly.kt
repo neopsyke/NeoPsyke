@@ -15,8 +15,8 @@ import ai.neopsyke.agent.memory.longterm.NoopHippocampus
 import ai.neopsyke.agent.memory.longterm.NoopLongTermMemoryAdvisor
 import ai.neopsyke.agent.memory.shortterm.MemoryStore
 import ai.neopsyke.agent.memory.scratchpad.ScratchpadStore
-import ai.neopsyke.agent.project.NoopProjectsGateway
-import ai.neopsyke.agent.project.ProjectsGateway
+import ai.neopsyke.agent.project.NoopGoalsGateway
+import ai.neopsyke.agent.project.GoalsGateway
 import ai.neopsyke.agent.superego.Superego
 import ai.neopsyke.agent.tools.mcp.FetchTool
 import ai.neopsyke.agent.tools.mcp.McpTimeTool
@@ -72,7 +72,7 @@ object EgoAssembler {
         webSearchActionHandler: WebSearchActionHandler? = null,
         mcpTimeTool: McpTimeTool? = null,
         fetchTool: FetchTool? = null,
-        projectsGateway: ProjectsGateway = NoopProjectsGateway,
+        projectsGateway: GoalsGateway = NoopGoalsGateway,
         output: (String) -> Unit = {},
     ): EgoAssembly {
         val memory = buildMemorySystem(

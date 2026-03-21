@@ -2,7 +2,7 @@ package ai.neopsyke.agent.ego
 
 import ai.neopsyke.agent.config.*
 import ai.neopsyke.agent.model.*
-import ai.neopsyke.agent.project.ProjectWorkUnit
+import ai.neopsyke.agent.project.GoalRunActivation
 import java.util.PriorityQueue
 
 class AttentionScheduler(
@@ -138,7 +138,7 @@ class AttentionScheduler(
         opportunities.removeIf { it is OpportunityWorkItem.ImpulseOpportunity }
     }
 
-    fun enqueueProjectWork(workUnit: ProjectWorkUnit): Boolean {
+    fun enqueueProjectWork(workUnit: GoalRunActivation): Boolean {
         opportunities.add(OpportunityWorkItem.GoalWorkOpportunity(workUnit))
         return true
     }

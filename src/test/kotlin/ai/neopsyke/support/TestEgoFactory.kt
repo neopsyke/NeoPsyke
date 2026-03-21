@@ -16,8 +16,8 @@ import ai.neopsyke.agent.memory.longterm.Hippocampus
 import ai.neopsyke.agent.memory.longterm.LongTermMemoryAdvisor
 import ai.neopsyke.agent.memory.longterm.NoopHippocampus
 import ai.neopsyke.agent.memory.longterm.NoopLongTermMemoryAdvisor
-import ai.neopsyke.agent.project.NoopProjectsGateway
-import ai.neopsyke.agent.project.ProjectsGateway
+import ai.neopsyke.agent.project.NoopGoalsGateway
+import ai.neopsyke.agent.project.GoalsGateway
 import ai.neopsyke.agent.superego.Superego
 import ai.neopsyke.instrumentation.AgentInstrumentation
 import ai.neopsyke.instrumentation.NoopAgentInstrumentation
@@ -36,7 +36,7 @@ fun buildTestEgo(
     logbook: Logbook? = null,
     logbookSummarizer: LogbookSummarizer = DeterministicLogbookSummarizer(config.logbook),
     runId: String? = null,
-    projectsGateway: ProjectsGateway = NoopProjectsGateway,
+    projectsGateway: GoalsGateway = NoopGoalsGateway,
 ): Ego {
     val memory = EgoAssembler.buildMemorySystem(
         config = config,
