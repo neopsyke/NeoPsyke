@@ -265,7 +265,7 @@ Freud live eval (single-input, STDIN/STDOUT, with LLM response caching):
 ```bash
 # Preferred wrapper for one-shot live/provider-backed evals:
 freud/scripts/live-eval.sh --input input.txt --expected expected.txt --timeout 120
-freud/scripts/live-eval.sh --input input.txt --cache-replay .neopsyke/runs/freud/latest/artifacts/llm-cache.jsonl
+freud/scripts/live-eval.sh --input input.txt --cache-replay "$(cat .neopsyke/runs/freud/latest-run.txt)/artifacts/llm-cache.jsonl"
 freud/scripts/live-eval.sh --input input.txt --preserve-memory
 
 # Lower-level debugging path if you are working on the wrapper itself:
@@ -292,17 +292,21 @@ freud/scripts/feature-loop.sh reasoning-matrix
 # Deterministic reasoning PR gate only
 freud/scripts/run-reasoning-pr-gate.sh
 
-# Manual weak-structure live lane
-freud/scripts/feature-loop.sh reasoning-matrix --live --config freud/config/live-weak-structure.env
+# Direct weak-structure live suite
+freud/scripts/run-bbh-smoke.sh --lane weak-structure
 
-# Manual production-routing live lane
-freud/scripts/feature-loop.sh reasoning-matrix --live --config freud/config/live-prod-acceptance.env
+# Direct production-routing live suite
+freud/scripts/run-bbh-smoke.sh --lane prod-acceptance
+
+# Orchestrated deterministic + live run
+freud/scripts/feature-loop.sh reasoning-matrix --live --config freud/config/live-weak-structure.env
 ```
 
 Freud reasoning lane notes:
 - `reasoning_eval_logic` now runs two deterministic passes: the existing logic core and a 45-case behavioral/perturbation logic pack.
 - `reasoning_eval_model` is reserved for manual live reasoning checks and currently runs a frozen 24-case BBH-style smoke slice.
-- The live reasoning lane always routes through `freud/scripts/live-eval.sh`, which invokes the lower-level `./run-neopsyke.sh --freud-live` path for each case.
+- `freud/scripts/run-bbh-smoke.sh` is the direct live reasoning suite entrypoint, and `freud/scripts/feature-loop.sh --live` orchestrates it after the deterministic steps.
+- The live reasoning lane still routes through `freud/scripts/live-eval.sh`, which invokes the lower-level `./run-neopsyke.sh --freud-live` path for each case.
 - The BBH smoke slice disables long-term MCP memory and episodic logbook recall by default so the lane measures reasoning instead of memory effects. Override with `FREUD_BBH_MCP_MEMORY_ENABLED=true` and/or `FREUD_BBH_LOGBOOK_ENABLED=true` only for explicit memory-aware experiments.
 - `FREUD_BBH_PRESERVE_MEMORY=true` is available if a future live reasoning sequence needs shared isolated memory across cases. The current BBH slice should keep the default isolated-per-case behavior.
 - The live lane configs intentionally do not hardcode local machine paths. They resolve repo-local YAML snapshots relative to the config directory so the committed setup stays portable across machines.

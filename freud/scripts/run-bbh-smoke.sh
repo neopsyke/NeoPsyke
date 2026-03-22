@@ -10,6 +10,10 @@ Usage: freud/scripts/run-bbh-smoke.sh [--lane <name>]
 
 Runs the frozen BBH-style smoke manifest through freud/scripts/live-eval.sh and
 scores exact normalized answer matches.
+
+Lanes:
+  weak-structure   weaker planner/meta routing
+  prod-acceptance  frozen production routing
 EOF
 }
 
@@ -55,6 +59,9 @@ MAX_REGRESSION_PERCENT="${FREUD_BBH_MAX_REGRESSION_PERCENT:-0}"
 PRESERVE_MEMORY="${FREUD_BBH_PRESERVE_MEMORY:-${FREUD_LIVE_EVAL_PRESERVE_MEMORY:-false}}"
 BBH_MCP_MEMORY_ENABLED="${FREUD_BBH_MCP_MEMORY_ENABLED:-false}"
 BBH_LOGBOOK_ENABLED="${FREUD_BBH_LOGBOOK_ENABLED:-false}"
+runtime_bootstrap_failure_count=0
+provider_model_failure_count=0
+live_eval_error_count=0
 
 if [[ ! -f "$PROMPTS_FILE" ]]; then
   echo "Prompt manifest not found: $PROMPTS_FILE"
@@ -62,6 +69,14 @@ if [[ ! -f "$PROMPTS_FILE" ]]; then
 fi
 if [[ ! -f "$ANSWERS_FILE" ]]; then
   echo "Answer manifest not found: $ANSWERS_FILE"
+  exit 1
+fi
+if [[ -z "$LIVE_EVAL_CMD" ]]; then
+  echo "BBH live lane not configured: FREUD_BBH_LIVE_EVAL_CMD resolved to an empty command."
+  exit 1
+fi
+if [[ ! -x "$LIVE_EVAL_CMD" ]]; then
+  echo "BBH live lane not configured: live eval command is not executable: $LIVE_EVAL_CMD"
   exit 1
 fi
 
@@ -134,8 +149,11 @@ write_summary() {
   local failed="$3"
   local timeout_count="$4"
   local schema_downgrade_count="$5"
-  local exact_match_rate="$6"
-  local regression_fail="$7"
+  local runtime_failure_count="$6"
+  local provider_failure_count="$7"
+  local live_eval_error_count_local="$8"
+  local exact_match_rate="$9"
+  local regression_fail="${10}"
 
   cat >"$SUMMARY_JSON" <<EOF
 {
@@ -145,6 +163,9 @@ write_summary() {
   "failed_cases": $failed,
   "timeout_count": $timeout_count,
   "schema_downgrade_count": $schema_downgrade_count,
+  "runtime_bootstrap_failure_count": $runtime_failure_count,
+  "provider_model_failure_count": $provider_failure_count,
+  "live_eval_error_count": $live_eval_error_count_local,
   "exact_match_rate_percent": $exact_match_rate,
   "min_pass_rate_percent": $MIN_PASS_RATE_PERCENT,
   "max_timeouts": $MAX_TIMEOUTS,
@@ -165,6 +186,9 @@ EOF
     echo "- failed_cases: \`$failed\`"
     echo "- timeout_count: \`$timeout_count\`"
     echo "- schema_downgrade_count: \`$schema_downgrade_count\`"
+    echo "- runtime_bootstrap_failure_count: \`$runtime_failure_count\`"
+    echo "- provider_model_failure_count: \`$provider_failure_count\`"
+    echo "- live_eval_error_count: \`$live_eval_error_count_local\`"
     echo "- exact_match_rate_percent: \`$exact_match_rate\`"
     echo
     echo "## Results"
@@ -224,7 +248,7 @@ EOF
   } >"$PROGRESS_MD"
 }
 
-printf "id\tcategory\tstatus\texpected\tactual\ttimeout\tschema_downgrade\trun_dir\n" >"$RESULTS_TSV"
+printf "id\tcategory\tstatus\tfailure_class\tdetail\texpected\tactual\ttimeout\tschema_downgrade\trun_dir\n" >"$RESULTS_TSV"
 
 total=0
 passed=0
@@ -270,6 +294,12 @@ while IFS=$'\t' read -r id category prompt; do
   fi
   actual="$(normalize_answer "$actual_raw")"
   expected_normalized="$(normalize_answer "$expected")"
+  failure_class=""
+  verdict_detail=""
+  if [[ -f "$verdict_file" ]]; then
+    failure_class="$(jq -r '.failure_class // ""' "$verdict_file" 2>/dev/null || true)"
+    verdict_detail="$(jq -r '.detail // ""' "$verdict_file" 2>/dev/null || true)"
+  fi
 
   schema_count_for_case="$(schema_downgrade_count_for_case "$case_dir")"
   schema_downgrade_count=$((schema_downgrade_count + schema_count_for_case))
@@ -290,14 +320,34 @@ while IFS=$'\t' read -r id category prompt; do
   elif [[ "$live_status" -eq 0 && "$actual" == "$expected_normalized" ]]; then
     case_status="pass"
     passed=$((passed + 1))
+  elif [[ "$failure_class" == "local_runtime_bootstrap_failure" || ( "$live_status" -ne 0 && ! -f "$verdict_file" ) ]]; then
+    case_status="runtime_bootstrap_failure"
+    failure_class="${failure_class:-local_runtime_bootstrap_failure}"
+    verdict_detail="${verdict_detail:-live-eval exited before writing verdict artifacts.}"
+    runtime_bootstrap_failure_count=$((runtime_bootstrap_failure_count + 1))
+    failed=$((failed + 1))
+  elif [[ "$failure_class" == "provider_model_failure" ]]; then
+    case_status="provider_model_failure"
+    provider_model_failure_count=$((provider_model_failure_count + 1))
+    failed=$((failed + 1))
+  elif [[ "$live_status" -eq 0 ]]; then
+    case_status="scoring_failure"
+    failure_class="${failure_class:-live_eval_scoring_failure}"
+    failed=$((failed + 1))
   else
+    case_status="live_eval_error"
+    failure_class="${failure_class:-live_eval_process_failure}"
+    verdict_detail="${verdict_detail:-live-eval exited with code $live_status before scoring.}"
+    live_eval_error_count=$((live_eval_error_count + 1))
     failed=$((failed + 1))
   fi
 
-  printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n" \
+  printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n" \
     "$id" \
     "$category" \
     "$case_status" \
+    "$(printf '%s' "$failure_class" | tr '\t' ' ')" \
+    "$(printf '%s' "$verdict_detail" | tr '\t' ' ')" \
     "$(printf '%s' "$expected_normalized" | tr '\t' ' ')" \
     "$(printf '%s' "$actual" | tr '\t' ' ')" \
     "$timeout_flag" \
@@ -316,8 +366,23 @@ if [[ -n "$BASELINE_FILE" && -f "$BASELINE_FILE" ]]; then
   fi
 fi
 
-write_summary "$total" "$passed" "$failed" "$timeout_count" "$schema_downgrade_count" "$exact_match_rate" "$regression_fail"
+write_summary "$total" "$passed" "$failed" "$timeout_count" "$schema_downgrade_count" "$runtime_bootstrap_failure_count" "$provider_model_failure_count" "$live_eval_error_count" "$exact_match_rate" "$regression_fail"
 write_progress "completed" "" "" "$total" "$passed" "$failed" "$timeout_count" "$schema_downgrade_count"
+
+if [[ "$runtime_bootstrap_failure_count" -gt 0 ]]; then
+  echo "BBH smoke encountered $runtime_bootstrap_failure_count local runtime/bootstrap failures before case execution or scoring. Inspect failing case verdict.json and stderr.log files."
+  exit 2
+fi
+
+if [[ "$provider_model_failure_count" -gt 0 ]]; then
+  echo "BBH smoke encountered $provider_model_failure_count provider/model failures. Inspect failing case verdict.json files before treating this as a reasoning regression."
+  exit 2
+fi
+
+if [[ "$live_eval_error_count" -gt 0 ]]; then
+  echo "BBH smoke encountered $live_eval_error_count live-eval process failures before reliable scoring. Inspect failing case verdict.json files."
+  exit 2
+fi
 
 if awk -v current="$exact_match_rate" -v min="$MIN_PASS_RATE_PERCENT" 'BEGIN { exit !(current < min) }'; then
   echo "BBH smoke exact-match rate $exact_match_rate is below minimum $MIN_PASS_RATE_PERCENT."

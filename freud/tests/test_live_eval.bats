@@ -166,3 +166,23 @@ EOF
   latest_dir="$(find "$REPO_ROOT/$RUN_ROOT_REL" -mindepth 1 -maxdepth 1 -type d | sort | tail -n 1)"
   grep -qx 'ego> synthetic-answer' "$latest_dir/artifacts/answer.txt"
 }
+
+@test "live-eval classifies local bootstrap failures in verdict artifacts" {
+  FAILING_STUB="$TEST_TMPDIR/failing-neopsyke.sh"
+  cat >"$FAILING_STUB" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+cat >/dev/null
+printf '%s\n' 'Gradle could not start your build.' >&2
+exit 1
+EOF
+  chmod +x "$FAILING_STUB"
+
+  run env \
+    FREUD_LIVE_EVAL_NEOPSYKE_CMD="$FAILING_STUB" \
+    FREUD_RUN_ROOT="$RUN_ROOT_REL" \
+    "$SCRIPTS_DIR/live-eval.sh" --input "$INPUT_FILE"
+  [[ "$status" -eq 1 ]]
+  latest_dir="$(find "$REPO_ROOT/$RUN_ROOT_REL" -mindepth 1 -maxdepth 1 -type d | sort | tail -n 1)"
+  grep -q '"failure_class": "local_runtime_bootstrap_failure"' "$latest_dir/artifacts/verdict.json"
+}

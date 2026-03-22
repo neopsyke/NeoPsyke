@@ -32,6 +32,11 @@ prime_gradle_wrapper_cache
 
 scenario_file="$repo_root/freud/scenarios/v1/neopsyke-agent-scenarios.json"
 dry_run="false"
+validated_manifest="$(mktemp)"
+cleanup() {
+  rm -f "$validated_manifest"
+}
+trap cleanup EXIT
 
 # Keep full workspace debug dumps enabled in direct scenario runs.
 export EGO_SCRATCHPAD_DEBUG_CAPTURE_ENABLED="true"
@@ -70,6 +75,71 @@ fi
 total=0
 passed=0
 failed=0
+
+selector_exists_in_tests() {
+  local selector="$1"
+  local class_part method_part class_short
+  if [[ "$selector" == *"*"* ]]; then
+    return 1
+  fi
+  class_part="${selector%.*}"
+  method_part="${selector##*.}"
+  class_short="${class_part##*.}"
+
+  if [[ -z "$class_short" || -z "$method_part" || "$class_short" == "$method_part" ]]; then
+    return 1
+  fi
+
+  local candidate_files file
+  set +e
+  candidate_files="$(rg -l --glob '*.kt' "fun[[:space:]]+${method_part}[[:space:]]*\\(" "$repo_root/src/test/kotlin" 2>/dev/null)"
+  set -e
+  while IFS= read -r file; do
+    [[ -z "$file" ]] && continue
+    if rg -q "(class|object)[[:space:]]+${class_short}\\b" "$file" 2>/dev/null; then
+      return 0
+    fi
+  done < <(printf '%s\n' "$candidate_files")
+  return 1
+}
+
+load_manifest_to_tsv() {
+  if [[ "$scenario_file" == *.json ]]; then
+    if ! command -v jq >/dev/null 2>&1; then
+      echo "jq is required to read JSON scenario manifests."
+      exit 1
+    fi
+    jq -r '
+      (.scenarios // .)
+      | if type == "array" then . else [] end
+      | .[]
+      | if type == "object" then [(.id // ""), (.selector // ""), (.description // "")] | @tsv else empty end
+    ' "$scenario_file"
+  else
+    cat "$scenario_file"
+  fi
+}
+
+validate_manifest_selectors() {
+  local invalid_count=0
+  while IFS=$'\t' read -r id selector description; do
+    [[ -z "${id:-}" ]] && continue
+    if [[ "$id" == \#* ]]; then
+      continue
+    fi
+    if ! selector_exists_in_tests "$selector"; then
+      echo "stale selector: scenario_id=$id selector=$selector does not match a test under src/test/kotlin"
+      invalid_count=$((invalid_count + 1))
+      continue
+    fi
+    printf '%s\t%s\t%s\n' "$id" "$selector" "$description" >>"$validated_manifest"
+  done < <(load_manifest_to_tsv)
+
+  if [[ "$invalid_count" -gt 0 ]]; then
+    echo "scenario manifest validation failed: $invalid_count stale selector(s) found."
+    exit 1
+  fi
+}
 
 run_scenario() {
   local id="$1"
@@ -111,30 +181,12 @@ run_scenario() {
   fi
 }
 
-if [[ "$scenario_file" == *.json ]]; then
-  if ! command -v jq >/dev/null 2>&1; then
-    echo "jq is required to read JSON scenario manifests."
-    exit 1
-  fi
-  while IFS=$'\t' read -r id selector description; do
-    run_scenario "$id" "$selector" "$description"
-  done < <(
-    jq -r '
-      (.scenarios // .)
-      | if type == "array" then . else [] end
-      | .[]
-      | if type == "object" then [(.id // ""), (.selector // ""), (.description // "")] | @tsv else empty end
-    ' "$scenario_file"
-  )
-else
-  while IFS=$'\t' read -r id selector description; do
-    [[ -z "${id:-}" ]] && continue
-    if [[ "$id" == \#* ]]; then
-      continue
-    fi
-    run_scenario "$id" "$selector" "$description"
-  done <"$scenario_file"
-fi
+validate_manifest_selectors
+
+while IFS=$'\t' read -r id selector description; do
+  [[ -z "${id:-}" ]] && continue
+  run_scenario "$id" "$selector" "$description"
+done <"$validated_manifest"
 
 echo "scenarios_total=$total scenarios_passed=$passed scenarios_failed=$failed"
 if [[ "$failed" -gt 0 ]]; then

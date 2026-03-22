@@ -1,171 +1,243 @@
 # Freud
 
-`Freud` is NeoPsyke's developer workflow layer. It sits on top of the app and gives you repeatable test runs, compact artifacts, fast failure triage, and optional live/provider-backed evals without turning every check into an ad hoc shell session.
+`Freud` is NeoPsyke's developer workflow layer. It gives you a small set of
+repeatable commands, isolated artifacts, and faster failure triage for both
+deterministic checks and optional live/provider-backed evals.
 
-If you're new to the project, the short version is:
-- NeoPsyke runtime code lives in `src/main/kotlin/ai/neopsyke`
-- Freud lives in `freud/`
-- You usually start with `freud/scripts/feature-loop.sh <feature-id>`
-- Freud runs cheap deterministic checks first, then optional live checks, and stores everything under `.neopsyke/runs/freud/`
+## Which Command Do I Use?
 
-## Why Freud Exists
-Without Freud, validating changes tends to fragment into:
-- one-off `gradle` commands
-- manual scenario runs
-- ad hoc live prompts
-- scattered logs with poor comparability
+| If you want to... | Run this |
+|---|---|
+| Validate a code change with the normal deterministic workflow | `freud/scripts/feature-loop.sh <feature-id>` |
+| Run one live prompt through the real agent | `freud/scripts/live-eval.sh --input <file>` |
+| Run the advanced live reasoning suite | `freud/scripts/run-bbh-smoke.sh --lane weak-structure` or `freud/scripts/run-bbh-smoke.sh --lane prod-acceptance` |
+| Orchestrate deterministic checks plus the live suite in one run | `freud/scripts/feature-loop.sh <feature-id> --live --config freud/config/live-weak-structure.env` or `...live-prod-acceptance.env` |
+| Run the deterministic scenario pack only | `freud/scripts/run-scenarios.sh --file freud/scenarios/v1/neopsyke-agent-scenarios.json` |
 
-Freud standardizes that into one workflow with a few practical advantages:
-- deterministic-first validation to catch most regressions cheaply
-- structured artifacts for failures, warnings, timing, and summaries
-- explicit live/provider-backed lanes instead of accidental paid runs
-- replayable single-input live evals via LLM cache record/replay
-- a stable place to compare runs over time
+`feature-loop.sh --live` is an orchestrator over the other live commands. It
+is not a separate live system. The direct live entrypoints are:
 
-This directory is intentionally separate from NeoPsyke runtime code so workflow logic does not leak into the app itself.
+- `freud/scripts/live-eval.sh --input ...`
+- `freud/scripts/run-bbh-smoke.sh --lane ...`
 
-## Start Here
+## Minimum Setup
 
-### Simplest Manual Run
-If you only want the default developer workflow:
+Deterministic Freud usage:
+
+- JDK 21+
+- `./gradlew` works in this repo
+- no provider API keys required
+
+Live Freud usage:
+
+- all of the above
+- provider API keys and routing config required for the lane you want to run
+- live commands may spend tokens and money
+
+By default, `freud/config/default.env` leaves live steps blank on purpose.
+Live commands are enabled by choosing a live config such as:
+
+- `freud/config/live-weak-structure.env`
+- `freud/config/live-prod-acceptance.env`
+
+## Common Workflows
+
+### I Changed Code, What Do I Run?
+
+Start here:
 
 ```bash
 freud/scripts/feature-loop.sh my-change
 ```
 
-That runs the standard deterministic sequence for the current repository and writes a run under `.neopsyke/runs/freud/<timestamp>-my-change/`.
+This is the primary deterministic command. It runs the normal developer loop:
 
-### Common Manual Modes
-Use these when you want something narrower or more explicit:
+- preflight compile
+- targeted tests
+- full tests
+- scenario pack
+- deterministic reasoning gate
+
+### I Want Deterministic Validation Only
+
+Use the same command:
 
 ```bash
-# Show what Freud would run without executing it
-freud/scripts/feature-loop.sh my-change --dry-run
-
-# Resume from a later step after fixing something
-freud/scripts/feature-loop.sh my-change --from-step reasoning_eval_logic
-
-# Run the deterministic reasoning PR gate only
-freud/scripts/run-reasoning-pr-gate.sh
-
-# Run the scenario pack only
-freud/scripts/run-scenarios.sh --file freud/scenarios/v1/neopsyke-agent-scenarios.json
+freud/scripts/feature-loop.sh my-change
 ```
 
-### Live Manual Modes
-Use these only when you intentionally want provider-backed validation:
+Narrower options:
 
 ```bash
-# Enable live steps in the normal feature loop
-freud/scripts/feature-loop.sh my-change --live
+freud/scripts/run-reasoning-pr-gate.sh
+freud/scripts/run-scenarios.sh --file freud/scenarios/v1/neopsyke-agent-scenarios.json
+freud/scripts/feature-loop.sh my-change --from-step scenario_pack
+```
 
-# Weak-structure reasoning lane
+### I Want One Live Smoke
+
+Use the single-input entrypoint:
+
+```bash
+freud/scripts/live-eval.sh --input input.txt
+freud/scripts/live-eval.sh --input input.txt --expected expected.txt
+freud/scripts/live-eval.sh --input input.txt --cache-replay .neopsyke/runs/freud/<run>/artifacts/llm-cache.jsonl
+```
+
+This is the primary live command for direct agent checks.
+
+### I Want The Full Live Reasoning Lane
+
+Run the live suite directly:
+
+```bash
+freud/scripts/run-bbh-smoke.sh --lane weak-structure
+freud/scripts/run-bbh-smoke.sh --lane prod-acceptance
+```
+
+Use these when you want the frozen live reasoning matrix, not just one prompt.
+
+If you want one orchestrated run that includes the live suite after the
+deterministic checks:
+
+```bash
 freud/scripts/feature-loop.sh my-change --live --config freud/config/live-weak-structure.env
-
-# Production-routing reasoning lane
 freud/scripts/feature-loop.sh my-change --live --config freud/config/live-prod-acceptance.env
 ```
 
-## Core Concepts
+### My Run Failed, Where Do I Look First?
 
-### 1. Feature Loop
-`freud/scripts/feature-loop.sh` is the main orchestrator. It runs named steps such as compile, tests, scenarios, deterministic reasoning evals, and optional live evals.
-GitHub PR CI uses the deterministic path only:
-```bash
-freud/scripts/feature-loop.sh ci-pr
-```
-alongside Freud's own BATS and pytest workflow tests.
+For any feature-loop run:
 
-### 2. Single-Input Live Eval
-`freud/scripts/live-eval.sh` is the preferred wrapper for one-shot live/provider-backed checks. It uses NeoPsyke's lower-level `--freud-live` mode but adds:
-- isolated memory paths
-- cache record/replay
-- stable artifacts
-- triage and summary generation
-- startup provider preflight, including one retry for transient health-check failures and soft-disable of optional `meta_reasoner_fallback` if it is unavailable
+1. `artifacts/summary.json`
+2. `artifacts/summary-compact.md`
+3. `artifacts/trail-index.tsv`
+4. `artifacts/step-index.tsv`
+5. `artifacts/step-meta/<step>.json`
+6. only then `logs/<step>.log`
 
-### 3. Reasoning Matrix
-For NeoPsyke, Freud currently owns a 3-lane reasoning setup:
-- deterministic logic gate
-- weak live reasoning lane
-- production live reasoning lane
+For one-shot live evals:
 
-### 4. Compact Artifacts
-Every run writes machine-readable artifacts so you can inspect failures without scraping stdout manually.
+1. `artifacts/verdict.json`
+2. `artifacts/summary-compact.md`
+3. `logs/stderr.log`
+4. `logs/neopsyke.log`
 
-## Quick Commands
-```bash
-# Default deterministic workflow
-freud/scripts/feature-loop.sh add-verifier
+For BBH smoke lanes:
 
-# Deterministic reasoning PR gate only
-freud/scripts/run-reasoning-pr-gate.sh
+1. `artifacts/bbh-smoke-<lane>-summary.json`
+2. `artifacts/bbh-smoke-<lane>-progress.json`
+3. `artifacts/bbh-smoke-<lane>-results.tsv`
+4. failing case directories under `bbh-cases/<lane>/`
 
-# Single-input live eval
-freud/scripts/live-eval.sh --input test-input.txt --timeout 120
-
-# Replay a prior live eval from recorded LLM calls
-freud/scripts/live-eval.sh --input test-input.txt \
-  --cache-replay .neopsyke/runs/freud/latest/artifacts/llm-cache.jsonl
-
-# Preserve isolated Freud memory across a sequence when needed
-freud/scripts/live-eval.sh --input test-input.txt --preserve-memory
-
-# Validate against an expected answer
-freud/scripts/live-eval.sh --input test-input.txt --expected expected-answer.txt
-```
-
-## What Gets Stored
-Freud artifacts live under `.neopsyke/runs/freud/<timestamp>-<feature-id>/` by default.
+### What Artifacts Matter Most?
 
 Read these first:
+
 - `artifacts/summary.json`
 - `artifacts/summary-compact.md`
 - `artifacts/trail-index.tsv`
 - `artifacts/step-index.tsv`
 - `artifacts/anomalies.md`
 
-Important supporting artifacts:
-- `artifacts/run-config.json`
-- `artifacts/freud-metrics.json`
-- `artifacts/step-meta/*.json`
-- `artifacts/context-pack.md`
-- `logs/*.log`
+Live-specific:
 
-Live BBH reasoning lanes also write:
-- `artifacts/bbh-smoke-<lane>-summary.json`
-- `artifacts/bbh-smoke-<lane>-summary.md`
-- `artifacts/bbh-smoke-<lane>-progress.json`
-- `artifacts/bbh-smoke-<lane>-progress.md`
-- `artifacts/bbh-smoke-<lane>-results.tsv`
+- one-shot: `artifacts/verdict.json`, `artifacts/answer.txt`
+- BBH suite: `artifacts/bbh-smoke-<lane>-summary.json`, `artifacts/bbh-smoke-<lane>-results.tsv`
 
-Live one-shot evals write under `.neopsyke/runs/freud/<timestamp>-live-eval/`:
-- `artifacts/answer.txt`
-- `artifacts/verdict.json`
-- `artifacts/llm-cache.jsonl`
-- `artifacts/cache-stats.json`
-- `artifacts/input.txt`
-- `logs/events.jsonl`
-- `logs/neopsyke.log`
+For tools and scripts, prefer `.neopsyke/runs/freud/latest-run.txt` as the
+convenience pointer to the newest Freud run. Timestamped run directories remain
+the source of truth.
 
-Ongoing rollout notes now live in [ROLLOUT_LEDGER.md](ROLLOUT_LEDGER.md).
+## Concurrency
 
-## Live Eval
+Concurrent Freud runs are mostly safe now:
 
-Prefer `live-eval.sh` for any single-input Freud live/provider-backed check. It wraps the raw `./run-neopsyke.sh --freud-live` path and keeps stdout focused on the final agent answer.
+- `feature-loop.sh` runs can overlap
+- `live-eval.sh` runs can overlap
+- `run-bbh-smoke.sh` runs can overlap
+- mixing those command families is fine
 
-### Record / Replay
-- First run without `--cache-replay` records LLM calls to `artifacts/llm-cache.jsonl`
-- Replay run uses `--cache-replay <file>`
-- Cached responses are matched by call order and message hash
-- On divergence, replay falls back to real provider calls for the remaining sequence
+Why:
 
-This is useful for:
-- reproducing a live failure cheaply
-- separating runtime bugs from provider variance
-- inspecting whether a prompt/control-flow change altered the call graph
+- each run gets its own timestamped run directory
+- the shared `latest` pointers are now best-effort convenience pointers, not a hard dependency for execution
 
-### Memory Isolation
+What is still shared:
+
+- `.neopsyke/runs/freud/latest`
+- `.neopsyke/runs/freud/latest-run.txt`
+- `freud/latest`
+- `freud/latest-run.txt`
+
+That means the last writer wins. During concurrent runs, do not treat those
+pointers as stable ownership markers for one specific run. Prefer:
+
+- the explicit `run_dir` printed by the command
+- the timestamped run directory itself
+- a dedicated `FREUD_RUN_ROOT` when a tool needs strict isolation
+
+### Important Memory Caveat
+
+Concurrent memory-dependent live runs are still not safe.
+
+By default, Freud live evals share these isolated-but-global memory resources:
+
+- pgvector namespace: `freud-eval`
+- episodic logbook: `.neopsyke/freud-logbook.db`
+- metrics DB: `.neopsyke/freud-metrics.db`
+
+So if two live runs use long-term memory at the same time, they can interfere
+with each other by:
+
+- clearing the same isolated memory state
+- contaminating recall with another run's imprints
+- mixing episodic/logbook state across runs
+
+Practical rule:
+
+- concurrent deterministic runs are fine
+- concurrent live runs are fine when memory is off or irrelevant
+- concurrent memory-dependent live runs are not safe and can contaminate each other
+
+This is one reason the BBH live suite disables long-term MCP memory and
+episodic logbook recall by default.
+
+## Live Runs And Cost
+
+Live commands are manual on purpose.
+
+- `live-eval.sh` runs a single real agent turn
+- `run-bbh-smoke.sh` runs a frozen multi-case live suite
+- `feature-loop.sh --live` just orchestrates those live steps after the deterministic ones
+
+Cost guidance:
+
+- deterministic runs are the default and should be your first pass
+- one-shot live eval is the cheapest live check
+- BBH smoke is an advanced live suite and costs more
+- live routing depends on your configured models/providers
+
+Memory behavior:
+
+- one-shot `live-eval.sh` uses isolated Freud memory by default
+- BBH smoke disables long-term MCP memory and episodic logbook recall by default so the suite measures reasoning rather than memory side-effects
+
+## Common Failure Modes
+
+Freud tries to classify failures clearly. The main classes to expect are:
+
+- `app/test failure`: compile/test/assertion failures in deterministic steps
+- `stale selector`: scenario manifest points at a test selector that no longer exists
+- `local bootstrap/runtime failure`: Gradle startup, filesystem, sandbox, or local process bootstrapping failed before the eval really ran
+- `provider/model failure`: auth, routing, quota, rate limit, or upstream model/provider failure
+- `live eval scoring failure`: the live run completed but the answer missed the expected score or exact match
+
+If a BBH lane reports a runtime/bootstrap or provider/model failure, treat that
+as an infrastructure/run issue first, not a reasoning regression.
+
+## Memory Isolation
+
 Freud live eval runs do not touch the user's default memory state.
 
 | Resource | Freud live eval | User default |
@@ -175,65 +247,21 @@ Freud live eval runs do not touch the user's default memory state.
 | Metrics DB | `.neopsyke/freud-metrics.db` | `.neopsyke/metrics.db` |
 
 Defaults:
+
 - `--clear-memory-all` is applied automatically
 - use `--preserve-memory` only when a sequence intentionally depends on prior isolated Freud memory
 - `--expected` uses normalized exact matching, not substring containment
-- BBH smoke lanes additionally disable long-term MCP memory and episodic logbook recall by default; single-input `live-eval.sh` keeps isolated memory enabled unless you override runtime env vars yourself
-
-### Exit Codes
-- `0`: answer delivered and accepted
-- `1`: answer rejected or runtime error
-- `2`: timeout
-
-## NeoPsyke-Specific Reasoning Lanes
-
-### Deterministic Reasoning Gate
-`freud/scripts/run-reasoning-pr-gate.sh`
-
-Purpose:
-- cheap PR-level regression coverage
-- deterministic retry/repair logic checks
-
-Content:
-- logic core tasks
-- 45 behavioral/perturbation deterministic tasks
-
-### Weak Live Lane
-`freud/config/live-weak-structure.env`
-
-Purpose:
-- check whether NeoPsyke structure still works when planner/meta-reasoner are weaker
-
-Notes:
-- BBH smoke runs disable long-term MCP memory and episodic logbook recall by default so this lane measures reasoning rather than memory effects
-
-### Production Live Lane
-`freud/config/live-prod-acceptance.env`
-
-Purpose:
-- validate the actual shipped routing
-
-Notes:
-- BBH smoke runs disable long-term MCP memory and episodic logbook recall by default so this lane stays comparable to the weak lane on reasoning-only signal
-
-### BBH Smoke Runner
-`freud/scripts/run-bbh-smoke.sh`
-
-Purpose:
-- run a small frozen reasoning slice through live providers
-- track exact-match score, schema downgrades, timeouts, and progress
-
-Defaults:
-- `FREUD_BBH_MCP_MEMORY_ENABLED=false`
-- `FREUD_BBH_LOGBOOK_ENABLED=false`
-- override those only for explicit memory-aware experiments
+- BBH smoke additionally disables long-term MCP memory and episodic logbook recall by default
 
 ## Configuration
+
 `feature-loop.sh` reads config from:
+
 1. `FREUD_CONFIG`, if set
 2. `freud/config/default.env`
 
 Important overrides:
+
 - `FREUD_TARGETED_TEST_CMD`
 - `FREUD_FULL_TEST_CMD`
 - `FREUD_SCENARIO_PACK_CMD`
@@ -250,32 +278,30 @@ Important overrides:
 - `FREUD_RUN_ROOT`
 - `FREUD_GRADLE_USER_HOME`
 
-Project-specific command wiring belongs in `freud/config/*.env`, not inside generic scripts.
+Project-specific command wiring belongs in `freud/config/*.env`, not inside the
+generic scripts.
 
 ## Layout
-- `freud/scripts/feature-loop.sh`: end-to-end workflow runner
-- `freud/scripts/run-scenarios.sh`: scenario pack runner
-- `freud/scripts/live-eval.sh`: one-shot live eval wrapper
+
+- `freud/scripts/feature-loop.sh`: deterministic-first orchestrator
+- `freud/scripts/live-eval.sh`: primary one-shot live entrypoint
+- `freud/scripts/run-bbh-smoke.sh`: advanced live reasoning suite
+- `freud/scripts/run-scenarios.sh`: deterministic scenario runner
 - `freud/scripts/run-reasoning-pr-gate.sh`: deterministic reasoning gate
-- `freud/scripts/run-bbh-smoke.sh`: live BBH-style smoke runner
-- `freud/scripts/helpers.sh`: shared Bash helpers
 - `freud/py/`: Python data-processing helpers
-- `freud/config/default.env`: NeoPsyke adapter defaults
-- `freud/config/live-weak-structure.env`: weak live lane
-- `freud/config/live-prod-acceptance.env`: prod live lane
-- `freud/config/adapter.example.env`: reusable template for other projects
-- `freud/scenarios/v1/*.json`: versioned scenario packs
 - `freud/tests/`: BATS and pytest coverage for the workflow tooling
 
-## Testing the Workflow Itself
+## Testing The Workflow Itself
 
 ### BATS
+
 ```bash
 brew install bats-core
 bats freud/tests/
 ```
 
 ### pytest
+
 ```bash
 python3 -m venv freud/.venv
 freud/.venv/bin/pip install pytest
@@ -283,13 +309,10 @@ PYTHONPATH=. freud/.venv/bin/pytest freud/tests/test_*_py.py freud/tests/test_co
 ```
 
 ## Design Rules
+
 - deterministic checks first
 - live/provider checks explicit and optional
-- compact machine-readable artifacts by default
-- isolated Gradle state for Freud runs when configured
-- `live-eval.sh` preferred over raw `--freud-live` for Freud-managed live checks
-
-## Summarization Policy
-- Use indexed artifacts first
-- Use model-assisted summarization only after the cheap artifact pass
-- Keep Codex for debugging, implementation, and decisions, not first-pass log condensation
+- a small number of clear entrypoints beats many overlapping wrappers
+- `live-eval.sh` is the primary live entrypoint
+- `run-bbh-smoke.sh` is the advanced live suite
+- `feature-loop.sh --live` orchestrates the above, it does not replace them

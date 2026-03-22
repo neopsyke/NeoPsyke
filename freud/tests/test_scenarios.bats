@@ -31,7 +31,7 @@ setup() {
 }
 
 @test "scenarios: empty JSON scenarios array reports zero" {
-  tmpfile="$(mktemp)"
+  tmpfile="$(mktemp).json"
   echo '{"version":"v1","scenarios":[]}' >"$tmpfile"
   run "$SCRIPTS_DIR/run-scenarios.sh" --file "$tmpfile" --dry-run
   rm -f "$tmpfile"
@@ -51,6 +51,18 @@ setup() {
   [[ "$status" -eq 0 ]]
   [[ "$output" == *"description=First test scenario"* ]]
   [[ "$output" == *"description=Second test scenario"* ]]
+}
+
+@test "scenarios: stale selector fails manifest validation before execution" {
+  tmpfile="$(mktemp)"
+  cat >"$tmpfile" <<'EOF'
+{"version":"v1","scenarios":[{"id":"broken","selector":"ai.neopsyke.eval.AgentScenarioPackTest.scenario_missing_selector","description":"Broken"}]}
+EOF
+  run "$SCRIPTS_DIR/run-scenarios.sh" --file "$tmpfile" --dry-run
+  rm -f "$tmpfile"
+  [[ "$status" -eq 1 ]]
+  [[ "$output" == *"stale selector"* ]]
+  [[ "$output" == *"scenario manifest validation failed"* ]]
 }
 
 @test "scenarios: --help shows usage" {
