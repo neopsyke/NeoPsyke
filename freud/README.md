@@ -176,14 +176,28 @@ the source of truth.
 
 ## Concurrency
 
-Concurrent Freud runs are mostly safe now:
+Concurrent Freud runs are only partly safe.
 
-- `feature-loop.sh` runs can overlap
+Not safe in the same checkout/worktree:
+
+- `feature-loop.sh` runs
+- `run-scenarios.sh` runs
+- `run-reasoning-pr-gate.sh` runs
+- raw `./gradlew ...` runs
+
+Reason:
+
+- those commands invoke Gradle/Kotlin compilation or tests against the same checkout
+- overlapping Gradle-backed runs can collide on shared `build/` outputs and Kotlin/Gradle daemon state
+- if parallel validation is needed, use separate git worktrees or separate clones
+
+Conditionally safe in the same checkout:
+
 - `live-eval.sh` runs can overlap
 - `run-bbh-smoke.sh` runs can overlap
-- mixing those command families is fine
+- mixing those live command families is fine only when they are not overlapping with any Gradle-backed command
 
-Why:
+Why the live-only case can work:
 
 - each run gets its own timestamped run directory
 - the shared `latest` pointers are now best-effort convenience pointers, not a hard dependency for execution
@@ -221,7 +235,7 @@ with each other by:
 
 Practical rule:
 
-- concurrent deterministic runs are fine
+- concurrent deterministic/Gradle-backed runs are not fine in one checkout
 - concurrent live runs are fine when memory is off or irrelevant
 - concurrent memory-dependent live runs are not safe and can contaminate each other
 

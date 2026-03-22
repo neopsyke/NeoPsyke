@@ -104,6 +104,28 @@ Instructions for coding agents working in this repository (Codex, Claude, Gemini
 - Optional `--continue-on-fail` (or `FREUD_CONTINUE_ON_FAIL=true`) runs remaining steps for diagnostics, but run status is still `fail` if any step failed.
 - `run-scenarios.sh` executes all listed scenarios in one run and reports aggregate pass/fail; it does not retry failing scenarios automatically.
 
+### Concurrency Policy (Important)
+- Never run overlapping Gradle-backed commands in the same checkout/worktree.
+- Treat all of these as Gradle-backed and therefore not parallel-safe in one checkout:
+  - raw `./gradlew ...`
+  - `freud/scripts/feature-loop.sh ...`
+  - `freud/scripts/run-scenarios.sh ...`
+  - `freud/scripts/run-reasoning-pr-gate.sh`
+- `feature-loop.sh --live` is also not parallel-safe with other Gradle-backed commands because it still runs the deterministic Gradle phases before the live steps.
+- If parallel validation is needed, use separate git worktrees or separate clones so each run has its own `build/` outputs and Gradle/Kotlin state.
+- Safe to overlap in the same checkout:
+  - artifact/log inspection
+  - `--dry-run` inspection commands
+  - non-build shell inspection commands
+- Conditionally safe to overlap in the same checkout:
+  - `freud/scripts/live-eval.sh ...`
+  - `freud/scripts/run-bbh-smoke.sh ...`
+- The live commands above may overlap only when all of these are true:
+  - they are not running at the same time as any Gradle-backed command
+  - they are not intentionally sharing memory state (`--preserve-memory`, shared user memory, or other shared persistent memory modes are off)
+  - you do not rely on shared `latest` pointers as stable ownership markers because the last writer wins
+- Concurrent memory-dependent live runs are not safe. They can contaminate recall/imprint state and should be serialized unless each run has fully isolated memory resources.
+
 ### Artifact Locations
 - Feature-loop run outputs are isolated per run under:
   - `.neopsyke/runs/freud/<timestamp>-<feature-id>/`
