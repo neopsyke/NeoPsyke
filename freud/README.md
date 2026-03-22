@@ -9,6 +9,7 @@ deterministic checks and optional live/provider-backed evals.
 | If you want to... | Run this |
 |---|---|
 | Validate a code change with the normal deterministic workflow | `freud/scripts/feature-loop.sh <feature-id>` |
+| Run the full deterministic signoff gate before considering work complete | `freud/scripts/feature-loop.sh ci-pr` |
 | Run one live prompt through the real agent | `freud/scripts/live-eval.sh --input <file>` |
 | Run the advanced live reasoning suite | `freud/scripts/run-bbh-smoke.sh --lane weak-structure` or `freud/scripts/run-bbh-smoke.sh --lane prod-acceptance` |
 | Orchestrate deterministic checks plus the live suite in one run | `freud/scripts/feature-loop.sh <feature-id> --live --config freud/config/live-weak-structure.env` or `...live-prod-acceptance.env` |
@@ -58,6 +59,27 @@ This is the primary deterministic command. It runs the normal developer loop:
 - scenario pack
 - deterministic reasoning gate
 
+Before considering the work fully validated, run the deterministic signoff
+gate:
+
+```bash
+freud/scripts/feature-loop.sh ci-pr
+```
+
+That is the command that should be treated as the default completion gate for
+non-live validation. `./gradlew test` alone is not enough because it does not
+exercise the Freud deterministic scenario pack or deterministic reasoning evals.
+`--dry-run` does not count. No commit and no "fully validated" claim should
+happen until non-dry `freud/scripts/feature-loop.sh ci-pr` passes.
+
+The expected deterministic gate order is:
+
+1. `preflight_compile`
+2. `targeted_tests`
+3. `full_tests`
+4. `scenario_pack`
+5. `reasoning_eval_logic`
+
 ### I Want Deterministic Validation Only
 
 Use the same command:
@@ -73,6 +95,9 @@ freud/scripts/run-reasoning-pr-gate.sh
 freud/scripts/run-scenarios.sh --file freud/scenarios/v1/neopsyke-agent-scenarios.json
 freud/scripts/feature-loop.sh my-change --from-step scenario_pack
 ```
+
+These narrower commands are for iteration speed. They are not the default
+signoff gate.
 
 ### I Want One Live Smoke
 

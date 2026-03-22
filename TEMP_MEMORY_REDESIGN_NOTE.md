@@ -12,6 +12,30 @@ current runtime remains:
 This note is intentionally temporary and decision-oriented. It should evolve
 into a more stable architecture document once the refactor starts landing.
 
+## Current State After Phase 1
+
+The redesign has started, but it is not complete.
+
+Already true:
+
+- `Hippocampus` has been reshaped into the new cognitive long-term memory
+  boundary with richer request/result types
+- typed imprint variants exist for narrative, fact, relation, and episode
+- `consolidate(...)` exists in the API as a stubbed lifecycle hook
+- logbook/episodic concepts have been moved conceptually toward the long-term
+  memory subsystem
+
+Not yet true:
+
+- the physical module split is not done
+- the runtime default is still effectively MCP-backed memory
+- `memory=embedded` does not exist yet
+- the typed API is not fully exploited end-to-end
+- episodic memory is not yet fully unified behaviorally behind one concrete
+  long-term facade path
+- `consolidate(...)` is not implemented or scheduled
+- the OSS installability/default-memory story is still unresolved
+
 ## Purpose
 
 The redesign should make long-term memory:
@@ -168,6 +192,13 @@ Owns:
 
 It should stop owning the core memory semantics.
 
+Current gap:
+
+- this module split is still mostly a design target
+- the refactor is still largely package-level inside the main app
+- `memory-api`, `memory-core`, `memory-embedded`, and `memory-mcp-server`
+  still need to become real physical modules
+
 ## Memory Modes
 
 The target runtime profiles are:
@@ -182,6 +213,14 @@ Notes:
 - `memory=embedded` is the recommended OSS local mode
 - `memory=mcp` remains useful for external/shared/remote memory services and
   experimentation
+
+Current gap:
+
+- these runtime profiles are not fully real yet
+- MCP is still effectively the real default backend path
+- runtime wiring still goes through `McpHippocampus`
+- the architecture is cleaner, but the product/runtime default is still
+  external-process memory
 
 ## Long-Term Memory Grouping
 
@@ -213,6 +252,13 @@ That means:
 
 This gives NeoPsyke one coherent long-term memory subsystem without forcing
 all long-term memory into one database engine.
+
+Current gap:
+
+- episodic memory is conceptually under the long-term boundary
+- episodic memory is not yet fully routed through one real long-term facade
+- physically and behaviorally, it still remains a partially separate backend
+  path
 
 ### Why absorb episodic memory into `Hippocampus`
 
@@ -601,6 +647,16 @@ implementations the precise language they need.
 - direct local backend without MCP for the default local runtime
 - app-managed local pgvector path
 
+This phase is currently the biggest OSS/product gap:
+
+- `memory=embedded` does not exist yet
+- if NeoPsyke should feel easy and first-party for open-source users, the
+  local default backend story still needs to be implemented
+- the biggest open-source product question is still:
+  - managed local pgvector
+  - starter backend
+  - or both
+
 ### Phase 5: optional hybrid expansion
 
 - add fact/graph/hybrid retrieval behind the same `Hippocampus` contract
@@ -618,6 +674,52 @@ These decisions are not yet final:
   sealed hierarchy
 - the exact final shape of phase-1 DTOs, to be finalized during implementation
   as long as they stay within the decisions recorded in this note
+
+## Remaining Redesign Gaps
+
+These are the main things still left before the redesign is truly complete.
+
+### 1. Physical module split is still pending
+
+- planned modules: `memory-api`, `memory-core`, `memory-embedded`,
+  `memory-mcp-server`
+- current state: mostly package-level refactor inside the main app
+
+### 2. MCP is still effectively the real default backend path
+
+- runtime wiring still goes through `McpHippocampus`
+- architecture improved, but the product/runtime default is still
+  external-process memory
+
+### 3. `memory=embedded` is still missing
+
+- the intended OSS local mode does not exist yet
+- this is the largest open-source readiness gap in the redesign
+
+### 4. The typed API is not fully exploited end-to-end
+
+- the API supports narrative, fact, relation, and episode imprints
+- in practice, the real path remains mostly narrative-oriented with
+  compatibility bridging
+
+### 5. Episodic memory is not yet fully unified behaviorally
+
+- conceptually under the long-term boundary: yes
+- physically/behaviorally under one concrete facade path: not yet
+
+### 6. `consolidate(...)` is still only a stub
+
+- good to keep in the contract now
+- not yet implemented
+- not yet scheduled or triggered
+
+### 7. OSS installability/default-memory strategy is unresolved
+
+The biggest unanswered product question is still:
+
+- managed local pgvector
+- starter backend
+- or both
 
 ## Current Leaning
 

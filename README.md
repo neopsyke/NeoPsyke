@@ -286,6 +286,9 @@ Freud live eval notes:
 
 Freud reasoning eval matrix:
 ```bash
+# Deterministic completion/signoff gate
+freud/scripts/feature-loop.sh ci-pr
+
 # Default deterministic feature loop (includes logic-core + logic-behavioral reasoning gate)
 freud/scripts/feature-loop.sh reasoning-matrix
 
@@ -303,6 +306,10 @@ freud/scripts/feature-loop.sh reasoning-matrix --live --config freud/config/live
 ```
 
 Freud reasoning lane notes:
+- `freud/scripts/feature-loop.sh ci-pr` should be treated as the default deterministic completion/signoff gate.
+- That deterministic gate runs, in order: `preflight_compile`, `targeted_tests`, `full_tests`, `scenario_pack`, and `reasoning_eval_logic`.
+- `--dry-run` is inspection only. No commit and no final validation claim should happen until non-dry `freud/scripts/feature-loop.sh ci-pr` passes.
+- `./gradlew test` alone is not sufficient for signoff because it does not cover the Freud deterministic scenario pack or the deterministic reasoning eval gate.
 - `reasoning_eval_logic` now runs two deterministic passes: the existing logic core and a 45-case behavioral/perturbation logic pack.
 - `reasoning_eval_model` is reserved for manual live reasoning checks and currently runs a frozen 24-case BBH-style smoke slice.
 - `freud/scripts/run-bbh-smoke.sh` is the direct live reasoning suite entrypoint, and `freud/scripts/feature-loop.sh --live` orchestrates it after the deterministic steps.

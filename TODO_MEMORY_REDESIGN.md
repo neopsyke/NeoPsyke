@@ -5,6 +5,31 @@ refactor so pending pieces are not lost during the structural changes.
 
 It is intentionally short and execution-oriented.
 
+## Major Remaining Redesign Work
+
+- Do the physical module split:
+  - `memory-api`
+  - `memory-core`
+  - `memory-embedded`
+  - `memory-mcp-server`
+- Stop relying on `McpHippocampus` as the effective default runtime backend.
+- Implement a real `memory=embedded` mode for the OSS/local default path.
+- Finish exploiting the new typed API end-to-end instead of remaining mostly
+  narrative-oriented with compatibility bridging.
+- Finish routing episodic memory through one real long-term facade path instead
+  of leaving it behaviorally partially separate.
+- Implement and schedule `Hippocampus.consolidate(...)`.
+
+## OSS Readiness Blockers
+
+- Decide the local default memory story:
+  - managed local pgvector
+  - starter backend
+  - or both
+- Make installability match the product promise for open-source users.
+- Reduce MCP to an adapter/integration surface instead of the practical default
+  architecture.
+
 ## Pending Wiring
 
 - Wire `MemoryEventType.FACT_CORRECTED` when fact supersession/correction paths
@@ -30,6 +55,11 @@ It is intentionally short and execution-oriented.
   while keeping the current SQLite backend behavior unchanged.
 - Adapt `MemorySystem` and call sites so episodic recall/imprint flow through
   the unified long-term memory facade.
+- Rework runtime wiring so the default local path no longer depends on
+  `McpHippocampus`.
+- Add the real `memory=embedded` mode after the module split and backend
+  decision are settled.
+- Replace package-level extraction with the real physical module split.
 
 ## Future Expansion
 

@@ -56,6 +56,10 @@ Instructions for coding agents working in this repository (Codex, Claude, Gemini
   - Freud may read/run against all NeoPsyke files, but Freud logic stays under `freud/**`.
 
 ### Required Commands
+- Default deterministic completion/signoff gate:
+  - `freud/scripts/feature-loop.sh ci-pr`
+  - This runs, in order: `preflight_compile`, `targeted_tests`, `full_tests`, `scenario_pack`, `reasoning_eval_logic`
+  - No commit, no "done", and no claim of full validation until this command has been run non-dry and has passed.
 - Stub/deterministic-first run:
   - `freud/scripts/feature-loop.sh <feature-id>`
 - Deterministic reasoning PR gate only:
@@ -179,9 +183,26 @@ Instructions for coding agents working in this repository (Codex, Claude, Gemini
   - `freud/templates/agent-operator-template.md`
 
 ## Build and Test
-- Preferred full verification:
+- Default completion/signoff verification:
+  - `freud/scripts/feature-loop.sh ci-pr`
+- Expected deterministic gate coverage/order:
+  - `preflight_compile`
+  - `targeted_tests`
+  - `full_tests`
+  - `scenario_pack`
+  - `reasoning_eval_logic`
+- `freud/scripts/feature-loop.sh ci-pr --dry-run` is inspection only. It does not count as validation.
+- No commit, no signoff, and no final "validated" report until non-dry `freud/scripts/feature-loop.sh ci-pr` passes.
+- `./gradlew test` is not sufficient for signoff. It covers the Kotlin/JVM test
+  suite, but it does not cover the Freud deterministic scenario pack or the
+  deterministic reasoning eval gate.
+- For faster iteration, targeted subsets are fine:
   - `./gradlew test`
-- For faster iteration, run targeted tests first, then full tests if core/shared code changed.
+  - specific `./gradlew :test --tests ...`
+  - direct `freud/scripts/run-scenarios.sh --dry-run`
+  - direct `freud/scripts/run-reasoning-pr-gate.sh`
+- Before reporting work as fully validated on a non-trivial change, use the
+  deterministic Freud gate and report validation based on that result.
 - If you cannot run tests, clearly state that in your final summary.
 - Test execution policy for coding agents:
   - Fast local unit/integration tests with deterministic stubs are allowed in the default `./gradlew test` suite.
