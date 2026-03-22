@@ -273,6 +273,11 @@ class GoalManagerTest {
                 observedEvidence = false,
             )
             manager1.finalizeGoalCycle(work.rootInputId)
+            waitUntil {
+                val state = manager1.goalStatus(goalId)
+                state?.goal?.status == GoalStatus.BLOCKED &&
+                    state.goal.plan.steps.firstOrNull()?.status == StepStatus.BLOCKED
+            }
             manager1.stop()
 
             provider.enqueue(operationId = "op-restore", statuses = listOf(AsyncOperationStatus.Succeeded("restored completion")))
@@ -292,6 +297,42 @@ class GoalManagerTest {
             }
 
             assertTrue(signals.any { it.goalId == goalId })
+            manager2.stop()
+        } finally {
+            root.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `restored READY step emits work-ready cue on restart`() {
+        val root = Files.createTempDirectory("psyke-pm-restore-ready")
+        try {
+            val store = GoalStore(root)
+            val manager1 = GoalManager(
+                config = testConfig(root),
+                store = store,
+                planner = DeterministicGoalPlanner(),
+            )
+            manager1.start(testScope())
+            val goalId = manager1.createGoal("Restore ready step cue")
+            manager1.stop()
+
+            val signals = CopyOnWriteArrayList<GoalRuntimeCue>()
+            val manager2 = GoalManager(
+                config = testConfig(root),
+                store = store,
+                cueEmitter = { cue -> signals += cue },
+            )
+            manager2.start(testScope())
+
+            waitUntil {
+                signals.any {
+                    it.goalId == goalId &&
+                        it.stepId == "step-1" &&
+                        it.reason == "goal_restored_work_ready"
+                }
+            }
+
             manager2.stop()
         } finally {
             root.toFile().deleteRecursively()

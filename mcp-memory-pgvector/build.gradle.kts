@@ -43,6 +43,10 @@ dependencies {
 
 tasks.test {
     useJUnitPlatform()
+    // Root-project --tests filters should not fail this unrelated subproject when no tests match.
+    filter {
+        isFailOnNoMatchingTests = false
+    }
 }
 
 val integrationTest by sourceSets.creating {

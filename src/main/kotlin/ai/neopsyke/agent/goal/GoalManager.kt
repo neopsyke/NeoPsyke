@@ -553,11 +553,24 @@ class GoalManager(
                 val state = store.loadGoal(goalId) ?: continue
                 states[goalId] = state
                 restoreSchedules(state)
+                emitRestoredWorkReady(state)
             } catch (ex: Exception) {
                 logger.warn(ex) { "Failed to restore goal $goalId" }
             }
         }
         refreshAmbientSnapshots()
+    }
+
+    private fun emitRestoredWorkReady(state: GoalState) {
+        if (state.isTerminal()) return
+        val step = state.nextRunnableStep() ?: return
+        cueEmitter(
+            GoalRuntimeCue(
+                goalId = state.id,
+                stepId = step.id,
+                reason = "goal_restored_work_ready",
+            )
+        )
     }
 
     private fun restoreSchedules(state: GoalState) {
