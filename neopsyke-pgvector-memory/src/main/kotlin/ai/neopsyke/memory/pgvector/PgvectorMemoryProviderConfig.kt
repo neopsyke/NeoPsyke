@@ -1,5 +1,19 @@
 package ai.neopsyke.memory.pgvector
 
+enum class PgvectorBootstrapMode {
+    OFF,
+    AUTO;
+
+    companion object {
+        fun parse(raw: String?): PgvectorBootstrapMode? =
+            when (raw?.trim()?.lowercase()) {
+                "off" -> OFF
+                "auto" -> AUTO
+                else -> null
+            }
+    }
+}
+
 data class PgvectorMemoryProviderConfig(
     val dbUrl: String,
     val dbUser: String,
@@ -13,6 +27,11 @@ data class PgvectorMemoryProviderConfig(
     val semanticDedupeSimilarityThreshold: Double,
     val semanticDedupeMinConfidence: Double,
     val factDefaultSubject: String,
+    val bootstrapMode: PgvectorBootstrapMode,
+    val bootstrapDockerImage: String,
+    val bootstrapContainerName: String,
+    val bootstrapVolumeName: String,
+    val bootstrapStartupTimeoutMs: Long,
     val providerName: String,
     val providerVersion: String,
 ) {
@@ -28,6 +47,11 @@ data class PgvectorMemoryProviderConfig(
         const val DEFAULT_SEMANTIC_DEDUPE_SIMILARITY_THRESHOLD = 0.93
         const val DEFAULT_SEMANTIC_DEDUPE_MIN_CONFIDENCE = 0.65
         const val DEFAULT_FACT_SUBJECT = "me"
+        val DEFAULT_BOOTSTRAP_MODE = PgvectorBootstrapMode.AUTO
+        const val DEFAULT_BOOTSTRAP_DOCKER_IMAGE = "pgvector/pgvector:pg17"
+        const val DEFAULT_BOOTSTRAP_CONTAINER_NAME = "neopsyke-pgvector-memory-db"
+        const val DEFAULT_BOOTSTRAP_VOLUME_NAME = "neopsyke-pgvector-memory-data"
+        const val DEFAULT_BOOTSTRAP_STARTUP_TIMEOUT_MS = 45_000L
         const val PROVIDER_NAME = "neopsyke-pgvector-memory"
         const val PROVIDER_VERSION = "0.1.0"
 
@@ -53,6 +77,18 @@ data class PgvectorMemoryProviderConfig(
                     ?.coerceIn(0.0, 1.0)
                     ?: DEFAULT_SEMANTIC_DEDUPE_MIN_CONFIDENCE,
                 factDefaultSubject = env(env, "MEMORY_FACT_DEFAULT_SUBJECT") ?: DEFAULT_FACT_SUBJECT,
+                bootstrapMode = PgvectorBootstrapMode.parse(env(env, "PGVECTOR_BOOTSTRAP_MODE"))
+                    ?: DEFAULT_BOOTSTRAP_MODE,
+                bootstrapDockerImage = env(env, "PGVECTOR_BOOTSTRAP_DOCKER_IMAGE")
+                    ?: DEFAULT_BOOTSTRAP_DOCKER_IMAGE,
+                bootstrapContainerName = env(env, "PGVECTOR_BOOTSTRAP_CONTAINER_NAME")
+                    ?: DEFAULT_BOOTSTRAP_CONTAINER_NAME,
+                bootstrapVolumeName = env(env, "PGVECTOR_BOOTSTRAP_VOLUME_NAME")
+                    ?: DEFAULT_BOOTSTRAP_VOLUME_NAME,
+                bootstrapStartupTimeoutMs = env(env, "PGVECTOR_BOOTSTRAP_STARTUP_TIMEOUT_MS")
+                    ?.toLongOrNull()
+                    ?.coerceAtLeast(1_000L)
+                    ?: DEFAULT_BOOTSTRAP_STARTUP_TIMEOUT_MS,
                 providerName = PROVIDER_NAME,
                 providerVersion = PROVIDER_VERSION,
             )

@@ -5,7 +5,9 @@ import mu.KotlinLogging
 private val providerMainLogger = KotlinLogging.logger {}
 
 fun main(args: Array<String>) {
-    val config = PgvectorMemoryProviderConfig.fromEnv()
+    val config = PgvectorMemoryProviderConfig.fromEnv().let { base ->
+        resolveBootstrapMode(args)?.let { base.copy(bootstrapMode = it) } ?: base
+    }
 
     if (config.embeddingApiKey.isBlank()) {
         providerMainLogger.error { "EMBEDDING_API_KEY or MISTRAL_API_KEY is required. Set one and restart." }
@@ -16,10 +18,11 @@ fun main(args: Array<String>) {
     val port = resolvePort(args)
     val host = resolveHost(args)
     val runtime = try {
+        DockerPgvectorBootstrap.ensureReady(config)
         ProviderRuntimeFactory.create(config)
     } catch (ex: Exception) {
         providerMainLogger.error(ex) {
-            "Failed to initialize provider runtime. Check PostgreSQL connectivity and embedding dimensions."
+            "Failed to initialize provider runtime. Check PostgreSQL connectivity, Docker/bootstrap state, and embedding dimensions."
         }
         System.exit(1)
         return
@@ -50,7 +53,13 @@ private fun resolveTransport(args: Array<String>): String =
         ?.lowercase()
         ?.ifBlank { null }
         ?: System.getenv("MEMORY_PROVIDER_TRANSPORT")?.trim()?.lowercase()?.ifBlank { null }
-        ?: "mcp"
+        ?: "http"
+
+private fun resolveBootstrapMode(args: Array<String>): PgvectorBootstrapMode? =
+    args.firstOrNull { it.startsWith("--bootstrap-pgvector=") }
+        ?.substringAfter('=')
+        ?.trim()
+        ?.let(PgvectorBootstrapMode.Companion::parse)
 
 private fun resolvePort(args: Array<String>): Int =
     args.firstOrNull { it.startsWith("--port=") }

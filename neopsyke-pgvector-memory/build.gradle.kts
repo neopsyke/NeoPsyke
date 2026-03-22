@@ -1,5 +1,6 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.gradle.api.tasks.testing.Test
+import org.gradle.api.tasks.bundling.Zip
 
 plugins {
     kotlin("jvm") version "2.2.0"
@@ -98,4 +99,23 @@ tasks.register<Jar>("fatJar") {
     }
     from(configurations.runtimeClasspath.get().map { if (it.isDirectory) it else zipTree(it) })
     with(tasks.jar.get())
+}
+
+tasks.register<Zip>("releaseBundleZip") {
+    description = "Builds a standalone release bundle with jar, scripts, docs, and Docker assets."
+    group = "distribution"
+    archiveBaseName.set("neopsyke-pgvector-memory")
+    archiveVersion.set(project.version.toString())
+    archiveClassifier.set("bundle")
+    dependsOn("fatJar")
+
+    from(tasks.named("fatJar")) {
+        into("dist")
+    }
+    from("README.md") { into("dist") }
+    from("LICENSE") { into("dist") }
+    from("NOTICE") { into("dist") }
+    from(".env.example") { into("dist") }
+    from("docker-compose.yml") { into("dist") }
+    from("scripts") { into("dist/scripts") }
 }

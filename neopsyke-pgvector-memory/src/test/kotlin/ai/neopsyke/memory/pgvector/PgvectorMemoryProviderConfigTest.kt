@@ -26,6 +26,23 @@ class PgvectorMemoryProviderConfigTest {
             config.semanticDedupeMinConfidence
         )
         assertEquals(PgvectorMemoryProviderConfig.DEFAULT_FACT_SUBJECT, config.factDefaultSubject)
+        assertEquals(PgvectorMemoryProviderConfig.DEFAULT_BOOTSTRAP_MODE, config.bootstrapMode)
+        assertEquals(
+            PgvectorMemoryProviderConfig.DEFAULT_BOOTSTRAP_DOCKER_IMAGE,
+            config.bootstrapDockerImage
+        )
+        assertEquals(
+            PgvectorMemoryProviderConfig.DEFAULT_BOOTSTRAP_CONTAINER_NAME,
+            config.bootstrapContainerName
+        )
+        assertEquals(
+            PgvectorMemoryProviderConfig.DEFAULT_BOOTSTRAP_VOLUME_NAME,
+            config.bootstrapVolumeName
+        )
+        assertEquals(
+            PgvectorMemoryProviderConfig.DEFAULT_BOOTSTRAP_STARTUP_TIMEOUT_MS,
+            config.bootstrapStartupTimeoutMs
+        )
         assertEquals("me", config.factDefaultSubject)
     }
 
@@ -41,6 +58,11 @@ class PgvectorMemoryProviderConfigTest {
             "MEMORY_SEMANTIC_DEDUPE_SIMILARITY_THRESHOLD" to "0.91",
             "MEMORY_SEMANTIC_DEDUPE_MIN_CONFIDENCE" to "0.72",
             "MEMORY_FACT_DEFAULT_SUBJECT" to "profile",
+            "PGVECTOR_BOOTSTRAP_MODE" to "off",
+            "PGVECTOR_BOOTSTRAP_DOCKER_IMAGE" to "pgvector/pgvector:pg16",
+            "PGVECTOR_BOOTSTRAP_CONTAINER_NAME" to "custom-container",
+            "PGVECTOR_BOOTSTRAP_VOLUME_NAME" to "custom-volume",
+            "PGVECTOR_BOOTSTRAP_STARTUP_TIMEOUT_MS" to "30000",
         )
         val config = PgvectorMemoryProviderConfig.fromEnv(env)
         assertEquals("jdbc:postgresql://custom:5432/mydb", config.dbUrl)
@@ -52,6 +74,11 @@ class PgvectorMemoryProviderConfigTest {
         assertEquals(0.91, config.semanticDedupeSimilarityThreshold)
         assertEquals(0.72, config.semanticDedupeMinConfidence)
         assertEquals("profile", config.factDefaultSubject)
+        assertEquals(PgvectorBootstrapMode.OFF, config.bootstrapMode)
+        assertEquals("pgvector/pgvector:pg16", config.bootstrapDockerImage)
+        assertEquals("custom-container", config.bootstrapContainerName)
+        assertEquals("custom-volume", config.bootstrapVolumeName)
+        assertEquals(30_000L, config.bootstrapStartupTimeoutMs)
     }
 
     @Test
