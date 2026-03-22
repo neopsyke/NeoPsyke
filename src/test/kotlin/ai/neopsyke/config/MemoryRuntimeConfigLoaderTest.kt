@@ -16,6 +16,10 @@ class MemoryRuntimeConfigLoaderTest {
         assertEquals(MemoryMode.DEFAULT, config.mode)
         assertEquals("neopsyke-pgvector-memory", config.defaultProvider.provider)
         assertEquals("http://127.0.0.1:7841", config.defaultProvider.baseUrl)
+        assertEquals(
+            "java -jar .neopsyke/providers/neopsyke-pgvector-memory/current/neopsyke-pgvector-memory-all.jar --transport=http --port=7841",
+            config.defaultProvider.command
+        )
         assertEquals("neopsyke", config.defaultProvider.namespace)
     }
 

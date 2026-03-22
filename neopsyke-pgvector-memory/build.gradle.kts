@@ -2,7 +2,7 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.gradle.api.tasks.testing.Test
 
 plugins {
-    kotlin("jvm")
+    kotlin("jvm") version "2.2.0"
     application
 }
 

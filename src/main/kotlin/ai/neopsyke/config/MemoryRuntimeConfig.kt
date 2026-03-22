@@ -30,7 +30,8 @@ data class DefaultMemoryProviderConfig(
     val provider: String = "neopsyke-pgvector-memory",
     val transport: String = "http",
     val baseUrl: String = "http://127.0.0.1:7841",
-    val command: String = "java -jar neopsyke-pgvector-memory/build/libs/neopsyke-pgvector-memory-0.1.0-all.jar --transport=http --port=7841",
+    val command: String =
+        "java -jar .neopsyke/providers/neopsyke-pgvector-memory/current/neopsyke-pgvector-memory-all.jar --transport=http --port=7841",
     val startupTimeoutMs: Long = 12_000,
     val healthTimeoutMs: Long = 3_000,
     val namespace: String = "neopsyke",

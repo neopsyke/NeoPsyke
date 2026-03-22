@@ -219,8 +219,8 @@ Notes:
 Current gap:
 
 - these runtime profiles are not fully real yet
-- `memory=default` still depends on same-repo provider build artifacts instead of
-  a real bootstrap/install flow
+- `memory=default` no longer assumes same-repo provider build artifacts, but the
+  real bootstrap/download flow is still missing
 - `memory=external` only supports HTTP in v1; MCP/direct external adapters are
   still future work
 

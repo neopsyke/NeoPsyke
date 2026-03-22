@@ -33,6 +33,9 @@ Related note:
   - external `neopsyke-pgvector-memory` provider
   - Docker-backed provider bootstrap
   - NeoPsyke-owned memory config
+- Finish extraction readiness for `neopsyke-pgvector-memory`:
+  - standalone repo files are now staged in-tree
+  - remaining work is bootstrap/release wiring, not same-repo jar assumptions
 - Make installability match the product promise for open-source users.
 - Reduce MCP to an adapter/integration surface instead of the practical
   default architecture.

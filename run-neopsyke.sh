@@ -3,7 +3,6 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_BIN="$ROOT_DIR/build/install/neopsyke/bin/neopsyke"
-MEMORY_FAT_JAR="$ROOT_DIR/neopsyke-pgvector-memory/build/libs/neopsyke-pgvector-memory-0.1.0-all.jar"
 LOG_LEVEL="${NEOPSYKE_LOG_LEVEL:-warning}"
 LOG_LEVEL_EXPLICIT=0
 LOG_LEVEL_FROM_ENV=0
@@ -314,24 +313,9 @@ elif [[ -n "$(find \
   NEEDS_BUILD=1
 fi
 
-NEEDS_MEMORY_FAT_JAR=0
-if [[ ! -f "$MEMORY_FAT_JAR" ]]; then
-  NEEDS_MEMORY_FAT_JAR=1
-elif [[ -n "$(find \
-  "$ROOT_DIR/neopsyke-pgvector-memory/src/main" \
-  "$ROOT_DIR/neopsyke-pgvector-memory/build.gradle.kts" \
-  -type f -newer "$MEMORY_FAT_JAR" -print -quit 2>/dev/null)" ]]; then
-  NEEDS_MEMORY_FAT_JAR=1
-fi
-
 if [[ "$NEEDS_BUILD" -eq 1 ]]; then
   log_info "Building local app distribution..."
   "$ROOT_DIR/gradlew" --no-daemon --no-problems-report installDist
-fi
-
-if [[ "$NEEDS_MEMORY_FAT_JAR" -eq 1 ]]; then
-  log_info "Building memory provider fat jar..."
-  "$ROOT_DIR/gradlew" --no-daemon --no-problems-report :neopsyke-pgvector-memory:fatJar
 fi
 
 maybe_start_pgvector

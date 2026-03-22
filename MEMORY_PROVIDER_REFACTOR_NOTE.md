@@ -250,6 +250,9 @@ Confirmed default mechanism:
 - NeoPsyke first-party install/bootstrap script downloads the provider release
   artifact
 - the provider uses Docker-backed bootstrap for pgvector/runtime provisioning
+- NeoPsyke should not assume the provider is built from a sibling subproject in
+  the same checkout; default command/config now target a standalone install
+  location under `.neopsyke/providers/...`
 
 This is the practical release-unblocking choice for now.
 

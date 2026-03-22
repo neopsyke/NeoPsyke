@@ -170,7 +170,7 @@ Standalone Kotlin JVM app using Gradle with:
   - `MCP_TIME_PROVIDER` / `WEBSITE_FETCH_PROVIDER` (optional env override for YAML provider)
   - `MCP_TIME_ENABLED` / `WEBSITE_FETCH_ENABLED` (optional env override for YAML enabled flag)
   - `NEOPSYKE_MEMORY_MODE` (`off|default|external`)
-  - `NEOPSYKE_MEMORY_DEFAULT_COMMAND` (optional override for managed default provider command)
+- `NEOPSYKE_MEMORY_DEFAULT_COMMAND` (optional override for managed default provider command)
   - `NEOPSYKE_MEMORY_DEFAULT_BASE_URL` (optional override for managed default provider base URL)
 - `NEOPSYKE_MEMORY_EXTERNAL_PROVIDER` / `NEOPSYKE_MEMORY_EXTERNAL_TRANSPORT` / `NEOPSYKE_MEMORY_EXTERNAL_BASE_URL` (advanced external provider wiring; `transport=http` supported in v1)
   - External HTTP providers must implement NeoPsyke's versioned `v1` contract (`/v1/health`, `/v1/metrics`, `/v1/recall`, `/v1/imprint`, `/v1/admin/forget`, `/v1/admin/reset`).
@@ -334,7 +334,7 @@ Memory live eval (real-world, no mocks):
 export GROQ_API_KEY=your_token
 # either configure memory-runtime.yaml (preferred) or override here:
 export NEOPSYKE_MEMORY_MODE=default
-export NEOPSYKE_MEMORY_DEFAULT_COMMAND='java -jar neopsyke-pgvector-memory/build/libs/neopsyke-pgvector-memory-0.1.0-all.jar --transport=http --port=7841'
+export NEOPSYKE_MEMORY_DEFAULT_COMMAND='java -jar .neopsyke/providers/neopsyke-pgvector-memory/current/neopsyke-pgvector-memory-all.jar --transport=http --port=7841'
 ./run-neopsyke.sh --eval-memory-live
 ```
 
@@ -374,9 +374,10 @@ Disable the default interactive delay for faster local/manual loops:
 
 Notes:
 - `run-neopsyke.sh` bootstraps `installDist` once if needed.
-- `run-neopsyke.sh` also bootstraps `:neopsyke-pgvector-memory:fatJar` when the memory provider jar is missing or stale.
 - After bootstrap, execution is direct (`build/install/neopsyke/bin/neopsyke`) without `gradle run`.
 - You do not run the default memory provider separately if `memory-runtime.yaml` (or `NEOPSYKE_MEMORY_*` overrides) is set correctly; NeoPsyke launches the managed provider on demand for `memory=default`.
+- The default managed provider command now points at the standalone install location under `.neopsyke/providers/neopsyke-pgvector-memory/current/`.
+- Until the default provider bootstrap/download flow is implemented, local development may still need an explicit `NEOPSYKE_MEMORY_DEFAULT_COMMAND` override or a manually installed provider artifact at that path.
 - Default log level in `run-neopsyke.sh` is `warning`.
 - Launcher logs are written to per-run files in `.neopsyke/logs/runs/`.
 - `.neopsyke/logs/latest.log` always points to the newest run log.

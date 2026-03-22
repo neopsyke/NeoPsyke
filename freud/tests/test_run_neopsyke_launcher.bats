@@ -4,7 +4,6 @@ setup() {
   TEST_TMPDIR="$(mktemp -d)"
   LAUNCHER_ROOT="$TEST_TMPDIR/launcher-root"
   mkdir -p "$LAUNCHER_ROOT/build/install/neopsyke/bin"
-  mkdir -p "$LAUNCHER_ROOT/neopsyke-pgvector-memory/build/libs"
   cp "$BATS_TEST_DIRNAME/../../run-neopsyke.sh" "$LAUNCHER_ROOT/run-neopsyke.sh"
   chmod +x "$LAUNCHER_ROOT/run-neopsyke.sh"
 
@@ -15,8 +14,6 @@ printf 'EGO_LOOP_DELAY_MS=%s\n' "${EGO_LOOP_DELAY_MS:-}" >"${NEOPSYKE_STUB_ENV_O
 printf 'ARGS=%s\n' "$*" >>"${NEOPSYKE_STUB_ENV_OUT:?}"
 EOF
   chmod +x "$LAUNCHER_ROOT/build/install/neopsyke/bin/neopsyke"
-
-  : >"$LAUNCHER_ROOT/neopsyke-pgvector-memory/build/libs/neopsyke-pgvector-memory-0.1.0-all.jar"
   ENV_OUT="$TEST_TMPDIR/launcher-env.txt"
 }
 
