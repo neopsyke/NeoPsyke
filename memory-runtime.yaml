@@ -1,0 +1,16 @@
+mode: default
+
+defaultProvider:
+  provider: neopsyke-pgvector-memory
+  transport: http
+  baseUrl: http://127.0.0.1:7841
+  command: "java -jar neopsyke-pgvector-memory/build/libs/neopsyke-pgvector-memory-0.1.0-all.jar --transport=http --port=7841"
+  startupTimeoutMs: 12000
+  healthTimeoutMs: 3000
+  namespace: neopsyke
+
+externalProvider:
+  provider: stub
+  transport: http
+  baseUrl: ""
+  namespace: neopsyke

@@ -40,7 +40,7 @@ It is intentionally high-level and should stay aligned with the code.
   - `AsyncOperationRegistry` (generic provider adapter registry for long-running action handles restored by the goal runtime)
   - `Ego` orchestrator
 - Interactive startup now performs an MCP memory health probe before enabling memory:
-  - if probe passes, memory is exposed as available and `McpHippocampus` is wired
+  - if probe passes, memory is exposed as available and a provider-backed `Hippocampus` is wired
   - if probe fails, memory is downgraded to noop for the run and reported unavailable
   - MCP memory server process now stays alive after `connect` until transport close so startup health checks can complete instead of racing a premature process exit
 - Interactive startup runs LLM provider health probes per configured cognitive role endpoint:
@@ -420,7 +420,7 @@ It is intentionally high-level and should stay aligned with the code.
   - Session/interlocutor filters are optional in episodic recall:
     - default temporal recall is cross-session
     - session/interlocutor filters are applied only when the user explicitly requests them (for example, “this session”, `session:<id>`, `interlocutor:<id>`)
-  - `McpHippocampus` requests `write_mode=dedupe_if_similar` when calling memory write tools.
+  - the default pgvector provider path dedupes narrative memory writes semantically before storing them.
   - Reflection lessons:
     - Triggered on denied-action/repeated-denied loops.
     - Persisted as `MemoryImprint(source=ego_reflection_lesson)` with tags (`kind:reflection_lesson`, action/reason/session metadata).

@@ -183,7 +183,8 @@ class GoalManagerTest {
             waitUntil {
                 val state = manager.goalStatus(goalId)
                 state?.goal?.status == GoalStatus.ACTIVE &&
-                    state.goal.plan.steps.firstOrNull()?.status == StepStatus.READY
+                    state.goal.plan.steps.firstOrNull()?.status == StepStatus.READY &&
+                    signals.any { it.goalId == goalId }
             }
 
             val state = manager.goalStatus(goalId)
@@ -293,7 +294,8 @@ class GoalManagerTest {
             waitUntil {
                 val state = manager2.goalStatus(goalId)
                 state?.goal?.status == GoalStatus.ACTIVE &&
-                    state.goal.plan.steps.firstOrNull()?.status == StepStatus.READY
+                    state.goal.plan.steps.firstOrNull()?.status == StepStatus.READY &&
+                    signals.any { it.goalId == goalId }
             }
 
             assertTrue(signals.any { it.goalId == goalId })
@@ -385,7 +387,8 @@ class GoalManagerTest {
             waitUntil {
                 val state = manager2.goalStatus(goalId)
                 state?.goal?.status == GoalStatus.ACTIVE &&
-                    state.goal.plan.steps.firstOrNull()?.status == StepStatus.READY
+                    state.goal.plan.steps.firstOrNull()?.status == StepStatus.READY &&
+                    signals.any { it.goalId == goalId }
             }
 
             val state = manager2.goalStatus(goalId)

@@ -31,10 +31,14 @@ Instructions for coding agents working in this repository (Codex, Claude, Gemini
 ## Working Rules
 - Keep changes focused and minimal.
 - Do not make unrelated refactors.
-- Do not add license headers unless asked.
 - Do not commit secrets, API keys, or local machine paths.
 - Prefer ASCII in docs/code unless the file already uses Unicode.
 - Preserve existing behavior unless the user asked for behavior changes.
+- When fixing tests, always prioritize understanding the feature and making sure the root
+  cause is addressed instead of making the test just pass.
+- If you find a failing test, flaky test, even if unrelated to current changes
+  make sure to find the root cause and fix it. Every work session must end with all
+  tests running. 
 
 ## Agent Logic Docs Maintenance (Required)
 - Keep both `AGENT_LOGIC_SUMMARY.md` and `AGENT_LOGIC_DIAGRAM.md` accurate as living runtime logic docs.

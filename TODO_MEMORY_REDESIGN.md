@@ -5,15 +5,21 @@ refactor so pending pieces are not lost during the structural changes.
 
 It is intentionally short and execution-oriented.
 
+Related note:
+
+- `MEMORY_PROVIDER_REFACTOR_NOTE.md` records the confirmed provider-oriented
+  architecture and bootstrap decisions for the next refactor stage
+
 ## Major Remaining Redesign Work
 
 - Do the physical module split:
   - `memory-api`
   - `memory-core`
-  - `memory-embedded`
-  - `memory-mcp-server`
+  - `memory-spi`
+  - `default-memory-bootstrap`
 - Stop relying on `McpHippocampus` as the effective default runtime backend.
-- Implement a real `memory=embedded` mode for the OSS/local default path.
+- Implement a real `memory=default` mode backed by
+  `neopsyke-pgvector-memory`.
 - Finish exploiting the new typed API end-to-end instead of remaining mostly
   narrative-oriented with compatibility bridging.
 - Finish routing episodic memory through one real long-term facade path instead
@@ -22,13 +28,15 @@ It is intentionally short and execution-oriented.
 
 ## OSS Readiness Blockers
 
-- Decide the local default memory story:
-  - managed local pgvector
-  - starter backend
-  - or both
+- Build the agreed default memory story:
+  - `memory=default`
+  - external `neopsyke-pgvector-memory` provider
+  - Docker-backed provider bootstrap
+  - NeoPsyke-owned memory config
 - Make installability match the product promise for open-source users.
-- Reduce MCP to an adapter/integration surface instead of the practical default
-  architecture.
+- Reduce MCP to an adapter/integration surface instead of the practical
+  default architecture.
+- Add the transport-agnostic provider SPI and the default HTTP provider path.
 
 ## Pending Wiring
 
@@ -57,9 +65,13 @@ It is intentionally short and execution-oriented.
   the unified long-term memory facade.
 - Rework runtime wiring so the default local path no longer depends on
   `McpHippocampus`.
-- Add the real `memory=embedded` mode after the module split and backend
-  decision are settled.
+- Add the real `memory=default` mode after the module split and provider
+  wiring are settled.
 - Replace package-level extraction with the real physical module split.
+- Add code-level SPI comments/TODOs that make future HTTP/MCP/direct provider
+  adapters obvious to contributors.
+- Keep `memory=external` present in config/runtime shape even if initially
+  stubbed.
 
 ## Future Expansion
 
@@ -70,3 +82,5 @@ It is intentionally short and execution-oriented.
   complete.
 - Revisit whether episodic storage should remain SQLite-backed permanently or
   become a pluggable backend under the unified long-term memory system.
+- Revisit first-class external providers such as Mem0 once the provider SPI and
+  default pgvector path are stable.

@@ -1,2 +1,2 @@
 rootProject.name = "neopsyke"
-include("mcp-memory-pgvector")
+include("neopsyke-pgvector-memory")

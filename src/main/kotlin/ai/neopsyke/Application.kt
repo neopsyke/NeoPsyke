@@ -3,6 +3,7 @@ package ai.neopsyke
 import mu.KotlinLogging
 import ai.neopsyke.config.AgentRuntimeSettingsLoader
 import ai.neopsyke.config.LlmRuntimeConfigLoader
+import ai.neopsyke.config.MemoryRuntimeConfigLoader
 import ai.neopsyke.config.McpRuntimeConfigLoader
 import ai.neopsyke.eval.ReasoningEvalMode
 
@@ -52,6 +53,7 @@ fun main(args: Array<String>) {
     val runtimeSettings = AgentRuntimeSettingsLoader.load()
     val config = runtimeSettings.agentConfig
     val mcpRuntimeConfig = McpRuntimeConfigLoader.load()
+    val memoryRuntimeConfig = MemoryRuntimeConfigLoader.load()
     val llmRuntimeConfig = LlmRuntimeConfigLoader.load()
     if (llmRuntimeConfig == null) {
         output.error("Invalid llm-runtime.yaml configuration. Supported providers are: groq, mistral, google, openai.")
@@ -72,6 +74,7 @@ fun main(args: Array<String>) {
             llm = llmRuntimeConfig,
             config = config,
             mcpRuntimeConfig = mcpRuntimeConfig,
+            memoryRuntimeConfig = memoryRuntimeConfig,
             cliOptions = cliOptions,
             runtimeSettings = runtimeSettings
         )
@@ -83,6 +86,7 @@ fun main(args: Array<String>) {
             llm = llmRuntimeConfig,
             config = config,
             mcpRuntimeConfig = mcpRuntimeConfig,
+            memoryRuntimeConfig = memoryRuntimeConfig,
             runtimeSettings = runtimeSettings,
             cliOptions = cliOptions
         )
@@ -93,6 +97,7 @@ fun main(args: Array<String>) {
         llm = llmRuntimeConfig,
         config = config,
         mcpRuntimeConfig = mcpRuntimeConfig,
+        memoryRuntimeConfig = memoryRuntimeConfig,
         runtimeSettings = runtimeSettings,
         cliOptions = cliOptions
     )
@@ -104,7 +109,7 @@ private fun printAppHelp() {
         NeoPsyke app options:
           --eval-reasoning-only           Run deterministic reasoning self-eval (no tools/actions)
           --eval-reasoning-mode MODE      Eval mode: logic (default) or model
-          --eval-memory-live              Run live memory eval (real LLM + real MCP memory)
+          --eval-memory-live              Run live memory eval (real LLM + real long-term memory provider)
           --eval-stage ID                 Label this eval run (default: UTC date, e.g. 2026-02-28)
           --eval-reasoning-max-attempts N Max retries per reasoning task (default: 4)
           --eval-reasoning-tasks id1,id2  Run only selected reasoning task ids

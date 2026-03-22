@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_BIN="$ROOT_DIR/build/install/neopsyke/bin/neopsyke"
-MEMORY_FAT_JAR="$ROOT_DIR/mcp-memory-pgvector/build/libs/mcp-memory-pgvector-0.1.0-all.jar"
+MEMORY_FAT_JAR="$ROOT_DIR/neopsyke-pgvector-memory/build/libs/neopsyke-pgvector-memory-0.1.0-all.jar"
 LOG_LEVEL="${NEOPSYKE_LOG_LEVEL:-warning}"
 LOG_LEVEL_EXPLICIT=0
 LOG_LEVEL_FROM_ENV=0
@@ -173,13 +173,16 @@ Environment:
   MISTRAL_API_KEY         Required when a configured provider uses Mistral
   GOOGLE_API_KEY          Required when a configured provider uses Google
   OPENAI_API_KEY          Required when a configured provider uses OpenAI
-  NEOPSYKE_MCP_CONFIG_FILE   Optional path to MCP runtime YAML (default: ./mcp-runtime.yaml)
-  MCP_MEMORY_SERVER_CMD   Optional override for memory command (required only if YAML memory command is not set)
+  NEOPSYKE_MCP_CONFIG_FILE      Optional path to MCP runtime YAML for time/fetch (default: ./mcp-runtime.yaml)
+  NEOPSYKE_MEMORY_CONFIG_FILE   Optional path to memory runtime YAML (default: ./memory-runtime.yaml)
   NEOPSYKE_LOG_LEVEL         Default log level if --log-level is not provided
   NEOPSYKE_LOG_DIR           Directory for run logs (default: .neopsyke/logs)
   NEOPSYKE_LOG_RETENTION     Number of run log files to keep (default: 30)
   NEOPSYKE_AUTO_START_PGVECTOR  When true, launcher runs 'docker compose up -d pgvector' if needed
-  MEMORY_DEFAULT_NAMESPACE  Namespace for memory MCP writes/reads (launcher default: neopsyke)
+  NEOPSYKE_MEMORY_MODE         Memory mode: off, default, external
+  NEOPSYKE_MEMORY_DEFAULT_COMMAND  Optional override for managed default provider command
+  NEOPSYKE_MEMORY_DEFAULT_BASE_URL Optional override for managed default provider base URL
+  MEMORY_DEFAULT_NAMESPACE  Namespace for long-term memory provider reads/writes (launcher default: neopsyke)
   NEOPSYKE_EVENT_LOG_FILE    Optional path override for instrumentation sidecar JSONL
   NEOPSYKE_METRICS_DB        SQLite path for persisted local metrics
   EGO_LOOP_DELAY_MS       Delay between loop cycles in ms (default via launcher: 1000)
@@ -199,7 +202,7 @@ Eval mode (forwarded to app):
   --eval-reasoning-only           Run deterministic reasoning self-eval (no tools/actions)
                                  (defaults launcher log level to trace unless overridden)
   --eval-reasoning-mode MODE      Eval mode: logic (default) or model
-  --eval-memory-live              Run live memory eval (real LLM + real MCP memory)
+  --eval-memory-live              Run live memory eval (real LLM + real long-term memory provider)
   --eval-stage ID                 Label this eval run (default: UTC date, e.g. 2026-02-28)
   --eval-reasoning-max-attempts N Max retries per reasoning task (default: 4)
   --eval-reasoning-tasks id1,id2  Run only selected reasoning task ids
@@ -312,8 +315,8 @@ NEEDS_MEMORY_FAT_JAR=0
 if [[ ! -f "$MEMORY_FAT_JAR" ]]; then
   NEEDS_MEMORY_FAT_JAR=1
 elif [[ -n "$(find \
-  "$ROOT_DIR/mcp-memory-pgvector/src/main" \
-  "$ROOT_DIR/mcp-memory-pgvector/build.gradle.kts" \
+  "$ROOT_DIR/neopsyke-pgvector-memory/src/main" \
+  "$ROOT_DIR/neopsyke-pgvector-memory/build.gradle.kts" \
   -type f -newer "$MEMORY_FAT_JAR" -print -quit 2>/dev/null)" ]]; then
   NEEDS_MEMORY_FAT_JAR=1
 fi
@@ -324,8 +327,8 @@ if [[ "$NEEDS_BUILD" -eq 1 ]]; then
 fi
 
 if [[ "$NEEDS_MEMORY_FAT_JAR" -eq 1 ]]; then
-  log_info "Building memory MCP fat jar..."
-  "$ROOT_DIR/gradlew" --no-daemon --no-problems-report :mcp-memory-pgvector:fatJar
+  log_info "Building memory provider fat jar..."
+  "$ROOT_DIR/gradlew" --no-daemon --no-problems-report :neopsyke-pgvector-memory:fatJar
 fi
 
 maybe_start_pgvector

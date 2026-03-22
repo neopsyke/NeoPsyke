@@ -12,6 +12,11 @@ current runtime remains:
 This note is intentionally temporary and decision-oriented. It should evolve
 into a more stable architecture document once the refactor starts landing.
 
+Related note:
+
+- `MEMORY_PROVIDER_REFACTOR_NOTE.md` records the newer provider-oriented
+  architecture decision below `Hippocampus`
+
 ## Current State After Phase 1
 
 The redesign has started, but it is not complete.
@@ -29,7 +34,7 @@ Not yet true:
 
 - the physical module split is not done
 - the runtime default is still effectively MCP-backed memory
-- `memory=embedded` does not exist yet
+- `memory=default` backed by the external pgvector provider does not exist yet
 - the typed API is not fully exploited end-to-end
 - episodic memory is not yet fully unified behaviorally behind one concrete
   long-term facade path
@@ -167,52 +172,49 @@ Owns:
 This layer may use more technical vocabulary such as `search`, `write`,
 `upsertFact`, `expandRelations`, and `compact`.
 
-### `memory-embedded`
+### `memory-spi`
 
-Default local backend path for open-source usage.
+Transport-agnostic provider SPI used below `memory-core`.
 
 Current intended direction:
 
-- local managed pgvector-backed runtime for strong default memory quality
-- no MCP in the default local path
-- implementation may internally combine vector store plus episodic store
+- NeoPsyke owns a provider-neutral technical contract
+- provider adapters may later exist for HTTP, MCP, or direct/in-process use
+- the default pgvector provider will initially be reached over HTTP
 
-This is "embedded" from NeoPsyke's product perspective, not necessarily
-"in-process with no auxiliary database runtime".
+### `default-memory-bootstrap`
 
-### `memory-mcp-server`
+Owns the opinionated NeoPsyke bootstrap/install/start path for the default
+memory provider.
 
-Thin transport/server adapter over `memory-core`.
+Current intended direction:
 
-Owns:
-
-- MCP tool registration
-- MCP payload translation
-- MCP transport/runtime concerns
-
-It should stop owning the core memory semantics.
+- NeoPsyke bootstraps the provider, not Postgres internals directly
+- the provider owns its own runtime boot contract
+- the initial default implementation uses a Docker-backed pgvector provider
 
 Current gap:
 
 - this module split is still mostly a design target
 - the refactor is still largely package-level inside the main app
-- `memory-api`, `memory-core`, `memory-embedded`, and `memory-mcp-server`
-  still need to become real physical modules
+- `memory-api`, `memory-core`, `memory-spi`, and
+  `default-memory-bootstrap` still need to become real physical modules
 
 ## Memory Modes
 
 The target runtime profiles are:
 
 - `memory=off`
-- `memory=embedded`
-- `memory=mcp`
+- `memory=default`
+- `memory=external`
 
 Notes:
 
 - `memory=off` is the default for tests, CI, and minimal runs
-- `memory=embedded` is the recommended OSS local mode
-- `memory=mcp` remains useful for external/shared/remote memory services and
-  experimentation
+- `memory=default` is the recommended OSS/full install mode
+- `memory=default` should use NeoPsyke's pgvector provider via HTTP
+- `memory=external` is a future-facing extension point for non-default
+  providers such as Mem0 or custom integrations
 
 Current gap:
 
@@ -632,7 +634,7 @@ implementations the precise language they need.
 
 ### Phase 2: extract shared core
 
-- move reusable storage semantics out of `mcp-memory-pgvector`
+- move reusable storage semantics out of `neopsyke-pgvector-memory`
 - keep MCP server functioning as an adapter over the extracted core
 
 ### Phase 3: absorb episodic memory under long-term facade

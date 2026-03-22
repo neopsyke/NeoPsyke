@@ -240,7 +240,7 @@ flowchart LR
     A["runInteractiveMode"] --> B["Resolve MCP memory command"]
     B -->|missing/disabled| C["NoopHippocampus (memory unavailable)"]
     B -->|present| D["MCP memory health probe (long-lived stdio connect + listTools)"]
-    D -->|pass| E["McpHippocampus enabled"]
+    D -->|pass| E["Provider-backed Hippocampus enabled"]
     D -->|fail| C
     E --> F["Emit action_capabilities(memory=available)"]
     C --> G["Emit action_capabilities(memory=unavailable + warning)"]

@@ -57,7 +57,7 @@ MAX_TIMEOUTS="${FREUD_BBH_MAX_TIMEOUTS:-0}"
 BASELINE_FILE="${FREUD_BBH_BASELINE_FILE:-}"
 MAX_REGRESSION_PERCENT="${FREUD_BBH_MAX_REGRESSION_PERCENT:-0}"
 PRESERVE_MEMORY="${FREUD_BBH_PRESERVE_MEMORY:-${FREUD_LIVE_EVAL_PRESERVE_MEMORY:-false}}"
-BBH_MCP_MEMORY_ENABLED="${FREUD_BBH_MCP_MEMORY_ENABLED:-false}"
+BBH_MEMORY_ENABLED="${FREUD_BBH_MEMORY_ENABLED:-false}"
 BBH_LOGBOOK_ENABLED="${FREUD_BBH_LOGBOOK_ENABLED:-false}"
 runtime_bootstrap_failure_count=0
 provider_model_failure_count=0
@@ -268,12 +268,12 @@ while IFS=$'\t' read -r id category prompt; do
 
   set +e
   if [[ "$PRESERVE_MEMORY" == "true" ]]; then
-    MCP_MEMORY_ENABLED="$BBH_MCP_MEMORY_ENABLED" \
+    NEOPSYKE_MEMORY_MODE="$([[ "$BBH_MEMORY_ENABLED" == "true" ]] && printf 'default' || printf 'off')" \
     NEOPSYKE_LOGBOOK_ENABLED="$BBH_LOGBOOK_ENABLED" \
     FREUD_LIVE_EVAL_RUN_DIR="$case_dir" \
     "$LIVE_EVAL_CMD" --input "$input_file" --timeout "${FREUD_LIVE_EVAL_TIMEOUT:-120}" --preserve-memory >/dev/null
   else
-    MCP_MEMORY_ENABLED="$BBH_MCP_MEMORY_ENABLED" \
+    NEOPSYKE_MEMORY_MODE="$([[ "$BBH_MEMORY_ENABLED" == "true" ]] && printf 'default' || printf 'off')" \
     NEOPSYKE_LOGBOOK_ENABLED="$BBH_LOGBOOK_ENABLED" \
     FREUD_LIVE_EVAL_RUN_DIR="$case_dir" \
     "$LIVE_EVAL_CMD" --input "$input_file" --timeout "${FREUD_LIVE_EVAL_TIMEOUT:-120}" >/dev/null
