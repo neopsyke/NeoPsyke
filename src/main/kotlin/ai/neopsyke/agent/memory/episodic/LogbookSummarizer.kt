@@ -1,4 +1,4 @@
-package ai.neopsyke.agent.memory.episodic
+package ai.neopsyke.agent.memory.longterm
 
 /**
  * Extracts keywords from text content for episodic logbook entries.

@@ -273,6 +273,11 @@ class GoalManagerTest {
                 observedEvidence = false,
             )
             manager1.finalizeGoalCycle(work.rootInputId)
+            waitUntil {
+                val state = manager1.goalStatus(goalId)
+                state?.goal?.status == GoalStatus.BLOCKED &&
+                    state.goal.plan.steps.firstOrNull()?.status == StepStatus.BLOCKED
+            }
             manager1.stop()
 
             provider.enqueue(operationId = "op-restore", statuses = listOf(AsyncOperationStatus.Succeeded("restored completion")))
@@ -292,6 +297,42 @@ class GoalManagerTest {
             }
 
             assertTrue(signals.any { it.goalId == goalId })
+            manager2.stop()
+        } finally {
+            root.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `restored READY step emits work-ready cue on restart`() {
+        val root = Files.createTempDirectory("psyke-pm-restore-ready")
+        try {
+            val store = GoalStore(root)
+            val manager1 = GoalManager(
+                config = testConfig(root),
+                store = store,
+                planner = DeterministicGoalPlanner(),
+            )
+            manager1.start(testScope())
+            val goalId = manager1.createGoal("Restore ready step cue")
+            manager1.stop()
+
+            val signals = CopyOnWriteArrayList<GoalRuntimeCue>()
+            val manager2 = GoalManager(
+                config = testConfig(root),
+                store = store,
+                cueEmitter = { cue -> signals += cue },
+            )
+            manager2.start(testScope())
+
+            waitUntil {
+                signals.any {
+                    it.goalId == goalId &&
+                        it.stepId == "step-1" &&
+                        it.reason == "goal_restored_work_ready"
+                }
+            }
+
             manager2.stop()
         } finally {
             root.toFile().deleteRecursively()
@@ -770,6 +811,71 @@ class GoalManagerTest {
             assertEquals(cronExpression, restoredSchedules[id])
 
             manager2.stop()
+        } finally {
+            root.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `executeOperation rejects invalid cron expression on create`() {
+        val root = Files.createTempDirectory("psyke-pm-invalid-cron")
+        try {
+            val manager = GoalManager(
+                config = testConfig(root),
+                store = GoalStore(root),
+                planner = DeterministicGoalPlanner(),
+            )
+            manager.start(testScope())
+
+            val result = manager.executeOperation(
+                GoalOperationRequest(
+                    operation = GoalOperation.CREATE,
+                    title = "Bad schedule",
+                    instruction = "Run on a bad schedule",
+                    cronExpression = "bad cron",
+                )
+            )
+
+            assertFalse(result.success)
+            assertTrue(result.message.contains("valid 5-field cron_expression", ignoreCase = true))
+            assertTrue(manager.allGoals().isEmpty())
+
+            manager.stop()
+        } finally {
+            root.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `createGoal with cron schedule does not emit immediate work-ready signal`() {
+        val root = Files.createTempDirectory("psyke-pm-cron-idle-create")
+        try {
+            val signals = CopyOnWriteArrayList<GoalRuntimeCue>()
+            val manager = GoalManager(
+                config = testConfig(root),
+                store = GoalStore(root),
+                planner = DeterministicGoalPlanner(),
+                cueEmitter = { cue -> signals += cue },
+            )
+            manager.start(testScope())
+            val future = ZonedDateTime.now().plusHours(2).withSecond(0).withNano(0)
+            val cronExpression = "${future.minute} ${future.hour} * * *"
+
+            val id = manager.createGoal(
+                instruction = "Check the weather and remind me on schedule",
+                title = "Weather reminder",
+                cronExpression = cronExpression,
+            )
+
+            assertTrue(id.isNotBlank())
+            assertTrue(signals.none { it.goalId == id })
+            val state = manager.goalStatus(id)
+            assertNotNull(state)
+            assertEquals(GoalStatus.ACTIVE, state.goal.status)
+            assertEquals(cronExpression, state.goal.cronExpression)
+            assertEquals(StepStatus.READY, state.goal.plan.steps.first().status)
+
+            manager.stop()
         } finally {
             root.toFile().deleteRecursively()
         }

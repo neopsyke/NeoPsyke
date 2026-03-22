@@ -6,13 +6,13 @@ import ai.neopsyke.agent.actions.websearch.WebSearchActionHandler
 import ai.neopsyke.agent.config.AgentConfig
 import ai.neopsyke.agent.cortex.motor.MotorCortex
 import ai.neopsyke.agent.cortex.sensory.SensoryCortex
-import ai.neopsyke.agent.memory.episodic.DeterministicLogbookSummarizer
-import ai.neopsyke.agent.memory.episodic.Logbook
-import ai.neopsyke.agent.memory.episodic.LogbookSummarizer
 import ai.neopsyke.agent.memory.longterm.Hippocampus
 import ai.neopsyke.agent.memory.longterm.LongTermMemoryAdvisor
 import ai.neopsyke.agent.memory.longterm.NoopHippocampus
 import ai.neopsyke.agent.memory.longterm.NoopLongTermMemoryAdvisor
+import ai.neopsyke.agent.memory.longterm.DeterministicLogbookSummarizer
+import ai.neopsyke.agent.memory.longterm.Logbook
+import ai.neopsyke.agent.memory.longterm.LogbookSummarizer
 import ai.neopsyke.agent.memory.shortterm.MemoryStore
 import ai.neopsyke.agent.memory.scratchpad.ScratchpadStore
 import ai.neopsyke.agent.goal.NoopGoalsGateway

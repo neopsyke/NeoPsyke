@@ -63,6 +63,25 @@ class ProjectStateMachineTest {
     }
 
     @Test
+    fun `PlanGenerated for recurring goal defers initial work-ready until cron wake`() {
+        val state = initialState().copy(
+            goal = initialState().goal.copy(cronExpression = "*/5 * * * *")
+        )
+        val plan = simplePlan("s1" to emptySet(), "s2" to setOf("s1"))
+
+        val (newState, commands) = GoalStateMachine.transition(
+            state,
+            GoalEvent.PlanGenerated(goalId = "proj-1", plan = plan, timestamp = now)
+        )
+
+        assertEquals(GoalStatus.ACTIVE, newState.goal.status)
+        assertEquals(StepStatus.READY, newState.goal.plan.steps[0].status)
+        assertEquals(StepStatus.PENDING, newState.goal.plan.steps[1].status)
+        assertTrue(commands.none { it is GoalCommand.EmitWorkReady })
+        assertTrue(commands.any { it is GoalCommand.PersistGoal })
+    }
+
+    @Test
     fun `nextRunnableStep prefers IN_PROGRESS over READY`() {
         val state = GoalState(
             goal = initialState().goal.copy(
@@ -101,6 +120,52 @@ class ProjectStateMachineTest {
 
         assertEquals(StepStatus.DONE, newState.goal.plan.steps.first().status)
         assertEquals(GoalStatus.COMPLETED, newState.goal.status)
+        assertTrue(commands.any { it is GoalCommand.PersistGoal })
+    }
+
+    @Test
+    fun `CronCycleStarted resets recurring completed goal and emits work-ready`() {
+        val state = GoalState(
+            goal = initialState().goal.copy(
+                status = GoalStatus.COMPLETED,
+                cronExpression = "*/5 * * * *",
+                plan = GoalPlan(
+                    steps = listOf(
+                        PlanStep(
+                            id = "s1",
+                            description = "Step 1",
+                            status = StepStatus.DONE,
+                            acceptanceCriteria = "verify s1",
+                            attempts = 2,
+                            completedAt = now,
+                            notes = "previous run completed"
+                        ),
+                        PlanStep(
+                            id = "s2",
+                            description = "Step 2",
+                            status = StepStatus.SKIPPED,
+                            acceptanceCriteria = "verify s2",
+                            requires = setOf("s1")
+                        ),
+                    ),
+                    generatedAt = now,
+                )
+            ),
+            producedKeys = setOf("artifact-key")
+        )
+
+        val (newState, commands) = GoalStateMachine.transition(
+            state,
+            GoalEvent.CronCycleStarted("proj-1", now)
+        )
+
+        assertEquals(GoalStatus.ACTIVE, newState.goal.status)
+        assertTrue(newState.producedKeys.isEmpty())
+        assertEquals(StepStatus.READY, newState.goal.plan.steps[0].status)
+        assertEquals(StepStatus.PENDING, newState.goal.plan.steps[1].status)
+        assertEquals(0, newState.goal.plan.steps[0].attempts)
+        assertEquals("", newState.goal.plan.steps[0].notes)
+        assertTrue(commands.any { it is GoalCommand.EmitWorkReady })
         assertTrue(commands.any { it is GoalCommand.PersistGoal })
     }
 

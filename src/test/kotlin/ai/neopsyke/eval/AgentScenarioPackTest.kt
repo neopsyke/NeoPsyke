@@ -46,6 +46,9 @@ import ai.neopsyke.agent.id.IdConfig
 import ai.neopsyke.agent.id.NeedConfig
 import ai.neopsyke.agent.id.ResponseCurveConfig
 import ai.neopsyke.agent.memory.longterm.Hippocampus
+import ai.neopsyke.agent.memory.longterm.ImprintRequest
+import ai.neopsyke.agent.memory.longterm.ImprintResult
+import ai.neopsyke.agent.memory.longterm.MemoryCapability
 import ai.neopsyke.agent.memory.longterm.MemoryImprint
 import ai.neopsyke.agent.memory.longterm.MemoryRecall
 import ai.neopsyke.agent.memory.longterm.MemoryRecallQuery
@@ -55,6 +58,8 @@ import ai.neopsyke.agent.goal.GoalManager
 import ai.neopsyke.agent.goal.GoalPriority
 import ai.neopsyke.agent.goal.GoalStatus
 import ai.neopsyke.agent.goal.GoalStore
+import ai.neopsyke.agent.goal.GoalsGateway
+import ai.neopsyke.agent.goal.NoopGoalsGateway
 import ai.neopsyke.agent.superego.Superego
 import ai.neopsyke.llm.ChatCompletion
 import ai.neopsyke.llm.ChatMessage
@@ -362,7 +367,7 @@ class AgentScenarioPackTest {
     }
 
     @Test
-    fun scenario_action_verifier_repairs_web_search_before_superego_review() {
+    fun scenario_action_verifier_does_not_semantically_rewrite_web_search_before_superego_review() {
         val plannerLlm = StubChatModelClient().apply {
             enqueueRawResponse(
                 """
@@ -407,16 +412,19 @@ class AgentScenarioPackTest {
 
         runAgentWithInput(agent, "check pricing\nexit\n")
 
-        assertEquals(listOf("official groq pricing"), observedQueries)
+        assertEquals(listOf("stale query"), observedQueries)
         assertTrue(
             instrumentation.events.any {
-                it.type == "action_verifier_result" && it.data["verdict"] == "repair"
+                it.type == "action_verifier_result" &&
+                    it.data["verdict"] == "approve" &&
+                    it.data["repaired"] == false &&
+                    (it.data["reason"] as? String)?.contains("alter action meaning", ignoreCase = true) == true
             }
         )
         assertTrue(
             instrumentation.events.any {
                 it.type == "action_review_requested" &&
-                    (it.data["action"] as? PendingAction)?.payload == "official groq pricing"
+                    (it.data["action"] as? PendingAction)?.payload == "stale query"
             }
         )
     }
@@ -681,6 +689,70 @@ class AgentScenarioPackTest {
         }
     }
 
+    @Test
+    fun scenario_natural_language_recurring_goal_creation() = runBlocking {
+        val root = Files.createTempDirectory("neopsyke-scenario-goal-create")
+        var manager: GoalManager? = null
+        try {
+            val plannerLlm = StubChatModelClient().apply {
+                enqueueRawResponse(
+                    """
+                    {
+                      "decision":"create_goal",
+                      "title":"Weather reminder",
+                      "instruction":"Check the current weather and send the user an update for this scheduled run.",
+                      "completion_criteria":"A weather update is delivered to the user for the current scheduled run.",
+                      "priority":"medium"
+                    }
+                    """.trimIndent()
+                )
+            }
+            val instrumentation = RecordingInstrumentation()
+            val outputs = mutableListOf<String>()
+            val config = AgentConfig(
+                planner = PlannerConfig(maxLoopStepsPerInput = 4, maxThoughtPasses = 2),
+                goals = GoalConfig(enabled = true, workspaceRoot = root),
+            )
+            manager = GoalManager(
+                config = config.goals,
+                store = GoalStore(root),
+                planner = DeterministicGoalPlanner(),
+                instrumentation = instrumentation,
+            )
+            manager.start(CoroutineScope(SupervisorJob() + Dispatchers.Default))
+            val agent = buildTestEgo(
+                planner = LlmEgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
+                superego = Superego(
+                    modelClient = StubChatModelClient().apply { enqueueRawResponse("""{"allow":true}""") },
+                    config = config,
+                    instrumentation = instrumentation
+                ),
+                motorCortex = buildMotorCortex(
+                    output = { outputs.add(it) },
+                    config = config,
+                    goalsGateway = manager,
+                ),
+                config = config,
+                instrumentation = instrumentation,
+                goalsGateway = manager,
+            )
+
+            runAgentWithInput(agent, "I would like to set a goal for you: Remind me of the current weather every 5 minutes.\nexit\n")
+
+            val goal = manager.allGoals().singleOrNull()
+            assertNotNull(goal)
+            val state = manager.goalStatus(goal.goalId)
+            assertNotNull(state)
+            assertEquals("*/5 * * * *", state.goal.cronExpression)
+            assertTrue(state.goal.instruction.contains("weather", ignoreCase = true))
+            assertTrue(outputs.single().contains("Goal created:", ignoreCase = true))
+            assertEquals("input_goal_create", plannerLlm.lastOptions.metadata.callSite)
+        } finally {
+            manager?.stop()
+            root.toFile().deleteRecursively()
+        }
+    }
+
     private fun runAgentWithInput(agent: Ego, stdinContent: String) {
         val previousIn = System.`in`
         try {
@@ -696,13 +768,17 @@ class AgentScenarioPackTest {
         webSearchEngine: WebSearchEngine = object : WebSearchEngine {
             override fun search(query: String, maxResults: Int): WebSearchResult =
                 WebSearchResult(summary = "unused", snippets = emptyList(), sources = emptyList())
-        }
+        },
+        config: AgentConfig = AgentConfig(),
+        goalsGateway: GoalsGateway = NoopGoalsGateway,
     ): MotorCortex {
         val webSearchHandler = WebSearchActionHandler(engine = webSearchEngine)
         return MotorCortex(
             webSearchActionHandler = webSearchHandler,
             output = output,
             reflectionMemoryRecorder = NoopReflectionMemoryRecorder,
+            config = config,
+            goalsGateway = goalsGateway,
         )
     }
 
@@ -791,17 +867,23 @@ class AgentScenarioPackTest {
         private val recall: MemoryRecall,
     ) : Hippocampus {
         override val providerName: String = recall.provider
+        override val capabilities: Set<MemoryCapability> = setOf(
+            MemoryCapability.SEMANTIC_RECALL,
+            MemoryCapability.NARRATIVE_IMPRINT,
+        )
         val queries = mutableListOf<MemoryRecallQuery>()
         val imprints = mutableListOf<MemoryImprint>()
 
-        override fun recall(query: MemoryRecallQuery): MemoryRecall {
-            queries += query
+        override fun recall(request: MemoryRecallQuery): MemoryRecall {
+            queries += request
             return recall
         }
 
-        override fun imprint(imprint: MemoryImprint): Boolean {
-            imprints += imprint
-            return true
+        override fun imprint(request: ImprintRequest): ImprintResult {
+            val narrative = request as? MemoryImprint
+                ?: return ImprintResult(provider = providerName, accepted = false, detail = "unsupported")
+            imprints += narrative
+            return ImprintResult(provider = providerName, accepted = true, storedCount = 1)
         }
     }
 }

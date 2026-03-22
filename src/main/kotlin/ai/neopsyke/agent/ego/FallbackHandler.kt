@@ -3,7 +3,7 @@ package ai.neopsyke.agent.ego
 import mu.KotlinLogging
 import ai.neopsyke.agent.config.*
 import ai.neopsyke.agent.model.*
-import ai.neopsyke.agent.memory.episodic.EpisodicEventType
+import ai.neopsyke.agent.memory.longterm.MemoryEventType
 import ai.neopsyke.agent.support.TextSecurity
 import ai.neopsyke.instrumentation.AgentEvents
 import ai.neopsyke.instrumentation.AgentInstrumentation
@@ -32,7 +32,7 @@ internal class FallbackHandler(
         deliberation.onActionDenied()
         instrumentation.emit(AgentEvents.actionDenied(action, reason, reasonCode))
         memory.journal(
-            EpisodicEventType.ACTION_DENIED,
+            MemoryEventType.ACTION_DENIED,
             "Denied ${action.type.name.lowercase()} by $source: $reason",
             actionType = action.type.name.lowercase(),
             metadata = mapOf(

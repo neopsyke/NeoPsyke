@@ -20,11 +20,14 @@ FREUD_RUN_ROOT=".freud/feature-loop-env-test-$$"
 FREUD_REASONING_EVAL_MODEL_CMD="$STEP_STUB"
 NEOPSYKE_LLM_CONFIG_FILE="$TEST_TMPDIR/llm-routing.yaml"
 EOF
+  : >"$TEST_TMPDIR/llm-routing.yaml"
 }
 
 teardown() {
   [[ -d "${TEST_TMPDIR:-}" ]] && rm -rf "$TEST_TMPDIR"
-  [[ -d "$REPO_ROOT/.freud/feature-loop-env-test-$$" ]] && rm -rf "$REPO_ROOT/.freud/feature-loop-env-test-$$"
+  if [[ -d "$REPO_ROOT/.freud/feature-loop-env-test-$$" ]]; then
+    rm -rf "$REPO_ROOT/.freud/feature-loop-env-test-$$"
+  fi
 }
 
 @test "feature-loop exports NEOPSYKE_LLM_CONFIG_FILE to live step commands" {
@@ -33,4 +36,15 @@ teardown() {
     "$SCRIPTS_DIR/feature-loop.sh" llm-config-export --live --from-step reasoning_eval_model --config "$CONFIG_FILE"
   [[ "$status" -eq 0 ]]
   grep -q "NEOPSYKE_LLM_CONFIG_FILE=$TEST_TMPDIR/llm-routing.yaml" "$ENV_LOG"
+}
+
+@test "feature-loop fails early when selected live step is not configured" {
+  cat >"$CONFIG_FILE" <<EOF
+FREUD_PROJECT_NAME="neopsyke-test"
+FREUD_RUN_ROOT=".freud/feature-loop-env-test-$$"
+EOF
+
+  run "$SCRIPTS_DIR/feature-loop.sh" live-missing --live --from-step reasoning_eval_model --config "$CONFIG_FILE"
+  [[ "$status" -eq 1 ]]
+  [[ "$output" == *"Live lane not configured"* ]]
 }

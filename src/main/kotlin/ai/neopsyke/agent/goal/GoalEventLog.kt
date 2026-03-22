@@ -120,6 +120,7 @@ internal data class EventWrapper(
             "WaitConditionTimedOut" -> GoalEvent.WaitConditionTimedOut(goalId, stepId!!, ts)
             "Suspended" -> GoalEvent.Suspended(goalId, reason ?: "", resumeAt?.let { java.time.Instant.parse(it) }, ts)
             "Resumed" -> GoalEvent.Resumed(goalId, ts)
+            "CronCycleStarted" -> GoalEvent.CronCycleStarted(goalId, ts)
             "Completed" -> GoalEvent.Completed(goalId, ts)
             "PriorityChanged" -> GoalEvent.PriorityChanged(
                 goalId = goalId,
@@ -166,6 +167,7 @@ internal data class EventWrapper(
                 is GoalEvent.WaitConditionTimedOut -> base.copy(stepId = event.stepId)
                 is GoalEvent.Suspended -> base.copy(reason = event.reason, resumeAt = event.resumeAt?.toString())
                 is GoalEvent.Resumed -> base
+                is GoalEvent.CronCycleStarted -> base
                 is GoalEvent.Completed -> base
                 is GoalEvent.PriorityChanged -> base.copy(priority = event.priority.name)
                 is GoalEvent.Failed -> base.copy(reason = event.reason)

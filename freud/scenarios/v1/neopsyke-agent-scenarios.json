@@ -33,8 +33,8 @@
     },
     {
       "id": "action_verifier_repair",
-      "selector": "ai.neopsyke.eval.AgentScenarioPackTest.scenario_action_verifier_repairs_web_search_before_superego_review",
-      "description": "Action verifier repairs a generic action before Superego policy review."
+      "selector": "ai.neopsyke.eval.AgentScenarioPackTest.scenario_action_verifier_does_not_semantically_rewrite_web_search_before_superego_review",
+      "description": "Action verifier preserves the original web-search intent before Superego policy review."
     },
     {
       "id": "plan_decomposition",

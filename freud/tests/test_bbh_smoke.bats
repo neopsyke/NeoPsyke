@@ -227,3 +227,32 @@ EOF
   [[ "$status" -eq 0 ]]
   grep -q -- '--preserve-memory' "$ARGS_LOG"
 }
+
+@test "run-bbh-smoke surfaces bootstrap failures instead of reporting only score regressions" {
+  cat >"$PROMPTS_FILE" <<'EOF'
+{"id":"case_a","category":"boolean_expressions","prompt":"case a"}
+EOF
+  cat >"$ANSWERS_FILE" <<'EOF'
+{"id":"case_a","answer":"case_a"}
+EOF
+  cat >"$LIVE_EVAL_STUB" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+RUN_DIR="$FREUD_LIVE_EVAL_RUN_DIR"
+mkdir -p "$RUN_DIR/logs"
+printf '%s\n' 'Gradle could not start your build.' >"$RUN_DIR/logs/stderr.log"
+exit 1
+EOF
+  chmod +x "$LIVE_EVAL_STUB"
+
+  run env \
+    FREUD_BBH_LIVE_EVAL_CMD="$LIVE_EVAL_STUB" \
+    FREUD_BBH_PROMPTS_FILE="$PROMPTS_FILE" \
+    FREUD_BBH_ANSWERS_FILE="$ANSWERS_FILE" \
+    FREUD_RUN_DIR="$TEST_RUN_DIR" \
+    FREUD_ARTIFACT_DIR="$TEST_ARTIFACT_DIR" \
+    "$SCRIPTS_DIR/run-bbh-smoke.sh" --lane weak-structure
+  [[ "$status" -eq 2 ]]
+  [[ "$output" == *"local runtime/bootstrap failures"* ]]
+  grep -q '"runtime_bootstrap_failure_count": 1' "$TEST_ARTIFACT_DIR/bbh-smoke-weak-structure-summary.json"
+}

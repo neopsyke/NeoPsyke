@@ -55,6 +55,7 @@ object GoalStateMachine {
             is GoalEvent.WaitConditionTimedOut -> handleWaitConditionTimedOut(state, event, commands)
             is GoalEvent.Suspended -> handleSuspended(state, event, commands)
             is GoalEvent.Resumed -> handleResumed(state, event, commands)
+            is GoalEvent.CronCycleStarted -> handleCronCycleStarted(state, event, commands)
             is GoalEvent.Completed -> handleCompleted(state, event, commands)
             is GoalEvent.PriorityChanged -> handlePriorityChanged(state, event, commands)
             is GoalEvent.Failed -> handleFailed(state, event, commands)
@@ -112,7 +113,9 @@ object GoalStateMachine {
         val newPlan = event.plan.copy(steps = stepsWithReady)
         val newGoal = state.goal.copy(plan = newPlan, status = GoalStatus.ACTIVE)
         commands += GoalCommand.PersistGoal(state.id)
-        emitWorkReadyIfRunnable(state.id, stepsWithReady, "plan_generated", commands)
+        if (!shouldDeferRecurringKickoff(state)) {
+            emitWorkReadyIfRunnable(state.id, stepsWithReady, "plan_generated", commands)
+        }
         return state.copy(goal = newGoal)
     }
 
@@ -125,7 +128,9 @@ object GoalStateMachine {
         val newPlan = event.plan.copy(steps = stepsWithReady, revisedAt = event.timestamp)
         val newGoal = state.goal.copy(plan = newPlan, status = GoalStatus.ACTIVE)
         commands += GoalCommand.PersistGoal(state.id)
-        emitWorkReadyIfRunnable(state.id, stepsWithReady, "plan_revised", commands)
+        if (!shouldDeferRecurringKickoff(state)) {
+            emitWorkReadyIfRunnable(state.id, stepsWithReady, "plan_revised", commands)
+        }
         return state.copy(goal = newGoal)
     }
 
@@ -394,6 +399,30 @@ object GoalStateMachine {
         )
     }
 
+    private fun handleCronCycleStarted(
+        state: GoalState,
+        event: GoalEvent.CronCycleStarted,
+        commands: MutableList<GoalCommand>,
+    ): GoalState {
+        if (state.goal.cronExpression.isNullOrBlank()) {
+            return state
+        }
+        val resetSteps = promoteReadySteps(
+            steps = resetRecurringPlanSteps(state.goal.plan.steps),
+            producedKeys = emptySet(),
+        )
+        val restarted = state.copy(
+            goal = state.goal.copy(
+                status = GoalStatus.ACTIVE,
+                plan = state.goal.plan.copy(steps = resetSteps),
+            ),
+            producedKeys = emptySet(),
+        )
+        emitWorkReadyIfRunnable(state.id, resetSteps, "cron_cycle_started", commands)
+        commands += GoalCommand.PersistGoal(state.id)
+        return restarted
+    }
+
     private fun handleFailed(
         state: GoalState,
         event: GoalEvent.Failed,
@@ -429,6 +458,11 @@ object GoalStateMachine {
 
     // ── Helpers ───────────────────────────────────────────────────────────
 
+    private fun shouldDeferRecurringKickoff(state: GoalState): Boolean =
+        !state.goal.cronExpression.isNullOrBlank() &&
+            state.goal.status == GoalStatus.PLANNING &&
+            state.goal.lastWorkedAt == null
+
     private fun updateStep(
         state: GoalState,
         stepId: String,
@@ -459,6 +493,18 @@ object GoalStateMachine {
             }
         }
     }
+
+    private fun resetRecurringPlanSteps(steps: List<PlanStep>): List<PlanStep> =
+        steps.map { step ->
+            step.copy(
+                status = StepStatus.PENDING,
+                waitCondition = null,
+                attempts = 0,
+                lastAttemptAt = null,
+                completedAt = null,
+                notes = "",
+            )
+        }
 
     private fun skipDependentSteps(
         state: GoalState,

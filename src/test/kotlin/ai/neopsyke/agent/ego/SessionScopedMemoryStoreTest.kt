@@ -13,6 +13,7 @@ import ai.neopsyke.agent.memory.longterm.Hippocampus
 import ai.neopsyke.agent.memory.longterm.LongTermMemoryAdvisor
 import ai.neopsyke.agent.memory.longterm.LongTermMemoryAssessmentContext
 import ai.neopsyke.agent.memory.longterm.LongTermMemoryAssessmentDecision
+import ai.neopsyke.agent.memory.longterm.MemoryCapability
 import ai.neopsyke.agent.memory.longterm.MemoryRecall
 import ai.neopsyke.agent.memory.longterm.MemoryRecallQuery
 import ai.neopsyke.agent.memory.shortterm.MemoryStore
@@ -151,8 +152,9 @@ class SessionScopedMemoryStoreTest {
         }
         val hippocampus = object : Hippocampus {
             override val providerName: String = "test"
+            override val capabilities: Set<MemoryCapability> = setOf(MemoryCapability.SEMANTIC_RECALL)
             override val enabled: Boolean = true
-            override fun recall(query: MemoryRecallQuery): MemoryRecall =
+            override fun recall(request: MemoryRecallQuery): MemoryRecall =
                 MemoryRecall(provider = providerName, text = "")
         }
         val config = AgentConfig(

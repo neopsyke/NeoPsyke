@@ -12,19 +12,27 @@ import ai.neopsyke.agent.model.EgoTrigger
 import ai.neopsyke.agent.model.DialogueRole
 import ai.neopsyke.agent.model.Interlocutor
 import ai.neopsyke.agent.model.PendingAction
-import ai.neopsyke.agent.memory.episodic.DeterministicLogbookSummarizer
-import ai.neopsyke.agent.memory.episodic.EpisodicEventType
-import ai.neopsyke.agent.memory.episodic.Logbook
-import ai.neopsyke.agent.memory.episodic.LogbookEntry
-import ai.neopsyke.agent.memory.episodic.LogbookNarrative
-import ai.neopsyke.agent.memory.episodic.LogbookQuery
-import ai.neopsyke.agent.memory.episodic.LogbookRecall
-import ai.neopsyke.agent.memory.episodic.LogbookSummarizer
+import ai.neopsyke.agent.memory.longterm.ConsolidationReason
+import ai.neopsyke.agent.memory.longterm.DeterministicLogbookSummarizer
+import ai.neopsyke.agent.memory.longterm.ForgetRequest
 import ai.neopsyke.agent.memory.longterm.Hippocampus
+import ai.neopsyke.agent.memory.longterm.HippocampusAdmin
+import ai.neopsyke.agent.memory.longterm.ImprintResult
+import ai.neopsyke.agent.memory.longterm.Logbook
+import ai.neopsyke.agent.memory.longterm.LogbookEntry
+import ai.neopsyke.agent.memory.longterm.LogbookNarrative
+import ai.neopsyke.agent.memory.longterm.LogbookQuery
+import ai.neopsyke.agent.memory.longterm.LogbookRecall
+import ai.neopsyke.agent.memory.longterm.LogbookSummarizer
 import ai.neopsyke.agent.memory.longterm.LongTermMemoryAdvisor
 import ai.neopsyke.agent.memory.longterm.LongTermMemoryAssessmentContext
-import ai.neopsyke.agent.memory.longterm.MemoryImprint
-import ai.neopsyke.agent.memory.longterm.MemoryRecallQuery
+import ai.neopsyke.agent.memory.longterm.MemoryContext
+import ai.neopsyke.agent.memory.longterm.MemoryEventType
+import ai.neopsyke.agent.memory.longterm.MemoryKind
+import ai.neopsyke.agent.memory.longterm.NarrativeImprint
+import ai.neopsyke.agent.memory.longterm.RecallIntent
+import ai.neopsyke.agent.memory.longterm.RecallLimits
+import ai.neopsyke.agent.memory.longterm.RecallRequest
 import ai.neopsyke.agent.memory.shortterm.MemoryStats
 import ai.neopsyke.agent.memory.shortterm.MemoryStore
 import ai.neopsyke.agent.support.DenialReasonClassifier
@@ -127,7 +135,7 @@ class MemorySystem(
         activeMemoryStore().remember(turn)
         if (turn.role == DialogueRole.USER) {
             journalSafe(
-                eventType = EpisodicEventType.INPUT_RECEIVED,
+                eventType = MemoryEventType.INPUT_RECEIVED,
                 summary = logbookSummarizer.summarizeInput(turn.content, config.logbook.maxSummaryChars),
                 keywords = logbookSummarizer.extractKeywords(turn.content),
             )
@@ -182,16 +190,19 @@ class MemorySystem(
         val startedAt = System.nanoTime()
         return try {
             val recall = hippocampus.recall(
-                MemoryRecallQuery(
+                RecallRequest(
                     cue = cue,
+                    intent = RecallIntent.LESSON,
                     recentDialogue = recentDialogue,
                     shortTermContextSummary = currentShortTermSummary(),
-                    maxItems = LESSON_RECALL_MAX_ITEMS,
-                    maxChars = LESSON_RECALL_MAX_CHARS
+                    limits = RecallLimits(
+                        maxItems = LESSON_RECALL_MAX_ITEMS,
+                        maxChars = LESSON_RECALL_MAX_CHARS
+                    )
                 )
             )
             val lessonText = PromptInjectionDefense.asUntrustedDataBlock(
-                text = recall.text,
+                text = recall.renderedText,
                 maxChars = LESSON_RECALL_MAX_CHARS
             )
             instrumentation.emit(
@@ -407,13 +418,18 @@ class MemorySystem(
         val imprintStartedAt = System.nanoTime()
         val saved = try {
             hippocampus.imprint(
-                MemoryImprint(
+                NarrativeImprint(
                     summary = decision.summary,
+                    kind = MemoryKind.NARRATIVE,
                     source = effectiveTrigger,
                     confidence = decision.confidence,
-                    tags = contextTags + decision.tags
+                    tags = contextTags + decision.tags,
+                    context = MemoryContext(
+                        sessionId = activeSessionId,
+                        interlocutorId = activeInterlocutor.id,
+                    )
                 )
-            )
+            ).accepted
         } catch (ex: Exception) {
             logger.warn(ex) { "Hippocampus imprint failed." }
             false
@@ -439,7 +455,7 @@ class MemorySystem(
                 sessionState.recentImprintFingerprints.removeFirst()
             }
             journalSafe(
-                eventType = EpisodicEventType.MEMORY_IMPRINT,
+                eventType = MemoryEventType.MEMORY_IMPRINT,
                 summary = decision.summary,
                 keywords = decision.tags,
             )
@@ -454,7 +470,7 @@ class MemorySystem(
      * normal memory flow (planner decisions, action outcomes, answers, denials).
      */
     fun journal(
-        eventType: EpisodicEventType,
+        eventType: MemoryEventType,
         summary: String,
         actionType: String? = null,
         metadata: Map<String, Any?>? = null,
@@ -469,7 +485,7 @@ class MemorySystem(
     }
 
     override fun recordReflection(action: PendingAction, summary: String, keywords: List<String>): Boolean {
-        val normalizedSummary = LogbookNarrative.normalizeSummary(EpisodicEventType.SELF_INITIATED, summary)
+        val normalizedSummary = LogbookNarrative.normalizeSummary(MemoryEventType.SELF_INITIATED, summary)
         if (normalizedSummary.isBlank()) return false
 
         val normalizedKeywords = keywords
@@ -480,13 +496,18 @@ class MemorySystem(
         val savedToLongTermMemory = if (hippocampus.enabled) {
             try {
                 hippocampus.imprint(
-                    MemoryImprint(
+                    NarrativeImprint(
                         summary = normalizedSummary,
+                        kind = MemoryKind.NARRATIVE,
                         source = "self_initiated_reflection",
                         confidence = REFLECTION_DEFAULT_CONFIDENCE,
                         tags = tags,
+                        context = MemoryContext(
+                            sessionId = activeSessionId,
+                            interlocutorId = activeInterlocutor.id,
+                        )
                     )
-                )
+                ).accepted
             } catch (ex: Exception) {
                 logger.debug(ex) { "Reflection imprint failed for action_type=${action.type.id}." }
                 false
@@ -502,7 +523,7 @@ class MemorySystem(
         }
 
         journalSafe(
-            eventType = EpisodicEventType.SELF_INITIATED,
+            eventType = MemoryEventType.SELF_INITIATED,
             summary = normalizedSummary,
             keywords = normalizedKeywords,
             actionType = action.type.id,
@@ -579,13 +600,18 @@ class MemorySystem(
         )
         val saved = try {
             hippocampus.imprint(
-                MemoryImprint(
+                NarrativeImprint(
                     summary = lesson,
+                    kind = MemoryKind.LESSON,
                     source = "ego_lesson",
                     confidence = LESSON_DEFAULT_CONFIDENCE,
-                    tags = contextTags
+                    tags = contextTags,
+                    context = MemoryContext(
+                        sessionId = activeSessionId,
+                        interlocutorId = activeInterlocutor.id,
+                    )
                 )
-            )
+            ).accepted
         } catch (ex: Exception) {
             logger.debug(ex) { "Lesson imprint failed." }
             false
@@ -609,7 +635,7 @@ class MemorySystem(
             recentLessonFingerprints.removeFirst()
         }
         journalSafe(
-            eventType = EpisodicEventType.MEMORY_IMPRINT,
+            eventType = MemoryEventType.MEMORY_IMPRINT,
             summary = lesson,
             keywords = contextTags,
             actionType = actionType?.name?.lowercase()
@@ -709,7 +735,7 @@ class MemorySystem(
     }
 
     private fun journalSafe(
-        eventType: EpisodicEventType,
+        eventType: MemoryEventType,
         summary: String,
         keywords: List<String> = emptyList(),
         actionType: String? = null,
@@ -848,19 +874,22 @@ class MemorySystem(
         val startedAt = System.nanoTime()
         return try {
             val recall = hippocampus.recall(
-                MemoryRecallQuery(
+                RecallRequest(
                     cue = cue,
+                    intent = RecallIntent.GENERAL,
                     recentDialogue = recentDialogue,
                     shortTermContextSummary = shortTermSummary,
-                    maxItems = config.memory.longTermMemoryRecallMaxItems,
-                    maxChars = config.memory.longTermMemoryRecallMaxChars
+                    limits = RecallLimits(
+                        maxItems = config.memory.longTermMemoryRecallMaxItems,
+                        maxChars = config.memory.longTermMemoryRecallMaxChars
+                    )
                 )
             )
             val recallText = PromptInjectionDefense.asUntrustedDataBlock(
-                text = recall.text,
+                text = recall.renderedText,
                 maxChars = config.memory.longTermMemoryRecallMaxChars
             )
-            val recallScan = PromptInjectionDefense.scan(recall.text)
+            val recallScan = PromptInjectionDefense.scan(recall.renderedText)
             val latencyMs = (System.nanoTime() - startedAt) / 1_000_000L
             val recallRootInputId = when (trigger) {
                 is EgoTrigger.IncomingInput -> trigger.input.rootInputId
@@ -961,7 +990,7 @@ class MemorySystem(
     }
 
     @Synchronized
-    private fun rememberAmbientUsefulUpdate(eventType: EpisodicEventType, summary: String) {
+    private fun rememberAmbientUsefulUpdate(eventType: MemoryEventType, summary: String) {
         if (eventType !in USEFUL_AMBIENT_EVENT_TYPES) return
         val preview = TextSecurity.preview(summary, AMBIENT_EVENT_PREVIEW_CHARS)
         if (preview.isBlank()) return
@@ -1308,7 +1337,7 @@ class MemorySystem(
      */
     private fun emitServerMetrics() {
         try {
-            val serverMetrics = hippocampus.fetchServerMetrics() ?: return
+            val serverMetrics = (hippocampus as? HippocampusAdmin)?.stats()?.stats ?: return
             instrumentation.emit(
                 AgentEvent(
                     type = "memory_server_metrics",
@@ -1372,10 +1401,10 @@ class MemorySystem(
         const val LEARNING_NEED_ID: String = "learn-something"
         const val MAX_AMBIENT_USEFUL_UPDATES: Int = 6
         const val AMBIENT_EVENT_PREVIEW_CHARS: Int = 180
-        val USEFUL_AMBIENT_EVENT_TYPES: Set<EpisodicEventType> = setOf(
-            EpisodicEventType.CONTACT_DELIVERED,
-            EpisodicEventType.ACTION_EXECUTED,
-            EpisodicEventType.SELF_INITIATED,
+        val USEFUL_AMBIENT_EVENT_TYPES: Set<MemoryEventType> = setOf(
+            MemoryEventType.CONTACT_DELIVERED,
+            MemoryEventType.ACTION_EXECUTED,
+            MemoryEventType.SELF_INITIATED,
         )
         val LESSON_TECHNICAL_TEXT_SIGNALS: Set<String> = setOf(
             "tool error",
@@ -1418,9 +1447,9 @@ class MemorySystem(
         val EXPLICIT_INTERLOCUTOR_SCOPE_REGEX: Regex = Regex("""\binterlocutor\s*[:=]?\s*([a-z0-9._-]{2,80})\b""")
         val RESERVED_SESSION_SCOPE_TOKENS: Set<String> = setOf("last", "this", "current", "previous")
 
-        val VECTOR_CUE_EVENT_TYPES: Set<EpisodicEventType> = setOf(
-            EpisodicEventType.INPUT_RECEIVED,
-            EpisodicEventType.CONTACT_DELIVERED,
+        val VECTOR_CUE_EVENT_TYPES: Set<MemoryEventType> = setOf(
+            MemoryEventType.INPUT_RECEIVED,
+            MemoryEventType.CONTACT_DELIVERED,
         )
 
         val EXPLICIT_REMEMBER_INTENT_PATTERNS: List<IntentPattern> = listOf(

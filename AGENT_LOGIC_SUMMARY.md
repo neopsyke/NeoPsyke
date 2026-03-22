@@ -31,7 +31,8 @@ It is intentionally high-level and should stay aligned with the code.
   - `LlmEgoPlanner`
   - `LlmMetaReasoner`
   - `LlmLongTermMemoryAdvisor`
-  - `Hippocampus` (MCP memory adapter or noop)
+  - `Hippocampus` (cognitive long-term memory facade: `recall`, typed `imprint`, `health`, future `consolidate`)
+    - operational/destructive controls are split behind `HippocampusAdmin`
   - `ScratchpadStore` (ephemeral per-request notebook/workspace)
   - `ScratchpadFinalizer` (noop or `LlmScratchpadFinalizer`)
   - `Id` (autonomous internal drive module; optional, loaded from `id-runtime.yaml`)
@@ -231,9 +232,12 @@ It is intentionally high-level and should stay aligned with the code.
 ## Planner Logic
 - File: `src/main/kotlin/ai/neopsyke/agent/ego/LlmEgoPlanner.kt`
 - Responsibilities:
+  - Top-level branch selection now routes obvious persistent-goal / reminder / monitoring requests away from the generic planner path before full action planning.
   - Prompt assembly with contract-based budget allocation (`required_core` > `required_context` > `optional`).
   - Overhead-aware floor reservation per section, tiered degradation, and single-message fallback under extreme prompt pressure.
   - Emits `prompt_budget_allocation` telemetry for planner and action-verifier prompt builds (cost estimates, degradation path, fallback/floor-violation signals).
+  - Dedicated goal-creation branch uses a narrow prompt to synthesize `goal_operation(create)` payloads instead of teaching recurring-goal payload generation inside the generic action-planner prompt.
+  - Goal-creation branch performs deterministic recurring-schedule detection for supported forms such as `every N minutes` and `every N hours`; unsupported recurring phrasings fall back to a user clarification message instead of silently creating a one-shot goal.
   - For Id-driven work, planner prompt may include an ambient context block containing optional goal/scratchpad/activity/open-loop/topic relevance signals.
   - Planner calls request schema-enforced structured output, but provider/model compatibility handling now lives below the planner in the LLM layer:
     - planner requests one structured-output contract (`response_format=json_schema`) plus call-site metadata
@@ -260,11 +264,14 @@ It is intentionally high-level and should stay aligned with the code.
     - goal-origin action lifecycle callbacks plus `finalizeGoalCycle(rootInputId)`
 - Runtime responsibilities:
   - Create/revise plans through `GoalPlanner`
+  - Accept `goal_operation(create)` requests with optional `cron_expression`; validate cron expressions against the runtime's supported 5-field parser before goal creation.
+  - Keep cron-backed goals idle after creation: planning can promote ready steps, but initial work-ready emission is deferred until the first cron wake.
   - Observe goal-origin action outcomes through the generic action lifecycle observer hook
   - Translate generic async action wait handles into blocked goal steps
   - Reject goal-origin `WAITING` outcomes that do not provide async handles; this is stage-1 enforcement of the async wait contract
   - Apply verifier decisions (`PASS`, `RETRY`, `BLOCK`, `CONTINUE`, `FAIL`) back into the event-sourced state machine
   - Restore timers, suspended resumes, and blocked waits on startup
+  - Treat cron-backed goals as recurring cycles: when a cron tick arrives after a cron goal reached `COMPLETED` or `FAILED`, the runtime resets plan-step execution state, clears produced keys, and re-emits work-ready for the next scheduled run.
   - Poll async-operation providers and accept externally-delivered async completion events for blocked steps
   - Persist `goal-events.jsonl`, `goal.json`, `goal-snapshot.json`, `workspace/context.md`, `workspace/scratch.md`, and per-step artifacts
   - Maintain cached best-effort summaries for ambient context (`activeGoals`, `pendingWorkSummary`) so Ego does not scan live goal state on the hot path
@@ -290,6 +297,7 @@ It is intentionally high-level and should stay aligned with the code.
     - reject propagation into noop-thoughts: verifier `reject` preserves denied action type/payload metadata so follow-up planning can see exactly which candidate was blocked
     - repeated-answer disagreement override: if a follow-up thought repeats the same `answer` payload after a prior non-technical verifier reject and the verifier rejects it again, planner keeps the original answer and the dispatcher lets that answer through instead of re-blocking it as an ordinary repeated denied action
     - structured follow-up lineage guard: follow-up thoughts carry origin action metadata (`originActionType`, `originActionObservedEvidence`), and verifier `repair` back to the same evidence action is ignored when the candidate is `answer`, prior evidence succeeded, and user did not explicitly request refresh/retry
+    - `contact_user` meaning guard: verifier repairs may clean up surface form, but repairs that would change the answer's meaning are ignored and the original answer is kept
     - no-op repair collapse: if verifier returns `repair` but action type/payload/summary are materially unchanged, planner treats it as `approve` instead of recording a repair
     - answer-action tuning: verifier instructions explicitly approve directly entailed exact-match answers when there is no contradictory evidence, and verifier sampling temperature is fixed at `0.0`
   - `answer_draft` action proposals are allowed only inside active plan-context thoughts; out-of-context proposals are coerced to `noop`.
@@ -462,7 +470,7 @@ It is intentionally high-level and should stay aligned with the code.
   - `web_search`
   - `mcp_time` (payload timezone is required by current MCP time server contract)
   - `website_fetch`
-  - `goal_operation`
+  - `goal_operation` (persistent goal lifecycle operations; create now supports optional `cron_expression` and emits direct user-visible confirmation)
   - `email_send` (Microsoft Graph adapter; disabled unless env config is present)
 - `web_search` provider routing is independent from cognitive-role routing:
   - configured directly via `web_search.provider` in `llm-runtime.yaml`.
@@ -522,16 +530,20 @@ It is intentionally high-level and should stay aligned with the code.
 
 ## Episodic Memory (Logbook)
 - File: `src/main/kotlin/ai/neopsyke/agent/memory/episodic/SqliteLogbook.kt`
+- Domain/API grouping: episodic/logbook memory now sits under the long-term memory boundary conceptually, even though the SQLite logbook backend remains a separate store from vector/MCP memory.
 - SQLite + FTS5 append-only log of timestamped interaction summaries and keywords.
 - Storage: separate DB file (default `.neopsyke/logbook.db`), WAL mode, synchronized access.
 - Schema: `entries` table (id, ts, ts_epoch_ms, event_type, summary, keywords, action_type, run_id, metadata) with FTS5 virtual table `entries_fts` auto-synced via triggers.
 - Event types recorded: `INPUT_RECEIVED`, `PLANNER_DECISION`, `ACTION_EXECUTED`, `ACTION_DENIED`, `CONTACT_DELIVERED`, `MEMORY_IMPRINT`, `SELF_INITIATED`.
+- Event type vocabulary is broader than current wiring and already reserves future long-term memory events such as `FACT_CORRECTED`, `RELATION_INFERRED`, `CONSOLIDATION_RUN`, `GOAL_UPDATED`, and `PREFERENCE_REINFORCED`.
 - Integration through `MemorySystem`:
   - `remember()` auto-journals `INPUT_RECEIVED` for user turns.
   - `maybeAssessLongTermMemory()` auto-journals `MEMORY_IMPRINT` on successful saves.
   - `journal()` public method called from Ego for planner decisions, action outcomes, denials, and answers.
   - `recordReflection()` owns `REFLECT` persistence, adding first-person normalization plus session/interlocutor/run and Id-origin provenance before writing logbook and long-term memory.
   - `REFLECT` only reports `DURABLE_MEMORY_SAVED` on durable long-term memory persistence success; journal-only fallback does not satisfy the originating learn need.
+  - long-term semantic recall now consumes structured `RecallResult` data while keeping prompt-ready rendered text for planner wiring.
+  - long-term persistence now uses typed `ImprintRequest` variants; current Ego wiring still emits narrative imprints while episodic writes remain native logbook entries.
 
 ## Id Need Satisfaction
 - Id-originated roots now resolve against structured action effects instead of the old "some action executed" heuristic.

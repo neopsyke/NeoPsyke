@@ -10,7 +10,7 @@ import ai.neopsyke.agent.cortex.sensory.CognitiveSignal
 import ai.neopsyke.agent.cortex.sensory.GoalRuntimeCue
 import ai.neopsyke.agent.cortex.sensory.RuntimeControlSignal
 import ai.neopsyke.agent.cortex.sensory.SensoryCortex
-import ai.neopsyke.agent.memory.episodic.EpisodicEventType
+import ai.neopsyke.agent.memory.longterm.MemoryEventType
 import ai.neopsyke.agent.memory.scratchpad.ScratchpadStore
 import ai.neopsyke.agent.id.EmptyGoalRegistry
 import ai.neopsyke.agent.id.GoalRegistry
@@ -887,7 +887,7 @@ class Ego(
             is EgoDecision.Noop ->
                 "Decision: noop — ${decision.reason}"
         }
-        memory.journal(EpisodicEventType.PLANNER_DECISION, summary, actionType = actionType)
+        memory.journal(MemoryEventType.PLANNER_DECISION, summary, actionType = actionType)
     }
 
     private companion object {

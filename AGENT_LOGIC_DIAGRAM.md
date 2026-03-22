@@ -17,6 +17,7 @@ flowchart LR
     E --> ID
 
     E --> P["LlmEgoPlanner"]
+    P --> GBR["Goal-Creation Branch"]
     P --> AV["Action Verifier LLM Call"]
     E --> TV["DecisionVerifier (Deterministic Task Gate)"]
     E --> S["Superego"]
@@ -33,9 +34,9 @@ flowchart LR
 
     E --> MC["MemorySystem"]
     MC --> MS["MemoryStore (Short-term)"]
-    MC --> H["Hippocampus (Long-term Recall/Imprint)"]
+    MC --> H["Hippocampus (Long-term facade: recall/imprint/health/consolidate stub)"]
     MC --> LTM["LlmLongTermMemoryAdvisor"]
-    MC --> LB["Logbook (Episodic, SQLite+FTS5)"]
+    MC --> LB["Logbook (Episodic backend, SQLite+FTS5, grouped under long-term domain)"]
     LB -.->|"event-type narrative normalization: User timeline vs agent first-person memory/reflection"| MC
     MC --> RL["Reflection Lessons (Recall + Imprint Filters)"]
     MC -.->|"temporal intent → episodic recall + vector cues"| LB
@@ -121,6 +122,8 @@ sequenceDiagram
             Note over Ego,Planner: For Id-origin thoughts, Ego reapplies Id convergence state and action filtering before planner decide
             Ego->>Planner: decide(context)
             Note over Ego,Planner: PromptBudgetAllocator reserves required-core/context floors with message-overhead accounting, trims optional first, and emits prompt_budget_allocation
+            Note over Ego,Planner: Obvious persistent reminder / monitoring / goal-creation inputs route into a dedicated goal-creation branch before the generic planner path
+            Note over Ego,Planner: Goal-creation branch uses a narrow schema prompt plus deterministic recurring schedule detection for supported forms like every N minutes / every N hours
             Note over Ego,Planner: Planner requests schema-enforced structured output the LLM layer owns compatibility degradation (strict json_schema -> relaxed json_schema -> prompt-only JSON) parse failures still do truncation-budget retry then strict-JSON retry before noop fallback
             Planner-->>Ego: thought/action/plan/noop
             Ego->>Delib: maybeApplyPressureOverride
@@ -129,6 +132,7 @@ sequenceDiagram
             Note over Ego,Planner: Redundancy is planner-side soft cost control (prompt and verifier), with telemetry event external_action_redundancy_signal
             Note over Ego,Planner: Action verifier uses strict json_schema with relaxed-schema fallback parse failures do truncation-budget retry then strict retry and may trip temporary verifier bypass (scoped per root_input and action_type)
             Note over Ego,Planner: Follow-up thoughts carry structured origin metadata (originActionType + observedEvidence) verifier repairs back to the same evidence action are ignored for evidence-backed answers unless user asked refresh/retry no-op verifier repairs collapse to approve
+            Note over Ego,Planner: For contact_user, verifier repairs are limited to meaning-preserving surface cleanup; semantic answer rewrites are ignored and the original answer is kept
             Note over Ego,Planner: Verifier rejects now preserve denied action metadata in noop-thoughts repeated non-technical reject of the same answer payload on a follow-up thought is treated as verifier disagreement planner keeps the answer and dispatcher does not re-block it as a normal repeated denied action
             Note over Ego,Planner: Follow-up evidence thoughts explicitly request one raw JSON planner decision and forbid tool/function wrappers
         else Task = action
@@ -221,6 +225,9 @@ flowchart LR
     PSM --> PCS["GoalCommand stream"]
     PCS -->|persist| Store["GoalStore / goal-events.jsonl + goal.json + goal-snapshot.json"]
     PCS -->|work ready| Sig["GoalRuntimeCue"]
+    Note over PSM,Sig: Cron-backed goals do not emit initial work-ready on creation; first execution waits for a cron wake
+    TS -->|"cron tick after completed/failed recurring goal"| PSM
+    PSM -->|"reset plan steps + clear produced keys"| PCS
     Sig --> Ego["Ego"]
     Ego -->|nextWorkFromCue| PM
     Ego -->|goal-origin action outcomes| PM

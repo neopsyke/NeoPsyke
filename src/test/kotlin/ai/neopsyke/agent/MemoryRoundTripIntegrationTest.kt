@@ -120,6 +120,10 @@ class MemoryRoundTripIntegrationTest {
 
     private class RoundTripHippocampus : Hippocampus {
         override val providerName: String = "roundtrip_memory"
+        override val capabilities: Set<MemoryCapability> = setOf(
+            MemoryCapability.SEMANTIC_RECALL,
+            MemoryCapability.NARRATIVE_IMPRINT,
+        )
         val recallQueries = mutableListOf<MemoryRecallQuery>()
         val imprints = mutableListOf<MemoryImprint>()
         
@@ -128,8 +132,8 @@ class MemoryRoundTripIntegrationTest {
             imprints.clear()
         }
 
-        override fun recall(query: MemoryRecallQuery): MemoryRecall {
-            recallQueries += query
+        override fun recall(request: RecallRequest): RecallResult {
+            recallQueries += request
             val latest = imprints.lastOrNull()
             return if (latest == null) {
                 MemoryRecall(provider = providerName, text = "", hitCount = 0, truncated = false)
@@ -143,9 +147,11 @@ class MemoryRoundTripIntegrationTest {
             }
         }
 
-        override fun imprint(imprint: MemoryImprint): Boolean {
-            imprints += imprint
-            return true
+        override fun imprint(request: ImprintRequest): ImprintResult {
+            val narrative = request as? NarrativeImprint
+                ?: return ImprintResult(provider = providerName, accepted = false, detail = "unsupported")
+            imprints += narrative
+            return ImprintResult(provider = providerName, accepted = true, storedCount = 1)
         }
     }
 }

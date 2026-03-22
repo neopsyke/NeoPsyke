@@ -9,9 +9,12 @@ import ai.neopsyke.agent.memory.episodic.LogbookEntry
 import ai.neopsyke.agent.memory.episodic.LogbookQuery
 import ai.neopsyke.agent.memory.episodic.LogbookRecall
 import ai.neopsyke.agent.memory.longterm.Hippocampus
+import ai.neopsyke.agent.memory.longterm.ImprintRequest
+import ai.neopsyke.agent.memory.longterm.ImprintResult
 import ai.neopsyke.agent.memory.longterm.LongTermMemoryAdvisor
 import ai.neopsyke.agent.memory.longterm.LongTermMemoryAssessmentContext
 import ai.neopsyke.agent.memory.longterm.LongTermMemoryAssessmentDecision
+import ai.neopsyke.agent.memory.longterm.MemoryCapability
 import ai.neopsyke.agent.memory.longterm.MemoryImprint
 import ai.neopsyke.agent.memory.longterm.MemoryRecall
 import ai.neopsyke.agent.memory.longterm.MemoryRecallQuery
@@ -314,15 +317,26 @@ class MemorySystemLogbookNarrativeTest {
         private val imprintResult: Boolean = true,
     ) : Hippocampus {
         override val providerName: String = "recording"
+        override val capabilities: Set<MemoryCapability> = setOf(
+            MemoryCapability.SEMANTIC_RECALL,
+            MemoryCapability.NARRATIVE_IMPRINT,
+        )
         override val enabled: Boolean = true
         val imprints = mutableListOf<MemoryImprint>()
 
-        override fun recall(query: MemoryRecallQuery): MemoryRecall =
+        override fun recall(request: MemoryRecallQuery): MemoryRecall =
             MemoryRecall(provider = providerName, text = "")
 
-        override fun imprint(imprint: MemoryImprint): Boolean {
-            imprints += imprint
-            return imprintResult
+        override fun imprint(request: ImprintRequest): ImprintResult {
+            val narrative = request as? MemoryImprint
+                ?: return ImprintResult(provider = providerName, accepted = false, detail = "unsupported")
+            imprints += narrative
+            return ImprintResult(
+                provider = providerName,
+                accepted = imprintResult,
+                storedCount = if (imprintResult) 1 else 0,
+                detail = if (imprintResult) "" else "imprint_failed"
+            )
         }
     }
 }

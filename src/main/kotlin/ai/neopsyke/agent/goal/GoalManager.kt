@@ -15,6 +15,7 @@ import ai.neopsyke.instrumentation.AgentInstrumentation
 import ai.neopsyke.instrumentation.NoopAgentInstrumentation
 import java.nio.file.Files
 import java.time.Instant
+import java.time.ZonedDateTime
 import java.time.temporal.ChronoUnit
 import java.util.concurrent.ConcurrentHashMap
 
@@ -277,19 +278,30 @@ class GoalManager(
         when (request.operation) {
             GoalOperation.CREATE -> {
                 val instruction = request.instruction?.trim().orEmpty()
+                val cronExpression = request.cronExpression?.trim().orEmpty()
                 if (instruction.isBlank()) {
                     GoalOperationResult(false, "Goal creation requires an instruction.")
+                } else if (cronExpression.isNotBlank() && !isValidCronExpression(cronExpression)) {
+                    GoalOperationResult(false, "Goal creation requires a valid 5-field cron_expression.")
                 } else {
                     val goalId = createGoal(
                         instruction = instruction,
                         title = request.title?.takeIf { it.isNotBlank() } ?: instruction.take(60),
                         priority = request.priority ?: GoalPriority.MEDIUM,
                         completionCriteria = request.completionCriteria ?: "User confirms the goal is met.",
+                        cronExpression = cronExpression.ifBlank { null },
                     )
                     if (goalId.isBlank()) {
                         GoalOperationResult(false, "Goal creation was rejected.")
                     } else {
-                        GoalOperationResult(true, "Goal created.", goalId)
+                        val scheduleSummary = cronExpression.takeIf { it.isNotBlank() }
+                            ?.let { " Recurs on cron '$it'." }
+                            .orEmpty()
+                        GoalOperationResult(
+                            true,
+                            "Goal created: ${request.title?.takeIf { it.isNotBlank() } ?: instruction.take(60)}.$scheduleSummary",
+                            goalId
+                        )
                     }
                 }
             }
@@ -541,11 +553,24 @@ class GoalManager(
                 val state = store.loadGoal(goalId) ?: continue
                 states[goalId] = state
                 restoreSchedules(state)
+                emitRestoredWorkReady(state)
             } catch (ex: Exception) {
                 logger.warn(ex) { "Failed to restore goal $goalId" }
             }
         }
         refreshAmbientSnapshots()
+    }
+
+    private fun emitRestoredWorkReady(state: GoalState) {
+        if (state.isTerminal()) return
+        val step = state.nextRunnableStep() ?: return
+        cueEmitter(
+            GoalRuntimeCue(
+                goalId = state.id,
+                stepId = step.id,
+                reason = "goal_restored_work_ready",
+            )
+        )
     }
 
     private fun restoreSchedules(state: GoalState) {
@@ -576,6 +601,9 @@ class GoalManager(
     private fun onTimerWake(goalId: String, scheduledAtMs: Long) {
         val state = states[goalId] ?: return
         val scheduledAt = Instant.ofEpochMilli(scheduledAtMs)
+        if (!state.goal.cronExpression.isNullOrBlank() && state.goal.status in setOf(GoalStatus.COMPLETED, GoalStatus.FAILED)) {
+            applyEvent(goalId, GoalEvent.CronCycleStarted(goalId, scheduledAt))
+        }
         if (state.goal.status == GoalStatus.SUSPENDED) {
             val resumeAt = state.goal.suspendedUntil
             if (resumeAt != null && resumeAt.toEpochMilli() <= scheduledAtMs) {
@@ -595,8 +623,11 @@ class GoalManager(
                 goalId,
                 GoalEvent.WaitConditionSatisfied(goalId, step.id, "timer")
             )
-        }
+            }
     }
+
+    private fun isValidCronExpression(expression: String): Boolean =
+        CronParser.nextAfter(expression, ZonedDateTime.now()) != null
 
     private fun onWaitConditionSatisfied(
         goalId: String,

@@ -4,7 +4,7 @@ import mu.KotlinLogging
 import ai.neopsyke.agent.config.*
 import ai.neopsyke.agent.model.*
 import ai.neopsyke.agent.cortex.motor.MotorCortex
-import ai.neopsyke.agent.memory.episodic.EpisodicEventType
+import ai.neopsyke.agent.memory.longterm.MemoryEventType
 import ai.neopsyke.agent.memory.scratchpad.ScratchpadStore
 import ai.neopsyke.agent.support.PromptInjectionDefense
 import ai.neopsyke.agent.support.TextSecurity
@@ -119,7 +119,7 @@ internal class ActionReviewPipeline(
         instrumentation.emit(AgentEvents.actionExecuted(resolvedAction, outcome.statusSummary))
         if (resolvedAction.type == ActionType.CONTACT_USER) {
             memory.journal(
-                EpisodicEventType.CONTACT_DELIVERED,
+                MemoryEventType.CONTACT_DELIVERED,
                 "Contacted user (fallback): ${TextSecurity.preview(resolvedAction.summary, JOURNAL_SUMMARY_PREVIEW_CHARS)}",
                 actionType = "contact_user",
             )
@@ -272,13 +272,13 @@ internal class ActionReviewPipeline(
     private fun journalActionExecution(resolvedAction: PendingAction, outcome: ActionOutcome) {
         if (resolvedAction.type == ActionType.CONTACT_USER) {
             memory.journal(
-                EpisodicEventType.CONTACT_DELIVERED,
+                MemoryEventType.CONTACT_DELIVERED,
                 "Contacted user: ${TextSecurity.preview(resolvedAction.summary, JOURNAL_SUMMARY_PREVIEW_CHARS)}",
                 actionType = "contact_user",
             )
         } else {
             memory.journal(
-                EpisodicEventType.ACTION_EXECUTED,
+                MemoryEventType.ACTION_EXECUTED,
                 "Executed ${resolvedAction.type.name.lowercase()}: ${TextSecurity.preview(outcome.statusSummary, JOURNAL_SUMMARY_PREVIEW_CHARS)}",
                 actionType = resolvedAction.type.name.lowercase(),
             )

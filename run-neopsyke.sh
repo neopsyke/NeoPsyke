@@ -185,7 +185,7 @@ Environment:
   EGO_LOOP_DELAY_MS       Delay between loop cycles in ms (default via launcher: 1000)
   NEOPSYKE_ID_CONFIG_FILE       Optional path to Id runtime YAML (default: ./id-runtime.yaml)
   NEOPSYKE_ID_ENABLED            Override Id module enabled state (true/false, overrides YAML)
-  NEOPSYKE_GOALS_ENABLED         Override goals subsystem enabled state (true/false, default: false)
+  NEOPSYKE_GOALS_ENABLED         Override goals subsystem enabled state (true/false, launcher default: true)
   NEOPSYKE_LLM_CACHE_MODE       LLM response cache mode: record, replay, or off (default: off)
   NEOPSYKE_LLM_CACHE_FILE       Path to LLM cache JSONL file (required when cache mode is record or replay)
   NEOPSYKE_EVAL_TRANSPORT_DEBUG  Set to true to keep low-level LLM transport debug lines in eval mode
@@ -276,7 +276,17 @@ if [[ "$DISABLE_ID" -eq 1 ]]; then
 fi
 
 if [[ -n "$GOALS_OVERRIDE" ]]; then
-  export NEOPSYKE_GOALS_ENABLED="$GOALS_OVERRIDE"
+  EFFECTIVE_GOALS_ENABLED="$GOALS_OVERRIDE"
+elif [[ -n "${NEOPSYKE_GOALS_ENABLED:-}" ]]; then
+  EFFECTIVE_GOALS_ENABLED="$NEOPSYKE_GOALS_ENABLED"
+else
+  EFFECTIVE_GOALS_ENABLED="true"
+fi
+export NEOPSYKE_GOALS_ENABLED="$EFFECTIVE_GOALS_ENABLED"
+
+effective_goals_enabled_normalized="$(printf '%s' "$EFFECTIVE_GOALS_ENABLED" | tr '[:upper:]' '[:lower:]')"
+if [[ "$effective_goals_enabled_normalized" != "true" ]]; then
+  log_info "Warning: goals subsystem is disabled for this run. Use --goals or set NEOPSYKE_GOALS_ENABLED=true to enable persistent goal creation."
 fi
 
 JAVA_OPTS_APPEND=" -Dorg.slf4j.simpleLogger.defaultLogLevel=${LOG_LEVEL} -Dorg.slf4j.simpleLogger.logFile=${RUN_LOG_FILE} -Dorg.slf4j.simpleLogger.showDateTime=true -Dorg.slf4j.simpleLogger.dateTimeFormat=yyyy-MM-dd_HH:mm:ss.SSSZ"

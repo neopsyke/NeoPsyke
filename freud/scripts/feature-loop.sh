@@ -13,9 +13,13 @@ Step names for --from-step:
   reasoning_eval_logic  reasoning_eval_model  memory_live_smoke
 
 Description:
-  Runs a deterministic-first feature workflow and writes compact artifacts under:
+  Runs the primary deterministic Freud workflow and writes compact artifacts under:
   .neopsyke/runs/freud/<timestamp>-<feature_id>/
   Use --from-step to resume from a specific step, skipping earlier ones.
+  With --live, this orchestrates the live commands configured for the selected
+  Freud config; the direct live entrypoints remain:
+    freud/scripts/live-eval.sh --input ...
+    freud/scripts/run-bbh-smoke.sh --lane weak-structure|prod-acceptance
 EOF
 }
 
@@ -183,6 +187,30 @@ step_is_active() {
   return 0
 }
 
+validate_live_wiring() {
+  [[ "$mode" == "live" ]] || return 0
+
+  if [[ -n "${NEOPSYKE_LLM_CONFIG_FILE:-}" && ! -f "${NEOPSYKE_LLM_CONFIG_FILE}" ]]; then
+    echo "Live lane not configured: NEOPSYKE_LLM_CONFIG_FILE does not exist: ${NEOPSYKE_LLM_CONFIG_FILE}"
+    return 1
+  fi
+
+  if step_is_active "reasoning_eval_model" && [[ -z "$reasoning_model_cmd" ]] && step_is_active "memory_live_smoke" && [[ -z "$memory_smoke_cmd" ]]; then
+    echo "Live lane not configured: both FREUD_REASONING_EVAL_MODEL_CMD and FREUD_MEMORY_SMOKE_CMD are blank. Use a live config such as freud/config/live-weak-structure.env."
+    return 1
+  fi
+
+  if step_is_active "reasoning_eval_model" && [[ "$from_step" == "reasoning_eval_model" ]] && [[ -z "$reasoning_model_cmd" ]]; then
+    echo "Live lane not configured: FREUD_REASONING_EVAL_MODEL_CMD is blank for reasoning_eval_model."
+    return 1
+  fi
+
+  if step_is_active "memory_live_smoke" && [[ "$from_step" == "memory_live_smoke" ]] && [[ -z "$memory_smoke_cmd" ]]; then
+    echo "Live lane not configured: FREUD_MEMORY_SMOKE_CMD is blank for memory_live_smoke."
+    return 1
+  fi
+}
+
 if [[ -n "$from_step" ]]; then
   valid_from="false"
   for s in "${all_steps_ordered[@]}"; do
@@ -194,6 +222,10 @@ if [[ -n "$from_step" ]]; then
     exit 1
   fi
   echo "Resuming from step: $from_step (earlier steps will be skipped)"
+fi
+
+if ! validate_live_wiring; then
+  exit 1
 fi
 
 run_id="$(date -u +"%Y%m%dT%H%M%SZ")"
@@ -222,13 +254,29 @@ fi
 export FREUD_RUN_DIR="$run_dir"
 export FREUD_ARTIFACT_DIR="$artifact_dir"
 
+update_symlink_pointer() {
+  local target="$1"
+  local link_path="$2"
+  local tmp_link="${link_path}.tmp.$$.$RANDOM"
+  ln -s "$target" "$tmp_link" 2>/dev/null || return 0
+  mv -f "$tmp_link" "$link_path" 2>/dev/null || rm -f "$tmp_link"
+}
+
+write_pointer_file() {
+  local value="$1"
+  local file_path="$2"
+  local tmp_file="${file_path}.tmp.$$.$RANDOM"
+  printf '%s\n' "$value" >"$tmp_file"
+  mv -f "$tmp_file" "$file_path"
+}
+
 write_local_freud_pointers() {
   local local_root="$repo_root/freud"
   mkdir -p "$local_root/logs"
-  ln -sfn "$run_dir" "$local_root/latest"
-  ln -sfn "$run_dir/logs" "$local_root/logs/latest"
-  ln -sfn "$run_dir/artifacts" "$local_root/artifacts-latest"
-  printf '%s\n' "$run_dir" >"$local_root/latest-run.txt"
+  update_symlink_pointer "$run_dir" "$local_root/latest"
+  update_symlink_pointer "$run_dir/logs" "$local_root/logs/latest"
+  update_symlink_pointer "$run_dir/artifacts" "$local_root/artifacts-latest"
+  write_pointer_file "$run_dir" "$local_root/latest-run.txt"
 }
 
 prime_gradle_wrapper_cache() {
@@ -525,7 +573,11 @@ run_step() {
   else
     status="skipped"
     {
-      echo "[skip] command is empty"
+      if [[ "$mode" == "live" && "$step_name" =~ ^(reasoning_eval_model|memory_live_smoke)$ ]]; then
+        echo "[skip] live lane not configured for $step_name"
+      else
+        echo "[skip] command is empty"
+      fi
     } >"$step_log"
   fi
 
@@ -900,8 +952,8 @@ if ! "$repo_root/freud/scripts/context-pack.sh" "$run_dir" >/dev/null; then
 fi
 build_run_index "$overall_status" "${first_failed_step:-}" "$steps_total" "$failed_test_count" "$eval_total_calls" "$eval_total_tokens"
 
-ln -sfn "$run_dir" "$run_root/latest"
-printf '%s\n' "$run_dir" >"$run_root/latest-run.txt"
+update_symlink_pointer "$run_dir" "$run_root/latest"
+write_pointer_file "$run_dir" "$run_root/latest-run.txt"
 write_local_freud_pointers
 
 echo "run_dir=$run_dir"

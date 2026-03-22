@@ -2225,24 +2225,31 @@ class EgoAgentTest {
         private val recall: MemoryRecall,
     ) : Hippocampus {
         override val providerName: String = recall.provider
+        override val capabilities: Set<MemoryCapability> = setOf(
+            MemoryCapability.SEMANTIC_RECALL,
+            MemoryCapability.NARRATIVE_IMPRINT,
+        )
         val queries = mutableListOf<MemoryRecallQuery>()
         val imprints = mutableListOf<MemoryImprint>()
 
-        override fun recall(query: MemoryRecallQuery): MemoryRecall {
-            queries += query
+        override fun recall(request: MemoryRecallQuery): MemoryRecall {
+            queries += request
             return recall
         }
 
-        override fun imprint(imprint: MemoryImprint): Boolean {
-            imprints += imprint
-            return true
+        override fun imprint(request: ImprintRequest): ImprintResult {
+            val narrative = request as? MemoryImprint
+                ?: return ImprintResult(provider = providerName, accepted = false, detail = "unsupported")
+            imprints += narrative
+            return ImprintResult(provider = providerName, accepted = true, storedCount = 1)
         }
     }
 
     private class ThrowingHippocampus : Hippocampus {
         override val providerName: String = "throwing_memory"
+        override val capabilities: Set<MemoryCapability> = setOf(MemoryCapability.SEMANTIC_RECALL)
 
-        override fun recall(query: MemoryRecallQuery): MemoryRecall {
+        override fun recall(request: MemoryRecallQuery): MemoryRecall {
             throw IllegalStateException("memory offline")
         }
     }

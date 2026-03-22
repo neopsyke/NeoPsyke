@@ -53,6 +53,7 @@ usage() {
 Usage: freud/scripts/live-eval.sh --input <file> [options]
 
 Runs a single-input live eval against NeoPsyke with LLM response caching.
+This is the primary Freud live entrypoint for one-off real-agent checks.
 
 Options:
   --input <file>          Input file containing the user message (required)
@@ -87,6 +88,20 @@ Exit codes:
 EOF
 }
 
+search_logs_with_fallback() {
+  local regex="$1"
+  shift
+  local path
+  for path in "$@"; do
+    [[ -e "$path" ]] || continue
+    if command -v rg >/dev/null 2>&1; then
+      rg -n "$regex" "$path" 2>/dev/null || true
+    else
+      grep -ERn -- "$regex" "$path" 2>/dev/null || true
+    fi
+  done
+}
+
 prime_gradle_wrapper_cache() {
   [[ -z "${GRADLE_USER_HOME:-}" ]] && return 0
   local local_dists="$GRADLE_USER_HOME/wrapper/dists"
@@ -100,13 +115,59 @@ prime_gradle_wrapper_cache() {
   fi
 }
 
+update_symlink_pointer() {
+  local target="$1"
+  local link_path="$2"
+  local tmp_link="${link_path}.tmp.$$.$RANDOM"
+  ln -s "$target" "$tmp_link" 2>/dev/null || return 0
+  mv -f "$tmp_link" "$link_path" 2>/dev/null || rm -f "$tmp_link"
+}
+
+write_pointer_file() {
+  local value="$1"
+  local file_path="$2"
+  local tmp_file="${file_path}.tmp.$$.$RANDOM"
+  printf '%s\n' "$value" >"$tmp_file"
+  mv -f "$tmp_file" "$file_path"
+}
+
 write_local_freud_pointers() {
   local local_root="$REPO_ROOT/freud"
   mkdir -p "$local_root/logs"
-  ln -sfn "$RUN_DIR" "$local_root/latest"
-  ln -sfn "$RUN_DIR/logs" "$local_root/logs/latest"
-  ln -sfn "$RUN_DIR/artifacts" "$local_root/artifacts-latest"
-  printf '%s\n' "$RUN_DIR" >"$local_root/latest-run.txt"
+  update_symlink_pointer "$RUN_DIR" "$local_root/latest"
+  update_symlink_pointer "$RUN_DIR/logs" "$local_root/logs/latest"
+  update_symlink_pointer "$RUN_DIR/artifacts" "$local_root/artifacts-latest"
+  write_pointer_file "$RUN_DIR" "$local_root/latest-run.txt"
+}
+
+classify_failure_class() {
+  local exit_code="$1"
+  local stderr_file="$2"
+  local app_log_file="$3"
+
+  if [[ "$exit_code" -eq 2 ]]; then
+    printf 'timeout'
+    return 0
+  fi
+
+  local runtime_matches provider_matches
+  runtime_matches="$(search_logs_with_fallback \
+    'Gradle could not start your build|Could not create service of type FileLockContentionHandler|Operation not permitted|Permission denied|Address already in use|No such file or directory|command not found|not executable|Unable to start|failed to launch|bootstrap|sandbox' \
+    "$stderr_file" "$app_log_file")"
+  if [[ -n "$runtime_matches" ]]; then
+    printf 'local_runtime_bootstrap_failure'
+    return 0
+  fi
+
+  provider_matches="$(search_logs_with_fallback \
+    '401|403|429|rate limit|quota|authentication|unauthorized|forbidden|api key|provider unavailable|model unavailable|service unavailable|bad gateway|upstream|provider error' \
+    "$stderr_file" "$app_log_file")"
+  if [[ -n "$provider_matches" ]]; then
+    printf 'provider_model_failure'
+    return 0
+  fi
+
+  printf 'live_eval_process_failure'
 }
 
 while [[ $# -gt 0 ]]; do
@@ -250,6 +311,7 @@ log_info "Exit code: $EXIT_CODE (duration: ${DURATION}s)"
 # Write verdict
 VERDICT="unknown"
 VERDICT_DETAIL=""
+FAILURE_CLASS=""
 
 if [[ "$EXIT_CODE" -eq 0 ]]; then
   if [[ -n "$EXPECTED_FILE" && -f "$EXPECTED_FILE" ]]; then
@@ -263,6 +325,7 @@ if [[ "$EXIT_CODE" -eq 0 ]]; then
     else
       VERDICT="fail"
       VERDICT_DETAIL="Answer did not match expected content after normalization."
+      FAILURE_CLASS="live_eval_scoring_failure"
       EXIT_CODE=1
     fi
   else
@@ -272,15 +335,18 @@ if [[ "$EXIT_CODE" -eq 0 ]]; then
 elif [[ "$EXIT_CODE" -eq 2 ]]; then
   VERDICT="timeout"
   VERDICT_DETAIL="Timed out after ${TIMEOUT}s."
+  FAILURE_CLASS="timeout"
 else
   VERDICT="error"
   VERDICT_DETAIL="Process exited with code $EXIT_CODE."
+  FAILURE_CLASS="$(classify_failure_class "$EXIT_CODE" "$RUN_DIR/logs/stderr.log" "$RUN_DIR/logs/neopsyke.log")"
 fi
 
 cat >"$RUN_DIR/artifacts/verdict.json" <<VJSON
 {
   "verdict": "$VERDICT",
   "detail": "$VERDICT_DETAIL",
+  "failure_class": "$FAILURE_CLASS",
   "exit_code": $EXIT_CODE,
   "duration_seconds": $DURATION,
   "cache_mode": "$CACHE_MODE",
@@ -314,8 +380,9 @@ if [[ -f "$RUN_DIR/artifacts/verdict.json" ]]; then
   PYTHONPATH="$REPO_ROOT" python3 -m freud.py.summarize "$RUN_DIR" 2>/dev/null || true
 fi
 
-# Update latest symlink
-ln -sfn "$RUN_DIR" "$RUN_ROOT_ABS/latest"
+# Update convenience pointer for the most recently completed live eval.
+update_symlink_pointer "$RUN_DIR" "$RUN_ROOT_ABS/latest"
+write_pointer_file "$RUN_DIR" "$RUN_ROOT_ABS/latest-run.txt"
 
 # Print summary
 log_info ""
