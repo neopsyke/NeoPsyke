@@ -14,7 +14,7 @@ repositories {
 }
 
 dependencies {
-    // MCP SDK (server-side)
+    // MCP SDK (provider-side)
     implementation("io.modelcontextprotocol:kotlin-sdk:0.6.0")
 
     // Coroutines
@@ -61,7 +61,7 @@ configurations[integrationTest.implementationConfigurationName].extendsFrom(conf
 configurations[integrationTest.runtimeOnlyConfigurationName].extendsFrom(configurations.testRuntimeOnly.get())
 
 tasks.register<Test>("integrationTest") {
-    description = "Runs manual DB-backed integration evals for the pgvector memory server."
+    description = "Runs manual DB-backed integration evals for the pgvector memory provider."
     group = "verification"
     testClassesDirs = integrationTest.output.classesDirs
     classpath = integrationTest.runtimeClasspath
@@ -87,14 +87,14 @@ tasks.withType<JavaCompile>().configureEach {
 }
 
 application {
-    mainClass.set("ai.neopsyke.pgvector.memory.ProviderServerKt")
+    mainClass.set("ai.neopsyke.memory.pgvector.PgvectorMemoryProviderMainKt")
 }
 
 tasks.register<Jar>("fatJar") {
     archiveClassifier.set("all")
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
     manifest {
-        attributes["Main-Class"] = "ai.neopsyke.pgvector.memory.ProviderServerKt"
+        attributes["Main-Class"] = "ai.neopsyke.memory.pgvector.PgvectorMemoryProviderMainKt"
     }
     from(configurations.runtimeClasspath.get().map { if (it.isDirectory) it else zipTree(it) })
     with(tasks.jar.get())

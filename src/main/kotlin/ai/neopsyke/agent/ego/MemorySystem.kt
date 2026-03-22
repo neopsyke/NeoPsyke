@@ -460,7 +460,7 @@ class MemorySystem(
                 keywords = decision.tags,
             )
         }
-        emitServerMetrics()
+        emitProviderMetrics()
     }
 
     // --- Episodic logbook ---
@@ -916,7 +916,7 @@ class MemorySystem(
                     )
                 )
             }
-            emitServerMetrics()
+            emitProviderMetrics()
             recallText
         } catch (ex: Exception) {
             val latencyMs = (System.nanoTime() - startedAt) / 1_000_000L
@@ -929,7 +929,7 @@ class MemorySystem(
                     reason = ex.message ?: "memory recall failed"
                 )
             )
-            emitServerMetrics()
+            emitProviderMetrics()
             ""
         }
     }
@@ -1331,21 +1331,21 @@ class MemorySystem(
     }
 
     /**
-     * Fetches server-side metrics from the memory backend and emits them as an
+     * Fetches provider-side metrics from the memory backend and emits them as an
      * instrumentation event. Called after every recall and imprint operation so
      * the dashboard receives an up-to-date snapshot without polling.
      */
-    private fun emitServerMetrics() {
+    private fun emitProviderMetrics() {
         try {
-            val serverMetrics = (hippocampus as? HippocampusAdmin)?.stats()?.stats ?: return
+            val providerMetrics = (hippocampus as? HippocampusAdmin)?.stats()?.stats ?: return
             instrumentation.emit(
                 AgentEvent(
-                    type = "memory_server_metrics",
-                    data = serverMetrics
+                    type = "memory_provider_metrics",
+                    data = providerMetrics
                 )
             )
         } catch (ex: Exception) {
-            logger.debug(ex) { "Failed to emit server-side memory metrics." }
+            logger.debug(ex) { "Failed to emit provider-side memory metrics." }
         }
     }
 

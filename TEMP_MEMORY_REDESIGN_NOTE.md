@@ -635,7 +635,7 @@ implementations the precise language they need.
 ### Phase 2: extract shared core
 
 - move reusable storage semantics out of `neopsyke-pgvector-memory`
-- keep MCP server functioning as an adapter over the extracted core
+- keep MCP provider functioning as an adapter over the extracted core
 
 ### Phase 3: absorb episodic memory under long-term facade
 

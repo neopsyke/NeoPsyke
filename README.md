@@ -210,9 +210,9 @@ Standalone Kotlin JVM app using Gradle with:
   - `EGO_LONG_TERM_MEMORY_RECALL_ECHO_TOKEN_OVERLAP_THRESHOLD` (default: `0.85`)
   - `NEOPSYKE_AUTO_START_PGVECTOR` (optional; when `true`, launcher runs `docker compose up -d pgvector` if needed)
   - `MEMORY_DEFAULT_NAMESPACE` (optional; long-term memory namespace/tenant default, launcher defaults to `neopsyke`)
-  - `MEMORY_SEMANTIC_DEDUPE_SIMILARITY_THRESHOLD` (memory server; default: `0.93`)
-  - `MEMORY_SEMANTIC_DEDUPE_MIN_CONFIDENCE` (memory server; default: `0.65`)
-  - `MEMORY_FACT_DEFAULT_SUBJECT` (memory server; default: `me`)
+  - `MEMORY_SEMANTIC_DEDUPE_SIMILARITY_THRESHOLD` (memory provider; default: `0.93`)
+  - `MEMORY_SEMANTIC_DEDUPE_MIN_CONFIDENCE` (memory provider; default: `0.65`)
+  - `MEMORY_FACT_DEFAULT_SUBJECT` (memory provider; default: `me`)
   - `NEOPSYKE_EVAL_MAX_RAW_RESPONSE_CHARS` (reasoning eval raw-thought capture cap; default: unlimited)
   - `NEOPSYKE_LLM_CACHE_MODE` (optional; `record`, `replay`, or `off`; default: `off`)
   - `NEOPSYKE_LLM_CACHE_FILE` (optional; path to JSONL cache file for LLM response caching)
@@ -350,7 +350,7 @@ Memory live eval output:
 - Tags each saved item with a unique run session marker to reduce cross-run collision.
 - Main run log focuses on memory eval flow (`[eval.memory] ...`).
 
-Manual DB-backed memory server eval (not part of default `test`):
+Manual DB-backed memory provider eval (not part of default `test`):
 ```bash
 # uses live PostgreSQL/pgvector configured via PGVECTOR_DB_* env vars
 ./gradlew :neopsyke-pgvector-memory:memoryDbEval
@@ -418,7 +418,7 @@ control> exit
   - Chat control plane: `/api/chat/*` (`sessions`, `messages`, session-scoped SSE)
   - Observability: `/api/obs/*` (`snapshot`, global `events`, `workspace`)
 - Scratchpad drawer (Action Flow -> `Scratchpad`) fetches full debug snapshots on demand from `/api/obs/workspace` and `/api/obs/workspace/{rootId}`.
-- Full workspace snapshots use two-lane instrumentation: lightweight `scratchpad_head` is streamed live; heavy `scratchpad_debug_snapshot` is captured server-side and excluded from SSE broadcasting.
+- Full workspace snapshots use two-lane instrumentation: lightweight `scratchpad_head` is streamed live; heavy `scratchpad_debug_snapshot` is captured provider-side and excluded from SSE broadcasting.
 - If dashboard bind fails, app continues running without the dashboard server.
 
 ## Loop behavior

@@ -39,10 +39,12 @@ It is intentionally high-level and should stay aligned with the code.
   - `GoalsGateway` (optional goal runtime boundary; also serves ambient active-goal queries)
   - `AsyncOperationRegistry` (generic provider adapter registry for long-running action handles restored by the goal runtime)
   - `Ego` orchestrator
-- Interactive startup now performs an MCP memory health probe before enabling memory:
-  - if probe passes, memory is exposed as available and a provider-backed `Hippocampus` is wired
-  - if probe fails, memory is downgraded to noop for the run and reported unavailable
-  - MCP memory server process now stays alive after `connect` until transport close so startup health checks can complete instead of racing a premature process exit
+- Interactive startup now resolves memory from `memory-runtime.yaml` and performs a provider health/startup check before enabling long-term vector memory:
+  - `memory=off` wires `NoopHippocampus`
+  - `memory=default` uses the managed `neopsyke-pgvector-memory` provider over HTTP
+  - if the configured provider is already healthy, NeoPsyke reuses it
+  - if not, NeoPsyke starts the configured provider command and waits for `/health`
+  - if startup or health checks fail, memory is downgraded to noop for the run and reported unavailable
 - Interactive startup runs LLM provider health probes per configured cognitive role endpoint:
   - probes use normalized URL joining (`base_url` + `/models`) so trailing slashes do not produce `//models`
   - for Google `v1beta/openai` routes, an `HTTP 404` probe on `/openai/models` falls back to native `/v1beta/models` before reporting status
@@ -530,7 +532,7 @@ It is intentionally high-level and should stay aligned with the code.
 
 ## Episodic Memory (Logbook)
 - File: `src/main/kotlin/ai/neopsyke/agent/memory/episodic/SqliteLogbook.kt`
-- Domain/API grouping: episodic/logbook memory now sits under the long-term memory boundary conceptually, even though the SQLite logbook backend remains a separate store from vector/MCP memory.
+- Domain/API grouping: episodic/logbook memory now sits under the long-term memory boundary conceptually, even though the SQLite logbook backend remains a separate store from vector/provider memory.
 - SQLite + FTS5 append-only log of timestamped interaction summaries and keywords.
 - Storage: separate DB file (default `.neopsyke/logbook.db`), WAL mode, synchronized access.
 - Schema: `entries` table (id, ts, ts_epoch_ms, event_type, summary, keywords, action_type, run_id, metadata) with FTS5 virtual table `entries_fts` auto-synced via triggers.

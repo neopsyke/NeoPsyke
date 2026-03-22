@@ -225,7 +225,7 @@ Practical rule:
 - concurrent live runs are fine when memory is off or irrelevant
 - concurrent memory-dependent live runs are not safe and can contaminate each other
 
-This is one reason the BBH live suite disables long-term MCP memory and
+This is one reason the BBH live suite disables long-term vector memory and
 episodic logbook recall by default.
 
 ## Live Runs And Cost
@@ -246,7 +246,7 @@ Cost guidance:
 Memory behavior:
 
 - one-shot `live-eval.sh` uses isolated Freud memory by default
-- BBH smoke disables long-term MCP memory and episodic logbook recall by default so the suite measures reasoning rather than memory side-effects
+- BBH smoke disables long-term vector memory and episodic logbook recall by default so the suite measures reasoning rather than memory side-effects
 
 ## Common Failure Modes
 
@@ -276,7 +276,7 @@ Defaults:
 - `--clear-memory-all` is applied automatically
 - use `--preserve-memory` only when a sequence intentionally depends on prior isolated Freud memory
 - `--expected` uses normalized exact matching, not substring containment
-- BBH smoke additionally disables long-term MCP memory and episodic logbook recall by default
+- BBH smoke additionally disables long-term vector memory and episodic logbook recall by default
 
 ## Configuration
 

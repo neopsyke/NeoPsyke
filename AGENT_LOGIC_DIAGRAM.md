@@ -237,12 +237,15 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-    A["runInteractiveMode"] --> B["Resolve MCP memory command"]
-    B -->|missing/disabled| C["NoopHippocampus (memory unavailable)"]
-    B -->|present| D["MCP memory health probe (long-lived stdio connect + listTools)"]
-    D -->|pass| E["Provider-backed Hippocampus enabled"]
-    D -->|fail| C
-    E --> F["Emit action_capabilities(memory=available)"]
+    A["runInteractiveMode"] --> B["Resolve memory mode from memory-runtime.yaml"]
+    B -->|memory=off| C["NoopHippocampus (memory unavailable)"]
+    B -->|memory=default| D["Check managed HTTP provider health"]
+    D -->|healthy| E["Provider-backed Hippocampus enabled"]
+    D -->|unhealthy| F["Start provider command and wait for /health"]
+    F -->|pass| E
+    F -->|fail| C
+    B -->|memory=external| C
+    E --> H["Emit action_capabilities(memory=available)"]
     C --> G["Emit action_capabilities(memory=unavailable + warning)"]
 ```
 

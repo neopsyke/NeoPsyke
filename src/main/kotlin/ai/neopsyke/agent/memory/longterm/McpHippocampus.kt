@@ -45,7 +45,7 @@ class McpHippocampus(
         }
 
         val toolName = resolveSearchToolName()
-            ?: throw IOException("MCP memory server does not expose a search-like tool.")
+            ?: throw IOException("MCP memory provider does not expose a search-like tool.")
 
         val maxItems = request.maxItems.coerceIn(1, max(1, defaultMaxItems))
         val maxChars = request.maxChars.coerceIn(256, max(256, defaultMaxChars))
@@ -123,7 +123,7 @@ class McpHippocampus(
                 stats = mapper.readValue(result.content, Map::class.java) as? Map<String, Any?> ?: emptyMap()
             )
         } catch (ex: Exception) {
-            logger.debug(ex) { "Failed to fetch server-side memory metrics." }
+            logger.debug(ex) { "Failed to fetch provider-side memory metrics." }
             MemoryStatsResult()
         }
     }

@@ -38,7 +38,7 @@ Instructions for coding agents working in this repository (Codex, Claude, Gemini
   cause is addressed instead of making the test just pass.
 - If you find a failing test, flaky test, even if unrelated to current changes
   make sure to find the root cause and fix it. Every work session must end with all
-  tests running. 
+  tests running and stable. 
 
 ## Agent Logic Docs Maintenance (Required)
 - Keep both `AGENT_LOGIC_SUMMARY.md` and `AGENT_LOGIC_DIAGRAM.md` accurate as living runtime logic docs.

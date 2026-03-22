@@ -116,7 +116,6 @@ import ai.neopsyke.agent.tools.mcp.ToolHealthStatus
 import kotlin.system.exitProcess
 import java.net.InetSocketAddress
 import java.util.concurrent.Executors
-import java.net.Socket
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
@@ -535,64 +534,6 @@ internal object AppModeRunners {
         } else {
             "multi"
         }
-    }
-    
-    private fun checkMcpMemoryProviderHealth(
-        command: List<String>,
-        timeoutMs: Long,
-        modeLabel: String,
-    ): Boolean {
-        val status = try {
-            runBlocking {
-                McpStdioClient.start(command = command, serverLabel = "memory-health")
-            }.use { client ->
-                runBlocking {
-                    val tools = client.listTools(timeoutMs)
-                    val hasSearchLike = tools.any { tool ->
-                        val lower = tool.lowercase()
-                        lower.contains("search") || lower.contains("recall") || lower.contains("query")
-                    }
-                    val hasWriteLike = tools.any { tool ->
-                        val lower = tool.lowercase()
-                        lower.contains("add_observations") ||
-                            lower.contains("remember") ||
-                            lower.contains("imprint") ||
-                            lower.contains("create_memory") ||
-                            lower.contains("add_memory") ||
-                            lower.contains("write_memory")
-                    }
-                    when {
-                        !hasSearchLike || !hasWriteLike -> {
-                            ProviderStatus(
-                                provider = "mcp_memory",
-                                state = ProviderHealthState.UNAVAILABLE,
-                                detail = "MCP memory server reachable but required tools are missing. search_like=$hasSearchLike write_like=$hasWriteLike tools=${tools.sorted().joinToString(",")}"
-                            )
-                        }
-
-                        else -> {
-                            ProviderStatus(
-                                provider = "mcp_memory",
-                                state = ProviderHealthState.AVAILABLE,
-                                detail = "MCP memory server reachable; required tools detected."
-                            )
-                        }
-                    }
-                }
-            }
-        } catch (ex: Exception) {
-            val postgresStatus = localPostgresStatus()
-            ProviderStatus(
-                provider = "mcp_memory",
-                state = ProviderHealthState.UNAVAILABLE,
-                detail = "MCP memory provider check failed. PostgreSQL status: $postgresStatus"
-            )
-        }
-    
-        return reportProviderStatusAndDecide(
-            modeLabel = modeLabel,
-            status = status
-        )
     }
     
     internal fun runInteractiveMode(
@@ -2222,20 +2163,6 @@ internal object AppModeRunners {
             closeable.close()
         } catch (_: Exception) {
             // ignore best-effort shutdown
-        }
-    }
-
-    private fun localPostgresStatus(): String {
-        val host = "127.0.0.1"
-        val port = 5432
-        val timeoutMs = 500
-        return try {
-            Socket().use { socket ->
-                socket.connect(InetSocketAddress(host, port), timeoutMs)
-            }
-            "available at localhost:5432"
-        } catch (_: Exception) {
-            "unavailable at localhost:5432"
         }
     }
 
