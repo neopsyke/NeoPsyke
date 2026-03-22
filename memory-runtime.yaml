@@ -10,7 +10,10 @@ defaultProvider:
   namespace: neopsyke
 
 externalProvider:
-  provider: stub
+  # Advanced mode: point NeoPsyke at a compatible external HTTP memory provider.
+  # v1 supports only transport=http here. MCP remains available in the provider
+  # project as an optional adapter, but NeoPsyke does not use it for external mode yet.
+  provider: custom-http-memory
   transport: http
   baseUrl: ""
   namespace: neopsyke

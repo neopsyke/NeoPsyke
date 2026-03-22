@@ -70,8 +70,8 @@ Related note:
 - Replace package-level extraction with the real physical module split.
 - Add code-level SPI comments/TODOs that make future HTTP/MCP/direct provider
   adapters obvious to contributors.
-- Keep `memory=external` present in config/runtime shape even if initially
-  stubbed.
+- Extend `memory=external` beyond the current HTTP-only implementation when
+  MCP/direct adapters are ready.
 
 ## Future Expansion
 

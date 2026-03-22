@@ -84,6 +84,7 @@ Standalone Kotlin JVM app using Gradle with:
     - `fallback_commands` (list of command strings; first executable in `PATH` is used)
 - Long-term memory provider settings are centralized in `memory-runtime.yaml` (repository root).
   - Default config uses `memory=default`, which points NeoPsyke at the managed `neopsyke-pgvector-memory` provider over HTTP.
+  - Advanced `memory=external` also supports the same HTTP contract when you point NeoPsyke at a compatible external provider.
   - Optional override file path: `NEOPSYKE_MEMORY_CONFIG_FILE=/path/to/memory-runtime.yaml`.
   - Environment variables override YAML when present (`NEOPSYKE_MEMORY_*`, `MEMORY_DEFAULT_NAMESPACE`).
 - Microsoft Graph email action (`email_send`) is configured via environment variables:
@@ -171,7 +172,8 @@ Standalone Kotlin JVM app using Gradle with:
   - `NEOPSYKE_MEMORY_MODE` (`off|default|external`)
   - `NEOPSYKE_MEMORY_DEFAULT_COMMAND` (optional override for managed default provider command)
   - `NEOPSYKE_MEMORY_DEFAULT_BASE_URL` (optional override for managed default provider base URL)
-  - `NEOPSYKE_MEMORY_EXTERNAL_PROVIDER` / `NEOPSYKE_MEMORY_EXTERNAL_TRANSPORT` / `NEOPSYKE_MEMORY_EXTERNAL_BASE_URL` (future-facing external provider wiring)
+- `NEOPSYKE_MEMORY_EXTERNAL_PROVIDER` / `NEOPSYKE_MEMORY_EXTERNAL_TRANSPORT` / `NEOPSYKE_MEMORY_EXTERNAL_BASE_URL` (advanced external provider wiring; `transport=http` supported in v1)
+  - External HTTP providers must implement NeoPsyke's versioned `v1` contract (`/v1/health`, `/v1/metrics`, `/v1/recall`, `/v1/imprint`, `/v1/admin/forget`, `/v1/admin/reset`).
   - `MISTRAL_WEBSEARCH_AGENT_ID` (optional when `web_search.provider=mistral`; if omitted, NeoPsyke creates an ephemeral Mistral web-search agent per run)
   - `MCP_CALL_TIMEOUT_MS` (default: `8000`)
   - `MCP_MEMORY_CALL_TIMEOUT_MS` (default: same as `MCP_CALL_TIMEOUT_MS`)

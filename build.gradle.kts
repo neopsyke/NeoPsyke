@@ -33,6 +33,7 @@ dependencies {
     implementation("org.xerial:sqlite-jdbc:3.46.1.3")
 
     testImplementation(kotlin("test"))
+    testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
 }
 
 tasks.test {

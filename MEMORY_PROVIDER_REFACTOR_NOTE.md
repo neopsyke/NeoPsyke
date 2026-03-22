@@ -202,6 +202,14 @@ That means:
 
 - NeoPsyke default provider path => HTTP
 - provider may also expose MCP for other clients
+- the stable provider HTTP contract is versioned under `v1`
+  - `/v1/health`
+  - `/v1/metrics`
+  - `/v1/recall`
+  - `/v1/imprint`
+  - `/v1/admin/forget`
+  - `/v1/admin/reset`
+- breaking wire changes require a new namespace such as `/v2/...`
 
 ## Default Install / Bootstrap Flow
 
@@ -351,7 +359,7 @@ These are implementation tasks, not open strategy questions:
 - move current pgvector memory logic toward the new provider repo structure
 - keep MCP in the provider project as an optional interface
 - wire `memory=off`, `memory=default`, and `memory=external` in NeoPsyke
-- keep `memory=external` stubbed but visible for future work
+- keep `memory=external` advanced and HTTP-first in v1; add MCP/direct later
 
 ## Relationship To Existing Notes
 

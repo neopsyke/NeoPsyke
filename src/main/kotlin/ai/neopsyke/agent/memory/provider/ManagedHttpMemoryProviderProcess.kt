@@ -35,7 +35,7 @@ class ManagedHttpMemoryProviderProcess(
             }
             try {
                 val request = Request.Builder()
-                    .url("$baseUrl/health")
+                    .url("$baseUrl/v1/health")
                     .get()
                     .build()
                 healthClient.newCall(request).execute().use { response ->
@@ -49,7 +49,7 @@ class ManagedHttpMemoryProviderProcess(
             }
             Thread.sleep(200)
         }
-        throw IOException("Timed out waiting for memory provider health at $baseUrl/health ($lastError).")
+        throw IOException("Timed out waiting for memory provider health at $baseUrl/v1/health ($lastError).")
     }
 
     override fun close() {

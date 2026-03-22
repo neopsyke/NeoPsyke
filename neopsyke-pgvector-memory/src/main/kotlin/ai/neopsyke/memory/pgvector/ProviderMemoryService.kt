@@ -10,6 +10,8 @@ import ai.neopsyke.memory.pgvector.tools.normalizeFingerprint
 import ai.neopsyke.memory.pgvector.tools.removeInlineTags
 import ai.neopsyke.memory.pgvector.tools.sanitizeFactKey
 import ai.neopsyke.memory.pgvector.tools.sanitizeNamespace
+import java.io.IOException
+import java.sql.SQLException
 import java.time.Instant
 
 class ProviderMemoryService(
@@ -29,12 +31,14 @@ class ProviderMemoryService(
             )
         }
         val namespace = sanitizeNamespace(request.namespace, config.defaultNamespace)
-        val embedding = embedder.embed(cue)
-        val rows = repository.searchByVector(
-            namespace = namespace,
-            queryEmbedding = embedding,
-            limit = request.maxItems.coerceIn(1, 50),
-        )
+        val rows = withDependencyGuard("recall_unavailable") {
+            val embedding = embedder.embed(cue)
+            repository.searchByVector(
+                namespace = namespace,
+                queryEmbedding = embedding,
+                limit = request.maxItems.coerceIn(1, 50),
+            )
+        }
         val items = rows.map { row ->
             ProviderMemoryItem(
                 id = row.id.toString(),
@@ -72,10 +76,9 @@ class ProviderMemoryService(
             "fact" -> storeFact(namespace, request)
             "relation" -> storeRelation(namespace, request)
             "episode" -> storeEpisode(namespace, request)
-            else -> ProviderImprintResponse(
-                provider = config.providerName,
-                accepted = false,
-                detail = "unsupported_type",
+            else -> throw ProviderBadRequestException(
+                errorCode = "unsupported_type",
+                message = "Unsupported imprint type '${request.type}'."
             )
         }
     }
@@ -86,39 +89,61 @@ class ProviderMemoryService(
 
     fun reset(request: ProviderResetRequest): ProviderResetResponse {
         if (!request.clearAll) {
-            return ProviderResetResponse(deletedCount = 0, detail = "clear_all_false")
+            throw ProviderBadRequestException(
+                errorCode = "clear_all_false",
+                message = "Reset requires clearAll=true."
+            )
         }
         val namespace = sanitizeNamespace(request.namespace, config.defaultNamespace)
-        val deleted = repository.deleteNamespace(namespace)
+        val deleted = withDependencyGuard("reset_unavailable") {
+            repository.deleteNamespace(namespace)
+        }
         return ProviderResetResponse(deletedCount = deleted)
     }
 
     fun forget(request: ProviderForgetRequest): ProviderForgetResponse {
         val namespace = sanitizeNamespace(request.namespace, config.defaultNamespace)
         val markers = request.tagMarkers.map { it.trim() }.filter { it.isNotBlank() }
-        if (markers.isEmpty()) {
-            return ProviderForgetResponse(deletedCount = 0)
+        val ids = request.ids.map { it.trim() }.filter { it.isNotBlank() }
+        if (markers.isEmpty() && ids.isEmpty()) {
+            throw ProviderBadRequestException(
+                errorCode = "missing_delete_criteria",
+                message = "Forget requires at least one tag marker or id."
+            )
         }
-        val deleted = repository.deleteByTagMarkers(namespace = namespace, tagMarkers = markers)
+        if (ids.isNotEmpty()) {
+            throw ProviderBadRequestException(
+                errorCode = "forget_by_id_not_supported",
+                message = "v1 forget supports tag markers only."
+            )
+        }
+        val deleted = withDependencyGuard("forget_unavailable") {
+            repository.deleteByTagMarkers(namespace = namespace, tagMarkers = markers)
+        }
         return ProviderForgetResponse(deletedCount = deleted)
     }
 
     private fun storeNarrative(namespace: String, request: ProviderImprintRequest): ProviderImprintResponse {
         val summary = request.summary?.trim().orEmpty()
         if (summary.isBlank()) {
-            return ProviderImprintResponse(provider = config.providerName, accepted = false, detail = "blank_summary")
+            throw ProviderBadRequestException(
+                errorCode = "blank_summary",
+                message = "Narrative imprint requires a non-blank summary."
+            )
         }
         val tags = request.tags + extractInlineTags(summary)
         val cleanedSummary = removeInlineTags(summary)
-        val result = write(
-            namespace = namespace,
-            content = cleanedSummary,
-            source = request.source,
-            confidence = request.confidence,
-            tags = tags,
-            writeMode = MemoryWriteMode.DEDUPE_IF_SIMILAR,
-            fact = null,
-        )
+        val result = withDependencyGuard("narrative_imprint_unavailable") {
+            write(
+                namespace = namespace,
+                content = cleanedSummary,
+                source = request.source,
+                confidence = request.confidence,
+                tags = tags,
+                writeMode = MemoryWriteMode.DEDUPE_IF_SIMILAR,
+                fact = null,
+            )
+        }
         return ProviderImprintResponse(
             provider = config.providerName,
             accepted = true,
@@ -130,26 +155,34 @@ class ProviderMemoryService(
     private fun storeFact(namespace: String, request: ProviderImprintRequest): ProviderImprintResponse {
         val subject = sanitizeNamespace(request.subject, config.factDefaultSubject)
         val predicate = sanitizeFactKey(request.predicate)
-            ?: return ProviderImprintResponse(provider = config.providerName, accepted = false, detail = "invalid_predicate")
+            ?: throw ProviderBadRequestException(
+                errorCode = "invalid_predicate",
+                message = "Fact imprint requires a valid predicate."
+            )
         val obj = request.obj?.trim().orEmpty()
         if (obj.isBlank()) {
-            return ProviderImprintResponse(provider = config.providerName, accepted = false, detail = "blank_object")
+            throw ProviderBadRequestException(
+                errorCode = "blank_object",
+                message = "Fact imprint requires a non-blank object value."
+            )
         }
         val content = "$subject $predicate $obj"
-        val result = write(
-            namespace = namespace,
-            content = content,
-            source = request.source,
-            confidence = request.confidence,
-            tags = request.tags + listOf("kind:fact"),
-            writeMode = MemoryWriteMode.UPSERT_FACT,
-            fact = FactWriteRequest(
-                subject = subject,
-                key = predicate,
-                value = obj,
-                versionedAt = Instant.now(),
-            ),
-        )
+        val result = withDependencyGuard("fact_imprint_unavailable") {
+            write(
+                namespace = namespace,
+                content = content,
+                source = request.source,
+                confidence = request.confidence,
+                tags = request.tags + listOf("kind:fact"),
+                writeMode = MemoryWriteMode.UPSERT_FACT,
+                fact = FactWriteRequest(
+                    subject = subject,
+                    key = predicate,
+                    value = obj,
+                    versionedAt = Instant.now(),
+                ),
+            )
+        }
         return ProviderImprintResponse(
             provider = config.providerName,
             accepted = true,
@@ -163,18 +196,23 @@ class ProviderMemoryService(
         val relation = request.relation?.trim().orEmpty()
         val to = request.to?.trim().orEmpty()
         if (from.isBlank() || relation.isBlank() || to.isBlank()) {
-            return ProviderImprintResponse(provider = config.providerName, accepted = false, detail = "invalid_relation")
+            throw ProviderBadRequestException(
+                errorCode = "invalid_relation",
+                message = "Relation imprint requires non-blank from, relation, and to fields."
+            )
         }
         val content = "$from $relation $to"
-        val result = write(
-            namespace = namespace,
-            content = content,
-            source = request.source,
-            confidence = request.confidence,
-            tags = request.tags + listOf("kind:relation"),
-            writeMode = MemoryWriteMode.DEDUPE_IF_SIMILAR,
-            fact = null,
-        )
+        val result = withDependencyGuard("relation_imprint_unavailable") {
+            write(
+                namespace = namespace,
+                content = content,
+                source = request.source,
+                confidence = request.confidence,
+                tags = request.tags + listOf("kind:relation"),
+                writeMode = MemoryWriteMode.DEDUPE_IF_SIMILAR,
+                fact = null,
+            )
+        }
         return ProviderImprintResponse(
             provider = config.providerName,
             accepted = true,
@@ -186,18 +224,23 @@ class ProviderMemoryService(
     private fun storeEpisode(namespace: String, request: ProviderImprintRequest): ProviderImprintResponse {
         val summary = request.summary?.trim().orEmpty()
         if (summary.isBlank()) {
-            return ProviderImprintResponse(provider = config.providerName, accepted = false, detail = "blank_summary")
+            throw ProviderBadRequestException(
+                errorCode = "blank_summary",
+                message = "Episode imprint requires a non-blank summary."
+            )
         }
         val eventTag = request.eventType?.takeIf { it.isNotBlank() }?.let { listOf("event:$it") }.orEmpty()
-        val result = write(
-            namespace = namespace,
-            content = summary,
-            source = request.source,
-            confidence = request.confidence,
-            tags = request.tags + listOf("kind:episode") + eventTag,
-            writeMode = MemoryWriteMode.APPEND,
-            fact = null,
-        )
+        val result = withDependencyGuard("episode_imprint_unavailable") {
+            write(
+                namespace = namespace,
+                content = summary,
+                source = request.source,
+                confidence = request.confidence,
+                tags = request.tags + listOf("kind:episode") + eventTag,
+                writeMode = MemoryWriteMode.APPEND,
+                fact = null,
+            )
+        }
         return ProviderImprintResponse(
             provider = config.providerName,
             accepted = true,
@@ -247,4 +290,15 @@ class ProviderMemoryService(
         }
         return normalizeFingerprint(content)
     }
+
+    private fun <T> withDependencyGuard(errorCode: String, block: () -> T): T =
+        try {
+            block()
+        } catch (ex: ProviderBadRequestException) {
+            throw ex
+        } catch (ex: SQLException) {
+            throw ProviderDependencyException(errorCode, "Storage dependency failed.", ex)
+        } catch (ex: IOException) {
+            throw ProviderDependencyException(errorCode, "Provider dependency failed.", ex)
+        }
 }

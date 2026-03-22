@@ -213,16 +213,16 @@ Notes:
 - `memory=off` is the default for tests, CI, and minimal runs
 - `memory=default` is the recommended OSS/full install mode
 - `memory=default` should use NeoPsyke's pgvector provider via HTTP
-- `memory=external` is a future-facing extension point for non-default
-  providers such as Mem0 or custom integrations
+- `memory=external` is now minimally real over HTTP for advanced/non-default
+  providers, but it remains intentionally secondary to the default pgvector path
 
 Current gap:
 
 - these runtime profiles are not fully real yet
-- MCP is still effectively the real default backend path
-- runtime wiring still goes through `McpHippocampus`
-- the architecture is cleaner, but the product/runtime default is still
-  external-process memory
+- `memory=default` still depends on same-repo provider build artifacts instead of
+  a real bootstrap/install flow
+- `memory=external` only supports HTTP in v1; MCP/direct external adapters are
+  still future work
 
 ## Long-Term Memory Grouping
 

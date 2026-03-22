@@ -19,11 +19,11 @@ private val httpProviderLogger = KotlinLogging.logger {}
 private val jsonMediaType = "application/json".toMediaType()
 
 class HttpMemoryProviderClient(
+    override val providerName: String = "neopsyke_pgvector_http",
     private val baseUrl: String,
     private val callTimeoutMs: Long,
     private val managedProcess: ManagedHttpMemoryProviderProcess? = null,
 ) : MemoryProviderClient, MemoryProviderAdminClient {
-    override val providerName: String = "neopsyke_pgvector_http"
     override val capabilities: Set<MemoryCapability> = setOf(
         MemoryCapability.SEMANTIC_RECALL,
         MemoryCapability.NARRATIVE_IMPRINT,
@@ -41,7 +41,7 @@ class HttpMemoryProviderClient(
         .build()
 
     override fun health(): MemoryHealth =
-        get("/health", MemoryHealth::class.java)
+        get(HEALTH_PATH, MemoryHealth::class.java)
 
     override fun recall(request: RecallRequest, namespace: String): RecallResult {
         val payload = linkedMapOf<String, Any?>(
@@ -54,7 +54,7 @@ class HttpMemoryProviderClient(
             "interlocutorId" to request.context.interlocutorId,
             "activeGoalIds" to request.context.activeGoalIds,
         )
-        return post("/v1/recall", payload, RecallResult::class.java)
+        return post(RECALL_PATH, payload, RecallResult::class.java)
     }
 
     override fun imprint(request: ImprintRequest, namespace: String): ImprintResult {
@@ -106,12 +106,12 @@ class HttpMemoryProviderClient(
                 "source" to request.source,
             )
         }
-        return post("/v1/imprint", payload, ImprintResult::class.java)
+        return post(IMPRINT_PATH, payload, ImprintResult::class.java)
     }
 
     override fun stats(): MemoryStatsResult {
         val type = object : TypeReference<Map<String, Any?>>() {}
-        val stats = get("/metrics", type)
+        val stats = get(METRICS_PATH, type)
         return MemoryStatsResult(stats = stats)
     }
 
@@ -121,7 +121,7 @@ class HttpMemoryProviderClient(
             "tagMarkers" to request.tagMarkers.toList(),
             "ids" to request.ids.toList(),
         )
-        return post("/v1/admin/forget", payload, ForgetResult::class.java)
+        return post(FORGET_PATH, payload, ForgetResult::class.java)
     }
 
     override fun reset(request: ResetRequest, namespace: String): ResetResult {
@@ -129,7 +129,7 @@ class HttpMemoryProviderClient(
             "namespace" to namespace,
             "clearAll" to request.clearAll,
         )
-        return post("/v1/admin/reset", payload, ResetResult::class.java)
+        return post(RESET_PATH, payload, ResetResult::class.java)
     }
 
     override fun close() {
@@ -139,10 +139,10 @@ class HttpMemoryProviderClient(
     private fun <T> get(path: String, type: Class<T>): T {
         val request = Request.Builder().url("$baseUrl$path").get().build()
         return client.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) {
-                throw IOException("HTTP memory provider GET $path failed with ${response.code}.")
-            }
             val body = response.body?.string().orEmpty()
+            if (!response.isSuccessful) {
+                throw IOException(buildErrorMessage("GET", path, response.code, body))
+            }
             mapper.readValue(body, type)
         }
     }
@@ -150,10 +150,10 @@ class HttpMemoryProviderClient(
     private fun <T> get(path: String, type: TypeReference<T>): T {
         val request = Request.Builder().url("$baseUrl$path").get().build()
         return client.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) {
-                throw IOException("HTTP memory provider GET $path failed with ${response.code}.")
-            }
             val body = response.body?.string().orEmpty()
+            if (!response.isSuccessful) {
+                throw IOException(buildErrorMessage("GET", path, response.code, body))
+            }
             mapper.readValue(body, type)
         }
     }
@@ -168,9 +168,32 @@ class HttpMemoryProviderClient(
             val body = response.body?.string().orEmpty()
             if (!response.isSuccessful) {
                 httpProviderLogger.warn { "HTTP memory provider POST $path failed status=${response.code} body=${body.take(220)}" }
-                throw IOException("HTTP memory provider POST $path failed with ${response.code}.")
+                throw IOException(buildErrorMessage("POST", path, response.code, body))
             }
             mapper.readValue(body, type)
         }
+    }
+
+    private fun buildErrorMessage(method: String, path: String, status: Int, body: String): String {
+        val detail = try {
+            val payload = mapper.readValue(body, object : TypeReference<Map<String, Any?>>() {})
+            listOf(payload["error"]?.toString(), payload["detail"]?.toString())
+                .filterNotNull()
+                .filter { it.isNotBlank() }
+                .joinToString(": ")
+        } catch (_: Exception) {
+            body.take(220)
+        }
+        return "HTTP memory provider $method $path failed with $status${detail.takeIf { it.isNotBlank() }?.let { " ($it)" } ?: ""}."
+    }
+
+    private companion object {
+        const val API_VERSION = "v1"
+        const val HEALTH_PATH = "/$API_VERSION/health"
+        const val METRICS_PATH = "/$API_VERSION/metrics"
+        const val RECALL_PATH = "/$API_VERSION/recall"
+        const val IMPRINT_PATH = "/$API_VERSION/imprint"
+        const val FORGET_PATH = "/$API_VERSION/admin/forget"
+        const val RESET_PATH = "/$API_VERSION/admin/reset"
     }
 }

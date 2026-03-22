@@ -73,6 +73,7 @@ typealias McpHippocampus = ai.neopsyke.agent.memory.longterm.McpHippocampus
 typealias LongTermMemoryAdvisor = ai.neopsyke.agent.memory.longterm.LongTermMemoryAdvisor
 typealias LongTermMemoryAssessmentContext = ai.neopsyke.agent.memory.longterm.LongTermMemoryAssessmentContext
 typealias LongTermMemoryAssessmentDecision = ai.neopsyke.agent.memory.longterm.LongTermMemoryAssessmentDecision
+typealias LongTermMemorySubject = ai.neopsyke.agent.memory.longterm.LongTermMemorySubject
 typealias LlmLongTermMemoryAdvisor = ai.neopsyke.agent.memory.longterm.LlmLongTermMemoryAdvisor
 
 typealias McpTimeTool = ai.neopsyke.agent.tools.mcp.McpTimeTool

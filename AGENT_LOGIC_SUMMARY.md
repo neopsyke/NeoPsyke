@@ -42,8 +42,10 @@ It is intentionally high-level and should stay aligned with the code.
 - Interactive startup now resolves memory from `memory-runtime.yaml` and performs a provider health/startup check before enabling long-term vector memory:
   - `memory=off` wires `NoopHippocampus`
   - `memory=default` uses the managed `neopsyke-pgvector-memory` provider over HTTP
+  - `memory=external` uses the same HTTP provider contract against an explicitly configured external provider
   - if the configured provider is already healthy, NeoPsyke reuses it
-  - if not, NeoPsyke starts the configured provider command and waits for `/health`
+  - if not, NeoPsyke starts the configured provider command and waits for `/v1/health`
+  - `memory=external` never auto-starts a provider process; it requires a reachable external HTTP endpoint
   - if startup or health checks fail, memory is downgraded to noop for the run and reported unavailable
 - Interactive startup runs LLM provider health probes per configured cognitive role endpoint:
   - probes use normalized URL joining (`base_url` + `/models`) so trailing slashes do not produce `//models`
@@ -325,8 +327,12 @@ It is intentionally high-level and should stay aligned with the code.
   - LLM semantic review second (only if deterministic checks pass)
 - Id-origin deterministic policy is enforced inside Superego (not plugins):
   - Direct `answer` from Id origin is hard-denied by default.
-  - Id-origin actions are allowlisted for internal/evidence-gathering types (`web_search`, `website_fetch`, `mcp_time`, `answer_draft`).
+  - Id-origin actions are allowlisted for internal/evidence-gathering types (`web_search`, `website_fetch`, `mcp_time`, `answer_draft`, `reflect`).
   - Non-allowlisted Id-origin actions are denied before LLM review.
+  - Id-origin `REFLECT` is treated as an internal-only durable-memory action:
+    - plugin deterministic validation still runs
+    - if payload is valid, Superego bypasses LLM semantic review entirely and auto-allows it
+    - this avoids generic “missing direct user request / off-topic” denials for internal reflections
 - Superego LLM review is separated into dedicated engines:
   - `SingleStageSuperegoReviewEngine` handles one model (retry, strict-JSON retry, parse validation, safe deny fallback).
   - `TwoStageSuperegoReviewEngine` runs cheap primary review first and escalates only on:
@@ -341,6 +347,7 @@ It is intentionally high-level and should stay aligned with the code.
   - hard-capped by `dynamicCompletionHardMaxTokens`
   - expansion is cost-weighted by configured model `token_weight`
 - Superego prompt assembly uses the same contract allocator and emits `prompt_budget_allocation` telemetry (`call_site=superego_prompt`).
+- Superego prompt now includes explicit action-origin context (`source`, `need_id`, `root_impulse_id`) so Id-origin actions are judged against origin policy, not only the latest user message.
 - Returns `GateDecision(allow, reason, reasonCode)` from schema-enforced structured output (`response_format=json_schema`), with parser fallback for defensive handling.
 - LLM deny responses can include optional `reason_code`; deterministic denials emit policy-prefixed `reason_code`s.
 - If initial LLM output is non-parseable, stage engine performs one schema-enforced retry before default deny fallback.
@@ -397,6 +404,13 @@ It is intentionally high-level and should stay aligned with the code.
 - Long-term consolidation:
   - `LlmLongTermMemoryAdvisor` decides `save|skip` with confidence/tags/summary.
   - Saved summaries are a first-person memory contract from the agent's perspective (for example, `I learned ...` / `I should remember ...`); common third-person outputs are normalized before persistence as a guardrail.
+  - Memory assessments now classify the subject of the candidate memory:
+    - `user`: durable user preferences/facts/goals
+    - `self`: Id/internal-drive reflections, self-observations, and durable agent learning interests
+  - When the latest salient turn is `INTERNAL`, the advisor is prompted as `subject=self` and self-origin normalization applies:
+    - reasons are rewritten away from “the user ...” phrasing
+    - tags such as `user preference` are normalized to self-origin tags
+    - `MemorySystem` persists these saves as `source=ego_self_memory_assessment` and adds `self_initiated` / `subject:self` tags
   - MCP-backed durable-memory writes stamp the fact/reference subject as `me` so persisted memories are attributed to the agent rather than the user if a fact-style backend path is used.
   - Advisor compresses oversized dialogue and recall blocks before prompting (`ContextBlockCompressor`) and emits `memory_advisor_prompt_compressed` diagnostics.
   - Memory-advisor completion budget is adaptive by prompt size and bounded by `MemoryConfig`:
@@ -541,6 +555,7 @@ It is intentionally high-level and should stay aligned with the code.
 - Integration through `MemorySystem`:
   - `remember()` auto-journals `INPUT_RECEIVED` for user turns.
   - `maybeAssessLongTermMemory()` auto-journals `MEMORY_IMPRINT` on successful saves.
+    - INTERNAL-turn assessments are tagged and sourced as self-origin durable memory instead of user preference memory.
   - `journal()` public method called from Ego for planner decisions, action outcomes, denials, and answers.
   - `recordReflection()` owns `REFLECT` persistence, adding first-person normalization plus session/interlocutor/run and Id-origin provenance before writing logbook and long-term memory.
   - `REFLECT` only reports `DURABLE_MEMORY_SAVED` on durable long-term memory persistence success; journal-only fallback does not satisfy the originating learn need.

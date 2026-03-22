@@ -1899,10 +1899,7 @@ internal object AppModeRunners {
         return when (runtimeConfig.mode) {
             MemoryMode.OFF -> NoopHippocampus
             MemoryMode.DEFAULT -> createDefaultProviderBackedHippocampus(config, runtimeConfig)
-            MemoryMode.EXTERNAL -> {
-                logger.info { "memory=external is reserved for future custom providers; long-term vector memory disabled for this run." }
-                NoopHippocampus
-            }
+            MemoryMode.EXTERNAL -> createExternalProviderBackedHippocampus(config, runtimeConfig)
         }
     }
 
@@ -1931,9 +1928,44 @@ internal object AppModeRunners {
         return ProviderBackedHippocampus(
             namespace = provider.namespace,
             client = HttpMemoryProviderClient(
+                providerName = provider.provider,
                 baseUrl = baseUrl,
                 callTimeoutMs = config.memory.mcpMemoryCallTimeoutMs,
                 managedProcess = managedProcess
+            )
+        )
+    }
+
+    private fun createExternalProviderBackedHippocampus(
+        config: AgentConfig,
+        runtimeConfig: MemoryRuntimeConfig,
+    ): Hippocampus {
+        val provider = runtimeConfig.externalProvider
+        val transport = provider.transport.trim().lowercase()
+        if (transport != "http") {
+            // TODO(memory-provider): add transport adapters for MCP/direct external providers.
+            throw IllegalStateException(
+                "memory=external currently supports only transport=http. " +
+                    "Configured provider=${provider.provider} transport=${provider.transport}."
+            )
+        }
+        val baseUrl = provider.baseUrl.trim().trimEnd('/')
+        if (baseUrl.isBlank()) {
+            throw IllegalStateException(
+                "memory=external requires a non-blank baseUrl for provider=${provider.provider}."
+            )
+        }
+        if (!isHttpMemoryProviderHealthy(baseUrl, config.memory.mcpMemoryCallTimeoutMs)) {
+            throw IllegalStateException(
+                "External memory provider health check failed for provider=${provider.provider} baseUrl=$baseUrl."
+            )
+        }
+        return ProviderBackedHippocampus(
+            namespace = provider.namespace,
+            client = HttpMemoryProviderClient(
+                providerName = provider.provider,
+                baseUrl = baseUrl,
+                callTimeoutMs = config.memory.mcpMemoryCallTimeoutMs,
             )
         )
     }
@@ -1945,10 +1977,12 @@ internal object AppModeRunners {
         val hippocampus = try {
             createHippocampus(config = config, runtimeConfig = runtimeConfig)
         } catch (ex: Exception) {
-            logger.warn(ex) { "Memory provider startup failed for interactive mode." }
+            val detail = ex.message?.takeIf { it.isNotBlank() }
+                ?: "Memory provider startup failed; long-term memory disabled for this run."
+            logger.warn(ex) { "Memory provider startup failed for interactive mode: $detail" }
             return InteractiveMemoryStartup(
                 hippocampus = NoopHippocampus,
-                detail = "Memory provider startup failed; long-term memory disabled for this run."
+                detail = detail
             )
         }
         if (!hippocampus.enabled) {
@@ -1974,7 +2008,7 @@ internal object AppModeRunners {
     private fun isHttpMemoryProviderHealthy(baseUrl: String, timeoutMs: Long): Boolean {
         return try {
             val request = okhttp3.Request.Builder()
-                .url("${baseUrl.trimEnd('/')}/health")
+                .url("${baseUrl.trimEnd('/')}/v1/health")
                 .get()
                 .build()
             okhttp3.OkHttpClient.Builder()

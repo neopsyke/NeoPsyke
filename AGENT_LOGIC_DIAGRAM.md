@@ -153,14 +153,19 @@ sequenceDiagram
                         Ego->>Sched: enqueue safe-alternative thought
                         Ego->>Mem: maybeRecordReflectionLesson(filtered)
                     else deterministic pass
-                        Ego->>Sup: llm review(action)
-                        Note over Ego,Sup: Stage-1 uses cheaper model from catalog when two-stage is enabled
-                        Note over Ego,Sup: Superego prompt build uses same prompt allocator contract and emits prompt_budget_allocation
-                        Note over Ego,Sup: Escalate on low confidence, policy-risk, or technical fallback
-                        Note over Ego,Sup: Superego completion max_tokens scales with prompt estimate (bounded floor/hard-cap) and model token_weight
-                        Note over Ego,Sup: Structured output is schema-enforced (response_format=json_schema)
-                        Note over Ego,Sup: Stage parse failures trigger one schema-enforced retry before default deny
-                        Sup-->>Ego: allow or deny (with reason_code on deny)
+                        alt action = id-origin reflect
+                            Note over Ego,Sup: Internal-only REFLECT bypasses LLM Superego review after deterministic payload validation
+                            Sup-->>Ego: allow
+                        else all other actions
+                            Ego->>Sup: llm review(action)
+                            Note over Ego,Sup: Stage-1 uses cheaper model from catalog when two-stage is enabled
+                            Note over Ego,Sup: Superego prompt build uses same prompt allocator contract, includes action-origin context, and emits prompt_budget_allocation
+                            Note over Ego,Sup: Escalate on low confidence, policy-risk, or technical fallback
+                            Note over Ego,Sup: Superego completion max_tokens scales with prompt estimate (bounded floor/hard-cap) and model token_weight
+                            Note over Ego,Sup: Structured output is schema-enforced (response_format=json_schema)
+                            Note over Ego,Sup: Stage parse failures trigger one schema-enforced retry before default deny
+                            Sup-->>Ego: allow or deny (with reason_code on deny)
+                        end
                         alt allow
                             alt action = resolution_draft
                                 Ego->>TWS: record resolution_draft section (internal chunk)
@@ -205,6 +210,7 @@ sequenceDiagram
         Note over Ego,Mem: Memory-advisor completion max_tokens scales with prompt estimate (bounded floor/hard-cap) and model token_weight
         Note over Ego,Mem: Long dialogue/recall blocks are compressed before advisor prompt
         Note over Ego,Mem: Saved durable memories are normalized to first-person agent perspective before imprint
+        Note over Ego,Mem: INTERNAL latest-salient turns switch long-term assessment into self-origin mode; reasons/tags/source are normalized away from user-preference framing
         Note over Ego,Mem: MCP fact/reference subject is stamped as "me" for agent-authored durable memories
         Note over Ego,Mem: Successful learning reflections track exact recent topic fingerprints; only learning retrieval uses them as freshness pressure, while other needs may still reuse the same topic context
     end
@@ -241,10 +247,12 @@ flowchart LR
     B -->|memory=off| C["NoopHippocampus (memory unavailable)"]
     B -->|memory=default| D["Check managed HTTP provider health"]
     D -->|healthy| E["Provider-backed Hippocampus enabled"]
-    D -->|unhealthy| F["Start provider command and wait for /health"]
+    D -->|unhealthy| F["Start provider command and wait for /v1/health"]
     F -->|pass| E
     F -->|fail| C
-    B -->|memory=external| C
+    B -->|memory=external| X["Check external HTTP provider health"]
+    X -->|healthy| E
+    X -->|unhealthy/unsupported| C
     E --> H["Emit action_capabilities(memory=available)"]
     C --> G["Emit action_capabilities(memory=unavailable + warning)"]
 ```

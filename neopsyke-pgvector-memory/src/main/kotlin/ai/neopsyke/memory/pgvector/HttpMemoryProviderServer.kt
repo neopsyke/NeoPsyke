@@ -9,6 +9,7 @@ import com.sun.net.httpserver.HttpServer
 import mu.KotlinLogging
 import java.net.InetSocketAddress
 import java.nio.charset.StandardCharsets
+import java.sql.SQLException
 import java.util.concurrent.Executors
 
 private val httpMemoryLogger = KotlinLogging.logger {}
@@ -29,32 +30,44 @@ class HttpMemoryProviderServer(
     )
     private val server: HttpServer = HttpServer.create(InetSocketAddress(host, port), 0).apply {
         executor = Executors.newCachedThreadPool()
-        createContext("/health") { exchange ->
-            writeJson(exchange, 200, mapOf(
-                "provider" to runtime.config.providerName,
-                "available" to true,
-                "detail" to "http_ready",
-                "degraded" to false,
-            ))
+        createContext(ProviderHttpContract.HEALTH_PATH) { exchange ->
+            handle(exchange, method = "GET") {
+                mapOf(
+                    "provider" to runtime.config.providerName,
+                    "available" to true,
+                    "detail" to "http_ready",
+                    "degraded" to false,
+                )
+            }
         }
-        createContext("/metrics") { exchange ->
-            writeJson(exchange, 200, runtime.metrics.snapshot())
+        createContext(ProviderHttpContract.METRICS_PATH) { exchange ->
+            handle(exchange, method = "GET") {
+                runtime.metrics.snapshot()
+            }
         }
-        createContext("/v1/recall") { exchange ->
-            val request = readJson(exchange, ProviderRecallRequest::class.java)
-            writeJson(exchange, 200, service.recall(request))
+        createContext(ProviderHttpContract.RECALL_PATH) { exchange ->
+            handle(exchange, method = "POST") {
+                val request = readJson(exchange, ProviderRecallRequest::class.java)
+                service.recall(request)
+            }
         }
-        createContext("/v1/imprint") { exchange ->
-            val request = readJson(exchange, ProviderImprintRequest::class.java)
-            writeJson(exchange, 200, service.imprint(request))
+        createContext(ProviderHttpContract.IMPRINT_PATH) { exchange ->
+            handle(exchange, method = "POST") {
+                val request = readJson(exchange, ProviderImprintRequest::class.java)
+                service.imprint(request)
+            }
         }
-        createContext("/v1/admin/reset") { exchange ->
-            val request = readJson(exchange, ProviderResetRequest::class.java)
-            writeJson(exchange, 200, service.reset(request))
+        createContext(ProviderHttpContract.RESET_PATH) { exchange ->
+            handle(exchange, method = "POST") {
+                val request = readJson(exchange, ProviderResetRequest::class.java)
+                service.reset(request)
+            }
         }
-        createContext("/v1/admin/forget") { exchange ->
-            val request = readJson(exchange, ProviderForgetRequest::class.java)
-            writeJson(exchange, 200, service.forget(request))
+        createContext(ProviderHttpContract.FORGET_PATH) { exchange ->
+            handle(exchange, method = "POST") {
+                val request = readJson(exchange, ProviderForgetRequest::class.java)
+                service.forget(request)
+            }
         }
     }
 
@@ -68,6 +81,77 @@ class HttpMemoryProviderServer(
     override fun close() {
         server.stop(0)
         runtime.close()
+    }
+
+    private fun handle(exchange: HttpExchange, method: String, block: () -> Any) {
+        try {
+            if (!exchange.requestMethod.equals(method, ignoreCase = true)) {
+                writeJson(
+                    exchange,
+                    405,
+                    ProviderHttpErrorResponse(
+                        provider = runtime.config.providerName,
+                        error = "method_not_allowed",
+                        detail = "Expected $method for ${exchange.requestURI.path}.",
+                    )
+                )
+                return
+            }
+            writeJson(exchange, 200, block())
+        } catch (ex: ProviderBadRequestException) {
+            writeJson(
+                exchange,
+                400,
+                ProviderHttpErrorResponse(
+                    provider = runtime.config.providerName,
+                    error = ex.errorCode,
+                    detail = ex.message,
+                )
+            )
+        } catch (ex: ProviderDependencyException) {
+            httpMemoryLogger.warn(ex) { "Provider dependency failure for path=${exchange.requestURI.path}" }
+            writeJson(
+                exchange,
+                503,
+                ProviderHttpErrorResponse(
+                    provider = runtime.config.providerName,
+                    error = ex.errorCode,
+                    detail = ex.message,
+                )
+            )
+        } catch (ex: com.fasterxml.jackson.core.JsonProcessingException) {
+            writeJson(
+                exchange,
+                400,
+                ProviderHttpErrorResponse(
+                    provider = runtime.config.providerName,
+                    error = "invalid_json",
+                    detail = "Request body could not be parsed.",
+                )
+            )
+        } catch (ex: SQLException) {
+            httpMemoryLogger.warn(ex) { "SQL dependency failure for path=${exchange.requestURI.path}" }
+            writeJson(
+                exchange,
+                503,
+                ProviderHttpErrorResponse(
+                    provider = runtime.config.providerName,
+                    error = "storage_unavailable",
+                    detail = "Storage dependency failed.",
+                )
+            )
+        } catch (ex: Exception) {
+            httpMemoryLogger.error(ex) { "Unexpected HTTP provider failure for path=${exchange.requestURI.path}" }
+            writeJson(
+                exchange,
+                500,
+                ProviderHttpErrorResponse(
+                    provider = runtime.config.providerName,
+                    error = "internal_error",
+                    detail = "Unexpected internal provider error.",
+                )
+            )
+        }
     }
 
     private fun <T> readJson(exchange: HttpExchange, type: Class<T>): T {

@@ -97,4 +97,38 @@ class MemoryRuntimeConfigLoaderTest {
         assertEquals("env-provider --serve", config.defaultProvider.command)
         assertEquals("freud-eval", config.defaultProvider.namespace)
     }
+
+    @Test
+    fun `env overrides yaml for external provider http settings`() {
+        val tempDir = Files.createTempDirectory("neopsyke-memory-config-external-env")
+        val yamlPath = tempDir.resolve("base.yaml")
+        Files.writeString(
+            yamlPath,
+            """
+            mode: "off"
+            externalProvider:
+              provider: yaml-external
+              transport: http
+              baseUrl: http://127.0.0.1:9999
+              namespace: yamlspace
+            """.trimIndent()
+        )
+
+        val config = MemoryRuntimeConfigLoader.load(
+            env = mapOf(
+                "NEOPSYKE_MEMORY_MODE" to "external",
+                "NEOPSYKE_MEMORY_EXTERNAL_PROVIDER" to "mem0-http",
+                "NEOPSYKE_MEMORY_EXTERNAL_TRANSPORT" to "http",
+                "NEOPSYKE_MEMORY_EXTERNAL_BASE_URL" to "https://memory.example",
+                "MEMORY_DEFAULT_NAMESPACE" to "external-space",
+            ),
+            defaultPath = yamlPath
+        )
+
+        assertEquals(MemoryMode.EXTERNAL, config.mode)
+        assertEquals("mem0-http", config.externalProvider.provider)
+        assertEquals("http", config.externalProvider.transport)
+        assertEquals("https://memory.example", config.externalProvider.baseUrl)
+        assertEquals("external-space", config.externalProvider.namespace)
+    }
 }

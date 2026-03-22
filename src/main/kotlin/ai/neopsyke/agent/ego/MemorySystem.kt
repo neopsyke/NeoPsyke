@@ -26,6 +26,7 @@ import ai.neopsyke.agent.memory.longterm.LogbookRecall
 import ai.neopsyke.agent.memory.longterm.LogbookSummarizer
 import ai.neopsyke.agent.memory.longterm.LongTermMemoryAdvisor
 import ai.neopsyke.agent.memory.longterm.LongTermMemoryAssessmentContext
+import ai.neopsyke.agent.memory.longterm.LongTermMemorySubject
 import ai.neopsyke.agent.memory.longterm.MemoryContext
 import ai.neopsyke.agent.memory.longterm.MemoryEventType
 import ai.neopsyke.agent.memory.longterm.MemoryKind
@@ -254,6 +255,7 @@ class MemorySystem(
         if (stepIndex == sessionState.lastConsolidationStep && sessionState.lastConsolidationStep > 0) return
 
         val effectiveTrigger = if (forcedByExplicitIntent) EXPLICIT_REMEMBER_INTENT_TRIGGER else trigger
+        val assessmentSubject = determineAssessmentSubject(recentDialogue)
         if (forcedByExplicitIntent) {
             sessionState.explicitIntentAssessmentTriggeredForInput = true
             instrumentation.emit(
@@ -277,7 +279,8 @@ class MemorySystem(
             longTermMemoryRecall = sessionState.latestLongTermRecall,
             metaGuidance = "",
             latestActionType = latestActionType,
-            latestActionOutcome = latestActionOutcome
+            latestActionOutcome = latestActionOutcome,
+            subject = assessmentSubject
         )
 
         val decision = try {
@@ -303,6 +306,7 @@ class MemorySystem(
                 data = mapOf(
                     "trigger" to effectiveTrigger,
                     "step_index" to stepIndex,
+                    "subject" to assessmentSubject.name.lowercase(Locale.ROOT),
                     "save" to decision.shouldSave,
                     "confidence" to decision.confidence,
                     "reason" to decision.reason,
@@ -321,6 +325,7 @@ class MemorySystem(
                 reasonDetail = "Advisor response parse fallback blocked persistence for this cycle (streak=$streak, disable_after=${config.memory.longTermMemoryParseFallbackDisableAfter}).",
                 decision = decision,
                 extra = mapOf(
+                    "subject" to assessmentSubject.name.lowercase(Locale.ROOT),
                     "parse_fallback_streak" to streak,
                     "parse_fallback_disable_after" to config.memory.longTermMemoryParseFallbackDisableAfter
                 )
@@ -368,6 +373,7 @@ class MemorySystem(
                 reasonDetail = "Decision confidence $confidence is below configured minimum $threshold.",
                 decision = decision,
                 extra = mapOf(
+                    "subject" to assessmentSubject.name.lowercase(Locale.ROOT),
                     "confidence" to decision.confidence,
                     "min_confidence" to config.memory.longTermMemoryMinConfidence
                 )
@@ -386,6 +392,7 @@ class MemorySystem(
                     "Summary matched recalled memory (mode=${recallEchoEvaluation.mode ?: "unknown"}, overlap=$overlapLabel, min_summary_chars=${config.memory.longTermMemoryRecallEchoMinSummaryChars}, min_token_length=${config.memory.longTermMemoryRecallEchoMinTokenLength}, min_token_count=${config.memory.longTermMemoryRecallEchoMinTokenCount}, overlap_threshold=$thresholdLabel).",
                 decision = decision,
                 extra = mapOf(
+                    "subject" to assessmentSubject.name.lowercase(Locale.ROOT),
                     "echo_mode" to recallEchoEvaluation.mode,
                     "echo_overlap_ratio" to recallEchoEvaluation.overlapRatio,
                     "echo_summary_token_count" to recallEchoEvaluation.summaryTokenCount,
@@ -414,14 +421,18 @@ class MemorySystem(
         val contextTags = listOfNotNull(
             "session:$activeSessionId",
             "interlocutor:${activeInterlocutor.id}",
-        )
+        ) + assessmentSubjectTags(assessmentSubject)
         val imprintStartedAt = System.nanoTime()
+        val imprintSource = when (assessmentSubject) {
+            LongTermMemorySubject.USER -> effectiveTrigger
+            LongTermMemorySubject.SELF -> SELF_MEMORY_ASSESSMENT_SOURCE
+        }
         val saved = try {
             hippocampus.imprint(
                 NarrativeImprint(
                     summary = decision.summary,
                     kind = MemoryKind.NARRATIVE,
-                    source = effectiveTrigger,
+                    source = imprintSource,
                     confidence = decision.confidence,
                     tags = contextTags + decision.tags,
                     context = MemoryContext(
@@ -442,6 +453,8 @@ class MemorySystem(
                     "trigger" to effectiveTrigger,
                     "saved" to saved,
                     "provider" to hippocampus.providerName,
+                    "subject" to assessmentSubject.name.lowercase(Locale.ROOT),
+                    "source" to imprintSource,
                     "summary_chars" to decision.summary.length,
                     "latency_ms" to imprintLatencyMs,
                     "confidence" to decision.confidence,
@@ -799,6 +812,23 @@ class MemorySystem(
                 action.rootInputId?.let { "root_input:$it" },
             ) + keywords
         ).distinct()
+
+    private fun determineAssessmentSubject(recentDialogue: List<DialogueTurn>): LongTermMemorySubject {
+        val latestSalientTurn = recentDialogue
+            .asReversed()
+            .firstOrNull { it.role != DialogueRole.ASSISTANT }
+        return if (latestSalientTurn?.role == DialogueRole.INTERNAL) {
+            LongTermMemorySubject.SELF
+        } else {
+            LongTermMemorySubject.USER
+        }
+    }
+
+    private fun assessmentSubjectTags(subject: LongTermMemorySubject): List<String> =
+        when (subject) {
+            LongTermMemorySubject.USER -> emptyList()
+            LongTermMemorySubject.SELF -> listOf("self_initiated", "subject:self")
+        }
 
     private fun buildReflectionMetadata(action: PendingAction): Map<String, Any?> =
         buildMap {
@@ -1399,6 +1429,7 @@ class MemorySystem(
         const val LESSON_DEFAULT_CONFIDENCE: Double = 0.72
         const val REFLECTION_DEFAULT_CONFIDENCE: Double = 0.6
         const val LEARNING_NEED_ID: String = "learn-something"
+        const val SELF_MEMORY_ASSESSMENT_SOURCE: String = "ego_self_memory_assessment"
         const val MAX_AMBIENT_USEFUL_UPDATES: Int = 6
         const val AMBIENT_EVENT_PREVIEW_CHARS: Int = 180
         val USEFUL_AMBIENT_EVENT_TYPES: Set<MemoryEventType> = setOf(

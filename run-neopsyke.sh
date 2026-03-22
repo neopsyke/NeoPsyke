@@ -182,6 +182,9 @@ Environment:
   NEOPSYKE_MEMORY_MODE         Memory mode: off, default, external
   NEOPSYKE_MEMORY_DEFAULT_COMMAND  Optional override for managed default provider command
   NEOPSYKE_MEMORY_DEFAULT_BASE_URL Optional override for managed default provider base URL
+  NEOPSYKE_MEMORY_EXTERNAL_PROVIDER Optional label for an external HTTP memory provider
+  NEOPSYKE_MEMORY_EXTERNAL_TRANSPORT External provider transport (v1 supports only http)
+  NEOPSYKE_MEMORY_EXTERNAL_BASE_URL Base URL for external HTTP memory provider
   MEMORY_DEFAULT_NAMESPACE  Namespace for long-term memory provider reads/writes (launcher default: neopsyke)
   NEOPSYKE_EVENT_LOG_FILE    Optional path override for instrumentation sidecar JSONL
   NEOPSYKE_METRICS_DB        SQLite path for persisted local metrics
