@@ -1,4 +1,4 @@
-package ai.neopsyke.agent.memory.episodic
+package ai.neopsyke.agent.memory.longterm
 
 import ai.neopsyke.agent.config.AgentConfig
 import ai.neopsyke.llm.ChatCompletion

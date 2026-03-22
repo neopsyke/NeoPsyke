@@ -2,59 +2,45 @@ package ai.neopsyke.agent.memory.longterm
 
 import ai.neopsyke.agent.model.DialogueTurn
 
-data class MemoryRecallQuery(
-    val cue: String,
-    val recentDialogue: List<DialogueTurn> = emptyList(),
-    val shortTermContextSummary: String = "",
-    val maxItems: Int = 4,
-    val maxChars: Int = 1200,
-)
-
-data class MemoryRecall(
-    val provider: String,
-    val text: String,
-    val hitCount: Int = 0,
-    val truncated: Boolean = false,
-)
-
-data class MemoryImprint(
-    val summary: String,
-    val source: String = "ego_long_term_memory_assessment",
-    val confidence: Double = 0.5,
-    val tags: List<String> = emptyList(),
-)
-
 interface Hippocampus : AutoCloseable {
     val providerName: String
+    val capabilities: Set<MemoryCapability>
     val enabled: Boolean
         get() = true
 
-    fun recall(query: MemoryRecallQuery): MemoryRecall
+    fun health(): MemoryHealth = MemoryHealth(provider = providerName, available = enabled)
 
-    fun imprint(imprint: MemoryImprint): Boolean = false
+    fun recall(request: RecallRequest): RecallResult
 
-    fun purgeTaggedObservations(tagMarkers: List<String>): Int = 0
-
-    /**
-     * Deletes **all** observations from the memory backend, regardless of tags.
-     * Returns the total number of observations removed, or 0 if the operation
-     * is not supported or the backend is empty.
-     */
-    fun clearAll(): Int = 0
+    fun imprint(request: ImprintRequest): ImprintResult = ImprintResult(
+        provider = providerName,
+        accepted = false,
+        storedCount = 0,
+        detail = "unsupported"
+    )
 
     /**
-     * Returns server-side metrics from the memory backend, or null if unsupported.
-     * Keys follow the structure emitted by [ai.neopsyke.mcp.memory.metrics.MemoryServerMetrics.snapshot].
+     * Reserved for future bounded background integration work:
+     * summarization, lesson derivation, dedupe consolidation, fact correction,
+     * relation extraction, and similar dream-like reorganization.
+     *
+     * TODO: wire this into a bounded scheduler or Id-driven internal need.
      */
-    fun fetchServerMetrics(): Map<String, Any>? = null
+    fun consolidate(request: ConsolidationRequest): ConsolidationResult =
+        ConsolidationResult.unsupported(providerName)
 
-    fun imprint(turn: DialogueTurn): Boolean {
+    fun imprint(turn: DialogueTurn): ImprintResult {
         val normalized = turn.content.trim()
         if (normalized.isBlank()) {
-            return false
+            return ImprintResult(
+                provider = providerName,
+                accepted = false,
+                storedCount = 0,
+                detail = "blank_turn"
+            )
         }
         return imprint(
-            MemoryImprint(
+            NarrativeImprint(
                 summary = normalized,
                 source = "dialogue_turn_${turn.role.name.lowercase()}"
             )
@@ -64,15 +50,37 @@ interface Hippocampus : AutoCloseable {
     override fun close() {}
 }
 
-object NoopHippocampus : Hippocampus {
+interface HippocampusAdmin {
+    val adminCapabilities: Set<MemoryAdminCapability>
+
+    fun stats(): MemoryStatsResult = MemoryStatsResult(stats = emptyMap())
+
+    fun forget(request: ForgetRequest): ForgetResult = ForgetResult(
+        deletedCount = 0,
+        detail = "unsupported"
+    )
+
+    fun reset(request: ResetRequest): ResetResult = ResetResult(
+        deletedCount = 0,
+        detail = "unsupported"
+    )
+}
+
+object NoopHippocampus : Hippocampus, HippocampusAdmin {
     override val providerName: String = "none"
+    override val capabilities: Set<MemoryCapability> = emptySet()
+    override val adminCapabilities: Set<MemoryAdminCapability> = emptySet()
     override val enabled: Boolean = false
 
-    override fun recall(query: MemoryRecallQuery): MemoryRecall =
-        MemoryRecall(provider = providerName, text = "", hitCount = 0, truncated = false)
+    override fun health(): MemoryHealth =
+        MemoryHealth(provider = providerName, available = false, detail = "disabled")
 
-    override fun imprint(imprint: MemoryImprint): Boolean = false
-
-    override fun purgeTaggedObservations(tagMarkers: List<String>): Int = 0
-    override fun clearAll(): Int = 0
+    override fun recall(request: RecallRequest): RecallResult =
+        RecallResult(
+            provider = providerName,
+            items = emptyList(),
+            renderedText = "",
+            hitCount = 0,
+            truncated = false
+        )
 }

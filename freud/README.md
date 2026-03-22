@@ -178,6 +178,7 @@ Defaults:
 - `--clear-memory-all` is applied automatically
 - use `--preserve-memory` only when a sequence intentionally depends on prior isolated Freud memory
 - `--expected` uses normalized exact matching, not substring containment
+- BBH smoke lanes additionally disable long-term MCP memory and episodic logbook recall by default; single-input `live-eval.sh` keeps isolated memory enabled unless you override runtime env vars yourself
 
 ### Exit Codes
 - `0`: answer delivered and accepted
@@ -203,11 +204,17 @@ Content:
 Purpose:
 - check whether NeoPsyke structure still works when planner/meta-reasoner are weaker
 
+Notes:
+- BBH smoke runs disable long-term MCP memory and episodic logbook recall by default so this lane measures reasoning rather than memory effects
+
 ### Production Live Lane
 `freud/config/live-prod-acceptance.env`
 
 Purpose:
 - validate the actual shipped routing
+
+Notes:
+- BBH smoke runs disable long-term MCP memory and episodic logbook recall by default so this lane stays comparable to the weak lane on reasoning-only signal
 
 ### BBH Smoke Runner
 `freud/scripts/run-bbh-smoke.sh`
@@ -215,6 +222,11 @@ Purpose:
 Purpose:
 - run a small frozen reasoning slice through live providers
 - track exact-match score, schema downgrades, timeouts, and progress
+
+Defaults:
+- `FREUD_BBH_MCP_MEMORY_ENABLED=false`
+- `FREUD_BBH_LOGBOOK_ENABLED=false`
+- override those only for explicit memory-aware experiments
 
 ## Configuration
 `feature-loop.sh` reads config from:
@@ -233,6 +245,8 @@ Important overrides:
 - `FREUD_BBH_MIN_PASS_RATE_PERCENT`
 - `FREUD_BBH_MAX_TIMEOUTS`
 - `FREUD_BBH_PRESERVE_MEMORY`
+- `FREUD_BBH_MCP_MEMORY_ENABLED`
+- `FREUD_BBH_LOGBOOK_ENABLED`
 - `FREUD_RUN_ROOT`
 - `FREUD_GRADLE_USER_HOME`
 

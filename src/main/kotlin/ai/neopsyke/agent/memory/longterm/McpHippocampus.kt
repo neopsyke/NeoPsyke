@@ -19,8 +19,17 @@ class McpHippocampus(
     private val callTimeoutMs: Long,
     private val defaultMaxItems: Int = 4,
     private val defaultMaxChars: Int = 1200,
-) : Hippocampus {
+) : Hippocampus, HippocampusAdmin {
     override val providerName: String = "mcp_memory"
+    override val capabilities: Set<MemoryCapability> = setOf(
+        MemoryCapability.SEMANTIC_RECALL,
+        MemoryCapability.NARRATIVE_IMPRINT,
+    )
+    override val adminCapabilities: Set<MemoryAdminCapability> = setOf(
+        MemoryAdminCapability.STATS,
+        MemoryAdminCapability.FORGET,
+        MemoryAdminCapability.RESET,
+    )
 
     private val clientHolder = LazyMcpClientHolder(command, serverLabel = "memory")
 
@@ -29,22 +38,22 @@ class McpHippocampus(
     @Volatile
     private var imprintToolName: String? = null
 
-    override fun recall(query: MemoryRecallQuery): MemoryRecall {
-        val cue = query.cue.trim()
+    override fun recall(request: RecallRequest): RecallResult {
+        val cue = request.cue.trim()
         if (cue.isEmpty()) {
-            return MemoryRecall(provider = providerName, text = "")
+            return RecallResult(provider = providerName, items = emptyList(), renderedText = "")
         }
 
         val toolName = resolveSearchToolName()
             ?: throw IOException("MCP memory server does not expose a search-like tool.")
 
-        val maxItems = query.maxItems.coerceIn(1, max(1, defaultMaxItems))
-        val maxChars = query.maxChars.coerceIn(256, max(256, defaultMaxChars))
+        val maxItems = request.maxItems.coerceIn(1, max(1, defaultMaxItems))
+        val maxChars = request.maxChars.coerceIn(256, max(256, defaultMaxChars))
         val result = callWithFallbackArguments(
             toolName = toolName,
             argumentCandidates = buildArgumentCandidates(
                 toolName = toolName,
-                query = query.copy(cue = cue),
+                request = request.copy(cue = cue),
                 maxItems = maxItems
             )
         )
@@ -56,9 +65,21 @@ class McpHippocampus(
         }
 
         val normalized = normalizeResultText(result.content, maxChars, cue)
-        return MemoryRecall(
+        return RecallResult(
             provider = providerName,
-            text = normalized.text,
+            items = normalized.text
+                .takeIf { it.isNotBlank() }
+                ?.let {
+                    listOf(
+                        MemoryItem(
+                            kind = MemoryKind.NARRATIVE,
+                            summary = normalized.text,
+                            content = normalized.text,
+                        )
+                    )
+                }
+                .orEmpty(),
+            renderedText = normalized.text,
             hitCount = normalized.hitCount,
             truncated = normalized.truncated
         )
@@ -68,44 +89,65 @@ class McpHippocampus(
         clientHolder.close()
     }
 
-    @Suppress("UNCHECKED_CAST")
-    override fun fetchServerMetrics(): Map<String, Any>? {
+    override fun health(): MemoryHealth {
         return try {
             val tools = runBlocking { clientHolder.listTools(callTimeoutMs) }
-            if (METRICS_TOOL_NAME !in tools) return null
-            val result = runBlocking { clientHolder.callTool(
-                toolName = METRICS_TOOL_NAME,
-                arguments = emptyMap(),
-                timeoutMs = callTimeoutMs
-            ) }
-            if (result.isError) return null
-            mapper.readValue(result.content, Map::class.java) as? Map<String, Any>
+            MemoryHealth(
+                provider = providerName,
+                available = true,
+                detail = "tools=${tools.sorted().joinToString(",")}"
+            )
         } catch (ex: Exception) {
-            logger.debug(ex) { "Failed to fetch server-side memory metrics." }
-            null
+            MemoryHealth(
+                provider = providerName,
+                available = false,
+                detail = ex.message ?: "health_check_failed"
+            )
         }
     }
 
-    override fun purgeTaggedObservations(tagMarkers: List<String>): Int {
-        val normalizedMarkers = tagMarkers
+    override fun stats(): MemoryStatsResult {
+        return try {
+            val tools = runBlocking { clientHolder.listTools(callTimeoutMs) }
+            if (METRICS_TOOL_NAME !in tools) return MemoryStatsResult()
+            val result = runBlocking {
+                clientHolder.callTool(
+                    toolName = METRICS_TOOL_NAME,
+                    arguments = emptyMap(),
+                    timeoutMs = callTimeoutMs
+                )
+            }
+            if (result.isError) return MemoryStatsResult()
+            @Suppress("UNCHECKED_CAST")
+            MemoryStatsResult(
+                stats = mapper.readValue(result.content, Map::class.java) as? Map<String, Any?> ?: emptyMap()
+            )
+        } catch (ex: Exception) {
+            logger.debug(ex) { "Failed to fetch server-side memory metrics." }
+            MemoryStatsResult()
+        }
+    }
+
+    override fun forget(request: ForgetRequest): ForgetResult {
+        val normalizedMarkers = request.tagMarkers
             .map { it.trim() }
             .filter { it.isNotBlank() }
         if (normalizedMarkers.isEmpty()) {
-            return 0
+            return ForgetResult(deletedCount = 0)
         }
 
         val toolNames = try {
             runBlocking { clientHolder.listTools(callTimeoutMs) }
         } catch (ex: Exception) {
             logger.warn(ex) { "MCP memory purge failed while listing tools." }
-            return 0
+            return ForgetResult(deletedCount = 0, detail = "tool_listing_failed")
         }
 
         if ("read_graph" !in toolNames || "delete_observations" !in toolNames) {
             logger.warn {
                 "MCP memory purge skipped; required tools missing. has_read_graph=${"read_graph" in toolNames} has_delete_observations=${"delete_observations" in toolNames}"
             }
-            return 0
+            return ForgetResult(deletedCount = 0, detail = "required_tools_missing")
         }
 
         val readResult = try {
@@ -115,19 +157,19 @@ class McpHippocampus(
             )
         } catch (ex: Exception) {
             logger.warn(ex) { "MCP memory purge failed while reading graph." }
-            return 0
+            return ForgetResult(deletedCount = 0, detail = "graph_read_failed")
         }
 
         if (readResult.isError) {
             logger.warn {
                 "MCP memory purge read_graph returned error: ${TextSecurity.preview(readResult.content, 220)}"
             }
-            return 0
+            return ForgetResult(deletedCount = 0, detail = "graph_read_error")
         }
 
         val deletions = buildObservationDeletions(readResult.content, normalizedMarkers)
         if (deletions.isEmpty()) {
-            return 0
+            return ForgetResult(deletedCount = 0)
         }
 
         val deleteResult = try {
@@ -139,35 +181,40 @@ class McpHippocampus(
             )
         } catch (ex: Exception) {
             logger.warn(ex) { "MCP memory purge failed while deleting observations." }
-            return 0
+            return ForgetResult(deletedCount = 0, detail = "delete_failed")
         }
 
         if (deleteResult.isError) {
             logger.warn {
                 "MCP memory purge delete_observations returned error: ${TextSecurity.preview(deleteResult.content, 220)}"
             }
-            return 0
+            return ForgetResult(deletedCount = 0, detail = "delete_error")
         }
 
-        return deletions.sumOf { deletion ->
+        return ForgetResult(
+            deletedCount = deletions.sumOf { deletion ->
             @Suppress("UNCHECKED_CAST")
             (deletion["observations"] as? List<String>)?.size ?: 0
-        }
+            }
+        )
     }
 
-    override fun clearAll(): Int {
+    override fun reset(request: ResetRequest): ResetResult {
+        if (!request.clearAll) {
+            return ResetResult(deletedCount = 0, detail = "clear_all_false")
+        }
         val toolNames = try {
             runBlocking { clientHolder.listTools(callTimeoutMs) }
         } catch (ex: Exception) {
             logger.warn(ex) { "MCP memory clearAll failed while listing tools." }
-            return 0
+            return ResetResult(deletedCount = 0, detail = "tool_listing_failed")
         }
 
         if ("read_graph" !in toolNames || "delete_observations" !in toolNames) {
             logger.warn {
                 "MCP memory clearAll skipped; required tools missing. has_read_graph=${"read_graph" in toolNames} has_delete_observations=${"delete_observations" in toolNames}"
             }
-            return 0
+            return ResetResult(deletedCount = 0, detail = "required_tools_missing")
         }
 
         val readResult = try {
@@ -177,19 +224,19 @@ class McpHippocampus(
             )
         } catch (ex: Exception) {
             logger.warn(ex) { "MCP memory clearAll failed while reading graph." }
-            return 0
+            return ResetResult(deletedCount = 0, detail = "graph_read_failed")
         }
 
         if (readResult.isError) {
             logger.warn {
                 "MCP memory clearAll read_graph returned error: ${TextSecurity.preview(readResult.content, 220)}"
             }
-            return 0
+            return ResetResult(deletedCount = 0, detail = "graph_read_error")
         }
 
         val deletions = buildAllObservationDeletions(readResult.content)
         if (deletions.isEmpty()) {
-            return 0
+            return ResetResult(deletedCount = 0)
         }
 
         val deleteResult = try {
@@ -201,62 +248,76 @@ class McpHippocampus(
             )
         } catch (ex: Exception) {
             logger.warn(ex) { "MCP memory clearAll failed while deleting observations." }
-            return 0
+            return ResetResult(deletedCount = 0, detail = "delete_failed")
         }
 
         if (deleteResult.isError) {
             logger.warn {
                 "MCP memory clearAll delete_observations returned error: ${TextSecurity.preview(deleteResult.content, 220)}"
             }
-            return 0
+            return ResetResult(deletedCount = 0, detail = "delete_error")
         }
 
-        return deletions.sumOf { deletion ->
+        return ResetResult(
+            deletedCount = deletions.sumOf { deletion ->
             @Suppress("UNCHECKED_CAST")
             (deletion["observations"] as? List<String>)?.size ?: 0
-        }
+            }
+        )
     }
 
-    override fun imprint(imprint: MemoryImprint): Boolean {
-        val summary = TextSecurity.clamp(imprint.summary.trim(), 600)
+    override fun imprint(request: ImprintRequest): ImprintResult {
+        val narrative = when (request) {
+            is NarrativeImprint -> request
+            else -> {
+                return ImprintResult(
+                    provider = providerName,
+                    accepted = false,
+                    storedCount = 0,
+                    detail = "unsupported_imprint_variant"
+                )
+            }
+        }
+        val summary = TextSecurity.clamp(narrative.summary.trim(), 600)
         if (summary.isBlank()) {
-            return false
+            return ImprintResult(provider = providerName, accepted = false, storedCount = 0, detail = "blank_summary")
         }
 
         val toolNames = try {
             runBlocking { clientHolder.listTools(callTimeoutMs) }
         } catch (ex: Exception) {
             logger.warn(ex) { "MCP memory imprint failed while listing tools." }
-            return false
+            return ImprintResult(provider = providerName, accepted = false, storedCount = 0, detail = "tool_listing_failed")
         }
 
         if ("add_observations" in toolNames) {
-            val graphSaved = imprintViaGraphObservations(toolNames, summary, imprint)
+            val graphSaved = imprintViaGraphObservations(toolNames, summary, narrative)
             if (graphSaved) {
-                return true
+                return ImprintResult(provider = providerName, accepted = true, storedCount = 1)
             }
             logger.warn {
                 "MCP graph memory imprint failed via add_observations; falling back to generic write tools."
             }
         }
 
-        val toolName = resolveImprintToolName(toolNames) ?: return false
+        val toolName = resolveImprintToolName(toolNames)
+            ?: return ImprintResult(provider = providerName, accepted = false, storedCount = 0, detail = "no_imprint_tool")
         return try {
             val result = callWithFallbackArguments(
                 toolName = toolName,
-                argumentCandidates = buildImprintArgumentCandidates(toolName, summary, imprint)
+                argumentCandidates = buildImprintArgumentCandidates(toolName, summary, narrative)
             )
             if (result.isError) {
                 logger.warn {
                     "MCP memory imprint tool=$toolName returned error: ${TextSecurity.preview(result.content, 220)}"
                 }
-                false
+                ImprintResult(provider = providerName, accepted = false, storedCount = 0, detail = "tool_error")
             } else {
-                true
+                ImprintResult(provider = providerName, accepted = true, storedCount = 1)
             }
         } catch (ex: Exception) {
             logger.warn(ex) { "MCP memory imprint call failed for tool=$toolName." }
-            false
+            ImprintResult(provider = providerName, accepted = false, storedCount = 0, detail = "call_failed")
         }
     }
 
@@ -291,21 +352,21 @@ class McpHippocampus(
 
     private fun buildArgumentCandidates(
         toolName: String,
-        query: MemoryRecallQuery,
+        request: RecallRequest,
         maxItems: Int,
     ): List<Map<String, Any>> {
-        val context = buildContext(query)
+        val context = buildContext(request)
         val baseCandidates = when (toolName) {
             "search_nodes" -> listOf(
-                mapOf("query" to query.cue),
-                mapOf("query" to query.cue, "limit" to maxItems)
+                mapOf("query" to request.cue),
+                mapOf("query" to request.cue, "limit" to maxItems)
             )
 
             else -> listOf(
-                mapOf("query" to query.cue, "limit" to maxItems),
-                mapOf("query" to query.cue),
-                mapOf("q" to query.cue, "top_k" to maxItems),
-                mapOf("text" to query.cue)
+                mapOf("query" to request.cue, "limit" to maxItems),
+                mapOf("query" to request.cue),
+                mapOf("q" to request.cue, "top_k" to maxItems),
+                mapOf("text" to request.cue)
             )
         }
 
@@ -321,7 +382,7 @@ class McpHippocampus(
     internal fun buildImprintArgumentCandidates(
         toolName: String,
         summary: String,
-        imprint: MemoryImprint,
+        imprint: NarrativeImprint,
     ): List<Map<String, Any>> {
         val tagsText = if (imprint.tags.isEmpty()) "" else " tags=${imprint.tags.joinToString(",")}"
         val enriched = "$summary$tagsText"
@@ -397,7 +458,7 @@ class McpHippocampus(
     private fun imprintViaGraphObservations(
         toolNames: Set<String>,
         summary: String,
-        imprint: MemoryImprint,
+        imprint: NarrativeImprint,
     ): Boolean {
         val entityName = "psyke_long_term_memory"
         if ("create_entities" in toolNames) {
@@ -506,13 +567,13 @@ class McpHippocampus(
         )
     }
 
-    private fun buildContext(query: MemoryRecallQuery): String {
-        val dialogue = query.recentDialogue
+    private fun buildContext(request: RecallRequest): String {
+        val dialogue = request.recentDialogue
             .takeLast(6)
             .joinToString(separator = "\n") { turn ->
                 "${turn.role.name.lowercase()}: ${TextSecurity.preview(turn.content, 120)}"
             }
-        val summary = query.shortTermContextSummary
+        val summary = request.shortTermContextSummary
             .lineSequence()
             .take(10)
             .joinToString(separator = "\n")

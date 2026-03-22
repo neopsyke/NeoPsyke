@@ -1,13 +1,13 @@
-package ai.neopsyke.agent.memory.episodic
+package ai.neopsyke.agent.memory.longterm
 
 internal object LogbookNarrative {
-    fun normalizeSummary(eventType: EpisodicEventType, rawSummary: String): String {
+    fun normalizeSummary(eventType: MemoryEventType, rawSummary: String): String {
         val summary = rawSummary.trim()
         if (summary.isBlank()) return ""
         return when (eventType) {
-            EpisodicEventType.INPUT_RECEIVED -> normalizeUserInput(summary)
-            EpisodicEventType.MEMORY_IMPRINT -> normalizeMemoryImprint(summary)
-            EpisodicEventType.SELF_INITIATED -> normalizeSelfInitiated(summary)
+            MemoryEventType.INPUT_RECEIVED -> normalizeUserInput(summary)
+            MemoryEventType.MEMORY_IMPRINT -> normalizeMemoryImprint(summary)
+            MemoryEventType.SELF_INITIATED -> normalizeSelfInitiated(summary)
             else -> summary
         }
     }

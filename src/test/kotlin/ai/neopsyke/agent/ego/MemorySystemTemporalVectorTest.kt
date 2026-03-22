@@ -12,6 +12,7 @@ import ai.neopsyke.agent.memory.episodic.EpisodicEventType
 import ai.neopsyke.agent.memory.episodic.LogbookEntry
 import ai.neopsyke.agent.memory.episodic.SqliteLogbook
 import ai.neopsyke.agent.memory.longterm.Hippocampus
+import ai.neopsyke.agent.memory.longterm.MemoryCapability
 import ai.neopsyke.agent.memory.longterm.MemoryRecall
 import ai.neopsyke.agent.memory.longterm.MemoryRecallQuery
 import ai.neopsyke.agent.memory.longterm.NoopHippocampus
@@ -146,9 +147,10 @@ class MemorySystemTemporalVectorTest {
             var capturedCue: String? = null
             val recordingHippocampus = object : Hippocampus {
                 override val providerName: String = "recording"
+                override val capabilities: Set<MemoryCapability> = setOf(MemoryCapability.SEMANTIC_RECALL)
                 override val enabled: Boolean = true
-                override fun recall(query: MemoryRecallQuery): MemoryRecall {
-                    capturedCue = query.cue
+                override fun recall(request: MemoryRecallQuery): MemoryRecall {
+                    capturedCue = request.cue
                     return MemoryRecall(provider = providerName, text = "", hitCount = 0)
                 }
             }
@@ -175,9 +177,10 @@ class MemorySystemTemporalVectorTest {
         var capturedCue: String? = null
         val recordingHippocampus = object : Hippocampus {
             override val providerName: String = "recording"
+            override val capabilities: Set<MemoryCapability> = setOf(MemoryCapability.SEMANTIC_RECALL)
             override val enabled: Boolean = true
-            override fun recall(query: MemoryRecallQuery): MemoryRecall {
-                capturedCue = query.cue
+            override fun recall(request: MemoryRecallQuery): MemoryRecall {
+                capturedCue = request.cue
                 return MemoryRecall(provider = providerName, text = "", hitCount = 0)
             }
         }
@@ -198,9 +201,10 @@ class MemorySystemTemporalVectorTest {
         var capturedCue: String? = null
         val recordingHippocampus = object : Hippocampus {
             override val providerName: String = "recording"
+            override val capabilities: Set<MemoryCapability> = setOf(MemoryCapability.SEMANTIC_RECALL)
             override val enabled: Boolean = true
-            override fun recall(query: MemoryRecallQuery): MemoryRecall {
-                capturedCue = query.cue
+            override fun recall(request: MemoryRecallQuery): MemoryRecall {
+                capturedCue = request.cue
                 return MemoryRecall(provider = providerName, text = "", hitCount = 0)
             }
         }
@@ -237,9 +241,10 @@ class MemorySystemTemporalVectorTest {
         var capturedCue: String? = null
         val recordingHippocampus = object : Hippocampus {
             override val providerName: String = "recording"
+            override val capabilities: Set<MemoryCapability> = setOf(MemoryCapability.SEMANTIC_RECALL)
             override val enabled: Boolean = true
-            override fun recall(query: MemoryRecallQuery): MemoryRecall {
-                capturedCue = query.cue
+            override fun recall(request: MemoryRecallQuery): MemoryRecall {
+                capturedCue = request.cue
                 return MemoryRecall(provider = providerName, text = "", hitCount = 0)
             }
         }

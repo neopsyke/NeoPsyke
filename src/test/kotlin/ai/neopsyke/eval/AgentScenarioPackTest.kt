@@ -46,6 +46,9 @@ import ai.neopsyke.agent.id.IdConfig
 import ai.neopsyke.agent.id.NeedConfig
 import ai.neopsyke.agent.id.ResponseCurveConfig
 import ai.neopsyke.agent.memory.longterm.Hippocampus
+import ai.neopsyke.agent.memory.longterm.ImprintRequest
+import ai.neopsyke.agent.memory.longterm.ImprintResult
+import ai.neopsyke.agent.memory.longterm.MemoryCapability
 import ai.neopsyke.agent.memory.longterm.MemoryImprint
 import ai.neopsyke.agent.memory.longterm.MemoryRecall
 import ai.neopsyke.agent.memory.longterm.MemoryRecallQuery
@@ -864,17 +867,23 @@ class AgentScenarioPackTest {
         private val recall: MemoryRecall,
     ) : Hippocampus {
         override val providerName: String = recall.provider
+        override val capabilities: Set<MemoryCapability> = setOf(
+            MemoryCapability.SEMANTIC_RECALL,
+            MemoryCapability.NARRATIVE_IMPRINT,
+        )
         val queries = mutableListOf<MemoryRecallQuery>()
         val imprints = mutableListOf<MemoryImprint>()
 
-        override fun recall(query: MemoryRecallQuery): MemoryRecall {
-            queries += query
+        override fun recall(request: MemoryRecallQuery): MemoryRecall {
+            queries += request
             return recall
         }
 
-        override fun imprint(imprint: MemoryImprint): Boolean {
-            imprints += imprint
-            return true
+        override fun imprint(request: ImprintRequest): ImprintResult {
+            val narrative = request as? MemoryImprint
+                ?: return ImprintResult(provider = providerName, accepted = false, detail = "unsupported")
+            imprints += narrative
+            return ImprintResult(provider = providerName, accepted = true, storedCount = 1)
         }
     }
 }

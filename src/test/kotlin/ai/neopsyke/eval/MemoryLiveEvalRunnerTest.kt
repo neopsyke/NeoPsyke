@@ -1,9 +1,12 @@
 package ai.neopsyke.eval
 
 import ai.neopsyke.agent.memory.longterm.Hippocampus
+import ai.neopsyke.agent.memory.longterm.ImprintRequest
 import ai.neopsyke.agent.memory.longterm.LongTermMemoryAdvisor
 import ai.neopsyke.agent.memory.longterm.LongTermMemoryAssessmentContext
 import ai.neopsyke.agent.memory.longterm.LongTermMemoryAssessmentDecision
+import ai.neopsyke.agent.memory.longterm.ImprintResult
+import ai.neopsyke.agent.memory.longterm.MemoryCapability
 import ai.neopsyke.agent.memory.longterm.MemoryImprint
 import ai.neopsyke.agent.memory.longterm.MemoryRecall
 import ai.neopsyke.agent.memory.longterm.MemoryRecallQuery
@@ -140,9 +143,19 @@ class MemoryLiveEvalRunnerTest {
         private val recallResult: MemoryRecall,
     ) : Hippocampus {
         override val providerName: String = "fake_memory"
+        override val capabilities: Set<MemoryCapability> = setOf(
+            MemoryCapability.SEMANTIC_RECALL,
+            MemoryCapability.NARRATIVE_IMPRINT,
+        )
 
-        override fun recall(query: MemoryRecallQuery): MemoryRecall = recallResult
+        override fun recall(request: MemoryRecallQuery): MemoryRecall = recallResult
 
-        override fun imprint(imprint: MemoryImprint): Boolean = imprintResult
+        override fun imprint(request: ImprintRequest): ImprintResult =
+            ImprintResult(
+                provider = providerName,
+                accepted = imprintResult,
+                storedCount = if (imprintResult) 1 else 0,
+                detail = if (imprintResult) "" else "imprint_failed"
+            )
     }
 }

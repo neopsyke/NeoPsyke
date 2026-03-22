@@ -8,11 +8,13 @@ import ai.neopsyke.agent.model.DeliberationState
 import ai.neopsyke.agent.model.DialogueRole
 import ai.neopsyke.agent.model.DialogueTurn
 import ai.neopsyke.agent.memory.longterm.Hippocampus
+import ai.neopsyke.agent.memory.longterm.HippocampusAdmin
 import ai.neopsyke.agent.memory.longterm.LongTermMemoryAdvisor
 import ai.neopsyke.agent.memory.longterm.LongTermMemoryAssessmentContext
 import ai.neopsyke.agent.memory.longterm.LongTermMemoryAssessmentDecision
-import ai.neopsyke.agent.memory.longterm.MemoryImprint
-import ai.neopsyke.agent.memory.longterm.MemoryRecallQuery
+import ai.neopsyke.agent.memory.longterm.NarrativeImprint
+import ai.neopsyke.agent.memory.longterm.RecallLimits
+import ai.neopsyke.agent.memory.longterm.RecallRequest
 import ai.neopsyke.agent.support.TextSecurity
 import ai.neopsyke.instrumentation.AgentEvent
 import ai.neopsyke.instrumentation.AgentInstrumentation
@@ -307,13 +309,13 @@ class MemoryLiveEvalRunner(
         val imprintStartedAt = System.nanoTime()
         val saved = try {
             hippocampus.imprint(
-                MemoryImprint(
+                NarrativeImprint(
                     summary = taggedSummary,
                     source = "memory_eval_live",
                     confidence = decision.confidence,
                     tags = task.tags + listOf("memory_eval_live", "memory_eval_live_ephemeral", task.id, options.sessionTag)
                 )
-            )
+            ).accepted
         } catch (ex: Exception) {
             imprintError = ex.message ?: ex::class.simpleName ?: "memory_eval_imprint_error"
             runtimeError = runtimeError ?: imprintError
@@ -342,14 +344,16 @@ class MemoryLiveEvalRunner(
         val recall = try {
             val cue = buildRecallCue(task, options.sessionTag)
             hippocampus.recall(
-                MemoryRecallQuery(
+                RecallRequest(
                     cue = cue,
                     recentDialogue = listOf(
                         DialogueTurn(DialogueRole.USER, task.recallCue)
                     ),
                     shortTermContextSummary = "",
-                    maxItems = 4,
-                    maxChars = 1_600
+                    limits = RecallLimits(
+                        maxItems = 4,
+                        maxChars = 1_600
+                    )
                 )
             )
         } catch (ex: Exception) {
@@ -722,7 +726,10 @@ class MemoryLiveEvalRunner(
 
     private fun purgeEvalMemories(phase: String): Int {
         return try {
-            hippocampus.purgeTaggedObservations(EVAL_MEMORY_TAG_MARKERS)
+            (hippocampus as? HippocampusAdmin)
+                ?.forget(ai.neopsyke.agent.memory.longterm.ForgetRequest(tagMarkers = EVAL_MEMORY_TAG_MARKERS.toSet()))
+                ?.deletedCount
+                ?: 0
         } catch (ex: Exception) {
             instrumentation.emit(
                 AgentEvent(

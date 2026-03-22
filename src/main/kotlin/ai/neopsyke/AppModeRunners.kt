@@ -5,10 +5,13 @@ import ai.neopsyke.agent.config.AgentConfig
 import ai.neopsyke.agent.ego.Ego
 import ai.neopsyke.agent.ego.EgoAssembler
 import ai.neopsyke.agent.ego.LlmEgoPlanner
-import ai.neopsyke.agent.memory.episodic.Logbook
-import ai.neopsyke.agent.memory.episodic.SqliteLogbook
 import ai.neopsyke.agent.ego.LlmScratchpadFinalizer
+import ai.neopsyke.agent.memory.longterm.Logbook
+import ai.neopsyke.agent.memory.longterm.SqliteLogbook
+import ai.neopsyke.agent.memory.longterm.DeterministicLogbookSummarizer
 import ai.neopsyke.agent.memory.longterm.Hippocampus
+import ai.neopsyke.agent.memory.longterm.HippocampusAdmin
+import ai.neopsyke.agent.memory.longterm.ForgetRequest
 import ai.neopsyke.agent.ego.LlmMetaReasoner
 import ai.neopsyke.agent.ego.NoopScratchpadFinalizer
 import ai.neopsyke.agent.memory.longterm.LlmLongTermMemoryAdvisor
@@ -20,6 +23,7 @@ import ai.neopsyke.agent.cortex.sensory.SensoryCortex
 import ai.neopsyke.agent.cortex.motor.ActionImplementationStatus
 import ai.neopsyke.agent.cortex.motor.MotorCortex
 import ai.neopsyke.agent.memory.longterm.NoopHippocampus
+import ai.neopsyke.agent.memory.longterm.ResetRequest
 import ai.neopsyke.agent.tools.mcp.NativeFetchTool
 import ai.neopsyke.agent.tools.mcp.SdkMcpTimeTool
 import ai.neopsyke.agent.superego.Superego
@@ -2087,11 +2091,11 @@ internal object AppModeRunners {
     private fun createLogbookSummarizer(
         config: AgentConfig,
         memoryClient: ai.neopsyke.llm.ChatModelClient,
-    ): ai.neopsyke.agent.memory.episodic.LogbookSummarizer {
+    ): ai.neopsyke.agent.memory.longterm.LogbookSummarizer {
         if (!config.logbook.useLlmSummarizer) {
-            return ai.neopsyke.agent.memory.episodic.DeterministicLogbookSummarizer(config.logbook)
+            return DeterministicLogbookSummarizer(config.logbook)
         }
-        return ai.neopsyke.agent.memory.episodic.LlmLogbookSummarizer(
+        return ai.neopsyke.agent.memory.longterm.LlmLogbookSummarizer(
             modelClient = memoryClient,
             config = config,
         )
@@ -2100,7 +2104,7 @@ internal object AppModeRunners {
     private fun executeLongTermMemoryClear(
         cliOptions: AppCliOptions,
         hippocampus: Hippocampus,
-        logbook: ai.neopsyke.agent.memory.episodic.Logbook?,
+        logbook: ai.neopsyke.agent.memory.longterm.Logbook?,
         instrumentation: ai.neopsyke.instrumentation.AgentInstrumentation,
     ) {
         val clearVector = cliOptions.clearMemoryAll || cliOptions.clearMemoryVector
@@ -2111,7 +2115,8 @@ internal object AppModeRunners {
             if (hippocampus.enabled) {
                 output.info("Clearing vector/hippocampus memory...")
                 try {
-                    val deleted = hippocampus.clearAll()
+                    val admin = hippocampus as? HippocampusAdmin
+                    val deleted = admin?.reset(ResetRequest(clearAll = true))?.deletedCount ?: 0
                     output.info("Vector memory cleared ($deleted observations removed).")
                     logger.info { "CLI --clear-memory: vector/hippocampus cleared, $deleted observations removed." }
                     instrumentation.emit(
@@ -2132,7 +2137,8 @@ internal object AppModeRunners {
             if (hippocampus.enabled) {
                 output.info("Clearing lessons from vector memory...")
                 try {
-                    val deleted = hippocampus.purgeTaggedObservations(listOf("kind:lesson"))
+                    val admin = hippocampus as? HippocampusAdmin
+                    val deleted = admin?.forget(ForgetRequest(tagMarkers = setOf("kind:lesson")))?.deletedCount ?: 0
                     output.info("Lessons cleared ($deleted observations removed).")
                     logger.info { "CLI --clear-memory: lessons cleared, $deleted observations removed." }
                     instrumentation.emit(

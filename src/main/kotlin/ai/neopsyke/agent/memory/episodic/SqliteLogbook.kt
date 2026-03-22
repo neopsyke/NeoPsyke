@@ -1,4 +1,4 @@
-package ai.neopsyke.agent.memory.episodic
+package ai.neopsyke.agent.memory.longterm
 
 import mu.KotlinLogging
 import ai.neopsyke.agent.config.LogbookConfig
@@ -189,8 +189,8 @@ class SqliteLogbook(
                                 LogbookEntry(
                                     id = rs.getLong("id"),
                                     ts = Instant.parse(rs.getString("ts")),
-                                    eventType = EpisodicEventType.fromDb(rs.getString("event_type"))
-                                        ?: EpisodicEventType.INPUT_RECEIVED,
+                                    eventType = MemoryEventType.fromDb(rs.getString("event_type"))
+                                        ?: MemoryEventType.INPUT_RECEIVED,
                                     summary = rs.getString("summary"),
                                     keywords = rs.getString("keywords")
                                         .split(" ")

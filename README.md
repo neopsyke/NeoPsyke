@@ -303,6 +303,7 @@ Freud reasoning lane notes:
 - `reasoning_eval_logic` now runs two deterministic passes: the existing logic core and a 45-case behavioral/perturbation logic pack.
 - `reasoning_eval_model` is reserved for manual live reasoning checks and currently runs a frozen 24-case BBH-style smoke slice.
 - The live reasoning lane always routes through `freud/scripts/live-eval.sh`, which invokes the lower-level `./run-neopsyke.sh --freud-live` path for each case.
+- The BBH smoke slice disables long-term MCP memory and episodic logbook recall by default so the lane measures reasoning instead of memory effects. Override with `FREUD_BBH_MCP_MEMORY_ENABLED=true` and/or `FREUD_BBH_LOGBOOK_ENABLED=true` only for explicit memory-aware experiments.
 - `FREUD_BBH_PRESERVE_MEMORY=true` is available if a future live reasoning sequence needs shared isolated memory across cases. The current BBH slice should keep the default isolated-per-case behavior.
 - The live lane configs intentionally do not hardcode local machine paths. They resolve repo-local YAML snapshots relative to the config directory so the committed setup stays portable across machines.
 - GitHub pull requests run only the fast non-live path: `freud/scripts/feature-loop.sh ci-pr`, plus Freud's own BATS and pytest suites. Live lanes remain manual-only.

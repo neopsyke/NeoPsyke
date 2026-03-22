@@ -34,9 +34,9 @@ flowchart LR
 
     E --> MC["MemorySystem"]
     MC --> MS["MemoryStore (Short-term)"]
-    MC --> H["Hippocampus (Long-term Recall/Imprint)"]
+    MC --> H["Hippocampus (Long-term facade: recall/imprint/health/consolidate stub)"]
     MC --> LTM["LlmLongTermMemoryAdvisor"]
-    MC --> LB["Logbook (Episodic, SQLite+FTS5)"]
+    MC --> LB["Logbook (Episodic backend, SQLite+FTS5, grouped under long-term domain)"]
     LB -.->|"event-type narrative normalization: User timeline vs agent first-person memory/reflection"| MC
     MC --> RL["Reflection Lessons (Recall + Imprint Filters)"]
     MC -.->|"temporal intent → episodic recall + vector cues"| LB

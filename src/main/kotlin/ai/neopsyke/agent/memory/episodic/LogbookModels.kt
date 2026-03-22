@@ -1,23 +1,28 @@
-package ai.neopsyke.agent.memory.episodic
+package ai.neopsyke.agent.memory.longterm
 
 import java.time.Instant
 
 /**
  * Types of events recorded in the episodic logbook.
  */
-enum class EpisodicEventType {
+enum class MemoryEventType {
     INPUT_RECEIVED,
     PLANNER_DECISION,
     ACTION_EXECUTED,
     ACTION_DENIED,
     CONTACT_DELIVERED,
     MEMORY_IMPRINT,
-    SELF_INITIATED;
+    SELF_INITIATED,
+    FACT_CORRECTED,
+    RELATION_INFERRED,
+    CONSOLIDATION_RUN,
+    GOAL_UPDATED,
+    PREFERENCE_REINFORCED;
 
     fun dbValue(): String = name.lowercase()
 
     companion object {
-        fun fromDb(value: String): EpisodicEventType? =
+        fun fromDb(value: String): MemoryEventType? =
             entries.firstOrNull { it.name.equals(value, ignoreCase = true) }
     }
 }
@@ -28,7 +33,7 @@ enum class EpisodicEventType {
 data class LogbookEntry(
     val id: Long = 0,
     val ts: Instant,
-    val eventType: EpisodicEventType,
+    val eventType: MemoryEventType,
     val summary: String,
     val keywords: List<String> = emptyList(),
     val actionType: String? = null,
@@ -45,7 +50,7 @@ data class LogbookQuery(
     val startTime: Instant? = null,
     val endTime: Instant? = null,
     val keywordSearch: String? = null,
-    val eventTypes: Set<EpisodicEventType>? = null,
+    val eventTypes: Set<MemoryEventType>? = null,
     val actionTypes: Set<String>? = null,
     val maxResults: Int = 20,
     val sessionId: String? = null,

@@ -31,7 +31,8 @@ It is intentionally high-level and should stay aligned with the code.
   - `LlmEgoPlanner`
   - `LlmMetaReasoner`
   - `LlmLongTermMemoryAdvisor`
-  - `Hippocampus` (MCP memory adapter or noop)
+  - `Hippocampus` (cognitive long-term memory facade: `recall`, typed `imprint`, `health`, future `consolidate`)
+    - operational/destructive controls are split behind `HippocampusAdmin`
   - `ScratchpadStore` (ephemeral per-request notebook/workspace)
   - `ScratchpadFinalizer` (noop or `LlmScratchpadFinalizer`)
   - `Id` (autonomous internal drive module; optional, loaded from `id-runtime.yaml`)
@@ -529,16 +530,20 @@ It is intentionally high-level and should stay aligned with the code.
 
 ## Episodic Memory (Logbook)
 - File: `src/main/kotlin/ai/neopsyke/agent/memory/episodic/SqliteLogbook.kt`
+- Domain/API grouping: episodic/logbook memory now sits under the long-term memory boundary conceptually, even though the SQLite logbook backend remains a separate store from vector/MCP memory.
 - SQLite + FTS5 append-only log of timestamped interaction summaries and keywords.
 - Storage: separate DB file (default `.neopsyke/logbook.db`), WAL mode, synchronized access.
 - Schema: `entries` table (id, ts, ts_epoch_ms, event_type, summary, keywords, action_type, run_id, metadata) with FTS5 virtual table `entries_fts` auto-synced via triggers.
 - Event types recorded: `INPUT_RECEIVED`, `PLANNER_DECISION`, `ACTION_EXECUTED`, `ACTION_DENIED`, `CONTACT_DELIVERED`, `MEMORY_IMPRINT`, `SELF_INITIATED`.
+- Event type vocabulary is broader than current wiring and already reserves future long-term memory events such as `FACT_CORRECTED`, `RELATION_INFERRED`, `CONSOLIDATION_RUN`, `GOAL_UPDATED`, and `PREFERENCE_REINFORCED`.
 - Integration through `MemorySystem`:
   - `remember()` auto-journals `INPUT_RECEIVED` for user turns.
   - `maybeAssessLongTermMemory()` auto-journals `MEMORY_IMPRINT` on successful saves.
   - `journal()` public method called from Ego for planner decisions, action outcomes, denials, and answers.
   - `recordReflection()` owns `REFLECT` persistence, adding first-person normalization plus session/interlocutor/run and Id-origin provenance before writing logbook and long-term memory.
   - `REFLECT` only reports `DURABLE_MEMORY_SAVED` on durable long-term memory persistence success; journal-only fallback does not satisfy the originating learn need.
+  - long-term semantic recall now consumes structured `RecallResult` data while keeping prompt-ready rendered text for planner wiring.
+  - long-term persistence now uses typed `ImprintRequest` variants; current Ego wiring still emits narrative imprints while episodic writes remain native logbook entries.
 
 ## Id Need Satisfaction
 - Id-originated roots now resolve against structured action effects instead of the old "some action executed" heuristic.

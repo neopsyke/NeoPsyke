@@ -1,4 +1,4 @@
-package ai.neopsyke.agent.memory.episodic
+package ai.neopsyke.agent.memory.longterm
 
 import com.fasterxml.jackson.databind.DeserializationFeature
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
