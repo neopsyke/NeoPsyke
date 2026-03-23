@@ -62,6 +62,11 @@ class AgentRuntimeSettingsLoaderTest {
         assertEquals(false, settings.agentConfig.nativeIntegrations.googleWorkspace.enabled)
         assertEquals(".neopsyke/auth/google", settings.agentConfig.nativeIntegrations.googleWorkspace.tokenStoreDir)
         assertEquals(
+            "GOOGLE_OAUTH_TOKEN_ENCRYPTION_SECRET",
+            settings.agentConfig.nativeIntegrations.googleWorkspace.oauthTokenEncryptionSecretHandle,
+        )
+        assertEquals(600L, settings.agentConfig.nativeIntegrations.googleWorkspace.oauthStateTtlSeconds)
+        assertEquals(
             setOf(
                 "https://www.googleapis.com/auth/gmail.readonly",
                 "https://www.googleapis.com/auth/calendar.readonly",
@@ -192,11 +197,13 @@ class AgentRuntimeSettingsLoaderTest {
                   oauth_client_id_handle: GOOGLE_CLIENT_ID_HANDLE
                   oauth_client_secret_handle: GOOGLE_CLIENT_SECRET_HANDLE
                   oauth_state_signing_secret_handle: GOOGLE_STATE_HANDLE
+                  oauth_token_encryption_secret_handle: GOOGLE_TOKEN_ENCRYPTION_HANDLE
                   callback_path: /oauth/google/callback
                   authorization_base_url: https://accounts.example.test/auth
                   token_base_url: https://accounts.example.test/token
                   require_pkce: false
                   require_refresh_token: false
+                  oauth_state_ttl_seconds: 120
                   scopes:
                     - https://www.googleapis.com/auth/gmail.readonly
               runtime:
@@ -305,11 +312,16 @@ class AgentRuntimeSettingsLoaderTest {
         assertEquals("GOOGLE_CLIENT_ID_HANDLE", settings.agentConfig.nativeIntegrations.googleWorkspace.oauthClientIdHandle)
         assertEquals("GOOGLE_CLIENT_SECRET_HANDLE", settings.agentConfig.nativeIntegrations.googleWorkspace.oauthClientSecretHandle)
         assertEquals("GOOGLE_STATE_HANDLE", settings.agentConfig.nativeIntegrations.googleWorkspace.oauthStateSigningSecretHandle)
+        assertEquals(
+            "GOOGLE_TOKEN_ENCRYPTION_HANDLE",
+            settings.agentConfig.nativeIntegrations.googleWorkspace.oauthTokenEncryptionSecretHandle,
+        )
         assertEquals("/oauth/google/callback", settings.agentConfig.nativeIntegrations.googleWorkspace.callbackPath)
         assertEquals("https://accounts.example.test/auth", settings.agentConfig.nativeIntegrations.googleWorkspace.authorizationBaseUrl)
         assertEquals("https://accounts.example.test/token", settings.agentConfig.nativeIntegrations.googleWorkspace.tokenBaseUrl)
         assertEquals(false, settings.agentConfig.nativeIntegrations.googleWorkspace.requirePkce)
         assertEquals(false, settings.agentConfig.nativeIntegrations.googleWorkspace.requireRefreshToken)
+        assertEquals(120L, settings.agentConfig.nativeIntegrations.googleWorkspace.oauthStateTtlSeconds)
         assertEquals(
             setOf("https://www.googleapis.com/auth/gmail.readonly"),
             settings.agentConfig.nativeIntegrations.googleWorkspace.scopes,
@@ -377,6 +389,8 @@ class AgentRuntimeSettingsLoaderTest {
                 "NEOPSYKE_GOOGLE_WORKSPACE_ENABLED" to "true",
                 "NEOPSYKE_GOOGLE_TOKEN_STORE_DIR" to "/env/google-auth",
                 "NEOPSYKE_GOOGLE_ALLOWED_OWNER_EMAIL" to "env-owner@example.com",
+                "NEOPSYKE_GOOGLE_OAUTH_TOKEN_ENCRYPTION_SECRET_HANDLE" to "ENV_GOOGLE_TOKEN_ENCRYPTION",
+                "NEOPSYKE_GOOGLE_OAUTH_STATE_TTL_SECONDS" to "180",
                 "NEOPSYKE_GOOGLE_SCOPES" to "https://www.googleapis.com/auth/gmail.readonly, https://www.googleapis.com/auth/calendar.readonly",
                 "NEOPSYKE_DASHBOARD_ENABLED" to "true",
                 "NEOPSYKE_DASHBOARD_PORT" to "9900",
@@ -411,6 +425,11 @@ class AgentRuntimeSettingsLoaderTest {
         assertEquals(true, settings.agentConfig.nativeIntegrations.googleWorkspace.enabled)
         assertEquals("/env/google-auth", settings.agentConfig.nativeIntegrations.googleWorkspace.tokenStoreDir)
         assertEquals("env-owner@example.com", settings.agentConfig.nativeIntegrations.googleWorkspace.allowedOwnerEmail)
+        assertEquals(
+            "ENV_GOOGLE_TOKEN_ENCRYPTION",
+            settings.agentConfig.nativeIntegrations.googleWorkspace.oauthTokenEncryptionSecretHandle,
+        )
+        assertEquals(180L, settings.agentConfig.nativeIntegrations.googleWorkspace.oauthStateTtlSeconds)
         assertEquals(
             setOf(
                 "https://www.googleapis.com/auth/gmail.readonly",

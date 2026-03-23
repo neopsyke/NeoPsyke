@@ -70,6 +70,7 @@ flowchart LR
     M --> EM["Email Send (Microsoft Graph)"]
     M --> COG["ConversationOutputGateway"]
     COG --> TGA["Telegram Bot API"]
+    TWH -.-> GAUTH["Native OAuth Auth Primitives (signed state + encrypted pending store)"]
     WS --> PID["PromptInjectionDefense"]
     MT --> PID
     MF --> PID
@@ -91,6 +92,7 @@ flowchart LR
     DS --> ACAPI["Action Control API (`/api/action-control/*`)"]
     Note over OX,ACAPI: Action control UI defaults to SIGNAL activity items and can opt into BACKGROUND or TRACE ledger visibility
     Note over TG,TWH: Telegram ingress is owner-only: POST webhook + shared secret + direct-chat restriction + owner chat/user allowlist
+    Note over TWH,GAUTH: Native Google auth foundation uses signed state tokens plus encrypted pending-auth storage; no plaintext refresh-token staging is intended
 ```
 
 ## 2) Loop Sequence (Per Input)

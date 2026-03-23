@@ -33,11 +33,13 @@ data class GoogleWorkspaceConfig(
     val oauthClientIdHandle: String = DEFAULT_OAUTH_CLIENT_ID_HANDLE,
     val oauthClientSecretHandle: String = DEFAULT_OAUTH_CLIENT_SECRET_HANDLE,
     val oauthStateSigningSecretHandle: String = DEFAULT_OAUTH_STATE_SIGNING_SECRET_HANDLE,
+    val oauthTokenEncryptionSecretHandle: String = DEFAULT_OAUTH_TOKEN_ENCRYPTION_SECRET_HANDLE,
     val callbackPath: String = DEFAULT_CALLBACK_PATH,
     val authorizationBaseUrl: String = DEFAULT_AUTHORIZATION_BASE_URL,
     val tokenBaseUrl: String = DEFAULT_TOKEN_BASE_URL,
     val requirePkce: Boolean = true,
     val requireRefreshToken: Boolean = true,
+    val oauthStateTtlSeconds: Long = DEFAULT_OAUTH_STATE_TTL_SECONDS,
     val scopes: Set<String> = DEFAULT_READONLY_SCOPES,
 ) {
     companion object {
@@ -45,9 +47,11 @@ data class GoogleWorkspaceConfig(
         const val DEFAULT_OAUTH_CLIENT_ID_HANDLE: String = "GOOGLE_OAUTH_CLIENT_ID"
         const val DEFAULT_OAUTH_CLIENT_SECRET_HANDLE: String = "GOOGLE_OAUTH_CLIENT_SECRET"
         const val DEFAULT_OAUTH_STATE_SIGNING_SECRET_HANDLE: String = "GOOGLE_OAUTH_STATE_SIGNING_SECRET"
+        const val DEFAULT_OAUTH_TOKEN_ENCRYPTION_SECRET_HANDLE: String = "GOOGLE_OAUTH_TOKEN_ENCRYPTION_SECRET"
         const val DEFAULT_CALLBACK_PATH: String = "/api/channels/google/oauth/callback"
         const val DEFAULT_AUTHORIZATION_BASE_URL: String = "https://accounts.google.com/o/oauth2/v2/auth"
         const val DEFAULT_TOKEN_BASE_URL: String = "https://oauth2.googleapis.com/token"
+        const val DEFAULT_OAUTH_STATE_TTL_SECONDS: Long = 600L
         val DEFAULT_READONLY_SCOPES: Set<String> = setOf(
             "https://www.googleapis.com/auth/gmail.readonly",
             "https://www.googleapis.com/auth/calendar.readonly",

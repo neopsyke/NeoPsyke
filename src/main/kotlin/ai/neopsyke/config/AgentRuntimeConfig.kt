@@ -218,11 +218,13 @@ private data class AgentRuntimeYamlGoogleWorkspace(
     val oauthClientIdHandle: String? = null,
     val oauthClientSecretHandle: String? = null,
     val oauthStateSigningSecretHandle: String? = null,
+    val oauthTokenEncryptionSecretHandle: String? = null,
     val callbackPath: String? = null,
     val authorizationBaseUrl: String? = null,
     val tokenBaseUrl: String? = null,
     val requirePkce: Boolean? = null,
     val requireRefreshToken: Boolean? = null,
+    val oauthStateTtlSeconds: Long? = null,
     val scopes: List<String>? = null,
 )
 
@@ -895,6 +897,11 @@ object AgentRuntimeSettingsLoader {
                         googleWorkspaceYaml.oauthStateSigningSecretHandle,
                         defaults.nativeIntegrations.googleWorkspace.oauthStateSigningSecretHandle
                     ),
+                    oauthTokenEncryptionSecretHandle = readNonBlank(
+                        env["NEOPSYKE_GOOGLE_OAUTH_TOKEN_ENCRYPTION_SECRET_HANDLE"],
+                        googleWorkspaceYaml.oauthTokenEncryptionSecretHandle,
+                        defaults.nativeIntegrations.googleWorkspace.oauthTokenEncryptionSecretHandle
+                    ),
                     callbackPath = readNonBlank(
                         env["NEOPSYKE_GOOGLE_OAUTH_CALLBACK_PATH"],
                         googleWorkspaceYaml.callbackPath,
@@ -919,6 +926,11 @@ object AgentRuntimeSettingsLoader {
                         env["NEOPSYKE_GOOGLE_OAUTH_REQUIRE_REFRESH_TOKEN"],
                         googleWorkspaceYaml.requireRefreshToken,
                         defaults.nativeIntegrations.googleWorkspace.requireRefreshToken
+                    ),
+                    oauthStateTtlSeconds = readPositiveLong(
+                        env["NEOPSYKE_GOOGLE_OAUTH_STATE_TTL_SECONDS"],
+                        googleWorkspaceYaml.oauthStateTtlSeconds,
+                        defaults.nativeIntegrations.googleWorkspace.oauthStateTtlSeconds
                     ),
                     scopes = readStringSet(
                         env["NEOPSYKE_GOOGLE_SCOPES"],

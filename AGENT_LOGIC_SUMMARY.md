@@ -68,6 +68,10 @@ It is intentionally high-level and should stay aligned with the code.
   - Telegram bot token and webhook secret are resolved through configured secret handles
   - secrets are read by the runtime and injected only into the native integration clients that need them
   - no connector subprocess environment passthrough is involved in this path
+  - Google Workspace auth foundation uses:
+    - HMAC-signed OAuth state tokens with provider/redirect/owner binding and TTL enforcement
+    - encrypted pending-auth storage under `.neopsyke/auth/google` for PKCE verifier and scope state
+    - explicit token-encryption secret handles rather than plaintext token artifacts
 
 ## Main Loop (Ego)
 - File: `src/main/kotlin/ai/neopsyke/agent/ego/Ego.kt`
