@@ -1,0 +1,22 @@
+policyVersion: v1
+
+actions:
+  contact_user:
+    directCommitEnabled: true
+    autonomousCommitEnabled: true
+
+  goal_operation:
+    directCommitEnabled: true
+    autonomousCommitEnabled: true
+    recurringRequiresApproval: true
+
+  email_send:
+    directCommitEnabled: false
+    autonomousCommitEnabled: false
+
+  reflect:
+    directCommitEnabled: true
+    autonomousCommitEnabled: true
+
+publicCommit:
+  enabledTargets: []

@@ -1,5 +1,7 @@
 package ai.neopsyke.eval
 
+import ai.neopsyke.agent.actioncontrol.DefaultActionControlService
+import ai.neopsyke.agent.actioncontrol.SqliteActionControlStore
 import ai.neopsyke.agent.actions.ActionDescriptor
 import ai.neopsyke.agent.actions.ActionExecutionContext
 import ai.neopsyke.agent.actions.ActionRegistry
@@ -23,6 +25,7 @@ import ai.neopsyke.agent.model.ActionOutcome
 import ai.neopsyke.agent.model.EgoDecision
 import ai.neopsyke.agent.model.EgoTrigger
 import ai.neopsyke.agent.model.ActionType
+import ai.neopsyke.agent.model.StagedActionStatus
 import ai.neopsyke.agent.config.MemoryConfig
 import ai.neopsyke.agent.model.PendingImpulse
 import ai.neopsyke.agent.model.PendingAction
@@ -693,6 +696,7 @@ class AgentScenarioPackTest {
     fun scenario_natural_language_recurring_goal_creation() = runBlocking {
         val root = Files.createTempDirectory("neopsyke-scenario-goal-create")
         var manager: GoalManager? = null
+        var actionControlStore: SqliteActionControlStore? = null
         try {
             val plannerLlm = StubChatModelClient().apply {
                 enqueueRawResponse(
@@ -720,6 +724,13 @@ class AgentScenarioPackTest {
                 instrumentation = instrumentation,
             )
             manager.start(CoroutineScope(SupervisorJob() + Dispatchers.Default))
+            val actionControlDb = root.resolve("action-control.db")
+            actionControlStore = SqliteActionControlStore(actionControlDb.toString())
+            val motorCortex = buildMotorCortex(
+                output = { outputs.add(it) },
+                config = config,
+                goalsGateway = manager,
+            )
             val agent = buildTestEgo(
                 planner = LlmEgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
                 superego = Superego(
@@ -727,27 +738,30 @@ class AgentScenarioPackTest {
                     config = config,
                     instrumentation = instrumentation
                 ),
-                motorCortex = buildMotorCortex(
-                    output = { outputs.add(it) },
-                    config = config,
-                    goalsGateway = manager,
-                ),
+                motorCortex = motorCortex,
                 config = config,
                 instrumentation = instrumentation,
                 goalsGateway = manager,
+                actionControlService = DefaultActionControlService(
+                    config = config.actionControl.copy(dbPath = actionControlDb.toString()),
+                    store = actionControlStore,
+                ) { action, authorization ->
+                    motorCortex.execute(action, config.searchResultCount, authorization)
+                },
             )
 
             runAgentWithInput(agent, "I would like to set a goal for you: Remind me of the current weather every 5 minutes.\nexit\n")
 
-            val goal = manager.allGoals().singleOrNull()
-            assertNotNull(goal)
-            val state = manager.goalStatus(goal.goalId)
-            assertNotNull(state)
-            assertEquals("*/5 * * * *", state.goal.cronExpression)
-            assertTrue(state.goal.instruction.contains("weather", ignoreCase = true))
-            assertTrue(outputs.single().contains("Goal created:", ignoreCase = true))
-            assertEquals("input_goal_create", plannerLlm.lastOptions.metadata.callSite)
+            assertTrue(manager.allGoals().isEmpty())
+            val staged = actionControlStore.listStagedActions(limit = 10).singleOrNull()
+            assertNotNull(staged)
+            assertEquals(ActionType.GOAL_OPERATION, staged.actionType)
+            assertEquals(StagedActionStatus.WAITING_AUTHORIZATION, staged.status)
+            assertTrue(staged.payload.contains("\"cron_expression\":\"*/5 * * * *\""))
+            assertTrue(outputs.single().contains("blocked by policy", ignoreCase = true))
+            assertTrue(plannerLlm.calls.any { it.options.metadata.callSite == "input_goal_create" })
         } finally {
+            actionControlStore?.close()
             manager?.stop()
             root.toFile().deleteRecursively()
         }

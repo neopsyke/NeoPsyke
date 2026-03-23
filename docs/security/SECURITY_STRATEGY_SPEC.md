@@ -1,6 +1,6 @@
 # NeoPsyke Security Strategy Spec
 
-> Status: Draft
+> Status: Draft, partially implemented
 >
 > Date: 2026-03-23
 >
@@ -158,16 +158,25 @@ Notes:
 
 Channel identity must be part of security context, not loose metadata.
 
-Proposed channel classes:
+The implementation uses a hybrid model:
 
-- `WEBAPP_OWNER_CHAT`
-- `WEBAPP_SHARED_CHAT`
-- `TELEGRAM_OWNER_DM`
-- `TELEGRAM_GROUP`
-- `WHATSAPP_OWNER_DM`
-- `WHATSAPP_GROUP`
-- `AUTOMATION_RUN`
-- `ADMIN_CONSOLE`
+- small stable semantic enums in code
+  - `ChannelSurface`
+  - `TransportClass`
+- dynamic provider/account/channel identifiers in data and YAML policy
+
+Example:
+
+```kotlin
+data class ChannelRef(
+    val provider: String,
+    val surface: ChannelSurface,
+    val transport: TransportClass,
+    val channelId: String,
+    val accountId: String? = null,
+    val attributes: Map<String, String> = emptyMap(),
+)
+```
 
 ### 5.3 Trust classes
 
@@ -197,24 +206,21 @@ NeoPsyke should track provenance explicitly through the pipeline.
 ### 6.1 Target abstraction
 
 ```kotlin
+data class SourceDescriptor(
+    val provider: String,
+    val contentKind: ContentKind,
+    val objectType: String,
+    val part: String? = null,
+    val sourceRef: String? = null,
+    val attributes: Map<String, String> = emptyMap(),
+)
+
 data class Provenance(
     val instructionTrust: InstructionTrust,
     val dataTrust: DataTrust,
-    val sourceKind: SourceKind,
-    val sourceRef: String? = null,
+    val source: SourceDescriptor,
     val sanitization: SanitizationRecord? = null,
 )
-
-enum class InstructionTrust {
-    TRUSTED_INSTRUCTION,
-    UNTRUSTED_INSTRUCTION,
-}
-
-enum class DataTrust {
-    TRUSTED_DATA,
-    EXTERNAL_DATA,
-    SANITIZED_EXTERNAL_DATA,
-}
 ```
 
 ### 6.2 Where provenance must exist
@@ -828,6 +834,35 @@ Target treatment:
 ## 14. Implementation Phases
 
 The phases below are organized around architecture, not product features.
+
+### Current Progress Snapshot
+
+Implemented or mostly implemented:
+
+- Phase 0 foundation:
+  - security context and action lifecycle types
+  - richer authorization decisions
+- Phase 1 foundation:
+  - trust/provenance carried through ingress and planner-visible context
+- Phase 2 substantial slice:
+  - YAML-backed authorization policy
+  - staged/direct-commit decisions from `Superego`
+  - no-dead-end denial feedback into Ego replanning
+  - `MotorCortex` authorization enforcement for side-effecting actions
+- Phase 3 partial:
+  - `goal_operation`, `email_send`, `contact_user`, and `reflect` now participate in the new policy model
+- Phase 4 partial:
+  - connector-boundary stubs
+  - dedicated embedded SQLite action-control store
+  - backend JSON inspectability endpoints for staged actions and receipts
+
+Still pending:
+
+- full staged outbox/product UI
+- autonomous staged-commit worker beyond direct-commit fast path
+- broader migration of all action execution paths onto durable receipts
+- out-of-process third-party connector runtime
+- new calendar/news/tasks/inbox/social product actions
 
 ### Phase 0 — Core Contract Rewrite
 

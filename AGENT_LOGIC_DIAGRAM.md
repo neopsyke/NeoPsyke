@@ -23,6 +23,9 @@ flowchart LR
     E --> S["Superego"]
     S --> S1["SingleStage Review Engine"]
     S --> S2["TwoStage Escalation Engine"]
+    E --> ACP["ActionAuthorizationPolicy (YAML)"]
+    E --> ACS["ActionControlService"]
+    ACS --> ACDB["ActionControl SQLite (staged / auth / receipts)"]
     E --> AR["ActionRegistry (ServiceLoader Discovery)"]
     E --> M["MotorCortex"]
     E --> BG["LLM Token Budget Gate"]
@@ -75,6 +78,7 @@ flowchart LR
     I --> DS["DashboardStateStore"]
     DS --> CP["Conversations Page (`/`) + Chat API (`/api/chat/*`)"]
     DS --> OP["Observability Page (`/dashboard`) + Obs API (`/api/obs/*`)"]
+    DS --> ACAPI["Action Control API (`/api/action-control/*`)"]
 ```
 
 ## 2) Loop Sequence (Per Input)
@@ -149,7 +153,7 @@ sequenceDiagram
                     Ego->>Mem: maybeRecordReflectionLesson(filtered)
                 else decision verifier allow
                     Note over Ego,TV: If volatile evidence is required but tools are unavailable, verifier returns graceful allow (TASK_EVIDENCE_UNAVAILABLE_GRACEFUL)
-                    Ego->>Sup: deterministic checks
+                    Ego->>Sup: deterministic checks + authorization policy
                     alt deterministic deny
                         Sup-->>Ego: deny (hard deny)
                         Ego->>Sched: enqueue safe-alternative thought
@@ -178,7 +182,18 @@ sequenceDiagram
                                 Note over Ego,TWS: Final-pass skip requires both no evidence and insufficient drafts (< max(2, activation_min_plan_steps))
                         Note over Ego,TWF: Apply workspace-confidence gate first, then model-confidence gate
                             end
-                            Ego->>Motor: execute(action)
+                            Ego->>ACS: stage / authorize / commit
+                            alt stage required
+                                ACS->>ACDB: save staged action
+                                ACS-->>Ego: staged action + approval required
+                                Ego->>Sched: enqueue approval-or-alternative thought
+                            else direct commit allowed
+                                ACS->>ACDB: save staged action + authorization
+                                ACS->>Motor: execute(action, authorization)
+                                Motor-->>ACS: outcome
+                                ACS->>ACDB: save receipt + final staged status
+                                ACS-->>Ego: executed outcome
+                            end
                             Note over Ego,Motor: Actions may complete immediately or return WAITING + async operation handles
                             Note over Ego,PG: Goal-origin WAITING without handles is rejected as a contract violation
                             Ego->>Ego: PromptInjectionDefense sanitize untrusted tool output
@@ -238,6 +253,7 @@ flowchart LR
     TS -->|"cron tick after completed/failed recurring goal"| PSM
     PSM -->|"reset plan steps + clear produced keys"| PCS
     Sig --> Ego["Ego"]
+    Note over Sig,Ego: Goal work is re-entered with a trusted internal automation conversation/security context
     Ego -->|nextWorkFromCue| PM
     Ego -->|goal-origin action outcomes| PM
 ```

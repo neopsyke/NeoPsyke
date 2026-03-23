@@ -39,6 +39,9 @@ class AgentRuntimeSettingsLoaderTest {
         assertEquals(true, settings.agentConfig.logbook.enabled)
         assertEquals(200, settings.agentConfig.logbook.maxSummaryChars)
         assertEquals(12, settings.agentConfig.logbook.maxKeywordsPerEntry)
+        assertEquals(true, settings.agentConfig.actionControl.enabled)
+        assertEquals(".neopsyke/action-control.db", settings.agentConfig.actionControl.dbPath)
+        assertEquals("action-security.yaml", settings.agentConfig.actionControl.policyPath)
 
         assertEquals(0, settings.agentConfig.loopDelayMs)
         assertEquals(64, settings.agentConfig.maxPendingThoughts)
@@ -121,6 +124,12 @@ class AgentRuntimeSettingsLoaderTest {
                 episodic_recall_max_chars: 333
                 episodic_recall_max_results: 11
                 use_llm_summarizer: true
+              action_control:
+                enabled: true
+                db_path: /tmp/neopsyke-action-control.db
+                policy_path: /tmp/neopsyke-action-security.yaml
+                authorization_ttl_ms: 555000
+                max_inspect_results: 75
               runtime:
                 loop_delay_ms: 9
                 max_pending_thoughts: 11
@@ -193,6 +202,11 @@ class AgentRuntimeSettingsLoaderTest {
         assertEquals(333, settings.agentConfig.logbook.episodicRecallMaxChars)
         assertEquals(11, settings.agentConfig.logbook.episodicRecallMaxResults)
         assertEquals(true, settings.agentConfig.logbook.useLlmSummarizer)
+        assertEquals(true, settings.agentConfig.actionControl.enabled)
+        assertEquals("/tmp/neopsyke-action-control.db", settings.agentConfig.actionControl.dbPath)
+        assertEquals("/tmp/neopsyke-action-security.yaml", settings.agentConfig.actionControl.policyPath)
+        assertEquals(555000, settings.agentConfig.actionControl.authorizationTtlMs)
+        assertEquals(75, settings.agentConfig.actionControl.maxInspectResults)
 
         assertEquals(9, settings.agentConfig.loopDelayMs)
         assertEquals(11, settings.agentConfig.maxPendingThoughts)

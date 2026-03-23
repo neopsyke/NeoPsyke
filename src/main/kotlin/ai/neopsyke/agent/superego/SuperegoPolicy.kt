@@ -1,5 +1,7 @@
 package ai.neopsyke.agent.superego
 
+import ai.neopsyke.agent.actioncontrol.ActionAuthorizationPolicy
+import ai.neopsyke.agent.actioncontrol.ConfiguredActionAuthorizationPolicy
 import ai.neopsyke.agent.actions.ActionRegistry
 import ai.neopsyke.agent.model.AuthorizationDecision
 import ai.neopsyke.agent.model.AuthorizationProgress
@@ -67,63 +69,13 @@ object SuperegoPolicy {
         action: PendingAction,
         conversationContext: ConversationContext,
         actionRegistry: ActionRegistry = ActionRegistry.empty(),
-    ): AuthorizationDecision {
-        val descriptor = actionRegistry.descriptor(action.type)
-            ?: return AuthorizationDecision(
-                progress = AuthorizationProgress.ALLOW_STAGE,
-                commitMode = CommitMode.APPROVAL_BACKED,
-                reason = "No explicit action contract was found; legacy runtime path may proceed but staging is preferred.",
-                reasonCode = "LEGACY_ACTION_CONTRACT_MISSING",
-            )
-        val contract = descriptor.contract
-        if (!contract.allowedInstructionTrust.contains(conversationContext.security.instructionTrust)) {
-            return AuthorizationDecision(
-                progress = AuthorizationProgress.DENY,
-                commitMode = CommitMode.NOT_APPLICABLE,
-                reason = "Action '${action.type.id}' is not allowed for instruction trust ${conversationContext.security.instructionTrust.name.lowercase()}.",
-                reasonCode = "POLICY_INSTRUCTION_TRUST_DENY",
-            )
-        }
-        if (contract.effectClass == ai.neopsyke.agent.model.ActionEffectClass.CONTROL_PLANE &&
-            conversationContext.security.instructionTrust != InstructionTrust.TRUSTED_INSTRUCTION
-        ) {
-            return AuthorizationDecision(
-                progress = AuthorizationProgress.DENY,
-                commitMode = CommitMode.NOT_APPLICABLE,
-                reason = "Control-plane action '${action.type.id}' requires trusted instruction.",
-                reasonCode = "POLICY_CONTROL_PLANE_TRUST_REQUIRED",
-            )
-        }
-        if (contract.effectClass == ai.neopsyke.agent.model.ActionEffectClass.COMMIT_PUBLIC &&
-            conversationContext.security.principal.role != ai.neopsyke.agent.model.PrincipalRole.OWNER
-        ) {
-            return AuthorizationDecision(
-                progress = AuthorizationProgress.ALLOW_STAGE,
-                commitMode = CommitMode.APPROVAL_BACKED,
-                reason = "Public commit action '${action.type.id}' requires owner approval until explicitly enabled.",
-                reasonCode = "POLICY_PUBLIC_COMMIT_OWNER_APPROVAL",
-            )
-        }
-        return if (contract.directCommitAllowed) {
-            AuthorizationDecision(
-                progress = AuthorizationProgress.ALLOW_COMMIT,
-                commitMode = CommitMode.POLICY_AUTONOMOUS,
-                reason = "Action contract allows direct commit in the current legacy runtime path.",
-                reasonCode = "POLICY_DIRECT_COMMIT_ALLOWED",
-            )
-        } else {
-            AuthorizationDecision(
-                progress = AuthorizationProgress.ALLOW_STAGE,
-                commitMode = if (contract.supportsAutonomousCommit) {
-                    CommitMode.POLICY_AUTONOMOUS
-                } else {
-                    CommitMode.APPROVAL_BACKED
-                },
-                reason = "Action contract requires staged authorization before commit.",
-                reasonCode = "POLICY_STAGE_REQUIRED",
-            )
-        }
-    }
+        authorizationPolicy: ActionAuthorizationPolicy = ConfiguredActionAuthorizationPolicy(),
+    ): AuthorizationDecision =
+        authorizationPolicy.authorize(
+            action = action,
+            conversationContext = conversationContext,
+            actionRegistry = actionRegistry,
+        )
 
     fun allDirectives(actionRegistry: ActionRegistry = ActionRegistry.empty()): List<String> =
         (actionRegistry.actionTypes() + ActionType.entries)

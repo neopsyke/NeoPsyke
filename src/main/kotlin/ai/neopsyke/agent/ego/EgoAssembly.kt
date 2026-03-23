@@ -1,5 +1,7 @@
 package ai.neopsyke.agent.ego
 
+import ai.neopsyke.agent.actioncontrol.ActionControlService
+import ai.neopsyke.agent.actioncontrol.NoopActionControlService
 import ai.neopsyke.agent.actions.ActionPluginFactoryContext
 import ai.neopsyke.agent.actions.ActionRegistry
 import ai.neopsyke.agent.actions.websearch.WebSearchActionHandler
@@ -27,6 +29,7 @@ data class EgoAssembly(
     val ego: Ego,
     val motorCortex: MotorCortex,
     val actionRegistry: ActionRegistry,
+    val actionControlService: ActionControlService,
     val memory: MemorySystem,
 ) : AutoCloseable {
     override fun close() {
@@ -73,6 +76,7 @@ object EgoAssembler {
         mcpTimeTool: McpTimeTool? = null,
         fetchTool: FetchTool? = null,
         goalsGateway: GoalsGateway = NoopGoalsGateway,
+        actionControlServiceFactory: (MotorCortex) -> ActionControlService = { NoopActionControlService },
         output: (String) -> Unit = {},
     ): EgoAssembly {
         val memory = buildMemorySystem(
@@ -96,6 +100,7 @@ object EgoAssembler {
             )
         )
         val motorCortex = MotorCortex(actionRegistry = actionRegistry)
+        val actionControlService = actionControlServiceFactory(motorCortex)
         val ego = Ego(
             planner = plannerFactory(motorCortex),
             superego = superegoFactory(actionRegistry),
@@ -107,6 +112,7 @@ object EgoAssembler {
             scratchpadStore = scratchpadStore,
             scratchpadFinalizer = scratchpadFinalizer,
             instrumentation = instrumentation,
+            actionControlService = actionControlService,
             goalRegistry = goalsGateway,
             goalsGateway = goalsGateway,
         )
@@ -114,6 +120,7 @@ object EgoAssembler {
             ego = ego,
             motorCortex = motorCortex,
             actionRegistry = actionRegistry,
+            actionControlService = actionControlService,
             memory = memory,
         )
     }

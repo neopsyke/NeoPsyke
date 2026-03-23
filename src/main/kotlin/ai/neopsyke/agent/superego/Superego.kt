@@ -1,5 +1,7 @@
 package ai.neopsyke.agent.superego
 
+import ai.neopsyke.agent.actioncontrol.ActionAuthorizationPolicy
+import ai.neopsyke.agent.actioncontrol.ConfiguredActionAuthorizationPolicy
 import ai.neopsyke.agent.actions.ActionRegistry
 import ai.neopsyke.agent.model.ActionType
 import ai.neopsyke.agent.config.AgentConfig
@@ -23,7 +25,7 @@ import ai.neopsyke.llm.ChatRole
 class Superego(
     private val modelClient: ChatModelClient,
     private val config: AgentConfig,
-    private val actionRegistry: ActionRegistry = ActionRegistry.empty(),
+    actionRegistry: ActionRegistry = ActionRegistry.empty(),
     private val modelTokenWeight: Double = DEFAULT_MODEL_TOKEN_WEIGHT,
     private val modelContextWindow: Int? = null,
     private val modelReasoningOverhead: Double = DEFAULT_REASONING_OVERHEAD,
@@ -32,11 +34,17 @@ class Superego(
     private val escalationModelContextWindow: Int? = null,
     private val escalationModelReasoningOverhead: Double = DEFAULT_REASONING_OVERHEAD,
     private val policy: SuperegoPolicy = SuperegoPolicy,
+    private val authorizationPolicy: ActionAuthorizationPolicy = ConfiguredActionAuthorizationPolicy(),
     private val instrumentation: AgentInstrumentation = NoopAgentInstrumentation,
 ) {
-    private val deterministicConscience = SuperegoDeterministicConscience(config, actionRegistry)
+    @Volatile
+    private var actionRegistry: ActionRegistry = actionRegistry
     private val primaryEngine: SingleStageSuperegoReviewEngine = buildPrimaryEngine()
     private val reviewEngine: SuperegoReviewEngine = buildReviewEngine(primaryEngine)
+
+    fun setActionRegistry(actionRegistry: ActionRegistry) {
+        this.actionRegistry = actionRegistry
+    }
 
     fun review(action: PendingAction, context: SuperegoContext): GateDecision {
         val authorizationDecision = reviewAuthorization(action, context)
@@ -102,6 +110,7 @@ class Superego(
             action = action,
             conversationContext = context.conversationContext,
             actionRegistry = actionRegistry,
+            authorizationPolicy = authorizationPolicy,
         )
         if (policyAuthorization.progress == AuthorizationProgress.DENY) {
             instrumentation.emit(
@@ -221,6 +230,9 @@ class Superego(
             instrumentation = instrumentation
         )
     }
+
+    private val deterministicConscience: SuperegoDeterministicConscience
+        get() = SuperegoDeterministicConscience(config, actionRegistry)
 
     private fun buildMessages(
         action: PendingAction,

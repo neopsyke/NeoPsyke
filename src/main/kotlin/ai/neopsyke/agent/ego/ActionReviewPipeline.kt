@@ -1,6 +1,9 @@
 package ai.neopsyke.agent.ego
 
 import mu.KotlinLogging
+import ai.neopsyke.agent.actioncontrol.ActionControlDecisionResult
+import ai.neopsyke.agent.actioncontrol.ActionControlService
+import ai.neopsyke.agent.actioncontrol.LegacyCompatibleActionControlService
 import ai.neopsyke.agent.config.*
 import ai.neopsyke.agent.model.*
 import ai.neopsyke.agent.cortex.motor.MotorCortex
@@ -35,6 +38,9 @@ internal class ActionReviewPipeline(
     private val superegoContext: (String, ActionOrigin, ConversationContext) -> SuperegoContext,
     private val cleanupResolvedInputAfterAnswer: (PendingAction) -> Unit,
     private val getId: () -> ai.neopsyke.agent.id.Id?,
+    private val actionControlService: ActionControlService = LegacyCompatibleActionControlService { action, authorization ->
+        motorCortex.execute(action, config.searchResultCount, authorization)
+    },
     private val actionLifecycleObserver: ActionLifecycleObserver = NoopActionLifecycleObserver,
 ) {
     suspend fun reviewAndExecute(action: PendingAction) {
@@ -57,13 +63,90 @@ internal class ActionReviewPipeline(
             return
         }
         timing.startPhase("superego_review")
-        if (!passesSuperego(resolvedAction, sessionId, convCtx)) {
+        val authorizationDecision = reviewSuperego(resolvedAction, sessionId, convCtx) ?: run {
             instrumentation.emit(AgentEvents.phaseTimings(timing.build()))
             return
         }
 
-        timing.startPhase("action_execute")
-        val outcome = executeActionSafely(resolvedAction)
+        timing.startPhase("action_control")
+        when (
+            val controlResult = actionControlService.handleAuthorizationDecision(
+                action = resolvedAction,
+                decision = authorizationDecision,
+                conversationContext = convCtx,
+            )
+        ) {
+            is ActionControlDecisionResult.Refused -> {
+                actionLifecycleObserver.onActionBlocked(
+                    action = resolvedAction,
+                    reason = controlResult.reason,
+                    reasonCode = controlResult.reasonCode,
+                    source = "action_control"
+                )
+                fallbackHandler.handleDeniedAction(
+                    action = resolvedAction,
+                    reason = controlResult.reason,
+                    reasonCode = controlResult.reasonCode,
+                    conversationContext = convCtx,
+                    sessionId = sessionId,
+                    source = "action_control"
+                )
+                instrumentation.emit(AgentEvents.phaseTimings(timing.build()))
+                return
+            }
+
+            is ActionControlDecisionResult.Staged -> {
+                instrumentation.emit(
+                    AgentEvent(
+                        type = "action_staged",
+                        data = mapOf(
+                            "action_id" to resolvedAction.id,
+                            "staged_action_id" to controlResult.stagedAction.id,
+                            "action_type" to resolvedAction.type.id,
+                            "commit_mode" to controlResult.authorizationDecision.commitMode.name.lowercase(),
+                            "reason" to controlResult.authorizationDecision.reason,
+                            "reason_code" to controlResult.authorizationDecision.reasonCode,
+                        )
+                    )
+                )
+                fallbackHandler.handleStagedAction(
+                    action = resolvedAction,
+                    stagedAction = controlResult.stagedAction,
+                    reason = controlResult.authorizationDecision.reason,
+                    reasonCode = controlResult.authorizationDecision.reasonCode,
+                    conversationContext = convCtx,
+                    source = "action_control"
+                )
+                instrumentation.emit(AgentEvents.phaseTimings(timing.build()))
+                return
+            }
+
+            is ActionControlDecisionResult.Executed -> {
+                timing.startPhase("action_execute")
+                val outcome = controlResult.outcome
+                processExecutedAction(
+                    resolvedAction = resolvedAction,
+                    outcome = outcome,
+                    sessionId = sessionId,
+                    convCtx = convCtx,
+                    timing = timing
+                )
+                return
+            }
+        }
+    }
+
+    private fun processExecutedAction(
+        resolvedAction: PendingAction,
+        outcome: ActionOutcome,
+        sessionId: String,
+        convCtx: ConversationContext,
+        timing: PhaseTimingCollector,
+    ) {
+        if (outcome.executionStatus == ActionExecutionStatus.FAILED) {
+            deliberation.markEvidenceFailure(resolvedAction)
+            instrumentation.emit(AgentEvents.warning("Action execution failed; action dropped."))
+        }
         impulseTracker.recordActionOutcome(resolvedAction, outcome)
         instrumentation.emit(AgentEvents.actionExecuted(resolvedAction, outcome.statusSummary))
         if (resolvedAction.origin.source != OriginSource.ID && outcome.successful) {
@@ -216,11 +299,11 @@ internal class ActionReviewPipeline(
         return true
     }
 
-    private fun passesSuperego(
+    private fun reviewSuperego(
         resolvedAction: PendingAction,
         sessionId: String,
         convCtx: ConversationContext,
-    ): Boolean {
+    ): AuthorizationDecision? {
         val authorizationDecision = superego.reviewAuthorization(
             resolvedAction,
             superegoContext(sessionId, resolvedAction.origin, convCtx)
@@ -266,12 +349,10 @@ internal class ActionReviewPipeline(
                 sessionId = sessionId,
                 source = "superego"
             )
-            return false
+            return null
         }
-        return true
+        return authorizationDecision
     }
-
-    // ── Execution ──
 
     private suspend fun executeActionSafely(action: PendingAction): ActionOutcome {
         return try {

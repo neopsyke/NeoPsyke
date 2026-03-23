@@ -9,6 +9,7 @@ data class AgentConfig(
     val memory: MemoryConfig = MemoryConfig(),
     val metaReasoner: MetaReasonerConfig = MetaReasonerConfig(),
     val logbook: LogbookConfig = LogbookConfig(),
+    val actionControl: ActionControlConfig = ActionControlConfig(),
     val innerVoice: InnerVoiceConfig = InnerVoiceConfig(),
     val goals: GoalConfig = GoalConfig(),
     val loopDelayMs: Int = 0,

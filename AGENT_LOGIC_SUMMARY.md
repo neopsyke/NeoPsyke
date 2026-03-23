@@ -28,6 +28,8 @@ It is intentionally high-level and should stay aligned with the code.
   - `Superego`
   - `ActionRegistry` (startup plugin discovery via `ServiceLoader<AgentActionPluginFactory>`)
   - `MotorCortex` (plugin-dispatched action execution)
+  - `ActionAuthorizationPolicy` (YAML-backed action security policy)
+  - `ActionControlService` + `SqliteActionControlStore` (staged actions, authorizations, receipts)
   - `LlmEgoPlanner`
   - `LlmMetaReasoner`
   - `LlmLongTermMemoryAdvisor`
@@ -217,7 +219,7 @@ It is intentionally high-level and should stay aligned with the code.
   - Emits lightweight scratchpad-head telemetry (`scratchpad_head`) on scratchpad mutations.
   - When `ScratchpadConfig.debugCaptureEnabled` is on, emits full debug snapshots (`scratchpad_debug_snapshot`) for dashboard-only inspection.
   - Fallback explanation actions bypass policy gate.
-  - Normal actions pass through deterministic `DecisionVerifier` first (task-truth/sufficiency gate), then `Superego.review`.
+  - Normal actions pass through deterministic `DecisionVerifier` first (task-truth/sufficiency gate), then `Superego.reviewAuthorization`.
     - Deterministic checks classify task intent + volatility for terminal answers.
     - External evidence is required only for volatile/unknown factual intents; transformation/personal-memory/subjective/static-reasoning intents bypass evidence requirement.
     - When volatile evidence is required but evidence actions are unavailable, verifier uses a graceful allow path (`TASK_EVIDENCE_UNAVAILABLE_GRACEFUL`) to avoid dead-loop retries.
@@ -228,7 +230,11 @@ It is intentionally high-level and should stay aligned with the code.
     - Attempt reflection-lesson persistence into long-term memory (filtered; technical/system failures are skipped).
     - Notify `ActionLifecycleObserver` subscribers so goal-origin actions can translate denials back into goal-step state.
   - If allowed:
-    - Execute via `MotorCortex.execute`.
+    - Route into `ActionControlService`.
+    - `ALLOW_STAGE` persists a staged action and feeds a structured approval-or-alternative thought back into Ego.
+    - `ALLOW_COMMIT` persists a staged snapshot plus authorization artifact, then executes through `MotorCortex`.
+    - `ActionControlService` refusals are treated as denials and fed back into Ego replanning.
+    - `MotorCortex` now performs a final no-bypass authorization check for side-effecting actions.
     - Actions may return either an immediate outcome or a generic async wait contract (`ActionOutcome.asyncWait`, typically with `executionStatus=WAITING`).
       - Synchronous tools keep the existing immediate-completion path.
       - Async start actions do not enqueue ordinary follow-up thoughts on the start call.
@@ -289,7 +295,7 @@ It is intentionally high-level and should stay aligned with the code.
     - goal-origin action lifecycle callbacks plus `finalizeGoalCycle(rootInputId)`
 - Runtime responsibilities:
   - Create/revise plans through `GoalPlanner`
-  - Accept `goal_operation(create)` requests with optional `cron_expression`; validate cron expressions against the runtime's supported 5-field parser before goal creation.
+  - Accept `goal_operation(create)` requests with optional `cron_expression`; validate cron expressions against the runtime's supported 5-field parser before goal creation when commit authorization permits execution.
   - Keep cron-backed goals idle after creation: planning can promote ready steps, but initial work-ready emission is deferred until the first cron wake.
   - Observe goal-origin action outcomes through the generic action lifecycle observer hook
   - Translate generic async action wait handles into blocked goal steps
@@ -302,6 +308,7 @@ It is intentionally high-level and should stay aligned with the code.
   - Maintain cached best-effort summaries for ambient context (`activeGoals`, `pendingWorkSummary`) so Ego does not scan live goal state on the hot path
 - Ego-facing signal contract:
   - The runtime emits only `GoalRuntimeCue(goalId, stepId, reason)` into the cognitive stimulus plane.
+  - Goal work activations reconstruct a trusted internal automation `ConversationContext`; goal-origin actions must not fall back to the default external conversation security context.
   - Timer wakes, wait-condition satisfaction, new-goal planning, and resume reconciliation stay inside the goal subsystem and are translated into a work-ready cue when runnable work exists.
   - Async wait resolution is carried back as wake metadata plus step notes so resumed goal work can react to the completion state.
   - Decision types:
@@ -354,12 +361,11 @@ It is intentionally high-level and should stay aligned with the code.
   - `DENY`
   - `ALLOW_STAGE`
   - `ALLOW_COMMIT`
-- Current runtime still executes through the legacy direct path, but `ALLOW_STAGE` is now visible in telemetry and is the migration hook for future prepared/staged execution.
 - `SuperegoPolicy.authorize` now evaluates action contracts against conversation security context:
-  - instruction-trust restrictions are enforced deterministically
-  - control-plane actions require trusted instruction
-  - public commits default to staged/approval-backed handling unless explicitly enabled
-  - direct-commit eligibility is taken from the action contract rather than inferred ad hoc
+  - instruction trust and principal role
+  - per-action YAML overrides for direct commit and autonomous commit
+  - public-commit deny-until-enabled rules
+  - recurring-goal stricter approval rules
 - Id-origin deterministic policy is enforced inside Superego (not plugins):
   - Direct `answer` from Id origin is hard-denied by default.
   - Id-origin actions are allowlisted for internal/evidence-gathering types (`web_search`, `website_fetch`, `mcp_time`, `answer_draft`, `reflect`).
@@ -499,6 +505,7 @@ It is intentionally high-level and should stay aligned with the code.
   - API namespaces are split:
     - Chat control plane and session-scoped SSE: `/api/chat/*`
     - Observability snapshot/events/workspace: `/api/obs/*`
+    - Action control inspection/approval: `/api/action-control/*`
   - Workspace identity and timing are both exposed in telemetry/event payloads:
     - `root_input_id`: stable request identity key
     - `root_input_received_at_ms`: timing anchor used for latency/timeline correlation
@@ -521,13 +528,17 @@ It is intentionally high-level and should stay aligned with the code.
   - `web_search`
   - `mcp_time` (payload timezone is required by current MCP time server contract)
   - `website_fetch`
-  - `goal_operation` (persistent goal lifecycle operations; create now supports optional `cron_expression` and emits direct user-visible confirmation)
+  - `goal_operation` (persistent goal lifecycle operations; create supports optional `cron_expression`; recurring cron-backed creates now stage for authorization while non-recurring trusted-owner operations may direct commit)
   - `email_send` (Microsoft Graph adapter; disabled unless env config is present)
 - `web_search` provider routing is independent from cognitive-role routing:
   - configured directly via `web_search.provider` in `llm-runtime.yaml`.
   - current web-search runtimes are `mistral`, `groq`, and `google`; configuring `openai` degrades to unavailable with a startup warning.
   - startup initialization failures (missing key, bad base URL, provider/session errors) degrade web search to an unavailable engine instead of crashing the app.
 - Action availability is runtime health-dependent and fed back into planner context.
+- Durable action-control state now lives outside the scheduler queues:
+  - staged actions
+  - commit authorizations
+  - action receipts
 - Planner payload repair is now action-type aware via registry hooks (plugin-specific `repairPlannerPayload`), with legacy default repair retained for bare `website_fetch` URLs.
 - Action outcomes can carry a generic `actionErrorCategory` (`none`, `retryable`, `non_retryable`).
   `website_fetch` currently maps its internal error categories into this generic field.

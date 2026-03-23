@@ -7,6 +7,8 @@ import com.fasterxml.jackson.module.kotlin.readValue
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
 import mu.KotlinLogging
+import ai.neopsyke.agent.actioncontrol.ActionControlService
+import ai.neopsyke.agent.model.ConversationSecurityContexts
 import ai.neopsyke.agent.goal.GoalManager
 import ai.neopsyke.metrics.LlmCallStatsReport
 import java.nio.file.Files
@@ -37,6 +39,7 @@ class DashboardServer(
     private val idInnerVoiceFilePath: Path? = null,
     @Volatile var metricsQueryProvider: MetricsQueryProvider? = null,
     @Volatile var goalManager: GoalManager? = null,
+    @Volatile var actionControlService: ActionControlService? = null,
     port: Int,
     host: String = "127.0.0.1",
 ) : Closeable {
@@ -142,6 +145,11 @@ class DashboardServer(
         server.createContext("/api/chat/sessions") { exchange ->
             withRequestGuard(exchange, "chat_api") {
                 handleChatApi(exchange)
+            }
+        }
+        server.createContext("/api/action-control") { exchange ->
+            withRequestGuard(exchange, "action_control_api") {
+                handleActionControlApi(exchange)
             }
         }
         server.createContext("/api/id-thinking/history") { exchange ->
@@ -330,6 +338,121 @@ class DashboardServer(
             }
             else -> respondText(exchange, 404, "Not found", "text/plain; charset=utf-8")
         }
+    }
+
+    private fun handleActionControlApi(exchange: HttpExchange) {
+        val service = actionControlService ?: run {
+            respondText(exchange, 503, """{"error":"Action control unavailable"}""", "application/json; charset=utf-8")
+            return
+        }
+        val path = exchange.requestURI.path
+        val basePath = "/api/action-control"
+        if (!(path == basePath || path.startsWith("$basePath/"))) {
+            respondText(exchange, 404, "Not found", "text/plain; charset=utf-8")
+            return
+        }
+        val suffix = path.removePrefix(basePath).trim()
+        if (suffix.isBlank()) {
+            respondText(
+                exchange,
+                200,
+                mapper.writeValueAsString(
+                    mapOf(
+                        "staged_path" to "/api/action-control/staged",
+                        "receipts_path" to "/api/action-control/receipts"
+                    )
+                ),
+                "application/json; charset=utf-8"
+            )
+            return
+        }
+        val parts = suffix.removePrefix("/").split("/").filter { it.isNotBlank() }
+        if (parts.isEmpty()) {
+            respondText(exchange, 404, "Not found", "text/plain; charset=utf-8")
+            return
+        }
+        when (parts.first()) {
+            "staged" -> handleStagedActionApi(exchange, service, parts.drop(1))
+            "receipts" -> handleActionReceiptApi(exchange, service, parts.drop(1))
+            else -> respondText(exchange, 404, "Not found", "text/plain; charset=utf-8")
+        }
+    }
+
+    private fun handleStagedActionApi(
+        exchange: HttpExchange,
+        service: ActionControlService,
+        suffixParts: List<String>,
+    ) {
+        if (suffixParts.isEmpty()) {
+            if (exchange.requestMethod.uppercase() != "GET") {
+                respondText(exchange, 405, "Method not allowed", "text/plain; charset=utf-8")
+                return
+            }
+            val limit = parseQueryParam(exchange.requestURI.query, "limit")?.toIntOrNull() ?: 50
+            respondText(
+                exchange,
+                200,
+                mapper.writeValueAsString(service.stagedActions(limit)),
+                "application/json; charset=utf-8"
+            )
+            return
+        }
+        val stagedActionId = suffixParts.first()
+        if (suffixParts.size == 1) {
+            if (exchange.requestMethod.uppercase() != "GET") {
+                respondText(exchange, 405, "Method not allowed", "text/plain; charset=utf-8")
+                return
+            }
+            val staged = service.stagedAction(stagedActionId)
+            if (staged == null) {
+                respondText(exchange, 404, """{"error":"Staged action not found"}""", "application/json; charset=utf-8")
+                return
+            }
+            respondText(exchange, 200, mapper.writeValueAsString(staged), "application/json; charset=utf-8")
+            return
+        }
+        val action = suffixParts.getOrNull(1).orEmpty()
+        if (action != "authorize" || exchange.requestMethod.uppercase() != "POST") {
+            respondText(exchange, 404, "Not found", "text/plain; charset=utf-8")
+            return
+        }
+        val result = runBlocking {
+            service.authorizeStagedAction(
+                stagedActionId = stagedActionId,
+                grantedBy = ConversationSecurityContexts.ownerDirect(
+                    provider = "webapp",
+                    channelId = "dashboard-action-control",
+                )
+            )
+        }
+        respondText(exchange, 200, mapper.writeValueAsString(result), "application/json; charset=utf-8")
+    }
+
+    private fun handleActionReceiptApi(
+        exchange: HttpExchange,
+        service: ActionControlService,
+        suffixParts: List<String>,
+    ) {
+        if (exchange.requestMethod.uppercase() != "GET") {
+            respondText(exchange, 405, "Method not allowed", "text/plain; charset=utf-8")
+            return
+        }
+        if (suffixParts.isEmpty()) {
+            val limit = parseQueryParam(exchange.requestURI.query, "limit")?.toIntOrNull() ?: 50
+            respondText(
+                exchange,
+                200,
+                mapper.writeValueAsString(service.receipts(limit)),
+                "application/json; charset=utf-8"
+            )
+            return
+        }
+        val receipt = service.receipt(suffixParts.first())
+        if (receipt == null) {
+            respondText(exchange, 404, """{"error":"Action receipt not found"}""", "application/json; charset=utf-8")
+            return
+        }
+        respondText(exchange, 200, mapper.writeValueAsString(receipt), "application/json; charset=utf-8")
     }
 
     private fun handleCreateChatSession(exchange: HttpExchange, bridge: ChatRuntimeBridge) {

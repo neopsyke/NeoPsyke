@@ -2,6 +2,8 @@ package ai.neopsyke.agent.ego
 
 import kotlinx.coroutines.delay
 import mu.KotlinLogging
+import ai.neopsyke.agent.actioncontrol.ActionControlService
+import ai.neopsyke.agent.actioncontrol.LegacyCompatibleActionControlService
 import ai.neopsyke.agent.config.*
 import ai.neopsyke.agent.model.*
 import ai.neopsyke.agent.cortex.motor.MotorCortex
@@ -38,10 +40,17 @@ class Ego(
     private val scratchpadStore: ScratchpadStore = ScratchpadStore(config.memory.scratchpad),
     private val scratchpadFinalizer: ScratchpadFinalizer = NoopScratchpadFinalizer,
     private val instrumentation: AgentInstrumentation = NoopAgentInstrumentation,
+    private val actionControlService: ActionControlService = LegacyCompatibleActionControlService { action, authorization ->
+        motorCortex.execute(action, config.searchResultCount, authorization)
+    },
     private val goalRegistry: GoalRegistry = EmptyGoalRegistry,
     private val goalsGateway: GoalsGateway = NoopGoalsGateway,
 ) {
     @Volatile private var id: ai.neopsyke.agent.id.Id? = null
+
+    init {
+        superego.setActionRegistry(motorCortex.actionRegistry())
+    }
 
     fun setId(id: ai.neopsyke.agent.id.Id) {
         this.id = id
@@ -95,6 +104,7 @@ class Ego(
         superegoContext = ::superegoContext,
         cleanupResolvedInputAfterAnswer = ::cleanupResolvedInputAfterAnswer,
         getId = { id },
+        actionControlService = actionControlService,
         actionLifecycleObserver = goalsGateway,
     )
 
@@ -493,7 +503,7 @@ class Ego(
 
     private suspend fun processGoalWork(work: GoalRunActivation) {
         val timing = PhaseTimingCollector("goal_work", "goal:${work.goalId}")
-        val convCtx = ConversationContext.default()
+        val convCtx = work.conversationContext
         val sessionId = resolveSessionId(convCtx)
         activateSession(convCtx)
 
