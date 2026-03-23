@@ -1,0 +1,21 @@
+connector_id: rss
+display_name: RSS
+vendor: pending-review
+description: >
+  Curated RSS connector definition for newsletter and social automation
+  workflows. The concrete connector command and digest remain unset until a
+  reviewed connector is chosen.
+mode: stdio
+command: ""
+allowed_tools:
+  - rss.read_feed
+secret_handles: []
+action_manifests:
+  - action_type: rss_observe_read_feed
+    tool_name: rss.read_feed
+    planner_description: "rss_observe_read_feed: read entries from an RSS or Atom feed."
+    payload_guidance: JSON object with a required url and optional max_results field.
+    payload_schema_example: '{"url":"https://example.com/feed.xml","max_results":10}'
+    effect_class: OBSERVE
+    requires_follow_up_thought: true
+    follow_up_prefix: RSS retrieval completed.

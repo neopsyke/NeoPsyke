@@ -3,6 +3,7 @@ package ai.neopsyke.agent.connectors
 import ai.neopsyke.agent.config.AgentConfig
 import ai.neopsyke.agent.config.ConnectorRuntimeConfig
 import java.nio.file.Files
+import java.nio.file.Paths
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -145,5 +146,18 @@ class ConnectorCatalogLoaderTest {
 
         assertTrue(result.plugins.isEmpty())
         assertTrue(result.warnings.any { it.contains("not allowlisted") })
+    }
+
+    @Test
+    fun `default curated catalog ships starter connector and bundle manifests`() {
+        val result = CuratedConnectorCatalogLoader.load(Paths.get("connectors/catalog"))
+
+        assertTrue(result.warnings.isEmpty(), result.warnings.joinToString(" | "))
+        assertTrue(result.catalog.connectors.keys.containsAll(setOf("gmail", "news", "rss", "telegram")))
+        assertTrue(
+            result.catalog.bundles.keys.containsAll(
+                setOf("morning-briefing", "inbox-management", "social-automation")
+            )
+        )
     }
 }
