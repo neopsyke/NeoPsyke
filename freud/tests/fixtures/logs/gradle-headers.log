@@ -1,0 +1,6 @@
+> Task :compileKotlin UP-TO-DATE
+> Task :compileTestKotlin UP-TO-DATE
+> Task :checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :test FAILED
+Actual test error here
+BUILD FAILED in 5s

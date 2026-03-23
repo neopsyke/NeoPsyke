@@ -1,0 +1,4 @@
+# This is a comment
+test_scenario_a	ai.neopsyke.eval.AgentScenarioPackTest.scenario_denial_alternative_action	First test scenario
+# Another comment
+test_scenario_b	ai.neopsyke.eval.AgentScenarioPackTest.scenario_unavailable_action_then_recover_with_answer	Second test scenario

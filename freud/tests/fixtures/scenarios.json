@@ -1,0 +1,15 @@
+{
+  "version": "v1",
+  "scenarios": [
+    {
+      "id": "test_scenario_a",
+      "selector": "ai.neopsyke.eval.AgentScenarioPackTest.scenario_denial_alternative_action",
+      "description": "First test scenario"
+    },
+    {
+      "id": "test_scenario_b",
+      "selector": "ai.neopsyke.eval.AgentScenarioPackTest.scenario_unavailable_action_then_recover_with_answer",
+      "description": "Second test scenario"
+    }
+  ]
+}

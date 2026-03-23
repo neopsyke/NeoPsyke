@@ -1,0 +1,321 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>NeoPsyke Goals</title>
+  <style>
+    :root {
+      --bg: #0f1a1f;
+      --panel: #16272e;
+      --line: #27414d;
+      --text: #d9e7eb;
+      --muted: #98b0b9;
+      --accent: #36c3a7;
+      --warn: #d4a843;
+      --danger: #d45050;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      background: radial-gradient(circle at 20% 0%, #17303a 0%, var(--bg) 55%);
+      color: var(--text);
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr);
+      overflow: hidden;
+    }
+    header {
+      padding: 14px 18px;
+      border-bottom: 1px solid var(--line);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .ghost-btn {
+      font-size: 12px;
+      padding: 4px 12px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: transparent;
+      color: var(--muted);
+      text-decoration: none;
+      cursor: pointer;
+    }
+    .ghost-btn:hover { border-color: var(--accent); color: var(--accent); }
+    .nav-links { display: flex; gap: 8px; align-items: center; }
+    .main { overflow-y: auto; padding: 18px; }
+
+    /* Goal list */
+    .goal-list { display: flex; flex-direction: column; gap: 12px; max-width: 1000px; margin: 0 auto; }
+    .goal-card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 14px 18px;
+      cursor: pointer;
+      transition: border-color 0.15s;
+    }
+    .goal-card:hover { border-color: var(--accent); }
+    .goal-card.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+    .goal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+    .goal-title { font-size: 14px; font-weight: 600; }
+    .goal-meta { font-size: 11px; color: var(--muted); display: flex; gap: 12px; align-items: center; }
+
+    /* Status badges */
+    .badge {
+      font-size: 10px;
+      padding: 2px 8px;
+      border-radius: 10px;
+      border: 1px solid;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+    .badge-created   { border-color: var(--muted); color: var(--muted); }
+    .badge-planning  { border-color: var(--warn); color: var(--warn); }
+    .badge-active    { border-color: var(--accent); color: var(--accent); }
+    .badge-blocked   { border-color: var(--danger); color: var(--danger); }
+    .badge-suspended { border-color: var(--warn); color: var(--warn); }
+    .badge-completed { border-color: #5ea85e; color: #5ea85e; }
+    .badge-failed    { border-color: var(--danger); color: var(--danger); }
+
+    /* Priority badges */
+    .priority { font-size: 10px; color: var(--muted); }
+    .priority-high   { color: var(--danger); }
+    .priority-medium { color: var(--warn); }
+
+    /* Progress bar */
+    .progress-bar {
+      height: 4px;
+      background: var(--line);
+      border-radius: 2px;
+      overflow: hidden;
+      margin-top: 8px;
+    }
+    .progress-fill {
+      height: 100%;
+      background: var(--accent);
+      border-radius: 2px;
+      transition: width 0.3s;
+    }
+
+    /* Step list */
+    .step-list { margin-top: 10px; font-size: 12px; }
+    .step-item { display: flex; align-items: center; gap: 8px; padding: 4px 0; }
+    .step-icon { width: 14px; text-align: center; flex-shrink: 0; }
+    .step-done   .step-icon { color: #5ea85e; }
+    .step-active .step-icon { color: var(--accent); }
+    .step-ready  .step-icon { color: var(--warn); }
+    .step-failed .step-icon { color: var(--danger); }
+    .step-blocked .step-icon { color: var(--danger); }
+    .step-pending .step-icon, .step-skipped .step-icon { color: var(--muted); }
+    .step-desc { color: var(--text); }
+    .step-pending .step-desc, .step-skipped .step-desc { color: var(--muted); }
+
+    /* Event timeline */
+    .timeline { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 10px; }
+    .timeline-title { font-size: 11px; color: var(--muted); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px; }
+    .timeline-events { max-height: 200px; overflow-y: auto; font-size: 11px; }
+    .timeline-event { padding: 3px 0; color: var(--muted); display: flex; gap: 8px; }
+    .timeline-event .ts { flex-shrink: 0; font-variant-numeric: tabular-nums; }
+    .timeline-event .ev-type { color: var(--accent); flex-shrink: 0; min-width: 160px; }
+
+    /* Empty state */
+    .empty-state {
+      text-align: center;
+      padding: 60px 20px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    /* Connection indicator */
+    .conn-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: var(--muted);
+      display: inline-block;
+    }
+    .conn-dot.connected { background: var(--accent); }
+  </style>
+</head>
+<body>
+  <header>
+    <div style="display:flex;align-items:center;gap:12px">
+      <strong>NeoPsyke Goals</strong>
+      <span class="conn-dot" id="conn-dot" title="SSE disconnected"></span>
+    </div>
+    <div class="nav-links">
+      <a class="ghost-btn" href="/" target="_blank" rel="noopener noreferrer">Conversations</a>
+      <a class="ghost-btn" href="/dashboard" target="_blank" rel="noopener noreferrer">Observability</a>
+      <a class="ghost-btn" href="/metrics" target="_blank" rel="noopener noreferrer">Metrics</a>
+    </div>
+  </header>
+  <div class="main">
+    <div class="goal-list" id="goal-list">
+      <div class="empty-state" id="empty-state">No goals yet.</div>
+    </div>
+  </div>
+
+  <script>
+    const listEl = document.getElementById('goal-list');
+    const emptyEl = document.getElementById('empty-state');
+    const connDot = document.getElementById('conn-dot');
+    let goals = [];
+    let selectedId = null;
+    let eventLog = []; // recent goal events from SSE
+
+    // ── Fetch initial data ──────────────────────────────────────
+    async function fetchGoals() {
+      try {
+        const res = await fetch('/api/goals');
+        if (!res.ok) return;
+        goals = await res.json();
+        render();
+      } catch (_) {}
+    }
+
+    // ── SSE for live updates ────────────────────────────────────
+    function connectSSE() {
+      const es = new EventSource('/api/obs/events');
+      es.addEventListener('ready', () => {
+        connDot.classList.add('connected');
+        connDot.title = 'SSE connected';
+      });
+      es.addEventListener('agent', (e) => {
+        try {
+          const ev = JSON.parse(e.data);
+          if (ev.event && ev.event.type && ev.event.type.startsWith('goal_')) {
+            eventLog.unshift(ev.event);
+            if (eventLog.length > 200) eventLog.length = 200;
+            // Refresh goal list on goal events
+            fetchGoals();
+          }
+        } catch (_) {}
+      });
+      es.addEventListener('error', () => {
+        connDot.classList.remove('connected');
+        connDot.title = 'SSE disconnected';
+      });
+    }
+
+    // ── Rendering ───────────────────────────────────────────────
+    function render() {
+      if (goals.length === 0) {
+        emptyEl.style.display = '';
+        // Remove goal cards but keep empty state
+        Array.from(listEl.querySelectorAll('.goal-card')).forEach(el => el.remove());
+        return;
+      }
+      emptyEl.style.display = 'none';
+
+      // Sort: active first, then by priority descending
+      const statusOrder = { ACTIVE: 0, PLANNING: 1, BLOCKED: 2, CREATED: 3, SUSPENDED: 4, COMPLETED: 5, FAILED: 6 };
+      const sorted = [...goals].sort((a, b) => {
+        const sa = statusOrder[a.status] ?? 9;
+        const sb = statusOrder[b.status] ?? 9;
+        if (sa !== sb) return sa - sb;
+        return (b.createdAtMs || 0) - (a.createdAtMs || 0);
+      });
+
+      // Remove old cards
+      Array.from(listEl.querySelectorAll('.goal-card')).forEach(el => el.remove());
+
+      for (const p of sorted) {
+        const card = document.createElement('div');
+        card.className = 'goal-card' + (p.goalId === selectedId ? ' selected' : '');
+        card.onclick = () => { selectedId = selectedId === p.goalId ? null : p.goalId; render(); };
+
+        const statusClass = 'badge-' + (p.status || 'created').toLowerCase();
+        const priorityClass = (p.priority || '').toLowerCase() === 'high' ? 'priority-high'
+          : (p.priority || '').toLowerCase() === 'medium' ? 'priority-medium' : '';
+
+        // Progress calculation
+        const totalSteps = p.totalSteps || 0;
+        const doneSteps = p.doneSteps || 0;
+        const pct = totalSteps > 0 ? Math.round((doneSteps / totalSteps) * 100) : 0;
+
+        let inner = `
+          <div class="goal-header">
+            <span class="goal-title">${esc(p.title || p.goalId)}</span>
+            <span class="badge ${statusClass}">${esc(p.status || 'CREATED')}</span>
+          </div>
+          <div class="goal-meta">
+            <span class="priority ${priorityClass}">${esc(p.priority || 'MEDIUM')}</span>
+            <span>${doneSteps}/${totalSteps} steps</span>
+            ${p.lastWorkedAt ? '<span>last: ' + relTime(p.lastWorkedAt) + '</span>' : ''}
+          </div>
+          <div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div>
+        `;
+
+        // Expanded view: show steps and event timeline
+        if (p.goalId === selectedId) {
+          inner += renderSteps(p);
+          inner += renderTimeline(p.goalId);
+        }
+
+        card.innerHTML = inner;
+        listEl.appendChild(card);
+      }
+    }
+
+    function renderSteps(p) {
+      if (!p.steps || p.steps.length === 0) return '';
+      let html = '<div class="step-list">';
+      for (const s of p.steps) {
+        const st = (s.status || 'pending').toLowerCase();
+        const icon = st === 'done' ? '\u2713' : st === 'in_progress' ? '\u25b6' : st === 'ready' ? '\u25cb'
+          : st === 'failed' ? '\u2717' : st === 'blocked' ? '\u26a0' : st === 'skipped' ? '\u2014' : '\u00b7';
+        html += `<div class="step-item step-${st}"><span class="step-icon">${icon}</span><span class="step-desc">${esc(s.description || s.id)}</span></div>`;
+      }
+      html += '</div>';
+      return html;
+    }
+
+    function renderTimeline(goalId) {
+      const relevant = eventLog.filter(ev => ev.data && ev.data.goal_id === goalId).slice(0, 30);
+      if (relevant.length === 0) return '';
+      let html = '<div class="timeline"><div class="timeline-title">Recent Events</div><div class="timeline-events">';
+      for (const ev of relevant) {
+        const ts = ev.tsIso ? new Date(ev.tsIso).toLocaleTimeString() : '';
+        const type = (ev.type || '').replace('goal_', '');
+        const detail = formatEventDetail(ev);
+        html += `<div class="timeline-event"><span class="ts">${ts}</span><span class="ev-type">${esc(type)}</span><span>${esc(detail)}</span></div>`;
+      }
+      html += '</div></div>';
+      return html;
+    }
+
+    function formatEventDetail(ev) {
+      const d = ev.data || {};
+      if (d.step_id) return d.step_id + (d.description ? ': ' + d.description : '');
+      if (d.previous_status && d.current_status) return d.previous_status + ' \u2192 ' + d.current_status;
+      if (d.signal_type) return d.signal_type;
+      return '';
+    }
+
+    // ── Helpers ──────────────────────────────────────────────────
+    function esc(s) {
+      const d = document.createElement('div');
+      d.textContent = s || '';
+      return d.innerHTML;
+    }
+
+    function relTime(isoOrMs) {
+      if (!isoOrMs) return '';
+      const ms = typeof isoOrMs === 'number' ? isoOrMs : new Date(isoOrMs).getTime();
+      const ago = Date.now() - ms;
+      if (ago < 60000) return 'just now';
+      if (ago < 3600000) return Math.floor(ago / 60000) + 'm ago';
+      if (ago < 86400000) return Math.floor(ago / 3600000) + 'h ago';
+      return Math.floor(ago / 86400000) + 'd ago';
+    }
+
+    // ── Init ────────────────────────────────────────────────────
+    fetchGoals();
+    connectSSE();
+    // Periodic refresh fallback
+    setInterval(fetchGoals, 15000);
+  </script>
+</body>
+</html>

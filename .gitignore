@@ -3,10 +3,22 @@
 build/
 out/
 .psyke/
+.neopsyke/
+.freud/
+.kotlin/
+freud/latest
+freud/latest-run.txt
+freud/artifacts-latest
+freud/logs/latest
 
 # IDE/editor files
 .idea/
 *.iml
 
+# Claude Code
+.claude/
+!.claude/settings.json
+
 # OS files
 .DS_Store
+__pycache__/

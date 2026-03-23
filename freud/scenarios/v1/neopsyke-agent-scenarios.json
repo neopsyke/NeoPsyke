@@ -1,0 +1,55 @@
+{
+  "version": "v1",
+  "scenarios": [
+    {
+      "id": "denial_alternative",
+      "selector": "ai.neopsyke.eval.AgentScenarioPackTest.scenario_denial_alternative_action",
+      "description": "Denied action is replaced with a materially different safe action."
+    },
+    {
+      "id": "fallback_external_failures",
+      "selector": "ai.neopsyke.eval.AgentScenarioPackTest.scenario_fallback_after_external_failures",
+      "description": "External failures converge to a fallback explanation instead of a silent drop."
+    },
+    {
+      "id": "memory_recall_context",
+      "selector": "ai.neopsyke.eval.AgentScenarioPackTest.scenario_memory_recall_injected_into_prompt",
+      "description": "Memory recall is injected into planner prompt context."
+    },
+    {
+      "id": "scratchpad_lifecycle",
+      "selector": "ai.neopsyke.eval.AgentScenarioPackTest.scenario_scratchpad_prompt_and_cleanup",
+      "description": "Per-request scratchpad is injected into prompt context and destroyed after terminal answer."
+    },
+    {
+      "id": "forced_terminal_model_errors",
+      "selector": "ai.neopsyke.eval.AgentScenarioPackTest.scenario_forced_terminal_after_repeated_model_errors",
+      "description": "Repeated planner model errors trigger forced terminal answer path."
+    },
+    {
+      "id": "unavailable_action_recovery",
+      "selector": "ai.neopsyke.eval.AgentScenarioPackTest.scenario_unavailable_action_then_recover_with_answer",
+      "description": "Unavailable actions are rejected and flow recovers to an answer."
+    },
+    {
+      "id": "action_verifier_repair",
+      "selector": "ai.neopsyke.eval.AgentScenarioPackTest.scenario_action_verifier_does_not_semantically_rewrite_web_search_before_superego_review",
+      "description": "Action verifier preserves the original web-search intent before Superego policy review."
+    },
+    {
+      "id": "plan_decomposition",
+      "selector": "ai.neopsyke.eval.AgentScenarioPackTest.scenario_plan_decomposition_then_execute",
+      "description": "Plan decision decomposes into step-thoughts that execute through normal Ego loop."
+    },
+    {
+      "id": "id_impulse_parallel_lifecycle",
+      "selector": "ai.neopsyke.eval.AgentScenarioPackTest.scenario_id_impulse_parallel_lifecycle",
+      "description": "Id impulse lifecycle finalizes only after all parallel branches complete and accepts when any branch executes valid work."
+    },
+    {
+      "id": "goal_async_wait_resume",
+      "selector": "ai.neopsyke.eval.AgentScenarioPackTest.scenario_goal_async_wait_resume",
+      "description": "Goal-origin async action blocks, resumes through the generic async provider path, and completes deterministically."
+    }
+  ]
+}

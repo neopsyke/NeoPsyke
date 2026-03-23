@@ -1,0 +1,5 @@
+scenario_id=broken_scenario selector=ai.neopsyke.eval.AgentScenarioPackTest.scenario_broken
+status=fail description=Forced terminal failed unexpectedly.
+scenario_id=broken_scenario selector=ai.neopsyke.eval.AgentScenarioPackTest.scenario_broken error=provider unavailable during setup
+java.lang.AssertionError: expected fallback answer
+scenarios_total=1 scenarios_passed=0 scenarios_failed=1

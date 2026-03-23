@@ -1,0 +1,12 @@
+time:
+  enabled: true
+  mode: stdio
+  provider: mcp-server-time
+  command: "uvx mcp-server-time"
+  fallback_commands:
+    - "python -m mcp_server_time"
+
+fetch:
+  enabled: true
+  mode: native
+  provider: native-jvm

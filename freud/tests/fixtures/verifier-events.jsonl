@@ -1,0 +1,4 @@
+{"type":"task_verifier_review","data":{"allow":true,"reason_code":"TASK_VERIFIED","intent_category":"factual","volatility_level":"stable","requires_external_evidence":false}}
+{"type":"task_verifier_review","data":{"allow":false,"reason_code":"VOLATILE_UNVERIFIED","intent_category":"volatile_fact","volatility_level":"volatile","requires_external_evidence":true}}
+{"type":"task_verifier_review","data":{"allow":true,"reason_code":"TASK_EVIDENCE_UNAVAILABLE_GRACEFUL","intent_category":"unknown","volatility_level":"stable","requires_external_evidence":true}}
+{"type":"other_event","data":{"unrelated":"data"}}
