@@ -100,6 +100,10 @@ class SqliteActionControlStore(
 
     override fun nextThreadSequence(rootInputId: String): Long =
         synchronized(connection) {
+            // Current sequence allocation is safe for this single-process runtime because staged actions
+            // are enforced in order once persisted. If future expansion introduces high concurrent staging
+            // for the same root input across threads/processes, sequence allocation should move into a
+            // single transactional claim/insert path instead of this read-then-assign helper.
             connection.prepareStatement(
                 """
                 SELECT COALESCE(MAX(thread_sequence), 0) + 1 AS next_thread_sequence
