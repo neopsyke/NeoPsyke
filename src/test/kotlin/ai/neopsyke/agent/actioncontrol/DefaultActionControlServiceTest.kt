@@ -12,6 +12,7 @@ import ai.neopsyke.agent.model.PendingAction
 import ai.neopsyke.agent.model.StagedActionStatus
 import ai.neopsyke.agent.model.Urgency
 import java.nio.file.Files
+import kotlin.test.assertContentEquals
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
@@ -68,6 +69,88 @@ class DefaultActionControlServiceTest {
             assertEquals(CommitMode.POLICY_AUTONOMOUS, authorization.commitMode)
             assertEquals("policy-autonomous-worker", authorization.grantedByPrincipalId)
             assertEquals(1, store.listReceipts(10).size)
+        }
+    }
+
+    @Test
+    fun `autonomous processor preserves same thread action order across polling cycles`() {
+        val tempDir = Files.createTempDirectory("action-control-thread-order-test")
+        val dbPath = tempDir.resolve("action-control.db").toString()
+        SqliteActionControlStore(dbPath).use { store ->
+            val executedPayloads = mutableListOf<String>()
+            val service = DefaultActionControlService(
+                config = ActionControlConfig(dbPath = dbPath),
+                store = store,
+            ) { action, _ ->
+                executedPayloads += action.payload
+                ActionOutcome(
+                    statusSummary = "Executed ${action.payload}",
+                    executionStatus = ActionExecutionStatus.SUCCESS,
+                )
+            }
+            val context = ConversationContext.default()
+            val rootInputId = "root-thread-order"
+
+            kotlinx.coroutines.runBlocking {
+                service.handleAuthorizationDecision(
+                    action = PendingAction(
+                        id = 11,
+                        urgency = Urgency.MEDIUM,
+                        type = ActionType.GOAL_OPERATION,
+                        payload = """{"operation":"revise","goal_id":"goal-1","step":"first"}""",
+                        summary = "first action",
+                        rootInputId = rootInputId,
+                        conversationContext = context,
+                    ),
+                    decision = AuthorizationDecision(
+                        progress = AuthorizationProgress.ALLOW_STAGE,
+                        commitMode = CommitMode.POLICY_AUTONOMOUS,
+                        policyVersion = "test-v1",
+                        reason = "autonomous stage",
+                        reasonCode = "TEST_THREAD_ORDER",
+                    ),
+                    conversationContext = context,
+                )
+                service.handleAuthorizationDecision(
+                    action = PendingAction(
+                        id = 12,
+                        urgency = Urgency.MEDIUM,
+                        type = ActionType.GOAL_OPERATION,
+                        payload = """{"operation":"revise","goal_id":"goal-2","step":"second"}""",
+                        summary = "second action",
+                        rootInputId = rootInputId,
+                        conversationContext = context,
+                    ),
+                    decision = AuthorizationDecision(
+                        progress = AuthorizationProgress.ALLOW_STAGE,
+                        commitMode = CommitMode.POLICY_AUTONOMOUS,
+                        policyVersion = "test-v1",
+                        reason = "autonomous stage",
+                        reasonCode = "TEST_THREAD_ORDER",
+                    ),
+                    conversationContext = context,
+                )
+            }
+
+            val firstBatch = kotlinx.coroutines.runBlocking {
+                service.processAutonomousStagedActions(limit = 10)
+            }
+            assertEquals(1, firstBatch.size)
+            assertEquals("first action", firstBatch.single().stagedAction.summary)
+            assertContentEquals(listOf("""{"operation":"revise","goal_id":"goal-1","step":"first"}"""), executedPayloads)
+
+            val secondBatch = kotlinx.coroutines.runBlocking {
+                service.processAutonomousStagedActions(limit = 10)
+            }
+            assertEquals(1, secondBatch.size)
+            assertEquals("second action", secondBatch.single().stagedAction.summary)
+            assertContentEquals(
+                listOf(
+                    """{"operation":"revise","goal_id":"goal-1","step":"first"}""",
+                    """{"operation":"revise","goal_id":"goal-2","step":"second"}""",
+                ),
+                executedPayloads,
+            )
         }
     }
 

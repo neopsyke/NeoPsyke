@@ -191,7 +191,7 @@ sequenceDiagram
                                 ACS->>ACDB: save staged action
                                 ACS-->>Ego: staged action (`WAITING_AUTHORIZATION` or `READY`)
                                 Ego->>Sched: enqueue approval-or-alternative thought
-                                Note over ACW,ACS: Background autonomous worker polls `READY` staged actions and executes them off the request path
+                                Note over ACW,ACS: Background autonomous worker polls SQL-filtered runnable `READY` actions, preserving same-thread order (`threadSequence`) and same-target serialization (`executionKey`) before atomic claim + execute
                             else direct commit allowed
                                 ACS->>ACDB: save staged action + authorization
                                 ACS->>Motor: execute(action, authorization)

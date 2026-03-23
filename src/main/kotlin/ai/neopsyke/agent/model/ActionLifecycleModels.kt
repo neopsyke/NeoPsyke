@@ -67,6 +67,8 @@ data class StagedAction(
     val preparedActionId: String,
     val rootInputId: String? = null,
     val rootInputReceivedAtMs: Long? = null,
+    val threadSequence: Long? = null,
+    val executionKey: String? = null,
     val actionType: ActionType,
     val summary: String,
     val payload: String,

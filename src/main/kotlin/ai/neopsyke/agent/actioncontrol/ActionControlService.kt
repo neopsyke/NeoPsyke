@@ -1,9 +1,13 @@
 package ai.neopsyke.agent.actioncontrol
 
+import com.fasterxml.jackson.databind.DeserializationFeature
+import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+import com.fasterxml.jackson.module.kotlin.readValue
 import ai.neopsyke.agent.config.ActionControlConfig
 import ai.neopsyke.agent.model.ActionExecutionStatus
 import ai.neopsyke.agent.model.ActionOutcome
 import ai.neopsyke.agent.model.ActionReceipt
+import ai.neopsyke.agent.model.ActionType
 import ai.neopsyke.agent.model.AuthorizationDecision
 import ai.neopsyke.agent.model.AuthorizationProgress
 import ai.neopsyke.agent.model.CommitAuthorization
@@ -256,12 +260,15 @@ class DefaultActionControlService(
         }
 
         val prepared = prepare(action, conversationContext)
+        val threadSequence = action.rootInputId?.let(store::nextThreadSequence)
         val staged = store.saveStagedAction(
             StagedAction(
                 id = nextId(),
                 preparedActionId = prepared.id,
                 rootInputId = action.rootInputId,
                 rootInputReceivedAtMs = action.rootInputReceivedAtMs,
+                threadSequence = threadSequence,
+                executionKey = deriveExecutionKey(action, conversationContext),
                 actionType = action.type,
                 summary = action.summary,
                 payload = action.payload,
@@ -343,26 +350,28 @@ class DefaultActionControlService(
     }
 
     override suspend fun processAutonomousStagedActions(limit: Int): List<ActionControlDecisionResult.Executed> {
-        val readyActions = store.listStagedActions(limit.coerceAtLeast(1).coerceAtMost(config.maxInspectResults))
-            .filter { staged ->
-                staged.status == StagedActionStatus.READY &&
-                    staged.commitMode == CommitMode.POLICY_AUTONOMOUS
-            }
+        val readyActions = store.listRunnableReadyAutonomousActions(
+            limit.coerceAtLeast(1).coerceAtMost(config.maxInspectResults)
+        )
         return buildList {
             readyActions.forEach { staged ->
-                val authorization = store.saveAuthorization(
-                    CommitAuthorization(
-                        id = nextId(),
-                        stagedActionId = staged.id,
-                        commitMode = CommitMode.POLICY_AUTONOMOUS,
-                        grantedByPrincipalId = AUTONOMOUS_WORKER_PRINCIPAL_ID,
-                        grantedByChannelId = AUTONOMOUS_WORKER_CHANNEL_ID,
-                        policyVersion = staged.policyVersion,
-                        actionHash = staged.actionHash,
-                        expiresAtMs = System.currentTimeMillis() + config.authorizationTtlMs,
-                    )
+                val nowMs = System.currentTimeMillis()
+                val authorization = CommitAuthorization(
+                    id = nextId(),
+                    stagedActionId = staged.id,
+                    commitMode = CommitMode.POLICY_AUTONOMOUS,
+                    grantedByPrincipalId = AUTONOMOUS_WORKER_PRINCIPAL_ID,
+                    grantedByChannelId = AUTONOMOUS_WORKER_CHANNEL_ID,
+                    policyVersion = staged.policyVersion,
+                    actionHash = staged.actionHash,
+                    expiresAtMs = nowMs + config.authorizationTtlMs,
                 )
-                when (val result = executeAuthorized(staged, authorization)) {
+                val claimed = store.tryClaimAutonomousReadyAction(
+                    stagedActionId = staged.id,
+                    authorization = authorization,
+                    updatedAtMs = nowMs,
+                ) ?: return@forEach
+                when (val result = executeAuthorized(claimed, authorization)) {
                     is ActionControlDecisionResult.Executed -> add(result)
                     else -> Unit
                 }
@@ -381,12 +390,15 @@ class DefaultActionControlService(
         reasonCode: String?,
     ): ActionReceipt {
         val prepared = prepare(action, conversationContext)
+        val threadSequence = action.rootInputId?.let(store::nextThreadSequence)
         val staged = store.saveStagedAction(
             StagedAction(
                 id = nextId(),
                 preparedActionId = prepared.id,
                 rootInputId = action.rootInputId,
                 rootInputReceivedAtMs = action.rootInputReceivedAtMs,
+                threadSequence = threadSequence,
+                executionKey = deriveExecutionKey(action, conversationContext),
                 actionType = action.type,
                 summary = action.summary,
                 payload = action.payload,
@@ -561,10 +573,66 @@ class DefaultActionControlService(
 
     private fun nextId(): String = UUID.randomUUID().toString()
 
+    private fun deriveExecutionKey(
+        action: PendingAction,
+        conversationContext: ConversationContext,
+    ): String? =
+        when (action.type) {
+            ActionType.CONTACT_USER -> {
+                val channel = conversationContext.security.channel
+                "contact:${channel.provider}:${channel.channelId}"
+            }
+
+            ActionType.GOAL_OPERATION -> deriveGoalExecutionKey(action)
+            EMAIL_SEND_ACTION_TYPE -> deriveEmailExecutionKey(action)
+            else -> null
+        }
+
+    private fun deriveGoalExecutionKey(action: PendingAction): String? {
+        val payload = runCatching { payloadMapper.readTree(action.payload) }.getOrNull() ?: return null
+        val goalId = payload.path("goal_id").textValue()
+            ?.ifBlank { null }
+            ?: payload.path("goalId").textValue()?.ifBlank { null }
+        if (!goalId.isNullOrBlank()) {
+            return "goal:${goalId.trim()}"
+        }
+        val operation = payload.path("operation").textValue()?.trim()?.lowercase().orEmpty()
+        return if (operation in setOf("pause", "resume", "reprioritize", "complete", "revise")) {
+            "goal-operation:${action.rootInputId.orEmpty()}:${operation}"
+        } else {
+            null
+        }
+    }
+
+    private fun deriveEmailExecutionKey(action: PendingAction): String? {
+        val payload = runCatching { payloadMapper.readValue<EmailExecutionKeyPayload>(action.payload) }.getOrNull() ?: return null
+        val sender = payload.sender?.trim().orEmpty()
+            .ifBlank { payload.onBehalfOf?.trim().orEmpty() }
+        val recipients = (payload.to.orEmpty() + payload.cc.orEmpty() + payload.bcc.orEmpty())
+            .map { it.trim().lowercase() }
+            .filter { it.isNotBlank() }
+            .sorted()
+        if (sender.isBlank() || recipients.isEmpty()) {
+            return null
+        }
+        return "email:$sender:${recipients.joinToString(",")}"
+    }
+
     private companion object {
         const val AUTONOMOUS_WORKER_PRINCIPAL_ID: String = "policy-autonomous-worker"
         const val AUTONOMOUS_WORKER_CHANNEL_ID: String = "action-control-worker"
         const val BYPASS_POLICY_VERSION: String = "runtime-bypass-v1"
         const val BYPASS_REASON_CODE: String = "ACTION_BYPASS_EXECUTION"
+        val EMAIL_SEND_ACTION_TYPE = ActionType("email_send")
+        val payloadMapper = jacksonObjectMapper()
+            .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
     }
 }
+
+private data class EmailExecutionKeyPayload(
+    val sender: String? = null,
+    val onBehalfOf: String? = null,
+    val to: List<String>? = null,
+    val cc: List<String>? = null,
+    val bcc: List<String>? = null,
+)

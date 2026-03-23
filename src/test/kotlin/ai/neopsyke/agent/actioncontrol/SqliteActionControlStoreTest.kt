@@ -10,6 +10,7 @@ import ai.neopsyke.agent.model.StagedAction
 import ai.neopsyke.agent.model.StagedActionStatus
 import java.nio.file.Files
 import kotlin.test.Test
+import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 
@@ -65,4 +66,119 @@ class SqliteActionControlStoreTest {
             assertEquals(1, store.listReceipts(20).size)
         }
     }
+
+    @Test
+    fun `store exposes only earliest runnable action per cognitive thread`() {
+        val tempDir = Files.createTempDirectory("action-control-store-thread-test")
+        val dbPath = tempDir.resolve("action-control.db").toString()
+
+        SqliteActionControlStore(dbPath).use { store ->
+            store.saveStagedAction(
+                stagedAction(
+                    id = "stage-thread-1",
+                    rootInputId = "root-1",
+                    threadSequence = 1L,
+                    executionKey = "goal:1",
+                    createdAtMs = 10L,
+                )
+            )
+            store.saveStagedAction(
+                stagedAction(
+                    id = "stage-thread-2",
+                    rootInputId = "root-1",
+                    threadSequence = 2L,
+                    executionKey = "goal:2",
+                    createdAtMs = 20L,
+                )
+            )
+
+            val firstRunnable = store.listRunnableReadyAutonomousActions(limit = 10)
+            assertContentEquals(listOf("stage-thread-1"), firstRunnable.map { it.id })
+
+            store.updateStagedAction(firstRunnable.single().copy(status = StagedActionStatus.COMPLETED, updatedAtMs = 30L))
+
+            val secondRunnable = store.listRunnableReadyAutonomousActions(limit = 10)
+            assertContentEquals(listOf("stage-thread-2"), secondRunnable.map { it.id })
+        }
+    }
+
+    @Test
+    fun `store exposes only earliest runnable action per execution key`() {
+        val tempDir = Files.createTempDirectory("action-control-store-key-test")
+        val dbPath = tempDir.resolve("action-control.db").toString()
+
+        SqliteActionControlStore(dbPath).use { store ->
+            store.saveStagedAction(
+                stagedAction(
+                    id = "stage-key-1",
+                    rootInputId = "root-1",
+                    threadSequence = 1L,
+                    executionKey = "contact:webapp:default-owner",
+                    createdAtMs = 10L,
+                )
+            )
+            store.saveStagedAction(
+                stagedAction(
+                    id = "stage-key-2",
+                    rootInputId = "root-2",
+                    threadSequence = 1L,
+                    executionKey = "contact:webapp:default-owner",
+                    createdAtMs = 20L,
+                )
+            )
+
+            val runnable = store.listRunnableReadyAutonomousActions(limit = 10)
+            assertContentEquals(listOf("stage-key-1"), runnable.map { it.id })
+
+            val authorization = CommitAuthorization(
+                id = "auth-claim-1",
+                stagedActionId = "stage-key-1",
+                commitMode = CommitMode.POLICY_AUTONOMOUS,
+                grantedByPrincipalId = "worker",
+                grantedByChannelId = "worker",
+                policyVersion = "test-v1",
+                actionHash = "hash-stage-key-1",
+            )
+            val claimed = store.tryClaimAutonomousReadyAction(
+                stagedActionId = "stage-key-1",
+                authorization = authorization,
+                updatedAtMs = 25L,
+            )
+            assertNotNull(claimed)
+            assertEquals(StagedActionStatus.EXECUTING, claimed.status)
+
+            val whileExecuting = store.listRunnableReadyAutonomousActions(limit = 10)
+            assertEquals(emptyList(), whileExecuting.map { it.id })
+
+            store.updateStagedAction(claimed.copy(status = StagedActionStatus.COMPLETED, updatedAtMs = 30L))
+
+            val afterCompletion = store.listRunnableReadyAutonomousActions(limit = 10)
+            assertContentEquals(listOf("stage-key-2"), afterCompletion.map { it.id })
+        }
+    }
+
+    private fun stagedAction(
+        id: String,
+        rootInputId: String,
+        threadSequence: Long,
+        executionKey: String?,
+        createdAtMs: Long,
+    ): StagedAction =
+        StagedAction(
+            id = id,
+            preparedActionId = "prep-$id",
+            rootInputId = rootInputId,
+            threadSequence = threadSequence,
+            executionKey = executionKey,
+            actionType = ActionType.CONTACT_USER,
+            summary = id,
+            payload = id,
+            conversationContext = ConversationContext.default(),
+            commitMode = CommitMode.POLICY_AUTONOMOUS,
+            status = StagedActionStatus.READY,
+            actionHash = "hash-$id",
+            policyVersion = "test-v1",
+            createdAtMs = createdAtMs,
+            updatedAtMs = createdAtMs,
+        )
 }

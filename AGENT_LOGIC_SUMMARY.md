@@ -542,6 +542,12 @@ It is intentionally high-level and should stay aligned with the code.
   - commit authorizations
   - action receipts
   - `READY` staged actions represent policy-autonomous commits waiting for the runtime-owned autonomous worker to pick them up
+  - worker selection is SQL-driven, not in-memory best-effort:
+    - autonomous candidates are filtered in the store before batching
+    - same-thread side effects are serialized by `threadSequence`
+    - same-target side effects are serialized by `executionKey`
+    - a candidate is only runnable when no earlier nonterminal same-thread action blocks it and no active/non-earlier same-key action blocks it
+    - claim remains atomic at execution time, so the runtime does not rely on stale candidate snapshots
   - fallback-bypass executions are mirrored into durable staged/receipt records so the receipt trail stays complete
 - Planner payload repair is now action-type aware via registry hooks (plugin-specific `repairPlannerPayload`), with legacy default repair retained for bare `website_fetch` URLs.
 - Action outcomes can carry a generic `actionErrorCategory` (`none`, `retryable`, `non_retryable`).

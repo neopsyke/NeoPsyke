@@ -5,10 +5,17 @@ import ai.neopsyke.agent.model.CommitAuthorization
 import ai.neopsyke.agent.model.StagedAction
 
 interface ActionControlStore : AutoCloseable {
+    fun nextThreadSequence(rootInputId: String): Long
     fun saveStagedAction(action: StagedAction): StagedAction
     fun updateStagedAction(action: StagedAction): StagedAction
     fun stagedAction(id: String): StagedAction?
     fun listStagedActions(limit: Int): List<StagedAction>
+    fun listRunnableReadyAutonomousActions(limit: Int): List<StagedAction>
+    fun tryClaimAutonomousReadyAction(
+        stagedActionId: String,
+        authorization: CommitAuthorization,
+        updatedAtMs: Long,
+    ): StagedAction?
 
     fun saveAuthorization(authorization: CommitAuthorization): CommitAuthorization
     fun authorization(id: String): CommitAuthorization?
