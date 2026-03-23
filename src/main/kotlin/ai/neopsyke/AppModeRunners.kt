@@ -62,6 +62,7 @@ import ai.neopsyke.eval.ReasoningLogicHarnessClient
 import ai.neopsyke.eval.ReasoningSelfEvalRunner
 import ai.neopsyke.eval.UsageTrackingChatClient
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.ClosedReceiveChannelException
@@ -638,24 +639,26 @@ internal object AppModeRunners {
                 criticalSinks = listOfNotNull(sidecarSink),
                 scope = agentScope
             ).use { instrumentation ->
-                val dashboardServer = if (dashboardEnabled) {
-                    try {
-                        DashboardServer(
-                            store = dashboardStore,
-                            chatBridge = chatBridge,
-                            innerVoiceStore = innerVoiceStore,
-                            idInnerVoiceFilePath = idInnerVoiceFileSink?.path,
-                            port = dashboardPort
-                        ).also { it.start() }
-                    } catch (ex: Exception) {
-                        logger.warn(ex) { "Dashboard failed to start on port $dashboardPort. Continuing without dashboard server." }
+                val actionAuthorizationPolicy = createActionAuthorizationPolicy(config)
+                createActionControlStoreIfEnabled(config).use { actionControlStore ->
+                    val dashboardServer = if (dashboardEnabled) {
+                        try {
+                            DashboardServer(
+                                store = dashboardStore,
+                                chatBridge = chatBridge,
+                                innerVoiceStore = innerVoiceStore,
+                                idInnerVoiceFilePath = idInnerVoiceFileSink?.path,
+                                port = dashboardPort
+                            ).also { it.start() }
+                        } catch (ex: Exception) {
+                            logger.warn(ex) { "Dashboard failed to start on port $dashboardPort. Continuing without dashboard server." }
+                            null
+                        }
+                    } else {
                         null
                     }
-                } else {
-                    null
-                }
-    
-                dashboardServer.use {
+
+                    dashboardServer.use {
                     if (dashboardEnabled) {
                         logger.info { "Dashboard available at ${dashboardServer?.url}" }
                     }
@@ -1002,6 +1005,7 @@ internal object AppModeRunners {
                                                                     ?: superegoReviewRouting.primaryTokenWeight,
                                                                 escalationModelContextWindow = superegoReviewRouting.escalationContextWindow,
                                                                 escalationModelReasoningOverhead = superegoReviewRouting.escalationReasoningOverhead,
+                                                                authorizationPolicy = actionAuthorizationPolicy,
                                                                 instrumentation = instrumentation
                                                             )
                                                         },
@@ -1036,6 +1040,19 @@ internal object AppModeRunners {
                                                         fetchTool = activeFetchTool,
                                                         goalsGateway = goalManager
                                                             ?: ai.neopsyke.agent.goal.NoopGoalsGateway,
+                                                        actionControlServiceFactory = { motorCortex ->
+                                                            actionControlStore?.let { store ->
+                                                                ai.neopsyke.agent.actioncontrol.DefaultActionControlService(
+                                                                    config = config.actionControl,
+                                                                    store = store,
+                                                                    executeCommittedAction = { action, authorization ->
+                                                                        motorCortex.execute(action, config.searchResultCount, authorization)
+                                                                    }
+                                                                )
+                                                            } ?: ai.neopsyke.agent.actioncontrol.LegacyCompatibleActionControlService { action, authorization ->
+                                                                motorCortex.execute(action, config.searchResultCount, authorization)
+                                                            }
+                                                        },
                                                         output = {},
                                                     )
                                                     assembly.actionRegistry.loadWarnings.forEach { warning ->
@@ -1047,6 +1064,7 @@ internal object AppModeRunners {
                                                         val registry = assembled.actionRegistry
                                                         val motorCortex = assembled.motorCortex
                                                         val ego = assembled.ego
+                                                        dashboardServer?.actionControlService = assembled.actionControlService
                                                         val actionStatuses = motorCortex.startupSmokeTest()
                                                         instrumentation.emit(AgentEvents.actionCapabilities(actionStatuses))
                                                         actionStatuses.filterNot { it.available }.forEach { status ->
@@ -1083,9 +1101,18 @@ internal object AppModeRunners {
                                                         val shutdownGuard = ShutdownCloseGuard("interactive-runtime").apply {
                                                             register(hippocampus)
                                                             register(logbook)
+                                                            register(actionControlStore)
                                                             register(activeFetchTool)
                                                             register(timeTool)
                                                         }
+                                                        shutdownGuard.register(
+                                                            createActionControlAutonomousWorker(
+                                                                scope = this,
+                                                                ego = ego,
+                                                                config = config,
+                                                                instrumentation = instrumentation,
+                                                            )
+                                                        )
                                                         val idConfig = ai.neopsyke.config.IdRuntimeConfigLoader.load()
                                                         val idModule = if (idConfig.enabled) {
                                                            ai.neopsyke.agent.id.Id(
@@ -1129,6 +1156,7 @@ internal object AppModeRunners {
                     dumpEndOfRunMetrics(metrics)
                 }
             }
+                }
             }
         } finally {
             idInnerVoiceFileSink?.close()
@@ -1369,6 +1397,8 @@ internal object AppModeRunners {
                                                 "memory_advisor=${llm.memoryAdvisor.providerLabel}/${llm.memoryAdvisor.model}"
                                         }
                                         try {
+                                        val actionAuthorizationPolicy = createActionAuthorizationPolicy(config)
+                                        val actionControlStore = createActionControlStoreIfEnabled(config)
                                         val mcpTimeTool = createMcpTimeTool(config, mcpRuntimeConfig.time, agentScope)
                                         val fetchTool = createFetchTool(config, mcpRuntimeConfig.fetch)
                                         val webSearchRuntime = createWebSearchRuntime(
@@ -1434,6 +1464,7 @@ internal object AppModeRunners {
                                                                 ?: superegoReviewRouting.primaryTokenWeight,
                                                             escalationModelContextWindow = superegoReviewRouting.escalationContextWindow,
                                                             escalationModelReasoningOverhead = superegoReviewRouting.escalationReasoningOverhead,
+                                                            authorizationPolicy = actionAuthorizationPolicy,
                                                             instrumentation = instrumentation
                                                         )
                                                     },
@@ -1468,6 +1499,19 @@ internal object AppModeRunners {
                                                     fetchTool = activeFetchTool,
                                                     goalsGateway = goalManager
                                                         ?: ai.neopsyke.agent.goal.NoopGoalsGateway,
+                                                    actionControlServiceFactory = { motorCortex ->
+                                                        actionControlStore?.let { store ->
+                                                            ai.neopsyke.agent.actioncontrol.DefaultActionControlService(
+                                                                config = config.actionControl,
+                                                                store = store,
+                                                                executeCommittedAction = { action, authorization ->
+                                                                    motorCortex.execute(action, config.searchResultCount, authorization)
+                                                                }
+                                                            )
+                                                        } ?: ai.neopsyke.agent.actioncontrol.LegacyCompatibleActionControlService { action, authorization ->
+                                                            motorCortex.execute(action, config.searchResultCount, authorization)
+                                                        }
+                                                    },
                                                     output = liveOutput,
                                                 )
                                                 assembly.actionRegistry.loadWarnings.forEach { warning ->
@@ -1482,9 +1526,18 @@ internal object AppModeRunners {
                                                     val shutdownGuard = ShutdownCloseGuard("freud-live-runtime").apply {
                                                         register(hippocampus)
                                                         register(logbook)
+                                                        register(actionControlStore)
                                                         register(activeFetchTool)
                                                         register(timeTool)
                                                     }
+                                                    shutdownGuard.register(
+                                                        createActionControlAutonomousWorker(
+                                                            scope = this,
+                                                            ego = ego,
+                                                            config = config,
+                                                            instrumentation = instrumentation,
+                                                        )
+                                                    )
                                                     val actionStatuses = motorCortex.startupSmokeTest()
                                                     instrumentation.emit(AgentEvents.actionCapabilities(actionStatuses))
                                                     instrumentation.emit(
@@ -2111,6 +2164,42 @@ internal object AppModeRunners {
             logger.warn(ex) { "Episodic logbook initialization failed; continuing without." }
             null
         }
+    }
+
+    private fun createActionAuthorizationPolicy(config: AgentConfig): ai.neopsyke.agent.actioncontrol.ActionAuthorizationPolicy =
+        ai.neopsyke.agent.actioncontrol.ConfiguredActionAuthorizationPolicy(
+            ai.neopsyke.agent.actioncontrol.ActionSecurityPolicyLoader.load(
+                Paths.get(config.actionControl.policyPath)
+            )
+        )
+
+    private fun createActionControlStoreIfEnabled(config: AgentConfig): ai.neopsyke.agent.actioncontrol.ActionControlStore? {
+        if (!config.actionControl.enabled) {
+            return null
+        }
+        return try {
+            ai.neopsyke.agent.actioncontrol.SqliteActionControlStore(config.actionControl.dbPath)
+        } catch (ex: Exception) {
+            logger.warn(ex) { "Action-control store initialization failed; continuing with legacy action control." }
+            null
+        }
+    }
+
+    private fun createActionControlAutonomousWorker(
+        scope: CoroutineScope,
+        ego: Ego,
+        config: AgentConfig,
+        instrumentation: ai.neopsyke.instrumentation.AgentInstrumentation,
+    ): AutoCloseable? {
+        if (!config.actionControl.enabled || !config.actionControl.autonomousWorkerEnabled) {
+            return null
+        }
+        return ai.neopsyke.agent.actioncontrol.ActionControlAutonomousWorker(
+            scope = scope,
+            config = config.actionControl,
+            processBatch = { limit -> ego.processAutonomousStagedActions(limit) },
+            instrumentation = instrumentation,
+        )
     }
 
     private fun createLogbookSummarizer(

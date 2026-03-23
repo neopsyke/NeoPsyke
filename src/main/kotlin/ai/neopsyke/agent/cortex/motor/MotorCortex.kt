@@ -8,6 +8,9 @@ import ai.neopsyke.agent.actions.websearch.WebSearchActionHandler
 import ai.neopsyke.agent.model.ActionOutcome
 import ai.neopsyke.agent.model.ActionType
 import ai.neopsyke.agent.config.AgentConfig
+import ai.neopsyke.agent.model.ActionEffectClass
+import ai.neopsyke.agent.model.ActionExecutionStatus
+import ai.neopsyke.agent.model.CommitAuthorization
 import ai.neopsyke.agent.model.PendingAction
 import ai.neopsyke.agent.goal.NoopGoalsGateway
 import ai.neopsyke.agent.goal.GoalsGateway
@@ -91,8 +94,28 @@ class MotorCortex(
     fun actionTypesWithCapability(capability: ActionCapability): Set<ActionType> =
         actionRegistry.actionTypesWithCapability(capability)
 
-    suspend fun execute(action: PendingAction, searchResultCount: Int): ActionOutcome {
-        return actionRegistry.execute(action, searchResultCount)
+    fun actionRegistry(): ActionRegistry = actionRegistry
+
+    suspend fun execute(
+        action: PendingAction,
+        searchResultCount: Int,
+        authorization: CommitAuthorization? = null,
+    ): ActionOutcome {
+        val contract = actionRegistry.contract(action.type)
+        if (
+            contract != null &&
+            contract.effectClass != ActionEffectClass.OBSERVE &&
+            !contract.directCommitAllowed &&
+            authorization == null
+        ) {
+            return ActionOutcome(
+                statusSummary = "Action '${action.type.id}' requires commit authorization before execution.",
+                executionStatus = ActionExecutionStatus.FAILED,
+                actionErrorCategory = "commit_authorization_required",
+                plannerSignal = "commit authorization required for ${action.type.id}",
+            )
+        }
+        return actionRegistry.execute(action, searchResultCount, authorization)
     }
 
     private suspend fun buildStatusSnapshot(): List<ActionImplementationStatus> =

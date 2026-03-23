@@ -7,6 +7,7 @@ import com.fasterxml.jackson.dataformat.yaml.YAMLFactory
 import com.fasterxml.jackson.module.kotlin.readValue
 import com.fasterxml.jackson.module.kotlin.registerKotlinModule
 import ai.neopsyke.agent.config.AgentConfig
+import ai.neopsyke.agent.config.ActionControlConfig
 import ai.neopsyke.agent.config.LogbookConfig
 import ai.neopsyke.agent.config.MemoryConfig
 import ai.neopsyke.agent.config.MetaReasonerConfig
@@ -49,6 +50,7 @@ private data class AgentRuntimeYamlAgent(
     val memory: AgentRuntimeYamlMemory? = AgentRuntimeYamlMemory(),
     val metaReasoner: AgentRuntimeYamlMetaReasoner? = AgentRuntimeYamlMetaReasoner(),
     val logbook: AgentRuntimeYamlLogbook? = AgentRuntimeYamlLogbook(),
+    val actionControl: AgentRuntimeYamlActionControl? = AgentRuntimeYamlActionControl(),
     val innerVoice: AgentRuntimeYamlInnerVoice? = AgentRuntimeYamlInnerVoice(),
     val runtime: AgentRuntimeYamlRuntime? = AgentRuntimeYamlRuntime(),
 )
@@ -161,6 +163,17 @@ private data class AgentRuntimeYamlLogbook(
     val useLlmSummarizer: Boolean? = null,
 )
 
+private data class AgentRuntimeYamlActionControl(
+    val enabled: Boolean? = null,
+    val dbPath: String? = null,
+    val policyPath: String? = null,
+    val authorizationTtlMs: Long? = null,
+    val maxInspectResults: Int? = null,
+    val autonomousWorkerEnabled: Boolean? = null,
+    val autonomousWorkerPollMs: Long? = null,
+    val autonomousWorkerBatchSize: Int? = null,
+)
+
 private data class AgentRuntimeYamlInnerVoice(
     val enabled: Boolean? = null,
     val maxContentChars: Int? = null,
@@ -200,6 +213,7 @@ object AgentRuntimeSettingsLoader {
         val scratchpadYaml = memoryYaml.scratchpad ?: AgentRuntimeYamlScratchpad()
         val metaReasonerYaml = agentYaml.metaReasoner ?: AgentRuntimeYamlMetaReasoner()
         val logbookYaml = agentYaml.logbook ?: AgentRuntimeYamlLogbook()
+        val actionControlYaml = agentYaml.actionControl ?: AgentRuntimeYamlActionControl()
         val innerVoiceYaml = agentYaml.innerVoice ?: AgentRuntimeYamlInnerVoice()
         val runtimeYaml = agentYaml.runtime ?: AgentRuntimeYamlRuntime()
 
@@ -646,6 +660,48 @@ object AgentRuntimeSettingsLoader {
                     logbookYaml.useLlmSummarizer,
                     defaults.logbook.useLlmSummarizer
                 )
+            ),
+            actionControl = ActionControlConfig(
+                enabled = readBoolean(
+                    env["NEOPSYKE_ACTION_CONTROL_ENABLED"],
+                    actionControlYaml.enabled,
+                    defaults.actionControl.enabled
+                ),
+                dbPath = readNonBlank(
+                    env["NEOPSYKE_ACTION_CONTROL_DB_PATH"],
+                    actionControlYaml.dbPath,
+                    defaults.actionControl.dbPath
+                ),
+                policyPath = readNonBlank(
+                    env["NEOPSYKE_ACTION_SECURITY_POLICY_FILE"],
+                    actionControlYaml.policyPath,
+                    defaults.actionControl.policyPath
+                ),
+                authorizationTtlMs = readPositiveLong(
+                    env["NEOPSYKE_ACTION_CONTROL_AUTH_TTL_MS"],
+                    actionControlYaml.authorizationTtlMs,
+                    defaults.actionControl.authorizationTtlMs
+                ),
+                maxInspectResults = readPositiveInt(
+                    env["NEOPSYKE_ACTION_CONTROL_MAX_INSPECT_RESULTS"],
+                    actionControlYaml.maxInspectResults,
+                    defaults.actionControl.maxInspectResults
+                ),
+                autonomousWorkerEnabled = readBoolean(
+                    env["NEOPSYKE_ACTION_CONTROL_AUTONOMOUS_WORKER_ENABLED"],
+                    actionControlYaml.autonomousWorkerEnabled,
+                    defaults.actionControl.autonomousWorkerEnabled
+                ),
+                autonomousWorkerPollMs = readPositiveLong(
+                    env["NEOPSYKE_ACTION_CONTROL_AUTONOMOUS_WORKER_POLL_MS"],
+                    actionControlYaml.autonomousWorkerPollMs,
+                    defaults.actionControl.autonomousWorkerPollMs
+                ),
+                autonomousWorkerBatchSize = readPositiveInt(
+                    env["NEOPSYKE_ACTION_CONTROL_AUTONOMOUS_WORKER_BATCH_SIZE"],
+                    actionControlYaml.autonomousWorkerBatchSize,
+                    defaults.actionControl.autonomousWorkerBatchSize
+                ),
             ),
             innerVoice = InnerVoiceConfig(
                 enabled = readBoolean(

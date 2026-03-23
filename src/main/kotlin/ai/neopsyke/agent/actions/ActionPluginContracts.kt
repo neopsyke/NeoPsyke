@@ -2,8 +2,13 @@ package ai.neopsyke.agent.actions
 
 import ai.neopsyke.agent.actions.websearch.WebSearchActionHandler
 import ai.neopsyke.agent.model.ActionOutcome
+import ai.neopsyke.agent.model.ActionEffectClass
 import ai.neopsyke.agent.model.ActionType
 import ai.neopsyke.agent.config.AgentConfig
+import ai.neopsyke.agent.model.CommitAuthorization
+import ai.neopsyke.agent.model.ConversationContext
+import ai.neopsyke.agent.model.DataTrust
+import ai.neopsyke.agent.model.InstructionTrust
 import ai.neopsyke.agent.model.PendingAction
 import ai.neopsyke.agent.model.SuperegoContext
 import ai.neopsyke.agent.goal.NoopGoalsGateway
@@ -26,6 +31,22 @@ enum class ActionCapability {
     GATHERS_EVIDENCE,
 }
 
+data class ActionContract(
+    val actionType: ActionType,
+    val effectClass: ActionEffectClass,
+    val capabilities: Set<ActionCapability>,
+    val directCommitAllowed: Boolean = false,
+    val supportsAutonomousCommit: Boolean = false,
+    val allowedInstructionTrust: Set<InstructionTrust> = setOf(
+        InstructionTrust.TRUSTED_INSTRUCTION,
+        InstructionTrust.UNTRUSTED_INSTRUCTION,
+    ),
+    val allowedArgumentDataTrust: Set<DataTrust> = setOf(
+        DataTrust.TRUSTED_DATA,
+        DataTrust.SANITIZED_EXTERNAL_DATA,
+    ),
+)
+
 data class ActionDescriptor(
     val actionType: ActionType,
     val dispatchable: Boolean = true,
@@ -36,7 +57,29 @@ data class ActionDescriptor(
     val followUpPrefix: String = "Action completed.",
     val superegoDirectives: List<String> = emptyList(),
     val capabilities: Set<ActionCapability> = emptySet(),
-)
+    val effectClass: ActionEffectClass = ActionEffectClass.OBSERVE,
+    val directCommitAllowed: Boolean = false,
+    val supportsAutonomousCommit: Boolean = false,
+    val allowedInstructionTrust: Set<InstructionTrust> = setOf(
+        InstructionTrust.TRUSTED_INSTRUCTION,
+        InstructionTrust.UNTRUSTED_INSTRUCTION,
+    ),
+    val allowedArgumentDataTrust: Set<DataTrust> = setOf(
+        DataTrust.TRUSTED_DATA,
+        DataTrust.SANITIZED_EXTERNAL_DATA,
+    ),
+) {
+    val contract: ActionContract
+        get() = ActionContract(
+            actionType = actionType,
+            effectClass = effectClass,
+            capabilities = capabilities,
+            directCommitAllowed = directCommitAllowed,
+            supportsAutonomousCommit = supportsAutonomousCommit,
+            allowedInstructionTrust = allowedInstructionTrust,
+            allowedArgumentDataTrust = allowedArgumentDataTrust,
+        )
+}
 
 data class ActionPluginHealth(
     val available: Boolean,
@@ -63,6 +106,10 @@ data class ActionDeterministicReview(
 
 data class ActionExecutionContext(
     val searchResultCount: Int,
+    val conversationContext: ConversationContext = ConversationContext.default(),
+    val requestId: String? = null,
+    val dryRun: Boolean = false,
+    val authorization: CommitAuthorization? = null,
 )
 
 interface ReflectionMemoryRecorder {
@@ -80,6 +127,8 @@ data class ActionPluginFactoryContext(
     val fetchTool: FetchTool?,
     val output: (String) -> Unit,
     val env: Map<String, String> = System.getenv(),
+    val secretProvider: ActionSecretProvider = EnvActionSecretProvider(env),
+    val connectorRuntime: ConnectorRuntimeBoundary = ConnectorRuntimeBoundary.firstPartyBuiltin(),
     val reflectionMemoryRecorder: ReflectionMemoryRecorder,
     val goalsGateway: GoalsGateway = NoopGoalsGateway,
 )

@@ -9,7 +9,7 @@ Keep diagrams high signal: small, readable, and updated as runtime logic evolves
 flowchart LR
     U["User / Web UI"] --> SC["SensoryCortex (typed cognitive stimuli ingress)"]
     SC --> E["Ego Orchestrator"]
-    NoteCtx["ConversationContext(sessionId required, unknown interlocutor resolved at sensory boundary)"] --> SC
+    NoteCtx["ConversationContext(sessionId required, unknown interlocutor resolved at sensory boundary, security context carried end-to-end)"] --> SC
 
     E --> AS["AttentionScheduler"]
     AS --> E
@@ -23,6 +23,11 @@ flowchart LR
     E --> S["Superego"]
     S --> S1["SingleStage Review Engine"]
     S --> S2["TwoStage Escalation Engine"]
+    E --> ACP["ActionAuthorizationPolicy (YAML)"]
+    E --> ACS["ActionControlService"]
+    E --> ACW["ActionControlAutonomousWorker"]
+    ACS --> ACDB["ActionControl SQLite (staged / auth / receipts)"]
+    ACW --> ACS
     E --> AR["ActionRegistry (ServiceLoader Discovery)"]
     E --> M["MotorCortex"]
     E --> BG["LLM Token Budget Gate"]
@@ -75,6 +80,8 @@ flowchart LR
     I --> DS["DashboardStateStore"]
     DS --> CP["Conversations Page (`/`) + Chat API (`/api/chat/*`)"]
     DS --> OP["Observability Page (`/dashboard`) + Obs API (`/api/obs/*`)"]
+    DS --> OX["Action Control Page (`/action-control`)"]
+    DS --> ACAPI["Action Control API (`/api/action-control/*`)"]
 ```
 
 ## 2) Loop Sequence (Per Input)
@@ -95,7 +102,7 @@ sequenceDiagram
 
     User->>SC: Web chat input text
     SC->>Ego: StimulusReceived (linguistic stimulus)
-    Note over SC,Ego: Stimulus carries ConversationContext(sessionId), rootInputId(identity), receivedAtMs(timing)
+    Note over SC,Ego: Stimulus carries ConversationContext(sessionId + security), provenance, rootInputId(identity), receivedAtMs(timing)
     Ego->>Sched: enqueue input opportunity
 
     loop While pending work and step limit not reached
@@ -120,8 +127,10 @@ sequenceDiagram
             Ego->>TWS: create or update request scratchpad and index summary
             Ego->>Dash: emit scratchpad_head (with optional debug snapshot)
             Note over Ego,Planner: For Id-origin thoughts, Ego reapplies Id convergence state and action filtering before planner decide
+            Note over Ego,Planner: Planner-visible actions are prefiltered by conversation instruction trust and action contract metadata before prompt build
             Ego->>Planner: decide(context)
             Note over Ego,Planner: PromptBudgetAllocator reserves required-core/context floors with message-overhead accounting, trims optional first, and emits prompt_budget_allocation
+            Note over Ego,Planner: Planner prompt includes conversation security summary and trigger provenance summary untrusted external content is framed as data, not instruction
             Note over Ego,Planner: Obvious persistent reminder / monitoring / goal-creation inputs route into a dedicated goal-creation branch before the generic planner path
             Note over Ego,Planner: Goal-creation branch uses a narrow schema prompt plus deterministic recurring schedule detection for supported forms like every N minutes / every N hours
             Note over Ego,Planner: Planner requests schema-enforced structured output the LLM layer owns compatibility degradation (strict json_schema -> relaxed json_schema -> prompt-only JSON) parse failures still do truncation-budget retry then strict-JSON retry before noop fallback
@@ -138,6 +147,7 @@ sequenceDiagram
         else Task = action
             alt Fallback explanation action
                 Ego->>Motor: execute (bypass Superego)
+                Note over Ego,ACS: Bypass execution is still mirrored into durable staged/receipt state
             else Normal action
                 Ego->>TV: review(action, evidence/recent dialogue)
                 Note over Ego,TV: DecisionVerifier classifies intent + volatility; evidence required only for volatile/unknown factual intents
@@ -147,7 +157,7 @@ sequenceDiagram
                     Ego->>Mem: maybeRecordReflectionLesson(filtered)
                 else decision verifier allow
                     Note over Ego,TV: If volatile evidence is required but tools are unavailable, verifier returns graceful allow (TASK_EVIDENCE_UNAVAILABLE_GRACEFUL)
-                    Ego->>Sup: deterministic checks
+                    Ego->>Sup: deterministic checks + authorization policy
                     alt deterministic deny
                         Sup-->>Ego: deny (hard deny)
                         Ego->>Sched: enqueue safe-alternative thought
@@ -176,7 +186,19 @@ sequenceDiagram
                                 Note over Ego,TWS: Final-pass skip requires both no evidence and insufficient drafts (< max(2, activation_min_plan_steps))
                         Note over Ego,TWF: Apply workspace-confidence gate first, then model-confidence gate
                             end
-                            Ego->>Motor: execute(action)
+                            Ego->>ACS: stage / authorize / commit
+                            alt stage required
+                                ACS->>ACDB: save staged action
+                                ACS-->>Ego: staged action (`WAITING_AUTHORIZATION` or `READY`)
+                                Ego->>Sched: enqueue approval-or-alternative thought
+                                Note over ACW,ACS: Background autonomous worker polls SQL-filtered runnable `READY` actions, preserving same-thread order (`threadSequence`) and same-target serialization (`executionKey`) before atomic claim + execute
+                            else direct commit allowed
+                                ACS->>ACDB: save staged action + authorization
+                                ACS->>Motor: execute(action, authorization)
+                                Motor-->>ACS: outcome
+                                ACS->>ACDB: save receipt + final staged status
+                                ACS-->>Ego: executed outcome
+                            end
                             Note over Ego,Motor: Actions may complete immediately or return WAITING + async operation handles
                             Note over Ego,PG: Goal-origin WAITING without handles is rejected as a contract violation
                             Ego->>Ego: PromptInjectionDefense sanitize untrusted tool output
@@ -210,6 +232,7 @@ sequenceDiagram
         Note over Ego,Mem: Memory-advisor completion max_tokens scales with prompt estimate (bounded floor/hard-cap) and model token_weight
         Note over Ego,Mem: Long dialogue/recall blocks are compressed before advisor prompt
         Note over Ego,Mem: Saved durable memories are normalized to first-person agent perspective before imprint
+        Note over Ego,Mem: Episodic logbook entries carry active channel/principal/policy-scope metadata
         Note over Ego,Mem: INTERNAL latest-salient turns switch long-term assessment into self-origin mode; reasons/tags/source are normalized away from user-preference framing
         Note over Ego,Mem: MCP fact/reference subject is stamped as "me" for agent-authored durable memories
         Note over Ego,Mem: Successful learning reflections track exact recent topic fingerprints; only learning retrieval uses them as freshness pressure, while other needs may still reuse the same topic context
@@ -235,6 +258,7 @@ flowchart LR
     TS -->|"cron tick after completed/failed recurring goal"| PSM
     PSM -->|"reset plan steps + clear produced keys"| PCS
     Sig --> Ego["Ego"]
+    Note over Sig,Ego: Goal work is re-entered with a trusted internal automation conversation/security context
     Ego -->|nextWorkFromCue| PM
     Ego -->|goal-origin action outcomes| PM
 ```
@@ -293,11 +317,12 @@ stateDiagram-v2
     TaskReview --> Denied: task verifier deny
 
     TaskReview --> PolicyReview: task verifier allow
-    PolicyReview --> Denied: deterministic hard deny / superego deny
+    PolicyReview --> Denied: deterministic hard deny / contract deny / superego deny
     Denied --> ThoughtQueued: enqueue safe alternative thought
     Note right of ThoughtQueued: Repeat-denied payload block is skipped for technical or transient denial reasons (prefer reason_code classification) reflection lessons persist only for non-technical and non-system denials
 
-    PolicyReview --> Executing: superego allow
+    PolicyReview --> Executing: allow_commit
+    PolicyReview --> Executing: allow_stage (legacy runtime compatibility path)
     Executing --> ThoughtQueued: action=resolution_draft (plan continues)
     Executing --> EvidenceObserved: external action succeeded
     Executing --> EvidenceMissing: tool/provider failure

@@ -1,0 +1,518 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>NeoPsyke Action Control</title>
+  <style>
+    :root {
+      --bg: #0f1a1f;
+      --panel: #16272e;
+      --line: #27414d;
+      --text: #d9e7eb;
+      --muted: #98b0b9;
+      --accent: #36c3a7;
+      --warn: #d4a843;
+      --danger: #d45050;
+      --ok: #5cbf72;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      background: radial-gradient(circle at 20% 0%, #17303a 0%, var(--bg) 55%);
+      color: var(--text);
+      display: grid;
+      grid-template-rows: auto auto minmax(0, 1fr);
+      overflow: hidden;
+    }
+    header {
+      padding: 14px 18px;
+      border-bottom: 1px solid var(--line);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .nav-links {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .ghost-btn, .primary-btn {
+      background: none;
+      border: 1px solid var(--line);
+      color: var(--muted);
+      padding: 5px 11px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 12px;
+      font-family: inherit;
+      text-decoration: none;
+    }
+    .ghost-btn:hover, .primary-btn:hover {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+    .primary-btn {
+      color: var(--text);
+      background: rgba(54, 195, 167, 0.08);
+    }
+    .primary-btn:disabled {
+      opacity: 0.55;
+      cursor: default;
+    }
+    .toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 10px 18px;
+      border-bottom: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .layout {
+      min-height: 0;
+      display: grid;
+      grid-template-columns: minmax(320px, 1.15fr) minmax(320px, 1fr) minmax(360px, 1.2fr);
+      gap: 12px;
+      padding: 12px;
+    }
+    .panel {
+      min-height: 0;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      background: rgba(22, 39, 46, 0.92);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+    .panel-head {
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--line);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .panel-body {
+      min-height: 0;
+      overflow: auto;
+    }
+    .list {
+      display: flex;
+      flex-direction: column;
+    }
+    .item {
+      border: 0;
+      border-bottom: 1px solid rgba(39, 65, 77, 0.45);
+      background: transparent;
+      color: inherit;
+      text-align: left;
+      padding: 12px;
+      cursor: pointer;
+      font: inherit;
+    }
+    .item:hover { background: rgba(54, 195, 167, 0.05); }
+    .item.active { background: rgba(54, 195, 167, 0.12); }
+    .item-title {
+      font-size: 12px;
+      font-weight: 700;
+      margin-bottom: 6px;
+      word-break: break-word;
+    }
+    .meta-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      font-size: 11px;
+      color: var(--muted);
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 2px 7px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .badge.ready, .badge.policy_autonomous { border-color: var(--warn); color: var(--warn); }
+    .badge.waiting_authorization, .badge.approval_backed { border-color: var(--accent); color: var(--accent); }
+    .badge.executing { border-color: var(--warn); color: var(--warn); }
+    .badge.completed, .badge.success, .badge.no_effect { border-color: var(--ok); color: var(--ok); }
+    .badge.failed { border-color: var(--danger); color: var(--danger); }
+    .badge.waiting_external { border-color: #7ec3ff; color: #7ec3ff; }
+    .detail {
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .detail-block {
+      border: 1px solid rgba(39, 65, 77, 0.45);
+      border-radius: 6px;
+      padding: 10px;
+      background: rgba(15, 26, 31, 0.42);
+    }
+    .detail-title {
+      font-size: 11px;
+      color: var(--muted);
+      margin-bottom: 8px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .kv {
+      display: grid;
+      grid-template-columns: 140px minmax(0, 1fr);
+      gap: 6px 10px;
+      font-size: 12px;
+      line-height: 1.45;
+    }
+    .kv .k { color: var(--muted); }
+    .kv .v { word-break: break-word; }
+    pre {
+      margin: 0;
+      white-space: pre-wrap;
+      word-break: break-word;
+      font: inherit;
+      font-size: 12px;
+      line-height: 1.45;
+    }
+    .empty {
+      padding: 18px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .error {
+      color: var(--danger);
+      font-size: 12px;
+    }
+    @media (max-width: 1180px) {
+      body { grid-template-rows: auto auto auto minmax(0, 1fr); }
+      .layout { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <strong>NeoPsyke Action Control</strong>
+      <div style="font-size:12px;color:var(--muted);margin-top:4px">Durable staged outbox, approvals, and receipts.</div>
+    </div>
+    <div class="nav-links">
+      <a class="ghost-btn" href="/" target="_blank" rel="noopener noreferrer">Conversations</a>
+      <a class="ghost-btn" href="/dashboard" target="_blank" rel="noopener noreferrer">Observability</a>
+      <a class="ghost-btn" href="/metrics" target="_blank" rel="noopener noreferrer">Metrics</a>
+      <a class="ghost-btn" href="/goals" target="_blank" rel="noopener noreferrer">Goals</a>
+    </div>
+  </header>
+
+  <div class="toolbar">
+    <div id="status-text">Loading staged actions and receipts...</div>
+    <div style="display:flex;gap:8px;align-items:center">
+      <span id="last-refresh">Not refreshed yet</span>
+      <button class="ghost-btn" id="refresh-btn" type="button">Refresh</button>
+    </div>
+  </div>
+
+  <div class="layout">
+    <section class="panel">
+      <div class="panel-head">
+        <strong>Staged Actions</strong>
+        <span id="staged-count">0</span>
+      </div>
+      <div class="panel-body list" id="staged-list">
+        <div class="empty">No staged actions found.</div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <strong>Receipts</strong>
+        <span id="receipt-count">0</span>
+      </div>
+      <div class="panel-body list" id="receipt-list">
+        <div class="empty">No receipts found.</div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <strong>Details</strong>
+        <span id="detail-kind">None selected</span>
+      </div>
+      <div class="panel-body detail" id="detail-pane">
+        <div class="empty">Select a staged action or receipt to inspect it.</div>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    const stagedListEl = document.getElementById('staged-list');
+    const receiptListEl = document.getElementById('receipt-list');
+    const detailPaneEl = document.getElementById('detail-pane');
+    const detailKindEl = document.getElementById('detail-kind');
+    const statusTextEl = document.getElementById('status-text');
+    const stagedCountEl = document.getElementById('staged-count');
+    const receiptCountEl = document.getElementById('receipt-count');
+    const lastRefreshEl = document.getElementById('last-refresh');
+    const refreshBtn = document.getElementById('refresh-btn');
+
+    let stagedActions = [];
+    let receipts = [];
+    let selection = { kind: null, id: null };
+
+    function formatTimestamp(ms) {
+      if (!ms) return 'n/a';
+      try {
+        return new Date(ms).toLocaleString();
+      } catch (_) {
+        return String(ms);
+      }
+    }
+
+    function cssSafe(value) {
+      return String(value || '')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '_');
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    function renderEmpty(target, message) {
+      target.innerHTML = '<div class="empty">' + escapeHtml(message) + '</div>';
+    }
+
+    function renderStagedList() {
+      stagedCountEl.textContent = String(stagedActions.length);
+      if (stagedActions.length === 0) {
+        renderEmpty(stagedListEl, 'No staged actions found.');
+        return;
+      }
+      stagedListEl.innerHTML = stagedActions.map((item) => {
+        const active = selection.kind === 'staged' && selection.id === item.id ? ' active' : '';
+        const statusClass = cssSafe(item.status);
+        const modeClass = cssSafe(item.commitMode);
+        return `
+          <button class="item${active}" data-kind="staged" data-id="${escapeHtml(item.id)}">
+            <div class="item-title">${escapeHtml(item.summary || item.actionType?.id || item.id)}</div>
+            <div class="meta-row">
+              <span class="badge ${statusClass}">${escapeHtml(item.status || 'unknown')}</span>
+              <span class="badge ${modeClass}">${escapeHtml(item.commitMode || 'n/a')}</span>
+              <span>${escapeHtml(item.actionType?.id || 'unknown')}</span>
+            </div>
+            <div class="meta-row" style="margin-top:6px">
+              <span>${escapeHtml(item.conversationContext?.security?.channel?.provider || 'unknown')}</span>
+              <span>${escapeHtml(item.conversationContext?.security?.principal?.role || 'unknown')}</span>
+              <span>${escapeHtml(formatTimestamp(item.updatedAtMs || item.createdAtMs))}</span>
+            </div>
+          </button>
+        `;
+      }).join('');
+    }
+
+    function renderReceiptList() {
+      receiptCountEl.textContent = String(receipts.length);
+      if (receipts.length === 0) {
+        renderEmpty(receiptListEl, 'No receipts found.');
+        return;
+      }
+      receiptListEl.innerHTML = receipts.map((item) => {
+        const active = selection.kind === 'receipt' && selection.id === item.id ? ' active' : '';
+        const statusClass = cssSafe(item.executionStatus);
+        return `
+          <button class="item${active}" data-kind="receipt" data-id="${escapeHtml(item.id)}">
+            <div class="item-title">${escapeHtml(item.statusSummary || item.actionType?.id || item.id)}</div>
+            <div class="meta-row">
+              <span class="badge ${statusClass}">${escapeHtml(item.executionStatus || 'unknown')}</span>
+              <span>${escapeHtml(item.actionType?.id || 'unknown')}</span>
+            </div>
+            <div class="meta-row" style="margin-top:6px">
+              <span>${escapeHtml(item.rootInputId || 'no root input')}</span>
+              <span>${escapeHtml(formatTimestamp(item.createdAtMs))}</span>
+            </div>
+          </button>
+        `;
+      }).join('');
+    }
+
+    function renderDetail() {
+      if (selection.kind === 'staged') {
+        const item = stagedActions.find((candidate) => candidate.id === selection.id);
+        if (!item) {
+          detailKindEl.textContent = 'Selection missing';
+          renderEmpty(detailPaneEl, 'The selected staged action is no longer available.');
+          return;
+        }
+        detailKindEl.textContent = 'Staged action';
+        const canAuthorize = item.status === 'WAITING_AUTHORIZATION' || item.status === 'READY';
+        detailPaneEl.innerHTML = `
+          <div class="detail-block">
+            <div class="detail-title">Overview</div>
+            <div class="kv">
+              <div class="k">ID</div><div class="v">${escapeHtml(item.id)}</div>
+              <div class="k">Action</div><div class="v">${escapeHtml(item.actionType?.id || 'unknown')}</div>
+              <div class="k">Status</div><div class="v">${escapeHtml(item.status || 'unknown')}</div>
+              <div class="k">Commit mode</div><div class="v">${escapeHtml(item.commitMode || 'n/a')}</div>
+              <div class="k">Policy version</div><div class="v">${escapeHtml(item.policyVersion || 'n/a')}</div>
+              <div class="k">Channel</div><div class="v">${escapeHtml(item.conversationContext?.security?.channel?.provider || 'unknown')} / ${escapeHtml(item.conversationContext?.security?.channel?.surface || 'unknown')}</div>
+              <div class="k">Principal</div><div class="v">${escapeHtml(item.conversationContext?.security?.principal?.role || 'unknown')} / ${escapeHtml(item.conversationContext?.security?.principal?.id || 'unknown')}</div>
+              <div class="k">Updated</div><div class="v">${escapeHtml(formatTimestamp(item.updatedAtMs || item.createdAtMs))}</div>
+              <div class="k">Reason</div><div class="v">${escapeHtml(item.statusReason || 'n/a')}</div>
+            </div>
+          </div>
+          <div class="detail-block">
+            <div class="detail-title">Summary</div>
+            <pre>${escapeHtml(item.summary || '(empty)')}</pre>
+          </div>
+          <div class="detail-block">
+            <div class="detail-title">Payload</div>
+            <pre>${escapeHtml(item.payload || '(empty)')}</pre>
+          </div>
+          <div class="detail-block">
+            <div class="detail-title">Actions</div>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+              <button class="primary-btn" id="authorize-btn" type="button" ${canAuthorize ? '' : 'disabled'}>Authorize from dashboard</button>
+              <span style="font-size:12px;color:var(--muted)">Owner-dashboard approval only.</span>
+            </div>
+            <div id="authorize-status" style="margin-top:10px;font-size:12px;color:var(--muted)"></div>
+          </div>
+        `;
+        const authorizeBtn = document.getElementById('authorize-btn');
+        if (authorizeBtn && canAuthorize) {
+          authorizeBtn.addEventListener('click', async () => {
+            authorizeBtn.disabled = true;
+            const statusEl = document.getElementById('authorize-status');
+            if (statusEl) statusEl.textContent = 'Authorizing staged action...';
+            try {
+              const res = await fetch('/api/action-control/staged/' + encodeURIComponent(item.id) + '/authorize', {
+                method: 'POST'
+              });
+              const payload = await res.json();
+              if (!res.ok) {
+                throw new Error(payload.error || 'Authorization failed');
+              }
+              if (statusEl) statusEl.textContent = 'Authorization accepted.';
+              await refreshAll();
+            } catch (err) {
+              if (statusEl) {
+                statusEl.innerHTML = '<span class="error">' + escapeHtml(err.message || 'Authorization failed') + '</span>';
+              }
+              authorizeBtn.disabled = false;
+            }
+          });
+        }
+        return;
+      }
+
+      if (selection.kind === 'receipt') {
+        const item = receipts.find((candidate) => candidate.id === selection.id);
+        if (!item) {
+          detailKindEl.textContent = 'Selection missing';
+          renderEmpty(detailPaneEl, 'The selected receipt is no longer available.');
+          return;
+        }
+        detailKindEl.textContent = 'Receipt';
+        detailPaneEl.innerHTML = `
+          <div class="detail-block">
+            <div class="detail-title">Overview</div>
+            <div class="kv">
+              <div class="k">ID</div><div class="v">${escapeHtml(item.id)}</div>
+              <div class="k">Staged action</div><div class="v">${escapeHtml(item.stagedActionId || 'n/a')}</div>
+              <div class="k">Authorization</div><div class="v">${escapeHtml(item.authorizationId || 'none')}</div>
+              <div class="k">Action</div><div class="v">${escapeHtml(item.actionType?.id || 'unknown')}</div>
+              <div class="k">Execution</div><div class="v">${escapeHtml(item.executionStatus || 'unknown')}</div>
+              <div class="k">Created</div><div class="v">${escapeHtml(formatTimestamp(item.createdAtMs))}</div>
+              <div class="k">Root input</div><div class="v">${escapeHtml(item.rootInputId || 'n/a')}</div>
+            </div>
+          </div>
+          <div class="detail-block">
+            <div class="detail-title">Status summary</div>
+            <pre>${escapeHtml(item.statusSummary || '(empty)')}</pre>
+          </div>
+          <div class="detail-block">
+            <div class="detail-title">Planner signal</div>
+            <pre>${escapeHtml(item.plannerSignal || '(empty)')}</pre>
+          </div>
+          <div class="detail-block">
+            <div class="detail-title">Raw receipt</div>
+            <pre>${escapeHtml(JSON.stringify(item, null, 2))}</pre>
+          </div>
+        `;
+        return;
+      }
+
+      detailKindEl.textContent = 'None selected';
+      renderEmpty(detailPaneEl, 'Select a staged action or receipt to inspect it.');
+    }
+
+    function bindListClicks() {
+      document.querySelectorAll('[data-kind][data-id]').forEach((el) => {
+        el.addEventListener('click', () => {
+          selection = {
+            kind: el.getAttribute('data-kind'),
+            id: el.getAttribute('data-id')
+          };
+          renderStagedList();
+          renderReceiptList();
+          renderDetail();
+        });
+      });
+    }
+
+    async function refreshAll() {
+      statusTextEl.textContent = 'Refreshing action-control data...';
+      try {
+        const [stagedRes, receiptRes] = await Promise.all([
+          fetch('/api/action-control/staged?limit=100'),
+          fetch('/api/action-control/receipts?limit=100')
+        ]);
+        if (!stagedRes.ok || !receiptRes.ok) {
+          throw new Error('Action-control API unavailable');
+        }
+        stagedActions = await stagedRes.json();
+        receipts = await receiptRes.json();
+        if (selection.kind === 'staged' && !stagedActions.some((item) => item.id === selection.id)) {
+          selection = { kind: null, id: null };
+        }
+        if (selection.kind === 'receipt' && !receipts.some((item) => item.id === selection.id)) {
+          selection = { kind: null, id: null };
+        }
+        renderStagedList();
+        renderReceiptList();
+        renderDetail();
+        bindListClicks();
+        const waitingCount = stagedActions.filter((item) => item.status === 'WAITING_AUTHORIZATION').length;
+        const readyCount = stagedActions.filter((item) => item.status === 'READY').length;
+        statusTextEl.textContent = 'Staged: ' + stagedActions.length + ' total, ' + waitingCount + ' waiting approval, ' + readyCount + ' ready for autonomous commit.';
+        lastRefreshEl.textContent = 'Last refresh: ' + new Date().toLocaleTimeString();
+      } catch (err) {
+        statusTextEl.innerHTML = '<span class="error">' + escapeHtml(err.message || 'Refresh failed') + '</span>';
+        renderEmpty(stagedListEl, 'Unable to load staged actions.');
+        renderEmpty(receiptListEl, 'Unable to load receipts.');
+        detailKindEl.textContent = 'Load error';
+        renderEmpty(detailPaneEl, 'Action-control API unavailable.');
+      }
+    }
+
+    refreshBtn.addEventListener('click', refreshAll);
+    refreshAll();
+    setInterval(refreshAll, 5000);
+  </script>
+</body>
+</html>

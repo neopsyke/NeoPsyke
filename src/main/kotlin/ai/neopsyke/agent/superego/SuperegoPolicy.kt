@@ -1,9 +1,17 @@
 package ai.neopsyke.agent.superego
 
+import ai.neopsyke.agent.actioncontrol.ActionAuthorizationPolicy
+import ai.neopsyke.agent.actioncontrol.ConfiguredActionAuthorizationPolicy
 import ai.neopsyke.agent.actions.ActionRegistry
+import ai.neopsyke.agent.model.AuthorizationDecision
+import ai.neopsyke.agent.model.AuthorizationProgress
 import ai.neopsyke.agent.model.ActionOrigin
 import ai.neopsyke.agent.model.ActionType
+import ai.neopsyke.agent.model.CommitMode
+import ai.neopsyke.agent.model.ConversationContext
+import ai.neopsyke.agent.model.InstructionTrust
 import ai.neopsyke.agent.model.OriginSource
+import ai.neopsyke.agent.model.PendingAction
 
 data class SuperegoPolicyDirectives(
     val general: List<String>,
@@ -56,6 +64,18 @@ object SuperegoPolicy {
      */
     private fun actionSpecificDirectives(actionType: ActionType, actionRegistry: ActionRegistry): List<String> =
         actionRegistry.superegoDirectives(actionType)
+
+    fun authorize(
+        action: PendingAction,
+        conversationContext: ConversationContext,
+        actionRegistry: ActionRegistry = ActionRegistry.empty(),
+        authorizationPolicy: ActionAuthorizationPolicy = ConfiguredActionAuthorizationPolicy(),
+    ): AuthorizationDecision =
+        authorizationPolicy.authorize(
+            action = action,
+            conversationContext = conversationContext,
+            actionRegistry = actionRegistry,
+        )
 
     fun allDirectives(actionRegistry: ActionRegistry = ActionRegistry.empty()): List<String> =
         (actionRegistry.actionTypes() + ActionType.entries)

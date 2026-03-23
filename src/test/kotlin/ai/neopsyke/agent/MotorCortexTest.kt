@@ -9,6 +9,7 @@ import ai.neopsyke.agent.actions.websearch.WebSearchResult
 import ai.neopsyke.agent.actions.websearch.WebSearchSource
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -261,5 +262,32 @@ class MotorCortexTest {
             setOf(ActionType.CONTACT_USER, ActionType.RESOLUTION_DRAFT, ActionType.WEBSITE_FETCH, ActionType.REFLECT),
             cortex.availableActionTypes()
         )
+    }
+
+    @Test
+    fun `private commit action without authorization is rejected by motor cortex`() = runBlocking {
+        val cortex = MotorCortex(
+            webSearchActionHandler = WebSearchActionHandler(
+                engine = object : WebSearchEngine {
+                    override fun search(query: String, maxResults: Int): WebSearchResult =
+                        WebSearchResult("unused", emptyList())
+                }
+            ),
+            reflectionMemoryRecorder = NoopReflectionMemoryRecorder,
+        )
+
+        val outcome = cortex.execute(
+            PendingAction(
+                id = 7,
+                urgency = Urgency.HIGH,
+                type = ActionType("email_send"),
+                payload = """{"to":["user@example.com"],"subject":"Status","body_text":"Done."}""",
+                summary = "send email"
+            ),
+            searchResultCount = 1
+        )
+
+        assertFalse(outcome.successful)
+        assertEquals("commit_authorization_required", outcome.actionErrorCategory)
     }
 }

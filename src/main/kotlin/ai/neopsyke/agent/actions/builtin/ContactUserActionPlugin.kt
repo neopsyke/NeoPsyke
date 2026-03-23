@@ -8,6 +8,7 @@ import ai.neopsyke.agent.actions.AgentActionPlugin
 import ai.neopsyke.agent.actions.AgentActionPluginFactory
 import ai.neopsyke.agent.actions.ActionPluginFactoryContext
 import ai.neopsyke.agent.model.ActionEffect
+import ai.neopsyke.agent.model.ActionEffectClass
 import ai.neopsyke.agent.model.ActionExecutionStatus
 import ai.neopsyke.agent.model.ActionOutcome
 import ai.neopsyke.agent.model.ActionType
@@ -29,7 +30,10 @@ class ContactUserActionPlugin(
         superegoDirectives = listOf(
             "Allow CONTACT_USER by default when it does not violate the general directives."
         ),
-        capabilities = setOf(ActionCapability.PRODUCES_USER_OUTPUT)
+        capabilities = setOf(ActionCapability.PRODUCES_USER_OUTPUT),
+        effectClass = ActionEffectClass.COMMIT_PRIVATE,
+        directCommitAllowed = true,
+        supportsAutonomousCommit = true,
     )
 
     override fun deterministicReview(

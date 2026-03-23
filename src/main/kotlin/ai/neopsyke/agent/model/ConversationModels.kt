@@ -38,6 +38,7 @@ data class Interlocutor(
 data class ConversationContext(
     val sessionId: String,
     val interlocutor: Interlocutor,
+    val security: ConversationSecurityContext = ConversationSecurityContexts.default(),
 ) {
     init {
         require(sessionId.isNotBlank()) { "sessionId must not be blank." }
@@ -47,6 +48,6 @@ data class ConversationContext(
         const val DEFAULT_SESSION_ID: String = "default"
 
         fun default(interlocutor: Interlocutor = Interlocutor.UNKNOWN) =
-            ConversationContext(DEFAULT_SESSION_ID, interlocutor)
+            ConversationContext(DEFAULT_SESSION_ID, interlocutor, ConversationSecurityContexts.default())
     }
 }

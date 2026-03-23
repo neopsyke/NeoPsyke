@@ -8,6 +8,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import mu.KotlinLogging
 import ai.neopsyke.agent.model.ConversationContext
+import ai.neopsyke.agent.model.ConversationSecurityContexts
 import ai.neopsyke.agent.model.Interlocutor
 import ai.neopsyke.agent.model.PendingImpulse
 import ai.neopsyke.instrumentation.AgentEvent
@@ -71,6 +72,10 @@ class Id(
     val conversationContext: ConversationContext = ConversationContext(
         sessionId = SESSION_ID,
         interlocutor = INTERLOCUTOR,
+        security = ConversationSecurityContexts.internalAutomation(
+            provider = "id",
+            channelId = SESSION_ID,
+        ),
     )
 
     // ── Lifecycle ────────────────────────────────────────────────────

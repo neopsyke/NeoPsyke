@@ -6,6 +6,8 @@ import ai.neopsyke.agent.config.AgentConfig
 import ai.neopsyke.agent.model.ActionType
 import ai.neopsyke.agent.model.AmbientContext
 import ai.neopsyke.agent.model.ConversationContext
+import ai.neopsyke.agent.model.ConversationSecurityContext
+import ai.neopsyke.agent.model.ConversationSecurityContexts
 import ai.neopsyke.agent.model.DeliberationState
 import ai.neopsyke.agent.model.DialogueTurn
 import ai.neopsyke.agent.model.EgoTrigger
@@ -73,10 +75,16 @@ class MemorySystem(
         }
     private var activeSessionId: String = ConversationContext.DEFAULT_SESSION_ID
     private var activeInterlocutor: Interlocutor = Interlocutor.UNKNOWN
+    private var activeSecurityContext: ConversationSecurityContext = ConversationSecurityContexts.default()
 
-    fun setActiveSession(sessionId: String, interlocutor: Interlocutor = Interlocutor.UNKNOWN) {
+    fun setActiveSession(
+        sessionId: String,
+        interlocutor: Interlocutor = Interlocutor.UNKNOWN,
+        securityContext: ConversationSecurityContext = ConversationSecurityContexts.default(),
+    ) {
         activeSessionId = sessionId
         activeInterlocutor = interlocutor
+        activeSecurityContext = securityContext
     }
 
     private fun activeMemoryStore(): MemoryStore =
@@ -762,6 +770,14 @@ class MemorySystem(
         if (normalizedSummary.isBlank()) return
         rememberAmbientUsefulUpdate(eventType, normalizedSummary)
         try {
+            val mergedMetadata = buildMap<String, Any?> {
+                put("principal_role", activeSecurityContext.principal.role.name.lowercase(Locale.ROOT))
+                put("channel_provider", activeSecurityContext.channel.provider)
+                put("channel_surface", activeSecurityContext.channel.surface.name.lowercase(Locale.ROOT))
+                put("instruction_trust", activeSecurityContext.instructionTrust.name.lowercase(Locale.ROOT))
+                put("policy_scope_id", activeSecurityContext.policyScopeId)
+                metadata?.forEach { (key, value) -> put(key, value) }
+            }
             lb.record(
                 LogbookEntry(
                     ts = Instant.now(),
@@ -770,7 +786,7 @@ class MemorySystem(
                     keywords = keywords,
                     actionType = actionType,
                     runId = runId,
-                    metadata = metadata,
+                    metadata = mergedMetadata,
                     sessionId = activeSessionId,
                     interlocutorId = activeInterlocutor.id,
                 )

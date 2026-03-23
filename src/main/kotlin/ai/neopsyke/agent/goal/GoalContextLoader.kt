@@ -3,6 +3,9 @@ package ai.neopsyke.agent.goal
 import java.nio.file.Files
 import java.nio.file.Path
 import java.time.Instant
+import ai.neopsyke.agent.model.ConversationContext
+import ai.neopsyke.agent.model.ConversationSecurityContexts
+import ai.neopsyke.agent.model.Interlocutor
 
 /**
  * Builds context at each tier for a goal.
@@ -12,6 +15,8 @@ import java.time.Instant
  * - Tier 3: full detail from workspace files, fetched on demand
  */
 object GoalContextLoader {
+    private const val GOAL_RUNTIME_PROVIDER: String = "goal-runtime"
+
 
     /**
      * Build a Tier 1 summary from in-memory [GoalState].
@@ -78,6 +83,14 @@ object GoalContextLoader {
             stepDescription = step.description,
             acceptanceCriteria = step.acceptanceCriteria,
             workingContext = tier2,
+            conversationContext = ConversationContext(
+                sessionId = ConversationContext.DEFAULT_SESSION_ID,
+                interlocutor = Interlocutor.named(GOAL_RUNTIME_PROVIDER),
+                security = ConversationSecurityContexts.internalAutomation(
+                    provider = GOAL_RUNTIME_PROVIDER,
+                    channelId = rootInputId,
+                ),
+            ),
             wakeReason = wakeReason,
         )
     }

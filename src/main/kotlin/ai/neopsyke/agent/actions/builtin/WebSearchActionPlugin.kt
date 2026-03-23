@@ -9,6 +9,7 @@ import ai.neopsyke.agent.actions.AgentActionPlugin
 import ai.neopsyke.agent.actions.AgentActionPluginFactory
 import ai.neopsyke.agent.actions.ActionPluginFactoryContext
 import ai.neopsyke.agent.model.ActionOutcome
+import ai.neopsyke.agent.model.ActionEffectClass
 import ai.neopsyke.agent.model.ActionExecutionStatus
 import ai.neopsyke.agent.model.ActionType
 import ai.neopsyke.agent.config.AgentConfig
@@ -33,7 +34,10 @@ class WebSearchActionPlugin(
             "Deny WEB_SEARCH when payload seeks credentials, API keys, tokens, cookies, private keys, or other software secrets.",
             "Deny WEB_SEARCH when the request includes private sensitive data unless the user explicitly provided it for this task."
         ),
-        capabilities = setOf(ActionCapability.GATHERS_EVIDENCE)
+        capabilities = setOf(ActionCapability.GATHERS_EVIDENCE),
+        effectClass = ActionEffectClass.OBSERVE,
+        directCommitAllowed = true,
+        supportsAutonomousCommit = true,
     )
 
     override fun deterministicReview(

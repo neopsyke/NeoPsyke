@@ -5,6 +5,7 @@ import ai.neopsyke.agent.model.ActionOutcome
 import ai.neopsyke.agent.model.ActionExecutionStatus
 import ai.neopsyke.agent.model.ActionType
 import ai.neopsyke.agent.config.AgentConfig
+import ai.neopsyke.agent.model.CommitAuthorization
 import ai.neopsyke.agent.model.PendingAction
 import ai.neopsyke.agent.model.SuperegoContext
 import java.util.ServiceLoader
@@ -40,7 +41,11 @@ class ActionRegistry private constructor(
                 detail = "Action plugin is not registered."
             )
 
-    suspend fun execute(action: PendingAction, searchResultCount: Int): ActionOutcome {
+    suspend fun execute(
+        action: PendingAction,
+        searchResultCount: Int,
+        authorization: CommitAuthorization? = null,
+    ): ActionOutcome {
         val plugin = pluginByType[action.type]
             ?: return ActionOutcome(
                 statusSummary = "Action type '${action.type.id}' is not registered.",
@@ -48,7 +53,12 @@ class ActionRegistry private constructor(
             )
         return plugin.execute(
             action = action,
-            context = ActionExecutionContext(searchResultCount = searchResultCount)
+            context = ActionExecutionContext(
+                searchResultCount = searchResultCount,
+                conversationContext = action.conversationContext,
+                requestId = action.rootInputId,
+                authorization = authorization,
+            )
         )
     }
 
@@ -73,6 +83,9 @@ class ActionRegistry private constructor(
 
     fun hasCapability(actionType: ActionType, capability: ActionCapability): Boolean =
         pluginByType[actionType]?.descriptor?.capabilities?.contains(capability) == true
+
+    fun contract(actionType: ActionType): ActionContract? =
+        pluginByType[actionType]?.descriptor?.contract
 
     fun actionTypesWithCapability(capability: ActionCapability): Set<ActionType> =
         pluginByType.values

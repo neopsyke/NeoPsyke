@@ -13,9 +13,11 @@ import ai.neopsyke.agent.actions.AgentActionPlugin
 import ai.neopsyke.agent.actions.AgentActionPluginFactory
 import ai.neopsyke.agent.actions.ActionPluginFactoryContext
 import ai.neopsyke.agent.config.AgentConfig
+import ai.neopsyke.agent.model.ActionEffectClass
 import ai.neopsyke.agent.model.ActionExecutionStatus
 import ai.neopsyke.agent.model.ActionOutcome
 import ai.neopsyke.agent.model.ActionType
+import ai.neopsyke.agent.model.InstructionTrust
 import ai.neopsyke.agent.model.PendingAction
 import ai.neopsyke.agent.model.SuperegoContext
 import ai.neopsyke.agent.goal.GoalOperation
@@ -35,6 +37,10 @@ class GoalOperationActionPlugin(
         requiresFollowUpThought = false,
         followUpPrefix = "Goal operation completed.",
         capabilities = setOf(ActionCapability.PRODUCES_USER_OUTPUT),
+        effectClass = ActionEffectClass.CONTROL_PLANE,
+        directCommitAllowed = true,
+        supportsAutonomousCommit = true,
+        allowedInstructionTrust = setOf(InstructionTrust.TRUSTED_INSTRUCTION),
     )
 
     override fun deterministicReview(

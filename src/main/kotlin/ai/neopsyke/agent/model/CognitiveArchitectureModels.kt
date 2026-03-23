@@ -27,6 +27,7 @@ data class StimulusEnvelope(
     val correlationId: String? = null,
     val causationId: String? = null,
     val trustLevel: StimulusTrustLevel = StimulusTrustLevel.DEFAULT,
+    val provenance: Provenance = Provenances.fromStimulusTrustLevel(source = source, trustLevel = trustLevel),
     val metadata: Map<String, String> = emptyMap(),
 )
 
@@ -45,6 +46,7 @@ data class Percept(
     val conversationContext: ConversationContext = ConversationContext.default(),
     val rootStimulusId: String? = null,
     val cognitiveThreadId: String? = null,
+    val provenance: Provenance = Provenances.defaultExternal(),
     val metadata: Map<String, String> = emptyMap(),
 )
 
@@ -54,6 +56,8 @@ data class CognitiveThread(
     val status: CognitiveThreadStatus,
     val title: String,
     val conversationContext: ConversationContext = ConversationContext.default(),
+    val securityContext: CognitiveThreadSecurityContext =
+        CognitiveThreadSecurityContext.fromConversation(ConversationContext.default().security),
     val goalId: String? = null,
     val goalRunId: String? = null,
     val rootStimulusId: String? = null,
@@ -84,9 +88,13 @@ data class Opportunity(
     val salience: Double,
     val createdAt: Instant,
     val conversationContext: ConversationContext = ConversationContext.default(),
+    val securityContext: CognitiveThreadSecurityContext =
+        CognitiveThreadSecurityContext.fromConversation(ConversationContext.default().security),
     val rootStimulusId: String? = null,
     val goalId: String? = null,
     val goalRunId: String? = null,
+    val allowedIntentions: Set<IntentionKind> = setOf(IntentionKind.DEFER),
+    val allowedCommitModes: Set<CommitMode> = setOf(CommitMode.NOT_APPLICABLE),
     val metadata: Map<String, String> = emptyMap(),
 )
 
@@ -106,6 +114,7 @@ data class Intention(
     val summary: String,
     val createdAt: Instant,
     val conversationContext: ConversationContext = ConversationContext.default(),
+    val commitMode: CommitMode = CommitMode.NOT_APPLICABLE,
     val rootStimulusId: String? = null,
     val goalId: String? = null,
     val goalRunId: String? = null,
@@ -113,10 +122,10 @@ data class Intention(
 )
 
 enum class IntentionKind {
-    RESPOND,
-    CLARIFY,
-    SEARCH,
-    CONTINUE_GOAL_WORK,
-    WAIT,
-    EXECUTE_ACTION,
+    OBSERVE,
+    PREPARE,
+    STAGE,
+    REQUEST_AUTHORIZATION,
+    COMMIT,
+    DEFER,
 }
