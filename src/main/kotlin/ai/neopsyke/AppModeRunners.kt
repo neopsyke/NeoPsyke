@@ -21,6 +21,9 @@ import ai.neopsyke.agent.memory.provider.ManagedHttpMemoryProviderProcess
 import ai.neopsyke.agent.memory.provider.ProviderBackedHippocampus
 import ai.neopsyke.agent.tools.mcp.McpStdioClient
 import ai.neopsyke.agent.model.ActionType
+import ai.neopsyke.agent.model.ConversationContext
+import ai.neopsyke.agent.model.ConversationSecurityContexts
+import ai.neopsyke.agent.model.Interlocutor
 import ai.neopsyke.agent.cortex.sensory.AsyncSignalSource
 import ai.neopsyke.agent.cortex.sensory.SensoryCortex
 import ai.neopsyke.agent.cortex.motor.ActionImplementationStatus
@@ -138,11 +141,25 @@ private val logger = KotlinLogging.logger {}
 private val output: ConsoleReporter = StdConsoleReporter
 private const val PROVIDER_HEALTH_CHECK_MAX_ATTEMPTS: Int = 2
 private const val PROVIDER_HEALTH_CHECK_RETRY_DELAY_MS: Long = 250L
+private const val FREUD_LIVE_SESSION_ID: String = "freud-live"
+private const val FREUD_LIVE_INTERLOCUTOR_ID: String = "freud-live-user"
 
 internal object AppModeRunners {
     private data class InteractiveLlmStartupConfig(
         val metaReasonerFallback: LlmEndpointConfig?,
     )
+
+    internal fun freudLiveConversationContext(
+        sessionId: String = FREUD_LIVE_SESSION_ID,
+    ): ConversationContext =
+        ConversationContext(
+            sessionId = sessionId,
+            interlocutor = Interlocutor.named(FREUD_LIVE_INTERLOCUTOR_ID),
+            security = ConversationSecurityContexts.ownerDirect(
+                provider = "freud-live",
+                channelId = sessionId,
+            ),
+        )
 
     internal fun runReasoningOnlyEval(
         llm: LlmRuntimeConfig,
@@ -1646,7 +1663,8 @@ internal object AppModeRunners {
 
                                                     sensoryInput.submitInput(
                                                         content = stdinContent,
-                                                        source = "freud-live"
+                                                        source = "freud-live",
+                                                        conversationContext = freudLiveConversationContext(),
                                                     )
 
                                                     val watchdog = launch {
