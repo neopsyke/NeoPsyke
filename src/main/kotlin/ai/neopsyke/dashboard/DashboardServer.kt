@@ -384,6 +384,7 @@ class DashboardServer(
         when (parts.first()) {
             "staged" -> handleStagedActionApi(exchange, service, parts.drop(1))
             "receipts" -> handleActionReceiptApi(exchange, service, parts.drop(1))
+            "ledger" -> handleActionLedgerApi(exchange, service, parts.drop(1))
             else -> respondText(exchange, 404, "Not found", "text/plain; charset=utf-8")
         }
     }
@@ -422,22 +423,40 @@ class DashboardServer(
             return
         }
         val action = suffixParts.getOrNull(1).orEmpty()
-        if (action != "authorize" || exchange.requestMethod.uppercase() != "POST") {
+        if (exchange.requestMethod.uppercase() != "POST" ||
+            (action != "authorize" && action != "deny")
+        ) {
             respondText(exchange, 404, "Not found", "text/plain; charset=utf-8")
             return
         }
+        val requestBody = readJsonBody(exchange)
         val result = runBlocking {
-            service.authorizeStagedAction(
-                stagedActionId = stagedActionId,
-                grantedBy = ConversationSecurityContexts.ownerDirect(
-                    provider = "webapp",
-                    channelId = "dashboard-action-control",
+            when (action) {
+                "authorize" -> service.authorizeStagedAction(
+                    stagedActionId = stagedActionId,
+                    grantedBy = ConversationSecurityContexts.ownerDirect(
+                        provider = "webapp",
+                        channelId = "dashboard-action-control",
+                    )
                 )
-            )
+
+                "deny" -> service.denyStagedAction(
+                    stagedActionId = stagedActionId,
+                    deniedBy = ConversationSecurityContexts.ownerDirect(
+                        provider = "webapp",
+                        channelId = "dashboard-action-control",
+                    ),
+                    reason = requestBody?.get("reason")?.toString()?.trim().takeUnless { it.isNullOrBlank() }
+                        ?: "Denied from dashboard.",
+                    reasonCode = requestBody?.get("reason_code")?.toString()?.trim().takeUnless { it.isNullOrBlank() }
+                )
+                else -> error("Unsupported staged action control verb: $action")
+            }
         }
         val statusCode = when (result) {
             is ActionControlDecisionResult.Refused -> 409
             is ActionControlDecisionResult.Staged,
+            is ActionControlDecisionResult.Cancelled,
             is ActionControlDecisionResult.Executed -> 200
         }
         respondText(exchange, statusCode, mapper.writeValueAsString(result), "application/json; charset=utf-8")
@@ -468,6 +487,33 @@ class DashboardServer(
             return
         }
         respondText(exchange, 200, mapper.writeValueAsString(receipt), "application/json; charset=utf-8")
+    }
+
+    private fun handleActionLedgerApi(
+        exchange: HttpExchange,
+        service: ActionControlService,
+        suffixParts: List<String>,
+    ) {
+        if (exchange.requestMethod.uppercase() != "GET") {
+            respondText(exchange, 405, "Method not allowed", "text/plain; charset=utf-8")
+            return
+        }
+        if (suffixParts.isEmpty()) {
+            val limit = parseQueryParam(exchange.requestURI.query, "limit")?.toIntOrNull() ?: 100
+            respondText(
+                exchange,
+                200,
+                mapper.writeValueAsString(service.ledgerEntries(limit)),
+                "application/json; charset=utf-8"
+            )
+            return
+        }
+        val entry = service.ledgerEntry(suffixParts.first())
+        if (entry == null) {
+            respondText(exchange, 404, """{"error":"Action ledger entry not found"}""", "application/json; charset=utf-8")
+            return
+        }
+        respondText(exchange, 200, mapper.writeValueAsString(entry), "application/json; charset=utf-8")
     }
 
     private fun handleCreateChatSession(exchange: HttpExchange, bridge: ChatRuntimeBridge) {

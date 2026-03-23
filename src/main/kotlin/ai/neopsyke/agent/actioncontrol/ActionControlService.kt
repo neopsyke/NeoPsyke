@@ -4,6 +4,9 @@ import com.fasterxml.jackson.databind.DeserializationFeature
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
 import ai.neopsyke.agent.config.ActionControlConfig
+import ai.neopsyke.agent.model.ActionLedgerEntry
+import ai.neopsyke.agent.model.ActionLedgerKind
+import ai.neopsyke.agent.model.ActionRecordImportance
 import ai.neopsyke.agent.model.ActionExecutionStatus
 import ai.neopsyke.agent.model.ActionOutcome
 import ai.neopsyke.agent.model.ActionReceipt
@@ -38,6 +41,11 @@ sealed interface ActionControlDecisionResult {
         val executedAction: PendingAction,
     ) : ActionControlDecisionResult
 
+    data class Cancelled(
+        val stagedAction: StagedAction,
+        val ledgerEntry: ActionLedgerEntry,
+    ) : ActionControlDecisionResult
+
     data class Refused(
         val reason: String,
         val reasonCode: String?,
@@ -56,6 +64,13 @@ interface ActionControlService {
         grantedBy: ConversationSecurityContext,
     ): ActionControlDecisionResult
 
+    suspend fun denyStagedAction(
+        stagedActionId: String,
+        deniedBy: ConversationSecurityContext,
+        reason: String = "Denied from dashboard.",
+        reasonCode: String? = null,
+    ): ActionControlDecisionResult
+
     suspend fun processAutonomousStagedActions(limit: Int = 10): List<ActionControlDecisionResult.Executed>
 
     suspend fun recordBypassExecution(
@@ -66,10 +81,25 @@ interface ActionControlService {
         reasonCode: String? = null,
     ): ActionReceipt?
 
+    fun recordLedgerEntry(
+        action: PendingAction,
+        conversationContext: ConversationContext,
+        kind: ActionLedgerKind,
+        importance: ActionRecordImportance,
+        summary: String,
+        reasonCode: String? = null,
+        source: String? = null,
+        stagedActionId: String? = null,
+        authorizationId: String? = null,
+        receiptId: String? = null,
+    ): ActionLedgerEntry?
+
     fun stagedActions(limit: Int): List<StagedAction>
     fun stagedAction(id: String): StagedAction?
     fun receipts(limit: Int): List<ActionReceipt>
     fun receipt(id: String): ActionReceipt?
+    fun ledgerEntries(limit: Int): List<ActionLedgerEntry>
+    fun ledgerEntry(id: String): ActionLedgerEntry?
 }
 
 object NoopActionControlService : ActionControlService {
@@ -92,6 +122,17 @@ object NoopActionControlService : ActionControlService {
             reasonCode = "ACTION_CONTROL_UNAVAILABLE",
         )
 
+    override suspend fun denyStagedAction(
+        stagedActionId: String,
+        deniedBy: ConversationSecurityContext,
+        reason: String,
+        reasonCode: String?,
+    ): ActionControlDecisionResult =
+        ActionControlDecisionResult.Refused(
+            reason = "Action control is not configured.",
+            reasonCode = "ACTION_CONTROL_UNAVAILABLE",
+        )
+
     override suspend fun processAutonomousStagedActions(limit: Int): List<ActionControlDecisionResult.Executed> = emptyList()
 
     override suspend fun recordBypassExecution(
@@ -102,10 +143,25 @@ object NoopActionControlService : ActionControlService {
         reasonCode: String?,
     ): ActionReceipt? = null
 
+    override fun recordLedgerEntry(
+        action: PendingAction,
+        conversationContext: ConversationContext,
+        kind: ActionLedgerKind,
+        importance: ActionRecordImportance,
+        summary: String,
+        reasonCode: String?,
+        source: String?,
+        stagedActionId: String?,
+        authorizationId: String?,
+        receiptId: String?,
+    ): ActionLedgerEntry? = null
+
     override fun stagedActions(limit: Int): List<StagedAction> = emptyList()
     override fun stagedAction(id: String): StagedAction? = null
     override fun receipts(limit: Int): List<ActionReceipt> = emptyList()
     override fun receipt(id: String): ActionReceipt? = null
+    override fun ledgerEntries(limit: Int): List<ActionLedgerEntry> = emptyList()
+    override fun ledgerEntry(id: String): ActionLedgerEntry? = null
 }
 
 class LegacyCompatibleActionControlService(
@@ -227,6 +283,17 @@ class LegacyCompatibleActionControlService(
             reasonCode = "LEGACY_ACTION_CONTROL_NO_PERSISTENCE",
         )
 
+    override suspend fun denyStagedAction(
+        stagedActionId: String,
+        deniedBy: ConversationSecurityContext,
+        reason: String,
+        reasonCode: String?,
+    ): ActionControlDecisionResult =
+        ActionControlDecisionResult.Refused(
+            reason = "Legacy action control does not persist staged actions.",
+            reasonCode = "LEGACY_ACTION_CONTROL_NO_PERSISTENCE",
+        )
+
     override suspend fun processAutonomousStagedActions(limit: Int): List<ActionControlDecisionResult.Executed> = emptyList()
 
     override suspend fun recordBypassExecution(
@@ -237,10 +304,25 @@ class LegacyCompatibleActionControlService(
         reasonCode: String?,
     ): ActionReceipt? = null
 
+    override fun recordLedgerEntry(
+        action: PendingAction,
+        conversationContext: ConversationContext,
+        kind: ActionLedgerKind,
+        importance: ActionRecordImportance,
+        summary: String,
+        reasonCode: String?,
+        source: String?,
+        stagedActionId: String?,
+        authorizationId: String?,
+        receiptId: String?,
+    ): ActionLedgerEntry? = null
+
     override fun stagedActions(limit: Int): List<StagedAction> = emptyList()
     override fun stagedAction(id: String): StagedAction? = null
     override fun receipts(limit: Int): List<ActionReceipt> = emptyList()
     override fun receipt(id: String): ActionReceipt? = null
+    override fun ledgerEntries(limit: Int): List<ActionLedgerEntry> = emptyList()
+    override fun ledgerEntry(id: String): ActionLedgerEntry? = null
 
     private fun nextId(): String = UUID.randomUUID().toString()
 }
@@ -292,6 +374,11 @@ class DefaultActionControlService(
                 policyVersion = decision.policyVersion,
             )
         )
+        saveStagedLedgerEntry(
+            staged = staged,
+            action = action,
+            conversationContext = conversationContext,
+        )
 
         if (decision.progress != AuthorizationProgress.ALLOW_COMMIT) {
             return ActionControlDecisionResult.Staged(staged, decision)
@@ -308,6 +395,12 @@ class DefaultActionControlService(
                 actionHash = staged.actionHash,
                 expiresAtMs = System.currentTimeMillis() + config.authorizationTtlMs,
             )
+        )
+        saveAuthorizedLedgerEntry(
+            staged = staged,
+            authorization = authorization,
+            action = action,
+            conversationContext = conversationContext,
         )
         return executeAuthorized(staged, authorization)
     }
@@ -349,7 +442,65 @@ class DefaultActionControlService(
                 expiresAtMs = System.currentTimeMillis() + config.authorizationTtlMs,
             )
         )
+        saveAuthorizedLedgerEntry(
+            staged = staged,
+            authorization = authorization,
+            action = staged.toPendingAction(),
+            conversationContext = staged.conversationContext,
+        )
         return executeAuthorized(staged, authorization)
+    }
+
+    override suspend fun denyStagedAction(
+        stagedActionId: String,
+        deniedBy: ConversationSecurityContext,
+        reason: String,
+        reasonCode: String?,
+    ): ActionControlDecisionResult {
+        if (deniedBy.principal.role != PrincipalRole.OWNER &&
+            deniedBy.principal.role != PrincipalRole.ADMIN_CONTROL
+        ) {
+            return ActionControlDecisionResult.Refused(
+                reason = "Only owner or admin-control principals may deny staged actions.",
+                reasonCode = "DENIAL_PRINCIPAL_NOT_ALLOWED",
+            )
+        }
+        val staged = store.stagedAction(stagedActionId)
+            ?: return ActionControlDecisionResult.Refused(
+                reason = "Staged action '$stagedActionId' was not found.",
+                reasonCode = "STAGED_ACTION_NOT_FOUND",
+            )
+        if (staged.status != StagedActionStatus.WAITING_AUTHORIZATION &&
+            staged.status != StagedActionStatus.READY
+        ) {
+            return ActionControlDecisionResult.Refused(
+                reason = "Staged action '${staged.id}' is not pending authorization or autonomous execution.",
+                reasonCode = "STAGED_ACTION_NOT_DENYABLE",
+            )
+        }
+        val cancelled = store.updateStagedAction(
+            staged.copy(
+                status = StagedActionStatus.CANCELLED,
+                statusReason = reason,
+                statusReasonCode = reasonCode ?: OWNER_DENIED_REASON_CODE,
+                updatedAtMs = System.currentTimeMillis(),
+            )
+        )
+        val ledger = store.saveLedgerEntry(
+            ActionLedgerEntry(
+                id = nextId(),
+                kind = ActionLedgerKind.CANCELLED,
+                importance = ActionRecordImportance.SIGNAL,
+                actionType = cancelled.actionType,
+                summary = reason,
+                rootInputId = cancelled.rootInputId,
+                stagedActionId = cancelled.id,
+                reasonCode = reasonCode ?: OWNER_DENIED_REASON_CODE,
+                source = "dashboard_deny",
+                conversationContext = cancelled.conversationContext,
+            )
+        )
+        return ActionControlDecisionResult.Cancelled(cancelled, ledger)
     }
 
     override suspend fun processAutonomousStagedActions(limit: Int): List<ActionControlDecisionResult.Executed> {
@@ -425,11 +576,28 @@ class DefaultActionControlService(
                 authorizationId = null,
                 rootInputId = action.rootInputId,
                 actionType = action.type,
+                importance = receiptImportanceFor(outcome),
                 executionStatus = outcome.executionStatus,
                 statusSummary = outcome.statusSummary,
                 plannerSignal = outcome.plannerSignal,
                 effects = outcome.effects,
                 asyncWait = outcome.asyncWait,
+            )
+        )
+        store.saveLedgerEntry(
+            ActionLedgerEntry(
+                id = nextId(),
+                kind = ActionLedgerKind.BYPASS_EXECUTED,
+                importance = receipt.importance,
+                actionType = action.type,
+                summary = outcome.statusSummary,
+                rootInputId = action.rootInputId,
+                actionId = action.id,
+                stagedActionId = staged.id,
+                receiptId = receipt.id,
+                reasonCode = reasonCode ?: BYPASS_REASON_CODE,
+                source = "bypass_execution",
+                conversationContext = conversationContext,
             )
         )
         store.updateStagedAction(
@@ -448,6 +616,41 @@ class DefaultActionControlService(
         store.listReceipts(limit.coerceAtLeast(1).coerceAtMost(config.maxInspectResults))
 
     override fun receipt(id: String): ActionReceipt? = store.receipt(id)
+
+    override fun ledgerEntries(limit: Int): List<ActionLedgerEntry> =
+        store.listLedgerEntries(limit.coerceAtLeast(1).coerceAtMost(config.maxInspectResults))
+
+    override fun ledgerEntry(id: String): ActionLedgerEntry? = store.ledgerEntry(id)
+
+    override fun recordLedgerEntry(
+        action: PendingAction,
+        conversationContext: ConversationContext,
+        kind: ActionLedgerKind,
+        importance: ActionRecordImportance,
+        summary: String,
+        reasonCode: String?,
+        source: String?,
+        stagedActionId: String?,
+        authorizationId: String?,
+        receiptId: String?,
+    ): ActionLedgerEntry =
+        store.saveLedgerEntry(
+            ActionLedgerEntry(
+                id = nextId(),
+                kind = kind,
+                importance = importance,
+                actionType = action.type,
+                summary = summary,
+                rootInputId = action.rootInputId,
+                actionId = action.id,
+                stagedActionId = stagedActionId,
+                authorizationId = authorizationId,
+                receiptId = receiptId,
+                reasonCode = reasonCode,
+                source = source,
+                conversationContext = conversationContext,
+            )
+        )
 
     private suspend fun executeAuthorized(
         staged: StagedAction,
@@ -490,11 +693,32 @@ class DefaultActionControlService(
                 authorizationId = authorization.id,
                 rootInputId = executing.rootInputId,
                 actionType = executing.actionType,
+                importance = receiptImportanceFor(outcome),
                 executionStatus = outcome.executionStatus,
                 statusSummary = outcome.statusSummary,
                 plannerSignal = outcome.plannerSignal,
                 effects = outcome.effects,
                 asyncWait = outcome.asyncWait,
+            )
+        )
+        store.saveLedgerEntry(
+            ActionLedgerEntry(
+                id = nextId(),
+                kind = if (outcome.executionStatus == ActionExecutionStatus.WAITING) {
+                    ActionLedgerKind.WAITING_EXTERNAL
+                } else {
+                    ActionLedgerKind.EXECUTED
+                },
+                importance = receipt.importance,
+                actionType = executing.actionType,
+                summary = outcome.statusSummary,
+                rootInputId = executing.rootInputId,
+                stagedActionId = executing.id,
+                authorizationId = authorization.id,
+                receiptId = receipt.id,
+                reasonCode = null,
+                source = "execute_authorized",
+                conversationContext = executing.conversationContext,
             )
         )
         val nextStatus = when (outcome.executionStatus) {
@@ -527,6 +751,68 @@ class DefaultActionControlService(
             ActionExecutionStatus.NO_EFFECT -> StagedActionStatus.COMPLETED
             ActionExecutionStatus.WAITING -> StagedActionStatus.WAITING_EXTERNAL
             ActionExecutionStatus.FAILED -> StagedActionStatus.FAILED
+        }
+
+    private fun saveStagedLedgerEntry(
+        staged: StagedAction,
+        action: PendingAction,
+        conversationContext: ConversationContext,
+    ) {
+        store.saveLedgerEntry(
+            ActionLedgerEntry(
+                id = nextId(),
+                kind = ActionLedgerKind.STAGED,
+                importance = when (staged.status) {
+                    StagedActionStatus.WAITING_AUTHORIZATION -> ActionRecordImportance.SIGNAL
+                    StagedActionStatus.READY,
+                    StagedActionStatus.AUTHORIZED,
+                    StagedActionStatus.EXECUTING,
+                    StagedActionStatus.WAITING_EXTERNAL,
+                    StagedActionStatus.COMPLETED,
+                    StagedActionStatus.FAILED,
+                    StagedActionStatus.CANCELLED -> ActionRecordImportance.BACKGROUND
+                },
+                actionType = staged.actionType,
+                summary = staged.statusReason ?: "Action staged for lifecycle control.",
+                rootInputId = staged.rootInputId,
+                actionId = action.id,
+                stagedActionId = staged.id,
+                reasonCode = staged.statusReasonCode,
+                source = "stage",
+                conversationContext = conversationContext,
+            )
+        )
+    }
+
+    private fun saveAuthorizedLedgerEntry(
+        staged: StagedAction,
+        authorization: CommitAuthorization,
+        action: PendingAction,
+        conversationContext: ConversationContext,
+    ) {
+        store.saveLedgerEntry(
+            ActionLedgerEntry(
+                id = nextId(),
+                kind = ActionLedgerKind.AUTHORIZED,
+                importance = ActionRecordImportance.BACKGROUND,
+                actionType = staged.actionType,
+                summary = "Action authorized for commit.",
+                rootInputId = staged.rootInputId,
+                actionId = action.id,
+                stagedActionId = staged.id,
+                authorizationId = authorization.id,
+                source = "authorize",
+                conversationContext = conversationContext,
+            )
+        )
+    }
+
+    private fun receiptImportanceFor(outcome: ActionOutcome): ActionRecordImportance =
+        when (outcome.executionStatus) {
+            ActionExecutionStatus.FAILED -> ActionRecordImportance.SIGNAL
+            ActionExecutionStatus.WAITING -> ActionRecordImportance.BACKGROUND
+            ActionExecutionStatus.SUCCESS,
+            ActionExecutionStatus.NO_EFFECT -> ActionRecordImportance.BACKGROUND
         }
 
     private fun prepare(action: PendingAction, conversationContext: ConversationContext): PreparedAction =
@@ -628,6 +914,7 @@ class DefaultActionControlService(
         const val AUTONOMOUS_WORKER_CHANNEL_ID: String = "action-control-worker"
         const val BYPASS_POLICY_VERSION: String = "runtime-bypass-v1"
         const val BYPASS_REASON_CODE: String = "ACTION_BYPASS_EXECUTION"
+        const val OWNER_DENIED_REASON_CODE: String = "OWNER_DENIED_STAGED_ACTION"
         val EMAIL_SEND_ACTION_TYPE = ActionType("email_send")
         val payloadMapper = jacksonObjectMapper()
             .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)

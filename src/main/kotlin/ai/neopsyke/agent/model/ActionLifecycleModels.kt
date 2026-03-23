@@ -105,10 +105,45 @@ data class ActionReceipt(
     val authorizationId: String? = null,
     val rootInputId: String? = null,
     val actionType: ActionType,
+    val importance: ActionRecordImportance = ActionRecordImportance.BACKGROUND,
     val executionStatus: ActionExecutionStatus,
     val statusSummary: String,
     val plannerSignal: String = statusSummary,
     val effects: Set<ActionEffect> = emptySet(),
     val asyncWait: ai.neopsyke.agent.actions.async.AsyncActionWait? = null,
+    val createdAtMs: Long = System.currentTimeMillis(),
+)
+
+enum class ActionRecordImportance {
+    SIGNAL,
+    BACKGROUND,
+    TRACE,
+}
+
+enum class ActionLedgerKind {
+    STAGED,
+    AUTHORIZED,
+    EXECUTED,
+    WAITING_EXTERNAL,
+    DENIED,
+    REFUSED,
+    CANCELLED,
+    BYPASS_EXECUTED,
+}
+
+data class ActionLedgerEntry(
+    val id: String,
+    val kind: ActionLedgerKind,
+    val importance: ActionRecordImportance,
+    val actionType: ActionType,
+    val summary: String,
+    val rootInputId: String? = null,
+    val actionId: Long? = null,
+    val stagedActionId: String? = null,
+    val authorizationId: String? = null,
+    val receiptId: String? = null,
+    val reasonCode: String? = null,
+    val source: String? = null,
+    val conversationContext: ConversationContext = ConversationContext.default(),
     val createdAtMs: Long = System.currentTimeMillis(),
 )

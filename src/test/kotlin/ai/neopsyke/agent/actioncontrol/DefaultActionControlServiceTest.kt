@@ -2,12 +2,14 @@ package ai.neopsyke.agent.actioncontrol
 
 import ai.neopsyke.agent.config.ActionControlConfig
 import ai.neopsyke.agent.model.ActionExecutionStatus
+import ai.neopsyke.agent.model.ActionLedgerKind
 import ai.neopsyke.agent.model.ActionOutcome
 import ai.neopsyke.agent.model.ActionType
 import ai.neopsyke.agent.model.AuthorizationDecision
 import ai.neopsyke.agent.model.AuthorizationProgress
 import ai.neopsyke.agent.model.CommitMode
 import ai.neopsyke.agent.model.ConversationContext
+import ai.neopsyke.agent.model.ConversationSecurityContexts
 import ai.neopsyke.agent.model.PendingAction
 import ai.neopsyke.agent.model.StagedActionStatus
 import ai.neopsyke.agent.model.Urgency
@@ -198,6 +200,64 @@ class DefaultActionControlServiceTest {
             assertEquals(receipt.id, staged.receiptId)
             assertEquals("SYSTEM_FALLBACK_BYPASS", staged.statusReasonCode)
             assertNull(staged.authorizationId)
+            val ledger = store.listLedgerEntries(10)
+            assertEquals(ActionLedgerKind.BYPASS_EXECUTED, ledger.first().kind)
+        }
+    }
+
+    @Test
+    fun `owner can deny staged action and create signal ledger entry`() {
+        val tempDir = Files.createTempDirectory("action-control-deny-test")
+        val dbPath = tempDir.resolve("action-control.db").toString()
+        SqliteActionControlStore(dbPath).use { store ->
+            val ownerContext = ConversationContext(
+                sessionId = ConversationContext.DEFAULT_SESSION_ID,
+                interlocutor = ConversationContext.default().interlocutor,
+                security = ConversationSecurityContexts.ownerDirect(
+                    provider = "webapp",
+                    channelId = "dashboard-test",
+                ),
+            )
+            val service = DefaultActionControlService(
+                config = ActionControlConfig(dbPath = dbPath),
+                store = store,
+            ) { _, _ ->
+                error("Denied staged action should not execute")
+            }
+            val stagedResult = kotlinx.coroutines.runBlocking {
+                service.handleAuthorizationDecision(
+                    action = PendingAction(
+                        id = 21,
+                        urgency = Urgency.MEDIUM,
+                        type = ActionType.CONTACT_USER,
+                        payload = "reply",
+                        summary = "reply for approval",
+                        conversationContext = ownerContext,
+                    ),
+                    decision = AuthorizationDecision(
+                        progress = AuthorizationProgress.ALLOW_STAGE,
+                        commitMode = CommitMode.APPROVAL_BACKED,
+                        policyVersion = "test-v1",
+                        reason = "Approval required",
+                        reasonCode = "TEST_APPROVAL_REQUIRED",
+                    ),
+                    conversationContext = ownerContext,
+                )
+            } as ActionControlDecisionResult.Staged
+
+            val denied = kotlinx.coroutines.runBlocking {
+                service.denyStagedAction(
+                    stagedActionId = stagedResult.stagedAction.id,
+                    deniedBy = ownerContext.security,
+                    reason = "No longer needed",
+                    reasonCode = "TEST_OWNER_DENIED",
+                )
+            }
+
+            denied as ActionControlDecisionResult.Cancelled
+            assertEquals(StagedActionStatus.CANCELLED, denied.stagedAction.status)
+            assertEquals(ActionLedgerKind.CANCELLED, denied.ledgerEntry.kind)
+            assertEquals("TEST_OWNER_DENIED", denied.ledgerEntry.reasonCode)
         }
     }
 }

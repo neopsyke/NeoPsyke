@@ -1,6 +1,7 @@
 package ai.neopsyke.agent.actioncontrol
 
 import ai.neopsyke.agent.model.ActionReceipt
+import ai.neopsyke.agent.model.ActionLedgerEntry
 import ai.neopsyke.agent.model.CommitAuthorization
 import ai.neopsyke.agent.model.StagedAction
 
@@ -23,6 +24,10 @@ interface ActionControlStore : AutoCloseable {
     fun saveReceipt(receipt: ActionReceipt): ActionReceipt
     fun receipt(id: String): ActionReceipt?
     fun listReceipts(limit: Int): List<ActionReceipt>
+
+    fun saveLedgerEntry(entry: ActionLedgerEntry): ActionLedgerEntry
+    fun ledgerEntry(id: String): ActionLedgerEntry?
+    fun listLedgerEntries(limit: Int): List<ActionLedgerEntry>
 
     override fun close() {}
 }

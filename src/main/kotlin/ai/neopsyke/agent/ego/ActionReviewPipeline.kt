@@ -77,6 +77,15 @@ internal class ActionReviewPipeline(
             )
         ) {
             is ActionControlDecisionResult.Refused -> {
+                actionControlService.recordLedgerEntry(
+                    action = resolvedAction,
+                    conversationContext = convCtx,
+                    kind = ActionLedgerKind.REFUSED,
+                    importance = ActionRecordImportance.SIGNAL,
+                    summary = controlResult.reason,
+                    reasonCode = controlResult.reasonCode,
+                    source = "action_control",
+                )
                 actionLifecycleObserver.onActionBlocked(
                     action = resolvedAction,
                     reason = controlResult.reason,
@@ -125,6 +134,25 @@ internal class ActionReviewPipeline(
                     reasonCode = controlResult.authorizationDecision.reasonCode,
                     conversationContext = convCtx,
                     source = "action_control"
+                )
+                instrumentation.emit(AgentEvents.phaseTimings(timing.build()))
+                return
+            }
+
+            is ActionControlDecisionResult.Cancelled -> {
+                actionLifecycleObserver.onActionBlocked(
+                    action = resolvedAction,
+                    reason = controlResult.ledgerEntry.summary,
+                    reasonCode = controlResult.ledgerEntry.reasonCode,
+                    source = "action_control_cancelled"
+                )
+                fallbackHandler.handleDeniedAction(
+                    action = resolvedAction,
+                    reason = controlResult.ledgerEntry.summary,
+                    reasonCode = controlResult.ledgerEntry.reasonCode,
+                    conversationContext = convCtx,
+                    sessionId = sessionId,
+                    source = "action_control_cancelled"
                 )
                 instrumentation.emit(AgentEvents.phaseTimings(timing.build()))
                 return
@@ -308,6 +336,15 @@ internal class ActionReviewPipeline(
             )
         )
         if (!taskVerificationDecision.allow) {
+            actionControlService.recordLedgerEntry(
+                action = resolvedAction,
+                conversationContext = convCtx,
+                kind = ActionLedgerKind.DENIED,
+                importance = ActionRecordImportance.SIGNAL,
+                summary = taskVerificationDecision.reason,
+                reasonCode = taskVerificationDecision.reasonCode,
+                source = "task_verifier",
+            )
             actionLifecycleObserver.onActionBlocked(
                 action = resolvedAction,
                 reason = taskVerificationDecision.reason,
@@ -371,6 +408,15 @@ internal class ActionReviewPipeline(
             )
         )
         if (!gateDecision.allow) {
+            actionControlService.recordLedgerEntry(
+                action = resolvedAction,
+                conversationContext = convCtx,
+                kind = ActionLedgerKind.DENIED,
+                importance = ActionRecordImportance.SIGNAL,
+                summary = gateDecision.reason,
+                reasonCode = gateDecision.reasonCode,
+                source = "superego",
+            )
             actionLifecycleObserver.onActionBlocked(
                 action = resolvedAction,
                 reason = gateDecision.reason,
