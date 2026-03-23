@@ -1,6 +1,7 @@
 package ai.neopsyke.agent.actions
 
 import mu.KotlinLogging
+import ai.neopsyke.agent.connectors.ConnectorActionPluginLoader
 import ai.neopsyke.agent.model.ActionOutcome
 import ai.neopsyke.agent.model.ActionExecutionStatus
 import ai.neopsyke.agent.model.ActionType
@@ -121,6 +122,9 @@ class ActionRegistry private constructor(
                     logger.warn(ex) { "Failed to initialize action plugin factory ${factory::class.qualifiedName}." }
                 }
             }
+            val connectorResult = ConnectorActionPluginLoader.load(context.config)
+            warnings += connectorResult.warnings
+            plugins += connectorResult.plugins
             val byType = linkedMapOf<ActionType, AgentActionPlugin>()
             plugins.forEach { plugin ->
                 val type = plugin.descriptor.actionType

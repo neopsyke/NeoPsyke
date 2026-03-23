@@ -162,6 +162,9 @@ class LazyMcpClientHolder(
 
     suspend fun listTools(timeoutMs: Long): Set<String> = ensureClient().listTools(timeoutMs)
 
+    suspend fun listToolDescriptors(timeoutMs: Long): List<McpToolDescriptor> =
+        ensureClient().listToolDescriptors(timeoutMs)
+
     private suspend fun ensureClient(): McpStdioClient {
         client?.let { return it }
         return mutex.withLock {
@@ -188,6 +191,12 @@ class McpStdioClient private constructor(
     private val serverLabel: String,
 ) : AutoCloseable {
     suspend fun listTools(timeoutMs: Long): Set<String> {
+        return listToolDescriptors(timeoutMs)
+            .map { it.name }
+            .toSet()
+    }
+
+    suspend fun listToolDescriptors(timeoutMs: Long): List<McpToolDescriptor> {
         val result = try {
             withTimeout(timeoutMs) {
                 client.listTools(ListToolsRequest())
@@ -195,7 +204,13 @@ class McpStdioClient private constructor(
         } catch (ex: TimeoutCancellationException) {
             throw IOException("MCP $serverLabel list-tools timed out after ${timeoutMs}ms", ex)
         }
-        return result?.tools.orEmpty().map { it.name }.toSet()
+        return result?.tools.orEmpty().map { tool ->
+            McpToolDescriptor(
+                name = tool.name,
+                description = tool.description.orEmpty(),
+                inputSchema = tool.inputSchema.toString(),
+            )
+        }
     }
 
     suspend fun callTool(toolName: String, arguments: Map<String, Any>, timeoutMs: Long): McpToolCallResult {
@@ -694,6 +709,12 @@ data class ToolHealthStatus(
     val detail: String,
 )
 
+data class McpToolDescriptor(
+    val name: String,
+    val description: String,
+    val inputSchema: String,
+)
+
 enum class FetchErrorCategory {
     NONE,
     MALFORMED_REQUEST,
@@ -712,7 +733,7 @@ private data class TimePayload(
 
 private data class FetchPayload(
     val url: String? = null,
-    @JsonProperty("max_chars")
+    @param:JsonProperty("max_chars")
     val maxChars: Int? = null,
 )
 

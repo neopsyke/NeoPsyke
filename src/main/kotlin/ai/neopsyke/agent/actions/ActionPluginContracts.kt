@@ -68,6 +68,8 @@ data class ActionDescriptor(
         DataTrust.TRUSTED_DATA,
         DataTrust.SANITIZED_EXTERNAL_DATA,
     ),
+    val connectorRuntime: ConnectorRuntimeBoundary = ConnectorRuntimeBoundary.firstPartyBuiltin(),
+    val connectorBinding: ConnectorActionBinding? = null,
 ) {
     val contract: ActionContract
         get() = ActionContract(

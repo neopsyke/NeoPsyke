@@ -8,6 +8,7 @@ import com.fasterxml.jackson.module.kotlin.readValue
 import com.fasterxml.jackson.module.kotlin.registerKotlinModule
 import ai.neopsyke.agent.config.AgentConfig
 import ai.neopsyke.agent.config.ActionControlConfig
+import ai.neopsyke.agent.config.ConnectorRuntimeConfig
 import ai.neopsyke.agent.config.LogbookConfig
 import ai.neopsyke.agent.config.MemoryConfig
 import ai.neopsyke.agent.config.MetaReasonerConfig
@@ -51,6 +52,7 @@ private data class AgentRuntimeYamlAgent(
     val metaReasoner: AgentRuntimeYamlMetaReasoner? = AgentRuntimeYamlMetaReasoner(),
     val logbook: AgentRuntimeYamlLogbook? = AgentRuntimeYamlLogbook(),
     val actionControl: AgentRuntimeYamlActionControl? = AgentRuntimeYamlActionControl(),
+    val connectors: AgentRuntimeYamlConnectors? = AgentRuntimeYamlConnectors(),
     val innerVoice: AgentRuntimeYamlInnerVoice? = AgentRuntimeYamlInnerVoice(),
     val runtime: AgentRuntimeYamlRuntime? = AgentRuntimeYamlRuntime(),
 )
@@ -174,6 +176,19 @@ private data class AgentRuntimeYamlActionControl(
     val autonomousWorkerBatchSize: Int? = null,
 )
 
+private data class AgentRuntimeYamlConnectors(
+    val enabled: Boolean? = null,
+    val curatedCatalogPath: String? = null,
+    val installStateDir: String? = null,
+    val failClosed: Boolean? = null,
+    val pinningEnabled: Boolean? = null,
+    val startupTimeoutMs: Long? = null,
+    val healthTimeoutMs: Long? = null,
+    val allowedConnectorIds: List<String>? = null,
+    val enabledBundleIds: List<String>? = null,
+    val allowThirdPartyConnectors: Boolean? = null,
+)
+
 private data class AgentRuntimeYamlInnerVoice(
     val enabled: Boolean? = null,
     val maxContentChars: Int? = null,
@@ -214,6 +229,7 @@ object AgentRuntimeSettingsLoader {
         val metaReasonerYaml = agentYaml.metaReasoner ?: AgentRuntimeYamlMetaReasoner()
         val logbookYaml = agentYaml.logbook ?: AgentRuntimeYamlLogbook()
         val actionControlYaml = agentYaml.actionControl ?: AgentRuntimeYamlActionControl()
+        val connectorsYaml = agentYaml.connectors ?: AgentRuntimeYamlConnectors()
         val innerVoiceYaml = agentYaml.innerVoice ?: AgentRuntimeYamlInnerVoice()
         val runtimeYaml = agentYaml.runtime ?: AgentRuntimeYamlRuntime()
 
@@ -703,6 +719,58 @@ object AgentRuntimeSettingsLoader {
                     defaults.actionControl.autonomousWorkerBatchSize
                 ),
             ),
+            connectors = ConnectorRuntimeConfig(
+                enabled = readBoolean(
+                    env["NEOPSYKE_CONNECTORS_ENABLED"],
+                    connectorsYaml.enabled,
+                    defaults.connectors.enabled
+                ),
+                curatedCatalogPath = readNonBlank(
+                    env["NEOPSYKE_CONNECTORS_CATALOG_PATH"],
+                    connectorsYaml.curatedCatalogPath,
+                    defaults.connectors.curatedCatalogPath
+                ),
+                installStateDir = readNonBlank(
+                    env["NEOPSYKE_CONNECTORS_STATE_DIR"],
+                    connectorsYaml.installStateDir,
+                    defaults.connectors.installStateDir
+                ),
+                failClosed = readBoolean(
+                    env["NEOPSYKE_CONNECTORS_FAIL_CLOSED"],
+                    connectorsYaml.failClosed,
+                    defaults.connectors.failClosed
+                ),
+                pinningEnabled = readBoolean(
+                    env["NEOPSYKE_CONNECTORS_PINNING_ENABLED"],
+                    connectorsYaml.pinningEnabled,
+                    defaults.connectors.pinningEnabled
+                ),
+                startupTimeoutMs = readPositiveLong(
+                    env["NEOPSYKE_CONNECTORS_STARTUP_TIMEOUT_MS"],
+                    connectorsYaml.startupTimeoutMs,
+                    defaults.connectors.startupTimeoutMs
+                ),
+                healthTimeoutMs = readPositiveLong(
+                    env["NEOPSYKE_CONNECTORS_HEALTH_TIMEOUT_MS"],
+                    connectorsYaml.healthTimeoutMs,
+                    defaults.connectors.healthTimeoutMs
+                ),
+                allowedConnectorIds = readStringSet(
+                    env["NEOPSYKE_CONNECTORS_ALLOWED_IDS"],
+                    connectorsYaml.allowedConnectorIds,
+                    defaults.connectors.allowedConnectorIds
+                ),
+                enabledBundleIds = readStringSet(
+                    env["NEOPSYKE_CONNECTORS_ENABLED_BUNDLES"],
+                    connectorsYaml.enabledBundleIds,
+                    defaults.connectors.enabledBundleIds
+                ),
+                allowThirdPartyConnectors = readBoolean(
+                    env["NEOPSYKE_CONNECTORS_ALLOW_THIRD_PARTY"],
+                    connectorsYaml.allowThirdPartyConnectors,
+                    defaults.connectors.allowThirdPartyConnectors
+                ),
+            ),
             innerVoice = InnerVoiceConfig(
                 enabled = readBoolean(
                     env["NEOPSYKE_INNER_VOICE_ENABLED"],
@@ -835,6 +903,20 @@ object AgentRuntimeSettingsLoader {
 
     private fun readNonBlank(env: String?, yaml: String?, fallback: String): String =
         firstNonBlank(env, yaml) ?: fallback
+
+    private fun readStringSet(env: String?, yaml: List<String>?, fallback: Set<String>): Set<String> {
+        val envValues = env
+            ?.split(',')
+            ?.mapNotNull { value -> value.trim().takeIf { it.isNotEmpty() } }
+            ?.toSet()
+        if (!envValues.isNullOrEmpty()) {
+            return envValues
+        }
+        val yamlValues = yaml
+            ?.mapNotNull { value -> value.trim().takeIf { it.isNotEmpty() } }
+            ?.toSet()
+        return if (!yamlValues.isNullOrEmpty()) yamlValues else fallback
+    }
 
     private fun parseBoolean(raw: String?): Boolean? =
         when (raw?.trim()?.lowercase()) {
