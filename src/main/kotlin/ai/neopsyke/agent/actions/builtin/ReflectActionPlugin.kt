@@ -42,8 +42,9 @@ class ReflectActionPlugin(
         requiresFollowUpThought = false,
         followUpPrefix = "Reflection recorded.",
         superegoDirectives = listOf(
-            "Allow REFLECT for genuine self-analysis, learning, and observation recording.",
-            "Deny REFLECT if the summary is empty, off-topic, or appears to leak internal mechanism details.",
+            "Allow REFLECT for genuine self-analysis, learning, and durable observation recording.",
+            "Id-origin REFLECT is internal-only and does not require a direct user request.",
+            "Deny REFLECT only if the summary is empty after trimming or appears to leak internal mechanism details.",
         ),
         capabilities = emptySet(),
     )

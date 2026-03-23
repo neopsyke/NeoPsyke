@@ -15,7 +15,10 @@ import ai.neopsyke.agent.memory.longterm.ForgetRequest
 import ai.neopsyke.agent.ego.LlmMetaReasoner
 import ai.neopsyke.agent.ego.NoopScratchpadFinalizer
 import ai.neopsyke.agent.memory.longterm.LlmLongTermMemoryAdvisor
-import ai.neopsyke.agent.memory.longterm.McpHippocampus
+import ai.neopsyke.agent.memory.provider.HttpMemoryProviderClient
+import ai.neopsyke.agent.memory.provider.DefaultMemoryProviderInstaller
+import ai.neopsyke.agent.memory.provider.ManagedHttpMemoryProviderProcess
+import ai.neopsyke.agent.memory.provider.ProviderBackedHippocampus
 import ai.neopsyke.agent.tools.mcp.McpStdioClient
 import ai.neopsyke.agent.model.ActionType
 import ai.neopsyke.agent.cortex.sensory.AsyncSignalSource
@@ -36,6 +39,8 @@ import ai.neopsyke.config.McpCapabilityConfig
 import ai.neopsyke.config.LlmEndpointConfig
 import ai.neopsyke.config.LlmProvider
 import ai.neopsyke.config.LlmRuntimeConfig
+import ai.neopsyke.config.MemoryMode
+import ai.neopsyke.config.MemoryRuntimeConfig
 import ai.neopsyke.config.McpRuntimeConfig
 import ai.neopsyke.dashboard.DashboardServer
 import ai.neopsyke.dashboard.DashboardStateStore
@@ -112,7 +117,8 @@ import ai.neopsyke.agent.tools.mcp.ToolHealthStatus
 import kotlin.system.exitProcess
 import java.net.InetSocketAddress
 import java.util.concurrent.Executors
-import java.net.Socket
+import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.atomic.AtomicBoolean
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
@@ -250,10 +256,11 @@ internal object AppModeRunners {
         llm: LlmRuntimeConfig,
         config: AgentConfig,
         mcpRuntimeConfig: McpRuntimeConfig,
+        memoryRuntimeConfig: MemoryRuntimeConfig,
         cliOptions: AppCliOptions,
         runtimeSettings: AgentRuntimeSettings,
     ) {
-        output.info("Running memory live eval (real LLM + real MCP memory)...")
+        output.info("Running memory live eval (real LLM + real long-term memory provider)...")
         val resolvedApiKey = llm.planner.apiKey.trim()
         if (resolvedApiKey.isBlank()) {
             val message = "${llm.planner.apiKeyEnvVar} is required for --eval-memory-live."
@@ -264,21 +271,25 @@ internal object AppModeRunners {
         if (!checkProviderHealth(endpoint = llm.planner, modeLabel = "eval_memory_live", roleLabel = "planner")) {
             return
         }
-        val memoryCommand = resolveMcpCommand(mcpRuntimeConfig.memory)
-        if (memoryCommand == null) {
-            val reason = disabledReason("memory", mcpRuntimeConfig.memory)
-            output.error(
-                "Memory MCP command is unavailable for --eval-memory-live. $reason Configure mcp-runtime.yaml or override with MCP_MEMORY_SERVER_CMD."
-            )
-            logger.warn {
-                "Memory MCP command is unavailable for --eval-memory-live. $reason"
-            }
+        val hippocampus = try {
+            createHippocampus(config = config, runtimeConfig = memoryRuntimeConfig)
+        } catch (ex: Exception) {
+            output.error("Memory provider startup failed for --eval-memory-live: ${ex.message}")
+            logger.warn(ex) { "Memory provider startup failed for --eval-memory-live." }
             return
         }
-        if (!checkMcpMemoryProviderHealth(command = memoryCommand, timeoutMs = config.memory.mcpMemoryCallTimeoutMs, modeLabel = "eval_memory_live")) {
+        if (!hippocampus.enabled) {
+            output.error(
+                "A non-off memory provider is required for --eval-memory-live. Current mode=${memoryRuntimeConfig.mode.name.lowercase()}."
+            )
+            logger.warn { "Memory live eval requires an enabled memory provider. mode=${memoryRuntimeConfig.mode}" }
+            closeQuietly(hippocampus)
             return
         }
     
+        val shutdownGuard = ShutdownCloseGuard("memory-live").apply {
+            register(hippocampus)
+        }
         val sidecarPath = resolveEvalEventSidecarPath()
         val sidecarSink = if (sidecarPath == null) {
             null
@@ -297,6 +308,7 @@ internal object AppModeRunners {
         )
         val evalRawResponseCharLimit = runtimeSettings.evalMaxRawResponseChars
         val evalScope = agentScope("neopsyke-memory-eval")
+        try {
         InstrumentationBus(
             sinks = sinks,
             criticalSinks = listOfNotNull(sidecarSink),
@@ -337,12 +349,7 @@ internal object AppModeRunners {
                     val stage = cliOptions.evalStage
                         ?: runtimeSettings.evalDefaultStage
                         ?: java.time.LocalDate.now(java.time.ZoneOffset.UTC).toString()
-                    McpHippocampus(
-                        command = memoryCommand,
-                        callTimeoutMs = config.memory.mcpMemoryCallTimeoutMs,
-                        defaultMaxItems = config.memory.longTermMemoryRecallMaxItems,
-                        defaultMaxChars = config.memory.longTermMemoryRecallMaxChars
-                    ).use { hippocampus ->
+                    hippocampus.use { activeHippocampus ->
                         val report = MemoryLiveEvalRunner(
                             client = client,
                             longTermMemoryAdvisor = LlmLongTermMemoryAdvisor(
@@ -352,10 +359,10 @@ internal object AppModeRunners {
                                 modelContextWindow = llm.modelCatalog.contextWindowFor(llm.planner),
                                 instrumentation = instrumentation
                             ),
-                            hippocampus = hippocampus,
+                            hippocampus = activeHippocampus,
                             tasks = MemoryLiveEvalTasks.defaults(),
                             instrumentation = instrumentation
-                        ).run(
+                ).run(
                             MemoryLiveEvalOptions(
                                 stage = stage,
                                 taskFilter = cliOptions.evalMemoryTaskFilter,
@@ -370,6 +377,9 @@ internal object AppModeRunners {
                     }
                 }
             }
+        }
+        } finally {
+            shutdownGuard.close()
         }
     }
     
@@ -536,68 +546,11 @@ internal object AppModeRunners {
         }
     }
     
-    private fun checkMcpMemoryProviderHealth(
-        command: List<String>,
-        timeoutMs: Long,
-        modeLabel: String,
-    ): Boolean {
-        val status = try {
-            runBlocking {
-                McpStdioClient.start(command = command, serverLabel = "memory-health")
-            }.use { client ->
-                runBlocking {
-                    val tools = client.listTools(timeoutMs)
-                    val hasSearchLike = tools.any { tool ->
-                        val lower = tool.lowercase()
-                        lower.contains("search") || lower.contains("recall") || lower.contains("query")
-                    }
-                    val hasWriteLike = tools.any { tool ->
-                        val lower = tool.lowercase()
-                        lower.contains("add_observations") ||
-                            lower.contains("remember") ||
-                            lower.contains("imprint") ||
-                            lower.contains("create_memory") ||
-                            lower.contains("add_memory") ||
-                            lower.contains("write_memory")
-                    }
-                    when {
-                        !hasSearchLike || !hasWriteLike -> {
-                            ProviderStatus(
-                                provider = "mcp_memory",
-                                state = ProviderHealthState.UNAVAILABLE,
-                                detail = "MCP memory server reachable but required tools are missing. search_like=$hasSearchLike write_like=$hasWriteLike tools=${tools.sorted().joinToString(",")}"
-                            )
-                        }
-
-                        else -> {
-                            ProviderStatus(
-                                provider = "mcp_memory",
-                                state = ProviderHealthState.AVAILABLE,
-                                detail = "MCP memory server reachable; required tools detected."
-                            )
-                        }
-                    }
-                }
-            }
-        } catch (ex: Exception) {
-            val postgresStatus = localPostgresStatus()
-            ProviderStatus(
-                provider = "mcp_memory",
-                state = ProviderHealthState.UNAVAILABLE,
-                detail = "MCP memory provider check failed. PostgreSQL status: $postgresStatus"
-            )
-        }
-    
-        return reportProviderStatusAndDecide(
-            modeLabel = modeLabel,
-            status = status
-        )
-    }
-    
     internal fun runInteractiveMode(
         llm: LlmRuntimeConfig,
         config: AgentConfig,
         mcpRuntimeConfig: McpRuntimeConfig,
+        memoryRuntimeConfig: MemoryRuntimeConfig,
         runtimeSettings: AgentRuntimeSettings,
         cliOptions: AppCliOptions? = null,
     ) {
@@ -974,9 +927,8 @@ internal object AppModeRunners {
                                             webSearchRuntime.use { runtime ->
                                                 val timeTool = mcpTimeTool
                                                 val activeFetchTool = fetchTool
-                                                try {
                                                     val earlyMemoryStartup =
-                                                        resolveInteractiveMemoryStartup(config, mcpRuntimeConfig.memory)
+                                                        resolveInteractiveMemoryStartup(config, memoryRuntimeConfig)
                                                     val hippocampus = earlyMemoryStartup.hippocampus
                                                     val logbook = createLogbookIfEnabled(config)
                                                     val longTermMemoryAdvisor = LlmLongTermMemoryAdvisor(
@@ -1128,6 +1080,12 @@ internal object AppModeRunners {
                                                                 instrumentation = instrumentation
                                                             )
                                                         }
+                                                        val shutdownGuard = ShutdownCloseGuard("interactive-runtime").apply {
+                                                            register(hippocampus)
+                                                            register(logbook)
+                                                            register(activeFetchTool)
+                                                            register(timeTool)
+                                                        }
                                                         val idConfig = ai.neopsyke.config.IdRuntimeConfigLoader.load()
                                                         val idModule = if (idConfig.enabled) {
                                                            ai.neopsyke.agent.id.Id(
@@ -1142,6 +1100,7 @@ internal object AppModeRunners {
                                                             ).also { id ->
                                                                 ego.setId(id)
                                                                 id.start()
+                                                                shutdownGuard.register(id)
                                                             }
                                                         } else {
                                                             null
@@ -1149,19 +1108,13 @@ internal object AppModeRunners {
                                                         try {
                                                             ego.runInteractive()
                                                         } finally {
-                                                            idModule?.close()
-                                                            hippocampus.close()
-                                                            closeQuietly(logbook)
+                                                            shutdownGuard.close()
                                                         }
                                                         } } finally {
                                                             goalManager?.stop()
                                                             egoDispatcher.close()
                                                         }
                                                     }
-                                                } finally {
-                                                    closeQuietly(activeFetchTool)
-                                                    closeQuietly(timeTool)
-                                                }
                                             }
                                         } finally {
                                             superegoEscalationClient?.close()
@@ -1189,6 +1142,7 @@ internal object AppModeRunners {
         llm: LlmRuntimeConfig,
         config: AgentConfig,
         mcpRuntimeConfig: McpRuntimeConfig,
+        memoryRuntimeConfig: MemoryRuntimeConfig,
         runtimeSettings: AgentRuntimeSettings,
         cliOptions: AppCliOptions,
     ) {
@@ -1428,9 +1382,8 @@ internal object AppModeRunners {
                                         webSearchRuntime.use { runtime ->
                                             val timeTool = mcpTimeTool
                                             val activeFetchTool = fetchTool
-                                            try {
                                                 val earlyMemoryStartup2 =
-                                                    resolveInteractiveMemoryStartup(config, mcpRuntimeConfig.memory)
+                                                    resolveInteractiveMemoryStartup(config, memoryRuntimeConfig)
                                                 val hippocampus = earlyMemoryStartup2.hippocampus
                                                 val logbook = createLogbookIfEnabled(config)
                                                 val longTermMemoryAdvisor = LlmLongTermMemoryAdvisor(
@@ -1526,6 +1479,12 @@ internal object AppModeRunners {
                                                     val registry = assembled.actionRegistry
                                                     val motorCortex = assembled.motorCortex
                                                     val ego = assembled.ego
+                                                    val shutdownGuard = ShutdownCloseGuard("freud-live-runtime").apply {
+                                                        register(hippocampus)
+                                                        register(logbook)
+                                                        register(activeFetchTool)
+                                                        register(timeTool)
+                                                    }
                                                     val actionStatuses = motorCortex.startupSmokeTest()
                                                     instrumentation.emit(AgentEvents.actionCapabilities(actionStatuses))
                                                     instrumentation.emit(
@@ -1582,8 +1541,7 @@ internal object AppModeRunners {
                                                         }
                                                     } finally {
                                                         watchdog.cancel()
-                                                        hippocampus.close()
-                                                        closeQuietly(logbook)
+                                                        shutdownGuard.close()
                                                     }
 
                                                     val exitCode = when {
@@ -1605,10 +1563,6 @@ internal object AppModeRunners {
                                                         egoDispatcher.close()
                                                     }
                                                 }
-                                            } finally {
-                                                closeQuietly(activeFetchTool)
-                                                closeQuietly(timeTool)
-                                            }
                                         }
                                     } finally {
                                         superegoEscalationClient?.close()
@@ -1951,61 +1905,132 @@ internal object AppModeRunners {
         )
     }
     
-    private fun createHippocampus(config: AgentConfig, capability: McpCapabilityConfig): Hippocampus {
-        return createHippocampus(config = config, capability = capability, resolvedCommand = null)
+    private fun createHippocampus(config: AgentConfig, runtimeConfig: MemoryRuntimeConfig): Hippocampus {
+        return when (runtimeConfig.mode) {
+            MemoryMode.OFF -> NoopHippocampus
+            MemoryMode.DEFAULT -> createDefaultProviderBackedHippocampus(config, runtimeConfig)
+            MemoryMode.EXTERNAL -> createExternalProviderBackedHippocampus(config, runtimeConfig)
+        }
     }
 
-    private fun createHippocampus(
+    private fun createDefaultProviderBackedHippocampus(
         config: AgentConfig,
-        capability: McpCapabilityConfig,
-        resolvedCommand: List<String>?,
+        runtimeConfig: MemoryRuntimeConfig,
     ): Hippocampus {
-        val command = resolvedCommand ?: resolveMcpCommand(capability)
-        if (command == null) {
-            logger.info { disabledReason("memory", capability) }
+        val provider = runtimeConfig.defaultProvider
+        val baseUrl = provider.baseUrl.trim().trimEnd('/')
+        if (baseUrl.isBlank()) {
+            logger.warn { "Default memory provider baseUrl is blank; disabling long-term vector memory for this run." }
             return NoopHippocampus
         }
-        return McpHippocampus(
-            command = command,
-            callTimeoutMs = config.memory.mcpMemoryCallTimeoutMs,
-            defaultMaxItems = config.memory.longTermMemoryRecallMaxItems,
-            defaultMaxChars = config.memory.longTermMemoryRecallMaxChars
+        val managedProcess = if (isHttpMemoryProviderHealthy(baseUrl, provider.healthTimeoutMs)) {
+            null
+        } else {
+            DefaultMemoryProviderInstaller().ensureInstalled(provider)
+            val command = resolveProviderCommand(provider.command)
+                ?: throw IllegalStateException("Default memory provider command is unavailable: ${provider.command}")
+            ManagedHttpMemoryProviderProcess(
+                command = command,
+                baseUrl = baseUrl,
+                startupTimeoutMs = provider.startupTimeoutMs,
+                healthTimeoutMs = provider.healthTimeoutMs
+            )
+        }
+        return ProviderBackedHippocampus(
+            namespace = provider.namespace,
+            client = HttpMemoryProviderClient(
+                providerName = provider.provider,
+                baseUrl = baseUrl,
+                callTimeoutMs = config.memory.mcpMemoryCallTimeoutMs,
+                managedProcess = managedProcess
+            )
+        )
+    }
+
+    private fun createExternalProviderBackedHippocampus(
+        config: AgentConfig,
+        runtimeConfig: MemoryRuntimeConfig,
+    ): Hippocampus {
+        val provider = runtimeConfig.externalProvider
+        val transport = provider.transport.trim().lowercase()
+        if (transport != "http") {
+            // TODO(memory-provider): add transport adapters for MCP/direct external providers.
+            throw IllegalStateException(
+                "memory=external currently supports only transport=http. " +
+                    "Configured provider=${provider.provider} transport=${provider.transport}."
+            )
+        }
+        val baseUrl = provider.baseUrl.trim().trimEnd('/')
+        if (baseUrl.isBlank()) {
+            throw IllegalStateException(
+                "memory=external requires a non-blank baseUrl for provider=${provider.provider}."
+            )
+        }
+        if (!isHttpMemoryProviderHealthy(baseUrl, config.memory.mcpMemoryCallTimeoutMs)) {
+            throw IllegalStateException(
+                "External memory provider health check failed for provider=${provider.provider} baseUrl=$baseUrl."
+            )
+        }
+        return ProviderBackedHippocampus(
+            namespace = provider.namespace,
+            client = HttpMemoryProviderClient(
+                providerName = provider.provider,
+                baseUrl = baseUrl,
+                callTimeoutMs = config.memory.mcpMemoryCallTimeoutMs,
+            )
         )
     }
 
     private fun resolveInteractiveMemoryStartup(
         config: AgentConfig,
-        capability: McpCapabilityConfig,
+        runtimeConfig: MemoryRuntimeConfig,
     ): InteractiveMemoryStartup {
-        val command = resolveMcpCommand(capability)
-        if (command == null) {
+        val hippocampus = try {
+            createHippocampus(config = config, runtimeConfig = runtimeConfig)
+        } catch (ex: Exception) {
+            val detail = ex.message?.takeIf { it.isNotBlank() }
+                ?: "Memory provider startup failed; long-term memory disabled for this run."
+            logger.warn(ex) { "Memory provider startup failed for interactive mode: $detail" }
             return InteractiveMemoryStartup(
                 hippocampus = NoopHippocampus,
-                detail = disabledReason("memory", capability)
+                detail = detail
             )
         }
-
-        val memoryHealthy = checkMcpMemoryProviderHealth(
-            command = command,
-            timeoutMs = config.memory.mcpMemoryCallTimeoutMs,
-            modeLabel = "interactive_memory"
-        )
-        if (!memoryHealthy) {
+        if (!hippocampus.enabled) {
             return InteractiveMemoryStartup(
                 hippocampus = NoopHippocampus,
-                detail = "MCP memory startup health check failed; long-term memory disabled for this run."
+                detail = "Long-term vector memory disabled (mode=${runtimeConfig.mode.name.lowercase()})."
             )
         }
-
-        val hippocampus = createHippocampus(
-            config = config,
-            capability = capability,
-            resolvedCommand = command
-        )
         return InteractiveMemoryStartup(
             hippocampus = hippocampus,
-            detail = "Provider: ${hippocampus.providerName} (${capability.provider})"
+            detail = "Provider: ${hippocampus.providerName} (${runtimeConfig.mode.name.lowercase()})"
         )
+    }
+
+    private fun resolveProviderCommand(command: String): List<String>? {
+        val parsed = McpStdioClient.parseCommand(command)
+        if (parsed.isEmpty()) {
+            return null
+        }
+        return parsed.takeIf { isExecutableAvailable(it.first()) }
+    }
+
+    private fun isHttpMemoryProviderHealthy(baseUrl: String, timeoutMs: Long): Boolean {
+        return try {
+            val request = okhttp3.Request.Builder()
+                .url("${baseUrl.trimEnd('/')}/v1/health")
+                .get()
+                .build()
+            okhttp3.OkHttpClient.Builder()
+                .callTimeout(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS)
+                .build()
+                .newCall(request)
+                .execute()
+                .use { response -> response.isSuccessful }
+        } catch (_: Exception) {
+            false
+        }
     }
     
     private fun resolveMcpCommand(capability: McpCapabilityConfig): List<String>? {
@@ -2186,17 +2211,49 @@ internal object AppModeRunners {
         }
     }
 
-    private fun localPostgresStatus(): String {
-        val host = "127.0.0.1"
-        val port = 5432
-        val timeoutMs = 500
-        return try {
-            Socket().use { socket ->
-                socket.connect(InetSocketAddress(host, port), timeoutMs)
+    // Ensure managed resources are closed on JVM shutdown (Ctrl-C / SIGTERM) as well as normal flow.
+    internal class ShutdownCloseGuard(
+        threadLabel: String,
+    ) : AutoCloseable {
+        private val closed = AtomicBoolean(false)
+        private val resources = CopyOnWriteArrayList<AutoCloseable>()
+        private val hook = Thread(
+            { closeInternal(removeHook = false) },
+            "neopsyke-$threadLabel-shutdown"
+        )
+
+        init {
+            Runtime.getRuntime().addShutdownHook(hook)
+        }
+
+        fun register(value: Any?) {
+            val closeable = value as? AutoCloseable ?: return
+            if (closed.get()) {
+                closeQuietly(closeable)
+                return
             }
-            "available at localhost:5432"
-        } catch (_: Exception) {
-            "unavailable at localhost:5432"
+            resources.add(closeable)
+            if (closed.get() && resources.remove(closeable)) {
+                closeQuietly(closeable)
+            }
+        }
+
+        override fun close() {
+            closeInternal(removeHook = true)
+        }
+
+        private fun closeInternal(removeHook: Boolean) {
+            if (!closed.compareAndSet(false, true)) return
+            if (removeHook) {
+                try {
+                    Runtime.getRuntime().removeShutdownHook(hook)
+                } catch (_: IllegalStateException) {
+                    // JVM shutdown already in progress; let the active hook own cleanup.
+                }
+            }
+            val snapshot = resources.toList().asReversed()
+            resources.clear()
+            snapshot.forEach(::closeQuietly)
         }
     }
 

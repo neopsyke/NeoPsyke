@@ -191,6 +191,46 @@ class MemorySystemLogbookNarrativeTest {
     }
 
     @Test
+    fun `internal assessment saves self-origin memory with self source and tags`() {
+        val logbook = RecordingLogbook()
+        val hippocampus = RecordingHippocampus()
+        val coordinator = MemorySystem(
+            hippocampus = hippocampus,
+            longTermMemoryAdvisor = object : LongTermMemoryAdvisor {
+                override fun assess(context: LongTermMemoryAssessmentContext): LongTermMemoryAssessmentDecision =
+                    LongTermMemoryAssessmentDecision(
+                        shouldSave = true,
+                        summary = "I want to remember that I feel curious about new learning topics.",
+                        confidence = 0.93,
+                        reason = "Agent curiosity indicates a stable self preference.",
+                        tags = listOf("learning", "self preference"),
+                    )
+            },
+            config = AgentConfig(
+                memory = MemoryConfig(
+                    longTermMemoryMinConfidence = 0.5
+                )
+            ),
+            instrumentation = NoopAgentInstrumentation,
+            logbook = logbook,
+        )
+        coordinator.setActiveSession("id:internal", Interlocutor.named("Id"))
+
+        coordinator.maybeAssessLongTermMemory(
+            trigger = "interval",
+            force = true,
+            deliberation = DeliberationState(stepIndex = 16),
+            recentDialogue = listOf(DialogueTurn(DialogueRole.INTERNAL, "I want to explore engaging new learning topics"))
+        )
+
+        val imprint = hippocampus.imprints.single()
+        assertEquals("ego_self_memory_assessment", imprint.source)
+        assertTrue(imprint.tags.contains("self_initiated"))
+        assertTrue(imprint.tags.contains("subject:self"))
+        assertTrue(imprint.tags.contains("self preference"))
+    }
+
+    @Test
     fun `recent learning topics keep exact topics and dedupe exact repeats`() {
         val coordinator = MemorySystem(
             hippocampus = RecordingHippocampus(),

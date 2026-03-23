@@ -176,14 +176,28 @@ the source of truth.
 
 ## Concurrency
 
-Concurrent Freud runs are mostly safe now:
+Concurrent Freud runs are only partly safe.
 
-- `feature-loop.sh` runs can overlap
+Not safe in the same checkout/worktree:
+
+- `feature-loop.sh` runs
+- `run-scenarios.sh` runs
+- `run-reasoning-pr-gate.sh` runs
+- raw `./gradlew ...` runs
+
+Reason:
+
+- those commands invoke Gradle/Kotlin compilation or tests against the same checkout
+- overlapping Gradle-backed runs can collide on shared `build/` outputs and Kotlin/Gradle daemon state
+- if parallel validation is needed, use separate git worktrees or separate clones
+
+Conditionally safe in the same checkout:
+
 - `live-eval.sh` runs can overlap
 - `run-bbh-smoke.sh` runs can overlap
-- mixing those command families is fine
+- mixing those live command families is fine only when they are not overlapping with any Gradle-backed command
 
-Why:
+Why the live-only case can work:
 
 - each run gets its own timestamped run directory
 - the shared `latest` pointers are now best-effort convenience pointers, not a hard dependency for execution
@@ -221,11 +235,11 @@ with each other by:
 
 Practical rule:
 
-- concurrent deterministic runs are fine
+- concurrent deterministic/Gradle-backed runs are not fine in one checkout
 - concurrent live runs are fine when memory is off or irrelevant
 - concurrent memory-dependent live runs are not safe and can contaminate each other
 
-This is one reason the BBH live suite disables long-term MCP memory and
+This is one reason the BBH live suite disables long-term vector memory and
 episodic logbook recall by default.
 
 ## Live Runs And Cost
@@ -246,7 +260,7 @@ Cost guidance:
 Memory behavior:
 
 - one-shot `live-eval.sh` uses isolated Freud memory by default
-- BBH smoke disables long-term MCP memory and episodic logbook recall by default so the suite measures reasoning rather than memory side-effects
+- BBH smoke disables long-term vector memory and episodic logbook recall by default so the suite measures reasoning rather than memory side-effects
 
 ## Common Failure Modes
 
@@ -276,7 +290,7 @@ Defaults:
 - `--clear-memory-all` is applied automatically
 - use `--preserve-memory` only when a sequence intentionally depends on prior isolated Freud memory
 - `--expected` uses normalized exact matching, not substring containment
-- BBH smoke additionally disables long-term MCP memory and episodic logbook recall by default
+- BBH smoke additionally disables long-term vector memory and episodic logbook recall by default
 
 ## Configuration
 
@@ -298,7 +312,7 @@ Important overrides:
 - `FREUD_BBH_MIN_PASS_RATE_PERCENT`
 - `FREUD_BBH_MAX_TIMEOUTS`
 - `FREUD_BBH_PRESERVE_MEMORY`
-- `FREUD_BBH_MCP_MEMORY_ENABLED`
+- `FREUD_BBH_MEMORY_ENABLED`
 - `FREUD_BBH_LOGBOOK_ENABLED`
 - `FREUD_RUN_ROOT`
 - `FREUD_GRADLE_USER_HOME`

@@ -361,6 +361,41 @@ class SuperegoGatekeeperTest {
 
         assertTrue(decision.allow)
         assertEquals(1, llm.calls.size)
+        assertTrue(llm.lastMessages.last().content.contains("Action origin:"))
+        assertTrue(llm.lastMessages.last().content.contains("source=id"))
+    }
+
+    @Test
+    fun `gatekeeper auto-approves id-origin reflect without llm review`() {
+        val llm = StubChatModelClient().apply {
+            enqueueRawResponse("""{"allow":false,"reason":"should not be used","reason_code":"POLICY_TEST"}""")
+        }
+        val instrumentation = RecordingInstrumentation()
+        val gatekeeper = Superego(
+            modelClient = llm,
+            config = AgentConfig(),
+            actionRegistry = testRegistry(),
+            instrumentation = instrumentation
+        )
+        val reflectAction = PendingAction(
+            id = 701,
+            urgency = Urgency.MEDIUM,
+            type = ActionType.REFLECT,
+            payload = """{"summary":"I learned something useful","keywords":["learning"]}""",
+            summary = "record internal reflection",
+            origin = ActionOrigin(
+                source = OriginSource.ID,
+                needId = "learn-something",
+                rootImpulseId = "imp-3"
+            )
+        )
+        val idContext = snapshot.copy(origin = reflectAction.origin)
+
+        val decision = gatekeeper.review(reflectAction, idContext)
+
+        assertTrue(decision.allow)
+        assertEquals(0, llm.calls.size, "Internal-only REFLECT should bypass LLM superego review")
+        assertTrue(instrumentation.events.any { it.type == "superego_llm_bypassed" })
     }
 
     @Test

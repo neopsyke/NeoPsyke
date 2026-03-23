@@ -5,6 +5,7 @@ import ai.neopsyke.agent.model.ActionType
 import ai.neopsyke.agent.config.AgentConfig
 import ai.neopsyke.agent.model.DialogueRole
 import ai.neopsyke.agent.model.GateDecision
+import ai.neopsyke.agent.model.OriginSource
 import ai.neopsyke.agent.model.PendingAction
 import ai.neopsyke.agent.model.SuperegoContext
 import ai.neopsyke.agent.support.PromptBudgetAllocator
@@ -86,6 +87,26 @@ class Superego(
                 )
             )
         )
+        if (shouldBypassLlmReview(action, context)) {
+            instrumentation.emit(
+                AgentEvent(
+                    type = "superego_llm_bypassed",
+                    data = mapOf(
+                        "action_id" to action.id,
+                        "policy" to "id_internal_reflect"
+                    )
+                )
+            )
+            instrumentation.emit(
+                AgentEvents.superegoReviewOutput(
+                    actionId = action.id,
+                    allow = true,
+                    reason = "Internal-only REFLECT action auto-approved after deterministic validation.",
+                    reasonCode = null
+                )
+            )
+            return GateDecision(allow = true, reason = "")
+        }
 
         val promptAllocation = buildMessages(action, context, resolvedDirectives)
         instrumentation.emit(
@@ -164,6 +185,9 @@ class Superego(
         val directivesBlock = directives.joinToString(separator = "\n") { "- $it" }
         val lastUserTurn = context.recentDialogue.lastOrNull { it.role == DialogueRole.USER }?.content ?: "none"
         val shortTermContextSummary = context.shortTermContextSummary.ifBlank { "none" }
+        val originSource = context.origin?.source?.name?.lowercase() ?: "user"
+        val originNeedId = context.origin?.needId ?: "none"
+        val originRootImpulseId = context.origin?.rootImpulseId ?: "none"
         return PromptBudgetAllocator.allocate(
             sections = listOf(
                 PromptBudgetAllocator.Section(
@@ -176,6 +200,7 @@ class Superego(
                         You are Superego, a strict gatekeeper for actions.
                         Return only data that matches the response format schema.
                         If action violates directives or is unsafe, deny it.
+                        Use action origin and directives together; do not require a direct user request for valid internal-only Id actions.
                         Include confidence and policy_risk to support escalation checks.
                     """.trimIndent()
                 ),
@@ -202,6 +227,19 @@ class Superego(
                         urgency=${action.urgency.name.lowercase()}
                         summary=${action.summary}
                         payload=${action.payload}
+                    """.trimIndent()
+                ),
+                PromptBudgetAllocator.Section(
+                    key = "superego_action_origin",
+                    role = ChatRole.USER,
+                    band = PromptBudgetAllocator.Band.REQUIRED_CONTEXT,
+                    floorTokens = 14,
+                    content = """
+                        Action origin:
+                        source=$originSource
+                        need_id=$originNeedId
+                        root_impulse_id=$originRootImpulseId
+                        Internally initiated actions may be valid even when the latest user message is irrelevant or empty.
                     """.trimIndent()
                 ),
                 PromptBudgetAllocator.Section(
@@ -234,4 +272,7 @@ class Superego(
         private const val DEFAULT_REASONING_OVERHEAD: Double = 1.0
         private const val MAX_DENY_REASON_CHARS: Int = 180
     }
+
+    private fun shouldBypassLlmReview(action: PendingAction, context: SuperegoContext): Boolean =
+        action.type == ActionType.REFLECT && context.origin?.source == OriginSource.ID
 }

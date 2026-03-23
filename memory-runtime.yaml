@@ -1,0 +1,23 @@
+mode: default
+
+defaultProvider:
+  provider: neopsyke-pgvector-memory
+  transport: http
+  baseUrl: http://127.0.0.1:7841
+  # NeoPsyke bootstraps the published provider artifact into this location by default.
+  command: "java -jar .neopsyke/providers/neopsyke-pgvector-memory/current/neopsyke-pgvector-memory-all.jar --transport=http --port=7841"
+  startupTimeoutMs: 12000
+  healthTimeoutMs: 3000
+  bootstrapEnabled: true
+  releaseApiUrl: https://api.github.com/repos/neopsyke/neopsyke-pgvector-memory/releases/tags/v0.1.0
+  downloadTimeoutMs: 30000
+  namespace: neopsyke
+
+externalProvider:
+  # Advanced mode: point NeoPsyke at a compatible external HTTP memory provider.
+  # v1 supports only transport=http here. MCP remains available in the provider
+  # project as an optional adapter, but NeoPsyke does not use it for external mode yet.
+  provider: custom-http-memory
+  transport: http
+  baseUrl: ""
+  namespace: neopsyke

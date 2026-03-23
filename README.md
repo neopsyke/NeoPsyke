@@ -72,16 +72,21 @@ Standalone Kotlin JVM app using Gradle with:
   - `GOOGLE_API_KEY`
   - `OPENAI_API_KEY`
 - OpenAI moderation is available as a standalone utility (`moderateWithOpenAi` / `OpenAiModerationClient`) using `omni-moderation-latest`; it is not auto-wired into cognitive-role chat calls.
-- MCP/time/fetch/memory provider settings are now centralized in `mcp-runtime.yaml` (repository root).
-  - Default config enables `time`, `website_fetch`, and `memory` in `stdio` mode with command/fallback lists.
+- MCP time/fetch settings are centralized in `mcp-runtime.yaml` (repository root).
+  - Default config enables `time` and `website_fetch`.
   - Optional override file path: `NEOPSYKE_MCP_CONFIG_FILE=/path/to/mcp-runtime.yaml`.
-  - Environment variables still override YAML when present (`MCP_TIME_*`, `WEBSITE_FETCH_*`, `MCP_MEMORY_*`, plus legacy `MCP_*_SERVER_CMD`).
+  - Environment variables still override YAML when present (`MCP_TIME_*`, `WEBSITE_FETCH_*`, plus legacy `*_SERVER_CMD`).
   - YAML schema per capability:
     - `enabled` (`true|false`)
     - `mode` (`stdio` currently supported)
     - `provider` (label/selector for provider intent)
     - `command` (primary command string)
     - `fallback_commands` (list of command strings; first executable in `PATH` is used)
+- Long-term memory provider settings are centralized in `memory-runtime.yaml` (repository root).
+  - Default config uses `memory=default`, which points NeoPsyke at the managed `neopsyke-pgvector-memory` provider over HTTP.
+  - Advanced `memory=external` also supports the same HTTP contract when you point NeoPsyke at a compatible external provider.
+  - Optional override file path: `NEOPSYKE_MEMORY_CONFIG_FILE=/path/to/memory-runtime.yaml`.
+  - Environment variables override YAML when present (`NEOPSYKE_MEMORY_*`, `MEMORY_DEFAULT_NAMESPACE`).
 - Microsoft Graph email action (`email_send`) is configured via environment variables:
   - `MS_GRAPH_EMAIL_ENABLED` (`true|false`, default `false`)
   - `MS_GRAPH_TENANT_ID`
@@ -116,6 +121,7 @@ Standalone Kotlin JVM app using Gradle with:
 - Optional:
   - `NEOPSYKE_LLM_CONFIG_FILE` (optional; path to LLM runtime YAML, default: `./llm-runtime.yaml`)
   - `NEOPSYKE_MCP_CONFIG_FILE` (optional; path to MCP runtime YAML, default: `./mcp-runtime.yaml`)
+  - `NEOPSYKE_MEMORY_CONFIG_FILE` (optional; path to memory runtime YAML, default: `./memory-runtime.yaml`)
   - `NEOPSYKE_AGENT_CONFIG_FILE` (optional; path to agent/app/eval runtime YAML, default: `./agent-runtime.yaml`)
   - `NEOPSYKE_ID_CONFIG_FILE` (optional; path to Id runtime YAML, default: `./id-runtime.yaml`)
   - `NEOPSYKE_ID_ENABLED` (default from `id-runtime.yaml`)
@@ -160,10 +166,17 @@ Standalone Kotlin JVM app using Gradle with:
   - `EGO_SEARCH_RESULT_COUNT` (default: `5`)
   - `MCP_TIME_SERVER_CMD` (optional env override for YAML time command)
   - `WEBSITE_FETCH_SERVER_CMD` (optional env override for YAML fetch command)
-  - `MCP_MEMORY_SERVER_CMD` (optional env override for YAML memory command)
-  - `MCP_TIME_MODE` / `WEBSITE_FETCH_MODE` / `MCP_MEMORY_MODE` (optional env override for YAML mode)
-  - `MCP_TIME_PROVIDER` / `WEBSITE_FETCH_PROVIDER` / `MCP_MEMORY_PROVIDER` (optional env override for YAML provider)
-  - `MCP_TIME_ENABLED` / `WEBSITE_FETCH_ENABLED` / `MCP_MEMORY_ENABLED` (optional env override for YAML enabled flag)
+  - `MCP_TIME_MODE` / `WEBSITE_FETCH_MODE` (optional env override for YAML mode)
+  - `MCP_TIME_PROVIDER` / `WEBSITE_FETCH_PROVIDER` (optional env override for YAML provider)
+  - `MCP_TIME_ENABLED` / `WEBSITE_FETCH_ENABLED` (optional env override for YAML enabled flag)
+  - `NEOPSYKE_MEMORY_MODE` (`off|default|external`)
+  - `NEOPSYKE_MEMORY_DEFAULT_COMMAND` (optional override for managed default provider command)
+  - `NEOPSYKE_MEMORY_DEFAULT_BASE_URL` (optional override for managed default provider base URL)
+  - `NEOPSYKE_MEMORY_DEFAULT_BOOTSTRAP_ENABLED` (default: `true`)
+  - `NEOPSYKE_MEMORY_DEFAULT_RELEASE_API_URL` (default: provider GitHub release API URL for `v0.1.0`)
+  - `NEOPSYKE_MEMORY_DEFAULT_DOWNLOAD_TIMEOUT_MS` (default: `30000`)
+- `NEOPSYKE_MEMORY_EXTERNAL_PROVIDER` / `NEOPSYKE_MEMORY_EXTERNAL_TRANSPORT` / `NEOPSYKE_MEMORY_EXTERNAL_BASE_URL` (advanced external provider wiring; `transport=http` supported in v1)
+  - External HTTP providers must implement NeoPsyke's versioned `v1` contract (`/v1/health`, `/v1/metrics`, `/v1/recall`, `/v1/imprint`, `/v1/admin/forget`, `/v1/admin/reset`).
   - `MISTRAL_WEBSEARCH_AGENT_ID` (optional when `web_search.provider=mistral`; if omitted, NeoPsyke creates an ephemeral Mistral web-search agent per run)
   - `MCP_CALL_TIMEOUT_MS` (default: `8000`)
   - `MCP_MEMORY_CALL_TIMEOUT_MS` (default: same as `MCP_CALL_TIMEOUT_MS`)
@@ -200,11 +213,10 @@ Standalone Kotlin JVM app using Gradle with:
   - `EGO_LONG_TERM_MEMORY_RECALL_ECHO_MIN_TOKEN_LENGTH` (default: `3`)
   - `EGO_LONG_TERM_MEMORY_RECALL_ECHO_MIN_TOKEN_COUNT` (default: `4`)
   - `EGO_LONG_TERM_MEMORY_RECALL_ECHO_TOKEN_OVERLAP_THRESHOLD` (default: `0.85`)
-  - `NEOPSYKE_AUTO_START_PGVECTOR` (optional; when `true`, launcher runs `docker compose up -d pgvector` if needed)
-  - `MEMORY_DEFAULT_NAMESPACE` (optional; memory MCP namespace/tenant default, launcher defaults to `neopsyke`)
-  - `MEMORY_SEMANTIC_DEDUPE_SIMILARITY_THRESHOLD` (memory server; default: `0.93`)
-  - `MEMORY_SEMANTIC_DEDUPE_MIN_CONFIDENCE` (memory server; default: `0.65`)
-  - `MEMORY_FACT_DEFAULT_SUBJECT` (memory server; default: `me`)
+  - `MEMORY_DEFAULT_NAMESPACE` (optional; long-term memory namespace/tenant default, launcher defaults to `neopsyke`)
+  - `MEMORY_SEMANTIC_DEDUPE_SIMILARITY_THRESHOLD` (memory provider; default: `0.93`)
+  - `MEMORY_SEMANTIC_DEDUPE_MIN_CONFIDENCE` (memory provider; default: `0.65`)
+  - `MEMORY_FACT_DEFAULT_SUBJECT` (memory provider; default: `me`)
   - `NEOPSYKE_EVAL_MAX_RAW_RESPONSE_CHARS` (reasoning eval raw-thought capture cap; default: unlimited)
   - `NEOPSYKE_LLM_CACHE_MODE` (optional; `record`, `replay`, or `off`; default: `off`)
   - `NEOPSYKE_LLM_CACHE_FILE` (optional; path to JSONL cache file for LLM response caching)
@@ -314,7 +326,7 @@ Freud reasoning lane notes:
 - `reasoning_eval_model` is reserved for manual live reasoning checks and currently runs a frozen 24-case BBH-style smoke slice.
 - `freud/scripts/run-bbh-smoke.sh` is the direct live reasoning suite entrypoint, and `freud/scripts/feature-loop.sh --live` orchestrates it after the deterministic steps.
 - The live reasoning lane still routes through `freud/scripts/live-eval.sh`, which invokes the lower-level `./run-neopsyke.sh --freud-live` path for each case.
-- The BBH smoke slice disables long-term MCP memory and episodic logbook recall by default so the lane measures reasoning instead of memory effects. Override with `FREUD_BBH_MCP_MEMORY_ENABLED=true` and/or `FREUD_BBH_LOGBOOK_ENABLED=true` only for explicit memory-aware experiments.
+- The BBH smoke slice disables long-term memory and episodic logbook recall by default so the lane measures reasoning instead of memory effects. Override with `FREUD_BBH_MEMORY_ENABLED=true` and/or `FREUD_BBH_LOGBOOK_ENABLED=true` only for explicit memory-aware experiments.
 - `FREUD_BBH_PRESERVE_MEMORY=true` is available if a future live reasoning sequence needs shared isolated memory across cases. The current BBH slice should keep the default isolated-per-case behavior.
 - The live lane configs intentionally do not hardcode local machine paths. They resolve repo-local YAML snapshots relative to the config directory so the committed setup stays portable across machines.
 - GitHub pull requests run only the fast non-live path: `freud/scripts/feature-loop.sh ci-pr`, plus Freud's own BATS and pytest suites. Live lanes remain manual-only.
@@ -322,8 +334,9 @@ Freud reasoning lane notes:
 Memory live eval (real-world, no mocks):
 ```bash
 export GROQ_API_KEY=your_token
-# either set in mcp-runtime.yaml (preferred) or override here:
-export MCP_MEMORY_SERVER_CMD='your-memory-mcp-server-command'
+# either configure memory-runtime.yaml (preferred) or override the managed provider command here:
+export NEOPSYKE_MEMORY_MODE=default
+export NEOPSYKE_MEMORY_DEFAULT_COMMAND='java -jar .neopsyke/providers/neopsyke-pgvector-memory/current/neopsyke-pgvector-memory-all.jar --transport=http --port=7841'
 ./run-neopsyke.sh --eval-memory-live
 ```
 
@@ -337,19 +350,14 @@ Memory live eval options:
 Memory live eval output:
 - Per-run detailed JSON in `.neopsyke/evals/memory-live/runs/`.
 - Append-only trend history in `.neopsyke/evals/memory-live/history.jsonl`.
-- Uses real `LlmLongTermMemoryAdvisor` + real `McpHippocampus` imprint/recall calls.
+- Uses real `LlmLongTermMemoryAdvisor` + real `Hippocampus` imprint/recall calls against the configured long-term memory provider.
 - Tags each saved item with a unique run session marker to reduce cross-run collision.
 - Main run log focuses on memory eval flow (`[eval.memory] ...`).
 
-Manual DB-backed memory server eval (not part of default `test`):
-```bash
-# uses live PostgreSQL/pgvector configured via PGVECTOR_DB_* env vars
-./gradlew :mcp-memory-pgvector:memoryDbEval
-```
-This eval verifies:
-- semantic dedupe (`write_mode=dedupe_if_similar`)
-- fact upsert supersession (`write_mode=upsert_fact`)
-- namespace isolation (no cross-tenant mixing)
+Manual DB-backed provider evals now live in the external provider repo:
+
+- source of truth: `https://github.com/neopsyke/neopsyke-pgvector-memory`
+- run them there, not from the NeoPsyke monorepo
 
 Set a specific log level via parameter:
 ```bash
@@ -363,17 +371,18 @@ Disable the default interactive delay for faster local/manual loops:
 
 Notes:
 - `run-neopsyke.sh` bootstraps `installDist` once if needed.
-- `run-neopsyke.sh` also bootstraps `:mcp-memory-pgvector:fatJar` when the memory MCP jar is missing or stale.
 - After bootstrap, execution is direct (`build/install/neopsyke/bin/neopsyke`) without `gradle run`.
-- You do not run memory MCP separately if memory command config is set correctly (from `mcp-runtime.yaml` or `MCP_MEMORY_SERVER_CMD` override); NeoPsyke launches it on demand.
+- You do not run the default memory provider separately if `memory-runtime.yaml` (or `NEOPSYKE_MEMORY_*` overrides) is set correctly; NeoPsyke launches the managed provider on demand for `memory=default`.
+- The default managed provider command now points at the standalone install location under `.neopsyke/providers/neopsyke-pgvector-memory/current/`.
+- NeoPsyke bootstraps the managed provider from the published GitHub release API before first launch when the jar is missing or stale.
+- The managed provider then owns Docker-backed pgvector startup internally; NeoPsyke no longer provisions PostgreSQL itself.
+- When NeoPsyke starts the managed provider itself, it also registers that process for JVM shutdown cleanup so normal shutdown and `Ctrl-C` stop the provider automatically.
 - Default log level in `run-neopsyke.sh` is `warning`.
 - Launcher logs are written to per-run files in `.neopsyke/logs/runs/`.
 - `.neopsyke/logs/latest.log` always points to the newest run log.
 - `.neopsyke/logs/latest-events.jsonl` always points to the newest event sidecar.
 - `.neopsyke/logs/latest-run.env` stores `NEOPSYKE_LOG_RUN_ID`, `NEOPSYKE_LOG_FILE`, `NEOPSYKE_EVENT_LOG_FILE`, and start time for the current run.
 - Old run logs are auto-pruned; retention defaults to 30 files (`NEOPSYKE_LOG_RETENTION`).
-- If pgvector is not running, launcher prints a startup tip: `docker compose up -d pgvector`.
-- Set `NEOPSYKE_AUTO_START_PGVECTOR=true` to auto-start pgvector from the launcher when required.
 - Launcher sets `MEMORY_DEFAULT_NAMESPACE=neopsyke` unless already set, so NeoPsyke memory stays isolated by default.
 - Memory MCP write tools support `write_mode`: `append`, `dedupe_if_similar`, `upsert_fact`.
 - `upsert_fact` supports `fact_subject`, `fact_key`, `fact_value`, `fact_versioned_at` and keeps only one active value per `(namespace, subject, key)`.
@@ -409,7 +418,7 @@ control> exit
   - Chat control plane: `/api/chat/*` (`sessions`, `messages`, session-scoped SSE)
   - Observability: `/api/obs/*` (`snapshot`, global `events`, `workspace`)
 - Scratchpad drawer (Action Flow -> `Scratchpad`) fetches full debug snapshots on demand from `/api/obs/workspace` and `/api/obs/workspace/{rootId}`.
-- Full workspace snapshots use two-lane instrumentation: lightweight `scratchpad_head` is streamed live; heavy `scratchpad_debug_snapshot` is captured server-side and excluded from SSE broadcasting.
+- Full workspace snapshots use two-lane instrumentation: lightweight `scratchpad_head` is streamed live; heavy `scratchpad_debug_snapshot` is captured provider-side and excluded from SSE broadcasting.
 - If dashboard bind fails, app continues running without the dashboard server.
 
 ## Loop behavior
@@ -424,11 +433,11 @@ control> exit
 - Optional Scratchpad (`EGO_SCRATCHPAD_ENABLED=true`) keeps an ephemeral per-request notebook (index + summaries + evidence).
 - Scratchpad is independent from short-term and long-term memory and is destroyed when the root request resolves; when queues drain, active scratchpads are cleared but per-session scratchpad digests are preserved for subsequent turns.
 - Terminal `answer` actions can run an optional LLM final-pass rewrite from the workspace compilation; rewrite is gated by workspace confidence and finalizer model confidence.
-- When memory capability is enabled/configured (via `mcp-runtime.yaml` or env override), Ego also runs internal `Hippocampus` memory recall per thought/input planning step (not a MotorCortex action).
+- When long-term memory is enabled/configured (via `memory-runtime.yaml` or env override), Ego also runs internal `Hippocampus` memory recall per thought/input planning step (not a MotorCortex action).
 - Ego tracks a `decision_pressure` signal to detect circular thought chains and increase convergence pressure.
 - A separate MetaReasoner LLM call runs periodically under pressure to classify chain health (`continue`, `continue_with_constraints`, `finalize_now`, `request_tool_then_finalize`).
 - A separate `MemoryConsolidationAdvisor` LLM call can run every N steps (default 8) and after allowed actions to decide if durable memory should be persisted.
-- If consolidation says yes with enough confidence, NeoPsyke generates a concise summary and writes it through `Hippocampus` imprint (MCP memory if configured).
+- If consolidation says yes with enough confidence, NeoPsyke generates a concise summary and writes it through `Hippocampus` imprint (default pgvector provider if configured).
 - If no inputs are pending, thoughts and actions are scheduled by urgency (`high`, `medium`, `low`).
 - Every proposed action includes a context summary capped at 180 chars.
 - MotorCortex runs a startup capability smoke test and emits `action_capabilities` instrumentation.
@@ -497,4 +506,4 @@ control> exit
 - If a required provider is unavailable, NeoPsyke prints a clear error to both stderr/stdout-facing output and logs, then exits early.
 - If provider is degraded (for example, rate limiting), NeoPsyke logs and prints a warning but continues.
 - In interactive and `--freud-live` startup, `meta_reasoner_fallback` is treated as optional: if its health check still fails after retry, NeoPsyke logs a warning, disables that fallback for the run, and continues with the primary meta-reasoner.
-- For `--eval-memory-live`, NeoPsyke also preflights the memory MCP provider (connect + tool listing) and fails early if required recall/write-like tools are missing or startup fails.
+- For `--eval-memory-live`, NeoPsyke also preflights the configured long-term memory provider and fails early if startup or health checks fail.

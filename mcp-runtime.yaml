@@ -10,9 +10,3 @@ fetch:
   enabled: true
   mode: native
   provider: native-jvm
-
-memory:
-  enabled: true
-  mode: stdio
-  provider: pgvector
-  command: "java -jar mcp-memory-pgvector/build/libs/mcp-memory-pgvector-0.1.0-all.jar"

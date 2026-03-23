@@ -376,5 +376,5 @@ data class MetricsSnapshot(
     val persistentTokensByModel: Map<String, Long> = emptyMap(),
     val runModelsByRole: Map<String, Set<String>> = emptyMap(),
     val persistentModelsByRole: Map<String, Set<String>> = emptyMap(),
-    val memoryServerMetrics: Map<String, Any>? = null,
+    val memoryProviderMetrics: Map<String, Any>? = null,
 )

@@ -4,6 +4,7 @@ import ai.neopsyke.support.StubChatModelClient
 import ai.neopsyke.support.RecordingInstrumentation
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class LongTermMemoryAdvisorTest {
@@ -144,5 +145,45 @@ class LongTermMemoryAdvisorTest {
         val prompt = llm.lastMessages.first().content
         assertTrue(prompt.contains("write the summary in first person from the agent's perspective"))
         assertTrue(prompt.contains("Bad: \"User prefers concise answers.\""))
+    }
+
+    @Test
+    fun `advisor marks internal reflections as self subject and normalizes self language`() {
+        val llm = StubChatModelClient().apply {
+            enqueueRawResponse(
+                """
+                {"save":true,"summary":"I want to remember that I feel curious and motivated to learn new things.","confidence":0.9,"reason":"User expressed curiosity and desire to learn, indicating a stable preference.","tags":["curiosity","learning","user preference"]}
+                """.trimIndent()
+            )
+        }
+        val advisor = LlmLongTermMemoryAdvisor(
+            modelClient = llm,
+            config = AgentConfig(
+                memory = MemoryConfig(
+                    longTermMemoryDynamicCompletionEnabled = false
+                )
+            )
+        )
+
+        val decision = advisor.assess(
+            LongTermMemoryAssessmentContext(
+                trigger = "interval",
+                deliberation = DeliberationState(stepIndex = 16, decisionPressure = 0.62),
+                recentDialogue = listOf(DialogueTurn(DialogueRole.INTERNAL, "I want to explore engaging learning topics.")),
+                shortTermContextSummary = "",
+                longTermMemoryRecall = "",
+                metaGuidance = "",
+                subject = LongTermMemorySubject.SELF
+            )
+        )
+
+        val prompt = llm.lastMessages.last().content
+        assertTrue(prompt.contains("Memory subject:"))
+        assertTrue(prompt.contains("subject=self"))
+        assertTrue(decision.shouldSave)
+        assertTrue(decision.reason.contains("self", ignoreCase = true) || decision.reason.contains("agent", ignoreCase = true))
+        assertFalse(decision.reason.contains("User", ignoreCase = true))
+        assertTrue(decision.tags.contains("self preference"))
+        assertFalse(decision.tags.any { it.equals("user preference", ignoreCase = true) })
     }
 }

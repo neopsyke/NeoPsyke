@@ -31,10 +31,14 @@ Instructions for coding agents working in this repository (Codex, Claude, Gemini
 ## Working Rules
 - Keep changes focused and minimal.
 - Do not make unrelated refactors.
-- Do not add license headers unless asked.
 - Do not commit secrets, API keys, or local machine paths.
 - Prefer ASCII in docs/code unless the file already uses Unicode.
 - Preserve existing behavior unless the user asked for behavior changes.
+- When fixing tests, always prioritize understanding the feature and making sure the root
+  cause is addressed instead of making the test just pass.
+- If you find a failing test, flaky test, even if unrelated to current changes
+  make sure to find the root cause and fix it. Every work session must end with all
+  tests running and stable. 
 
 ## Agent Logic Docs Maintenance (Required)
 - Keep both `AGENT_LOGIC_SUMMARY.md` and `AGENT_LOGIC_DIAGRAM.md` accurate as living runtime logic docs.
@@ -99,6 +103,28 @@ Instructions for coding agents working in this repository (Codex, Claude, Gemini
   - Exit code is `2` when any step fails.
 - Optional `--continue-on-fail` (or `FREUD_CONTINUE_ON_FAIL=true`) runs remaining steps for diagnostics, but run status is still `fail` if any step failed.
 - `run-scenarios.sh` executes all listed scenarios in one run and reports aggregate pass/fail; it does not retry failing scenarios automatically.
+
+### Concurrency Policy (Important)
+- Never run overlapping Gradle-backed commands in the same checkout/worktree.
+- Treat all of these as Gradle-backed and therefore not parallel-safe in one checkout:
+  - raw `./gradlew ...`
+  - `freud/scripts/feature-loop.sh ...`
+  - `freud/scripts/run-scenarios.sh ...`
+  - `freud/scripts/run-reasoning-pr-gate.sh`
+- `feature-loop.sh --live` is also not parallel-safe with other Gradle-backed commands because it still runs the deterministic Gradle phases before the live steps.
+- If parallel validation is needed, use separate git worktrees or separate clones so each run has its own `build/` outputs and Gradle/Kotlin state.
+- Safe to overlap in the same checkout:
+  - artifact/log inspection
+  - `--dry-run` inspection commands
+  - non-build shell inspection commands
+- Conditionally safe to overlap in the same checkout:
+  - `freud/scripts/live-eval.sh ...`
+  - `freud/scripts/run-bbh-smoke.sh ...`
+- The live commands above may overlap only when all of these are true:
+  - they are not running at the same time as any Gradle-backed command
+  - they are not intentionally sharing memory state (`--preserve-memory`, shared user memory, or other shared persistent memory modes are off)
+  - you do not rely on shared `latest` pointers as stable ownership markers because the last writer wins
+- Concurrent memory-dependent live runs are not safe. They can contaminate recall/imprint state and should be serialized unless each run has fully isolated memory resources.
 
 ### Artifact Locations
 - Feature-loop run outputs are isolated per run under:

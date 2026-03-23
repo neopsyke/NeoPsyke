@@ -3,7 +3,6 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_BIN="$ROOT_DIR/build/install/neopsyke/bin/neopsyke"
-MEMORY_FAT_JAR="$ROOT_DIR/mcp-memory-pgvector/build/libs/mcp-memory-pgvector-0.1.0-all.jar"
 LOG_LEVEL="${NEOPSYKE_LOG_LEVEL:-warning}"
 LOG_LEVEL_EXPLICIT=0
 LOG_LEVEL_FROM_ENV=0
@@ -14,7 +13,6 @@ GOALS_OVERRIDE=""
 LOOP_DELAY_MS="${EGO_LOOP_DELAY_MS:-1000}"
 LOG_DIR="${NEOPSYKE_LOG_DIR:-$ROOT_DIR/.neopsyke/logs}"
 LOG_RETENTION="${NEOPSYKE_LOG_RETENTION:-30}"
-AUTO_START_PGVECTOR="${NEOPSYKE_AUTO_START_PGVECTOR:-false}"
 APP_ARGS=()
 
 log_info() {
@@ -27,40 +25,6 @@ log_info() {
 
 log_error() {
   printf '%s\n' "$*" >&2
-}
-
-is_pgvector_running() {
-  if ! command -v docker >/dev/null 2>&1; then
-    return 1
-  fi
-  if [[ ! -f "$ROOT_DIR/docker-compose.yml" ]]; then
-    return 1
-  fi
-  docker compose ps --status running --services 2>/dev/null | grep -qx "pgvector"
-}
-
-maybe_start_pgvector() {
-  if [[ "$AUTO_START_PGVECTOR" != "true" ]]; then
-    if ! is_pgvector_running; then
-      log_info "Tip: pgvector is not running. Start it with: docker compose up -d pgvector"
-    fi
-    return
-  fi
-  if is_pgvector_running; then
-    return
-  fi
-  if ! command -v docker >/dev/null 2>&1; then
-    log_error "NEOPSYKE_AUTO_START_PGVECTOR=true but docker is not available in PATH."
-    return
-  fi
-  if [[ ! -f "$ROOT_DIR/docker-compose.yml" ]]; then
-    log_error "NEOPSYKE_AUTO_START_PGVECTOR=true but docker-compose.yml is missing at $ROOT_DIR."
-    return
-  fi
-  log_info "Starting pgvector service via docker compose..."
-  if ! docker compose up -d pgvector; then
-    log_error "Failed to start pgvector automatically. Run: docker compose up -d pgvector"
-  fi
 }
 
 if [[ -n "${NEOPSYKE_LOG_LEVEL:-}" ]]; then
@@ -173,13 +137,21 @@ Environment:
   MISTRAL_API_KEY         Required when a configured provider uses Mistral
   GOOGLE_API_KEY          Required when a configured provider uses Google
   OPENAI_API_KEY          Required when a configured provider uses OpenAI
-  NEOPSYKE_MCP_CONFIG_FILE   Optional path to MCP runtime YAML (default: ./mcp-runtime.yaml)
-  MCP_MEMORY_SERVER_CMD   Optional override for memory command (required only if YAML memory command is not set)
+  NEOPSYKE_MCP_CONFIG_FILE      Optional path to MCP runtime YAML for time/fetch (default: ./mcp-runtime.yaml)
+  NEOPSYKE_MEMORY_CONFIG_FILE   Optional path to memory runtime YAML (default: ./memory-runtime.yaml)
   NEOPSYKE_LOG_LEVEL         Default log level if --log-level is not provided
   NEOPSYKE_LOG_DIR           Directory for run logs (default: .neopsyke/logs)
   NEOPSYKE_LOG_RETENTION     Number of run log files to keep (default: 30)
-  NEOPSYKE_AUTO_START_PGVECTOR  When true, launcher runs 'docker compose up -d pgvector' if needed
-  MEMORY_DEFAULT_NAMESPACE  Namespace for memory MCP writes/reads (launcher default: neopsyke)
+  NEOPSYKE_MEMORY_MODE         Memory mode: off, default, external
+  NEOPSYKE_MEMORY_DEFAULT_COMMAND  Optional override for managed default provider command
+  NEOPSYKE_MEMORY_DEFAULT_BASE_URL Optional override for managed default provider base URL
+  NEOPSYKE_MEMORY_DEFAULT_BOOTSTRAP_ENABLED  Enable/disable default provider artifact bootstrap (default: true)
+  NEOPSYKE_MEMORY_DEFAULT_RELEASE_API_URL  Override the GitHub release API URL used for the managed provider
+  NEOPSYKE_MEMORY_DEFAULT_DOWNLOAD_TIMEOUT_MS  Download timeout for managed provider bootstrap
+  NEOPSYKE_MEMORY_EXTERNAL_PROVIDER Optional label for an external HTTP memory provider
+  NEOPSYKE_MEMORY_EXTERNAL_TRANSPORT External provider transport (v1 supports only http)
+  NEOPSYKE_MEMORY_EXTERNAL_BASE_URL Base URL for external HTTP memory provider
+  MEMORY_DEFAULT_NAMESPACE  Namespace for long-term memory provider reads/writes (launcher default: neopsyke)
   NEOPSYKE_EVENT_LOG_FILE    Optional path override for instrumentation sidecar JSONL
   NEOPSYKE_METRICS_DB        SQLite path for persisted local metrics
   EGO_LOOP_DELAY_MS       Delay between loop cycles in ms (default via launcher: 1000)
@@ -199,7 +171,7 @@ Eval mode (forwarded to app):
   --eval-reasoning-only           Run deterministic reasoning self-eval (no tools/actions)
                                  (defaults launcher log level to trace unless overridden)
   --eval-reasoning-mode MODE      Eval mode: logic (default) or model
-  --eval-memory-live              Run live memory eval (real LLM + real MCP memory)
+  --eval-memory-live              Run live memory eval (real LLM + real long-term memory provider)
   --eval-stage ID                 Label this eval run (default: UTC date, e.g. 2026-02-28)
   --eval-reasoning-max-attempts N Max retries per reasoning task (default: 4)
   --eval-reasoning-tasks id1,id2  Run only selected reasoning task ids
@@ -308,28 +280,10 @@ elif [[ -n "$(find \
   NEEDS_BUILD=1
 fi
 
-NEEDS_MEMORY_FAT_JAR=0
-if [[ ! -f "$MEMORY_FAT_JAR" ]]; then
-  NEEDS_MEMORY_FAT_JAR=1
-elif [[ -n "$(find \
-  "$ROOT_DIR/mcp-memory-pgvector/src/main" \
-  "$ROOT_DIR/mcp-memory-pgvector/build.gradle.kts" \
-  -type f -newer "$MEMORY_FAT_JAR" -print -quit 2>/dev/null)" ]]; then
-  NEEDS_MEMORY_FAT_JAR=1
-fi
-
 if [[ "$NEEDS_BUILD" -eq 1 ]]; then
   log_info "Building local app distribution..."
   "$ROOT_DIR/gradlew" --no-daemon --no-problems-report installDist
 fi
-
-if [[ "$NEEDS_MEMORY_FAT_JAR" -eq 1 ]]; then
-  log_info "Building memory MCP fat jar..."
-  "$ROOT_DIR/gradlew" --no-daemon --no-problems-report :mcp-memory-pgvector:fatJar
-fi
-
-maybe_start_pgvector
-
 log_info "NeoPsyke logs for this run: $RUN_LOG_FILE"
 log_info "NeoPsyke event sidecar for this run: $RUN_EVENT_FILE"
 log_info "Latest run log pointer: $LOG_DIR/latest.log"

@@ -22,7 +22,6 @@ data class McpCapabilityConfig(
 data class McpRuntimeConfig(
     val time: McpCapabilityConfig = defaults().time,
     val fetch: McpCapabilityConfig = defaults().fetch,
-    val memory: McpCapabilityConfig = defaults().memory,
 ) {
     companion object {
         fun defaults(): McpRuntimeConfig =
@@ -38,12 +37,6 @@ data class McpRuntimeConfig(
                     enabled = true,
                     mode = "native",
                     provider = "native-jvm",
-                ),
-                memory = McpCapabilityConfig(
-                    enabled = true,
-                    mode = "stdio",
-                    provider = "pgvector",
-                    command = "java -jar mcp-memory-pgvector/build/libs/mcp-memory-pgvector-0.1.0-all.jar",
                 )
             )
     }
@@ -84,7 +77,6 @@ object McpRuntimeConfigLoader {
         copy(
             time = time.applyEnvOverrides(env, prefix = "MCP_TIME", commandEnv = "MCP_TIME_SERVER_CMD"),
             fetch = fetch.applyEnvOverrides(env, prefix = "WEBSITE_FETCH", commandEnv = "WEBSITE_FETCH_SERVER_CMD"),
-            memory = memory.applyEnvOverrides(env, prefix = "MCP_MEMORY", commandEnv = "MCP_MEMORY_SERVER_CMD")
         )
 
     private fun McpCapabilityConfig.applyEnvOverrides(

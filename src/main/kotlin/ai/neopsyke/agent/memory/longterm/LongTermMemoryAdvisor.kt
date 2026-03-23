@@ -33,6 +33,7 @@ data class LongTermMemoryAssessmentContext(
     val metaGuidance: String,
     val latestActionType: ActionType? = null,
     val latestActionOutcome: String? = null,
+    val subject: LongTermMemorySubject = LongTermMemorySubject.USER,
 )
 
 data class LongTermMemoryAssessmentDecision(
@@ -43,6 +44,11 @@ data class LongTermMemoryAssessmentDecision(
     val tags: List<String> = emptyList(),
     val parseFallback: Boolean = false,
 )
+
+enum class LongTermMemorySubject {
+    USER,
+    SELF,
+}
 
 interface LongTermMemoryAdvisor {
     val enabled: Boolean
@@ -109,7 +115,7 @@ class LlmLongTermMemoryAdvisor(
                 parseFallback = true
             )
         }
-        return parseResponse(response.content)
+        return parseResponse(response.content, context)
     }
 
     private fun resolveCompletionTokenBudget(messages: List<ChatMessage>): Int {
@@ -215,6 +221,13 @@ class LlmLongTermMemoryAdvisor(
         val guidance = promptPayload.guidance
         val dialogue = promptPayload.dialogue
         val d = context.deliberation
+        val memorySubject = context.subject.name.lowercase(Locale.ROOT)
+        val subjectDescription = when (context.subject) {
+            LongTermMemorySubject.USER ->
+                "The candidate memory is about the user, their preferences, goals, or durable facts relevant to helping them."
+            LongTermMemorySubject.SELF ->
+                "The candidate memory is about the agent's own internal drive, reflection, learning interest, or durable self-observation."
+        }
         return listOf(
             ChatMessage(
                 role = ChatRole.SYSTEM,
@@ -224,10 +237,16 @@ class LlmLongTermMemoryAdvisor(
                 If you save memory, write the summary in first person from the agent's perspective.
                 Good: "I learned that the user prefers concise answers."
                 Good: "I should remember that the user's name is Victor."
+                Good: "I want to remember that I feel curious about learning topics."
                 Bad: "User prefers concise answers."
                 Bad: "The agent learned the user's name is Victor."
+                If memory_subject=self:
+                - treat INTERNAL dialogue turns as the agent's own impulses or reflections
+                - never describe them as user preferences, user requests, or user intent
+                - reasons and tags must use self/agent language, not user language
                 Prefer saving:
-                - stable user preferences
+                - stable user preferences or durable user facts when memory_subject=user
+                - stable self-observations, self-initiated learning interests, or internal drive patterns when memory_subject=self
                 - durable goal constraints or decisions
                 - important factual outcomes
                 Avoid saving transient chatter or redundant details.
@@ -258,6 +277,10 @@ class LlmLongTermMemoryAdvisor(
                 type=$actionType
                 outcome=$actionOutcome
 
+                Memory subject:
+                subject=$memorySubject
+                subject_description=$subjectDescription
+
                 Meta guidance:
                 $guidance
 
@@ -274,7 +297,10 @@ class LlmLongTermMemoryAdvisor(
         )
     }
 
-    private fun parseResponse(raw: String): LongTermMemoryAssessmentDecision {
+    private fun parseResponse(
+        raw: String,
+        context: LongTermMemoryAssessmentContext,
+    ): LongTermMemoryAssessmentDecision {
         return try {
             val json = TextSecurity.extractJsonObject(raw)
             val payload = mapper.readValue<LongTermMemoryAssessmentPayload>(json)
@@ -300,8 +326,14 @@ class LlmLongTermMemoryAdvisor(
                 shouldSave = shouldSave && summary.isNotBlank(),
                 summary = summary,
                 confidence = payload.confidence?.coerceIn(0.0, 1.0) ?: 0.5,
-                reason = TextSecurity.clamp(payload.reason?.trim().orEmpty().ifBlank { "no reason" }, 140),
-                tags = payload.tags.orEmpty().map { it.trim() }.filter { it.isNotBlank() }.take(6),
+                reason = normalizeReasonForSubject(
+                    rawReason = payload.reason?.trim().orEmpty().ifBlank { "no reason" },
+                    subject = context.subject
+                ),
+                tags = normalizeTagsForSubject(
+                    rawTags = payload.tags.orEmpty(),
+                    subject = context.subject
+                ),
                 parseFallback = false
             )
         } catch (ex: Exception) {
@@ -333,6 +365,49 @@ class LlmLongTermMemoryAdvisor(
             "$FIRST_PERSON_MEMORY_PREFIX$normalizedLead",
             config.memory.longTermMemoryMaxSummaryChars
         )
+    }
+
+    private fun normalizeReasonForSubject(
+        rawReason: String,
+        subject: LongTermMemorySubject,
+    ): String {
+        val clamped = TextSecurity.clamp(rawReason.trim(), 140)
+        if (subject != LongTermMemorySubject.SELF) {
+            return clamped
+        }
+        val replaced = clamped
+            .replace(Regex("\\b[Tt]he user\\b"), "the agent")
+            .replace(Regex("\\b[Uu]ser\\b"), "agent")
+            .replace(Regex("\\bstable preference\\b", RegexOption.IGNORE_CASE), "stable self preference")
+        val normalized = when {
+            replaced.startsWith("I ", ignoreCase = true) -> replaced
+            replaced.startsWith("internal", ignoreCase = true) -> replaced
+            replaced.startsWith("agent", ignoreCase = true) -> replaced.replaceFirstChar { it.uppercase() }
+            else -> "Internal self-observation: $replaced"
+        }
+        return TextSecurity.clamp(normalized, 140)
+    }
+
+    private fun normalizeTagsForSubject(
+        rawTags: List<String>,
+        subject: LongTermMemorySubject,
+    ): List<String> {
+        val normalized = rawTags
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .map { tag ->
+                if (subject != LongTermMemorySubject.SELF) {
+                    tag
+                } else {
+                    when (tag.lowercase(Locale.ROOT)) {
+                        "user preference" -> "self preference"
+                        "user_preference" -> "self_preference"
+                        else -> tag
+                    }
+                }
+            }
+            .take(6)
+        return normalized
     }
 
     private data class LongTermMemoryAssessmentPayload(
