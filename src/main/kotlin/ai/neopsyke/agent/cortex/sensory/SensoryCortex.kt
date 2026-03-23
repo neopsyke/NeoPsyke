@@ -4,13 +4,16 @@ import ai.neopsyke.agent.config.AgentConfig
 import ai.neopsyke.agent.config.DefaultInterlocutorResolver
 import ai.neopsyke.agent.config.InterlocutorResolver
 import ai.neopsyke.agent.model.ConversationContext
+import ai.neopsyke.agent.model.ConversationSecurityContexts
 import ai.neopsyke.agent.model.InputPriority
 import ai.neopsyke.agent.model.Interlocutor
 import ai.neopsyke.agent.model.Percept
 import ai.neopsyke.agent.model.PerceptFamily
 import ai.neopsyke.agent.model.RootInputIds
+import ai.neopsyke.agent.model.SanitizationRecord
 import ai.neopsyke.agent.model.StimulusEnvelope
 import ai.neopsyke.agent.model.StimulusFamily
+import ai.neopsyke.agent.model.Provenances
 import ai.neopsyke.agent.model.StimulusTrustLevel
 import ai.neopsyke.agent.support.TextSecurity
 import java.io.Closeable
@@ -59,6 +62,16 @@ data class GoalRuntimeCue(
             source = SOURCE,
             content = "goal_runtime_work_ready",
             receivedAt = Instant.now(),
+            conversationContext = ConversationContext(
+                sessionId = ConversationContext.DEFAULT_SESSION_ID,
+                interlocutor = Interlocutor.named(SOURCE),
+                security = ConversationSecurityContexts.internalAutomation(
+                    provider = SOURCE,
+                    channelId = ConversationContext.DEFAULT_SESSION_ID,
+                ),
+            ),
+            provenance = Provenances.trustedSystemSignal(provider = SOURCE, sourceRef = goalId),
+            trustLevel = StimulusTrustLevel.TRUSTED_INTERNAL,
             metadata = mapOf(
                 METADATA_CUE_TYPE to CUE_TYPE_WORK_READY,
                 METADATA_GOAL_ID to goalId,
@@ -122,6 +135,7 @@ class PerceptualAppraiser {
             occurredAt = stimulus.receivedAt,
             conversationContext = stimulus.conversationContext,
             rootStimulusId = stimulus.id,
+            provenance = stimulus.provenance,
             metadata = stimulus.metadata,
         )
 }
@@ -140,17 +154,25 @@ class StdinSignalSource(
             return@withContext CognitiveSignal.NoStimulus
         }
         CognitiveSignal.StimulusReceived(
-            StimulusEnvelope(
-                id = RootInputIds.next(),
-                family = StimulusFamily.LINGUISTIC,
-                source = "stdin",
-                content = rawInput,
-                receivedAt = Instant.now(),
-                conversationContext = ConversationContext.default(),
-                trustLevel = StimulusTrustLevel.DEFAULT,
-                metadata = mapOf("priority" to InputPriority.HIGH.name),
+                StimulusEnvelope(
+                    id = RootInputIds.next(),
+                    family = StimulusFamily.LINGUISTIC,
+                    source = "stdin",
+                    content = rawInput,
+                    receivedAt = Instant.now(),
+                    conversationContext = ConversationContext(
+                        sessionId = ConversationContext.DEFAULT_SESSION_ID,
+                        interlocutor = Interlocutor.named("stdin-user"),
+                        security = ConversationSecurityContexts.ownerDirect(
+                            provider = "stdin",
+                            channelId = ConversationContext.DEFAULT_SESSION_ID,
+                        ),
+                    ),
+                    trustLevel = StimulusTrustLevel.DEFAULT,
+                    provenance = Provenances.trustedMessage(provider = "stdin", sourceRef = "stdin"),
+                    metadata = mapOf("priority" to InputPriority.HIGH.name),
+                )
             )
-        )
     }
 }
 
@@ -218,7 +240,16 @@ class AsyncSignalSource(
                     source = "id",
                     content = CUE_TYPE_ID_IMPULSE_READY,
                     receivedAt = Instant.now(),
+                    conversationContext = ConversationContext(
+                        sessionId = ConversationContext.DEFAULT_SESSION_ID,
+                        interlocutor = Interlocutor.named("id"),
+                        security = ConversationSecurityContexts.internalAutomation(
+                            provider = "id",
+                            channelId = ConversationContext.DEFAULT_SESSION_ID,
+                        ),
+                    ),
                     trustLevel = StimulusTrustLevel.TRUSTED_INTERNAL,
+                    provenance = Provenances.trustedSystemSignal(provider = "id", sourceRef = rootImpulseId),
                     metadata = buildMap {
                         put(METADATA_CUE_TYPE, CUE_TYPE_ID_IMPULSE_READY)
                         if (!rootImpulseId.isNullOrBlank()) {
@@ -247,6 +278,16 @@ class AsyncSignalSource(
                 receivedAt = Instant.now(),
                 conversationContext = conversationContext,
                 trustLevel = StimulusTrustLevel.DEFAULT,
+                provenance = when (conversationContext.security.instructionTrust) {
+                    ai.neopsyke.agent.model.InstructionTrust.TRUSTED_INSTRUCTION ->
+                        Provenances.trustedMessage(provider = source, sourceRef = conversationContext.sessionId)
+                    ai.neopsyke.agent.model.InstructionTrust.UNTRUSTED_INSTRUCTION ->
+                        Provenances.fromStimulusTrustLevel(
+                            source = source,
+                            trustLevel = StimulusTrustLevel.UNTRUSTED_EXTERNAL,
+                            sourceRef = conversationContext.sessionId,
+                        )
+                },
                 metadata = mapOf("priority" to priority.name),
             )
         )
@@ -307,7 +348,17 @@ class SensoryCortex(
 
         return stimulus.copy(
             content = sanitized,
-            conversationContext = ConversationContext(resolvedSessionId, resolvedInterlocutor),
+            conversationContext = ConversationContext(
+                sessionId = resolvedSessionId,
+                interlocutor = resolvedInterlocutor,
+                security = providedContext.security,
+            ),
+            provenance = stimulus.provenance.copy(
+                sanitization = SanitizationRecord(
+                    method = "input_clamp",
+                    originalChars = stimulus.content.length,
+                )
+            ),
         )
     }
 

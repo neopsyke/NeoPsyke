@@ -1,6 +1,7 @@
 package ai.neopsyke.dashboard
 
 import ai.neopsyke.agent.model.ConversationContext
+import ai.neopsyke.agent.model.ConversationSecurityContexts
 import ai.neopsyke.agent.config.DefaultInterlocutorResolver
 import ai.neopsyke.agent.model.InputPriority
 import ai.neopsyke.agent.config.InterlocutorResolver
@@ -59,7 +60,11 @@ class ChatRuntimeBridge(
         val interlocutor = interlocutorResolver.resolve(source)
         val conversationContext = ConversationContext(
             sessionId = message.sessionId,
-            interlocutor = interlocutor
+            interlocutor = interlocutor,
+            security = ConversationSecurityContexts.ownerDirect(
+                provider = "webapp",
+                channelId = message.sessionId,
+            ),
         )
         val accepted = sensoryInput.submitInput(
             content = message.content,

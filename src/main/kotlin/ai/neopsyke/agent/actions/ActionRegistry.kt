@@ -48,7 +48,11 @@ class ActionRegistry private constructor(
             )
         return plugin.execute(
             action = action,
-            context = ActionExecutionContext(searchResultCount = searchResultCount)
+            context = ActionExecutionContext(
+                searchResultCount = searchResultCount,
+                conversationContext = action.conversationContext,
+                requestId = action.rootInputId,
+            )
         )
     }
 
@@ -73,6 +77,9 @@ class ActionRegistry private constructor(
 
     fun hasCapability(actionType: ActionType, capability: ActionCapability): Boolean =
         pluginByType[actionType]?.descriptor?.capabilities?.contains(capability) == true
+
+    fun contract(actionType: ActionType): ActionContract? =
+        pluginByType[actionType]?.descriptor?.contract
 
     fun actionTypesWithCapability(capability: ActionCapability): Set<ActionType> =
         pluginByType.values
