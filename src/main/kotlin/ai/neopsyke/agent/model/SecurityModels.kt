@@ -284,3 +284,47 @@ object Provenances {
             )
         }
 }
+
+fun ConversationSecurityContext.renderSummary(): String =
+    buildString {
+        append("principal_role=")
+        append(principal.role.name.lowercase())
+        append("\nchannel_provider=")
+        append(channel.provider)
+        append("\nchannel_surface=")
+        append(channel.surface.name.lowercase())
+        append("\ntransport_class=")
+        append(channel.transport.name.lowercase())
+        append("\ninstruction_trust=")
+        append(instructionTrust.name.lowercase())
+        append("\npolicy_scope_id=")
+        append(policyScopeId)
+    }
+
+fun Provenance.renderSummary(): String =
+    buildString {
+        append("instruction_trust=")
+        append(instructionTrust.name.lowercase())
+        append("\ndata_trust=")
+        append(dataTrust.name.lowercase())
+        append("\nsource_provider=")
+        append(source.provider)
+        append("\ncontent_kind=")
+        append(source.contentKind.name.lowercase())
+        append("\nobject_type=")
+        append(source.objectType)
+        if (!source.part.isNullOrBlank()) {
+            append("\nsource_part=")
+            append(source.part)
+        }
+        if (!source.sourceRef.isNullOrBlank()) {
+            append("\nsource_ref=")
+            append(source.sourceRef)
+        }
+        sanitization?.let {
+            append("\nsanitization_method=")
+            append(it.method)
+            append("\nsanitization_original_chars=")
+            append(it.originalChars)
+        }
+    }

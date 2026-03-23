@@ -75,6 +75,8 @@ data class PlannerContext(
     val evidenceHints: String = "",
     val deliberation: DeliberationState = DeliberationState(),
     val metaGuidance: String = "",
+    val conversationSecuritySummary: String = "",
+    val triggerProvenanceSummary: String = "",
     val availableActions: Set<ActionType> = ActionType.entries.toSet(),
     val dispatchableActions: Set<ActionType> = availableActions,
     val actionDefinitions: List<ActionPlanningDefinition> = emptyList(),
@@ -88,6 +90,13 @@ data class ActionPlanningDefinition(
     val description: String,
     val payloadGuidance: String,
     val payloadSchemaExample: String? = null,
+    val effectClass: ActionEffectClass = ActionEffectClass.OBSERVE,
+    val directCommitAllowed: Boolean = false,
+    val supportsAutonomousCommit: Boolean = false,
+    val allowedInstructionTrust: Set<InstructionTrust> = setOf(
+        InstructionTrust.TRUSTED_INSTRUCTION,
+        InstructionTrust.UNTRUSTED_INSTRUCTION,
+    ),
 )
 
 data class SuperegoContext(

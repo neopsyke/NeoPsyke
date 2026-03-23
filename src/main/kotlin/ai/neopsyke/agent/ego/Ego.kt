@@ -113,7 +113,7 @@ class Ego(
     private fun activateSession(conversationContext: ConversationContext) {
         val sessionId = resolveSessionId(conversationContext)
         val interlocutor = conversationContext.interlocutor
-        memory.setActiveSession(sessionId, interlocutor)
+        memory.setActiveSession(sessionId, interlocutor, conversationContext.security)
         deliberation.setActiveSession(sessionId)
     }
 
@@ -594,14 +594,23 @@ class Ego(
             maxTokens = config.memory.scratchpad.digestMaxPromptTokens
         )
         val disabled = deliberation.disabledActionTypes(rootInputId, sessionId)
-        val availableActions = motorCortex.availableActionTypes() - disabled
-        val dispatchableActions = motorCortex.dispatchableActionTypes() - disabled
-        val actionDefinitions = motorCortex.plannerDescriptors().map { descriptor ->
+        val plannerDescriptors = motorCortex.plannerDescriptors()
+            .filter { descriptor ->
+                descriptor.allowedInstructionTrust.contains(conversationContext.security.instructionTrust)
+            }
+        val policyActionTypes = plannerDescriptors.map { it.actionType }.toSet()
+        val availableActions = (motorCortex.availableActionTypes() intersect policyActionTypes) - disabled
+        val dispatchableActions = (motorCortex.dispatchableActionTypes() intersect policyActionTypes) - disabled
+        val actionDefinitions = plannerDescriptors.map { descriptor ->
             ActionPlanningDefinition(
                 actionType = descriptor.actionType,
                 description = descriptor.plannerDescription,
                 payloadGuidance = descriptor.payloadGuidance,
-                payloadSchemaExample = descriptor.payloadSchemaExample
+                payloadSchemaExample = descriptor.payloadSchemaExample,
+                effectClass = descriptor.effectClass,
+                directCommitAllowed = descriptor.directCommitAllowed,
+                supportsAutonomousCommit = descriptor.supportsAutonomousCommit,
+                allowedInstructionTrust = descriptor.allowedInstructionTrust,
             )
         }
         val evidenceHints = buildEvidenceHints(rootInputId, sessionId)
@@ -618,12 +627,45 @@ class Ego(
             evidenceHints = evidenceHints,
             deliberation = deliberation.snapshot(),
             metaGuidance = deliberation.guidance(),
+            conversationSecuritySummary = conversationContext.security.renderSummary(),
+            triggerProvenanceSummary = triggerProvenanceSummary(trigger),
             availableActions = availableActions,
             dispatchableActions = dispatchableActions,
             actionDefinitions = actionDefinitions,
             conversationContext = conversationContext
         )
     }
+
+    private fun triggerProvenanceSummary(trigger: EgoTrigger): String =
+        when (trigger) {
+            is EgoTrigger.IncomingInput ->
+                Provenances.fromStimulusTrustLevel(
+                    source = trigger.input.source,
+                    trustLevel = when (trigger.input.conversationContext.security.instructionTrust) {
+                        InstructionTrust.TRUSTED_INSTRUCTION -> StimulusTrustLevel.TRUSTED_INTERNAL
+                        InstructionTrust.UNTRUSTED_INSTRUCTION -> StimulusTrustLevel.UNTRUSTED_EXTERNAL
+                    },
+                    sourceRef = trigger.input.rootInputId,
+                ).renderSummary()
+
+            is EgoTrigger.PendingThoughtInput ->
+                Provenances.trustedSystemSignal(
+                    provider = "planner_thought",
+                    sourceRef = trigger.thought.rootInputId,
+                ).renderSummary()
+
+            is EgoTrigger.IncomingImpulse ->
+                Provenances.trustedSystemSignal(
+                    provider = "id",
+                    sourceRef = trigger.impulse.rootImpulseId,
+                ).renderSummary()
+
+            is EgoTrigger.GoalWork ->
+                Provenances.trustedSystemSignal(
+                    provider = "goal-runtime",
+                    sourceRef = trigger.workUnit.rootInputId,
+                ).renderSummary()
+        }
 
     private fun buildAmbientContext(trigger: EgoTrigger): AmbientContext {
         if (!shouldAttachAmbientContext(trigger)) {

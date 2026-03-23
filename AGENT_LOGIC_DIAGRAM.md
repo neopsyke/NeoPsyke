@@ -9,7 +9,7 @@ Keep diagrams high signal: small, readable, and updated as runtime logic evolves
 flowchart LR
     U["User / Web UI"] --> SC["SensoryCortex (typed cognitive stimuli ingress)"]
     SC --> E["Ego Orchestrator"]
-    NoteCtx["ConversationContext(sessionId required, unknown interlocutor resolved at sensory boundary)"] --> SC
+    NoteCtx["ConversationContext(sessionId required, unknown interlocutor resolved at sensory boundary, security context carried end-to-end)"] --> SC
 
     E --> AS["AttentionScheduler"]
     AS --> E
@@ -95,7 +95,7 @@ sequenceDiagram
 
     User->>SC: Web chat input text
     SC->>Ego: StimulusReceived (linguistic stimulus)
-    Note over SC,Ego: Stimulus carries ConversationContext(sessionId), rootInputId(identity), receivedAtMs(timing)
+    Note over SC,Ego: Stimulus carries ConversationContext(sessionId + security), provenance, rootInputId(identity), receivedAtMs(timing)
     Ego->>Sched: enqueue input opportunity
 
     loop While pending work and step limit not reached
@@ -120,8 +120,10 @@ sequenceDiagram
             Ego->>TWS: create or update request scratchpad and index summary
             Ego->>Dash: emit scratchpad_head (with optional debug snapshot)
             Note over Ego,Planner: For Id-origin thoughts, Ego reapplies Id convergence state and action filtering before planner decide
+            Note over Ego,Planner: Planner-visible actions are prefiltered by conversation instruction trust and action contract metadata before prompt build
             Ego->>Planner: decide(context)
             Note over Ego,Planner: PromptBudgetAllocator reserves required-core/context floors with message-overhead accounting, trims optional first, and emits prompt_budget_allocation
+            Note over Ego,Planner: Planner prompt includes conversation security summary and trigger provenance summary untrusted external content is framed as data, not instruction
             Note over Ego,Planner: Obvious persistent reminder / monitoring / goal-creation inputs route into a dedicated goal-creation branch before the generic planner path
             Note over Ego,Planner: Goal-creation branch uses a narrow schema prompt plus deterministic recurring schedule detection for supported forms like every N minutes / every N hours
             Note over Ego,Planner: Planner requests schema-enforced structured output the LLM layer owns compatibility degradation (strict json_schema -> relaxed json_schema -> prompt-only JSON) parse failures still do truncation-budget retry then strict-JSON retry before noop fallback
@@ -210,6 +212,7 @@ sequenceDiagram
         Note over Ego,Mem: Memory-advisor completion max_tokens scales with prompt estimate (bounded floor/hard-cap) and model token_weight
         Note over Ego,Mem: Long dialogue/recall blocks are compressed before advisor prompt
         Note over Ego,Mem: Saved durable memories are normalized to first-person agent perspective before imprint
+        Note over Ego,Mem: Episodic logbook entries carry active channel/principal/policy-scope metadata
         Note over Ego,Mem: INTERNAL latest-salient turns switch long-term assessment into self-origin mode; reasons/tags/source are normalized away from user-preference framing
         Note over Ego,Mem: MCP fact/reference subject is stamped as "me" for agent-authored durable memories
         Note over Ego,Mem: Successful learning reflections track exact recent topic fingerprints; only learning retrieval uses them as freshness pressure, while other needs may still reuse the same topic context

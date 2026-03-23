@@ -41,7 +41,7 @@ internal class ActionReviewPipeline(
         val timing = PhaseTimingCollector("action", action.rootInputId)
         val convCtx = action.conversationContext
         val sessionId = resolveSessionId(convCtx)
-        memory.setActiveSession(sessionId, convCtx.interlocutor)
+        memory.setActiveSession(sessionId, convCtx.interlocutor, convCtx.security)
         deliberation.setActiveSession(sessionId)
 
         timing.startPhase("scratchpad_final_pass")
