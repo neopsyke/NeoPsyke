@@ -27,6 +27,7 @@ agent:
     max_plans_per_input: 2
     action_retry_budget_non_retryable_failures: 3
     action_retry_cooldown_steps: 10
+    action_verifier_enabled: false
 
   superego:
     max_completion_tokens: 192

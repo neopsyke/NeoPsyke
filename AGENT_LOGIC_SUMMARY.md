@@ -365,6 +365,7 @@ It is intentionally high-level and should stay aligned with the code.
     - action verifier can reject low-value repeated external calls when evidence hints already contain usable signal
     - `Ego` emits `external_action_redundancy_signal` telemetry (soft signal, not policy deny) with repeated signature hit count and evidence state
   - Secondary action verifier pass (`approve|repair|reject`) with:
+    - disabled by default via `agent.planner.action_verifier_enabled: false` / `PlannerConfig.actionVerifierEnabled = false`; tests or lanes that need verifier behavior must opt in explicitly
     - strict-schema-first call with relaxed-schema fallback on provider schema-validation failure
     - one truncation retry with increased completion budget on likely-truncated output
     - one strict-JSON retry on parse failure

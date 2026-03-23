@@ -79,6 +79,7 @@ private data class AgentRuntimeYamlPlanner(
     val maxPlansPerInput: Int? = null,
     val actionRetryBudgetNonRetryableFailures: Int? = null,
     val actionRetryCooldownSteps: Int? = null,
+    val actionVerifierEnabled: Boolean? = null,
 )
 
 private data class AgentRuntimeYamlSuperego(
@@ -358,6 +359,11 @@ object AgentRuntimeSettingsLoader {
                     env["EGO_ACTION_RETRY_COOLDOWN_STEPS"],
                     plannerYaml.actionRetryCooldownSteps,
                     defaults.planner.actionRetryCooldownSteps
+                ),
+                actionVerifierEnabled = readBoolean(
+                    env["EGO_ACTION_VERIFIER_ENABLED"],
+                    plannerYaml.actionVerifierEnabled,
+                    defaults.planner.actionVerifierEnabled
                 ),
             ),
             superego = SuperegoConfig(

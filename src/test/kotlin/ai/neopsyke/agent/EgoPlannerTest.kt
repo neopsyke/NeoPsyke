@@ -467,7 +467,7 @@ class EgoPlannerTest {
         var repairCount = 0
         val planner = LlmEgoPlanner(
             modelClient = llm,
-            config = AgentConfig(),
+            config = AgentConfig(planner = PlannerConfig(actionVerifierEnabled = true)),
             instrumentation = instrumentation,
             onPlannerOutputRepaired = { repairCount += 1 }
         )
@@ -548,7 +548,7 @@ class EgoPlannerTest {
         var repairCount = 0
         val planner = LlmEgoPlanner(
             modelClient = llm,
-            config = AgentConfig(),
+            config = AgentConfig(planner = PlannerConfig(actionVerifierEnabled = true)),
             instrumentation = instrumentation,
             onPlannerOutputRepaired = { repairCount += 1 }
         )
@@ -602,7 +602,7 @@ class EgoPlannerTest {
         var repairCount = 0
         val planner = LlmEgoPlanner(
             modelClient = llm,
-            config = AgentConfig(),
+            config = AgentConfig(planner = PlannerConfig(actionVerifierEnabled = true)),
             instrumentation = instrumentation,
             onPlannerOutputRepaired = { repairCount += 1 }
         )
@@ -652,7 +652,7 @@ class EgoPlannerTest {
         val instrumentation = RecordingInstrumentation()
         val planner = LlmEgoPlanner(
             modelClient = llm,
-            config = AgentConfig(),
+            config = AgentConfig(planner = PlannerConfig(actionVerifierEnabled = true)),
             instrumentation = instrumentation
         )
 
@@ -712,7 +712,10 @@ class EgoPlannerTest {
                 """.trimIndent()
             )
         }
-        val planner = LlmEgoPlanner(modelClient = llm, config = AgentConfig())
+        val planner = LlmEgoPlanner(
+            modelClient = llm,
+            config = AgentConfig(planner = PlannerConfig(actionVerifierEnabled = true))
+        )
 
         val decision = planner.decide(
             trigger = ai.neopsyke.agent.model.EgoTrigger.PendingThoughtInput(
@@ -756,7 +759,7 @@ class EgoPlannerTest {
         var repairCount = 0
         val planner = LlmEgoPlanner(
             modelClient = llm,
-            config = AgentConfig(),
+            config = AgentConfig(planner = PlannerConfig(actionVerifierEnabled = true)),
             instrumentation = instrumentation,
             onPlannerOutputRepaired = { repairCount += 1 }
         )
@@ -804,7 +807,10 @@ class EgoPlannerTest {
                 """.trimIndent()
             )
         }
-        val planner = LlmEgoPlanner(modelClient = llm, config = AgentConfig())
+        val planner = LlmEgoPlanner(
+            modelClient = llm,
+            config = AgentConfig(planner = PlannerConfig(actionVerifierEnabled = true))
+        )
 
         val decision = planner.decide(
             trigger = ai.neopsyke.agent.model.EgoTrigger.IncomingInput(PendingInput(1, "pricing")),
@@ -837,7 +843,7 @@ class EgoPlannerTest {
         val instrumentation = RecordingInstrumentation()
         val planner = LlmEgoPlanner(
             modelClient = llm,
-            config = AgentConfig(),
+            config = AgentConfig(planner = PlannerConfig(actionVerifierEnabled = true)),
             instrumentation = instrumentation
         )
 
@@ -876,7 +882,7 @@ class EgoPlannerTest {
         val instrumentation = RecordingInstrumentation()
         val planner = LlmEgoPlanner(
             modelClient = llm,
-            config = AgentConfig(),
+            config = AgentConfig(planner = PlannerConfig(actionVerifierEnabled = true)),
             instrumentation = instrumentation
         )
 
@@ -917,7 +923,7 @@ class EgoPlannerTest {
         val instrumentation = RecordingInstrumentation()
         val planner = LlmEgoPlanner(
             modelClient = llm,
-            config = AgentConfig(),
+            config = AgentConfig(planner = PlannerConfig(actionVerifierEnabled = true)),
             instrumentation = instrumentation
         )
 
@@ -964,7 +970,10 @@ class EgoPlannerTest {
                 content = """{"verdict":"reject","reason":"retry parsed and rejected"}"""
             )
         }
-        val planner = LlmEgoPlanner(modelClient = llm, config = AgentConfig())
+        val planner = LlmEgoPlanner(
+            modelClient = llm,
+            config = AgentConfig(planner = PlannerConfig(actionVerifierEnabled = true))
+        )
 
         val decision = planner.decide(
             trigger = ai.neopsyke.agent.model.EgoTrigger.IncomingInput(PendingInput(1, "safe response only")),
@@ -997,7 +1006,7 @@ class EgoPlannerTest {
         val instrumentation = RecordingInstrumentation()
         val planner = LlmEgoPlanner(
             modelClient = llm,
-            config = AgentConfig(),
+            config = AgentConfig(planner = PlannerConfig(actionVerifierEnabled = true)),
             instrumentation = instrumentation
         )
         val trigger = ai.neopsyke.agent.model.EgoTrigger.IncomingInput(PendingInput(1, "test"))
@@ -1032,7 +1041,10 @@ class EgoPlannerTest {
             enqueueRawResponseForCallSite(callSite = "action_verifier", content = "bad-2")
             enqueueRawResponseForCallSite(callSite = "action_verifier_json_retry", content = "bad-2-retry")
         }
-        val planner = LlmEgoPlanner(modelClient = llm, config = AgentConfig())
+        val planner = LlmEgoPlanner(
+            modelClient = llm,
+            config = AgentConfig(planner = PlannerConfig(actionVerifierEnabled = true))
+        )
         val context = PlannerContext(recentDialogue = emptyList(), queue = QueueSnapshot(0, 0, 0))
         val triggerA = ai.neopsyke.agent.model.EgoTrigger.IncomingInput(
             PendingInput(id = 1, content = "test-a", receivedAtMs = 1L)
@@ -1172,7 +1184,10 @@ class EgoPlannerTest {
         val llm = StubChatModelClient().apply {
             enqueueRawResponse("""{"decision":"noop","reason":"done"}""")
         }
-        val planner = LlmEgoPlanner(modelClient = llm, config = AgentConfig())
+        val planner = LlmEgoPlanner(
+            modelClient = llm,
+            config = AgentConfig(planner = PlannerConfig(actionVerifierEnabled = true))
+        )
 
         planner.decide(
            ai.neopsyke.agent.model.EgoTrigger.IncomingInput(PendingInput(1, "question")),

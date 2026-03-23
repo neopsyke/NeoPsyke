@@ -815,6 +815,9 @@ class LlmEgoPlanner(
         context: PlannerContext,
         decision: EgoDecision,
     ): EgoDecision {
+        if (!config.planner.actionVerifierEnabled) {
+            return decision
+        }
         if (decision !is EgoDecision.ProposeAction) {
             return decision
         }

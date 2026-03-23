@@ -22,6 +22,7 @@ class AgentRuntimeSettingsLoaderTest {
         assertEquals(2, settings.agentConfig.planner.maxPlansPerInput)
         assertEquals(3, settings.agentConfig.planner.actionRetryBudgetNonRetryableFailures)
         assertEquals(10, settings.agentConfig.planner.actionRetryCooldownSteps)
+        assertEquals(false, settings.agentConfig.planner.actionVerifierEnabled)
 
         assertEquals(192, settings.agentConfig.superego.maxCompletionTokens)
         assertEquals(true, settings.agentConfig.superego.dynamicCompletionEnabled)
@@ -125,6 +126,7 @@ class AgentRuntimeSettingsLoaderTest {
                 max_plans_per_input: 3
                 action_retry_budget_non_retryable_failures: 7
                 action_retry_cooldown_steps: 15
+                action_verifier_enabled: true
               superego:
                 dynamic_completion_enabled: false
                 dynamic_completion_hard_max_tokens: 700
@@ -260,6 +262,7 @@ class AgentRuntimeSettingsLoaderTest {
         assertEquals(3, settings.agentConfig.planner.maxPlansPerInput)
         assertEquals(7, settings.agentConfig.planner.actionRetryBudgetNonRetryableFailures)
         assertEquals(15, settings.agentConfig.planner.actionRetryCooldownSteps)
+        assertEquals(true, settings.agentConfig.planner.actionVerifierEnabled)
 
         assertEquals(false, settings.agentConfig.superego.dynamicCompletionEnabled)
         assertEquals(700, settings.agentConfig.superego.dynamicCompletionHardMaxTokens)
