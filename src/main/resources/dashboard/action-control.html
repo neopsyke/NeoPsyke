@@ -218,6 +218,14 @@
   <div class="toolbar">
     <div id="status-text">Loading staged actions and receipts...</div>
     <div style="display:flex;gap:8px;align-items:center">
+      <label style="display:flex;gap:6px;align-items:center">
+        <input id="include-background" type="checkbox" />
+        <span>Include background</span>
+      </label>
+      <label style="display:flex;gap:6px;align-items:center">
+        <input id="include-trace" type="checkbox" />
+        <span>Show trace</span>
+      </label>
       <span id="last-refresh">Not refreshed yet</span>
       <button class="ghost-btn" id="refresh-btn" type="button">Refresh</button>
     </div>
@@ -236,11 +244,11 @@
 
     <section class="panel">
       <div class="panel-head">
-        <strong>Receipts</strong>
-        <span id="receipt-count">0</span>
+        <strong>Activity</strong>
+        <span id="ledger-count">0</span>
       </div>
-      <div class="panel-body list" id="receipt-list">
-        <div class="empty">No receipts found.</div>
+      <div class="panel-body list" id="ledger-list">
+        <div class="empty">No activity found.</div>
       </div>
     </section>
 
@@ -250,24 +258,26 @@
         <span id="detail-kind">None selected</span>
       </div>
       <div class="panel-body detail" id="detail-pane">
-        <div class="empty">Select a staged action or receipt to inspect it.</div>
+        <div class="empty">Select a staged action or activity item to inspect it.</div>
       </div>
     </section>
   </div>
 
   <script>
     const stagedListEl = document.getElementById('staged-list');
-    const receiptListEl = document.getElementById('receipt-list');
+    const ledgerListEl = document.getElementById('ledger-list');
     const detailPaneEl = document.getElementById('detail-pane');
     const detailKindEl = document.getElementById('detail-kind');
     const statusTextEl = document.getElementById('status-text');
     const stagedCountEl = document.getElementById('staged-count');
-    const receiptCountEl = document.getElementById('receipt-count');
+    const ledgerCountEl = document.getElementById('ledger-count');
     const lastRefreshEl = document.getElementById('last-refresh');
     const refreshBtn = document.getElementById('refresh-btn');
+    const includeBackgroundEl = document.getElementById('include-background');
+    const includeTraceEl = document.getElementById('include-trace');
 
     let stagedActions = [];
-    let receipts = [];
+    let ledgerEntries = [];
     let selection = { kind: null, id: null };
 
     function formatTimestamp(ms) {
@@ -298,6 +308,15 @@
       target.innerHTML = '<div class="empty">' + escapeHtml(message) + '</div>';
     }
 
+    function visibleLedgerEntries() {
+      return ledgerEntries.filter((item) => {
+        if (item.importance === 'SIGNAL') return true;
+        if (item.importance === 'BACKGROUND') return !!includeBackgroundEl.checked;
+        if (item.importance === 'TRACE') return !!includeTraceEl.checked;
+        return false;
+      });
+    }
+
     function renderStagedList() {
       stagedCountEl.textContent = String(stagedActions.length);
       if (stagedActions.length === 0) {
@@ -326,23 +345,27 @@
       }).join('');
     }
 
-    function renderReceiptList() {
-      receiptCountEl.textContent = String(receipts.length);
-      if (receipts.length === 0) {
-        renderEmpty(receiptListEl, 'No receipts found.');
+    function renderLedgerList() {
+      const visible = visibleLedgerEntries();
+      ledgerCountEl.textContent = String(visible.length);
+      if (visible.length === 0) {
+        renderEmpty(ledgerListEl, 'No activity found for the current filter.');
         return;
       }
-      receiptListEl.innerHTML = receipts.map((item) => {
-        const active = selection.kind === 'receipt' && selection.id === item.id ? ' active' : '';
-        const statusClass = cssSafe(item.executionStatus);
+      ledgerListEl.innerHTML = visible.map((item) => {
+        const active = selection.kind === 'ledger' && selection.id === item.id ? ' active' : '';
+        const kindClass = cssSafe(item.kind);
+        const importanceClass = cssSafe(item.importance);
         return `
-          <button class="item${active}" data-kind="receipt" data-id="${escapeHtml(item.id)}">
-            <div class="item-title">${escapeHtml(item.statusSummary || item.actionType?.id || item.id)}</div>
+          <button class="item${active}" data-kind="ledger" data-id="${escapeHtml(item.id)}">
+            <div class="item-title">${escapeHtml(item.summary || item.actionType?.id || item.id)}</div>
             <div class="meta-row">
-              <span class="badge ${statusClass}">${escapeHtml(item.executionStatus || 'unknown')}</span>
+              <span class="badge ${kindClass}">${escapeHtml(item.kind || 'unknown')}</span>
+              <span class="badge ${importanceClass}">${escapeHtml(item.importance || 'unknown')}</span>
               <span>${escapeHtml(item.actionType?.id || 'unknown')}</span>
             </div>
             <div class="meta-row" style="margin-top:6px">
+              <span>${escapeHtml(item.source || 'runtime')}</span>
               <span>${escapeHtml(item.rootInputId || 'no root input')}</span>
               <span>${escapeHtml(formatTimestamp(item.createdAtMs))}</span>
             </div>
@@ -361,6 +384,7 @@
         }
         detailKindEl.textContent = 'Staged action';
         const canAuthorize = item.status === 'WAITING_AUTHORIZATION' || item.status === 'READY';
+        const canDeny = canAuthorize;
         detailPaneEl.innerHTML = `
           <div class="detail-block">
             <div class="detail-title">Overview</div>
@@ -372,6 +396,8 @@
               <div class="k">Policy version</div><div class="v">${escapeHtml(item.policyVersion || 'n/a')}</div>
               <div class="k">Channel</div><div class="v">${escapeHtml(item.conversationContext?.security?.channel?.provider || 'unknown')} / ${escapeHtml(item.conversationContext?.security?.channel?.surface || 'unknown')}</div>
               <div class="k">Principal</div><div class="v">${escapeHtml(item.conversationContext?.security?.principal?.role || 'unknown')} / ${escapeHtml(item.conversationContext?.security?.principal?.id || 'unknown')}</div>
+              <div class="k">Thread sequence</div><div class="v">${escapeHtml(item.threadSequence ?? 'n/a')}</div>
+              <div class="k">Execution key</div><div class="v">${escapeHtml(item.executionKey || 'n/a')}</div>
               <div class="k">Updated</div><div class="v">${escapeHtml(formatTimestamp(item.updatedAtMs || item.createdAtMs))}</div>
               <div class="k">Reason</div><div class="v">${escapeHtml(item.statusReason || 'n/a')}</div>
             </div>
@@ -388,15 +414,20 @@
             <div class="detail-title">Actions</div>
             <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
               <button class="primary-btn" id="authorize-btn" type="button" ${canAuthorize ? '' : 'disabled'}>Authorize from dashboard</button>
-              <span style="font-size:12px;color:var(--muted)">Owner-dashboard approval only.</span>
+              <button class="ghost-btn" id="deny-btn" type="button" ${canDeny ? '' : 'disabled'}>Deny</button>
+              <span style="font-size:12px;color:var(--muted)">Owner-dashboard approve/deny only.</span>
             </div>
             <div id="authorize-status" style="margin-top:10px;font-size:12px;color:var(--muted)"></div>
           </div>
         `;
+
         const authorizeBtn = document.getElementById('authorize-btn');
+        const denyBtn = document.getElementById('deny-btn');
+
         if (authorizeBtn && canAuthorize) {
           authorizeBtn.addEventListener('click', async () => {
             authorizeBtn.disabled = true;
+            if (denyBtn) denyBtn.disabled = true;
             const statusEl = document.getElementById('authorize-status');
             if (statusEl) statusEl.textContent = 'Authorizing staged action...';
             try {
@@ -414,43 +445,72 @@
                 statusEl.innerHTML = '<span class="error">' + escapeHtml(err.message || 'Authorization failed') + '</span>';
               }
               authorizeBtn.disabled = false;
+              if (denyBtn) denyBtn.disabled = false;
+            }
+          });
+        }
+
+        if (denyBtn && canDeny) {
+          denyBtn.addEventListener('click', async () => {
+            denyBtn.disabled = true;
+            if (authorizeBtn) authorizeBtn.disabled = true;
+            const statusEl = document.getElementById('authorize-status');
+            if (statusEl) statusEl.textContent = 'Denying staged action...';
+            try {
+              const res = await fetch('/api/action-control/staged/' + encodeURIComponent(item.id) + '/deny', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ reason: 'Denied from dashboard.' })
+              });
+              const payload = await res.json();
+              if (!res.ok) {
+                throw new Error(payload.error || 'Denial failed');
+              }
+              if (statusEl) statusEl.textContent = 'Staged action denied.';
+              await refreshAll();
+            } catch (err) {
+              if (statusEl) {
+                statusEl.innerHTML = '<span class="error">' + escapeHtml(err.message || 'Denial failed') + '</span>';
+              }
+              denyBtn.disabled = false;
+              if (authorizeBtn) authorizeBtn.disabled = false;
             }
           });
         }
         return;
       }
 
-      if (selection.kind === 'receipt') {
-        const item = receipts.find((candidate) => candidate.id === selection.id);
+      if (selection.kind === 'ledger') {
+        const item = ledgerEntries.find((candidate) => candidate.id === selection.id);
         if (!item) {
           detailKindEl.textContent = 'Selection missing';
-          renderEmpty(detailPaneEl, 'The selected receipt is no longer available.');
+          renderEmpty(detailPaneEl, 'The selected activity item is no longer available.');
           return;
         }
-        detailKindEl.textContent = 'Receipt';
+        detailKindEl.textContent = 'Activity';
         detailPaneEl.innerHTML = `
           <div class="detail-block">
             <div class="detail-title">Overview</div>
             <div class="kv">
               <div class="k">ID</div><div class="v">${escapeHtml(item.id)}</div>
-              <div class="k">Staged action</div><div class="v">${escapeHtml(item.stagedActionId || 'n/a')}</div>
-              <div class="k">Authorization</div><div class="v">${escapeHtml(item.authorizationId || 'none')}</div>
+              <div class="k">Kind</div><div class="v">${escapeHtml(item.kind || 'unknown')}</div>
+              <div class="k">Importance</div><div class="v">${escapeHtml(item.importance || 'unknown')}</div>
               <div class="k">Action</div><div class="v">${escapeHtml(item.actionType?.id || 'unknown')}</div>
-              <div class="k">Execution</div><div class="v">${escapeHtml(item.executionStatus || 'unknown')}</div>
+              <div class="k">Source</div><div class="v">${escapeHtml(item.source || 'runtime')}</div>
               <div class="k">Created</div><div class="v">${escapeHtml(formatTimestamp(item.createdAtMs))}</div>
               <div class="k">Root input</div><div class="v">${escapeHtml(item.rootInputId || 'n/a')}</div>
+              <div class="k">Staged action</div><div class="v">${escapeHtml(item.stagedActionId || 'n/a')}</div>
+              <div class="k">Authorization</div><div class="v">${escapeHtml(item.authorizationId || 'none')}</div>
+              <div class="k">Receipt</div><div class="v">${escapeHtml(item.receiptId || 'none')}</div>
+              <div class="k">Reason code</div><div class="v">${escapeHtml(item.reasonCode || 'n/a')}</div>
             </div>
           </div>
           <div class="detail-block">
-            <div class="detail-title">Status summary</div>
-            <pre>${escapeHtml(item.statusSummary || '(empty)')}</pre>
+            <div class="detail-title">Summary</div>
+            <pre>${escapeHtml(item.summary || '(empty)')}</pre>
           </div>
           <div class="detail-block">
-            <div class="detail-title">Planner signal</div>
-            <pre>${escapeHtml(item.plannerSignal || '(empty)')}</pre>
-          </div>
-          <div class="detail-block">
-            <div class="detail-title">Raw receipt</div>
+            <div class="detail-title">Raw activity</div>
             <pre>${escapeHtml(JSON.stringify(item, null, 2))}</pre>
           </div>
         `;
@@ -458,7 +518,7 @@
       }
 
       detailKindEl.textContent = 'None selected';
-      renderEmpty(detailPaneEl, 'Select a staged action or receipt to inspect it.');
+      renderEmpty(detailPaneEl, 'Select a staged action or activity item to inspect it.');
     }
 
     function bindListClicks() {
@@ -469,7 +529,7 @@
             id: el.getAttribute('data-id')
           };
           renderStagedList();
-          renderReceiptList();
+          renderLedgerList();
           renderDetail();
         });
       });
@@ -478,39 +538,50 @@
     async function refreshAll() {
       statusTextEl.textContent = 'Refreshing action-control data...';
       try {
-        const [stagedRes, receiptRes] = await Promise.all([
+        const [stagedRes, ledgerRes] = await Promise.all([
           fetch('/api/action-control/staged?limit=100'),
-          fetch('/api/action-control/receipts?limit=100')
+          fetch('/api/action-control/ledger?limit=200')
         ]);
-        if (!stagedRes.ok || !receiptRes.ok) {
+        if (!stagedRes.ok || !ledgerRes.ok) {
           throw new Error('Action-control API unavailable');
         }
         stagedActions = await stagedRes.json();
-        receipts = await receiptRes.json();
+        ledgerEntries = await ledgerRes.json();
         if (selection.kind === 'staged' && !stagedActions.some((item) => item.id === selection.id)) {
           selection = { kind: null, id: null };
         }
-        if (selection.kind === 'receipt' && !receipts.some((item) => item.id === selection.id)) {
+        if (selection.kind === 'ledger' && !ledgerEntries.some((item) => item.id === selection.id)) {
           selection = { kind: null, id: null };
         }
         renderStagedList();
-        renderReceiptList();
+        renderLedgerList();
         renderDetail();
         bindListClicks();
         const waitingCount = stagedActions.filter((item) => item.status === 'WAITING_AUTHORIZATION').length;
         const readyCount = stagedActions.filter((item) => item.status === 'READY').length;
-        statusTextEl.textContent = 'Staged: ' + stagedActions.length + ' total, ' + waitingCount + ' waiting approval, ' + readyCount + ' ready for autonomous commit.';
+        const signalCount = ledgerEntries.filter((item) => item.importance === 'SIGNAL').length;
+        statusTextEl.textContent = 'Staged: ' + stagedActions.length + ' total, ' + waitingCount + ' waiting approval, ' + readyCount + ' ready for autonomous commit, ' + signalCount + ' high-signal activity items.';
         lastRefreshEl.textContent = 'Last refresh: ' + new Date().toLocaleTimeString();
       } catch (err) {
         statusTextEl.innerHTML = '<span class="error">' + escapeHtml(err.message || 'Refresh failed') + '</span>';
         renderEmpty(stagedListEl, 'Unable to load staged actions.');
-        renderEmpty(receiptListEl, 'Unable to load receipts.');
+        renderEmpty(ledgerListEl, 'Unable to load action activity.');
         detailKindEl.textContent = 'Load error';
         renderEmpty(detailPaneEl, 'Action-control API unavailable.');
       }
     }
 
     refreshBtn.addEventListener('click', refreshAll);
+    includeBackgroundEl.addEventListener('change', () => {
+      renderLedgerList();
+      renderDetail();
+      bindListClicks();
+    });
+    includeTraceEl.addEventListener('change', () => {
+      renderLedgerList();
+      renderDetail();
+      bindListClicks();
+    });
     refreshAll();
     setInterval(refreshAll, 5000);
   </script>

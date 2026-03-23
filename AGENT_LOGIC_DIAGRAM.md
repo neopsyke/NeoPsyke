@@ -82,6 +82,7 @@ flowchart LR
     DS --> OP["Observability Page (`/dashboard`) + Obs API (`/api/obs/*`)"]
     DS --> OX["Action Control Page (`/action-control`)"]
     DS --> ACAPI["Action Control API (`/api/action-control/*`)"]
+    Note over OX,ACAPI: Action control UI defaults to SIGNAL activity items and can opt into BACKGROUND or TRACE ledger visibility
 ```
 
 ## 2) Loop Sequence (Per Input)
@@ -189,6 +190,7 @@ sequenceDiagram
                             Ego->>ACS: stage / authorize / commit
                             alt stage required
                                 ACS->>ACDB: save staged action
+                                ACS->>ACDB: save signal/background ledger entry
                                 ACS-->>Ego: staged action (`WAITING_AUTHORIZATION` or `READY`)
                                 Ego->>Sched: enqueue approval-or-alternative thought
                                 Note over ACW,ACS: Background autonomous worker polls SQL-filtered runnable `READY` actions, preserving same-thread order (`threadSequence`) and same-target serialization (`executionKey`) before atomic claim + execute
@@ -196,7 +198,7 @@ sequenceDiagram
                                 ACS->>ACDB: save staged action + authorization
                                 ACS->>Motor: execute(action, authorization)
                                 Motor-->>ACS: outcome
-                                ACS->>ACDB: save receipt + final staged status
+                                ACS->>ACDB: save receipt + ledger + final staged status
                                 ACS-->>Ego: executed outcome
                             end
                             Note over Ego,Motor: Actions may complete immediately or return WAITING + async operation handles
@@ -216,6 +218,7 @@ sequenceDiagram
                             Ego->>Mem: maybeAssessLongTermMemory(post_allowed_action, optional force)
                             Note over Ego,Mem: Blocked imprints emit long_term_memory_persistence_skipped (reason_code, reason_detail) for timeline visibility
                         else deny
+                            Ego->>ACS: save durable denial/refusal ledger entry
                             Ego->>Sched: enqueue safe-alternative thought
                             Ego->>Mem: maybeRecordReflectionLesson(filtered)
                         end

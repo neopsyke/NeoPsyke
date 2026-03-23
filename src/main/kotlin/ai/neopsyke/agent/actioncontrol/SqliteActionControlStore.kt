@@ -3,6 +3,7 @@ package ai.neopsyke.agent.actioncontrol
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
 import mu.KotlinLogging
+import ai.neopsyke.agent.model.ActionLedgerEntry
 import ai.neopsyke.agent.model.ActionReceipt
 import ai.neopsyke.agent.model.CommitAuthorization
 import ai.neopsyke.agent.model.CommitMode
@@ -95,6 +96,22 @@ class SqliteActionControlStore(
             )
             statement.execute("CREATE INDEX IF NOT EXISTS idx_action_receipts_staged_action_id ON action_receipts(staged_action_id);")
             statement.execute("CREATE INDEX IF NOT EXISTS idx_action_receipts_created_at_ms ON action_receipts(created_at_ms DESC);")
+            statement.execute(
+                """
+                CREATE TABLE IF NOT EXISTS action_ledger_entries (
+                  id TEXT PRIMARY KEY,
+                  created_at_ms INTEGER NOT NULL,
+                  importance TEXT NOT NULL,
+                  kind TEXT NOT NULL,
+                  action_type TEXT NOT NULL,
+                  root_input_id TEXT,
+                  payload_json TEXT NOT NULL
+                );
+                """.trimIndent()
+            )
+            statement.execute("CREATE INDEX IF NOT EXISTS idx_action_ledger_entries_created_at_ms ON action_ledger_entries(created_at_ms DESC);")
+            statement.execute("CREATE INDEX IF NOT EXISTS idx_action_ledger_entries_importance ON action_ledger_entries(importance, created_at_ms DESC);")
+            statement.execute("CREATE INDEX IF NOT EXISTS idx_action_ledger_entries_kind ON action_ledger_entries(kind, created_at_ms DESC);")
         }
     }
 
@@ -334,6 +351,70 @@ class SqliteActionControlStore(
                     buildList {
                         while (rs.next()) {
                             add(mapper.readValue<ActionReceipt>(rs.getString("payload_json")))
+                        }
+                    }
+                }
+            }
+        }
+
+    override fun saveLedgerEntry(entry: ActionLedgerEntry): ActionLedgerEntry {
+        synchronized(connection) {
+            connection.prepareStatement(
+                """
+                INSERT INTO action_ledger_entries(id, created_at_ms, importance, kind, action_type, root_input_id, payload_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                  created_at_ms = excluded.created_at_ms,
+                  importance = excluded.importance,
+                  kind = excluded.kind,
+                  action_type = excluded.action_type,
+                  root_input_id = excluded.root_input_id,
+                  payload_json = excluded.payload_json
+                """.trimIndent()
+            ).use { statement ->
+                statement.setString(1, entry.id)
+                statement.setLong(2, entry.createdAtMs)
+                statement.setString(3, entry.importance.name)
+                statement.setString(4, entry.kind.name)
+                statement.setString(5, entry.actionType.id)
+                statement.setString(6, entry.rootInputId)
+                statement.setString(7, mapper.writeValueAsString(entry))
+                statement.executeUpdate()
+            }
+        }
+        return entry
+    }
+
+    override fun ledgerEntry(id: String): ActionLedgerEntry? =
+        synchronized(connection) {
+            connection.prepareStatement(
+                "SELECT payload_json FROM action_ledger_entries WHERE id = ?"
+            ).use { statement ->
+                statement.setString(1, id)
+                statement.executeQuery().use { rs ->
+                    if (!rs.next()) {
+                        return null
+                    }
+                    mapper.readValue<ActionLedgerEntry>(rs.getString("payload_json"))
+                }
+            }
+        }
+
+    override fun listLedgerEntries(limit: Int): List<ActionLedgerEntry> =
+        synchronized(connection) {
+            connection.prepareStatement(
+                """
+                SELECT payload_json
+                FROM action_ledger_entries
+                ORDER BY created_at_ms DESC
+                LIMIT ?
+                """.trimIndent()
+            ).use { statement ->
+                statement.setInt(1, limit)
+                statement.executeQuery().use { rs ->
+                    buildList {
+                        while (rs.next()) {
+                            add(mapper.readValue<ActionLedgerEntry>(rs.getString("payload_json")))
                         }
                     }
                 }

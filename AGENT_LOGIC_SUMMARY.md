@@ -541,6 +541,7 @@ It is intentionally high-level and should stay aligned with the code.
   - staged actions
   - commit authorizations
   - action receipts
+  - action ledger entries (signal/background/trace)
   - `READY` staged actions represent policy-autonomous commits waiting for the runtime-owned autonomous worker to pick them up
   - worker selection is SQL-driven, not in-memory best-effort:
     - autonomous candidates are filtered in the store before batching
@@ -549,6 +550,8 @@ It is intentionally high-level and should stay aligned with the code.
     - a candidate is only runnable when no earlier nonterminal same-thread action blocks it and no active/non-earlier same-key action blocks it
     - claim remains atomic at execution time, so the runtime does not rely on stale candidate snapshots
   - fallback-bypass executions are mirrored into durable staged/receipt records so the receipt trail stays complete
+  - denials/refusals are also mirrored into the durable action ledger for operator inspection
+  - dashboard outbox supports owner approve/deny on staged actions; activity defaults to `SIGNAL` visibility and can opt into `BACKGROUND` / `TRACE`
 - Planner payload repair is now action-type aware via registry hooks (plugin-specific `repairPlannerPayload`), with legacy default repair retained for bare `website_fetch` URLs.
 - Action outcomes can carry a generic `actionErrorCategory` (`none`, `retryable`, `non_retryable`).
   `website_fetch` currently maps its internal error categories into this generic field.

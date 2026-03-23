@@ -4,6 +4,9 @@ import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
 import ai.neopsyke.agent.actioncontrol.ActionControlDecisionResult
 import ai.neopsyke.agent.actioncontrol.ActionControlService
+import ai.neopsyke.agent.model.ActionLedgerEntry
+import ai.neopsyke.agent.model.ActionLedgerKind
+import ai.neopsyke.agent.model.ActionRecordImportance
 import ai.neopsyke.agent.model.ActionExecutionStatus
 import ai.neopsyke.agent.model.ActionReceipt
 import ai.neopsyke.agent.model.ActionType
@@ -144,7 +147,7 @@ class DashboardServerTest {
     }
 
     @Test
-    fun `action control page can inspect and authorize staged actions`() {
+    fun `action control page can inspect authorize and deny staged actions plus ledger activity`() {
         startServer().use { started ->
             started.server.actionControlService = TestActionControlService()
 
@@ -152,6 +155,10 @@ class DashboardServerTest {
             assertEquals(200, staged.statusCode())
             assertTrue(staged.body().contains("stage-1"))
             assertTrue(staged.body().contains("WAITING_AUTHORIZATION"))
+
+            val ledgerBefore = get("http://127.0.0.1:${started.port}/api/action-control/ledger")
+            assertEquals(200, ledgerBefore.statusCode())
+            assertTrue(ledgerBefore.body().contains("\"SIGNAL\""))
 
             val authorize = postJson(
                 "http://127.0.0.1:${started.port}/api/action-control/staged/stage-1/authorize",
@@ -163,6 +170,12 @@ class DashboardServerTest {
             val receipts = get("http://127.0.0.1:${started.port}/api/action-control/receipts")
             assertEquals(200, receipts.statusCode())
             assertTrue(receipts.body().contains("receipt-1"))
+
+            val deny = postJson(
+                "http://127.0.0.1:${started.port}/api/action-control/staged/stage-1/deny",
+                mapOf("reason" to "No longer needed")
+            )
+            assertEquals(409, deny.statusCode())
         }
     }
 
@@ -274,6 +287,19 @@ class DashboardServerTest {
 
     private class TestActionControlService : ActionControlService {
         private val context = ConversationContext.default()
+        private val ledgerEntries = mutableListOf(
+            ActionLedgerEntry(
+                id = "ledger-0",
+                kind = ActionLedgerKind.STAGED,
+                importance = ActionRecordImportance.SIGNAL,
+                actionType = ActionType.CONTACT_USER,
+                summary = "Approval needed for owner reply",
+                rootInputId = "root-1",
+                stagedActionId = "stage-1",
+                source = "stage",
+                conversationContext = context,
+            )
+        )
         private var staged = StagedAction(
             id = "stage-1",
             preparedActionId = "prepared-1",
@@ -312,6 +338,7 @@ class DashboardServerTest {
                 stagedActionId = stagedActionId,
                 authorizationId = authorization.id,
                 actionType = staged.actionType,
+                importance = ActionRecordImportance.BACKGROUND,
                 executionStatus = ActionExecutionStatus.SUCCESS,
                 statusSummary = "Authorized from dashboard",
             )
@@ -319,6 +346,18 @@ class DashboardServerTest {
                 status = StagedActionStatus.COMPLETED,
                 authorizationId = authorization.id,
                 receiptId = receipt?.id,
+            )
+            ledgerEntries += ActionLedgerEntry(
+                id = "ledger-1",
+                kind = ActionLedgerKind.AUTHORIZED,
+                importance = ActionRecordImportance.BACKGROUND,
+                actionType = staged.actionType,
+                summary = "Action authorized for commit.",
+                rootInputId = "root-1",
+                stagedActionId = stagedActionId,
+                authorizationId = authorization.id,
+                source = "authorize",
+                conversationContext = context,
             )
             return ActionControlDecisionResult.Executed(
                 stagedAction = staged,
@@ -339,6 +378,14 @@ class DashboardServerTest {
             )
         }
 
+        override suspend fun denyStagedAction(
+            stagedActionId: String,
+            deniedBy: ConversationSecurityContext,
+            reason: String,
+            reasonCode: String?,
+        ): ActionControlDecisionResult =
+            ActionControlDecisionResult.Refused(reason = "Stage already completed.", reasonCode = "STAGED_ACTION_NOT_DENYABLE")
+
         override suspend fun processAutonomousStagedActions(limit: Int): List<ActionControlDecisionResult.Executed> = emptyList()
 
         override suspend fun recordBypassExecution(
@@ -349,9 +396,38 @@ class DashboardServerTest {
             reasonCode: String?,
         ): ActionReceipt? = null
 
+        override fun recordLedgerEntry(
+            action: PendingAction,
+            conversationContext: ConversationContext,
+            kind: ActionLedgerKind,
+            importance: ActionRecordImportance,
+            summary: String,
+            reasonCode: String?,
+            source: String?,
+            stagedActionId: String?,
+            authorizationId: String?,
+            receiptId: String?,
+        ): ActionLedgerEntry =
+            ActionLedgerEntry(
+                id = "ledger-dynamic",
+                kind = kind,
+                importance = importance,
+                actionType = action.type,
+                summary = summary,
+                rootInputId = action.rootInputId,
+                stagedActionId = stagedActionId,
+                authorizationId = authorizationId,
+                receiptId = receiptId,
+                reasonCode = reasonCode,
+                source = source,
+                conversationContext = conversationContext,
+            ).also { ledgerEntries += it }
+
         override fun stagedActions(limit: Int): List<StagedAction> = listOf(staged)
         override fun stagedAction(id: String): StagedAction? = staged.takeIf { it.id == id }
         override fun receipts(limit: Int): List<ActionReceipt> = listOfNotNull(receipt)
         override fun receipt(id: String): ActionReceipt? = receipt?.takeIf { it.id == id }
+        override fun ledgerEntries(limit: Int): List<ActionLedgerEntry> = ledgerEntries.takeLast(limit).reversed()
+        override fun ledgerEntry(id: String): ActionLedgerEntry? = ledgerEntries.lastOrNull { it.id == id }
     }
 }

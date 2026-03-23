@@ -1,6 +1,9 @@
 package ai.neopsyke.agent.actioncontrol
 
 import ai.neopsyke.agent.model.ActionExecutionStatus
+import ai.neopsyke.agent.model.ActionLedgerEntry
+import ai.neopsyke.agent.model.ActionLedgerKind
+import ai.neopsyke.agent.model.ActionRecordImportance
 import ai.neopsyke.agent.model.ActionReceipt
 import ai.neopsyke.agent.model.ActionType
 import ai.neopsyke.agent.model.CommitAuthorization
@@ -64,6 +67,32 @@ class SqliteActionControlStoreTest {
             assertNotNull(store.receipt(receipt.id))
             assertEquals(1, store.listStagedActions(20).size)
             assertEquals(1, store.listReceipts(20).size)
+        }
+    }
+
+    @Test
+    fun `store persists ledger entries`() {
+        val tempDir = Files.createTempDirectory("action-control-ledger-test")
+        val dbPath = tempDir.resolve("action-control.db").toString()
+
+        SqliteActionControlStore(dbPath).use { store ->
+            val entry = store.saveLedgerEntry(
+                ActionLedgerEntry(
+                    id = "ledger-1",
+                    kind = ActionLedgerKind.DENIED,
+                    importance = ActionRecordImportance.SIGNAL,
+                    actionType = ActionType.CONTACT_USER,
+                    summary = "Task verifier denied action",
+                    rootInputId = "root-1",
+                    source = "task_verifier",
+                    reasonCode = "TASK_DENIED",
+                    conversationContext = ConversationContext.default(),
+                )
+            )
+
+            assertNotNull(store.ledgerEntry(entry.id))
+            assertEquals(1, store.listLedgerEntries(20).size)
+            assertEquals(ActionLedgerKind.DENIED, store.listLedgerEntries(20).single().kind)
         }
     }
 
