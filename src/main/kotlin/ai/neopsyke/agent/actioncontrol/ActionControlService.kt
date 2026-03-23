@@ -31,6 +31,7 @@ sealed interface ActionControlDecisionResult {
         val authorization: CommitAuthorization,
         val receipt: ActionReceipt,
         val outcome: ActionOutcome,
+        val executedAction: PendingAction,
     ) : ActionControlDecisionResult
 
     data class Refused(
@@ -52,6 +53,14 @@ interface ActionControlService {
     ): ActionControlDecisionResult
 
     suspend fun processAutonomousStagedActions(limit: Int = 10): List<ActionControlDecisionResult.Executed>
+
+    suspend fun recordBypassExecution(
+        action: PendingAction,
+        conversationContext: ConversationContext,
+        outcome: ActionOutcome,
+        reason: String,
+        reasonCode: String? = null,
+    ): ActionReceipt?
 
     fun stagedActions(limit: Int): List<StagedAction>
     fun stagedAction(id: String): StagedAction?
@@ -80,6 +89,14 @@ object NoopActionControlService : ActionControlService {
         )
 
     override suspend fun processAutonomousStagedActions(limit: Int): List<ActionControlDecisionResult.Executed> = emptyList()
+
+    override suspend fun recordBypassExecution(
+        action: PendingAction,
+        conversationContext: ConversationContext,
+        outcome: ActionOutcome,
+        reason: String,
+        reasonCode: String?,
+    ): ActionReceipt? = null
 
     override fun stagedActions(limit: Int): List<StagedAction> = emptyList()
     override fun stagedAction(id: String): StagedAction? = null
@@ -193,6 +210,7 @@ class LegacyCompatibleActionControlService(
             authorization = authorization,
             receipt = receipt,
             outcome = outcome,
+            executedAction = action,
         )
     }
 
@@ -206,6 +224,14 @@ class LegacyCompatibleActionControlService(
         )
 
     override suspend fun processAutonomousStagedActions(limit: Int): List<ActionControlDecisionResult.Executed> = emptyList()
+
+    override suspend fun recordBypassExecution(
+        action: PendingAction,
+        conversationContext: ConversationContext,
+        outcome: ActionOutcome,
+        reason: String,
+        reasonCode: String?,
+    ): ActionReceipt? = null
 
     override fun stagedActions(limit: Int): List<StagedAction> = emptyList()
     override fun stagedAction(id: String): StagedAction? = null
@@ -347,6 +373,58 @@ class DefaultActionControlService(
     override fun stagedActions(limit: Int): List<StagedAction> =
         store.listStagedActions(limit.coerceAtLeast(1).coerceAtMost(config.maxInspectResults))
 
+    override suspend fun recordBypassExecution(
+        action: PendingAction,
+        conversationContext: ConversationContext,
+        outcome: ActionOutcome,
+        reason: String,
+        reasonCode: String?,
+    ): ActionReceipt {
+        val prepared = prepare(action, conversationContext)
+        val staged = store.saveStagedAction(
+            StagedAction(
+                id = nextId(),
+                preparedActionId = prepared.id,
+                rootInputId = action.rootInputId,
+                rootInputReceivedAtMs = action.rootInputReceivedAtMs,
+                actionType = action.type,
+                summary = action.summary,
+                payload = action.payload,
+                conversationContext = conversationContext,
+                provenance = prepared.provenance,
+                origin = action.origin,
+                commitMode = CommitMode.NOT_APPLICABLE,
+                status = terminalStatusFor(outcome),
+                actionHash = hashAction(action),
+                statusReason = reason,
+                statusReasonCode = reasonCode ?: BYPASS_REASON_CODE,
+                policyVersion = BYPASS_POLICY_VERSION,
+            )
+        )
+        val receipt = store.saveReceipt(
+            ActionReceipt(
+                id = nextId(),
+                stagedActionId = staged.id,
+                authorizationId = null,
+                rootInputId = action.rootInputId,
+                actionType = action.type,
+                executionStatus = outcome.executionStatus,
+                statusSummary = outcome.statusSummary,
+                plannerSignal = outcome.plannerSignal,
+                effects = outcome.effects,
+                asyncWait = outcome.asyncWait,
+            )
+        )
+        store.updateStagedAction(
+            staged.copy(
+                receiptId = receipt.id,
+                updatedAtMs = System.currentTimeMillis(),
+                statusReason = outcome.statusSummary,
+            )
+        )
+        return receipt
+    }
+
     override fun stagedAction(id: String): StagedAction? = store.stagedAction(id)
 
     override fun receipts(limit: Int): List<ActionReceipt> =
@@ -422,8 +500,17 @@ class DefaultActionControlService(
             authorization = authorization,
             receipt = receipt,
             outcome = outcome,
+            executedAction = action,
         )
     }
+
+    private fun terminalStatusFor(outcome: ActionOutcome): StagedActionStatus =
+        when (outcome.executionStatus) {
+            ActionExecutionStatus.SUCCESS,
+            ActionExecutionStatus.NO_EFFECT -> StagedActionStatus.COMPLETED
+            ActionExecutionStatus.WAITING -> StagedActionStatus.WAITING_EXTERNAL
+            ActionExecutionStatus.FAILED -> StagedActionStatus.FAILED
+        }
 
     private fun prepare(action: PendingAction, conversationContext: ConversationContext): PreparedAction =
         PreparedAction(
@@ -477,5 +564,7 @@ class DefaultActionControlService(
     private companion object {
         const val AUTONOMOUS_WORKER_PRINCIPAL_ID: String = "policy-autonomous-worker"
         const val AUTONOMOUS_WORKER_CHANNEL_ID: String = "action-control-worker"
+        const val BYPASS_POLICY_VERSION: String = "runtime-bypass-v1"
+        const val BYPASS_REASON_CODE: String = "ACTION_BYPASS_EXECUTION"
     }
 }

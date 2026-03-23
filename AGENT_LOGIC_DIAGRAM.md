@@ -25,7 +25,9 @@ flowchart LR
     S --> S2["TwoStage Escalation Engine"]
     E --> ACP["ActionAuthorizationPolicy (YAML)"]
     E --> ACS["ActionControlService"]
+    E --> ACW["ActionControlAutonomousWorker"]
     ACS --> ACDB["ActionControl SQLite (staged / auth / receipts)"]
+    ACW --> ACS
     E --> AR["ActionRegistry (ServiceLoader Discovery)"]
     E --> M["MotorCortex"]
     E --> BG["LLM Token Budget Gate"]
@@ -78,6 +80,7 @@ flowchart LR
     I --> DS["DashboardStateStore"]
     DS --> CP["Conversations Page (`/`) + Chat API (`/api/chat/*`)"]
     DS --> OP["Observability Page (`/dashboard`) + Obs API (`/api/obs/*`)"]
+    DS --> OX["Action Control Page (`/action-control`)"]
     DS --> ACAPI["Action Control API (`/api/action-control/*`)"]
 ```
 
@@ -144,6 +147,7 @@ sequenceDiagram
         else Task = action
             alt Fallback explanation action
                 Ego->>Motor: execute (bypass Superego)
+                Note over Ego,ACS: Bypass execution is still mirrored into durable staged/receipt state
             else Normal action
                 Ego->>TV: review(action, evidence/recent dialogue)
                 Note over Ego,TV: DecisionVerifier classifies intent + volatility; evidence required only for volatile/unknown factual intents
@@ -187,6 +191,7 @@ sequenceDiagram
                                 ACS->>ACDB: save staged action
                                 ACS-->>Ego: staged action (`WAITING_AUTHORIZATION` or `READY`)
                                 Ego->>Sched: enqueue approval-or-alternative thought
+                                Note over ACW,ACS: Background autonomous worker polls `READY` staged actions and executes them off the request path
                             else direct commit allowed
                                 ACS->>ACDB: save staged action + authorization
                                 ACS->>Motor: execute(action, authorization)

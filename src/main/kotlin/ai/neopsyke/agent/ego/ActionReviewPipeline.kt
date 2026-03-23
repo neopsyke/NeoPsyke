@@ -96,21 +96,6 @@ internal class ActionReviewPipeline(
             }
 
             is ActionControlDecisionResult.Staged -> {
-                if (controlResult.stagedAction.commitMode == CommitMode.POLICY_AUTONOMOUS) {
-                    val autonomousExecution = actionControlService.processAutonomousStagedActions(limit = 1)
-                        .firstOrNull { it.stagedAction.id == controlResult.stagedAction.id }
-                    if (autonomousExecution != null) {
-                        timing.startPhase("action_execute")
-                        processExecutedAction(
-                            resolvedAction = resolvedAction,
-                            outcome = autonomousExecution.outcome,
-                            sessionId = sessionId,
-                            convCtx = convCtx,
-                            timing = timing
-                        )
-                        return
-                    }
-                }
                 instrumentation.emit(
                     AgentEvent(
                         type = "action_staged",
@@ -124,6 +109,15 @@ internal class ActionReviewPipeline(
                         )
                     )
                 )
+                if (controlResult.stagedAction.commitMode == CommitMode.POLICY_AUTONOMOUS) {
+                    instrumentation.emit(
+                        AgentEvents.warning(
+                            "Action '${resolvedAction.type.id}' was queued for autonomous staged execution."
+                        )
+                    )
+                    instrumentation.emit(AgentEvents.phaseTimings(timing.build()))
+                    return
+                }
                 fallbackHandler.handleStagedAction(
                     action = resolvedAction,
                     stagedAction = controlResult.stagedAction,
@@ -138,17 +132,37 @@ internal class ActionReviewPipeline(
 
             is ActionControlDecisionResult.Executed -> {
                 timing.startPhase("action_execute")
-                val outcome = controlResult.outcome
-                processExecutedAction(
-                    resolvedAction = resolvedAction,
-                    outcome = outcome,
-                    sessionId = sessionId,
-                    convCtx = convCtx,
-                    timing = timing
-                )
+                processExecutedControlResult(controlResult, timing)
                 return
             }
         }
+    }
+
+    suspend fun processAutonomousStagedActions(limit: Int): Int {
+        val executed = actionControlService.processAutonomousStagedActions(limit)
+        executed.forEach { result ->
+            val timing = PhaseTimingCollector("action_worker", result.stagedAction.rootInputId)
+            timing.startPhase("worker_execute")
+            processExecutedControlResult(result, timing)
+        }
+        return executed.size
+    }
+
+    private fun processExecutedControlResult(
+        controlResult: ActionControlDecisionResult.Executed,
+        timing: PhaseTimingCollector,
+    ) {
+        val resolvedAction = controlResult.executedAction
+        val convCtx = resolvedAction.conversationContext
+        val sessionId = resolveSessionId(convCtx)
+        val outcome = controlResult.outcome
+        processExecutedAction(
+            resolvedAction = resolvedAction,
+            outcome = outcome,
+            sessionId = sessionId,
+            convCtx = convCtx,
+            timing = timing
+        )
     }
 
     private fun processExecutedAction(
@@ -213,6 +227,13 @@ internal class ActionReviewPipeline(
             )
         )
         val outcome = executeActionSafely(resolvedAction)
+        actionControlService.recordBypassExecution(
+            action = resolvedAction,
+            conversationContext = convCtx,
+            outcome = outcome,
+            reason = "Fallback explanation bypass executed directly.",
+            reasonCode = "SYSTEM_FALLBACK_BYPASS",
+        )
         impulseTracker.recordActionOutcome(resolvedAction, outcome)
         instrumentation.emit(AgentEvents.actionExecuted(resolvedAction, outcome.statusSummary))
         if (resolvedAction.type == ActionType.CONTACT_USER) {

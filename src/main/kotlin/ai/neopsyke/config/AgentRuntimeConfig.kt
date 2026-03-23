@@ -169,6 +169,9 @@ private data class AgentRuntimeYamlActionControl(
     val policyPath: String? = null,
     val authorizationTtlMs: Long? = null,
     val maxInspectResults: Int? = null,
+    val autonomousWorkerEnabled: Boolean? = null,
+    val autonomousWorkerPollMs: Long? = null,
+    val autonomousWorkerBatchSize: Int? = null,
 )
 
 private data class AgentRuntimeYamlInnerVoice(
@@ -683,6 +686,21 @@ object AgentRuntimeSettingsLoader {
                     env["NEOPSYKE_ACTION_CONTROL_MAX_INSPECT_RESULTS"],
                     actionControlYaml.maxInspectResults,
                     defaults.actionControl.maxInspectResults
+                ),
+                autonomousWorkerEnabled = readBoolean(
+                    env["NEOPSYKE_ACTION_CONTROL_AUTONOMOUS_WORKER_ENABLED"],
+                    actionControlYaml.autonomousWorkerEnabled,
+                    defaults.actionControl.autonomousWorkerEnabled
+                ),
+                autonomousWorkerPollMs = readPositiveLong(
+                    env["NEOPSYKE_ACTION_CONTROL_AUTONOMOUS_WORKER_POLL_MS"],
+                    actionControlYaml.autonomousWorkerPollMs,
+                    defaults.actionControl.autonomousWorkerPollMs
+                ),
+                autonomousWorkerBatchSize = readPositiveInt(
+                    env["NEOPSYKE_ACTION_CONTROL_AUTONOMOUS_WORKER_BATCH_SIZE"],
+                    actionControlYaml.autonomousWorkerBatchSize,
+                    defaults.actionControl.autonomousWorkerBatchSize
                 ),
             ),
             innerVoice = InnerVoiceConfig(

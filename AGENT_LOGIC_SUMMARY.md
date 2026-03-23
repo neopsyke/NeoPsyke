@@ -30,6 +30,7 @@ It is intentionally high-level and should stay aligned with the code.
   - `MotorCortex` (plugin-dispatched action execution)
   - `ActionAuthorizationPolicy` (YAML-backed action security policy)
   - `ActionControlService` + `SqliteActionControlStore` (staged actions, authorizations, receipts)
+  - `ActionControlAutonomousWorker` (runtime-owned background poller for `READY` staged actions)
   - `LlmEgoPlanner`
   - `LlmMetaReasoner`
   - `LlmLongTermMemoryAdvisor`
@@ -502,6 +503,7 @@ It is intentionally high-level and should stay aligned with the code.
   - UI routes are split:
     - Conversations page: `/`
     - Observability dashboard: `/dashboard`
+    - Action control / outbox: `/action-control`
   - API namespaces are split:
     - Chat control plane and session-scoped SSE: `/api/chat/*`
     - Observability snapshot/events/workspace: `/api/obs/*`
@@ -539,7 +541,8 @@ It is intentionally high-level and should stay aligned with the code.
   - staged actions
   - commit authorizations
   - action receipts
-  - `READY` staged actions represent policy-autonomous commits waiting for the durable staged execution path to pick them up
+  - `READY` staged actions represent policy-autonomous commits waiting for the runtime-owned autonomous worker to pick them up
+  - fallback-bypass executions are mirrored into durable staged/receipt records so the receipt trail stays complete
 - Planner payload repair is now action-type aware via registry hooks (plugin-specific `repairPlannerPayload`), with legacy default repair retained for bare `website_fetch` URLs.
 - Action outcomes can carry a generic `actionErrorCategory` (`none`, `retryable`, `non_retryable`).
   `website_fetch` currently maps its internal error categories into this generic field.

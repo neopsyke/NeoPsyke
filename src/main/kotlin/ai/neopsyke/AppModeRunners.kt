@@ -62,6 +62,7 @@ import ai.neopsyke.eval.ReasoningLogicHarnessClient
 import ai.neopsyke.eval.ReasoningSelfEvalRunner
 import ai.neopsyke.eval.UsageTrackingChatClient
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.ClosedReceiveChannelException
@@ -1100,9 +1101,18 @@ internal object AppModeRunners {
                                                         val shutdownGuard = ShutdownCloseGuard("interactive-runtime").apply {
                                                             register(hippocampus)
                                                             register(logbook)
+                                                            register(actionControlStore)
                                                             register(activeFetchTool)
                                                             register(timeTool)
                                                         }
+                                                        shutdownGuard.register(
+                                                            createActionControlAutonomousWorker(
+                                                                scope = this,
+                                                                ego = ego,
+                                                                config = config,
+                                                                instrumentation = instrumentation,
+                                                            )
+                                                        )
                                                         val idConfig = ai.neopsyke.config.IdRuntimeConfigLoader.load()
                                                         val idModule = if (idConfig.enabled) {
                                                            ai.neopsyke.agent.id.Id(
@@ -1520,6 +1530,14 @@ internal object AppModeRunners {
                                                         register(activeFetchTool)
                                                         register(timeTool)
                                                     }
+                                                    shutdownGuard.register(
+                                                        createActionControlAutonomousWorker(
+                                                            scope = this,
+                                                            ego = ego,
+                                                            config = config,
+                                                            instrumentation = instrumentation,
+                                                        )
+                                                    )
                                                     val actionStatuses = motorCortex.startupSmokeTest()
                                                     instrumentation.emit(AgentEvents.actionCapabilities(actionStatuses))
                                                     instrumentation.emit(
@@ -2165,6 +2183,23 @@ internal object AppModeRunners {
             logger.warn(ex) { "Action-control store initialization failed; continuing with legacy action control." }
             null
         }
+    }
+
+    private fun createActionControlAutonomousWorker(
+        scope: CoroutineScope,
+        ego: Ego,
+        config: AgentConfig,
+        instrumentation: ai.neopsyke.instrumentation.AgentInstrumentation,
+    ): AutoCloseable? {
+        if (!config.actionControl.enabled || !config.actionControl.autonomousWorkerEnabled) {
+            return null
+        }
+        return ai.neopsyke.agent.actioncontrol.ActionControlAutonomousWorker(
+            scope = scope,
+            config = config.actionControl,
+            processBatch = { limit -> ego.processAutonomousStagedActions(limit) },
+            instrumentation = instrumentation,
+        )
     }
 
     private fun createLogbookSummarizer(

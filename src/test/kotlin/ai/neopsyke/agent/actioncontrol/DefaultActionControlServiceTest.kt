@@ -15,6 +15,7 @@ import java.nio.file.Files
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 
 class DefaultActionControlServiceTest {
 
@@ -67,6 +68,53 @@ class DefaultActionControlServiceTest {
             assertEquals(CommitMode.POLICY_AUTONOMOUS, authorization.commitMode)
             assertEquals("policy-autonomous-worker", authorization.grantedByPrincipalId)
             assertEquals(1, store.listReceipts(10).size)
+        }
+    }
+
+    @Test
+    fun `bypass executions are persisted as durable receipts`() {
+        val tempDir = Files.createTempDirectory("action-control-bypass-test")
+        val dbPath = tempDir.resolve("action-control.db").toString()
+        SqliteActionControlStore(dbPath).use { store ->
+            val service = DefaultActionControlService(
+                config = ActionControlConfig(dbPath = dbPath),
+                store = store,
+            ) { _, _ ->
+                error("Bypass receipt test should not execute committed actions")
+            }
+            val action = PendingAction(
+                id = 7,
+                urgency = Urgency.MEDIUM,
+                type = ActionType.CONTACT_USER,
+                payload = "fallback",
+                summary = "fallback explanation",
+                conversationContext = ConversationContext.default(),
+            )
+            val outcome = ActionOutcome(
+                statusSummary = "Delivered fallback explanation",
+                executionStatus = ActionExecutionStatus.SUCCESS,
+                plannerSignal = "fallback delivered",
+            )
+
+            val receipt = kotlinx.coroutines.runBlocking {
+                service.recordBypassExecution(
+                    action = action,
+                    conversationContext = action.conversationContext,
+                    outcome = outcome,
+                    reason = "Fallback explanation bypass executed directly.",
+                    reasonCode = "SYSTEM_FALLBACK_BYPASS",
+                )
+            }
+
+            assertEquals(ActionExecutionStatus.SUCCESS, receipt.executionStatus)
+            val persistedReceipt = store.receipt(receipt.id)
+            assertNotNull(persistedReceipt)
+            val staged = store.stagedAction(receipt.stagedActionId)
+            assertNotNull(staged)
+            assertEquals(StagedActionStatus.COMPLETED, staged.status)
+            assertEquals(receipt.id, staged.receiptId)
+            assertEquals("SYSTEM_FALLBACK_BYPASS", staged.statusReasonCode)
+            assertNull(staged.authorizationId)
         }
     }
 }

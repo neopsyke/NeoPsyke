@@ -64,6 +64,9 @@ class Ego(
     /** Checks whether the Ego has any pending work. Used by the Id module for idle detection. */
     fun hasPendingWork(): Boolean = scheduler.hasPendingWork()
 
+    suspend fun processAutonomousStagedActions(limit: Int = config.actionControl.autonomousWorkerBatchSize): Int =
+        actionPipeline.processAutonomousStagedActions(limit)
+
     interface Planner {
         fun decide(trigger: EgoTrigger, context: PlannerContext): EgoDecision
         fun resetForInput(rootInputId: String) {}

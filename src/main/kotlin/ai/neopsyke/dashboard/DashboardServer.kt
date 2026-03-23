@@ -7,6 +7,7 @@ import com.fasterxml.jackson.module.kotlin.readValue
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
 import mu.KotlinLogging
+import ai.neopsyke.agent.actioncontrol.ActionControlDecisionResult
 import ai.neopsyke.agent.actioncontrol.ActionControlService
 import ai.neopsyke.agent.model.ConversationSecurityContexts
 import ai.neopsyke.agent.goal.GoalManager
@@ -88,6 +89,15 @@ class DashboardServer(
                     return@withRequestGuard
                 }
                 respondText(exchange, 200, DashboardAssets.goalsHtml, "text/html; charset=utf-8")
+            }
+        }
+        server.createContext("/action-control") { exchange ->
+            withRequestGuard(exchange, "action_control_page") {
+                if (exchange.requestURI.path != "/action-control") {
+                    respondText(exchange, 404, "Not found", "text/plain; charset=utf-8")
+                    return@withRequestGuard
+                }
+                respondText(exchange, 200, DashboardAssets.actionControlHtml, "text/html; charset=utf-8")
             }
         }
         server.createContext("/api/goals") { exchange ->
@@ -425,7 +435,12 @@ class DashboardServer(
                 )
             )
         }
-        respondText(exchange, 200, mapper.writeValueAsString(result), "application/json; charset=utf-8")
+        val statusCode = when (result) {
+            is ActionControlDecisionResult.Refused -> 409
+            is ActionControlDecisionResult.Staged,
+            is ActionControlDecisionResult.Executed -> 200
+        }
+        respondText(exchange, statusCode, mapper.writeValueAsString(result), "application/json; charset=utf-8")
     }
 
     private fun handleActionReceiptApi(

@@ -753,7 +753,8 @@ class AgentScenarioPackTest {
             runAgentWithInput(agent, "I would like to set a goal for you: Remind me of the current weather every 5 minutes.\nexit\n")
 
             assertTrue(manager.allGoals().isEmpty())
-            val staged = actionControlStore.listStagedActions(limit = 10).singleOrNull()
+            val staged = actionControlStore.listStagedActions(limit = 10)
+                .firstOrNull { it.actionType == ActionType.GOAL_OPERATION }
             assertNotNull(staged)
             assertEquals(ActionType.GOAL_OPERATION, staged.actionType)
             assertEquals(StagedActionStatus.WAITING_AUTHORIZATION, staged.status)
