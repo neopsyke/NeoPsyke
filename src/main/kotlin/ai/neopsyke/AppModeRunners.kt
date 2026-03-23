@@ -1138,7 +1138,8 @@ internal object AppModeRunners {
                                                                     store = store,
                                                                     executeCommittedAction = { action, authorization ->
                                                                         motorCortex.execute(action, config.searchResultCount, authorization)
-                                                                    }
+                                                                    },
+                                                                    actionRegistry = motorCortex.actionRegistry(),
                                                                 )
                                                             } ?: ai.neopsyke.agent.actioncontrol.LegacyCompatibleActionControlService { action, authorization ->
                                                                 motorCortex.execute(action, config.searchResultCount, authorization)
@@ -1598,7 +1599,8 @@ internal object AppModeRunners {
                                                                 store = store,
                                                                 executeCommittedAction = { action, authorization ->
                                                                     motorCortex.execute(action, config.searchResultCount, authorization)
-                                                                }
+                                                                },
+                                                                actionRegistry = motorCortex.actionRegistry(),
                                                             )
                                                         } ?: ai.neopsyke.agent.actioncontrol.LegacyCompatibleActionControlService { action, authorization ->
                                                             motorCortex.execute(action, config.searchResultCount, authorization)

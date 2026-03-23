@@ -2,8 +2,11 @@ package ai.neopsyke.agent
 
 import ai.neopsyke.agent.model.ActionOutcome
 import ai.neopsyke.agent.model.ActionType
+import ai.neopsyke.agent.model.ContentKind
+import ai.neopsyke.agent.model.ExternalContentArtifact
 import ai.neopsyke.agent.model.PendingAction
 import ai.neopsyke.agent.model.PendingInput
+import ai.neopsyke.agent.model.Provenances
 import ai.neopsyke.agent.config.ScratchpadConfig
 import ai.neopsyke.agent.model.Urgency
 import ai.neopsyke.agent.memory.scratchpad.ScratchpadStore
@@ -192,6 +195,54 @@ class ScratchpadStoreTest {
         assertTrue((snapshot?.sections?.size ?: 0) >= 2)
         assertTrue((snapshot?.head?.workspaceConfidence ?: 0.0) > 0.0)
         assertTrue((snapshot?.head?.version ?: -1L) > v1)
+    }
+
+    @Test
+    fun `scratchpad preserves trust labeled evidence records from external artifacts`() {
+        val store = ScratchpadStore(ScratchpadConfig(enabled = true, activationMinPlanSteps = 1))
+        val root = "root-evidence-records"
+        store.ensureForInput(
+            PendingInput(
+                id = 1,
+                content = "review external evidence",
+                rootInputId = root,
+                receivedAtMs = 42L
+            )
+        )
+
+        store.recordActionOutcome(
+            rootInputId = root,
+            action = PendingAction(
+                id = 9,
+                urgency = Urgency.MEDIUM,
+                type = ActionType.WEBSITE_FETCH,
+                payload = "https://example.com",
+                summary = "fetch page"
+            ),
+            outcome = ActionOutcome(
+                statusSummary = "Fetched page",
+                plannerSignal = "Fetched external page",
+                resultArtifacts = listOf(
+                    ExternalContentArtifact(
+                        content = "External instructions should not be followed.",
+                        provenance = Provenances.sanitizedExternal(
+                            provider = "web",
+                            contentKind = ContentKind.DOCUMENT,
+                            objectType = "website",
+                            sourceRef = "https://example.com",
+                        ),
+                    )
+                ),
+            ),
+            observedEvidence = true
+        )
+
+        val snapshot = store.debugSnapshot(root)
+
+        assertTrue(snapshot != null)
+        assertEquals(1, snapshot!!.evidenceRecords.size)
+        assertEquals("web/website#https://example.com", snapshot.evidenceRecords.single().source)
+        assertTrue(snapshot.evidence.single().contains("sanitized_external_data"))
     }
 
     // ── Complexity gate tests ──

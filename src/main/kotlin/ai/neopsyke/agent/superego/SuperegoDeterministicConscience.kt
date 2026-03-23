@@ -135,7 +135,8 @@ internal class SuperegoDeterministicConscience(
             ActionType.MCP_TIME,
             ActionType.RESOLUTION_DRAFT,
             ActionType.CONTACT_USER,
-            ActionType.REFLECT,
+            ActionType.REFLECT_INTERNAL,
+            ActionType.REFLECT_EVIDENCE,
         )
     }
 }

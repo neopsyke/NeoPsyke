@@ -45,6 +45,15 @@ class AgentRuntimeSettingsLoaderTest {
         assertEquals(true, settings.agentConfig.actionControl.autonomousWorkerEnabled)
         assertEquals(500L, settings.agentConfig.actionControl.autonomousWorkerPollMs)
         assertEquals(16, settings.agentConfig.actionControl.autonomousWorkerBatchSize)
+        assertEquals(10, settings.agentConfig.actionControl.observePerTypePerRootInput)
+        assertEquals(5, settings.agentConfig.actionControl.contactUserPerRootInput)
+        assertEquals(2, settings.agentConfig.actionControl.reflectionFamilyPerRootInput)
+        assertEquals(1, settings.agentConfig.actionControl.reflectEvidencePerRootInput)
+        assertEquals(3, settings.agentConfig.actionControl.goalOperationPerRootInput)
+        assertEquals(3, settings.agentConfig.actionControl.commitPrivatePerTypePerRootInput)
+        assertEquals(2, settings.agentConfig.actionControl.commitStatefulPerTypePerRootInput)
+        assertEquals(1, settings.agentConfig.actionControl.commitPublicPerTypePerRootInput)
+        assertEquals(2, settings.agentConfig.actionControl.controlPlanePerTypePerRootInput)
         assertEquals(false, settings.agentConfig.connectors.enabled)
         assertEquals("connectors/catalog", settings.agentConfig.connectors.curatedCatalogPath)
         assertEquals(".neopsyke/connectors", settings.agentConfig.connectors.installStateDir)
@@ -166,6 +175,15 @@ class AgentRuntimeSettingsLoaderTest {
                 autonomous_worker_enabled: false
                 autonomous_worker_poll_ms: 4321
                 autonomous_worker_batch_size: 9
+                observe_per_type_per_root_input: 14
+                contact_user_per_root_input: 6
+                reflection_family_per_root_input: 4
+                reflect_evidence_per_root_input: 2
+                goal_operation_per_root_input: 5
+                commit_private_per_type_per_root_input: 7
+                commit_stateful_per_type_per_root_input: 3
+                commit_public_per_type_per_root_input: 2
+                control_plane_per_type_per_root_input: 4
               connectors:
                 enabled: true
                 curated_catalog_path: /tmp/neopsyke-connectors/catalog
@@ -290,6 +308,15 @@ class AgentRuntimeSettingsLoaderTest {
         assertEquals(false, settings.agentConfig.actionControl.autonomousWorkerEnabled)
         assertEquals(4321L, settings.agentConfig.actionControl.autonomousWorkerPollMs)
         assertEquals(9, settings.agentConfig.actionControl.autonomousWorkerBatchSize)
+        assertEquals(14, settings.agentConfig.actionControl.observePerTypePerRootInput)
+        assertEquals(6, settings.agentConfig.actionControl.contactUserPerRootInput)
+        assertEquals(4, settings.agentConfig.actionControl.reflectionFamilyPerRootInput)
+        assertEquals(2, settings.agentConfig.actionControl.reflectEvidencePerRootInput)
+        assertEquals(5, settings.agentConfig.actionControl.goalOperationPerRootInput)
+        assertEquals(7, settings.agentConfig.actionControl.commitPrivatePerTypePerRootInput)
+        assertEquals(3, settings.agentConfig.actionControl.commitStatefulPerTypePerRootInput)
+        assertEquals(2, settings.agentConfig.actionControl.commitPublicPerTypePerRootInput)
+        assertEquals(4, settings.agentConfig.actionControl.controlPlanePerTypePerRootInput)
         assertEquals(true, settings.agentConfig.connectors.enabled)
         assertEquals("/tmp/neopsyke-connectors/catalog", settings.agentConfig.connectors.curatedCatalogPath)
         assertEquals("/tmp/neopsyke-connectors/state", settings.agentConfig.connectors.installStateDir)

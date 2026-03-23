@@ -62,7 +62,7 @@ flowchart LR
     CR --> AP
     AP --> M
     Note over CR,AP: Connector bundles are install presets only; goals compose primitive actions rather than executing bundle workflows directly
-    AP -.->|"Actions emit structured effects; REFLECT emits durable-memory-save only on successful persistence"| MC
+    AP -.->|"Actions emit structured effects; reflection emits durable-memory-save only on successful persistence"| MC
 
     M --> WS["Web Search Handler/Engine"]
     CfgWS["WebSearch Provider Config (provider/key/base/model)"] --> WS
@@ -144,7 +144,7 @@ sequenceDiagram
             Ego->>TWS: create or update request scratchpad and index summary
             Ego->>Dash: emit scratchpad_head (with optional debug snapshot)
             Note over Ego,Planner: For Id-origin thoughts, Ego reapplies Id convergence state and action filtering before planner decide
-            Note over Ego,Planner: Planner-visible actions are prefiltered by conversation instruction trust and action contract metadata before prompt build
+            Note over Ego,Planner: Planner-visible actions are prefiltered by conversation instruction trust, current thread data trust, and action contract metadata before prompt build
             Ego->>Planner: decide(context)
             Note over Ego,Planner: PromptBudgetAllocator reserves required-core/context floors with message-overhead accounting, trims optional first, and emits prompt_budget_allocation
             Note over Ego,Planner: Planner prompt includes conversation security summary and trigger provenance summary untrusted external content is framed as data, not instruction
@@ -181,7 +181,7 @@ sequenceDiagram
                         Ego->>Mem: maybeRecordReflectionLesson(filtered)
                     else deterministic pass
                         alt action = id-origin reflect
-                            Note over Ego,Sup: Internal-only REFLECT bypasses LLM Superego review after deterministic payload validation
+                            Note over Ego,Sup: Internal-only reflect_internal bypasses LLM Superego review after deterministic payload validation trusted-data only; reflect_evidence remains evidence-bound
                             Sup-->>Ego: allow
                         else all other actions
                             Ego->>Sup: llm review(action)
@@ -230,6 +230,7 @@ sequenceDiagram
                                 Ego->>Mem: maybeAssessLongTermMemory(post_terminal_answer, forced)
                             end
                             Ego->>TWS: record non-contact_user/non-resolution_draft action outcomes/evidence
+                            Note over Ego,TWS: External evidence is stored as typed artifacts first and rendered into scratchpad with trust/source labels
                             Ego->>PG: onActionExecuted / allowFollowUp (generic action lifecycle observer)
                             Ego->>Sched: enqueue follow-up thought (for evidence actions)
                             Ego->>Mem: maybeAssessLongTermMemory(post_allowed_action, optional force)
@@ -245,7 +246,7 @@ sequenceDiagram
         end
 
         Ego->>Delib: maybeForceTerminalAnswer
-        Note over Ego,Delib: Deliberation state is session-scoped evidence and circuit state is scoped by root-session
+        Note over Ego,Delib: Deliberation state is session-scoped evidence, root-session thread trust is sticky for the request, and action control rate limits are enforced per root-session scope
         Note over Ego,Delib: Meta-reasoner output is schema-enforced; repeated empty-content or schema-validation failures can trigger optional fallback endpoint
         Ego->>Mem: maybeAssessLongTermMemory(interval or explicit remember-intent)
         Note over Ego,Mem: Episodic recall filters session/interlocutor only when explicitly requested by user input

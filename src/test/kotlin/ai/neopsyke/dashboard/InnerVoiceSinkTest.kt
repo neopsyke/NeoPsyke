@@ -662,7 +662,7 @@ class InnerVoiceSinkTest {
         val action = PendingAction(
             id = 10,
             urgency = Urgency.MEDIUM,
-            type = ActionType.REFLECT,
+            type = ActionType.REFLECT_INTERNAL,
             payload = """{"summary":"Learned that X is important","keywords":["X","important"]}""",
             summary = "Record insight about X",
             rootInputId = "root-1"
@@ -679,7 +679,7 @@ class InnerVoiceSinkTest {
             assertEquals("Insight recorded: X is important", event["content"])
             @Suppress("UNCHECKED_CAST")
             val meta = event["metadata"] as Map<String, Any?>
-            assertEquals("reflect", meta["action_type"])
+            assertEquals("reflect_internal", meta["action_type"])
         }
 
         sub.close()

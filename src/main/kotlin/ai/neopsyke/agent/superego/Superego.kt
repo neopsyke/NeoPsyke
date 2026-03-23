@@ -331,5 +331,5 @@ class Superego(
     }
 
     private fun shouldBypassLlmReview(action: PendingAction, context: SuperegoContext): Boolean =
-        action.type == ActionType.REFLECT && context.origin?.source == OriginSource.ID
+        action.type == ActionType.REFLECT_INTERNAL && context.origin?.source == OriginSource.ID
 }

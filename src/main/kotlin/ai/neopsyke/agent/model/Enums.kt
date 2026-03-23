@@ -40,7 +40,8 @@ data class ActionType(
         val RESOLUTION_DRAFT: ActionType = ActionType("resolution_draft")
         val MCP_TIME: ActionType = ActionType("mcp_time")
         val WEBSITE_FETCH: ActionType = ActionType("website_fetch")
-        val REFLECT: ActionType = ActionType("reflect")
+        val REFLECT_INTERNAL: ActionType = ActionType("reflect_internal")
+        val REFLECT_EVIDENCE: ActionType = ActionType("reflect_evidence")
         val GOAL_OPERATION: ActionType = ActionType("goal_operation")
 
         /** Built-in action set for compatibility with existing loops/tests. */
@@ -50,7 +51,8 @@ data class ActionType(
             RESOLUTION_DRAFT,
             MCP_TIME,
             WEBSITE_FETCH,
-            REFLECT,
+            REFLECT_INTERNAL,
+            REFLECT_EVIDENCE,
             GOAL_OPERATION,
         )
 

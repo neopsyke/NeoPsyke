@@ -3,6 +3,9 @@ package ai.neopsyke.agent.actions.websearch
 import ai.neopsyke.agent.model.ActionEffect
 import ai.neopsyke.agent.model.ActionExecutionStatus
 import ai.neopsyke.agent.model.ActionOutcome
+import ai.neopsyke.agent.model.ContentKind
+import ai.neopsyke.agent.model.SourceDescriptor
+import ai.neopsyke.agent.support.ExternalContentPipeline
 import ai.neopsyke.agent.support.PromptInjectionDefense
 import ai.neopsyke.agent.support.TextSecurity
 import java.net.URI
@@ -58,6 +61,15 @@ class WebSearchActionHandler(
             "web_search result: $summary; key_sources: $keySources; source_confidence: $confidence; query_injection_signals: $promptInjectionSignals",
             420
         )
+        val artifact = ExternalContentPipeline.ingest(
+            text = "summary: $summary\nsnippets: $snippets\nsources: $sources\nsource_confidence: $confidence",
+            maxChars = 1_500,
+            source = SourceDescriptor(
+                provider = "web_search",
+                contentKind = ContentKind.RESPONSE,
+                objectType = "search_result",
+            ),
+        )
 
         return ActionOutcome(
             statusSummary = "Web search summary: $summary; snippets: $snippets; sources: $sources; source_confidence: $confidence; query_injection_signals: $promptInjectionSignals",
@@ -68,7 +80,8 @@ class WebSearchActionHandler(
             } else {
                 emptySet()
             },
-            observedEvidence = observedEvidence
+            observedEvidence = observedEvidence,
+            resultArtifacts = listOf(artifact),
         )
     }
 

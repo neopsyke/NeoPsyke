@@ -52,7 +52,11 @@ data class ActionSecurityPolicyConfig(
                         directCommitEnabled = false,
                         autonomousCommitEnabled = false,
                     ),
-                    ActionType.REFLECT.id to ActionSecurityActionRule(
+                    ActionType.REFLECT_INTERNAL.id to ActionSecurityActionRule(
+                        directCommitEnabled = true,
+                        autonomousCommitEnabled = true,
+                    ),
+                    ActionType.REFLECT_EVIDENCE.id to ActionSecurityActionRule(
                         directCommitEnabled = true,
                         autonomousCommitEnabled = true,
                     ),
@@ -128,6 +132,13 @@ class ConfiguredActionAuthorizationPolicy(
             return deny(
                 reason = "Action '${action.type.id}' is not allowed for instruction trust ${instructionTrust.name.lowercase()}.",
                 reasonCode = "POLICY_INSTRUCTION_TRUST_DENY",
+            )
+        }
+
+        if (!contract.allowedArgumentDataTrust.contains(action.argumentDataTrust)) {
+            return deny(
+                reason = "Action '${action.type.id}' is not allowed for argument data trust ${action.argumentDataTrust.name.lowercase()}.",
+                reasonCode = "POLICY_ARGUMENT_DATA_TRUST_DENY",
             )
         }
 

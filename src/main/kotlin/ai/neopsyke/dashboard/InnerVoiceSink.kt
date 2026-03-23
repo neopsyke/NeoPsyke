@@ -217,7 +217,7 @@ class InnerVoiceSink(
         val rootInputId = action.rootInputId ?: return
 
         // Reflect actions always produce inner voice events (proactive insights)
-        if (action.type == ActionType.REFLECT) {
+        if (action.type == ActionType.REFLECT_INTERNAL || action.type == ActionType.REFLECT_EVIDENCE) {
             synchronized(lock) { activatedRoots.add(rootInputId) }
             val outcomeSummary = event.data["outcome_summary"]?.toString()
             val payload = action.payload

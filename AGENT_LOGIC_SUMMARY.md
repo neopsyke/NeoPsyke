@@ -27,6 +27,7 @@ It is intentionally high-level and should stay aligned with the code.
     - `web_search` runtime remains independently configurable.
   - `Superego`
   - `ActionRegistry` (startup plugin discovery via `ServiceLoader<AgentActionPluginFactory>`)
+  - `ExternalContentPipeline` (single sanitized-ingestion path for external evidence artifacts)
   - `MotorCortex` (plugin-dispatched action execution)
   - `ConversationOutputGateway` (channel-aware `contact_user` delivery)
   - `ActionAuthorizationPolicy` (YAML-backed action security policy)
@@ -219,9 +220,10 @@ It is intentionally high-level and should stay aligned with the code.
     - external evidence hints derived from prior successful/failed evidence actions for the same root input
     - deliberation state and meta-guidance
     - conversation security summary and trigger provenance summary
+    - thread security summary derived from root-scoped aggregated data trust + taint sources
     - currently available action types from `MotorCortex`
     - dispatchable action set + per-action planner definitions (description/payload guidance/example/effect class/commit capability/trust constraints)
-    - planner-visible action availability is prefiltered by conversation instruction trust, so the planner only sees policy-shaped actions for the current thread
+    - planner-visible action availability is prefiltered by conversation instruction trust and current thread data trust, so the planner only sees policy-shaped actions for the current thread
   - Runs planner (`LlmEgoPlanner`) and applies deliberation pressure override if needed.
   - Applies decision by enqueueing thought/action/plan/noop-thought.
 
@@ -266,6 +268,7 @@ It is intentionally high-level and should stay aligned with the code.
     - `ALLOW_STAGE` persists a staged action and feeds a structured approval-or-alternative thought back into Ego.
     - `ALLOW_COMMIT` persists a staged snapshot plus authorization artifact, then executes through `MotorCortex`.
     - `ActionControlService` refusals are treated as denials and fed back into Ego replanning.
+    - `ActionControlService` also enforces centralized per-root-input rate limits across observe, messaging, reflection, goal-operation, and commit/control-plane action families.
     - `MotorCortex` now performs a final no-bypass authorization check for side-effecting actions.
     - `contact_user` delivery is channel-aware:
       - Telegram owner conversations route through the configured Telegram Bot API sink using the conversation channel id
@@ -279,6 +282,8 @@ It is intentionally high-level and should stay aligned with the code.
     - Record outcome + deliberation evidence.
     - Notify `ActionLifecycleObserver` subscribers after execution so goal-origin actions can update step acceptance/block/retry state.
     - Record non-answer/non-answer_draft action outcomes into the scratchpad (when enabled).
+      - external observe outputs are captured as typed result artifacts first
+      - scratchpad evidence now retains trust/source labels instead of flattening everything to anonymous strings immediately
     - Store assistant output in dialogue and short-term memory when applicable.
     - For `answer`, optionally force a post-terminal-answer long-term memory assessment.
     - Follow-up thought behavior is action-descriptor-driven (`requiresFollowUpThought` + `followUpPrefix`).
@@ -401,17 +406,18 @@ It is intentionally high-level and should stay aligned with the code.
   - `ALLOW_COMMIT`
 - `SuperegoPolicy.authorize` now evaluates action contracts against conversation security context:
   - instruction trust and principal role
+  - action argument data trust
   - per-action YAML overrides for direct commit and autonomous commit
   - public-commit deny-until-enabled rules
   - recurring-goal stricter approval rules
 - Id-origin deterministic policy is enforced inside Superego (not plugins):
   - Direct `answer` from Id origin is hard-denied by default.
-  - Id-origin actions are allowlisted for internal/evidence-gathering types (`web_search`, `website_fetch`, `mcp_time`, `answer_draft`, `reflect`).
+  - Id-origin actions are allowlisted for internal/evidence-gathering types (`web_search`, `website_fetch`, `mcp_time`, `answer_draft`, `reflect_internal`, `reflect_evidence`).
   - Non-allowlisted Id-origin actions are denied before LLM review.
-  - Id-origin `REFLECT` is treated as an internal-only durable-memory action:
+  - Id-origin `reflect_internal` is treated as an internal-only durable-memory action:
     - plugin deterministic validation still runs
     - if payload is valid, Superego bypasses LLM semantic review entirely and auto-allows it
-    - this avoids generic “missing direct user request / off-topic” denials for internal reflections
+    - this avoids generic “missing direct user request / off-topic” denials for trusted internal reflections
 - Superego LLM review is separated into dedicated engines:
   - `SingleStageSuperegoReviewEngine` handles one model (retry, strict-JSON retry, parse validation, safe deny fallback).
   - `TwoStageSuperegoReviewEngine` runs cheap primary review first and escalates only on:
@@ -527,6 +533,7 @@ It is intentionally high-level and should stay aligned with the code.
   - Activation remains plan-gated with `MemoryConfig.scratchpad.activationMinPlanSteps=2`.
   - Scoped to root input; independent from short-term and long-term memory pipelines.
   - Stores compact sections/evidence for the active request only.
+  - Evidence entries preserve trust/source labels from external artifacts instead of flattening them to anonymous strings at ingestion time.
   - `answer_draft` sections are stored separately and counted for final-pass gating.
   - Planner receives only prompt-capped scratchpad index/summaries, not full scratchpad content.
   - Provides final-pass compilation input with scratchpad confidence estimate (sections/evidence/goal weighted signal).
@@ -668,8 +675,13 @@ It is intentionally high-level and should stay aligned with the code.
     - channel provider/surface
     - instruction trust
     - policy scope id
-  - `recordReflection()` owns `REFLECT` persistence, adding first-person normalization plus session/interlocutor/run and Id-origin provenance before writing logbook and long-term memory.
-  - `REFLECT` only reports `DURABLE_MEMORY_SAVED` on durable long-term memory persistence success; journal-only fallback does not satisfy the originating learn need.
+  - reflection persistence is split:
+    - `recordInternalReflection()` for trusted self-observation only
+    - `recordEvidenceReflection()` for evidence-backed durable learning only
+  - `reflect_internal` is trusted-data only and rejects tainted thread context.
+  - `reflect_evidence` only accepts same-root evidence artifact references and persists into a quarantined evidence-memory lane.
+  - quarantined evidence memories are durable but excluded from normal planner recall unless recall intent is explicitly evidence-oriented.
+  - reflection actions only report `DURABLE_MEMORY_SAVED` on durable long-term memory persistence success; journal-only fallback does not satisfy the originating learn need.
   - long-term semantic recall now consumes structured `RecallResult` data while keeping prompt-ready rendered text for planner wiring.
   - long-term persistence now uses typed `ImprintRequest` variants; current Ego wiring still emits narrative imprints while episodic writes remain native logbook entries.
 

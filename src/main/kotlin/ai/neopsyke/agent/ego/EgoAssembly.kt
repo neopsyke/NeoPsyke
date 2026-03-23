@@ -3,6 +3,7 @@ package ai.neopsyke.agent.ego
 import ai.neopsyke.agent.actioncontrol.ActionControlService
 import ai.neopsyke.agent.actioncontrol.NoopActionControlService
 import ai.neopsyke.agent.actions.ActionPluginFactoryContext
+import ai.neopsyke.agent.actions.InMemoryEvidenceArtifactStore
 import ai.neopsyke.agent.actions.ConversationOutputGateway
 import ai.neopsyke.agent.actions.RoutedConversationOutputGateway
 import ai.neopsyke.agent.actions.ActionRegistry
@@ -91,6 +92,7 @@ object EgoAssembler {
             logbookSummarizer = logbookSummarizer,
             runId = runId,
         )
+        val evidenceArtifactStore = InMemoryEvidenceArtifactStore()
         val actionRegistry = ActionRegistry.discover(
             ActionPluginFactoryContext(
                 config = config,
@@ -99,6 +101,7 @@ object EgoAssembler {
                 fetchTool = fetchTool,
                 output = output,
                 conversationOutput = conversationOutput,
+                evidenceArtifactStore = evidenceArtifactStore,
                 reflectionMemoryRecorder = memory,
                 goalsGateway = goalsGateway,
             )
@@ -119,6 +122,7 @@ object EgoAssembler {
             actionControlService = actionControlService,
             goalRegistry = goalsGateway,
             goalsGateway = goalsGateway,
+            evidenceArtifactStore = evidenceArtifactStore,
         )
         return EgoAssembly(
             ego = ego,

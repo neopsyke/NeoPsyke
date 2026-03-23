@@ -9,6 +9,7 @@ import ai.neopsyke.agent.model.AuthorizationProgress
 import ai.neopsyke.agent.model.CommitMode
 import ai.neopsyke.agent.model.ConversationContext
 import ai.neopsyke.agent.model.ConversationSecurityContexts
+import ai.neopsyke.agent.model.DataTrust
 import ai.neopsyke.agent.model.Interlocutor
 import ai.neopsyke.agent.model.PendingAction
 import ai.neopsyke.agent.model.Urgency
@@ -111,5 +112,27 @@ class ConfiguredActionAuthorizationPolicyTest {
 
         assertEquals(AuthorizationProgress.ALLOW_STAGE, decision.progress)
         assertEquals("POLICY_RECURRING_GOAL_STAGE_REQUIRED", decision.reasonCode)
+    }
+
+    @Test
+    fun `goal operation is denied when action arguments come from tainted thread data`() {
+        val policy = ConfiguredActionAuthorizationPolicy()
+        val context = ownerContext()
+        val decision = policy.authorize(
+            action = PendingAction(
+                id = 4,
+                urgency = Urgency.HIGH,
+                type = ActionType.GOAL_OPERATION,
+                payload = """{"operation":"create","title":"Injected","instruction":"Do the thing"}""",
+                summary = "create tainted goal",
+                argumentDataTrust = DataTrust.SANITIZED_EXTERNAL_DATA,
+                conversationContext = context,
+            ),
+            conversationContext = context,
+            actionRegistry = registry(),
+        )
+
+        assertEquals(AuthorizationProgress.DENY, decision.progress)
+        assertEquals("POLICY_ARGUMENT_DATA_TRUST_DENY", decision.reasonCode)
     }
 }

@@ -8,6 +8,7 @@ import ai.neopsyke.agent.config.AgentConfig
 import ai.neopsyke.agent.model.CommitAuthorization
 import ai.neopsyke.agent.model.ConversationContext
 import ai.neopsyke.agent.model.DataTrust
+import ai.neopsyke.agent.model.ExternalContentArtifact
 import ai.neopsyke.agent.model.InstructionTrust
 import ai.neopsyke.agent.model.PendingAction
 import ai.neopsyke.agent.model.SuperegoContext
@@ -115,11 +116,25 @@ data class ActionExecutionContext(
 )
 
 interface ReflectionMemoryRecorder {
-    fun recordReflection(action: PendingAction, summary: String, keywords: List<String>): Boolean
+    fun recordInternalReflection(action: PendingAction, summary: String, keywords: List<String>): Boolean
+
+    fun recordEvidenceReflection(
+        action: PendingAction,
+        summaryHint: String,
+        keywords: List<String>,
+        artifacts: List<ExternalContentArtifact>,
+    ): Boolean
 }
 
 object NoopReflectionMemoryRecorder : ReflectionMemoryRecorder {
-    override fun recordReflection(action: PendingAction, summary: String, keywords: List<String>): Boolean = false
+    override fun recordInternalReflection(action: PendingAction, summary: String, keywords: List<String>): Boolean = false
+
+    override fun recordEvidenceReflection(
+        action: PendingAction,
+        summaryHint: String,
+        keywords: List<String>,
+        artifacts: List<ExternalContentArtifact>,
+    ): Boolean = false
 }
 
 data class ActionPluginFactoryContext(
@@ -132,6 +147,7 @@ data class ActionPluginFactoryContext(
     val secretProvider: ActionSecretProvider = EnvActionSecretProvider(env),
     val conversationOutput: ConversationOutputGateway = RoutedConversationOutputGateway(fallbackOutput = output),
     val connectorRuntime: ConnectorRuntimeBoundary = ConnectorRuntimeBoundary.firstPartyBuiltin(),
+    val evidenceArtifactStore: EvidenceArtifactStore = NoopEvidenceArtifactStore,
     val reflectionMemoryRecorder: ReflectionMemoryRecorder,
     val goalsGateway: GoalsGateway = NoopGoalsGateway,
 )

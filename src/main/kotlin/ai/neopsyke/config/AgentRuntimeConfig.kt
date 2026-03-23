@@ -178,6 +178,15 @@ private data class AgentRuntimeYamlActionControl(
     val autonomousWorkerEnabled: Boolean? = null,
     val autonomousWorkerPollMs: Long? = null,
     val autonomousWorkerBatchSize: Int? = null,
+    val observePerTypePerRootInput: Int? = null,
+    val contactUserPerRootInput: Int? = null,
+    val reflectionFamilyPerRootInput: Int? = null,
+    val reflectEvidencePerRootInput: Int? = null,
+    val goalOperationPerRootInput: Int? = null,
+    val commitPrivatePerTypePerRootInput: Int? = null,
+    val commitStatefulPerTypePerRootInput: Int? = null,
+    val commitPublicPerTypePerRootInput: Int? = null,
+    val controlPlanePerTypePerRootInput: Int? = null,
 )
 
 private data class AgentRuntimeYamlConnectors(
@@ -761,6 +770,51 @@ object AgentRuntimeSettingsLoader {
                     env["NEOPSYKE_ACTION_CONTROL_AUTONOMOUS_WORKER_BATCH_SIZE"],
                     actionControlYaml.autonomousWorkerBatchSize,
                     defaults.actionControl.autonomousWorkerBatchSize
+                ),
+                observePerTypePerRootInput = readPositiveInt(
+                    env["NEOPSYKE_ACTION_CONTROL_OBSERVE_PER_TYPE_PER_ROOT_INPUT"],
+                    actionControlYaml.observePerTypePerRootInput,
+                    defaults.actionControl.observePerTypePerRootInput
+                ),
+                contactUserPerRootInput = readPositiveInt(
+                    env["NEOPSYKE_ACTION_CONTROL_CONTACT_USER_PER_ROOT_INPUT"],
+                    actionControlYaml.contactUserPerRootInput,
+                    defaults.actionControl.contactUserPerRootInput
+                ),
+                reflectionFamilyPerRootInput = readPositiveInt(
+                    env["NEOPSYKE_ACTION_CONTROL_REFLECTION_FAMILY_PER_ROOT_INPUT"],
+                    actionControlYaml.reflectionFamilyPerRootInput,
+                    defaults.actionControl.reflectionFamilyPerRootInput
+                ),
+                reflectEvidencePerRootInput = readPositiveInt(
+                    env["NEOPSYKE_ACTION_CONTROL_REFLECT_EVIDENCE_PER_ROOT_INPUT"],
+                    actionControlYaml.reflectEvidencePerRootInput,
+                    defaults.actionControl.reflectEvidencePerRootInput
+                ),
+                goalOperationPerRootInput = readPositiveInt(
+                    env["NEOPSYKE_ACTION_CONTROL_GOAL_OPERATION_PER_ROOT_INPUT"],
+                    actionControlYaml.goalOperationPerRootInput,
+                    defaults.actionControl.goalOperationPerRootInput
+                ),
+                commitPrivatePerTypePerRootInput = readPositiveInt(
+                    env["NEOPSYKE_ACTION_CONTROL_COMMIT_PRIVATE_PER_TYPE_PER_ROOT_INPUT"],
+                    actionControlYaml.commitPrivatePerTypePerRootInput,
+                    defaults.actionControl.commitPrivatePerTypePerRootInput
+                ),
+                commitStatefulPerTypePerRootInput = readPositiveInt(
+                    env["NEOPSYKE_ACTION_CONTROL_COMMIT_STATEFUL_PER_TYPE_PER_ROOT_INPUT"],
+                    actionControlYaml.commitStatefulPerTypePerRootInput,
+                    defaults.actionControl.commitStatefulPerTypePerRootInput
+                ),
+                commitPublicPerTypePerRootInput = readPositiveInt(
+                    env["NEOPSYKE_ACTION_CONTROL_COMMIT_PUBLIC_PER_TYPE_PER_ROOT_INPUT"],
+                    actionControlYaml.commitPublicPerTypePerRootInput,
+                    defaults.actionControl.commitPublicPerTypePerRootInput
+                ),
+                controlPlanePerTypePerRootInput = readPositiveInt(
+                    env["NEOPSYKE_ACTION_CONTROL_CONTROL_PLANE_PER_TYPE_PER_ROOT_INPUT"],
+                    actionControlYaml.controlPlanePerTypePerRootInput,
+                    defaults.actionControl.controlPlanePerTypePerRootInput
                 ),
             ),
             connectors = ConnectorRuntimeConfig(

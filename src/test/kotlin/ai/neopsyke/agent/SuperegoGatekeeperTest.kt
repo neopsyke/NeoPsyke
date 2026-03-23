@@ -380,7 +380,7 @@ class SuperegoGatekeeperTest {
         val reflectAction = PendingAction(
             id = 701,
             urgency = Urgency.MEDIUM,
-            type = ActionType.REFLECT,
+            type = ActionType.REFLECT_INTERNAL,
             payload = """{"summary":"I learned something useful","keywords":["learning"]}""",
             summary = "record internal reflection",
             origin = ActionOrigin(

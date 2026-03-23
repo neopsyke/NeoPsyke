@@ -3,7 +3,9 @@ package ai.neopsyke.agent.actioncontrol
 import com.fasterxml.jackson.databind.DeserializationFeature
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
+import ai.neopsyke.agent.actions.ActionRegistry
 import ai.neopsyke.agent.config.ActionControlConfig
+import ai.neopsyke.agent.model.ActionEffectClass
 import ai.neopsyke.agent.model.ActionLedgerEntry
 import ai.neopsyke.agent.model.ActionLedgerKind
 import ai.neopsyke.agent.model.ActionRecordImportance
@@ -188,6 +190,7 @@ class LegacyCompatibleActionControlService(
                     actionType = action.type,
                     summary = action.summary,
                     payload = action.payload,
+                    argumentDataTrust = action.argumentDataTrust,
                     conversationContext = conversationContext,
                     provenance = when (conversationContext.security.instructionTrust) {
                         ai.neopsyke.agent.model.InstructionTrust.TRUSTED_INSTRUCTION ->
@@ -240,6 +243,7 @@ class LegacyCompatibleActionControlService(
             actionType = action.type,
             summary = action.summary,
             payload = action.payload,
+            argumentDataTrust = action.argumentDataTrust,
             conversationContext = conversationContext,
             provenance = Provenances.defaultExternal(sourceRef = action.rootInputId),
             origin = action.origin,
@@ -330,6 +334,7 @@ class LegacyCompatibleActionControlService(
 class DefaultActionControlService(
     private val config: ActionControlConfig,
     private val store: ActionControlStore,
+    private val actionRegistry: ActionRegistry = ActionRegistry.empty(),
     private val executeCommittedAction: suspend (PendingAction, CommitAuthorization?) -> ActionOutcome,
 ) : ActionControlService {
     override suspend fun handleAuthorizationDecision(
@@ -340,6 +345,7 @@ class DefaultActionControlService(
         if (decision.progress == AuthorizationProgress.DENY) {
             return ActionControlDecisionResult.Refused(decision.reason, decision.reasonCode)
         }
+        rateLimitRefusal(action, conversationContext)?.let { return it }
 
         val prepared = prepare(action, conversationContext)
         // `threadSequence` ordering is enforced after the staged row exists. If staging later becomes
@@ -357,6 +363,7 @@ class DefaultActionControlService(
                 actionType = action.type,
                 summary = action.summary,
                 payload = action.payload,
+                argumentDataTrust = action.argumentDataTrust,
                 conversationContext = conversationContext,
                 provenance = prepared.provenance,
                 origin = action.origin,
@@ -558,6 +565,7 @@ class DefaultActionControlService(
                 actionType = action.type,
                 summary = action.summary,
                 payload = action.payload,
+                argumentDataTrust = action.argumentDataTrust,
                 conversationContext = conversationContext,
                 provenance = prepared.provenance,
                 origin = action.origin,
@@ -823,6 +831,7 @@ class DefaultActionControlService(
             actionType = action.type,
             summary = action.summary,
             payload = action.payload,
+            argumentDataTrust = action.argumentDataTrust,
             conversationContext = conversationContext,
             provenance = when (conversationContext.security.instructionTrust) {
                 ai.neopsyke.agent.model.InstructionTrust.TRUSTED_INSTRUCTION ->
@@ -846,6 +855,7 @@ class DefaultActionControlService(
             rootInputId = rootInputId,
             rootInputReceivedAtMs = rootInputReceivedAtMs,
             conversationContext = conversationContext,
+            argumentDataTrust = argumentDataTrust,
             origin = origin,
         )
 
@@ -855,12 +865,102 @@ class DefaultActionControlService(
             action.type.id,
             action.summary,
             action.payload,
+            action.argumentDataTrust.name,
             action.rootInputId.orEmpty(),
             action.conversationContext.sessionId,
         ).joinToString(separator = "\n")
         return digest.digest(raw.toByteArray(StandardCharsets.UTF_8))
             .joinToString(separator = "") { "%02x".format(it) }
     }
+
+    private fun rateLimitRefusal(
+        action: PendingAction,
+        conversationContext: ConversationContext,
+    ): ActionControlDecisionResult.Refused? {
+        val rootInputId = action.rootInputId?.trim().orEmpty()
+        if (rootInputId.isEmpty()) return null
+        val scopedActions = store.listStagedActions(config.maxInspectResults)
+            .asSequence()
+            .filter { it.rootInputId == rootInputId }
+            .filter { it.conversationContext.sessionId == conversationContext.sessionId }
+            .filter { it.status != StagedActionStatus.CANCELLED }
+            .toList()
+        val effectClass = actionRegistry.contract(action.type)?.effectClass ?: defaultEffectClass(action)
+        fun refusal(message: String): ActionControlDecisionResult.Refused =
+            ActionControlDecisionResult.Refused(
+                reason = message,
+                reasonCode = "ACTION_RATE_LIMIT_EXCEEDED",
+            )
+
+        when (action.type) {
+            ActionType.CONTACT_USER -> {
+                val count = scopedActions.count { it.actionType == ActionType.CONTACT_USER }
+                if (config.contactUserPerRootInput > 0 && count >= config.contactUserPerRootInput) {
+                    return refusal("Action '${action.type.id}' exceeded the per-request rate limit.")
+                }
+                return null
+            }
+
+            ActionType.REFLECT_INTERNAL -> {
+                val familyCount = scopedActions.count {
+                    it.actionType == ActionType.REFLECT_INTERNAL || it.actionType == ActionType.REFLECT_EVIDENCE
+                }
+                if (config.reflectionFamilyPerRootInput > 0 && familyCount >= config.reflectionFamilyPerRootInput) {
+                    return refusal("Action '${action.type.id}' exceeded the reflection-family rate limit.")
+                }
+                return null
+            }
+
+            ActionType.REFLECT_EVIDENCE -> {
+                val familyCount = scopedActions.count {
+                    it.actionType == ActionType.REFLECT_INTERNAL || it.actionType == ActionType.REFLECT_EVIDENCE
+                }
+                if (config.reflectionFamilyPerRootInput > 0 && familyCount >= config.reflectionFamilyPerRootInput) {
+                    return refusal("Action '${action.type.id}' exceeded the reflection-family rate limit.")
+                }
+                val evidenceCount = scopedActions.count { it.actionType == ActionType.REFLECT_EVIDENCE }
+                if (config.reflectEvidencePerRootInput > 0 && evidenceCount >= config.reflectEvidencePerRootInput) {
+                    return refusal("Action '${action.type.id}' exceeded the evidence-reflection rate limit.")
+                }
+                return null
+            }
+
+            ActionType.GOAL_OPERATION -> {
+                val limit = config.goalOperationPerRootInput
+                if (limit <= 0) return null
+                val matchingCount = scopedActions.count { goalOperationBucket(it) == goalOperationBucket(action) }
+                if (matchingCount >= limit) {
+                    return refusal("Action '${action.type.id}' exceeded the per-request rate limit for operation kind '${goalOperationBucket(action)}'.")
+                }
+                return null
+            }
+
+            else -> {
+                val limit = when (effectClass) {
+                    ActionEffectClass.OBSERVE -> config.observePerTypePerRootInput
+                    ActionEffectClass.COMMIT_PRIVATE -> config.commitPrivatePerTypePerRootInput
+                    ActionEffectClass.COMMIT_PUBLIC -> config.commitPublicPerTypePerRootInput
+                    ActionEffectClass.COMMIT_STATEFUL -> config.commitStatefulPerTypePerRootInput
+                    ActionEffectClass.CONTROL_PLANE -> config.controlPlanePerTypePerRootInput
+                }
+                if (limit <= 0) return null
+                val matchingCount = scopedActions.count { it.actionType == action.type }
+                if (matchingCount >= limit) {
+                    return refusal("Action '${action.type.id}' exceeded the per-request rate limit.")
+                }
+                return null
+            }
+        }
+    }
+
+    private fun defaultEffectClass(action: PendingAction): ActionEffectClass =
+        when (action.type) {
+            ActionType.CONTACT_USER -> ActionEffectClass.COMMIT_PRIVATE
+            ActionType.GOAL_OPERATION -> ActionEffectClass.CONTROL_PLANE
+            ActionType.REFLECT_INTERNAL,
+            ActionType.REFLECT_EVIDENCE -> ActionEffectClass.COMMIT_STATEFUL
+            else -> ActionEffectClass.OBSERVE
+        }
 
     private fun nextId(): String = UUID.randomUUID().toString()
 
@@ -893,6 +993,27 @@ class DefaultActionControlService(
         } else {
             null
         }
+    }
+
+    private fun goalOperationBucket(action: PendingAction): String {
+        return goalOperationBucketPayload(action.type.id, action.payload)
+    }
+
+    private fun goalOperationBucket(action: StagedAction): String {
+        return goalOperationBucketPayload(action.actionType.id, action.payload)
+    }
+
+    private fun goalOperationBucketPayload(actionTypeId: String, payloadRaw: String): String {
+        val payload = runCatching { payloadMapper.readTree(payloadRaw) }.getOrNull()
+        val operation = payload?.path("operation")?.asText("")?.trim()?.lowercase().orEmpty()
+        val cronExpression = payload?.path("cron_expression")?.asText(payload.path("cronExpression").asText(""))?.trim().orEmpty()
+        val category = when (operation) {
+            "list", "inspect" -> "goal_read"
+            "create", "revise" -> if (cronExpression.isNotBlank()) "goal_recurring_mutation" else "goal_mutation"
+            "pause", "resume", "reprioritize", "complete" -> "goal_mutation"
+            else -> "goal_other"
+        }
+        return "$actionTypeId:$category"
     }
 
     private fun deriveEmailExecutionKey(action: PendingAction): String? {

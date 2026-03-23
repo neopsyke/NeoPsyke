@@ -13,9 +13,12 @@ import ai.neopsyke.agent.model.ActionEffect
 import ai.neopsyke.agent.model.ActionExecutionStatus
 import ai.neopsyke.agent.model.ActionOutcome
 import ai.neopsyke.agent.model.ActionType
+import ai.neopsyke.agent.model.ContentKind
 import ai.neopsyke.agent.config.AgentConfig
 import ai.neopsyke.agent.model.PendingAction
+import ai.neopsyke.agent.model.SourceDescriptor
 import ai.neopsyke.agent.model.SuperegoContext
+import ai.neopsyke.agent.support.ExternalContentPipeline
 import ai.neopsyke.agent.support.PromptInjectionDefense
 import ai.neopsyke.agent.tools.mcp.McpToolCallResult
 import java.util.concurrent.atomic.AtomicBoolean
@@ -114,11 +117,22 @@ internal class ConnectorActionPlugin(
                 actionErrorCategory = "connector_tool_error",
             )
         }
+        val artifact = ExternalContentPipeline.ingest(
+            text = result.content.ifBlank { sanitized },
+            maxChars = MAX_RESULT_CHARS,
+            source = SourceDescriptor(
+                provider = connectorManifest.connectorId,
+                contentKind = ContentKind.RESPONSE,
+                objectType = actionManifest.toolName,
+                sourceRef = action.rootInputId,
+            ),
+        )
         return ActionOutcome(
             statusSummary = sanitized,
             executionStatus = ActionExecutionStatus.SUCCESS,
             observedEvidence = descriptor.effectClass == ai.neopsyke.agent.model.ActionEffectClass.OBSERVE,
             effects = successEffects(descriptor.effectClass),
+            resultArtifacts = listOf(artifact),
         )
     }
 

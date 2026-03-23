@@ -1574,6 +1574,7 @@ class LlmEgoPlanner(
         val evidenceHints = context.evidenceHints.ifBlank { "none" }
         val metaGuidance = context.metaGuidance.ifBlank { "none" }
         val conversationSecuritySummary = context.conversationSecuritySummary.ifBlank { "none" }
+        val threadSecuritySummary = context.threadSecuritySummary.ifBlank { "none" }
         val triggerProvenanceSummary = context.triggerProvenanceSummary.ifBlank { "none" }
         val deliberation = context.deliberation
         val availableActionList = context.availableActions
@@ -1729,7 +1730,7 @@ class LlmEgoPlanner(
                     role = ChatRole.USER,
                     band = PromptBudgetAllocator.Band.REQUIRED_CONTEXT,
                     floorTokens = 18,
-                    content = "Conversation security context:\n$conversationSecuritySummary"
+                    content = "Conversation security context:\n$conversationSecuritySummary\n\nThread trust state:\n$threadSecuritySummary"
                 ),
                 PromptBudgetAllocator.Section(
                     key = "planner_trigger_provenance",
@@ -1867,7 +1868,7 @@ class LlmEgoPlanner(
                     """
                     Self-motivated context:
                     This trigger is self-initiated, not a user request.
-                    Prefer researching and reflecting internally using action=reflect.
+                    Prefer researching and reflecting internally using action=reflect_internal.
                     Only address the user (action=contact_user) if you discover something immediately valuable or actionable.
                     Act proportionally to your motivation level ($motivation).
                     Only act if there is genuine value; prefer noop otherwise.
@@ -1876,7 +1877,7 @@ class LlmEgoPlanner(
                     """
                     Self-motivated context:
                     This trigger is self-initiated, not a user request.
-                    Research using available tools, then use action=reflect to record what you learned.
+                    Research using available tools, then use action=reflect_evidence to record what you learned from same-request evidence.
                     Do not address the user directly.
                     Act proportionally to your motivation level ($motivation).
                     Only act if there is genuine value; prefer noop otherwise.

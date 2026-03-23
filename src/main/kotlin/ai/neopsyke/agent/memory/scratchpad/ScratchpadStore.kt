@@ -1,6 +1,8 @@
 package ai.neopsyke.agent.memory.scratchpad
 
 import ai.neopsyke.agent.model.ActionOutcome
+import ai.neopsyke.agent.model.DataTrust
+import ai.neopsyke.agent.model.ExternalContentArtifact
 import ai.neopsyke.agent.model.PendingAction
 import ai.neopsyke.agent.model.PendingInput
 import ai.neopsyke.agent.config.ScratchpadConfig
@@ -45,6 +47,13 @@ data class ScratchpadDebugSnapshot(
     val head: ScratchpadDebugHead,
     val sections: List<ScratchpadDebugSection>,
     val evidence: List<String>,
+    val evidenceRecords: List<ScratchpadDebugEvidence>,
+)
+
+data class ScratchpadDebugEvidence(
+    val content: String,
+    val trust: DataTrust,
+    val source: String,
 )
 
 data class WorkspaceDigestEntry(
@@ -156,9 +165,13 @@ class ScratchpadStore(
             source = SOURCE_ACTION
         )
         if (observedEvidence) {
-            workspace.addEvidence(
-                TextSecurity.preview(outcome.plannerSignal.ifBlank { outcome.statusSummary }, config.maxEvidenceChars)
-            )
+            if (outcome.resultArtifacts.isNotEmpty()) {
+                outcome.resultArtifacts.forEach(workspace::addEvidence)
+            } else {
+                workspace.addEvidence(
+                    TextSecurity.preview(outcome.plannerSignal.ifBlank { outcome.statusSummary }, config.maxEvidenceChars)
+                )
+            }
         }
     }
 
@@ -219,7 +232,7 @@ class ScratchpadStore(
                 append("evidence:\n")
                 evidence.forEach { item ->
                     append("- ")
-                    append(item)
+                    append(item.render())
                     append('\n')
                 }
             }
@@ -265,7 +278,7 @@ class ScratchpadStore(
         val evidencePerItemCap = max(48, config.digestMaxChars / max(1, DIGEST_MAX_EVIDENCE_ITEMS))
         val keyEvidence = workspace.evidence
             .takeLast(DIGEST_MAX_EVIDENCE_ITEMS)
-            .map { TextSecurity.preview(it, evidencePerItemCap) }
+            .map { TextSecurity.preview(it.render(), evidencePerItemCap) }
         val entry = WorkspaceDigestEntry(
             rootInputId = rootInputId ?: "",
             goal = workspace.goal,
@@ -434,12 +447,20 @@ class ScratchpadStore(
         val source: String,
     )
 
+    private data class ScratchpadEvidence(
+        val content: String,
+        val trust: DataTrust,
+        val source: String,
+    ) {
+        fun render(): String = "[${trust.name.lowercase()} | $source] $content"
+    }
+
     private inner class Scratchpad(
         val rootInputId: String,
         val rootInputReceivedAtMs: Long,
         var goal: String,
         val sections: ArrayDeque<ScratchpadSection> = ArrayDeque(),
-        val evidence: ArrayDeque<String> = ArrayDeque(),
+        val evidence: ArrayDeque<ScratchpadEvidence> = ArrayDeque(),
     ) {
         var version: Long = 0L
             private set
@@ -471,7 +492,29 @@ class ScratchpadStore(
         fun addEvidence(value: String) {
             val normalized = TextSecurity.preview(value, evidenceItemCap())
             if (normalized.isBlank()) return
-            evidence.addLast(normalized)
+            evidence.addLast(
+                ScratchpadEvidence(
+                    content = normalized,
+                    trust = DataTrust.SANITIZED_EXTERNAL_DATA,
+                    source = "legacy_evidence",
+                )
+            )
+            while (evidence.size > evidenceCap()) {
+                evidence.removeFirst()
+            }
+            touch()
+        }
+
+        fun addEvidence(artifact: ExternalContentArtifact) {
+            val normalized = TextSecurity.preview(artifact.content, evidenceItemCap())
+            if (normalized.isBlank()) return
+            evidence.addLast(
+                ScratchpadEvidence(
+                    content = normalized,
+                    trust = artifact.dataTrust,
+                    source = artifact.taintSourceSummary(),
+                )
+            )
             while (evidence.size > evidenceCap()) {
                 evidence.removeFirst()
             }
@@ -503,7 +546,7 @@ class ScratchpadStore(
                     append("recent_evidence:\n")
                     evidence.forEach { item ->
                         append("- ")
-                        append(item)
+                        append(item.render())
                         append('\n')
                     }
                 }
@@ -552,7 +595,14 @@ class ScratchpadStore(
                         source = section.source
                     )
                 },
-                evidence = evidence.toList()
+                evidence = evidence.map { it.render() },
+                evidenceRecords = evidence.map { item ->
+                    ScratchpadDebugEvidence(
+                        content = item.content,
+                        trust = item.trust,
+                        source = item.source,
+                    )
+                }
             )
 
         private fun touch() {
@@ -565,7 +615,7 @@ class ScratchpadStore(
             sections.forEach { section ->
                 total += section.title.length + section.summary.length + section.content.length + section.source.length
             }
-            evidence.forEach { item -> total += item.length }
+            evidence.forEach { item -> total += item.content.length + item.source.length + item.trust.name.length }
             return total
         }
     }

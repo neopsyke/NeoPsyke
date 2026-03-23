@@ -3,6 +3,7 @@ package ai.neopsyke.agent.model
 import ai.neopsyke.agent.actions.async.AsyncActionWait
 import ai.neopsyke.agent.id.ConvergenceMode
 import ai.neopsyke.agent.goal.GoalRunActivation
+import java.util.UUID
 
 /**
  * Snapshot of the Id's drive state, injected into [PlannerContext] when the
@@ -76,6 +77,7 @@ data class PlannerContext(
     val deliberation: DeliberationState = DeliberationState(),
     val metaGuidance: String = "",
     val conversationSecuritySummary: String = "",
+    val threadSecuritySummary: String = "",
     val triggerProvenanceSummary: String = "",
     val availableActions: Set<ActionType> = ActionType.entries.toSet(),
     val dispatchableActions: Set<ActionType> = availableActions,
@@ -104,6 +106,8 @@ data class SuperegoContext(
     val shortTermContextSummary: String = "",
     val origin: ActionOrigin? = null,
     val conversationContext: ConversationContext = ConversationContext.default(),
+    val threadSecurityContext: CognitiveThreadSecurityContext =
+        CognitiveThreadSecurityContext.fromConversation(ConversationContext.default().security),
 )
 
 sealed interface EgoTrigger {
@@ -165,12 +169,37 @@ data class ActionOutcome(
     val actionErrorCategory: String? = null,
     val fetchErrorCategory: String? = null,
     val asyncWait: AsyncActionWait? = null,
+    val resultArtifacts: List<ExternalContentArtifact> = emptyList(),
 ) {
     val successful: Boolean
         get() = executionStatus == ActionExecutionStatus.SUCCESS
 
     val waiting: Boolean
         get() = executionStatus == ActionExecutionStatus.WAITING || asyncWait != null
+}
+
+data class ExternalContentArtifact(
+    val id: String = UUID.randomUUID().toString(),
+    val content: String,
+    val provenance: Provenance,
+) {
+    val dataTrust: DataTrust
+        get() = provenance.dataTrust
+
+    fun taintSourceSummary(): String =
+        buildString {
+            append(provenance.source.provider)
+            append("/")
+            append(provenance.source.objectType)
+            provenance.source.part?.takeIf { it.isNotBlank() }?.let {
+                append(":")
+                append(it)
+            }
+            provenance.source.sourceRef?.takeIf { it.isNotBlank() }?.let {
+                append("#")
+                append(it)
+            }
+        }
 }
 
 data class DeliberationState(

@@ -169,6 +169,7 @@ internal class DecisionDispatcher(
                     rootInputId = rootInputId,
                     rootInputReceivedAtMs = rootInputReceivedAtMs,
                     conversationContext = conversationContext,
+                    argumentDataTrust = deliberation.threadSecurityContext(rootInputId, conversationContext).aggregatedDataTrust,
                     origin = origin,
                 )
                 instrumentation.emit(
