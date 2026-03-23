@@ -247,12 +247,13 @@ flowchart LR
     B -->|memory=off| C["NoopHippocampus (memory unavailable)"]
     B -->|memory=default| D["Check managed HTTP provider health"]
     D -->|healthy| E["Provider-backed Hippocampus enabled"]
-    D -->|unhealthy| F["Start provider command and wait for /v1/health"]
+    D -->|unhealthy| F["Install managed provider artifact if needed,\nstart provider command, wait for /v1/health"]
     F -->|pass| E
     F -->|fail| C
     B -->|memory=external| X["Check external HTTP provider health"]
     X -->|healthy| E
     X -->|unhealthy/unsupported| C
+    E --> Z["Register managed closeables with JVM shutdown hook\nso Ctrl-C / SIGTERM also closes the provider process"]
     E --> H["Emit action_capabilities(memory=available)"]
     C --> G["Emit action_capabilities(memory=unavailable + warning)"]
 ```

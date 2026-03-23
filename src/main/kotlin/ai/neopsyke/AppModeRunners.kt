@@ -16,6 +16,7 @@ import ai.neopsyke.agent.ego.LlmMetaReasoner
 import ai.neopsyke.agent.ego.NoopScratchpadFinalizer
 import ai.neopsyke.agent.memory.longterm.LlmLongTermMemoryAdvisor
 import ai.neopsyke.agent.memory.provider.HttpMemoryProviderClient
+import ai.neopsyke.agent.memory.provider.DefaultMemoryProviderInstaller
 import ai.neopsyke.agent.memory.provider.ManagedHttpMemoryProviderProcess
 import ai.neopsyke.agent.memory.provider.ProviderBackedHippocampus
 import ai.neopsyke.agent.tools.mcp.McpStdioClient
@@ -116,6 +117,8 @@ import ai.neopsyke.agent.tools.mcp.ToolHealthStatus
 import kotlin.system.exitProcess
 import java.net.InetSocketAddress
 import java.util.concurrent.Executors
+import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.atomic.AtomicBoolean
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
@@ -284,6 +287,9 @@ internal object AppModeRunners {
             return
         }
     
+        val shutdownGuard = ShutdownCloseGuard("memory-live").apply {
+            register(hippocampus)
+        }
         val sidecarPath = resolveEvalEventSidecarPath()
         val sidecarSink = if (sidecarPath == null) {
             null
@@ -302,6 +308,7 @@ internal object AppModeRunners {
         )
         val evalRawResponseCharLimit = runtimeSettings.evalMaxRawResponseChars
         val evalScope = agentScope("neopsyke-memory-eval")
+        try {
         InstrumentationBus(
             sinks = sinks,
             criticalSinks = listOfNotNull(sidecarSink),
@@ -355,7 +362,7 @@ internal object AppModeRunners {
                             hippocampus = activeHippocampus,
                             tasks = MemoryLiveEvalTasks.defaults(),
                             instrumentation = instrumentation
-                        ).run(
+                ).run(
                             MemoryLiveEvalOptions(
                                 stage = stage,
                                 taskFilter = cliOptions.evalMemoryTaskFilter,
@@ -370,6 +377,9 @@ internal object AppModeRunners {
                     }
                 }
             }
+        }
+        } finally {
+            shutdownGuard.close()
         }
     }
     
@@ -917,7 +927,6 @@ internal object AppModeRunners {
                                             webSearchRuntime.use { runtime ->
                                                 val timeTool = mcpTimeTool
                                                 val activeFetchTool = fetchTool
-                                                try {
                                                     val earlyMemoryStartup =
                                                         resolveInteractiveMemoryStartup(config, memoryRuntimeConfig)
                                                     val hippocampus = earlyMemoryStartup.hippocampus
@@ -1071,6 +1080,12 @@ internal object AppModeRunners {
                                                                 instrumentation = instrumentation
                                                             )
                                                         }
+                                                        val shutdownGuard = ShutdownCloseGuard("interactive-runtime").apply {
+                                                            register(hippocampus)
+                                                            register(logbook)
+                                                            register(activeFetchTool)
+                                                            register(timeTool)
+                                                        }
                                                         val idConfig = ai.neopsyke.config.IdRuntimeConfigLoader.load()
                                                         val idModule = if (idConfig.enabled) {
                                                            ai.neopsyke.agent.id.Id(
@@ -1085,6 +1100,7 @@ internal object AppModeRunners {
                                                             ).also { id ->
                                                                 ego.setId(id)
                                                                 id.start()
+                                                                shutdownGuard.register(id)
                                                             }
                                                         } else {
                                                             null
@@ -1092,19 +1108,13 @@ internal object AppModeRunners {
                                                         try {
                                                             ego.runInteractive()
                                                         } finally {
-                                                            idModule?.close()
-                                                            hippocampus.close()
-                                                            closeQuietly(logbook)
+                                                            shutdownGuard.close()
                                                         }
                                                         } } finally {
                                                             goalManager?.stop()
                                                             egoDispatcher.close()
                                                         }
                                                     }
-                                                } finally {
-                                                    closeQuietly(activeFetchTool)
-                                                    closeQuietly(timeTool)
-                                                }
                                             }
                                         } finally {
                                             superegoEscalationClient?.close()
@@ -1372,7 +1382,6 @@ internal object AppModeRunners {
                                         webSearchRuntime.use { runtime ->
                                             val timeTool = mcpTimeTool
                                             val activeFetchTool = fetchTool
-                                            try {
                                                 val earlyMemoryStartup2 =
                                                     resolveInteractiveMemoryStartup(config, memoryRuntimeConfig)
                                                 val hippocampus = earlyMemoryStartup2.hippocampus
@@ -1470,6 +1479,12 @@ internal object AppModeRunners {
                                                     val registry = assembled.actionRegistry
                                                     val motorCortex = assembled.motorCortex
                                                     val ego = assembled.ego
+                                                    val shutdownGuard = ShutdownCloseGuard("freud-live-runtime").apply {
+                                                        register(hippocampus)
+                                                        register(logbook)
+                                                        register(activeFetchTool)
+                                                        register(timeTool)
+                                                    }
                                                     val actionStatuses = motorCortex.startupSmokeTest()
                                                     instrumentation.emit(AgentEvents.actionCapabilities(actionStatuses))
                                                     instrumentation.emit(
@@ -1526,8 +1541,7 @@ internal object AppModeRunners {
                                                         }
                                                     } finally {
                                                         watchdog.cancel()
-                                                        hippocampus.close()
-                                                        closeQuietly(logbook)
+                                                        shutdownGuard.close()
                                                     }
 
                                                     val exitCode = when {
@@ -1549,10 +1563,6 @@ internal object AppModeRunners {
                                                         egoDispatcher.close()
                                                     }
                                                 }
-                                            } finally {
-                                                closeQuietly(activeFetchTool)
-                                                closeQuietly(timeTool)
-                                            }
                                         }
                                     } finally {
                                         superegoEscalationClient?.close()
@@ -1916,6 +1926,7 @@ internal object AppModeRunners {
         val managedProcess = if (isHttpMemoryProviderHealthy(baseUrl, provider.healthTimeoutMs)) {
             null
         } else {
+            DefaultMemoryProviderInstaller().ensureInstalled(provider)
             val command = resolveProviderCommand(provider.command)
                 ?: throw IllegalStateException("Default memory provider command is unavailable: ${provider.command}")
             ManagedHttpMemoryProviderProcess(
@@ -2197,6 +2208,52 @@ internal object AppModeRunners {
             closeable.close()
         } catch (_: Exception) {
             // ignore best-effort shutdown
+        }
+    }
+
+    // Ensure managed resources are closed on JVM shutdown (Ctrl-C / SIGTERM) as well as normal flow.
+    internal class ShutdownCloseGuard(
+        threadLabel: String,
+    ) : AutoCloseable {
+        private val closed = AtomicBoolean(false)
+        private val resources = CopyOnWriteArrayList<AutoCloseable>()
+        private val hook = Thread(
+            { closeInternal(removeHook = false) },
+            "neopsyke-$threadLabel-shutdown"
+        )
+
+        init {
+            Runtime.getRuntime().addShutdownHook(hook)
+        }
+
+        fun register(value: Any?) {
+            val closeable = value as? AutoCloseable ?: return
+            if (closed.get()) {
+                closeQuietly(closeable)
+                return
+            }
+            resources.add(closeable)
+            if (closed.get() && resources.remove(closeable)) {
+                closeQuietly(closeable)
+            }
+        }
+
+        override fun close() {
+            closeInternal(removeHook = true)
+        }
+
+        private fun closeInternal(removeHook: Boolean) {
+            if (!closed.compareAndSet(false, true)) return
+            if (removeHook) {
+                try {
+                    Runtime.getRuntime().removeShutdownHook(hook)
+                } catch (_: IllegalStateException) {
+                    // JVM shutdown already in progress; let the active hook own cleanup.
+                }
+            }
+            val snapshot = resources.toList().asReversed()
+            resources.clear()
+            snapshot.forEach(::closeQuietly)
         }
     }
 

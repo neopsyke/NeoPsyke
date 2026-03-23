@@ -170,8 +170,11 @@ Standalone Kotlin JVM app using Gradle with:
   - `MCP_TIME_PROVIDER` / `WEBSITE_FETCH_PROVIDER` (optional env override for YAML provider)
   - `MCP_TIME_ENABLED` / `WEBSITE_FETCH_ENABLED` (optional env override for YAML enabled flag)
   - `NEOPSYKE_MEMORY_MODE` (`off|default|external`)
-- `NEOPSYKE_MEMORY_DEFAULT_COMMAND` (optional override for managed default provider command)
+  - `NEOPSYKE_MEMORY_DEFAULT_COMMAND` (optional override for managed default provider command)
   - `NEOPSYKE_MEMORY_DEFAULT_BASE_URL` (optional override for managed default provider base URL)
+  - `NEOPSYKE_MEMORY_DEFAULT_BOOTSTRAP_ENABLED` (default: `true`)
+  - `NEOPSYKE_MEMORY_DEFAULT_RELEASE_API_URL` (default: provider GitHub release API URL for `v0.1.0`)
+  - `NEOPSYKE_MEMORY_DEFAULT_DOWNLOAD_TIMEOUT_MS` (default: `30000`)
 - `NEOPSYKE_MEMORY_EXTERNAL_PROVIDER` / `NEOPSYKE_MEMORY_EXTERNAL_TRANSPORT` / `NEOPSYKE_MEMORY_EXTERNAL_BASE_URL` (advanced external provider wiring; `transport=http` supported in v1)
   - External HTTP providers must implement NeoPsyke's versioned `v1` contract (`/v1/health`, `/v1/metrics`, `/v1/recall`, `/v1/imprint`, `/v1/admin/forget`, `/v1/admin/reset`).
   - `MISTRAL_WEBSEARCH_AGENT_ID` (optional when `web_search.provider=mistral`; if omitted, NeoPsyke creates an ephemeral Mistral web-search agent per run)
@@ -210,7 +213,6 @@ Standalone Kotlin JVM app using Gradle with:
   - `EGO_LONG_TERM_MEMORY_RECALL_ECHO_MIN_TOKEN_LENGTH` (default: `3`)
   - `EGO_LONG_TERM_MEMORY_RECALL_ECHO_MIN_TOKEN_COUNT` (default: `4`)
   - `EGO_LONG_TERM_MEMORY_RECALL_ECHO_TOKEN_OVERLAP_THRESHOLD` (default: `0.85`)
-  - `NEOPSYKE_AUTO_START_PGVECTOR` (optional; when `true`, launcher runs `docker compose up -d pgvector` if needed)
   - `MEMORY_DEFAULT_NAMESPACE` (optional; long-term memory namespace/tenant default, launcher defaults to `neopsyke`)
   - `MEMORY_SEMANTIC_DEDUPE_SIMILARITY_THRESHOLD` (memory provider; default: `0.93`)
   - `MEMORY_SEMANTIC_DEDUPE_MIN_CONFIDENCE` (memory provider; default: `0.65`)
@@ -332,7 +334,7 @@ Freud reasoning lane notes:
 Memory live eval (real-world, no mocks):
 ```bash
 export GROQ_API_KEY=your_token
-# either configure memory-runtime.yaml (preferred) or override here:
+# either configure memory-runtime.yaml (preferred) or override the managed provider command here:
 export NEOPSYKE_MEMORY_MODE=default
 export NEOPSYKE_MEMORY_DEFAULT_COMMAND='java -jar .neopsyke/providers/neopsyke-pgvector-memory/current/neopsyke-pgvector-memory-all.jar --transport=http --port=7841'
 ./run-neopsyke.sh --eval-memory-live
@@ -352,15 +354,10 @@ Memory live eval output:
 - Tags each saved item with a unique run session marker to reduce cross-run collision.
 - Main run log focuses on memory eval flow (`[eval.memory] ...`).
 
-Manual DB-backed memory provider eval (not part of default `test`):
-```bash
-# uses live PostgreSQL/pgvector configured via PGVECTOR_DB_* env vars
-./gradlew :neopsyke-pgvector-memory:memoryDbEval
-```
-This eval verifies:
-- semantic dedupe (`write_mode=dedupe_if_similar`)
-- fact upsert supersession (`write_mode=upsert_fact`)
-- namespace isolation (no cross-tenant mixing)
+Manual DB-backed provider evals now live in the external provider repo:
+
+- source of truth: `https://github.com/neopsyke/neopsyke-pgvector-memory`
+- run them there, not from the NeoPsyke monorepo
 
 Set a specific log level via parameter:
 ```bash
@@ -377,15 +374,15 @@ Notes:
 - After bootstrap, execution is direct (`build/install/neopsyke/bin/neopsyke`) without `gradle run`.
 - You do not run the default memory provider separately if `memory-runtime.yaml` (or `NEOPSYKE_MEMORY_*` overrides) is set correctly; NeoPsyke launches the managed provider on demand for `memory=default`.
 - The default managed provider command now points at the standalone install location under `.neopsyke/providers/neopsyke-pgvector-memory/current/`.
-- Until the default provider bootstrap/download flow is implemented, local development may still need an explicit `NEOPSYKE_MEMORY_DEFAULT_COMMAND` override or a manually installed provider artifact at that path.
+- NeoPsyke bootstraps the managed provider from the published GitHub release API before first launch when the jar is missing or stale.
+- The managed provider then owns Docker-backed pgvector startup internally; NeoPsyke no longer provisions PostgreSQL itself.
+- When NeoPsyke starts the managed provider itself, it also registers that process for JVM shutdown cleanup so normal shutdown and `Ctrl-C` stop the provider automatically.
 - Default log level in `run-neopsyke.sh` is `warning`.
 - Launcher logs are written to per-run files in `.neopsyke/logs/runs/`.
 - `.neopsyke/logs/latest.log` always points to the newest run log.
 - `.neopsyke/logs/latest-events.jsonl` always points to the newest event sidecar.
 - `.neopsyke/logs/latest-run.env` stores `NEOPSYKE_LOG_RUN_ID`, `NEOPSYKE_LOG_FILE`, `NEOPSYKE_EVENT_LOG_FILE`, and start time for the current run.
 - Old run logs are auto-pruned; retention defaults to 30 files (`NEOPSYKE_LOG_RETENTION`).
-- If pgvector is not running, launcher prints a startup tip: `docker compose up -d pgvector`.
-- Set `NEOPSYKE_AUTO_START_PGVECTOR=true` to auto-start pgvector from the launcher when required.
 - Launcher sets `MEMORY_DEFAULT_NAMESPACE=neopsyke` unless already set, so NeoPsyke memory stays isolated by default.
 - Memory MCP write tools support `write_mode`: `append`, `dedupe_if_similar`, `upsert_fact`.
 - `upsert_fact` supports `fact_subject`, `fact_key`, `fact_value`, `fact_versioned_at` and keeps only one active value per `(namespace, subject, key)`.

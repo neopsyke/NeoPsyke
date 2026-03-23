@@ -41,12 +41,13 @@ It is intentionally high-level and should stay aligned with the code.
   - `Ego` orchestrator
 - Interactive startup now resolves memory from `memory-runtime.yaml` and performs a provider health/startup check before enabling long-term vector memory:
   - `memory=off` wires `NoopHippocampus`
-  - `memory=default` uses the managed `neopsyke-pgvector-memory` provider over HTTP
+  - `memory=default` bootstraps the managed `neopsyke-pgvector-memory` artifact and uses it over HTTP
   - `memory=external` uses the same HTTP provider contract against an explicitly configured external provider
   - if the configured provider is already healthy, NeoPsyke reuses it
-  - if not, NeoPsyke starts the configured provider command and waits for `/v1/health`
+  - if not, NeoPsyke installs the managed provider artifact if needed, starts the configured provider command, and waits for `/v1/health`
   - `memory=external` never auto-starts a provider process; it requires a reachable external HTTP endpoint
   - if startup or health checks fail, memory is downgraded to noop for the run and reported unavailable
+  - managed closeables, including the default memory provider process when NeoPsyke started it, are also registered with a JVM shutdown hook so `Ctrl-C` / `SIGTERM` runs the same cleanup path as normal shutdown
 - Interactive startup runs LLM provider health probes per configured cognitive role endpoint:
   - probes use normalized URL joining (`base_url` + `/models`) so trailing slashes do not produce `//models`
   - for Google `v1beta/openai` routes, an `HTTP 404` probe on `/openai/models` falls back to native `/v1beta/models` before reporting status

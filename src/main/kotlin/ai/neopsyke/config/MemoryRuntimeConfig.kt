@@ -34,6 +34,9 @@ data class DefaultMemoryProviderConfig(
         "java -jar .neopsyke/providers/neopsyke-pgvector-memory/current/neopsyke-pgvector-memory-all.jar --transport=http --port=7841",
     val startupTimeoutMs: Long = 12_000,
     val healthTimeoutMs: Long = 3_000,
+    val bootstrapEnabled: Boolean = true,
+    val releaseApiUrl: String = "https://api.github.com/repos/neopsyke/neopsyke-pgvector-memory/releases/tags/v0.1.0",
+    val downloadTimeoutMs: Long = 30_000,
     val namespace: String = "neopsyke",
 )
 
@@ -99,6 +102,12 @@ object MemoryRuntimeConfigLoader {
                     ?: defaultProvider.startupTimeoutMs,
                 healthTimeoutMs = env["NEOPSYKE_MEMORY_DEFAULT_HEALTH_TIMEOUT_MS"]?.trim()?.toLongOrNull()
                     ?: defaultProvider.healthTimeoutMs,
+                bootstrapEnabled = env["NEOPSYKE_MEMORY_DEFAULT_BOOTSTRAP_ENABLED"]?.trim()?.toBooleanStrictOrNull()
+                    ?: defaultProvider.bootstrapEnabled,
+                releaseApiUrl = env["NEOPSYKE_MEMORY_DEFAULT_RELEASE_API_URL"]?.trim().orEmpty().ifBlank { null }
+                    ?: defaultProvider.releaseApiUrl,
+                downloadTimeoutMs = env["NEOPSYKE_MEMORY_DEFAULT_DOWNLOAD_TIMEOUT_MS"]?.trim()?.toLongOrNull()
+                    ?: defaultProvider.downloadTimeoutMs,
                 namespace = namespaceOverride ?: defaultProvider.namespace,
             ),
             externalProvider = externalProvider.copy(

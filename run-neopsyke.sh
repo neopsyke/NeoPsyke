@@ -13,7 +13,6 @@ GOALS_OVERRIDE=""
 LOOP_DELAY_MS="${EGO_LOOP_DELAY_MS:-1000}"
 LOG_DIR="${NEOPSYKE_LOG_DIR:-$ROOT_DIR/.neopsyke/logs}"
 LOG_RETENTION="${NEOPSYKE_LOG_RETENTION:-30}"
-AUTO_START_PGVECTOR="${NEOPSYKE_AUTO_START_PGVECTOR:-false}"
 APP_ARGS=()
 
 log_info() {
@@ -26,40 +25,6 @@ log_info() {
 
 log_error() {
   printf '%s\n' "$*" >&2
-}
-
-is_pgvector_running() {
-  if ! command -v docker >/dev/null 2>&1; then
-    return 1
-  fi
-  if [[ ! -f "$ROOT_DIR/docker-compose.yml" ]]; then
-    return 1
-  fi
-  docker compose ps --status running --services 2>/dev/null | grep -qx "pgvector"
-}
-
-maybe_start_pgvector() {
-  if [[ "$AUTO_START_PGVECTOR" != "true" ]]; then
-    if ! is_pgvector_running; then
-      log_info "Tip: pgvector is not running. Start it with: docker compose up -d pgvector"
-    fi
-    return
-  fi
-  if is_pgvector_running; then
-    return
-  fi
-  if ! command -v docker >/dev/null 2>&1; then
-    log_error "NEOPSYKE_AUTO_START_PGVECTOR=true but docker is not available in PATH."
-    return
-  fi
-  if [[ ! -f "$ROOT_DIR/docker-compose.yml" ]]; then
-    log_error "NEOPSYKE_AUTO_START_PGVECTOR=true but docker-compose.yml is missing at $ROOT_DIR."
-    return
-  fi
-  log_info "Starting pgvector service via docker compose..."
-  if ! docker compose up -d pgvector; then
-    log_error "Failed to start pgvector automatically. Run: docker compose up -d pgvector"
-  fi
 }
 
 if [[ -n "${NEOPSYKE_LOG_LEVEL:-}" ]]; then
@@ -177,10 +142,12 @@ Environment:
   NEOPSYKE_LOG_LEVEL         Default log level if --log-level is not provided
   NEOPSYKE_LOG_DIR           Directory for run logs (default: .neopsyke/logs)
   NEOPSYKE_LOG_RETENTION     Number of run log files to keep (default: 30)
-  NEOPSYKE_AUTO_START_PGVECTOR  When true, launcher runs 'docker compose up -d pgvector' if needed
   NEOPSYKE_MEMORY_MODE         Memory mode: off, default, external
   NEOPSYKE_MEMORY_DEFAULT_COMMAND  Optional override for managed default provider command
   NEOPSYKE_MEMORY_DEFAULT_BASE_URL Optional override for managed default provider base URL
+  NEOPSYKE_MEMORY_DEFAULT_BOOTSTRAP_ENABLED  Enable/disable default provider artifact bootstrap (default: true)
+  NEOPSYKE_MEMORY_DEFAULT_RELEASE_API_URL  Override the GitHub release API URL used for the managed provider
+  NEOPSYKE_MEMORY_DEFAULT_DOWNLOAD_TIMEOUT_MS  Download timeout for managed provider bootstrap
   NEOPSYKE_MEMORY_EXTERNAL_PROVIDER Optional label for an external HTTP memory provider
   NEOPSYKE_MEMORY_EXTERNAL_TRANSPORT External provider transport (v1 supports only http)
   NEOPSYKE_MEMORY_EXTERNAL_BASE_URL Base URL for external HTTP memory provider
@@ -317,9 +284,6 @@ if [[ "$NEEDS_BUILD" -eq 1 ]]; then
   log_info "Building local app distribution..."
   "$ROOT_DIR/gradlew" --no-daemon --no-problems-report installDist
 fi
-
-maybe_start_pgvector
-
 log_info "NeoPsyke logs for this run: $RUN_LOG_FILE"
 log_info "NeoPsyke event sidecar for this run: $RUN_EVENT_FILE"
 log_info "Latest run log pointer: $LOG_DIR/latest.log"

@@ -4,11 +4,13 @@ defaultProvider:
   provider: neopsyke-pgvector-memory
   transport: http
   baseUrl: http://127.0.0.1:7841
-  # Expected standalone install location. Until default bootstrap/download exists,
-  # local dev can override this with NEOPSYKE_MEMORY_DEFAULT_COMMAND.
+  # NeoPsyke bootstraps the published provider artifact into this location by default.
   command: "java -jar .neopsyke/providers/neopsyke-pgvector-memory/current/neopsyke-pgvector-memory-all.jar --transport=http --port=7841"
   startupTimeoutMs: 12000
   healthTimeoutMs: 3000
+  bootstrapEnabled: true
+  releaseApiUrl: https://api.github.com/repos/neopsyke/neopsyke-pgvector-memory/releases/tags/v0.1.0
+  downloadTimeoutMs: 30000
   namespace: neopsyke
 
 externalProvider:

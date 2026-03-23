@@ -12,7 +12,6 @@ services:
       - "5432:5432"
     volumes:
       - pgvector-data:/var/lib/postgresql/data
-      - ./neopsyke-pgvector-memory/docker/init.sql:/docker-entrypoint-initdb.d/01-init.sql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U neopsyke -d neopsyke_memory"]
       interval: 5s

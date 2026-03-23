@@ -20,6 +20,12 @@ class MemoryRuntimeConfigLoaderTest {
             "java -jar .neopsyke/providers/neopsyke-pgvector-memory/current/neopsyke-pgvector-memory-all.jar --transport=http --port=7841",
             config.defaultProvider.command
         )
+        assertEquals(true, config.defaultProvider.bootstrapEnabled)
+        assertEquals(
+            "https://api.github.com/repos/neopsyke/neopsyke-pgvector-memory/releases/tags/v0.1.0",
+            config.defaultProvider.releaseApiUrl
+        )
+        assertEquals(30_000L, config.defaultProvider.downloadTimeoutMs)
         assertEquals("neopsyke", config.defaultProvider.namespace)
     }
 
@@ -38,6 +44,9 @@ class MemoryRuntimeConfigLoaderTest {
               command: "provider-a --serve"
               startupTimeoutMs: 1000
               healthTimeoutMs: 2000
+              bootstrapEnabled: false
+              releaseApiUrl: https://api.example/releases/tags/v9.9.9
+              downloadTimeoutMs: 9000
               namespace: local
             externalProvider:
               provider: mem0
@@ -55,6 +64,9 @@ class MemoryRuntimeConfigLoaderTest {
         assertEquals(MemoryMode.EXTERNAL, config.mode)
         assertEquals("provider-a", config.defaultProvider.provider)
         assertEquals("http://127.0.0.1:9001", config.defaultProvider.baseUrl)
+        assertEquals(false, config.defaultProvider.bootstrapEnabled)
+        assertEquals("https://api.example/releases/tags/v9.9.9", config.defaultProvider.releaseApiUrl)
+        assertEquals(9_000L, config.defaultProvider.downloadTimeoutMs)
         assertEquals("mem0", config.externalProvider.provider)
         assertEquals("https://mem.example", config.externalProvider.baseUrl)
     }
@@ -90,6 +102,9 @@ class MemoryRuntimeConfigLoaderTest {
                 "NEOPSYKE_MEMORY_DEFAULT_TRANSPORT" to "http",
                 "NEOPSYKE_MEMORY_DEFAULT_BASE_URL" to "http://127.0.0.1:8123",
                 "NEOPSYKE_MEMORY_DEFAULT_COMMAND" to "env-provider --serve",
+                "NEOPSYKE_MEMORY_DEFAULT_BOOTSTRAP_ENABLED" to "false",
+                "NEOPSYKE_MEMORY_DEFAULT_RELEASE_API_URL" to "https://api.example/releases/latest",
+                "NEOPSYKE_MEMORY_DEFAULT_DOWNLOAD_TIMEOUT_MS" to "18000",
                 "MEMORY_DEFAULT_NAMESPACE" to "freud-eval"
             ),
             defaultPath = yamlPath
@@ -99,6 +114,9 @@ class MemoryRuntimeConfigLoaderTest {
         assertEquals("env-provider", config.defaultProvider.provider)
         assertEquals("http://127.0.0.1:8123", config.defaultProvider.baseUrl)
         assertEquals("env-provider --serve", config.defaultProvider.command)
+        assertEquals(false, config.defaultProvider.bootstrapEnabled)
+        assertEquals("https://api.example/releases/latest", config.defaultProvider.releaseApiUrl)
+        assertEquals(18_000L, config.defaultProvider.downloadTimeoutMs)
         assertEquals("freud-eval", config.defaultProvider.namespace)
     }
 
