@@ -51,6 +51,8 @@ interface ActionControlService {
         grantedBy: ConversationSecurityContext,
     ): ActionControlDecisionResult
 
+    suspend fun processAutonomousStagedActions(limit: Int = 10): List<ActionControlDecisionResult.Executed>
+
     fun stagedActions(limit: Int): List<StagedAction>
     fun stagedAction(id: String): StagedAction?
     fun receipts(limit: Int): List<ActionReceipt>
@@ -76,6 +78,8 @@ object NoopActionControlService : ActionControlService {
             reason = "Action control is not configured.",
             reasonCode = "ACTION_CONTROL_UNAVAILABLE",
         )
+
+    override suspend fun processAutonomousStagedActions(limit: Int): List<ActionControlDecisionResult.Executed> = emptyList()
 
     override fun stagedActions(limit: Int): List<StagedAction> = emptyList()
     override fun stagedAction(id: String): StagedAction? = null
@@ -119,7 +123,11 @@ class LegacyCompatibleActionControlService(
                     },
                     origin = action.origin,
                     commitMode = decision.commitMode,
-                    status = StagedActionStatus.WAITING_AUTHORIZATION,
+                    status = if (decision.commitMode == CommitMode.POLICY_AUTONOMOUS) {
+                        StagedActionStatus.READY
+                    } else {
+                        StagedActionStatus.WAITING_AUTHORIZATION
+                    },
                     actionHash = nextId(),
                     statusReason = decision.reason,
                     statusReasonCode = decision.reasonCode,
@@ -197,6 +205,8 @@ class LegacyCompatibleActionControlService(
             reasonCode = "LEGACY_ACTION_CONTROL_NO_PERSISTENCE",
         )
 
+    override suspend fun processAutonomousStagedActions(limit: Int): List<ActionControlDecisionResult.Executed> = emptyList()
+
     override fun stagedActions(limit: Int): List<StagedAction> = emptyList()
     override fun stagedAction(id: String): StagedAction? = null
     override fun receipts(limit: Int): List<ActionReceipt> = emptyList()
@@ -235,6 +245,8 @@ class DefaultActionControlService(
                 commitMode = decision.commitMode,
                 status = if (decision.progress == AuthorizationProgress.ALLOW_COMMIT) {
                     StagedActionStatus.AUTHORIZED
+                } else if (decision.commitMode == CommitMode.POLICY_AUTONOMOUS) {
+                    StagedActionStatus.READY
                 } else {
                     StagedActionStatus.WAITING_AUTHORIZATION
                 },
@@ -302,6 +314,34 @@ class DefaultActionControlService(
             )
         )
         return executeAuthorized(staged, authorization)
+    }
+
+    override suspend fun processAutonomousStagedActions(limit: Int): List<ActionControlDecisionResult.Executed> {
+        val readyActions = store.listStagedActions(limit.coerceAtLeast(1).coerceAtMost(config.maxInspectResults))
+            .filter { staged ->
+                staged.status == StagedActionStatus.READY &&
+                    staged.commitMode == CommitMode.POLICY_AUTONOMOUS
+            }
+        return buildList {
+            readyActions.forEach { staged ->
+                val authorization = store.saveAuthorization(
+                    CommitAuthorization(
+                        id = nextId(),
+                        stagedActionId = staged.id,
+                        commitMode = CommitMode.POLICY_AUTONOMOUS,
+                        grantedByPrincipalId = AUTONOMOUS_WORKER_PRINCIPAL_ID,
+                        grantedByChannelId = AUTONOMOUS_WORKER_CHANNEL_ID,
+                        policyVersion = staged.policyVersion,
+                        actionHash = staged.actionHash,
+                        expiresAtMs = System.currentTimeMillis() + config.authorizationTtlMs,
+                    )
+                )
+                when (val result = executeAuthorized(staged, authorization)) {
+                    is ActionControlDecisionResult.Executed -> add(result)
+                    else -> Unit
+                }
+            }
+        }
     }
 
     override fun stagedActions(limit: Int): List<StagedAction> =
@@ -433,4 +473,9 @@ class DefaultActionControlService(
     }
 
     private fun nextId(): String = UUID.randomUUID().toString()
+
+    private companion object {
+        const val AUTONOMOUS_WORKER_PRINCIPAL_ID: String = "policy-autonomous-worker"
+        const val AUTONOMOUS_WORKER_CHANNEL_ID: String = "action-control-worker"
+    }
 }

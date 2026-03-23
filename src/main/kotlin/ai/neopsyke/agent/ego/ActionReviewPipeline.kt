@@ -96,6 +96,21 @@ internal class ActionReviewPipeline(
             }
 
             is ActionControlDecisionResult.Staged -> {
+                if (controlResult.stagedAction.commitMode == CommitMode.POLICY_AUTONOMOUS) {
+                    val autonomousExecution = actionControlService.processAutonomousStagedActions(limit = 1)
+                        .firstOrNull { it.stagedAction.id == controlResult.stagedAction.id }
+                    if (autonomousExecution != null) {
+                        timing.startPhase("action_execute")
+                        processExecutedAction(
+                            resolvedAction = resolvedAction,
+                            outcome = autonomousExecution.outcome,
+                            sessionId = sessionId,
+                            convCtx = convCtx,
+                            timing = timing
+                        )
+                        return
+                    }
+                }
                 instrumentation.emit(
                     AgentEvent(
                         type = "action_staged",

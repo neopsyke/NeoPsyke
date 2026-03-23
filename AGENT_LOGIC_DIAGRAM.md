@@ -185,7 +185,7 @@ sequenceDiagram
                             Ego->>ACS: stage / authorize / commit
                             alt stage required
                                 ACS->>ACDB: save staged action
-                                ACS-->>Ego: staged action + approval required
+                                ACS-->>Ego: staged action (`WAITING_AUTHORIZATION` or `READY`)
                                 Ego->>Sched: enqueue approval-or-alternative thought
                             else direct commit allowed
                                 ACS->>ACDB: save staged action + authorization
