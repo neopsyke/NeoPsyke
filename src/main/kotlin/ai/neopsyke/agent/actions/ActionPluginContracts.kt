@@ -127,6 +127,8 @@ data class ActionPluginFactoryContext(
     val fetchTool: FetchTool?,
     val output: (String) -> Unit,
     val env: Map<String, String> = System.getenv(),
+    val secretProvider: ActionSecretProvider = EnvActionSecretProvider(env),
+    val connectorRuntime: ConnectorRuntimeBoundary = ConnectorRuntimeBoundary.firstPartyBuiltin(),
     val reflectionMemoryRecorder: ReflectionMemoryRecorder,
     val goalsGateway: GoalsGateway = NoopGoalsGateway,
 )

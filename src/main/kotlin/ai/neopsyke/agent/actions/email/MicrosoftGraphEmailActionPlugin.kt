@@ -19,6 +19,7 @@ import ai.neopsyke.agent.actions.ActionPluginFactoryContext
 import ai.neopsyke.agent.actions.ActionPluginHealth
 import ai.neopsyke.agent.actions.AgentActionPlugin
 import ai.neopsyke.agent.actions.AgentActionPluginFactory
+import ai.neopsyke.agent.actions.SecretHandle
 import ai.neopsyke.agent.model.ActionEffect
 import ai.neopsyke.agent.model.ActionEffectClass
 import ai.neopsyke.agent.model.ActionExecutionStatus
@@ -358,7 +359,18 @@ class MicrosoftGraphEmailActionPlugin(
         val message: String,
     )
 
-    private companion object {
+    companion object {
+        val requiredSecretHandles: Set<SecretHandle> = setOf(
+            SecretHandle("MS_GRAPH_EMAIL_ENABLED"),
+            SecretHandle("MS_GRAPH_TENANT_ID"),
+            SecretHandle("MS_GRAPH_CLIENT_ID"),
+            SecretHandle("MS_GRAPH_CLIENT_SECRET"),
+            SecretHandle("MS_GRAPH_SCOPE"),
+            SecretHandle("MS_GRAPH_DEFAULT_SENDER"),
+            SecretHandle("MS_GRAPH_ALLOWED_RECIPIENT_DOMAINS"),
+            SecretHandle("MS_GRAPH_AUTH_BASE_URL"),
+            SecretHandle("MS_GRAPH_BASE_URL"),
+        )
         private const val DEFAULT_TIMEOUT_SEC: Long = 20
         private val mapper = jacksonObjectMapper()
             .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
@@ -368,5 +380,7 @@ class MicrosoftGraphEmailActionPlugin(
 
 class MicrosoftGraphEmailActionPluginFactory : AgentActionPluginFactory {
     override fun create(context: ActionPluginFactoryContext): AgentActionPlugin =
-        MicrosoftGraphEmailActionPlugin(env = context.env)
+        MicrosoftGraphEmailActionPlugin(
+            env = context.secretProvider.materialize(MicrosoftGraphEmailActionPlugin.requiredSecretHandles)
+        )
 }
