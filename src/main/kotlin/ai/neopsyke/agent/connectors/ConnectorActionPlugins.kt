@@ -176,6 +176,11 @@ object ConnectorActionPluginLoader {
         val warnings = mutableListOf<String>()
         warnings += catalogResult.warnings
         warnings += stateResult.warnings
+        val allowedConnectorIds = resolveAllowedConnectorIds(
+            catalog = catalogResult.catalog,
+            config = config,
+            warnings = warnings,
+        )
 
         val hosts = linkedMapOf<String, SharedConnectorHost>()
         val plugins = mutableListOf<AgentActionPlugin>()
@@ -185,8 +190,8 @@ object ConnectorActionPluginLoader {
                 if (!state.enabled) {
                     return@forEach
                 }
-                if (config.connectors.allowedConnectorIds.isNotEmpty() &&
-                    state.connectorId !in config.connectors.allowedConnectorIds
+                if (allowedConnectorIds.isNotEmpty() &&
+                    state.connectorId !in allowedConnectorIds
                 ) {
                     warnings += "Connector ${state.connectorId} is enabled locally but not allowlisted; skipping."
                     return@forEach
@@ -280,6 +285,24 @@ object ConnectorActionPluginLoader {
             plugins = plugins.toList(),
             warnings = warnings.toList(),
         )
+    }
+
+    private fun resolveAllowedConnectorIds(
+        catalog: CuratedConnectorCatalog,
+        config: AgentConfig,
+        warnings: MutableList<String>,
+    ): Set<String> {
+        val explicitConnectorIds = config.connectors.allowedConnectorIds
+        val presetConnectorIds = linkedSetOf<String>()
+        config.connectors.enabledBundleIds.forEach { bundleId ->
+            val bundle = catalog.bundle(bundleId)
+            if (bundle == null) {
+                warnings += "Connector preset $bundleId is configured but missing from the curated catalog."
+                return@forEach
+            }
+            presetConnectorIds += bundle.connectorIds
+        }
+        return explicitConnectorIds + presetConnectorIds
     }
 
     private fun resolveCommand(

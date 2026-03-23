@@ -149,7 +149,61 @@ class ConnectorCatalogLoaderTest {
     }
 
     @Test
-    fun `default curated catalog ships starter connector and bundle manifests`() {
+    fun `bundle presets expand the connector allowlist`() {
+        val tempDir = Files.createTempDirectory("neopsyke-connector-bundle-allowlist")
+        val catalogDir = tempDir.resolve("catalog")
+        val stateDir = tempDir.resolve("state")
+        Files.createDirectories(ConnectorRuntimePaths.curatedConnectorsDir(catalogDir))
+        Files.createDirectories(ConnectorRuntimePaths.curatedBundlesDir(catalogDir))
+        Files.createDirectories(ConnectorRuntimePaths.installedStateDir(stateDir))
+        Files.writeString(
+            ConnectorRuntimePaths.curatedConnectorsDir(catalogDir).resolve("gmail.yaml"),
+            """
+            connector_id: gmail
+            display_name: Gmail
+            vendor: google
+            action_manifests:
+              - action_type: gmail_observe_search
+                tool_name: gmail.search_messages
+                planner_description: Search Gmail messages
+                payload_guidance: JSON search payload
+            """.trimIndent()
+        )
+        Files.writeString(
+            ConnectorRuntimePaths.curatedBundlesDir(catalogDir).resolve("morning-briefing.yaml"),
+            """
+            bundle_id: morning-briefing
+            display_name: Morning Briefing
+            connector_ids:
+              - gmail
+            """.trimIndent()
+        )
+        Files.writeString(
+            ConnectorRuntimePaths.installedStateDir(stateDir).resolve("gmail.yaml"),
+            """
+            connector_id: gmail
+            enabled: true
+            """.trimIndent()
+        )
+
+        val result = ConnectorActionPluginLoader.load(
+            AgentConfig(
+                connectors = ConnectorRuntimeConfig(
+                    enabled = true,
+                    curatedCatalogPath = catalogDir.toString(),
+                    installStateDir = stateDir.toString(),
+                    enabledBundleIds = setOf("morning-briefing"),
+                )
+            )
+        )
+
+        assertTrue(result.plugins.isEmpty())
+        assertTrue(result.warnings.none { it.contains("not allowlisted") })
+        assertTrue(result.warnings.any { it.contains("no executable command") })
+    }
+
+    @Test
+    fun `default curated catalog ships starter connector and preset manifests`() {
         val result = CuratedConnectorCatalogLoader.load(Paths.get("connectors/catalog"))
 
         assertTrue(result.warnings.isEmpty(), result.warnings.joinToString(" | "))

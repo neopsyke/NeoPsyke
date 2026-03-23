@@ -298,6 +298,7 @@ It is intentionally high-level and should stay aligned with the code.
   - Create/revise plans through `GoalPlanner`
   - Accept `goal_operation(create)` requests with optional `cron_expression`; validate cron expressions against the runtime's supported 5-field parser before goal creation when commit authorization permits execution.
   - Keep cron-backed goals idle after creation: planning can promote ready steps, but initial work-ready emission is deferred until the first cron wake.
+  - Compose available primitive actions, including connector-backed actions when they pass runtime policy and health checks
   - Observe goal-origin action outcomes through the generic action lifecycle observer hook
   - Translate generic async action wait handles into blocked goal steps
   - Reject goal-origin `WAITING` outcomes that do not provide async handles; this is stage-1 enforcement of the async wait contract
@@ -518,12 +519,14 @@ It is intentionally high-level and should stay aligned with the code.
 - File: `src/main/kotlin/ai/neopsyke/agent/cortex/motor/MotorCortex.kt`
 - Startup discovery:
   - Action plugins are discovered at runtime through `ServiceLoader` factories (`AgentActionPluginFactory`).
+  - After built-in discovery, the registry may also load connector-backed action plugins from the curated connector runtime.
   - Each plugin self-describes:
     - action id (`ActionType` id string)
     - dispatchable flag
     - planner description/payload guidance/example
     - deterministic superego directives
     - follow-up-thought behavior
+    - connector provenance metadata when the action is backed by an external connector
 - Built-in discovered action plugins:
   - `answer`
   - `answer_draft` (internal chunked synthesis, non-user-visible)
@@ -532,6 +535,14 @@ It is intentionally high-level and should stay aligned with the code.
   - `website_fetch`
   - `goal_operation` (persistent goal lifecycle operations; create supports optional `cron_expression`; recurring cron-backed creates now stage for authorization while non-recurring trusted-owner operations may direct commit)
   - `email_send` (Microsoft Graph adapter; disabled unless env config is present)
+- Connector-backed actions:
+  - are optional and fail-closed behind `config.connectors.enabled`
+  - are loaded only from the shipped curated catalog plus local installed state
+  - require local enablement, allowlisting, capability validation, and tool-description pinning before becoming planner-visible
+  - remain primitive action surfaces; higher-level routines such as morning briefings or inbox cleanup should be modeled as goals that compose these actions, not as single workflow actions
+- Curated connector bundles are install presets only:
+  - they can expand the connector allowlist for local enablement convenience
+  - they do not create planner-visible workflow actions and do not replace the goals runtime
 - `web_search` provider routing is independent from cognitive-role routing:
   - configured directly via `web_search.provider` in `llm-runtime.yaml`.
   - current web-search runtimes are `mistral`, `groq`, and `google`; configuring `openai` degrades to unavailable with a startup warning.

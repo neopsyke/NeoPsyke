@@ -257,10 +257,11 @@ Explicitly not in the first slice:
 Those are valid future goals, but they require stronger policy and isolation
 than the initial connector host foundation.
 
-### 5.4 Ready-to-use curated bundles
+### 5.4 Ready-to-use curated install presets
 
 To support "works out of the box" integrations without making them ambiently
-trusted, NeoPsyke should ship curated bundles for high-value workflows.
+trusted, NeoPsyke should ship curated install presets for high-value capability
+sets.
 
 Examples:
 
@@ -289,6 +290,15 @@ It should not mean:
 - auto-enabled
 - auto-credentialed
 - auto-authorized for commits
+
+These presets are install/enablement convenience only.
+
+- They may expand the connector allowlist or installation set.
+- They must not become planner-visible workflow actions by themselves.
+- The actual runtime execution model should remain:
+  - primitive actions/tools
+  - composed by NeoPsyke goals when the user asks for recurring routines such as
+    Morning Briefing or Inbox Management
 
 ---
 

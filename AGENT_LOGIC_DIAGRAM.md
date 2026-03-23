@@ -29,6 +29,7 @@ flowchart LR
     ACS --> ACDB["ActionControl SQLite (staged / auth / receipts)"]
     ACW --> ACS
     E --> AR["ActionRegistry (ServiceLoader Discovery)"]
+    AR --> CR["Connector Runtime (curated catalog + local install state + stdio host)"]
     E --> M["MotorCortex"]
     E --> BG["LLM Token Budget Gate"]
     E --> MCat["Model Catalog (ROI token_weight)"]
@@ -55,7 +56,9 @@ flowchart LR
     PM --> PS["GoalStateMachine + GoalStore"]
 
     AR --> AP["Action Plugins (self-described)"]
+    CR --> AP
     AP --> M
+    Note over CR,AP: Connector bundles are install presets only; goals compose primitive actions rather than executing bundle workflows directly
     AP -.->|"Actions emit structured effects; REFLECT emits durable-memory-save only on successful persistence"| MC
 
     M --> WS["Web Search Handler/Engine"]

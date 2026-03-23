@@ -9,6 +9,8 @@ data class ConnectorRuntimeConfig(
     val startupTimeoutMs: Long = DEFAULT_STARTUP_TIMEOUT_MS,
     val healthTimeoutMs: Long = DEFAULT_HEALTH_TIMEOUT_MS,
     val allowedConnectorIds: Set<String> = emptySet(),
+    // Optional install presets only. These expand the connector allowlist but do
+    // not create planner-visible workflow actions by themselves.
     val enabledBundleIds: Set<String> = emptySet(),
     val allowThirdPartyConnectors: Boolean = false,
 ) {
