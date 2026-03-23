@@ -28,6 +28,7 @@ It is intentionally high-level and should stay aligned with the code.
   - `Superego`
   - `ActionRegistry` (startup plugin discovery via `ServiceLoader<AgentActionPluginFactory>`)
   - `MotorCortex` (plugin-dispatched action execution)
+  - `ConversationOutputGateway` (channel-aware `contact_user` delivery)
   - `ActionAuthorizationPolicy` (YAML-backed action security policy)
   - `ActionControlService` + `SqliteActionControlStore` (staged actions, authorizations, receipts)
   - `ActionControlAutonomousWorker` (runtime-owned background poller for `READY` staged actions)
@@ -41,6 +42,14 @@ It is intentionally high-level and should stay aligned with the code.
   - `Id` (autonomous internal drive module; optional, loaded from `id-runtime.yaml`)
   - `GoalsGateway` (optional goal runtime boundary; also serves ambient active-goal queries)
   - `AsyncOperationRegistry` (generic provider adapter registry for long-running action handles restored by the goal runtime)
+  - `TelegramWebhookBridge` (optional owner-only Telegram webhook ingress)
+  - `TelegramBotApiClient` (optional Telegram Bot API delivery for owner direct chat)
+  - `GoogleWorkspaceOAuthBridge` (optional native Google OAuth start/callback flow)
+  - `GoogleWorkspaceCredentialStore` (encrypted local Google token storage)
+  - native Google observe actions:
+    - `gmail_observe_search`
+    - `gmail_observe_message`
+    - `calendar_observe_events`
   - `Ego` orchestrator
 - Interactive startup now resolves memory from `memory-runtime.yaml` and performs a provider health/startup check before enabling long-term vector memory:
   - `memory=off` wires `NoopHippocampus`
@@ -61,6 +70,15 @@ It is intentionally high-level and should stay aligned with the code.
   - optional hard caps are configurable via `PlannerConfig` / `agent-runtime.yaml` (`max_run_total_tokens`, `max_run_tokens_per_provider`, `max_run_tokens_per_role`)
   - limits are enforced before outbound model calls using conservative prompt/completion estimates
   - default `0` keeps each cap disabled
+- Native integration wiring is currently explicit-handle based:
+  - Telegram bot token and webhook secret are resolved through configured secret handles
+  - secrets are read by the runtime and injected only into the native integration clients that need them
+  - no connector subprocess environment passthrough is involved in this path
+  - Google Workspace auth foundation uses:
+    - HMAC-signed OAuth state tokens with provider/redirect/owner binding and TTL enforcement
+    - encrypted pending-auth storage under `.neopsyke/auth/google` for PKCE verifier and scope state
+    - explicit token-encryption secret handles rather than plaintext token artifacts
+    - dashboard-hosted OAuth start/callback endpoints; the public callback URL must be supplied explicitly
 
 ## Main Loop (Ego)
 - File: `src/main/kotlin/ai/neopsyke/agent/ego/Ego.kt`
@@ -70,7 +88,8 @@ It is intentionally high-level and should stay aligned with the code.
     - `CognitiveSignal` for typed stimuli that the agent should perceive.
     - `RuntimeControlSignal` for runtime lifecycle/control events.
   - Typed cognitive stimuli currently arrive as:
-    - linguistic stimuli from chat/stdin chat mode
+    - linguistic stimuli from dashboard chat sessions
+    - linguistic stimuli from owner-only Telegram webhook ingress
     - cue stimuli from Id impulse wakeups
     - cue stimuli from goal-runtime work-ready cues
   - Runs `runLoop()` while there is pending work.
@@ -162,7 +181,19 @@ It is intentionally high-level and should stay aligned with the code.
 - Current ingress defaults:
   - dashboard chat is treated as trusted owner direct-chat context
   - stdin chat is treated as trusted owner direct-chat context
+  - Telegram webhook ingress is treated as trusted owner direct-chat context only after webhook-secret validation and owner chat/user allowlist checks
   - Id and goal-runtime cues are treated as trusted internal automation context
+- Telegram owner chat ingress specifics:
+  - accepts only `POST` webhook calls on the configured path
+  - requires exact `X-Telegram-Bot-Api-Secret-Token` match
+  - can require private/direct chats only
+  - can require both owner `chat_id` and owner `user_id`
+  - unauthorized traffic fails closed or is silently dropped based on `dropUnauthorizedMessages`
+  - accepted updates are mapped into dedicated sessions using `<sessionIdPrefix>:<chatId>`
+- Google Workspace native auth specifics:
+  - OAuth start is initiated through a local NeoPsyke HTTP endpoint that returns the Google authorization URL
+  - callback handling verifies signed state, consumes the encrypted PKCE pending-auth record, exchanges the code, verifies the Gmail profile email against the configured owner, and then stores encrypted credentials locally
+  - read-only Gmail/Calendar actions remain unavailable until this authorization completes successfully
 - `StimulusEnvelope` and `Percept` now carry provenance metadata (instruction trust, data trust, provider/object identity, sanitization record).
 - `PerceptualAppraiser` currently maps stimulus families into percept families:
   - `LINGUISTIC` -> `REQUEST`
@@ -236,6 +267,11 @@ It is intentionally high-level and should stay aligned with the code.
     - `ALLOW_COMMIT` persists a staged snapshot plus authorization artifact, then executes through `MotorCortex`.
     - `ActionControlService` refusals are treated as denials and fed back into Ego replanning.
     - `MotorCortex` now performs a final no-bypass authorization check for side-effecting actions.
+    - `contact_user` delivery is channel-aware:
+      - Telegram owner conversations route through the configured Telegram Bot API sink using the conversation channel id
+      - other interactive sessions continue through the existing local/dashboard delivery path
+      - missing Telegram delivery configuration fails closed at action execution time
+    - native Google observe actions (`gmail_observe_search`, `gmail_observe_message`, `calendar_observe_events`) use encrypted local credentials plus on-demand access-token refresh and always stay in `OBSERVE` effect class
     - Actions may return either an immediate outcome or a generic async wait contract (`ActionOutcome.asyncWait`, typically with `executionStatus=WAITING`).
       - Synchronous tools keep the existing immediate-completion path.
       - Async start actions do not enqueue ordinary follow-up thoughts on the start call.
@@ -298,6 +334,7 @@ It is intentionally high-level and should stay aligned with the code.
   - Create/revise plans through `GoalPlanner`
   - Accept `goal_operation(create)` requests with optional `cron_expression`; validate cron expressions against the runtime's supported 5-field parser before goal creation when commit authorization permits execution.
   - Keep cron-backed goals idle after creation: planning can promote ready steps, but initial work-ready emission is deferred until the first cron wake.
+  - Compose available primitive actions, including connector-backed actions when they pass runtime policy and health checks
   - Observe goal-origin action outcomes through the generic action lifecycle observer hook
   - Translate generic async action wait handles into blocked goal steps
   - Reject goal-origin `WAITING` outcomes that do not provide async handles; this is stage-1 enforcement of the async wait contract
@@ -518,12 +555,14 @@ It is intentionally high-level and should stay aligned with the code.
 - File: `src/main/kotlin/ai/neopsyke/agent/cortex/motor/MotorCortex.kt`
 - Startup discovery:
   - Action plugins are discovered at runtime through `ServiceLoader` factories (`AgentActionPluginFactory`).
+  - After built-in discovery, the registry may also load connector-backed action plugins from the curated connector runtime.
   - Each plugin self-describes:
     - action id (`ActionType` id string)
     - dispatchable flag
     - planner description/payload guidance/example
     - deterministic superego directives
     - follow-up-thought behavior
+    - connector provenance metadata when the action is backed by an external connector
 - Built-in discovered action plugins:
   - `answer`
   - `answer_draft` (internal chunked synthesis, non-user-visible)
@@ -532,6 +571,14 @@ It is intentionally high-level and should stay aligned with the code.
   - `website_fetch`
   - `goal_operation` (persistent goal lifecycle operations; create supports optional `cron_expression`; recurring cron-backed creates now stage for authorization while non-recurring trusted-owner operations may direct commit)
   - `email_send` (Microsoft Graph adapter; disabled unless env config is present)
+- Connector-backed actions:
+  - are optional and fail-closed behind `config.connectors.enabled`
+  - are loaded only from the shipped curated catalog plus local installed state
+  - require local enablement, allowlisting, capability validation, and tool-description pinning before becoming planner-visible
+  - remain primitive action surfaces; higher-level routines such as morning briefings or inbox cleanup should be modeled as goals that compose these actions, not as single workflow actions
+- Curated connector bundles are install presets only:
+  - they can expand the connector allowlist for local enablement convenience
+  - they do not create planner-visible workflow actions and do not replace the goals runtime
 - `web_search` provider routing is independent from cognitive-role routing:
   - configured directly via `web_search.provider` in `llm-runtime.yaml`.
   - current web-search runtimes are `mistral`, `groq`, and `google`; configuring `openai` degrades to unavailable with a startup warning.

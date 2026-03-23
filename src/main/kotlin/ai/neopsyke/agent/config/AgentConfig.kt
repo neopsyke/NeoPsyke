@@ -10,6 +10,8 @@ data class AgentConfig(
     val metaReasoner: MetaReasonerConfig = MetaReasonerConfig(),
     val logbook: LogbookConfig = LogbookConfig(),
     val actionControl: ActionControlConfig = ActionControlConfig(),
+    val connectors: ConnectorRuntimeConfig = ConnectorRuntimeConfig(),
+    val nativeIntegrations: NativeIntegrationsConfig = NativeIntegrationsConfig(),
     val innerVoice: InnerVoiceConfig = InnerVoiceConfig(),
     val goals: GoalConfig = GoalConfig(),
     val loopDelayMs: Int = 0,

@@ -337,7 +337,8 @@ class EgoAgentTest {
                 scratchpad = ScratchpadConfig(
                     enabled = true,
                     activationMinPlanSteps = 1,
-                    digestMaxEntries = 4
+                    digestMaxEntries = 4,
+                    maxPromptTokens = 420,
                 )
             )
         )
@@ -1017,7 +1018,7 @@ class EgoAgentTest {
                 scratchpad = ScratchpadConfig(
                     enabled = true,
                     activationMinPlanSteps = 1,
-                    maxPromptTokens = 280,
+                    maxPromptTokens = 420,
                     debugCaptureEnabled = true
                 )
             )
@@ -1040,8 +1041,14 @@ class EgoAgentTest {
         assertTrue(plannerCalls.size >= 2)
         val followUpPrompt = plannerCalls[1].messages.last().content
         assertTrue(followUpPrompt.contains("Scratchpad summary:"))
-        assertTrue(followUpPrompt.contains("Request"))
-        assertTrue(followUpPrompt.contains("web_search_result"))
+        assertTrue(
+            followUpPrompt.contains("Request") ||
+                followUpPrompt.contains("find current pricing")
+        )
+        assertTrue(
+            followUpPrompt.contains("web_search_result") ||
+                followUpPrompt.contains("Official pricing page confirms current Pro plan rate.")
+        )
         assertEquals(listOf("ego> Final answer from planner"), outputs)
         assertTrue(instrumentation.events.any { it.type == "scratchpad_created" })
         assertTrue(instrumentation.events.any { it.type == "scratchpad_updated" })

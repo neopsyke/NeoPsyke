@@ -1,4 +1,4 @@
-# NeoPsyke Secure Tools Strategy
+# NeoPsyke Secure Tools Review
 
 > **Purpose:** Define the security architecture for new NeoPsyke action plugins
 > (Morning Briefing, Email/Inbox Management, Content & Social Media Automation)

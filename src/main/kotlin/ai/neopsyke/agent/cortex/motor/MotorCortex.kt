@@ -1,6 +1,8 @@
 package ai.neopsyke.agent.cortex.motor
 
 import ai.neopsyke.agent.actions.ActionCapability
+import ai.neopsyke.agent.actions.ConversationOutputGateway
+import ai.neopsyke.agent.actions.RoutedConversationOutputGateway
 import ai.neopsyke.agent.actions.ActionRegistry
 import ai.neopsyke.agent.actions.ActionPluginFactoryContext
 import ai.neopsyke.agent.actions.ReflectionMemoryRecorder
@@ -32,6 +34,7 @@ class MotorCortex(
         mcpTimeTool: McpTimeTool? = null,
         fetchTool: FetchTool? = null,
         output: (String) -> Unit = ::println,
+        conversationOutput: ConversationOutputGateway = RoutedConversationOutputGateway(fallbackOutput = output),
         reflectionMemoryRecorder: ReflectionMemoryRecorder,
         config: AgentConfig = AgentConfig(),
         goalsGateway: GoalsGateway = NoopGoalsGateway,
@@ -43,6 +46,7 @@ class MotorCortex(
                 mcpTimeTool = mcpTimeTool,
                 fetchTool = fetchTool,
                 output = output,
+                conversationOutput = conversationOutput,
                 reflectionMemoryRecorder = reflectionMemoryRecorder,
                 goalsGateway = goalsGateway,
             )

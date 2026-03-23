@@ -11,6 +11,8 @@ import ai.neopsyke.agent.actioncontrol.ActionControlDecisionResult
 import ai.neopsyke.agent.actioncontrol.ActionControlService
 import ai.neopsyke.agent.model.ConversationSecurityContexts
 import ai.neopsyke.agent.goal.GoalManager
+import ai.neopsyke.integrations.google.GoogleWorkspaceOAuthBridge
+import ai.neopsyke.integrations.telegram.TelegramWebhookBridge
 import ai.neopsyke.metrics.LlmCallStatsReport
 import java.nio.file.Files
 import java.nio.file.Path
@@ -36,6 +38,8 @@ private const val SNAPSHOT_MAX_EVENTS_LIMIT: Int = 1_000
 class DashboardServer(
     private val store: DashboardStateStore,
     private val chatBridge: ChatRuntimeBridge? = null,
+    private val telegramWebhookBridge: TelegramWebhookBridge? = null,
+    private val googleOAuthBridge: GoogleWorkspaceOAuthBridge? = null,
     private val innerVoiceStore: InnerVoiceStore? = null,
     private val idInnerVoiceFilePath: Path? = null,
     @Volatile var metricsQueryProvider: MetricsQueryProvider? = null,
@@ -155,6 +159,25 @@ class DashboardServer(
         server.createContext("/api/chat/sessions") { exchange ->
             withRequestGuard(exchange, "chat_api") {
                 handleChatApi(exchange)
+            }
+        }
+        telegramWebhookBridge?.let { bridge ->
+            server.createContext(bridge.webhookPath()) { exchange ->
+                withRequestGuard(exchange, "telegram_webhook") {
+                    handleTelegramWebhook(exchange, bridge)
+                }
+            }
+        }
+        googleOAuthBridge?.let { bridge ->
+            server.createContext(bridge.startPath()) { exchange ->
+                withRequestGuard(exchange, "google_oauth_start") {
+                    handleGoogleOAuthStart(exchange, bridge)
+                }
+            }
+            server.createContext(bridge.callbackPath()) { exchange ->
+                withRequestGuard(exchange, "google_oauth_callback") {
+                    handleGoogleOAuthCallback(exchange, bridge)
+                }
             }
         }
         server.createContext("/api/action-control") { exchange ->
@@ -387,6 +410,67 @@ class DashboardServer(
             "ledger" -> handleActionLedgerApi(exchange, service, parts.drop(1))
             else -> respondText(exchange, 404, "Not found", "text/plain; charset=utf-8")
         }
+    }
+
+    private fun handleTelegramWebhook(exchange: HttpExchange, bridge: TelegramWebhookBridge) {
+        val result = bridge.handleWebhook(
+            requestMethod = exchange.requestMethod,
+            secretTokenHeader = exchange.requestHeaders.getFirst(TELEGRAM_SECRET_HEADER),
+            requestBody = readRawBody(exchange),
+        )
+        respondText(
+            exchange,
+            result.statusCode,
+            mapper.writeValueAsString(
+                mapOf(
+                    "accepted" to result.accepted,
+                    "detail" to result.detail,
+                )
+            ),
+            "application/json; charset=utf-8"
+        )
+    }
+
+    private fun handleGoogleOAuthStart(exchange: HttpExchange, bridge: GoogleWorkspaceOAuthBridge) {
+        if (exchange.requestMethod.uppercase() != "GET") {
+            respondText(exchange, 405, "Method not allowed", "text/plain; charset=utf-8")
+            return
+        }
+        val result = bridge.startAuthorization()
+        respondText(
+            exchange,
+            result.statusCode,
+            mapper.writeValueAsString(
+                mapOf(
+                    "ok" to result.ok,
+                    "detail" to result.detail,
+                    "authorization_url" to result.authorizationUrl,
+                )
+            ),
+            "application/json; charset=utf-8"
+        )
+    }
+
+    private fun handleGoogleOAuthCallback(exchange: HttpExchange, bridge: GoogleWorkspaceOAuthBridge) {
+        if (exchange.requestMethod.uppercase() != "GET") {
+            respondText(exchange, 405, "Method not allowed", "text/plain; charset=utf-8")
+            return
+        }
+        val result = bridge.completeAuthorization(
+            code = parseQueryParam(exchange.requestURI.query, "code"),
+            stateToken = parseQueryParam(exchange.requestURI.query, "state"),
+        )
+        respondText(
+            exchange,
+            result.statusCode,
+            mapper.writeValueAsString(
+                mapOf(
+                    "ok" to result.ok,
+                    "detail" to result.detail,
+                )
+            ),
+            "application/json; charset=utf-8"
+        )
     }
 
     private fun handleStagedActionApi(
@@ -933,7 +1017,7 @@ class DashboardServer(
 
     private fun readJsonBody(exchange: HttpExchange): Map<String, Any?>? {
         return try {
-            val bytes = exchange.requestBody.readBytes()
+            val bytes = readRawBody(exchange).toByteArray(StandardCharsets.UTF_8)
             if (bytes.isEmpty()) {
                 emptyMap()
             } else {
@@ -946,6 +1030,9 @@ class DashboardServer(
             null
         }
     }
+
+    private fun readRawBody(exchange: HttpExchange): String =
+        exchange.requestBody.bufferedReader(StandardCharsets.UTF_8).use { it.readText() }
 
     private inline fun withRequestGuard(
         exchange: HttpExchange,
@@ -1073,6 +1160,7 @@ class DashboardServer(
     )
 
     private companion object {
+        private const val TELEGRAM_SECRET_HEADER: String = "X-Telegram-Bot-Api-Secret-Token"
         val EMPTY_LLM_STATS_REPORT = LlmCallStatsReport(
             byModel = emptyMap(),
             byRole = emptyMap(),

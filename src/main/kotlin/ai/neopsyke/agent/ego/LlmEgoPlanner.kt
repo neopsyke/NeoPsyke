@@ -1586,13 +1586,16 @@ class LlmEgoPlanner(
         } else {
             context.dispatchableActions
         }
+        val plannerVisibleActions = dispatchableActions
+            .filter { context.availableActions.contains(it) }
+            .toSet()
         val unavailableActionList = dispatchableActions
             .filterNot { context.availableActions.contains(it) }
             .map { it.id }
             .sorted()
             .joinToString(", ")
             .ifBlank { "none" }
-        val actionSchemaEnum = dispatchableActions
+        val actionSchemaEnum = plannerVisibleActions
             .map { it.id }
             .sorted()
             .joinToString("|")
@@ -1780,7 +1783,8 @@ class LlmEgoPlanner(
                 PromptBudgetAllocator.Section(
                     key = "planner_session_digest",
                     role = ChatRole.USER,
-                    band = PromptBudgetAllocator.Band.OPTIONAL,
+                    band = PromptBudgetAllocator.Band.REQUIRED_CONTEXT,
+                    floorTokens = 16,
                     content = "Prior workspace digests (resolved requests in this session):\n$sessionScratchpadDigest"
                 ),
                 context.ambientContext.takeIf { !it.isEmpty() }?.let {

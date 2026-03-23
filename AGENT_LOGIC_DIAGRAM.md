@@ -8,6 +8,9 @@ Keep diagrams high signal: small, readable, and updated as runtime logic evolves
 ```mermaid
 flowchart LR
     U["User / Web UI"] --> SC["SensoryCortex (typed cognitive stimuli ingress)"]
+    TG["Telegram Owner Chat"] --> TWH["TelegramWebhookBridge"]
+    TWH --> SC
+    GOU["Google OAuth Browser Flow"] --> GOA["GoogleWorkspaceOAuthBridge"]
     SC --> E["Ego Orchestrator"]
     NoteCtx["ConversationContext(sessionId required, unknown interlocutor resolved at sensory boundary, security context carried end-to-end)"] --> SC
 
@@ -29,6 +32,7 @@ flowchart LR
     ACS --> ACDB["ActionControl SQLite (staged / auth / receipts)"]
     ACW --> ACS
     E --> AR["ActionRegistry (ServiceLoader Discovery)"]
+    AR --> CR["Connector Runtime (curated catalog + local install state + stdio host)"]
     E --> M["MotorCortex"]
     E --> BG["LLM Token Budget Gate"]
     E --> MCat["Model Catalog (ROI token_weight)"]
@@ -55,7 +59,9 @@ flowchart LR
     PM --> PS["GoalStateMachine + GoalStore"]
 
     AR --> AP["Action Plugins (self-described)"]
+    CR --> AP
     AP --> M
+    Note over CR,AP: Connector bundles are install presets only; goals compose primitive actions rather than executing bundle workflows directly
     AP -.->|"Actions emit structured effects; REFLECT emits durable-memory-save only on successful persistence"| MC
 
     M --> WS["Web Search Handler/Engine"]
@@ -63,6 +69,13 @@ flowchart LR
     M --> MT["MCP Time Tool"]
     M --> MF["Fetch Tool"]
     M --> EM["Email Send (Microsoft Graph)"]
+    M --> COG["ConversationOutputGateway"]
+    COG --> TGA["Telegram Bot API"]
+    TWH -.-> GAUTH["Native OAuth Auth Primitives (signed state + encrypted pending store)"]
+    GOA --> GCS["GoogleWorkspaceCredentialStore (encrypted)"]
+    GOA --> GAP["Google OAuth + Gmail Profile Verification"]
+    M --> GOBS["Native Google Observe Actions"]
+    GOBS --> GAP
     WS --> PID["PromptInjectionDefense"]
     MT --> PID
     MF --> PID
@@ -83,6 +96,9 @@ flowchart LR
     DS --> OX["Action Control Page (`/action-control`)"]
     DS --> ACAPI["Action Control API (`/api/action-control/*`)"]
     Note over OX,ACAPI: Action control UI defaults to SIGNAL activity items and can opt into BACKGROUND or TRACE ledger visibility
+    Note over TG,TWH: Telegram ingress is owner-only: POST webhook + shared secret + direct-chat restriction + owner chat/user allowlist
+    Note over TWH,GAUTH: Native Google auth foundation uses signed state tokens plus encrypted pending-auth storage; no plaintext refresh-token staging is intended
+    Note over GOU,GOA: Google auth uses explicit public callback URL, signed state, PKCE, owner-email verification, and encrypted local credential storage
 ```
 
 ## 2) Loop Sequence (Per Input)
@@ -202,6 +218,7 @@ sequenceDiagram
                                 ACS-->>Ego: executed outcome
                             end
                             Note over Ego,Motor: Actions may complete immediately or return WAITING + async operation handles
+                            Note over Ego,Motor: `contact_user` delivery is channel-aware; Telegram sessions send through Bot API, dashboard sessions continue through local/dashboard delivery
                             Note over Ego,PG: Goal-origin WAITING without handles is rejected as a contract violation
                             Ego->>Ego: PromptInjectionDefense sanitize untrusted tool output
                             alt action = contact_user
@@ -242,6 +259,8 @@ sequenceDiagram
     end
 
     Note over User,SC: Terminal stdin is control-only in interactive mode (exit command), non-command text is not enqueued as chat input
+    Note over User,SC: Interactive linguistic ingress currently comes from dashboard chat sessions or owner-only Telegram webhook updates
+    Note over Ego,GOBS: Gmail and Calendar are native read-only observe actions, intended for goals such as Morning Briefing and Inbox Management
 ```
 
 ## 2.1) Goals Boundary

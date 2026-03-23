@@ -1,0 +1,23 @@
+connector_id: telegram
+display_name: Telegram
+vendor: pending-review
+description: >
+  Curated Telegram connector definition for private digest delivery. The
+  concrete connector command and pinned digest remain unset until a secure
+  connector is selected and reviewed.
+mode: stdio
+command: ""
+allowed_tools:
+  - telegram.send_message
+secret_handles:
+  - TELEGRAM_BOT_TOKEN
+action_manifests:
+  - action_type: telegram_commit_send_digest
+    tool_name: telegram.send_message
+    planner_description: "telegram_commit_send_digest: send a formatted digest to an approved Telegram destination."
+    payload_guidance: >
+      JSON object with chat_id, text, and optional parse_mode fields. Use only
+      for owner-approved private destinations.
+    payload_schema_example: '{"chat_id":"123456789","text":"Morning briefing...","parse_mode":"Markdown"}'
+    effect_class: COMMIT_PRIVATE
+    follow_up_prefix: Telegram digest delivery completed.

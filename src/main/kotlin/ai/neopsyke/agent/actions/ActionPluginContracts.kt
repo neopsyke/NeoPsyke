@@ -68,6 +68,8 @@ data class ActionDescriptor(
         DataTrust.TRUSTED_DATA,
         DataTrust.SANITIZED_EXTERNAL_DATA,
     ),
+    val connectorRuntime: ConnectorRuntimeBoundary = ConnectorRuntimeBoundary.firstPartyBuiltin(),
+    val connectorBinding: ConnectorActionBinding? = null,
 ) {
     val contract: ActionContract
         get() = ActionContract(
@@ -128,6 +130,7 @@ data class ActionPluginFactoryContext(
     val output: (String) -> Unit,
     val env: Map<String, String> = System.getenv(),
     val secretProvider: ActionSecretProvider = EnvActionSecretProvider(env),
+    val conversationOutput: ConversationOutputGateway = RoutedConversationOutputGateway(fallbackOutput = output),
     val connectorRuntime: ConnectorRuntimeBoundary = ConnectorRuntimeBoundary.firstPartyBuiltin(),
     val reflectionMemoryRecorder: ReflectionMemoryRecorder,
     val goalsGateway: GoalsGateway = NoopGoalsGateway,

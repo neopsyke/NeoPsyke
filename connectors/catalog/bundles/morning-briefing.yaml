@@ -1,0 +1,9 @@
+bundle_id: morning-briefing
+display_name: Morning Briefing
+description: >
+  Curated starter bundle for morning briefing workflows. It combines read-only
+  evidence gathering with one constrained private delivery path.
+connector_ids:
+  - news
+  - gmail
+  - telegram

@@ -3,6 +3,8 @@ package ai.neopsyke.agent.ego
 import ai.neopsyke.agent.actioncontrol.ActionControlService
 import ai.neopsyke.agent.actioncontrol.NoopActionControlService
 import ai.neopsyke.agent.actions.ActionPluginFactoryContext
+import ai.neopsyke.agent.actions.ConversationOutputGateway
+import ai.neopsyke.agent.actions.RoutedConversationOutputGateway
 import ai.neopsyke.agent.actions.ActionRegistry
 import ai.neopsyke.agent.actions.websearch.WebSearchActionHandler
 import ai.neopsyke.agent.config.AgentConfig
@@ -78,6 +80,7 @@ object EgoAssembler {
         goalsGateway: GoalsGateway = NoopGoalsGateway,
         actionControlServiceFactory: (MotorCortex) -> ActionControlService = { NoopActionControlService },
         output: (String) -> Unit = {},
+        conversationOutput: ConversationOutputGateway = RoutedConversationOutputGateway(fallbackOutput = output),
     ): EgoAssembly {
         val memory = buildMemorySystem(
             config = config,
@@ -95,6 +98,7 @@ object EgoAssembler {
                 mcpTimeTool = mcpTimeTool,
                 fetchTool = fetchTool,
                 output = output,
+                conversationOutput = conversationOutput,
                 reflectionMemoryRecorder = memory,
                 goalsGateway = goalsGateway,
             )

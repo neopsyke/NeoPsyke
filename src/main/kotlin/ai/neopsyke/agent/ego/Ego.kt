@@ -614,18 +614,20 @@ class Ego(
         val policyActionTypes = plannerDescriptors.map { it.actionType }.toSet()
         val availableActions = (motorCortex.availableActionTypes() intersect policyActionTypes) - disabled
         val dispatchableActions = (motorCortex.dispatchableActionTypes() intersect policyActionTypes) - disabled
-        val actionDefinitions = plannerDescriptors.map { descriptor ->
-            ActionPlanningDefinition(
-                actionType = descriptor.actionType,
-                description = descriptor.plannerDescription,
-                payloadGuidance = descriptor.payloadGuidance,
-                payloadSchemaExample = descriptor.payloadSchemaExample,
-                effectClass = descriptor.effectClass,
-                directCommitAllowed = descriptor.directCommitAllowed,
-                supportsAutonomousCommit = descriptor.supportsAutonomousCommit,
-                allowedInstructionTrust = descriptor.allowedInstructionTrust,
-            )
-        }
+        val actionDefinitions = plannerDescriptors
+            .filter { descriptor -> descriptor.actionType in availableActions }
+            .map { descriptor ->
+                ActionPlanningDefinition(
+                    actionType = descriptor.actionType,
+                    description = descriptor.plannerDescription,
+                    payloadGuidance = descriptor.payloadGuidance,
+                    payloadSchemaExample = descriptor.payloadSchemaExample,
+                    effectClass = descriptor.effectClass,
+                    directCommitAllowed = descriptor.directCommitAllowed,
+                    supportsAutonomousCommit = descriptor.supportsAutonomousCommit,
+                    allowedInstructionTrust = descriptor.allowedInstructionTrust,
+                )
+            }
         val evidenceHints = buildEvidenceHints(rootInputId, sessionId)
         return PlannerContext(
             recentDialogue = recentDialogue,

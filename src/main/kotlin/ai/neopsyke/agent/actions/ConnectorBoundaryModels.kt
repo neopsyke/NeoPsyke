@@ -4,6 +4,11 @@ data class SecretHandle(
     val name: String,
 )
 
+data class ConnectorActionBinding(
+    val manifestId: String,
+    val toolName: String,
+)
+
 interface ActionSecretProvider {
     fun read(handle: SecretHandle): String?
 
@@ -40,6 +45,18 @@ data class ConnectorRuntimeBoundary(
                 isolationLevel = ConnectorIsolationLevel.FIRST_PARTY_IN_PROCESS,
                 trustedCode = true,
                 supportsThirdPartyHost = false,
+            )
+
+        fun thirdPartyHosted(
+            connectorId: String,
+            vendor: String,
+        ): ConnectorRuntimeBoundary =
+            ConnectorRuntimeBoundary(
+                connectorId = connectorId,
+                vendor = vendor,
+                isolationLevel = ConnectorIsolationLevel.THIRD_PARTY_OUT_OF_PROCESS,
+                trustedCode = false,
+                supportsThirdPartyHost = true,
             )
     }
 }

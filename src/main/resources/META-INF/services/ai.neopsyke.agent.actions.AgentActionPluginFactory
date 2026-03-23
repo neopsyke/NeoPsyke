@@ -6,3 +6,6 @@ ai.neopsyke.agent.actions.builtin.WebsiteFetchActionPluginFactory
 ai.neopsyke.agent.actions.builtin.ReflectActionPluginFactory
 ai.neopsyke.agent.actions.builtin.GoalOperationActionPluginFactory
 ai.neopsyke.agent.actions.email.MicrosoftGraphEmailActionPluginFactory
+ai.neopsyke.agent.actions.google.GmailObserveSearchActionPluginFactory
+ai.neopsyke.agent.actions.google.GmailObserveMessageActionPluginFactory
+ai.neopsyke.agent.actions.google.CalendarObserveEventsActionPluginFactory
