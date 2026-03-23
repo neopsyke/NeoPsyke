@@ -12,6 +12,7 @@ import ai.neopsyke.agent.actions.ActionExecutionContext
 import ai.neopsyke.agent.actions.ActionRegistry
 import ai.neopsyke.agent.actions.AgentActionPlugin
 import ai.neopsyke.agent.actions.NoopReflectionMemoryRecorder
+import ai.neopsyke.agent.actions.RoutedConversationOutputGateway
 import ai.neopsyke.agent.actions.async.AsyncActionHandle
 import ai.neopsyke.agent.actions.async.AsyncActionWait
 import ai.neopsyke.agent.actions.async.AsyncOperationProvider
@@ -513,7 +514,11 @@ class EgoProjectIntegrationTest {
                     ),
                 )
         }
-        val contactPlugin = ContactUserActionPlugin(output = { outputs += it })
+        val contactPlugin = ContactUserActionPlugin(
+            conversationOutput = RoutedConversationOutputGateway(
+                fallbackOutput = { text -> outputs += text }
+            )
+        )
         val registry = ActionRegistry.fromPlugins(listOf(contactPlugin, asyncPlugin))
         return MotorCortex(registry)
     }

@@ -28,6 +28,7 @@ It is intentionally high-level and should stay aligned with the code.
   - `Superego`
   - `ActionRegistry` (startup plugin discovery via `ServiceLoader<AgentActionPluginFactory>`)
   - `MotorCortex` (plugin-dispatched action execution)
+  - `ConversationOutputGateway` (channel-aware `contact_user` delivery)
   - `ActionAuthorizationPolicy` (YAML-backed action security policy)
   - `ActionControlService` + `SqliteActionControlStore` (staged actions, authorizations, receipts)
   - `ActionControlAutonomousWorker` (runtime-owned background poller for `READY` staged actions)
@@ -41,6 +42,8 @@ It is intentionally high-level and should stay aligned with the code.
   - `Id` (autonomous internal drive module; optional, loaded from `id-runtime.yaml`)
   - `GoalsGateway` (optional goal runtime boundary; also serves ambient active-goal queries)
   - `AsyncOperationRegistry` (generic provider adapter registry for long-running action handles restored by the goal runtime)
+  - `TelegramWebhookBridge` (optional owner-only Telegram webhook ingress)
+  - `TelegramBotApiClient` (optional Telegram Bot API delivery for owner direct chat)
   - `Ego` orchestrator
 - Interactive startup now resolves memory from `memory-runtime.yaml` and performs a provider health/startup check before enabling long-term vector memory:
   - `memory=off` wires `NoopHippocampus`
@@ -61,6 +64,10 @@ It is intentionally high-level and should stay aligned with the code.
   - optional hard caps are configurable via `PlannerConfig` / `agent-runtime.yaml` (`max_run_total_tokens`, `max_run_tokens_per_provider`, `max_run_tokens_per_role`)
   - limits are enforced before outbound model calls using conservative prompt/completion estimates
   - default `0` keeps each cap disabled
+- Native integration wiring is currently explicit-handle based:
+  - Telegram bot token and webhook secret are resolved through configured secret handles
+  - secrets are read by the runtime and injected only into the native integration clients that need them
+  - no connector subprocess environment passthrough is involved in this path
 
 ## Main Loop (Ego)
 - File: `src/main/kotlin/ai/neopsyke/agent/ego/Ego.kt`
@@ -70,7 +77,8 @@ It is intentionally high-level and should stay aligned with the code.
     - `CognitiveSignal` for typed stimuli that the agent should perceive.
     - `RuntimeControlSignal` for runtime lifecycle/control events.
   - Typed cognitive stimuli currently arrive as:
-    - linguistic stimuli from chat/stdin chat mode
+    - linguistic stimuli from dashboard chat sessions
+    - linguistic stimuli from owner-only Telegram webhook ingress
     - cue stimuli from Id impulse wakeups
     - cue stimuli from goal-runtime work-ready cues
   - Runs `runLoop()` while there is pending work.
@@ -162,7 +170,15 @@ It is intentionally high-level and should stay aligned with the code.
 - Current ingress defaults:
   - dashboard chat is treated as trusted owner direct-chat context
   - stdin chat is treated as trusted owner direct-chat context
+  - Telegram webhook ingress is treated as trusted owner direct-chat context only after webhook-secret validation and owner chat/user allowlist checks
   - Id and goal-runtime cues are treated as trusted internal automation context
+- Telegram owner chat ingress specifics:
+  - accepts only `POST` webhook calls on the configured path
+  - requires exact `X-Telegram-Bot-Api-Secret-Token` match
+  - can require private/direct chats only
+  - can require both owner `chat_id` and owner `user_id`
+  - unauthorized traffic fails closed or is silently dropped based on `dropUnauthorizedMessages`
+  - accepted updates are mapped into dedicated sessions using `<sessionIdPrefix>:<chatId>`
 - `StimulusEnvelope` and `Percept` now carry provenance metadata (instruction trust, data trust, provider/object identity, sanitization record).
 - `PerceptualAppraiser` currently maps stimulus families into percept families:
   - `LINGUISTIC` -> `REQUEST`
@@ -236,6 +252,10 @@ It is intentionally high-level and should stay aligned with the code.
     - `ALLOW_COMMIT` persists a staged snapshot plus authorization artifact, then executes through `MotorCortex`.
     - `ActionControlService` refusals are treated as denials and fed back into Ego replanning.
     - `MotorCortex` now performs a final no-bypass authorization check for side-effecting actions.
+    - `contact_user` delivery is channel-aware:
+      - Telegram owner conversations route through the configured Telegram Bot API sink using the conversation channel id
+      - other interactive sessions continue through the existing local/dashboard delivery path
+      - missing Telegram delivery configuration fails closed at action execution time
     - Actions may return either an immediate outcome or a generic async wait contract (`ActionOutcome.asyncWait`, typically with `executionStatus=WAITING`).
       - Synchronous tools keep the existing immediate-completion path.
       - Async start actions do not enqueue ordinary follow-up thoughts on the start call.

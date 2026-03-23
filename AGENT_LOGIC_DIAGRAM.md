@@ -8,6 +8,8 @@ Keep diagrams high signal: small, readable, and updated as runtime logic evolves
 ```mermaid
 flowchart LR
     U["User / Web UI"] --> SC["SensoryCortex (typed cognitive stimuli ingress)"]
+    TG["Telegram Owner Chat"] --> TWH["TelegramWebhookBridge"]
+    TWH --> SC
     SC --> E["Ego Orchestrator"]
     NoteCtx["ConversationContext(sessionId required, unknown interlocutor resolved at sensory boundary, security context carried end-to-end)"] --> SC
 
@@ -66,6 +68,8 @@ flowchart LR
     M --> MT["MCP Time Tool"]
     M --> MF["Fetch Tool"]
     M --> EM["Email Send (Microsoft Graph)"]
+    M --> COG["ConversationOutputGateway"]
+    COG --> TGA["Telegram Bot API"]
     WS --> PID["PromptInjectionDefense"]
     MT --> PID
     MF --> PID
@@ -86,6 +90,7 @@ flowchart LR
     DS --> OX["Action Control Page (`/action-control`)"]
     DS --> ACAPI["Action Control API (`/api/action-control/*`)"]
     Note over OX,ACAPI: Action control UI defaults to SIGNAL activity items and can opt into BACKGROUND or TRACE ledger visibility
+    Note over TG,TWH: Telegram ingress is owner-only: POST webhook + shared secret + direct-chat restriction + owner chat/user allowlist
 ```
 
 ## 2) Loop Sequence (Per Input)
@@ -205,6 +210,7 @@ sequenceDiagram
                                 ACS-->>Ego: executed outcome
                             end
                             Note over Ego,Motor: Actions may complete immediately or return WAITING + async operation handles
+                            Note over Ego,Motor: `contact_user` delivery is channel-aware; Telegram sessions send through Bot API, dashboard sessions continue through local/dashboard delivery
                             Note over Ego,PG: Goal-origin WAITING without handles is rejected as a contract violation
                             Ego->>Ego: PromptInjectionDefense sanitize untrusted tool output
                             alt action = contact_user
@@ -245,6 +251,7 @@ sequenceDiagram
     end
 
     Note over User,SC: Terminal stdin is control-only in interactive mode (exit command), non-command text is not enqueued as chat input
+    Note over User,SC: Interactive linguistic ingress currently comes from dashboard chat sessions or owner-only Telegram webhook updates
 ```
 
 ## 2.1) Goals Boundary

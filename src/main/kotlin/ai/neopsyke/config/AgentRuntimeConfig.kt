@@ -12,6 +12,9 @@ import ai.neopsyke.agent.config.ConnectorRuntimeConfig
 import ai.neopsyke.agent.config.LogbookConfig
 import ai.neopsyke.agent.config.MemoryConfig
 import ai.neopsyke.agent.config.MetaReasonerConfig
+import ai.neopsyke.agent.config.NativeIntegrationsConfig
+import ai.neopsyke.agent.config.GoogleWorkspaceConfig
+import ai.neopsyke.agent.config.TelegramChannelConfig
 import ai.neopsyke.dashboard.InnerVoiceConfig
 import ai.neopsyke.agent.config.PlannerConfig
 import ai.neopsyke.agent.goal.GoalConfig
@@ -53,6 +56,7 @@ private data class AgentRuntimeYamlAgent(
     val logbook: AgentRuntimeYamlLogbook? = AgentRuntimeYamlLogbook(),
     val actionControl: AgentRuntimeYamlActionControl? = AgentRuntimeYamlActionControl(),
     val connectors: AgentRuntimeYamlConnectors? = AgentRuntimeYamlConnectors(),
+    val nativeIntegrations: AgentRuntimeYamlNativeIntegrations? = AgentRuntimeYamlNativeIntegrations(),
     val innerVoice: AgentRuntimeYamlInnerVoice? = AgentRuntimeYamlInnerVoice(),
     val runtime: AgentRuntimeYamlRuntime? = AgentRuntimeYamlRuntime(),
 )
@@ -189,6 +193,39 @@ private data class AgentRuntimeYamlConnectors(
     val allowThirdPartyConnectors: Boolean? = null,
 )
 
+private data class AgentRuntimeYamlNativeIntegrations(
+    val telegram: AgentRuntimeYamlTelegram? = AgentRuntimeYamlTelegram(),
+    val googleWorkspace: AgentRuntimeYamlGoogleWorkspace? = AgentRuntimeYamlGoogleWorkspace(),
+)
+
+private data class AgentRuntimeYamlTelegram(
+    val enabled: Boolean? = null,
+    val webhookPath: String? = null,
+    val ownerChatId: String? = null,
+    val ownerUserId: String? = null,
+    val botTokenHandle: String? = null,
+    val webhookSecretHandle: String? = null,
+    val policyScopeId: String? = null,
+    val sessionIdPrefix: String? = null,
+    val requireDirectChat: Boolean? = null,
+    val dropUnauthorizedMessages: Boolean? = null,
+)
+
+private data class AgentRuntimeYamlGoogleWorkspace(
+    val enabled: Boolean? = null,
+    val tokenStoreDir: String? = null,
+    val allowedOwnerEmail: String? = null,
+    val oauthClientIdHandle: String? = null,
+    val oauthClientSecretHandle: String? = null,
+    val oauthStateSigningSecretHandle: String? = null,
+    val callbackPath: String? = null,
+    val authorizationBaseUrl: String? = null,
+    val tokenBaseUrl: String? = null,
+    val requirePkce: Boolean? = null,
+    val requireRefreshToken: Boolean? = null,
+    val scopes: List<String>? = null,
+)
+
 private data class AgentRuntimeYamlInnerVoice(
     val enabled: Boolean? = null,
     val maxContentChars: Int? = null,
@@ -230,6 +267,9 @@ object AgentRuntimeSettingsLoader {
         val logbookYaml = agentYaml.logbook ?: AgentRuntimeYamlLogbook()
         val actionControlYaml = agentYaml.actionControl ?: AgentRuntimeYamlActionControl()
         val connectorsYaml = agentYaml.connectors ?: AgentRuntimeYamlConnectors()
+        val nativeIntegrationsYaml = agentYaml.nativeIntegrations ?: AgentRuntimeYamlNativeIntegrations()
+        val telegramYaml = nativeIntegrationsYaml.telegram ?: AgentRuntimeYamlTelegram()
+        val googleWorkspaceYaml = nativeIntegrationsYaml.googleWorkspace ?: AgentRuntimeYamlGoogleWorkspace()
         val innerVoiceYaml = agentYaml.innerVoice ?: AgentRuntimeYamlInnerVoice()
         val runtimeYaml = agentYaml.runtime ?: AgentRuntimeYamlRuntime()
 
@@ -769,6 +809,122 @@ object AgentRuntimeSettingsLoader {
                     env["NEOPSYKE_CONNECTORS_ALLOW_THIRD_PARTY"],
                     connectorsYaml.allowThirdPartyConnectors,
                     defaults.connectors.allowThirdPartyConnectors
+                ),
+            ),
+            nativeIntegrations = NativeIntegrationsConfig(
+                telegram = TelegramChannelConfig(
+                    enabled = readBoolean(
+                        env["NEOPSYKE_TELEGRAM_ENABLED"],
+                        telegramYaml.enabled,
+                        defaults.nativeIntegrations.telegram.enabled
+                    ),
+                    webhookPath = readNonBlank(
+                        env["NEOPSYKE_TELEGRAM_WEBHOOK_PATH"],
+                        telegramYaml.webhookPath,
+                        defaults.nativeIntegrations.telegram.webhookPath
+                    ),
+                    ownerChatId = readNonBlank(
+                        env["NEOPSYKE_TELEGRAM_OWNER_CHAT_ID"],
+                        telegramYaml.ownerChatId,
+                        defaults.nativeIntegrations.telegram.ownerChatId
+                    ),
+                    ownerUserId = readNonBlank(
+                        env["NEOPSYKE_TELEGRAM_OWNER_USER_ID"],
+                        telegramYaml.ownerUserId,
+                        defaults.nativeIntegrations.telegram.ownerUserId
+                    ),
+                    botTokenHandle = readNonBlank(
+                        env["NEOPSYKE_TELEGRAM_BOT_TOKEN_HANDLE"],
+                        telegramYaml.botTokenHandle,
+                        defaults.nativeIntegrations.telegram.botTokenHandle
+                    ),
+                    webhookSecretHandle = readNonBlank(
+                        env["NEOPSYKE_TELEGRAM_WEBHOOK_SECRET_HANDLE"],
+                        telegramYaml.webhookSecretHandle,
+                        defaults.nativeIntegrations.telegram.webhookSecretHandle
+                    ),
+                    policyScopeId = readNonBlank(
+                        env["NEOPSYKE_TELEGRAM_POLICY_SCOPE_ID"],
+                        telegramYaml.policyScopeId,
+                        defaults.nativeIntegrations.telegram.policyScopeId
+                    ),
+                    sessionIdPrefix = readNonBlank(
+                        env["NEOPSYKE_TELEGRAM_SESSION_ID_PREFIX"],
+                        telegramYaml.sessionIdPrefix,
+                        defaults.nativeIntegrations.telegram.sessionIdPrefix
+                    ),
+                    requireDirectChat = readBoolean(
+                        env["NEOPSYKE_TELEGRAM_REQUIRE_DIRECT_CHAT"],
+                        telegramYaml.requireDirectChat,
+                        defaults.nativeIntegrations.telegram.requireDirectChat
+                    ),
+                    dropUnauthorizedMessages = readBoolean(
+                        env["NEOPSYKE_TELEGRAM_DROP_UNAUTHORIZED_MESSAGES"],
+                        telegramYaml.dropUnauthorizedMessages,
+                        defaults.nativeIntegrations.telegram.dropUnauthorizedMessages
+                    ),
+                ),
+                googleWorkspace = GoogleWorkspaceConfig(
+                    enabled = readBoolean(
+                        env["NEOPSYKE_GOOGLE_WORKSPACE_ENABLED"],
+                        googleWorkspaceYaml.enabled,
+                        defaults.nativeIntegrations.googleWorkspace.enabled
+                    ),
+                    tokenStoreDir = readNonBlank(
+                        env["NEOPSYKE_GOOGLE_TOKEN_STORE_DIR"],
+                        googleWorkspaceYaml.tokenStoreDir,
+                        defaults.nativeIntegrations.googleWorkspace.tokenStoreDir
+                    ),
+                    allowedOwnerEmail = readNonBlank(
+                        env["NEOPSYKE_GOOGLE_ALLOWED_OWNER_EMAIL"],
+                        googleWorkspaceYaml.allowedOwnerEmail,
+                        defaults.nativeIntegrations.googleWorkspace.allowedOwnerEmail
+                    ),
+                    oauthClientIdHandle = readNonBlank(
+                        env["NEOPSYKE_GOOGLE_OAUTH_CLIENT_ID_HANDLE"],
+                        googleWorkspaceYaml.oauthClientIdHandle,
+                        defaults.nativeIntegrations.googleWorkspace.oauthClientIdHandle
+                    ),
+                    oauthClientSecretHandle = readNonBlank(
+                        env["NEOPSYKE_GOOGLE_OAUTH_CLIENT_SECRET_HANDLE"],
+                        googleWorkspaceYaml.oauthClientSecretHandle,
+                        defaults.nativeIntegrations.googleWorkspace.oauthClientSecretHandle
+                    ),
+                    oauthStateSigningSecretHandle = readNonBlank(
+                        env["NEOPSYKE_GOOGLE_OAUTH_STATE_SIGNING_SECRET_HANDLE"],
+                        googleWorkspaceYaml.oauthStateSigningSecretHandle,
+                        defaults.nativeIntegrations.googleWorkspace.oauthStateSigningSecretHandle
+                    ),
+                    callbackPath = readNonBlank(
+                        env["NEOPSYKE_GOOGLE_OAUTH_CALLBACK_PATH"],
+                        googleWorkspaceYaml.callbackPath,
+                        defaults.nativeIntegrations.googleWorkspace.callbackPath
+                    ),
+                    authorizationBaseUrl = readNonBlank(
+                        env["NEOPSYKE_GOOGLE_OAUTH_AUTH_BASE_URL"],
+                        googleWorkspaceYaml.authorizationBaseUrl,
+                        defaults.nativeIntegrations.googleWorkspace.authorizationBaseUrl
+                    ),
+                    tokenBaseUrl = readNonBlank(
+                        env["NEOPSYKE_GOOGLE_OAUTH_TOKEN_BASE_URL"],
+                        googleWorkspaceYaml.tokenBaseUrl,
+                        defaults.nativeIntegrations.googleWorkspace.tokenBaseUrl
+                    ),
+                    requirePkce = readBoolean(
+                        env["NEOPSYKE_GOOGLE_OAUTH_REQUIRE_PKCE"],
+                        googleWorkspaceYaml.requirePkce,
+                        defaults.nativeIntegrations.googleWorkspace.requirePkce
+                    ),
+                    requireRefreshToken = readBoolean(
+                        env["NEOPSYKE_GOOGLE_OAUTH_REQUIRE_REFRESH_TOKEN"],
+                        googleWorkspaceYaml.requireRefreshToken,
+                        defaults.nativeIntegrations.googleWorkspace.requireRefreshToken
+                    ),
+                    scopes = readStringSet(
+                        env["NEOPSYKE_GOOGLE_SCOPES"],
+                        googleWorkspaceYaml.scopes,
+                        defaults.nativeIntegrations.googleWorkspace.scopes
+                    ),
                 ),
             ),
             innerVoice = InnerVoiceConfig(

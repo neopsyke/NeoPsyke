@@ -506,9 +506,19 @@ class DashboardStateStore(
         }
     }
 
-    fun ensureChatSession(sessionId: String = DEFAULT_SESSION_ID, title: String? = null): ChatSessionSummary {
+    fun ensureChatSession(
+        sessionId: String = DEFAULT_SESSION_ID,
+        title: String? = null,
+        interlocutor: Interlocutor? = null,
+    ): ChatSessionSummary {
         synchronized(lock) {
-            return toSummary(ensureChatSessionLocked(sessionId = sanitizeSessionId(sessionId), title = title))
+            return toSummary(
+                ensureChatSessionLocked(
+                    sessionId = sanitizeSessionId(sessionId),
+                    title = title,
+                    interlocutor = interlocutor,
+                )
+            )
         }
     }
 

@@ -10,6 +10,7 @@ import ai.neopsyke.agent.actions.websearch.WebSearchActionHandler
 import ai.neopsyke.agent.actions.websearch.WebSearchEngine
 import ai.neopsyke.agent.actions.websearch.WebSearchResult
 import ai.neopsyke.agent.actions.NoopReflectionMemoryRecorder
+import ai.neopsyke.agent.actions.RoutedConversationOutputGateway
 import ai.neopsyke.agent.actions.async.AsyncActionHandle
 import ai.neopsyke.agent.actions.async.AsyncActionWait
 import ai.neopsyke.agent.actions.async.AsyncOperationProvider
@@ -828,7 +829,14 @@ class AgentScenarioPackTest {
         }
         return MotorCortex(
             ActionRegistry.fromPlugins(
-                listOf(ContactUserActionPlugin(output = { outputs += it }), asyncPlugin)
+                listOf(
+                    ContactUserActionPlugin(
+                        conversationOutput = RoutedConversationOutputGateway(
+                            fallbackOutput = { text -> outputs += text }
+                        )
+                    ),
+                    asyncPlugin,
+                )
             )
         )
     }

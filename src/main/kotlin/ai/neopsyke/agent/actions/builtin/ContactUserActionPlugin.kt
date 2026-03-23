@@ -7,6 +7,7 @@ import ai.neopsyke.agent.actions.ActionExecutionContext
 import ai.neopsyke.agent.actions.AgentActionPlugin
 import ai.neopsyke.agent.actions.AgentActionPluginFactory
 import ai.neopsyke.agent.actions.ActionPluginFactoryContext
+import ai.neopsyke.agent.actions.ConversationOutputGateway
 import ai.neopsyke.agent.model.ActionEffect
 import ai.neopsyke.agent.model.ActionEffectClass
 import ai.neopsyke.agent.model.ActionExecutionStatus
@@ -17,7 +18,7 @@ import ai.neopsyke.agent.model.PendingAction
 import ai.neopsyke.agent.model.SuperegoContext
 
 class ContactUserActionPlugin(
-    private val output: (String) -> Unit,
+    private val conversationOutput: ConversationOutputGateway,
 ) : AgentActionPlugin {
     override val descriptor: ActionDescriptor = ActionDescriptor(
         actionType = ActionType.CONTACT_USER,
@@ -52,7 +53,17 @@ class ContactUserActionPlugin(
     }
 
     override suspend fun execute(action: PendingAction, context: ActionExecutionContext): ActionOutcome {
-        output("ego> ${action.payload}")
+        val delivery = conversationOutput.deliver(
+            text = action.payload,
+            conversationContext = context.conversationContext,
+        )
+        if (!delivery.delivered) {
+            return ActionOutcome(
+                statusSummary = "Message delivery failed: ${delivery.detail}",
+                executionStatus = ActionExecutionStatus.FAILED,
+                actionErrorCategory = "message_delivery_failed",
+            )
+        }
         return ActionOutcome(
             statusSummary = "Message delivered to interlocutor.",
             assistantOutput = action.payload,
@@ -64,5 +75,5 @@ class ContactUserActionPlugin(
 
 class ContactUserActionPluginFactory : AgentActionPluginFactory {
     override fun create(context: ActionPluginFactoryContext): AgentActionPlugin =
-        ContactUserActionPlugin(output = context.output)
+        ContactUserActionPlugin(conversationOutput = context.conversationOutput)
 }

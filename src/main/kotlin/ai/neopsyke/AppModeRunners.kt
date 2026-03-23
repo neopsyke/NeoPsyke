@@ -34,6 +34,9 @@ import ai.neopsyke.agent.actions.websearch.WebSearchActionHandler
 import ai.neopsyke.agent.actions.websearch.WebSearchEngine
 import ai.neopsyke.agent.actions.websearch.WebSearchEngineHealth
 import ai.neopsyke.agent.actions.websearch.WebSearchResult
+import ai.neopsyke.agent.actions.EnvActionSecretProvider
+import ai.neopsyke.agent.actions.RoutedConversationOutputGateway
+import ai.neopsyke.agent.actions.SecretHandle
 import ai.neopsyke.config.AgentRuntimeSettings
 import ai.neopsyke.config.McpCapabilityConfig
 import ai.neopsyke.config.LlmEndpointConfig
@@ -110,6 +113,8 @@ import ai.neopsyke.integrations.mistral.websearch.MistralConversationsWebSearchE
 import ai.neopsyke.integrations.mistral.websearch.MistralWebSearchMode
 import ai.neopsyke.integrations.mistral.websearch.MistralWebSearchProfile
 import ai.neopsyke.integrations.mistral.websearch.MistralWebSearchAgentSession
+import ai.neopsyke.integrations.telegram.TelegramBotApiClient
+import ai.neopsyke.integrations.telegram.TelegramWebhookBridge
 import ai.neopsyke.metrics.MetricsQueryProvider
 import ai.neopsyke.metrics.MetricsRuntimeFactory
 import ai.neopsyke.agent.tools.mcp.FetchTool
@@ -581,11 +586,35 @@ internal object AppModeRunners {
             source = sensoryInput,
             interlocutorResolver = interlocutorResolver
         )
+        val secretProvider = EnvActionSecretProvider(System.getenv())
+        val telegramConfig = config.nativeIntegrations.telegram
+        val telegramBotToken = secretProvider.read(SecretHandle(telegramConfig.botTokenHandle))
+        val telegramWebhookSecret = secretProvider.read(SecretHandle(telegramConfig.webhookSecretHandle))
+        val telegramSink = if (telegramConfig.enabled && !telegramBotToken.isNullOrBlank()) {
+            TelegramBotApiClient(botToken = telegramBotToken)
+        } else {
+            null
+        }
+        val conversationOutput = RoutedConversationOutputGateway(
+            fallbackOutput = {},
+            telegramSink = telegramSink,
+        )
         val chatBridge = ChatRuntimeBridge(
             store = dashboardStore,
             sensoryInput = sensoryInput,
             interlocutorResolver = interlocutorResolver
         )
+        val telegramWebhookBridge = if (telegramConfig.enabled) {
+            TelegramWebhookBridge(
+                store = dashboardStore,
+                sensoryInput = sensoryInput,
+                config = telegramConfig,
+                webhookSecret = telegramWebhookSecret,
+                interlocutorResolver = interlocutorResolver,
+            )
+        } else {
+            null
+        }
         val sidecarPath = resolveEvalEventSidecarPath()
         val sidecarSink = if (sidecarPath == null) {
             null
@@ -646,6 +675,7 @@ internal object AppModeRunners {
                             DashboardServer(
                                 store = dashboardStore,
                                 chatBridge = chatBridge,
+                                telegramWebhookBridge = telegramWebhookBridge,
                                 innerVoiceStore = innerVoiceStore,
                                 idInnerVoiceFilePath = idInnerVoiceFileSink?.path,
                                 port = dashboardPort
@@ -1054,6 +1084,7 @@ internal object AppModeRunners {
                                                             }
                                                         },
                                                         output = {},
+                                                        conversationOutput = conversationOutput,
                                                     )
                                                     assembly.actionRegistry.loadWarnings.forEach { warning ->
                                                         instrumentation.emit(AgentEvents.warning(warning))
