@@ -32,7 +32,7 @@ internal class ActionReviewPipeline(
     private val impulseTracker: ImpulseLifecycleTracker,
     private val dialogueFor: (String) -> ArrayDeque<DialogueTurn>,
     private val resolveSessionId: (ConversationContext) -> String,
-    private val superegoContext: (String, ActionOrigin) -> SuperegoContext,
+    private val superegoContext: (String, ActionOrigin, ConversationContext) -> SuperegoContext,
     private val cleanupResolvedInputAfterAnswer: (PendingAction) -> Unit,
     private val getId: () -> ai.neopsyke.agent.id.Id?,
     private val actionLifecycleObserver: ActionLifecycleObserver = NoopActionLifecycleObserver,
@@ -221,7 +221,28 @@ internal class ActionReviewPipeline(
         sessionId: String,
         convCtx: ConversationContext,
     ): Boolean {
-        val gateDecision = superego.review(resolvedAction, superegoContext(sessionId, resolvedAction.origin))
+        val authorizationDecision = superego.reviewAuthorization(
+            resolvedAction,
+            superegoContext(sessionId, resolvedAction.origin, convCtx)
+        )
+        instrumentation.emit(
+            AgentEvent(
+                type = "superego_authorization_decision",
+                data = mapOf(
+                    "action_id" to resolvedAction.id,
+                    "action_type" to resolvedAction.type.id,
+                    "progress" to authorizationDecision.progress.name.lowercase(),
+                    "commit_mode" to authorizationDecision.commitMode.name.lowercase(),
+                    "reason" to authorizationDecision.reason,
+                    "reason_code" to authorizationDecision.reasonCode,
+                )
+            )
+        )
+        val gateDecision = GateDecision(
+            allow = authorizationDecision.progress != AuthorizationProgress.DENY,
+            reason = authorizationDecision.reason,
+            reasonCode = authorizationDecision.reasonCode,
+        )
         instrumentation.emit(
             AgentEvents.actionReviewResult(
                 actionId = resolvedAction.id,

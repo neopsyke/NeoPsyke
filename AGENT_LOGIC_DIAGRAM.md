@@ -296,11 +296,12 @@ stateDiagram-v2
     TaskReview --> Denied: task verifier deny
 
     TaskReview --> PolicyReview: task verifier allow
-    PolicyReview --> Denied: deterministic hard deny / superego deny
+    PolicyReview --> Denied: deterministic hard deny / contract deny / superego deny
     Denied --> ThoughtQueued: enqueue safe alternative thought
     Note right of ThoughtQueued: Repeat-denied payload block is skipped for technical or transient denial reasons (prefer reason_code classification) reflection lessons persist only for non-technical and non-system denials
 
-    PolicyReview --> Executing: superego allow
+    PolicyReview --> Executing: allow_commit
+    PolicyReview --> Executing: allow_stage (legacy runtime compatibility path)
     Executing --> ThoughtQueued: action=resolution_draft (plan continues)
     Executing --> EvidenceObserved: external action succeeded
     Executing --> EvidenceMissing: tool/provider failure

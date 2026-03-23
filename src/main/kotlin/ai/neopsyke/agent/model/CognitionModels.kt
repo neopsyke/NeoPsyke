@@ -103,6 +103,7 @@ data class SuperegoContext(
     val recentDialogue: List<DialogueTurn>,
     val shortTermContextSummary: String = "",
     val origin: ActionOrigin? = null,
+    val conversationContext: ConversationContext = ConversationContext.default(),
 )
 
 sealed interface EgoTrigger {

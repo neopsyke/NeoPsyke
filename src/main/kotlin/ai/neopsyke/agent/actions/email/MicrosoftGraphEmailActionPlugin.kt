@@ -20,10 +20,12 @@ import ai.neopsyke.agent.actions.ActionPluginHealth
 import ai.neopsyke.agent.actions.AgentActionPlugin
 import ai.neopsyke.agent.actions.AgentActionPluginFactory
 import ai.neopsyke.agent.model.ActionEffect
+import ai.neopsyke.agent.model.ActionEffectClass
 import ai.neopsyke.agent.model.ActionExecutionStatus
 import ai.neopsyke.agent.model.ActionOutcome
 import ai.neopsyke.agent.model.ActionType
 import ai.neopsyke.agent.config.AgentConfig
+import ai.neopsyke.agent.model.InstructionTrust
 import ai.neopsyke.agent.model.PendingAction
 import ai.neopsyke.agent.model.SuperegoContext
 import ai.neopsyke.agent.support.TextSecurity
@@ -59,7 +61,10 @@ class MicrosoftGraphEmailActionPlugin(
             "Deny EMAIL_SEND to out-of-policy recipient domains when domain restrictions are configured.",
             "Allow EMAIL_SEND only when sender identity is explicit or a configured default sender exists."
         ),
-        capabilities = setOf(ActionCapability.PRODUCES_USER_OUTPUT)
+        capabilities = setOf(ActionCapability.PRODUCES_USER_OUTPUT),
+        effectClass = ActionEffectClass.COMMIT_PRIVATE,
+        supportsAutonomousCommit = true,
+        allowedInstructionTrust = setOf(InstructionTrust.TRUSTED_INSTRUCTION),
     )
 
     override suspend fun healthCheck(): ActionPluginHealth {

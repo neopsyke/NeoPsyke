@@ -771,12 +771,14 @@ class Ego(
     private fun superegoContext(
         sessionId: String = ConversationContext.DEFAULT_SESSION_ID,
         origin: ActionOrigin? = null,
+        conversationContext: ConversationContext = ConversationContext.default(),
     ): SuperegoContext {
         val shortTermSummary = memory.currentShortTermSummary()
         return SuperegoContext(
             recentDialogue = dialogueFor(sessionId).takeLast(12),
             shortTermContextSummary = shortTermSummary,
             origin = origin,
+            conversationContext = conversationContext,
         )
     }
 

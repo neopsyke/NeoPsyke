@@ -221,7 +221,7 @@ It is intentionally high-level and should stay aligned with the code.
     - Deterministic checks classify task intent + volatility for terminal answers.
     - External evidence is required only for volatile/unknown factual intents; transformation/personal-memory/subjective/static-reasoning intents bypass evidence requirement.
     - When volatile evidence is required but evidence actions are unavailable, verifier uses a graceful allow path (`TASK_EVIDENCE_UNAVAILABLE_GRACEFUL`) to avoid dead-loop retries.
-    - Forced-terminal system answers (decision-pressure safety path) are exempt from `DecisionVerifier` evidence requirement.
+                - Forced-terminal system answers (decision-pressure safety path) are exempt from `DecisionVerifier` evidence requirement.
   - If denied:
     - Record denial metrics/evidence.
     - Enqueue a new "find safe alternative" thought with denied-action context, including structured `reason_code`.
@@ -345,7 +345,21 @@ It is intentionally high-level and should stay aligned with the code.
 - File: `src/main/kotlin/ai/neopsyke/agent/superego/Superego.kt`
 - Reviews each non-fallback action with layered checks:
   - deterministic hard-deny checks first (`SuperegoDeterministicConscience`)
-  - LLM semantic review second (only if deterministic checks pass)
+  - deterministic authorization-contract evaluation second (`SuperegoPolicy.authorize`)
+  - LLM semantic review third (only if deterministic checks pass and contract does not hard-deny)
+- Superego now exposes two decision surfaces:
+  - legacy `GateDecision(allow/deny)` for the current execution path
+  - richer `AuthorizationDecision(progress, commitMode, reason, reasonCode)` for the new security architecture
+- Authorization progress currently distinguishes:
+  - `DENY`
+  - `ALLOW_STAGE`
+  - `ALLOW_COMMIT`
+- Current runtime still executes through the legacy direct path, but `ALLOW_STAGE` is now visible in telemetry and is the migration hook for future prepared/staged execution.
+- `SuperegoPolicy.authorize` now evaluates action contracts against conversation security context:
+  - instruction-trust restrictions are enforced deterministically
+  - control-plane actions require trusted instruction
+  - public commits default to staged/approval-backed handling unless explicitly enabled
+  - direct-commit eligibility is taken from the action contract rather than inferred ad hoc
 - Id-origin deterministic policy is enforced inside Superego (not plugins):
   - Direct `answer` from Id origin is hard-denied by default.
   - Id-origin actions are allowlisted for internal/evidence-gathering types (`web_search`, `website_fetch`, `mcp_time`, `answer_draft`, `reflect`).
