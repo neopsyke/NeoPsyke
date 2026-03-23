@@ -44,6 +44,12 @@ It is intentionally high-level and should stay aligned with the code.
   - `AsyncOperationRegistry` (generic provider adapter registry for long-running action handles restored by the goal runtime)
   - `TelegramWebhookBridge` (optional owner-only Telegram webhook ingress)
   - `TelegramBotApiClient` (optional Telegram Bot API delivery for owner direct chat)
+  - `GoogleWorkspaceOAuthBridge` (optional native Google OAuth start/callback flow)
+  - `GoogleWorkspaceCredentialStore` (encrypted local Google token storage)
+  - native Google observe actions:
+    - `gmail_observe_search`
+    - `gmail_observe_message`
+    - `calendar_observe_events`
   - `Ego` orchestrator
 - Interactive startup now resolves memory from `memory-runtime.yaml` and performs a provider health/startup check before enabling long-term vector memory:
   - `memory=off` wires `NoopHippocampus`
@@ -72,6 +78,7 @@ It is intentionally high-level and should stay aligned with the code.
     - HMAC-signed OAuth state tokens with provider/redirect/owner binding and TTL enforcement
     - encrypted pending-auth storage under `.neopsyke/auth/google` for PKCE verifier and scope state
     - explicit token-encryption secret handles rather than plaintext token artifacts
+    - dashboard-hosted OAuth start/callback endpoints; the public callback URL must be supplied explicitly
 
 ## Main Loop (Ego)
 - File: `src/main/kotlin/ai/neopsyke/agent/ego/Ego.kt`
@@ -183,6 +190,10 @@ It is intentionally high-level and should stay aligned with the code.
   - can require both owner `chat_id` and owner `user_id`
   - unauthorized traffic fails closed or is silently dropped based on `dropUnauthorizedMessages`
   - accepted updates are mapped into dedicated sessions using `<sessionIdPrefix>:<chatId>`
+- Google Workspace native auth specifics:
+  - OAuth start is initiated through a local NeoPsyke HTTP endpoint that returns the Google authorization URL
+  - callback handling verifies signed state, consumes the encrypted PKCE pending-auth record, exchanges the code, verifies the Gmail profile email against the configured owner, and then stores encrypted credentials locally
+  - read-only Gmail/Calendar actions remain unavailable until this authorization completes successfully
 - `StimulusEnvelope` and `Percept` now carry provenance metadata (instruction trust, data trust, provider/object identity, sanitization record).
 - `PerceptualAppraiser` currently maps stimulus families into percept families:
   - `LINGUISTIC` -> `REQUEST`
@@ -260,6 +271,7 @@ It is intentionally high-level and should stay aligned with the code.
       - Telegram owner conversations route through the configured Telegram Bot API sink using the conversation channel id
       - other interactive sessions continue through the existing local/dashboard delivery path
       - missing Telegram delivery configuration fails closed at action execution time
+    - native Google observe actions (`gmail_observe_search`, `gmail_observe_message`, `calendar_observe_events`) use encrypted local credentials plus on-demand access-token refresh and always stay in `OBSERVE` effect class
     - Actions may return either an immediate outcome or a generic async wait contract (`ActionOutcome.asyncWait`, typically with `executionStatus=WAITING`).
       - Synchronous tools keep the existing immediate-completion path.
       - Async start actions do not enqueue ordinary follow-up thoughts on the start call.

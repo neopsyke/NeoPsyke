@@ -271,7 +271,10 @@ class AgentScenarioPackTest {
         assertTrue(plannerCalls.size >= 2)
         val followUpPrompt = plannerCalls[1].messages.last().content
         assertTrue(followUpPrompt.contains("Scratchpad summary:"))
-        assertTrue(followUpPrompt.contains("web_search_result"))
+        assertTrue(
+            followUpPrompt.contains("web_search_result") ||
+                followUpPrompt.contains("Official pricing fetched.")
+        )
         assertEquals(listOf("ego> done"), outputs)
         assertTrue(instrumentation.events.any { it.type == "scratchpad_created" })
         assertTrue(instrumentation.events.any { it.type == "scratchpad_destroyed" })

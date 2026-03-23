@@ -11,6 +11,7 @@ import ai.neopsyke.agent.actioncontrol.ActionControlDecisionResult
 import ai.neopsyke.agent.actioncontrol.ActionControlService
 import ai.neopsyke.agent.model.ConversationSecurityContexts
 import ai.neopsyke.agent.goal.GoalManager
+import ai.neopsyke.integrations.google.GoogleWorkspaceOAuthBridge
 import ai.neopsyke.integrations.telegram.TelegramWebhookBridge
 import ai.neopsyke.metrics.LlmCallStatsReport
 import java.nio.file.Files
@@ -38,6 +39,7 @@ class DashboardServer(
     private val store: DashboardStateStore,
     private val chatBridge: ChatRuntimeBridge? = null,
     private val telegramWebhookBridge: TelegramWebhookBridge? = null,
+    private val googleOAuthBridge: GoogleWorkspaceOAuthBridge? = null,
     private val innerVoiceStore: InnerVoiceStore? = null,
     private val idInnerVoiceFilePath: Path? = null,
     @Volatile var metricsQueryProvider: MetricsQueryProvider? = null,
@@ -163,6 +165,18 @@ class DashboardServer(
             server.createContext(bridge.webhookPath()) { exchange ->
                 withRequestGuard(exchange, "telegram_webhook") {
                     handleTelegramWebhook(exchange, bridge)
+                }
+            }
+        }
+        googleOAuthBridge?.let { bridge ->
+            server.createContext(bridge.startPath()) { exchange ->
+                withRequestGuard(exchange, "google_oauth_start") {
+                    handleGoogleOAuthStart(exchange, bridge)
+                }
+            }
+            server.createContext(bridge.callbackPath()) { exchange ->
+                withRequestGuard(exchange, "google_oauth_callback") {
+                    handleGoogleOAuthCallback(exchange, bridge)
                 }
             }
         }
@@ -410,6 +424,48 @@ class DashboardServer(
             mapper.writeValueAsString(
                 mapOf(
                     "accepted" to result.accepted,
+                    "detail" to result.detail,
+                )
+            ),
+            "application/json; charset=utf-8"
+        )
+    }
+
+    private fun handleGoogleOAuthStart(exchange: HttpExchange, bridge: GoogleWorkspaceOAuthBridge) {
+        if (exchange.requestMethod.uppercase() != "GET") {
+            respondText(exchange, 405, "Method not allowed", "text/plain; charset=utf-8")
+            return
+        }
+        val result = bridge.startAuthorization()
+        respondText(
+            exchange,
+            result.statusCode,
+            mapper.writeValueAsString(
+                mapOf(
+                    "ok" to result.ok,
+                    "detail" to result.detail,
+                    "authorization_url" to result.authorizationUrl,
+                )
+            ),
+            "application/json; charset=utf-8"
+        )
+    }
+
+    private fun handleGoogleOAuthCallback(exchange: HttpExchange, bridge: GoogleWorkspaceOAuthBridge) {
+        if (exchange.requestMethod.uppercase() != "GET") {
+            respondText(exchange, 405, "Method not allowed", "text/plain; charset=utf-8")
+            return
+        }
+        val result = bridge.completeAuthorization(
+            code = parseQueryParam(exchange.requestURI.query, "code"),
+            stateToken = parseQueryParam(exchange.requestURI.query, "state"),
+        )
+        respondText(
+            exchange,
+            result.statusCode,
+            mapper.writeValueAsString(
+                mapOf(
+                    "ok" to result.ok,
                     "detail" to result.detail,
                 )
             ),

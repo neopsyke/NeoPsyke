@@ -89,6 +89,11 @@ import ai.neopsyke.llm.AdaptiveStructuredOutputChatClient
 import ai.neopsyke.llm.InstrumentedChatModelClient
 import ai.neopsyke.llm.ChatModelClient
 import ai.neopsyke.integrations.google.websearch.GeminiWebSearchEngine
+import ai.neopsyke.integrations.google.GoogleWorkspaceApiClient
+import ai.neopsyke.integrations.google.GoogleWorkspaceCredentialStore
+import ai.neopsyke.integrations.google.GoogleWorkspaceOAuthBridge
+import ai.neopsyke.integrations.auth.OAuthPendingAuthorizationStore
+import ai.neopsyke.integrations.auth.OAuthStateCodec
 import ai.neopsyke.llm.GeminiChatClient
 import ai.neopsyke.llm.GeminiProviderStatusChecker
 import ai.neopsyke.llm.GroqChatClient
@@ -615,6 +620,61 @@ internal object AppModeRunners {
         } else {
             null
         }
+        val googleConfig = config.nativeIntegrations.googleWorkspace
+        val googleClientId = secretProvider.read(SecretHandle(googleConfig.oauthClientIdHandle))
+        val googleClientSecret = secretProvider.read(SecretHandle(googleConfig.oauthClientSecretHandle))
+        val googleStateSigningSecret = secretProvider.read(SecretHandle(googleConfig.oauthStateSigningSecretHandle))
+        val googleTokenEncryptionSecret = secretProvider.read(SecretHandle(googleConfig.oauthTokenEncryptionSecretHandle))
+        val googleCredentialStore = if (
+            googleConfig.enabled &&
+            !googleTokenEncryptionSecret.isNullOrBlank()
+        ) {
+            GoogleWorkspaceCredentialStore(
+                rootDir = Paths.get(googleConfig.tokenStoreDir),
+                encryptionSecret = googleTokenEncryptionSecret,
+            )
+        } else {
+            null
+        }
+        val googleApiClient = if (
+            googleConfig.enabled &&
+            !googleClientId.isNullOrBlank() &&
+            !googleClientSecret.isNullOrBlank() &&
+            googleCredentialStore != null
+        ) {
+            GoogleWorkspaceApiClient(
+                clientId = googleClientId,
+                clientSecret = googleClientSecret,
+                tokenBaseUrl = googleConfig.tokenBaseUrl,
+                credentialStore = googleCredentialStore,
+            )
+        } else {
+            null
+        }
+        val googleOAuthBridge = if (
+            googleConfig.enabled &&
+            !googleClientId.isNullOrBlank() &&
+            !googleClientSecret.isNullOrBlank() &&
+            !googleStateSigningSecret.isNullOrBlank() &&
+            !googleTokenEncryptionSecret.isNullOrBlank() &&
+            googleApiClient != null &&
+            googleCredentialStore != null
+        ) {
+            GoogleWorkspaceOAuthBridge(
+                config = googleConfig,
+                clientId = googleClientId,
+                clientSecret = googleClientSecret,
+                stateCodec = OAuthStateCodec(signingSecret = googleStateSigningSecret),
+                pendingAuthorizationStore = OAuthPendingAuthorizationStore(
+                    rootDir = Paths.get(googleConfig.tokenStoreDir).resolve("pending"),
+                    encryptionSecret = googleTokenEncryptionSecret,
+                ),
+                credentialStore = googleCredentialStore,
+                apiClient = googleApiClient,
+            )
+        } else {
+            null
+        }
         val sidecarPath = resolveEvalEventSidecarPath()
         val sidecarSink = if (sidecarPath == null) {
             null
@@ -676,6 +736,7 @@ internal object AppModeRunners {
                                 store = dashboardStore,
                                 chatBridge = chatBridge,
                                 telegramWebhookBridge = telegramWebhookBridge,
+                                googleOAuthBridge = googleOAuthBridge,
                                 innerVoiceStore = innerVoiceStore,
                                 idInnerVoiceFilePath = idInnerVoiceFileSink?.path,
                                 port = dashboardPort

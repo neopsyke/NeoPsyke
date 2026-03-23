@@ -241,25 +241,33 @@ class DashboardServerTest {
     }
 
     private fun startServer(): StartedServer {
-        val port = ServerSocket(0).use { it.localPort }
-        val store = DashboardStateStore()
-        val sensory = AsyncSignalSource(
-            includeStdin = false,
-            emitStdinClosedSignal = false
-        )
-        val bridge = ChatRuntimeBridge(store = store, sensoryInput = sensory)
-        val server = DashboardServer(
-            store = store,
-            chatBridge = bridge,
-            port = port
-        )
-        server.start()
-        return StartedServer(
-            port = port,
-            store = store,
-            server = server,
-            sensory = sensory
-        )
+        repeat(5) { attempt ->
+            val port = ServerSocket(0).use { it.localPort }
+            val store = DashboardStateStore()
+            val sensory = AsyncSignalSource(
+                includeStdin = false,
+                emitStdinClosedSignal = false
+            )
+            val bridge = ChatRuntimeBridge(store = store, sensoryInput = sensory)
+            try {
+                val server = DashboardServer(
+                    store = store,
+                    chatBridge = bridge,
+                    port = port
+                )
+                server.start()
+                return StartedServer(
+                    port = port,
+                    store = store,
+                    server = server,
+                    sensory = sensory
+                )
+            } catch (ex: java.net.BindException) {
+                serverCloseQuietly(store, sensory)
+                if (attempt == 4) throw ex
+            }
+        }
+        error("Unreachable")
     }
 
     private data class StartedServer(
@@ -273,6 +281,11 @@ class DashboardServerTest {
             sensory.close()
             store.close()
         }
+    }
+
+    private fun serverCloseQuietly(store: DashboardStateStore, sensory: AsyncSignalSource) {
+        runCatching { sensory.close() }
+        runCatching { store.close() }
     }
 
     private data class SseConnection(

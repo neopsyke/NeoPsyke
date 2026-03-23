@@ -215,6 +215,8 @@ private data class AgentRuntimeYamlGoogleWorkspace(
     val enabled: Boolean? = null,
     val tokenStoreDir: String? = null,
     val allowedOwnerEmail: String? = null,
+    val publicBaseUrl: String? = null,
+    val oauthStartPath: String? = null,
     val oauthClientIdHandle: String? = null,
     val oauthClientSecretHandle: String? = null,
     val oauthStateSigningSecretHandle: String? = null,
@@ -881,6 +883,16 @@ object AgentRuntimeSettingsLoader {
                         env["NEOPSYKE_GOOGLE_ALLOWED_OWNER_EMAIL"],
                         googleWorkspaceYaml.allowedOwnerEmail,
                         defaults.nativeIntegrations.googleWorkspace.allowedOwnerEmail
+                    ),
+                    publicBaseUrl = readNonBlank(
+                        env["NEOPSYKE_GOOGLE_PUBLIC_BASE_URL"],
+                        googleWorkspaceYaml.publicBaseUrl,
+                        defaults.nativeIntegrations.googleWorkspace.publicBaseUrl
+                    ),
+                    oauthStartPath = readNonBlank(
+                        env["NEOPSYKE_GOOGLE_OAUTH_START_PATH"],
+                        googleWorkspaceYaml.oauthStartPath,
+                        defaults.nativeIntegrations.googleWorkspace.oauthStartPath
                     ),
                     oauthClientIdHandle = readNonBlank(
                         env["NEOPSYKE_GOOGLE_OAUTH_CLIENT_ID_HANDLE"],

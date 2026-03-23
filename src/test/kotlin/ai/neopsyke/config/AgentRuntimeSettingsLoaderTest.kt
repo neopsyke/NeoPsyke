@@ -61,6 +61,8 @@ class AgentRuntimeSettingsLoaderTest {
         assertEquals("TELEGRAM_WEBHOOK_SECRET", settings.agentConfig.nativeIntegrations.telegram.webhookSecretHandle)
         assertEquals(false, settings.agentConfig.nativeIntegrations.googleWorkspace.enabled)
         assertEquals(".neopsyke/auth/google", settings.agentConfig.nativeIntegrations.googleWorkspace.tokenStoreDir)
+        assertEquals("", settings.agentConfig.nativeIntegrations.googleWorkspace.publicBaseUrl)
+        assertEquals("/api/channels/google/oauth/start", settings.agentConfig.nativeIntegrations.googleWorkspace.oauthStartPath)
         assertEquals(
             "GOOGLE_OAUTH_TOKEN_ENCRYPTION_SECRET",
             settings.agentConfig.nativeIntegrations.googleWorkspace.oauthTokenEncryptionSecretHandle,
@@ -194,6 +196,8 @@ class AgentRuntimeSettingsLoaderTest {
                   enabled: true
                   token_store_dir: /tmp/neopsyke-google-auth
                   allowed_owner_email: owner@example.com
+                  public_base_url: https://neopsyke.example.test
+                  oauth_start_path: /oauth/google/start
                   oauth_client_id_handle: GOOGLE_CLIENT_ID_HANDLE
                   oauth_client_secret_handle: GOOGLE_CLIENT_SECRET_HANDLE
                   oauth_state_signing_secret_handle: GOOGLE_STATE_HANDLE
@@ -309,6 +313,8 @@ class AgentRuntimeSettingsLoaderTest {
         assertEquals(true, settings.agentConfig.nativeIntegrations.googleWorkspace.enabled)
         assertEquals("/tmp/neopsyke-google-auth", settings.agentConfig.nativeIntegrations.googleWorkspace.tokenStoreDir)
         assertEquals("owner@example.com", settings.agentConfig.nativeIntegrations.googleWorkspace.allowedOwnerEmail)
+        assertEquals("https://neopsyke.example.test", settings.agentConfig.nativeIntegrations.googleWorkspace.publicBaseUrl)
+        assertEquals("/oauth/google/start", settings.agentConfig.nativeIntegrations.googleWorkspace.oauthStartPath)
         assertEquals("GOOGLE_CLIENT_ID_HANDLE", settings.agentConfig.nativeIntegrations.googleWorkspace.oauthClientIdHandle)
         assertEquals("GOOGLE_CLIENT_SECRET_HANDLE", settings.agentConfig.nativeIntegrations.googleWorkspace.oauthClientSecretHandle)
         assertEquals("GOOGLE_STATE_HANDLE", settings.agentConfig.nativeIntegrations.googleWorkspace.oauthStateSigningSecretHandle)
@@ -389,6 +395,8 @@ class AgentRuntimeSettingsLoaderTest {
                 "NEOPSYKE_GOOGLE_WORKSPACE_ENABLED" to "true",
                 "NEOPSYKE_GOOGLE_TOKEN_STORE_DIR" to "/env/google-auth",
                 "NEOPSYKE_GOOGLE_ALLOWED_OWNER_EMAIL" to "env-owner@example.com",
+                "NEOPSYKE_GOOGLE_PUBLIC_BASE_URL" to "https://env-neopsyke.example.test",
+                "NEOPSYKE_GOOGLE_OAUTH_START_PATH" to "/env/oauth/google/start",
                 "NEOPSYKE_GOOGLE_OAUTH_TOKEN_ENCRYPTION_SECRET_HANDLE" to "ENV_GOOGLE_TOKEN_ENCRYPTION",
                 "NEOPSYKE_GOOGLE_OAUTH_STATE_TTL_SECONDS" to "180",
                 "NEOPSYKE_GOOGLE_SCOPES" to "https://www.googleapis.com/auth/gmail.readonly, https://www.googleapis.com/auth/calendar.readonly",
@@ -425,6 +433,8 @@ class AgentRuntimeSettingsLoaderTest {
         assertEquals(true, settings.agentConfig.nativeIntegrations.googleWorkspace.enabled)
         assertEquals("/env/google-auth", settings.agentConfig.nativeIntegrations.googleWorkspace.tokenStoreDir)
         assertEquals("env-owner@example.com", settings.agentConfig.nativeIntegrations.googleWorkspace.allowedOwnerEmail)
+        assertEquals("https://env-neopsyke.example.test", settings.agentConfig.nativeIntegrations.googleWorkspace.publicBaseUrl)
+        assertEquals("/env/oauth/google/start", settings.agentConfig.nativeIntegrations.googleWorkspace.oauthStartPath)
         assertEquals(
             "ENV_GOOGLE_TOKEN_ENCRYPTION",
             settings.agentConfig.nativeIntegrations.googleWorkspace.oauthTokenEncryptionSecretHandle,

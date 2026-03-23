@@ -30,6 +30,8 @@ data class GoogleWorkspaceConfig(
     val enabled: Boolean = false,
     val tokenStoreDir: String = DEFAULT_TOKEN_STORE_DIR,
     val allowedOwnerEmail: String = "",
+    val publicBaseUrl: String = "",
+    val oauthStartPath: String = DEFAULT_START_PATH,
     val oauthClientIdHandle: String = DEFAULT_OAUTH_CLIENT_ID_HANDLE,
     val oauthClientSecretHandle: String = DEFAULT_OAUTH_CLIENT_SECRET_HANDLE,
     val oauthStateSigningSecretHandle: String = DEFAULT_OAUTH_STATE_SIGNING_SECRET_HANDLE,
@@ -48,6 +50,7 @@ data class GoogleWorkspaceConfig(
         const val DEFAULT_OAUTH_CLIENT_SECRET_HANDLE: String = "GOOGLE_OAUTH_CLIENT_SECRET"
         const val DEFAULT_OAUTH_STATE_SIGNING_SECRET_HANDLE: String = "GOOGLE_OAUTH_STATE_SIGNING_SECRET"
         const val DEFAULT_OAUTH_TOKEN_ENCRYPTION_SECRET_HANDLE: String = "GOOGLE_OAUTH_TOKEN_ENCRYPTION_SECRET"
+        const val DEFAULT_START_PATH: String = "/api/channels/google/oauth/start"
         const val DEFAULT_CALLBACK_PATH: String = "/api/channels/google/oauth/callback"
         const val DEFAULT_AUTHORIZATION_BASE_URL: String = "https://accounts.google.com/o/oauth2/v2/auth"
         const val DEFAULT_TOKEN_BASE_URL: String = "https://oauth2.googleapis.com/token"
