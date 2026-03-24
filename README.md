@@ -122,7 +122,7 @@ Standalone Kotlin JVM app using Gradle with:
   - Legacy flat `agent.*` runtime keys are not supported.
   - `app` section covers UI/runtime flags (for example dashboard enablement and port).
   - `eval` section covers eval defaults (for example stage default and raw-response cap).
-  - Precedence is `CLI > env > external YAML > bundled YAML > code defaults for omitted fields in partial user configs`.
+  - Runtime config precedence is `env > external YAML override > bundled YAML defaults`.
 - Id runtime settings are centralized in `config/id-runtime.yaml`.
   - Release artifacts bundle the checked-in `config/id-runtime.yaml`. If no external file is present, NeoPsyke uses the bundled default YAML.
   - Optional override file path: `NEOPSYKE_ID_CONFIG_FILE=/path/to/id-runtime.yaml`.

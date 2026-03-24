@@ -26,6 +26,8 @@ These files are packaged into the application artifact as bundled resources. Kot
 
 `config/llm-runtime.yaml` is also the only source of truth for the model catalog.
 
+The shipped defaults are not treated as external override files. The canonical checked-in files live under `config/`, and the classpath-bundled copies are what artifact users get by default.
+
 ## Loading Model
 
 Each runtime config now loads in this order:
@@ -50,7 +52,21 @@ The canonical shipped defaults live under `config/`. External overrides are sepa
 
 ## File Resolution
 
-Each runtime has a default file path in the repo root and an optional env var pointing to an external override file:
+Each runtime has:
+
+- a bundled canonical default under `config/`
+- a default external override filename in the current working directory
+- an optional env var pointing to an external override file anywhere else
+
+Default external override filenames:
+
+- `agent-runtime.yaml`
+- `id-runtime.yaml`
+- `llm-runtime.yaml`
+- `mcp-runtime.yaml`
+- `memory-runtime.yaml`
+
+Override env vars:
 
 - `NEOPSYKE_AGENT_CONFIG_FILE`
 - `NEOPSYKE_ID_CONFIG_FILE`
@@ -61,9 +77,15 @@ Each runtime has a default file path in the repo root and an optional env var po
 Resolution rules:
 
 - If the override env var is set, that file must exist and be non-empty.
-- If the default path exists, it is treated as an external overlay file.
+- If the default external filename exists in the working directory, it is treated as an external overlay file.
 - If no external file exists, the bundled YAML is used by itself.
 - If a file exists but is empty, loading fails.
+
+This means:
+
+- clone users can drop a local `llm-runtime.yaml` or `agent-runtime.yaml` into the repo root and it will be treated as an override
+- artifact users can point `NEOPSYKE_*_CONFIG_FILE` at any file they want
+- if neither exists, the app falls back to the bundled `config/*.yaml` resources in the JAR
 
 ## Validation Model
 
@@ -86,6 +108,8 @@ Current validation coverage:
   - Referenced providers must be valid enum values.
   - Referenced providers must have configured provider blocks.
   - Required provider fields such as `base_url` and `api_key_env` must exist.
+
+Environment variables are then applied on top of validated YAML and can still override specific values. This is mainly for secrets, machine-local endpoints, and operator-local runtime toggles.
 
 ## LLM Runtime Clean Cut
 
@@ -136,6 +160,22 @@ Important consequences:
 - Provider default model names live in YAML, not Kotlin.
 - Partial external LLM configs inherit bundled provider definitions automatically.
 - If a role references an invalid or missing provider, loading fails with a direct error.
+- `model_catalog` is YAML-only and supports source-review timestamps through `metadata_updated_at`.
+
+### Provider Auth Variables
+
+Providers declare which auth env var they use via `providers.<name>.api_key_env`.
+
+Typical values in the shipped config:
+
+- `ANTHROPIC_API_KEY`
+- `GROQ_API_KEY`
+- `GOOGLE_API_KEY`
+- `MISTRAL_API_KEY`
+- `OPENAI_API_KEY`
+- `OLLAMA_API_KEY`
+
+`OLLAMA_API_KEY` is optional for local Ollama and only matters for authenticated Ollama hosts.
 
 ## Practical Examples
 
@@ -143,6 +183,8 @@ Ready-to-use external overlay examples live under:
 
 - `examples/runtime-config/`
 - `examples/runtime-config/README.md`
+
+Those are designed as fast-start operator overlays with the important decisions already made, not as exhaustive copies of the canonical runtime files.
 
 ### Example: Small LLM Overlay
 
@@ -204,5 +246,9 @@ Regression tests now cover:
 For shipped runtime configs, the contract is:
 
 `env overrides > external YAML overlay > bundled YAML defaults`
+
+This precedence applies to runtime config loading itself.
+
+CLI flags remain a separate layer for app behavior outside the runtime YAML files, but they are not part of the YAML merge chain.
 
 There should be no intentional dependence on legacy config shapes or duplicate Kotlin-owned default catalogs.
