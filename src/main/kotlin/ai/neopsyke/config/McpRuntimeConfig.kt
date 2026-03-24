@@ -14,7 +14,7 @@ data class McpCapabilityConfig(
     val mode: String = "stdio",
     val provider: String = "auto",
     val command: String = "",
-    @JsonProperty("fallback_commands")
+    @param:JsonProperty("fallback_commands")
     val fallbackCommands: List<String> = emptyList(),
 )
 

@@ -77,7 +77,7 @@ Variable names are configured in `config/llm-runtime.yaml` under `providers.<nam
 | `EGO_LLM_RETRY_ATTEMPTS` | `2` | Retries on transient LLM failures. |
 | `EGO_ACTION_RETRY_BUDGET_NON_RETRYABLE_FAILURES` | `3` | Non-retryable action failures before giving up. |
 | `EGO_ACTION_RETRY_COOLDOWN_STEPS` | `10` | Steps to wait before retrying a failed action type. |
-| `EGO_LOOP_DELAY_MS` | `0` | Delay between Ego loop iterations (ms). `run-neopsyke.sh` defaults to `1000`. |
+| `EGO_LOOP_DELAY_MS` | `0` | Delay between Ego loop iterations (ms). When `0` the delay is skipped entirely. |
 | `EGO_MAX_ACTION_PAYLOAD_CHARS` | `4000` | Maximum action payload size (chars). |
 | `EGO_SEARCH_RESULT_COUNT` | `5` | Number of web search results to request. |
 

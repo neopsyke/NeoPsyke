@@ -333,6 +333,22 @@ pattern `config.<domain>.<field>` (e.g. `config.planner.llmRetryAttempts`).
 - Use existing abstractions (`SensoryCortex`, `MotorCortex`, `SuperegoGatekeeper`, instrumentation hooks) instead of duplicating logic.
 - Keep logging and metrics instrumentation consistent with existing patterns.
 
+### Zero Compiler Warnings Policy
+The build must produce **zero** Kotlin compiler warnings. Before opening a PR,
+run `./gradlew compileKotlin compileTestKotlin` and verify no `w:` lines appear.
+Common pitfalls and their fixes:
+
+- **Deprecated `JsonNode.asText(defaultValue)`** — use `node.path("key").asText()`
+  (returns `""` for missing nodes) or `.asText().ifEmpty { fallback }` when a
+  non-empty fallback is needed. For null-default cases use
+  `if (node.isTextual) node.asText() else null`.
+- **`@JsonProperty` on data-class constructor params** — always use the explicit
+  target `@param:JsonProperty("snake_name")` to silence KT-73255.
+- **`ObjectMapper.configure(MapperFeature, Boolean)`** — use the builder API:
+  `JsonMapper.builder(factory).enable(MapperFeature.X).disable(DeserializationFeature.Y).build()`.
+- When a new Jackson or Kotlin deprecation surfaces, fix it immediately rather
+  than suppressing the warning.
+
 ## Logging Practices (Required)
 - Log for diagnosis, not verbosity: every warning/error must include enough context to locate the failing path quickly.
 - Include stable keys in log messages for machine filtering:

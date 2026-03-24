@@ -220,15 +220,15 @@ private data class GeminiChatCompletionRequest(
     val model: String,
     val messages: List<GeminiChatMessage>,
     val temperature: Double? = null,
-    @JsonProperty("max_tokens")
+    @param:JsonProperty("max_tokens")
     val maxTokens: Int? = null,
-    @JsonProperty("response_format")
+    @param:JsonProperty("response_format")
     val responseFormat: GeminiResponseFormat? = null,
 )
 
 private data class GeminiResponseFormat(
     val type: String,
-    @JsonProperty("json_schema")
+    @param:JsonProperty("json_schema")
     val jsonSchema: GeminiJsonSchemaFormat,
 )
 
@@ -245,7 +245,7 @@ private data class GeminiChatMessage(
 
 private data class GeminiChatCompletionResponse(
     val id: String?,
-    @JsonProperty("object")
+    @param:JsonProperty("object")
     val objectType: String? = null,
     val model: String?,
     val choices: List<GeminiChoice> = emptyList(),
@@ -255,7 +255,7 @@ private data class GeminiChatCompletionResponse(
 private data class GeminiChoice(
     val index: Int? = null,
     val message: GeminiResponseMessage,
-    @JsonProperty("finish_reason")
+    @param:JsonProperty("finish_reason")
     val finishReason: String? = null,
 )
 
@@ -265,11 +265,11 @@ private data class GeminiResponseMessage(
 )
 
 private data class GeminiUsage(
-    @JsonProperty("prompt_tokens")
+    @param:JsonProperty("prompt_tokens")
     val promptTokens: Int? = null,
-    @JsonProperty("completion_tokens")
+    @param:JsonProperty("completion_tokens")
     val completionTokens: Int? = null,
-    @JsonProperty("total_tokens")
+    @param:JsonProperty("total_tokens")
     val totalTokens: Int? = null,
 ) {
     fun toChatUsage(): ChatUsage =

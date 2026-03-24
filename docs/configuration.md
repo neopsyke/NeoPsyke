@@ -327,7 +327,7 @@ The meta-reasoner is a deliberation engine that fires when decision pressure bui
 
 | Key | Default | Description |
 |---|---|---|
-| `loop_delay_ms` | `0` | Delay between Ego loop iterations. Use `run-neopsyke.sh` default of `1000ms` for interactive use, `0` for evals. |
+| `loop_delay_ms` | `0` | Delay between Ego loop iterations (ms). When `0` (the default) the delay is skipped entirely. |
 | `max_pending_thoughts` | `64` | Maximum queued thoughts. |
 | `max_pending_actions` | `32` | Maximum queued actions. |
 | `max_pending_inputs` | `32` | Maximum queued inputs. |

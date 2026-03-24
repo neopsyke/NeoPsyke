@@ -199,13 +199,13 @@ private fun parseEvidencePayload(raw: String): ReflectEvidencePayload? =
         val node = mapper.readTree(raw)
         ReflectEvidencePayload(
             artifactIds = when {
-                node.path("artifact_ids").isArray -> node.path("artifact_ids").mapNotNull { it.asText(null)?.trim() }.filter { it.isNotBlank() }
-                node.path("artifactIds").isArray -> node.path("artifactIds").mapNotNull { it.asText(null)?.trim() }.filter { it.isNotBlank() }
+                node.path("artifact_ids").isArray -> node.path("artifact_ids").mapNotNull { if (it.isTextual) it.asText().trim() else null }.filter { it.isNotBlank() }
+                node.path("artifactIds").isArray -> node.path("artifactIds").mapNotNull { if (it.isTextual) it.asText().trim() else null }.filter { it.isNotBlank() }
                 else -> emptyList()
             },
-            summaryHint = node.path("summary_hint").asText(node.path("summaryHint").asText("")).trim(),
+            summaryHint = node.path("summary_hint").asText().ifEmpty { node.path("summaryHint").asText() }.trim(),
             keywords = when {
-                node.path("keywords").isArray -> node.path("keywords").mapNotNull { it.asText(null)?.trim() }.filter { it.isNotBlank() }
+                node.path("keywords").isArray -> node.path("keywords").mapNotNull { if (it.isTextual) it.asText().trim() else null }.filter { it.isNotBlank() }
                 else -> emptyList()
             }
         )

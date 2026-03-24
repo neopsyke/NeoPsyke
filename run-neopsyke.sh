@@ -11,7 +11,7 @@ FREUD_LIVE_MODE=0
 DISABLE_ID=0
 GOALS_OVERRIDE=""
 CLEAR_ACTION_CONTROL=0
-LOOP_DELAY_MS="${EGO_LOOP_DELAY_MS:-1000}"
+LOOP_DELAY_MS="${EGO_LOOP_DELAY_MS:-0}"
 LOG_DIR="${NEOPSYKE_LOG_DIR:-$ROOT_DIR/.neopsyke/logs}"
 LOG_RETENTION="${NEOPSYKE_LOG_RETENTION:-30}"
 APP_ARGS=()
@@ -122,8 +122,8 @@ Usage: ./run-neopsyke.sh [--log-level LEVEL] [--loop-delay-ms MS|--no-delay] [--
 
 Options:
   -l, --log-level LEVEL   SLF4J simple logger level (default: warning)
-      --loop-delay-ms MS  Delay between interactive loop cycles (default: 1000)
-      --no-delay          Alias for --loop-delay-ms 0
+      --loop-delay-ms MS  Delay between ego loop cycles in ms (default: 0, no delay)
+      --no-delay          Alias for --loop-delay-ms 0 (already the default)
       --no-id             Disable the Id module (autonomous drives) for this run
       --goals             Enable the goals subsystem for this run
       --no-goals          Disable the goals subsystem for this run
@@ -161,7 +161,7 @@ Environment:
   NEOPSYKE_EVENT_LOG_FILE    Optional path override for instrumentation sidecar JSONL
   NEOPSYKE_METRICS_DB        SQLite path for persisted local metrics
   NEOPSYKE_GOALS_WORKSPACE_ROOT  Optional goal workspace root override
-  EGO_LOOP_DELAY_MS       Delay between loop cycles in ms (default via launcher: 1000)
+  EGO_LOOP_DELAY_MS       Delay between loop cycles in ms (default: 0, no delay)
   NEOPSYKE_ID_CONFIG_FILE       Optional path to Id runtime YAML (otherwise use bundled config/id-runtime.yaml)
   NEOPSYKE_ID_ENABLED            Override Id module enabled state (true/false, overrides YAML)
   NEOPSYKE_GOALS_ENABLED         Override goals subsystem enabled state (true/false, launcher default: true)
