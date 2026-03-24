@@ -42,7 +42,7 @@ It is trying to build a coherent mind-like architecture in which:
 ### Prerequisites
 
 - JDK 21+
-- At least one LLM API key (OpenAI, Groq, Mistral, or Google)
+- At least one LLM API key (Anthropic, OpenAI, Groq, Mistral, Google, or local Ollama)
 - Docker (optional but recommended, for long-term vector memory via pgvector)
 
 ### 1. Clone and build
@@ -55,20 +55,20 @@ cd neopsyke
 
 ### 2. Configure LLM access
 
-Copy and edit the LLM configuration:
+NeoPsyke ships with bundled defaults under `config/`. To customize, copy a ready-made overlay or create a minimal one:
 
 ```bash
-cp llm-runtime.yaml.example llm-runtime.yaml   # if an example exists, otherwise edit llm-runtime.yaml directly
+cp examples/runtime-config/llm-runtime.external.example.yaml llm-runtime.yaml
 ```
 
 Set your API keys as environment variables:
 
 ```bash
-export OPENAI_API_KEY="sk-..."
-# and/or: GROQ_API_KEY, MISTRAL_API_KEY, GOOGLE_API_KEY
+export GOOGLE_API_KEY="..."
+# Supported: ANTHROPIC_API_KEY, GROQ_API_KEY, GOOGLE_API_KEY, MISTRAL_API_KEY, OPENAI_API_KEY, OLLAMA_API_KEY
 ```
 
-Edit `llm-runtime.yaml` to assign providers and models to cognitive roles (`planner`, `superego`, `action_verifier`, `meta_reasoner`, `memory_advisor`). Each role can use a different provider and model.
+The overlay merges on top of the bundled defaults — you only need to specify the fields you want to change. Each cognitive role (`planner`, `superego_primary`, `superego_escalation`, `meta_reasoner`, `memory_advisor`) can use a different provider and model.
 
 ### 3. (Optional) Start the memory backend
 
@@ -245,20 +245,20 @@ Live evaluation lanes (weak-structure, prod-acceptance) and memory live eval are
 
 ## Configuration
 
-NeoPsyke uses six YAML configuration files, all optional and overridable by environment variables:
+NeoPsyke ships with bundled default configuration under `config/`. Local overlay files in the working directory merge on top of the bundled defaults — you only need to specify the fields you want to change.
 
-| File | Env override | Controls |
-|---|---|---|
-| `llm-runtime.yaml` | `NEOPSYKE_LLM_CONFIG_FILE` | LLM providers, models, cognitive role routing, web search |
-| `agent-runtime.yaml` | `NEOPSYKE_AGENT_CONFIG_FILE` | Planner limits, superego budget, memory caps, dashboard port |
-| `memory-runtime.yaml` | `NEOPSYKE_MEMORY_CONFIG_FILE` | Long-term memory provider (managed pgvector / external / off) |
-| `id-runtime.yaml` | `NEOPSYKE_ID_CONFIG_FILE` | Drive system (needs, growth rates, thresholds, cooldowns) |
-| `mcp-runtime.yaml` | `NEOPSYKE_MCP_CONFIG_FILE` | MCP tool servers (time, website fetch) |
-| `action-security.yaml` | -- | Per-action commit policy (direct/staged/denied) |
+| Bundled default | Local overlay | Env override | Controls |
+|---|---|---|---|
+| `config/llm-runtime.yaml` | `llm-runtime.yaml` | `NEOPSYKE_LLM_CONFIG_FILE` | LLM providers, models, cognitive role routing, web search |
+| `config/agent-runtime.yaml` | `agent-runtime.yaml` | `NEOPSYKE_AGENT_CONFIG_FILE` | Planner limits, superego budget, memory caps, dashboard port |
+| `config/memory-runtime.yaml` | `memory-runtime.yaml` | `NEOPSYKE_MEMORY_CONFIG_FILE` | Long-term memory provider (managed pgvector / external / off) |
+| `config/id-runtime.yaml` | `id-runtime.yaml` | `NEOPSYKE_ID_CONFIG_FILE` | Drive system (needs, growth rates, thresholds, cooldowns) |
+| `config/mcp-runtime.yaml` | `mcp-runtime.yaml` | `NEOPSYKE_MCP_CONFIG_FILE` | MCP tool servers (time, website fetch) |
+| — | `action-security.yaml` | — | Per-action commit policy (direct/staged/denied) |
 
-Precedence: CLI args > environment variables > YAML > code defaults.
+Precedence: environment variables > external YAML overlay > bundled YAML defaults.
 
-Each cognitive role (planner, superego, action verifier, meta-reasoner, memory advisor) can be independently routed to different LLM providers and models, allowing cost and quality optimization per function.
+Each cognitive role (planner, superego primary/escalation, action verifier, meta-reasoner, memory advisor) can be independently routed to different LLM providers and models, allowing cost and quality optimization per function. Supported providers: Anthropic, Groq, Google, Mistral, OpenAI, Ollama.
 
 ## Docs map
 
@@ -273,10 +273,14 @@ Each cognitive role (planner, superego, action verifier, meta-reasoner, memory a
 | `AGENTS.md` | Instructions for coding agents working in this repository |
 | `AGENT_LOGIC_SUMMARY.md` | Current runtime logic reference |
 | `AGENT_LOGIC_DIAGRAM.md` | Visual flow of the current agent loop |
+| [examples/runtime-config/](examples/runtime-config/) | Ready-to-use external overlay examples for fast start |
 
 ## Project structure
 
 ```
+config/                # Bundled runtime YAML defaults (packaged into artifact)
+examples/
+  runtime-config/      # Ready-to-use external overlay examples
 src/main/kotlin/ai/neopsyke/
   agent/
     id/              # Drive system (Id)
@@ -292,7 +296,7 @@ src/main/kotlin/ai/neopsyke/
     support/         # Prompt injection defense, text security, payload validation
     tools/mcp/       # MCP tool integration
   config/            # Runtime configuration loaders
-  llm/               # LLM provider clients (OpenAI, Groq, Mistral, Google)
+  llm/               # LLM provider clients (Anthropic, OpenAI, Groq, Mistral, Google, Ollama)
   integrations/      # Telegram, Google Workspace, email
   dashboard/         # Web UI and API server
   instrumentation/   # Event bus and telemetry sinks

@@ -2,34 +2,38 @@
 
 Complete reference of all environment variables supported by NeoPsyke. For most users, the YAML configuration files are sufficient — environment variables are primarily useful for quick overrides, CI, and containerized deployments.
 
-**Precedence:** CLI args > environment variables > YAML > code defaults.
+**Precedence:** environment variables > external YAML overlay > bundled YAML defaults. CLI flags are a separate layer for app behavior outside the YAML merge chain.
 
-For configuration concepts and tuning guidance, see [configuration.md](configuration.md).
+For configuration concepts, the loading model, and tuning guidance, see [configuration.md](configuration.md).
 
 ---
 
 ## Configuration file paths
 
-| Variable | Default | Description |
+These override the default external overlay path. Bundled defaults under `config/` are always loaded first; these files are overlays.
+
+| Variable | Default overlay path | Description |
 |---|---|---|
-| `NEOPSYKE_LLM_CONFIG_FILE` | `./llm-runtime.yaml` | Path to LLM runtime configuration. |
-| `NEOPSYKE_AGENT_CONFIG_FILE` | `./agent-runtime.yaml` | Path to agent/app/eval runtime configuration. |
-| `NEOPSYKE_MEMORY_CONFIG_FILE` | `./memory-runtime.yaml` | Path to memory provider configuration. |
-| `NEOPSYKE_ID_CONFIG_FILE` | `./id-runtime.yaml` | Path to Id drive system configuration. |
-| `NEOPSYKE_MCP_CONFIG_FILE` | `./mcp-runtime.yaml` | Path to MCP tool server configuration. |
+| `NEOPSYKE_LLM_CONFIG_FILE` | `./llm-runtime.yaml` | Path to LLM runtime overlay. |
+| `NEOPSYKE_AGENT_CONFIG_FILE` | `./agent-runtime.yaml` | Path to agent/app/eval runtime overlay. |
+| `NEOPSYKE_MEMORY_CONFIG_FILE` | `./memory-runtime.yaml` | Path to memory provider overlay. |
+| `NEOPSYKE_ID_CONFIG_FILE` | `./id-runtime.yaml` | Path to Id drive system overlay. |
+| `NEOPSYKE_MCP_CONFIG_FILE` | `./mcp-runtime.yaml` | Path to MCP tool server overlay. |
 
 ---
 
 ## LLM API keys
 
-Variable names are configured in `llm-runtime.yaml` under `providers.<name>.api_key_env`. Common defaults:
+Variable names are configured in `config/llm-runtime.yaml` under `providers.<name>.api_key_env`. Shipped defaults:
 
 | Variable | Description |
 |---|---|
+| `ANTHROPIC_API_KEY` | Anthropic API key. |
 | `OPENAI_API_KEY` | OpenAI API key. |
 | `GROQ_API_KEY` | Groq API key. |
 | `MISTRAL_API_KEY` | Mistral API key. |
 | `GOOGLE_API_KEY` | Google AI API key. |
+| `OLLAMA_API_KEY` | Ollama API key (optional — only needed for authenticated remote Ollama hosts). |
 
 ---
 

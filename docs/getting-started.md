@@ -9,7 +9,7 @@ For the full configuration reference, see [configuration.md](configuration.md).
 ## Prerequisites
 
 - **JDK 21+** — NeoPsyke targets Java 21 bytecode.
-- **At least one LLM API key** — OpenAI, Groq, Mistral, or Google. Multiple providers can be used simultaneously for different cognitive roles.
+- **At least one LLM API key** — Anthropic, OpenAI, Groq, Mistral, Google, or local Ollama. Multiple providers can be used simultaneously for different cognitive roles.
 - **Docker** (optional but recommended) — for long-term vector memory via PostgreSQL + pgvector.
 
 ## Install and build
@@ -24,41 +24,43 @@ This compiles the project and produces a standalone distribution under `build/in
 
 ## Configure LLM access
 
-Edit `llm-runtime.yaml` at the repository root to assign LLM providers and models to cognitive roles.
+NeoPsyke ships with bundled default configuration under `config/`. To customize, create a local overlay file at the repository root named `llm-runtime.yaml`. This file merges on top of the bundled defaults — you only need to specify the fields you want to change.
 
-Each cognitive role — planner, superego, action verifier, meta-reasoner, memory advisor — can use a different provider and model:
+The fastest way to start is to copy one of the ready-made examples:
+
+```bash
+cp examples/runtime-config/llm-runtime.external.example.yaml llm-runtime.yaml
+```
+
+Or create a minimal overlay that changes just the provider and model for each cognitive role:
 
 ```yaml
-providers:
-  openai:
-    api_key_env: OPENAI_API_KEY
-  groq:
-    api_key_env: GROQ_API_KEY
-
 cognitive_roles:
   planner:
-    provider: openai
-    model: gpt-4o-mini
-  superego:
-    provider: groq
-    model: openai/gpt-oss-20b
+    provider: google
+    model: gemini-2.5-flash
+  superego_primary:
+    provider: google
+    model: gemini-2.5-flash
   meta_reasoner:
-    provider: openai
-    model: gpt-4o-mini
+    provider: google
+    model: gemini-2.5-flash
   memory_advisor:
-    provider: groq
-    model: openai/gpt-oss-20b
+    provider: google
+    model: gemini-2.5-flash
 
 web_search:
-  provider: groq
-  model: groq/compound-beta
+  provider: google
+  model: gemini-2.5-flash
 ```
+
+Provider definitions (base URLs, API key env var names, default models) are already in the bundled `config/llm-runtime.yaml`. Your overlay inherits them automatically.
 
 Set your API keys as environment variables:
 
 ```bash
-export OPENAI_API_KEY="sk-..."
-export GROQ_API_KEY="gsk_..."
+export GOOGLE_API_KEY="..."
+# Supported: ANTHROPIC_API_KEY, GROQ_API_KEY, GOOGLE_API_KEY, MISTRAL_API_KEY, OPENAI_API_KEY, OLLAMA_API_KEY
 ```
 
 ## (Optional) Start the memory backend

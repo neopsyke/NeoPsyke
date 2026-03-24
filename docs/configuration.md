@@ -1,95 +1,160 @@
 # Configuration Reference
 
-NeoPsyke uses domain-grouped YAML configuration files, all optional and overridable by environment variables and CLI arguments.
-
-**Precedence:** CLI args > environment variables > YAML > code defaults.
+NeoPsyke uses domain-grouped YAML configuration files with a layered loading model.
 
 > **A note on tuning.** Many of these knobs interact with each other and with the specific LLM models you use. Token budgets, completion limits, pressure thresholds, and memory assessment intervals all affect agent behavior in non-obvious ways. Significant testing is needed to find good configurations for your setup. When in doubt, start with the defaults and adjust one thing at a time.
 
 ---
 
-## Configuration files overview
+## Loading model
 
-| File | Env override | Purpose |
+Each runtime configuration loads in this order:
+
+1. **Bundled YAML** — canonical defaults shipped under `config/` and packaged into the application artifact.
+2. **External YAML overlay** — an optional file that merges on top of the bundled defaults.
+3. **Environment variable overrides** — applied on top of the merged YAML.
+4. **Validation** — the loader rejects malformed or incomplete configuration early instead of silently falling back.
+
+The external YAML is an **overlay**, not a replacement. YAML objects merge recursively by key, scalars replace bundled values, lists replace bundled lists, and `null` values are ignored for merge purposes. A small overlay file can safely change a single field without restating the entire configuration.
+
+**Precedence:** environment variables > external YAML overlay > bundled YAML defaults. CLI flags remain a separate layer for app behavior outside the YAML merge chain.
+
+### File resolution
+
+Each runtime has a bundled default under `config/`, a default external overlay filename in the working directory, and an optional env var pointing to an override file anywhere:
+
+| Bundled file | External overlay default | Env override |
 |---|---|---|
-| `llm-runtime.yaml` | `NEOPSYKE_LLM_CONFIG_FILE` | LLM providers, models, cognitive role routing, web search |
-| `agent-runtime.yaml` | `NEOPSYKE_AGENT_CONFIG_FILE` | Planner limits, superego budget, memory caps, dashboard, goals, integrations |
-| `memory-runtime.yaml` | `NEOPSYKE_MEMORY_CONFIG_FILE` | Long-term memory provider (managed pgvector / external / off) |
-| `id-runtime.yaml` | `NEOPSYKE_ID_CONFIG_FILE` | Drive system (needs, growth rates, thresholds, cooldowns) |
-| `mcp-runtime.yaml` | `NEOPSYKE_MCP_CONFIG_FILE` | MCP tool servers (time, website fetch) |
-| `action-security.yaml` | — | Per-action commit and staging policy |
+| `config/agent-runtime.yaml` | `agent-runtime.yaml` | `NEOPSYKE_AGENT_CONFIG_FILE` |
+| `config/id-runtime.yaml` | `id-runtime.yaml` | `NEOPSYKE_ID_CONFIG_FILE` |
+| `config/llm-runtime.yaml` | `llm-runtime.yaml` | `NEOPSYKE_LLM_CONFIG_FILE` |
+| `config/mcp-runtime.yaml` | `mcp-runtime.yaml` | `NEOPSYKE_MCP_CONFIG_FILE` |
+| `config/memory-runtime.yaml` | `memory-runtime.yaml` | `NEOPSYKE_MEMORY_CONFIG_FILE` |
 
-All files are expected at the repository root by default. Override the path with the corresponding environment variable.
+Resolution rules:
+
+- If the override env var is set, that file **must** exist and be non-empty.
+- If the default external filename exists in the working directory, it is treated as an overlay.
+- If no external file exists, the bundled YAML is used alone.
+- Empty files are rejected.
+
+This means:
+
+- **Source checkouts** can drop a local `llm-runtime.yaml` into the repo root and it will be treated as an overlay.
+- **Artifact users** can point `NEOPSYKE_*_CONFIG_FILE` at any file they want.
+- If neither exists, the app runs with the bundled `config/*.yaml` resources from the JAR.
+
+### Action security policy
+
+`action-security.yaml` is loaded from the working directory. It is not bundled or overlaid — it is the operator's policy file.
+
+### Example overlays
+
+Ready-to-use external overlay examples live under `examples/runtime-config/`. These are minimal fast-start overlays with the important decisions already made, not exhaustive copies of the bundled files. See `examples/runtime-config/README.md` for usage.
 
 ---
 
-## 1. LLM Configuration (`llm-runtime.yaml`)
+## 1. LLM Configuration (`config/llm-runtime.yaml`)
 
-This file controls which LLM providers and models are used for each cognitive function in the agent.
+This file controls which LLM providers and models are used for each cognitive function. It is also the single source of truth for the model catalog.
 
 ### Providers
 
 ```yaml
 providers:
-  openai:
-    api_key_env: OPENAI_API_KEY
-    base_url: https://api.openai.com/v1
+  anthropic:
+    api_key_env: ANTHROPIC_API_KEY
+    base_url: https://api.anthropic.com/v1
+    default_model: claude-sonnet-4-20250514
+    default_web_search_model: claude-sonnet-4-20250514
   groq:
     api_key_env: GROQ_API_KEY
     base_url: https://api.groq.com/openai/v1
-  mistral:
-    api_key_env: MISTRAL_API_KEY
-    base_url: https://api.mistral.ai/v1
+    default_model: openai/gpt-oss-20b
+    default_web_search_model: groq/compound-mini
   google:
     api_key_env: GOOGLE_API_KEY
     base_url: https://generativelanguage.googleapis.com/v1beta/openai/
+    default_model: gemini-2.5-flash
+    default_web_search_model: gemini-2.5-flash
+  mistral:
+    api_key_env: MISTRAL_API_KEY
+    base_url: https://api.mistral.ai/v1
+    default_model: mistral-small-2506
+    default_web_search_model: mistral-small-2506
+  ollama:
+    api_key_env: OLLAMA_API_KEY
+    base_url: http://localhost:11434/api
+    default_model: gpt-oss
+    default_web_search_model: gpt-oss
+  openai:
+    api_key_env: OPENAI_API_KEY
+    base_url: https://api.openai.com/v1
+    default_model: gpt-4o-mini
+    default_web_search_model: gpt-4o-mini
 ```
 
-Each provider declares the environment variable name for its API key (not the key itself) and a base URL. All providers use an OpenAI-compatible chat completions API.
+Each provider declares: the environment variable name for its API key (not the key itself), a base URL, and default model names. Provider base URLs and default models live in YAML, not in Kotlin code.
+
+Supported providers: `anthropic`, `groq`, `google`, `mistral`, `ollama`, `openai`. All use an OpenAI-compatible chat completions API. `OLLAMA_API_KEY` is optional — it only matters for authenticated remote Ollama hosts.
+
+If a cognitive role references an invalid or missing provider, loading fails with a direct error.
 
 ### Cognitive roles
 
 ```yaml
 cognitive_roles:
   planner:
-    provider: openai
-    model: gpt-4o-mini
-  action_verifier:
     provider: groq
-    model: openai/gpt-oss-20b
-  superego:
+    model: openai/gpt-oss-120b
+  action_verifier:
     provider: openai
     model: gpt-4o-mini
+  superego_primary:
+    provider: openai
+    model: gpt-4o-mini
+  superego_escalation:
+    provider: openai
+    model: gpt-4.1-mini
   meta_reasoner:
-    provider: openai
-    model: gpt-4o-mini
+    provider: groq
+    model: openai/gpt-oss-120b
   meta_reasoner_fallback:
     provider: openai
     model: gpt-5-mini
   memory_advisor:
-    provider: groq
-    model: openai/gpt-oss-20b
+    provider: openai
+    model: gpt-4.1-mini
 ```
 
-Each cognitive role can use a different provider and model. This allows cost optimization — use cheaper/faster models for high-frequency low-stakes roles (superego, memory advisor) and stronger models for planning.
+Each cognitive role can use a different provider and model. This allows cost optimization — use cheaper/faster models for high-frequency low-stakes roles and stronger models for planning.
 
 | Role | What it does |
 |---|---|
 | `planner` | Main reasoning and planning LLM. Forms thoughts, proposes actions, generates answers. |
 | `action_verifier` | Checks whether a candidate action is grounded, sufficient, and ready to commit. |
-| `superego` | Reviews proposed actions against safety directives and policy. |
+| `superego_primary` | Reviews proposed actions against safety directives and policy. |
+| `superego_escalation` | Stronger model used when two-stage review escalates on low confidence or medium policy risk. |
 | `meta_reasoner` | Intervenes when the planning chain stalls or loops. Classifies chain health. |
 | `meta_reasoner_fallback` | Optional fallback if the primary meta-reasoner is unavailable. Treated as optional at startup. |
 | `memory_advisor` | Periodically assesses whether current context should be consolidated into long-term memory. |
 
-If a role or model is omitted, NeoPsyke falls back to provider defaults.
+Partial external overlay files inherit bundled provider definitions automatically. A minimal overlay can change just the planner without restating all other roles:
+
+```yaml
+# Example: change only the planner
+cognitive_roles:
+  planner:
+    provider: anthropic
+    model: claude-sonnet-4-20250514
+```
 
 ### Web search
 
 ```yaml
 web_search:
   provider: groq
-  model: groq/compound-beta
+  model: groq/compound-mini
 ```
 
 Web search is configured independently from cognitive roles. Supported providers: `groq`, `mistral`, `google`, `openai`.
@@ -99,29 +164,29 @@ Web search is configured independently from cognitive roles. Supported providers
 ```yaml
 model_catalog:
   openai:
-    gpt-4o-mini:
+    - model: gpt-4o-mini
       tier: mid
       token_weight: 1.0
       context_window: 128000
   groq:
-    openai/gpt-oss-20b:
+    - model: openai/gpt-oss-20b
       tier: low
       token_weight: 0.3
       context_window: 32000
 ```
 
-`token_weight` is used to scale dynamic completion budgets for the superego and memory advisor. Lower weight = more generous budget (the model is cheaper, so the system can afford more tokens).
+The model catalog is YAML-only and supports source-review timestamps through `metadata_updated_at`. `token_weight` is used to scale dynamic completion budgets for the superego and memory advisor. Lower weight = more generous budget (the model is cheaper, so the system can afford more tokens).
 
 ### Tuning notes
 
 - **Planner model quality matters most.** The planner drives all reasoning. A weak planner produces poor plans regardless of other settings.
-- **Superego can use a cheaper model** since its task is narrower (policy review, not open-ended reasoning).
+- **Superego can use a cheaper model** for `superego_primary` since its task is narrower (policy review, not open-ended reasoning). Use a stronger model for `superego_escalation` to catch edge cases the primary misses.
 - **Meta-reasoner fires infrequently** (only under pressure), so cost is usually low regardless of model choice.
 - **Memory advisor fires periodically** (every N steps). A cheap model works if you accept occasional suboptimal consolidation decisions.
 
 ---
 
-## 2. Agent Configuration (`agent-runtime.yaml`)
+## 2. Agent Configuration (`config/agent-runtime.yaml`)
 
 This is the largest configuration file, covering the Ego planner, Superego, memory system, meta-reasoner, episodic logbook, goals, integrations, and runtime behavior.
 
@@ -279,7 +344,7 @@ The meta-reasoner is a deliberation engine that fires when decision pressure bui
 
 ---
 
-## 3. Memory Provider (`memory-runtime.yaml`)
+## 3. Memory Provider (`config/memory-runtime.yaml`)
 
 Controls the long-term memory backend.
 
@@ -318,7 +383,7 @@ External HTTP providers must implement NeoPsyke's versioned `v1` contract:
 
 ---
 
-## 4. Id Configuration (`id-runtime.yaml`)
+## 4. Id Configuration (`config/id-runtime.yaml`)
 
 Controls the autonomous drive system.
 
@@ -383,7 +448,7 @@ Each need is individually configurable:
 
 ---
 
-## 5. MCP Tools (`mcp-runtime.yaml`)
+## 5. MCP Tools (`config/mcp-runtime.yaml`)
 
 Controls Model Context Protocol tool servers.
 
