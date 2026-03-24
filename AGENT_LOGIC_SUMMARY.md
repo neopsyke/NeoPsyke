@@ -44,6 +44,7 @@ It is intentionally high-level and should stay aligned with the code.
   - `GoalsGateway` (optional goal runtime boundary; also serves ambient active-goal queries)
   - `AsyncOperationRegistry` (generic provider adapter registry for long-running action handles restored by the goal runtime)
   - `TelegramWebhookBridge` (optional owner-only Telegram webhook ingress)
+  - `TelegramPollingBridge` (optional owner-only Telegram long-poll ingress for local/dev use)
   - `TelegramBotApiClient` (optional Telegram Bot API delivery for owner direct chat)
   - `GoogleWorkspaceOAuthBridge` (optional native Google OAuth start/callback flow)
   - `GoogleWorkspaceCredentialStore` (encrypted local Google token storage)
@@ -73,6 +74,7 @@ It is intentionally high-level and should stay aligned with the code.
   - default `0` keeps each cap disabled
 - Native integration wiring is currently explicit-handle based:
   - Telegram bot token and webhook secret are resolved through configured secret handles
+  - Telegram ingress mode is configurable: `webhook` or `polling`
   - secrets are read by the runtime and injected only into the native integration clients that need them
   - no connector subprocess environment passthrough is involved in this path
   - Google Workspace auth foundation uses:
@@ -90,7 +92,7 @@ It is intentionally high-level and should stay aligned with the code.
     - `RuntimeControlSignal` for runtime lifecycle/control events.
   - Typed cognitive stimuli currently arrive as:
     - linguistic stimuli from dashboard chat sessions
-    - linguistic stimuli from owner-only Telegram webhook ingress
+    - linguistic stimuli from owner-only Telegram webhook or polling ingress
     - cue stimuli from Id impulse wakeups
     - cue stimuli from goal-runtime work-ready cues
   - Runs `runLoop()` while there is pending work.
@@ -183,8 +185,12 @@ It is intentionally high-level and should stay aligned with the code.
   - dashboard chat is treated as trusted owner direct-chat context
   - stdin chat is treated as trusted owner direct-chat context
   - Telegram webhook ingress is treated as trusted owner direct-chat context only after webhook-secret validation and owner chat/user allowlist checks
+  - Telegram polling ingress is treated as trusted owner direct-chat context only after the same private-chat and owner chat/user allowlist checks
   - Id and goal-runtime cues are treated as trusted internal automation context
 - Telegram owner chat ingress specifics:
+  - supports two transport modes:
+    - `webhook`: Telegram delivers `POST` updates to the configured HTTPS path
+    - `polling`: NeoPsyke calls `getUpdates` directly and clears any existing webhook on startup so local polling works
   - accepts only `POST` webhook calls on the configured path
   - requires exact `X-Telegram-Bot-Api-Secret-Token` match
   - can require private/direct chats only

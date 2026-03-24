@@ -9,7 +9,9 @@ Keep diagrams high signal: small, readable, and updated as runtime logic evolves
 flowchart LR
     U["User / Web UI"] --> SC["SensoryCortex (typed cognitive stimuli ingress)"]
     TG["Telegram Owner Chat"] --> TWH["TelegramWebhookBridge"]
+    TG --> TLP["TelegramPollingBridge"]
     TWH --> SC
+    TLP --> SC
     GOU["Google OAuth Browser Flow"] --> GOA["GoogleWorkspaceOAuthBridge"]
     SC --> E["Ego Orchestrator"]
     NoteCtx["ConversationContext(sessionId required, unknown interlocutor resolved at sensory boundary, security context carried end-to-end)"] --> SC

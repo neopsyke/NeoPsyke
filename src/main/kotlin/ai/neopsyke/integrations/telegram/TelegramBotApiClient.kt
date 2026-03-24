@@ -1,7 +1,6 @@
 package ai.neopsyke.integrations.telegram
 
-import com.fasterxml.jackson.databind.DeserializationFeature
-import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.module.kotlin.readValue
 import mu.KotlinLogging
 import okhttp3.FormBody
@@ -60,15 +59,15 @@ class TelegramBotApiClient(
                             detail = "Telegram sendMessage failed (${response.code}).",
                         )
                     }
-                    val parsed: TelegramApiResponse = mapper.readValue(responseBody)
-                    if (parsed.ok == true) {
+                    val parsed = mapper.readTree(responseBody)
+                    if (parsed.path("ok").asBoolean(false)) {
                         return@withContext ConversationDeliveryResult(
                             delivered = true,
                             detail = "Telegram message delivered.",
                         )
                     }
                     logger.warn {
-                        "Telegram sendMessage returned ok=false chat_id=$chatId description='${parsed.description.orEmpty().take(120)}'"
+                        "Telegram sendMessage returned ok=false chat_id=$chatId description='${parsed.path("description").asText().take(120)}'"
                     }
                     ConversationDeliveryResult(
                         delivered = false,
@@ -84,15 +83,113 @@ class TelegramBotApiClient(
             }
         }
 
-    private data class TelegramApiResponse(
-        val ok: Boolean? = null,
-        val description: String? = null,
+    internal suspend fun deleteWebhook(dropPendingUpdates: Boolean = false): Boolean =
+        withContext(Dispatchers.IO) {
+            val request = Request.Builder()
+                .url("${baseUrl.trimEnd('/')}/bot$botToken/deleteWebhook")
+                .post(
+                    FormBody.Builder()
+                        .add("drop_pending_updates", dropPendingUpdates.toString())
+                        .build()
+                )
+                .build()
+            callTelegramApi(request, operation = "deleteWebhook") != null
+        }
+
+    internal suspend fun getUpdates(
+        offset: Long?,
+        timeoutSeconds: Int,
+        limit: Int = 10,
+    ): List<TelegramUpdate> = withContext(Dispatchers.IO) {
+        val timeout = timeoutSeconds.coerceAtLeast(1)
+        val boundedLimit = limit.coerceIn(1, 100)
+        val query = buildList {
+            offset?.let { add("offset=${it}") }
+            add("timeout=$timeout")
+            add("limit=$boundedLimit")
+        }.joinToString("&")
+        val url = "${baseUrl.trimEnd('/')}/bot$botToken/getUpdates?$query"
+        val request = Request.Builder()
+            .url(url)
+            .get()
+            .build()
+        val payload = callTelegramApi(request, operation = "getUpdates") ?: return@withContext emptyList()
+        payload.path("result").takeIf { it.isArray }?.let { mapper.treeToValue(it, Array<TelegramUpdate>::class.java).toList() }
+            ?: emptyList()
+    }
+
+    internal suspend fun setWebhook(
+        url: String,
+        secretToken: String,
+    ): Boolean = withContext(Dispatchers.IO) {
+        val request = Request.Builder()
+            .url("${baseUrl.trimEnd('/')}/bot$botToken/setWebhook")
+            .post(
+                FormBody.Builder()
+                    .add("url", url)
+                    .add("secret_token", secretToken)
+                    .build()
+            )
+            .build()
+        callTelegramApi(request, operation = "setWebhook") != null
+    }
+
+    internal suspend fun getWebhookInfo(): TelegramWebhookInfo? =
+        withContext(Dispatchers.IO) {
+        val request = Request.Builder()
+            .url("${baseUrl.trimEnd('/')}/bot$botToken/getWebhookInfo")
+            .get()
+            .build()
+            val payload = callTelegramApi(request, operation = "getWebhookInfo") ?: return@withContext null
+            payload.path("result").takeIf { !it.isMissingNode && !it.isNull }?.let {
+                mapper.treeToValue(it, TelegramWebhookInfo::class.java)
+            }
+        }
+
+    private fun callTelegramApi(
+        request: Request,
+        operation: String,
+    ): JsonNode? {
+        if (botToken.isBlank()) {
+            logger.warn { "Telegram $operation failed because bot token is not configured." }
+            return null
+        }
+        return try {
+            client.newCall(request).execute().use { response ->
+                val responseBody = response.body?.string().orEmpty()
+                if (!response.isSuccessful) {
+                    logger.warn {
+                        "Telegram $operation failed status=${response.code} preview='${responseBody.take(160)}'"
+                    }
+                    return null
+                }
+                val parsed = mapper.readTree(responseBody)
+                if (parsed.path("ok").asBoolean(false)) {
+                    parsed
+                } else {
+                    logger.warn {
+                        "Telegram $operation returned ok=false description='${parsed.path("description").asText().take(160)}'"
+                    }
+                    null
+                }
+            }
+        } catch (ex: Exception) {
+            logger.warn(ex) { "Telegram $operation call failed." }
+            null
+        }
+    }
+
+    data class TelegramWebhookInfo(
+        val url: String? = null,
+        @field:com.fasterxml.jackson.annotation.JsonProperty("pending_update_count")
+        val pendingUpdateCount: Int? = null,
+        @field:com.fasterxml.jackson.annotation.JsonProperty("last_error_message")
+        val lastErrorMessage: String? = null,
     )
 
     companion object {
         private const val DEFAULT_BASE_URL: String = "https://api.telegram.org"
-        private const val DEFAULT_TIMEOUT_SEC: Long = 20L
-        private val mapper = jacksonObjectMapper()
-            .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
+        private const val DEFAULT_TIMEOUT_SEC: Long = 45L
+        private val mapper = TelegramJson.mapper
     }
 }

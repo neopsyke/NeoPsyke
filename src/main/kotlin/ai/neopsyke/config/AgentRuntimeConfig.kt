@@ -15,6 +15,7 @@ import ai.neopsyke.agent.config.MetaReasonerConfig
 import ai.neopsyke.agent.config.NativeIntegrationsConfig
 import ai.neopsyke.agent.config.GoogleWorkspaceConfig
 import ai.neopsyke.agent.config.TelegramChannelConfig
+import ai.neopsyke.agent.config.TelegramIngressMode
 import ai.neopsyke.dashboard.InnerVoiceConfig
 import ai.neopsyke.agent.config.PlannerConfig
 import ai.neopsyke.agent.goal.GoalConfig
@@ -210,6 +211,7 @@ private data class AgentRuntimeYamlNativeIntegrations(
 
 private data class AgentRuntimeYamlTelegram(
     val enabled: Boolean? = null,
+    val mode: String? = null,
     val webhookPath: String? = null,
     val ownerChatId: String? = null,
     val ownerUserId: String? = null,
@@ -219,6 +221,8 @@ private data class AgentRuntimeYamlTelegram(
     val sessionIdPrefix: String? = null,
     val requireDirectChat: Boolean? = null,
     val dropUnauthorizedMessages: Boolean? = null,
+    val pollTimeoutSeconds: Int? = null,
+    val pollRetryDelayMs: Long? = null,
 )
 
 private data class AgentRuntimeYamlGoogleWorkspace(
@@ -882,6 +886,11 @@ object AgentRuntimeSettingsLoader {
                         telegramYaml.enabled,
                         defaults.nativeIntegrations.telegram.enabled
                     ),
+                    mode = readTelegramIngressMode(
+                        env["NEOPSYKE_TELEGRAM_MODE"],
+                        telegramYaml.mode,
+                        defaults.nativeIntegrations.telegram.mode
+                    ),
                     webhookPath = readNonBlank(
                         env["NEOPSYKE_TELEGRAM_WEBHOOK_PATH"],
                         telegramYaml.webhookPath,
@@ -926,6 +935,16 @@ object AgentRuntimeSettingsLoader {
                         env["NEOPSYKE_TELEGRAM_DROP_UNAUTHORIZED_MESSAGES"],
                         telegramYaml.dropUnauthorizedMessages,
                         defaults.nativeIntegrations.telegram.dropUnauthorizedMessages
+                    ),
+                    pollTimeoutSeconds = readPositiveInt(
+                        env["NEOPSYKE_TELEGRAM_POLL_TIMEOUT_SECONDS"],
+                        telegramYaml.pollTimeoutSeconds,
+                        defaults.nativeIntegrations.telegram.pollTimeoutSeconds
+                    ),
+                    pollRetryDelayMs = readPositiveLong(
+                        env["NEOPSYKE_TELEGRAM_POLL_RETRY_DELAY_MS"],
+                        telegramYaml.pollRetryDelayMs,
+                        defaults.nativeIntegrations.telegram.pollRetryDelayMs
                     ),
                 ),
                 googleWorkspace = GoogleWorkspaceConfig(
@@ -1164,6 +1183,19 @@ object AgentRuntimeSettingsLoader {
             "0", "false", "no" -> false
             else -> null
         }
+
+    private fun readTelegramIngressMode(
+        env: String?,
+        yaml: String?,
+        fallback: TelegramIngressMode,
+    ): TelegramIngressMode {
+        val raw = firstNonBlank(env, yaml) ?: return fallback
+        return when (raw.trim().lowercase()) {
+            "webhook" -> TelegramIngressMode.WEBHOOK
+            "polling" -> TelegramIngressMode.POLLING
+            else -> fallback
+        }
+    }
 
     private fun firstNonBlank(vararg values: String?): String? =
         values.firstOrNull { !it.isNullOrBlank() }?.trim()

@@ -1,5 +1,6 @@
 package ai.neopsyke.config
 
+import ai.neopsyke.agent.config.TelegramIngressMode
 import java.nio.file.Files
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -66,9 +67,12 @@ class AgentRuntimeSettingsLoaderTest {
         assertTrue(settings.agentConfig.connectors.enabledBundleIds.isEmpty())
         assertEquals(false, settings.agentConfig.connectors.allowThirdPartyConnectors)
         assertEquals(false, settings.agentConfig.nativeIntegrations.telegram.enabled)
+        assertEquals(TelegramIngressMode.WEBHOOK, settings.agentConfig.nativeIntegrations.telegram.mode)
         assertEquals("/api/channels/telegram/webhook", settings.agentConfig.nativeIntegrations.telegram.webhookPath)
         assertEquals("TELEGRAM_BOT_TOKEN", settings.agentConfig.nativeIntegrations.telegram.botTokenHandle)
         assertEquals("TELEGRAM_WEBHOOK_SECRET", settings.agentConfig.nativeIntegrations.telegram.webhookSecretHandle)
+        assertEquals(25, settings.agentConfig.nativeIntegrations.telegram.pollTimeoutSeconds)
+        assertEquals(1_000L, settings.agentConfig.nativeIntegrations.telegram.pollRetryDelayMs)
         assertEquals(false, settings.agentConfig.nativeIntegrations.googleWorkspace.enabled)
         assertEquals(".neopsyke/auth/google", settings.agentConfig.nativeIntegrations.googleWorkspace.tokenStoreDir)
         assertEquals("", settings.agentConfig.nativeIntegrations.googleWorkspace.publicBaseUrl)
@@ -203,6 +207,7 @@ class AgentRuntimeSettingsLoaderTest {
               native_integrations:
                 telegram:
                   enabled: true
+                  mode: polling
                   webhook_path: /hooks/telegram
                   owner_chat_id: 1234
                   owner_user_id: 5678
@@ -212,6 +217,8 @@ class AgentRuntimeSettingsLoaderTest {
                   session_id_prefix: telegram-owner
                   require_direct_chat: true
                   drop_unauthorized_messages: false
+                  poll_timeout_seconds: 17
+                  poll_retry_delay_ms: 2222
                 google_workspace:
                   enabled: true
                   token_store_dir: /tmp/neopsyke-google-auth
@@ -331,6 +338,7 @@ class AgentRuntimeSettingsLoaderTest {
         assertEquals(setOf("morning-briefing"), settings.agentConfig.connectors.enabledBundleIds)
         assertEquals(true, settings.agentConfig.connectors.allowThirdPartyConnectors)
         assertEquals(true, settings.agentConfig.nativeIntegrations.telegram.enabled)
+        assertEquals(TelegramIngressMode.POLLING, settings.agentConfig.nativeIntegrations.telegram.mode)
         assertEquals("/hooks/telegram", settings.agentConfig.nativeIntegrations.telegram.webhookPath)
         assertEquals("1234", settings.agentConfig.nativeIntegrations.telegram.ownerChatId)
         assertEquals("5678", settings.agentConfig.nativeIntegrations.telegram.ownerUserId)
@@ -340,6 +348,8 @@ class AgentRuntimeSettingsLoaderTest {
         assertEquals("telegram-owner", settings.agentConfig.nativeIntegrations.telegram.sessionIdPrefix)
         assertEquals(true, settings.agentConfig.nativeIntegrations.telegram.requireDirectChat)
         assertEquals(false, settings.agentConfig.nativeIntegrations.telegram.dropUnauthorizedMessages)
+        assertEquals(17, settings.agentConfig.nativeIntegrations.telegram.pollTimeoutSeconds)
+        assertEquals(2222L, settings.agentConfig.nativeIntegrations.telegram.pollRetryDelayMs)
         assertEquals(true, settings.agentConfig.nativeIntegrations.googleWorkspace.enabled)
         assertEquals("/tmp/neopsyke-google-auth", settings.agentConfig.nativeIntegrations.googleWorkspace.tokenStoreDir)
         assertEquals("owner@example.com", settings.agentConfig.nativeIntegrations.googleWorkspace.allowedOwnerEmail)
@@ -417,11 +427,14 @@ class AgentRuntimeSettingsLoaderTest {
                 "NEOPSYKE_CONNECTORS_ENABLED_BUNDLES" to "morning-briefing, inbox-management",
                 "NEOPSYKE_CONNECTORS_ALLOW_THIRD_PARTY" to "false",
                 "NEOPSYKE_TELEGRAM_ENABLED" to "true",
+                "NEOPSYKE_TELEGRAM_MODE" to "polling",
                 "NEOPSYKE_TELEGRAM_WEBHOOK_PATH" to "/env/telegram/webhook",
                 "NEOPSYKE_TELEGRAM_OWNER_CHAT_ID" to "999",
                 "NEOPSYKE_TELEGRAM_OWNER_USER_ID" to "111",
                 "NEOPSYKE_TELEGRAM_BOT_TOKEN_HANDLE" to "ENV_TELEGRAM_TOKEN",
                 "NEOPSYKE_TELEGRAM_WEBHOOK_SECRET_HANDLE" to "ENV_TELEGRAM_SECRET",
+                "NEOPSYKE_TELEGRAM_POLL_TIMEOUT_SECONDS" to "31",
+                "NEOPSYKE_TELEGRAM_POLL_RETRY_DELAY_MS" to "4444",
                 "NEOPSYKE_GOOGLE_WORKSPACE_ENABLED" to "true",
                 "NEOPSYKE_GOOGLE_TOKEN_STORE_DIR" to "/env/google-auth",
                 "NEOPSYKE_GOOGLE_ALLOWED_OWNER_EMAIL" to "env-owner@example.com",
@@ -455,11 +468,14 @@ class AgentRuntimeSettingsLoaderTest {
         assertEquals(setOf("morning-briefing", "inbox-management"), settings.agentConfig.connectors.enabledBundleIds)
         assertEquals(false, settings.agentConfig.connectors.allowThirdPartyConnectors)
         assertEquals(true, settings.agentConfig.nativeIntegrations.telegram.enabled)
+        assertEquals(TelegramIngressMode.POLLING, settings.agentConfig.nativeIntegrations.telegram.mode)
         assertEquals("/env/telegram/webhook", settings.agentConfig.nativeIntegrations.telegram.webhookPath)
         assertEquals("999", settings.agentConfig.nativeIntegrations.telegram.ownerChatId)
         assertEquals("111", settings.agentConfig.nativeIntegrations.telegram.ownerUserId)
         assertEquals("ENV_TELEGRAM_TOKEN", settings.agentConfig.nativeIntegrations.telegram.botTokenHandle)
         assertEquals("ENV_TELEGRAM_SECRET", settings.agentConfig.nativeIntegrations.telegram.webhookSecretHandle)
+        assertEquals(31, settings.agentConfig.nativeIntegrations.telegram.pollTimeoutSeconds)
+        assertEquals(4444L, settings.agentConfig.nativeIntegrations.telegram.pollRetryDelayMs)
         assertEquals(true, settings.agentConfig.nativeIntegrations.googleWorkspace.enabled)
         assertEquals("/env/google-auth", settings.agentConfig.nativeIntegrations.googleWorkspace.tokenStoreDir)
         assertEquals("env-owner@example.com", settings.agentConfig.nativeIntegrations.googleWorkspace.allowedOwnerEmail)

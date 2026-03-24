@@ -5,8 +5,14 @@ data class NativeIntegrationsConfig(
     val googleWorkspace: GoogleWorkspaceConfig = GoogleWorkspaceConfig(),
 )
 
+enum class TelegramIngressMode {
+    WEBHOOK,
+    POLLING,
+}
+
 data class TelegramChannelConfig(
     val enabled: Boolean = false,
+    val mode: TelegramIngressMode = TelegramIngressMode.WEBHOOK,
     val webhookPath: String = DEFAULT_WEBHOOK_PATH,
     val ownerChatId: String = "",
     val ownerUserId: String = "",
@@ -16,6 +22,8 @@ data class TelegramChannelConfig(
     val sessionIdPrefix: String = DEFAULT_SESSION_ID_PREFIX,
     val requireDirectChat: Boolean = true,
     val dropUnauthorizedMessages: Boolean = true,
+    val pollTimeoutSeconds: Int = DEFAULT_POLL_TIMEOUT_SECONDS,
+    val pollRetryDelayMs: Long = DEFAULT_POLL_RETRY_DELAY_MS,
 ) {
     companion object {
         const val DEFAULT_WEBHOOK_PATH: String = "/api/channels/telegram/webhook"
@@ -23,6 +31,8 @@ data class TelegramChannelConfig(
         const val DEFAULT_WEBHOOK_SECRET_HANDLE: String = "TELEGRAM_WEBHOOK_SECRET"
         const val DEFAULT_POLICY_SCOPE_ID: String = "telegram-owner"
         const val DEFAULT_SESSION_ID_PREFIX: String = "telegram"
+        const val DEFAULT_POLL_TIMEOUT_SECONDS: Int = 25
+        const val DEFAULT_POLL_RETRY_DELAY_MS: Long = 1_000L
     }
 }
 

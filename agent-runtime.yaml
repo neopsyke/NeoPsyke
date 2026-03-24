@@ -118,6 +118,27 @@ agent:
     max_content_chars: 500
     max_events_per_session: 100
 
+  native_integrations:
+    telegram:
+      enabled: true
+      mode: polling
+      webhook_path: /api/channels/telegram/webhook
+      # Prefer env overrides for these if you do not want them visible in YAML:
+      #   NEOPSYKE_TELEGRAM_OWNER_CHAT_ID
+      #   NEOPSYKE_TELEGRAM_OWNER_USER_ID
+      owner_chat_id: ""
+      owner_user_id: ""
+      # These are secret handle names, not the secret values themselves.
+      # The current runtime resolves them from environment variables.
+      bot_token_handle: TELEGRAM_BOT_TOKEN
+      webhook_secret_handle: TELEGRAM_WEBHOOK_SECRET
+      policy_scope_id: telegram-owner
+      session_id_prefix: telegram
+      require_direct_chat: true
+      drop_unauthorized_messages: false
+      poll_timeout_seconds: 25
+      poll_retry_delay_ms: 1000
+
   runtime:
     loop_delay_ms: 0
     max_pending_thoughts: 64

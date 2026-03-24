@@ -2,6 +2,7 @@ package ai.neopsyke
 
 import mu.KotlinLogging
 import ai.neopsyke.agent.config.AgentConfig
+import ai.neopsyke.agent.config.TelegramIngressMode
 import ai.neopsyke.agent.ego.Ego
 import ai.neopsyke.agent.ego.EgoAssembler
 import ai.neopsyke.agent.ego.LlmEgoPlanner
@@ -122,6 +123,8 @@ import ai.neopsyke.integrations.mistral.websearch.MistralWebSearchMode
 import ai.neopsyke.integrations.mistral.websearch.MistralWebSearchProfile
 import ai.neopsyke.integrations.mistral.websearch.MistralWebSearchAgentSession
 import ai.neopsyke.integrations.telegram.TelegramBotApiClient
+import ai.neopsyke.integrations.telegram.TelegramPollingBridge
+import ai.neopsyke.integrations.telegram.TelegramUpdateProcessor
 import ai.neopsyke.integrations.telegram.TelegramWebhookBridge
 import ai.neopsyke.metrics.MetricsQueryProvider
 import ai.neopsyke.metrics.MetricsRuntimeFactory
@@ -612,6 +615,21 @@ internal object AppModeRunners {
         val telegramConfig = config.nativeIntegrations.telegram
         val telegramBotToken = secretProvider.read(SecretHandle(telegramConfig.botTokenHandle))
         val telegramWebhookSecret = secretProvider.read(SecretHandle(telegramConfig.webhookSecretHandle))
+        if (telegramConfig.enabled) {
+            logger.info {
+                "Telegram integration config enabled=true mode=${telegramConfig.mode.name.lowercase()} bot_token_present=${!telegramBotToken.isNullOrBlank()} webhook_secret_present=${!telegramWebhookSecret.isNullOrBlank()} owner_chat_id=${telegramConfig.ownerChatId.ifBlank { "unset" }} owner_user_id=${telegramConfig.ownerUserId.ifBlank { "unset" }} require_direct_chat=${telegramConfig.requireDirectChat} drop_unauthorized_messages=${telegramConfig.dropUnauthorizedMessages}"
+            }
+            if (telegramBotToken.isNullOrBlank()) {
+                logger.warn {
+                    "Telegram integration is enabled but bot token handle '${telegramConfig.botTokenHandle}' resolved blank; ingress/egress will not start."
+                }
+            }
+            if (telegramConfig.mode == TelegramIngressMode.WEBHOOK && telegramWebhookSecret.isNullOrBlank()) {
+                logger.warn {
+                    "Telegram webhook mode is enabled but webhook secret handle '${telegramConfig.webhookSecretHandle}' resolved blank; inbound webhook auth will fail closed."
+                }
+            }
+        }
         val telegramSink = if (telegramConfig.enabled && !telegramBotToken.isNullOrBlank()) {
             TelegramBotApiClient(botToken = telegramBotToken)
         } else {
@@ -626,7 +644,20 @@ internal object AppModeRunners {
             sensoryInput = sensoryInput,
             interlocutorResolver = interlocutorResolver
         )
-        val telegramWebhookBridge = if (telegramConfig.enabled) {
+        val telegramUpdateProcessor = if (telegramConfig.enabled) {
+            TelegramUpdateProcessor(
+                store = dashboardStore,
+                sensoryInput = sensoryInput,
+                config = telegramConfig,
+                interlocutorResolver = interlocutorResolver,
+            )
+        } else {
+            null
+        }
+        val telegramWebhookBridge = if (
+            telegramConfig.enabled &&
+            telegramConfig.mode == TelegramIngressMode.WEBHOOK
+        ) {
             TelegramWebhookBridge(
                 store = dashboardStore,
                 sensoryInput = sensoryInput,
@@ -635,6 +666,24 @@ internal object AppModeRunners {
                 interlocutorResolver = interlocutorResolver,
             )
         } else {
+            null
+        }
+        val telegramPollingBridge = if (
+            telegramConfig.enabled &&
+            telegramConfig.mode == TelegramIngressMode.POLLING &&
+            telegramSink != null &&
+            telegramUpdateProcessor != null
+        ) {
+            TelegramPollingBridge.create(
+                scope = agentScope,
+                config = telegramConfig,
+                apiClient = telegramSink,
+                processor = telegramUpdateProcessor,
+            ).also { it.start() }
+        } else {
+            if (telegramConfig.enabled && telegramConfig.mode == TelegramIngressMode.POLLING && telegramSink == null) {
+                logger.warn { "Telegram polling mode was requested but the polling bridge did not start because the bot token is unavailable." }
+            }
             null
         }
         val googleConfig = config.nativeIntegrations.googleWorkspace
@@ -1269,6 +1318,7 @@ internal object AppModeRunners {
                 }
             }
         } finally {
+            telegramPollingBridge?.close()
             idInnerVoiceFileSink?.close()
             innerVoiceStore?.close()
             sensoryInput.close()
