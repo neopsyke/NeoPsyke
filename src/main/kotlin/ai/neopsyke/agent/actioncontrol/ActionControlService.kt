@@ -988,7 +988,7 @@ class DefaultActionControlService(
             return "goal:${goalId.trim()}"
         }
         val operation = payload.path("operation").textValue()?.trim()?.lowercase().orEmpty()
-        return if (operation in setOf("pause", "resume", "reprioritize", "complete", "revise")) {
+        return if (operation in setOf("pause", "resume", "reprioritize", "complete", "revise_plan", "delete_all")) {
             "goal-operation:${action.rootInputId.orEmpty()}:${operation}"
         } else {
             null
@@ -1009,8 +1009,8 @@ class DefaultActionControlService(
         val cronExpression = payload?.path("cron_expression")?.asText(payload.path("cronExpression").asText(""))?.trim().orEmpty()
         val category = when (operation) {
             "list", "inspect" -> "goal_read"
-            "create", "revise" -> if (cronExpression.isNotBlank()) "goal_recurring_mutation" else "goal_mutation"
-            "pause", "resume", "reprioritize", "complete" -> "goal_mutation"
+            "create", "revise_plan" -> if (cronExpression.isNotBlank()) "goal_recurring_mutation" else "goal_mutation"
+            "pause", "resume", "reprioritize", "complete", "delete", "delete_all" -> "goal_mutation"
             else -> "goal_other"
         }
         return "$actionTypeId:$category"

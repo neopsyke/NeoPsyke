@@ -1,7 +1,14 @@
 package ai.neopsyke.dashboard
 
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+import kotlinx.coroutines.CoroutineName
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.launch
 import java.io.Closeable
 
 class InnerVoiceStore(
@@ -12,33 +19,26 @@ class InnerVoiceStore(
     private val lock = Any()
     private val subscribers = mutableMapOf<String, MutableSet<Channel<String>>>()
     private val eventBuffers = mutableMapOf<String, ArrayDeque<InnerVoiceEvent>>()
+    private val transportScope = CoroutineScope(SupervisorJob() + Dispatchers.Default + CoroutineName("inner-voice-store"))
+    private val eventChannel = Channel<InnerVoiceEvent>(capacity = EVENT_CHANNEL_CAPACITY)
+    private val transportJob: Job = transportScope.launch {
+        eventLoop()
+    }
 
     // Global (session-independent) Id inner-voice stream
     private val idGlobalSubscribers = mutableSetOf<Channel<String>>()
     private val idGlobalBuffer = ArrayDeque<InnerVoiceEvent>()
 
     fun emit(event: InnerVoiceEvent) {
-        val sessionId = event.sessionId ?: return
-        val payloadJson: String
-        synchronized(lock) {
-            payloadJson = buildPayloadJson(event)
-            if (event.origin == "id") {
-                // Route to global Id stream
-                if (idGlobalBuffer.size >= maxIdGlobalEvents) {
-                    idGlobalBuffer.removeFirst()
-                }
-                idGlobalBuffer.addLast(event)
-                broadcastToIdGlobal(payloadJson)
-            } else {
-                // Route to per-session conversation stream
-                val buffer = eventBuffers.getOrPut(sessionId) { ArrayDeque() }
-                if (buffer.size >= maxEventsPerSession) {
-                    buffer.removeFirst()
-                }
-                buffer.addLast(event)
-                broadcastToSession(sessionId, payloadJson)
-            }
+        if (event.sessionId == null) {
+            return
         }
+        val result = eventChannel.trySend(event)
+        if (result.isSuccess) {
+            return
+        }
+        eventChannel.tryReceive()
+        eventChannel.trySend(event)
     }
 
     fun subscribe(sessionId: String): DashboardFlowSubscription? {
@@ -75,6 +75,12 @@ class InnerVoiceStore(
         synchronized(lock) { idGlobalBuffer.toList() }
 
     override fun close() {
+        eventChannel.close()
+        @Suppress("BlockingMethodInNonBlockingContext")
+        kotlinx.coroutines.runBlocking {
+            transportJob.join()
+        }
+        transportScope.cancel()
         synchronized(lock) {
             subscribers.values.forEach { set -> set.forEach { it.close() } }
             subscribers.clear()
@@ -82,6 +88,29 @@ class InnerVoiceStore(
             idGlobalSubscribers.forEach { it.close() }
             idGlobalSubscribers.clear()
             idGlobalBuffer.clear()
+        }
+    }
+
+    private suspend fun eventLoop() {
+        for (event in eventChannel) {
+            val sessionId = event.sessionId ?: continue
+            val payloadJson = buildPayloadJson(event)
+            synchronized(lock) {
+                if (event.origin == "id") {
+                    if (idGlobalBuffer.size >= maxIdGlobalEvents) {
+                        idGlobalBuffer.removeFirst()
+                    }
+                    idGlobalBuffer.addLast(event)
+                    broadcastToIdGlobal(payloadJson)
+                } else {
+                    val buffer = eventBuffers.getOrPut(sessionId) { ArrayDeque() }
+                    if (buffer.size >= maxEventsPerSession) {
+                        buffer.removeFirst()
+                    }
+                    buffer.addLast(event)
+                    broadcastToSession(sessionId, payloadJson)
+                }
+            }
         }
     }
 
@@ -137,5 +166,6 @@ class InnerVoiceStore(
 
     private companion object {
         const val SUBSCRIBER_CHANNEL_CAPACITY: Int = 1_000
+        const val EVENT_CHANNEL_CAPACITY: Int = 1_024
     }
 }

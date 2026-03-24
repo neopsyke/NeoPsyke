@@ -381,6 +381,27 @@ class GoalManager(
                 }
             }
 
+            GoalOperation.DELETE -> {
+                val goalId = request.goalId.orEmpty()
+                if (goalId.isBlank()) {
+                    GoalOperationResult(false, "Goal delete requires goalId.")
+                } else if (!deleteGoalState(goalId)) {
+                    GoalOperationResult(false, "Goal not found.")
+                } else {
+                    GoalOperationResult(true, "Goal deleted.", goalId)
+                }
+            }
+
+            GoalOperation.DELETE_ALL -> {
+                val deletedCount = deleteAllGoalStates()
+                val message = if (deletedCount == 0) {
+                    "No goals to delete."
+                } else {
+                    "Deleted $deletedCount goals."
+                }
+                GoalOperationResult(true, message)
+            }
+
             GoalOperation.REVISE_PLAN -> {
                 val goalId = request.goalId.orEmpty()
                 val state = states[goalId]
@@ -688,6 +709,26 @@ class GoalManager(
         if (state.eventCount % config.snapshotEveryNEvents == 0) {
             store.saveSnapshot(goalId, state)
         }
+    }
+
+    private fun deleteAllGoalStates(): Int =
+        states.keys.toList().count { goalId -> deleteGoalState(goalId) }
+
+    private fun deleteGoalState(goalId: String): Boolean {
+        val state = states[goalId] ?: return false
+        runCatching { store.deleteGoal(goalId) }
+            .onFailure { ex ->
+                logger.warn(ex) { "Failed to delete goal workspace for goal=$goalId" }
+                return false
+            }
+        timerScheduler?.cancel(goalId)
+        state.goal.plan.steps.forEach { step ->
+            waitConditionMonitor?.unregister(goalId, step.id)
+        }
+        states.remove(goalId)
+        sessionsByRootInputId.entries.removeIf { (_, session) -> session.goalId == goalId }
+        refreshAmbientSnapshots()
+        return true
     }
 
     private fun pruneExpiredCompletedGoals() {

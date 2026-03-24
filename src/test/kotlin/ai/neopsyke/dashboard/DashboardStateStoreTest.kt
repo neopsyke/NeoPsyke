@@ -242,6 +242,21 @@ class DashboardStateStoreTest {
     }
 
     @Test
+    fun `filtered subscription only receives matching events`() = runBlocking {
+        val store = DashboardStateStore(maxEvents = 10)
+        val subscription = store.subscribe { event -> event.type.startsWith("goal_") }
+        store.onEvent(AgentEvent(id = 1, type = "warning", data = mapOf("message" to "ignore")))
+        store.onEvent(AgentEvent(id = 2, type = "goal_started", data = mapOf("goal_id" to "goal-1")))
+
+        val payload = withTimeoutOrNull(200) { subscription.receive() }
+        assertNotNull(payload)
+        assertTrue(payload.contains("\"type\":\"goal_started\""))
+        assertTrue(payload.contains("\"goal_id\":\"goal-1\""))
+        subscription.close()
+        store.close()
+    }
+
+    @Test
     fun `scratchpad debug snapshot is captured for api but not broadcast over sse`() {
         val store = DashboardStateStore(maxEvents = 20)
         val subscription = store.subscribe()

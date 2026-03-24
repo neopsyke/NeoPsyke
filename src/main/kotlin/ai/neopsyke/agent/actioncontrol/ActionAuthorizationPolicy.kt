@@ -10,6 +10,7 @@ import ai.neopsyke.agent.model.ActionEffectClass
 import ai.neopsyke.agent.model.ActionType
 import ai.neopsyke.agent.model.AuthorizationDecision
 import ai.neopsyke.agent.model.AuthorizationProgress
+import ai.neopsyke.agent.model.ChannelSurface
 import ai.neopsyke.agent.model.CommitMode
 import ai.neopsyke.agent.model.ConversationContext
 import ai.neopsyke.agent.model.InstructionTrust
@@ -142,6 +143,36 @@ class ConfiguredActionAuthorizationPolicy(
             )
         }
 
+        classifyGoalDeleteIntent(action, actionRegistry)?.let { deleteIntent ->
+            when (deleteIntent) {
+                GoalDeleteIntent.DELETE_ALL -> {
+                    return stage(
+                        commitMode = CommitMode.APPROVAL_BACKED,
+                        reason = "Deleting all goals always requires explicit owner reapproval.",
+                        reasonCode = "POLICY_GOAL_DELETE_ALL_STAGE_REQUIRED",
+                    )
+                }
+
+                GoalDeleteIntent.DELETE_AMBIGUOUS -> {
+                    return stage(
+                        commitMode = CommitMode.APPROVAL_BACKED,
+                        reason = "Ambiguous goal deletion requests require staged owner approval.",
+                        reasonCode = "POLICY_GOAL_DELETE_AMBIGUOUS_STAGE_REQUIRED",
+                    )
+                }
+
+                GoalDeleteIntent.DELETE_EXACT -> {
+                    if (!isOwnerVerifiedDirectChannel(conversationContext)) {
+                        return stage(
+                            commitMode = CommitMode.APPROVAL_BACKED,
+                            reason = "Goal deletion may direct commit only from an owner-verified direct channel.",
+                            reasonCode = "POLICY_GOAL_DELETE_OWNER_DIRECT_REQUIRED",
+                        )
+                    }
+                }
+            }
+        }
+
         if (isRecurringGoalMutation(action) && (rule?.recurringRequiresApproval != false)) {
             return stage(
                 commitMode = CommitMode.APPROVAL_BACKED,
@@ -220,11 +251,40 @@ class ConfiguredActionAuthorizationPolicy(
         if (action.type != ActionType.GOAL_OPERATION) {
             return false
         }
-        val node = runCatching { mapper.readTree(action.payload) }.getOrNull() ?: return false
+        val node = goalOperationNode(action, ActionRegistry.empty()) ?: return false
         val operation = node.path("operation").asText("").trim().lowercase()
         val cronExpression = node.path("cron_expression").asText(node.path("cronExpression").asText("")).trim()
-        return cronExpression.isNotBlank() && operation in setOf("create", "revise")
+        return cronExpression.isNotBlank() && operation in setOf("create", "revise_plan")
     }
+
+    private fun classifyGoalDeleteIntent(
+        action: PendingAction,
+        actionRegistry: ActionRegistry,
+    ): GoalDeleteIntent? {
+        if (action.type != ActionType.GOAL_OPERATION) {
+            return null
+        }
+        val node = goalOperationNode(action, actionRegistry) ?: return null
+        val operation = node.path("operation").asText("").trim().lowercase()
+        val goalId = node.path("goal_id").asText(node.path("goalId").asText("")).trim()
+        return when (operation) {
+            "delete_all" -> GoalDeleteIntent.DELETE_ALL
+            "delete" -> if (goalId.isNotBlank()) GoalDeleteIntent.DELETE_EXACT else GoalDeleteIntent.DELETE_AMBIGUOUS
+            else -> null
+        }
+    }
+
+    private fun goalOperationNode(
+        action: PendingAction,
+        actionRegistry: ActionRegistry,
+    ) = runCatching {
+        mapper.readTree(actionRegistry.repairPlannerPayload(ActionType.GOAL_OPERATION, action.payload))
+    }.getOrNull()
+
+    private fun isOwnerVerifiedDirectChannel(conversationContext: ConversationContext): Boolean =
+        conversationContext.security.principal.role == PrincipalRole.OWNER &&
+            conversationContext.security.instructionTrust == InstructionTrust.TRUSTED_INSTRUCTION &&
+            conversationContext.security.channel.surface == ChannelSurface.DIRECT
 
     private fun isPublicCommitAutonomyAllowed(conversationContext: ConversationContext): Boolean {
         if (conversationContext.security.principal.role != PrincipalRole.OWNER) {
@@ -262,4 +322,10 @@ class ConfiguredActionAuthorizationPolicy(
             reason = reason,
             reasonCode = reasonCode,
         )
+
+    private enum class GoalDeleteIntent {
+        DELETE_EXACT,
+        DELETE_AMBIGUOUS,
+        DELETE_ALL,
+    }
 }

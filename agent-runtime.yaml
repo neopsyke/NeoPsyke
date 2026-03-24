@@ -118,6 +118,12 @@ agent:
     max_content_chars: 500
     max_events_per_session: 100
 
+  goals:
+    enabled: true
+    # Optional. Defaults to ~/.neopsyke/goals for normal runtime.
+    # Set this for eval/test/live isolation when goals should not mix with user runtime.
+    # workspace_root: ".neopsyke/eval-goals"
+
   native_integrations:
     telegram:
       enabled: true

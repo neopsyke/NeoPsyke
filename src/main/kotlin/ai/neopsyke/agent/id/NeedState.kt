@@ -153,6 +153,13 @@ class NeedState(
         "urgency" to urgency,
         "delta" to delta,
         "growthRate" to config.growthRate,
+        "responseCurve" to mapOf(
+            "type" to config.responseCurve.type,
+            "exponent" to config.responseCurve.exponent,
+            "steepness" to config.responseCurve.steepness,
+            "midpoint" to config.responseCurve.midpoint,
+            "scale" to config.responseCurve.scale,
+        ),
         "cooldownRemaining" to cooldownRemaining,
         "inFlight" to inFlight,
         "inFlightPulsesRemaining" to inFlightPulsesRemaining,

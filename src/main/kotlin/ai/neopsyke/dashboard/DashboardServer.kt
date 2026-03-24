@@ -109,6 +109,15 @@ class DashboardServer(
                 handleGoalsApi(exchange)
             }
         }
+        server.createContext("/api/goals/events") { exchange ->
+            withRequestGuard(exchange, "goals_events_sse") {
+                if (exchange.requestMethod != "GET") {
+                    respondText(exchange, 405, "Method not allowed", "text/plain; charset=utf-8")
+                    return@withRequestGuard
+                }
+                handleGoalsSse(exchange)
+            }
+        }
         server.createContext("/api/obs/llm-stats") { exchange ->
             withRequestGuard(exchange, "obs_llm_stats") {
                 if (exchange.requestMethod != "GET") {
@@ -241,12 +250,37 @@ class DashboardServer(
     }
 
     private fun handleSse(exchange: HttpExchange) {
+        handleSubscriptionSse(
+            exchange = exchange,
+            subscription = store.subscribe(),
+            expectedDisconnectMessage = "Observability SSE client disconnected.",
+            unexpectedDisconnectMessage = "Observability SSE stream terminated unexpectedly.",
+            streamName = "obs_events_sse"
+        )
+    }
+
+    private fun handleGoalsSse(exchange: HttpExchange) {
+        handleSubscriptionSse(
+            exchange = exchange,
+            subscription = store.subscribe { event -> event.type.startsWith("goal_") },
+            expectedDisconnectMessage = "Goals SSE client disconnected.",
+            unexpectedDisconnectMessage = "Goals SSE stream terminated unexpectedly.",
+            streamName = "goals_events_sse"
+        )
+    }
+
+    private fun handleSubscriptionSse(
+        exchange: HttpExchange,
+        subscription: DashboardFlowSubscription,
+        expectedDisconnectMessage: String,
+        unexpectedDisconnectMessage: String,
+        streamName: String,
+    ) {
         exchange.responseHeaders.add("Content-Type", "text/event-stream")
         exchange.responseHeaders.add("Cache-Control", "no-cache")
         exchange.responseHeaders.add("Connection", "keep-alive")
         exchange.sendResponseHeaders(200, 0)
 
-        val subscription = store.subscribe()
         val output = exchange.responseBody.bufferedWriter(StandardCharsets.UTF_8)
         try {
             output.write("event: ready\n")
@@ -269,13 +303,13 @@ class DashboardServer(
             }
         } catch (ex: Exception) {
             if (isExpectedClientDisconnect(ex)) {
-                logger.debug { "Observability SSE client disconnected." }
+                logger.debug { expectedDisconnectMessage }
             } else {
-                logger.warn(ex) { "Observability SSE stream terminated unexpectedly." }
+                logger.warn(ex) { unexpectedDisconnectMessage }
             }
         } finally {
             subscription.close()
-            closeStreamQuietly(output, streamName = "obs_events_sse")
+            closeStreamQuietly(output, streamName = streamName)
         }
     }
 

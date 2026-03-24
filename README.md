@@ -102,10 +102,11 @@ Standalone Kotlin JVM app using Gradle with:
   - `agent` is domain-grouped and mirrors `AgentConfig` ownership:
     - `agent.planner.*`
     - `agent.superego.*`
-    - `agent.memory.*` and `agent.memory.scratchpad.*`
-    - `agent.meta_reasoner.*`
-    - `agent.logbook.*`
-    - `agent.runtime.*` (loop/pending queues/search/mcp timeout/fetch cap)
+  - `agent.memory.*` and `agent.memory.scratchpad.*`
+  - `agent.meta_reasoner.*`
+  - `agent.logbook.*`
+  - `agent.goals.*`
+  - `agent.runtime.*` (loop/pending queues/search/mcp timeout/fetch cap)
   - Legacy flat `agent.*` runtime keys are not supported.
   - `app` section covers UI/runtime flags (for example dashboard enablement and port).
   - `eval` section covers eval defaults (for example stage default and raw-response cap).
@@ -125,6 +126,8 @@ Standalone Kotlin JVM app using Gradle with:
   - `NEOPSYKE_AGENT_CONFIG_FILE` (optional; path to agent/app/eval runtime YAML, default: `./agent-runtime.yaml`)
   - `NEOPSYKE_ID_CONFIG_FILE` (optional; path to Id runtime YAML, default: `./id-runtime.yaml`)
   - `NEOPSYKE_ID_ENABLED` (default from `id-runtime.yaml`)
+  - `NEOPSYKE_GOALS_ENABLED` (default from `agent-runtime.yaml` / launcher)
+  - `NEOPSYKE_GOALS_WORKSPACE_ROOT` (optional; override goal workspace root, default normal runtime: `~/.neopsyke/goals`)
   - `NEOPSYKE_DASHBOARD_ENABLED` (default: `true`)
   - `NEOPSYKE_DASHBOARD_PORT` (default: `8787`)
   - `EGO_MAX_LOOP_STEPS` (default: `180`)
@@ -384,6 +387,7 @@ Notes:
 - `.neopsyke/logs/latest-run.env` stores `NEOPSYKE_LOG_RUN_ID`, `NEOPSYKE_LOG_FILE`, `NEOPSYKE_EVENT_LOG_FILE`, and start time for the current run.
 - Old run logs are auto-pruned; retention defaults to 30 files (`NEOPSYKE_LOG_RETENTION`).
 - Launcher sets `MEMORY_DEFAULT_NAMESPACE=neopsyke` unless already set, so NeoPsyke memory stays isolated by default.
+- Launcher also auto-isolates goal storage for eval modes when goals are enabled and no explicit `NEOPSYKE_GOALS_WORKSPACE_ROOT` is set, so eval-created goals do not mix with normal runtime goals under `~/.neopsyke/goals`.
 - Memory MCP write tools support `write_mode`: `append`, `dedupe_if_similar`, `upsert_fact`.
 - `upsert_fact` supports `fact_subject`, `fact_key`, `fact_value`, `fact_versioned_at` and keeps only one active value per `(namespace, subject, key)`.
 - NeoPsyke's own long-term memory writes stamp the subject/reference as `me` so durable memories are attributed to the agent rather than the user.

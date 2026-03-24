@@ -162,9 +162,11 @@
     const listEl = document.getElementById('goal-list');
     const emptyEl = document.getElementById('empty-state');
     const connDot = document.getElementById('conn-dot');
+    const GOALS_REFRESH_DEBOUNCE_MS = 150;
     let goals = [];
     let selectedId = null;
     let eventLog = []; // recent goal events from SSE
+    let refreshTimer = null;
 
     // ── Fetch initial data ──────────────────────────────────────
     async function fetchGoals() {
@@ -178,7 +180,7 @@
 
     // ── SSE for live updates ────────────────────────────────────
     function connectSSE() {
-      const es = new EventSource('/api/obs/events');
+      const es = new EventSource('/api/goals/events');
       es.addEventListener('ready', () => {
         connDot.classList.add('connected');
         connDot.title = 'SSE connected';
@@ -186,11 +188,10 @@
       es.addEventListener('agent', (e) => {
         try {
           const ev = JSON.parse(e.data);
-          if (ev.event && ev.event.type && ev.event.type.startsWith('goal_')) {
-            eventLog.unshift(ev.event);
+          if (ev.type && ev.type.startsWith('goal_')) {
+            eventLog.unshift(ev);
             if (eventLog.length > 200) eventLog.length = 200;
-            // Refresh goal list on goal events
-            fetchGoals();
+            scheduleRefresh();
           }
         } catch (_) {}
       });
@@ -198,6 +199,14 @@
         connDot.classList.remove('connected');
         connDot.title = 'SSE disconnected';
       });
+    }
+
+    function scheduleRefresh() {
+      if (refreshTimer !== null) return;
+      refreshTimer = setTimeout(() => {
+        refreshTimer = null;
+        fetchGoals();
+      }, GOALS_REFRESH_DEBOUNCE_MS);
     }
 
     // ── Rendering ───────────────────────────────────────────────

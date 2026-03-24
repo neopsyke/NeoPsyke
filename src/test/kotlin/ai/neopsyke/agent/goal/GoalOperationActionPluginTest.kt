@@ -90,6 +90,79 @@ class GoalOperationActionPluginTest {
     }
 
     @Test
+    fun `plugin normalizes delete all intent from revise payload`() = runBlocking {
+        var capturedRequest: GoalOperationRequest? = null
+        val gateway = object : GoalsGateway by NoopGoalsGateway {
+            override fun executeOperation(request: GoalOperationRequest): GoalOperationResult {
+                capturedRequest = request
+                return GoalOperationResult(true, "deleted")
+            }
+        }
+        val plugin = GoalOperationActionPlugin(
+            ActionPluginFactoryContext(
+                config = AgentConfig(goals = GoalConfig(enabled = true)),
+                webSearchActionHandler = null,
+                mcpTimeTool = null,
+                fetchTool = null,
+                output = {},
+                reflectionMemoryRecorder = ai.neopsyke.agent.actions.NoopReflectionMemoryRecorder,
+                goalsGateway = gateway,
+            )
+        )
+
+        val outcome = plugin.execute(
+            PendingAction(
+                id = 1L,
+                urgency = Urgency.MEDIUM,
+                type = ActionType.GOAL_OPERATION,
+                payload = """{"operation":"revise","instruction":"Delete all existing goals"}""",
+                summary = "delete goals",
+            ),
+            ActionExecutionContext(searchResultCount = 0)
+        )
+
+        assertEquals(ActionExecutionStatus.SUCCESS, outcome.executionStatus)
+        assertEquals(GoalOperation.DELETE_ALL, capturedRequest?.operation)
+    }
+
+    @Test
+    fun `plugin keeps ambiguous delete payload as single delete instead of delete all`() = runBlocking {
+        var capturedRequest: GoalOperationRequest? = null
+        val gateway = object : GoalsGateway by NoopGoalsGateway {
+            override fun executeOperation(request: GoalOperationRequest): GoalOperationResult {
+                capturedRequest = request
+                return GoalOperationResult(false, "Goal delete requires goalId.")
+            }
+        }
+        val plugin = GoalOperationActionPlugin(
+            ActionPluginFactoryContext(
+                config = AgentConfig(goals = GoalConfig(enabled = true)),
+                webSearchActionHandler = null,
+                mcpTimeTool = null,
+                fetchTool = null,
+                output = {},
+                reflectionMemoryRecorder = ai.neopsyke.agent.actions.NoopReflectionMemoryRecorder,
+                goalsGateway = gateway,
+            )
+        )
+
+        val outcome = plugin.execute(
+            PendingAction(
+                id = 2L,
+                urgency = Urgency.MEDIUM,
+                type = ActionType.GOAL_OPERATION,
+                payload = """{"operation":"delete"}""",
+                summary = "delete goal ambiguously",
+            ),
+            ActionExecutionContext(searchResultCount = 0)
+        )
+
+        assertEquals(ActionExecutionStatus.FAILED, outcome.executionStatus)
+        assertEquals(GoalOperation.DELETE, capturedRequest?.operation)
+        assertEquals(null, capturedRequest?.goalId)
+    }
+
+    @Test
     fun `plugin executes goal lifecycle operations through manager gateway`() = runBlocking {
         val root = Files.createTempDirectory("psyke-goal-op-lifecycle")
         try {

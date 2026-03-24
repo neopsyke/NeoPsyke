@@ -50,5 +50,7 @@ enum class GoalOperation {
     RESUME,
     REPRIORITIZE,
     COMPLETE,
+    DELETE,
+    DELETE_ALL,
     REVISE_PLAN,
 }

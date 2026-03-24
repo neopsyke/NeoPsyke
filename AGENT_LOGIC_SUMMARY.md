@@ -354,6 +354,7 @@ It is intentionally high-level and should stay aligned with the code.
   - Treat cron-backed goals as recurring cycles: when a cron tick arrives after a cron goal reached `COMPLETED` or `FAILED`, the runtime resets plan-step execution state, clears produced keys, and re-emits work-ready for the next scheduled run.
   - Poll async-operation providers and accept externally-delivered async completion events for blocked steps
   - Persist `goal-events.jsonl`, `goal.json`, `goal-snapshot.json`, `workspace/context.md`, `workspace/scratch.md`, and per-step artifacts
+  - Normal interactive runs default goal persistence to `~/.neopsyke/goals`; eval/live runs should override `config.goals.workspaceRoot` so eval-created goals stay isolated from user runtime state
   - Maintain cached best-effort summaries for ambient context (`activeGoals`, `pendingWorkSummary`) so Ego does not scan live goal state on the hot path
 - Ego-facing signal contract:
   - The runtime emits only `GoalRuntimeCue(goalId, stepId, reason)` into the cognitive stimulus plane.
@@ -417,6 +418,10 @@ It is intentionally high-level and should stay aligned with the code.
   - per-action YAML overrides for direct commit and autonomous commit
   - public-commit deny-until-enabled rules
   - recurring-goal stricter approval rules
+  - goal-delete stricter approval rules:
+    - `goal_operation(delete_all)` always stages for explicit owner reapproval
+    - single-goal delete may direct commit only from an owner-verified direct channel and only when an exact `goal_id` is present
+    - ambiguous deletes plus non-owner/external/group delete requests are staged instead of direct-committed
 - Id-origin deterministic policy is enforced inside Superego (not plugins):
   - Direct `answer` from Id origin is hard-denied by default.
   - Id-origin actions are allowlisted for internal/evidence-gathering types (`web_search`, `website_fetch`, `mcp_time`, `answer_draft`, `reflect_internal`, `reflect_evidence`).

@@ -30,7 +30,7 @@ id:
     user-interaction:
       enabled: true
       description: "Drive to proactively contact the user"
-      growth_rate: 0.01
+      growth_rate: 0.005
       satisfaction_decay: 0.8
       cooldown_pulses: 5
       convergence: contact_user
@@ -48,7 +48,7 @@ id:
     learn-something:
       enabled: true
       description: "Drive to acquire new knowledge"
-      growth_rate: 0.01
+      growth_rate: 0.003
       satisfaction_decay: 0.8
       cooldown_pulses: 5
       convergence: internalize
@@ -58,3 +58,8 @@ id:
         scale: 10.0
       satisfaction_effects_any_of:
         - durable_memory_saved
+
+# Future plans:
+# - "Drive to reorganize/consolidate memories" Dream?
+# - "Drive to make external observations. Check on the user? on the environment?"
+# - "Drive to find improvements in NeoPsyke code?"

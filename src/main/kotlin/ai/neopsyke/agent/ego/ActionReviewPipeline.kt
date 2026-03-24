@@ -231,6 +231,7 @@ internal class ActionReviewPipeline(
             latestActionOutcome = outcome.plannerSignal,
             sessionId = sessionId
         )
+        maybeDeliverAssistantOutput(resolvedAction, outcome, convCtx)
 
         timing.startPhase("follow_up")
         maybeEnqueueFollowUp(resolvedAction, outcome, observed, convCtx)
@@ -751,6 +752,36 @@ internal class ActionReviewPipeline(
     }
 
     // ── Follow-up ──
+
+    private fun maybeDeliverAssistantOutput(
+        resolvedAction: PendingAction,
+        outcome: ActionOutcome,
+        convCtx: ConversationContext,
+    ) {
+        val assistantOutput = outcome.assistantOutput?.trim().orEmpty()
+        if (assistantOutput.isBlank()) return
+        if (resolvedAction.type == ActionType.CONTACT_USER) return
+        if (resolvedAction.origin.source != OriginSource.USER) return
+        if (resolvedAction.requiresFollowUpThought) return
+        val queued = scheduler.enqueueAction(
+            type = ActionType.CONTACT_USER,
+            payload = assistantOutput,
+            summary = "Deliver action result to user",
+            urgency = resolvedAction.urgency,
+            rootInputId = resolvedAction.rootInputId,
+            rootInputReceivedAtMs = resolvedAction.rootInputReceivedAtMs,
+            conversationContext = convCtx,
+            origin = resolvedAction.origin,
+        )
+        if (!queued) {
+            instrumentation.emit(AgentEvents.warning("Failed to enqueue user-visible action result."))
+            telemetry.recordQueueSaturation(
+                queueType = "action",
+                capacity = config.maxPendingActions,
+                reason = "enqueue_user_visible_action_result_failed_full"
+            )
+        }
+    }
 
     private fun maybeEnqueueFollowUp(
         resolvedAction: PendingAction,

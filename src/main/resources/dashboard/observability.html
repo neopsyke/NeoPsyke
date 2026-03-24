@@ -1758,19 +1758,65 @@
       return "<span class=\"eta-val\">" + h + ":" + mm + ":" + ss + "</span>";
     }
 
-    /** Compute ETA seconds for a need, accounting for elapsed wall-clock time since last pulse. */
+    function clamp01(value) {
+      if (!Number.isFinite(value)) return 0;
+      return Math.max(0, Math.min(1, value));
+    }
+
+    function inverseCurveUrgency(targetUrgency, curve) {
+      const target = clamp01(targetUrgency);
+      const cfg = curve || {};
+      const type = String(cfg.type || "linear").toLowerCase();
+      if (type === "power") {
+        const exponent = Number(cfg.exponent);
+        if (!(exponent > 0)) return target;
+        return clamp01(Math.pow(target, 1 / exponent));
+      }
+      if (type === "sigmoid") {
+        const steepness = Number(cfg.steepness);
+        const midpoint = clamp01(Number(cfg.midpoint));
+        if (!(steepness > 0)) return target;
+        const rawSigmoid = function(x) {
+          return 1 / (1 + Math.exp(-steepness * (x - midpoint)));
+        };
+        const f0 = rawSigmoid(0);
+        const f1 = rawSigmoid(1);
+        const range = f1 - f0;
+        if (!Number.isFinite(range) || range === 0) return target;
+        const rawTarget = clamp01(target * range + f0);
+        if (rawTarget <= 0 || rawTarget >= 1) return rawTarget <= 0 ? 0 : 1;
+        const logit = Math.log(rawTarget / (1 - rawTarget));
+        return clamp01(midpoint + (logit / steepness));
+      }
+      if (type === "logarithmic") {
+        const scale = Number(cfg.scale);
+        if (!(scale > 0)) return target;
+        return clamp01((Math.exp(target * Math.log(1 + scale)) - 1) / scale);
+      }
+      return target;
+    }
+
+    /** Compute ETA seconds for a need using the real growth rate, curve, and pulse-based gating. */
     function needEtaSec(n, elapsedMs) {
       const id = state.id;
       const threshold = id.triggerThreshold;
       const pulseMs = id.pulseIntervalMs;
       const useUrgency = id.thresholdOnUrgency;
       const raw = n.rawValue || 0;
-      const urg = n.urgency || 0;
       const growthRate = n.growthRate || 0;
-      const effectiveVal = useUrgency ? urg : raw;
-      if (effectiveVal >= threshold) return 0;
-      if (growthRate <= 0) return Infinity;
-      const pulsesNeeded = Math.ceil((threshold - raw) / growthRate);
+      const curve = n.responseCurve || null;
+      const rawThreshold = useUrgency ? inverseCurveUrgency(threshold, curve) : clamp01(threshold);
+      const pulsesUntilEligible = Math.max(
+        Number(n.cooldownRemaining) || 0,
+        Number(n.backoffPulsesRemaining) || 0,
+        Number(n.inFlightPulsesRemaining) || 0
+      );
+      let pulsesUntilThreshold = 0;
+      if (raw < rawThreshold) {
+        if (growthRate <= 0) return Infinity;
+        pulsesUntilThreshold = Math.ceil((rawThreshold - raw) / growthRate);
+      }
+      const pulsesNeeded = Math.max(pulsesUntilThreshold, pulsesUntilEligible);
       const totalSec = pulsesNeeded * (pulseMs / 1000);
       return Math.max(0, totalSec - (elapsedMs / 1000));
     }
@@ -1923,7 +1969,9 @@
           if (d.trigger_threshold != null) state.id.triggerThreshold = d.trigger_threshold;
           if (d.pulse_interval_ms != null) state.id.pulseIntervalMs = d.pulse_interval_ms;
           if (d.threshold_on_urgency != null) state.id.thresholdOnUrgency = d.threshold_on_urgency;
-          state.id.lastPulseAt = Date.now();
+          if (typeof event.ts === "number" && Number.isFinite(event.ts)) {
+            state.id.lastPulseAt = event.ts;
+          }
           break;
         }
         case "id_impulse_fired":
@@ -2114,16 +2162,13 @@
           detail: processingDetail(state.currentProcessing)
         };
         // Hydrate Id state from snapshot events (they aren't replayed through applyEvent).
-        // We replay all id_ events so needs/impulse state is current, then anchor
-        // lastPulseAt to now so the countdown starts from the freshest pulse data.
-        var hadIdPulse = false;
+        // We replay all id_ events so needs/impulse state is current and preserve
+        // the original pulse timestamp for countdown math.
         (state.recentEvents || []).forEach(function(evt) {
           if (typeof evt.type === "string" && evt.type.startsWith("id_")) {
             applyIdEvent(evt);
-            if (evt.type === "id_pulse") hadIdPulse = true;
           }
         });
-        if (hadIdPulse) state.id.lastPulseAt = Date.now();
       } catch (err) {
         console.error("[dashboard] failed to load initial snapshot", err);
       }

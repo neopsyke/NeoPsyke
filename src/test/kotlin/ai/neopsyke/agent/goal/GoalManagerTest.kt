@@ -252,6 +252,36 @@ class GoalManagerTest {
     }
 
     @Test
+    fun `delete all operation removes all goals and workspaces`() {
+        val root = Files.createTempDirectory("psyke-pm-delete-all")
+        try {
+            val manager = GoalManager(
+                config = testConfig(root),
+                store = GoalStore(root),
+                planner = DeterministicGoalPlanner(),
+            )
+            manager.start(testScope())
+
+            val firstId = manager.createGoal("Delete me first")
+            val secondId = manager.createGoal("Delete me second")
+            assertTrue(Files.exists(root.resolve(firstId)))
+            assertTrue(Files.exists(root.resolve(secondId)))
+
+            val result = manager.executeOperation(GoalOperationRequest(operation = GoalOperation.DELETE_ALL))
+
+            assertTrue(result.success)
+            assertEquals("Deleted 2 goals.", result.message)
+            assertTrue(manager.allGoals().isEmpty())
+            assertFalse(Files.exists(root.resolve(firstId)))
+            assertFalse(Files.exists(root.resolve(secondId)))
+
+            manager.stop()
+        } finally {
+            root.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
     fun `async poll wait is restored on restart and unblocks step`() {
         val root = Files.createTempDirectory("psyke-pm-async-poll-restore")
         try {

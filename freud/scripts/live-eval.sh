@@ -278,6 +278,7 @@ export EGO_SCRATCHPAD_DEBUG_CAPTURE_ENABLED="true"
 export MEMORY_DEFAULT_NAMESPACE="freud-eval"
 export NEOPSYKE_LOGBOOK_DB_PATH="$REPO_ROOT/.neopsyke/freud-logbook.db"
 export NEOPSYKE_METRICS_DB="$REPO_ROOT/.neopsyke/freud-metrics.db"
+export NEOPSYKE_GOALS_WORKSPACE_ROOT="${NEOPSYKE_GOALS_WORKSPACE_ROOT:-$RUN_DIR/artifacts/goals}"
 
 if [[ -n "$GOALS_OVERRIDE" ]]; then
   export NEOPSYKE_GOALS_ENABLED="$GOALS_OVERRIDE"

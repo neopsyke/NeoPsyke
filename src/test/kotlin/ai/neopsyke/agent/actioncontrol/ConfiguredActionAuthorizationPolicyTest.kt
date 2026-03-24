@@ -6,12 +6,18 @@ import ai.neopsyke.agent.actions.NoopReflectionMemoryRecorder
 import ai.neopsyke.agent.config.AgentConfig
 import ai.neopsyke.agent.model.ActionType
 import ai.neopsyke.agent.model.AuthorizationProgress
+import ai.neopsyke.agent.model.ChannelRef
+import ai.neopsyke.agent.model.ChannelSurface
 import ai.neopsyke.agent.model.CommitMode
 import ai.neopsyke.agent.model.ConversationContext
+import ai.neopsyke.agent.model.ConversationSecurityContext
 import ai.neopsyke.agent.model.ConversationSecurityContexts
 import ai.neopsyke.agent.model.DataTrust
 import ai.neopsyke.agent.model.Interlocutor
 import ai.neopsyke.agent.model.PendingAction
+import ai.neopsyke.agent.model.PrincipalRef
+import ai.neopsyke.agent.model.PrincipalRole
+import ai.neopsyke.agent.model.TransportClass
 import ai.neopsyke.agent.model.Urgency
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -47,6 +53,22 @@ class ConfiguredActionAuthorizationPolicyTest {
             security = ConversationSecurityContexts.externalParticipant(
                 provider = "slack",
                 channelId = "team-channel",
+            ),
+        )
+
+    private fun ownerGroupContext(): ConversationContext =
+        ConversationContext(
+            sessionId = "owner-group-session",
+            interlocutor = Interlocutor.named("owner"),
+            security = ConversationSecurityContext(
+                principal = PrincipalRef(id = "owner", role = PrincipalRole.OWNER, label = "Owner"),
+                channel = ChannelRef(
+                    provider = "slack",
+                    surface = ChannelSurface.GROUP,
+                    transport = TransportClass.CHAT,
+                    channelId = "team-channel",
+                ),
+                instructionTrust = ai.neopsyke.agent.model.InstructionTrust.TRUSTED_INSTRUCTION,
             ),
         )
 
@@ -134,5 +156,136 @@ class ConfiguredActionAuthorizationPolicyTest {
 
         assertEquals(AuthorizationProgress.DENY, decision.progress)
         assertEquals("POLICY_ARGUMENT_DATA_TRUST_DENY", decision.reasonCode)
+    }
+
+    @Test
+    fun `exact goal delete is allowed only for owner direct channels`() {
+        val policy = ConfiguredActionAuthorizationPolicy()
+        val context = ownerContext()
+        val decision = policy.authorize(
+            action = PendingAction(
+                id = 5,
+                urgency = Urgency.HIGH,
+                type = ActionType.GOAL_OPERATION,
+                payload = """{"operation":"delete","goal_id":"goal-123"}""",
+                summary = "delete goal",
+                conversationContext = context,
+            ),
+            conversationContext = context,
+            actionRegistry = registry(),
+        )
+
+        assertEquals(AuthorizationProgress.ALLOW_COMMIT, decision.progress)
+        assertEquals(CommitMode.POLICY_AUTONOMOUS, decision.commitMode)
+    }
+
+    @Test
+    fun `delete all is always staged even for trusted owner direct channel`() {
+        val policy = ConfiguredActionAuthorizationPolicy()
+        val context = ownerContext()
+        val decision = policy.authorize(
+            action = PendingAction(
+                id = 6,
+                urgency = Urgency.HIGH,
+                type = ActionType.GOAL_OPERATION,
+                payload = """{"operation":"delete_all"}""",
+                summary = "delete all goals",
+                conversationContext = context,
+            ),
+            conversationContext = context,
+            actionRegistry = registry(),
+        )
+
+        assertEquals(AuthorizationProgress.ALLOW_STAGE, decision.progress)
+        assertEquals(CommitMode.APPROVAL_BACKED, decision.commitMode)
+        assertEquals("POLICY_GOAL_DELETE_ALL_STAGE_REQUIRED", decision.reasonCode)
+    }
+
+    @Test
+    fun `delete all alias payload is normalized and staged`() {
+        val policy = ConfiguredActionAuthorizationPolicy()
+        val context = ownerContext()
+        val decision = policy.authorize(
+            action = PendingAction(
+                id = 61,
+                urgency = Urgency.HIGH,
+                type = ActionType.GOAL_OPERATION,
+                payload = """{"operation":"revise","instruction":"Delete all existing goals"}""",
+                summary = "delete all goals via alias",
+                conversationContext = context,
+            ),
+            conversationContext = context,
+            actionRegistry = registry(),
+        )
+
+        assertEquals(AuthorizationProgress.ALLOW_STAGE, decision.progress)
+        assertEquals(CommitMode.APPROVAL_BACKED, decision.commitMode)
+        assertEquals("POLICY_GOAL_DELETE_ALL_STAGE_REQUIRED", decision.reasonCode)
+    }
+
+    @Test
+    fun `ambiguous goal delete is staged even for trusted owner direct channel`() {
+        val policy = ConfiguredActionAuthorizationPolicy()
+        val context = ownerContext()
+        val decision = policy.authorize(
+            action = PendingAction(
+                id = 7,
+                urgency = Urgency.HIGH,
+                type = ActionType.GOAL_OPERATION,
+                payload = """{"operation":"delete"}""",
+                summary = "delete some goal",
+                conversationContext = context,
+            ),
+            conversationContext = context,
+            actionRegistry = registry(),
+        )
+
+        assertEquals(AuthorizationProgress.ALLOW_STAGE, decision.progress)
+        assertEquals(CommitMode.APPROVAL_BACKED, decision.commitMode)
+        assertEquals("POLICY_GOAL_DELETE_AMBIGUOUS_STAGE_REQUIRED", decision.reasonCode)
+    }
+
+    @Test
+    fun `exact goal delete from external participant is staged`() {
+        val policy = ConfiguredActionAuthorizationPolicy()
+        val context = externalContext()
+        val decision = policy.authorize(
+            action = PendingAction(
+                id = 8,
+                urgency = Urgency.HIGH,
+                type = ActionType.GOAL_OPERATION,
+                payload = """{"operation":"delete","goal_id":"goal-123"}""",
+                summary = "delete goal from external",
+                conversationContext = context,
+            ),
+            conversationContext = context,
+            actionRegistry = registry(),
+        )
+
+        assertEquals(AuthorizationProgress.ALLOW_STAGE, decision.progress)
+        assertEquals(CommitMode.APPROVAL_BACKED, decision.commitMode)
+        assertEquals("POLICY_UNTRUSTED_STAGE_OWNER_APPROVAL", decision.reasonCode)
+    }
+
+    @Test
+    fun `exact goal delete from owner group channel is staged`() {
+        val policy = ConfiguredActionAuthorizationPolicy()
+        val context = ownerGroupContext()
+        val decision = policy.authorize(
+            action = PendingAction(
+                id = 9,
+                urgency = Urgency.HIGH,
+                type = ActionType.GOAL_OPERATION,
+                payload = """{"operation":"delete","goal_id":"goal-123"}""",
+                summary = "delete goal from owner group channel",
+                conversationContext = context,
+            ),
+            conversationContext = context,
+            actionRegistry = registry(),
+        )
+
+        assertEquals(AuthorizationProgress.ALLOW_STAGE, decision.progress)
+        assertEquals(CommitMode.APPROVAL_BACKED, decision.commitMode)
+        assertEquals("POLICY_GOAL_DELETE_OWNER_DIRECT_REQUIRED", decision.reasonCode)
     }
 }

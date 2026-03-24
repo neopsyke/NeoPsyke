@@ -132,6 +132,38 @@ class DashboardServerTest {
     }
 
     @Test
+    fun `goals sse only emits goal events`() {
+        startServer().use { started ->
+            val goals = openSse("http://127.0.0.1:${started.port}/api/goals/events")
+            goals.use {
+                readNextEvent(goals)
+
+                started.store.onEvent(
+                    AgentEvent(
+                        id = 1,
+                        type = "warning",
+                        data = mapOf("message" to "not-a-goal-event")
+                    )
+                )
+                val nonGoalEvent = readNextEvent(goals, timeoutMs = 600)
+                assertNull(nonGoalEvent)
+
+                started.store.onEvent(
+                    AgentEvent(
+                        id = 2,
+                        type = "goal_started",
+                        data = mapOf("goal_id" to "goal-1")
+                    )
+                )
+                val goalEvent = readNextEvent(goals, timeoutMs = 2_000)
+                assertNotNull(goalEvent)
+                assertEquals("agent", goalEvent.first)
+                assertTrue(goalEvent.second.contains("\"type\":\"goal_started\""))
+            }
+        }
+    }
+
+    @Test
     fun `llm stats endpoint returns warmup payload immediately when provider throws`() {
         startServer().use { started ->
             started.server.metricsQueryProvider = object : MetricsQueryProvider {
