@@ -37,6 +37,10 @@ It is trying to build a coherent mind-like architecture in which:
 - durable goals are distinct from ephemeral turns
 - judgment and safety are explicit architectural functions
 
+## Why Kotlin?
+
+Most AI agent projects default to Python. This one uses Kotlin, and the choice is deliberate. Type safety and the compiler give coding agents a tight feedback loop — errors are caught at compile time, not at runtime. Kotlin's sealed hierarchies and data classes are a natural fit for modeling cognitive types. Coroutines provide structured concurrency for an inherently concurrent architecture. And pragmatically: I have deeper experience in Kotlin than in production-grade Python, and trying to write well-architected Python was costing more time than the language choice was worth. The architecture mattered more than the ecosystem default. See [docs/why-kotlin.md](docs/why-kotlin.md) for the full reasoning.
+
 ## Quickstart
 
 ### Prerequisites
@@ -269,6 +273,7 @@ Each cognitive role (planner, superego primary/escalation, action verifier, meta
 | [docs/evaluation.md](docs/evaluation.md) | Testing layers, eval pipeline, and contributor directions |
 | [docs/env-reference.md](docs/env-reference.md) | Complete environment variable reference |
 | [docs/security.md](docs/security.md) | Security model: trust, policy enforcement, action lifecycle |
+| [docs/why-kotlin.md](docs/why-kotlin.md) | Why Kotlin instead of Python |
 | [docs/telegram-setup.md](docs/telegram-setup.md) | Telegram bot setup (webhook/polling, owner filtering) |
 | `AGENTS.md` | Instructions for coding agents working in this repository |
 | `AGENT_LOGIC_SUMMARY.md` | Current runtime logic reference |
