@@ -166,6 +166,11 @@ This allows the runtime to preserve the distinction between:
 - an internal system signal
 - external material that the model may reason over but must not obey
 
+At runtime this is also active thread state, not just passive metadata. Each
+root input carries aggregated data trust plus taint-source summaries. When
+observe-style actions ingest external artifacts, the thread trust degrades and
+stays degraded for the lifetime of that root input.
+
 ---
 
 ## 5. Ingress Security Model
@@ -244,15 +249,22 @@ Examples from current plugins:
 - `goal_operation`
   - control-plane
   - trusted instruction only
+  - trusted argument data only
   - direct commit allowed by contract, but recurring mutations are staged by
     policy
 - `email_send`
   - private commit
   - trusted instruction only
   - staged by default under current policy
-- `reflect`
-  - currently defaults to observe-class because it does not declare a stronger
-    effect class in its descriptor
+- `reflect_internal`
+  - commit-stateful
+  - trusted data only
+  - intended only for trusted self-observation / internal lessons
+- `reflect_evidence`
+  - commit-stateful
+  - sanitized external data only
+  - accepts same-root evidence artifact references only
+  - persists into quarantined evidence memory, not normal trusted self-memory
 
 Relevant code:
 
@@ -320,7 +332,7 @@ Important properties:
 - policy denials are authoritative
 - the LLM can still deny after deterministic and policy allow
 - the LLM is not the first or only safety layer
-- certain internal `REFLECT` paths may bypass LLM review after deterministic
+- certain internal `reflect_internal` paths may bypass LLM review after deterministic
   and policy checks
 
 ### 7.3 Policy Authorization
@@ -573,6 +585,8 @@ Current protections:
 - deterministic scan for common instruction-override patterns
 - role-like line redaction
 - code-fence neutralization
+- unified external-content ingestion for current external observe paths before
+  they become planner/scratchpad/memory inputs
 - explicit untrusted-data framing with:
   - `UNTRUSTED_EXTERNAL_DATA_BEGIN`
   - `UNTRUSTED_EXTERNAL_DATA_END`

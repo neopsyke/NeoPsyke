@@ -1,655 +1,370 @@
 # TODO: External Connector Runtime
 
-> Status: Planned, not implemented
+> Status: In progress
 >
-> Date: 2026-03-23
+> Last reviewed: 2026-03-24
 >
-> Purpose: Handoff document for the future implementation session that adds
-> out-of-process external tool/connectors plus the associated security model.
+> Purpose: Track the remaining security and runtime work for external
+> connectors and adjacent native integrations. This document now reflects the
+> code already landed and focuses only on what is still left to do.
 
 ---
 
 ## 1. Scope
 
-This document covers the future implementation of:
+This document covers the remaining work for:
 
-- out-of-process third-party connector runtime
-- external tool integration path
-- connector security model
-- NeoPsyke-native action wrapping over external tools
-- MCP-aligned ecosystem access
+- out-of-process third-party connector hosting
+- MCP-aligned compatibility under NeoPsyke-owned policy/lifecycle control
+- native high-trust integrations that fill the same product needs
+- connector/runtime security hardening that is still incomplete
 
-This is intentionally implementation-oriented. It assumes the broader security
-redesign in [SECURITY_STRATEGY_SPEC.md](/Users/victor.toral/atomitl/ai/psyke/docs/security/SECURITY_STRATEGY_SPEC.md).
+It assumes and must remain aligned with:
 
-Whenever this TODO is implemented, the current-state manual in
-[SECURITY_MODEL_MANUAL.md](/Users/victor.toral/atomitl/ai/psyke/docs/security/SECURITY_MODEL_MANUAL.md)
-must be updated in the same change set. External connector hosting will change
-the real trust boundary, secret-handling model, approval surface, and remaining
-risks section of the manual.
+- [SECURITY_STRATEGY_SPEC.md](/Users/victor.toral/atomitl/ai/psyke/docs/security/SECURITY_STRATEGY_SPEC.md)
+- [SECURITY_MODEL_MANUAL.md](/Users/victor.toral/atomitl/ai/psyke/docs/security/SECURITY_MODEL_MANUAL.md)
+- [SECURE_TOOLS_REVIEW.md](/Users/victor.toral/atomitl/ai/psyke/docs/security/SECURE_TOOLS_REVIEW.md)
+
+Whenever a remaining item here is implemented, update the manual and the
+runtime-logic docs in the same change set.
 
 ---
 
 ## 2. Locked Decisions
 
-These decisions are already made and should be treated as constraints:
+These are already decided and should not be reopened casually:
 
-1. Third-party connectors must be zero-trust by default.
-2. The runtime should use `stdio` transport for the first host implementation.
-3. The ecosystem target should be MCP-aligned compatibility, not a purely custom
-   connector protocol.
-4. MCP is the compatibility boundary, not the security or policy boundary.
-5. NeoPsyke-specific policy, staging, approval, and commit controls must remain
-   above the connector protocol boundary.
-6. The first host implementation should support local subprocess connectors only,
-   not arbitrary remote MCP servers.
-7. We want `MCP tools + NeoPsyke action manifests`, not raw MCP tools as the
-   final agent-facing abstraction.
-8. Third-party connectors must be install-disabled by default behind an
-   operator-controlled config flag.
-9. Retry-from-outbox stays internal-only in v1.
-10. External connector outputs should be treated as untrusted by default unless
-    explicit operator policy says otherwise.
-11. The default connector failure mode must be fail-closed.
-12. If handshake, pinning, manifest validation, or health checks fail, the
-    connector must expose no planner-visible actions.
+1. MCP is the compatibility boundary, not the security boundary.
+2. NeoPsyke action manifests remain the planner-facing abstraction, not raw MCP
+   tool names.
+3. The first external host is local subprocess only over `stdio`.
+4. Remote MCP servers are out of scope for the first host.
+5. Third-party connectors are zero-trust by default.
+6. Third-party connectors are disabled by default and require explicit
+   allowlisting.
+7. Connector startup, handshake, validation, pinning, or health failures fail
+   closed.
+8. Connector outputs are external/untrusted by default unless NeoPsyke
+   explicitly sanitizes and classifies them.
+9. Secret injection uses explicit handles only; no ambient `System.getenv()`
+   passthrough to connector processes.
+10. Workflow examples such as Morning Briefing and Inbox Management are goal
+    compositions, not special workflow actions.
 
 ---
 
-## 3. What “MCP Tools + NeoPsyke Action Manifests” Means
+## 3. Current State
 
-The connector runtime should not expose raw third-party tool names directly as
-the final agent planning/execution surface.
+The following foundation is already implemented:
 
-Target layering:
+### 3.1 Connector/runtime foundation
 
-1. Connector process speaks an MCP-aligned protocol over `stdio`
-2. NeoPsyke discovers the connector's low-level tools/capabilities
-3. NeoPsyke maps approved capabilities into NeoPsyke-native action manifests
-4. Ego/Superego/ActionControl operate on NeoPsyke actions, not arbitrary raw
-   tool names
+- `ConnectorRuntimeConfig` exists and loads from runtime YAML/env.
+- A shipped curated catalog plus local installed state exists.
+- Connector host/runtime support exists for local subprocess connectors.
+- Connector-backed actions can be surfaced through the normal action registry.
+- Connector outputs already route through the shared
+  [ExternalContentPipeline.kt](/Users/victor.toral/atomitl/ai/psyke/src/main/kotlin/ai/neopsyke/agent/support/ExternalContentPipeline.kt).
 
-Example:
+Relevant code:
 
-- connector low-level tools:
-  - `gmail.search_messages`
-  - `gmail.get_message`
-  - `gmail.send_message`
+- [ConnectorRuntimeConfig.kt](/Users/victor.toral/atomitl/ai/psyke/src/main/kotlin/ai/neopsyke/agent/config/ConnectorRuntimeConfig.kt)
+- [ConnectorCatalogLoader.kt](/Users/victor.toral/atomitl/ai/psyke/src/main/kotlin/ai/neopsyke/agent/connectors/ConnectorCatalogLoader.kt)
+- [ConnectorCatalogModels.kt](/Users/victor.toral/atomitl/ai/psyke/src/main/kotlin/ai/neopsyke/agent/connectors/ConnectorCatalogModels.kt)
+- [ConnectorHostRuntime.kt](/Users/victor.toral/atomitl/ai/psyke/src/main/kotlin/ai/neopsyke/agent/connectors/ConnectorHostRuntime.kt)
+- [ConnectorActionPlugins.kt](/Users/victor.toral/atomitl/ai/psyke/src/main/kotlin/ai/neopsyke/agent/connectors/ConnectorActionPlugins.kt)
 
-- NeoPsyke-native actions:
-  - `email_observe_search`
-  - `email_prepare_reply`
-  - `email_commit_send`
+### 3.2 Native high-trust integrations
 
-The important point is:
+These are implemented as first-party/native code instead of external published
+connectors:
 
-- MCP gives ecosystem compatibility
-- NeoPsyke action manifests preserve NeoPsyke's cognitive model, policy model,
-  staged lifecycle, effect classes, ordering keys, and approval/autonomy rules
+- owner-only Telegram channel ingress/egress
+- native Google OAuth start/callback flow
+- Gmail read/search actions
+- Google Calendar read actions
 
-### 3.1 MCP is the compatibility layer, not the control layer
+Relevant code:
 
-This runtime should treat MCP as the protocol used to reach mature external
-tool ecosystems, not as the final authority for what the agent may do.
+- [NativeIntegrationsConfig.kt](/Users/victor.toral/atomitl/ai/psyke/src/main/kotlin/ai/neopsyke/agent/config/NativeIntegrationsConfig.kt)
+- [TelegramWebhookBridge.kt](/Users/victor.toral/atomitl/ai/psyke/src/main/kotlin/ai/neopsyke/integrations/telegram/TelegramWebhookBridge.kt)
+- [TelegramBotApiClient.kt](/Users/victor.toral/atomitl/ai/psyke/src/main/kotlin/ai/neopsyke/integrations/telegram/TelegramBotApiClient.kt)
+- [GoogleWorkspaceOAuthBridge.kt](/Users/victor.toral/atomitl/ai/psyke/src/main/kotlin/ai/neopsyke/integrations/google/GoogleWorkspaceOAuthBridge.kt)
+- [GoogleWorkspaceObserveActionPlugins.kt](/Users/victor.toral/atomitl/ai/psyke/src/main/kotlin/ai/neopsyke/agent/actions/google/GoogleWorkspaceObserveActionPlugins.kt)
 
-That means:
+### 3.3 Security redesign already landed
 
-- MCP tools are discovered at the connector boundary
-- NeoPsyke decides which capabilities are exposed at all
-- NeoPsyke assigns effect classes, trust rules, staging rules, and commit policy
-- NeoPsyke remains the only layer that can authorize autonomous or
-  approval-backed commits
+The following review items are no longer TODOs here:
 
-Put differently:
+- unified external-content ingestion path
+- sticky per-root trust degradation
+- `reflect_internal` / `reflect_evidence` split
+- quarantined evidence-memory lane
+- centralized per-root action-family rate limits
+- Telegram webhook auth for the Telegram channel itself
+- verifier disabled by default behind planner config
 
-- good: `MCP/stdio connector -> NeoPsyke host -> NeoPsyke action manifest`
-- bad: `raw MCP tool -> planner-visible action`
+Relevant code:
 
-This is the core design choice that allows ecosystem extensibility without
-handing security control to the connector protocol.
-
----
-
-## 4. Current Relevant Code
-
-Current foundation already in repo:
-
-- connector boundary stub:
-  - [ConnectorBoundaryModels.kt](/Users/victor.toral/atomitl/ai/psyke/src/main/kotlin/ai/neopsyke/agent/actions/ConnectorBoundaryModels.kt)
-- action plugin contract:
-  - [ActionPluginContracts.kt](/Users/victor.toral/atomitl/ai/psyke/src/main/kotlin/ai/neopsyke/agent/actions/ActionPluginContracts.kt)
-- action registry / execution boundary:
-  - [ActionRegistry.kt](/Users/victor.toral/atomitl/ai/psyke/src/main/kotlin/ai/neopsyke/agent/actions/ActionRegistry.kt)
-  - [MotorCortex.kt](/Users/victor.toral/atomitl/ai/psyke/src/main/kotlin/ai/neopsyke/agent/cortex/motor/MotorCortex.kt)
-- action security / lifecycle:
-  - [ActionControlService.kt](/Users/victor.toral/atomitl/ai/psyke/src/main/kotlin/ai/neopsyke/agent/actioncontrol/ActionControlService.kt)
-  - [ActionControlStore.kt](/Users/victor.toral/atomitl/ai/psyke/src/main/kotlin/ai/neopsyke/agent/actioncontrol/ActionControlStore.kt)
-  - [SqliteActionControlStore.kt](/Users/victor.toral/atomitl/ai/psyke/src/main/kotlin/ai/neopsyke/agent/actioncontrol/SqliteActionControlStore.kt)
-- action models:
-  - [ActionLifecycleModels.kt](/Users/victor.toral/atomitl/ai/psyke/src/main/kotlin/ai/neopsyke/agent/model/ActionLifecycleModels.kt)
-- policy:
-  - [ActionAuthorizationPolicy.kt](/Users/victor.toral/atomitl/ai/psyke/src/main/kotlin/ai/neopsyke/agent/actioncontrol/ActionAuthorizationPolicy.kt)
-- runtime config loading:
-  - [AgentConfig.kt](/Users/victor.toral/atomitl/ai/psyke/src/main/kotlin/ai/neopsyke/agent/config/AgentConfig.kt)
-  - [ActionControlConfig.kt](/Users/victor.toral/atomitl/ai/psyke/src/main/kotlin/ai/neopsyke/agent/config/ActionControlConfig.kt)
-  - [AgentRuntimeConfig.kt](/Users/victor.toral/atomitl/ai/psyke/src/main/kotlin/ai/neopsyke/config/AgentRuntimeConfig.kt)
-
-Current state:
-
-- connector runtime is still in-process only
-- third-party hosting is not implemented
-- external tool discovery is not yet mapped into NeoPsyke action manifests
-- no MCP host/runtime exists yet
-- `ActionDescriptor` does not yet carry connector manifest metadata
-- `ActionPluginFactoryContext` still exposes broad ambient env by default, which
-  is acceptable for first-party builtins but not for zero-trust third-party
-  connectors
-- `AgentConfig` has no dedicated connector-runtime config domain yet
-- there is no installed-connector registry, allowlist store, or manifest pinning
-  path
-
-### 4.1 Concrete gaps to close next
-
-The remaining work is not "invent a new action system". The remaining work is:
-
-1. Add a real connector runtime/config boundary under agent runtime config
-2. Add a shipped curated connector catalog plus local installed-state registry
-3. Add a subprocess host/client for MCP-aligned `stdio` connectors
-4. Add capability-to-action-manifest mapping with NeoPsyke-owned policy fields
-5. Add connector-scoped secret resolution that does not expose ambient env
-6. Thread connector provenance and correlation through execution, receipts, and
-   logs
-
-That means the secure action lifecycle already in code should be reused, not
-replaced.
+- [ExternalContentPipeline.kt](/Users/victor.toral/atomitl/ai/psyke/src/main/kotlin/ai/neopsyke/agent/support/ExternalContentPipeline.kt)
+- [ReflectActionPlugin.kt](/Users/victor.toral/atomitl/ai/psyke/src/main/kotlin/ai/neopsyke/agent/actions/builtin/ReflectActionPlugin.kt)
+- [EvidenceArtifactStore.kt](/Users/victor.toral/atomitl/ai/psyke/src/main/kotlin/ai/neopsyke/agent/actions/EvidenceArtifactStore.kt)
+- [MemorySystem.kt](/Users/victor.toral/atomitl/ai/psyke/src/main/kotlin/ai/neopsyke/agent/ego/MemorySystem.kt)
+- [ActionControlService.kt](/Users/victor.toral/atomitl/ai/psyke/src/main/kotlin/ai/neopsyke/agent/actioncontrol/ActionControlService.kt)
+- [LlmEgoPlanner.kt](/Users/victor.toral/atomitl/ai/psyke/src/main/kotlin/ai/neopsyke/agent/ego/LlmEgoPlanner.kt)
 
 ---
 
-## 5. Target Architecture
+## 4. What Still Needs To Be Done
 
-### 5.1 High-level flow
+The remaining work is no longer "build the connector runtime from scratch". The
+remaining work is the hardening and productization layer on top of the
+foundation that now exists.
 
-1. NeoPsyke ships curated connector definitions and product bundles
-2. Operator installs/enables a connector or bundle locally
-3. NeoPsyke resolves local install state and connector policy
-4. NeoPsyke starts the connector in a separate subprocess
-5. Host boundary performs MCP-aligned handshake over `stdio`
-6. NeoPsyke discovers available external tools/capabilities
-7. NeoPsyke validates connector manifest + operator policy
-8. NeoPsyke exposes approved capabilities as NeoPsyke-native action manifests
-9. Planner/Superego/ActionControl use those manifests like first-party actions
-10. Motor/connector host translate manifest execution into connector protocol
+### 4.1 Third-party connector trust hardening
 
-### 5.2 Boundary layers
+Still needed:
 
-- `Curated Connector Catalog`
-  - shipped with NeoPsyke
-  - read-only trusted definitions
-  - curated connector manifests
-  - curated product bundles
-  - default policy and action-mapping templates
+1. Strong tool-description / manifest pinning policy
+   - pin reviewed connector capability metadata, not just connector ids
+   - fail closed on drift
+   - make operator-facing drift reasons explicit
 
-- `Connector Process`
-  - third-party code
-  - low-level MCP-aligned tool exposure
+2. Better provenance/correlation in durable records
+   - ensure connector id, manifest id, capability id, and pin set flow through
+     receipts, ledger entries, and action history consistently
 
-- `Local Install State`
-  - enabled/disabled state
-  - installed binary/package path
-  - resolved version/hash
-  - local pinsets
-  - local overrides
+3. Connector process isolation review
+   - verify current subprocess host boundaries are tight enough for genuinely
+     untrusted third-party MCP servers
+   - decide whether extra sandboxing is required before enabling any real
+     external published connector
 
-- `Connector Host`
-  - subprocess lifecycle
-  - stdio protocol
-  - timeout handling
-  - crash handling
-  - health
-  - stdout/stderr capture
-  - secret-handle injection
+4. Redaction and secret-spill hardening
+   - ensure connector stdout/stderr/log capture cannot leak tokens or OAuth
+     material into logs or UI surfaces
 
-- `Connector Registry`
-  - curated definitions + local installed state
-  - enabled/disabled state
-  - operator allowlists
-  - policy binding
+### 4.2 Secret and credential hardening
 
-- `Action Manifest Layer`
-  - maps discovered connector capabilities into NeoPsyke-native actions
-  - assigns effect class / trust rules / staging rules / execution key strategy
+Current explicit-handle secret injection is good enough for v1, but not the end
+state.
 
-- `NeoPsyke Action Lifecycle`
-  - prepare/stage/authorize/commit/record
-  - always remains the final control layer
+Still needed:
 
-### 5.3 First thin slice to build
+1. Move sensitive persistent credentials toward OS keychain-backed storage
+   - Google tokens are currently encrypted locally; keychain-backed storage is
+     still a remaining step
 
-To keep the first implementation useful without recreating the OpenClaw-style
-attack surface, the first slice should be:
+2. Add stronger token lifecycle controls
+   - revocation / reconnect flows
+   - operator-visible auth health
+   - last-success / last-failure / scope diagnostics
 
-1. `news_observe_read`
-   - read-only
-   - observe-class
-   - external data only
-2. `gmail_observe_search`
-   - read-only
-   - observe-class
-   - external data only
-3. `gmail_observe_message`
-   - read-only
-   - observe-class
-   - external data only
-4. `telegram_commit_send_digest`
-   - private commit
-   - owner-targeted allowlist only
-   - approval-backed by default until the confirmation/autonomy policy is proven
+3. Harden connector-specific secret resolution further
+   - per-connector handle policies
+   - better secret usage audit trail
+   - explicit deny surface for undeclared handles
 
-Explicitly not in the first slice:
+### 4.3 Policy/runtime hardening still incomplete
 
-- Gmail send / unsubscribe / archive / label mutation
-- inbound Telegram webhook control plane
-- social publishing
-- local filesystem read/write
-- shell/exec style tools
-- spawning Codex/Claude/sandbox workers as generic connector actions
+Centralized rate limiting exists, but the remaining policy work is:
 
-Those are valid future goals, but they require stronger policy and isolation
-than the initial connector host foundation.
+1. Add time-window based rate limits on top of per-root-input limits
+   - especially for outbound messaging, future email send, future social post,
+     and future repo/file mutation
 
-### 5.4 Ready-to-use curated install presets
+2. Add finer-grained destination/resource buckets
+   - per Telegram chat
+   - per mailbox/account
+   - per repo / filesystem root / external account when those actions exist
 
-To support "works out of the box" integrations without making them ambiently
-trusted, NeoPsyke should ship curated install presets for high-value capability
-sets.
+3. Strengthen deterministic execution templates for future commit actions
+   - current reflection/contact/goal normalization is not enough for future
+     Gmail send, publish, repo admin, or file mutation
 
-Examples:
+4. Keep `allowedArgumentDataTrust` enforcement universal as new action families
+   land
+   - every future observe path and every future side-effecting action must be
+     checked against trust policy instead of relying on plugin-local discipline
 
-- `morning-briefing`
-  - news read
-  - weather read
-  - calendar read
-  - Gmail read
-  - Telegram digest send
-- `inbox-management`
-  - Gmail search/read first
-  - send/unsubscribe stays disabled until later phases
-- `social-automation`
-  - RSS/newsletter draft first
-  - public posting stays disabled until later phases
+### 4.4 Operator UX and runtime visibility
 
-Out of the box should mean:
+Still needed:
 
-- predesigned
-- pre-mapped
-- pre-pinned
-- pre-policy-shaped
+1. Clear setup/auth status UX for Google and Telegram
+   - auth connected/disconnected
+   - webhook configured/misconfigured
+   - last health failure reason
 
-It should not mean:
+2. Connector install/enable/allowlist UX
+   - which curated connectors are shipped
+   - which ones are installed locally
+   - which ones are enabled and planner-visible
+   - why a connector is blocked
 
-- auto-enabled
-- auto-credentialed
-- auto-authorized for commits
+3. Approval and audit UX for future high-risk outbound actions
+   - Gmail send
+   - social publish
+   - repo/file mutation
 
-These presets are install/enablement convenience only.
+### 4.5 First real external published connector path
 
-- They may expand the connector allowlist or installation set.
-- They must not become planner-visible workflow actions by themselves.
-- The actual runtime execution model should remain:
-  - primitive actions/tools
-  - composed by NeoPsyke goals when the user asks for recurring routines such as
-    Morning Briefing or Inbox Management
+No external published connector has been integrated yet. This remains a major
+next step and must continue to require explicit user review before choosing a
+real connector.
 
----
+Still needed:
 
-## 6. Security Requirements
+1. Define connector selection criteria
+   - maintenance quality
+   - capability scope
+   - local `stdio` support
+   - install/update story
+   - secret handling model
+   - license/provenance
 
-### 6.1 Hard requirements
+2. Review and approve the first real external candidate with the user before
+   integrating it
 
-1. No in-process third-party code execution
-2. No raw `System.getenv()` exposure to connector code
-3. No connector-owned approval/autonomy policy
-4. No direct bypass of staged/authorized commit lifecycle
-5. No trust upgrade from connector output without explicit policy
-6. No agent write access to operator connector policy/manifests by default
+3. Add conformance tests for any approved published connector
+   - startup/handshake
+   - pinning drift
+   - sanitization/trust downgrade
+   - crash/timeout behavior
 
-### 6.2 Secret handling
+### 4.6 Future inbound channels
 
-Preferred model:
+Telegram inbound auth is implemented, but generic inbound channel security is
+not generalized yet.
 
-- connectors declare required secret handles
-- host resolves/injects secrets per request or per process start under operator
-  policy
-- connectors do not receive broad ambient env by default
+Still needed:
 
-Working v1 decision:
+1. extract a shared inbound-channel auth/allowlist framework only when a second
+   inbound channel is added
+2. ensure every future inbound channel uses the same fail-closed,
+   owner/tenant-scoped, rate-limited ingress model
 
-- start with per-process scoped injection from explicit secret handles only
-- keep the resolver interface compatible with future per-request materialization
+### 4.7 Deliberately deferred high-risk capabilities
 
-### 6.3 Provenance
+These stay out of scope until the connector/runtime hardening above is stronger:
 
-Connector outputs should enter NeoPsyke as:
+- Gmail send / archive / unsubscribe / label mutation
+- social publish
+- local filesystem mutation
+- repo administration / contributor management
+- shell/exec style connectors
+- nested coding-agent delegation as a generic tool surface
+- arbitrary remote MCP servers
 
-- `EXTERNAL_DATA` by default
-- `SANITIZED_EXTERNAL_DATA` only after explicit sanitization
-- never `TRUSTED_INSTRUCTION` just because a connector is installed
-
-### 6.4 Policy ownership
-
-Connector manifests may describe capabilities, but they do not decide:
-
-- whether autonomous commit is allowed
-- whether approval is required
-- whether public posting is enabled
-- whether a side effect is direct-commit eligible
-
-Those remain NeoPsyke/operator policy decisions.
-
-### 6.5 Catalog and install-state separation
-
-The runtime should separate:
-
-- shipped curated catalog
-  - read-only definitions shipped with the app/repo
-  - trusted source for curated connectors and bundles
-- local installed state
-  - mutable machine-specific runtime state under `.neopsyke/connectors/`
-
-This separation is required so NeoPsyke can ship ready-to-use safe integrations
-without letting the agent or a compromised connector rewrite the trusted source
-of truth.
-
-### 6.6 Failure semantics
-
-Connector runtime failures must fail closed.
-
-If any of these fail:
-
-- connector startup
-- MCP handshake/discovery
-- manifest validation
-- tool/manifest pinning
-- health check
-
-Then:
-
-- the connector is unavailable
-- no planner-visible actions are exposed from that connector
-- no partial trust upgrade occurs
-- the runtime emits clear logs and health status for operator inspection
+These require a separate security review before implementation.
 
 ---
 
-## 7. Proposed Runtime Components
+## 5. Product-Facing Capability Priorities
 
-Future implementation should likely introduce something close to:
+The product goal is still to let goals compose safe primitive actions for:
 
-- `CuratedConnectorCatalog`
-- `ConnectorManifest`
-- `ConnectorBundleManifest`
-- `InstalledConnector`
-- `ConnectorHostProcess`
-- `ConnectorHostClient`
-- `McpConnectorProtocolClient`
-- `ConnectorCapabilityDescriptor`
-- `ExternalToolBinding`
-- `ActionManifestGenerator`
-- `ConnectorPolicyBinding`
-- `ConnectorSecretResolver`
+- Morning Briefing
+- Email / Inbox Management
+- later: Content & Social Media Automation
 
-Do not assume these exact names are final. The important thing is the boundary
-separation, not the literal class names.
+That means the remaining capability priorities are:
 
----
+### Priority A: stabilize native Morning Briefing / Inbox primitives
 
-## 8. Action Manifest Requirements
+- Gmail read/search
+- Calendar read
+- Telegram two-way owner chat and digest delivery
+- news/web fetch through existing observe tools
 
-Each NeoPsyke-native external action manifest should declare:
+Remaining work here:
 
-- action family id
-- underlying connector id
-- mapped tool/capability id
-- effect class
-- allowed instruction trust
-- allowed argument data trust
-- direct-commit eligibility
-- autonomous-commit support
-- execution-key derivation strategy
-- deterministic payload validation
-- planner-facing description/guidance
+- improve auth/setup/operator visibility
+- improve health reporting
+- add stronger approval/autonomy defaults before broadening outbound behavior
 
-The agent should plan using these manifests, not raw connector methods.
+### Priority B: add first reviewed external published connector
 
----
+Not because native support is missing, but because the ecosystem path needs to
+be proven under NeoPsyke control.
 
-## 9. Phased Rollout
+Recommended first category:
 
-### Phase 1: Connector Host Foundation
+- low-blast-radius read-only connector
 
-- add `ConnectorRuntimeConfig` as a new AgentConfig domain
-- operator config flag to enable third-party connectors
-- shipped curated connector catalog plus bundle metadata
-- dedicated local installed-state directory under `.neopsyke/connectors/`
-- subprocess launcher
-- stdio transport
-- MCP-aligned handshake/discovery
-- local subprocess connectors only; no remote MCP server connections in v1
-- health + timeout + crash accounting
-- structured logs with connector ids
-- no planner-visible actions yet
+Do not start with:
 
-### Phase 2: Policy and Manifest Layer
-
-- connector allowlist / enable-disable model
-- per-capability allowlists
-- action manifest generation or explicit mapping
-- trust/provenance defaults
-- secret-handle resolution
-- connector metadata on planner-visible descriptors
-- manifest/tool description pinning for reviewed connectors
-
-### Phase 3: Runtime Integration
-
-- connector-backed actions appear in action registry
-- Superego and policy can evaluate them
-- staged action lifecycle works end-to-end
-- receipts/ledger/log correlation works for connector-backed actions
-- final execution guard still lives in `MotorCortex`
-
-### Phase 4: First Read-Only Reference Connectors
-
-Implement the lowest-risk useful product slice first:
-
-- read-only RSS/news
-- Gmail read/search only
-- optional calendar/tasks read after the first two are stable
-
-The acceptance bar here is:
-
-- connector outputs always land as `EXTERNAL_DATA`
-- observe actions can be planned/executed without widening commit authority
-- receipts/logs clearly correlate connector activity
-- connector crashes/timeouts degrade cleanly without poisoning the action system
-
-### Phase 5: First Constrained Outbound Path
-
-After read-only connectors are stable, add one narrow private outbound path:
-
-- Telegram digest delivery to explicit owner-approved destinations
-- approval-backed by default
-- deterministic payload validation
-- clear execution-key serialization by destination/account
-
-This is the proving ground for connector-backed commit actions before Gmail send
-or social posting.
-
-### Phase 6: Higher-risk Commits
-
-Only after the earlier phases are stable:
-
-- inbox drafting
-- Gmail send
-- unsubscribe / archive / labeling
-- social draft/publish
-- recurring automation tied to connector-backed tools
-- generic high-risk connectors (repo administration, local file mutation,
-  sandboxed coding-agent delegation)
+- public-posting connector
+- filesystem connector
+- repo admin connector
+- generic shell connector
 
 ---
 
-## 10. Logging and Observability Requirements
+## 6. Remaining Work Packages
 
-Normal logs must remain first-class. Durable receipts/ledger do not replace
-logs.
+The next implementation sessions should roughly follow this order:
 
-Connector-host related logs should include stable correlation fields:
+1. Finish connector hardening
+   - tool-description / manifest pinning
+   - durable provenance correlation
+   - stdout/stderr redaction review
+   - process isolation review
 
-- `connector_id`
-- `manifest_id`
-- `root_input_id`
-- `staged_action_id`
-- `authorization_id`
-- `receipt_id`
-- `action_type`
-- `reason_code`
+2. Improve native integration operator visibility
+   - Google auth health/status
+   - Telegram webhook/delivery health/status
+   - setup guidance in dashboard/docs
 
-We want both:
+3. Add stronger credential lifecycle support
+   - revoke/reconnect
+   - better token storage
+   - explicit handle audit trail
 
-- durable structured truth for UI/audit
-- detailed logs for coding agents and incident/debug inspection
+4. Tighten rate limiting and commit policy for future side effects
+   - time-window limits
+   - destination/resource buckets
+   - stronger deterministic payload shaping
 
----
+5. Select and review the first real external published connector with the user
+   before integration
 
-## 11. Initial Implementation Decisions
-
-These should be treated as the working decisions for the first implementation
-pass unless a later design review changes them:
-
-1. Secret delivery model in v1:
-   - per-process scoped injection from explicit secret handles only
-   - do not expose raw ambient env to connector subprocesses
-   - keep the resolver interface compatible with a future keychain-backed store
-
-2. Manifest mapping strategy in v1:
-   - hybrid
-   - discovery can propose mappings, but operator allowlists and overrides remain
-     authoritative
-
-3. Capability granularity for first rollout:
-   - read-only capabilities first
-   - plus one explicitly constrained private-send action family for Telegram
-     digest delivery
-
-4. Connector installation metadata location:
-   - split model
-   - shipped curated catalog lives in a read-only app/repo path
-   - mutable local installed state lives under `.neopsyke/connectors/`
-   - repo docs do not become the installation database
-
-5. Process lifecycle model:
-   - persistent subprocess per connector first
-
-6. Whether first MCP-aligned host should be:
-   - strict useful subset first
-   - do not design a dead-end that blocks future fuller MCP compatibility
-   - local `stdio` subprocess connectors only in the first implementation
-
-7. First outbound commit path:
-   - Telegram private send only
-   - no public posting in the first connector-backed commit slice
-
-8. Gmail scope in the first slice:
-   - observe/search/read only
-   - do not include send/modify/unsubscribe in the initial rollout
-
-9. Default failure mode:
-   - fail closed
-   - connectors with failed startup, handshake, validation, pinning, or health
-     checks expose no planner-visible actions
-
-10. Third-party enablement stance:
-   - disabled by default
-   - explicit per-connector allowlisting only
-   - curated bundles do not bypass enablement or policy review
+6. Only then consider high-risk capability families
 
 ---
 
-## 12. Remaining Design Questions After The First Slice
+## 7. Open Questions
 
-These decisions can remain open until after the host foundation and first
-reference connectors exist:
+These remain open on purpose:
 
-1. When to move from env-backed secret resolution to OS keychain-backed storage
-2. Whether tool-description pinning should hash raw MCP metadata only or the
-   generated NeoPsyke mapping artifact too
-3. Whether inbound Telegram/WhatsApp webhook receivers land in the same runtime
-   package or a separate channel-host package
-4. Whether future connector manifests should be YAML only or support a stricter
-   signed bundle format
-5. What additional approval UX is needed before Gmail send, social publish, or
-   local file mutation can be enabled
-6. Whether curated catalog entries should be filesystem manifests only or also
-   support signed packaged distributions
+1. When to move from encrypted local token files to OS keychain-backed storage
+   for all long-lived credentials
+2. Whether tool-description pinning should hash only raw MCP metadata or also
+   the generated NeoPsyke manifest mapping
+3. Whether the first approved published connector should be read-only email,
+   news/RSS, or something even narrower
+4. Whether future curated catalog entries should remain plain filesystem
+   manifests or move to signed bundles
+5. What additional sandboxing is required before enabling truly untrusted
+   third-party local subprocess connectors by default
 
 ---
 
-## 13. Work Packages For The Next Implementation Session
+## 8. Guardrails For Future Sessions
 
-The next coding session should attack the work in this order:
+When continuing this work:
 
-1. Config domain and install metadata
-   - add `ConnectorRuntimeConfig`
-   - load connector runtime config from `AgentRuntimeConfig`
-   - define curated catalog paths and local install-state paths
-2. Connector host/process layer
-   - subprocess lifecycle
-   - stdio transport
-   - timeout/crash handling
-   - structured connector logs
-3. Registry and manifest layer
-   - curated connector manifest model
-   - connector bundle manifest model
-   - installed connector state model
-   - capability discovery model
-   - action manifest mapping model
-   - tool/manifest pinning
-4. Runtime integration
-   - surface connector-backed descriptors through `ActionRegistry`
-   - preserve current `ActionAuthorizationPolicy` and `MotorCortex` guardrails
-   - propagate connector ids into receipts/ledger/logs
-5. First reference actions
-   - news read
-   - Gmail search/read
-   - Telegram digest send
-6. Tests
-   - deterministic runtime/manifest tests
-   - staged-action lifecycle tests for connector-backed actions
-   - crash/timeout/pinning regression tests
+- do not treat raw MCP compatibility as trust
+- do not expose raw MCP tool names directly to the planner
+- do not let connectors define approval/autonomy policy
+- do not widen outbound authority before stronger deterministic payload and
+  approval UX exists
+- do not add high-risk capability families without a fresh security review
+- do not pick an external published connector without confirming the candidate
+  with the user first
 
----
+The desired end state remains:
 
-## 14. Implementation Notes For Future Session
-
-When coding this:
-
-- do not collapse raw MCP tools directly into planner-visible actions without a
-  NeoPsyke manifest/policy layer
-- do not treat MCP compatibility as permission to trust connector tool
-  descriptions, outputs, or autonomy claims
-- do not let connector code define autonomy/approval policy
-- do not overfit the first host to one connector; keep the host boundary clean
-- do not support arbitrary remote MCP servers in the first host slice
-- keep logs and durable ledger correlated
-- reuse the current action lifecycle instead of inventing a parallel execution
-  path
-- tighten `ActionPluginFactoryContext` / secret handling before third-party
-  connector code can consume plugin factory inputs
-- keep generic high-risk capabilities (filesystem mutation, repo administration,
-  nested coding-agent execution) behind a later dedicated security review
-
-The desired end state is:
-
-- good external ecosystem reach through MCP-aligned tooling
-- NeoPsyke-native safety/lifecycle semantics
-- no return to a full-trust tool/plugin architecture
+- strong ecosystem reach through MCP-aligned compatibility
+- NeoPsyke-owned policy, staging, approval, and trust boundaries
+- no return to ambient-trust tools or plugin architectures

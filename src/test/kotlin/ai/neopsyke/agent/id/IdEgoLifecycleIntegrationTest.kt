@@ -366,7 +366,7 @@ class IdEgoLifecycleIntegrationTest {
                     is EgoTrigger.IncomingInput -> EgoDecision.Noop("ignore user test input")
                     is EgoTrigger.IncomingImpulse -> EgoDecision.ProposeAction(
                         urgency = Urgency.MEDIUM,
-                        actionType = ActionType.REFLECT,
+                        actionType = ActionType.REFLECT_INTERNAL,
                         payload = """{"summary":"I learned something durable","keywords":["learning"]}""",
                         summary = "persist insight"
                     )
@@ -389,10 +389,17 @@ class IdEgoLifecycleIntegrationTest {
             ),
             motorCortex = buildMotorCortex(
                 reflectionMemoryRecorder = object : ReflectionMemoryRecorder {
-                    override fun recordReflection(
+                    override fun recordInternalReflection(
                         action: ai.neopsyke.agent.model.PendingAction,
                         summary: String,
                         keywords: List<String>,
+                    ): Boolean = false
+
+                    override fun recordEvidenceReflection(
+                        action: ai.neopsyke.agent.model.PendingAction,
+                        summaryHint: String,
+                        keywords: List<String>,
+                        artifacts: List<ai.neopsyke.agent.model.ExternalContentArtifact>,
                     ): Boolean = false
                 }
             ),

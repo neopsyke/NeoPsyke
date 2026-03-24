@@ -83,6 +83,7 @@ data class PendingAction(
     val conversationContext: ConversationContext = ConversationContext.default(),
     val requiresFollowUpThought: Boolean = false,
     val followUpPrefix: String = "Action completed.",
+    val argumentDataTrust: DataTrust = DataTrust.TRUSTED_DATA,
     val origin: ActionOrigin = ActionOrigin.USER,
 )
 

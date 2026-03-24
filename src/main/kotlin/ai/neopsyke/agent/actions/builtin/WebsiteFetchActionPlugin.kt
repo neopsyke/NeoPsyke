@@ -17,10 +17,13 @@ import ai.neopsyke.agent.model.ActionEffect
 import ai.neopsyke.agent.model.ActionExecutionStatus
 import ai.neopsyke.agent.model.ActionOutcome
 import ai.neopsyke.agent.model.ActionType
+import ai.neopsyke.agent.model.ContentKind
 import ai.neopsyke.agent.config.AgentConfig
 import ai.neopsyke.agent.model.PendingAction
+import ai.neopsyke.agent.model.SourceDescriptor
 import ai.neopsyke.agent.model.SuperegoContext
 import ai.neopsyke.agent.support.ActionPayloadSecurity
+import ai.neopsyke.agent.support.ExternalContentPipeline
 
 class WebsiteFetchActionPlugin(
     private val tool: ai.neopsyke.agent.tools.mcp.FetchTool?,
@@ -123,6 +126,22 @@ class WebsiteFetchActionPlugin(
                 executionStatus = ActionExecutionStatus.FAILED,
             )
         val outcome = active.fetchWithOutcome(action.payload)
+        val artifact = if (outcome.errorCategory == ai.neopsyke.agent.tools.mcp.FetchErrorCategory.NONE) {
+            listOf(
+                ExternalContentPipeline.ingest(
+                    text = outcome.message,
+                    maxChars = MAX_FETCH_ARTIFACT_CHARS,
+                    source = SourceDescriptor(
+                        provider = "website_fetch",
+                        contentKind = ContentKind.DOCUMENT,
+                        objectType = "fetched_page",
+                        sourceRef = action.rootInputId,
+                    ),
+                )
+            )
+        } else {
+            emptyList()
+        }
         return ActionOutcome(
             statusSummary = outcome.message,
             executionStatus = if (outcome.errorCategory == ai.neopsyke.agent.tools.mcp.FetchErrorCategory.NONE) {
@@ -140,7 +159,8 @@ class WebsiteFetchActionPlugin(
                ai.neopsyke.agent.tools.mcp.FetchErrorCategory.RETRYABLE -> "retryable"
                 else -> null
             },
-            fetchErrorCategory = outcome.errorCategory.name.lowercase()
+            fetchErrorCategory = outcome.errorCategory.name.lowercase(),
+            resultArtifacts = artifact,
         )
     }
 
@@ -169,6 +189,7 @@ class WebsiteFetchActionPlugin(
         val mapper: ObjectMapper = jacksonObjectMapper()
         val strictMapper: ObjectMapper = jacksonObjectMapper()
             .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
+        const val MAX_FETCH_ARTIFACT_CHARS: Int = 4_000
     }
 }
 

@@ -303,11 +303,11 @@ enum class ActionEffect {
 
 | Gap | Description | Exploitable By |
 |-----|-------------|----------------|
-| **No taint/provenance tracking** | Actions don't know if the current cycle was triggered by external content | SOUL.md-style persistent backdoor |
+| **Planner-context provenance carriage still partial** | Root-scoped thread taint now exists, but prompt/scratchpad provenance is not yet fully typed end-to-end | Residual confused-deputy risk |
 | **No blast radius classification** | `REFLECT` and `EMAIL_SEND` treated with same framework | Excessive agency |
-| **No rate limiting per action type** | An agent could send 50 emails in a loop | Hijacked agent amplification |
-| **No inbound channel authentication** | `SensoryCortex` designed for local input | Webhook injection when Telegram/WhatsApp added |
-| **Sanitization not universal** | `PromptInjectionDefense` applied to fetch results but not email subjects, RSS titles, calendar names | Log/memory poisoning |
+| **Rate limiting rollout still incomplete** | Centralized action-control rate limits now exist, but the policy surface is still coarse and not yet time-window based | Hijacked agent amplification |
+| **Generic inbound channel authentication not generalized** | Telegram owner webhook auth is implemented, but the same framework is not yet abstracted for future channels | Webhook injection when new channels are added carelessly |
+| **Sanitization rollout still incomplete for future paths** | Current web/google/MCP/connector observe paths route through a unified external-content pipeline, but future integrations must keep using it | Log/memory poisoning |
 | **`ActionCapability` too coarse** | Only `PRODUCES_USER_OUTPUT` and `GATHERS_EVIDENCE` — no `EXTERNAL_BROADCAST`, `PERSISTENT_WRITE`, etc. | Insufficient review granularity |
 
 ---

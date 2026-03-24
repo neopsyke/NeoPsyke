@@ -17,6 +17,7 @@ import ai.neopsyke.agent.model.ActionEffectClass
 import ai.neopsyke.agent.model.ActionExecutionStatus
 import ai.neopsyke.agent.model.ActionOutcome
 import ai.neopsyke.agent.model.ActionType
+import ai.neopsyke.agent.model.DataTrust
 import ai.neopsyke.agent.model.InstructionTrust
 import ai.neopsyke.agent.model.PendingAction
 import ai.neopsyke.agent.model.SuperegoContext
@@ -41,6 +42,7 @@ class GoalOperationActionPlugin(
         directCommitAllowed = true,
         supportsAutonomousCommit = true,
         allowedInstructionTrust = setOf(InstructionTrust.TRUSTED_INSTRUCTION),
+        allowedArgumentDataTrust = setOf(DataTrust.TRUSTED_DATA),
     )
 
     override fun deterministicReview(
@@ -48,6 +50,13 @@ class GoalOperationActionPlugin(
         context: SuperegoContext,
         config: AgentConfig,
     ): ActionDeterministicReview {
+        if (context.threadSecurityContext.aggregatedDataTrust != DataTrust.TRUSTED_DATA) {
+            return ActionDeterministicReview(
+                allow = false,
+                ruleId = "goal_operation_tainted_context",
+                reason = "GOAL_OPERATION requires trusted thread data.",
+            )
+        }
         val payload = parsePayload(action.payload)
             ?: return ActionDeterministicReview(
                 allow = false,
@@ -63,6 +72,22 @@ class GoalOperationActionPlugin(
             )
         }
         return ActionDeterministicReview(allow = true)
+    }
+
+    override fun repairPlannerPayload(raw: String): String {
+        val payload = parsePayload(raw) ?: return raw
+        return mapper.writeValueAsString(
+            payload.copy(
+                operation = payload.operation?.trim()?.lowercase(),
+                goalId = payload.goalId?.trim()?.ifBlank { null },
+                title = payload.title?.trim()?.ifBlank { null },
+                instruction = payload.instruction?.trim()?.ifBlank { null },
+                priority = payload.priority?.trim()?.uppercase()?.ifBlank { null },
+                completionCriteria = payload.completionCriteria?.trim()?.ifBlank { null },
+                cronExpression = payload.cronExpression?.trim()?.ifBlank { null },
+                reason = payload.reason?.trim()?.ifBlank { null },
+            )
+        )
     }
 
     override suspend fun execute(action: PendingAction, context: ActionExecutionContext): ActionOutcome {

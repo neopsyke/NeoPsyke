@@ -35,7 +35,7 @@ internal class ActionReviewPipeline(
     private val impulseTracker: ImpulseLifecycleTracker,
     private val dialogueFor: (String) -> ArrayDeque<DialogueTurn>,
     private val resolveSessionId: (ConversationContext) -> String,
-    private val superegoContext: (String, ActionOrigin, ConversationContext) -> SuperegoContext,
+    private val superegoContext: (String, String?, ActionOrigin, ConversationContext) -> SuperegoContext,
     private val cleanupResolvedInputAfterAnswer: (PendingAction) -> Unit,
     private val getId: () -> ai.neopsyke.agent.id.Id?,
     private val actionControlService: ActionControlService = LegacyCompatibleActionControlService { action, authorization ->
@@ -379,7 +379,7 @@ internal class ActionReviewPipeline(
     ): AuthorizationDecision? {
         val authorizationDecision = superego.reviewAuthorization(
             resolvedAction,
-            superegoContext(sessionId, resolvedAction.origin, convCtx)
+            superegoContext(sessionId, resolvedAction.rootInputId, resolvedAction.origin, convCtx)
         )
         instrumentation.emit(
             AgentEvent(

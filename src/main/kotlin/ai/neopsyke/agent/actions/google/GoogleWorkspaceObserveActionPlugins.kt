@@ -19,8 +19,11 @@ import ai.neopsyke.agent.model.ActionEffectClass
 import ai.neopsyke.agent.model.ActionExecutionStatus
 import ai.neopsyke.agent.model.ActionOutcome
 import ai.neopsyke.agent.model.ActionType
+import ai.neopsyke.agent.model.ContentKind
 import ai.neopsyke.agent.model.PendingAction
+import ai.neopsyke.agent.model.SourceDescriptor
 import ai.neopsyke.agent.model.SuperegoContext
+import ai.neopsyke.agent.support.ExternalContentPipeline
 import ai.neopsyke.integrations.google.CalendarEventsRequest
 import ai.neopsyke.integrations.google.GmailSearchRequest
 import ai.neopsyke.integrations.google.GoogleWorkspaceApiClient
@@ -59,6 +62,17 @@ abstract class GoogleWorkspaceObserveActionPlugin(
             executionStatus = ActionExecutionStatus.SUCCESS,
             effects = setOf(ActionEffect.TASK_PROGRESS, ActionEffect.EVIDENCE_GATHERED),
             observedEvidence = true,
+            resultArtifacts = listOf(
+                ExternalContentPipeline.ingest(
+                    text = text,
+                    maxChars = MAX_RESULT_CHARS,
+                    source = SourceDescriptor(
+                        provider = "google_workspace",
+                        contentKind = ContentKind.RECORD,
+                        objectType = descriptor.actionType.id,
+                    ),
+                )
+            ),
         )
 
     protected fun failure(message: String): ActionOutcome =

@@ -5,6 +5,8 @@ import ai.neopsyke.agent.actions.ConversationOutputGateway
 import ai.neopsyke.agent.actions.RoutedConversationOutputGateway
 import ai.neopsyke.agent.actions.ActionRegistry
 import ai.neopsyke.agent.actions.ActionPluginFactoryContext
+import ai.neopsyke.agent.actions.EvidenceArtifactStore
+import ai.neopsyke.agent.actions.NoopEvidenceArtifactStore
 import ai.neopsyke.agent.actions.ReflectionMemoryRecorder
 import ai.neopsyke.agent.actions.websearch.WebSearchActionHandler
 import ai.neopsyke.agent.model.ActionOutcome
@@ -38,6 +40,7 @@ class MotorCortex(
         reflectionMemoryRecorder: ReflectionMemoryRecorder,
         config: AgentConfig = AgentConfig(),
         goalsGateway: GoalsGateway = NoopGoalsGateway,
+        evidenceArtifactStore: EvidenceArtifactStore = NoopEvidenceArtifactStore,
     ) : this(
         actionRegistry = ActionRegistry.discover(
             ActionPluginFactoryContext(
@@ -47,6 +50,7 @@ class MotorCortex(
                 fetchTool = fetchTool,
                 output = output,
                 conversationOutput = conversationOutput,
+                evidenceArtifactStore = evidenceArtifactStore,
                 reflectionMemoryRecorder = reflectionMemoryRecorder,
                 goalsGateway = goalsGateway,
             )

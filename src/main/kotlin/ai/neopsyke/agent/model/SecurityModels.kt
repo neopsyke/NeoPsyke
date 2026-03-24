@@ -100,11 +100,14 @@ data class CognitiveThreadSecurityContext(
     val instructionTrust: InstructionTrust,
     val channelSurface: ChannelSurface,
     val aggregatedDataTrust: DataTrust,
+    val taintSourceSummaries: List<String> = emptyList(),
 ) {
     companion object {
+        private const val MAX_TAINT_SOURCE_SUMMARIES: Int = 8
+
         fun fromConversation(
             security: ConversationSecurityContext,
-            aggregatedDataTrust: DataTrust = DataTrust.SANITIZED_EXTERNAL_DATA,
+            aggregatedDataTrust: DataTrust = DataTrust.TRUSTED_DATA,
         ): CognitiveThreadSecurityContext =
             CognitiveThreadSecurityContext(
                 policyScopeId = security.policyScopeId,
@@ -114,6 +117,36 @@ data class CognitiveThreadSecurityContext(
                 aggregatedDataTrust = aggregatedDataTrust,
             )
     }
+
+    fun withObservedArtifact(sourceSummary: String, dataTrust: DataTrust): CognitiveThreadSecurityContext {
+        val normalizedSummary = sourceSummary.trim()
+        val nextSources = if (normalizedSummary.isBlank()) {
+            taintSourceSummaries
+        } else {
+            (taintSourceSummaries + normalizedSummary).distinct().takeLast(MAX_TAINT_SOURCE_SUMMARIES)
+        }
+        return copy(
+            aggregatedDataTrust = minDataTrust(aggregatedDataTrust, dataTrust),
+            taintSourceSummaries = nextSources,
+        )
+    }
+
+    private fun minDataTrust(left: DataTrust, right: DataTrust): DataTrust {
+        val worstRank = maxOf(left.rank(), right.rank())
+        return when (worstRank) {
+            2 -> DataTrust.EXTERNAL_DATA
+            1 -> DataTrust.SANITIZED_EXTERNAL_DATA
+            else -> DataTrust.TRUSTED_DATA
+        }
+    }
+
+    private fun DataTrust.rank(): Int =
+        when (this) {
+            DataTrust.TRUSTED_DATA -> 0
+            DataTrust.SANITIZED_EXTERNAL_DATA -> 1
+            DataTrust.EXTERNAL_DATA -> 2
+        }
+
 }
 
 object ConversationSecurityContexts {
@@ -258,6 +291,32 @@ object Provenances {
             ),
         )
 
+    fun sanitizedExternal(
+        provider: String,
+        contentKind: ContentKind,
+        objectType: String,
+        part: String? = null,
+        sourceRef: String? = null,
+        signalIds: Set<String> = emptySet(),
+        originalChars: Int = 0,
+    ): Provenance =
+        Provenance(
+            instructionTrust = InstructionTrust.UNTRUSTED_INSTRUCTION,
+            dataTrust = DataTrust.SANITIZED_EXTERNAL_DATA,
+            source = SourceDescriptor(
+                provider = provider,
+                contentKind = contentKind,
+                objectType = objectType,
+                part = part,
+                sourceRef = sourceRef,
+            ),
+            sanitization = SanitizationRecord(
+                method = "prompt_injection_defense_v1",
+                signalIds = signalIds,
+                originalChars = originalChars,
+            ),
+        )
+
     fun fromStimulusTrustLevel(
         source: String,
         trustLevel: StimulusTrustLevel,
@@ -299,6 +358,24 @@ fun ConversationSecurityContext.renderSummary(): String =
         append(instructionTrust.name.lowercase())
         append("\npolicy_scope_id=")
         append(policyScopeId)
+    }
+
+fun CognitiveThreadSecurityContext.renderSummary(): String =
+    buildString {
+        append("policy_scope_id=")
+        append(policyScopeId)
+        append("\nprincipal_role=")
+        append(principalRole.name.lowercase())
+        append("\ninstruction_trust=")
+        append(instructionTrust.name.lowercase())
+        append("\nchannel_surface=")
+        append(channelSurface.name.lowercase())
+        append("\naggregated_data_trust=")
+        append(aggregatedDataTrust.name.lowercase())
+        if (taintSourceSummaries.isNotEmpty()) {
+            append("\ntaint_sources=")
+            append(taintSourceSummaries.joinToString(" | "))
+        }
     }
 
 fun Provenance.renderSummary(): String =

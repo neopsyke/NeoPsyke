@@ -1,9 +1,12 @@
 package ai.neopsyke.agent.ego
 
 import mu.KotlinLogging
+import ai.neopsyke.agent.actions.EvidenceArtifactStore
+import ai.neopsyke.agent.actions.NoopEvidenceArtifactStore
 import ai.neopsyke.agent.model.ActionOutcome
 import ai.neopsyke.agent.model.ActionType
 import ai.neopsyke.agent.config.AgentConfig
+import ai.neopsyke.agent.model.CognitiveThreadSecurityContext
 import ai.neopsyke.agent.model.ConversationContext
 import ai.neopsyke.agent.model.DeliberationState
 import ai.neopsyke.agent.model.EgoDecision
@@ -26,6 +29,7 @@ internal class DeliberationEngine(
     private val config: AgentConfig,
     private val instrumentation: AgentInstrumentation,
     private val metaReasoner: MetaReasoner,
+    private val evidenceArtifactStore: EvidenceArtifactStore = NoopEvidenceArtifactStore,
     private val isEvidenceActionType: (ActionType) -> Boolean = { false },
 ) {
     private data class SessionDeliberationState(
@@ -59,6 +63,11 @@ internal class DeliberationEngine(
     private val actionCooldownByScope: MutableMap<InputScope, MutableMap<ActionType, ActionCooldownState>> =
         object : LinkedHashMap<InputScope, MutableMap<ActionType, ActionCooldownState>>(16, 0.75f, true) {
             override fun removeEldestEntry(eldest: MutableMap.MutableEntry<InputScope, MutableMap<ActionType, ActionCooldownState>>): Boolean =
+                size > MAX_EVIDENCE_ENTRIES
+        }
+    private val threadSecurityByScope: MutableMap<InputScope, CognitiveThreadSecurityContext> =
+        object : LinkedHashMap<InputScope, CognitiveThreadSecurityContext>(16, 0.75f, true) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<InputScope, CognitiveThreadSecurityContext>): Boolean =
                 size > MAX_EVIDENCE_ENTRIES
         }
 
@@ -224,9 +233,21 @@ internal class DeliberationEngine(
         return externalEvidence[scope]
     }
 
+    fun threadSecurityContext(
+        rootInputId: String?,
+        conversationContext: ConversationContext,
+    ): CognitiveThreadSecurityContext {
+        val scope = inputScope(rootInputId, conversationContext.sessionId)
+            ?: return CognitiveThreadSecurityContext.fromConversation(conversationContext.security)
+        return threadSecurityByScope.getOrPut(scope) {
+            CognitiveThreadSecurityContext.fromConversation(conversationContext.security)
+        }
+    }
+
     // --- Action retry budget / cooldown ---
 
     fun recordActionOutcome(action: PendingAction, outcome: ActionOutcome, observed: Boolean) {
+        updateThreadSecurityContext(action, outcome)
         if (!isEvidenceAction(action)) return
         val scope = inputScope(action.rootInputId, action.conversationContext.sessionId) ?: return
         val failureBudget = config.planner.actionRetryBudgetNonRetryableFailures
@@ -307,6 +328,14 @@ internal class DeliberationEngine(
         forcedTerminalAnswerQueuedByInput.remove(scope)
         externalEvidence.remove(scope)
         actionCooldownByScope.remove(scope)
+        threadSecurityByScope.remove(scope)
+        evidenceArtifactStore.clear(
+            rootInputId,
+            ConversationContext(
+                sessionId = sessionId,
+                interlocutor = ai.neopsyke.agent.model.Interlocutor.UNKNOWN,
+            )
+        )
     }
 
     fun reset() {
@@ -314,6 +343,7 @@ internal class DeliberationEngine(
         forcedTerminalAnswerQueuedByInput.clear()
         externalEvidence.clear()
         actionCooldownByScope.clear()
+        threadSecurityByScope.clear()
     }
 
     // --- Private helpers ---
@@ -404,4 +434,20 @@ internal class DeliberationEngine(
 
     private fun isEvidenceAction(action: PendingAction): Boolean =
         action.requiresFollowUpThought || isEvidenceActionType(action.type)
+
+    private fun updateThreadSecurityContext(action: PendingAction, outcome: ActionOutcome) {
+        if (outcome.resultArtifacts.isEmpty()) return
+        val scope = inputScope(action.rootInputId, action.conversationContext.sessionId) ?: return
+        val current = threadSecurityByScope.getOrPut(scope) {
+            CognitiveThreadSecurityContext.fromConversation(action.conversationContext.security)
+        }
+        val updated = outcome.resultArtifacts.fold(current) { acc, artifact ->
+            acc.withObservedArtifact(
+                sourceSummary = artifact.taintSourceSummary(),
+                dataTrust = artifact.dataTrust,
+            )
+        }
+        threadSecurityByScope[scope] = updated
+        evidenceArtifactStore.record(action.rootInputId, action.conversationContext, outcome.resultArtifacts)
+    }
 }

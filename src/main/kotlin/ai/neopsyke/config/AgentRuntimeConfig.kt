@@ -15,6 +15,7 @@ import ai.neopsyke.agent.config.MetaReasonerConfig
 import ai.neopsyke.agent.config.NativeIntegrationsConfig
 import ai.neopsyke.agent.config.GoogleWorkspaceConfig
 import ai.neopsyke.agent.config.TelegramChannelConfig
+import ai.neopsyke.agent.config.TelegramIngressMode
 import ai.neopsyke.dashboard.InnerVoiceConfig
 import ai.neopsyke.agent.config.PlannerConfig
 import ai.neopsyke.agent.goal.GoalConfig
@@ -79,6 +80,7 @@ private data class AgentRuntimeYamlPlanner(
     val maxPlansPerInput: Int? = null,
     val actionRetryBudgetNonRetryableFailures: Int? = null,
     val actionRetryCooldownSteps: Int? = null,
+    val actionVerifierEnabled: Boolean? = null,
 )
 
 private data class AgentRuntimeYamlSuperego(
@@ -178,6 +180,15 @@ private data class AgentRuntimeYamlActionControl(
     val autonomousWorkerEnabled: Boolean? = null,
     val autonomousWorkerPollMs: Long? = null,
     val autonomousWorkerBatchSize: Int? = null,
+    val observePerTypePerRootInput: Int? = null,
+    val contactUserPerRootInput: Int? = null,
+    val reflectionFamilyPerRootInput: Int? = null,
+    val reflectEvidencePerRootInput: Int? = null,
+    val goalOperationPerRootInput: Int? = null,
+    val commitPrivatePerTypePerRootInput: Int? = null,
+    val commitStatefulPerTypePerRootInput: Int? = null,
+    val commitPublicPerTypePerRootInput: Int? = null,
+    val controlPlanePerTypePerRootInput: Int? = null,
 )
 
 private data class AgentRuntimeYamlConnectors(
@@ -200,6 +211,7 @@ private data class AgentRuntimeYamlNativeIntegrations(
 
 private data class AgentRuntimeYamlTelegram(
     val enabled: Boolean? = null,
+    val mode: String? = null,
     val webhookPath: String? = null,
     val ownerChatId: String? = null,
     val ownerUserId: String? = null,
@@ -209,6 +221,8 @@ private data class AgentRuntimeYamlTelegram(
     val sessionIdPrefix: String? = null,
     val requireDirectChat: Boolean? = null,
     val dropUnauthorizedMessages: Boolean? = null,
+    val pollTimeoutSeconds: Int? = null,
+    val pollRetryDelayMs: Long? = null,
 )
 
 private data class AgentRuntimeYamlGoogleWorkspace(
@@ -349,6 +363,11 @@ object AgentRuntimeSettingsLoader {
                     env["EGO_ACTION_RETRY_COOLDOWN_STEPS"],
                     plannerYaml.actionRetryCooldownSteps,
                     defaults.planner.actionRetryCooldownSteps
+                ),
+                actionVerifierEnabled = readBoolean(
+                    env["EGO_ACTION_VERIFIER_ENABLED"],
+                    plannerYaml.actionVerifierEnabled,
+                    defaults.planner.actionVerifierEnabled
                 ),
             ),
             superego = SuperegoConfig(
@@ -762,6 +781,51 @@ object AgentRuntimeSettingsLoader {
                     actionControlYaml.autonomousWorkerBatchSize,
                     defaults.actionControl.autonomousWorkerBatchSize
                 ),
+                observePerTypePerRootInput = readPositiveInt(
+                    env["NEOPSYKE_ACTION_CONTROL_OBSERVE_PER_TYPE_PER_ROOT_INPUT"],
+                    actionControlYaml.observePerTypePerRootInput,
+                    defaults.actionControl.observePerTypePerRootInput
+                ),
+                contactUserPerRootInput = readPositiveInt(
+                    env["NEOPSYKE_ACTION_CONTROL_CONTACT_USER_PER_ROOT_INPUT"],
+                    actionControlYaml.contactUserPerRootInput,
+                    defaults.actionControl.contactUserPerRootInput
+                ),
+                reflectionFamilyPerRootInput = readPositiveInt(
+                    env["NEOPSYKE_ACTION_CONTROL_REFLECTION_FAMILY_PER_ROOT_INPUT"],
+                    actionControlYaml.reflectionFamilyPerRootInput,
+                    defaults.actionControl.reflectionFamilyPerRootInput
+                ),
+                reflectEvidencePerRootInput = readPositiveInt(
+                    env["NEOPSYKE_ACTION_CONTROL_REFLECT_EVIDENCE_PER_ROOT_INPUT"],
+                    actionControlYaml.reflectEvidencePerRootInput,
+                    defaults.actionControl.reflectEvidencePerRootInput
+                ),
+                goalOperationPerRootInput = readPositiveInt(
+                    env["NEOPSYKE_ACTION_CONTROL_GOAL_OPERATION_PER_ROOT_INPUT"],
+                    actionControlYaml.goalOperationPerRootInput,
+                    defaults.actionControl.goalOperationPerRootInput
+                ),
+                commitPrivatePerTypePerRootInput = readPositiveInt(
+                    env["NEOPSYKE_ACTION_CONTROL_COMMIT_PRIVATE_PER_TYPE_PER_ROOT_INPUT"],
+                    actionControlYaml.commitPrivatePerTypePerRootInput,
+                    defaults.actionControl.commitPrivatePerTypePerRootInput
+                ),
+                commitStatefulPerTypePerRootInput = readPositiveInt(
+                    env["NEOPSYKE_ACTION_CONTROL_COMMIT_STATEFUL_PER_TYPE_PER_ROOT_INPUT"],
+                    actionControlYaml.commitStatefulPerTypePerRootInput,
+                    defaults.actionControl.commitStatefulPerTypePerRootInput
+                ),
+                commitPublicPerTypePerRootInput = readPositiveInt(
+                    env["NEOPSYKE_ACTION_CONTROL_COMMIT_PUBLIC_PER_TYPE_PER_ROOT_INPUT"],
+                    actionControlYaml.commitPublicPerTypePerRootInput,
+                    defaults.actionControl.commitPublicPerTypePerRootInput
+                ),
+                controlPlanePerTypePerRootInput = readPositiveInt(
+                    env["NEOPSYKE_ACTION_CONTROL_CONTROL_PLANE_PER_TYPE_PER_ROOT_INPUT"],
+                    actionControlYaml.controlPlanePerTypePerRootInput,
+                    defaults.actionControl.controlPlanePerTypePerRootInput
+                ),
             ),
             connectors = ConnectorRuntimeConfig(
                 enabled = readBoolean(
@@ -822,6 +886,11 @@ object AgentRuntimeSettingsLoader {
                         telegramYaml.enabled,
                         defaults.nativeIntegrations.telegram.enabled
                     ),
+                    mode = readTelegramIngressMode(
+                        env["NEOPSYKE_TELEGRAM_MODE"],
+                        telegramYaml.mode,
+                        defaults.nativeIntegrations.telegram.mode
+                    ),
                     webhookPath = readNonBlank(
                         env["NEOPSYKE_TELEGRAM_WEBHOOK_PATH"],
                         telegramYaml.webhookPath,
@@ -866,6 +935,16 @@ object AgentRuntimeSettingsLoader {
                         env["NEOPSYKE_TELEGRAM_DROP_UNAUTHORIZED_MESSAGES"],
                         telegramYaml.dropUnauthorizedMessages,
                         defaults.nativeIntegrations.telegram.dropUnauthorizedMessages
+                    ),
+                    pollTimeoutSeconds = readPositiveInt(
+                        env["NEOPSYKE_TELEGRAM_POLL_TIMEOUT_SECONDS"],
+                        telegramYaml.pollTimeoutSeconds,
+                        defaults.nativeIntegrations.telegram.pollTimeoutSeconds
+                    ),
+                    pollRetryDelayMs = readPositiveLong(
+                        env["NEOPSYKE_TELEGRAM_POLL_RETRY_DELAY_MS"],
+                        telegramYaml.pollRetryDelayMs,
+                        defaults.nativeIntegrations.telegram.pollRetryDelayMs
                     ),
                 ),
                 googleWorkspace = GoogleWorkspaceConfig(
@@ -1104,6 +1183,19 @@ object AgentRuntimeSettingsLoader {
             "0", "false", "no" -> false
             else -> null
         }
+
+    private fun readTelegramIngressMode(
+        env: String?,
+        yaml: String?,
+        fallback: TelegramIngressMode,
+    ): TelegramIngressMode {
+        val raw = firstNonBlank(env, yaml) ?: return fallback
+        return when (raw.trim().lowercase()) {
+            "webhook" -> TelegramIngressMode.WEBHOOK
+            "polling" -> TelegramIngressMode.POLLING
+            else -> fallback
+        }
+    }
 
     private fun firstNonBlank(vararg values: String?): String? =
         values.firstOrNull { !it.isNullOrBlank() }?.trim()

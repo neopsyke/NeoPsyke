@@ -16,6 +16,7 @@ import ai.neopsyke.agent.model.ActionType
 import ai.neopsyke.agent.config.AgentConfig
 import ai.neopsyke.agent.model.PendingAction
 import ai.neopsyke.agent.model.SuperegoContext
+import ai.neopsyke.agent.support.TextSecurity
 
 class ContactUserActionPlugin(
     private val conversationOutput: ConversationOutputGateway,
@@ -52,6 +53,9 @@ class ContactUserActionPlugin(
         return ActionDeterministicReview(allow = true)
     }
 
+    override fun repairPlannerPayload(raw: String): String =
+        TextSecurity.clamp(raw.trim(), MAX_MESSAGE_CHARS)
+
     override suspend fun execute(action: PendingAction, context: ActionExecutionContext): ActionOutcome {
         val delivery = conversationOutput.deliver(
             text = action.payload,
@@ -77,3 +81,5 @@ class ContactUserActionPluginFactory : AgentActionPluginFactory {
     override fun create(context: ActionPluginFactoryContext): AgentActionPlugin =
         ContactUserActionPlugin(conversationOutput = context.conversationOutput)
 }
+
+private const val MAX_MESSAGE_CHARS: Int = 8_000

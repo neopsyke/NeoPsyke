@@ -123,7 +123,7 @@ class GoalManagerTest {
                 action = PendingAction(
                     id = 1L,
                     urgency = Urgency.MEDIUM,
-                    type = ActionType.REFLECT,
+                    type = ActionType.REFLECT_INTERNAL,
                     payload = """{"note":"done"}""",
                     summary = "done",
                     rootInputId = work.rootInputId,
@@ -423,7 +423,7 @@ class GoalManagerTest {
                 action = PendingAction(
                     id = 2L,
                     urgency = Urgency.MEDIUM,
-                    type = ActionType.REFLECT,
+                    type = ActionType.REFLECT_INTERNAL,
                     payload = """{"note":"done"}""",
                     summary = "done",
                     rootInputId = work.rootInputId,
@@ -896,7 +896,7 @@ class GoalManagerTest {
     private fun projectAction(rootInputId: String) = PendingAction(
         id = 99L,
         urgency = Urgency.MEDIUM,
-        type = ActionType.REFLECT,
+        type = ActionType.REFLECT_INTERNAL,
         payload = """{"summary":"async start","keywords":["async"]}""",
         summary = "start async operation",
         rootInputId = rootInputId,

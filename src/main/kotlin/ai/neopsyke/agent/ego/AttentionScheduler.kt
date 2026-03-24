@@ -94,6 +94,7 @@ class AttentionScheduler(
         rootInputId: String? = null,
         rootInputReceivedAtMs: Long? = null,
         conversationContext: ConversationContext = ConversationContext.default(),
+        argumentDataTrust: DataTrust = DataTrust.TRUSTED_DATA,
         origin: ActionOrigin = ActionOrigin.USER,
     ): Boolean {
         if (actions.size >= config.maxPendingActions) {
@@ -113,6 +114,7 @@ class AttentionScheduler(
                 rootInputId = rootInputId,
                 rootInputReceivedAtMs = rootInputReceivedAtMs,
                 conversationContext = conversationContext,
+                argumentDataTrust = argumentDataTrust,
                 origin = origin,
             )
         )

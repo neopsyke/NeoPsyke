@@ -19,6 +19,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 class DefaultActionControlServiceTest {
 
@@ -258,6 +259,193 @@ class DefaultActionControlServiceTest {
             assertEquals(StagedActionStatus.CANCELLED, denied.stagedAction.status)
             assertEquals(ActionLedgerKind.CANCELLED, denied.ledgerEntry.kind)
             assertEquals("TEST_OWNER_DENIED", denied.ledgerEntry.reasonCode)
+        }
+    }
+
+    @Test
+    fun `reflect evidence enforces both family and evidence specific rate limits`() {
+        val tempDir = Files.createTempDirectory("action-control-reflect-rate-limit-test")
+        val dbPath = tempDir.resolve("action-control.db").toString()
+        SqliteActionControlStore(dbPath).use { store ->
+            val service = DefaultActionControlService(
+                config = ActionControlConfig(
+                    dbPath = dbPath,
+                    reflectionFamilyPerRootInput = 2,
+                    reflectEvidencePerRootInput = 1,
+                ),
+                store = store,
+            ) { action, _ ->
+                ActionOutcome(
+                    statusSummary = "Executed ${action.type.id}",
+                    executionStatus = ActionExecutionStatus.SUCCESS,
+                )
+            }
+            val context = ConversationContext.default()
+            val rootInputId = "root-reflect-rate-limit"
+
+            val first = kotlinx.coroutines.runBlocking {
+                service.handleAuthorizationDecision(
+                    action = PendingAction(
+                        id = 101,
+                        urgency = Urgency.MEDIUM,
+                        type = ActionType.REFLECT_INTERNAL,
+                        payload = """{"summary":"trusted insight","keywords":["one"]}""",
+                        summary = "reflect one",
+                        rootInputId = rootInputId,
+                        conversationContext = context,
+                    ),
+                    decision = AuthorizationDecision(
+                        progress = AuthorizationProgress.ALLOW_STAGE,
+                        commitMode = CommitMode.POLICY_AUTONOMOUS,
+                        policyVersion = "test-v1",
+                        reason = "stage reflection",
+                        reasonCode = "TEST_REFLECT_STAGE",
+                    ),
+                    conversationContext = context,
+                )
+            }
+            assertTrue(first is ActionControlDecisionResult.Staged)
+
+            val second = kotlinx.coroutines.runBlocking {
+                service.handleAuthorizationDecision(
+                    action = PendingAction(
+                        id = 102,
+                        urgency = Urgency.MEDIUM,
+                        type = ActionType.REFLECT_EVIDENCE,
+                        payload = """{"artifact_ids":["artifact-1"],"summary_hint":"evidence insight","keywords":["gmail"]}""",
+                        summary = "reflect evidence",
+                        rootInputId = rootInputId,
+                        conversationContext = context,
+                    ),
+                    decision = AuthorizationDecision(
+                        progress = AuthorizationProgress.ALLOW_STAGE,
+                        commitMode = CommitMode.POLICY_AUTONOMOUS,
+                        policyVersion = "test-v1",
+                        reason = "stage reflection",
+                        reasonCode = "TEST_REFLECT_STAGE",
+                    ),
+                    conversationContext = context,
+                )
+            }
+            assertTrue(second is ActionControlDecisionResult.Staged)
+
+            val third = kotlinx.coroutines.runBlocking {
+                service.handleAuthorizationDecision(
+                    action = PendingAction(
+                        id = 103,
+                        urgency = Urgency.MEDIUM,
+                        type = ActionType.REFLECT_EVIDENCE,
+                        payload = """{"artifact_ids":["artifact-2"],"summary_hint":"second evidence insight","keywords":["calendar"]}""",
+                        summary = "reflect evidence second",
+                        rootInputId = rootInputId,
+                        conversationContext = context,
+                    ),
+                    decision = AuthorizationDecision(
+                        progress = AuthorizationProgress.ALLOW_STAGE,
+                        commitMode = CommitMode.POLICY_AUTONOMOUS,
+                        policyVersion = "test-v1",
+                        reason = "stage reflection",
+                        reasonCode = "TEST_REFLECT_STAGE",
+                    ),
+                    conversationContext = context,
+                )
+            }
+
+            val refused = third as ActionControlDecisionResult.Refused
+            assertEquals("ACTION_RATE_LIMIT_EXCEEDED", refused.reasonCode)
+        }
+    }
+
+    @Test
+    fun `goal operation rate limit is scoped by normalized operation kind`() {
+        val tempDir = Files.createTempDirectory("action-control-goal-rate-limit-test")
+        val dbPath = tempDir.resolve("action-control.db").toString()
+        SqliteActionControlStore(dbPath).use { store ->
+            val service = DefaultActionControlService(
+                config = ActionControlConfig(
+                    dbPath = dbPath,
+                    goalOperationPerRootInput = 1,
+                ),
+                store = store,
+            ) { action, _ ->
+                ActionOutcome(
+                    statusSummary = "Executed ${action.type.id}",
+                    executionStatus = ActionExecutionStatus.SUCCESS,
+                )
+            }
+            val context = ConversationContext.default()
+            val rootInputId = "root-goal-rate-limit"
+
+            val listResult = kotlinx.coroutines.runBlocking {
+                service.handleAuthorizationDecision(
+                    action = PendingAction(
+                        id = 201,
+                        urgency = Urgency.MEDIUM,
+                        type = ActionType.GOAL_OPERATION,
+                        payload = """{"operation":"list"}""",
+                        summary = "list goals",
+                        rootInputId = rootInputId,
+                        conversationContext = context,
+                    ),
+                    decision = AuthorizationDecision(
+                        progress = AuthorizationProgress.ALLOW_STAGE,
+                        commitMode = CommitMode.POLICY_AUTONOMOUS,
+                        policyVersion = "test-v1",
+                        reason = "stage goal operation",
+                        reasonCode = "TEST_GOAL_STAGE",
+                    ),
+                    conversationContext = context,
+                )
+            }
+            assertTrue(listResult is ActionControlDecisionResult.Staged)
+
+            val createResult = kotlinx.coroutines.runBlocking {
+                service.handleAuthorizationDecision(
+                    action = PendingAction(
+                        id = 202,
+                        urgency = Urgency.MEDIUM,
+                        type = ActionType.GOAL_OPERATION,
+                        payload = """{"operation":"create","title":"Goal","instruction":"Do it"}""",
+                        summary = "create goal",
+                        rootInputId = rootInputId,
+                        conversationContext = context,
+                    ),
+                    decision = AuthorizationDecision(
+                        progress = AuthorizationProgress.ALLOW_STAGE,
+                        commitMode = CommitMode.POLICY_AUTONOMOUS,
+                        policyVersion = "test-v1",
+                        reason = "stage goal operation",
+                        reasonCode = "TEST_GOAL_STAGE",
+                    ),
+                    conversationContext = context,
+                )
+            }
+            assertTrue(createResult is ActionControlDecisionResult.Staged)
+
+            val secondCreate = kotlinx.coroutines.runBlocking {
+                service.handleAuthorizationDecision(
+                    action = PendingAction(
+                        id = 203,
+                        urgency = Urgency.MEDIUM,
+                        type = ActionType.GOAL_OPERATION,
+                        payload = """{"operation":"create","title":"Goal 2","instruction":"Do it again"}""",
+                        summary = "create goal 2",
+                        rootInputId = rootInputId,
+                        conversationContext = context,
+                    ),
+                    decision = AuthorizationDecision(
+                        progress = AuthorizationProgress.ALLOW_STAGE,
+                        commitMode = CommitMode.POLICY_AUTONOMOUS,
+                        policyVersion = "test-v1",
+                        reason = "stage goal operation",
+                        reasonCode = "TEST_GOAL_STAGE",
+                    ),
+                    conversationContext = context,
+                )
+            }
+
+            val refused = secondCreate as ActionControlDecisionResult.Refused
+            assertEquals("ACTION_RATE_LIMIT_EXCEEDED", refused.reasonCode)
         }
     }
 }

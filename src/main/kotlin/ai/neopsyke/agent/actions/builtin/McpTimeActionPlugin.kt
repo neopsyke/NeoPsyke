@@ -15,10 +15,13 @@ import ai.neopsyke.agent.model.ActionEffect
 import ai.neopsyke.agent.model.ActionExecutionStatus
 import ai.neopsyke.agent.model.ActionOutcome
 import ai.neopsyke.agent.model.ActionType
+import ai.neopsyke.agent.model.ContentKind
 import ai.neopsyke.agent.config.AgentConfig
 import ai.neopsyke.agent.model.PendingAction
+import ai.neopsyke.agent.model.SourceDescriptor
 import ai.neopsyke.agent.model.SuperegoContext
 import ai.neopsyke.agent.support.ActionPayloadSecurity
+import ai.neopsyke.agent.support.ExternalContentPipeline
 
 class McpTimeActionPlugin(
     private val tool: ai.neopsyke.agent.tools.mcp.McpTimeTool?,
@@ -94,10 +97,27 @@ class McpTimeActionPlugin(
         val status = tool?.getCurrentTime(action.payload)
             ?: "MCP time tool is not configured."
         val success = status.startsWith("MCP time result:", ignoreCase = true)
+        val artifacts = if (success) {
+            listOf(
+                ExternalContentPipeline.ingest(
+                    text = status,
+                    maxChars = 500,
+                    source = SourceDescriptor(
+                        provider = "mcp_time",
+                        contentKind = ContentKind.RESPONSE,
+                        objectType = "time_lookup",
+                        sourceRef = action.rootInputId,
+                    ),
+                )
+            )
+        } else {
+            emptyList()
+        }
         return ActionOutcome(
             statusSummary = status,
             executionStatus = if (success) ActionExecutionStatus.SUCCESS else ActionExecutionStatus.FAILED,
             effects = if (success) setOf(ActionEffect.TASK_PROGRESS, ActionEffect.EVIDENCE_GATHERED) else emptySet(),
+            resultArtifacts = artifacts,
         )
     }
 

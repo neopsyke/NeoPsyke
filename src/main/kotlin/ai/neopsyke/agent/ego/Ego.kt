@@ -5,6 +5,8 @@ import mu.KotlinLogging
 import ai.neopsyke.agent.actioncontrol.ActionControlService
 import ai.neopsyke.agent.actioncontrol.LegacyCompatibleActionControlService
 import ai.neopsyke.agent.config.*
+import ai.neopsyke.agent.actions.EvidenceArtifactStore
+import ai.neopsyke.agent.actions.InMemoryEvidenceArtifactStore
 import ai.neopsyke.agent.model.*
 import ai.neopsyke.agent.cortex.motor.MotorCortex
 import ai.neopsyke.agent.cortex.sensory.CognitiveCueMetadata
@@ -45,6 +47,7 @@ class Ego(
     },
     private val goalRegistry: GoalRegistry = EmptyGoalRegistry,
     private val goalsGateway: GoalsGateway = NoopGoalsGateway,
+    private val evidenceArtifactStore: EvidenceArtifactStore = InMemoryEvidenceArtifactStore(),
 ) {
     @Volatile private var id: ai.neopsyke.agent.id.Id? = null
 
@@ -80,7 +83,7 @@ class Ego(
                 size > MAX_TRACKED_SESSIONS
         }
     private val deliberation = DeliberationEngine(
-        config, instrumentation, metaReasoner,
+        config, instrumentation, metaReasoner, evidenceArtifactStore,
         isEvidenceActionType = { motorCortex.hasCapability(it, ai.neopsyke.agent.actions.ActionCapability.GATHERS_EVIDENCE) }
     )
     private val telemetry = EgoTelemetry(instrumentation, scheduler, memory, scratchpadStore, config)
@@ -606,10 +609,12 @@ class Ego(
             sessionId = sessionId,
             maxTokens = config.memory.scratchpad.digestMaxPromptTokens
         )
+        val threadSecurityContext = deliberation.threadSecurityContext(rootInputId, conversationContext)
         val disabled = deliberation.disabledActionTypes(rootInputId, sessionId)
         val plannerDescriptors = motorCortex.plannerDescriptors()
             .filter { descriptor ->
-                descriptor.allowedInstructionTrust.contains(conversationContext.security.instructionTrust)
+                descriptor.allowedInstructionTrust.contains(conversationContext.security.instructionTrust) &&
+                    descriptor.allowedArgumentDataTrust.contains(threadSecurityContext.aggregatedDataTrust)
             }
         val policyActionTypes = plannerDescriptors.map { it.actionType }.toSet()
         val availableActions = (motorCortex.availableActionTypes() intersect policyActionTypes) - disabled
@@ -643,6 +648,7 @@ class Ego(
             deliberation = deliberation.snapshot(),
             metaGuidance = deliberation.guidance(),
             conversationSecuritySummary = conversationContext.security.renderSummary(),
+            threadSecuritySummary = threadSecurityContext.renderSummary(),
             triggerProvenanceSummary = triggerProvenanceSummary(trigger),
             availableActions = availableActions,
             dispatchableActions = dispatchableActions,
@@ -785,6 +791,7 @@ class Ego(
 
     private fun superegoContext(
         sessionId: String = ConversationContext.DEFAULT_SESSION_ID,
+        rootInputId: String? = null,
         origin: ActionOrigin? = null,
         conversationContext: ConversationContext = ConversationContext.default(),
     ): SuperegoContext {
@@ -794,6 +801,7 @@ class Ego(
             shortTermContextSummary = shortTermSummary,
             origin = origin,
             conversationContext = conversationContext,
+            threadSecurityContext = deliberation.threadSecurityContext(rootInputId, conversationContext),
         )
     }
 
@@ -820,6 +828,7 @@ class Ego(
         val scope = inputScope(rootInputId, action.conversationContext)
         planner.resetForInput(rootInputId)
         deliberation.clearForInput(rootInputId, sessionId)
+        evidenceArtifactStore.clear(rootInputId, action.conversationContext)
         dispatcher.clearExternalActionSignatures(scope)
         telemetry.emitScratchpadTelemetry(
             rootInputId = rootInputId,

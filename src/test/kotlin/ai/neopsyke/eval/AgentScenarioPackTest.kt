@@ -408,7 +408,13 @@ class AgentScenarioPackTest {
                 )
             }
         }
-        val config = AgentConfig(planner = PlannerConfig(maxLoopStepsPerInput = 2, maxThoughtPasses = 2))
+        val config = AgentConfig(
+            planner = PlannerConfig(
+                maxLoopStepsPerInput = 2,
+                maxThoughtPasses = 2,
+                actionVerifierEnabled = true
+            )
+        )
         val agent = buildTestEgo(
             planner = LlmEgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
             superego = Superego(modelClient = superegoLlm, config = config, instrumentation = instrumentation),
