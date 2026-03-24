@@ -30,8 +30,8 @@ class GoalOperationActionPlugin(
     override val descriptor: ActionDescriptor = ActionDescriptor(
         actionType = ActionType.GOAL_OPERATION,
         dispatchable = context.config.goals.enabled,
-        plannerDescription = "goal_operation: create, inspect, pause, resume, reprioritize, complete, list, or revise persistent goals, including recurring cron-backed reminders.",
-        payloadGuidance = "Strict JSON with an operation field and the required goal arguments. For recurring goals, include cron_expression.",
+        plannerDescription = "goal_operation: create, status, list, pause, resume, reprioritize, complete, delete, delete_all, or revise_plan persistent goals, including recurring cron-backed reminders.",
+        payloadGuidance = "Strict JSON with an operation field and the required goal arguments. Use delete_all to remove every goal. For recurring goals, include cron_expression.",
         payloadSchemaExample = """
             {"operation":"create","title":"Weather reminder","instruction":"Check the current weather and remind me every time this goal runs.","priority":"HIGH","completion_criteria":"A weather reminder is delivered for the current scheduled run.","cron_expression":"*/5 * * * *"}
         """.trimIndent(),
@@ -78,7 +78,7 @@ class GoalOperationActionPlugin(
         val payload = parsePayload(raw) ?: return raw
         return mapper.writeValueAsString(
             payload.copy(
-                operation = payload.operation?.trim()?.lowercase(),
+                operation = normalizeOperation(payload),
                 goalId = payload.goalId?.trim()?.ifBlank { null },
                 title = payload.title?.trim()?.ifBlank { null },
                 instruction = payload.instruction?.trim()?.ifBlank { null },
@@ -96,12 +96,11 @@ class GoalOperationActionPlugin(
                 statusSummary = "Invalid goal_operation payload.",
                 executionStatus = ActionExecutionStatus.FAILED,
             )
-        val operation = payload.operation
-            ?.trim()
+        val operation = normalizeOperation(payload)
             ?.uppercase()
             ?.let { runCatching { GoalOperation.valueOf(it) }.getOrNull() }
             ?: return ActionOutcome(
-                statusSummary = "Unknown goal operation '${payload.operation}'.",
+                statusSummary = "Unknown goal operation '${payload.operation?.trim()}'.",
                 executionStatus = ActionExecutionStatus.FAILED,
             )
         val result = this.context.goalsGateway.executeOperation(
@@ -131,6 +130,30 @@ class GoalOperationActionPlugin(
 
     private fun parsePayload(raw: String): ProjectOperationPayload? =
         runCatching { mapper.readValue<ProjectOperationPayload>(raw) }.getOrNull()
+
+    private fun normalizeOperation(payload: ProjectOperationPayload): String? {
+        val operation = payload.operation?.trim()?.lowercase()?.ifBlank { return null } ?: return null
+        val hasGoalId = !payload.goalId.isNullOrBlank()
+        val deleteAllIntent = looksLikeDeleteAllIntent(payload)
+        return when (operation) {
+            "inspect" -> if (hasGoalId) "status" else "list"
+            "revise" -> if (deleteAllIntent) "delete_all" else "revise_plan"
+            "delete_all" -> "delete_all"
+            "delete", "remove", "clear" -> if (deleteAllIntent) "delete_all" else "delete"
+            else -> operation
+        }
+    }
+
+    private fun looksLikeDeleteAllIntent(payload: ProjectOperationPayload): Boolean {
+        val instruction = payload.instruction?.trim()?.lowercase().orEmpty()
+        if (instruction.isBlank()) {
+            return false
+        }
+        val deleteVerbPresent = listOf("delete", "remove", "clear").any(instruction::contains)
+        val goalReferencePresent = instruction.contains("goal")
+        val bulkReferencePresent = instruction.contains("all") || instruction.contains("existing")
+        return deleteVerbPresent && goalReferencePresent && bulkReferencePresent
+    }
 
     private data class ProjectOperationPayload(
         val operation: String? = null,

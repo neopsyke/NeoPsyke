@@ -2,6 +2,7 @@ package ai.neopsyke.config
 
 import ai.neopsyke.agent.config.TelegramIngressMode
 import java.nio.file.Files
+import java.nio.file.Paths
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
@@ -89,6 +90,8 @@ class AgentRuntimeSettingsLoaderTest {
             ),
             settings.agentConfig.nativeIntegrations.googleWorkspace.scopes,
         )
+        assertEquals(false, settings.agentConfig.goals.enabled)
+        assertEquals(Paths.get(System.getProperty("user.home"), ".neopsyke", "goals"), settings.agentConfig.goals.workspaceRoot)
 
         assertEquals(0, settings.agentConfig.loopDelayMs)
         assertEquals(64, settings.agentConfig.maxPendingThoughts)
@@ -172,6 +175,9 @@ class AgentRuntimeSettingsLoaderTest {
                 episodic_recall_max_chars: 333
                 episodic_recall_max_results: 11
                 use_llm_summarizer: true
+              goals:
+                enabled: true
+                workspace_root: /tmp/neopsyke-goals
               action_control:
                 enabled: true
                 db_path: /tmp/neopsyke-action-control.db
@@ -310,6 +316,8 @@ class AgentRuntimeSettingsLoaderTest {
         assertEquals(333, settings.agentConfig.logbook.episodicRecallMaxChars)
         assertEquals(11, settings.agentConfig.logbook.episodicRecallMaxResults)
         assertEquals(true, settings.agentConfig.logbook.useLlmSummarizer)
+        assertEquals(true, settings.agentConfig.goals.enabled)
+        assertEquals(Paths.get("/tmp/neopsyke-goals"), settings.agentConfig.goals.workspaceRoot)
         assertEquals(true, settings.agentConfig.actionControl.enabled)
         assertEquals("/tmp/neopsyke-action-control.db", settings.agentConfig.actionControl.dbPath)
         assertEquals("/tmp/neopsyke-action-security.yaml", settings.agentConfig.actionControl.policyPath)
@@ -443,6 +451,8 @@ class AgentRuntimeSettingsLoaderTest {
                 "NEOPSYKE_GOOGLE_OAUTH_TOKEN_ENCRYPTION_SECRET_HANDLE" to "ENV_GOOGLE_TOKEN_ENCRYPTION",
                 "NEOPSYKE_GOOGLE_OAUTH_STATE_TTL_SECONDS" to "180",
                 "NEOPSYKE_GOOGLE_SCOPES" to "https://www.googleapis.com/auth/gmail.readonly, https://www.googleapis.com/auth/calendar.readonly",
+                "NEOPSYKE_GOALS_ENABLED" to "true",
+                "NEOPSYKE_GOALS_WORKSPACE_ROOT" to "/env/goals",
                 "NEOPSYKE_DASHBOARD_ENABLED" to "true",
                 "NEOPSYKE_DASHBOARD_PORT" to "9900",
                 "NEOPSYKE_EVAL_MAX_RAW_RESPONSE_CHARS" to "5555",
@@ -493,6 +503,8 @@ class AgentRuntimeSettingsLoaderTest {
             ),
             settings.agentConfig.nativeIntegrations.googleWorkspace.scopes,
         )
+        assertEquals(true, settings.agentConfig.goals.enabled)
+        assertEquals(Paths.get("/env/goals"), settings.agentConfig.goals.workspaceRoot)
         assertEquals(true, settings.dashboardEnabled)
         assertEquals(9900, settings.dashboardPort)
         assertEquals(5555, settings.evalMaxRawResponseChars)

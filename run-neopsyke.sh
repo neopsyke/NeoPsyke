@@ -154,6 +154,7 @@ Environment:
   MEMORY_DEFAULT_NAMESPACE  Namespace for long-term memory provider reads/writes (launcher default: neopsyke)
   NEOPSYKE_EVENT_LOG_FILE    Optional path override for instrumentation sidecar JSONL
   NEOPSYKE_METRICS_DB        SQLite path for persisted local metrics
+  NEOPSYKE_GOALS_WORKSPACE_ROOT  Optional goal workspace root override
   EGO_LOOP_DELAY_MS       Delay between loop cycles in ms (default via launcher: 1000)
   NEOPSYKE_ID_CONFIG_FILE       Optional path to Id runtime YAML (default: ./id-runtime.yaml)
   NEOPSYKE_ID_ENABLED            Override Id module enabled state (true/false, overrides YAML)
@@ -259,6 +260,9 @@ export NEOPSYKE_GOALS_ENABLED="$EFFECTIVE_GOALS_ENABLED"
 effective_goals_enabled_normalized="$(printf '%s' "$EFFECTIVE_GOALS_ENABLED" | tr '[:upper:]' '[:lower:]')"
 if [[ "$effective_goals_enabled_normalized" != "true" ]]; then
   log_info "Warning: goals subsystem is disabled for this run. Use --goals or set NEOPSYKE_GOALS_ENABLED=true to enable persistent goal creation."
+elif [[ "$EVAL_MODE" -eq 1 ]] && [[ -z "${NEOPSYKE_GOALS_WORKSPACE_ROOT:-}" ]]; then
+  export NEOPSYKE_GOALS_WORKSPACE_ROOT="$ROOT_DIR/.neopsyke/eval-goals/$RUN_ID"
+  log_info "Eval mode detected; isolating goals workspace at $NEOPSYKE_GOALS_WORKSPACE_ROOT"
 fi
 
 JAVA_OPTS_APPEND=" -Dorg.slf4j.simpleLogger.defaultLogLevel=${LOG_LEVEL} -Dorg.slf4j.simpleLogger.logFile=${RUN_LOG_FILE} -Dorg.slf4j.simpleLogger.showDateTime=true -Dorg.slf4j.simpleLogger.dateTimeFormat=yyyy-MM-dd_HH:mm:ss.SSSZ"

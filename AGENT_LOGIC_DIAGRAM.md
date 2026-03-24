@@ -33,6 +33,7 @@ flowchart LR
     E --> ACW["ActionControlAutonomousWorker"]
     ACS --> ACDB["ActionControl SQLite (staged / auth / receipts)"]
     ACW --> ACS
+    Note over ACP,ACS: Goal deletes are delete-sensitive: delete_all always stages, and single-goal delete direct commit is restricted to owner-direct channels with exact goal_id
     E --> AR["ActionRegistry (ServiceLoader Discovery)"]
     AR --> CR["Connector Runtime (curated catalog + local install state + stdio host)"]
     E --> M["MotorCortex"]
@@ -284,6 +285,7 @@ flowchart LR
     PSM -->|"reset plan steps + clear produced keys"| PCS
     Sig --> Ego["Ego"]
     Note over Sig,Ego: Goal work is re-entered with a trusted internal automation conversation/security context
+    Note over PCS,Store: Eval/live launches should isolate GoalStore root from the default user runtime store
     Ego -->|nextWorkFromCue| PM
     Ego -->|goal-origin action outcomes| PM
 ```

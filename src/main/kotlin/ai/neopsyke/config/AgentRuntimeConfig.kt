@@ -59,6 +59,7 @@ private data class AgentRuntimeYamlAgent(
     val connectors: AgentRuntimeYamlConnectors? = AgentRuntimeYamlConnectors(),
     val nativeIntegrations: AgentRuntimeYamlNativeIntegrations? = AgentRuntimeYamlNativeIntegrations(),
     val innerVoice: AgentRuntimeYamlInnerVoice? = AgentRuntimeYamlInnerVoice(),
+    val goals: AgentRuntimeYamlGoals? = AgentRuntimeYamlGoals(),
     val runtime: AgentRuntimeYamlRuntime? = AgentRuntimeYamlRuntime(),
 )
 
@@ -250,6 +251,11 @@ private data class AgentRuntimeYamlInnerVoice(
     val maxEventsPerSession: Int? = null,
 )
 
+private data class AgentRuntimeYamlGoals(
+    val enabled: Boolean? = null,
+    val workspaceRoot: String? = null,
+)
+
 private data class AgentRuntimeYamlRuntime(
     val loopDelayMs: Int? = null,
     val maxPendingThoughts: Int? = null,
@@ -289,6 +295,7 @@ object AgentRuntimeSettingsLoader {
         val telegramYaml = nativeIntegrationsYaml.telegram ?: AgentRuntimeYamlTelegram()
         val googleWorkspaceYaml = nativeIntegrationsYaml.googleWorkspace ?: AgentRuntimeYamlGoogleWorkspace()
         val innerVoiceYaml = agentYaml.innerVoice ?: AgentRuntimeYamlInnerVoice()
+        val goalsYaml = agentYaml.goals ?: AgentRuntimeYamlGoals()
         val runtimeYaml = agentYaml.runtime ?: AgentRuntimeYamlRuntime()
 
         val mcpCallTimeoutMs = readPositiveLong(
@@ -1050,8 +1057,13 @@ object AgentRuntimeSettingsLoader {
             goals = GoalConfig(
                 enabled = readBoolean(
                     env["NEOPSYKE_GOALS_ENABLED"],
-                    yaml = null,
+                    yaml = goalsYaml.enabled,
                     fallback = defaults.goals.enabled
+                ),
+                workspaceRoot = readPath(
+                    env["NEOPSYKE_GOALS_WORKSPACE_ROOT"],
+                    yaml = goalsYaml.workspaceRoot,
+                    fallback = defaults.goals.workspaceRoot
                 ),
             ),
             loopDelayMs = readNonNegativeInt(
@@ -1159,6 +1171,15 @@ object AgentRuntimeSettingsLoader {
 
     private fun readBoolean(env: String?, yaml: Boolean?, fallback: Boolean): Boolean =
         parseBoolean(env) ?: yaml ?: fallback
+
+    private fun readPath(env: String?, yaml: String?, fallback: Path): Path {
+        val configured = firstNonBlank(env, yaml) ?: return fallback
+        return try {
+            Paths.get(configured)
+        } catch (_: Exception) {
+            fallback
+        }
+    }
 
     private fun readNonBlank(env: String?, yaml: String?, fallback: String): String =
         firstNonBlank(env, yaml) ?: fallback

@@ -8,6 +8,7 @@ import ai.neopsyke.instrumentation.AgentInstrumentation
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 class IdTest {
@@ -681,12 +682,37 @@ class IdTest {
 
     @Test
     fun `id_pulse event includes trigger_threshold and pulse_interval_ms and threshold_on_urgency`() {
-        val id = buildId(config = defaultConfig(triggerThreshold = 0.42, thresholdOnUrgency = false))
+        val id = buildId(
+            config = defaultConfig(
+                triggerThreshold = 0.42,
+                thresholdOnUrgency = false,
+                needs = mapOf(
+                    "be-useful" to NeedConfig(
+                        description = "test drive",
+                        growthRate = 0.1,
+                        satisfactionDecay = 0.8,
+                        cooldownPulses = 2,
+                        prompt = "Be useful!",
+                        responseCurve = ResponseCurveConfig(type = "sigmoid", steepness = 8.0, midpoint = 0.4),
+                        activityDecay = mapOf("action_executed" to 0.1),
+                    ),
+                ),
+            )
+        )
         id.pulse()
 
         val pulseEvent = events.first { it.type == "id_pulse" }
         assertEquals(0.42, pulseEvent.data["trigger_threshold"])
         assertEquals(1000L, pulseEvent.data["pulse_interval_ms"])
         assertEquals(false, pulseEvent.data["threshold_on_urgency"])
+        @Suppress("UNCHECKED_CAST")
+        val needs = pulseEvent.data["needs"] as List<Map<String, Any?>>
+        val need = needs.single()
+        @Suppress("UNCHECKED_CAST")
+        val responseCurve = need["responseCurve"] as? Map<String, Any?>
+        assertNotNull(responseCurve)
+        assertEquals("sigmoid", responseCurve["type"])
+        assertEquals(8.0, responseCurve["steepness"])
+        assertEquals(0.4, responseCurve["midpoint"])
     }
 }
