@@ -563,12 +563,14 @@ It is intentionally high-level and should stay aligned with the code.
   - API namespaces are split:
     - Chat control plane and session-scoped SSE: `/api/chat/*`
     - Observability snapshot/events/workspace: `/api/obs/*`
-    - Action control inspection/approval: `/api/action-control/*`
+    - Action control inspection/approval/live updates: `/api/action-control/*`
   - Workspace identity and timing are both exposed in telemetry/event payloads:
     - `root_input_id`: stable request identity key
     - `root_input_received_at_ms`: timing anchor used for latency/timeline correlation
   - Observability SSE lane streams lightweight events only; heavy scratchpad debug snapshots are captured in a bounded TTL ring and served on-demand via `/api/obs/workspace` and `/api/obs/workspace/{rootId}`.
   - The dashboard drawer fetches snapshot detail on demand to avoid continuous large-payload updates in timeline/event streams.
+  - Chat submission responses now include the authoritative stored message payload and distinguish `recorded` from `enqueued` so the UI can keep optimistic local echo aligned with backend state.
+  - Root-input to chat-session routing is retained until staged work reaches a terminal action-control state (or scratchpad teardown), so dashboard-approved staged actions can still route completion messages back into the originating conversation.
 
 ## Action Execution Surface
 - File: `src/main/kotlin/ai/neopsyke/agent/cortex/motor/MotorCortex.kt`
@@ -618,6 +620,7 @@ It is intentionally high-level and should stay aligned with the code.
   - fallback-bypass executions are mirrored into durable staged/receipt records so the receipt trail stays complete
   - denials/refusals are also mirrored into the durable action ledger for operator inspection
   - dashboard outbox supports owner approve/deny on staged actions; activity defaults to `SIGNAL` visibility and can opt into `BACKGROUND` / `TRACE`
+  - dashboard approval/deny now emits a dedicated action-control SSE update instead of relying on polling, and dashboard-approved executions append a conversation-visible completion message back into the originating chat session
 - Planner payload repair is now action-type aware via registry hooks (plugin-specific `repairPlannerPayload`), with legacy default repair retained for bare `website_fetch` URLs.
 - Action outcomes can carry a generic `actionErrorCategory` (`none`, `retryable`, `non_retryable`).
   `website_fetch` currently maps its internal error categories into this generic field.

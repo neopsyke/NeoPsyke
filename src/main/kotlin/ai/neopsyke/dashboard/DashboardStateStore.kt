@@ -33,6 +33,7 @@ class DashboardStateStore(
     private sealed interface TransportMessage {
         data class InstrumentationEvent(val event: AgentEvent) : TransportMessage
         data class ChatEvent(val sessionId: String, val payload: Map<String, Any?>) : TransportMessage
+        data class ActionControlEvent(val payload: Map<String, Any?>) : TransportMessage
     }
 
     private data class EventSubscriber(
@@ -81,6 +82,7 @@ class DashboardStateStore(
     private val chatSessions = linkedMapOf<String, ChatSessionRecord>()
     private val rootInputSessionMap = mutableMapOf<String, String>()
     private val chatSubscribers = mutableMapOf<String, MutableSet<Channel<String>>>()
+    private val actionControlSubscribers = mutableSetOf<Channel<String>>()
     private var nextChatMessageId: Long = 1L
     private val sessionSequenceCounters = mutableMapOf<String, AtomicLong>()
     private val plannerStructuredOutputModes = mutableMapOf<PlannerStructuredOutputScope, String>()
@@ -92,6 +94,7 @@ class DashboardStateStore(
 
     override fun onEvent(event: AgentEvent) {
         var eventForBroadcast: AgentEvent? = null
+        var actionControlPayload: Map<String, Any?>? = null
         synchronized(lock) {
             val effectiveEvent = enrichPlannerStructuredOutputModeLocked(event)
             val isDebugScratchpadSnapshot = event.type == "scratchpad_debug_snapshot"
@@ -206,7 +209,6 @@ class DashboardStateStore(
                                 emitEvent = true
                             )
                         }
-                        rootInputSessionMap.remove(rootInputId)
                     }
                 }
 
@@ -321,10 +323,23 @@ class DashboardStateStore(
                 if (subscribers.any { it.accepts(effectiveEvent) }) {
                     eventForBroadcast = effectiveEvent
                 }
+                if (
+                    effectiveEvent.type in ACTION_CONTROL_STREAM_EVENT_TYPES &&
+                    actionControlSubscribers.isNotEmpty()
+                ) {
+                    actionControlPayload = mapOf(
+                        "type" to effectiveEvent.type,
+                        "ts" to effectiveEvent.ts,
+                        "data" to effectiveEvent.data,
+                    )
+                }
             }
         }
         if (eventForBroadcast != null) {
             enqueueTransport(TransportMessage.InstrumentationEvent(eventForBroadcast!!))
+        }
+        if (actionControlPayload != null) {
+            enqueueTransport(TransportMessage.ActionControlEvent(actionControlPayload!!))
         }
     }
 
@@ -590,6 +605,35 @@ class DashboardStateStore(
     }
 
     fun addUserMessage(sessionId: String, content: String, source: String = "web"): ChatMessage? {
+        return addChatMessage(
+            sessionId = sessionId,
+            role = "user",
+            content = content,
+            source = source,
+        )
+    }
+
+    fun addAssistantMessage(
+        sessionId: String,
+        content: String,
+        source: String = "agent",
+        interlocutorName: String? = null,
+    ): ChatMessage? =
+        addChatMessage(
+            sessionId = sessionId,
+            role = "assistant",
+            content = content,
+            source = source,
+            interlocutorName = interlocutorName,
+        )
+
+    private fun addChatMessage(
+        sessionId: String,
+        role: String,
+        content: String,
+        source: String,
+        interlocutorName: String? = null,
+    ): ChatMessage? {
         val sanitizedSessionId = sanitizeSessionId(sessionId)
         val sanitizedContent = content.trim()
         if (sanitizedContent.isBlank()) {
@@ -601,9 +645,10 @@ class DashboardStateStore(
             }
             addChatMessageLocked(
                 sessionId = sanitizedSessionId,
-                role = "user",
+                role = role,
                 content = sanitizedContent,
                 source = source,
+                interlocutorName = interlocutorName,
                 emitEvent = true
             )
         }
@@ -611,6 +656,24 @@ class DashboardStateStore(
 
     fun resolveSessionForRootInput(rootInputId: String): String? =
         synchronized(lock) { rootInputSessionMap[rootInputId] }
+
+    fun clearSessionForRootInput(rootInputId: String) {
+        synchronized(lock) {
+            rootInputSessionMap.remove(rootInputId)
+        }
+    }
+
+    fun publishActionControlUpdate(type: String, data: Map<String, Any?> = emptyMap()) {
+        enqueueTransport(
+            TransportMessage.ActionControlEvent(
+                payload = mapOf(
+                    "type" to type,
+                    "ts" to System.currentTimeMillis(),
+                    "data" to data,
+                )
+            )
+        )
+    }
 
     fun nextSequenceNumber(sessionId: String): Long {
         synchronized(lock) {
@@ -641,6 +704,30 @@ class DashboardStateStore(
         }
     }
 
+    fun subscribeActionControl(): DashboardFlowSubscription {
+        val channel = Channel<String>(SUBSCRIBER_CHANNEL_CAPACITY)
+        synchronized(lock) {
+            actionControlSubscribers.add(channel)
+        }
+        return DashboardFlowSubscription(channel) {
+            synchronized(lock) {
+                actionControlSubscribers.remove(channel)
+            }
+            channel.close()
+        }
+    }
+
+    fun chatMessagePayload(message: ChatMessage): Map<String, Any?> =
+        mapOf(
+            "id" to message.id,
+            "role" to message.role,
+            "content" to message.content,
+            "source" to message.source,
+            "created_at_ms" to message.createdAtMs,
+            "interlocutor" to message.interlocutor,
+            "sequence" to message.sequence
+        )
+
     override fun close() {
         transportChannel.close()
         @Suppress("BlockingMethodInNonBlockingContext")
@@ -653,6 +740,8 @@ class DashboardStateStore(
             subscribers.clear()
             chatSubscribers.values.forEach { set -> set.forEach { it.close() } }
             chatSubscribers.clear()
+            actionControlSubscribers.forEach { it.close() }
+            actionControlSubscribers.clear()
         }
     }
 
@@ -869,6 +958,10 @@ class DashboardStateStore(
                     val payloadJson = mapper.writeValueAsString(message.payload)
                     broadcastChatPayload(message.sessionId, payloadJson)
                 }
+                is TransportMessage.ActionControlEvent -> {
+                    val payloadJson = mapper.writeValueAsString(message.payload)
+                    broadcastActionControlPayload(payloadJson)
+                }
             }
         }
     }
@@ -891,6 +984,31 @@ class DashboardStateStore(
                 if (chatSubscribers[sessionId].isNullOrEmpty()) {
                     chatSubscribers.remove(sessionId)
                 }
+            }
+        }
+    }
+
+    private fun broadcastActionControlPayload(payloadJson: String) {
+        val subscriberSnapshot = synchronized(lock) { actionControlSubscribers.toSet() }
+        if (subscriberSnapshot.isEmpty()) {
+            return
+        }
+        val staleSubscribers = mutableListOf<Channel<String>>()
+        subscriberSnapshot.forEach { channel ->
+            val result = channel.trySend(payloadJson)
+            if (result.isFailure && result.isClosed) {
+                staleSubscribers.add(channel)
+            } else if (result.isFailure) {
+                channel.tryReceive()
+                val retryResult = channel.trySend(payloadJson)
+                if (retryResult.isFailure && retryResult.isClosed) {
+                    staleSubscribers.add(channel)
+                }
+            }
+        }
+        if (staleSubscribers.isNotEmpty()) {
+            synchronized(lock) {
+                actionControlSubscribers.removeAll(staleSubscribers.toSet())
             }
         }
     }
@@ -1090,6 +1208,11 @@ class DashboardStateStore(
         const val TRANSPORT_CHANNEL_CAPACITY: Int = 2_048
         const val MAX_PHASE_TIMINGS: Int = 200
         val PLANNER_CALL_SITES: Set<String> = setOf("input", "thought", "impulse")
+        val ACTION_CONTROL_STREAM_EVENT_TYPES: Set<String> = setOf(
+            "action_staged",
+            "action_executed",
+            "action_denied",
+        )
         val SNAPSHOT_HEAVY_EVENT_TYPES: Set<String> = setOf(
             "llm_raw_response",
         )

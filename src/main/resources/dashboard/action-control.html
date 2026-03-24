@@ -120,6 +120,13 @@
     }
     .item:hover { background: rgba(54, 195, 167, 0.05); }
     .item.active { background: rgba(54, 195, 167, 0.12); }
+    .item.needs-action {
+      border-left: 4px solid var(--warn);
+      background: rgba(212, 168, 67, 0.08);
+    }
+    .item.awaiting-approval {
+      box-shadow: inset 0 0 0 1px rgba(212, 168, 67, 0.22);
+    }
     .item-title {
       font-size: 12px;
       font-weight: 700;
@@ -168,6 +175,56 @@
       margin-bottom: 8px;
       text-transform: uppercase;
       letter-spacing: 0.04em;
+    }
+    .attention-banner {
+      border: 1px solid rgba(212, 168, 67, 0.45);
+      background: rgba(212, 168, 67, 0.12);
+      color: #f2d58a;
+    }
+    .success-banner {
+      border: 1px solid rgba(92, 191, 114, 0.45);
+      background: rgba(92, 191, 114, 0.12);
+      color: #9fe0af;
+    }
+    .error-banner {
+      border: 1px solid rgba(212, 80, 80, 0.45);
+      background: rgba(212, 80, 80, 0.12);
+      color: #f0aaaa;
+    }
+    .request-status {
+      font-size: 12px;
+      line-height: 1.45;
+      padding: 10px;
+      border-radius: 6px;
+    }
+    .action-buttons {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .meta-note {
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 3px 8px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      font-size: 11px;
+    }
+    .pill.attention {
+      border-color: rgba(212, 168, 67, 0.55);
+      color: #f2d58a;
+      background: rgba(212, 168, 67, 0.12);
+    }
+    .pill.live {
+      border-color: rgba(54, 195, 167, 0.45);
+      color: var(--accent);
+      background: rgba(54, 195, 167, 0.08);
     }
     .kv {
       display: grid;
@@ -218,6 +275,8 @@
   <div class="toolbar">
     <div id="status-text">Loading staged actions and receipts...</div>
     <div style="display:flex;gap:8px;align-items:center">
+      <span id="attention-pill" class="pill attention">0 need approval</span>
+      <span id="live-status" class="pill live">Live updates connecting...</span>
       <label style="display:flex;gap:6px;align-items:center">
         <input id="include-background" type="checkbox" />
         <span>Include background</span>
@@ -275,10 +334,16 @@
     const refreshBtn = document.getElementById('refresh-btn');
     const includeBackgroundEl = document.getElementById('include-background');
     const includeTraceEl = document.getElementById('include-trace');
+    const attentionPillEl = document.getElementById('attention-pill');
+    const liveStatusEl = document.getElementById('live-status');
 
     let stagedActions = [];
     let ledgerEntries = [];
     let selection = { kind: null, id: null };
+    let actionControlSource = null;
+    let refreshScheduled = false;
+    let refreshInFlight = false;
+    const actionMutationState = Object.create(null);
 
     function formatTimestamp(ms) {
       if (!ms) return 'n/a';
@@ -317,29 +382,59 @@
       });
     }
 
+    function needsManualAction(item) {
+      return item && (item.status === 'WAITING_AUTHORIZATION' || item.status === 'READY');
+    }
+
+    function currentMutationState(stagedActionId) {
+      return stagedActionId ? actionMutationState[stagedActionId] || null : null;
+    }
+
+    function sortStagedActions(items) {
+      const priority = {
+        WAITING_AUTHORIZATION: 0,
+        READY: 1,
+        EXECUTING: 2,
+        WAITING_EXTERNAL: 3,
+        FAILED: 4,
+        COMPLETED: 5,
+        CANCELLED: 6
+      };
+      return items.slice().sort((left, right) => {
+        const leftPriority = priority[left.status] ?? 99;
+        const rightPriority = priority[right.status] ?? 99;
+        if (leftPriority !== rightPriority) return leftPriority - rightPriority;
+        return (right.updatedAtMs || right.createdAtMs || 0) - (left.updatedAtMs || left.createdAtMs || 0);
+      });
+    }
+
     function renderStagedList() {
       stagedCountEl.textContent = String(stagedActions.length);
       if (stagedActions.length === 0) {
         renderEmpty(stagedListEl, 'No staged actions found.');
         return;
       }
-      stagedListEl.innerHTML = stagedActions.map((item) => {
+      stagedListEl.innerHTML = sortStagedActions(stagedActions).map((item) => {
         const active = selection.kind === 'staged' && selection.id === item.id ? ' active' : '';
+        const needsAction = needsManualAction(item);
+        const mutation = currentMutationState(item.id);
         const statusClass = cssSafe(item.status);
         const modeClass = cssSafe(item.commitMode);
         return `
-          <button class="item${active}" data-kind="staged" data-id="${escapeHtml(item.id)}">
+          <button class="item${active}${needsAction ? ' needs-action awaiting-approval' : ''}" data-kind="staged" data-id="${escapeHtml(item.id)}">
             <div class="item-title">${escapeHtml(item.summary || item.actionType?.id || item.id)}</div>
             <div class="meta-row">
               <span class="badge ${statusClass}">${escapeHtml(item.status || 'unknown')}</span>
               <span class="badge ${modeClass}">${escapeHtml(item.commitMode || 'n/a')}</span>
               <span>${escapeHtml(item.actionType?.id || 'unknown')}</span>
+              ${needsAction ? '<span class="pill attention">Needs approval</span>' : ''}
             </div>
             <div class="meta-row" style="margin-top:6px">
               <span>${escapeHtml(item.conversationContext?.security?.channel?.provider || 'unknown')}</span>
               <span>${escapeHtml(item.conversationContext?.security?.principal?.role || 'unknown')}</span>
               <span>${escapeHtml(formatTimestamp(item.updatedAtMs || item.createdAtMs))}</span>
             </div>
+            ${mutation && mutation.phase === 'accepted' ? '<div class="meta-row" style="margin-top:6px;color:var(--ok)">Backend accepted ' + escapeHtml(mutation.verb) + '.</div>' : ''}
           </button>
         `;
       }).join('');
@@ -383,9 +478,27 @@
           return;
         }
         detailKindEl.textContent = 'Staged action';
+        const mutation = currentMutationState(item.id);
         const canAuthorize = item.status === 'WAITING_AUTHORIZATION' || item.status === 'READY';
         const canDeny = canAuthorize;
+        const isSubmitting = mutation && mutation.phase === 'submitting';
+        const approvalBanner = needsManualAction(item)
+          ? `
+            <div class="detail-block attention-banner">
+              <div class="detail-title">Needs Manual Action</div>
+              <div class="request-status">This staged action is waiting for owner approval from the dashboard before it can continue.</div>
+            </div>
+          `
+          : '';
+        const mutationBanner = mutation ? `
+          <div class="detail-block ${mutation.phase === 'error' ? 'error-banner' : mutation.phase === 'accepted' ? 'success-banner' : 'attention-banner'}">
+            <div class="detail-title">${escapeHtml(mutation.phase === 'submitting' ? 'Submitting request' : mutation.phase === 'accepted' ? 'Backend accepted' : 'Request error')}</div>
+            <div class="request-status">${escapeHtml(mutation.message || '')}</div>
+          </div>
+        ` : '';
         detailPaneEl.innerHTML = `
+          ${approvalBanner}
+          ${mutationBanner}
           <div class="detail-block">
             <div class="detail-title">Overview</div>
             <div class="kv">
@@ -412,71 +525,13 @@
           </div>
           <div class="detail-block">
             <div class="detail-title">Actions</div>
-            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-              <button class="primary-btn" id="authorize-btn" type="button" ${canAuthorize ? '' : 'disabled'}>Authorize from dashboard</button>
-              <button class="ghost-btn" id="deny-btn" type="button" ${canDeny ? '' : 'disabled'}>Deny</button>
-              <span style="font-size:12px;color:var(--muted)">Owner-dashboard approve/deny only.</span>
+            <div class="action-buttons">
+              <button class="primary-btn" id="authorize-btn" data-action-control="authorize" type="button" ${canAuthorize && !isSubmitting ? '' : 'disabled'}>${isSubmitting && mutation && mutation.verb === 'authorize' ? 'Authorizing...' : mutation && mutation.phase === 'accepted' && mutation.verb === 'authorize' ? 'Authorized' : 'Approve And Run'}</button>
+              <button class="ghost-btn" id="deny-btn" data-action-control="deny" type="button" ${canDeny && !isSubmitting ? '' : 'disabled'}>${isSubmitting && mutation && mutation.verb === 'deny' ? 'Denying...' : mutation && mutation.phase === 'accepted' && mutation.verb === 'deny' ? 'Denied' : 'Deny'}</button>
+              <span class="meta-note">Only owner-dashboard approval/deny can mutate this action.</span>
             </div>
-            <div id="authorize-status" style="margin-top:10px;font-size:12px;color:var(--muted)"></div>
           </div>
         `;
-
-        const authorizeBtn = document.getElementById('authorize-btn');
-        const denyBtn = document.getElementById('deny-btn');
-
-        if (authorizeBtn && canAuthorize) {
-          authorizeBtn.addEventListener('click', async () => {
-            authorizeBtn.disabled = true;
-            if (denyBtn) denyBtn.disabled = true;
-            const statusEl = document.getElementById('authorize-status');
-            if (statusEl) statusEl.textContent = 'Authorizing staged action...';
-            try {
-              const res = await fetch('/api/action-control/staged/' + encodeURIComponent(item.id) + '/authorize', {
-                method: 'POST'
-              });
-              const payload = await res.json();
-              if (!res.ok) {
-                throw new Error(payload.error || 'Authorization failed');
-              }
-              if (statusEl) statusEl.textContent = 'Authorization accepted.';
-              await refreshAll();
-            } catch (err) {
-              if (statusEl) {
-                statusEl.innerHTML = '<span class="error">' + escapeHtml(err.message || 'Authorization failed') + '</span>';
-              }
-              authorizeBtn.disabled = false;
-              if (denyBtn) denyBtn.disabled = false;
-            }
-          });
-        }
-
-        if (denyBtn && canDeny) {
-          denyBtn.addEventListener('click', async () => {
-            denyBtn.disabled = true;
-            if (authorizeBtn) authorizeBtn.disabled = true;
-            const statusEl = document.getElementById('authorize-status');
-            if (statusEl) statusEl.textContent = 'Denying staged action...';
-            try {
-              const res = await fetch('/api/action-control/staged/' + encodeURIComponent(item.id) + '/deny', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ reason: 'Denied from dashboard.' })
-              });
-              const payload = await res.json();
-              if (!res.ok) {
-                throw new Error(payload.error || 'Denial failed');
-              }
-              if (statusEl) statusEl.textContent = 'Staged action denied.';
-              await refreshAll();
-            } catch (err) {
-              if (statusEl) {
-                statusEl.innerHTML = '<span class="error">' + escapeHtml(err.message || 'Denial failed') + '</span>';
-              }
-              denyBtn.disabled = false;
-              if (authorizeBtn) authorizeBtn.disabled = false;
-            }
-          });
-        }
         return;
       }
 
@@ -521,22 +576,78 @@
       renderEmpty(detailPaneEl, 'Select a staged action or activity item to inspect it.');
     }
 
-    function bindListClicks() {
-      document.querySelectorAll('[data-kind][data-id]').forEach((el) => {
-        el.addEventListener('click', () => {
-          selection = {
-            kind: el.getAttribute('data-kind'),
-            id: el.getAttribute('data-id')
-          };
-          renderStagedList();
-          renderLedgerList();
-          renderDetail();
-        });
-      });
+    function updateCounts() {
+      const waitingCount = stagedActions.filter((item) => item.status === 'WAITING_AUTHORIZATION').length;
+      const readyCount = stagedActions.filter((item) => item.status === 'READY').length;
+      const signalCount = ledgerEntries.filter((item) => item.importance === 'SIGNAL').length;
+      attentionPillEl.textContent = String(waitingCount + readyCount) + ' need approval';
+      statusTextEl.textContent = 'Staged: ' + stagedActions.length + ' total, ' + waitingCount + ' waiting approval, ' + readyCount + ' ready, ' + signalCount + ' high-signal activity items.';
     }
 
-    async function refreshAll() {
-      statusTextEl.textContent = 'Refreshing action-control data...';
+    function scheduleRefresh(reason) {
+      if (refreshScheduled) return;
+      refreshScheduled = true;
+      window.setTimeout(() => {
+        refreshScheduled = false;
+        refreshAll(reason || 'scheduled');
+      }, 120);
+    }
+
+    async function mutateSelectedAction(verb) {
+      if (selection.kind !== 'staged' || !selection.id) return;
+      const item = stagedActions.find((candidate) => candidate.id === selection.id);
+      if (!item || !needsManualAction(item)) return;
+      actionMutationState[item.id] = {
+        phase: 'submitting',
+        verb: verb,
+        message: (verb === 'authorize' ? 'Sending approval to backend...' : 'Sending denial to backend...')
+      };
+      renderStagedList();
+      renderDetail();
+      try {
+        const response = await fetch('/api/action-control/staged/' + encodeURIComponent(item.id) + '/' + verb, {
+          method: 'POST',
+          headers: verb === 'deny' ? { 'Content-Type': 'application/json' } : undefined,
+          body: verb === 'deny' ? JSON.stringify({ reason: 'Denied from dashboard.' }) : undefined
+        });
+        const payload = await response.json();
+        if (!response.ok) {
+          throw new Error(payload.error || payload.reason || (verb === 'authorize' ? 'Authorization failed' : 'Denial failed'));
+        }
+        actionMutationState[item.id] = {
+          phase: 'accepted',
+          verb: verb,
+          message: payload.receipt && payload.receipt.statusSummary
+            ? payload.receipt.statusSummary
+            : payload.ledgerEntry && payload.ledgerEntry.summary
+              ? payload.ledgerEntry.summary
+              : (verb === 'authorize' ? 'Backend accepted the approval request.' : 'Backend accepted the denial request.')
+        };
+        if (payload.stagedAction) {
+          stagedActions = stagedActions.map((candidate) => candidate.id === item.id ? payload.stagedAction : candidate);
+        }
+        renderStagedList();
+        renderDetail();
+        scheduleRefresh('mutation');
+      } catch (err) {
+        actionMutationState[item.id] = {
+          phase: 'error',
+          verb: verb,
+          message: err && err.message ? err.message : (verb === 'authorize' ? 'Authorization failed' : 'Denial failed')
+        };
+        renderStagedList();
+        renderDetail();
+      }
+    }
+
+    async function refreshAll(reason) {
+      if (refreshInFlight) {
+        return;
+      }
+      refreshInFlight = true;
+      if (reason !== 'live') {
+        statusTextEl.textContent = 'Refreshing action-control data...';
+      }
       try {
         const [stagedRes, ledgerRes] = await Promise.all([
           fetch('/api/action-control/staged?limit=100'),
@@ -556,11 +667,7 @@
         renderStagedList();
         renderLedgerList();
         renderDetail();
-        bindListClicks();
-        const waitingCount = stagedActions.filter((item) => item.status === 'WAITING_AUTHORIZATION').length;
-        const readyCount = stagedActions.filter((item) => item.status === 'READY').length;
-        const signalCount = ledgerEntries.filter((item) => item.importance === 'SIGNAL').length;
-        statusTextEl.textContent = 'Staged: ' + stagedActions.length + ' total, ' + waitingCount + ' waiting approval, ' + readyCount + ' ready for autonomous commit, ' + signalCount + ' high-signal activity items.';
+        updateCounts();
         lastRefreshEl.textContent = 'Last refresh: ' + new Date().toLocaleTimeString();
       } catch (err) {
         statusTextEl.innerHTML = '<span class="error">' + escapeHtml(err.message || 'Refresh failed') + '</span>';
@@ -568,22 +675,62 @@
         renderEmpty(ledgerListEl, 'Unable to load action activity.');
         detailKindEl.textContent = 'Load error';
         renderEmpty(detailPaneEl, 'Action-control API unavailable.');
+      } finally {
+        refreshInFlight = false;
       }
     }
 
-    refreshBtn.addEventListener('click', refreshAll);
+    function connectActionControlEvents() {
+      if (actionControlSource) {
+        actionControlSource.close();
+      }
+      actionControlSource = new EventSource('/api/action-control/events');
+      actionControlSource.addEventListener('ready', () => {
+        liveStatusEl.textContent = 'Live updates connected';
+      });
+      actionControlSource.addEventListener('action-control', () => {
+        liveStatusEl.textContent = 'Live updates connected';
+        scheduleRefresh('live');
+      });
+      actionControlSource.addEventListener('error', () => {
+        liveStatusEl.textContent = 'Live updates reconnecting...';
+      });
+    }
+
+    function handleSelectionClick(event) {
+      const button = event.target.closest('[data-kind][data-id]');
+      if (!button) return;
+      selection = {
+        kind: button.getAttribute('data-kind'),
+        id: button.getAttribute('data-id')
+      };
+      renderStagedList();
+      renderLedgerList();
+      renderDetail();
+    }
+
+    stagedListEl.addEventListener('click', handleSelectionClick);
+    ledgerListEl.addEventListener('click', handleSelectionClick);
+    detailPaneEl.addEventListener('click', (event) => {
+      const button = event.target.closest('[data-action-control]');
+      if (!button) return;
+      const verb = button.getAttribute('data-action-control');
+      if (verb === 'authorize' || verb === 'deny') {
+        mutateSelectedAction(verb);
+      }
+    });
+
+    refreshBtn.addEventListener('click', () => refreshAll('manual'));
     includeBackgroundEl.addEventListener('change', () => {
       renderLedgerList();
       renderDetail();
-      bindListClicks();
     });
     includeTraceEl.addEventListener('change', () => {
       renderLedgerList();
       renderDetail();
-      bindListClicks();
     });
-    refreshAll();
-    setInterval(refreshAll, 5000);
+    refreshAll('initial');
+    connectActionControlEvents();
   </script>
 </body>
 </html>

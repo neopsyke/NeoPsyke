@@ -8,8 +8,10 @@ import ai.neopsyke.agent.config.InterlocutorResolver
 import ai.neopsyke.agent.cortex.sensory.AsyncSignalSource
 
 data class ChatSubmitResult(
-    val accepted: Boolean,
+    val recorded: Boolean,
+    val enqueued: Boolean,
     val detail: String,
+    val message: ChatMessage? = null,
 )
 
 class ChatRuntimeBridge(
@@ -32,19 +34,22 @@ class ChatRuntimeBridge(
         val sanitizedContent = content.trim()
         if (sanitizedContent.isBlank()) {
             return ChatSubmitResult(
-                accepted = false,
+                recorded = false,
+                enqueued = false,
                 detail = "Message content cannot be blank."
             )
         }
         if (!store.hasChatSession(sessionId)) {
             return ChatSubmitResult(
-                accepted = false,
+                recorded = false,
+                enqueued = false,
                 detail = "Unknown session id."
             )
         }
         if (sessionId.startsWith("id:")) {
             return ChatSubmitResult(
-                accepted = false,
+                recorded = false,
+                enqueued = false,
                 detail = "This is a read-only internal session."
             )
         }
@@ -53,7 +58,8 @@ class ChatRuntimeBridge(
             content = sanitizedContent,
             source = "web"
         ) ?: return ChatSubmitResult(
-            accepted = false,
+            recorded = false,
+            enqueued = false,
             detail = "Failed to record user message."
         )
         val source = "chat:${message.sessionId}"
@@ -66,21 +72,25 @@ class ChatRuntimeBridge(
                 channelId = message.sessionId,
             ),
         )
-        val accepted = sensoryInput.submitInput(
+        val enqueued = sensoryInput.submitInput(
             content = message.content,
             source = source,
             priority = InputPriority.HIGH,
             conversationContext = conversationContext
         )
-        return if (accepted) {
+        return if (enqueued) {
             ChatSubmitResult(
-                accepted = true,
-                detail = "Message enqueued."
+                recorded = true,
+                enqueued = true,
+                detail = "Message recorded and enqueued.",
+                message = message,
             )
         } else {
             ChatSubmitResult(
-                accepted = false,
-                detail = "Input queue is full."
+                recorded = true,
+                enqueued = false,
+                detail = "Message recorded, but the input queue is full.",
+                message = message,
             )
         }
     }

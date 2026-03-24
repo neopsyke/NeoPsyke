@@ -82,6 +82,8 @@ class DashboardServerTest {
             )
             assertEquals(202, submitRes.statusCode())
             assertTrue(submitRes.body().contains("\"accepted\":true"))
+            assertTrue(submitRes.body().contains("\"recorded\":true"))
+            assertTrue(submitRes.body().contains("\"message\""))
         }
     }
 
@@ -182,32 +184,47 @@ class DashboardServerTest {
     fun `action control page can inspect authorize and deny staged actions plus ledger activity`() {
         startServer().use { started ->
             started.server.actionControlService = TestActionControlService()
+            val actionEvents = openSse("http://127.0.0.1:${started.port}/api/action-control/events")
 
-            val staged = get("http://127.0.0.1:${started.port}/api/action-control/staged")
-            assertEquals(200, staged.statusCode())
-            assertTrue(staged.body().contains("stage-1"))
-            assertTrue(staged.body().contains("WAITING_AUTHORIZATION"))
+            actionEvents.use {
+                readNextEvent(actionEvents)
 
-            val ledgerBefore = get("http://127.0.0.1:${started.port}/api/action-control/ledger")
-            assertEquals(200, ledgerBefore.statusCode())
-            assertTrue(ledgerBefore.body().contains("\"SIGNAL\""))
+                val staged = get("http://127.0.0.1:${started.port}/api/action-control/staged")
+                assertEquals(200, staged.statusCode())
+                assertTrue(staged.body().contains("stage-1"))
+                assertTrue(staged.body().contains("WAITING_AUTHORIZATION"))
 
-            val authorize = postJson(
-                "http://127.0.0.1:${started.port}/api/action-control/staged/stage-1/authorize",
-                emptyMap()
-            )
-            assertEquals(200, authorize.statusCode())
-            assertTrue(authorize.body().contains("\"Executed\"") || authorize.body().contains("\"receipt\""))
+                val ledgerBefore = get("http://127.0.0.1:${started.port}/api/action-control/ledger")
+                assertEquals(200, ledgerBefore.statusCode())
+                assertTrue(ledgerBefore.body().contains("\"SIGNAL\""))
 
-            val receipts = get("http://127.0.0.1:${started.port}/api/action-control/receipts")
-            assertEquals(200, receipts.statusCode())
-            assertTrue(receipts.body().contains("receipt-1"))
+                val authorize = postJson(
+                    "http://127.0.0.1:${started.port}/api/action-control/staged/stage-1/authorize",
+                    emptyMap()
+                )
+                assertEquals(200, authorize.statusCode())
+                assertTrue(authorize.body().contains("\"Executed\"") || authorize.body().contains("\"receipt\""))
 
-            val deny = postJson(
-                "http://127.0.0.1:${started.port}/api/action-control/staged/stage-1/deny",
-                mapOf("reason" to "No longer needed")
-            )
-            assertEquals(409, deny.statusCode())
+                val event = readNextEvent(actionEvents, timeoutMs = 2_000)
+                assertNotNull(event)
+                assertEquals("action-control", event.first)
+                assertTrue(event.second.contains("\"action_control_state_changed\""))
+                assertTrue(event.second.contains("\"authorize\""))
+
+                val receipts = get("http://127.0.0.1:${started.port}/api/action-control/receipts")
+                assertEquals(200, receipts.statusCode())
+                assertTrue(receipts.body().contains("receipt-1"))
+
+                val defaultSession = get("http://127.0.0.1:${started.port}/api/chat/sessions/default")
+                assertEquals(200, defaultSession.statusCode())
+                assertTrue(defaultSession.body().contains("reply body"))
+
+                val deny = postJson(
+                    "http://127.0.0.1:${started.port}/api/action-control/staged/stage-1/deny",
+                    mapOf("reason" to "No longer needed")
+                )
+                assertEquals(409, deny.statusCode())
+            }
         }
     }
 
