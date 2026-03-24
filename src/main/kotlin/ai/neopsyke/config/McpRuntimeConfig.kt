@@ -6,7 +6,6 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory
 import com.fasterxml.jackson.module.kotlin.readValue
 import com.fasterxml.jackson.module.kotlin.registerKotlinModule
-import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
 
@@ -51,25 +50,31 @@ object McpRuntimeConfigLoader {
         env: Map<String, String> = System.getenv(),
         defaultPath: Path = Paths.get("mcp-runtime.yaml"),
     ): McpRuntimeConfig {
-        val filePath = resolveConfigPath(env, defaultPath)
-        val base = readYaml(filePath) ?: McpRuntimeConfig.defaults()
+        val base = YamlConfigSources.loadYamlConfig<McpRuntimeConfig>(
+            mapper = mapper,
+            env = env,
+            envKey = "NEOPSYKE_MCP_CONFIG_FILE",
+            defaultPath = defaultPath,
+            bundledResourceName = "mcp-runtime.yaml",
+        ) ?: throw IllegalStateException("Missing bundled or external mcp-runtime.yaml configuration.")
+        validate(base)
         return base.applyEnvOverrides(env)
     }
 
-    private fun resolveConfigPath(env: Map<String, String>, defaultPath: Path): Path {
-        val configured = env["NEOPSYKE_MCP_CONFIG_FILE"]?.trim().orEmpty()
-        if (configured.isBlank()) {
-            return defaultPath
-        }
-        return Paths.get(configured)
+    private fun validate(config: McpRuntimeConfig) {
+        validateCapability(name = "time", capability = config.time)
+        validateCapability(name = "fetch", capability = config.fetch)
     }
 
-    private fun readYaml(path: Path): McpRuntimeConfig? {
-        if (!Files.exists(path)) {
-            return null
+    private fun validateCapability(name: String, capability: McpCapabilityConfig) {
+        if (capability.mode.isBlank()) {
+            throw IllegalStateException("mcp-runtime.yaml is missing required field: $name.mode")
         }
-        Files.newBufferedReader(path).use { reader ->
-            return mapper.readValue<McpRuntimeConfig>(reader)
+        if (capability.provider.isBlank()) {
+            throw IllegalStateException("mcp-runtime.yaml is missing required field: $name.provider")
+        }
+        if (capability.mode.equals("stdio", ignoreCase = true) && capability.command.isBlank()) {
+            throw IllegalStateException("mcp-runtime.yaml requires $name.command when $name.mode=stdio")
         }
     }
 

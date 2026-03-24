@@ -137,14 +137,14 @@ Memory clearing (applied before agent startup):
       --clear-action-control     Delete the active action-control SQLite store before starting
 
 Environment:
-  NEOPSYKE_LLM_CONFIG_FILE   Optional path to LLM runtime YAML (default: ./llm-runtime.yaml)
-  NEOPSYKE_AGENT_CONFIG_FILE Optional path to agent/app/eval runtime YAML (default: ./agent-runtime.yaml)
+  NEOPSYKE_LLM_CONFIG_FILE   Optional path to LLM runtime YAML (otherwise use bundled config/llm-runtime.yaml)
+  NEOPSYKE_AGENT_CONFIG_FILE Optional path to agent/app/eval runtime YAML (otherwise use bundled config/agent-runtime.yaml)
   GROQ_API_KEY            Required when a configured provider uses Groq
   MISTRAL_API_KEY         Required when a configured provider uses Mistral
   GOOGLE_API_KEY          Required when a configured provider uses Google
   OPENAI_API_KEY          Required when a configured provider uses OpenAI
-  NEOPSYKE_MCP_CONFIG_FILE      Optional path to MCP runtime YAML for time/fetch (default: ./mcp-runtime.yaml)
-  NEOPSYKE_MEMORY_CONFIG_FILE   Optional path to memory runtime YAML (default: ./memory-runtime.yaml)
+  NEOPSYKE_MCP_CONFIG_FILE      Optional path to MCP runtime YAML for time/fetch (otherwise use bundled config/mcp-runtime.yaml)
+  NEOPSYKE_MEMORY_CONFIG_FILE   Optional path to memory runtime YAML (otherwise use bundled config/memory-runtime.yaml)
   NEOPSYKE_LOG_LEVEL         Default log level if --log-level is not provided
   NEOPSYKE_LOG_DIR           Directory for run logs (default: .neopsyke/logs)
   NEOPSYKE_LOG_RETENTION     Number of run log files to keep (default: 30)
@@ -162,7 +162,7 @@ Environment:
   NEOPSYKE_METRICS_DB        SQLite path for persisted local metrics
   NEOPSYKE_GOALS_WORKSPACE_ROOT  Optional goal workspace root override
   EGO_LOOP_DELAY_MS       Delay between loop cycles in ms (default via launcher: 1000)
-  NEOPSYKE_ID_CONFIG_FILE       Optional path to Id runtime YAML (default: ./id-runtime.yaml)
+  NEOPSYKE_ID_CONFIG_FILE       Optional path to Id runtime YAML (otherwise use bundled config/id-runtime.yaml)
   NEOPSYKE_ID_ENABLED            Override Id module enabled state (true/false, overrides YAML)
   NEOPSYKE_GOALS_ENABLED         Override goals subsystem enabled state (true/false, launcher default: true)
   NEOPSYKE_LLM_CACHE_MODE       LLM response cache mode: record, replay, or off (default: off)

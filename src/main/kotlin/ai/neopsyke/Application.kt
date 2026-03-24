@@ -55,11 +55,6 @@ fun main(args: Array<String>) {
     val mcpRuntimeConfig = McpRuntimeConfigLoader.load()
     val memoryRuntimeConfig = MemoryRuntimeConfigLoader.load()
     val llmRuntimeConfig = LlmRuntimeConfigLoader.load()
-    if (llmRuntimeConfig == null) {
-        output.error("Invalid llm-runtime.yaml configuration. Supported providers are: groq, mistral, google, openai.")
-        logger.warn { "Invalid llm-runtime.yaml configuration. Supported providers are: groq, mistral, google, openai." }
-        return
-    }
 
     if (cliOptions.evalReasoningOnly) {
         AppModeRunners.runReasoningOnlyEval(

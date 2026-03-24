@@ -21,7 +21,6 @@ import ai.neopsyke.agent.config.PlannerConfig
 import ai.neopsyke.agent.goal.GoalConfig
 import ai.neopsyke.agent.config.SuperegoConfig
 import ai.neopsyke.agent.config.ScratchpadConfig
-import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
 
@@ -34,9 +33,9 @@ data class AgentRuntimeSettings(
 )
 
 private data class AgentRuntimeYamlConfig(
-    val app: AgentRuntimeYamlApp? = AgentRuntimeYamlApp(),
-    val eval: AgentRuntimeYamlEval? = AgentRuntimeYamlEval(),
-    val agent: AgentRuntimeYamlAgent? = AgentRuntimeYamlAgent(),
+    val app: AgentRuntimeYamlApp? = null,
+    val eval: AgentRuntimeYamlEval? = null,
+    val agent: AgentRuntimeYamlAgent? = null,
 )
 
 private data class AgentRuntimeYamlApp(
@@ -50,17 +49,17 @@ private data class AgentRuntimeYamlEval(
 )
 
 private data class AgentRuntimeYamlAgent(
-    val planner: AgentRuntimeYamlPlanner? = AgentRuntimeYamlPlanner(),
-    val superego: AgentRuntimeYamlSuperego? = AgentRuntimeYamlSuperego(),
-    val memory: AgentRuntimeYamlMemory? = AgentRuntimeYamlMemory(),
-    val metaReasoner: AgentRuntimeYamlMetaReasoner? = AgentRuntimeYamlMetaReasoner(),
-    val logbook: AgentRuntimeYamlLogbook? = AgentRuntimeYamlLogbook(),
-    val actionControl: AgentRuntimeYamlActionControl? = AgentRuntimeYamlActionControl(),
-    val connectors: AgentRuntimeYamlConnectors? = AgentRuntimeYamlConnectors(),
-    val nativeIntegrations: AgentRuntimeYamlNativeIntegrations? = AgentRuntimeYamlNativeIntegrations(),
-    val innerVoice: AgentRuntimeYamlInnerVoice? = AgentRuntimeYamlInnerVoice(),
-    val goals: AgentRuntimeYamlGoals? = AgentRuntimeYamlGoals(),
-    val runtime: AgentRuntimeYamlRuntime? = AgentRuntimeYamlRuntime(),
+    val planner: AgentRuntimeYamlPlanner? = null,
+    val superego: AgentRuntimeYamlSuperego? = null,
+    val memory: AgentRuntimeYamlMemory? = null,
+    val metaReasoner: AgentRuntimeYamlMetaReasoner? = null,
+    val logbook: AgentRuntimeYamlLogbook? = null,
+    val actionControl: AgentRuntimeYamlActionControl? = null,
+    val connectors: AgentRuntimeYamlConnectors? = null,
+    val nativeIntegrations: AgentRuntimeYamlNativeIntegrations? = null,
+    val innerVoice: AgentRuntimeYamlInnerVoice? = null,
+    val goals: AgentRuntimeYamlGoals? = null,
+    val runtime: AgentRuntimeYamlRuntime? = null,
 )
 
 private data class AgentRuntimeYamlPlanner(
@@ -206,8 +205,8 @@ private data class AgentRuntimeYamlConnectors(
 )
 
 private data class AgentRuntimeYamlNativeIntegrations(
-    val telegram: AgentRuntimeYamlTelegram? = AgentRuntimeYamlTelegram(),
-    val googleWorkspace: AgentRuntimeYamlGoogleWorkspace? = AgentRuntimeYamlGoogleWorkspace(),
+    val telegram: AgentRuntimeYamlTelegram? = null,
+    val googleWorkspace: AgentRuntimeYamlGoogleWorkspace? = null,
 )
 
 private data class AgentRuntimeYamlTelegram(
@@ -254,6 +253,14 @@ private data class AgentRuntimeYamlInnerVoice(
 private data class AgentRuntimeYamlGoals(
     val enabled: Boolean? = null,
     val workspaceRoot: String? = null,
+    val maxActiveGoals: Int? = null,
+    val maxStepsPerPlan: Int? = null,
+    val actionsPerCycle: Int? = null,
+    val snapshotEveryNEvents: Int? = null,
+    val timerResolutionMs: Long? = null,
+    val conditionCheckIntervalMs: Long? = null,
+    val completedGoalRetentionDays: Int? = null,
+    val maxWorkspaceBytes: Long? = null,
 )
 
 private data class AgentRuntimeYamlRuntime(
@@ -279,24 +286,31 @@ object AgentRuntimeSettingsLoader {
         defaultPath: Path = Paths.get("agent-runtime.yaml"),
     ): AgentRuntimeSettings {
         val defaults = AgentConfig()
-        val yaml = readYaml(resolveConfigPath(env, defaultPath)) ?: AgentRuntimeYamlConfig()
-        val appYaml = yaml.app ?: AgentRuntimeYamlApp()
-        val evalYaml = yaml.eval ?: AgentRuntimeYamlEval()
-        val agentYaml = yaml.agent ?: AgentRuntimeYamlAgent()
-        val plannerYaml = agentYaml.planner ?: AgentRuntimeYamlPlanner()
-        val superegoYaml = agentYaml.superego ?: AgentRuntimeYamlSuperego()
-        val memoryYaml = agentYaml.memory ?: AgentRuntimeYamlMemory()
-        val scratchpadYaml = memoryYaml.scratchpad ?: AgentRuntimeYamlScratchpad()
-        val metaReasonerYaml = agentYaml.metaReasoner ?: AgentRuntimeYamlMetaReasoner()
-        val logbookYaml = agentYaml.logbook ?: AgentRuntimeYamlLogbook()
-        val actionControlYaml = agentYaml.actionControl ?: AgentRuntimeYamlActionControl()
-        val connectorsYaml = agentYaml.connectors ?: AgentRuntimeYamlConnectors()
-        val nativeIntegrationsYaml = agentYaml.nativeIntegrations ?: AgentRuntimeYamlNativeIntegrations()
-        val telegramYaml = nativeIntegrationsYaml.telegram ?: AgentRuntimeYamlTelegram()
-        val googleWorkspaceYaml = nativeIntegrationsYaml.googleWorkspace ?: AgentRuntimeYamlGoogleWorkspace()
-        val innerVoiceYaml = agentYaml.innerVoice ?: AgentRuntimeYamlInnerVoice()
-        val goalsYaml = agentYaml.goals ?: AgentRuntimeYamlGoals()
-        val runtimeYaml = agentYaml.runtime ?: AgentRuntimeYamlRuntime()
+        val yaml = YamlConfigSources.loadYamlConfig<AgentRuntimeYamlConfig>(
+            mapper = mapper,
+            env = env,
+            envKey = "NEOPSYKE_AGENT_CONFIG_FILE",
+            defaultPath = defaultPath,
+            bundledResourceName = "agent-runtime.yaml",
+        ) ?: throw IllegalStateException("Missing bundled or external agent-runtime.yaml configuration.")
+        validate(yaml)
+        val appYaml = yaml.app!!
+        val evalYaml = yaml.eval!!
+        val agentYaml = yaml.agent!!
+        val plannerYaml = agentYaml.planner!!
+        val superegoYaml = agentYaml.superego!!
+        val memoryYaml = agentYaml.memory!!
+        val scratchpadYaml = memoryYaml.scratchpad!!
+        val metaReasonerYaml = agentYaml.metaReasoner!!
+        val logbookYaml = agentYaml.logbook!!
+        val actionControlYaml = agentYaml.actionControl!!
+        val connectorsYaml = agentYaml.connectors!!
+        val nativeIntegrationsYaml = agentYaml.nativeIntegrations!!
+        val telegramYaml = nativeIntegrationsYaml.telegram!!
+        val googleWorkspaceYaml = nativeIntegrationsYaml.googleWorkspace!!
+        val innerVoiceYaml = agentYaml.innerVoice!!
+        val goalsYaml = agentYaml.goals!!
+        val runtimeYaml = agentYaml.runtime!!
 
         val mcpCallTimeoutMs = readPositiveLong(
             env = env["MCP_CALL_TIMEOUT_MS"],
@@ -1065,6 +1079,46 @@ object AgentRuntimeSettingsLoader {
                     yaml = goalsYaml.workspaceRoot,
                     fallback = defaults.goals.workspaceRoot
                 ),
+                maxActiveGoals = readPositiveInt(
+                    env["NEOPSYKE_GOALS_MAX_ACTIVE_GOALS"],
+                    yaml = goalsYaml.maxActiveGoals,
+                    fallback = defaults.goals.maxActiveGoals
+                ),
+                maxStepsPerPlan = readPositiveInt(
+                    env["NEOPSYKE_GOALS_MAX_STEPS_PER_PLAN"],
+                    yaml = goalsYaml.maxStepsPerPlan,
+                    fallback = defaults.goals.maxStepsPerPlan
+                ),
+                actionsPerCycle = readPositiveInt(
+                    env["NEOPSYKE_GOALS_ACTIONS_PER_CYCLE"],
+                    yaml = goalsYaml.actionsPerCycle,
+                    fallback = defaults.goals.actionsPerCycle
+                ),
+                snapshotEveryNEvents = readPositiveInt(
+                    env["NEOPSYKE_GOALS_SNAPSHOT_EVERY_N_EVENTS"],
+                    yaml = goalsYaml.snapshotEveryNEvents,
+                    fallback = defaults.goals.snapshotEveryNEvents
+                ),
+                timerResolutionMs = readPositiveLong(
+                    env["NEOPSYKE_GOALS_TIMER_RESOLUTION_MS"],
+                    yaml = goalsYaml.timerResolutionMs,
+                    fallback = defaults.goals.timerResolutionMs
+                ),
+                conditionCheckIntervalMs = readPositiveLong(
+                    env["NEOPSYKE_GOALS_CONDITION_CHECK_INTERVAL_MS"],
+                    yaml = goalsYaml.conditionCheckIntervalMs,
+                    fallback = defaults.goals.conditionCheckIntervalMs
+                ),
+                completedGoalRetentionDays = readPositiveInt(
+                    env["NEOPSYKE_GOALS_COMPLETED_RETENTION_DAYS"],
+                    yaml = goalsYaml.completedGoalRetentionDays,
+                    fallback = defaults.goals.completedGoalRetentionDays
+                ),
+                maxWorkspaceBytes = readPositiveLong(
+                    env["NEOPSYKE_GOALS_MAX_WORKSPACE_BYTES"],
+                    yaml = goalsYaml.maxWorkspaceBytes,
+                    fallback = defaults.goals.maxWorkspaceBytes
+                ),
             ),
             loopDelayMs = readNonNegativeInt(
                 env["EGO_LOOP_DELAY_MS"],
@@ -1140,20 +1194,30 @@ object AgentRuntimeSettingsLoader {
         )
     }
 
-    private fun resolveConfigPath(env: Map<String, String>, defaultPath: Path): Path {
-        val configured = env["NEOPSYKE_AGENT_CONFIG_FILE"]?.trim().orEmpty()
-        if (configured.isBlank()) {
-            return defaultPath
-        }
-        return Paths.get(configured)
+    private fun validate(yaml: AgentRuntimeYamlConfig) {
+        requireSection(yaml.app, "app")
+        requireSection(yaml.eval, "eval")
+        val agent = yaml.agent ?: throw IllegalStateException("agent-runtime.yaml is missing required section: agent")
+        requireSection(agent.planner, "agent.planner")
+        requireSection(agent.superego, "agent.superego")
+        val memory = agent.memory ?: throw IllegalStateException("agent-runtime.yaml is missing required section: agent.memory")
+        requireSection(memory.scratchpad, "agent.memory.scratchpad")
+        requireSection(agent.metaReasoner, "agent.meta_reasoner")
+        requireSection(agent.logbook, "agent.logbook")
+        requireSection(agent.actionControl, "agent.action_control")
+        requireSection(agent.connectors, "agent.connectors")
+        val nativeIntegrations = agent.nativeIntegrations
+            ?: throw IllegalStateException("agent-runtime.yaml is missing required section: agent.native_integrations")
+        requireSection(nativeIntegrations.telegram, "agent.native_integrations.telegram")
+        requireSection(nativeIntegrations.googleWorkspace, "agent.native_integrations.google_workspace")
+        requireSection(agent.innerVoice, "agent.inner_voice")
+        requireSection(agent.goals, "agent.goals")
+        requireSection(agent.runtime, "agent.runtime")
     }
 
-    private fun readYaml(path: Path): AgentRuntimeYamlConfig? {
-        if (!Files.exists(path)) {
-            return null
-        }
-        Files.newBufferedReader(path).use { reader ->
-            return mapper.readValue<AgentRuntimeYamlConfig>(reader)
+    private fun requireSection(value: Any?, path: String) {
+        if (value == null) {
+            throw IllegalStateException("agent-runtime.yaml is missing required section: $path")
         }
     }
 

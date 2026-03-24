@@ -23,35 +23,42 @@ Standalone Kotlin JVM app using Gradle with:
   - If `web_search.provider` is different, set that provider key too.
 
 ## Configuration
-- LLM settings are centralized in `llm-runtime.yaml` (repository root).
+- LLM settings are centralized in `config/llm-runtime.yaml`.
+  - Release artifacts bundle the checked-in `config/llm-runtime.yaml`. If no external file is present, NeoPsyke uses the bundled default YAML.
   - Cognitive role routing is set in `cognitive_roles`:
     - `planner`, `action_verifier`, `superego`, `meta_reasoner`, optional `meta_reasoner_fallback`, `memory_advisor`
   - Each cognitive role can set independent `provider` and `model`.
-  - Provider credentials/endpoints are set under `providers` (`api_key_env`, `base_url`).
+  - Provider credentials/endpoints/defaults are set under `providers` (`api_key_env`, `base_url`, `default_model`, `default_web_search_model`).
   - `web_search` remains independently configurable (`provider`, `model`, optional `api_key_env`, `base_url`).
+  - `model_catalog` is sourced from YAML only. NeoPsyke does not carry a built-in catalog fallback in code.
   - Optional `model_catalog` can list per-provider ROI profiles (`tier`, `token_weight`, optional input/output cost metadata). NeoPsyke uses `token_weight` to scale dynamic completion budgets for superego and memory-advisor.
-  - If a role/model is omitted, NeoPsyke falls back to provider defaults.
+  - `model_catalog` entries may also carry `metadata_updated_at` (`YYYY-MM-DD`) to record when the source-backed pricing/context metadata was last reviewed.
+  - If a role/model is omitted, NeoPsyke falls back to the provider defaults declared in YAML.
   - Optional override file path: `NEOPSYKE_LLM_CONFIG_FILE=/path/to/llm-runtime.yaml`.
   - Example:
     ```yaml
     providers:
+      anthropic:
+        api_key_env: ANTHROPIC_API_KEY
       groq:
         api_key_env: GROQ_API_KEY
       google:
         api_key_env: GOOGLE_API_KEY
+      ollama:
+        base_url: http://localhost:11434/api
       openai:
         api_key_env: OPENAI_API_KEY
 
     cognitive_roles:
       planner:
-        provider: openai
-        model: gpt-4o-mini
+        provider: anthropic
+        model: claude-sonnet-4-20250514
       action_verifier:
         provider: groq
         model: openai/gpt-oss-20b
       superego:
-        provider: openai
-        model: gpt-4o-mini
+        provider: anthropic
+        model: claude-sonnet-4-20250514
       meta_reasoner:
         provider: openai
         model: gpt-4o-mini
@@ -59,8 +66,8 @@ Standalone Kotlin JVM app using Gradle with:
         provider: openai
         model: gpt-5-mini
       memory_advisor:
-        provider: groq
-        model: openai/gpt-oss-20b
+        provider: ollama
+        model: gpt-oss
 
     web_search:
       provider: mistral
@@ -71,8 +78,11 @@ Standalone Kotlin JVM app using Gradle with:
   - `MISTRAL_API_KEY`
   - `GOOGLE_API_KEY`
   - `OPENAI_API_KEY`
+  - `ANTHROPIC_API_KEY`
+  - `OLLAMA_API_KEY` (optional for local Ollama; required only when using an authenticated Ollama host)
 - OpenAI moderation is available as a standalone utility (`moderateWithOpenAi` / `OpenAiModerationClient`) using `omni-moderation-latest`; it is not auto-wired into cognitive-role chat calls.
-- MCP time/fetch settings are centralized in `mcp-runtime.yaml` (repository root).
+- MCP time/fetch settings are centralized in `config/mcp-runtime.yaml`.
+  - Release artifacts bundle the checked-in `config/mcp-runtime.yaml`. If no external file is present, NeoPsyke uses the bundled default YAML.
   - Default config enables `time` and `website_fetch`.
   - Optional override file path: `NEOPSYKE_MCP_CONFIG_FILE=/path/to/mcp-runtime.yaml`.
   - Environment variables still override YAML when present (`MCP_TIME_*`, `WEBSITE_FETCH_*`, plus legacy `*_SERVER_CMD`).
@@ -82,7 +92,8 @@ Standalone Kotlin JVM app using Gradle with:
     - `provider` (label/selector for provider intent)
     - `command` (primary command string)
     - `fallback_commands` (list of command strings; first executable in `PATH` is used)
-- Long-term memory provider settings are centralized in `memory-runtime.yaml` (repository root).
+- Long-term memory provider settings are centralized in `config/memory-runtime.yaml`.
+  - Release artifacts bundle the checked-in `config/memory-runtime.yaml`. If no external file is present, NeoPsyke uses the bundled default YAML.
   - Default config uses `memory=default`, which points NeoPsyke at the managed `neopsyke-pgvector-memory` provider over HTTP.
   - Advanced `memory=external` also supports the same HTTP contract when you point NeoPsyke at a compatible external provider.
   - Optional override file path: `NEOPSYKE_MEMORY_CONFIG_FILE=/path/to/memory-runtime.yaml`.
@@ -97,7 +108,8 @@ Standalone Kotlin JVM app using Gradle with:
   - `MS_GRAPH_ALLOWED_RECIPIENT_DOMAINS` (optional comma-separated domain allowlist)
   - `MS_GRAPH_AUTH_BASE_URL` (optional, default `https://login.microsoftonline.com`)
   - `MS_GRAPH_BASE_URL` (optional, default `https://graph.microsoft.com/v1.0`)
-- Agent/app/eval runtime settings are centralized in `agent-runtime.yaml` (repository root).
+- Agent/app/eval runtime settings are centralized in `config/agent-runtime.yaml`.
+  - Release artifacts bundle the checked-in `config/agent-runtime.yaml`. If no external file is present, NeoPsyke uses the bundled default YAML.
   - Optional override file path: `NEOPSYKE_AGENT_CONFIG_FILE=/path/to/agent-runtime.yaml`.
   - `agent` is domain-grouped and mirrors `AgentConfig` ownership:
     - `agent.planner.*`
@@ -110,8 +122,9 @@ Standalone Kotlin JVM app using Gradle with:
   - Legacy flat `agent.*` runtime keys are not supported.
   - `app` section covers UI/runtime flags (for example dashboard enablement and port).
   - `eval` section covers eval defaults (for example stage default and raw-response cap).
-  - Precedence is `CLI > env > YAML > code defaults`.
-- Id runtime settings are centralized in `id-runtime.yaml` (repository root).
+  - Precedence is `CLI > env > external YAML > bundled YAML > code defaults for omitted fields in partial user configs`.
+- Id runtime settings are centralized in `config/id-runtime.yaml`.
+  - Release artifacts bundle the checked-in `config/id-runtime.yaml`. If no external file is present, NeoPsyke uses the bundled default YAML.
   - Optional override file path: `NEOPSYKE_ID_CONFIG_FILE=/path/to/id-runtime.yaml`.
   - `id.enabled` toggles autonomous internal drive impulses.
   - `id.max_consecutive_denials` controls when denial backoff is applied.
@@ -120,11 +133,11 @@ Standalone Kotlin JVM app using Gradle with:
     - direct Id-origin `answer` is denied by default
     - internal/evidence actions (`web_search`, `website_fetch`, `mcp_time`, `answer_draft`) are allowed to proceed to normal review/execution flow.
 - Optional:
-  - `NEOPSYKE_LLM_CONFIG_FILE` (optional; path to LLM runtime YAML, default: `./llm-runtime.yaml`)
-  - `NEOPSYKE_MCP_CONFIG_FILE` (optional; path to MCP runtime YAML, default: `./mcp-runtime.yaml`)
-  - `NEOPSYKE_MEMORY_CONFIG_FILE` (optional; path to memory runtime YAML, default: `./memory-runtime.yaml`)
-  - `NEOPSYKE_AGENT_CONFIG_FILE` (optional; path to agent/app/eval runtime YAML, default: `./agent-runtime.yaml`)
-  - `NEOPSYKE_ID_CONFIG_FILE` (optional; path to Id runtime YAML, default: `./id-runtime.yaml`)
+  - `NEOPSYKE_LLM_CONFIG_FILE` (optional; path to an external LLM runtime YAML override)
+  - `NEOPSYKE_MCP_CONFIG_FILE` (optional; path to an external MCP runtime YAML override)
+  - `NEOPSYKE_MEMORY_CONFIG_FILE` (optional; path to an external memory runtime YAML override)
+  - `NEOPSYKE_AGENT_CONFIG_FILE` (optional; path to an external agent/app/eval runtime YAML override)
+  - `NEOPSYKE_ID_CONFIG_FILE` (optional; path to an external Id runtime YAML override)
   - `NEOPSYKE_ID_ENABLED` (default from `id-runtime.yaml`)
   - `NEOPSYKE_GOALS_ENABLED` (default from `agent-runtime.yaml` / launcher)
   - `NEOPSYKE_GOALS_WORKSPACE_ROOT` (optional; override goal workspace root, default normal runtime: `~/.neopsyke/goals`)

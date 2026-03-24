@@ -147,7 +147,7 @@ Then send the bot a message and call `getUpdates` again.
 
 NeoPsyke reads Telegram config from:
 
-- [agent-runtime.yaml](/Users/victor.toral/atomitl/ai/psyke/agent-runtime.yaml)
+- [agent-runtime.yaml](/Users/victor.toral/atomitl/ai/psyke/config/agent-runtime.yaml)
 
 Current Telegram section:
 

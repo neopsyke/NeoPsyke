@@ -5,12 +5,13 @@ import java.nio.file.Files
 import java.nio.file.Paths
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class AgentRuntimeSettingsLoaderTest {
     @Test
-    fun `load falls back to defaults when config file is missing`() {
+    fun `load falls back to bundled defaults when config file is missing`() {
         val tempDir = Files.createTempDirectory("neopsyke-agent-runtime-missing")
         val settings = AgentRuntimeSettingsLoader.load(
             env = emptyMap(),
@@ -18,89 +19,18 @@ class AgentRuntimeSettingsLoaderTest {
         )
 
         assertEquals(180, settings.agentConfig.planner.maxLoopStepsPerInput)
-        assertEquals(5, settings.agentConfig.planner.maxThoughtPasses)
-        assertEquals(6, settings.agentConfig.planner.maxPlanSteps)
-        assertEquals(120, settings.agentConfig.planner.maxPlanStepDescriptionChars)
-        assertEquals(2, settings.agentConfig.planner.maxPlansPerInput)
-        assertEquals(3, settings.agentConfig.planner.actionRetryBudgetNonRetryableFailures)
-        assertEquals(10, settings.agentConfig.planner.actionRetryCooldownSteps)
-        assertEquals(false, settings.agentConfig.planner.actionVerifierEnabled)
-
         assertEquals(192, settings.agentConfig.superego.maxCompletionTokens)
-        assertEquals(true, settings.agentConfig.superego.dynamicCompletionEnabled)
-        assertEquals(true, settings.agentConfig.superego.twoStageSkipForContactUserActions)
-        assertEquals(true, settings.agentConfig.superego.twoStageSkipForWebSearchActions)
-
-        assertEquals(false, settings.agentConfig.memory.scratchpad.enabled)
-        assertEquals(false, settings.agentConfig.memory.scratchpad.debugCaptureEnabled)
-        assertEquals(4, settings.agentConfig.memory.scratchpad.digestMaxEntries)
+        assertEquals(true, settings.agentConfig.memory.scratchpad.enabled)
         assertEquals(true, settings.agentConfig.memory.longTermMemoryPromptCompressionEnabled)
-
-        assertEquals(true, settings.agentConfig.metaReasoner.dynamicCompletionEnabled)
-        assertEquals(640, settings.agentConfig.metaReasoner.dynamicCompletionHardMaxTokens)
-
         assertEquals(true, settings.agentConfig.logbook.enabled)
-        assertEquals(200, settings.agentConfig.logbook.maxSummaryChars)
-        assertEquals(12, settings.agentConfig.logbook.maxKeywordsPerEntry)
         assertEquals(true, settings.agentConfig.actionControl.enabled)
-        assertEquals(".neopsyke/action-control.db", settings.agentConfig.actionControl.dbPath)
-        assertEquals("action-security.yaml", settings.agentConfig.actionControl.policyPath)
-        assertEquals(true, settings.agentConfig.actionControl.autonomousWorkerEnabled)
-        assertEquals(500L, settings.agentConfig.actionControl.autonomousWorkerPollMs)
-        assertEquals(16, settings.agentConfig.actionControl.autonomousWorkerBatchSize)
-        assertEquals(10, settings.agentConfig.actionControl.observePerTypePerRootInput)
-        assertEquals(5, settings.agentConfig.actionControl.contactUserPerRootInput)
-        assertEquals(2, settings.agentConfig.actionControl.reflectionFamilyPerRootInput)
-        assertEquals(1, settings.agentConfig.actionControl.reflectEvidencePerRootInput)
-        assertEquals(3, settings.agentConfig.actionControl.goalOperationPerRootInput)
-        assertEquals(3, settings.agentConfig.actionControl.commitPrivatePerTypePerRootInput)
-        assertEquals(2, settings.agentConfig.actionControl.commitStatefulPerTypePerRootInput)
-        assertEquals(1, settings.agentConfig.actionControl.commitPublicPerTypePerRootInput)
-        assertEquals(2, settings.agentConfig.actionControl.controlPlanePerTypePerRootInput)
         assertEquals(false, settings.agentConfig.connectors.enabled)
-        assertEquals("connectors/catalog", settings.agentConfig.connectors.curatedCatalogPath)
-        assertEquals(".neopsyke/connectors", settings.agentConfig.connectors.installStateDir)
-        assertEquals(true, settings.agentConfig.connectors.failClosed)
-        assertEquals(true, settings.agentConfig.connectors.pinningEnabled)
-        assertEquals(5_000L, settings.agentConfig.connectors.startupTimeoutMs)
-        assertEquals(5_000L, settings.agentConfig.connectors.healthTimeoutMs)
-        assertTrue(settings.agentConfig.connectors.allowedConnectorIds.isEmpty())
-        assertTrue(settings.agentConfig.connectors.enabledBundleIds.isEmpty())
-        assertEquals(false, settings.agentConfig.connectors.allowThirdPartyConnectors)
-        assertEquals(false, settings.agentConfig.nativeIntegrations.telegram.enabled)
-        assertEquals(TelegramIngressMode.WEBHOOK, settings.agentConfig.nativeIntegrations.telegram.mode)
+        assertEquals(true, settings.agentConfig.nativeIntegrations.telegram.enabled)
+        assertEquals(TelegramIngressMode.POLLING, settings.agentConfig.nativeIntegrations.telegram.mode)
         assertEquals("/api/channels/telegram/webhook", settings.agentConfig.nativeIntegrations.telegram.webhookPath)
-        assertEquals("TELEGRAM_BOT_TOKEN", settings.agentConfig.nativeIntegrations.telegram.botTokenHandle)
-        assertEquals("TELEGRAM_WEBHOOK_SECRET", settings.agentConfig.nativeIntegrations.telegram.webhookSecretHandle)
-        assertEquals(25, settings.agentConfig.nativeIntegrations.telegram.pollTimeoutSeconds)
-        assertEquals(1_000L, settings.agentConfig.nativeIntegrations.telegram.pollRetryDelayMs)
         assertEquals(false, settings.agentConfig.nativeIntegrations.googleWorkspace.enabled)
-        assertEquals(".neopsyke/auth/google", settings.agentConfig.nativeIntegrations.googleWorkspace.tokenStoreDir)
-        assertEquals("", settings.agentConfig.nativeIntegrations.googleWorkspace.publicBaseUrl)
-        assertEquals("/api/channels/google/oauth/start", settings.agentConfig.nativeIntegrations.googleWorkspace.oauthStartPath)
-        assertEquals(
-            "GOOGLE_OAUTH_TOKEN_ENCRYPTION_SECRET",
-            settings.agentConfig.nativeIntegrations.googleWorkspace.oauthTokenEncryptionSecretHandle,
-        )
-        assertEquals(600L, settings.agentConfig.nativeIntegrations.googleWorkspace.oauthStateTtlSeconds)
-        assertEquals(
-            setOf(
-                "https://www.googleapis.com/auth/gmail.readonly",
-                "https://www.googleapis.com/auth/calendar.readonly",
-            ),
-            settings.agentConfig.nativeIntegrations.googleWorkspace.scopes,
-        )
-        assertEquals(false, settings.agentConfig.goals.enabled)
-        assertEquals(Paths.get(System.getProperty("user.home"), ".neopsyke", "goals"), settings.agentConfig.goals.workspaceRoot)
-
-        assertEquals(0, settings.agentConfig.loopDelayMs)
-        assertEquals(64, settings.agentConfig.maxPendingThoughts)
-        assertEquals(32, settings.agentConfig.maxPendingActions)
-        assertEquals(32, settings.agentConfig.maxPendingInputs)
-        assertEquals(5, settings.agentConfig.searchResultCount)
-        assertEquals(8_000, settings.agentConfig.mcpCallTimeoutMs)
-        assertEquals(4_000, settings.agentConfig.fetchMaxChars)
-
+        assertEquals(true, settings.agentConfig.goals.enabled)
+        assertEquals(Paths.get(".neopsyke/goals"), settings.agentConfig.goals.workspaceRoot)
         assertTrue(settings.dashboardEnabled)
         assertEquals(8787, settings.dashboardPort)
         assertEquals(Int.MAX_VALUE, settings.evalMaxRawResponseChars)
@@ -391,6 +321,57 @@ class AgentRuntimeSettingsLoaderTest {
     }
 
     @Test
+    fun `partial external yaml overlays bundled agent defaults`() {
+        val tempDir = Files.createTempDirectory("neopsyke-agent-runtime-overlay")
+        val yamlPath = tempDir.resolve("agent-runtime.yaml")
+        Files.writeString(
+            yamlPath,
+            """
+            app:
+              dashboard_port: 9101
+            agent:
+              planner:
+                max_loop_steps_per_input: 21
+              native_integrations:
+                telegram:
+                  mode: webhook
+            """.trimIndent()
+        )
+
+        val settings = AgentRuntimeSettingsLoader.load(
+            env = emptyMap(),
+            defaultPath = yamlPath
+        )
+
+        assertTrue(settings.dashboardEnabled)
+        assertEquals(9101, settings.dashboardPort)
+        assertEquals(Int.MAX_VALUE, settings.evalMaxRawResponseChars)
+        assertEquals(21, settings.agentConfig.planner.maxLoopStepsPerInput)
+        assertEquals(true, settings.agentConfig.memory.scratchpad.enabled)
+        assertEquals(true, settings.agentConfig.actionControl.enabled)
+        assertEquals(false, settings.agentConfig.connectors.enabled)
+        assertEquals(TelegramIngressMode.WEBHOOK, settings.agentConfig.nativeIntegrations.telegram.mode)
+        assertEquals(false, settings.agentConfig.nativeIntegrations.googleWorkspace.enabled)
+        assertEquals(true, settings.agentConfig.goals.enabled)
+    }
+
+    @Test
+    fun `empty agent override file fails clearly`() {
+        val tempDir = Files.createTempDirectory("neopsyke-agent-runtime-invalid")
+        val yamlPath = tempDir.resolve("agent-runtime.yaml")
+        Files.writeString(yamlPath, "")
+
+        val error = assertFailsWith<IllegalStateException> {
+            AgentRuntimeSettingsLoader.load(
+                env = emptyMap(),
+                defaultPath = yamlPath
+            )
+        }
+
+        assertTrue(error.message!!.contains("empty"))
+    }
+
+    @Test
     fun `env overrides grouped yaml values`() {
         val tempDir = Files.createTempDirectory("neopsyke-agent-runtime-env")
         val yamlPath = tempDir.resolve("agent-runtime.yaml")
@@ -532,7 +513,7 @@ class AgentRuntimeSettingsLoaderTest {
         )
 
         assertEquals(180, settings.agentConfig.planner.maxLoopStepsPerInput)
-        assertEquals(false, settings.agentConfig.memory.scratchpad.enabled)
+        assertEquals(true, settings.agentConfig.memory.scratchpad.enabled)
         assertEquals(false, settings.agentConfig.memory.scratchpad.debugCaptureEnabled)
         assertEquals(true, settings.agentConfig.superego.dynamicCompletionEnabled)
     }
@@ -564,5 +545,19 @@ class AgentRuntimeSettingsLoaderTest {
         assertEquals(42, settings.agentConfig.planner.maxLoopStepsPerInput)
         assertEquals(Int.MAX_VALUE, settings.evalMaxRawResponseChars)
         assertNull(settings.evalDefaultStage)
+    }
+
+    @Test
+    fun `external agent example overlay loads`() {
+        val settings = AgentRuntimeSettingsLoader.load(
+            env = emptyMap(),
+            defaultPath = Paths.get("examples/runtime-config/agent-runtime.external.example.yaml")
+        )
+
+        assertTrue(settings.dashboardEnabled)
+        assertEquals(false, settings.agentConfig.goals.enabled)
+        assertEquals(false, settings.agentConfig.actionControl.autonomousWorkerEnabled)
+        assertEquals(false, settings.agentConfig.nativeIntegrations.telegram.enabled)
+        assertEquals(false, settings.agentConfig.nativeIntegrations.googleWorkspace.enabled)
     }
 }

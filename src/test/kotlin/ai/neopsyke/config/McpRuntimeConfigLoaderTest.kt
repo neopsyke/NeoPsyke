@@ -3,11 +3,12 @@ package ai.neopsyke.config
 import java.nio.file.Files
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 class McpRuntimeConfigLoaderTest {
     @Test
-    fun `load falls back to defaults when config file is missing`() {
+    fun `load falls back to bundled defaults when config file is missing`() {
         val tempDir = Files.createTempDirectory("neopsyke-mcp-config-missing")
         val config = McpRuntimeConfigLoader.load(
             env = emptyMap(),
@@ -79,5 +80,64 @@ class McpRuntimeConfigLoaderTest {
         assertEquals("stdio", config.fetch.mode)
         assertEquals("env-provider", config.fetch.provider)
         assertEquals("env-fetch --serve", config.fetch.command)
+    }
+
+    @Test
+    fun `partial external yaml overlays bundled mcp defaults`() {
+        val tempDir = Files.createTempDirectory("neopsyke-mcp-config-overlay")
+        val yamlPath = tempDir.resolve("mcp-runtime.yaml")
+        Files.writeString(
+            yamlPath,
+            """
+            fetch:
+              provider: custom-fetch
+            """.trimIndent()
+        )
+
+        val config = McpRuntimeConfigLoader.load(
+            env = emptyMap(),
+            defaultPath = yamlPath
+        )
+
+        assertTrue(config.time.enabled)
+        assertEquals("mcp-server-time", config.time.provider)
+        assertEquals("uvx mcp-server-time", config.time.command)
+        assertEquals("native", config.fetch.mode)
+        assertEquals("custom-fetch", config.fetch.provider)
+    }
+
+    @Test
+    fun `stdio capability without command fails validation`() {
+        val tempDir = Files.createTempDirectory("neopsyke-mcp-config-invalid")
+        val yamlPath = tempDir.resolve("mcp-runtime.yaml")
+        Files.writeString(
+            yamlPath,
+            """
+            time:
+              command: ""
+            """.trimIndent()
+        )
+
+        val error = assertFailsWith<IllegalStateException> {
+            McpRuntimeConfigLoader.load(
+                env = emptyMap(),
+                defaultPath = yamlPath
+            )
+        }
+
+        assertTrue(error.message!!.contains("time.command"))
+    }
+
+    @Test
+    fun `external mcp example overlay loads`() {
+        val config = McpRuntimeConfigLoader.load(
+            env = emptyMap(),
+            defaultPath = java.nio.file.Path.of("examples/runtime-config/mcp-runtime.external.example.yaml")
+        )
+
+        assertTrue(config.time.enabled)
+        assertEquals("mcp-server-time", config.time.provider)
+        assertTrue(config.fetch.enabled)
+        assertEquals("native-jvm", config.fetch.provider)
     }
 }
