@@ -374,6 +374,64 @@ class DashboardStateStoreTest {
     }
 
     @Test
+    fun `root input session mapping is retained through contact user execution and cleared on scratchpad destroy`() {
+        val store = DashboardStateStore(maxEvents = 20)
+        val sessionId = store.createChatSession(title = "Mapping Test").sessionId
+        val rootInputId = "root-retain-1"
+        val rootInputMs = 1234L
+        val conversationContext = ConversationContext(sessionId, Interlocutor.named("owner"))
+
+        store.onEvent(
+            AgentEvent(
+                id = 1,
+                type = "input_queued",
+                data = mapOf(
+                    "input" to PendingInput(
+                        id = 10L,
+                        content = "hello",
+                        source = "chat:$sessionId",
+                        rootInputId = rootInputId,
+                        conversationContext = conversationContext,
+                        receivedAtMs = rootInputMs,
+                    )
+                )
+            )
+        )
+        store.onEvent(
+            AgentEvent(
+                id = 2,
+                type = "action_executed",
+                data = mapOf(
+                    "action" to PendingAction(
+                        id = 11L,
+                        urgency = Urgency.MEDIUM,
+                        type = ActionType.CONTACT_USER,
+                        payload = "reply",
+                        summary = "summary",
+                        rootInputId = rootInputId,
+                        rootInputReceivedAtMs = rootInputMs,
+                        conversationContext = conversationContext,
+                    ),
+                    "outcome_summary" to "ok",
+                )
+            )
+        )
+
+        assertEquals(sessionId, store.resolveSessionForRootInput(rootInputId))
+
+        store.onEvent(
+            AgentEvent(
+                id = 3,
+                type = "scratchpad_destroyed",
+                data = mapOf("root_input_id" to rootInputId),
+            )
+        )
+
+        assertNull(store.resolveSessionForRootInput(rootInputId))
+        store.close()
+    }
+
+    @Test
     fun `phase timings events are accumulated in ring buffer with max limit`() {
         val store = DashboardStateStore(maxEvents = 300)
         repeat(210) { i ->

@@ -97,8 +97,8 @@ flowchart LR
     DS --> CP["Conversations Page (`/`) + Chat API (`/api/chat/*`)"]
     DS --> OP["Observability Page (`/dashboard`) + Obs API (`/api/obs/*`)"]
     DS --> OX["Action Control Page (`/action-control`)"]
-    DS --> ACAPI["Action Control API (`/api/action-control/*`)"]
-    Note over OX,ACAPI: Action control UI defaults to SIGNAL activity items and can opt into BACKGROUND or TRACE ledger visibility
+    DS --> ACAPI["Action Control API + SSE (`/api/action-control/*`)"]
+    Note over OX,ACAPI: Action control UI defaults to SIGNAL activity items and can opt into BACKGROUND or TRACE ledger visibility live updates replace polling for staged-action changes
     Note over TG,TWH: Telegram ingress is owner-only: POST webhook + shared secret + direct-chat restriction + owner chat/user allowlist
     Note over TWH,GAUTH: Native Google auth foundation uses signed state tokens plus encrypted pending-auth storage; no plaintext refresh-token staging is intended
     Note over GOU,GOA: Google auth uses explicit public callback URL, signed state, PKCE, owner-email verification, and encrypted local credential storage
@@ -212,6 +212,7 @@ sequenceDiagram
                                 ACS->>ACDB: save signal/background ledger entry
                                 ACS-->>Ego: staged action (`WAITING_AUTHORIZATION` or `READY`)
                                 Ego->>Sched: enqueue approval-or-alternative thought
+                                Note over Dash,ACAPI: Dashboard action-control page watches a dedicated SSE lane and refreshes on staged/authorization lifecycle updates rather than polling
                                 Note over ACW,ACS: Background autonomous worker polls SQL-filtered runnable `READY` actions, preserving same-thread order (`threadSequence`) and same-target serialization (`executionKey`) before atomic claim + execute
                             else direct commit allowed
                                 ACS->>ACDB: save staged action + authorization
@@ -222,6 +223,7 @@ sequenceDiagram
                             end
                             Note over Ego,Motor: Actions may complete immediately or return WAITING + async operation handles
                             Note over Ego,Motor: `contact_user` delivery is channel-aware; Telegram sessions send through Bot API, dashboard sessions continue through local/dashboard delivery
+                            Note over ACAPI,Dash: Dashboard-approved staged executions can append a completion/answer message back into the originating chat session before root-session mapping is cleared
                             Note over Ego,PG: Goal-origin WAITING without handles is rejected as a contract violation
                             Ego->>Ego: PromptInjectionDefense sanitize untrusted tool output
                             alt action = contact_user

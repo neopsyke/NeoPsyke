@@ -10,6 +10,7 @@ EVAL_MODE=0
 FREUD_LIVE_MODE=0
 DISABLE_ID=0
 GOALS_OVERRIDE=""
+CLEAR_ACTION_CONTROL=0
 LOOP_DELAY_MS="${EGO_LOOP_DELAY_MS:-1000}"
 LOG_DIR="${NEOPSYKE_LOG_DIR:-$ROOT_DIR/.neopsyke/logs}"
 LOG_RETENTION="${NEOPSYKE_LOG_RETENTION:-30}"
@@ -111,9 +112,13 @@ while [[ $# -gt 0 ]]; do
       APP_ARGS+=("$1")
       shift
       ;;
+    --clear-action-control)
+      CLEAR_ACTION_CONTROL=1
+      shift
+      ;;
     -h|--help)
       cat <<'EOF'
-Usage: ./run-neopsyke.sh [--log-level LEVEL] [--loop-delay-ms MS|--no-delay] [--no-id] [--goals|--no-goals] [--clear-memory-*] [--] [app-args...]
+Usage: ./run-neopsyke.sh [--log-level LEVEL] [--loop-delay-ms MS|--no-delay] [--no-id] [--goals|--no-goals] [--clear-memory-*] [--clear-action-control] [--] [app-args...]
 
 Options:
   -l, --log-level LEVEL   SLF4J simple logger level (default: warning)
@@ -129,6 +134,7 @@ Memory clearing (applied before agent startup):
       --clear-memory-vector      Clear vector/hippocampus memory before starting
       --clear-memory-episodic    Clear episodic logbook memory before starting
       --clear-memory-lessons     Clear lessons from vector memory before starting
+      --clear-action-control     Delete the active action-control SQLite store before starting
 
 Environment:
   NEOPSYKE_LLM_CONFIG_FILE   Optional path to LLM runtime YAML (default: ./llm-runtime.yaml)
@@ -243,6 +249,22 @@ export NEOPSYKE_LOG_FILE="$RUN_LOG_FILE"
 export NEOPSYKE_EVENT_LOG_FILE="$RUN_EVENT_FILE"
 export MEMORY_DEFAULT_NAMESPACE="${MEMORY_DEFAULT_NAMESPACE:-neopsyke}"
 export EGO_SCRATCHPAD_DEBUG_CAPTURE_ENABLED="true"
+
+ACTION_CONTROL_DB_PATH="${NEOPSYKE_ACTION_CONTROL_DB_PATH:-$ROOT_DIR/.neopsyke/action-control.db}"
+if [[ "$EVAL_MODE" -eq 1 ]] && [[ -z "${NEOPSYKE_ACTION_CONTROL_DB_PATH:-}" ]]; then
+  if [[ "$FREUD_LIVE_MODE" -eq 1 ]]; then
+    ACTION_CONTROL_DB_PATH="$ROOT_DIR/.neopsyke/freud-action-control/$RUN_ID.db"
+  else
+    ACTION_CONTROL_DB_PATH="$ROOT_DIR/.neopsyke/eval-action-control/$RUN_ID.db"
+  fi
+  log_info "Eval mode detected; isolating action-control store at $ACTION_CONTROL_DB_PATH"
+fi
+mkdir -p "$(dirname "$ACTION_CONTROL_DB_PATH")"
+if [[ "$CLEAR_ACTION_CONTROL" -eq 1 ]]; then
+  rm -f "$ACTION_CONTROL_DB_PATH"
+  log_info "Cleared action-control store at $ACTION_CONTROL_DB_PATH"
+fi
+export NEOPSYKE_ACTION_CONTROL_DB_PATH="$ACTION_CONTROL_DB_PATH"
 
 if [[ "$DISABLE_ID" -eq 1 ]]; then
   export NEOPSYKE_ID_ENABLED="false"

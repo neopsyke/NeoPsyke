@@ -9,7 +9,10 @@ import kotlinx.coroutines.withTimeoutOrNull
 import mu.KotlinLogging
 import ai.neopsyke.agent.actioncontrol.ActionControlDecisionResult
 import ai.neopsyke.agent.actioncontrol.ActionControlService
+import ai.neopsyke.agent.model.ActionType
 import ai.neopsyke.agent.model.ConversationSecurityContexts
+import ai.neopsyke.agent.model.StagedAction
+import ai.neopsyke.agent.model.StagedActionStatus
 import ai.neopsyke.agent.goal.GoalManager
 import ai.neopsyke.integrations.google.GoogleWorkspaceOAuthBridge
 import ai.neopsyke.integrations.telegram.TelegramWebhookBridge
@@ -34,6 +37,7 @@ private const val LLM_STATS_WARMUP_STATUS: Int = 202
 private const val LLM_STATS_MAX_PARALLEL_REFRESH: Int = 1
 private const val SNAPSHOT_DEFAULT_EVENTS_LIMIT: Int = 300
 private const val SNAPSHOT_MAX_EVENTS_LIMIT: Int = 1_000
+private const val RESPONSE_STATUS_ATTRIBUTE: String = "dashboard.response_status"
 
 class DashboardServer(
     private val store: DashboardStateStore,
@@ -269,16 +273,29 @@ class DashboardServer(
         )
     }
 
+    private fun handleActionControlSse(exchange: HttpExchange) {
+        handleSubscriptionSse(
+            exchange = exchange,
+            subscription = store.subscribeActionControl(),
+            expectedDisconnectMessage = "Action-control SSE client disconnected.",
+            unexpectedDisconnectMessage = "Action-control SSE stream terminated unexpectedly.",
+            streamName = "action_control_events_sse",
+            eventName = "action-control",
+        )
+    }
+
     private fun handleSubscriptionSse(
         exchange: HttpExchange,
         subscription: DashboardFlowSubscription,
         expectedDisconnectMessage: String,
         unexpectedDisconnectMessage: String,
         streamName: String,
+        eventName: String = "agent",
     ) {
         exchange.responseHeaders.add("Content-Type", "text/event-stream")
         exchange.responseHeaders.add("Cache-Control", "no-cache")
         exchange.responseHeaders.add("Connection", "keep-alive")
+        recordResponseStatus(exchange, 200)
         exchange.sendResponseHeaders(200, 0)
 
         val output = exchange.responseBody.bufferedWriter(StandardCharsets.UTF_8)
@@ -292,7 +309,7 @@ class DashboardServer(
                         subscription.receive()
                     }
                     if (payload != null) {
-                        output.write("event: agent\n")
+                        output.write("event: $eventName\n")
                         output.write("data: $payload\n\n")
                         output.flush()
                     } else {
@@ -439,6 +456,13 @@ class DashboardServer(
             return
         }
         when (parts.first()) {
+            "events" -> {
+                if (exchange.requestMethod.uppercase() != "GET") {
+                    respondText(exchange, 405, "Method not allowed", "text/plain; charset=utf-8")
+                    return
+                }
+                handleActionControlSse(exchange)
+            }
             "staged" -> handleStagedActionApi(exchange, service, parts.drop(1))
             "receipts" -> handleActionReceiptApi(exchange, service, parts.drop(1))
             "ledger" -> handleActionLedgerApi(exchange, service, parts.drop(1))
@@ -571,6 +595,7 @@ class DashboardServer(
                 else -> error("Unsupported staged action control verb: $action")
             }
         }
+        handleActionControlDecisionSideEffects(mutation = action, result = result)
         val statusCode = when (result) {
             is ActionControlDecisionResult.Refused -> 409
             is ActionControlDecisionResult.Staged,
@@ -659,18 +684,23 @@ class DashboardServer(
         }
         val content = body["content"]?.toString().orEmpty()
         val result = bridge.submitMessage(sessionId = sessionId, content = content)
-        if (!result.accepted) {
+        if (!result.recorded) {
             val statusCode = if (result.detail.contains("Unknown session", ignoreCase = true)) 404 else 400
             val payload = mapOf(
                 "accepted" to false,
+                "recorded" to false,
+                "enqueued" to false,
                 "detail" to result.detail
             )
             respondText(exchange, statusCode, mapper.writeValueAsString(payload), "application/json; charset=utf-8")
             return
         }
         val payload = mapOf(
-            "accepted" to true,
-            "detail" to result.detail
+            "accepted" to result.enqueued,
+            "recorded" to result.recorded,
+            "enqueued" to result.enqueued,
+            "detail" to result.detail,
+            "message" to result.message?.let(store::chatMessagePayload),
         )
         respondText(exchange, 202, mapper.writeValueAsString(payload), "application/json; charset=utf-8")
     }
@@ -689,6 +719,7 @@ class DashboardServer(
         exchange.responseHeaders.add("Content-Type", "text/event-stream")
         exchange.responseHeaders.add("Cache-Control", "no-cache")
         exchange.responseHeaders.add("Connection", "keep-alive")
+        recordResponseStatus(exchange, 200)
         exchange.sendResponseHeaders(200, 0)
 
         val output = exchange.responseBody.bufferedWriter(StandardCharsets.UTF_8)
@@ -738,6 +769,7 @@ class DashboardServer(
         exchange.responseHeaders.add("Content-Type", "text/event-stream")
         exchange.responseHeaders.add("Cache-Control", "no-cache")
         exchange.responseHeaders.add("Connection", "keep-alive")
+        recordResponseStatus(exchange, 200)
         exchange.sendResponseHeaders(200, 0)
 
         val output = exchange.responseBody.bufferedWriter(StandardCharsets.UTF_8)
@@ -1073,6 +1105,13 @@ class DashboardServer(
         handlerName: String,
         block: () -> Unit,
     ) {
+        val accessLogging = shouldLogAccess(exchange.requestURI.path)
+        val startedAtNs = if (accessLogging) System.nanoTime() else 0L
+        if (accessLogging) {
+            logger.info {
+                "Dashboard request started handler=$handlerName method=${exchange.requestMethod} path=${exchange.requestURI.path} query=${exchange.requestURI.query.orEmpty().ifBlank { "-" }}"
+            }
+        }
         try {
             block()
         } catch (ex: Exception) {
@@ -1088,6 +1127,14 @@ class DashboardServer(
                 "Dashboard request handler failed handler=$handlerName request=$requestSummary"
             }
             writeFallbackInternalError(exchange, handlerName)
+        } finally {
+            if (accessLogging) {
+                val elapsedMs = (System.nanoTime() - startedAtNs) / 1_000_000L
+                val status = exchange.getAttribute(RESPONSE_STATUS_ATTRIBUTE) as? Int ?: -1
+                logger.info {
+                    "Dashboard request finished handler=$handlerName method=${exchange.requestMethod} path=${exchange.requestURI.path} status=$status duration_ms=$elapsedMs"
+                }
+            }
         }
     }
 
@@ -1175,10 +1222,132 @@ class DashboardServer(
         exchange.responseHeaders.add("Content-Type", contentType)
         exchange.responseHeaders.add("Cache-Control", "no-store, no-cache, must-revalidate")
         exchange.responseHeaders.add("Pragma", "no-cache")
+        recordResponseStatus(exchange, status)
         exchange.sendResponseHeaders(status, bytes.size.toLong())
         exchange.responseBody.use { output ->
             output.write(bytes)
         }
+    }
+
+    private fun handleActionControlDecisionSideEffects(
+        mutation: String,
+        result: ActionControlDecisionResult,
+    ) {
+        when (result) {
+            is ActionControlDecisionResult.Executed -> {
+                maybeAppendDashboardApprovalMessage(result)
+                maybeClearRootInputSession(result.stagedAction)
+                store.publishActionControlUpdate(
+                    type = "action_control_state_changed",
+                    data = actionControlUpdatePayload(
+                        mutation = mutation,
+                        stagedAction = result.stagedAction,
+                        detail = result.receipt.statusSummary,
+                    ) + mapOf(
+                        "execution_status" to result.receipt.executionStatus.name,
+                        "receipt_id" to result.receipt.id,
+                        "authorization_id" to result.authorization.id,
+                    )
+                )
+            }
+            is ActionControlDecisionResult.Cancelled -> {
+                maybeClearRootInputSession(result.stagedAction)
+                store.publishActionControlUpdate(
+                    type = "action_control_state_changed",
+                    data = actionControlUpdatePayload(
+                        mutation = mutation,
+                        stagedAction = result.stagedAction,
+                        detail = result.ledgerEntry.summary,
+                    ) + mapOf(
+                        "ledger_id" to result.ledgerEntry.id,
+                    )
+                )
+            }
+            is ActionControlDecisionResult.Refused -> {
+                store.publishActionControlUpdate(
+                    type = "action_control_request_refused",
+                    data = mapOf(
+                        "mutation" to mutation,
+                        "reason" to result.reason,
+                        "reason_code" to result.reasonCode,
+                    )
+                )
+            }
+            is ActionControlDecisionResult.Staged -> {
+                store.publishActionControlUpdate(
+                    type = "action_control_state_changed",
+                    data = actionControlUpdatePayload(
+                        mutation = mutation,
+                        stagedAction = result.stagedAction,
+                        detail = result.authorizationDecision.reason,
+                    )
+                )
+            }
+        }
+    }
+
+    private fun maybeAppendDashboardApprovalMessage(result: ActionControlDecisionResult.Executed) {
+        val sessionId = result.stagedAction.rootInputId
+            ?.let(store::resolveSessionForRootInput)
+            ?: result.stagedAction.conversationContext.sessionId
+        if (sessionId.isBlank()) {
+            return
+        }
+        val content = if (result.executedAction.type == ActionType.CONTACT_USER) {
+            result.executedAction.payload.trim()
+        } else {
+            buildDashboardApprovalSummary(result)
+        }
+        if (content.isBlank()) {
+            return
+        }
+        store.addAssistantMessage(
+            sessionId = sessionId,
+            content = content,
+            source = "dashboard-action-control",
+        )
+    }
+
+    private fun buildDashboardApprovalSummary(result: ActionControlDecisionResult.Executed): String {
+        val actionType = result.executedAction.type.id
+        val summary = result.receipt.statusSummary.trim()
+        return when (result.stagedAction.status) {
+            StagedActionStatus.WAITING_EXTERNAL ->
+                "Dashboard-approved action '$actionType' is waiting on external completion: $summary"
+            StagedActionStatus.FAILED ->
+                "Dashboard-approved action '$actionType' failed: $summary"
+            else ->
+                "Dashboard-approved action '$actionType' completed: $summary"
+        }
+    }
+
+    private fun maybeClearRootInputSession(stagedAction: StagedAction) {
+        val rootInputId = stagedAction.rootInputId ?: return
+        if (stagedAction.status in TERMINAL_STAGED_ACTION_STATUSES) {
+            store.clearSessionForRootInput(rootInputId)
+        }
+    }
+
+    private fun actionControlUpdatePayload(
+        mutation: String,
+        stagedAction: StagedAction,
+        detail: String?,
+    ): Map<String, Any?> =
+        mapOf(
+            "mutation" to mutation,
+            "staged_action_id" to stagedAction.id,
+            "status" to stagedAction.status.name,
+            "action_type" to stagedAction.actionType.id,
+            "root_input_id" to stagedAction.rootInputId,
+            "session_id" to stagedAction.conversationContext.sessionId,
+            "detail" to detail,
+        )
+
+    private fun shouldLogAccess(path: String): Boolean =
+        path.startsWith("/api/chat/") || path.startsWith("/api/action-control")
+
+    private fun recordResponseStatus(exchange: HttpExchange, status: Int) {
+        exchange.setAttribute(RESPONSE_STATUS_ATTRIBUTE, status)
     }
 
     private data class LlmStatsQuery(
@@ -1195,6 +1364,11 @@ class DashboardServer(
 
     private companion object {
         private const val TELEGRAM_SECRET_HEADER: String = "X-Telegram-Bot-Api-Secret-Token"
+        val TERMINAL_STAGED_ACTION_STATUSES: Set<StagedActionStatus> = setOf(
+            StagedActionStatus.COMPLETED,
+            StagedActionStatus.CANCELLED,
+            StagedActionStatus.FAILED,
+        )
         val EMPTY_LLM_STATS_REPORT = LlmCallStatsReport(
             byModel = emptyMap(),
             byRole = emptyMap(),
