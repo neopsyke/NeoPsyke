@@ -1,8 +1,8 @@
-# NeoPsyke Security Model Manual
+# NeoPsyke Security Model
 
-> Status: Current implementation manual
+> Status: Current implementation reference
 >
-> Date: 2026-03-23
+> Last updated: 2026-03-24
 >
 > Source of truth: current code under `src/main/kotlin/ai/neopsyke/**`
 
@@ -23,8 +23,8 @@ for the current runtime:
 - what is durably recorded
 - what remains risky or incomplete
 
-Where existing security strategy documents match the implementation, they may
-describe the same ideas. When they diverge, the code wins.
+This is the single authoritative security reference for the project. When this
+document and the code diverge, the code wins.
 
 ---
 
@@ -107,7 +107,7 @@ principal role:
 - `UNAUTHENTICATED_EXTERNAL`
 
 This is implemented in
-[SecurityModels.kt](/Users/victor.toral/atomitl/ai/psyke/src/main/kotlin/ai/neopsyke/agent/model/SecurityModels.kt).
+[SecurityModels.kt](src/main/kotlin/ai/neopsyke/agent/model/SecurityModels.kt).
 
 Current practical meaning:
 
@@ -180,7 +180,7 @@ stays degraded for the lifetime of that root input.
 The sensory layer attaches security context at ingress, not later.
 
 Implemented examples in
-[SensoryCortex.kt](/Users/victor.toral/atomitl/ai/psyke/src/main/kotlin/ai/neopsyke/agent/cortex/sensory/SensoryCortex.kt):
+[SensoryCortex.kt](src/main/kotlin/ai/neopsyke/agent/cortex/sensory/SensoryCortex.kt):
 
 - stdin chat input is treated as an owner direct trusted instruction source
 - `id` cue signals are treated as trusted internal automation
@@ -200,6 +200,85 @@ This is one of the system's strongest current architectural properties:
 - trust is visible to later policy
 - later stages do not need to guess where input came from
 
+### 5.3 Cognitive Thread Security Context
+
+Each cognitive thread carries a security context established from its root input:
+
+- root principal and channel
+- instruction trust
+- aggregated data trust with taint-source summaries
+- policy scope
+- visible action-family bounds
+
+When observe-style actions ingest external artifacts during a thread, the
+thread's trust degrades and stays degraded for the lifetime of that root input.
+This ensures that externally tainted content cannot later be treated as trusted
+material within the same reasoning chain.
+
+### 5.4 Security Through the Cognitive Pipeline
+
+Security context flows through the full cognitive sequence, not just at the
+boundaries:
+
+```
+stimulus → percept → cognitive thread → opportunity → intention →
+  prepared action → staged action → authorized commit → receipt
+```
+
+The first five stages are cognitive. The later stages are the secure action
+lifecycle that begins when an intention targets an action.
+
+At each stage:
+
+- **Stimulus**: source is authenticated, principal is resolved, initial
+  provenance is attached. No raw stimulus enters cognition without security
+  metadata.
+- **Percept**: trust is normalized and classified (trusted instruction, trusted
+  data, external data, sanitized external data). Invalid or unauthenticated
+  input is rejected.
+- **Cognitive thread**: the security frame is established. The thread defines
+  what is thinkable in this context through its policy scope and action-family
+  bounds.
+- **Opportunity**: prohibited or impossible next steps are pruned. Only actions
+  allowed by policy and provenance are surfaced to the Ego.
+- **Intention**: the Ego selects from already policy-shaped opportunities. It
+  cannot widen the action surface it receives.
+- **Prepared/staged/committed action**: the action lifecycle enforces
+  deterministic policy, Superego judgment, durable authorization, and final
+  motor guard.
+
+### 5.5 Distributed Policy Enforcement
+
+The Superego is central to governance, but it is not the sole enforcement
+boundary. Hard policy belongs in deterministic code, distributed across the
+cognitive pipeline:
+
+- `SensoryCortex` enforces stimulus/percept-level policy:
+  - channel authentication
+  - identity normalization
+  - initial trust/provenance assignment
+  - early rejection of invalid or unauthenticated input
+- Cognitive-thread construction enforces thread-level policy:
+  - root trust scope
+  - policy scope
+  - visible action-family bounds
+- Opportunity construction enforces opportunity-level policy:
+  - which next moves are actually available in this thread
+  - which lifecycle transitions are permitted
+  - which options are removed due to provenance, limits, or policy
+- `Ego` selects among already policy-shaped opportunities. It must not widen
+  the action surface it receives.
+- `SuperegoDeterministicConscience` enforces hard policy invariants on intended
+  action progression through deterministic code rules.
+- `SuperegoReviewEngine` handles contextual judgment within policy bounds,
+  optionally using an LLM with two-stage escalation support.
+- `MotorCortex` refuses to execute any commit that lacks a valid authorization
+  artifact or violates final execution constraints.
+
+This means that by the time the Ego forms an intention, the action surface has
+already been narrowed by multiple independent policy layers. The Superego
+reviews what remains, and the MotorCortex enforces the final guard.
+
 ---
 
 ## 6. Action Security Architecture
@@ -207,7 +286,7 @@ This is one of the system's strongest current architectural properties:
 ### 6.1 Action Contracts
 
 Each action descriptor exposes a security contract through
-[ActionPluginContracts.kt](/Users/victor.toral/atomitl/ai/psyke/src/main/kotlin/ai/neopsyke/agent/actions/ActionPluginContracts.kt).
+[ActionPluginContracts.kt](src/main/kotlin/ai/neopsyke/agent/actions/ActionPluginContracts.kt).
 
 Current contract fields include:
 
@@ -268,17 +347,17 @@ Examples from current plugins:
 
 Relevant code:
 
-- [ContactUserActionPlugin.kt](/Users/victor.toral/atomitl/ai/psyke/src/main/kotlin/ai/neopsyke/agent/actions/builtin/ContactUserActionPlugin.kt)
-- [GoalOperationActionPlugin.kt](/Users/victor.toral/atomitl/ai/psyke/src/main/kotlin/ai/neopsyke/agent/actions/builtin/GoalOperationActionPlugin.kt)
-- [MicrosoftGraphEmailActionPlugin.kt](/Users/victor.toral/atomitl/ai/psyke/src/main/kotlin/ai/neopsyke/agent/actions/email/MicrosoftGraphEmailActionPlugin.kt)
-- [ReflectActionPlugin.kt](/Users/victor.toral/atomitl/ai/psyke/src/main/kotlin/ai/neopsyke/agent/actions/builtin/ReflectActionPlugin.kt)
+- [ContactUserActionPlugin.kt](src/main/kotlin/ai/neopsyke/agent/actions/builtin/ContactUserActionPlugin.kt)
+- [GoalOperationActionPlugin.kt](src/main/kotlin/ai/neopsyke/agent/actions/builtin/GoalOperationActionPlugin.kt)
+- [MicrosoftGraphEmailActionPlugin.kt](src/main/kotlin/ai/neopsyke/agent/actions/email/MicrosoftGraphEmailActionPlugin.kt)
+- [ReflectActionPlugin.kt](src/main/kotlin/ai/neopsyke/agent/actions/builtin/ReflectActionPlugin.kt)
 
 ---
 
 ## 7. Review and Authorization Pipeline
 
 The current action path is implemented in
-[ActionReviewPipeline.kt](/Users/victor.toral/atomitl/ai/psyke/src/main/kotlin/ai/neopsyke/agent/ego/ActionReviewPipeline.kt).
+[ActionReviewPipeline.kt](src/main/kotlin/ai/neopsyke/agent/ego/ActionReviewPipeline.kt).
 
 The path is:
 
@@ -294,7 +373,7 @@ The decision verifier is a deterministic pre-answer gate for volatile factual
 answers delivered through `contact_user`.
 
 Implemented in
-[DecisionVerifier.kt](/Users/victor.toral/atomitl/ai/psyke/src/main/kotlin/ai/neopsyke/agent/ego/DecisionVerifier.kt).
+[DecisionVerifier.kt](src/main/kotlin/ai/neopsyke/agent/ego/DecisionVerifier.kt).
 
 It classifies requests into categories such as:
 
@@ -317,8 +396,8 @@ The current superego is layered, not purely LLM-based.
 
 Implemented in:
 
-- [Superego.kt](/Users/victor.toral/atomitl/ai/psyke/src/main/kotlin/ai/neopsyke/agent/superego/Superego.kt)
-- [SuperegoDeterministicConscience.kt](/Users/victor.toral/atomitl/ai/psyke/src/main/kotlin/ai/neopsyke/agent/superego/SuperegoDeterministicConscience.kt)
+- [Superego.kt](src/main/kotlin/ai/neopsyke/agent/superego/Superego.kt)
+- [SuperegoDeterministicConscience.kt](src/main/kotlin/ai/neopsyke/agent/superego/SuperegoDeterministicConscience.kt)
 
 Current order:
 
@@ -338,7 +417,7 @@ Important properties:
 ### 7.3 Policy Authorization
 
 Authorization policy is implemented in
-[ActionAuthorizationPolicy.kt](/Users/victor.toral/atomitl/ai/psyke/src/main/kotlin/ai/neopsyke/agent/actioncontrol/ActionAuthorizationPolicy.kt).
+[ActionAuthorizationPolicy.kt](src/main/kotlin/ai/neopsyke/agent/actioncontrol/ActionAuthorizationPolicy.kt).
 
 Current policy properties:
 
@@ -379,7 +458,7 @@ Current policy behavior also enforces:
 ### 8.1 Lifecycle Model
 
 The durable lifecycle types are implemented in
-[ActionLifecycleModels.kt](/Users/victor.toral/atomitl/ai/psyke/src/main/kotlin/ai/neopsyke/agent/model/ActionLifecycleModels.kt).
+[ActionLifecycleModels.kt](src/main/kotlin/ai/neopsyke/agent/model/ActionLifecycleModels.kt).
 
 Current lifecycle objects:
 
@@ -424,7 +503,7 @@ action is staged, the system can inspect:
 ### 8.3 Storage
 
 Durable action-control state is persisted in SQLite via
-[SqliteActionControlStore.kt](/Users/victor.toral/atomitl/ai/psyke/src/main/kotlin/ai/neopsyke/agent/actioncontrol/SqliteActionControlStore.kt).
+[SqliteActionControlStore.kt](src/main/kotlin/ai/neopsyke/agent/actioncontrol/SqliteActionControlStore.kt).
 
 Current durable tables:
 
@@ -439,7 +518,7 @@ request memory.
 ### 8.4 Autonomous Worker
 
 Autonomous staged actions are processed by a runtime-owned background worker in
-[ActionControlAutonomousWorker.kt](/Users/victor.toral/atomitl/ai/psyke/src/main/kotlin/ai/neopsyke/agent/actioncontrol/ActionControlAutonomousWorker.kt).
+[ActionControlAutonomousWorker.kt](src/main/kotlin/ai/neopsyke/agent/actioncontrol/ActionControlAutonomousWorker.kt).
 
 This means `READY` staged actions are not executed opportunistically inside a
 random interactive request path. They are drained by a dedicated runtime worker.
@@ -516,7 +595,7 @@ security-relevant denials are part of the runtime truth.
 ### 9.3 Current UI and API
 
 The dashboard exposes action control at `/action-control` through
-[DashboardServer.kt](/Users/victor.toral/atomitl/ai/psyke/src/main/kotlin/ai/neopsyke/dashboard/DashboardServer.kt).
+[DashboardServer.kt](src/main/kotlin/ai/neopsyke/dashboard/DashboardServer.kt).
 
 Current APIs:
 
@@ -557,7 +636,7 @@ the next step, but the denial itself becomes durable and inspectable.
 ## 11. Final Execution Guard
 
 The final execution guard lives in
-[MotorCortex.kt](/Users/victor.toral/atomitl/ai/psyke/src/main/kotlin/ai/neopsyke/agent/cortex/motor/MotorCortex.kt).
+[MotorCortex.kt](src/main/kotlin/ai/neopsyke/agent/cortex/motor/MotorCortex.kt).
 
 Current behavior:
 
@@ -578,7 +657,7 @@ enforcement point.
 ### 12.1 Prompt Injection Defense
 
 Implemented in
-[PromptInjectionDefense.kt](/Users/victor.toral/atomitl/ai/psyke/src/main/kotlin/ai/neopsyke/agent/support/PromptInjectionDefense.kt).
+[PromptInjectionDefense.kt](src/main/kotlin/ai/neopsyke/agent/support/PromptInjectionDefense.kt).
 
 Current protections:
 
@@ -598,7 +677,7 @@ This is a meaningful hardening layer, but it is not a full isolation boundary.
 ### 12.2 Action Payload Security
 
 Implemented in
-[ActionPayloadSecurity.kt](/Users/victor.toral/atomitl/ai/psyke/src/main/kotlin/ai/neopsyke/agent/support/ActionPayloadSecurity.kt).
+[ActionPayloadSecurity.kt](src/main/kotlin/ai/neopsyke/agent/support/ActionPayloadSecurity.kt).
 
 Current deterministic helpers include:
 
@@ -669,7 +748,7 @@ are current implementation boundaries.
 
 Action plugins are currently discovered with Java `ServiceLoader` and run
 in-process through
-[ActionRegistry.kt](/Users/victor.toral/atomitl/ai/psyke/src/main/kotlin/ai/neopsyke/agent/actions/ActionRegistry.kt).
+[ActionRegistry.kt](src/main/kotlin/ai/neopsyke/agent/actions/ActionRegistry.kt).
 
 This means the current plugin model assumes trusted first-party code.
 
@@ -688,7 +767,7 @@ zero-trust model for third-party connectors.
 
 ### 14.3 Third-party connector isolation is only stubbed today
 
-[ConnectorBoundaryModels.kt](/Users/victor.toral/atomitl/ai/psyke/src/main/kotlin/ai/neopsyke/agent/actions/ConnectorBoundaryModels.kt)
+[ConnectorBoundaryModels.kt](src/main/kotlin/ai/neopsyke/agent/actions/ConnectorBoundaryModels.kt)
 defines the concept of out-of-process isolation, but the actual runtime only
 implements `FIRST_PARTY_IN_PROCESS`.
 

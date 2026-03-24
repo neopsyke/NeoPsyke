@@ -1,0 +1,291 @@
+# Evaluation and Testing
+
+NeoPsyke uses a multi-layered testing and evaluation approach, from fast unit tests to end-to-end cognitive loop validation. The evaluation infrastructure is still evolving, and better, more comprehensive evals are one of the most impactful areas for contribution.
+
+---
+
+## Quick reference
+
+```bash
+# Unit tests only (fast, no LLM calls)
+./gradlew test
+
+# Full validation gate (required for PRs)
+freud/scripts/feature-loop.sh ci-pr
+
+# Deterministic reasoning eval only
+./run-neopsyke.sh --eval-reasoning-only
+
+# Memory live eval (requires pgvector backend)
+./run-neopsyke.sh --eval-memory-live
+```
+
+---
+
+## Test layers
+
+### 1. Unit tests (`./gradlew test`)
+
+Standard JUnit tests covering individual components: planner parsing, Superego policy logic, memory compaction, goal state machines, action validation, security models, configuration loading, etc.
+
+These are fast, deterministic, and require no API keys or external services.
+
+**Important:** `./gradlew test` alone is not sufficient for signoff. It does not cover the Freud scenario pack or reasoning eval gates.
+
+### 2. Freud validation pipeline
+
+Freud is the project's multi-phase validation orchestrator. It lives under `freud/` and includes shell scripts, Python tooling, scenario packs, and reasoning eval harnesses.
+
+The default PR gate runs:
+
+```bash
+freud/scripts/feature-loop.sh ci-pr
+```
+
+This executes five phases in order:
+
+| Phase | What it does |
+|---|---|
+| `preflight_compile` | Fast build check — catches compilation errors before running tests. |
+| `targeted_tests` | Runs tests related to the changed feature (when identifiable). |
+| `full_tests` | Full JUnit test suite. |
+| `scenario_pack` | Deterministic agent behavior scenarios that exercise the cognitive loop end-to-end. |
+| `reasoning_eval_logic` | Deterministic logic gate tests — no external LLM calls. |
+
+All five phases must pass for a PR to be considered ready.
+
+### 3. Scenario pack (`freud/scenarios/v1/`)
+
+A JSON-based pack of deterministic scenarios that test specific agent behaviors:
+
+- Does the planner produce the correct action type for a given input?
+- Does the Superego correctly deny a disallowed action?
+- Does the goal system handle lifecycle transitions correctly?
+- Does the feedback loop work when actions are denied?
+
+Scenarios are evaluated deterministically using recorded LLM responses, not live API calls.
+
+### 4. Reasoning eval — logic mode
+
+Deterministic tests that verify structural properties of planner output without making LLM calls:
+
+- **shape-lock** — Does the planner output conform to the expected JSON schema?
+- **feedback-carry** — Does the planner correctly incorporate denial feedback into the next thought?
+- **multi-fix** — Can the planner recover from multiple consecutive failures?
+
+The logic eval also includes a 45-case behavioral/perturbation pack that tests edge cases and boundary conditions.
+
+```bash
+# Run specific logic tasks
+./run-neopsyke.sh --eval-reasoning-only --eval-reasoning-tasks shape-lock,multi-fix
+
+# Run all logic tasks
+./run-neopsyke.sh --eval-reasoning-only --eval-reasoning-mode logic
+```
+
+### 5. Reasoning eval — model mode
+
+Live LLM-backed reasoning tests using a frozen BBH-style smoke slice (24 cases). These require API keys and make real provider calls.
+
+```bash
+# Live reasoning eval with real LLM calls
+./run-neopsyke.sh --eval-reasoning-only --eval-reasoning-mode model
+```
+
+This mode is for manual validation during development, not for CI.
+
+### 6. Live reasoning lanes
+
+More comprehensive live evaluation using the Freud BBH smoke harness:
+
+```bash
+# Weak-structure lane (more lenient scoring)
+freud/scripts/run-bbh-smoke.sh --lane weak-structure
+
+# Production-acceptance lane (stricter scoring)
+freud/scripts/run-bbh-smoke.sh --lane prod-acceptance
+
+# Full orchestrated run: deterministic + live
+freud/scripts/feature-loop.sh reasoning-matrix --live --config freud/config/live-weak-structure.env
+```
+
+Live lanes disable long-term memory and episodic logbook recall by default so they measure reasoning quality, not memory effects.
+
+### 7. Memory live eval
+
+Tests the real memory pipeline end-to-end: LLM memory advisor → Hippocampus imprint → vector recall. Requires the pgvector backend running.
+
+```bash
+./run-neopsyke.sh --eval-memory-live
+
+# Run specific memory tasks
+./run-neopsyke.sh --eval-memory-live --eval-memory-tasks user-preference-color,goal-constraint-timezone
+```
+
+### 8. Freud live eval (single-input)
+
+For testing individual inputs with LLM response caching for reproducibility:
+
+```bash
+# Record a run
+freud/scripts/live-eval.sh --input input.txt --expected expected.txt --timeout 120
+
+# Replay from cache
+freud/scripts/live-eval.sh --input input.txt --cache-replay "$(cat .neopsyke/runs/freud/latest-run.txt)/artifacts/llm-cache.jsonl"
+```
+
+The LLM cache uses sequential matching with SHA-256 hash validation for deterministic replay.
+
+---
+
+## Eval output and artifacts
+
+| Artifact | Location |
+|---|---|
+| Reasoning eval runs | `.neopsyke/evals/reasoning/runs/` |
+| Reasoning eval history | `.neopsyke/evals/reasoning/history.jsonl` |
+| Memory eval runs | `.neopsyke/evals/memory-live/runs/` |
+| Memory eval history | `.neopsyke/evals/memory-live/history.jsonl` |
+| Run logs | `.neopsyke/logs/runs/` |
+| Event sidecar | `.neopsyke/logs/latest-events.jsonl` |
+| Freud artifacts | `.neopsyke/runs/freud/<timestamp>-<feature-id>/` |
+
+---
+
+## Telemetry and diagnostics
+
+NeoPsyke emits structured instrumentation events to a per-run sidecar JSONL file. These events are the primary data source for understanding agent behavior beyond pass/fail eval results.
+
+### Task verifier telemetry
+
+The `task_verifier_review` event captures how the DecisionVerifier evaluates candidate actions:
+
+- `intent_category`, `volatility_level`, `volatility_score`
+- `requires_external_evidence`
+- `evidence_actions_available`, `evidence_actions_dispatchable`
+- `had_successful_evidence`, `had_external_failures`
+- `reason_code` (`TASK_EVIDENCE_REQUIRED`, `TECH_EXTERNAL_EVIDENCE_FAILURE`, `TASK_EVIDENCE_UNAVAILABLE_GRACEFUL`)
+
+Aggregate from the event sidecar:
+
+```bash
+freud/scripts/task-verifier-telemetry.sh .neopsyke/logs/latest-events.jsonl
+
+# Or from a specific run:
+freud/scripts/task-verifier-telemetry.sh .neopsyke/logs/runs/<run-id>.events.jsonl
+```
+
+The dashboard snapshot (`/api/obs/snapshot`) also exposes aggregated `taskVerifierStats` counters and rates.
+
+### Prompt budget telemetry
+
+The `prompt_budget_allocation` event is emitted when prompts are assembled for each cognitive role (`planner_prompt`, `action_verifier_prompt`, `superego_prompt`, `meta_reasoner_prompt`). The event payload includes:
+
+- Budget and cost estimates (`max_tokens`, `estimated_total_cost`, `allocated_total_cost`, `reserved_floor_cost`)
+- Degradation path (what was dropped to fit the budget)
+- Fallback/floor pressure (`single_message_fallback`, `floor_violation_count`, `dropped_section_count`)
+- Per-band rollup (`bands.required_core|required_context|optional`)
+
+Aggregate from the event sidecar:
+
+```bash
+freud/scripts/prompt-budget-telemetry.sh .neopsyke/logs/latest-events.jsonl
+```
+
+The dashboard snapshot exposes aggregated `promptBudgetStats`.
+
+For detailed tuning workflows, see `PROMPT_BUDGET_TUNING_GUIDE.md` and `PROMPT_BUDGET_RUN_DIAGNOSTICS.md`.
+
+### Live dashboard observability
+
+The dashboard (`/dashboard`) provides live observability during interactive runs: thought chains, LLM call details, Superego decisions, memory operations, queue states, and scratchpad snapshots. All events are streamed as typed SSE events.
+
+---
+
+## Current limitations
+
+The eval infrastructure today is useful but incomplete. Major gaps include:
+
+- **No systematic behavioral regression suite.** The scenario pack covers specific cases, but there is no broad test of "does the agent still behave reasonably across a diverse set of tasks?"
+- **No adversarial security eval.** Prompt injection defense is tested with deterministic checks, but there is no red-team harness that systematically probes the agent with adversarial inputs.
+- **No multi-turn conversation eval.** Current evals are single-input. Multi-turn coherence, context management, and memory interaction across turns are not formally tested.
+- **No goal lifecycle eval.** Goal creation, execution, blocking, resumption, and recurring activation are tested in unit tests but not in end-to-end evals with real LLM reasoning.
+- **No Id feedback loop eval.** The closed loop between motivation, governance, and drive satisfaction is not formally measured.
+- **No cost/efficiency benchmarking.** Token usage per task type, provider cost per cognitive role, and total cost per interaction are tracked in metrics but not evaluated against baselines.
+- **Memory advisor quality is unmeasured.** The advisor's consolidation decisions (what to save, what to skip) are not evaluated against ground truth.
+- **No cross-model comparison framework.** Swapping models in cognitive roles changes behavior, but there is no systematic way to compare configurations.
+
+---
+
+## Directions for contributors
+
+The following are high-impact areas where evaluation work would significantly improve the project:
+
+### Behavioral regression suite
+
+Build a diverse set of 50–100 representative tasks (factual questions, multi-step reasoning, web research, summarization, creative writing) with expected behavior baselines. Run them with LLM caching so results are reproducible. Track pass/fail rates across changes.
+
+### Adversarial prompt injection testing
+
+Create a red-team harness that:
+- Injects instructions into web search results and fetched pages.
+- Tests whether the Superego correctly denies actions influenced by injected content.
+- Tests whether provenance tracking prevents internal drive impersonation.
+- Measures false positive and false negative rates.
+
+### Multi-turn conversation coherence
+
+Design conversation sequences that test:
+- Context retention across turns.
+- Memory compaction quality (does the summary preserve the right information?).
+- Long-term memory recall relevance.
+- Episodic recall usefulness.
+
+### Goal lifecycle integration tests
+
+End-to-end tests that create goals via natural language, verify plan generation, execute steps, handle blocking conditions, and verify completion. Include recurring goals and timer-based goals.
+
+### Id–Ego–Superego interaction evals
+
+Measure the closed motivation-governance loop:
+- Does the drive reset when an impulse-driven action succeeds?
+- Does pressure continue to build when actions are denied?
+- Does backoff work correctly after repeated denials?
+- Does the system recover when backoff expires?
+
+### Cost and efficiency benchmarking
+
+Build a standard task set and measure:
+- Total tokens per task.
+- Token distribution across cognitive roles.
+- Cost per task at different model configurations.
+- Quality vs. cost trade-offs for different provider assignments.
+
+### Memory advisor evaluation
+
+Create ground-truth datasets for:
+- "This information should be consolidated" (true positives).
+- "This is ephemeral and should not be saved" (true negatives).
+- Measure precision and recall of the advisor's recommendations.
+
+### Configuration sensitivity analysis
+
+Systematically vary key tuning knobs (`max_loop_steps`, `pressure_threshold`, `assess_every_steps`, etc.) and measure their effect on:
+- Answer quality.
+- Token usage.
+- Convergence speed.
+- False denial rates.
+
+This would produce a tuning guide grounded in data rather than intuition.
+
+---
+
+## Running evals in CI
+
+GitHub pull requests run only the fast non-live path:
+
+```bash
+freud/scripts/feature-loop.sh ci-pr
+```
+
+This includes Freud's own BATS and pytest suites in addition to the five main phases. Live reasoning lanes remain manual-only to avoid API key requirements and cost in CI.

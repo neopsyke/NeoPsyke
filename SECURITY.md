@@ -1,12 +1,14 @@
 # Security Policy
 
+For details on NeoPsyke's security architecture, see [docs/security.md](docs/security.md).
+
 ## Supported Versions
 
-NeoPsyke is currently an unreleased prototype.
+NeoPsyke is experimental and under active development.
 
-At this stage, security fixes are targeted at the latest development state of
-the project rather than a stable release line. Assume only the current default
-branch is supported unless a maintainer says otherwise.
+Security fixes are targeted at the latest development state of the project
+rather than a stable release line. Only the current default branch is supported
+unless a maintainer says otherwise.
 
 ## Reporting a Vulnerability
 
@@ -14,7 +16,7 @@ Please do not open a public issue for security problems.
 
 Report vulnerabilities privately to:
 
-- `hello@neopsyke.ai`
+- `security@neopsyke.ai`
 
 If the repository host supports private vulnerability reporting or security
 advisories, prefer that channel as well.
@@ -34,9 +36,9 @@ real secrets in the report. Use redacted examples.
 
 ## Response Expectations
 
-This is a small prototype project, so response times may vary. Initial triage
-should normally happen within a reasonable best-effort window, but no formal
-SLA is promised at this stage.
+This is a small project, so response times may vary. Initial triage should
+normally happen within a reasonable best-effort window, but no formal SLA is
+promised at this stage.
 
 ## Disclosure
 
