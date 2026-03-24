@@ -98,6 +98,8 @@ import ai.neopsyke.integrations.google.GoogleWorkspaceCredentialStore
 import ai.neopsyke.integrations.google.GoogleWorkspaceOAuthBridge
 import ai.neopsyke.integrations.auth.OAuthPendingAuthorizationStore
 import ai.neopsyke.integrations.auth.OAuthStateCodec
+import ai.neopsyke.llm.AnthropicChatClient
+import ai.neopsyke.llm.AnthropicProviderStatusChecker
 import ai.neopsyke.llm.GeminiChatClient
 import ai.neopsyke.llm.GeminiProviderStatusChecker
 import ai.neopsyke.llm.GroqChatClient
@@ -109,6 +111,8 @@ import ai.neopsyke.llm.MistralChatClient
 import ai.neopsyke.llm.MistralProviderStatusChecker
 import ai.neopsyke.llm.OpenAiChatClient
 import ai.neopsyke.llm.OpenAiProviderStatusChecker
+import ai.neopsyke.llm.OllamaChatClient
+import ai.neopsyke.llm.OllamaProviderStatusChecker
 import ai.neopsyke.llm.ProviderHealthState
 import ai.neopsyke.llm.ProviderStatus
 import ai.neopsyke.llm.TokenBudgetGuardedChatClient
@@ -451,7 +455,7 @@ internal object AppModeRunners {
         modeLabel: String,
         roleLabel: String,
     ): ProviderStatus {
-        if (endpoint.apiKey.isBlank()) {
+        if (endpoint.provider.requiresApiKey() && endpoint.apiKey.isBlank()) {
             return ProviderStatus(
                 provider = endpoint.providerLabel,
                 state = ProviderHealthState.UNAVAILABLE,
@@ -459,6 +463,11 @@ internal object AppModeRunners {
             )
         }
         val checker = when (endpoint.provider) {
+            LlmProvider.ANTHROPIC -> AnthropicProviderStatusChecker(
+                apiKey = endpoint.apiKey,
+                baseUrl = endpoint.baseUrl
+            )
+
             LlmProvider.GROQ -> GroqProviderStatusChecker(
                 apiKey = endpoint.apiKey,
                 baseUrl = endpoint.baseUrl
@@ -475,6 +484,11 @@ internal object AppModeRunners {
             )
 
             LlmProvider.OPENAI -> OpenAiProviderStatusChecker(
+                apiKey = endpoint.apiKey,
+                baseUrl = endpoint.baseUrl
+            )
+
+            LlmProvider.OLLAMA -> OllamaProviderStatusChecker(
                 apiKey = endpoint.apiKey,
                 baseUrl = endpoint.baseUrl
             )
@@ -1815,6 +1829,12 @@ internal object AppModeRunners {
         val webSearch = llm.webSearch
         return try {
             when (webSearch.provider) {
+                LlmProvider.ANTHROPIC -> WebSearchRuntime(
+                    engine = UnavailableWebSearchEngine(
+                        "Web search provider 'anthropic' is not implemented. Use groq, mistral, or google for web_search."
+                    )
+                )
+
                 LlmProvider.MISTRAL -> {
                     val session = MistralWebSearchAgentSession.start(
                         apiKey = webSearch.apiKey,
@@ -1881,6 +1901,12 @@ internal object AppModeRunners {
                 LlmProvider.OPENAI -> WebSearchRuntime(
                     engine = UnavailableWebSearchEngine(
                         "Web search provider 'openai' is not implemented. Use groq, mistral, or google for web_search."
+                    )
+                )
+
+                LlmProvider.OLLAMA -> WebSearchRuntime(
+                    engine = UnavailableWebSearchEngine(
+                        "Web search provider 'ollama' is not implemented. Use groq, mistral, or google for web_search."
                     )
                 )
             }
@@ -2052,6 +2078,13 @@ internal object AppModeRunners {
         callObserver: ai.neopsyke.llm.ChatCallObserver? = null,
     ): ChatModelClient {
         return when (endpoint.provider) {
+            LlmProvider.ANTHROPIC -> AnthropicChatClient(
+                apiKey = endpoint.apiKey,
+                baseUrl = endpoint.baseUrl,
+                modelName = endpoint.model,
+                callObserver = callObserver
+            )
+
             LlmProvider.GROQ -> GroqChatClient(
                 apiKey = endpoint.apiKey,
                 baseUrl = endpoint.baseUrl,
@@ -2074,6 +2107,13 @@ internal object AppModeRunners {
             )
 
             LlmProvider.OPENAI -> OpenAiChatClient(
+                apiKey = endpoint.apiKey,
+                baseUrl = endpoint.baseUrl,
+                modelName = endpoint.model,
+                callObserver = callObserver
+            )
+
+            LlmProvider.OLLAMA -> OllamaChatClient(
                 apiKey = endpoint.apiKey,
                 baseUrl = endpoint.baseUrl,
                 modelName = endpoint.model,

@@ -20,6 +20,7 @@ providers:
     default_model: mistral-small-2506
     default_web_search_model: mistral-small-2506
   ollama:
+    # Optional for local Ollama. Keep this env var for authenticated remote Ollama hosts.
     api_key_env: OLLAMA_API_KEY
     base_url: http://localhost:11434/api
     default_model: gpt-oss
@@ -33,7 +34,7 @@ providers:
 cognitive_roles:
   planner:
     provider: groq
-    model: openai/gpt-oss-20b
+    model: openai/gpt-oss-120b
   action_verifier:
     provider: openai
     model: gpt-4o-mini
@@ -45,7 +46,7 @@ cognitive_roles:
     model: gpt-4.1-mini
   meta_reasoner:
     provider: groq
-    model: openai/gpt-oss-20b
+    model: openai/gpt-oss-120b
   meta_reasoner_fallback:
     provider: openai
     model: gpt-5-mini

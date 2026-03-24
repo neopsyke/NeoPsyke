@@ -3,10 +3,12 @@ package ai.neopsyke.config
 import java.nio.file.Files
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
+import kotlin.test.assertTrue
 
 class MemoryRuntimeConfigLoaderTest {
     @Test
-    fun `load falls back to defaults when config file is missing`() {
+    fun `load falls back to bundled defaults when config file is missing`() {
         val tempDir = Files.createTempDirectory("neopsyke-memory-config-missing")
         val config = MemoryRuntimeConfigLoader.load(
             env = emptyMap(),
@@ -27,6 +29,7 @@ class MemoryRuntimeConfigLoaderTest {
         )
         assertEquals(30_000L, config.defaultProvider.downloadTimeoutMs)
         assertEquals("neopsyke", config.defaultProvider.namespace)
+        assertEquals("custom-http-memory", config.externalProvider.provider)
     }
 
     @Test
@@ -152,5 +155,65 @@ class MemoryRuntimeConfigLoaderTest {
         assertEquals("http", config.externalProvider.transport)
         assertEquals("https://memory.example", config.externalProvider.baseUrl)
         assertEquals("external-space", config.externalProvider.namespace)
+    }
+
+    @Test
+    fun `partial external yaml overlays bundled memory defaults`() {
+        val tempDir = Files.createTempDirectory("neopsyke-memory-config-overlay")
+        val yamlPath = tempDir.resolve("memory-runtime.yaml")
+        Files.writeString(
+            yamlPath,
+            """
+            mode: external
+            externalProvider:
+              baseUrl: https://memory.example
+            """.trimIndent()
+        )
+
+        val config = MemoryRuntimeConfigLoader.load(
+            env = emptyMap(),
+            defaultPath = yamlPath
+        )
+
+        assertEquals(MemoryMode.EXTERNAL, config.mode)
+        assertEquals("neopsyke-pgvector-memory", config.defaultProvider.provider)
+        assertTrue(config.defaultProvider.command.contains("neopsyke-pgvector-memory-all.jar"))
+        assertEquals("custom-http-memory", config.externalProvider.provider)
+        assertEquals("https://memory.example", config.externalProvider.baseUrl)
+        assertEquals("neopsyke", config.externalProvider.namespace)
+    }
+
+    @Test
+    fun `blank default provider command fails validation`() {
+        val tempDir = Files.createTempDirectory("neopsyke-memory-config-invalid")
+        val yamlPath = tempDir.resolve("memory-runtime.yaml")
+        Files.writeString(
+            yamlPath,
+            """
+            defaultProvider:
+              command: ""
+            """.trimIndent()
+        )
+
+        val error = assertFailsWith<IllegalStateException> {
+            MemoryRuntimeConfigLoader.load(
+                env = emptyMap(),
+                defaultPath = yamlPath
+            )
+        }
+
+        assertTrue(error.message!!.contains("defaultProvider.command"))
+    }
+
+    @Test
+    fun `external memory example overlay loads`() {
+        val config = MemoryRuntimeConfigLoader.load(
+            env = emptyMap(),
+            defaultPath = java.nio.file.Path.of("examples/runtime-config/memory-runtime.external.example.yaml")
+        )
+
+        assertEquals(MemoryMode.DEFAULT, config.mode)
+        assertEquals(true, config.defaultProvider.bootstrapEnabled)
+        assertEquals("neopsyke-local", config.defaultProvider.namespace)
     }
 }

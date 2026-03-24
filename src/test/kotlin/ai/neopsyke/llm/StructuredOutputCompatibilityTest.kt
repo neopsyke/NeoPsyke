@@ -165,4 +165,51 @@ class StructuredOutputCompatibilityTest {
         assertTrue(reasonType.any { it.asText() == "string" })
         assertTrue(reasonType.any { it.asText() == "null" })
     }
+
+    @Test
+    fun `adapter leaves native anthropic and ollama schemas untouched`() {
+        val responseFormat = ChatResponseFormat.JsonSchema(
+            name = "planner_decision",
+            strict = true,
+            schemaJson = """
+                {
+                  "type": "object",
+                  "required": ["decision"],
+                  "properties": {
+                    "decision": { "type": "string" },
+                    "reason": { "type": "string" }
+                  },
+                  "additionalProperties": false
+                }
+            """.trimIndent()
+        )
+
+        val anthropic = StructuredOutputCompatibility.adapt(
+            provider = LlmProvider.ANTHROPIC,
+            modelName = "claude-sonnet-4-20250514",
+            responseFormat = responseFormat,
+            mapper = mapper
+        )
+        val ollama = StructuredOutputCompatibility.adapt(
+            provider = LlmProvider.OLLAMA,
+            modelName = "gpt-oss",
+            responseFormat = responseFormat,
+            mapper = mapper
+        )
+
+        val anthropicFormat = anthropic.responseFormat as? ChatResponseFormat.JsonSchema
+        val ollamaFormat = ollama.responseFormat as? ChatResponseFormat.JsonSchema
+        assertNotNull(anthropicFormat)
+        assertNotNull(ollamaFormat)
+        assertEquals(
+            mapper.readTree(responseFormat.schemaJson),
+            mapper.readTree(anthropicFormat.schemaJson)
+        )
+        assertEquals(
+            mapper.readTree(responseFormat.schemaJson),
+            mapper.readTree(ollamaFormat.schemaJson)
+        )
+        assertTrue(anthropic.droppedKeywords.isEmpty())
+        assertTrue(ollama.droppedKeywords.isEmpty())
+    }
 }

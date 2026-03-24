@@ -6,7 +6,6 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory
 import com.fasterxml.jackson.module.kotlin.readValue
 import com.fasterxml.jackson.module.kotlin.registerKotlinModule
-import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
 
@@ -67,25 +66,29 @@ object MemoryRuntimeConfigLoader {
         env: Map<String, String> = System.getenv(),
         defaultPath: Path = Paths.get("memory-runtime.yaml"),
     ): MemoryRuntimeConfig {
-        val filePath = resolveConfigPath(env, defaultPath)
-        val base = readYaml(filePath) ?: MemoryRuntimeConfig.defaults()
+        val base = YamlConfigSources.loadYamlConfig<MemoryRuntimeConfig>(
+            mapper = mapper,
+            env = env,
+            envKey = "NEOPSYKE_MEMORY_CONFIG_FILE",
+            defaultPath = defaultPath,
+            bundledResourceName = "memory-runtime.yaml",
+        ) ?: throw IllegalStateException("Missing bundled or external memory-runtime.yaml configuration.")
+        validate(base)
         return base.applyEnvOverrides(env)
     }
 
-    private fun resolveConfigPath(env: Map<String, String>, defaultPath: Path): Path {
-        val configured = env["NEOPSYKE_MEMORY_CONFIG_FILE"]?.trim().orEmpty()
-        if (configured.isBlank()) {
-            return defaultPath
-        }
-        return Paths.get(configured)
+    private fun validate(config: MemoryRuntimeConfig) {
+        requireField(config.defaultProvider.provider.isNotBlank(), "memory-runtime.yaml defaultProvider.provider")
+        requireField(config.defaultProvider.transport.isNotBlank(), "memory-runtime.yaml defaultProvider.transport")
+        requireField(config.defaultProvider.baseUrl.isNotBlank(), "memory-runtime.yaml defaultProvider.baseUrl")
+        requireField(config.defaultProvider.command.isNotBlank(), "memory-runtime.yaml defaultProvider.command")
+        requireField(config.externalProvider.provider.isNotBlank(), "memory-runtime.yaml externalProvider.provider")
+        requireField(config.externalProvider.transport.isNotBlank(), "memory-runtime.yaml externalProvider.transport")
     }
 
-    private fun readYaml(path: Path): MemoryRuntimeConfig? {
-        if (!Files.exists(path)) {
-            return null
-        }
-        Files.newBufferedReader(path).use { reader ->
-            return mapper.readValue<MemoryRuntimeConfig>(reader)
+    private fun requireField(condition: Boolean, fieldName: String) {
+        if (!condition) {
+            throw IllegalStateException("Missing or blank required field: $fieldName")
         }
     }
 

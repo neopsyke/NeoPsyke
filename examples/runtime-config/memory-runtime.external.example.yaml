@@ -1,0 +1,11 @@
+# Minimal managed-memory overlay.
+# Decisions made here:
+# - use the bundled managed pgvector memory provider
+# - keep bootstrap enabled
+# - isolate data under a local namespace
+
+mode: default
+
+defaultProvider:
+  bootstrapEnabled: true
+  namespace: neopsyke-local
