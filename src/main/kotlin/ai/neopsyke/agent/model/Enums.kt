@@ -25,7 +25,7 @@ enum class Urgency(val priority: Int) {
  * id can be instantiated to support plugin-discovered actions.
  *
  * Whether an action is dispatchable (i.e. the planner may propose it) is determined
- * by [ai.neopsyke.agent.actions.ActionDescriptor.dispatchable], not by the type itself.
+ * by [ai.neopsyke.agent.cortex.motor.actions.ActionDescriptor.dispatchable], not by the type itself.
  */
 data class ActionType(
     val id: String,

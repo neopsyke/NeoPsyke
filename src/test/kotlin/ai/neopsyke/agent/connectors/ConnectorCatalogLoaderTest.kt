@@ -1,7 +1,13 @@
-package ai.neopsyke.agent.connectors
+package ai.neopsyke.agent.cortex.connectors
 
 import ai.neopsyke.agent.config.AgentConfig
 import ai.neopsyke.agent.config.ConnectorRuntimeConfig
+import ai.neopsyke.agent.cortex.connectors.ConnectorActionPluginLoader
+import ai.neopsyke.agent.cortex.connectors.ConnectorCapabilityDescriptor
+import ai.neopsyke.agent.cortex.connectors.ConnectorRuntimePaths
+import ai.neopsyke.agent.cortex.connectors.ConnectorToolDescriptorPinning
+import ai.neopsyke.agent.cortex.connectors.CuratedConnectorCatalogLoader
+import ai.neopsyke.agent.cortex.connectors.InstalledConnectorStateLoader
 import java.nio.file.Files
 import java.nio.file.Paths
 import kotlin.test.Test

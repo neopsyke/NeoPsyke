@@ -3,10 +3,8 @@ package ai.neopsyke.agent.goal
 import kotlinx.coroutines.CoroutineScope
 import ai.neopsyke.agent.ego.ActionLifecycleObserver
 import ai.neopsyke.agent.id.GoalRegistry
-import ai.neopsyke.agent.actions.async.AsyncOperationEvent
+import ai.neopsyke.agent.cortex.motor.actions.async.AsyncOperationEvent
 import ai.neopsyke.agent.cortex.sensory.GoalRuntimeCue
-import ai.neopsyke.agent.model.ActionOutcome
-import ai.neopsyke.agent.model.PendingAction
 
 interface GoalsGateway : GoalRegistry, ActionLifecycleObserver {
     fun start(scope: CoroutineScope) {}

@@ -106,10 +106,25 @@ Use the single-input entrypoint:
 ```bash
 freud/scripts/live-eval.sh --input input.txt
 freud/scripts/live-eval.sh --input input.txt --expected expected.txt
-freud/scripts/live-eval.sh --input input.txt --cache-replay .neopsyke/runs/freud/<run>/artifacts/llm-cache.jsonl
 ```
 
 This is the primary live command for direct agent checks.
+
+### I Want To Replay A Previous Run (No API Calls)
+
+Every live eval automatically records all LLM responses. Replay them to re-run the eval for free:
+
+```bash
+# Find the cache from your last run
+CACHE=$(cat .neopsyke/runs/freud/latest-run.txt)/artifacts/llm-cache.jsonl
+
+# Replay — zero tokens, same result
+freud/scripts/live-eval.sh --input input.txt --cache-replay "$CACHE"
+```
+
+Replay serves cached responses as long as the messages sent to the LLM haven't changed. When they diverge (because your code changed what the agent sends), it switches to real API calls from that point forward and logs exactly where divergence happened.
+
+This is the recommended workflow for iterative development: record once, then replay while tuning policies, scoring, post-processing, or telemetry. See [LLM response cache](../docs/evaluation.md#llm-response-cache-record--replay) for the full reference.
 
 ### I Want The Full Live Reasoning Lane
 
@@ -254,6 +269,7 @@ Cost guidance:
 
 - deterministic runs are the default and should be your first pass
 - one-shot live eval is the cheapest live check
+- **use `--cache-replay` to re-run live evals without API calls** — record once, iterate for free
 - BBH smoke is an advanced live suite and costs more
 - live routing depends on your configured models/providers
 

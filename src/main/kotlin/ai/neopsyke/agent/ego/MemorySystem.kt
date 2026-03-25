@@ -1,7 +1,7 @@
 package ai.neopsyke.agent.ego
 
 import mu.KotlinLogging
-import ai.neopsyke.agent.actions.ReflectionMemoryRecorder
+import ai.neopsyke.agent.cortex.motor.actions.ReflectionMemoryRecorder
 import ai.neopsyke.agent.config.AgentConfig
 import ai.neopsyke.agent.model.ActionType
 import ai.neopsyke.agent.model.AmbientContext
@@ -15,12 +15,9 @@ import ai.neopsyke.agent.model.DialogueRole
 import ai.neopsyke.agent.model.ExternalContentArtifact
 import ai.neopsyke.agent.model.Interlocutor
 import ai.neopsyke.agent.model.PendingAction
-import ai.neopsyke.agent.memory.longterm.ConsolidationReason
 import ai.neopsyke.agent.memory.longterm.DeterministicLogbookSummarizer
-import ai.neopsyke.agent.memory.longterm.ForgetRequest
 import ai.neopsyke.agent.memory.longterm.Hippocampus
 import ai.neopsyke.agent.memory.longterm.HippocampusAdmin
-import ai.neopsyke.agent.memory.longterm.ImprintResult
 import ai.neopsyke.agent.memory.longterm.Logbook
 import ai.neopsyke.agent.memory.longterm.LogbookEntry
 import ai.neopsyke.agent.memory.longterm.LogbookNarrative

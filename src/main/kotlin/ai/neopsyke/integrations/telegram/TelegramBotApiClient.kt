@@ -1,13 +1,12 @@
 package ai.neopsyke.integrations.telegram
 
 import com.fasterxml.jackson.databind.JsonNode
-import com.fasterxml.jackson.module.kotlin.readValue
 import mu.KotlinLogging
 import okhttp3.FormBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import ai.neopsyke.agent.actions.ConversationDeliveryResult
-import ai.neopsyke.agent.actions.TelegramMessageSink
+import ai.neopsyke.agent.cortex.motor.actions.ConversationDeliveryResult
+import ai.neopsyke.agent.cortex.motor.actions.TelegramMessageSink
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.util.concurrent.TimeUnit

@@ -4,10 +4,11 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.SupervisorJob
-import ai.neopsyke.agent.actions.ActionExecutionContext
-import ai.neopsyke.agent.actions.ActionPluginFactoryContext
-import ai.neopsyke.agent.actions.builtin.GoalOperationActionPlugin
+import ai.neopsyke.agent.cortex.motor.actions.ActionExecutionContext
+import ai.neopsyke.agent.cortex.motor.actions.ActionPluginFactoryContext
+import ai.neopsyke.agent.cortex.motor.actions.plugin.builtin.GoalOperationActionPlugin
 import ai.neopsyke.agent.config.AgentConfig
+import ai.neopsyke.agent.cortex.motor.actions.NoopReflectionMemoryRecorder
 import ai.neopsyke.agent.model.ActionExecutionStatus
 import ai.neopsyke.agent.model.ActionType
 import ai.neopsyke.agent.model.PendingAction
@@ -30,7 +31,7 @@ class GoalOperationActionPluginTest {
                 webSearchActionHandler = null,
                 fetchTool = null,
                 output = {},
-                reflectionMemoryRecorder = ai.neopsyke.agent.actions.NoopReflectionMemoryRecorder,
+                reflectionMemoryRecorder = NoopReflectionMemoryRecorder,
             )
         )
         val enabled = GoalOperationActionPlugin(
@@ -39,7 +40,7 @@ class GoalOperationActionPluginTest {
                 webSearchActionHandler = null,
                 fetchTool = null,
                 output = {},
-                reflectionMemoryRecorder = ai.neopsyke.agent.actions.NoopReflectionMemoryRecorder,
+                reflectionMemoryRecorder = NoopReflectionMemoryRecorder,
             )
         )
 
@@ -62,7 +63,7 @@ class GoalOperationActionPluginTest {
                 webSearchActionHandler = null,
                 fetchTool = null,
                 output = {},
-                reflectionMemoryRecorder = ai.neopsyke.agent.actions.NoopReflectionMemoryRecorder,
+                reflectionMemoryRecorder = NoopReflectionMemoryRecorder,
                 goalsGateway = gateway,
             )
         )
@@ -101,7 +102,7 @@ class GoalOperationActionPluginTest {
                 webSearchActionHandler = null,
                 fetchTool = null,
                 output = {},
-                reflectionMemoryRecorder = ai.neopsyke.agent.actions.NoopReflectionMemoryRecorder,
+                reflectionMemoryRecorder = NoopReflectionMemoryRecorder,
                 goalsGateway = gateway,
             )
         )
@@ -136,7 +137,7 @@ class GoalOperationActionPluginTest {
                 webSearchActionHandler = null,
                 fetchTool = null,
                 output = {},
-                reflectionMemoryRecorder = ai.neopsyke.agent.actions.NoopReflectionMemoryRecorder,
+                reflectionMemoryRecorder = NoopReflectionMemoryRecorder,
                 goalsGateway = gateway,
             )
         )
@@ -272,7 +273,7 @@ class GoalOperationActionPluginTest {
                 webSearchActionHandler = null,
                 fetchTool = null,
                 output = {},
-                reflectionMemoryRecorder = ai.neopsyke.agent.actions.NoopReflectionMemoryRecorder,
+                reflectionMemoryRecorder = NoopReflectionMemoryRecorder,
                 goalsGateway = gateway,
             )
         )

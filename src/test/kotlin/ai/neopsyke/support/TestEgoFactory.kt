@@ -3,7 +3,8 @@ package ai.neopsyke.support
 import ai.neopsyke.agent.config.AgentConfig
 import ai.neopsyke.agent.cortex.motor.MotorCortex
 import ai.neopsyke.agent.cortex.sensory.SensoryCortex
-import ai.neopsyke.agent.actioncontrol.ActionControlService
+import ai.neopsyke.agent.cortex.motor.actions.control.ActionControlService
+import ai.neopsyke.agent.cortex.motor.actions.control.LegacyCompatibleActionControlService
 import ai.neopsyke.agent.ego.Ego
 import ai.neopsyke.agent.ego.EgoAssembler
 import ai.neopsyke.agent.ego.MetaReasoner
@@ -60,7 +61,7 @@ fun buildTestEgo(
         scratchpadFinalizer = scratchpadFinalizer,
         instrumentation = instrumentation,
         actionControlService = actionControlService
-            ?: ai.neopsyke.agent.actioncontrol.LegacyCompatibleActionControlService { action, authorization ->
+            ?: LegacyCompatibleActionControlService { action, authorization ->
                 motorCortex.execute(action, config.searchResultCount, authorization)
             },
         goalRegistry = goalsGateway,

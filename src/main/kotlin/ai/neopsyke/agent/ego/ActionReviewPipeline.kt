@@ -1,13 +1,14 @@
 package ai.neopsyke.agent.ego
 
 import mu.KotlinLogging
-import ai.neopsyke.agent.actioncontrol.ActionControlDecisionResult
-import ai.neopsyke.agent.actioncontrol.ActionControlService
-import ai.neopsyke.agent.actioncontrol.LegacyCompatibleActionControlService
+import ai.neopsyke.agent.cortex.motor.actions.control.ActionControlDecisionResult
+import ai.neopsyke.agent.cortex.motor.actions.control.ActionControlService
+import ai.neopsyke.agent.cortex.motor.actions.control.LegacyCompatibleActionControlService
 import ai.neopsyke.agent.config.*
 import ai.neopsyke.agent.id.evaluateSatisfaction
 import ai.neopsyke.agent.model.*
 import ai.neopsyke.agent.cortex.motor.MotorCortex
+import ai.neopsyke.agent.cortex.motor.actions.ActionCapability
 import ai.neopsyke.agent.memory.longterm.MemoryEventType
 import ai.neopsyke.agent.memory.scratchpad.ScratchpadStore
 import ai.neopsyke.agent.support.PromptInjectionDefense
@@ -332,7 +333,7 @@ internal class ActionReviewPipeline(
                 externalEvidence = deliberation.evidenceFor(resolvedAction.rootInputId, sessionId),
                 availableActions = availableActionsForScope,
                 dispatchableActions = dispatchableActionsForScope,
-                evidenceActionTypes = motorCortex.actionTypesWithCapability(ai.neopsyke.agent.actions.ActionCapability.GATHERS_EVIDENCE),
+                evidenceActionTypes = motorCortex.actionTypesWithCapability(ActionCapability.GATHERS_EVIDENCE),
                 latestUserTurn = latestUserTurn
             )
         )

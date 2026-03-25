@@ -21,25 +21,30 @@ import ai.neopsyke.agent.memory.provider.DefaultMemoryProviderInstaller
 import ai.neopsyke.agent.memory.provider.ManagedHttpMemoryProviderProcess
 import ai.neopsyke.agent.memory.provider.ProviderBackedHippocampus
 import ai.neopsyke.agent.tools.mcp.McpStdioClient
-import ai.neopsyke.agent.model.ActionType
 import ai.neopsyke.agent.model.ConversationContext
 import ai.neopsyke.agent.model.ConversationSecurityContexts
 import ai.neopsyke.agent.model.Interlocutor
 import ai.neopsyke.agent.cortex.sensory.AsyncSignalSource
 import ai.neopsyke.agent.cortex.sensory.SensoryCortex
-import ai.neopsyke.agent.cortex.motor.ActionImplementationStatus
-import ai.neopsyke.agent.cortex.motor.MotorCortex
 import ai.neopsyke.agent.memory.longterm.NoopHippocampus
 import ai.neopsyke.agent.memory.longterm.ResetRequest
 import ai.neopsyke.agent.tools.mcp.NativeFetchTool
 import ai.neopsyke.agent.superego.Superego
-import ai.neopsyke.agent.actions.websearch.WebSearchActionHandler
-import ai.neopsyke.agent.actions.websearch.WebSearchEngine
-import ai.neopsyke.agent.actions.websearch.WebSearchEngineHealth
-import ai.neopsyke.agent.actions.websearch.WebSearchResult
-import ai.neopsyke.agent.actions.EnvActionSecretProvider
-import ai.neopsyke.agent.actions.RoutedConversationOutputGateway
-import ai.neopsyke.agent.actions.SecretHandle
+import ai.neopsyke.agent.cortex.motor.actions.websearch.WebSearchActionHandler
+import ai.neopsyke.agent.cortex.motor.actions.websearch.WebSearchEngine
+import ai.neopsyke.agent.cortex.motor.actions.websearch.WebSearchEngineHealth
+import ai.neopsyke.agent.cortex.motor.actions.websearch.WebSearchResult
+import ai.neopsyke.agent.cortex.motor.actions.EnvActionSecretProvider
+import ai.neopsyke.agent.cortex.motor.actions.RoutedConversationOutputGateway
+import ai.neopsyke.agent.cortex.motor.actions.SecretHandle
+import ai.neopsyke.agent.cortex.motor.actions.control.ActionAuthorizationPolicy
+import ai.neopsyke.agent.cortex.motor.actions.control.ActionControlAutonomousWorker
+import ai.neopsyke.agent.cortex.motor.actions.control.ActionControlStore
+import ai.neopsyke.agent.cortex.motor.actions.control.ActionSecurityPolicyLoader
+import ai.neopsyke.agent.cortex.motor.actions.control.ConfiguredActionAuthorizationPolicy
+import ai.neopsyke.agent.cortex.motor.actions.control.DefaultActionControlService
+import ai.neopsyke.agent.cortex.motor.actions.control.LegacyCompatibleActionControlService
+import ai.neopsyke.agent.cortex.motor.actions.control.SqliteActionControlStore
 import ai.neopsyke.config.AgentRuntimeSettings
 import ai.neopsyke.config.LlmEndpointConfig
 import ai.neopsyke.config.LlmProvider
@@ -132,7 +137,6 @@ import ai.neopsyke.metrics.MetricsRuntimeFactory
 import ai.neopsyke.agent.tools.mcp.FetchTool
 import ai.neopsyke.agent.tools.mcp.ToolHealthStatus
 import kotlin.system.exitProcess
-import java.net.InetSocketAddress
 import java.util.concurrent.Executors
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicBoolean
@@ -1205,16 +1209,24 @@ internal object AppModeRunners {
                                                             ?: ai.neopsyke.agent.goal.NoopGoalsGateway,
                                                         actionControlServiceFactory = { motorCortex ->
                                                             actionControlStore?.let { store ->
-                                                                ai.neopsyke.agent.actioncontrol.DefaultActionControlService(
+                                                                DefaultActionControlService(
                                                                     config = config.actionControl,
                                                                     store = store,
                                                                     executeCommittedAction = { action, authorization ->
-                                                                        motorCortex.execute(action, config.searchResultCount, authorization)
+                                                                        motorCortex.execute(
+                                                                            action,
+                                                                            config.searchResultCount,
+                                                                            authorization
+                                                                        )
                                                                     },
                                                                     actionRegistry = motorCortex.actionRegistry(),
                                                                 )
-                                                            } ?: ai.neopsyke.agent.actioncontrol.LegacyCompatibleActionControlService { action, authorization ->
-                                                                motorCortex.execute(action, config.searchResultCount, authorization)
+                                                            } ?: LegacyCompatibleActionControlService { action, authorization ->
+                                                                motorCortex.execute(
+                                                                    action,
+                                                                    config.searchResultCount,
+                                                                    authorization
+                                                                )
                                                             }
                                                         },
                                                         output = {},
@@ -1662,16 +1674,24 @@ internal object AppModeRunners {
                                                         ?: ai.neopsyke.agent.goal.NoopGoalsGateway,
                                                     actionControlServiceFactory = { motorCortex ->
                                                         actionControlStore?.let { store ->
-                                                            ai.neopsyke.agent.actioncontrol.DefaultActionControlService(
+                                                            DefaultActionControlService(
                                                                 config = config.actionControl,
                                                                 store = store,
                                                                 executeCommittedAction = { action, authorization ->
-                                                                    motorCortex.execute(action, config.searchResultCount, authorization)
+                                                                    motorCortex.execute(
+                                                                        action,
+                                                                        config.searchResultCount,
+                                                                        authorization
+                                                                    )
                                                                 },
                                                                 actionRegistry = motorCortex.actionRegistry(),
                                                             )
-                                                        } ?: ai.neopsyke.agent.actioncontrol.LegacyCompatibleActionControlService { action, authorization ->
-                                                            motorCortex.execute(action, config.searchResultCount, authorization)
+                                                        } ?: LegacyCompatibleActionControlService { action, authorization ->
+                                                            motorCortex.execute(
+                                                                action,
+                                                                config.searchResultCount,
+                                                                authorization
+                                                            )
                                                         }
                                                     },
                                                     output = liveOutput,
@@ -2289,19 +2309,19 @@ internal object AppModeRunners {
         }
     }
 
-    private fun createActionAuthorizationPolicy(config: AgentConfig): ai.neopsyke.agent.actioncontrol.ActionAuthorizationPolicy =
-        ai.neopsyke.agent.actioncontrol.ConfiguredActionAuthorizationPolicy(
-            ai.neopsyke.agent.actioncontrol.ActionSecurityPolicyLoader.load(
+    private fun createActionAuthorizationPolicy(config: AgentConfig): ActionAuthorizationPolicy =
+        ConfiguredActionAuthorizationPolicy(
+            ActionSecurityPolicyLoader.load(
                 Paths.get(config.actionControl.policyPath)
             )
         )
 
-    private fun createActionControlStoreIfEnabled(config: AgentConfig): ai.neopsyke.agent.actioncontrol.ActionControlStore? {
+    private fun createActionControlStoreIfEnabled(config: AgentConfig): ActionControlStore? {
         if (!config.actionControl.enabled) {
             return null
         }
         return try {
-            ai.neopsyke.agent.actioncontrol.SqliteActionControlStore(config.actionControl.dbPath)
+            SqliteActionControlStore(config.actionControl.dbPath)
         } catch (ex: Exception) {
             logger.warn(ex) { "Action-control store initialization failed; continuing with legacy action control." }
             null
@@ -2317,7 +2337,7 @@ internal object AppModeRunners {
         if (!config.actionControl.enabled || !config.actionControl.autonomousWorkerEnabled) {
             return null
         }
-        return ai.neopsyke.agent.actioncontrol.ActionControlAutonomousWorker(
+        return ActionControlAutonomousWorker(
             scope = scope,
             config = config.actionControl,
             processBatch = { limit -> ego.processAutonomousStagedActions(limit) },

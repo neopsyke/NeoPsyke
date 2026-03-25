@@ -615,17 +615,17 @@ builtin_tools:
 
 ### Files to Modify
 
-- `src/main/kotlin/ai/neopsyke/agent/actions/builtin/WebsiteFetchActionPlugin.kt`
+- `src/main/kotlin/ai/neopsyke/agent/cortex/motor/actions/plugin/builtin/WebsiteFetchActionPlugin.kt`
   -- cache full content after fetch
-- `src/main/kotlin/ai/neopsyke/agent/actions/builtin/WebsiteExtractActionPlugin.kt`
+- `src/main/kotlin/ai/neopsyke/agent/cortex/motor/actions/plugin/builtin/WebsiteExtractActionPlugin.kt`
   -- new file: extract action plugin + factory
-- `src/main/kotlin/ai/neopsyke/agent/actions/builtin/FetchContentCache.kt`
+- `src/main/kotlin/ai/neopsyke/agent/cortex/motor/actions/plugin/builtin/FetchContentCache.kt`
   -- new file: per-request content cache
 - `src/main/kotlin/ai/neopsyke/agent/config/BuiltinToolsConfig.kt`
   -- add `WebsiteExtractConfig`
 - `src/main/kotlin/ai/neopsyke/config/AgentRuntimeConfig.kt`
   -- parse `website_extract` YAML section
-- `src/main/kotlin/ai/neopsyke/agent/actions/ActionRegistry.kt`
+- `src/main/kotlin/ai/neopsyke/agent/cortex/motor/actions/ActionRegistry.kt`
   -- register new plugin
 - `src/main/kotlin/ai/neopsyke/agent/model/ActionType.kt`
   -- add `WEBSITE_EXTRACT` enum value

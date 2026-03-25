@@ -2,8 +2,8 @@ package ai.neopsyke.dashboard
 
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
-import ai.neopsyke.agent.actioncontrol.ActionControlDecisionResult
-import ai.neopsyke.agent.actioncontrol.ActionControlService
+import ai.neopsyke.agent.cortex.motor.actions.control.ActionControlDecisionResult
+import ai.neopsyke.agent.cortex.motor.actions.control.ActionControlService
 import ai.neopsyke.agent.model.ActionLedgerEntry
 import ai.neopsyke.agent.model.ActionLedgerKind
 import ai.neopsyke.agent.model.ActionRecordImportance
@@ -15,9 +15,11 @@ import ai.neopsyke.agent.model.CommitMode
 import ai.neopsyke.agent.model.ConversationContext
 import ai.neopsyke.agent.model.ConversationSecurityContext
 import ai.neopsyke.agent.cortex.sensory.AsyncSignalSource
+import ai.neopsyke.agent.model.ActionOutcome
 import ai.neopsyke.agent.model.PendingAction
 import ai.neopsyke.agent.model.StagedAction
 import ai.neopsyke.agent.model.StagedActionStatus
+import ai.neopsyke.agent.model.Urgency
 import ai.neopsyke.instrumentation.AgentEvent
 import ai.neopsyke.metrics.MetricsQueryProvider
 import java.io.BufferedReader
@@ -574,13 +576,13 @@ class DashboardServerTest {
                 stagedAction = staged,
                 authorization = authorization,
                 receipt = receipt ?: error("Receipt missing"),
-                outcome = ai.neopsyke.agent.model.ActionOutcome(
+                outcome = ActionOutcome(
                     statusSummary = "Authorized from dashboard",
                     executionStatus = ActionExecutionStatus.SUCCESS,
                 ),
                 executedAction = PendingAction(
                     id = 1,
-                    urgency = ai.neopsyke.agent.model.Urgency.MEDIUM,
+                    urgency = Urgency.MEDIUM,
                     type = staged.actionType,
                     payload = staged.payload,
                     summary = staged.summary,

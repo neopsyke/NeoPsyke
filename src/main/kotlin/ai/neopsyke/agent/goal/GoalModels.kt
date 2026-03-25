@@ -1,6 +1,6 @@
 package ai.neopsyke.agent.goal
 
-import ai.neopsyke.agent.actions.async.AsyncActionWait
+import ai.neopsyke.agent.cortex.motor.actions.async.AsyncActionWait
 import java.nio.file.Path
 import java.time.Instant
 import ai.neopsyke.agent.model.ConversationContext

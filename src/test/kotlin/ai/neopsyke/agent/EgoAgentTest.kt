@@ -1,10 +1,11 @@
 package ai.neopsyke.agent
 
-import ai.neopsyke.agent.actions.NoopReflectionMemoryRecorder
-import ai.neopsyke.agent.actions.websearch.WebSearchActionHandler
-import ai.neopsyke.agent.actions.websearch.WebSearchEngine
-import ai.neopsyke.agent.actions.websearch.WebSearchResult
-import ai.neopsyke.agent.actions.websearch.WebSearchSource
+import ai.neopsyke.agent.cortex.motor.actions.NoopReflectionMemoryRecorder
+import ai.neopsyke.agent.cortex.motor.actions.websearch.WebSearchActionHandler
+import ai.neopsyke.agent.cortex.motor.actions.websearch.WebSearchEngine
+import ai.neopsyke.agent.cortex.motor.actions.websearch.WebSearchEngineHealth
+import ai.neopsyke.agent.cortex.motor.actions.websearch.WebSearchResult
+import ai.neopsyke.agent.cortex.motor.actions.websearch.WebSearchSource
 import ai.neopsyke.support.buildTestEgo
 import ai.neopsyke.support.RecordingInstrumentation
 import ai.neopsyke.support.StubChatModelClient
@@ -288,8 +289,8 @@ class EgoAgentTest {
             override fun search(query: String, maxResults: Int): WebSearchResult =
                 WebSearchResult(summary = "offline", snippets = emptyList())
 
-            override fun healthCheck(): ai.neopsyke.agent.actions.websearch.WebSearchEngineHealth =
-               ai.neopsyke.agent.actions.websearch.WebSearchEngineHealth(
+            override fun healthCheck(): WebSearchEngineHealth =
+                WebSearchEngineHealth(
                     available = false,
                     detail = "search offline"
                 )

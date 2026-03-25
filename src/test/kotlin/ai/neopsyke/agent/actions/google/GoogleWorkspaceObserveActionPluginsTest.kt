@@ -1,10 +1,12 @@
-package ai.neopsyke.agent.actions.google
+package ai.neopsyke.agent.cortex.motor.actions.plugin.google
 
 import kotlinx.coroutines.runBlocking
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
-import ai.neopsyke.agent.actions.ActionExecutionContext
+import ai.neopsyke.agent.cortex.motor.actions.ActionExecutionContext
+import ai.neopsyke.agent.cortex.motor.actions.plugin.google.CalendarObserveEventsActionPlugin
+import ai.neopsyke.agent.cortex.motor.actions.plugin.google.GmailObserveSearchActionPlugin
 import ai.neopsyke.agent.model.ActionType
 import ai.neopsyke.agent.model.PendingAction
 import ai.neopsyke.agent.model.Urgency

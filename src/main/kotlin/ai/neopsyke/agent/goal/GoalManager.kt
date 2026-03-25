@@ -2,8 +2,8 @@ package ai.neopsyke.agent.goal
 
 import kotlinx.coroutines.CoroutineScope
 import mu.KotlinLogging
-import ai.neopsyke.agent.actions.async.AsyncOperationEvent
-import ai.neopsyke.agent.actions.async.AsyncOperationRegistry
+import ai.neopsyke.agent.cortex.motor.actions.async.AsyncOperationEvent
+import ai.neopsyke.agent.cortex.motor.actions.async.AsyncOperationRegistry
 import ai.neopsyke.agent.cortex.sensory.GoalRuntimeCue
 import ai.neopsyke.agent.id.GoalCommitment
 import ai.neopsyke.agent.model.ActionOutcome

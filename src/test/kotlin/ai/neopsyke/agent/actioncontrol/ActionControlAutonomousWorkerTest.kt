@@ -1,9 +1,9 @@
-package ai.neopsyke.agent.actioncontrol
+package ai.neopsyke.agent.cortex.motor.actions.control
 
 import ai.neopsyke.agent.config.ActionControlConfig
+import ai.neopsyke.agent.cortex.motor.actions.control.ActionControlAutonomousWorker
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.runBlocking

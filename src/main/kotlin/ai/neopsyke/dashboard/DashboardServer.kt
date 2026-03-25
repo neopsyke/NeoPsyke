@@ -8,8 +8,8 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.selects.select
 import mu.KotlinLogging
-import ai.neopsyke.agent.actioncontrol.ActionControlDecisionResult
-import ai.neopsyke.agent.actioncontrol.ActionControlService
+import ai.neopsyke.agent.cortex.motor.actions.control.ActionControlDecisionResult
+import ai.neopsyke.agent.cortex.motor.actions.control.ActionControlService
 import ai.neopsyke.agent.model.ActionType
 import ai.neopsyke.agent.model.ConversationSecurityContexts
 import ai.neopsyke.agent.model.StagedAction

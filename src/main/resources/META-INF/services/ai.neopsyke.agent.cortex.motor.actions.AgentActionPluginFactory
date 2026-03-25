@@ -1,0 +1,11 @@
+ai.neopsyke.agent.cortex.motor.actions.plugin.builtin.ContactUserActionPluginFactory
+ai.neopsyke.agent.cortex.motor.actions.plugin.builtin.ResolutionDraftActionPluginFactory
+ai.neopsyke.agent.cortex.motor.actions.plugin.builtin.WebSearchActionPluginFactory
+ai.neopsyke.agent.cortex.motor.actions.plugin.builtin.WebsiteFetchActionPluginFactory
+ai.neopsyke.agent.cortex.motor.actions.plugin.builtin.ReflectInternalActionPluginFactory
+ai.neopsyke.agent.cortex.motor.actions.plugin.builtin.ReflectEvidenceActionPluginFactory
+ai.neopsyke.agent.cortex.motor.actions.plugin.builtin.GoalOperationActionPluginFactory
+ai.neopsyke.agent.cortex.motor.actions.plugin.email.MicrosoftGraphEmailActionPluginFactory
+ai.neopsyke.agent.cortex.motor.actions.plugin.google.GmailObserveSearchActionPluginFactory
+ai.neopsyke.agent.cortex.motor.actions.plugin.google.GmailObserveMessageActionPluginFactory
+ai.neopsyke.agent.cortex.motor.actions.plugin.google.CalendarObserveEventsActionPluginFactory

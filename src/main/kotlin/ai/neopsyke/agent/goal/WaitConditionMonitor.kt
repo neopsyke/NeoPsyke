@@ -6,13 +6,14 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import mu.KotlinLogging
-import ai.neopsyke.agent.actions.async.AsyncActionHandle
-import ai.neopsyke.agent.actions.async.AsyncOperationEvent
-import ai.neopsyke.agent.actions.async.AsyncOperationEventStatus
-import ai.neopsyke.agent.actions.async.AsyncOperationRegistry
-import ai.neopsyke.agent.actions.async.AsyncOperationStatus
-import ai.neopsyke.agent.actions.async.AsyncResumeMode
-import ai.neopsyke.agent.actions.async.AsyncWaitAggregation
+import ai.neopsyke.agent.cortex.motor.actions.async.AsyncActionHandle
+import ai.neopsyke.agent.cortex.motor.actions.async.AsyncActionWait
+import ai.neopsyke.agent.cortex.motor.actions.async.AsyncOperationEvent
+import ai.neopsyke.agent.cortex.motor.actions.async.AsyncOperationEventStatus
+import ai.neopsyke.agent.cortex.motor.actions.async.AsyncOperationRegistry
+import ai.neopsyke.agent.cortex.motor.actions.async.AsyncOperationStatus
+import ai.neopsyke.agent.cortex.motor.actions.async.AsyncResumeMode
+import ai.neopsyke.agent.cortex.motor.actions.async.AsyncWaitAggregation
 import java.time.Instant
 import java.util.concurrent.ConcurrentHashMap
 
@@ -163,7 +164,7 @@ class WaitConditionMonitor(
     private fun resolveAsyncWaitIfReady(
         key: RegistrationKey,
         state: RegistrationState,
-        wait: ai.neopsyke.agent.actions.async.AsyncActionWait,
+        wait: AsyncActionWait,
     ) {
         val resolution = resolveAsyncWait(wait, state.terminalHandleStates)
         if (resolution == null) return
@@ -172,7 +173,7 @@ class WaitConditionMonitor(
     }
 
     private fun resolveAsyncWait(
-        wait: ai.neopsyke.agent.actions.async.AsyncActionWait,
+        wait: AsyncActionWait,
         terminalHandleStates: Map<String, TerminalHandleState>,
     ): WaitConditionResolution? {
         val total = wait.handles.size
