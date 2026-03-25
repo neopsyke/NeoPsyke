@@ -1275,6 +1275,8 @@ class DashboardFlowSubscription(
 ) : Closeable {
     fun asFlow(): Flow<String> = channel.receiveAsFlow()
 
+    internal fun asReceiveChannel(): ReceiveChannel<String> = channel
+
     suspend fun receive(): String = channel.receive()
 
     suspend fun receiveCatching() = channel.receiveCatching()

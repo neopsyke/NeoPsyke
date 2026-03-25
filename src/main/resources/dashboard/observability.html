@@ -32,6 +32,9 @@
       align-items: center;
       justify-content: space-between;
     }
+    body.embedded header a.ghost-btn {
+      display: none;
+    }
     .status { font-size: 12px; color: var(--muted); }
 
     /* Header loop pills */
@@ -2170,6 +2173,7 @@
           }
         });
       } catch (err) {
+        status.textContent = "failed to load snapshot: " + (err && err.message ? err.message : "unknown");
         console.error("[dashboard] failed to load initial snapshot", err);
       }
 
@@ -2201,6 +2205,10 @@
       });
       window.addEventListener("beforeunload", () => { es.close(); });
       window.addEventListener("pagehide", () => { es.close(); });
+    }
+
+    if (window.self !== window.top) {
+      document.body.classList.add("embedded");
     }
 
     boot();

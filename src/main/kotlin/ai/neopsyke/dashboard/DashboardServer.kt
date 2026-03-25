@@ -6,6 +6,7 @@ import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.selects.select
 import mu.KotlinLogging
 import ai.neopsyke.agent.actioncontrol.ActionControlDecisionResult
 import ai.neopsyke.agent.actioncontrol.ActionControlService
@@ -69,7 +70,7 @@ class DashboardServer(
                     respondText(exchange, 404, "Not found", "text/plain; charset=utf-8")
                     return@withRequestGuard
                 }
-                respondText(exchange, 200, DashboardAssets.conversationsHtml, "text/html; charset=utf-8")
+                respondText(exchange, 200, DashboardAssets.shellHtml, "text/html; charset=utf-8")
             }
         }
         server.createContext("/dashboard") { exchange ->
@@ -78,7 +79,7 @@ class DashboardServer(
                     respondText(exchange, 404, "Not found", "text/plain; charset=utf-8")
                     return@withRequestGuard
                 }
-                respondText(exchange, 200, DashboardAssets.observabilityHtml, "text/html; charset=utf-8")
+                respondText(exchange, 200, DashboardAssets.shellHtml, "text/html; charset=utf-8")
             }
         }
         server.createContext("/metrics") { exchange ->
@@ -87,7 +88,7 @@ class DashboardServer(
                     respondText(exchange, 404, "Not found", "text/plain; charset=utf-8")
                     return@withRequestGuard
                 }
-                respondText(exchange, 200, DashboardAssets.metricsHtml, "text/html; charset=utf-8")
+                respondText(exchange, 200, DashboardAssets.shellHtml, "text/html; charset=utf-8")
             }
         }
         server.createContext("/goals") { exchange ->
@@ -96,7 +97,7 @@ class DashboardServer(
                     respondText(exchange, 404, "Not found", "text/plain; charset=utf-8")
                     return@withRequestGuard
                 }
-                respondText(exchange, 200, DashboardAssets.goalsHtml, "text/html; charset=utf-8")
+                respondText(exchange, 200, DashboardAssets.shellHtml, "text/html; charset=utf-8")
             }
         }
         server.createContext("/action-control") { exchange ->
@@ -105,7 +106,12 @@ class DashboardServer(
                     respondText(exchange, 404, "Not found", "text/plain; charset=utf-8")
                     return@withRequestGuard
                 }
-                respondText(exchange, 200, DashboardAssets.actionControlHtml, "text/html; charset=utf-8")
+                respondText(exchange, 200, DashboardAssets.shellHtml, "text/html; charset=utf-8")
+            }
+        }
+        server.createContext("/__dashboard") { exchange ->
+            withRequestGuard(exchange, "embedded_dashboard_page") {
+                handleEmbeddedDashboardPage(exchange)
             }
         }
         server.createContext("/api/goals") { exchange ->
@@ -263,6 +269,27 @@ class DashboardServer(
         )
     }
 
+    private fun handleEmbeddedDashboardPage(exchange: HttpExchange) {
+        if (exchange.requestMethod.uppercase() != "GET") {
+            respondText(exchange, 405, "Method not allowed", "text/plain; charset=utf-8")
+            return
+        }
+        val path = exchange.requestURI.path.removePrefix("/__dashboard").trim()
+        val asset = when (path) {
+            "/conversations" -> DashboardAssets.conversationsHtml
+            "/observability" -> DashboardAssets.observabilityHtml
+            "/metrics" -> DashboardAssets.metricsHtml
+            "/goals" -> DashboardAssets.goalsHtml
+            "/action-control" -> DashboardAssets.actionControlHtml
+            else -> null
+        }
+        if (asset == null) {
+            respondText(exchange, 404, "Not found", "text/plain; charset=utf-8")
+            return
+        }
+        respondText(exchange, 200, asset, "text/html; charset=utf-8")
+    }
+
     private fun handleGoalsSse(exchange: HttpExchange) {
         handleSubscriptionSse(
             exchange = exchange,
@@ -412,6 +439,13 @@ class DashboardServer(
                     return
                 }
                 handleChatSse(exchange, chatBridge, sessionId)
+            }
+            "stream" -> {
+                if (exchange.requestMethod.uppercase() != "GET") {
+                    respondText(exchange, 405, "Method not allowed", "text/plain; charset=utf-8")
+                    return
+                }
+                handleConversationStreamSse(exchange, chatBridge, sessionId)
             }
             "thinking" -> {
                 if (exchange.requestMethod.uppercase() != "GET") {
@@ -804,6 +838,68 @@ class DashboardServer(
         }
     }
 
+    private fun handleConversationStreamSse(
+        exchange: HttpExchange,
+        bridge: ChatRuntimeBridge,
+        sessionId: String,
+    ) {
+        val chatSubscription = bridge.subscribe(sessionId)
+        if (chatSubscription == null) {
+            respondText(exchange, 404, "Session not found", "text/plain; charset=utf-8")
+            return
+        }
+        val thinkingSubscription = innerVoiceStore?.subscribe(sessionId)
+
+        exchange.responseHeaders.add("Content-Type", "text/event-stream")
+        exchange.responseHeaders.add("Cache-Control", "no-cache")
+        exchange.responseHeaders.add("Connection", "keep-alive")
+        recordResponseStatus(exchange, 200)
+        exchange.sendResponseHeaders(200, 0)
+
+        val output = exchange.responseBody.bufferedWriter(StandardCharsets.UTF_8)
+        val chatChannel = chatSubscription.asReceiveChannel()
+        val thinkingChannel = thinkingSubscription?.asReceiveChannel()
+        try {
+            output.write("event: ready\n")
+            output.write("data: {\"status\":\"connected\",\"session_id\":\"$sessionId\"}\n\n")
+            output.flush()
+            runBlocking {
+                while (true) {
+                    val nextEvent = withTimeoutOrNull(SSE_HEARTBEAT_TIMEOUT_MS) {
+                        select<SessionSseEvent> {
+                            chatChannel.onReceiveCatching { result ->
+                                SessionSseEvent(eventName = "chat", payload = result.getOrThrow())
+                            }
+                            if (thinkingChannel != null) {
+                                thinkingChannel.onReceiveCatching { result ->
+                                    SessionSseEvent(eventName = "thinking", payload = result.getOrThrow())
+                                }
+                            }
+                        }
+                    }
+                    if (nextEvent != null) {
+                        output.write("event: ${nextEvent.eventName}\n")
+                        output.write("data: ${nextEvent.payload}\n\n")
+                        output.flush()
+                    } else {
+                        output.write(": heartbeat\n\n")
+                        output.flush()
+                    }
+                }
+            }
+        } catch (ex: Exception) {
+            if (isExpectedClientDisconnect(ex)) {
+                logger.debug { "Conversation SSE client disconnected for session=$sessionId." }
+            } else {
+                logger.warn(ex) { "Conversation SSE stream terminated unexpectedly for session=$sessionId." }
+            }
+        } finally {
+            chatSubscription.close()
+            thinkingSubscription?.close()
+            closeStreamQuietly(output, streamName = "conversation_stream_sse", context = "session=$sessionId")
+        }
+    }
+
     private fun handleIdThinkingSse(exchange: HttpExchange) {
         val voiceStore = innerVoiceStore
         if (voiceStore == null) {
@@ -848,6 +944,11 @@ class DashboardServer(
             closeStreamQuietly(output, streamName = "id_thinking_sse")
         }
     }
+
+    private data class SessionSseEvent(
+        val eventName: String,
+        val payload: String,
+    )
 
     private fun handleIdThinkingHistory(exchange: HttpExchange) {
         val filePath = idInnerVoiceFilePath

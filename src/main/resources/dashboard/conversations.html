@@ -57,6 +57,9 @@
       border-color: var(--accent);
       color: var(--accent);
     }
+    body.embedded .actions a.btn {
+      display: none;
+    }
     .layout {
       min-height: 0;
       display: grid;
@@ -464,6 +467,7 @@
   </div>
 
   <script>
+    const REQUEST_TIMEOUT_MS = 8000;
     const state = {
       sessions: [],
       selectedSessionId: null,
@@ -483,6 +487,19 @@
       document.getElementById("status").textContent = text;
     }
 
+    function errorText(err) {
+      if (!err) return "unknown";
+      if (typeof err === "string") return err;
+      if (err.name === "AbortError") return "request timeout";
+      return err.message ? err.message : String(err);
+    }
+
+    function reportClientFailure(context, err) {
+      const message = context + ": " + errorText(err);
+      setStatus(message);
+      console.error("[conversations] " + context, err);
+    }
+
     function fmtTime(ms) {
       if (!ms) return "-";
       try {
@@ -500,15 +517,24 @@
     }
 
     async function fetchJson(url, init) {
-      const res = await fetch(url, Object.assign({ cache: "no-store" }, init || {}));
-      const text = await res.text();
-      let payload = null;
-      try { payload = text ? JSON.parse(text) : null; } catch (_) {}
-      if (!res.ok) {
-        const detail = payload && payload.detail ? payload.detail : ("HTTP " + res.status);
-        throw new Error(detail);
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+      try {
+        const res = await fetch(
+          url,
+          Object.assign({ cache: "no-store", signal: controller.signal }, init || {})
+        );
+        const text = await res.text();
+        let payload = null;
+        try { payload = text ? JSON.parse(text) : null; } catch (_) {}
+        if (!res.ok) {
+          const detail = payload && payload.detail ? payload.detail : ("HTTP " + res.status);
+          throw new Error(detail);
+        }
+        return payload;
+      } finally {
+        clearTimeout(timeout);
       }
-      return payload;
     }
 
     function renderSessions() {
@@ -732,6 +758,9 @@
       document.getElementById("id-voice-panel").classList.add("visible");
       document.getElementById("main-layout").classList.add("id-panel-open");
       document.getElementById("id-voice-toggle").classList.add("active");
+      document.getElementById("id-voice-status").textContent = "connecting...";
+      connectIdThinking();
+      loadIdThinkingHistory();
     }
 
     function hideIdPanel() {
@@ -740,6 +769,11 @@
       document.getElementById("id-voice-panel").classList.remove("visible");
       document.getElementById("main-layout").classList.remove("id-panel-open");
       document.getElementById("id-voice-toggle").classList.remove("active");
+      if (state.idThinkingSource) {
+        state.idThinkingSource.close();
+        state.idThinkingSource = null;
+      }
+      document.getElementById("id-voice-status").textContent = "disconnected";
     }
 
     function renderIdVoiceEvents() {
@@ -866,7 +900,7 @@
     }
 
     function connectSessionEvents(sessionId) {
-      // Close per-session sources only (Id SSE is global)
+      // Close per-session sources only (Id SSE is global/lazy)
       if (state.eventSource) {
         state.eventSource.close();
         state.eventSource = null;
@@ -875,7 +909,7 @@
         state.thinkingSource.close();
         state.thinkingSource = null;
       }
-      const es = new EventSource("/api/chat/sessions/" + encodeURIComponent(sessionId) + "/events");
+      const es = new EventSource("/api/chat/sessions/" + encodeURIComponent(sessionId) + "/stream");
       state.eventSource = es;
       es.addEventListener("open", () => setStatus("Connected"));
       es.addEventListener("error", () => setStatus("Reconnecting..."));
@@ -896,10 +930,7 @@
         renderMessages();
         refreshSessionSnapshotCounts();
       });
-
-      const ts = new EventSource("/api/chat/sessions/" + encodeURIComponent(sessionId) + "/thinking");
-      state.thinkingSource = ts;
-      ts.addEventListener("thinking", (event) => {
+      es.addEventListener("thinking", (event) => {
         let payload = null;
         try { payload = JSON.parse(event.data); } catch (_) { return; }
         if (!payload || payload.type !== "thinking" || !payload.event) return;
@@ -935,6 +966,7 @@
     }
 
     async function loadSessions() {
+      setStatus("Loading sessions...");
       const payload = await fetchJson("/api/chat/sessions");
       state.sessions = Array.isArray(payload && payload.sessions) ? payload.sessions : [];
       if (!state.sessions.length) {
@@ -950,6 +982,7 @@
 
     async function selectSession(sessionId) {
       if (!sessionId) return;
+      setStatus("Loading conversation...");
       const textarea = document.getElementById("composer");
       const sendBtn = document.getElementById("send-btn");
       if (state.selectedSessionId) {
@@ -1090,14 +1123,22 @@
       }
     });
 
-    // Initialize: load sessions + Id inner-voice (in parallel)
+    if (window.self !== window.top) {
+      document.body.classList.add("embedded");
+    }
+
+    // Initialize only the core chat session state. The Id panel opens lazily so
+    // background tabs do not consume an extra long-lived SSE connection.
     Promise.all([
-      loadSessions().then(() => setStatus("Connected")),
-      loadIdThinkingHistory()
+      loadSessions().then(() => setStatus("Connected"))
     ]).catch((err) => setStatus("Failed to load: " + (err && err.message ? err.message : "unknown")));
 
-    // Connect global Id thinking SSE
-    connectIdThinking();
+    window.addEventListener("error", (event) => {
+      reportClientFailure("Client error", event.error || event.message);
+    });
+    window.addEventListener("unhandledrejection", (event) => {
+      reportClientFailure("Unhandled promise rejection", event.reason);
+    });
 
     window.addEventListener("beforeunload", () => closeEventSource());
   </script>

@@ -45,6 +45,7 @@
     }
     .ghost-btn:hover { border-color: var(--accent); color: var(--accent); }
     .nav-links { display: flex; gap: 8px; align-items: center; }
+    body.embedded .nav-links a.ghost-btn { display: none; }
     .main { overflow-y: auto; padding: 18px; }
 
     /* Goal list */
@@ -172,10 +173,18 @@
     async function fetchGoals() {
       try {
         const res = await fetch('/api/goals');
-        if (!res.ok) return;
+        if (!res.ok) {
+          connDot.classList.remove('connected');
+          connDot.title = 'Goals API HTTP ' + res.status;
+          return;
+        }
         goals = await res.json();
+        connDot.title = 'Goals loaded';
         render();
-      } catch (_) {}
+      } catch (err) {
+        connDot.classList.remove('connected');
+        connDot.title = err && err.message ? err.message : 'Goals API unavailable';
+      }
     }
 
     // ── SSE for live updates ────────────────────────────────────
@@ -319,6 +328,10 @@
       if (ago < 3600000) return Math.floor(ago / 60000) + 'm ago';
       if (ago < 86400000) return Math.floor(ago / 3600000) + 'h ago';
       return Math.floor(ago / 86400000) + 'd ago';
+    }
+
+    if (window.self !== window.top) {
+      document.body.classList.add('embedded');
     }
 
     // ── Init ────────────────────────────────────────────────────

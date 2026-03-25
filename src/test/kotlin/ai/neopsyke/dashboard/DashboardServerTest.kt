@@ -40,7 +40,7 @@ class DashboardServerTest {
     private val client: HttpClient = HttpClient.newHttpClient()
 
     @Test
-    fun `routes serve split conversation and dashboard pages`() {
+    fun `public dashboard routes serve the shell with route-based tabs`() {
         startServer().use { started ->
             val root = get("http://127.0.0.1:${started.port}/")
             val dashboard = get("http://127.0.0.1:${started.port}/dashboard")
@@ -49,10 +49,26 @@ class DashboardServerTest {
             assertEquals(200, root.statusCode())
             assertEquals(200, dashboard.statusCode())
             assertEquals(200, actionControl.statusCode())
-            assertTrue(root.body().contains("NeoPsyke Conversations"))
-            assertTrue(dashboard.body().contains("NeoPsyke Realtime Dashboard"))
-            assertTrue(dashboard.body().contains("tl-structured-chip"))
-            assertTrue(actionControl.body().contains("NeoPsyke Action Control"))
+            assertTrue(root.body().contains("NeoPsyke Dashboard"))
+            assertTrue(root.body().contains("href=\"/dashboard\""))
+            assertTrue(dashboard.body().contains("framePath: \"/__dashboard/observability\""))
+            assertTrue(actionControl.body().contains("framePath: \"/__dashboard/action-control\""))
+        }
+    }
+
+    @Test
+    fun `internal dashboard routes still serve the standalone page implementations`() {
+        startServer().use { started ->
+            val conversations = get("http://127.0.0.1:${started.port}/__dashboard/conversations")
+            val observability = get("http://127.0.0.1:${started.port}/__dashboard/observability")
+            val metrics = get("http://127.0.0.1:${started.port}/__dashboard/metrics")
+
+            assertEquals(200, conversations.statusCode())
+            assertEquals(200, observability.statusCode())
+            assertEquals(200, metrics.statusCode())
+            assertTrue(conversations.body().contains("NeoPsyke Conversations"))
+            assertTrue(observability.body().contains("NeoPsyke Realtime Dashboard"))
+            assertTrue(metrics.body().contains("NeoPsyke Metrics"))
         }
     }
 
@@ -92,8 +108,8 @@ class DashboardServerTest {
         startServer().use { started ->
             val s1 = createSession(started.port, "S1")
             val s2 = createSession(started.port, "S2")
-            val sse1 = openSse("http://127.0.0.1:${started.port}/api/chat/sessions/$s1/events")
-            val sse2 = openSse("http://127.0.0.1:${started.port}/api/chat/sessions/$s2/events")
+            val sse1 = openSse("http://127.0.0.1:${started.port}/api/chat/sessions/$s1/stream")
+            val sse2 = openSse("http://127.0.0.1:${started.port}/api/chat/sessions/$s2/stream")
             val obs = openSse("http://127.0.0.1:${started.port}/api/obs/events")
 
             sse1.use {
@@ -129,6 +145,45 @@ class DashboardServerTest {
                         assertTrue(obsEvent.second.contains("\"type\":\"warning\""))
                     }
                 }
+            }
+        }
+    }
+
+    @Test
+    fun `combined conversation stream emits chat and thinking over one connection`() {
+        startServer().use { started ->
+            val sessionId = createSession(started.port, "Combined")
+            val stream = openSse("http://127.0.0.1:${started.port}/api/chat/sessions/$sessionId/stream")
+
+            stream.use {
+                readNextEvent(stream)
+
+                started.innerVoiceStore.emit(
+                    InnerVoiceEvent(
+                        id = 7,
+                        type = InnerVoiceEventType.PLAN,
+                        content = "think-first",
+                        rootInputId = "root-7",
+                        sessionId = sessionId,
+                        ts = System.currentTimeMillis(),
+                        sequence = 1,
+                    )
+                )
+
+                val thinkingEvent = readNextEvent(stream, timeoutMs = 2_000)
+                assertNotNull(thinkingEvent)
+                assertEquals("thinking", thinkingEvent.first)
+                assertTrue(thinkingEvent.second.contains("think-first"))
+
+                postJson(
+                    "http://127.0.0.1:${started.port}/api/chat/sessions/$sessionId/messages",
+                    mapOf("content" to "hello-stream")
+                )
+
+                val chatEvent = readNextEvent(stream, timeoutMs = 2_000)
+                assertNotNull(chatEvent)
+                assertEquals("chat", chatEvent.first)
+                assertTrue(chatEvent.second.contains("hello-stream"))
             }
         }
     }
@@ -298,10 +353,12 @@ class DashboardServerTest {
                 emitStdinClosedSignal = false
             )
             val bridge = ChatRuntimeBridge(store = store, sensoryInput = sensory)
+            val innerVoiceStore = InnerVoiceStore()
             try {
                 val server = DashboardServer(
                     store = store,
                     chatBridge = bridge,
+                    innerVoiceStore = innerVoiceStore,
                     port = port
                 )
                 server.start()
@@ -309,10 +366,11 @@ class DashboardServerTest {
                     port = port,
                     store = store,
                     server = server,
-                    sensory = sensory
+                    sensory = sensory,
+                    innerVoiceStore = innerVoiceStore,
                 )
             } catch (ex: java.net.BindException) {
-                serverCloseQuietly(store, sensory)
+                serverCloseQuietly(store, sensory, innerVoiceStore)
                 if (attempt == 4) throw ex
             }
         }
@@ -324,15 +382,22 @@ class DashboardServerTest {
         val store: DashboardStateStore,
         val server: DashboardServer,
         val sensory: AsyncSignalSource,
+        val innerVoiceStore: InnerVoiceStore,
     ) : Closeable {
         override fun close() {
             server.close()
+            innerVoiceStore.close()
             sensory.close()
             store.close()
         }
     }
 
-    private fun serverCloseQuietly(store: DashboardStateStore, sensory: AsyncSignalSource) {
+    private fun serverCloseQuietly(
+        store: DashboardStateStore,
+        sensory: AsyncSignalSource,
+        innerVoiceStore: InnerVoiceStore,
+    ) {
+        runCatching { innerVoiceStore.close() }
         runCatching { sensory.close() }
         runCatching { store.close() }
     }

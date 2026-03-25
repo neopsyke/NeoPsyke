@@ -56,6 +56,9 @@
       border-color: var(--accent);
       color: var(--accent);
     }
+    body.embedded .nav-links a.ghost-btn {
+      display: none;
+    }
     .primary-btn {
       color: var(--text);
       background: rgba(54, 195, 167, 0.08);
@@ -729,6 +732,10 @@
       renderLedgerList();
       renderDetail();
     });
+    if (window.self !== window.top) {
+      document.body.classList.add('embedded');
+    }
+
     refreshAll('initial');
     connectActionControlEvents();
   </script>

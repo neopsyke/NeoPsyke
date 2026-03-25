@@ -49,6 +49,7 @@
       text-decoration: none;
     }
     .ghost-btn:hover { border-color: var(--accent); color: var(--accent); }
+    body.embedded .nav-links a.ghost-btn { display: none; }
     .status { font-size: 12px; color: var(--muted); }
 
     .main-scroll {
@@ -1088,6 +1089,7 @@
         state.limits = snapshot.limits || {};
         state.storeStats = snapshot.storeStats || {};
       } catch (err) {
+        statusEl.textContent = "failed to load snapshot: " + (err && err.message ? err.message : "unknown");
         console.error("[metrics] failed to load initial snapshot", err);
       }
 
@@ -1143,6 +1145,10 @@
     }
 
     window.addEventListener("resize", () => renderStmChart());
+    if (window.self !== window.top) {
+      document.body.classList.add("embedded");
+    }
+
     boot();
   </script>
 </body>
