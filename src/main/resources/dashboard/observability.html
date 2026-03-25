@@ -885,7 +885,7 @@
         lastImpulseEvent: null,
         triggerThreshold: 0.5,
         pulseIntervalMs: 30000,
-        thresholdOnUrgency: true,
+        thresholdOnTension: true,
         lastPulseAt: 0
       }
     };
@@ -1147,14 +1147,14 @@
         }
         // ── Id / Impulse events ──────────────────────────
         case "impulse_processing":
-          return (d.need_id || "impulse") + " (urg " + (d.urgency != null ? Number(d.urgency).toFixed(3) : "?") + ")" +
+          return (d.need_id || "impulse") + " (tension " + (d.tension != null ? Number(d.tension).toFixed(3) : "?") + ")" +
             (d.prompt ? "\n" + d.prompt : "");
         case "impulse_noop":
           return "noop — " + (d.need_id || "?");
         case "impulse_lifecycle_finalized":
           return (d.need_id || "?") + " — " + (d.result || "?");
         case "id_impulse_fired":
-          return (d.need_id || "?") + " urg=" + (d.urgency != null ? Number(d.urgency).toFixed(3) : "?") +
+          return (d.need_id || "?") + " tension=" + (d.tension != null ? Number(d.tension).toFixed(3) : "?") +
             " raw=" + (d.raw_value != null ? Number(d.raw_value).toFixed(3) : "?");
         case "id_impulse_accepted":
           return d.need_id || "?";
@@ -1864,7 +1864,7 @@
       const id = state.id;
       const threshold = id.triggerThreshold;
       const pulseMs = id.pulseIntervalMs;
-      const useUrgency = id.thresholdOnUrgency;
+      const useUrgency = id.thresholdOnTension;
       const raw = n.rawValue || 0;
       const growthRate = n.growthRate || 0;
       const curve = n.responseCurve || null;
@@ -1917,7 +1917,7 @@
 
       // Meta line: pulse count, threshold, interval
       const intervalSec = (id.pulseIntervalMs / 1000).toFixed(0);
-      const threshLabel = id.thresholdOnUrgency ? "urgency" : "raw";
+      const threshLabel = id.thresholdOnTension ? "tension" : "raw";
       metaEl.textContent = "pulse #" + id.pulse + " | thr " + id.triggerThreshold.toFixed(2) + " (" + threshLabel + ") | " + intervalSec + "s interval" + (id.egoBusy ? " | ego busy" : "");
 
       // Pending impulse bar
@@ -1926,7 +1926,7 @@
       if (imp) {
         impulseBar.style.display = "";
         impulseBar.className = "id-impulse-bar " + (imp.status === "fired" ? "fired" : "fired");
-        impulseBar.innerHTML = "IMPULSE " + escapeHtml(imp.status.toUpperCase()) + " \u2014 " + escapeHtml(imp.needId) + " (urg " + (imp.urgency != null ? imp.urgency.toFixed(3) : "?") + ")";
+        impulseBar.innerHTML = "IMPULSE " + escapeHtml(imp.status.toUpperCase()) + " \u2014 " + escapeHtml(imp.needId) + " (tension " + (imp.tension != null ? imp.tension.toFixed(3) : "?") + ")";
       } else if (lastImp && lastImp.type) {
         impulseBar.style.display = "";
         const cls = lastImp.type === "denied" || lastImp.type === "failed" ? "denied"
@@ -1945,15 +1945,15 @@
       // Legend + render each need
       const legendHtml = "<div class=\"id-legend\">"
         + "<span class=\"id-legend-swatch\" style=\"background:rgba(54,195,167,0.25)\"></span>raw"
-        + "<span class=\"id-legend-swatch\" style=\"background:var(--accent);opacity:0.7\"></span>urgency"
+        + "<span class=\"id-legend-swatch\" style=\"background:var(--accent);opacity:0.7\"></span>tension"
         + "<span class=\"id-legend-swatch\" style=\"background:#e8a735;width:4px;height:8px;border-radius:50%\"></span>threshold"
         + "</div>";
       const threshold = id.triggerThreshold;
       const pulseMs = id.pulseIntervalMs;
-      const useUrgency = id.thresholdOnUrgency;
+      const useUrgency = id.thresholdOnTension;
       const rows = id.needs.map(function(n) {
         const raw = n.rawValue || 0;
-        const urg = n.urgency || 0;
+        const urg = n.tension || 0;
         const growthRate = n.growthRate || 0;
         const thresholdPct = (threshold * 100).toFixed(1);
         const effectiveVal = useUrgency ? urg : raw;
@@ -2031,14 +2031,14 @@
           if (Array.isArray(d.needs)) state.id.needs = d.needs;
           if (d.trigger_threshold != null) state.id.triggerThreshold = d.trigger_threshold;
           if (d.pulse_interval_ms != null) state.id.pulseIntervalMs = d.pulse_interval_ms;
-          if (d.threshold_on_urgency != null) state.id.thresholdOnUrgency = d.threshold_on_urgency;
+          if (d.threshold_on_tension != null) state.id.thresholdOnTension = d.threshold_on_tension;
           if (typeof event.ts === "number" && Number.isFinite(event.ts)) {
             state.id.lastPulseAt = event.ts;
           }
           break;
         }
         case "id_impulse_fired":
-          state.id.pendingImpulse = { needId: event.data.need_id, status: "fired", urgency: event.data.urgency };
+          state.id.pendingImpulse = { needId: event.data.need_id, status: "fired", tension: event.data.tension };
           state.id.lastImpulseEvent = { type: "fired", needId: event.data.need_id, ts: event.ts };
           break;
         case "id_impulse_accepted":

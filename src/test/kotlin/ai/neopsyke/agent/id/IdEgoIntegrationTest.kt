@@ -51,7 +51,7 @@ class IdEgoIntegrationTest {
             enabled = true,
             pulseIntervalMs = 1000,
             triggerThreshold = triggerThreshold,
-            thresholdOnUrgency = true,
+            thresholdOnTension = true,
             maxConsecutiveDenials = 5,
             backoffPulses = 10,
             maxInFlightPulses = 20,
@@ -160,7 +160,7 @@ class IdEgoIntegrationTest {
             id = 1,
             needId = "test-need",
             prompt = "test",
-            urgency = 0.8,
+            tension = 0.8,
             rawValue = 0.8,
             conversationContext = ai.neopsyke.agent.model.ConversationContext(
                 sessionId = Id.SESSION_ID,

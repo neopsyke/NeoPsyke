@@ -22,7 +22,7 @@ class IdConfigLoaderTest {
               enabled: true
               pulse_interval_ms: 5000
               trigger_threshold: 0.6
-              threshold_on_urgency: false
+              threshold_on_tension: false
               max_consecutive_denials: 3
               backoff_pulses: 5
               max_in_flight_pulses: 15
@@ -48,7 +48,7 @@ class IdConfigLoaderTest {
         assertTrue(config.enabled)
         assertEquals(5000L, config.pulseIntervalMs)
         assertEquals(0.6, config.triggerThreshold, epsilon)
-        assertFalse(config.thresholdOnUrgency)
+        assertFalse(config.thresholdOnTension)
         assertEquals(3, config.maxConsecutiveDenials)
         assertEquals(5, config.backoffPulses)
         assertEquals(15, config.maxInFlightPulses)
@@ -79,7 +79,7 @@ class IdConfigLoaderTest {
         assertTrue(config.enabled)
         assertEquals(5000L, config.pulseIntervalMs)
         assertEquals(0.5, config.triggerThreshold, epsilon)
-        assertTrue(config.thresholdOnUrgency)
+        assertTrue(config.thresholdOnTension)
         assertEquals(5, config.maxConsecutiveDenials)
         assertEquals(10, config.backoffPulses)
         assertEquals(20, config.maxInFlightPulses)

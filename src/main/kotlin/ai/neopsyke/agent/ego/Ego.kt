@@ -391,7 +391,7 @@ class Ego(
         val context = applyIdConvergenceContextForOrigin(
             baseContext = baseContext,
             origin = thought.origin,
-            triggeringUrgency = idNeedUrgency(thought.origin.needId),
+            triggeringTension = idNeedTension(thought.origin.needId),
         )
 
         timing.startPhase("meta_assessment")
@@ -433,7 +433,7 @@ class Ego(
                 type = "impulse_processing",
                 data = mapOf(
                     "need_id" to impulse.needId,
-                    "urgency" to impulse.urgency,
+                    "tension" to impulse.tension,
                     "raw_value" to impulse.rawValue,
                     "root_impulse_id" to impulse.rootImpulseId,
                     "prompt" to impulse.prompt,
@@ -463,7 +463,7 @@ class Ego(
         val idConstrainedContext = applyIdConvergenceContext(
             baseContext = baseContext,
             needId = impulse.needId,
-            triggeringUrgency = impulse.urgency,
+            triggeringTension = impulse.tension,
         )
         val projectSummary = goalsGateway.pendingWorkSummary()
         val context = idConstrainedContext.copy(
@@ -759,7 +759,7 @@ class Ego(
     private fun applyIdConvergenceContextForOrigin(
         baseContext: PlannerContext,
         origin: ActionOrigin,
-        triggeringUrgency: Double,
+        triggeringTension: Double,
     ): PlannerContext {
         if (origin.source != OriginSource.ID) return baseContext
         val needId = origin.needId?.trim().orEmpty()
@@ -767,22 +767,22 @@ class Ego(
         return applyIdConvergenceContext(
             baseContext = baseContext,
             needId = needId,
-            triggeringUrgency = triggeringUrgency,
+            triggeringTension = triggeringTension,
         )
     }
 
     private fun applyIdConvergenceContext(
         baseContext: PlannerContext,
         needId: String,
-        triggeringUrgency: Double,
+        triggeringTension: Double,
     ): PlannerContext {
         val needCfg = id?.needConfig(needId)
         val convergence = needCfg?.convergence ?: ai.neopsyke.agent.id.ConvergenceMode.CONTACT_USER
         val allowEscalation = needCfg?.allowEscalation ?: false
-        val allNeeds = id?.needUrgencies() ?: emptyMap()
+        val allNeeds = id?.needTensions() ?: emptyMap()
         val idState = IdStateSnapshot(
             triggeringNeed = needId,
-            triggeringUrgency = triggeringUrgency,
+            triggeringTension = triggeringTension,
             allNeeds = allNeeds,
             convergence = convergence,
             allowEscalation = allowEscalation,
@@ -806,8 +806,8 @@ class Ego(
         )
     }
 
-    private fun idNeedUrgency(needId: String?): Double =
-        needId?.let { id?.needUrgencies()?.get(it) } ?: 0.0
+    private fun idNeedTension(needId: String?): Double =
+        needId?.let { id?.needTensions()?.get(it) } ?: 0.0
 
     private fun buildEvidenceHints(rootInputId: String?, sessionId: String): String {
         val evidence = deliberation.evidenceFor(rootInputId, sessionId) ?: return ""

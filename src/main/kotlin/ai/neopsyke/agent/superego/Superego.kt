@@ -81,7 +81,7 @@ class Superego(
             )
             instrumentation.emit(
                 AgentEvent(
-                    type = "superego_deterministic_review",
+                    type = "superego_deterministic_judgement",
                     data = mapOf(
                         "action_id" to action.id,
                         "allow" to false,
@@ -125,7 +125,7 @@ class Superego(
         }
         instrumentation.emit(
             AgentEvent(
-                type = "superego_deterministic_review",
+                type = "superego_deterministic_judgement",
                 data = mapOf(
                     "action_id" to action.id,
                     "allow" to true

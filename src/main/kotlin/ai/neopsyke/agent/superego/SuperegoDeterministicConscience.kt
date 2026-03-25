@@ -54,7 +54,7 @@ internal class SuperegoDeterministicConscience(
             allow()
         } catch (_: Exception) {
             deny(
-                ruleId = "deterministic_review_failed",
+                ruleId = "deterministic_judgement_failed",
                 reason = "Deterministic superego checks failed unexpectedly; denying by default."
             )
         }

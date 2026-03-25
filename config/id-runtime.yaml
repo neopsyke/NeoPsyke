@@ -2,7 +2,7 @@ id:
   enabled: true
   pulse_interval_ms: 5000
   trigger_threshold: 0.5
-  threshold_on_urgency: true
+  threshold_on_tension: true
   max_consecutive_denials: 5
   backoff_pulses: 10
   max_in_flight_pulses: 20

@@ -21,7 +21,7 @@ private val logger = KotlinLogging.logger {}
  * The Id — autonomous drive module inspired by the Freudian psyche.
  *
  * Maintains a set of [needs][NeedState] that grow over time. Each pulse,
- * the highest-urgency need above threshold can fire an impulse to the Ego
+ * the highest-tension need above threshold can fire an impulse to the Ego
  * (via [enqueueImpulse]). The Ego processes it through its normal pipeline
  * (planner → superego → execution) and reports back via callbacks.
  *
@@ -148,15 +148,15 @@ class Id(
         }
         if (candidates.isEmpty()) return
 
-        // 6. Winner = highest effective urgency.
-        val winner = candidates.maxBy { it.urgency }
+        // 6. Winner = highest effective tension.
+        val winner = candidates.maxBy { it.tension }
 
         // 7. Enqueue impulse.
         val impulse = PendingImpulse(
             id = pulseCount,
             needId = winner.name,
             prompt = winner.config.prompt,
-            urgency = winner.urgency,
+            tension = winner.tension,
             rawValue = winner.value,
             conversationContext = conversationContext,
         )
@@ -170,16 +170,16 @@ class Id(
             )
             emitImpulseFired(winner, impulse)
             notifyEgo()
-            logger.debug { "Id impulse fired: need='${winner.name}' urgency=${winner.urgency}" }
+            logger.debug { "Id impulse fired: need='${winner.name}' tension=${winner.tension}" }
         } else {
             emitPreGateBlocked(winner.name, "impulse_queue_full")
             logger.debug { "Id impulse rejected (queue full): need='${winner.name}'" }
         }
     }
 
-    /** Returns the urgency or raw value depending on [IdConfig.thresholdOnUrgency]. */
+    /** Returns the tension or raw value depending on [IdConfig.thresholdOnTension]. */
     private fun effectiveValue(need: NeedState): Double =
-        if (config.thresholdOnUrgency) need.urgency else need.value
+        if (config.thresholdOnTension) need.tension else need.value
 
     // ── Ego callbacks ────────────────────────────────────────────────
 
@@ -251,10 +251,10 @@ class Id(
         }
     }
 
-    /** Read-only snapshot of all need urgencies for planner context. */
-    fun needUrgencies(): Map<String, Double> =
+    /** Read-only snapshot of all need tensions for planner context. */
+    fun needTensions(): Map<String, Double> =
         synchronized(stateLock) {
-            needs.mapValues { (_, state) -> state.urgency }
+            needs.mapValues { (_, state) -> state.tension }
         }
 
     /** Look up the config for a specific need. */
@@ -272,7 +272,7 @@ class Id(
                     "ego_busy" to hasPendingWork(),
                     "trigger_threshold" to config.triggerThreshold,
                     "pulse_interval_ms" to config.pulseIntervalMs,
-                    "threshold_on_urgency" to config.thresholdOnUrgency,
+                    "threshold_on_tension" to config.thresholdOnTension,
                 ),
             )
         )
@@ -284,7 +284,7 @@ class Id(
                 type = "id_impulse_fired",
                 data = mapOf(
                     "need_id" to need.name,
-                    "urgency" to need.urgency,
+                    "tension" to need.tension,
                     "raw_value" to need.value,
                     "root_impulse_id" to impulse.rootImpulseId,
                 ),

@@ -6,10 +6,9 @@ import ai.neopsyke.agent.model.ExternalContentArtifact
 interface EvidenceArtifactStore {
     fun record(rootInputId: String?, conversationContext: ConversationContext, artifacts: List<ExternalContentArtifact>)
 
-    fun resolve(
+    fun resolveAll(
         rootInputId: String?,
         conversationContext: ConversationContext,
-        artifactIds: List<String>,
     ): List<ExternalContentArtifact>
 
     fun clear(rootInputId: String?, conversationContext: ConversationContext)
@@ -18,10 +17,9 @@ interface EvidenceArtifactStore {
 object NoopEvidenceArtifactStore : EvidenceArtifactStore {
     override fun record(rootInputId: String?, conversationContext: ConversationContext, artifacts: List<ExternalContentArtifact>) = Unit
 
-    override fun resolve(
+    override fun resolveAll(
         rootInputId: String?,
         conversationContext: ConversationContext,
-        artifactIds: List<String>,
     ): List<ExternalContentArtifact> = emptyList()
 
     override fun clear(rootInputId: String?, conversationContext: ConversationContext) = Unit
@@ -46,14 +44,13 @@ class InMemoryEvidenceArtifactStore : EvidenceArtifactStore {
     }
 
     @Synchronized
-    override fun resolve(
+    override fun resolveAll(
         rootInputId: String?,
         conversationContext: ConversationContext,
-        artifactIds: List<String>,
     ): List<ExternalContentArtifact> {
         val scope = scope(rootInputId, conversationContext) ?: return emptyList()
         val bucket = artifactsByScope[scope] ?: return emptyList()
-        return artifactIds.mapNotNull(bucket::get)
+        return bucket.values.toList()
     }
 
     @Synchronized

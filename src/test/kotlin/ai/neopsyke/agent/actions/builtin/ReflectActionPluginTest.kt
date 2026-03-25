@@ -62,7 +62,7 @@ class ReflectActionPluginTest {
     }
 
     @Test
-    fun `evidence reflection resolves same-request artifacts`() = runBlocking {
+    fun `evidence reflection resolves same-request artifacts from scope`() = runBlocking {
         val store = InMemoryEvidenceArtifactStore()
         val artifact = ExternalContentPipeline.ingest(
             text = "Use Gmail search operators for inbox cleanup.",
@@ -76,7 +76,7 @@ class ReflectActionPluginTest {
         )
         val action = action(
             type = ActionType.REFLECT_EVIDENCE,
-            payload = """{"artifact_ids":["${artifact.id}"],"summary_hint":"Gmail search operators help triage inboxes","keywords":["gmail"]}""",
+            payload = """{"summary_hint":"Gmail search operators help triage inboxes","keywords":["gmail"]}""",
             rootInputId = "root-1",
         )
         store.record(action.rootInputId, action.conversationContext, listOf(artifact))
@@ -97,6 +97,34 @@ class ReflectActionPluginTest {
 
         assertEquals("Reflection recorded to memory.", outcome.statusSummary)
         assertEquals(1, recorder.evidenceArtifactCounts.single())
+    }
+
+    @Test
+    fun `evidence reflection fails when no artifacts in scope`() = runBlocking {
+        val store = InMemoryEvidenceArtifactStore()
+        val action = action(
+            type = ActionType.REFLECT_EVIDENCE,
+            payload = """{"summary_hint":"Something learned","keywords":["test"]}""",
+            rootInputId = "root-empty",
+        )
+        val recorder = RecordingReflectionMemoryRecorder()
+        val plugin = ReflectEvidenceActionPlugin(
+            context = ActionPluginFactoryContext(
+                config = AgentConfig(),
+                webSearchActionHandler = null,
+                mcpTimeTool = null,
+                fetchTool = null,
+                output = {},
+                evidenceArtifactStore = store,
+                reflectionMemoryRecorder = recorder,
+            ),
+            reflectionMemoryRecorder = recorder,
+        )
+
+        val outcome = plugin.execute(action, ActionExecutionContext(searchResultCount = 0))
+
+        assertEquals("reflect_evidence_no_artifacts_in_scope", outcome.actionErrorCategory)
+        assertTrue(recorder.evidenceArtifactCounts.isEmpty())
     }
 
     private fun action(

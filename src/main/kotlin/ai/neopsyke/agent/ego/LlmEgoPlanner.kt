@@ -1864,7 +1864,7 @@ class LlmEgoPlanner(
      * natural motivation framed in terms of the convergence mode.
      */
     private fun buildSelfMotivatedContext(idState: IdStateSnapshot): String {
-        val motivation = String.format(Locale.ROOT, "%.3f", idState.triggeringUrgency)
+        val motivation = String.format(Locale.ROOT, "%.3f", idState.triggeringTension)
         return when (idState.convergence) {
            ai.neopsyke.agent.id.ConvergenceMode.INTERNALIZE -> {
                 if (idState.allowEscalation) {

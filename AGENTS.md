@@ -294,6 +294,14 @@ and any future caller) must follow all three sub-rules:
 
 Do not add a new LLM caller without all three sub-rules in place.
 
+### No LLM-Relayed Internal Identifiers
+Never trust the LLM to relay internal identifiers. If it's resolvable from
+object metadata or scope, resolve it in the execution layer. LLMs hallucinate
+and mangle UUIDs; the action handler must derive system-internal references
+(artifact IDs, scope keys, etc.) from the action's own metadata
+(`rootInputId`, `conversationContext`) rather than parsing them from the
+planner payload.
+
 ### Named Constants for Numeric Thresholds
 Magic numbers (character limits, ratios, step counts, token caps) must be
 extracted to `const val` entries in the `companion object` of the class that

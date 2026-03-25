@@ -5,10 +5,10 @@ import kotlin.math.ln
 import kotlin.math.pow
 
 /**
- * Maps a raw need value in [0, 1] to an effective urgency in [0, 1].
+ * Maps a raw need value in [0, 1] to an effective tension in [0, 1].
  *
  * Different curve shapes encode different behavioural characters:
- * - [Linear]: urgency tracks value 1:1. Baseline / test only.
+ * - [Linear]: tension tracks value 1:1. Baseline / test only.
  * - [Power]: ignorable when low, overwhelming when high. Best for core purpose drives.
  * - [Sigmoid]: tipping-point behaviour. Best for social / interaction drives.
  * - [Logarithmic]: immediately felt but never desperate. Best for curiosity / epistemic drives.
@@ -16,11 +16,11 @@ import kotlin.math.pow
  * All implementations guarantee f(0) ≈ 0 and f(1) ≈ 1 (monotonically non-decreasing).
  */
 sealed class ResponseCurve {
-    abstract fun urgency(rawValue: Double): Double
+    abstract fun tension(rawValue: Double): Double
 
     /** f(x) = x */
     data object Linear : ResponseCurve() {
-        override fun urgency(rawValue: Double): Double = rawValue.coerceIn(0.0, 1.0)
+        override fun tension(rawValue: Double): Double = rawValue.coerceIn(0.0, 1.0)
     }
 
     /** f(x) = x^[exponent]. Exponent > 1 creates a concave-up curve (slow start, fast finish). */
@@ -29,7 +29,7 @@ sealed class ResponseCurve {
             require(exponent > 0.0) { "Power exponent must be positive, was $exponent" }
         }
 
-        override fun urgency(rawValue: Double): Double =
+        override fun tension(rawValue: Double): Double =
             rawValue.coerceIn(0.0, 1.0).pow(exponent)
     }
 
@@ -48,7 +48,7 @@ sealed class ResponseCurve {
         private val f1: Double = rawSigmoid(1.0)
         private val range: Double = f1 - f0
 
-        override fun urgency(rawValue: Double): Double {
+        override fun tension(rawValue: Double): Double {
             val x = rawValue.coerceIn(0.0, 1.0)
             if (range == 0.0) return x // degenerate: fall back to linear
             return ((rawSigmoid(x) - f0) / range).coerceIn(0.0, 1.0)
@@ -70,7 +70,7 @@ sealed class ResponseCurve {
 
         private val denominator: Double = ln(1.0 + scale)
 
-        override fun urgency(rawValue: Double): Double {
+        override fun tension(rawValue: Double): Double {
             val x = rawValue.coerceIn(0.0, 1.0)
             return (ln(1.0 + x * scale) / denominator).coerceIn(0.0, 1.0)
         }

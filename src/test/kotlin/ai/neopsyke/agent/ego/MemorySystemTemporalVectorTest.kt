@@ -216,7 +216,7 @@ class MemorySystemTemporalVectorTest {
                     id = 1L,
                     needId = "learn-something",
                     prompt = "I feel curious and want to learn something new.",
-                    urgency = 0.9,
+                    tension = 0.9,
                     rawValue = 0.9,
                     conversationContext = ai.neopsyke.agent.model.ConversationContext.default(),
                 )
@@ -256,7 +256,7 @@ class MemorySystemTemporalVectorTest {
                     id = 2L,
                     needId = "be-useful",
                     prompt = "I want to do something useful.",
-                    urgency = 0.7,
+                    tension = 0.7,
                     rawValue = 0.7,
                     conversationContext = ai.neopsyke.agent.model.ConversationContext.default(),
                 )
