@@ -1,7 +1,5 @@
 # Getting Started
 
-> **Terminology:** See the [Glossary](glossary.md) for definitions of all agent concepts used in this document.
-
 This guide walks through installation, first run, and real examples of what NeoPsyke can do today.
 
 For the full configuration reference, see [configuration.md](configuration.md).
@@ -276,6 +274,8 @@ Open `http://localhost:8787` in your browser:
 - **Action Control** (`/action-control`) — review staged actions, approve or deny them, and inspect execution receipts.
 
 ---
+
+> **Terminology:** See the [Glossary](glossary.md) for definitions of all agent concepts used in this document.
 
 ## What to explore next
 

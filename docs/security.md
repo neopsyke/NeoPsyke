@@ -1,7 +1,5 @@
 # NeoPsyke Security Model
 
-> **Terminology:** See the [Glossary](glossary.md) for definitions of all agent concepts used in this document.
-
 > Status: Current implementation reference
 >
 > Last updated: 2026-03-24
@@ -60,6 +58,8 @@ The core philosophy is:
 - denials must not dead-end work silently
 
 ---
+
+> **Terminology:** See the [Glossary](glossary.md) for definitions of all agent concepts used in this document.
 
 ## 3. Security Paradigm
 

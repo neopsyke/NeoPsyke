@@ -1,10 +1,10 @@
 # Configuration Reference
 
-> **Terminology:** See the [Glossary](glossary.md) for definitions of all agent concepts used in this document.
-
 NeoPsyke uses domain-grouped YAML configuration files with a layered loading model.
 
 > **A note on tuning.** Many of these knobs interact with each other and with the specific LLM models you use. Token budgets, completion limits, pressure thresholds, and memory assessment intervals all affect agent behavior in non-obvious ways. Significant testing is needed to find good configurations for your setup. When in doubt, start with the defaults and adjust one thing at a time.
+
+> **Terminology:** See the [Glossary](glossary.md) for definitions of all agent concepts used in this document.
 
 ---
 

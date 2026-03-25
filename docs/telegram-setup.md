@@ -1,7 +1,5 @@
 # Telegram Integration Guide
 
-> **Terminology:** See the [Glossary](glossary.md) for definitions of all agent concepts used in this document.
-
 This guide explains how to connect a Telegram bot to NeoPsyke.
 
 It covers:
