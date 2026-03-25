@@ -69,7 +69,6 @@ flowchart LR
 
     M --> WS["Web Search Handler/Engine"]
     CfgWS["WebSearch Provider Config (provider/key/base/model)"] --> WS
-    M --> MT["MCP Time Tool"]
     M --> MF["Fetch Tool"]
     M --> EM["Email Send (Microsoft Graph)"]
     M --> COG["ConversationOutputGateway"]

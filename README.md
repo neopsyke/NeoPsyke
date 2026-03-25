@@ -1,22 +1,20 @@
 # NeoPsyke
 
-NeoPsyke is an autonomous AI agent organized around a cognitive architecture inspired by Freud's structural model. The objective is an agent that can generate its own internal motivation, maintain long-term memory and goals, and subject every action to explicit governance -- producing a more useful, reliable, safe, and creative assistant.
+NeoPsyke is an autonomous AI agent built around a cognitive architecture inspired by Freud's structural model. It is designed to generate internal motivation, maintain long-term memory, durable goals and route actions through explicit governance.
 
-Built around three core modules:
+The system is organized around three core modules:
 
-- **Id** -- Generates motivation and proactive behavior through bounded internal drives.
-- **Ego** -- Plans, reasons, and mediates between motivation, reality, and limitations.
-- **Superego** -- Judges intentions and enforces governance, safety, and self-control.
+- **Id** -- generates motivation and proactive behavior through bounded internal drives.
+- **Ego** -- plans, reasons, and mediates between motivation, reality, and constraints.
+- **Superego** -- judges intentions and enforces governance, safety, and self-control.
 
-For a full reference of all agent concepts and terminology, see the [Glossary](docs/glossary.md).
-
-Backed by LLMs for all internal cognitive roles and with capacity for short-term, long-term, and episodic memory, recurring and durable goals, and a multi-layered security model baked into the core architecture.
+LLMs power the internal cognitive roles. Around that core, NeoPsyke provides short-term, long-term, and episodic memory, durable and recurring goals, and a layered security model built into the runtime.
 
 > **Status:** Experimental. The architecture is real and implemented, but the project is under active development. Expect rough edges.
 
 ## Why this exists
 
-The starting point was simple: by creating an orchestration program using conventional software methods, it may be possible to build an internally motivated control loop that leverages existing LLM technology. Not to create consciousness, and not to claim AGI, but to test that a useful autonomous agent can be organized around distinct internal functions for motivation, planning, and governance.
+The starting point was simple: by creating an orchestration program using conventional software methods, it may be possible to build an internally motivated control loop that leverages existing LLM technology. Not to create consciousness, and not to claim AGI, but to test whether a useful autonomous agent can be organized around distinct internal functions for motivation, planning, and governance.
 
 The choice of Freud's model is not presented as a claim that psychoanalysis is scientifically complete or literally true. It is used as an operational decomposition: the Id, Ego, and Superego provide a familiar and compact way to describe three different jobs inside an agent:
 
@@ -26,22 +24,22 @@ The choice of Freud's model is not presented as a claim that psychoanalysis is s
 
 The project is not trying to be:
 
-- a chat wrapper around an LLM
-- a generic "tool-calling agent"
-- a workflow engine with anthropomorphic names
+- a chat interface over an LLM
+- a generic tool-calling agent
+- a conventional workflow engine with cognitive terminology layered on top
 
-It is trying to build a coherent mind-like architecture in which:
+It is trying to build a useful, capable cognitive architecture with clear internal boundaries:
 
 - perception is distinct from control
 - interpretation is distinct from transport
 - internal drives are distinct from user requests
-- executive choice is distinct from action execution
-- durable goals are distinct from ephemeral turns
-- judgment and safety are explicit architectural functions
+- decision-making is separate from execution
+- durable goals are separate from ephemeral turns
+- judgment and safety are first-class architectural functions
 
 ## Why Kotlin?
 
-Most AI agent projects default to Python. This one uses Kotlin, and the choice is deliberate. Type safety and the compiler give coding agents a tight feedback loop — errors are caught at compile time, not at runtime. Kotlin's sealed hierarchies and data classes are a natural fit for modeling cognitive types. Coroutines provide structured concurrency for an inherently concurrent architecture. And pragmatically: I have deeper experience in Kotlin than in production-grade Python, and trying to write well-architected Python was costing more time than the language choice was worth. The architecture mattered more than the ecosystem default. See [docs/why-kotlin.md](docs/why-kotlin.md) for the full reasoning.
+Most AI agent projects default to Python. This one uses Kotlin, and the choice is deliberate. Type safety and the compiler give coding agents a tight feedback loop -- errors are caught at compile time, not at runtime. Kotlin's sealed hierarchies and data classes are a natural fit for modeling cognitive types. Coroutines provide structured concurrency for an inherently concurrent architecture. And pragmatically: I have deeper experience in Kotlin than in production-grade Python, and trying to write well-architected Python was costing more time than the language choice was worth. The architecture mattered more than the ecosystem default. See [docs/why-kotlin.md](docs/why-kotlin.md) for the full reasoning.
 
 ## Quickstart
 
@@ -74,7 +72,7 @@ export GOOGLE_API_KEY="..."
 # Supported: ANTHROPIC_API_KEY, GROQ_API_KEY, GOOGLE_API_KEY, MISTRAL_API_KEY, OPENAI_API_KEY, OLLAMA_API_KEY
 ```
 
-The overlay merges on top of the bundled defaults — you only need to specify the fields you want to change. Each cognitive role (`planner`, `superego_primary`, `superego_escalation`, `meta_reasoner`, `memory_advisor`) can use a different provider and model.
+The overlay merges on top of the bundled defaults -- you only need to specify the fields you want to change. Each cognitive role (`planner`, `superego_primary`, `superego_escalation`, `meta_reasoner`, `memory_advisor`) can use a different provider and model.
 
 ### 3. (Optional) Start the memory backend
 
@@ -113,6 +111,7 @@ User input -----> SensoryCortex -----> Ego (Planner + Attention)
                     MemorySystem (short-term + long-term + episodic)
                     GoalManager (durable, recurring, scheduled goals)
 ```
+> For a full reference of all agent concepts and terminology, see the [Glossary](docs/glossary.md).
 
 ### Canonical cognitive sequence
 
@@ -134,19 +133,21 @@ The Ego runs in a bounded loop (configurable, default 180 steps per input) to pr
 
 ## Capabilities
 
-**Conversation and reasoning.** Multi-turn dialogue with planning, meta-reasoning for pressure detection and fallback strategies, and a scratchpad for intermediate working state.
+**Conversation and reasoning.** Multi-turn dialogue with planning, bounded deliberation, meta-reasoning under decision pressure, and a scratchpad workspace for intermediate working state.
 
-**Autonomous motivation.** The Id maintains a set of internal drives (learn something, seek interaction) that accumulate pressure over time. When a drive crosses a threshold and the Ego is idle, the Id emits an impulse. If the resulting action is approved and satisfies the need, the drive resets. If denied, pressure continues to build. This creates a closed feedback loop between motivation, governance, and action execution.
+**Autonomous motivation.** The Id maintains internal drives that accumulate pressure over time. When a drive crosses a threshold and the Ego is idle, the system can initiate proactive behavior. Approved actions relieve pressure; denied actions feed back into the loop.
 
-**Durable goals.** Goals are first-class persistent objects with lifecycle management (dormant, active, blocked, suspended, completed, failed). Goals support scheduled triggers, event-driven triggers, polling, manual activation, and async resume. Each goal can have an execution plan with steps and acceptance criteria, or operate as a standing monitor or recurring synthesis task. Goals track novelty to avoid re-alerting on already-seen information.
+**Durable goals.** Goals are first-class persistent objects with lifecycle management (`CREATED`, `PLANNING`, `ACTIVE`, `BLOCKED`, `SUSPENDED`, `COMPLETED`, `FAILED`). They can be triggered by schedules, events, polling, manual activation, or async resume. Each goal can carry an execution plan with steps and acceptance criteria, or act as a standing monitor or recurring synthesis task. Goals also track novelty to avoid re-alerting on already-seen information.
 
-**Three-tier memory.** Short-term memory maintains rolling context per conversation with automatic compaction. Episodic memory records narrative events in a SQLite FTS5 store with configurable retention. Long-term memory uses pgvector for semantic recall and imprint, with an LLM-based advisor that periodically assesses what is worth consolidating.
+**Three-tier memory.** Short-term memory maintains rolling context per conversation with automatic compaction. Episodic memory records narrative events in a SQLite FTS5 store with configurable retention. Long-term memory uses pgvector for semantic recall and imprint, guided by an LLM-based advisor that periodically assesses what is worth consolidating.
 
-**Web search and browsing.** Configurable web search (Groq, Mistral, Google, or OpenAI providers) and website content fetching, with prompt-injection defense applied to all external content before it reaches the planner.
+**Web search and browsing.** Configurable web search (Groq, Mistral, or Google providers) and website content fetching, with prompt-injection defense applied to all external content before it reaches the planner.
 
-**External integrations.** Telegram bot (webhook or polling mode, owner-only filtering). Google Workspace observation (Gmail search/read, Calendar events) via OAuth with PKCE. Email sending via Microsoft Graph (staged by default, requires explicit approval).
+**Human-in-the-loop action control.** High-impact actions can be staged, reviewed, authorized, denied, and recorded through the dashboard instead of being executed immediately.
 
-**Action plugin system.** Actions are discovered at startup via Java `ServiceLoader`. First-party plugins include `contact_user`, `resolution_draft`, `web_search`, `website_fetch`, `reflect_internal`, `reflect_evidence`, `goal_operation`, `email_send`, plus Google Workspace observe actions (`gmail_observe_search`, `gmail_observe_message`, `calendar_observe_events`). New actions can be added by implementing the plugin interface and registering via `ServiceLoader`.
+**External integrations.** Telegram bot support, Google Workspace read/observe integrations for Gmail and Calendar via OAuth with PKCE, and staged email sending through Microsoft Graph.
+
+**Action plugin system.** Actions are discovered at startup via Java `ServiceLoader`. Built-in actions cover user communication (`contact_user`, `resolution_draft`), web research (`web_search`, `website_fetch`), internal reflection and memory capture (`reflect_internal`, `reflect_evidence`), goal management (`goal_operation`), outbound email (`email_send`), and Google Workspace observation (`gmail_observe_search`, `gmail_observe_message`, `calendar_observe_events`). New actions can be added by implementing the plugin interface and registering via `ServiceLoader`.
 
 **Web dashboard.** Chat interface, observability dashboard with runtime metrics, and an action control panel for reviewing staged actions and approvals -- all served from a local web server.
 
@@ -190,7 +191,11 @@ Internal drives and user messages are never allowed to impersonate each other. T
 
 ### Prompt injection defense
 
-All external content (web search results, fetched pages, tool outputs) passes through a deterministic sanitization pipeline before reaching the planner. Action payloads are validated for:
+All external content (web search results, fetched pages, tool outputs) passes through a deterministic sanitization pipeline before reaching the planner.
+
+### Action payload validation
+
+Action payloads are validated for:
 
 - Secret exfiltration attempts
 - PII leakage patterns
@@ -206,7 +211,7 @@ Denied actions are not silently discarded. The denial reason is fed back into th
 
 Staged actions, approvals, denials, and execution receipts are durably recorded and visible through the dashboard. The system maintains an inspectable ledger of what was proposed, what was allowed, and what was executed.
 
-### Current limitations (honestly)
+### Current limitations
 
 Plugins run in-process as trusted code -- third-party connector isolation is designed but not yet implemented. Dashboard approval assumes local owner trust. Prompt injection defense is heuristic, not a full sandbox. These boundaries are documented and tracked.
 
@@ -222,7 +227,7 @@ NeoPsyke does not try to:
 - **Be production-ready today.** The security model is serious but the project is experimental. Deploy at your own risk.
 - **Support untrusted multi-tenant operation.** The current trust model assumes a single owner-operator.
 
-**Known brittleness:**
+**Current risks:**
 
 - LLM quality directly affects planning and reasoning quality. The architecture mitigates but cannot eliminate model errors.
 - The Id's drive model is simple by design (configurable state machine, not learned behavior). This mirrors the structural role of drives in the original model -- complexity is expected to emerge from the interaction between modules, not from the drive source itself.
@@ -251,7 +256,7 @@ Live evaluation lanes (weak-structure, prod-acceptance) and memory live eval are
 
 ## Configuration
 
-NeoPsyke ships with bundled default configuration under `config/`. Local overlay files in the working directory merge on top of the bundled defaults — you only need to specify the fields you want to change.
+NeoPsyke ships with bundled default configuration under `config/`. Local overlay files in the working directory merge on top of the bundled defaults -- you only need to specify the fields you want to change.
 
 | Bundled default | Local overlay | Env override | Controls |
 |---|---|---|---|
@@ -259,7 +264,7 @@ NeoPsyke ships with bundled default configuration under `config/`. Local overlay
 | `config/agent-runtime.yaml` | `agent-runtime.yaml` | `NEOPSYKE_AGENT_CONFIG_FILE` | Planner limits, superego budget, memory caps, dashboard port |
 | `config/memory-runtime.yaml` | `memory-runtime.yaml` | `NEOPSYKE_MEMORY_CONFIG_FILE` | Long-term memory provider (managed pgvector / external / off) |
 | `config/id-runtime.yaml` | `id-runtime.yaml` | `NEOPSYKE_ID_CONFIG_FILE` | Drive system (needs, growth rates, thresholds, cooldowns) |
-| — | `action-security.yaml` | — | Per-action commit policy (direct/staged/denied) |
+| -- | `action-security.yaml` | -- | Per-action commit policy (direct/staged/denied) |
 
 Precedence: environment variables > external YAML overlay > bundled YAML defaults.
 
@@ -274,7 +279,11 @@ Each cognitive role (planner, superego primary/escalation, action verifier, meta
 | [docs/configuration.md](docs/configuration.md) | Full configuration reference (YAML files, env vars, tuning) |
 | [docs/evaluation.md](docs/evaluation.md) | Testing layers, eval pipeline, and contributor directions |
 | [docs/env-reference.md](docs/env-reference.md) | Complete environment variable reference |
+| [docs/glossary.md](docs/glossary.md) | Core runtime terms and architecture vocabulary |
 | [docs/security.md](docs/security.md) | Security model: trust, policy enforcement, action lifecycle |
+| [docs/tuning/PROMPT_BUDGET_RUN_DIAGNOSTICS.md](docs/tuning/PROMPT_BUDGET_RUN_DIAGNOSTICS.md) | How to inspect prompt-budget run diagnostics |
+| [docs/tuning/PROMPT_BUDGET_TUNING_GUIDE.md](docs/tuning/PROMPT_BUDGET_TUNING_GUIDE.md) | Prompt-budget tuning guidance |
+| [docs/tuning/TASK_VERIFIER_TUNING_GUIDE.md](docs/tuning/TASK_VERIFIER_TUNING_GUIDE.md) | Task-verifier tuning guidance |
 | [docs/why-kotlin.md](docs/why-kotlin.md) | Why Kotlin instead of Python |
 | [docs/telegram-setup.md](docs/telegram-setup.md) | Telegram bot setup (webhook/polling, owner filtering) |
 | `AGENTS.md` | Instructions for coding agents working in this repository |
