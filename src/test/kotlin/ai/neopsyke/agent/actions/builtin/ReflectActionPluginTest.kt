@@ -112,7 +112,6 @@ class ReflectActionPluginTest {
             context = ActionPluginFactoryContext(
                 config = AgentConfig(),
                 webSearchActionHandler = null,
-                mcpTimeTool = null,
                 fetchTool = null,
                 output = {},
                 evidenceArtifactStore = store,
