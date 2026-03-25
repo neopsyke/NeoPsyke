@@ -1,6 +1,7 @@
 package ai.neopsyke.agent.actioncontrol
 
 import com.fasterxml.jackson.databind.DeserializationFeature
+import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory
 import com.fasterxml.jackson.module.kotlin.readValue
@@ -253,7 +254,7 @@ class ConfiguredActionAuthorizationPolicy(
         }
         val node = goalOperationNode(action, ActionRegistry.empty()) ?: return false
         val operation = node.path("operation").asText().trim().lowercase()
-        val cronExpression = node.path("cron_expression").asText().ifEmpty { node.path("cronExpression").asText() }.trim()
+        val cronExpression = optionalText(node, "cron_expression", "cronExpression")
         return cronExpression.isNotBlank() && operation in setOf("create", "revise_plan")
     }
 
@@ -266,7 +267,7 @@ class ConfiguredActionAuthorizationPolicy(
         }
         val node = goalOperationNode(action, actionRegistry) ?: return null
         val operation = node.path("operation").asText().trim().lowercase()
-        val goalId = node.path("goal_id").asText().ifEmpty { node.path("goalId").asText() }.trim()
+        val goalId = optionalText(node, "goal_id", "goalId")
         return when (operation) {
             "delete_all" -> GoalDeleteIntent.DELETE_ALL
             "delete" -> if (goalId.isNotBlank()) GoalDeleteIntent.DELETE_EXACT else GoalDeleteIntent.DELETE_AMBIGUOUS
@@ -280,6 +281,19 @@ class ConfiguredActionAuthorizationPolicy(
     ) = runCatching {
         mapper.readTree(actionRegistry.repairPlannerPayload(ActionType.GOAL_OPERATION, action.payload))
     }.getOrNull()
+
+    private fun optionalText(
+        node: JsonNode,
+        primaryField: String,
+        fallbackField: String,
+    ): String {
+        val primary = node.path(primaryField)
+        if (primary.isTextual) {
+            return primary.asText().trim()
+        }
+        val fallback = node.path(fallbackField)
+        return if (fallback.isTextual) fallback.asText().trim() else ""
+    }
 
     private fun isOwnerVerifiedDirectChannel(conversationContext: ConversationContext): Boolean =
         conversationContext.security.principal.role == PrincipalRole.OWNER &&

@@ -10,7 +10,7 @@ interface ActionControlStore : AutoCloseable {
     fun saveStagedAction(action: StagedAction): StagedAction
     fun updateStagedAction(action: StagedAction): StagedAction
     fun stagedAction(id: String): StagedAction?
-    fun listStagedActions(limit: Int): List<StagedAction>
+    fun listStagedActions(limit: Int, includeTerminal: Boolean = true): List<StagedAction>
     fun listRunnableReadyAutonomousActions(limit: Int): List<StagedAction>
     fun tryClaimAutonomousReadyAction(
         stagedActionId: String,

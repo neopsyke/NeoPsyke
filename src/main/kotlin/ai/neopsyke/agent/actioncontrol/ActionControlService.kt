@@ -96,7 +96,7 @@ interface ActionControlService {
         receiptId: String? = null,
     ): ActionLedgerEntry?
 
-    fun stagedActions(limit: Int): List<StagedAction>
+    fun stagedActions(limit: Int, includeTerminal: Boolean = true): List<StagedAction>
     fun stagedAction(id: String): StagedAction?
     fun receipts(limit: Int): List<ActionReceipt>
     fun receipt(id: String): ActionReceipt?
@@ -158,7 +158,7 @@ object NoopActionControlService : ActionControlService {
         receiptId: String?,
     ): ActionLedgerEntry? = null
 
-    override fun stagedActions(limit: Int): List<StagedAction> = emptyList()
+    override fun stagedActions(limit: Int, includeTerminal: Boolean): List<StagedAction> = emptyList()
     override fun stagedAction(id: String): StagedAction? = null
     override fun receipts(limit: Int): List<ActionReceipt> = emptyList()
     override fun receipt(id: String): ActionReceipt? = null
@@ -321,7 +321,7 @@ class LegacyCompatibleActionControlService(
         receiptId: String?,
     ): ActionLedgerEntry? = null
 
-    override fun stagedActions(limit: Int): List<StagedAction> = emptyList()
+    override fun stagedActions(limit: Int, includeTerminal: Boolean): List<StagedAction> = emptyList()
     override fun stagedAction(id: String): StagedAction? = null
     override fun receipts(limit: Int): List<ActionReceipt> = emptyList()
     override fun receipt(id: String): ActionReceipt? = null
@@ -540,8 +540,11 @@ class DefaultActionControlService(
         }
     }
 
-    override fun stagedActions(limit: Int): List<StagedAction> =
-        store.listStagedActions(limit.coerceAtLeast(1).coerceAtMost(config.maxInspectResults))
+    override fun stagedActions(limit: Int, includeTerminal: Boolean): List<StagedAction> =
+        store.listStagedActions(
+            limit = limit.coerceAtLeast(1).coerceAtMost(config.maxInspectResults),
+            includeTerminal = includeTerminal,
+        )
 
     override suspend fun recordBypassExecution(
         action: PendingAction,

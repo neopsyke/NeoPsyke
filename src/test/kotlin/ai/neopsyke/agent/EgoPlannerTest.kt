@@ -1137,7 +1137,7 @@ class EgoPlannerTest {
         planner.decide(ai.neopsyke.agent.model.EgoTrigger.IncomingInput(PendingInput(1, "question")), context)
 
         val prompt = llm.lastMessages.last().content
-        assertTrue(prompt.contains("Long-term memory recall:"))
+        assertTrue(prompt.contains("Relevant long-term memory:"))
         assertTrue(prompt.contains("deploy checklist"))
     }
 
@@ -1227,7 +1227,7 @@ class EgoPlannerTest {
         )
 
         val prompt = llm.lastMessages.last().content
-        assertTrue(prompt.contains("Ambient context:"))
+        assertTrue(prompt.contains("Background context:"))
         assertTrue(prompt.contains("active_goals:"))
         assertTrue(prompt.contains("Improve the memory subsystem"))
         assertTrue(prompt.contains("unresolved_open_loops:"))

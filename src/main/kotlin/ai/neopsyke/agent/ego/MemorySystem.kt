@@ -1148,6 +1148,15 @@ class MemorySystem(
         } else {
             null
         }
+        if (!ambientContext.isEmpty()) {
+            instrumentation.emit(
+                AgentEvents.ambientContextSnapshot(
+                    trigger = "impulse",
+                    usage = "memory_recall_cue",
+                    ambientContext = ambientContext,
+                )
+            )
+        }
         return listOfNotNull(
             baseCue.takeIf { it.isNotBlank() },
             renderedAmbientContext.takeIf { it.isNotBlank() }?.let { "Ambient context:\n$it" },

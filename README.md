@@ -14,7 +14,7 @@ Backed by LLMs for all internal cognitive roles and with capacity for short-term
 
 ## Why this exists
 
-The starting point was simple: by creating an orchestration program using conventional software methods, it may be possible to build an internally motivated control loop that leverages existing LLM technology. Not a claim of consciousness, and not a claim of AGI, but a claim that a useful autonomous agent can be organized around distinct internal functions for motivation, planning, and governance.
+The starting point was simple: by creating an orchestration program using conventional software methods, it may be possible to build an internally motivated control loop that leverages existing LLM technology. Not to create consciousness, and not to claim AGI, but to test that a useful autonomous agent can be organized around distinct internal functions for motivation, planning, and governance.
 
 The choice of Freud's model is not presented as a claim that psychoanalysis is scientifically complete or literally true. It is used as an operational decomposition: the Id, Ego, and Superego provide a familiar and compact way to describe three different jobs inside an agent:
 

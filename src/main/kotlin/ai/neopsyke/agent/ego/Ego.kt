@@ -109,6 +109,7 @@ class Ego(
         resolveSessionId = ::resolveSessionId,
         superegoContext = ::superegoContext,
         cleanupResolvedInputAfterAnswer = ::cleanupResolvedInputAfterAnswer,
+        cleanupSatisfiedIdImpulse = ::cleanupSatisfiedIdImpulse,
         getId = { id },
         actionControlService = actionControlService,
         actionLifecycleObserver = goalsGateway,
@@ -592,6 +593,13 @@ class Ego(
         val shortTermSummary = memory.currentShortTermSummary()
         val episodicCues = memory.recallEpisodicAsVectorCues(recentDialogue)
         val ambientContext = buildAmbientContext(trigger)
+        emitAmbientContextSnapshot(
+            trigger = trigger,
+            usage = "planner_context",
+            ambientContext = ambientContext,
+            sessionId = sessionId,
+            rootInputId = rootInputIdForTrigger(trigger),
+        )
         val longTermRecall = memory.recall(
             trigger = trigger,
             shortTermSummary = shortTermSummary,
@@ -713,6 +721,41 @@ class Ego(
             is EgoTrigger.PendingThoughtInput -> trigger.thought.origin.source == OriginSource.ID
         }
 
+    private fun emitAmbientContextSnapshot(
+        trigger: EgoTrigger,
+        usage: String,
+        ambientContext: AmbientContext,
+        sessionId: String,
+        rootInputId: String?,
+    ) {
+        if (ambientContext.isEmpty()) return
+        instrumentation.emit(
+            AgentEvents.ambientContextSnapshot(
+                trigger = triggerLabel(trigger),
+                usage = usage,
+                ambientContext = ambientContext,
+                sessionId = sessionId,
+                rootInputId = rootInputId,
+            )
+        )
+    }
+
+    private fun rootInputIdForTrigger(trigger: EgoTrigger): String? =
+        when (trigger) {
+            is EgoTrigger.IncomingInput -> trigger.input.rootInputId
+            is EgoTrigger.PendingThoughtInput -> trigger.thought.rootInputId
+            is EgoTrigger.IncomingImpulse -> trigger.impulse.rootImpulseId
+            is EgoTrigger.GoalWork -> trigger.workUnit.rootInputId
+        }
+
+    private fun triggerLabel(trigger: EgoTrigger): String =
+        when (trigger) {
+            is EgoTrigger.IncomingInput -> "input"
+            is EgoTrigger.PendingThoughtInput -> "thought"
+            is EgoTrigger.IncomingImpulse -> "impulse"
+            is EgoTrigger.GoalWork -> "goal-work"
+        }
+
     private fun applyIdConvergenceContextForOrigin(
         baseContext: PlannerContext,
         origin: ActionOrigin,
@@ -745,19 +788,19 @@ class Ego(
             allowEscalation = allowEscalation,
         )
 
-        // Internalize without escalation must not offer direct user messaging.
-        val filteredDispatchable = if (convergence == ai.neopsyke.agent.id.ConvergenceMode.INTERNALIZE && !allowEscalation) {
-            baseContext.dispatchableActions - setOf(ActionType.CONTACT_USER)
+        // Internalize without escalation must stay evidence-bound: no direct user
+        // messaging and no trusted-data-only reflect_internal fallback.
+        val blockedPlannerActions = if (convergence == ai.neopsyke.agent.id.ConvergenceMode.INTERNALIZE && !allowEscalation) {
+            setOf(ActionType.CONTACT_USER, ActionType.REFLECT_INTERNAL)
         } else {
-            baseContext.dispatchableActions
+            emptySet()
         }
-        val filteredDefinitions = if (convergence == ai.neopsyke.agent.id.ConvergenceMode.INTERNALIZE && !allowEscalation) {
-            baseContext.actionDefinitions.filter { it.actionType != ActionType.CONTACT_USER }
-        } else {
-            baseContext.actionDefinitions
-        }
+        val filteredAvailable = baseContext.availableActions - blockedPlannerActions
+        val filteredDispatchable = baseContext.dispatchableActions - blockedPlannerActions
+        val filteredDefinitions = baseContext.actionDefinitions.filterNot { it.actionType in blockedPlannerActions }
         return baseContext.copy(
             idState = idState,
+            availableActions = filteredAvailable,
             dispatchableActions = filteredDispatchable,
             actionDefinitions = filteredDefinitions,
         )
@@ -823,6 +866,14 @@ class Ego(
     }
 
     private fun cleanupResolvedInputAfterAnswer(action: PendingAction) {
+        cleanupResolvedInput(action, reason = "input_resolved")
+    }
+
+    private fun cleanupSatisfiedIdImpulse(action: PendingAction) {
+        cleanupResolvedInput(action, reason = "id_satisfaction_resolved")
+    }
+
+    private fun cleanupResolvedInput(action: PendingAction, reason: String) {
         val rootInputId = action.rootInputId ?: return
         val sessionId = resolveSessionId(action.conversationContext)
         val scope = inputScope(rootInputId, action.conversationContext)
@@ -861,7 +912,7 @@ class Ego(
                         "root_input_received_at_ms" to destroyedScratchpad.rootInputReceivedAtMs,
                         "section_count" to destroyedScratchpad.sectionCount,
                         "evidence_count" to destroyedScratchpad.evidenceCount,
-                        "reason" to "input_resolved"
+                        "reason" to reason
                     )
                 )
             )
@@ -879,7 +930,8 @@ class Ego(
                     "root_input_received_at_ms" to action.rootInputReceivedAtMs,
                     "session_id" to sessionId,
                     "removed_thoughts" to cleared.thoughtsRemoved,
-                    "removed_actions" to cleared.actionsRemoved
+                    "removed_actions" to cleared.actionsRemoved,
+                    "reason" to reason
                 )
             )
         )

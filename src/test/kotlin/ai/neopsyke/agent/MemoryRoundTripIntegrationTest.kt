@@ -80,7 +80,7 @@ class MemoryRoundTripIntegrationTest {
             assertTrue(hippocampus.imprints.single().summary.contains("favorite color is teal", ignoreCase = true))
             assertTrue(hippocampus.recallQueries.size >= 2)
             val lastPlannerPrompt = plannerLlm.lastMessages.last().content
-            assertTrue(lastPlannerPrompt.contains("Long-term memory recall:"))
+            assertTrue(lastPlannerPrompt.contains("Relevant long-term memory:"))
             assertTrue(lastPlannerPrompt.contains("favorite color is teal", ignoreCase = true))
             assertEquals(
                 listOf(

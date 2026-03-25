@@ -32,6 +32,9 @@
       align-items: center;
       justify-content: space-between;
     }
+    body.embedded header a.ghost-btn {
+      display: none;
+    }
     .status { font-size: 12px; color: var(--muted); }
 
     /* Header loop pills */
@@ -852,6 +855,7 @@
       inFlight: { active: false, taskType: null, detail: null },
       queues: { inputs: [], thoughts: [], actions: [] },
       recentEvents: [],
+      expandedEventDetails: new Set(),
       lastSuperegoInput: null,
       lastSuperegoOutput: null,
       actionCapabilities: [],
@@ -934,7 +938,7 @@
       "memory_consolidation_assessment", "long_term_memory_assessment",
       "convergence_thought_enqueued", "warning",
       "long_term_memory_explicit_intent_detected",
-      "memory_recall_failure",
+      "memory_recall_failure", "ambient_context_snapshot",
       "impulse_processing", "impulse_noop", "impulse_lifecycle_finalized",
       "id_impulse_fired", "id_impulse_accepted", "id_impulse_completed",
       "id_impulse_denied", "id_pregate_blocked"
@@ -986,6 +990,7 @@
       const type = String(event?.type || "");
       if (type.startsWith("id_") || type.startsWith("impulse_")) return "id";
       if (type.startsWith("planner") || type === "plan_created" || type === "plan_steps_enqueued" || type === "duplicate_plan_suppressed") return "planner";
+      if (type === "ambient_context_snapshot") return "planner";
       if (type.startsWith("superego") || type === "action_review_result" || type === "action_denied") return "superego";
       if (type.startsWith("action_")) return "action";
       if (type.includes("thought") || type === "input_processing" || type === "input_queued") return "thought";
@@ -1079,6 +1084,23 @@
         }
         case "memory_recall_start":
           return (d.provider || "") + " — " + (d.cue_preview || "");
+        case "ambient_context_snapshot": {
+          const usage = String(d.usage || "unknown");
+          const trigger = String(d.trigger || "unknown");
+          const rendered = String(d.rendered_context || "");
+          const sectionCounts = [
+            ["goals", Array.isArray(d.active_goals) ? d.active_goals.length : 0],
+            ["themes", Array.isArray(d.recent_scratchpad_themes) ? d.recent_scratchpad_themes.length : 0],
+            ["updates", Array.isArray(d.recent_useful_actions_updates) ? d.recent_useful_actions_updates.length : 0],
+            ["loops", Array.isArray(d.unresolved_open_loops) ? d.unresolved_open_loops.length : 0],
+            ["topics", Array.isArray(d.recent_exact_learning_topics) ? d.recent_exact_learning_topics.length : 0]
+          ]
+            .filter(function(entry) { return entry[1] > 0; })
+            .map(function(entry) { return entry[0] + "=" + entry[1]; })
+            .join(", ");
+          const header = usage + " / " + trigger + (sectionCounts ? " — " + sectionCounts : "");
+          return rendered ? header + "\n" + rendered : header;
+        }
         case "memory_recall_result": {
           const header = (d.hit_count || 0) + " hits, " +
             (d.recall_chars || 0) + " chars" +
@@ -1142,6 +1164,18 @@
           return (d.need_id || "?") + " denials=" + (d.consecutive_denials || 0);
         case "id_pregate_blocked":
           return (d.need_id || "?") + " — " + (d.reason || "?");
+        case "prompt_budget_allocation": {
+          const callSite = String(d.call_site || "unknown");
+          const dropped = Number(d.dropped_section_count || 0);
+          const emitted = Array.isArray(d.emitted_section_keys) ? d.emitted_section_keys : [];
+          const droppedKeys = Array.isArray(d.dropped_section_keys) ? d.dropped_section_keys : [];
+          const ambientKept = emitted.includes("planner_ambient_context");
+          const ambientDropped = droppedKeys.includes("planner_ambient_context");
+          let line = callSite + " — dropped=" + dropped;
+          if (ambientKept) line += " ambient=kept";
+          else if (ambientDropped) line += " ambient=dropped";
+          return line;
+        }
         case "id_activity_decay":
           return (d.need_id || "?") + " " + (d.event_type || "") + " -" + (d.decay || 0) + " (" + (d.before != null ? Number(d.before).toFixed(3) : "?") + "→" + (d.after != null ? Number(d.after).toFixed(3) : "?") + ")";
         default:
@@ -1172,17 +1206,18 @@
           ? "<div class=\"tl-content\">" + escapeHtml(short(content, 300)) + "</div>"
           : "";
         let detailsHtml;
+        const detailsKey = eventDetailsKey(event, "timeline-primary");
         if (event.type === "plan_created" && Array.isArray((event.data || {}).steps) && event.data.steps.length) {
           const stepsHtml = event.data.steps
             .map((s, i) => escapeHtml((i + 1) + ". " + s))
             .join("\n");
           detailsHtml =
-            "<details class=\"tl-raw\"><summary>plan steps</summary>" +
+            "<details class=\"tl-raw\" data-event-details-key=\"" + escapeHtml(detailsKey) + "\"" + detailsOpenAttr(detailsKey) + "><summary>plan steps</summary>" +
               "<pre>" + stepsHtml + "</pre>" +
             "</details>";
         } else {
           detailsHtml =
-            "<details class=\"tl-raw\"><summary>raw</summary>" +
+            "<details class=\"tl-raw\" data-event-details-key=\"" + escapeHtml(detailsKey) + "\"" + detailsOpenAttr(detailsKey) + "><summary>raw</summary>" +
               "<pre>" + escapeHtml(fmt(event.data || {})) + "</pre>" +
             "</details>";
         }
@@ -1198,8 +1233,9 @@
         "</div>";
       }
 
+      const detailsKey = eventDetailsKey(event, "timeline-secondary");
       return "<div class=\"tl-row tl-secondary" + catClass + criticalClass + "\">" +
-        "<details>" +
+        "<details data-event-details-key=\"" + escapeHtml(detailsKey) + "\"" + detailsOpenAttr(detailsKey) + ">" +
           "<summary>" +
             "<span class=\"tl-type\">" + escapeHtml(typeLabel) + "</span> " +
             sessionChip +
@@ -1361,8 +1397,35 @@
       return short(JSON.stringify(compact), 220);
     }
 
+    function eventBaseKey(event) {
+      if (event.id != null && event.id !== "") return String(event.id);
+      const ts = event.tsIso || event.ts || "unknown-ts";
+      return String(ts) + ":" + String(event.type || "unknown-type");
+    }
+
+    function eventDetailsKey(event, section) {
+      return String(section) + ":" + eventBaseKey(event);
+    }
+
+    function detailsOpenAttr(detailsKey) {
+      return state.expandedEventDetails.has(detailsKey) ? " open" : "";
+    }
+
+    function pruneExpandedDetailsState() {
+      const validKeys = new Set();
+      state.recentEvents.forEach(function(event) {
+        validKeys.add(eventDetailsKey(event, "action"));
+        validKeys.add(eventDetailsKey(event, "timeline-primary"));
+        validKeys.add(eventDetailsKey(event, "timeline-secondary"));
+      });
+      state.expandedEventDetails.forEach(function(detailsKey) {
+        if (!validKeys.has(detailsKey)) state.expandedEventDetails.delete(detailsKey);
+      });
+    }
+
     function renderEventItem(event) {
-      return "<div class=\"item\"><details>" +
+      const detailsKey = eventDetailsKey(event, "action");
+      return "<div class=\"item\"><details data-event-details-key=\"" + escapeHtml(detailsKey) + "\"" + detailsOpenAttr(detailsKey) + ">" +
         "<summary>" +
         "<span class=\"pill\">#" + escapeHtml(event.id || "?") + " " + escapeHtml(event.type) + "</span> " +
         "<span class=\"ts\">" + escapeHtml(event.tsIso || new Date(event.ts).toISOString()) + "</span> " +
@@ -1999,6 +2062,7 @@
     function applyEvent(event) {
       state.recentEvents.push(event);
       if (state.recentEvents.length > 2000) state.recentEvents.shift();
+      pruneExpandedDetailsState();
 
       switch (event.type) {
         case "loop_status":
@@ -2139,6 +2203,61 @@
       });
     }
 
+    const usingShellTransport = window.self !== window.top;
+    let dashboardSource = null;
+    let idCountdownTimer = null;
+    let embeddedVisible = !usingShellTransport;
+    let bootComplete = false;
+    const pendingShellEvents = [];
+
+    function handleShellDashboardEvent(eventName, payload) {
+      if (eventName !== "agent") return;
+      try {
+        applyEvent(JSON.parse(payload));
+      } catch (err) {
+        console.error("[dashboard] failed to parse shell payload", err, payload);
+      }
+    }
+
+    function flushPendingShellEvents() {
+      if (!bootComplete) return;
+      while (pendingShellEvents.length > 0) {
+        const item = pendingShellEvents.shift();
+        handleShellDashboardEvent(item.eventName, item.payload);
+      }
+    }
+
+    function connectDashboardStream() {
+      const status = document.getElementById("status");
+      if (usingShellTransport || dashboardSource || !embeddedVisible) return;
+      const es = new EventSource("/api/dashboard/events");
+      dashboardSource = es;
+      es.addEventListener("open", () => { status.textContent = "connected"; });
+      es.addEventListener("error", () => { status.textContent = "reconnecting..."; });
+      es.addEventListener("agent", (msg) => {
+        try {
+          applyEvent(JSON.parse(msg.data));
+        } catch (err) {
+          console.error("[dashboard] failed to parse SSE payload", err, msg && msg.data);
+        }
+      });
+    }
+
+    function disconnectDashboardStream() {
+      if (!dashboardSource) return;
+      dashboardSource.close();
+      dashboardSource = null;
+    }
+
+    function setEmbeddedVisibility(visible) {
+      embeddedVisible = visible;
+      if (embeddedVisible) {
+        connectDashboardStream();
+      } else {
+        disconnectDashboardStream();
+      }
+    }
+
     async function boot() {
       const status = document.getElementById("status");
       try {
@@ -2170,6 +2289,7 @@
           }
         });
       } catch (err) {
+        status.textContent = "failed to load snapshot: " + (err && err.message ? err.message : "unknown");
         console.error("[dashboard] failed to load initial snapshot", err);
       }
 
@@ -2186,22 +2306,44 @@
         state.scratchpad.activeTab = "raw";
         renderScratchpadDrawer();
       });
+      document.addEventListener("toggle", (event) => {
+        const detailsEl = event.target;
+        if (!(detailsEl instanceof HTMLDetailsElement)) return;
+        if (!detailsEl.closest("#timeline, #actions")) return;
+        const detailsKey = detailsEl.dataset.eventDetailsKey;
+        if (!detailsKey) return;
+        if (detailsEl.open) state.expandedEventDetails.add(detailsKey);
+        else state.expandedEventDetails.delete(detailsKey);
+      }, true);
       render();
-      setInterval(tickIdCountdowns, 1000);
-
-      const es = new EventSource("/api/obs/events");
-      es.addEventListener("open", () => { status.textContent = "connected"; });
-      es.addEventListener("error", () => { status.textContent = "reconnecting..."; });
-      es.addEventListener("agent", (msg) => {
-        try {
-          applyEvent(JSON.parse(msg.data));
-        } catch (err) {
-          console.error("[dashboard] failed to parse SSE payload", err, msg && msg.data);
-        }
-      });
-      window.addEventListener("beforeunload", () => { es.close(); });
-      window.addEventListener("pagehide", () => { es.close(); });
+      idCountdownTimer = setInterval(tickIdCountdowns, 1000);
+      bootComplete = true;
+      flushPendingShellEvents();
+      connectDashboardStream();
+      window.addEventListener("beforeunload", () => { disconnectDashboardStream(); });
+      window.addEventListener("pagehide", () => { disconnectDashboardStream(); });
     }
+
+    if (window.self !== window.top) {
+      document.body.classList.add("embedded");
+    }
+    window.addEventListener("message", (event) => {
+      if (event.origin !== window.location.origin) return;
+      if (!event.data || typeof event.data.type !== "string") return;
+      if (event.data.type === "neopsyke-shell-visibility") {
+        setEmbeddedVisibility(Boolean(event.data.visible));
+        return;
+      }
+      if (event.data.type === "neopsyke-dashboard-bootstrap") {
+        pendingShellEvents.push(...(event.data.events || []));
+        flushPendingShellEvents();
+        return;
+      }
+      if (event.data.type === "neopsyke-dashboard-event") {
+        pendingShellEvents.push({ eventName: event.data.eventName, payload: event.data.payload });
+        flushPendingShellEvents();
+      }
+    });
 
     boot();
   </script>

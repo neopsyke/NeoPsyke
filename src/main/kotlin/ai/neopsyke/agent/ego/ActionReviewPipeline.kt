@@ -5,6 +5,7 @@ import ai.neopsyke.agent.actioncontrol.ActionControlDecisionResult
 import ai.neopsyke.agent.actioncontrol.ActionControlService
 import ai.neopsyke.agent.actioncontrol.LegacyCompatibleActionControlService
 import ai.neopsyke.agent.config.*
+import ai.neopsyke.agent.id.evaluateSatisfaction
 import ai.neopsyke.agent.model.*
 import ai.neopsyke.agent.cortex.motor.MotorCortex
 import ai.neopsyke.agent.memory.longterm.MemoryEventType
@@ -37,6 +38,7 @@ internal class ActionReviewPipeline(
     private val resolveSessionId: (ConversationContext) -> String,
     private val superegoContext: (String, String?, ActionOrigin, ConversationContext) -> SuperegoContext,
     private val cleanupResolvedInputAfterAnswer: (PendingAction) -> Unit,
+    private val cleanupSatisfiedIdImpulse: (PendingAction) -> Unit,
     private val getId: () -> ai.neopsyke.agent.id.Id?,
     private val actionControlService: ActionControlService = LegacyCompatibleActionControlService { action, authorization ->
         motorCortex.execute(action, config.searchResultCount, authorization)
@@ -232,6 +234,11 @@ internal class ActionReviewPipeline(
             sessionId = sessionId
         )
         maybeDeliverAssistantOutput(resolvedAction, outcome, convCtx)
+        if (shouldCleanupSatisfiedIdImpulse(resolvedAction, outcome)) {
+            cleanupSatisfiedIdImpulse(resolvedAction)
+            instrumentation.emit(AgentEvents.phaseTimings(timing.build()))
+            return
+        }
 
         timing.startPhase("follow_up")
         maybeEnqueueFollowUp(resolvedAction, outcome, observed, convCtx)
@@ -281,7 +288,25 @@ internal class ActionReviewPipeline(
         deliberation.onActionExecuted(resolvedAction, observed)
         maybeRecordScratchpadOutcome(resolvedAction, outcome, observed)
         maybeRunTerminalAnswerMemoryAssessment(resolvedAction, outcome, sessionId)
+        if (shouldCleanupSatisfiedIdImpulse(resolvedAction, outcome)) {
+            cleanupSatisfiedIdImpulse(resolvedAction)
+            instrumentation.emit(AgentEvents.phaseTimings(timing.build()))
+            return
+        }
         instrumentation.emit(AgentEvents.phaseTimings(timing.build()))
+    }
+
+    private fun shouldCleanupSatisfiedIdImpulse(
+        action: PendingAction,
+        outcome: ActionOutcome,
+    ): Boolean {
+        if (!outcome.successful) return false
+        if (action.type == ActionType.CONTACT_USER) return false
+        if (action.origin.source != OriginSource.ID) return false
+        val needId = action.origin.needId?.trim().orEmpty()
+        if (needId.isBlank()) return false
+        val needConfig = getId()?.needConfig(needId) ?: return false
+        return needConfig.evaluateSatisfaction(outcome.effects).satisfied
     }
 
     // ── Review gates ──

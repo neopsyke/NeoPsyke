@@ -81,7 +81,17 @@ class IdEgoLifecycleIntegrationTest {
             config = config,
             instrumentation = instrumentation,
         )
-        val idModule = buildIdModule(instrumentation)
+        val idModule = buildIdModule(
+            instrumentation = instrumentation,
+            needConfig = NeedConfig(
+                description = "test",
+                growthRate = 0.1,
+                cooldownPulses = 0,
+                prompt = "Be useful.",
+                satisfactionEffectsAnyOf = setOf(ActionEffect.DURABLE_MEMORY_SAVED),
+                responseCurve = ResponseCurveConfig(type = "linear"),
+            ),
+        )
         ego.setId(idModule)
 
         val rootImpulseId = "impulse-root-parallel"
@@ -105,14 +115,13 @@ class IdEgoLifecycleIntegrationTest {
         val idDenied = instrumentation.events.filter { it.type == "id_impulse_denied" }
         val idCompleted = instrumentation.events.filter { it.type == "id_impulse_completed" }
         assertEquals(1, idAccepted.size, "Impulse should be accepted once")
-        assertEquals(0, idDenied.size, "No denial should be emitted while another valid branch is processed")
-        assertEquals(1, idCompleted.size, "Impulse should complete once")
-        assertEquals(true, idCompleted.single().data["success"])
+        assertEquals(1, idDenied.size, "Impulse should deny after all branches drain without satisfying the need")
+        assertEquals(0, idCompleted.size, "Unsatisfied impulse should not report completion success")
 
         val lifecycleFinalized = instrumentation.events
             .firstOrNull { it.type == "impulse_lifecycle_finalized" && it.data["root_impulse_id"] == rootImpulseId }
         assertNotNull(lifecycleFinalized)
-        assertEquals("accepted", lifecycleFinalized.data["result"])
+        assertEquals("denied", lifecycleFinalized.data["result"])
 
         val idOriginAction = instrumentation.events
             .mapNotNull { it.data["action"] as? ai.neopsyke.agent.model.PendingAction }
@@ -133,8 +142,11 @@ class IdEgoLifecycleIntegrationTest {
     @Test
     fun `id internalize constraints persist on follow-up thoughts`() {
         val instrumentation = RecordingInstrumentation()
+        var followUpHasReflectInternalAvailable: Boolean? = null
         var followUpHasContactDispatchable: Boolean? = null
+        var followUpHasReflectInternalDispatchable: Boolean? = null
         var followUpHasContactDefinition: Boolean? = null
+        var followUpHasReflectInternalDefinition: Boolean? = null
         var followUpConvergence: ConvergenceMode? = null
 
         val planner = object : Ego.Planner {
@@ -150,8 +162,13 @@ class IdEgoLifecycleIntegrationTest {
                     is EgoTrigger.GoalWork -> EgoDecision.Noop("ignore goal work in test")
                     is EgoTrigger.PendingThoughtInput -> {
                         if (trigger.thought.originActionType == ActionType.WEB_SEARCH) {
+                            followUpHasReflectInternalAvailable = ActionType.REFLECT_INTERNAL in context.availableActions
                             followUpHasContactDispatchable = ActionType.CONTACT_USER in context.dispatchableActions
+                            followUpHasReflectInternalDispatchable = ActionType.REFLECT_INTERNAL in context.dispatchableActions
                             followUpHasContactDefinition = context.actionDefinitions.any { it.actionType == ActionType.CONTACT_USER }
+                            followUpHasReflectInternalDefinition = context.actionDefinitions.any {
+                                it.actionType == ActionType.REFLECT_INTERNAL
+                            }
                             followUpConvergence = context.idState?.convergence
                         }
                         EgoDecision.Noop("done")
@@ -185,6 +202,7 @@ class IdEgoLifecycleIntegrationTest {
                 prompt = "Be useful.",
                 convergence = ConvergenceMode.INTERNALIZE,
                 allowEscalation = false,
+                satisfactionEffectsAnyOf = setOf(ActionEffect.DURABLE_MEMORY_SAVED),
                 responseCurve = ResponseCurveConfig(type = "linear"),
             ),
         )
@@ -207,16 +225,22 @@ class IdEgoLifecycleIntegrationTest {
         runAgentWithInput(ego, "kickoff\nexit\n")
 
         assertNotNull(followUpHasContactDispatchable, "Expected a WEB_SEARCH follow-up thought to be processed")
+        assertFalse(followUpHasReflectInternalAvailable == true, "follow-up available actions must exclude reflect_internal")
         assertFalse(followUpHasContactDispatchable == true, "follow-up dispatchable actions must exclude contact_user")
+        assertFalse(followUpHasReflectInternalDispatchable == true, "follow-up dispatchable actions must exclude reflect_internal")
         assertFalse(followUpHasContactDefinition == true, "follow-up action definitions must exclude contact_user")
+        assertFalse(followUpHasReflectInternalDefinition == true, "follow-up action definitions must exclude reflect_internal")
         assertEquals(ConvergenceMode.INTERNALIZE, followUpConvergence)
     }
 
     @Test
     fun `id internalize constraints persist on impulse plan step thoughts`() {
         val instrumentation = RecordingInstrumentation()
+        var planStepHasReflectInternalAvailable: Boolean? = null
         var planStepHasContactDispatchable: Boolean? = null
+        var planStepHasReflectInternalDispatchable: Boolean? = null
         var planStepHasContactDefinition: Boolean? = null
+        var planStepHasReflectInternalDefinition: Boolean? = null
         var planStepConvergence: ConvergenceMode? = null
 
         val planner = object : Ego.Planner {
@@ -231,8 +255,13 @@ class IdEgoLifecycleIntegrationTest {
                     is EgoTrigger.GoalWork -> EgoDecision.Noop("ignore goal work in test")
                     is EgoTrigger.PendingThoughtInput -> {
                         if (trigger.thought.planContext != null) {
+                            planStepHasReflectInternalAvailable = ActionType.REFLECT_INTERNAL in context.availableActions
                             planStepHasContactDispatchable = ActionType.CONTACT_USER in context.dispatchableActions
+                            planStepHasReflectInternalDispatchable = ActionType.REFLECT_INTERNAL in context.dispatchableActions
                             planStepHasContactDefinition = context.actionDefinitions.any { it.actionType == ActionType.CONTACT_USER }
+                            planStepHasReflectInternalDefinition = context.actionDefinitions.any {
+                                it.actionType == ActionType.REFLECT_INTERNAL
+                            }
                             planStepConvergence = context.idState?.convergence
                         }
                         EgoDecision.Noop("done")
@@ -253,7 +282,22 @@ class IdEgoLifecycleIntegrationTest {
                 config = config,
                 instrumentation = instrumentation,
             ),
-            motorCortex = buildMotorCortex(),
+            motorCortex = buildMotorCortex(
+                reflectionMemoryRecorder = object : ReflectionMemoryRecorder {
+                    override fun recordInternalReflection(
+                        action: ai.neopsyke.agent.model.PendingAction,
+                        summary: String,
+                        keywords: List<String>,
+                    ): Boolean = true
+
+                    override fun recordEvidenceReflection(
+                        action: ai.neopsyke.agent.model.PendingAction,
+                        summaryHint: String,
+                        keywords: List<String>,
+                        artifacts: List<ai.neopsyke.agent.model.ExternalContentArtifact>,
+                    ): Boolean = true
+                }
+            ),
             config = config,
             instrumentation = instrumentation,
         )
@@ -288,9 +332,123 @@ class IdEgoLifecycleIntegrationTest {
         runAgentWithInput(ego, "kickoff\nexit\n")
 
         assertNotNull(planStepHasContactDispatchable, "Expected an impulse-origin plan step thought to be processed")
+        assertFalse(planStepHasReflectInternalAvailable == true, "plan-step available actions must exclude reflect_internal")
         assertFalse(planStepHasContactDispatchable == true, "plan-step dispatchable actions must exclude contact_user")
+        assertFalse(planStepHasReflectInternalDispatchable == true, "plan-step dispatchable actions must exclude reflect_internal")
         assertFalse(planStepHasContactDefinition == true, "plan-step action definitions must exclude contact_user")
+        assertFalse(planStepHasReflectInternalDefinition == true, "plan-step action definitions must exclude reflect_internal")
         assertEquals(ConvergenceMode.INTERNALIZE, planStepConvergence)
+    }
+
+    @Test
+    fun `id satisfaction cleanup clears pending same-root work immediately`() {
+        val instrumentation = RecordingInstrumentation()
+        var redundantStepProcessed = false
+
+        val planner = object : Ego.Planner {
+            override fun decide(trigger: EgoTrigger, context: PlannerContext): EgoDecision =
+                when (trigger) {
+                    is EgoTrigger.IncomingInput -> EgoDecision.Noop("ignore user test input")
+                    is EgoTrigger.IncomingImpulse -> EgoDecision.EnqueuePlan(
+                        urgency = Urgency.MEDIUM,
+                        goal = "Learn and remember one thing",
+                        steps = listOf("Record a trusted lesson", "Run redundant leftover step")
+                    )
+                    is EgoTrigger.GoalWork -> EgoDecision.Noop("ignore goal work in test")
+                    is EgoTrigger.PendingThoughtInput ->
+                        when (trigger.thought.planContext?.stepIndex) {
+                            0 -> EgoDecision.ProposeAction(
+                                urgency = Urgency.MEDIUM,
+                                actionType = ActionType.REFLECT_INTERNAL,
+                                payload = """{"summary":"Remember this useful lesson","keywords":["lesson"]}""",
+                                summary = "Record trusted lesson"
+                            )
+                            1 -> {
+                                redundantStepProcessed = true
+                                EgoDecision.Noop("redundant leftover should not run")
+                            }
+                            else -> EgoDecision.Noop("done")
+                        }
+                }
+        }
+
+        val config = AgentConfig(
+            planner = PlannerConfig(
+                maxLoopStepsPerInput = 12,
+                maxThoughtPasses = 2
+            )
+        )
+        val ego = buildTestEgo(
+            planner = planner,
+            superego = Superego(
+                modelClient = StubChatModelClient().apply { enqueueRawResponse("""{"allow":true}""") },
+                config = config,
+                instrumentation = instrumentation,
+            ),
+            motorCortex = buildMotorCortex(
+                reflectionMemoryRecorder = object : ReflectionMemoryRecorder {
+                    override fun recordInternalReflection(
+                        action: ai.neopsyke.agent.model.PendingAction,
+                        summary: String,
+                        keywords: List<String>,
+                    ): Boolean = true
+
+                    override fun recordEvidenceReflection(
+                        action: ai.neopsyke.agent.model.PendingAction,
+                        summaryHint: String,
+                        keywords: List<String>,
+                        artifacts: List<ai.neopsyke.agent.model.ExternalContentArtifact>,
+                    ): Boolean = true
+                }
+            ),
+            config = config,
+            instrumentation = instrumentation,
+        )
+        val idModule = buildIdModule(
+            instrumentation = instrumentation,
+            needConfig = NeedConfig(
+                description = "test",
+                growthRate = 0.1,
+                cooldownPulses = 0,
+                prompt = "Learn something worth remembering.",
+                convergence = ConvergenceMode.INTERNALIZE,
+                allowEscalation = true,
+                satisfactionEffectsAnyOf = setOf(ActionEffect.DURABLE_MEMORY_SAVED),
+                responseCurve = ResponseCurveConfig(type = "linear"),
+            ),
+        )
+        ego.setId(idModule)
+
+        val rootImpulseId = "impulse-root-satisfaction-cleanup"
+        val queued = ego.enqueueImpulse(
+            PendingImpulse(
+                id = 1,
+                needId = "be-useful",
+                prompt = "Learn one lesson and stop.",
+                urgency = 0.9,
+                rawValue = 0.9,
+                rootImpulseId = rootImpulseId,
+                conversationContext = idModule.conversationContext,
+            ),
+            maxPendingImpulses = 1
+        )
+        assertTrue(queued)
+
+        runAgentWithInput(ego, "kickoff\nexit\n")
+
+        assertFalse(redundantStepProcessed, "pending same-root work should be cleared after satisfaction")
+
+        val cleanup = instrumentation.events.firstOrNull {
+            it.type == "input_resolution_cleanup" &&
+                it.data["root_input_id"] == rootImpulseId
+        }
+        assertNotNull(cleanup, "Expected cleanup event after Id satisfaction")
+        assertEquals("id_satisfaction_resolved", cleanup.data["reason"])
+        assertTrue((cleanup.data["removed_thoughts"] as? Int ?: 0) >= 1)
+
+        val completed = instrumentation.events.filter { it.type == "id_impulse_completed" }
+        assertEquals(1, completed.size)
+        assertEquals(true, completed.single().data["success"])
     }
 
     @Test

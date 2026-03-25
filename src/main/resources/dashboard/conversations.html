@@ -57,6 +57,9 @@
       border-color: var(--accent);
       color: var(--accent);
     }
+    body.embedded .actions a.btn {
+      display: none;
+    }
     .layout {
       min-height: 0;
       display: grid;
@@ -464,6 +467,8 @@
   </div>
 
   <script>
+    const REQUEST_TIMEOUT_MS = 8000;
+    const usingShellTransport = window.self !== window.top;
     const state = {
       sessions: [],
       selectedSessionId: null,
@@ -476,11 +481,27 @@
       idThinkingSource: null,
       idVoiceEvents: [],
       idPanelVisible: false,
-      idPanelManuallyToggled: false
+      idPanelManuallyToggled: false,
+      embeddedVisible: !usingShellTransport
     };
+    let bootComplete = false;
+    const pendingShellEvents = [];
 
     function setStatus(text) {
       document.getElementById("status").textContent = text;
+    }
+
+    function errorText(err) {
+      if (!err) return "unknown";
+      if (typeof err === "string") return err;
+      if (err.name === "AbortError") return "request timeout";
+      return err.message ? err.message : String(err);
+    }
+
+    function reportClientFailure(context, err) {
+      const message = context + ": " + errorText(err);
+      setStatus(message);
+      console.error("[conversations] " + context, err);
     }
 
     function fmtTime(ms) {
@@ -500,15 +521,24 @@
     }
 
     async function fetchJson(url, init) {
-      const res = await fetch(url, Object.assign({ cache: "no-store" }, init || {}));
-      const text = await res.text();
-      let payload = null;
-      try { payload = text ? JSON.parse(text) : null; } catch (_) {}
-      if (!res.ok) {
-        const detail = payload && payload.detail ? payload.detail : ("HTTP " + res.status);
-        throw new Error(detail);
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+      try {
+        const res = await fetch(
+          url,
+          Object.assign({ cache: "no-store", signal: controller.signal }, init || {})
+        );
+        const text = await res.text();
+        let payload = null;
+        try { payload = text ? JSON.parse(text) : null; } catch (_) {}
+        if (!res.ok) {
+          const detail = payload && payload.detail ? payload.detail : ("HTTP " + res.status);
+          throw new Error(detail);
+        }
+        return payload;
+      } finally {
+        clearTimeout(timeout);
       }
-      return payload;
     }
 
     function renderSessions() {
@@ -732,6 +762,9 @@
       document.getElementById("id-voice-panel").classList.add("visible");
       document.getElementById("main-layout").classList.add("id-panel-open");
       document.getElementById("id-voice-toggle").classList.add("active");
+      document.getElementById("id-voice-status").textContent = "connecting...";
+      connectIdThinking();
+      loadIdThinkingHistory();
     }
 
     function hideIdPanel() {
@@ -740,6 +773,11 @@
       document.getElementById("id-voice-panel").classList.remove("visible");
       document.getElementById("main-layout").classList.remove("id-panel-open");
       document.getElementById("id-voice-toggle").classList.remove("active");
+      if (state.idThinkingSource) {
+        state.idThinkingSource.close();
+        state.idThinkingSource = null;
+      }
+      document.getElementById("id-voice-status").textContent = "disconnected";
     }
 
     function renderIdVoiceEvents() {
@@ -787,6 +825,10 @@
     }
 
     function connectIdThinking() {
+      if (usingShellTransport) {
+        document.getElementById("id-voice-status").textContent = "connected";
+        return;
+      }
       if (state.idThinkingSource) {
         state.idThinkingSource.close();
         state.idThinkingSource = null;
@@ -853,6 +895,40 @@
       }
     }
 
+    function suspendEmbeddedStreams() {
+      if (!usingShellTransport) {
+        closeEventSource();
+      }
+      setStatus("Paused");
+    }
+
+    function resumeEmbeddedStreams() {
+      if (!state.embeddedVisible) return;
+      if (usingShellTransport) {
+        window.parent.postMessage(
+          {
+            type: "neopsyke-conversation-select",
+            sessionId: state.selectedSessionId || (state.sessions[0] && state.sessions[0].session_id)
+          },
+          window.location.origin
+        );
+        setStatus("Connected");
+        return;
+      }
+      if (!state.sessions.length) {
+        loadSessions().catch((err) => setStatus("Failed to resume: " + (err && err.message ? err.message : "unknown")));
+        return;
+      }
+      selectSession(state.selectedSessionId || (state.sessions[0] && state.sessions[0].session_id))
+        .then(() => {
+          if (state.idPanelVisible) {
+            connectIdThinking();
+            loadIdThinkingHistory();
+          }
+        })
+        .catch((err) => setStatus("Failed to resume: " + (err && err.message ? err.message : "unknown")));
+    }
+
     function insertBySequence(msg) {
       var sequence = msg.sequence || 0;
       var arr = state.selectedSessionMessages;
@@ -866,7 +942,15 @@
     }
 
     function connectSessionEvents(sessionId) {
-      // Close per-session sources only (Id SSE is global)
+      if (usingShellTransport) {
+        window.parent.postMessage(
+          { type: "neopsyke-conversation-select", sessionId: sessionId },
+          window.location.origin
+        );
+        setStatus("Connected");
+        return;
+      }
+      // Close per-session sources only (Id SSE is global/lazy)
       if (state.eventSource) {
         state.eventSource.close();
         state.eventSource = null;
@@ -875,7 +959,7 @@
         state.thinkingSource.close();
         state.thinkingSource = null;
       }
-      const es = new EventSource("/api/chat/sessions/" + encodeURIComponent(sessionId) + "/events");
+      const es = new EventSource("/api/chat/sessions/" + encodeURIComponent(sessionId) + "/stream");
       state.eventSource = es;
       es.addEventListener("open", () => setStatus("Connected"));
       es.addEventListener("error", () => setStatus("Reconnecting..."));
@@ -896,10 +980,7 @@
         renderMessages();
         refreshSessionSnapshotCounts();
       });
-
-      const ts = new EventSource("/api/chat/sessions/" + encodeURIComponent(sessionId) + "/thinking");
-      state.thinkingSource = ts;
-      ts.addEventListener("thinking", (event) => {
+      es.addEventListener("thinking", (event) => {
         let payload = null;
         try { payload = JSON.parse(event.data); } catch (_) { return; }
         if (!payload || payload.type !== "thinking" || !payload.event) return;
@@ -922,6 +1003,92 @@
       });
     }
 
+    function handleIncomingChatPayload(sessionId, payload) {
+      if (!payload || payload.type !== "message" || !payload.message) return;
+      const incoming = payload.message;
+      if (state.selectedSessionId !== sessionId) return;
+      if (existingMessageIndex(incoming.id) >= 0) return;
+      const pendingIndex = matchPendingMessage(incoming);
+      if (pendingIndex >= 0) {
+        const pending = state.selectedSessionMessages[pendingIndex];
+        removePendingToken(sessionId, pending._temp_id);
+        state.selectedSessionMessages.splice(pendingIndex, 1, incoming);
+      } else {
+        insertBySequence(incoming);
+      }
+      renderMessages();
+      refreshSessionSnapshotCounts();
+    }
+
+    function handleIncomingThinkingPayload(sessionId, payload) {
+      if (!payload || payload.type !== "thinking" || !payload.event) return;
+      if (state.selectedSessionId !== sessionId) return;
+      const ev = payload.event;
+      const dupThinking = state.selectedSessionMessages.some(
+        (m) => m._thinking && m._thinkingId === ev.id
+      );
+      if (dupThinking) return;
+      const thinkingMsg = {
+        _thinking: true,
+        _thinkingType: ev.type,
+        _thinkingId: ev.id,
+        content: ev.content || "",
+        created_at_ms: ev.ts,
+        sequence: ev.sequence || 0,
+        _metadata: ev.metadata || null
+      };
+      insertBySequence(thinkingMsg);
+      renderMessages();
+    }
+
+    function handleShellEvent(message) {
+      if (message.type === "neopsyke-dashboard-event") {
+        if (message.eventName !== "id-thinking") return;
+        let payload = null;
+        try { payload = JSON.parse(message.payload); } catch (_) { return; }
+        if (!payload || payload.type !== "thinking" || !payload.event) return;
+        handleIdThinkingEvent(payload.event);
+        return;
+      }
+      if (message.type === "neopsyke-dashboard-bootstrap") {
+        (message.events || []).forEach(function(item) {
+          handleShellEvent({
+            type: "neopsyke-dashboard-event",
+            eventName: item.eventName,
+            payload: item.payload
+          });
+        });
+        return;
+      }
+      if (message.type === "neopsyke-conversation-event") {
+        let payload = null;
+        try { payload = JSON.parse(message.payload); } catch (_) { return; }
+        if (message.eventName === "chat") {
+          handleIncomingChatPayload(message.sessionId, payload);
+        } else if (message.eventName === "thinking") {
+          handleIncomingThinkingPayload(message.sessionId, payload);
+        }
+        return;
+      }
+      if (message.type === "neopsyke-conversation-bootstrap") {
+        (message.events || []).forEach(function(item) {
+          handleShellEvent({
+            type: "neopsyke-conversation-event",
+            sessionId: message.sessionId,
+            eventName: item.eventName,
+            payload: item.payload
+          });
+        });
+      }
+    }
+
+    function flushPendingShellEvents() {
+      if (!bootComplete) return;
+      while (pendingShellEvents.length > 0) {
+        handleShellEvent(pendingShellEvents.shift());
+      }
+    }
+
     function refreshSessionSnapshotCounts() {
       const current = state.sessions.find((s) => s.session_id === state.selectedSessionId);
       if (!current) return;
@@ -935,6 +1102,7 @@
     }
 
     async function loadSessions() {
+      setStatus("Loading sessions...");
       const payload = await fetchJson("/api/chat/sessions");
       state.sessions = Array.isArray(payload && payload.sessions) ? payload.sessions : [];
       if (!state.sessions.length) {
@@ -950,6 +1118,7 @@
 
     async function selectSession(sessionId) {
       if (!sessionId) return;
+      setStatus("Loading conversation...");
       const textarea = document.getElementById("composer");
       const sendBtn = document.getElementById("send-btn");
       if (state.selectedSessionId) {
@@ -1090,14 +1259,42 @@
       }
     });
 
-    // Initialize: load sessions + Id inner-voice (in parallel)
-    Promise.all([
-      loadSessions().then(() => setStatus("Connected")),
-      loadIdThinkingHistory()
-    ]).catch((err) => setStatus("Failed to load: " + (err && err.message ? err.message : "unknown")));
+    if (window.self !== window.top) {
+      document.body.classList.add("embedded");
+    }
+    window.addEventListener("message", (event) => {
+      if (event.origin !== window.location.origin) return;
+      if (!event.data || typeof event.data.type !== "string") return;
+      if (event.data.type === "neopsyke-shell-visibility") {
+        const visible = Boolean(event.data.visible);
+        if (state.embeddedVisible === visible) return;
+        state.embeddedVisible = visible;
+        if (visible) {
+          resumeEmbeddedStreams();
+        } else {
+          suspendEmbeddedStreams();
+        }
+        return;
+      }
+      pendingShellEvents.push(event.data);
+      flushPendingShellEvents();
+    });
 
-    // Connect global Id thinking SSE
-    connectIdThinking();
+    // Initialize only the core chat session state. The Id panel opens lazily so
+    // background tabs do not consume an extra long-lived SSE connection.
+    Promise.all([
+      loadSessions().then(() => setStatus("Connected"))
+    ]).then(() => {
+      bootComplete = true;
+      flushPendingShellEvents();
+    }).catch((err) => setStatus("Failed to load: " + (err && err.message ? err.message : "unknown")));
+
+    window.addEventListener("error", (event) => {
+      reportClientFailure("Client error", event.error || event.message);
+    });
+    window.addEventListener("unhandledrejection", (event) => {
+      reportClientFailure("Unhandled promise rejection", event.reason);
+    });
 
     window.addEventListener("beforeunload", () => closeEventSource());
   </script>
