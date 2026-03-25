@@ -8,6 +8,8 @@ Built around three core modules:
 - **Ego** -- Plans, reasons, and mediates between motivation, reality, and limitations.
 - **Superego** -- Judges intentions and enforces governance, safety, and self-control.
 
+For a full reference of all agent concepts and terminology, see the [Glossary](docs/glossary.md).
+
 Backed by LLMs for all internal cognitive roles and with capacity for short-term, long-term, and episodic memory, recurring and durable goals, and a multi-layered security model baked into the core architecture.
 
 > **Status:** Experimental. The architecture is real and implemented, but the project is under active development. Expect rough edges.
@@ -268,6 +270,7 @@ Each cognitive role (planner, superego primary/escalation, action verifier, meta
 
 | Document | Description |
 |---|---|
+| [docs/glossary.md](docs/glossary.md) | Grouped reference for all agent concepts and terminology |
 | [docs/getting-started.md](docs/getting-started.md) | Installation, first run, and real usage examples |
 | [docs/configuration.md](docs/configuration.md) | Full configuration reference (YAML files, env vars, tuning) |
 | [docs/evaluation.md](docs/evaluation.md) | Testing layers, eval pipeline, and contributor directions |
