@@ -26,7 +26,7 @@ private data class IdRuntimeYamlId(
     val enabled: Boolean? = null,
     val pulseIntervalMs: Long? = null,
     val triggerThreshold: Double? = null,
-    val thresholdOnUrgency: Boolean? = null,
+    val thresholdOnTension: Boolean? = null,
     val maxConsecutiveDenials: Int? = null,
     val backoffPulses: Int? = null,
     val maxInFlightPulses: Int? = null,
@@ -123,10 +123,10 @@ object IdRuntimeConfigLoader {
                 yaml.triggerThreshold,
                 defaults.triggerThreshold
             ),
-            thresholdOnUrgency = readBoolean(
-                env["NEOPSYKE_ID_THRESHOLD_ON_URGENCY"],
-                yaml.thresholdOnUrgency,
-                defaults.thresholdOnUrgency
+            thresholdOnTension = readBoolean(
+                env["NEOPSYKE_ID_THRESHOLD_ON_TENSION"],
+                yaml.thresholdOnTension,
+                defaults.thresholdOnTension
             ),
             maxConsecutiveDenials = readNonNegativeInt(
                 env["NEOPSYKE_ID_MAX_CONSECUTIVE_DENIALS"],

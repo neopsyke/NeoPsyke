@@ -35,7 +35,7 @@ class IdActivityDecayTest {
             enabled = true,
             pulseIntervalMs = 1000,
             triggerThreshold = 0.5,
-            thresholdOnUrgency = true,
+            thresholdOnTension = true,
             maxInFlightPulses = 20,
             backoffPulses = 10,
             maxPendingImpulses = 1,
@@ -270,7 +270,7 @@ class IdActivityDecayTest {
                 enabled = true,
                 pulseIntervalMs = 1000,
                 triggerThreshold = 0.5,
-                thresholdOnUrgency = false, // use raw value for simplicity
+                thresholdOnTension = false, // use raw value for simplicity
                 maxInFlightPulses = 20,
                 backoffPulses = 10,
                 maxPendingImpulses = 1,

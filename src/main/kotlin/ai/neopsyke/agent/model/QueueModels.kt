@@ -63,7 +63,7 @@ data class PendingImpulse(
     val id: Long,
     val needId: String,
     val prompt: String,
-    val urgency: Double,
+    val tension: Double,
     val rawValue: Double,
     val rootImpulseId: String = RootInputIds.next(),
     val receivedAtMs: Long = System.currentTimeMillis(),

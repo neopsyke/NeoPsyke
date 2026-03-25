@@ -331,7 +331,7 @@ class AttentionScheduler(
         private fun opportunityPriority(item: OpportunityWorkItem): Int =
             when (item) {
                 is OpportunityWorkItem.InputOpportunity -> item.input.priority.level
-                is OpportunityWorkItem.ImpulseOpportunity -> (item.impulse.urgency * 1000).toInt()
+                is OpportunityWorkItem.ImpulseOpportunity -> (item.impulse.tension * 1000).toInt()
                 is OpportunityWorkItem.GoalWorkOpportunity -> 0
             }
     }

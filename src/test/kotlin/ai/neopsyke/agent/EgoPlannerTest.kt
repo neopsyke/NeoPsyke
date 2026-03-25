@@ -1216,7 +1216,7 @@ class EgoPlannerTest {
                     id = 1,
                     needId = "learn-something",
                     prompt = "I feel curious and want to learn something new.",
-                    urgency = 0.8,
+                    tension = 0.8,
                     rawValue = 0.8,
                     conversationContext = ai.neopsyke.agent.model.ConversationContext.default(),
                 )

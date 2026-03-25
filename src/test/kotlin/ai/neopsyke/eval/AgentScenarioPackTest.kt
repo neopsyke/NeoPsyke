@@ -581,7 +581,7 @@ class AgentScenarioPackTest {
                 id = 1,
                 needId = "be-useful",
                 prompt = "Try something useful.",
-                urgency = 0.9,
+                tension = 0.9,
                 rawValue = 0.9,
                 rootImpulseId = rootImpulseId,
                 conversationContext = idModule.conversationContext,
