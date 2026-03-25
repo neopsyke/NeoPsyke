@@ -77,22 +77,7 @@ class IdEgoLifecycleIntegrationTest {
                 config = config,
                 instrumentation = instrumentation,
             ),
-            motorCortex = buildMotorCortex(
-                reflectionMemoryRecorder = object : ReflectionMemoryRecorder {
-                    override fun recordInternalReflection(
-                        action: ai.neopsyke.agent.model.PendingAction,
-                        summary: String,
-                        keywords: List<String>,
-                    ): Boolean = true
-
-                    override fun recordEvidenceReflection(
-                        action: ai.neopsyke.agent.model.PendingAction,
-                        summaryHint: String,
-                        keywords: List<String>,
-                        artifacts: List<ai.neopsyke.agent.model.ExternalContentArtifact>,
-                    ): Boolean = true
-                }
-            ),
+            motorCortex = buildMotorCortex(),
             config = config,
             instrumentation = instrumentation,
         )
@@ -130,14 +115,13 @@ class IdEgoLifecycleIntegrationTest {
         val idDenied = instrumentation.events.filter { it.type == "id_impulse_denied" }
         val idCompleted = instrumentation.events.filter { it.type == "id_impulse_completed" }
         assertEquals(1, idAccepted.size, "Impulse should be accepted once")
-        assertEquals(0, idDenied.size, "No denial should be emitted while another valid branch is processed")
-        assertEquals(1, idCompleted.size, "Impulse should complete once")
-        assertEquals(true, idCompleted.single().data["success"])
+        assertEquals(1, idDenied.size, "Impulse should deny after all branches drain without satisfying the need")
+        assertEquals(0, idCompleted.size, "Unsatisfied impulse should not report completion success")
 
         val lifecycleFinalized = instrumentation.events
             .firstOrNull { it.type == "impulse_lifecycle_finalized" && it.data["root_impulse_id"] == rootImpulseId }
         assertNotNull(lifecycleFinalized)
-        assertEquals("accepted", lifecycleFinalized.data["result"])
+        assertEquals("denied", lifecycleFinalized.data["result"])
 
         val idOriginAction = instrumentation.events
             .mapNotNull { it.data["action"] as? ai.neopsyke.agent.model.PendingAction }
@@ -298,7 +282,22 @@ class IdEgoLifecycleIntegrationTest {
                 config = config,
                 instrumentation = instrumentation,
             ),
-            motorCortex = buildMotorCortex(),
+            motorCortex = buildMotorCortex(
+                reflectionMemoryRecorder = object : ReflectionMemoryRecorder {
+                    override fun recordInternalReflection(
+                        action: ai.neopsyke.agent.model.PendingAction,
+                        summary: String,
+                        keywords: List<String>,
+                    ): Boolean = true
+
+                    override fun recordEvidenceReflection(
+                        action: ai.neopsyke.agent.model.PendingAction,
+                        summaryHint: String,
+                        keywords: List<String>,
+                        artifacts: List<ai.neopsyke.agent.model.ExternalContentArtifact>,
+                    ): Boolean = true
+                }
+            ),
             config = config,
             instrumentation = instrumentation,
         )
@@ -386,7 +385,22 @@ class IdEgoLifecycleIntegrationTest {
                 config = config,
                 instrumentation = instrumentation,
             ),
-            motorCortex = buildMotorCortex(),
+            motorCortex = buildMotorCortex(
+                reflectionMemoryRecorder = object : ReflectionMemoryRecorder {
+                    override fun recordInternalReflection(
+                        action: ai.neopsyke.agent.model.PendingAction,
+                        summary: String,
+                        keywords: List<String>,
+                    ): Boolean = true
+
+                    override fun recordEvidenceReflection(
+                        action: ai.neopsyke.agent.model.PendingAction,
+                        summaryHint: String,
+                        keywords: List<String>,
+                        artifacts: List<ai.neopsyke.agent.model.ExternalContentArtifact>,
+                    ): Boolean = true
+                }
+            ),
             config = config,
             instrumentation = instrumentation,
         )
@@ -422,21 +436,6 @@ class IdEgoLifecycleIntegrationTest {
 
         runAgentWithInput(ego, "kickoff\nexit\n")
 
-        if (redundantStepProcessed) {
-            instrumentation.events
-                .filter {
-                    it.type in setOf(
-                        "thought_processing",
-                        "planner_decision",
-                        "action_proposed",
-                        "action_executed",
-                        "input_resolution_cleanup",
-                        "id_impulse_completed",
-                        "impulse_lifecycle_finalized"
-                    )
-                }
-                .forEach { println("DEBUG_EVENT ${it.type} ${it.data}") }
-        }
         assertFalse(redundantStepProcessed, "pending same-root work should be cleared after satisfaction")
 
         val cleanup = instrumentation.events.firstOrNull {
