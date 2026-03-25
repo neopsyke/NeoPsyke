@@ -1574,6 +1574,7 @@ class LlmEgoPlanner(
         val scratchpadSummary = context.scratchpadSummary.ifBlank { "none" }
         val sessionScratchpadDigest = context.sessionScratchpadDigest.ifBlank { "none" }
         val ambientContext = context.ambientContext.render().ifBlank { "none" }
+        val goalWorkSummary = context.goalWorkSummary.ifBlank { "none" }
         val evidenceHints = context.evidenceHints.ifBlank { "none" }
         val metaGuidance = context.metaGuidance.ifBlank { "none" }
         val conversationSecuritySummary = context.conversationSecuritySummary.ifBlank { "none" }
@@ -1798,6 +1799,14 @@ class LlmEgoPlanner(
                         band = PromptBudgetAllocator.Band.REQUIRED_CONTEXT,
                         floorTokens = 20,
                         content = "Background context:\n$ambientContext"
+                    )
+                },
+                goalWorkSummary.takeIf { it != "none" }?.let {
+                    PromptBudgetAllocator.Section(
+                        key = "planner_active_goals",
+                        role = ChatRole.USER,
+                        band = PromptBudgetAllocator.Band.OPTIONAL,
+                        content = "Persistent goals (use the number or title as goal_id in goal_operation):\n$goalWorkSummary"
                     )
                 },
                 PromptBudgetAllocator.Section(

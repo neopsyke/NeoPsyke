@@ -642,6 +642,7 @@ class Ego(
                 )
             }
         val evidenceHints = buildEvidenceHints(rootInputId, sessionId)
+        val goalSummary = buildNumberedGoalSummary()
         return PlannerContext(
             recentDialogue = recentDialogue,
             queue = scheduler.queueSnapshot(),
@@ -661,7 +662,8 @@ class Ego(
             availableActions = availableActions,
             dispatchableActions = dispatchableActions,
             actionDefinitions = actionDefinitions,
-            conversationContext = conversationContext
+            conversationContext = conversationContext,
+            goalWorkSummary = goalSummary,
         )
     }
 
@@ -695,6 +697,19 @@ class Ego(
                     sourceRef = trigger.workUnit.rootInputId,
                 ).renderSummary()
         }
+
+    private fun buildNumberedGoalSummary(): String {
+        val goals = goalsGateway.allGoals()
+        if (goals.isEmpty()) return ""
+        return buildString {
+            append("Active goals:")
+            goals.forEachIndexed { index, g ->
+                append("\n${index + 1}. \"${g.title}\" (${g.status}")
+                if (!g.cronExpression.isNullOrBlank()) append(", cron=${g.cronExpression}")
+                append(")")
+            }
+        }
+    }
 
     private fun buildAmbientContext(trigger: EgoTrigger): AmbientContext {
         if (!shouldAttachAmbientContext(trigger)) {

@@ -35,6 +35,16 @@ sealed interface GoalEvent {
         override val timestamp: Instant = Instant.now(),
     ) : GoalEvent
 
+    data class Updated(
+        override val goalId: String,
+        val cronExpression: String? = null,
+        val instruction: String? = null,
+        val title: String? = null,
+        val completionCriteria: String? = null,
+        val reason: String? = null,
+        override val timestamp: Instant = Instant.now(),
+    ) : GoalEvent
+
     // ── Step progress ────────────────────────────────────────────────────
 
     data class StepStarted(

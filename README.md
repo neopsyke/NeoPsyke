@@ -209,11 +209,15 @@ Denied actions are not silently discarded. The denial reason is fed back into th
 
 ### Operator visibility
 
-Staged actions, approvals, denials, and execution receipts are durably recorded and visible through the dashboard. The system maintains an inspectable ledger of what was proposed, what was allowed, and what was executed.
+Staged actions, approvals, denials, and execution receipts are durably recorded and visible through the dashboard. The system maintains an inspectable ledger of what was proposed, what was allowed, and what was executed. Currently approvals are only available through the Action Control dashboard (work in progress). 
 
 ### Current limitations
 
-Plugins run in-process as trusted code -- third-party connector isolation is designed but not yet implemented. Dashboard approval assumes local owner trust. Prompt injection defense is heuristic, not a full sandbox. These boundaries are documented and tracked.
+Prompt injection defense is heuristic, not a full sandbox.
+Plugins run in-process as trusted code -- third-party connector isolation is designed but not yet implemented.
+Dashboard approval assumes local owner trust.
+
+These boundaries are documented and tracked.
 
 For the full implementation details, see [docs/security.md](docs/security.md).
 
@@ -227,12 +231,20 @@ NeoPsyke does not try to:
 - **Be production-ready today.** The security model is serious but the project is experimental. Deploy at your own risk.
 - **Support untrusted multi-tenant operation.** The current trust model assumes a single owner-operator.
 
-**Current risks:**
+Some omissions are deliberate architectural decisions rather than missing checklist items:
+
+- **Use sub-agents before trust boundaries are ready.** Delegation is intentionally excluded for now because the current security model is not yet strong enough around trust propagation, authority boundaries, and containment.
+- **Push the Ego into full async processing before the main loop is stable.** Broader async Ego execution is being deferred until the core cognitive loop is more stable across the current feature set.
+
+**Current risks and limitations:**
 
 - LLM quality directly affects planning and reasoning quality. The architecture mitigates but cannot eliminate model errors.
-- The Id's drive model is simple by design (configurable state machine, not learned behavior). This mirrors the structural role of drives in the original model -- complexity is expected to emerge from the interaction between modules, not from the drive source itself.
-- Long-running goal execution depends on external service availability and correct action contracts.
+- Long-running goal execution depends on external service availability and correct action contracts. Goals still needs a lot of testing and tuning.
 - The memory advisor's consolidation decisions are LLM-dependent and not yet formally evaluated.
+- The Id's drive model is simple by design (configurable state machine, not learned behavior). This mirrors the structural role of drives in the original model -- complexity is expected to emerge from the interaction between modules, not from the drive source itself.
+- The dashboard is basic and suitable only for local monitoring and debugging. It's not yet a production-ready multi-user tool.
+- Much testing and tuning is still required in the agent all-around.
+- The evals are still minimal and could use much improvement and expansion.
 
 ## Testing and evaluation
 

@@ -274,8 +274,12 @@ class GoalManager(
     override fun notifyAsyncOperationEvent(event: AsyncOperationEvent): Int =
         waitConditionMonitor?.notifyAsyncEvent(event) ?: 0
 
-    override fun executeOperation(request: GoalOperationRequest): GoalOperationResult =
-        when (request.operation) {
+    override fun executeOperation(request: GoalOperationRequest): GoalOperationResult {
+        logger.info {
+            "goal_operation: op=${request.operation} goalId='${request.goalId.orEmpty()}' " +
+                "title='${request.title?.take(60).orEmpty()}' cron='${request.cronExpression.orEmpty()}'"
+        }
+        return when (request.operation) {
             GoalOperation.CREATE -> {
                 val instruction = request.instruction?.trim().orEmpty()
                 val cronExpression = request.cronExpression?.trim().orEmpty()
@@ -406,6 +410,7 @@ class GoalManager(
                 val goalId = request.goalId.orEmpty()
                 val state = states[goalId]
                 if (state == null) {
+                    logger.warn { "REVISE_PLAN goal not found: goalId='$goalId' available=${states.keys}" }
                     GoalOperationResult(false, "Goal not found.")
                 } else {
                     val plan = planner.generatePlan(state.goal)
@@ -420,7 +425,47 @@ class GoalManager(
                     GoalOperationResult(true, "Goal plan revised.", goalId)
                 }
             }
+
+            GoalOperation.UPDATE -> {
+                val goalId = request.goalId.orEmpty()
+                val state = states[goalId]
+                if (goalId.isBlank() || state == null) {
+                    logger.warn { "UPDATE goal not found: goalId='$goalId' available=${states.keys}" }
+                    GoalOperationResult(false, "Goal update requires a valid goal_id. Goal not found.")
+                } else {
+                    val newCron = request.cronExpression?.trim()?.ifBlank { null }
+                    if (newCron != null && !isValidCronExpression(newCron)) {
+                        GoalOperationResult(false, "Invalid cron_expression: '$newCron'.")
+                    } else {
+                        applyEvent(
+                            goalId,
+                            GoalEvent.Updated(
+                                goalId = goalId,
+                                cronExpression = newCron,
+                                instruction = request.instruction?.trim()?.ifBlank { null },
+                                title = request.title?.trim()?.ifBlank { null },
+                                completionCriteria = request.completionCriteria?.trim()?.ifBlank { null },
+                                reason = request.reason?.trim()?.ifBlank { null },
+                            )
+                        )
+                        if (newCron != null) {
+                            timerScheduler?.cancel(goalId)
+                            timerScheduler?.registerCron(goalId, newCron)
+                        }
+                        persistState(goalId, states[goalId]!!)
+                        val changes = listOfNotNull(
+                            newCron?.let { "cron=$it" },
+                            request.instruction?.let { "instruction updated" },
+                            request.title?.let { "title updated" },
+                            request.completionCriteria?.let { "criteria updated" },
+                        ).joinToString(", ").ifBlank { "no fields changed" }
+                        logger.info { "Goal updated: goalId='$goalId' changes=[$changes]" }
+                        GoalOperationResult(true, "Goal updated: $changes.", goalId)
+                    }
+                }
+            }
         }
+    }
 
     override fun allGoals(): List<GoalTier1Summary> =
         states.values
@@ -622,6 +667,7 @@ class GoalManager(
     private fun onTimerWake(goalId: String, scheduledAtMs: Long) {
         val state = states[goalId] ?: return
         val scheduledAt = Instant.ofEpochMilli(scheduledAtMs)
+        logger.info { "onTimerWake: goal=$goalId status=${state.goal.status} scheduledAt=$scheduledAt" }
         if (!state.goal.cronExpression.isNullOrBlank() && state.goal.status in setOf(GoalStatus.COMPLETED, GoalStatus.FAILED)) {
             applyEvent(goalId, GoalEvent.CronCycleStarted(goalId, scheduledAt))
         }
@@ -644,7 +690,17 @@ class GoalManager(
                 goalId,
                 GoalEvent.WaitConditionSatisfied(goalId, step.id, "timer")
             )
+        }
+        // Cron wake for ACTIVE goals: emit work-ready cue so the Ego picks up the step
+        if (!state.goal.cronExpression.isNullOrBlank() && state.goal.status == GoalStatus.ACTIVE) {
+            val step = state.nextRunnableStep()
+            if (step != null) {
+                logger.info { "Cron wake emitting work-ready cue: goal=$goalId step=${step.id}" }
+                cueEmitter(GoalRuntimeCue(goalId = goalId, stepId = step.id, reason = "cron_wake_active"))
+            } else {
+                logger.info { "Cron wake for ACTIVE goal=$goalId but no runnable step found" }
             }
+        }
     }
 
     private fun isValidCronExpression(expression: String): Boolean =

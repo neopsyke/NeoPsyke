@@ -59,6 +59,7 @@ object GoalStateMachine {
             is GoalEvent.Completed -> handleCompleted(state, event, commands)
             is GoalEvent.PriorityChanged -> handlePriorityChanged(state, event, commands)
             is GoalEvent.Failed -> handleFailed(state, event, commands)
+            is GoalEvent.Updated -> handleUpdated(state, event)
             is GoalEvent.ContextUpdated -> state
             is GoalEvent.WorkCycleCompleted -> handleWorkCycleCompleted(state, event, commands)
         }
@@ -132,6 +133,18 @@ object GoalStateMachine {
             emitWorkReadyIfRunnable(state.id, stepsWithReady, "plan_revised", commands)
         }
         return state.copy(goal = newGoal)
+    }
+
+    private fun handleUpdated(
+        state: GoalState,
+        event: GoalEvent.Updated,
+    ): GoalState {
+        var goal = state.goal
+        event.cronExpression?.let { goal = goal.copy(cronExpression = it) }
+        event.instruction?.let { goal = goal.copy(instruction = it) }
+        event.title?.let { goal = goal.copy(title = it) }
+        event.completionCriteria?.let { goal = goal.copy(completionCriteria = it) }
+        return state.copy(goal = goal)
     }
 
     private fun handleStepStarted(

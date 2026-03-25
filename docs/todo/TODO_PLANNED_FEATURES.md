@@ -197,13 +197,292 @@ personality:
 
 ---
 
-## 2. Fetch + Extract Action Pair for Long Web Content
+## 2. Action-Claim Hallucination Detection in contact_user Messages
 
 > Status: Backlog
 >
 > Added: 2026-03-25
 
 ### Problem
+
+The LLM planner can use `contact_user` to tell the user "Goal created: Daily
+8:22 am AI news summary" without ever dispatching a `goal_operation:CREATE`
+action. This is **action hallucination** — the model claims via free-text output
+that it performed a system action it never actually executed.
+
+**Observed incident (2026-03-25):** User asked to create a second goal. The
+planner correctly requested confirmation via `contact_user`. When the user
+confirmed, instead of dispatching `goal_operation:CREATE`, the planner issued
+another `contact_user` with payload claiming the goal was created. No
+`goal_operation` was executed. The user saw confirmation but no goal existed.
+
+**Why it goes undetected today:**
+- `contact_user` has `requiresFollowUpThought = false` — no verification cycle.
+- `ContactUserActionPlugin.deterministicReview()` only checks `!payload.isBlank()`.
+- `DeterministicDecisionVerifier` classifies intent (volatile fact, memory, etc.)
+  but has no concept of "claimed action outcomes."
+- The LLM superego checks safety/ethics, not factual truthfulness of claims.
+
+### Technique: Deterministic Execution Trace Comparison
+
+Based on SOTA research (see References), the most effective approach for this
+failure mode is **deterministic execution trace comparison**: independently log
+all tool-call events, then cross-reference the LLM's textual claims against the
+actual execution log. Discrepancies (claimed action with no corresponding log
+entry) are flagged.
+
+This fits the existing NeoPsyke architecture perfectly:
+- The Planner-Auditor separation already exists (Ego/Superego).
+- Per-`rootInputId` tracking already lives in `DeliberationEngine`.
+- The `DeterministicDecisionVerifier` already gates `contact_user` actions.
+
+### Design
+
+#### Core Mechanism
+
+Add an **action-claim detector** to the `DeterministicDecisionVerifier` that:
+
+1. **Pattern-matches** the `contact_user` payload for phrases that claim an
+   action was performed (e.g., "goal created", "email sent", "reminder set").
+2. **Cross-references** against the set of action types that were actually
+   dispatched and executed for the current `rootInputId`.
+3. **Denies** the `contact_user` action if a claim is detected but the
+   corresponding action type was never executed.
+
+The denial triggers a follow-up thought asking the planner to actually dispatch
+the claimed action rather than fabricating the outcome.
+
+#### Action-Claim Pattern Map
+
+A static map from regex patterns to expected `ActionType`:
+
+```kotlin
+private val actionClaimPatterns: List<Pair<Regex, ActionType>> = listOf(
+    Regex("\\bgoal\\s+(created|set up|established|added|registered)", IGNORE_CASE)
+        to ActionType.GOAL_OPERATION,
+    Regex("\\b(email|message)\\s+sent\\b", IGNORE_CASE)
+        to ActionType.EMAIL_SEND,
+    Regex("\\breminder\\s+(created|set|scheduled)\\b", IGNORE_CASE)
+        to ActionType.GOAL_OPERATION,
+    Regex("\\b(search|searched|looked up)\\b", IGNORE_CASE)
+        to ActionType.WEB_SEARCH,
+)
+```
+
+This map is extensible. New patterns can be added as new action types are
+introduced.
+
+#### Data Flow
+
+```
+contact_user action proposed
+  → DeterministicDecisionVerifier.review()
+    → classifyTaskIntent() [existing]
+    → detectActionClaims(payload) [NEW]
+      → for each matched pattern:
+        → check if pattern's ActionType ∈ executedActionTypes
+        → if NOT: deny with reason "CLAIMED_ACTION_NOT_EXECUTED"
+    → if denied: return DecisionVerifierDecision(allow=false, ...)
+      → ActionReviewPipeline enqueues follow-up thought:
+        "contact_user denied: message claims 'goal created' but no
+         goal_operation was dispatched. Dispatch the actual action."
+```
+
+#### Changes to DecisionVerifierContext
+
+Add a new field to track what actions were actually executed for the current
+root input:
+
+```kotlin
+internal data class DecisionVerifierContext(
+    val recentDialogue: List<DialogueTurn> = emptyList(),
+    val externalEvidence: DeliberationEngine.ExternalEvidenceProgress? = null,
+    val availableActions: Set<ActionType> = emptySet(),
+    val dispatchableActions: Set<ActionType> = emptySet(),
+    val evidenceActionTypes: Set<ActionType> = emptySet(),
+    val latestUserTurn: String = "",
+    val executedActionTypes: Set<ActionType> = emptySet(), // NEW
+)
+```
+
+#### Tracking Executed Actions in DeliberationEngine
+
+Add a per-input-scope set of executed action types:
+
+```kotlin
+// In DeliberationEngine:
+private val executedActionsByScope: MutableMap<InputScope, MutableSet<ActionType>> =
+    object : LinkedHashMap<InputScope, MutableSet<ActionType>>(16, 0.75f, true) {
+        override fun removeEldestEntry(
+            eldest: MutableMap.MutableEntry<InputScope, MutableSet<ActionType>>
+        ): Boolean = size > MAX_EVIDENCE_ENTRIES
+    }
+
+fun recordActionExecuted(action: PendingAction) {
+    val scope = inputScope(action.rootInputId, action.conversationContext.sessionId)
+        ?: return
+    executedActionsByScope.getOrPut(scope) { mutableSetOf() }.add(action.type)
+}
+
+fun executedActionTypes(rootInputId: String?, sessionId: String): Set<ActionType> {
+    val scope = inputScope(rootInputId, sessionId) ?: return emptySet()
+    return executedActionsByScope[scope].orEmpty()
+}
+```
+
+`recordActionExecuted()` is called from `ActionReviewPipeline.processExecutedAction()`
+after successful execution, alongside the existing `recordEvidenceProgress()`.
+
+#### Changes to DeterministicDecisionVerifier
+
+Insert the action-claim check early in `review()`, after the existing
+`isForcedTerminalAnswer` bypass and before the intent classification:
+
+```kotlin
+override fun review(
+    action: PendingAction,
+    context: DecisionVerifierContext,
+): DecisionVerifierDecision {
+    if (action.type != ActionType.CONTACT_USER || action.isFallbackExplanation) {
+        return DecisionVerifierDecision(allow = true)
+    }
+    if (isForcedTerminalAnswer(action.summary)) {
+        return DecisionVerifierDecision(allow = true)
+    }
+
+    // NEW: Detect action-claim hallucination
+    val claimedButNotExecuted = detectUnexecutedClaims(
+        payload = action.payload,
+        executedActionTypes = context.executedActionTypes,
+    )
+    if (claimedButNotExecuted.isNotEmpty()) {
+        val claimSummary = claimedButNotExecuted.joinToString { it.name }
+        return DecisionVerifierDecision(
+            allow = false,
+            reason = "contact_user payload claims action outcome(s) " +
+                "[$claimSummary] but no corresponding action was dispatched. " +
+                "Dispatch the actual action before reporting the outcome.",
+            reasonCode = REASON_CODE_CLAIMED_ACTION_NOT_EXECUTED,
+        )
+    }
+
+    // ... existing intent classification logic ...
+}
+
+private fun detectUnexecutedClaims(
+    payload: String,
+    executedActionTypes: Set<ActionType>,
+): Set<ActionType> {
+    val normalized = payload.lowercase(Locale.ROOT)
+    return actionClaimPatterns
+        .filter { (pattern, _) -> pattern.containsMatchIn(normalized) }
+        .map { (_, expectedType) -> expectedType }
+        .filter { it !in executedActionTypes }
+        .toSet()
+}
+```
+
+#### Changes to ActionReviewPipeline
+
+In `reviewAndExecute()`, after successful action execution, record it:
+
+```kotlin
+// After motorCortex.execute() succeeds:
+deliberation.recordActionExecuted(resolvedAction)
+```
+
+In the context construction for the task verifier, pass the new field:
+
+```kotlin
+context = DecisionVerifierContext(
+    recentDialogue = recentDialogue,
+    externalEvidence = deliberation.evidenceFor(resolvedAction.rootInputId, sessionId),
+    availableActions = availableActionsForScope,
+    dispatchableActions = dispatchableActionsForScope,
+    evidenceActionTypes = motorCortex.actionTypesWithCapability(GATHERS_EVIDENCE),
+    latestUserTurn = latestUserTurn,
+    executedActionTypes = deliberation.executedActionTypes(   // NEW
+        resolvedAction.rootInputId, sessionId
+    ),
+)
+```
+
+#### Denial → Follow-Up Thought
+
+When the verifier denies a `contact_user` for action-claim hallucination, the
+existing `ActionReviewPipeline` denial flow handles it: the action is rejected,
+a thought is enqueued with the denial reason, and the planner re-evaluates.
+The denial reason explicitly says "Dispatch the actual action before reporting
+the outcome," guiding the planner to use `goal_operation` instead of
+`contact_user`.
+
+### Edge Cases and Mitigations
+
+| Edge Case | Mitigation |
+|-----------|------------|
+| Payload legitimately discusses goals without claiming creation (e.g., "I can create a goal for you, would you like that?") | Patterns must match **past-tense/completed** phrasing ("goal created", "goal set up"), not future/conditional ("can create", "would you like to create") |
+| Action was staged but not yet authorized | `executedActionTypes` only includes fully executed actions, not staged ones. Staged actions correctly won't appear, so the verifier would deny — which is correct because the action hasn't happened yet |
+| Action was executed but in a different root input | Per-`rootInputId` scoping ensures cross-input leakage doesn't occur. The planner must dispatch the action within the same input processing cycle |
+| False positive from pattern matching | The patterns are conservative (past-tense action verbs + specific nouns). Review and tune the pattern list based on production false-positive rates. Add a WARN-level log on every denial for observability |
+| Planner rewording to dodge patterns | Defense-in-depth, not a silver bullet. The patterns raise the bar significantly. Future work: use an LLM-based claim detector for higher coverage |
+
+### Files to Modify
+
+1. **`src/main/kotlin/ai/neopsyke/agent/ego/DecisionVerifier.kt`**
+   - Add `executedActionTypes` to `DecisionVerifierContext`
+   - Add `detectUnexecutedClaims()` method
+   - Add action-claim check in `review()`
+   - Add `REASON_CODE_CLAIMED_ACTION_NOT_EXECUTED` constant
+   - Add `actionClaimPatterns` list
+
+2. **`src/main/kotlin/ai/neopsyke/agent/ego/DeliberationEngine.kt`**
+   - Add `executedActionsByScope` map
+   - Add `recordActionExecuted()` method
+   - Add `executedActionTypes()` query method
+   - Clean up in `clearEvidenceForInput()`
+
+3. **`src/main/kotlin/ai/neopsyke/agent/ego/ActionReviewPipeline.kt`**
+   - Call `deliberation.recordActionExecuted()` after successful execution
+   - Pass `executedActionTypes` when constructing `DecisionVerifierContext`
+
+4. **`src/test/kotlin/ai/neopsyke/agent/ego/DecisionVerifierTest.kt`**
+   - Test: payload claiming "goal created" without execution → denied
+   - Test: payload claiming "goal created" with execution → allowed
+   - Test: payload asking "shall I create a goal?" → allowed (no false positive)
+   - Test: multiple claims, one executed, one not → denied for the unexecuted one
+   - Test: empty `executedActionTypes` with no claims → existing behavior unchanged
+
+5. **`src/test/kotlin/ai/neopsyke/agent/ego/DeliberationEngineTest.kt`**
+   - Test: `recordActionExecuted` + `executedActionTypes` round-trip
+   - Test: per-scope isolation
+   - Test: cleanup on `clearEvidenceForInput`
+
+### Verification
+
+1. `./gradlew test` — all existing tests pass, new tests pass.
+2. Manual scenario: Run the agent, ask to create a recurring goal. If the
+   planner attempts to claim creation via `contact_user` without dispatching
+   `goal_operation`, the verifier denies it and the planner retries with the
+   actual action.
+3. Check logs for `CLAIMED_ACTION_NOT_EXECUTED` denial events to confirm
+   detection is working.
+
+### References
+
+- [LLM-based Agents Suffer from Hallucinations: Survey](https://arxiv.org/abs/2509.18970)
+- [MIRAGE-Bench: Hallucination in Interactive LLM-Agent Scenarios](https://arxiv.org/abs/2507.21017)
+- [AgentGuard: Runtime Verification of AI Agents](https://arxiv.org/abs/2509.23864)
+- [Reducing Tool Hallucination via Reliability Alignment (ICML 2024)](https://arxiv.org/abs/2412.04141)
+- [Chain-of-Verification (CoVe)](https://arxiv.org/abs/2309.11495)
+- [Reflexion: Language Agents with Verbal Reinforcement Learning](https://arxiv.org/abs/2303.11366)
+- [The Reasoning Trap: How Reasoning Amplifies Tool Hallucination](https://arxiv.org/html/2510.22977v1)
+- [Blueprint First, Model Second](https://arxiv.org/pdf/2508.02721)
+- Incident log: run `20260325T071119Z-1289`, events id=466 (planner hallucinated
+  goal creation via contact_user without dispatching goal_operation)
+
+---
+
+## 3. Fetch + Extract Action Pair for Long Web Content
 
 The `WEBSITE_FETCH` action returns up to 12k chars of page content, but the
 planner context pipeline truncates it severely before it reaches the LLM:

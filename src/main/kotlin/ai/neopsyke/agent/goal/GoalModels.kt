@@ -127,4 +127,5 @@ data class GoalTier1Summary(
     val currentStepDescription: String?,
     val blockers: List<String>,
     val lastWorkedAt: Instant?,
+    val cronExpression: String? = null,
 )
