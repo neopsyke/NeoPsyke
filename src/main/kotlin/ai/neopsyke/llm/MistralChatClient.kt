@@ -220,17 +220,17 @@ private data class MistralChatCompletionRequest(
     val model: String,
     val messages: List<MistralChatMessage>,
     val temperature: Double? = null,
-    @JsonProperty("max_tokens")
+    @param:JsonProperty("max_tokens")
     val maxTokens: Int? = null,
-    @JsonProperty("safe_prompt")
+    @param:JsonProperty("safe_prompt")
     val safePrompt: Boolean? = null,
-    @JsonProperty("response_format")
+    @param:JsonProperty("response_format")
     val responseFormat: MistralResponseFormat? = null,
 )
 
 private data class MistralResponseFormat(
     val type: String,
-    @JsonProperty("json_schema")
+    @param:JsonProperty("json_schema")
     val jsonSchema: MistralJsonSchemaFormat,
 )
 
@@ -247,7 +247,7 @@ private data class MistralChatMessage(
 
 private data class MistralChatCompletionResponse(
     val id: String?,
-    @JsonProperty("object")
+    @param:JsonProperty("object")
     val objectType: String? = null,
     val model: String?,
     val choices: List<MistralChoice> = emptyList(),
@@ -257,7 +257,7 @@ private data class MistralChatCompletionResponse(
 private data class MistralChoice(
     val index: Int? = null,
     val message: MistralResponseMessage,
-    @JsonProperty("finish_reason")
+    @param:JsonProperty("finish_reason")
     val finishReason: String? = null,
 )
 
@@ -267,11 +267,11 @@ private data class MistralResponseMessage(
 )
 
 private data class MistralUsage(
-    @JsonProperty("prompt_tokens")
+    @param:JsonProperty("prompt_tokens")
     val promptTokens: Int? = null,
-    @JsonProperty("completion_tokens")
+    @param:JsonProperty("completion_tokens")
     val completionTokens: Int? = null,
-    @JsonProperty("total_tokens")
+    @param:JsonProperty("total_tokens")
     val totalTokens: Int? = null,
 ) {
     fun toChatUsage(): ChatUsage =

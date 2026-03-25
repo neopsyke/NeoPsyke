@@ -2,7 +2,7 @@ package ai.neopsyke.config
 
 import com.fasterxml.jackson.databind.DeserializationFeature
 import com.fasterxml.jackson.databind.MapperFeature
-import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.databind.json.JsonMapper
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory
 import com.fasterxml.jackson.module.kotlin.readValue
 import com.fasterxml.jackson.module.kotlin.registerKotlinModule
@@ -57,10 +57,11 @@ data class MemoryRuntimeConfig(
 }
 
 object MemoryRuntimeConfigLoader {
-    private val mapper = ObjectMapper(YAMLFactory())
+    private val mapper = JsonMapper.builder(YAMLFactory())
+        .enable(MapperFeature.ACCEPT_CASE_INSENSITIVE_ENUMS)
+        .disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
+        .build()
         .registerKotlinModule()
-        .configure(MapperFeature.ACCEPT_CASE_INSENSITIVE_ENUMS, true)
-        .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
 
     fun load(
         env: Map<String, String> = System.getenv(),

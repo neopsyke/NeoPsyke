@@ -1005,8 +1005,8 @@ class DefaultActionControlService(
 
     private fun goalOperationBucketPayload(actionTypeId: String, payloadRaw: String): String {
         val payload = runCatching { payloadMapper.readTree(payloadRaw) }.getOrNull()
-        val operation = payload?.path("operation")?.asText("")?.trim()?.lowercase().orEmpty()
-        val cronExpression = payload?.path("cron_expression")?.asText(payload.path("cronExpression").asText(""))?.trim().orEmpty()
+        val operation = payload?.path("operation")?.asText()?.trim()?.lowercase().orEmpty()
+        val cronExpression = payload?.path("cron_expression")?.asText()?.ifEmpty { payload.path("cronExpression").asText() }?.trim().orEmpty()
         val category = when (operation) {
             "list", "inspect" -> "goal_read"
             "create", "revise_plan" -> if (cronExpression.isNotBlank()) "goal_recurring_mutation" else "goal_mutation"

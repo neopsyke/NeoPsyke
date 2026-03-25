@@ -28,7 +28,7 @@ teardown() {
     "$LAUNCHER_ROOT/run-neopsyke.sh" --freud-live
 
   [[ "$status" -eq 0 ]]
-  grep -q '^EGO_LOOP_DELAY_MS=1000$' "$ENV_OUT"
+  grep -q '^EGO_LOOP_DELAY_MS=0$' "$ENV_OUT"
   grep -q 'ARGS=--freud-live' "$ENV_OUT"
   grep -q "^NEOPSYKE_GOALS_WORKSPACE_ROOT=$LAUNCHER_ROOT/.neopsyke/eval-goals/" "$ENV_OUT"
 }

@@ -252,8 +252,8 @@ class ConfiguredActionAuthorizationPolicy(
             return false
         }
         val node = goalOperationNode(action, ActionRegistry.empty()) ?: return false
-        val operation = node.path("operation").asText("").trim().lowercase()
-        val cronExpression = node.path("cron_expression").asText(node.path("cronExpression").asText("")).trim()
+        val operation = node.path("operation").asText().trim().lowercase()
+        val cronExpression = node.path("cron_expression").asText().ifEmpty { node.path("cronExpression").asText() }.trim()
         return cronExpression.isNotBlank() && operation in setOf("create", "revise_plan")
     }
 
@@ -265,8 +265,8 @@ class ConfiguredActionAuthorizationPolicy(
             return null
         }
         val node = goalOperationNode(action, actionRegistry) ?: return null
-        val operation = node.path("operation").asText("").trim().lowercase()
-        val goalId = node.path("goal_id").asText(node.path("goalId").asText("")).trim()
+        val operation = node.path("operation").asText().trim().lowercase()
+        val goalId = node.path("goal_id").asText().ifEmpty { node.path("goalId").asText() }.trim()
         return when (operation) {
             "delete_all" -> GoalDeleteIntent.DELETE_ALL
             "delete" -> if (goalId.isNotBlank()) GoalDeleteIntent.DELETE_EXACT else GoalDeleteIntent.DELETE_AMBIGUOUS
