@@ -914,6 +914,55 @@ class GoalManagerTest {
         }
     }
 
+    @Test
+    fun `cron timer wake on ACTIVE goal with READY step emits work-ready cue`() {
+        val root = Files.createTempDirectory("psyke-pm-cron-wake-active")
+        try {
+            val signals = CopyOnWriteArrayList<GoalRuntimeCue>()
+            val manager = GoalManager(
+                config = testConfig(root),
+                store = GoalStore(root),
+                planner = DeterministicGoalPlanner(),
+                cueEmitter = { cue -> signals += cue },
+            )
+            manager.start(testScope())
+            // Use a far-future cron so it doesn't fire on its own during the test
+            val future = ZonedDateTime.now().plusHours(2).withSecond(0).withNano(0)
+            val cronExpression = "${future.minute} ${future.hour} * * *"
+
+            val id = manager.createGoal(
+                instruction = "Send weather report on cron schedule",
+                title = "Weather cron test",
+                cronExpression = cronExpression,
+            )
+            assertTrue(id.isNotBlank())
+            val state = manager.goalStatus(id)
+            assertNotNull(state)
+            assertEquals(GoalStatus.ACTIVE, state.goal.status)
+            assertEquals(StepStatus.READY, state.goal.plan.steps.first().status)
+
+            // No work-ready cue should have been emitted at creation for a cron goal
+            assertTrue(signals.none { it.goalId == id })
+
+            // Simulate the cron timer firing by invoking onTimerWake reflectively
+            val onTimerWake = GoalManager::class.java.getDeclaredMethod(
+                "onTimerWake", String::class.java, Long::class.javaPrimitiveType
+            )
+            onTimerWake.isAccessible = true
+            onTimerWake.invoke(manager, id, System.currentTimeMillis())
+
+            // Now a work-ready cue should have been emitted
+            val cue = signals.firstOrNull { it.goalId == id }
+            assertNotNull(cue, "Expected work-ready cue after cron timer wake on ACTIVE goal")
+            assertEquals("cron_wake_active", cue.reason)
+            assertEquals(state.goal.plan.steps.first().id, cue.stepId)
+
+            manager.stop()
+        } finally {
+            root.toFile().deleteRecursively()
+        }
+    }
+
     private fun waitUntil(timeoutMs: Long = 2_500, predicate: () -> Boolean) {
         val deadline = System.currentTimeMillis() + timeoutMs
         while (System.currentTimeMillis() < deadline) {

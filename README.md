@@ -231,6 +231,11 @@ NeoPsyke does not try to:
 - **Be production-ready today.** The security model is serious but the project is experimental. Deploy at your own risk.
 - **Support untrusted multi-tenant operation.** The current trust model assumes a single owner-operator.
 
+Some omissions are deliberate architectural decisions rather than missing checklist items:
+
+- **Use sub-agents before trust boundaries are ready.** Delegation is intentionally excluded for now because the current security model is not yet strong enough around trust propagation, authority boundaries, and containment.
+- **Push the Ego into full async processing before the main loop is stable.** Broader async Ego execution is being deferred until the core cognitive loop is more stable across the current feature set.
+
 **Current risks and limitations:**
 
 - LLM quality directly affects planning and reasoning quality. The architecture mitigates but cannot eliminate model errors.

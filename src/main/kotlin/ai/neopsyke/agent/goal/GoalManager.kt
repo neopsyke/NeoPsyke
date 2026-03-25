@@ -667,6 +667,7 @@ class GoalManager(
     private fun onTimerWake(goalId: String, scheduledAtMs: Long) {
         val state = states[goalId] ?: return
         val scheduledAt = Instant.ofEpochMilli(scheduledAtMs)
+        logger.info { "onTimerWake: goal=$goalId status=${state.goal.status} scheduledAt=$scheduledAt" }
         if (!state.goal.cronExpression.isNullOrBlank() && state.goal.status in setOf(GoalStatus.COMPLETED, GoalStatus.FAILED)) {
             applyEvent(goalId, GoalEvent.CronCycleStarted(goalId, scheduledAt))
         }
@@ -689,7 +690,17 @@ class GoalManager(
                 goalId,
                 GoalEvent.WaitConditionSatisfied(goalId, step.id, "timer")
             )
+        }
+        // Cron wake for ACTIVE goals: emit work-ready cue so the Ego picks up the step
+        if (!state.goal.cronExpression.isNullOrBlank() && state.goal.status == GoalStatus.ACTIVE) {
+            val step = state.nextRunnableStep()
+            if (step != null) {
+                logger.info { "Cron wake emitting work-ready cue: goal=$goalId step=${step.id}" }
+                cueEmitter(GoalRuntimeCue(goalId = goalId, stepId = step.id, reason = "cron_wake_active"))
+            } else {
+                logger.info { "Cron wake for ACTIVE goal=$goalId but no runnable step found" }
             }
+        }
     }
 
     private fun isValidCronExpression(expression: String): Boolean =
