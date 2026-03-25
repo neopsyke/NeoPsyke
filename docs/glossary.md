@@ -65,6 +65,16 @@ Each section covers terms that appear together in the same area of the agent.
 - **LoopTask** — The unit of work the Ego executes in one step: `AttendOpportunity`, `ProcessThought`, or `PerformAction`. Pulled from the `AttentionScheduler`.
 - **OpportunityWorkItem** — A pending item that competes for the Ego's attention: `InputOpportunity`, `ImpulseOpportunity`, or `GoalWorkOpportunity`.
 - **AmbientContext** — Best-effort cached snapshot of active goals, recent scratchpad themes, useful recent actions, and open loops. Advisory only — biases recall and prompting toward relevant topics without blocking on state queries.
+- **EgoTrigger** — A sealed type representing what caused the Ego to run the current step. Four variants: `IncomingInput` (user/system message), `PendingThoughtInput` (follow-up reasoning), `IncomingImpulse` (Id-driven work), `GoalWork` (goal step activation). `CognitionModels.kt`
+- **ActionOrigin** — Provenance marker on pending thoughts and actions, tracking which source initiated the work (`USER`, `ID`, `SYSTEM`, `GOAL`) and optionally the `needId` and `rootImpulseId` for Id-originated work. `QueueModels.kt`
+- **OriginSource** — Enum identifying the source of work: `USER`, `ID`, `SYSTEM`, `GOAL`. Part of `ActionOrigin`.
+- **DecisionVerifier** — Pre-superego gate that validates whether a proposed action is grounded and ready to commit. Assesses task intent (personal memory, external observation, etc.), volatility, evidence requirements, and dispatch eligibility. `DecisionVerifier.kt`
+- **DecisionDispatcher** — Routes planner decisions into the appropriate queues. Handles thought and action enqueueing, plan suppression with dedup gates, and recovery from suppressed plans. `DecisionDispatcher.kt`
+- **FallbackHandler** — Manages fallback behavior when actions are denied or fail. Enqueues denial thoughts, staged-action follow-ups, and fallback explanations when the planner exhausts options. `FallbackHandler.kt`
+- **DeliberationEngine** — Manages deliberation state, external evidence tracking, action cooldown (retry budget), thread security context, and meta-reasoning pressure. Separate from `DeliberationProgressMonitor`. `DeliberationEngine.kt`
+- **ScratchpadFinalizer** — Optional LLM-backed pass that rewrites the final action payload using gathered evidence, scratchpad state, and dialogue history. Returns confidence and grounding assessment. `ScratchpadFinalizer.kt`
+- **ActionReviewPipeline** — Orchestrates the full path from proposed action to execution: scratchpad finalization, decision verifier check, superego review, action-control authorization, and execution. `ActionReviewPipeline.kt`
+- **ImpulseLifecycleTracker** — Tracks the lifecycle of Id impulses through the Ego, recording action outcomes and evaluating need satisfaction when all impulse-driven work completes. `ImpulseLifecycleTracker.kt`
 
 ---
 
@@ -97,6 +107,11 @@ Each section covers terms that appear together in the same area of the agent.
 - **ActionControlService** — Orchestrates the full authorization, staging, and execution lifecycle. Routes superego decisions, manages the SQLite store, and coordinates the autonomous worker. `DefaultActionControlService`
 - **AutonomousWorker** — A background poller that picks up staged actions with status `READY` and executes them without waiting for the main Ego loop. `ActionControlAutonomousWorker`
 - **DirectCommit** — An action that is allowed to skip staging and execute immediately because its policy says so. The superego still reviews it, but it does not wait for human approval.
+- **AgentActionPlugin** — Interface for action handlers. Must provide `execute()`, may override `deterministicReview()`, `repairPlannerPayload()`, and `healthCheck()`. Discovered at startup via `ServiceLoader`. `ActionPluginContracts.kt`
+- **ActionDescriptor** — Full configuration for an action type: planner guidance, payload schema, capabilities, effect class, superego directives, connector binding, and trust constraints. `ActionPluginContracts.kt`
+- **ActionPlanningDefinition** — Per-action guidance injected into the `PlannerContext`: description, payload guidance, schema examples, effect class, and trust constraints. Derived from `ActionDescriptor`. `CognitionModels.kt`
+- **ActionCapability** — Enum declaring behavioral traits of action plugins: `PRODUCES_USER_OUTPUT`, `GATHERS_EVIDENCE`. Allows cross-cutting systems (evidence tracking, workspace synthesis) to query plugin traits without hard-coding action types. `ActionPluginContracts.kt`
+- **ActionExecutionContext** — Runtime context passed to action handlers during execution: conversation context, request ID, dry-run flag, and authorization record. `ActionPluginContracts.kt`
 
 ---
 

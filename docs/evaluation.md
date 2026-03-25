@@ -2,6 +2,8 @@
 
 NeoPsyke uses a multi-layered testing and evaluation approach, from fast unit tests to end-to-end cognitive loop validation. The evaluation infrastructure is still evolving, and better, more comprehensive evals are one of the most impactful areas for contribution.
 
+> **Terminology:** See the [Glossary](glossary.md) for definitions of all agent concepts used in this document.
+
 ---
 
 ## Quick reference

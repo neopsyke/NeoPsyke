@@ -59,6 +59,8 @@ The core philosophy is:
 
 ---
 
+> **Terminology:** See the [Glossary](glossary.md) for definitions of all agent concepts used in this document.
+
 ## 3. Security Paradigm
 
 NeoPsyke's current model is a layered control system, not a single gate.

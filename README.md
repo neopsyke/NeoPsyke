@@ -274,6 +274,7 @@ Each cognitive role (planner, superego primary/escalation, action verifier, meta
 
 | Document | Description |
 |---|---|
+| [docs/glossary.md](docs/glossary.md) | Grouped reference for all agent concepts and terminology |
 | [docs/getting-started.md](docs/getting-started.md) | Installation, first run, and real usage examples |
 | [docs/configuration.md](docs/configuration.md) | Full configuration reference (YAML files, env vars, tuning) |
 | [docs/evaluation.md](docs/evaluation.md) | Testing layers, eval pipeline, and contributor directions |
