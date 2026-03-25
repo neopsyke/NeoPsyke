@@ -133,8 +133,11 @@ class IdEgoLifecycleIntegrationTest {
     @Test
     fun `id internalize constraints persist on follow-up thoughts`() {
         val instrumentation = RecordingInstrumentation()
+        var followUpHasReflectInternalAvailable: Boolean? = null
         var followUpHasContactDispatchable: Boolean? = null
+        var followUpHasReflectInternalDispatchable: Boolean? = null
         var followUpHasContactDefinition: Boolean? = null
+        var followUpHasReflectInternalDefinition: Boolean? = null
         var followUpConvergence: ConvergenceMode? = null
 
         val planner = object : Ego.Planner {
@@ -150,8 +153,13 @@ class IdEgoLifecycleIntegrationTest {
                     is EgoTrigger.GoalWork -> EgoDecision.Noop("ignore goal work in test")
                     is EgoTrigger.PendingThoughtInput -> {
                         if (trigger.thought.originActionType == ActionType.WEB_SEARCH) {
+                            followUpHasReflectInternalAvailable = ActionType.REFLECT_INTERNAL in context.availableActions
                             followUpHasContactDispatchable = ActionType.CONTACT_USER in context.dispatchableActions
+                            followUpHasReflectInternalDispatchable = ActionType.REFLECT_INTERNAL in context.dispatchableActions
                             followUpHasContactDefinition = context.actionDefinitions.any { it.actionType == ActionType.CONTACT_USER }
+                            followUpHasReflectInternalDefinition = context.actionDefinitions.any {
+                                it.actionType == ActionType.REFLECT_INTERNAL
+                            }
                             followUpConvergence = context.idState?.convergence
                         }
                         EgoDecision.Noop("done")
@@ -207,16 +215,22 @@ class IdEgoLifecycleIntegrationTest {
         runAgentWithInput(ego, "kickoff\nexit\n")
 
         assertNotNull(followUpHasContactDispatchable, "Expected a WEB_SEARCH follow-up thought to be processed")
+        assertFalse(followUpHasReflectInternalAvailable == true, "follow-up available actions must exclude reflect_internal")
         assertFalse(followUpHasContactDispatchable == true, "follow-up dispatchable actions must exclude contact_user")
+        assertFalse(followUpHasReflectInternalDispatchable == true, "follow-up dispatchable actions must exclude reflect_internal")
         assertFalse(followUpHasContactDefinition == true, "follow-up action definitions must exclude contact_user")
+        assertFalse(followUpHasReflectInternalDefinition == true, "follow-up action definitions must exclude reflect_internal")
         assertEquals(ConvergenceMode.INTERNALIZE, followUpConvergence)
     }
 
     @Test
     fun `id internalize constraints persist on impulse plan step thoughts`() {
         val instrumentation = RecordingInstrumentation()
+        var planStepHasReflectInternalAvailable: Boolean? = null
         var planStepHasContactDispatchable: Boolean? = null
+        var planStepHasReflectInternalDispatchable: Boolean? = null
         var planStepHasContactDefinition: Boolean? = null
+        var planStepHasReflectInternalDefinition: Boolean? = null
         var planStepConvergence: ConvergenceMode? = null
 
         val planner = object : Ego.Planner {
@@ -231,8 +245,13 @@ class IdEgoLifecycleIntegrationTest {
                     is EgoTrigger.GoalWork -> EgoDecision.Noop("ignore goal work in test")
                     is EgoTrigger.PendingThoughtInput -> {
                         if (trigger.thought.planContext != null) {
+                            planStepHasReflectInternalAvailable = ActionType.REFLECT_INTERNAL in context.availableActions
                             planStepHasContactDispatchable = ActionType.CONTACT_USER in context.dispatchableActions
+                            planStepHasReflectInternalDispatchable = ActionType.REFLECT_INTERNAL in context.dispatchableActions
                             planStepHasContactDefinition = context.actionDefinitions.any { it.actionType == ActionType.CONTACT_USER }
+                            planStepHasReflectInternalDefinition = context.actionDefinitions.any {
+                                it.actionType == ActionType.REFLECT_INTERNAL
+                            }
                             planStepConvergence = context.idState?.convergence
                         }
                         EgoDecision.Noop("done")
@@ -288,8 +307,11 @@ class IdEgoLifecycleIntegrationTest {
         runAgentWithInput(ego, "kickoff\nexit\n")
 
         assertNotNull(planStepHasContactDispatchable, "Expected an impulse-origin plan step thought to be processed")
+        assertFalse(planStepHasReflectInternalAvailable == true, "plan-step available actions must exclude reflect_internal")
         assertFalse(planStepHasContactDispatchable == true, "plan-step dispatchable actions must exclude contact_user")
+        assertFalse(planStepHasReflectInternalDispatchable == true, "plan-step dispatchable actions must exclude reflect_internal")
         assertFalse(planStepHasContactDefinition == true, "plan-step action definitions must exclude contact_user")
+        assertFalse(planStepHasReflectInternalDefinition == true, "plan-step action definitions must exclude reflect_internal")
         assertEquals(ConvergenceMode.INTERNALIZE, planStepConvergence)
     }
 

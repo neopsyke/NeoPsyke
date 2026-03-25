@@ -356,7 +356,7 @@ class EgoAgentTest {
         val plannerInputCalls = plannerLlm.calls.filter { it.options.metadata.callSite == "input" }
         assertTrue(plannerInputCalls.size >= 2)
         val secondPrompt = plannerInputCalls[1].messages.joinToString("\\n\\n") { it.content }
-        assertTrue(secondPrompt.contains("Prior workspace digests"))
+        assertTrue(secondPrompt.contains("Recent completed work summaries"))
         assertTrue(secondPrompt.contains("digest sentinel one"))
         assertTrue(
             instrumentation.events.any { it.type == "scratchpad_digest_captured" },
@@ -967,7 +967,7 @@ class EgoAgentTest {
         assertTrue(hippocampus.queries.isNotEmpty())
         assertTrue(hippocampus.queries.any { it.cue.contains("hello") })
         val prompt = plannerLlm.lastMessages.last().content
-        assertTrue(prompt.contains("Long-term memory recall:"))
+        assertTrue(prompt.contains("Relevant long-term memory:"))
         assertTrue(prompt.contains("prior preference: concise responses"))
         assertEquals(listOf("ego> ok"), outputs)
         assertTrue(
@@ -1040,7 +1040,7 @@ class EgoAgentTest {
         val plannerCalls = plannerLlm.calls.filter { it.options.metadata.callSite != "action_verifier" }
         assertTrue(plannerCalls.size >= 2)
         val followUpPrompt = plannerCalls[1].messages.last().content
-        assertTrue(followUpPrompt.contains("Scratchpad summary:"))
+        assertTrue(followUpPrompt.contains("Working notes for this request:"))
         assertTrue(
             followUpPrompt.contains("Request") ||
                 followUpPrompt.contains("find current pricing")

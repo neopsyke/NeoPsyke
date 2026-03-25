@@ -160,16 +160,25 @@ class SqliteActionControlStore(
             }
         }
 
-    override fun listStagedActions(limit: Int): List<StagedAction> =
+    override fun listStagedActions(limit: Int, includeTerminal: Boolean): List<StagedAction> =
         synchronized(connection) {
-            connection.prepareStatement(
+            val sql = if (includeTerminal) {
                 """
                 SELECT payload_json
                 FROM staged_actions
                 ORDER BY updated_at_ms DESC
                 LIMIT ?
                 """.trimIndent()
-            ).use { statement ->
+            } else {
+                """
+                SELECT payload_json
+                FROM staged_actions
+                WHERE status NOT IN ('COMPLETED', 'CANCELLED', 'FAILED')
+                ORDER BY updated_at_ms DESC
+                LIMIT ?
+                """.trimIndent()
+            }
+            connection.prepareStatement(sql).use { statement ->
                 statement.setInt(1, limit)
                 statement.executeQuery().use { rs ->
                     buildList {

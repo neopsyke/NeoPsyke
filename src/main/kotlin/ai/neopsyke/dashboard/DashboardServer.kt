@@ -645,10 +645,11 @@ class DashboardServer(
                 return
             }
             val limit = parseQueryParam(exchange.requestURI.query, "limit")?.toIntOrNull() ?: 50
+            val includeTerminal = parseBooleanQueryParam(exchange.requestURI.query, "include_terminal") ?: false
             respondText(
                 exchange,
                 200,
-                mapper.writeValueAsString(service.stagedActions(limit)),
+                mapper.writeValueAsString(service.stagedActions(limit, includeTerminal = includeTerminal)),
                 "application/json; charset=utf-8"
             )
             return

@@ -52,7 +52,7 @@
       font-family: inherit;
       text-decoration: none;
     }
-    .ghost-btn:hover, .primary-btn:hover {
+    .ghost-btn:not(:disabled):hover, .primary-btn:not(:disabled):hover {
       border-color: var(--accent);
       color: var(--accent);
     }
@@ -63,9 +63,13 @@
       color: var(--text);
       background: rgba(54, 195, 167, 0.08);
     }
+    .ghost-btn:disabled,
     .primary-btn:disabled {
       opacity: 0.55;
       cursor: default;
+      border-color: var(--line);
+      color: var(--muted);
+      background: none;
     }
     .toolbar {
       display: flex;
@@ -288,6 +292,10 @@
         <input id="include-trace" type="checkbox" />
         <span>Show trace</span>
       </label>
+      <label style="display:flex;gap:6px;align-items:center">
+        <input id="include-terminal" type="checkbox" />
+        <span>Show terminal</span>
+      </label>
       <span id="last-refresh">Not refreshed yet</span>
       <button class="ghost-btn" id="refresh-btn" type="button">Refresh</button>
     </div>
@@ -296,11 +304,11 @@
   <div class="layout">
     <section class="panel">
       <div class="panel-head">
-        <strong>Staged Actions</strong>
+        <strong id="staged-heading">Open Staged Actions</strong>
         <span id="staged-count">0</span>
       </div>
       <div class="panel-body list" id="staged-list">
-        <div class="empty">No staged actions found.</div>
+        <div class="empty">No open staged actions found.</div>
       </div>
     </section>
 
@@ -331,12 +339,14 @@
     const detailPaneEl = document.getElementById('detail-pane');
     const detailKindEl = document.getElementById('detail-kind');
     const statusTextEl = document.getElementById('status-text');
+    const stagedHeadingEl = document.getElementById('staged-heading');
     const stagedCountEl = document.getElementById('staged-count');
     const ledgerCountEl = document.getElementById('ledger-count');
     const lastRefreshEl = document.getElementById('last-refresh');
     const refreshBtn = document.getElementById('refresh-btn');
     const includeBackgroundEl = document.getElementById('include-background');
     const includeTraceEl = document.getElementById('include-trace');
+    const includeTerminalEl = document.getElementById('include-terminal');
     const attentionPillEl = document.getElementById('attention-pill');
     const liveStatusEl = document.getElementById('live-status');
 
@@ -418,7 +428,7 @@
     function renderStagedList() {
       stagedCountEl.textContent = String(stagedActions.length);
       if (stagedActions.length === 0) {
-        renderEmpty(stagedListEl, 'No staged actions found.');
+        renderEmpty(stagedListEl, includeTerminalEl.checked ? 'No staged actions found.' : 'No open staged actions found.');
         return;
       }
       stagedListEl.innerHTML = sortStagedActions(stagedActions).map((item) => {
@@ -588,7 +598,8 @@
       const readyCount = stagedActions.filter((item) => item.status === 'READY').length;
       const signalCount = ledgerEntries.filter((item) => item.importance === 'SIGNAL').length;
       attentionPillEl.textContent = String(waitingCount + readyCount) + ' need approval';
-      statusTextEl.textContent = 'Staged: ' + stagedActions.length + ' total, ' + waitingCount + ' waiting approval, ' + readyCount + ' ready, ' + signalCount + ' high-signal activity items.';
+      stagedHeadingEl.textContent = includeTerminalEl.checked ? 'Staged Actions' : 'Open Staged Actions';
+      statusTextEl.textContent = (includeTerminalEl.checked ? 'Staged' : 'Open staged') + ': ' + stagedActions.length + ' shown, ' + waitingCount + ' waiting approval, ' + readyCount + ' ready, ' + signalCount + ' high-signal activity items.';
     }
 
     function scheduleRefresh(reason) {
@@ -657,7 +668,7 @@
       }
       try {
         const [stagedRes, ledgerRes] = await Promise.all([
-          fetch('/api/action-control/staged?limit=100'),
+          fetch('/api/action-control/staged?limit=100&include_terminal=' + (includeTerminalEl.checked ? 'true' : 'false')),
           fetch('/api/action-control/ledger?limit=200')
         ]);
         if (!stagedRes.ok || !ledgerRes.ok) {
@@ -758,6 +769,7 @@
     });
 
     refreshBtn.addEventListener('click', () => refreshAll('manual'));
+    includeTerminalEl.addEventListener('change', () => refreshAll('manual'));
     includeBackgroundEl.addEventListener('change', () => {
       renderLedgerList();
       renderDetail();

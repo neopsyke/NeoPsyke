@@ -31,6 +31,7 @@ import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -296,6 +297,12 @@ class DashboardServerTest {
                 assertEquals(200, staged.statusCode())
                 assertTrue(staged.body().contains("stage-1"))
                 assertTrue(staged.body().contains("WAITING_AUTHORIZATION"))
+                assertFalse(staged.body().contains("stage-2"))
+
+                val stagedWithTerminal = get("http://127.0.0.1:${started.port}/api/action-control/staged?include_terminal=true")
+                assertEquals(200, stagedWithTerminal.statusCode())
+                assertTrue(stagedWithTerminal.body().contains("stage-2"))
+                assertTrue(stagedWithTerminal.body().contains("COMPLETED"))
 
                 val ledgerBefore = get("http://127.0.0.1:${started.port}/api/action-control/ledger")
                 assertEquals(200, ledgerBefore.statusCode())
@@ -502,6 +509,19 @@ class DashboardServerTest {
             actionHash = "hash-1",
             commitMode = CommitMode.APPROVAL_BACKED,
         )
+        private val completedStage = StagedAction(
+            id = "stage-2",
+            preparedActionId = "prepared-2",
+            actionType = ActionType.CONTACT_USER,
+            summary = "Previously completed owner reply",
+            payload = "done",
+            conversationContext = context,
+            status = StagedActionStatus.COMPLETED,
+            actionHash = "hash-2",
+            commitMode = CommitMode.APPROVAL_BACKED,
+            receiptId = "receipt-0",
+            statusReason = "Completed earlier",
+        )
         private var receipt: ActionReceipt? = null
 
         override suspend fun handleAuthorizationDecision(
@@ -614,8 +634,16 @@ class DashboardServerTest {
                 conversationContext = conversationContext,
             ).also { ledgerEntries += it }
 
-        override fun stagedActions(limit: Int): List<StagedAction> = listOf(staged)
-        override fun stagedAction(id: String): StagedAction? = staged.takeIf { it.id == id }
+        override fun stagedActions(limit: Int, includeTerminal: Boolean): List<StagedAction> =
+            listOf(staged, completedStage)
+                .filter { includeTerminal || it.status !in setOf(StagedActionStatus.COMPLETED, StagedActionStatus.CANCELLED, StagedActionStatus.FAILED) }
+                .take(limit)
+        override fun stagedAction(id: String): StagedAction? =
+            when (id) {
+                staged.id -> staged
+                completedStage.id -> completedStage
+                else -> null
+            }
         override fun receipts(limit: Int): List<ActionReceipt> = listOfNotNull(receipt)
         override fun receipt(id: String): ActionReceipt? = receipt?.takeIf { it.id == id }
         override fun ledgerEntries(limit: Int): List<ActionLedgerEntry> = ledgerEntries.takeLast(limit).reversed()

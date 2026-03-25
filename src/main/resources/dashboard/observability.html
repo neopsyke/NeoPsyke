@@ -855,6 +855,7 @@
       inFlight: { active: false, taskType: null, detail: null },
       queues: { inputs: [], thoughts: [], actions: [] },
       recentEvents: [],
+      expandedEventDetails: new Set(),
       lastSuperegoInput: null,
       lastSuperegoOutput: null,
       actionCapabilities: [],
@@ -1175,17 +1176,18 @@
           ? "<div class=\"tl-content\">" + escapeHtml(short(content, 300)) + "</div>"
           : "";
         let detailsHtml;
+        const detailsKey = eventDetailsKey(event, "timeline-primary");
         if (event.type === "plan_created" && Array.isArray((event.data || {}).steps) && event.data.steps.length) {
           const stepsHtml = event.data.steps
             .map((s, i) => escapeHtml((i + 1) + ". " + s))
             .join("\n");
           detailsHtml =
-            "<details class=\"tl-raw\"><summary>plan steps</summary>" +
+            "<details class=\"tl-raw\" data-event-details-key=\"" + escapeHtml(detailsKey) + "\"" + detailsOpenAttr(detailsKey) + "><summary>plan steps</summary>" +
               "<pre>" + stepsHtml + "</pre>" +
             "</details>";
         } else {
           detailsHtml =
-            "<details class=\"tl-raw\"><summary>raw</summary>" +
+            "<details class=\"tl-raw\" data-event-details-key=\"" + escapeHtml(detailsKey) + "\"" + detailsOpenAttr(detailsKey) + "><summary>raw</summary>" +
               "<pre>" + escapeHtml(fmt(event.data || {})) + "</pre>" +
             "</details>";
         }
@@ -1201,8 +1203,9 @@
         "</div>";
       }
 
+      const detailsKey = eventDetailsKey(event, "timeline-secondary");
       return "<div class=\"tl-row tl-secondary" + catClass + criticalClass + "\">" +
-        "<details>" +
+        "<details data-event-details-key=\"" + escapeHtml(detailsKey) + "\"" + detailsOpenAttr(detailsKey) + ">" +
           "<summary>" +
             "<span class=\"tl-type\">" + escapeHtml(typeLabel) + "</span> " +
             sessionChip +
@@ -1364,8 +1367,35 @@
       return short(JSON.stringify(compact), 220);
     }
 
+    function eventBaseKey(event) {
+      if (event.id != null && event.id !== "") return String(event.id);
+      const ts = event.tsIso || event.ts || "unknown-ts";
+      return String(ts) + ":" + String(event.type || "unknown-type");
+    }
+
+    function eventDetailsKey(event, section) {
+      return String(section) + ":" + eventBaseKey(event);
+    }
+
+    function detailsOpenAttr(detailsKey) {
+      return state.expandedEventDetails.has(detailsKey) ? " open" : "";
+    }
+
+    function pruneExpandedDetailsState() {
+      const validKeys = new Set();
+      state.recentEvents.forEach(function(event) {
+        validKeys.add(eventDetailsKey(event, "action"));
+        validKeys.add(eventDetailsKey(event, "timeline-primary"));
+        validKeys.add(eventDetailsKey(event, "timeline-secondary"));
+      });
+      state.expandedEventDetails.forEach(function(detailsKey) {
+        if (!validKeys.has(detailsKey)) state.expandedEventDetails.delete(detailsKey);
+      });
+    }
+
     function renderEventItem(event) {
-      return "<div class=\"item\"><details>" +
+      const detailsKey = eventDetailsKey(event, "action");
+      return "<div class=\"item\"><details data-event-details-key=\"" + escapeHtml(detailsKey) + "\"" + detailsOpenAttr(detailsKey) + ">" +
         "<summary>" +
         "<span class=\"pill\">#" + escapeHtml(event.id || "?") + " " + escapeHtml(event.type) + "</span> " +
         "<span class=\"ts\">" + escapeHtml(event.tsIso || new Date(event.ts).toISOString()) + "</span> " +
@@ -2002,6 +2032,7 @@
     function applyEvent(event) {
       state.recentEvents.push(event);
       if (state.recentEvents.length > 2000) state.recentEvents.shift();
+      pruneExpandedDetailsState();
 
       switch (event.type) {
         case "loop_status":
@@ -2245,6 +2276,15 @@
         state.scratchpad.activeTab = "raw";
         renderScratchpadDrawer();
       });
+      document.addEventListener("toggle", (event) => {
+        const detailsEl = event.target;
+        if (!(detailsEl instanceof HTMLDetailsElement)) return;
+        if (!detailsEl.closest("#timeline, #actions")) return;
+        const detailsKey = detailsEl.dataset.eventDetailsKey;
+        if (!detailsKey) return;
+        if (detailsEl.open) state.expandedEventDetails.add(detailsKey);
+        else state.expandedEventDetails.delete(detailsKey);
+      }, true);
       render();
       idCountdownTimer = setInterval(tickIdCountdowns, 1000);
       bootComplete = true;

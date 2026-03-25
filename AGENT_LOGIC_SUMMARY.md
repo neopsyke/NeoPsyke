@@ -146,7 +146,7 @@ It is intentionally high-level and should stay aligned with the code.
   - Each impulse root (`root_impulse_id`) gets a lifecycle record.
   - Id-origin is propagated on every downstream thought/action enqueue path (follow-up, denial recovery, suppression recovery, fallback).
   - Id convergence constraints are re-applied on every Id-origin thought (including follow-up and plan-step thoughts), not only on the initial impulse planner pass.
-    - `internalize` + `allowEscalation=false` removes `contact_user` from planner dispatchable actions and planner action definitions.
+    - `internalize` + `allowEscalation=false` removes `contact_user` and `reflect_internal` from planner-visible actions (`availableActions`, `dispatchableActions`, and planner action definitions), keeping the path evidence-bound through `reflect_evidence`.
   - Id-driven planning now assembles a shared ambient context before planner/retrieval work:
     - optional active goals from `GoalRegistry`
     - recent scratchpad themes from scratchpad digests

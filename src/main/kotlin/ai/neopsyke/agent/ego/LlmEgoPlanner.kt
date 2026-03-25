@@ -1651,14 +1651,14 @@ class LlmEgoPlanner(
                     Never emit tool calls, function wrappers, named envelopes, markdown, or code fences.
                     Allowed actions:
                     $actionGuidanceBlock
-                    You may receive Long-term memory recall from Hippocampus search.
-                    Use long-term memory recall only when relevant to the current trigger.
-                    If long-term memory recall is missing or ambiguous, do not invent details.
-                    You may receive Episodic memory timeline from the session logbook.
-                    Use episodic memory to answer questions about past actions, events, or conversations.
-                    If the user asks about past events, prefer episodic memory over other sources.
-                    You may receive a Scratchpad summary scoped to the current request.
-                    Treat Scratchpad as ephemeral working notes, not durable long-term memory.
+                    You may receive Relevant long-term memory from retrieval.
+                    Use relevant long-term memory only when relevant to the current trigger.
+                    If relevant long-term memory is missing or ambiguous, do not invent details.
+                    You may receive Recent past events from the session logbook.
+                    Use recent past events to answer questions about past actions, events, or conversations.
+                    If the user asks about past events, prefer recent past events over other sources.
+                    You may receive Working notes for this request.
+                    Treat working notes for this request as ephemeral notes, not durable long-term memory.
                     External actions have real latency/cost and must be value-add.
                     Treat redundancy as a soft cost signal: if recent evidence already covers the trigger
                     and the trigger does not explicitly ask to refresh/retry, prefer action=contact_user or noop.
@@ -1761,7 +1761,7 @@ class LlmEgoPlanner(
                     role = ChatRole.USER,
                     band = PromptBudgetAllocator.Band.REQUIRED_CONTEXT,
                     floorTokens = 24,
-                    content = "Long-term memory recall:\n$longTermMemoryRecall"
+                    content = "Relevant long-term memory:\n$longTermMemoryRecall"
                 ),
                 PromptBudgetAllocator.Section(
                     key = "planner_lessons",
@@ -1775,21 +1775,21 @@ class LlmEgoPlanner(
                     role = ChatRole.USER,
                     band = PromptBudgetAllocator.Band.REQUIRED_CONTEXT,
                     floorTokens = 24,
-                    content = "Episodic memory timeline:\n$episodicRecall"
+                    content = "Recent past events:\n$episodicRecall"
                 ),
                 PromptBudgetAllocator.Section(
                     key = "planner_scratchpad_summary",
                     role = ChatRole.USER,
                     band = PromptBudgetAllocator.Band.REQUIRED_CONTEXT,
                     floorTokens = 20,
-                    content = "Scratchpad summary:\n$scratchpadSummary"
+                    content = "Working notes for this request:\n$scratchpadSummary"
                 ),
                 PromptBudgetAllocator.Section(
                     key = "planner_session_digest",
                     role = ChatRole.USER,
                     band = PromptBudgetAllocator.Band.REQUIRED_CONTEXT,
                     floorTokens = 16,
-                    content = "Prior workspace digests (resolved requests in this session):\n$sessionScratchpadDigest"
+                    content = "Recent completed work summaries:\n$sessionScratchpadDigest"
                 ),
                 context.ambientContext.takeIf { !it.isEmpty() }?.let {
                     PromptBudgetAllocator.Section(
@@ -1797,7 +1797,7 @@ class LlmEgoPlanner(
                         role = ChatRole.USER,
                         band = PromptBudgetAllocator.Band.REQUIRED_CONTEXT,
                         floorTokens = 20,
-                        content = "Ambient context:\n$ambientContext"
+                        content = "Background context:\n$ambientContext"
                     )
                 },
                 PromptBudgetAllocator.Section(
@@ -1986,7 +1986,7 @@ class LlmEgoPlanner(
                     key = "action_verifier_long_term_recall",
                     role = ChatRole.USER,
                     band = PromptBudgetAllocator.Band.OPTIONAL,
-                    content = "Long-term memory recall:\n$longTermMemoryRecall"
+                    content = "Relevant long-term memory:\n$longTermMemoryRecall"
                 ),
                 PromptBudgetAllocator.Section(
                     key = "action_verifier_lessons",
@@ -1998,13 +1998,13 @@ class LlmEgoPlanner(
                     key = "action_verifier_workspace_summary",
                     role = ChatRole.USER,
                     band = PromptBudgetAllocator.Band.OPTIONAL,
-                    content = "Scratchpad summary:\n$scratchpadSummary"
+                    content = "Working notes for this request:\n$scratchpadSummary"
                 ),
                 PromptBudgetAllocator.Section(
                     key = "action_verifier_session_digest",
                     role = ChatRole.USER,
                     band = PromptBudgetAllocator.Band.OPTIONAL,
-                    content = "Prior workspace digests:\n$sessionScratchpadDigest"
+                    content = "Recent completed work summaries:\n$sessionScratchpadDigest"
                 ),
                 PromptBudgetAllocator.Section(
                     key = "action_verifier_evidence_hints",

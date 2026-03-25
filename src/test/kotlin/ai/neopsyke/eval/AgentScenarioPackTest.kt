@@ -213,7 +213,7 @@ class AgentScenarioPackTest {
         assertTrue(hippocampus.queries.isNotEmpty())
         assertTrue(hippocampus.queries.any { it.cue.contains("hello") })
         val prompt = plannerLlm.lastMessages.last().content
-        assertTrue(prompt.contains("Long-term memory recall:"))
+        assertTrue(prompt.contains("Relevant long-term memory:"))
         assertTrue(prompt.contains("prior preference: concise responses"))
         assertEquals(listOf("ego> ok"), outputs)
     }
@@ -270,7 +270,7 @@ class AgentScenarioPackTest {
         val plannerCalls = plannerLlm.calls.filter { it.options.metadata.callSite != "action_verifier" }
         assertTrue(plannerCalls.size >= 2)
         val followUpPrompt = plannerCalls[1].messages.last().content
-        assertTrue(followUpPrompt.contains("Scratchpad summary:"))
+        assertTrue(followUpPrompt.contains("Working notes for this request:"))
         assertTrue(
             followUpPrompt.contains("web_search_result") ||
                 followUpPrompt.contains("Official pricing fetched.")

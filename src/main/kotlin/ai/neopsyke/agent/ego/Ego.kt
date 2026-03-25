@@ -745,19 +745,19 @@ class Ego(
             allowEscalation = allowEscalation,
         )
 
-        // Internalize without escalation must not offer direct user messaging.
-        val filteredDispatchable = if (convergence == ai.neopsyke.agent.id.ConvergenceMode.INTERNALIZE && !allowEscalation) {
-            baseContext.dispatchableActions - setOf(ActionType.CONTACT_USER)
+        // Internalize without escalation must stay evidence-bound: no direct user
+        // messaging and no trusted-data-only reflect_internal fallback.
+        val blockedPlannerActions = if (convergence == ai.neopsyke.agent.id.ConvergenceMode.INTERNALIZE && !allowEscalation) {
+            setOf(ActionType.CONTACT_USER, ActionType.REFLECT_INTERNAL)
         } else {
-            baseContext.dispatchableActions
+            emptySet()
         }
-        val filteredDefinitions = if (convergence == ai.neopsyke.agent.id.ConvergenceMode.INTERNALIZE && !allowEscalation) {
-            baseContext.actionDefinitions.filter { it.actionType != ActionType.CONTACT_USER }
-        } else {
-            baseContext.actionDefinitions
-        }
+        val filteredAvailable = baseContext.availableActions - blockedPlannerActions
+        val filteredDispatchable = baseContext.dispatchableActions - blockedPlannerActions
+        val filteredDefinitions = baseContext.actionDefinitions.filterNot { it.actionType in blockedPlannerActions }
         return baseContext.copy(
             idState = idState,
+            availableActions = filteredAvailable,
             dispatchableActions = filteredDispatchable,
             actionDefinitions = filteredDefinitions,
         )
