@@ -275,6 +275,8 @@ Open `http://localhost:8787` in your browser:
 
 ---
 
+> **Terminology:** See the [Glossary](glossary.md) for definitions of all agent concepts used in this document.
+
 ## What to explore next
 
 - [Configuration reference](configuration.md) — YAML files, tuning knobs, and metrics/observability.

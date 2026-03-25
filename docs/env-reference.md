@@ -6,6 +6,8 @@ Reference of the environment variables supported by NeoPsyke. For most users, th
 
 For configuration concepts, the loading model, and tuning guidance, see [configuration.md](configuration.md).
 
+> **Terminology:** See the [Glossary](glossary.md) for definitions of all agent concepts used in this document.
+
 ---
 
 ## Configuration file paths
