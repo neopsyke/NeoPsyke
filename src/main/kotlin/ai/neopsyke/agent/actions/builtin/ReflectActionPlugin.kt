@@ -107,14 +107,14 @@ class ReflectEvidenceActionPlugin(
     override val descriptor: ActionDescriptor = ActionDescriptor(
         actionType = ActionType.REFLECT_EVIDENCE,
         dispatchable = true,
-        plannerDescription = "reflect_evidence: persist evidence-backed learning from same-request external artifacts using artifact_ids only.",
-        payloadGuidance = """JSON: {"artifact_ids":["artifact-id-1"],"summary_hint":"Optional concise learning angle","keywords":["topic1","topic2"]}""",
-        payloadSchemaExample = """{"artifact_ids":["artifact-id-1"],"summary_hint":"Gmail search operators are useful for inbox cleanup","keywords":["gmail","search"]}""",
+        plannerDescription = "reflect_evidence: persist evidence-backed learning from same-request external artifacts (artifacts are resolved automatically from scope).",
+        payloadGuidance = """JSON: {"summary_hint":"Concise learning angle","keywords":["topic1","topic2"]}""",
+        payloadSchemaExample = """{"summary_hint":"Gmail search operators are useful for inbox cleanup","keywords":["gmail","search"]}""",
         requiresFollowUpThought = false,
         followUpPrefix = "Evidence-backed reflection recorded.",
         superegoDirectives = listOf(
-            "Allow REFLECT_EVIDENCE only when the payload references same-request evidence artifact ids.",
-            "Deny REFLECT_EVIDENCE when artifact ids are missing, unresolved, or not evidence-backed.",
+            "Allow REFLECT_EVIDENCE only when same-request evidence artifacts exist in scope.",
+            "Deny REFLECT_EVIDENCE when no evidence artifacts are available for the current request.",
         ),
         capabilities = emptySet(),
         allowedArgumentDataTrust = setOf(DataTrust.SANITIZED_EXTERNAL_DATA),
@@ -125,19 +125,12 @@ class ReflectEvidenceActionPlugin(
         context: SuperegoContext,
         config: AgentConfig,
     ): ActionDeterministicReview {
-        val payload = parseEvidencePayload(action.payload)
+        parseEvidencePayload(action.payload)
             ?: return ActionDeterministicReview(
                 allow = false,
                 ruleId = "reflect_evidence_payload_invalid",
-                reason = "REFLECT_EVIDENCE payload must be valid JSON with artifact_ids.",
+                reason = "REFLECT_EVIDENCE payload must be valid JSON with summary_hint or keywords.",
             )
-        if (payload.artifactIds.isEmpty()) {
-            return ActionDeterministicReview(
-                allow = false,
-                ruleId = "reflect_evidence_artifacts_missing",
-                reason = "REFLECT_EVIDENCE requires at least one artifact id.",
-            )
-        }
         return ActionDeterministicReview(allow = true)
     }
 
@@ -145,7 +138,6 @@ class ReflectEvidenceActionPlugin(
         val payload = parseEvidencePayload(raw) ?: return raw
         return mapper.writeValueAsString(
             mapOf(
-                "artifact_ids" to payload.artifactIds.distinct(),
                 "summary_hint" to payload.summaryHint.trim(),
                 "keywords" to payload.keywords.map { it.trim() }.filter { it.isNotEmpty() }.distinct(),
             )
@@ -155,16 +147,15 @@ class ReflectEvidenceActionPlugin(
     override suspend fun execute(action: PendingAction, context: ActionExecutionContext): ActionOutcome {
         val payload = parseEvidencePayload(action.payload)
             ?: return invalidOutcome("reflect_evidence_payload_invalid")
-        val artifacts = this.context.evidenceArtifactStore.resolve(
+        val artifacts = this.context.evidenceArtifactStore.resolveAll(
             rootInputId = action.rootInputId,
             conversationContext = action.conversationContext,
-            artifactIds = payload.artifactIds,
         )
-        if (artifacts.size != payload.artifactIds.distinct().size) {
+        if (artifacts.isEmpty()) {
             return ActionOutcome(
-                statusSummary = "Evidence reflection failed: referenced artifacts are unavailable for this request.",
+                statusSummary = "Evidence reflection failed: no artifacts available in scope for this request.",
                 executionStatus = ActionExecutionStatus.FAILED,
-                actionErrorCategory = "reflect_evidence_artifacts_unresolved",
+                actionErrorCategory = "reflect_evidence_no_artifacts_in_scope",
             )
         }
         val saved = reflectionMemoryRecorder.recordEvidenceReflection(
@@ -186,7 +177,6 @@ private data class ReflectInternalPayload(
 )
 
 private data class ReflectEvidencePayload(
-    val artifactIds: List<String> = emptyList(),
     val summaryHint: String = "",
     val keywords: List<String> = emptyList(),
 )
@@ -198,11 +188,6 @@ private fun parseEvidencePayload(raw: String): ReflectEvidencePayload? =
     runCatching {
         val node = mapper.readTree(raw)
         ReflectEvidencePayload(
-            artifactIds = when {
-                node.path("artifact_ids").isArray -> node.path("artifact_ids").mapNotNull { if (it.isTextual) it.asText().trim() else null }.filter { it.isNotBlank() }
-                node.path("artifactIds").isArray -> node.path("artifactIds").mapNotNull { if (it.isTextual) it.asText().trim() else null }.filter { it.isNotBlank() }
-                else -> emptyList()
-            },
             summaryHint = node.path("summary_hint").asText().ifEmpty { node.path("summaryHint").asText() }.trim(),
             keywords = when {
                 node.path("keywords").isArray -> node.path("keywords").mapNotNull { if (it.isTextual) it.asText().trim() else null }.filter { it.isNotBlank() }
