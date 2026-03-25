@@ -1,5 +1,7 @@
 # Getting Started
 
+> **Terminology:** See the [Glossary](glossary.md) for definitions of all agent concepts used in this document.
+
 This guide walks through installation, first run, and real examples of what NeoPsyke can do today.
 
 For the full configuration reference, see [configuration.md](configuration.md).

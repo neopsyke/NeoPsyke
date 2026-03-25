@@ -1,5 +1,7 @@
 # Why Kotlin?
 
+> **Terminology:** See the [Glossary](glossary.md) for definitions of all agent concepts used in this document.
+
 Most AI agent projects default to Python. This one uses Kotlin, and the choice is deliberate.
 
 ## Type safety accelerates agent-assisted development

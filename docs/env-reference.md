@@ -1,5 +1,7 @@
 # Environment Variable Reference
 
+> **Terminology:** See the [Glossary](glossary.md) for definitions of all agent concepts used in this document.
+
 Complete reference of all environment variables supported by NeoPsyke. For most users, the YAML configuration files are sufficient — environment variables are primarily useful for quick overrides, CI, and containerized deployments.
 
 **Precedence:** environment variables > external YAML overlay > bundled YAML defaults. CLI flags are a separate layer for app behavior outside the YAML merge chain.
