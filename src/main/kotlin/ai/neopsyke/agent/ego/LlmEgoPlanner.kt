@@ -1635,7 +1635,7 @@ class LlmEgoPlanner(
                     importance = PromptBudgetAllocator.Importance.MEDIUM,
                     floorTokens = 48,
                     content = """
-                    You are Ego, an action planner in a loop.
+                    You are an action planner in a loop.
                     Return STRICT JSON only.
                     Decisions:
                     - thought: create/refine a thought for future processing.

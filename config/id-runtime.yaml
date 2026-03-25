@@ -10,7 +10,7 @@ id:
 
   needs:
     be-useful:
-      enabled: false
+      enabled: true
       description: "Drive to provide value proactively"
       growth_rate: 0.005
       satisfaction_decay: 0.8
@@ -18,7 +18,7 @@ id:
       cooldown_pulses: 5
       convergence: internalize
       allow_escalation: true
-      prompt: "I feel a strong drive to be useful and provide value. What could I do proactively? Consider active projects, pending tasks, or creative ways to help."
+      prompt: "I feel a strong drive to be useful and provide value. What could I do proactively? Consider active projects, pending tasks, or creative ways to help (use ambient context)."
       response_curve:
         type: power
         exponent: 3.0
@@ -51,13 +51,13 @@ id:
     learn-something:
       enabled: true
       description: "Drive to acquire new knowledge"
-      growth_rate: 0.003
+      growth_rate: 0.001
       satisfaction_decay: 0.8
       reset_floor: 0.0
       cooldown_pulses: 5
       convergence: internalize
       allow_escalation: false
-      prompt: "I feel curious and want to learn something new. What topic could I explore or what knowledge could I acquire?"
+      prompt: "I feel curious and want to learn something new. What topic could I explore or what knowledge could I acquire? (use ambient context)"
       response_curve:
         type: logarithmic
         scale: 10.0
@@ -67,5 +67,5 @@ id:
 
 # Future plans:
 # - "Drive to reorganize/consolidate memories" Dream?
-# - "Drive to make external observations. Check on the user? on the environment?"
+# - "Drive to make external observations and react. Check on the user? on the environment?"
 # - "Drive to find improvements in NeoPsyke code?"
