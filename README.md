@@ -1,6 +1,6 @@
 # NeoPsyke
 
-NeoPsyke is an autonomous AI agent built around a cognitive architecture inspired by Freud's structural model. It is designed to generate internal motivation, maintain long-term memory, durable goals and route actions through explicit governance.
+NeoPsyke is an autonomous AI agent built around a cognitive architecture inspired by Freud's structural model. It is designed to generate internal motivation, maintain durable goals and memory, do useful work through a full agent runtime, and route actions through explicit governance.
 
 The system is organized around three core modules:
 
@@ -36,6 +36,8 @@ It is trying to build a useful, capable cognitive architecture with clear intern
 - decision-making is separate from execution
 - durable goals are separate from ephemeral turns
 - judgment and safety are first-class architectural functions
+
+Just as importantly, the goal is not a minimal theoretical demonstration. If the core mechanism were the only objective, it could be explored in a much smaller and simpler project. NeoPsyke is an attempt to embed that mechanism in a genuinely useful agent runtime.
 
 ## Why Kotlin?
 
@@ -135,9 +137,9 @@ The Ego runs in a bounded loop (configurable, default 180 steps per input) to pr
 
 **Conversation and reasoning.** Multi-turn dialogue with planning, bounded deliberation, meta-reasoning under decision pressure, and a scratchpad workspace for intermediate working state.
 
-**Autonomous motivation.** The Id maintains internal drives that accumulate pressure over time. When a drive crosses a threshold and the Ego is idle, the system can initiate proactive behavior. Approved actions relieve pressure; denied actions feed back into the loop.
+**Autonomous motivation.** The Id maintains internal drives that accumulate pressure over time. When a drive crosses a threshold and the Ego is idle, the system can initiate proactive behavior. The agent is driven by generic internal prompts rather than narrowly predefined tasks, so it has to decide what deserves attention and what kind of work to pursue. Governance and action outcomes feed back into motivation: successful actions can discharge pressure, while denied or failed paths do not.
 
-**Durable goals.** Goals are first-class persistent objects with lifecycle management (`CREATED`, `PLANNING`, `ACTIVE`, `BLOCKED`, `SUSPENDED`, `COMPLETED`, `FAILED`). They can be triggered by schedules, events, polling, manual activation, or async resume. Each goal can carry an execution plan with steps and acceptance criteria, or act as a standing monitor or recurring synthesis task. Goals also track novelty to avoid re-alerting on already-seen information.
+**Durable goals.** Goals are first-class persistent objects with lifecycle management (`CREATED`, `PLANNING`, `ACTIVE`, `BLOCKED`, `SUSPENDED`, `COMPLETED`, `FAILED`). They can be triggered by schedules, events, polling, manual activation, or async resume. This is where NeoPsyke places explicit scheduled work: tasks that genuinely need reliability, timing, or frequency. Each goal can carry an execution plan with steps and acceptance criteria, or act as a standing monitor or recurring synthesis task. Goals also track novelty to avoid re-alerting on already-seen information.
 
 **Three-tier memory.** Short-term memory maintains rolling context per conversation with automatic compaction. Episodic memory records narrative events in a SQLite FTS5 store with configurable retention. Long-term memory uses pgvector for semantic recall and imprint, guided by an LLM-based advisor that periodically assesses what is worth consolidating.
 
@@ -243,6 +245,7 @@ Some omissions are deliberate architectural decisions rather than missing checkl
 - The memory advisor's consolidation decisions are LLM-dependent and not yet formally evaluated.
 - The Id's drive model is simple by design (configurable state machine, not learned behavior). This mirrors the structural role of drives in the original model -- complexity is expected to emerge from the interaction between modules, not from the drive source itself.
 - The dashboard is basic and suitable only for local monitoring and debugging. It's not yet a production-ready multi-user tool.
+- Prompt injection defense is heuristic, not a full sandbox, and plugins currently run in-process as trusted code.
 - Much testing and tuning is still required in the agent all-around.
 - The evals are still minimal and could use much improvement and expansion.
 
