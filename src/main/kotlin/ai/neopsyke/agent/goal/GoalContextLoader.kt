@@ -42,6 +42,7 @@ object GoalContextLoader {
             currentStepDescription = currentStep?.description,
             blockers = blockers,
             lastWorkedAt = state.goal.lastWorkedAt,
+            cronExpression = state.goal.cronExpression,
         )
     }
 

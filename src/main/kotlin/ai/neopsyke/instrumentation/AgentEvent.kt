@@ -269,6 +269,7 @@ object AgentEvents {
         truncated: Boolean,
         recallTextPreview: String = "",
         rootInputId: String? = null,
+        intent: String? = null,
     ): AgentEvent =
         AgentEvent(
             type = "memory_recall_result",
@@ -281,6 +282,7 @@ object AgentEvents {
                 "truncated" to truncated,
                 "recall_text_preview" to recallTextPreview,
                 "root_input_id" to rootInputId,
+                "intent" to intent,
             )
         )
 

@@ -1086,6 +1086,7 @@ class MemorySystem(
                     truncated = filteredRecall.truncated,
                     recallTextPreview = recallText,
                     rootInputId = recallRootInputId,
+                    intent = recallIntent.name.lowercase(Locale.ROOT),
                 )
             )
             if (recallScan.suspicious) {

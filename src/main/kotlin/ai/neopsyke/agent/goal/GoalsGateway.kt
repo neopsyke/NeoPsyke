@@ -53,4 +53,5 @@ enum class GoalOperation {
     DELETE,
     DELETE_ALL,
     REVISE_PLAN,
+    UPDATE,
 }
