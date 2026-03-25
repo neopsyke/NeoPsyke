@@ -8,6 +8,7 @@ import com.fasterxml.jackson.module.kotlin.readValue
 import com.fasterxml.jackson.module.kotlin.registerKotlinModule
 import ai.neopsyke.agent.config.AgentConfig
 import ai.neopsyke.agent.config.ActionControlConfig
+import ai.neopsyke.agent.config.BuiltinToolsConfig
 import ai.neopsyke.agent.config.ConnectorRuntimeConfig
 import ai.neopsyke.agent.config.LogbookConfig
 import ai.neopsyke.agent.config.MemoryConfig
@@ -16,6 +17,7 @@ import ai.neopsyke.agent.config.NativeIntegrationsConfig
 import ai.neopsyke.agent.config.GoogleWorkspaceConfig
 import ai.neopsyke.agent.config.TelegramChannelConfig
 import ai.neopsyke.agent.config.TelegramIngressMode
+import ai.neopsyke.agent.config.WebsiteFetchConfig
 import ai.neopsyke.dashboard.InnerVoiceConfig
 import ai.neopsyke.agent.config.PlannerConfig
 import ai.neopsyke.agent.goal.GoalConfig
@@ -56,6 +58,7 @@ private data class AgentRuntimeYamlAgent(
     val logbook: AgentRuntimeYamlLogbook? = null,
     val actionControl: AgentRuntimeYamlActionControl? = null,
     val connectors: AgentRuntimeYamlConnectors? = null,
+    val builtinTools: AgentRuntimeYamlBuiltinTools? = null,
     val nativeIntegrations: AgentRuntimeYamlNativeIntegrations? = null,
     val innerVoice: AgentRuntimeYamlInnerVoice? = null,
     val goals: AgentRuntimeYamlGoals? = null,
@@ -199,9 +202,20 @@ private data class AgentRuntimeYamlConnectors(
     val pinningEnabled: Boolean? = null,
     val startupTimeoutMs: Long? = null,
     val healthTimeoutMs: Long? = null,
+    val callTimeoutMs: Long? = null,
     val allowedConnectorIds: List<String>? = null,
     val enabledBundleIds: List<String>? = null,
     val allowThirdPartyConnectors: Boolean? = null,
+)
+
+private data class AgentRuntimeYamlBuiltinTools(
+    val websiteFetch: AgentRuntimeYamlWebsiteFetch? = null,
+)
+
+private data class AgentRuntimeYamlWebsiteFetch(
+    val enabled: Boolean? = null,
+    val callTimeoutMs: Long? = null,
+    val maxChars: Int? = null,
 )
 
 private data class AgentRuntimeYamlNativeIntegrations(
@@ -269,8 +283,6 @@ private data class AgentRuntimeYamlRuntime(
     val maxPendingActions: Int? = null,
     val maxPendingInputs: Int? = null,
     val searchResultCount: Int? = null,
-    val mcpCallTimeoutMs: Long? = null,
-    val fetchMaxChars: Int? = null,
 )
 
 object AgentRuntimeSettingsLoader {
@@ -305,18 +317,14 @@ object AgentRuntimeSettingsLoader {
         val logbookYaml = agentYaml.logbook!!
         val actionControlYaml = agentYaml.actionControl!!
         val connectorsYaml = agentYaml.connectors!!
+        val builtinToolsYaml = agentYaml.builtinTools!!
+        val websiteFetchYaml = builtinToolsYaml.websiteFetch!!
         val nativeIntegrationsYaml = agentYaml.nativeIntegrations!!
         val telegramYaml = nativeIntegrationsYaml.telegram!!
         val googleWorkspaceYaml = nativeIntegrationsYaml.googleWorkspace!!
         val innerVoiceYaml = agentYaml.innerVoice!!
         val goalsYaml = agentYaml.goals!!
         val runtimeYaml = agentYaml.runtime!!
-
-        val mcpCallTimeoutMs = readPositiveLong(
-            env = env["MCP_CALL_TIMEOUT_MS"],
-            yaml = runtimeYaml.mcpCallTimeoutMs,
-            fallback = defaults.mcpCallTimeoutMs
-        )
 
         val agentConfig = AgentConfig(
             planner = PlannerConfig(
@@ -654,7 +662,7 @@ object AgentRuntimeSettingsLoader {
                 mcpMemoryCallTimeoutMs = readPositiveLong(
                     env = env["MCP_MEMORY_CALL_TIMEOUT_MS"],
                     yaml = memoryYaml.mcpMemoryCallTimeoutMs,
-                    fallback = mcpCallTimeoutMs
+                    fallback = defaults.memory.mcpMemoryCallTimeoutMs
                 ),
             ),
             metaReasoner = MetaReasonerConfig(
@@ -884,6 +892,11 @@ object AgentRuntimeSettingsLoader {
                     connectorsYaml.healthTimeoutMs,
                     defaults.connectors.healthTimeoutMs
                 ),
+                callTimeoutMs = readPositiveLong(
+                    env["NEOPSYKE_CONNECTORS_CALL_TIMEOUT_MS"],
+                    connectorsYaml.callTimeoutMs,
+                    defaults.connectors.callTimeoutMs
+                ),
                 allowedConnectorIds = readStringSet(
                     env["NEOPSYKE_CONNECTORS_ALLOWED_IDS"],
                     connectorsYaml.allowedConnectorIds,
@@ -899,6 +912,25 @@ object AgentRuntimeSettingsLoader {
                     connectorsYaml.allowThirdPartyConnectors,
                     defaults.connectors.allowThirdPartyConnectors
                 ),
+            ),
+            builtinTools = BuiltinToolsConfig(
+                websiteFetch = WebsiteFetchConfig(
+                    enabled = readBoolean(
+                        env["WEBSITE_FETCH_ENABLED"],
+                        websiteFetchYaml.enabled,
+                        defaults.builtinTools.websiteFetch.enabled
+                    ),
+                    callTimeoutMs = readPositiveLong(
+                        env["WEBSITE_FETCH_CALL_TIMEOUT_MS"],
+                        websiteFetchYaml.callTimeoutMs,
+                        defaults.builtinTools.websiteFetch.callTimeoutMs
+                    ),
+                    maxChars = readPositiveInt(
+                        env["WEBSITE_FETCH_MAX_CHARS"],
+                        websiteFetchYaml.maxChars,
+                        defaults.builtinTools.websiteFetch.maxChars
+                    ),
+                )
             ),
             nativeIntegrations = NativeIntegrationsConfig(
                 telegram = TelegramChannelConfig(
@@ -1145,12 +1177,6 @@ object AgentRuntimeSettingsLoader {
                 runtimeYaml.searchResultCount,
                 defaults.searchResultCount
             ),
-            mcpCallTimeoutMs = mcpCallTimeoutMs,
-            fetchMaxChars = readPositiveInt(
-                env["WEBSITE_FETCH_MAX_CHARS"],
-                runtimeYaml.fetchMaxChars,
-                defaults.fetchMaxChars
-            ),
             maxActionPayloadChars = readPositiveInt(
                 env["EGO_MAX_ACTION_PAYLOAD_CHARS"],
                 plannerYaml.maxActionPayloadChars,
@@ -1206,6 +1232,9 @@ object AgentRuntimeSettingsLoader {
         requireSection(agent.logbook, "agent.logbook")
         requireSection(agent.actionControl, "agent.action_control")
         requireSection(agent.connectors, "agent.connectors")
+        val builtinTools = agent.builtinTools
+            ?: throw IllegalStateException("agent-runtime.yaml is missing required section: agent.builtin_tools")
+        requireSection(builtinTools.websiteFetch, "agent.builtin_tools.website_fetch")
         val nativeIntegrations = agent.nativeIntegrations
             ?: throw IllegalStateException("agent-runtime.yaml is missing required section: agent.native_integrations")
         requireSection(nativeIntegrations.telegram, "agent.native_integrations.telegram")

@@ -8,6 +8,7 @@ data class ConnectorRuntimeConfig(
     val pinningEnabled: Boolean = true,
     val startupTimeoutMs: Long = DEFAULT_STARTUP_TIMEOUT_MS,
     val healthTimeoutMs: Long = DEFAULT_HEALTH_TIMEOUT_MS,
+    val callTimeoutMs: Long = DEFAULT_CALL_TIMEOUT_MS,
     val allowedConnectorIds: Set<String> = emptySet(),
     // Optional install presets only. These expand the connector allowlist but do
     // not create planner-visible workflow actions by themselves.
@@ -17,5 +18,6 @@ data class ConnectorRuntimeConfig(
     companion object {
         const val DEFAULT_STARTUP_TIMEOUT_MS: Long = 5_000L
         const val DEFAULT_HEALTH_TIMEOUT_MS: Long = 5_000L
+        const val DEFAULT_CALL_TIMEOUT_MS: Long = 8_000L
     }
 }

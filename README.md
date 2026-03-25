@@ -140,7 +140,7 @@ The Ego runs in a bounded loop (configurable, default 180 steps per input) to pr
 
 **External integrations.** Telegram bot (webhook or polling mode, owner-only filtering). Google Workspace observation (Gmail search/read, Calendar events) via OAuth with PKCE. Email sending via Microsoft Graph (staged by default, requires explicit approval).
 
-**Action plugin system.** Actions are discovered at startup via Java `ServiceLoader`. Built-in plugins: `contact_user`, `web_search`, `website_fetch`, `mcp_time`, `email_send`, `answer`, `reflect`, `goal_operation`. New actions can be added by implementing the plugin interface and registering via `ServiceLoader`.
+**Action plugin system.** Actions are discovered at startup via Java `ServiceLoader`. First-party plugins include `contact_user`, `resolution_draft`, `web_search`, `website_fetch`, `reflect_internal`, `reflect_evidence`, `goal_operation`, `email_send`, plus Google Workspace observe actions (`gmail_observe_search`, `gmail_observe_message`, `calendar_observe_events`). New actions can be added by implementing the plugin interface and registering via `ServiceLoader`.
 
 **Web dashboard.** Chat interface, observability dashboard with runtime metrics, and an action control panel for reviewing staged actions and approvals -- all served from a local web server.
 
@@ -253,7 +253,6 @@ NeoPsyke ships with bundled default configuration under `config/`. Local overlay
 | `config/agent-runtime.yaml` | `agent-runtime.yaml` | `NEOPSYKE_AGENT_CONFIG_FILE` | Planner limits, superego budget, memory caps, dashboard port |
 | `config/memory-runtime.yaml` | `memory-runtime.yaml` | `NEOPSYKE_MEMORY_CONFIG_FILE` | Long-term memory provider (managed pgvector / external / off) |
 | `config/id-runtime.yaml` | `id-runtime.yaml` | `NEOPSYKE_ID_CONFIG_FILE` | Drive system (needs, growth rates, thresholds, cooldowns) |
-| `config/mcp-runtime.yaml` | `mcp-runtime.yaml` | `NEOPSYKE_MCP_CONFIG_FILE` | MCP tool servers (time, website fetch) |
 | — | `action-security.yaml` | — | Per-action commit policy (direct/staged/denied) |
 
 Precedence: environment variables > external YAML overlay > bundled YAML defaults.

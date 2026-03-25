@@ -76,13 +76,11 @@ typealias LongTermMemoryAssessmentDecision = ai.neopsyke.agent.memory.longterm.L
 typealias LongTermMemorySubject = ai.neopsyke.agent.memory.longterm.LongTermMemorySubject
 typealias LlmLongTermMemoryAdvisor = ai.neopsyke.agent.memory.longterm.LlmLongTermMemoryAdvisor
 
-typealias McpTimeTool = ai.neopsyke.agent.tools.mcp.McpTimeTool
 typealias FetchTool = ai.neopsyke.agent.tools.mcp.FetchTool
 typealias FetchOutcome = ai.neopsyke.agent.tools.mcp.FetchOutcome
 typealias FetchErrorCategory = ai.neopsyke.agent.tools.mcp.FetchErrorCategory
 typealias ToolHealthStatus = ai.neopsyke.agent.tools.mcp.ToolHealthStatus
 typealias McpStdioClient = ai.neopsyke.agent.tools.mcp.McpStdioClient
-typealias SdkMcpTimeTool = ai.neopsyke.agent.tools.mcp.SdkMcpTimeTool
 typealias NativeFetchTool = ai.neopsyke.agent.tools.mcp.NativeFetchTool
 
 typealias PromptBudgetAllocator = ai.neopsyke.agent.support.PromptBudgetAllocator

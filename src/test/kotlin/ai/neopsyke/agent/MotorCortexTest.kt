@@ -83,39 +83,6 @@ class MotorCortexTest {
     }
 
     @Test
-    fun `mcp time action delegates to configured tool`() = runBlocking {
-        val cortex = MotorCortex(
-            webSearchActionHandler = WebSearchActionHandler(
-                engine = object : WebSearchEngine {
-                    override fun search(query: String, maxResults: Int): WebSearchResult =
-                        WebSearchResult("unused", emptyList())
-                }
-            ),
-            mcpTimeTool = object : McpTimeTool {
-                override suspend fun getCurrentTime(payload: String): String {
-                    assertEquals("""{"timezone":"Europe/Berlin"}""", payload)
-                    return "MCP time result: 2026-02-28T10:15:00+01:00"
-                }
-            },
-            reflectionMemoryRecorder = NoopReflectionMemoryRecorder,
-        )
-
-        val outcome = cortex.execute(
-            PendingAction(
-                id = 3,
-                urgency = Urgency.MEDIUM,
-                type = ActionType.MCP_TIME,
-                payload = """{"timezone":"Europe/Berlin"}""",
-                summary = "time lookup"
-            ),
-            searchResultCount = 1
-        )
-
-        assertEquals("MCP time result: 2026-02-28T10:15:00+01:00", outcome.statusSummary)
-        assertNull(outcome.assistantOutput)
-    }
-
-    @Test
     fun `fetch action delegates to configured tool and propagates success category`() = runBlocking {
         val cortex = MotorCortex(
             webSearchActionHandler = WebSearchActionHandler(
@@ -236,12 +203,6 @@ class MotorCortexTest {
                         )
                 }
             ),
-            mcpTimeTool = object : McpTimeTool {
-                override suspend fun getCurrentTime(payload: String): String = "unused"
-
-                override suspend fun healthCheck(): ToolHealthStatus =
-                    ToolHealthStatus(available = false, detail = "time server offline")
-            },
             fetchTool = object : FetchTool {
                 override suspend fun fetch(payload: String): String = "unused"
 
@@ -256,7 +217,6 @@ class MotorCortexTest {
 
         assertEquals(true, byType[ActionType.CONTACT_USER]?.available)
         assertEquals(false, byType[ActionType.WEB_SEARCH]?.available)
-        assertEquals(false, byType[ActionType.MCP_TIME]?.available)
         assertEquals(true, byType[ActionType.WEBSITE_FETCH]?.available)
         assertEquals(
             setOf(ActionType.CONTACT_USER, ActionType.RESOLUTION_DRAFT, ActionType.WEBSITE_FETCH, ActionType.REFLECT_INTERNAL, ActionType.REFLECT_EVIDENCE),

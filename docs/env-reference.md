@@ -1,6 +1,6 @@
 # Environment Variable Reference
 
-Complete reference of all environment variables supported by NeoPsyke. For most users, the YAML configuration files are sufficient — environment variables are primarily useful for quick overrides, CI, and containerized deployments.
+Reference of the environment variables supported by NeoPsyke. For most users, the YAML configuration files are sufficient — environment variables are primarily useful for quick overrides, CI, and containerized deployments.
 
 **Precedence:** environment variables > external YAML overlay > bundled YAML defaults. CLI flags are a separate layer for app behavior outside the YAML merge chain.
 
@@ -18,7 +18,6 @@ These override the default external overlay path. Bundled defaults under `config
 | `NEOPSYKE_AGENT_CONFIG_FILE` | `./agent-runtime.yaml` | Path to agent/app/eval runtime overlay. |
 | `NEOPSYKE_MEMORY_CONFIG_FILE` | `./memory-runtime.yaml` | Path to memory provider overlay. |
 | `NEOPSYKE_ID_CONFIG_FILE` | `./id-runtime.yaml` | Path to Id drive system overlay. |
-| `NEOPSYKE_MCP_CONFIG_FILE` | `./mcp-runtime.yaml` | Path to MCP tool server overlay. |
 
 ---
 
@@ -59,7 +58,15 @@ Variable names are configured in `config/llm-runtime.yaml` under `providers.<nam
 | Variable | Default | Description |
 |---|---|---|
 | `NEOPSYKE_GOALS_ENABLED` | from `agent-runtime.yaml` | Enable the goal subsystem. |
-| `NEOPSYKE_GOALS_WORKSPACE_ROOT` | `~/.neopsyke/goals` | Goal state and artifact persistence directory. |
+| `NEOPSYKE_GOALS_WORKSPACE_ROOT` | `.neopsyke/goals` | Goal state and artifact persistence directory when using the bundled runtime defaults. |
+| `NEOPSYKE_GOALS_MAX_ACTIVE_GOALS` | `10` | Maximum concurrently active goals. |
+| `NEOPSYKE_GOALS_MAX_STEPS_PER_PLAN` | `20` | Maximum persisted steps in a goal plan. |
+| `NEOPSYKE_GOALS_ACTIONS_PER_CYCLE` | `5` | Maximum goal-origin actions per goal execution cycle. |
+| `NEOPSYKE_GOALS_SNAPSHOT_EVERY_N_EVENTS` | `50` | Goal snapshot cadence. |
+| `NEOPSYKE_GOALS_TIMER_RESOLUTION_MS` | `5000` | Timer wakeup resolution for scheduled goals. |
+| `NEOPSYKE_GOALS_CONDITION_CHECK_INTERVAL_MS` | `30000` | Poll interval for condition-based waits. |
+| `NEOPSYKE_GOALS_COMPLETED_RETENTION_DAYS` | `30` | Retention window for completed goal artifacts. |
+| `NEOPSYKE_GOALS_MAX_WORKSPACE_BYTES` | `10485760` | Workspace storage cap per goal root. |
 
 ---
 
@@ -71,12 +78,18 @@ Variable names are configured in `config/llm-runtime.yaml` under `providers.<nam
 | `EGO_MAX_THOUGHT_PASSES` | `5` | Maximum consecutive thought passes before the planner must act. |
 | `EGO_MAX_PROMPT_TOKENS` | `2400` | Planner prompt token budget. |
 | `EGO_MAX_COMPLETION_TOKENS` | `900` | Planner completion token budget. |
+| `EGO_MAX_THOUGHT_CHARS` | `600` | Maximum chars in one planner thought. |
+| `EGO_MAX_INPUT_CHARS` | `2000` | Maximum processed input length. |
 | `EGO_MAX_RUN_TOTAL_TOKENS` | `0` (disabled) | Per-run total token cap across all roles and providers. |
 | `EGO_MAX_RUN_TOKENS_PER_PROVIDER` | `0` (disabled) | Per-run token cap per provider. |
 | `EGO_MAX_RUN_TOKENS_PER_ROLE` | `0` (disabled) | Per-run token cap per cognitive role. |
+| `EGO_MAX_PLAN_STEPS` | `6` | Maximum planner-generated steps per plan. |
+| `EGO_MAX_PLAN_STEP_DESC_CHARS` | `120` | Maximum chars per generated plan-step description. |
+| `EGO_MAX_PLANS_PER_INPUT` | `2` | Maximum plan generations per input. |
 | `EGO_LLM_RETRY_ATTEMPTS` | `2` | Retries on transient LLM failures. |
 | `EGO_ACTION_RETRY_BUDGET_NON_RETRYABLE_FAILURES` | `3` | Non-retryable action failures before giving up. |
 | `EGO_ACTION_RETRY_COOLDOWN_STEPS` | `10` | Steps to wait before retrying a failed action type. |
+| `EGO_ACTION_VERIFIER_ENABLED` | `false` | Enable the planner-side action-verifier LLM pass before Superego review. |
 | `EGO_LOOP_DELAY_MS` | `0` | Delay between Ego loop iterations (ms). `run-neopsyke.sh` defaults to `1000`. |
 | `EGO_MAX_ACTION_PAYLOAD_CHARS` | `4000` | Maximum action payload size (chars). |
 | `EGO_SEARCH_RESULT_COUNT` | `5` | Number of web search results to request. |
@@ -95,6 +108,8 @@ Variable names are configured in `config/llm-runtime.yaml` under `providers.<nam
 | `EGO_SUPEREGO_TWO_STAGE_REVIEW_ENABLED` | `false` | Cheap model first, escalate to stronger model on low confidence. |
 | `EGO_SUPEREGO_TWO_STAGE_LOW_CONFIDENCE_THRESHOLD` | `0.60` | Confidence below which the cheap model escalates. |
 | `EGO_SUPEREGO_TWO_STAGE_ESCALATE_ON_MEDIUM_POLICY_RISK` | `true` | Also escalate when policy risk is medium. |
+| `EGO_SUPEREGO_TWO_STAGE_SKIP_FOR_ANSWER_ACTIONS` | `true` | Skip two-stage review for terminal `contact_user` actions. |
+| `EGO_SUPEREGO_TWO_STAGE_SKIP_FOR_WEB_SEARCH_ACTIONS` | `true` | Skip two-stage review for `web_search` actions. |
 
 ---
 
@@ -111,7 +126,8 @@ Variable names are configured in `config/llm-runtime.yaml` under `providers.<nam
 
 | Variable | Default | Description |
 |---|---|---|
-| `EGO_SCRATCHPAD_ENABLED` | `false` | Enable scratchpad (YAML default may differ). |
+| `EGO_SCRATCHPAD_ENABLED` | `false` | Enable scratchpad (bundled YAML default is `true`). |
+| `EGO_SCRATCHPAD_ACTIVATION_MIN_PLAN_STEPS` | `2` | Minimum plan steps before scratchpad activates. |
 | `EGO_SCRATCHPAD_MAX_PROMPT_TOKENS` | `220` | Scratchpad prompt token budget. |
 | `EGO_SCRATCHPAD_MAX_SECTIONS` | `10` | Maximum scratchpad sections. |
 | `EGO_SCRATCHPAD_MAX_SECTION_CHARS` | `1200` | Maximum chars per section. |
@@ -125,6 +141,9 @@ Variable names are configured in `config/llm-runtime.yaml` under `providers.<nam
 | `EGO_SCRATCHPAD_FINAL_PASS_MIN_MODEL_CONFIDENCE` | `0.55` | Minimum model confidence for final pass. |
 | `EGO_SCRATCHPAD_DEBUG_CAPTURE_ENABLED` | `false` | Enable debug snapshot capture. Forced `true` by `run-neopsyke.sh`, Gradle tests, and Freud. |
 | `EGO_SCRATCHPAD_MAX_ACTIVE_TASKS` | `32` | Maximum concurrent scratchpad tasks. |
+| `EGO_SCRATCHPAD_DIGEST_MAX_ENTRIES` | `4` | Maximum retained digest entries per session. |
+| `EGO_SCRATCHPAD_DIGEST_MAX_CHARS` | `800` | Maximum chars in one session digest entry. |
+| `EGO_SCRATCHPAD_DIGEST_MAX_PROMPT_TOKENS` | `160` | Prompt-token budget for digest compaction. |
 
 ---
 
@@ -181,6 +200,10 @@ Variable names are configured in `config/llm-runtime.yaml` under `providers.<nam
 | `NEOPSYKE_MEMORY_MODE` | `default` | Memory mode: `off`, `default` (managed pgvector), or `external`. |
 | `NEOPSYKE_MEMORY_DEFAULT_COMMAND` | from YAML | Override managed provider start command. |
 | `NEOPSYKE_MEMORY_DEFAULT_BASE_URL` | from YAML | Override managed provider base URL. |
+| `NEOPSYKE_MEMORY_DEFAULT_PROVIDER` | from YAML | Override managed provider label. |
+| `NEOPSYKE_MEMORY_DEFAULT_TRANSPORT` | from YAML | Override managed provider transport. |
+| `NEOPSYKE_MEMORY_DEFAULT_STARTUP_TIMEOUT_MS` | `12000` | Managed provider startup timeout. |
+| `NEOPSYKE_MEMORY_DEFAULT_HEALTH_TIMEOUT_MS` | `3000` | Managed provider health-check timeout. |
 | `NEOPSYKE_MEMORY_DEFAULT_BOOTSTRAP_ENABLED` | `true` | Auto-download provider jar from GitHub releases. |
 | `NEOPSYKE_MEMORY_DEFAULT_RELEASE_API_URL` | GitHub release URL | Provider artifact download URL. |
 | `NEOPSYKE_MEMORY_DEFAULT_DOWNLOAD_TIMEOUT_MS` | `30000` | Timeout for provider artifact download. |
@@ -191,23 +214,18 @@ Variable names are configured in `config/llm-runtime.yaml` under `providers.<nam
 | `MEMORY_SEMANTIC_DEDUPE_SIMILARITY_THRESHOLD` | `0.93` | Provider-side semantic deduplication threshold. |
 | `MEMORY_SEMANTIC_DEDUPE_MIN_CONFIDENCE` | `0.65` | Provider-side minimum confidence for deduplication. |
 | `MEMORY_FACT_DEFAULT_SUBJECT` | `me` | Default subject for fact-type memories. |
-| `MCP_MEMORY_CALL_TIMEOUT_MS` | same as `MCP_CALL_TIMEOUT_MS` | Timeout for memory provider calls. |
+| `MCP_MEMORY_CALL_TIMEOUT_MS` | `8000` | Timeout for memory provider calls. |
 
 ---
 
-## MCP tools
+## Built-in tools
+
+These apply to NeoPsyke's native built-in website fetch action.
 
 | Variable | Default | Description |
 |---|---|---|
-| `MCP_CALL_TIMEOUT_MS` | `8000` | Timeout for MCP tool calls (ms). |
-| `MCP_TIME_ENABLED` | from YAML | Enable MCP time tool. |
-| `MCP_TIME_MODE` | from YAML | Time tool mode (`stdio`). |
-| `MCP_TIME_PROVIDER` | from YAML | Time tool provider label. |
-| `MCP_TIME_SERVER_CMD` | from YAML | Override time tool command. |
-| `WEBSITE_FETCH_ENABLED` | from YAML | Enable website fetch tool. |
-| `WEBSITE_FETCH_MODE` | from YAML | Fetch tool mode (`stdio` or `native`). |
-| `WEBSITE_FETCH_PROVIDER` | from YAML | Fetch tool provider label. |
-| `WEBSITE_FETCH_SERVER_CMD` | from YAML | Override fetch tool command. |
+| `WEBSITE_FETCH_ENABLED` | `true` | Enable the built-in website fetch action. |
+| `WEBSITE_FETCH_CALL_TIMEOUT_MS` | `8000` | Timeout for native website fetch requests. |
 | `WEBSITE_FETCH_MAX_CHARS` | `4000` | Maximum chars fetched from websites. |
 
 ---
@@ -240,10 +258,98 @@ Variable names are configured in `config/llm-runtime.yaml` under `providers.<nam
 
 | Variable | Default | Description |
 |---|---|---|
+| `NEOPSYKE_TELEGRAM_ENABLED` | `true` | Enable Telegram integration. |
+| `NEOPSYKE_TELEGRAM_MODE` | `polling` | Telegram ingress mode: `polling` or `webhook`. |
+| `NEOPSYKE_TELEGRAM_WEBHOOK_PATH` | `/api/channels/telegram/webhook` | Telegram webhook route when webhook mode is used. |
 | `TELEGRAM_BOT_TOKEN` | — | Telegram bot API token. |
 | `TELEGRAM_WEBHOOK_SECRET` | — | Webhook secret for request validation. |
 | `NEOPSYKE_TELEGRAM_OWNER_CHAT_ID` | — | Restrict to this chat ID. |
 | `NEOPSYKE_TELEGRAM_OWNER_USER_ID` | — | Restrict to this user ID. |
+| `NEOPSYKE_TELEGRAM_BOT_TOKEN_HANDLE` | `TELEGRAM_BOT_TOKEN` | Override the configured secret-handle name for the Telegram bot token. |
+| `NEOPSYKE_TELEGRAM_WEBHOOK_SECRET_HANDLE` | `TELEGRAM_WEBHOOK_SECRET` | Override the configured secret-handle name for the Telegram webhook secret. |
+| `NEOPSYKE_TELEGRAM_POLICY_SCOPE_ID` | `telegram-owner` | Policy scope id assigned to authorized Telegram conversations. |
+| `NEOPSYKE_TELEGRAM_SESSION_ID_PREFIX` | `telegram` | Session id prefix used for Telegram chats. |
+| `NEOPSYKE_TELEGRAM_REQUIRE_DIRECT_CHAT` | `true` | Require private/direct chats only. |
+| `NEOPSYKE_TELEGRAM_DROP_UNAUTHORIZED_MESSAGES` | `false` | Silently drop unauthorized Telegram traffic instead of returning `403`. |
+| `NEOPSYKE_TELEGRAM_POLL_TIMEOUT_SECONDS` | `25` | Long-poll timeout when using polling mode. |
+| `NEOPSYKE_TELEGRAM_POLL_RETRY_DELAY_MS` | `1000` | Retry delay after polling failures. |
+
+---
+
+## Google Workspace
+
+| Variable | Default | Description |
+|---|---|---|
+| `NEOPSYKE_GOOGLE_WORKSPACE_ENABLED` | `false` | Enable native Google Workspace OAuth and observe actions. |
+| `NEOPSYKE_GOOGLE_TOKEN_STORE_DIR` | `.neopsyke/auth/google` | Local encrypted credential store. |
+| `NEOPSYKE_GOOGLE_ALLOWED_OWNER_EMAIL` | — | Restrict OAuth authorization to this email address. |
+| `NEOPSYKE_GOOGLE_PUBLIC_BASE_URL` | — | Public base URL used for OAuth callback construction. |
+| `NEOPSYKE_GOOGLE_OAUTH_START_PATH` | `/api/channels/google/oauth/start` | OAuth start endpoint path. |
+| `NEOPSYKE_GOOGLE_OAUTH_CLIENT_ID_HANDLE` | `GOOGLE_OAUTH_CLIENT_ID` | Secret-handle name for Google OAuth client id. |
+| `NEOPSYKE_GOOGLE_OAUTH_CLIENT_SECRET_HANDLE` | `GOOGLE_OAUTH_CLIENT_SECRET` | Secret-handle name for Google OAuth client secret. |
+| `NEOPSYKE_GOOGLE_OAUTH_STATE_SIGNING_SECRET_HANDLE` | `GOOGLE_OAUTH_STATE_SIGNING_SECRET` | Secret-handle name for OAuth state signing. |
+| `NEOPSYKE_GOOGLE_OAUTH_TOKEN_ENCRYPTION_SECRET_HANDLE` | `GOOGLE_OAUTH_TOKEN_ENCRYPTION_SECRET` | Secret-handle name for local token encryption. |
+| `NEOPSYKE_GOOGLE_OAUTH_CALLBACK_PATH` | `/api/channels/google/oauth/callback` | OAuth callback endpoint path. |
+| `NEOPSYKE_GOOGLE_OAUTH_AUTH_BASE_URL` | `https://accounts.google.com/o/oauth2/v2/auth` | OAuth authorization endpoint. |
+| `NEOPSYKE_GOOGLE_OAUTH_TOKEN_BASE_URL` | `https://oauth2.googleapis.com/token` | OAuth token endpoint. |
+| `NEOPSYKE_GOOGLE_OAUTH_REQUIRE_PKCE` | `true` | Require PKCE for the native OAuth flow. |
+| `NEOPSYKE_GOOGLE_OAUTH_REQUIRE_REFRESH_TOKEN` | `true` | Require a refresh token. |
+| `NEOPSYKE_GOOGLE_OAUTH_STATE_TTL_SECONDS` | `600` | OAuth state-token TTL. |
+| `NEOPSYKE_GOOGLE_SCOPES` | from YAML | Override requested Google OAuth scopes. |
+
+---
+
+## Action Control
+
+| Variable | Default | Description |
+|---|---|---|
+| `NEOPSYKE_ACTION_CONTROL_ENABLED` | `true` | Enable durable action staging and authorization. |
+| `NEOPSYKE_ACTION_CONTROL_DB_PATH` | `.neopsyke/action-control.db` | SQLite path for action-control state. |
+| `NEOPSYKE_ACTION_SECURITY_POLICY_FILE` | `action-security.yaml` | Policy file used by the action authorization layer. |
+| `NEOPSYKE_ACTION_CONTROL_AUTH_TTL_MS` | `86400000` | Default authorization TTL. |
+| `NEOPSYKE_ACTION_CONTROL_MAX_INSPECT_RESULTS` | `200` | Max rows returned by inspect endpoints. |
+| `NEOPSYKE_ACTION_CONTROL_AUTONOMOUS_WORKER_ENABLED` | `true` | Enable background processing of runnable `READY` staged actions. |
+| `NEOPSYKE_ACTION_CONTROL_AUTONOMOUS_WORKER_POLL_MS` | `500` | Autonomous worker poll interval. |
+| `NEOPSYKE_ACTION_CONTROL_AUTONOMOUS_WORKER_BATCH_SIZE` | `16` | Max claims per autonomous worker poll cycle. |
+| `NEOPSYKE_ACTION_CONTROL_OBSERVE_PER_TYPE_PER_ROOT_INPUT` | `10` | Per-root-input cap for observe-style actions of the same type. |
+| `NEOPSYKE_ACTION_CONTROL_CONTACT_USER_PER_ROOT_INPUT` | `5` | Per-root-input cap for `contact_user` deliveries. |
+| `NEOPSYKE_ACTION_CONTROL_REFLECTION_FAMILY_PER_ROOT_INPUT` | `2` | Per-root-input cap across reflection-family actions. |
+| `NEOPSYKE_ACTION_CONTROL_REFLECT_EVIDENCE_PER_ROOT_INPUT` | `1` | Per-root-input cap specifically for `reflect_evidence`. |
+| `NEOPSYKE_ACTION_CONTROL_GOAL_OPERATION_PER_ROOT_INPUT` | `3` | Per-root-input cap for `goal_operation` actions. |
+| `NEOPSYKE_ACTION_CONTROL_COMMIT_PRIVATE_PER_TYPE_PER_ROOT_INPUT` | `3` | Per-root-input cap for private side-effecting commits of the same type. |
+| `NEOPSYKE_ACTION_CONTROL_COMMIT_STATEFUL_PER_TYPE_PER_ROOT_INPUT` | `2` | Per-root-input cap for stateful side-effecting commits of the same type. |
+| `NEOPSYKE_ACTION_CONTROL_COMMIT_PUBLIC_PER_TYPE_PER_ROOT_INPUT` | `1` | Per-root-input cap for public side-effecting commits of the same type. |
+| `NEOPSYKE_ACTION_CONTROL_CONTROL_PLANE_PER_TYPE_PER_ROOT_INPUT` | `2` | Per-root-input cap for control-plane actions of the same type. |
+
+---
+
+## Connectors
+
+These apply to third-party connector action loading. They are separate from the native built-in website fetch config.
+
+| Variable | Default | Description |
+|---|---|---|
+| `NEOPSYKE_CONNECTORS_ENABLED` | `false` | Enable connector action loading. |
+| `NEOPSYKE_CONNECTORS_CATALOG_PATH` | `connectors/catalog` | Curated connector catalog path. |
+| `NEOPSYKE_CONNECTORS_STATE_DIR` | `.neopsyke/connectors` | Local installed/enabled connector state directory. |
+| `NEOPSYKE_CONNECTORS_FAIL_CLOSED` | `true` | Skip invalid/incomplete connectors. |
+| `NEOPSYKE_CONNECTORS_PINNING_ENABLED` | `true` | Require pinned tool-description digests. |
+| `NEOPSYKE_CONNECTORS_STARTUP_TIMEOUT_MS` | `5000` | Connector capability discovery timeout. |
+| `NEOPSYKE_CONNECTORS_HEALTH_TIMEOUT_MS` | `5000` | Connector health-check timeout. |
+| `NEOPSYKE_CONNECTORS_CALL_TIMEOUT_MS` | `8000` | Connector capability call timeout. |
+| `NEOPSYKE_CONNECTORS_ALLOWED_IDS` | — | Comma-separated connector allowlist. |
+| `NEOPSYKE_CONNECTORS_ENABLED_BUNDLES` | — | Comma-separated curated bundle ids. |
+| `NEOPSYKE_CONNECTORS_ALLOW_THIRD_PARTY` | `false` | Explicit opt-in for curated third-party connectors. |
+
+---
+
+## Inner Voice
+
+| Variable | Default | Description |
+|---|---|---|
+| `NEOPSYKE_INNER_VOICE_ENABLED` | `true` | Enable inner-voice event capture. |
+| `NEOPSYKE_INNER_VOICE_MAX_CONTENT_CHARS` | `500` | Max chars per inner-voice event. |
+| `NEOPSYKE_INNER_VOICE_MAX_EVENTS_PER_SESSION` | `100` | Max retained inner-voice events per session. |
 
 ---
 
@@ -266,5 +372,6 @@ Variable names are configured in `config/llm-runtime.yaml` under `providers.<nam
 | Variable | Default | Description |
 |---|---|---|
 | `NEOPSYKE_EVAL_MAX_RAW_RESPONSE_CHARS` | unlimited | Reasoning eval raw-thought capture cap. |
+| `NEOPSYKE_EVAL_STAGE` | from YAML / CLI | Default stage label for eval runs when CLI `--eval-stage` is omitted. |
 | `NEOPSYKE_LLM_CACHE_MODE` | `off` | LLM response caching: `record`, `replay`, or `off`. |
 | `NEOPSYKE_LLM_CACHE_FILE` | — | Path to JSONL cache file for LLM response caching. |

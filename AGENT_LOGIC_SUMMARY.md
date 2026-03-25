@@ -18,7 +18,7 @@ It is intentionally high-level and should stay aligned with the code.
     - Optional `model_catalog` in `llm-runtime.yaml` provides per-provider model ROI metadata (`tier`, `token_weight`, optional cost fields).
     - Superego and memory-advisor read `token_weight` for their configured models and apply it to dynamic completion-budget scaling.
     - When `SuperegoConfig.twoStageReviewEnabled` is on, runtime resolves a cheaper primary superego model from `model_catalog` (same provider) and keeps the configured superego model as escalation stage.
-    - Supported cognitive-role providers are `groq`, `mistral`, `google`, and `openai`.
+    - Supported cognitive-role providers are `anthropic`, `groq`, `google`, `mistral`, `ollama`, and `openai`.
     - OpenAI moderation utility (`omni-moderation-latest`) exists as a standalone callable path and is not auto-wired into cognitive-role chat calls.
     - Planner runtime wiring now inserts an LLM-layer structured-output adapter ahead of the planner client:
       - provider/model/call-site compatibility policy lives in the LLM layer, not `LlmEgoPlanner`
@@ -119,7 +119,7 @@ It is intentionally high-level and should stay aligned with the code.
       - `processThought`
       - `processAction`
     - Catch task errors, emit warning, continue loop.
-    - Optionally queue forced terminal answer under high pressure (scoped to current root input when available).
+    - Optionally queue forced terminal `contact_user` delivery under high pressure (scoped to current root input when available).
     - Optionally run long-term memory assessment (interval trigger, plus explicit remember-intent fast path).
   - If step limit is reached with pending work:
     - Try to execute one fallback explanation action.
@@ -152,7 +152,7 @@ It is intentionally high-level and should stay aligned with the code.
     - recent scratchpad themes from scratchpad digests
     - recent useful actions/updates from episodic logbook history
     - unresolved/open loops from active scratchpads
-    - recently explored exact learning topics from successful `reflect` saves
+    - recently explored exact learning topics from successful reflection saves
   - The ambient context is advisory only:
     - it biases recall/prompting toward user-relevant topics
     - it does not hard-require goal alignment
@@ -183,7 +183,7 @@ It is intentionally high-level and should stay aligned with the code.
 - Session id derivation from `source` (for example `chat:<sessionId>`) only applies when incoming context uses the default session id.
 - Current ingress defaults:
   - dashboard chat is treated as trusted owner direct-chat context
-  - stdin chat is treated as trusted owner direct-chat context
+  - interactive stdin is control-only and does not create chat stimuli
   - Telegram webhook ingress is treated as trusted owner direct-chat context only after webhook-secret validation and owner chat/user allowlist checks
   - Telegram polling ingress is treated as trusted owner direct-chat context only after the same private-chat and owner chat/user allowlist checks
   - Id and goal-runtime cues are treated as trusted internal automation context
@@ -236,8 +236,8 @@ It is intentionally high-level and should stay aligned with the code.
 ## Thought Path
 - `processThought`:
   - Drops thought if `passes >= maxThoughtPasses`.
-  - If dropped and fallback explanation is allowed, enqueue fallback answer action.
-  - Duplicate fallback answer enqueues are suppressed per `(root input, sessionId)` scope so one session cannot block fallback for another.
+  - If dropped and fallback explanation is allowed, enqueue fallback `contact_user` action.
+  - Duplicate fallback `contact_user` enqueues are suppressed per `(root input, sessionId)` scope so one session cannot block fallback for another.
   - For Id-origin thoughts, planner context now rebuilds Id convergence state and applies the same convergence action filters used during impulse processing.
   - Otherwise mirrors input path:
     - build context
@@ -247,8 +247,8 @@ It is intentionally high-level and should stay aligned with the code.
 
 ## Action Path
 - `processAction`:
-- For `answer_draft` actions, records an internal draft section in the scratchpad and does not emit a user-visible assistant turn.
-- For terminal `answer` actions, runs scratchpad final-pass processing before action execution:
+- For `resolution_draft` actions, records an internal draft section in the scratchpad and does not emit a user-visible assistant turn.
+- For terminal `contact_user` actions, runs scratchpad final-pass processing before action execution:
     - records candidate answer draft into the scratchpad
     - builds final compilation from scratchpad sections/evidence
     - skips final-pass only when both `evidenceCount == 0` and `answerDraftCount < max(2, activationMinPlanSteps)`
@@ -260,10 +260,10 @@ It is intentionally high-level and should stay aligned with the code.
   - When `ScratchpadConfig.debugCaptureEnabled` is on, emits full debug snapshots (`scratchpad_debug_snapshot`) for dashboard-only inspection.
   - Fallback explanation actions bypass policy gate.
   - Normal actions pass through deterministic `DecisionVerifier` first (task-truth/sufficiency gate), then `Superego.reviewAuthorization`.
-    - Deterministic checks classify task intent + volatility for terminal answers.
+    - Deterministic checks classify task intent + volatility for terminal `contact_user` outputs.
     - External evidence is required only for volatile/unknown factual intents; transformation/personal-memory/subjective/static-reasoning intents bypass evidence requirement.
     - When volatile evidence is required but evidence actions are unavailable, verifier uses a graceful allow path (`TASK_EVIDENCE_UNAVAILABLE_GRACEFUL`) to avoid dead-loop retries.
-                - Forced-terminal system answers (decision-pressure safety path) are exempt from `DecisionVerifier` evidence requirement.
+                - Forced-terminal system `contact_user` actions (decision-pressure safety path) are exempt from `DecisionVerifier` evidence requirement.
   - If denied:
     - Record denial metrics/evidence.
     - Enqueue a new "find safe alternative" thought with denied-action context, including structured `reason_code`.
@@ -287,18 +287,18 @@ It is intentionally high-level and should stay aligned with the code.
       - For goal-origin actions, `WAITING` without async handles is treated as a contract violation and translated into a retry path instead of a fake generic wait.
     - Record outcome + deliberation evidence.
     - Notify `ActionLifecycleObserver` subscribers after execution so goal-origin actions can update step acceptance/block/retry state.
-    - Record non-answer/non-answer_draft action outcomes into the scratchpad (when enabled).
+    - Record non-`contact_user`/non-`resolution_draft` action outcomes into the scratchpad (when enabled).
       - external observe outputs are captured as typed result artifacts first
       - scratchpad evidence now retains trust/source labels instead of flattening everything to anonymous strings immediately
     - Store assistant output in dialogue and short-term memory when applicable.
-    - For `answer`, optionally force a post-terminal-answer long-term memory assessment.
+    - For `contact_user`, optionally force a post-terminal-answer long-term memory assessment.
     - Follow-up thought behavior is action-descriptor-driven (`requiresFollowUpThought` + `followUpPrefix`).
     - Optionally run immediate post-allowed-action long-term memory assessment.
-- For `answer`, response latency is emitted and per-input evidence cache is cleared.
-- After `answer`, pending thoughts/actions for the same `(root input, sessionId)` scope are pruned from queues
+- For `contact_user`, response latency is emitted and per-input evidence cache is cleared.
+- After `contact_user`, pending thoughts/actions for the same `(root input, sessionId)` scope are pruned from queues
     (`input_resolution_cleanup`) so stale plan/follow-up work cannot continue cycling or leak across sessions.
-- After `answer`, the scratchpad digest is captured into the session digest ring before scratchpad destruction.
-- After `answer`, the scratchpad for that root input is destroyed (`scratchpad_destroyed`).
+- After `contact_user`, the scratchpad digest is captured into the session digest ring before scratchpad destruction.
+- After `contact_user`, the scratchpad for that root input is destroyed (`scratchpad_destroyed`).
 
 ## Planner Logic
 - File: `src/main/kotlin/ai/neopsyke/agent/ego/LlmEgoPlanner.kt`
@@ -354,7 +354,7 @@ It is intentionally high-level and should stay aligned with the code.
   - Treat cron-backed goals as recurring cycles: when a cron tick arrives after a cron goal reached `COMPLETED` or `FAILED`, the runtime resets plan-step execution state, clears produced keys, and re-emits work-ready for the next scheduled run.
   - Poll async-operation providers and accept externally-delivered async completion events for blocked steps
   - Persist `goal-events.jsonl`, `goal.json`, `goal-snapshot.json`, `workspace/context.md`, `workspace/scratch.md`, and per-step artifacts
-  - Normal interactive runs default goal persistence to `~/.neopsyke/goals`; eval/live runs should override `config.goals.workspaceRoot` so eval-created goals stay isolated from user runtime state
+  - Bundled runtime defaults persist goals under `.neopsyke/goals`; eval/live runs should override `config.goals.workspaceRoot` so eval-created goals stay isolated from user runtime state
   - Maintain cached best-effort summaries for ambient context (`activeGoals`, `pendingWorkSummary`) so Ego does not scan live goal state on the hot path
 - Ego-facing signal contract:
   - The runtime emits only `GoalRuntimeCue(goalId, stepId, reason)` into the cognitive stimulus plane.
@@ -378,12 +378,12 @@ It is intentionally high-level and should stay aligned with the code.
     - one strict-JSON retry on parse failure
     - parse-failure circuit breaker (scoped by `root_input + action_type`) that bypasses verifier for one decision after repeated malformed verifier outputs
     - reject propagation into noop-thoughts: verifier `reject` preserves denied action type/payload metadata so follow-up planning can see exactly which candidate was blocked
-    - repeated-answer disagreement override: if a follow-up thought repeats the same `answer` payload after a prior non-technical verifier reject and the verifier rejects it again, planner keeps the original answer and the dispatcher lets that answer through instead of re-blocking it as an ordinary repeated denied action
-    - structured follow-up lineage guard: follow-up thoughts carry origin action metadata (`originActionType`, `originActionObservedEvidence`), and verifier `repair` back to the same evidence action is ignored when the candidate is `answer`, prior evidence succeeded, and user did not explicitly request refresh/retry
+    - repeated-answer disagreement override: if a follow-up thought repeats the same `contact_user` payload after a prior non-technical verifier reject and the verifier rejects it again, planner keeps the original answer and the dispatcher lets that output through instead of re-blocking it as an ordinary repeated denied action
+    - structured follow-up lineage guard: follow-up thoughts carry origin action metadata (`originActionType`, `originActionObservedEvidence`), and verifier `repair` back to the same evidence action is ignored when the candidate is `contact_user`, prior evidence succeeded, and user did not explicitly request refresh/retry
     - `contact_user` meaning guard: verifier repairs may clean up surface form, but repairs that would change the answer's meaning are ignored and the original answer is kept
     - no-op repair collapse: if verifier returns `repair` but action type/payload/summary are materially unchanged, planner treats it as `approve` instead of recording a repair
     - answer-action tuning: verifier instructions explicitly approve directly entailed exact-match answers when there is no contradictory evidence, and verifier sampling temperature is fixed at `0.0`
-  - `answer_draft` action proposals are allowed only inside active plan-context thoughts; out-of-context proposals are coerced to `noop`.
+  - `resolution_draft` action proposals are allowed only inside active plan-context thoughts; out-of-context proposals are coerced to `noop`.
   - Retry policy and safe fallback to `Noop` on model/parse failures.
   - Follow-up evidence thoughts now explicitly ask for the next planner decision as one raw JSON object and forbid tool/function wrappers.
   - Planner and action-verifier prompts now include "reflection lessons" context to avoid repeated failed strategies.
@@ -423,8 +423,8 @@ It is intentionally high-level and should stay aligned with the code.
     - single-goal delete may direct commit only from an owner-verified direct channel and only when an exact `goal_id` is present
     - ambiguous deletes plus non-owner/external/group delete requests are staged instead of direct-committed
 - Id-origin deterministic policy is enforced inside Superego (not plugins):
-  - Direct `answer` from Id origin is hard-denied by default.
-  - Id-origin actions are allowlisted for internal/evidence-gathering types (`web_search`, `website_fetch`, `mcp_time`, `answer_draft`, `reflect_internal`, `reflect_evidence`).
+  - Direct `contact_user` from Id origin is hard-denied by default.
+  - Id-origin actions are allowlisted for internal/evidence-gathering types (`web_search`, `website_fetch`, `resolution_draft`, `reflect_internal`, `reflect_evidence`).
   - Non-allowlisted Id-origin actions are denied before LLM review.
   - Id-origin `reflect_internal` is treated as an internal-only durable-memory action:
     - plugin deterministic validation still runs
@@ -469,7 +469,7 @@ It is intentionally high-level and should stay aligned with the code.
   - meta-reasoner assessment cadence
   - guidance text for planner
   - optional override toward finalization
-  - forced terminal answer enqueue under persistent circular pressure
+  - forced terminal `contact_user` enqueue under persistent circular pressure
 - Deliberation runtime state is session-scoped:
   - each session has its own `DeliberationProgressMonitor`, `lastAssessmentStep`, and guidance text
   - forced terminal/evidence/fetch-circuit bookkeeping is scoped by `(rootInputId, sessionId)`
@@ -518,7 +518,7 @@ It is intentionally high-level and should stay aligned with the code.
   - `MemorySystem` enforces:
     - interval/cooldown gates
     - explicit remember-intent fast path (one forced assessment per input when user asks to remember)
-    - optional forced assessments (post-allowed-action and post-terminal-answer)
+    - optional forced assessments (post-allowed-action and post-terminal-`contact_user`)
     - confidence threshold
     - recall-echo suppression (skip imprints whose summary substantially matches current recall payload)
       - thresholds are configurable via `MemoryConfig` / `EGO_LONG_TERM_MEMORY_RECALL_ECHO_*`
@@ -546,7 +546,7 @@ It is intentionally high-level and should stay aligned with the code.
   - Scoped to root input; independent from short-term and long-term memory pipelines.
   - Stores compact sections/evidence for the active request only.
   - Evidence entries preserve trust/source labels from external artifacts instead of flattening them to anonymous strings at ingestion time.
-  - `answer_draft` sections are stored separately and counted for final-pass gating.
+  - `resolution_draft` sections are stored separately and counted for final-pass gating.
   - Planner receives only prompt-capped scratchpad index/summaries, not full scratchpad content.
   - Provides final-pass compilation input with scratchpad confidence estimate (sections/evidence/goal weighted signal).
   - Exposes debug head/snapshot views (versioned) for development-time observability.
@@ -585,13 +585,17 @@ It is intentionally high-level and should stay aligned with the code.
     - follow-up-thought behavior
     - connector provenance metadata when the action is backed by an external connector
 - Built-in discovered action plugins:
-  - `answer`
-  - `answer_draft` (internal chunked synthesis, non-user-visible)
+  - `contact_user`
+  - `resolution_draft` (internal chunked synthesis, non-user-visible)
   - `web_search`
-  - `mcp_time` (payload timezone is required by current MCP time server contract)
   - `website_fetch`
+  - `reflect_internal`
+  - `reflect_evidence`
   - `goal_operation` (persistent goal lifecycle operations; create supports optional `cron_expression`; recurring cron-backed creates now stage for authorization while non-recurring trusted-owner operations may direct commit)
   - `email_send` (Microsoft Graph adapter; disabled unless env config is present)
+  - `gmail_observe_search`
+  - `gmail_observe_message`
+  - `calendar_observe_events`
 - Connector-backed actions:
   - are optional and fail-closed behind `config.connectors.enabled`
   - are loaded only from the shipped curated catalog plus local installed state
@@ -638,7 +642,7 @@ It is intentionally high-level and should stay aligned with the code.
 - Supports root-input scoped queue operations used by convergence logic:
   - detect pending fallback explanation actions per `(rootInputId, sessionId)` scope
   - detect pending plan-context or convergence thoughts per `(rootInputId, sessionId)` scope
-  - clear pending thoughts/actions for a resolved `(rootInputId, sessionId)` scope after terminal answer
+  - clear pending thoughts/actions for a resolved `(rootInputId, sessionId)` scope after terminal `contact_user`
 - Saturation leads to drop + instrumentation warning/event.
 
 ## Safety and Fallback Patterns

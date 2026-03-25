@@ -639,13 +639,13 @@ class EgoPlannerTest {
         val llm = StubChatModelClient().apply {
             enqueueRawResponse(
                 """
-                {"decision":"action","urgency":"medium","action_type":"contact_user","action_payload":"The current time in Hamburg is 12:18 PM.","action_summary":"Provide current time answer"}
+                {"decision":"action","urgency":"medium","action_type":"contact_user","action_payload":"The page confirms the pricing details.","action_summary":"Provide fetched summary"}
                 """.trimIndent()
             )
             enqueueRawResponseForCallSite(
                 callSite = "action_verifier",
                 content = """
-                {"verdict":"repair","action_type":"mcp_time","action_payload":{"timezone":"Europe/Berlin"},"action_summary":"Run another time lookup","reason":"verify recency"}
+                {"verdict":"repair","action_type":"website_fetch","action_payload":{"url":"https://example.com/pricing","max_chars":900},"action_summary":"Fetch pricing page again","reason":"verify page contents"}
                 """.trimIndent()
             )
         }
@@ -662,20 +662,15 @@ class EgoPlannerTest {
                     id = 9,
                     urgency = Urgency.MEDIUM,
                     content = """
-                    MCP time lookup completed.
+                    Website fetch completed.
                     UNTRUSTED_EXTERNAL_DATA_BEGIN
-                    MCP time result: {
-                      "timezone": "Europe/Berlin",
-                      "datetime": "2026-03-09T12:18:19+01:00",
-                      "day_of_week": "Monday",
-                      "is_dst": false
-                    }
+                    Fetch completed for https://example.com/pricing. Extracted 612 chars. Preview: Pricing page with current plans and rates.
                     UNTRUSTED_EXTERNAL_DATA_END
                     Produce the next planner decision as one raw JSON object only.
                     Do not use tool or function wrappers.
                     """.trimIndent(),
                     passes = 1,
-                    originActionType = ActionType.MCP_TIME,
+                    originActionType = ActionType.WEBSITE_FETCH,
                     originActionObservedEvidence = true
                 )
             ),
@@ -702,13 +697,13 @@ class EgoPlannerTest {
         val llm = StubChatModelClient().apply {
             enqueueRawResponse(
                 """
-                {"decision":"action","urgency":"medium","action_type":"contact_user","action_payload":"The current time in Hamburg is 12:18 PM.","action_summary":"Provide current time answer"}
+                {"decision":"action","urgency":"medium","action_type":"contact_user","action_payload":"The page confirms the pricing details.","action_summary":"Provide fetched summary"}
                 """.trimIndent()
             )
             enqueueRawResponseForCallSite(
                 callSite = "action_verifier",
                 content = """
-                {"verdict":"repair","action_type":"mcp_time","action_payload":{"timezone":"Europe/Berlin"},"action_summary":"Run another time lookup","reason":"user asked to refresh"}
+                {"verdict":"repair","action_type":"website_fetch","action_payload":{"url":"https://example.com/pricing","max_chars":900},"action_summary":"Fetch pricing page again","reason":"user asked to refresh"}
                 """.trimIndent()
             )
         }
@@ -724,7 +719,7 @@ class EgoPlannerTest {
                     urgency = Urgency.MEDIUM,
                     content = "follow-up",
                     passes = 1,
-                    originActionType = ActionType.MCP_TIME,
+                    originActionType = ActionType.WEBSITE_FETCH,
                     originActionObservedEvidence = true
                 )
             ),
@@ -736,7 +731,7 @@ class EgoPlannerTest {
 
         val action = assertIs<ai.neopsyke.agent.model.EgoDecision.ProposeAction>(decision)
         assertEquals(ActionType.CONTACT_USER, action.actionType)
-        assertEquals("The current time in Hamburg is 12:18 PM.", action.payload)
+        assertEquals("The page confirms the pricing details.", action.payload)
         assertTrue(llm.calls.any { it.options.metadata.callSite == "action_verifier" })
     }
 
@@ -745,13 +740,13 @@ class EgoPlannerTest {
         val llm = StubChatModelClient().apply {
             enqueueRawResponse(
                 """
-                {"decision":"action","urgency":"medium","action_type":"mcp_time","action_payload":"{\"timezone\":\"Europe/Berlin\"}","action_summary":"Retrieve current time for Hamburg"}
+                {"decision":"action","urgency":"medium","action_type":"website_fetch","action_payload":"{\"url\":\"https://example.com/pricing\",\"max_chars\":900}","action_summary":"Fetch pricing page"}
                 """.trimIndent()
             )
             enqueueRawResponseForCallSite(
                 callSite = "action_verifier",
                 content = """
-                {"verdict":"repair","action_type":"mcp_time","action_payload":{"timezone":"Europe/Berlin"},"action_summary":"Retrieve current time for Hamburg","reason":"same action wording update"}
+                {"verdict":"repair","action_type":"website_fetch","action_payload":{"url":"https://example.com/pricing","max_chars":900},"action_summary":"Fetch pricing page","reason":"same action wording update"}
                 """.trimIndent()
             )
         }
@@ -773,8 +768,8 @@ class EgoPlannerTest {
         )
 
         val action = assertIs<ai.neopsyke.agent.model.EgoDecision.ProposeAction>(decision)
-        assertEquals(ActionType.MCP_TIME, action.actionType)
-        assertEquals("""{"timezone":"Europe/Berlin"}""", action.payload)
+        assertEquals(ActionType.WEBSITE_FETCH, action.actionType)
+        assertEquals("""{"url":"https://example.com/pricing","max_chars":900}""", action.payload)
         assertEquals(0, repairCount)
         assertTrue(llm.calls.any { it.options.metadata.callSite == "action_verifier" })
         assertTrue(

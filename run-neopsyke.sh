@@ -143,7 +143,6 @@ Environment:
   MISTRAL_API_KEY         Required when a configured provider uses Mistral
   GOOGLE_API_KEY          Required when a configured provider uses Google
   OPENAI_API_KEY          Required when a configured provider uses OpenAI
-  NEOPSYKE_MCP_CONFIG_FILE      Optional path to MCP runtime YAML for time/fetch (otherwise use bundled config/mcp-runtime.yaml)
   NEOPSYKE_MEMORY_CONFIG_FILE   Optional path to memory runtime YAML (otherwise use bundled config/memory-runtime.yaml)
   NEOPSYKE_LOG_LEVEL         Default log level if --log-level is not provided
   NEOPSYKE_LOG_DIR           Directory for run logs (default: .neopsyke/logs)

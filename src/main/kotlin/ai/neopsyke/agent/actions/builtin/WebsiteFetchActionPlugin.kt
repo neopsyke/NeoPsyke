@@ -89,11 +89,12 @@ class WebsiteFetchActionPlugin(
             )
         }
         val requestedMaxChars = parsed.maxChars
-        if (requestedMaxChars != null && requestedMaxChars !in ActionPayloadSecurity.WEBSITE_FETCH_MIN_MAX_CHARS..config.fetchMaxChars) {
+        val maxFetchChars = config.builtinTools.websiteFetch.maxChars
+        if (requestedMaxChars != null && requestedMaxChars !in ActionPayloadSecurity.WEBSITE_FETCH_MIN_MAX_CHARS..maxFetchChars) {
             return ActionDeterministicReview(
                 allow = false,
                 ruleId = "website_fetch_max_chars_out_of_bounds",
-                reason = "WEBSITE_FETCH max_chars must be between ${ActionPayloadSecurity.WEBSITE_FETCH_MIN_MAX_CHARS} and ${config.fetchMaxChars}."
+                reason = "WEBSITE_FETCH max_chars must be between ${ActionPayloadSecurity.WEBSITE_FETCH_MIN_MAX_CHARS} and $maxFetchChars."
             )
         }
         if (ActionPayloadSecurity.containsSecretExfilIntent(action.payload) || ActionPayloadSecurity.containsInlineSecretMaterial(action.payload)) {

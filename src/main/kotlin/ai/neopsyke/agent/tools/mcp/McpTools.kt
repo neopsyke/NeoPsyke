@@ -55,15 +55,6 @@ import kotlin.concurrent.thread
 
 private val logger = KotlinLogging.logger {}
 
-interface McpTimeTool {
-    suspend fun getCurrentTime(payload: String): String
-
-    suspend fun healthCheck(): ToolHealthStatus = ToolHealthStatus(
-        available = true,
-        detail = "health check not implemented"
-    )
-}
-
 interface FetchTool {
     suspend fun fetch(payload: String): String
 
@@ -74,76 +65,6 @@ interface FetchTool {
         available = true,
         detail = "health check not implemented"
     )
-}
-
-class SdkMcpTimeTool(
-    command: List<String>,
-    private val callTimeoutMs: Long,
-    scope: CoroutineScope? = null,
-) : McpTimeTool, AutoCloseable {
-    private val clientHolder = LazyMcpClientHolder(command, serverLabel = "time", scope = scope)
-
-    override suspend fun getCurrentTime(payload: String): String {
-        val parsed = try {
-            mapper.readValue<TimePayload>(payload)
-        } catch (_: Exception) {
-            TimePayload()
-        }
-
-        val arguments = buildMap<String, Any> {
-            val timezone = parsed.timezone?.trim().orEmpty()
-            if (timezone.isNotEmpty()) {
-                put("timezone", timezone)
-            }
-        }
-
-        val result = try {
-            clientHolder.callTool(
-                toolName = "get_current_time",
-                arguments = arguments,
-                timeoutMs = callTimeoutMs
-            )
-        } catch (ex: Exception) {
-            logger.warn(ex) { "MCP time tool call failed." }
-            return "MCP time unavailable: ${ex.message ?: "tool call failed"}"
-        }
-
-        val content = PromptInjectionDefense.sanitizeExternalText(
-            result.content.ifBlank { "No time data returned." },
-            500
-        )
-        return if (result.isError) {
-            "MCP time tool returned an error: $content"
-        } else {
-            "MCP time result: $content"
-        }
-    }
-
-    override fun close() {
-        clientHolder.close()
-    }
-
-    override suspend fun healthCheck(): ToolHealthStatus {
-        return try {
-            val toolNames = clientHolder.listTools(callTimeoutMs)
-            if ("get_current_time" in toolNames) {
-                ToolHealthStatus(
-                    available = true,
-                    detail = "MCP time server reachable and tool get_current_time is registered."
-                )
-            } else {
-                ToolHealthStatus(
-                    available = false,
-                    detail = "MCP time server reachable but get_current_time tool is missing."
-                )
-            }
-        } catch (ex: Exception) {
-            ToolHealthStatus(
-                available = false,
-                detail = "MCP time server health check failed: ${ex.message ?: "unknown error"}"
-            )
-        }
-    }
 }
 
 class LazyMcpClientHolder(
@@ -725,10 +646,6 @@ enum class FetchErrorCategory {
 data class FetchOutcome(
     val message: String,
     val errorCategory: FetchErrorCategory = FetchErrorCategory.NONE,
-)
-
-private data class TimePayload(
-    val timezone: String? = null,
 )
 
 private data class FetchPayload(

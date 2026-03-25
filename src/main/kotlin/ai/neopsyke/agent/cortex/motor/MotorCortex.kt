@@ -19,7 +19,6 @@ import ai.neopsyke.agent.model.PendingAction
 import ai.neopsyke.agent.goal.NoopGoalsGateway
 import ai.neopsyke.agent.goal.GoalsGateway
 import ai.neopsyke.agent.tools.mcp.FetchTool
-import ai.neopsyke.agent.tools.mcp.McpTimeTool
 
 data class ActionImplementationStatus(
     val actionType: ActionType,
@@ -33,7 +32,6 @@ class MotorCortex(
 ) {
     constructor(
         webSearchActionHandler: WebSearchActionHandler,
-        mcpTimeTool: McpTimeTool? = null,
         fetchTool: FetchTool? = null,
         output: (String) -> Unit = ::println,
         conversationOutput: ConversationOutputGateway = RoutedConversationOutputGateway(fallbackOutput = output),
@@ -46,7 +44,6 @@ class MotorCortex(
             ActionPluginFactoryContext(
                 config = config,
                 webSearchActionHandler = webSearchActionHandler,
-                mcpTimeTool = mcpTimeTool,
                 fetchTool = fetchTool,
                 output = output,
                 conversationOutput = conversationOutput,

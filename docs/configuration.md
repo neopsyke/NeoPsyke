@@ -28,7 +28,6 @@ Each runtime has a bundled default under `config/`, a default external overlay f
 | `config/agent-runtime.yaml` | `agent-runtime.yaml` | `NEOPSYKE_AGENT_CONFIG_FILE` |
 | `config/id-runtime.yaml` | `id-runtime.yaml` | `NEOPSYKE_ID_CONFIG_FILE` |
 | `config/llm-runtime.yaml` | `llm-runtime.yaml` | `NEOPSYKE_LLM_CONFIG_FILE` |
-| `config/mcp-runtime.yaml` | `mcp-runtime.yaml` | `NEOPSYKE_MCP_CONFIG_FILE` |
 | `config/memory-runtime.yaml` | `memory-runtime.yaml` | `NEOPSYKE_MEMORY_CONFIG_FILE` |
 
 Resolution rules:
@@ -94,9 +93,9 @@ providers:
     default_web_search_model: gpt-4o-mini
 ```
 
-Each provider declares: the environment variable name for its API key (not the key itself), a base URL, and default model names. Provider base URLs and default models live in YAML, not in Kotlin code.
+Each provider declares: the environment variable name for its API key (not the key itself), a base URL, and default model names. Runtime routing defaults are loaded from YAML; some client classes also keep internal fallback constants for direct construction outside the normal runtime loader path.
 
-Supported providers: `anthropic`, `groq`, `google`, `mistral`, `ollama`, `openai`. All use an OpenAI-compatible chat completions API. `OLLAMA_API_KEY` is optional — it only matters for authenticated remote Ollama hosts.
+Supported providers: `anthropic`, `groq`, `google`, `mistral`, `ollama`, `openai`. Most are wired through OpenAI-compatible chat-completions endpoints, but Anthropic uses its native Messages API. `OLLAMA_API_KEY` is optional — it only matters for authenticated remote Ollama hosts.
 
 If a cognitive role references an invalid or missing provider, loading fails with a direct error.
 
@@ -210,7 +209,7 @@ This is the largest configuration file, covering the Ego planner, Superego, memo
 | `max_plans_per_input` | `2` | Maximum plan generations per input. |
 | `action_retry_budget_non_retryable_failures` | `3` | How many non-retryable action failures before giving up. |
 | `action_retry_cooldown_steps` | `10` | Steps to wait before retrying a failed action type. |
-| `action_verifier_enabled` | `false` | Enable the DecisionVerifier LLM call before Superego review. |
+| `action_verifier_enabled` | `false` | Enable the planner-side action-verifier LLM pass that can repair or veto proposed actions before Superego review. This is separate from the deterministic `DecisionVerifier` gate. |
 
 **Tuning notes:**
 - `max_loop_steps_per_input` is your main safety valve. Start with the default (180) and lower it if you find the agent spending too many tokens on simple requests.
@@ -302,12 +301,74 @@ The meta-reasoner is a deliberation engine that fires when decision pressure bui
 | `max_entries_per_query` | `20` | Maximum entries returned per search. |
 | `use_llm_summarizer` | `false` | Use LLM to generate episode summaries (vs. deterministic). |
 
+### Action control (`agent.action_control`)
+
+This is the durable authorization/staging subsystem used by the dashboard and by autonomous staged execution.
+
+| Key | Default | Description |
+|---|---|---|
+| `enabled` | `true` | Enable durable action staging, authorization, receipts, and ledger storage. |
+| `db_path` | `.neopsyke/action-control.db` | SQLite store for staged actions, authorizations, receipts, and ledger entries. |
+| `policy_path` | `action-security.yaml` | Operator policy file that controls direct/staged/denied behavior. |
+| `authorization_ttl_ms` | `86400000` | Default authorization TTL for approval-backed commits. |
+| `max_inspect_results` | `200` | Maximum staged/ledger rows returned by inspection endpoints. |
+| `autonomous_worker_enabled` | `true` | Enable the runtime-owned background worker for runnable `READY` staged actions. |
+| `autonomous_worker_poll_ms` | `500` | Poll interval for the autonomous staged-action worker. |
+| `autonomous_worker_batch_size` | `16` | Maximum staged actions claimed per poll cycle. |
+| `observe_per_type_per_root_input` | `10` | Per-root-input cap for observe-style actions of the same type. |
+| `contact_user_per_root_input` | `5` | Per-root-input cap for terminal `contact_user` deliveries. |
+| `reflection_family_per_root_input` | `2` | Per-root-input cap across reflection-family actions. |
+| `reflect_evidence_per_root_input` | `1` | Per-root-input cap specifically for `reflect_evidence`. |
+| `goal_operation_per_root_input` | `3` | Per-root-input cap for `goal_operation` actions. |
+| `commit_private_per_type_per_root_input` | `3` | Per-root-input cap for private side-effecting commits of the same type. |
+| `commit_stateful_per_type_per_root_input` | `2` | Per-root-input cap for stateful side-effecting commits of the same type. |
+| `commit_public_per_type_per_root_input` | `1` | Per-root-input cap for public side-effecting commits of the same type. |
+| `control_plane_per_type_per_root_input` | `2` | Per-root-input cap for control-plane actions of the same type. |
+
+### Connectors (`agent.connectors`)
+
+This subsystem is separate from the built-in website-fetch config. Connector plugins are loaded from curated connector manifests plus local installed connector state.
+
+| Key | Default | Description |
+|---|---|---|
+| `enabled` | `false` | Enable third-party connector action loading. |
+| `curated_catalog_path` | `connectors/catalog` | Curated manifest catalog path. |
+| `install_state_dir` | `.neopsyke/connectors` | Local installed/enabled connector state directory. |
+| `fail_closed` | `true` | Skip connector actions when manifests/state are invalid or incomplete. |
+| `pinning_enabled` | `true` | Require pinned tool-description digests before loading connector tools. |
+| `startup_timeout_ms` | `5000` | Capability discovery timeout when booting connector hosts. |
+| `health_timeout_ms` | `5000` | Health-check timeout for loaded connector hosts. |
+| `call_timeout_ms` | `8000` | Tool-call timeout for connector capability execution. |
+| `allowed_connector_ids` | `[]` | Explicit connector allowlist. Empty means no additional allowlist restriction beyond enabled bundles. |
+| `enabled_bundle_ids` | `[]` | Optional curated bundle presets that expand the connector allowlist. |
+| `allow_third_party_connectors` | `false` | Require explicit opt-in before loading curated third-party connectors. |
+
+### Built-in tools (`agent.builtin_tools`)
+
+This section configures native first-party tools that are shipped with NeoPsyke itself rather than loaded through connectors.
+
+#### Website fetch (`agent.builtin_tools.website_fetch`)
+
+| Key | Default | Description |
+|---|---|---|
+| `enabled` | `true` | Enable the built-in native website fetch action. |
+| `call_timeout_ms` | `8000` | Timeout for native website fetch requests. |
+| `max_chars` | `4000` | Maximum sanitized characters returned from a fetched page. |
+
 ### Goals (`agent.goals`)
 
 | Key | Default | Description |
 |---|---|---|
 | `enabled` | `true` | Enable the goal subsystem. |
-| `workspace_root` | `~/.neopsyke/goals` | Where goal state and artifacts are persisted. |
+| `workspace_root` | `.neopsyke/goals` | Where goal state and artifacts are persisted by the bundled runtime defaults. |
+| `max_active_goals` | `10` | Maximum concurrently active goals. |
+| `max_steps_per_plan` | `20` | Maximum persisted steps in a goal plan. |
+| `actions_per_cycle` | `5` | Maximum goal-origin actions per goal execution cycle. |
+| `snapshot_every_n_events` | `50` | Snapshot cadence for persisted goal state. |
+| `timer_resolution_ms` | `5000` | Polling resolution for timer-based goal wakeups. |
+| `condition_check_interval_ms` | `30000` | Poll interval for condition-based waits. |
+| `completed_goal_retention_days` | `30` | Retention window for completed goal artifacts. |
+| `max_workspace_bytes` | `10485760` | Workspace storage limit per goal root. |
 
 ### Integrations (`agent.native_integrations`)
 
@@ -317,11 +378,50 @@ The meta-reasoner is a deliberation engine that fires when decision pressure bui
 |---|---|---|
 | `enabled` | `true` | Enable Telegram integration. |
 | `mode` | `polling` | Ingress mode: `polling` or `webhook`. |
+| `webhook_path` | `/api/channels/telegram/webhook` | Dashboard route used in webhook mode. |
 | `bot_token_handle` | `TELEGRAM_BOT_TOKEN` | Env var name containing the bot token. |
 | `webhook_secret_handle` | `TELEGRAM_WEBHOOK_SECRET` | Env var name for webhook secret validation. |
+| `policy_scope_id` | `telegram-owner` | Policy scope attached to authorized Telegram conversations. |
+| `session_id_prefix` | `telegram` | Session-id prefix used for Telegram chat sessions. |
 | `owner_chat_id` | — | Restrict to this chat ID (env override: `NEOPSYKE_TELEGRAM_OWNER_CHAT_ID`). |
 | `owner_user_id` | — | Restrict to this user ID (env override: `NEOPSYKE_TELEGRAM_OWNER_USER_ID`). |
 | `require_direct_chat` | `true` | Only accept private direct messages. |
+| `drop_unauthorized_messages` | `false` | Silently drop unauthorized traffic instead of returning `403`. |
+| `poll_timeout_seconds` | `25` | Long-poll timeout used in polling mode. |
+| `poll_retry_delay_ms` | `1000` | Retry delay after polling failures. |
+
+#### Google Workspace (`agent.native_integrations.google_workspace`)
+
+These settings power the native OAuth bridge and the built-in Gmail/Calendar observe actions. They are not loaded through the generic connector runtime.
+
+| Key | Default | Description |
+|---|---|---|
+| `enabled` | `false` | Enable Google Workspace OAuth endpoints and native observe actions. |
+| `token_store_dir` | `.neopsyke/auth/google` | Local encrypted credential store path. |
+| `allowed_owner_email` | — | Restrict authorization to this Google account email. |
+| `public_base_url` | — | Public base URL used to construct OAuth callback URLs. |
+| `oauth_start_path` | `/api/channels/google/oauth/start` | Dashboard-hosted OAuth start endpoint. |
+| `oauth_client_id_handle` | `GOOGLE_OAUTH_CLIENT_ID` | Env var name containing the Google OAuth client id. |
+| `oauth_client_secret_handle` | `GOOGLE_OAUTH_CLIENT_SECRET` | Env var name containing the Google OAuth client secret. |
+| `oauth_state_signing_secret_handle` | `GOOGLE_OAUTH_STATE_SIGNING_SECRET` | Env var name for OAuth state signing. |
+| `oauth_token_encryption_secret_handle` | `GOOGLE_OAUTH_TOKEN_ENCRYPTION_SECRET` | Env var name for local token encryption. |
+| `callback_path` | `/api/channels/google/oauth/callback` | Dashboard-hosted OAuth callback endpoint. |
+| `authorization_base_url` | `https://accounts.google.com/o/oauth2/v2/auth` | Google OAuth authorization endpoint. |
+| `token_base_url` | `https://oauth2.googleapis.com/token` | Google OAuth token endpoint. |
+| `require_pkce` | `true` | Require PKCE for the native OAuth flow. |
+| `require_refresh_token` | `true` | Require an offline-capable refresh token. |
+| `oauth_state_ttl_seconds` | `600` | OAuth state-token TTL. |
+| `scopes` | Gmail readonly + Calendar readonly | Requested Google OAuth scopes. |
+
+### Inner voice (`agent.inner_voice`)
+
+This controls the internal thought/event stream shown in observability views and optional file sinks.
+
+| Key | Default | Description |
+|---|---|---|
+| `enabled` | `true` | Enable inner-voice event capture. |
+| `max_content_chars` | `500` | Maximum characters stored per inner-voice event. |
+| `max_events_per_session` | `100` | Maximum retained inner-voice events per session. |
 
 ### Runtime (`agent.runtime`)
 
@@ -332,8 +432,6 @@ The meta-reasoner is a deliberation engine that fires when decision pressure bui
 | `max_pending_actions` | `32` | Maximum queued actions. |
 | `max_pending_inputs` | `32` | Maximum queued inputs. |
 | `search_result_count` | `5` | Number of web search results to request. |
-| `mcp_call_timeout_ms` | `8000` | Timeout for MCP tool calls. |
-| `fetch_max_chars` | `4000` | Maximum characters fetched from websites. |
 
 ### App (`app`)
 
@@ -448,27 +546,20 @@ Each need is individually configurable:
 
 ---
 
-## 5. MCP Tools (`config/mcp-runtime.yaml`)
+## 5. Built-in Tools (`agent.builtin_tools`)
 
-Controls Model Context Protocol tool servers.
+NeoPsyke currently ships one native built-in fetch tool. It is configured in `agent-runtime.yaml`, not in a separate MCP runtime file.
 
 ```yaml
-time:
-  enabled: true
-  mode: stdio
-  provider: mcp-time
-  command: "npx -y @anthropic/mcp-time"
-  fallback_commands:
-    - "uvx mcp-server-time"
-    - "npx -y mcp-server-time"
-
-website_fetch:
-  enabled: true
-  mode: native
-  provider: native-jvm
+agent:
+  builtin_tools:
+    website_fetch:
+      enabled: true
+      call_timeout_ms: 8000
+      max_chars: 4000
 ```
 
-Each tool can use `stdio` mode (external process) or `native` mode (in-process JVM). The `fallback_commands` list is tried in order if the primary command is not found in `PATH`.
+This built-in website fetch action is native JVM code (`OkHttp` + `Jsoup`), not an MCP server. External connector plugins are configured separately under `agent.connectors`.
 
 ---
 

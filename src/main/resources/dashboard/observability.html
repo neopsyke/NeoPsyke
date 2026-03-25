@@ -1565,7 +1565,7 @@
       const runActionCalls = metrics?.runActionCallsByType || {};
       const allActionCalls = metrics?.persistentActionCallsByType || {};
 
-      const order = ["contact_user", "web_search", "mcp_time", "website_fetch", "memory"];
+      const order = ["contact_user", "web_search", "website_fetch", "memory"];
       const sorted = list
         .slice()
         .sort((a, b) => {

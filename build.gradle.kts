@@ -47,7 +47,6 @@ tasks.processResources {
             "agent-runtime.yaml",
             "id-runtime.yaml",
             "llm-runtime.yaml",
-            "mcp-runtime.yaml",
             "memory-runtime.yaml",
         )
         into("")

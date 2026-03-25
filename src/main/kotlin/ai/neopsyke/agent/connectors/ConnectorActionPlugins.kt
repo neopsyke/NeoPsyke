@@ -96,7 +96,7 @@ internal class ConnectorActionPlugin(
             hostClient.callCapability(
                 capabilityName = actionManifest.toolName,
                 arguments = arguments,
-                timeoutMs = config.mcpCallTimeoutMs,
+                timeoutMs = config.connectors.callTimeoutMs,
             )
         } catch (ex: Exception) {
             return ActionOutcome(

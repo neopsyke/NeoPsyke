@@ -134,12 +134,18 @@ class AgentRuntimeSettingsLoaderTest {
                 pinning_enabled: false
                 startup_timeout_ms: 6123
                 health_timeout_ms: 7123
+                call_timeout_ms: 8123
                 allowed_connector_ids:
                   - gmail
                   - telegram
                 enabled_bundle_ids:
                   - morning-briefing
                 allow_third_party_connectors: true
+              builtin_tools:
+                website_fetch:
+                  enabled: false
+                  call_timeout_ms: 12345
+                  max_chars: 7777
               native_integrations:
                 telegram:
                   enabled: true
@@ -179,8 +185,6 @@ class AgentRuntimeSettingsLoaderTest {
                 max_pending_actions: 12
                 max_pending_inputs: 13
                 search_result_count: 8
-                mcp_call_timeout_ms: 12345
-                fetch_max_chars: 7777
             """.trimIndent()
         )
 
@@ -272,9 +276,13 @@ class AgentRuntimeSettingsLoaderTest {
         assertEquals(false, settings.agentConfig.connectors.pinningEnabled)
         assertEquals(6123L, settings.agentConfig.connectors.startupTimeoutMs)
         assertEquals(7123L, settings.agentConfig.connectors.healthTimeoutMs)
+        assertEquals(8123L, settings.agentConfig.connectors.callTimeoutMs)
         assertEquals(setOf("gmail", "telegram"), settings.agentConfig.connectors.allowedConnectorIds)
         assertEquals(setOf("morning-briefing"), settings.agentConfig.connectors.enabledBundleIds)
         assertEquals(true, settings.agentConfig.connectors.allowThirdPartyConnectors)
+        assertEquals(false, settings.agentConfig.builtinTools.websiteFetch.enabled)
+        assertEquals(12345L, settings.agentConfig.builtinTools.websiteFetch.callTimeoutMs)
+        assertEquals(7777, settings.agentConfig.builtinTools.websiteFetch.maxChars)
         assertEquals(true, settings.agentConfig.nativeIntegrations.telegram.enabled)
         assertEquals(TelegramIngressMode.POLLING, settings.agentConfig.nativeIntegrations.telegram.mode)
         assertEquals("/hooks/telegram", settings.agentConfig.nativeIntegrations.telegram.webhookPath)
@@ -316,8 +324,6 @@ class AgentRuntimeSettingsLoaderTest {
         assertEquals(12, settings.agentConfig.maxPendingActions)
         assertEquals(13, settings.agentConfig.maxPendingInputs)
         assertEquals(8, settings.agentConfig.searchResultCount)
-        assertEquals(12345, settings.agentConfig.mcpCallTimeoutMs)
-        assertEquals(7777, settings.agentConfig.fetchMaxChars)
     }
 
     @Test
@@ -412,9 +418,13 @@ class AgentRuntimeSettingsLoaderTest {
                 "NEOPSYKE_CONNECTORS_PINNING_ENABLED" to "true",
                 "NEOPSYKE_CONNECTORS_STARTUP_TIMEOUT_MS" to "8111",
                 "NEOPSYKE_CONNECTORS_HEALTH_TIMEOUT_MS" to "8222",
+                "NEOPSYKE_CONNECTORS_CALL_TIMEOUT_MS" to "8333",
                 "NEOPSYKE_CONNECTORS_ALLOWED_IDS" to "gmail, telegram",
                 "NEOPSYKE_CONNECTORS_ENABLED_BUNDLES" to "morning-briefing, inbox-management",
                 "NEOPSYKE_CONNECTORS_ALLOW_THIRD_PARTY" to "false",
+                "WEBSITE_FETCH_ENABLED" to "false",
+                "WEBSITE_FETCH_CALL_TIMEOUT_MS" to "9123",
+                "WEBSITE_FETCH_MAX_CHARS" to "3456",
                 "NEOPSYKE_TELEGRAM_ENABLED" to "true",
                 "NEOPSYKE_TELEGRAM_MODE" to "polling",
                 "NEOPSYKE_TELEGRAM_WEBHOOK_PATH" to "/env/telegram/webhook",
@@ -455,9 +465,13 @@ class AgentRuntimeSettingsLoaderTest {
         assertEquals(true, settings.agentConfig.connectors.pinningEnabled)
         assertEquals(8111L, settings.agentConfig.connectors.startupTimeoutMs)
         assertEquals(8222L, settings.agentConfig.connectors.healthTimeoutMs)
+        assertEquals(8333L, settings.agentConfig.connectors.callTimeoutMs)
         assertEquals(setOf("gmail", "telegram"), settings.agentConfig.connectors.allowedConnectorIds)
         assertEquals(setOf("morning-briefing", "inbox-management"), settings.agentConfig.connectors.enabledBundleIds)
         assertEquals(false, settings.agentConfig.connectors.allowThirdPartyConnectors)
+        assertEquals(false, settings.agentConfig.builtinTools.websiteFetch.enabled)
+        assertEquals(9123L, settings.agentConfig.builtinTools.websiteFetch.callTimeoutMs)
+        assertEquals(3456, settings.agentConfig.builtinTools.websiteFetch.maxChars)
         assertEquals(true, settings.agentConfig.nativeIntegrations.telegram.enabled)
         assertEquals(TelegramIngressMode.POLLING, settings.agentConfig.nativeIntegrations.telegram.mode)
         assertEquals("/env/telegram/webhook", settings.agentConfig.nativeIntegrations.telegram.webhookPath)

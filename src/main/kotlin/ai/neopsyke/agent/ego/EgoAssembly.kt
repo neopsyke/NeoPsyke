@@ -24,7 +24,6 @@ import ai.neopsyke.agent.goal.NoopGoalsGateway
 import ai.neopsyke.agent.goal.GoalsGateway
 import ai.neopsyke.agent.superego.Superego
 import ai.neopsyke.agent.tools.mcp.FetchTool
-import ai.neopsyke.agent.tools.mcp.McpTimeTool
 import ai.neopsyke.instrumentation.AgentInstrumentation
 import ai.neopsyke.instrumentation.NoopAgentInstrumentation
 
@@ -76,7 +75,6 @@ object EgoAssembler {
         logbookSummarizer: LogbookSummarizer = DeterministicLogbookSummarizer(config.logbook),
         runId: String? = null,
         webSearchActionHandler: WebSearchActionHandler? = null,
-        mcpTimeTool: McpTimeTool? = null,
         fetchTool: FetchTool? = null,
         goalsGateway: GoalsGateway = NoopGoalsGateway,
         actionControlServiceFactory: (MotorCortex) -> ActionControlService = { NoopActionControlService },
@@ -97,7 +95,6 @@ object EgoAssembler {
             ActionPluginFactoryContext(
                 config = config,
                 webSearchActionHandler = webSearchActionHandler,
-                mcpTimeTool = mcpTimeTool,
                 fetchTool = fetchTool,
                 output = output,
                 conversationOutput = conversationOutput,

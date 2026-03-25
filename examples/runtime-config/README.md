@@ -7,7 +7,6 @@ Use them by pointing the matching env var at the file you want:
 - `NEOPSYKE_AGENT_CONFIG_FILE`
 - `NEOPSYKE_ID_CONFIG_FILE`
 - `NEOPSYKE_LLM_CONFIG_FILE`
-- `NEOPSYKE_MCP_CONFIG_FILE`
 - `NEOPSYKE_MEMORY_CONFIG_FILE`
 
 Example:

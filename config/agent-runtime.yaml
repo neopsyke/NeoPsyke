@@ -64,7 +64,7 @@ agent:
     long_term_memory_recall_echo_min_token_length: 3
     long_term_memory_recall_echo_min_token_count: 4
     long_term_memory_recall_echo_token_overlap_threshold: 0.85
-    # Optional. Falls back to runtime.mcp_call_timeout_ms when omitted.
+    # Optional. Falls back to the MemoryConfig default when omitted.
     # mcp_memory_call_timeout_ms: 8000
 
     scratchpad:
@@ -138,9 +138,16 @@ agent:
     pinning_enabled: true
     startup_timeout_ms: 5000
     health_timeout_ms: 5000
+    call_timeout_ms: 8000
     allowed_connector_ids: []
     enabled_bundle_ids: []
     allow_third_party_connectors: false
+
+  builtin_tools:
+    website_fetch:
+      enabled: true
+      call_timeout_ms: 8000
+      max_chars: 4000
 
   inner_voice:
     enabled: true
@@ -205,5 +212,3 @@ agent:
     max_pending_actions: 32
     max_pending_inputs: 32
     search_result_count: 5
-    mcp_call_timeout_ms: 8000
-    fetch_max_chars: 4000

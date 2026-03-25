@@ -29,7 +29,6 @@ class ConfiguredActionAuthorizationPolicyTest {
             ActionPluginFactoryContext(
                 config = config,
                 webSearchActionHandler = null,
-                mcpTimeTool = null,
                 fetchTool = null,
                 output = {},
                 reflectionMemoryRecorder = NoopReflectionMemoryRecorder,

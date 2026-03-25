@@ -28,7 +28,6 @@ class GoalOperationActionPluginTest {
             ActionPluginFactoryContext(
                 config = AgentConfig(goals = GoalConfig(enabled = false)),
                 webSearchActionHandler = null,
-                mcpTimeTool = null,
                 fetchTool = null,
                 output = {},
                 reflectionMemoryRecorder = ai.neopsyke.agent.actions.NoopReflectionMemoryRecorder,
@@ -38,7 +37,6 @@ class GoalOperationActionPluginTest {
             ActionPluginFactoryContext(
                 config = AgentConfig(goals = GoalConfig(enabled = true)),
                 webSearchActionHandler = null,
-                mcpTimeTool = null,
                 fetchTool = null,
                 output = {},
                 reflectionMemoryRecorder = ai.neopsyke.agent.actions.NoopReflectionMemoryRecorder,
@@ -62,7 +60,6 @@ class GoalOperationActionPluginTest {
             ActionPluginFactoryContext(
                 config = AgentConfig(goals = GoalConfig(enabled = true)),
                 webSearchActionHandler = null,
-                mcpTimeTool = null,
                 fetchTool = null,
                 output = {},
                 reflectionMemoryRecorder = ai.neopsyke.agent.actions.NoopReflectionMemoryRecorder,
@@ -102,7 +99,6 @@ class GoalOperationActionPluginTest {
             ActionPluginFactoryContext(
                 config = AgentConfig(goals = GoalConfig(enabled = true)),
                 webSearchActionHandler = null,
-                mcpTimeTool = null,
                 fetchTool = null,
                 output = {},
                 reflectionMemoryRecorder = ai.neopsyke.agent.actions.NoopReflectionMemoryRecorder,
@@ -138,7 +134,6 @@ class GoalOperationActionPluginTest {
             ActionPluginFactoryContext(
                 config = AgentConfig(goals = GoalConfig(enabled = true)),
                 webSearchActionHandler = null,
-                mcpTimeTool = null,
                 fetchTool = null,
                 output = {},
                 reflectionMemoryRecorder = ai.neopsyke.agent.actions.NoopReflectionMemoryRecorder,
@@ -275,7 +270,6 @@ class GoalOperationActionPluginTest {
             ActionPluginFactoryContext(
                 config = AgentConfig(goals = GoalConfig(enabled = true, workspaceRoot = root)),
                 webSearchActionHandler = null,
-                mcpTimeTool = null,
                 fetchTool = null,
                 output = {},
                 reflectionMemoryRecorder = ai.neopsyke.agent.actions.NoopReflectionMemoryRecorder,

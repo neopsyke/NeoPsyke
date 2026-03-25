@@ -92,7 +92,7 @@ NeoPsyke starts in interactive mode. On startup it will:
 
 Before accepting input, NeoPsyke verifies that all configured LLM providers are reachable. Each check includes DNS resolution for the provider host and a short authenticated HTTP probe (`GET /models`).
 
-- If a **required provider** is unavailable (planner, superego), NeoPsyke prints a clear error and exits early.
+- If a **required configured cognitive-role endpoint** is unavailable (the endpoints assigned to `planner`, `action_verifier`, `superego`, `meta_reasoner`, or `memory_advisor` in the active LLM config), NeoPsyke prints a clear error and exits early.
 - If a provider is **degraded** (e.g., rate limiting), NeoPsyke logs a warning but continues.
 - **Transient failures** (timeouts) are retried once before deciding the final state.
 - The `meta_reasoner_fallback` role is treated as **optional**: if its health check fails after retry, NeoPsyke disables it for the run and continues with the primary meta-reasoner.
@@ -112,7 +112,7 @@ The terminal is reserved for runtime control commands only (e.g., `exit`).
 ./run-neopsyke.sh --no-delay
 
 # Disable the Id (no autonomous impulses)
-./run-neopsyke.sh --disable-id
+./run-neopsyke.sh --no-id
 
 # Run without goals
 NEOPSYKE_GOALS_ENABLED=false ./run-neopsyke.sh
