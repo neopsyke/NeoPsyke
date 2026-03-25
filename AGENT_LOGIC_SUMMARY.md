@@ -166,6 +166,7 @@ It is intentionally high-level and should stay aligned with the code.
   - Lifecycle result is aggregated across parallel branches:
     - accepted: at least one Id-origin action executed
     - denied: all branches finished without any executed Id-origin action
+  - For Id-origin successful actions, if the action's emitted effects satisfy the triggering need, Ego immediately clears the remaining same-root queued work before follow-up scheduling.
   - Final callback to Id is emitted only when no pending scheduler work remains for that root.
 - Denial dynamics:
   - `IdConfig.maxConsecutiveDenials` is now authoritative for backoff thresholding.

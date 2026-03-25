@@ -237,6 +237,7 @@ sequenceDiagram
                             Ego->>TWS: record non-contact_user/non-resolution_draft action outcomes/evidence
                             Note over Ego,TWS: External evidence is stored as typed artifacts first and rendered into scratchpad with trust/source labels
                             Ego->>PG: onActionExecuted / allowFollowUp (generic action lifecycle observer)
+                            Note over Ego,Sched: Id-origin satisfying actions clear remaining same-root queued work before any follow-up can be enqueued
                             Ego->>Sched: enqueue follow-up thought (for evidence actions)
                             Ego->>Mem: maybeAssessLongTermMemory(post_allowed_action, optional force)
                             Note over Ego,Mem: Blocked imprints emit long_term_memory_persistence_skipped [reason_code, reason_detail] for timeline visibility

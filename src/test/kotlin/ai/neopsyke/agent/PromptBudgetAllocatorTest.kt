@@ -6,6 +6,7 @@ import ai.neopsyke.llm.ChatRole
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertContains
 import kotlin.test.assertTrue
 
 class PromptBudgetAllocatorTest {
@@ -126,5 +127,45 @@ class PromptBudgetAllocatorTest {
 
         val coreSection = result.diagnostics.sections.first { it.key == "core" }
         assertTrue(coreSection.allocatedTokens >= coreSection.reservedFloorTokens)
+    }
+
+    @Test
+    fun `telemetry includes emitted and dropped section keys`() {
+        val result = PromptBudgetAllocator.allocate(
+            sections = listOf(
+                PromptBudgetAllocator.Section(
+                    key = "core",
+                    role = ChatRole.SYSTEM,
+                    band = PromptBudgetAllocator.Band.REQUIRED_CORE,
+                    importance = PromptBudgetAllocator.Importance.HIGH,
+                    floorTokens = 8,
+                    content = "Core instructions " + "f".repeat(280)
+                ),
+                PromptBudgetAllocator.Section(
+                    key = "planner_ambient_context",
+                    role = ChatRole.USER,
+                    band = PromptBudgetAllocator.Band.REQUIRED_CONTEXT,
+                    floorTokens = 10,
+                    content = "Background context:\nactive_goals:\n1. Keep planner stable\n" + "g".repeat(320)
+                ),
+                PromptBudgetAllocator.Section(
+                    key = "optional",
+                    role = ChatRole.USER,
+                    band = PromptBudgetAllocator.Band.OPTIONAL,
+                    content = "Optional block " + "h".repeat(640)
+                )
+            ),
+            maxTokens = 70
+        )
+
+        val telemetry = result.diagnostics.toTelemetryData(callSite = "planner_prompt")
+        @Suppress("UNCHECKED_CAST")
+        val emitted = telemetry["emitted_section_keys"] as List<String>
+        @Suppress("UNCHECKED_CAST")
+        val dropped = telemetry["dropped_section_keys"] as List<String>
+
+        assertContains(emitted, "core")
+        assertContains(emitted, "planner_ambient_context")
+        assertContains(dropped, "optional")
     }
 }

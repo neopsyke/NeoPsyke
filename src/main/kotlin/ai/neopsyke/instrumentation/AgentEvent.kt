@@ -1,6 +1,7 @@
 package ai.neopsyke.instrumentation
 
 import ai.neopsyke.agent.model.PendingAction
+import ai.neopsyke.agent.model.AmbientContext
 import ai.neopsyke.agent.model.PendingInput
 import ai.neopsyke.agent.model.PendingThought
 import ai.neopsyke.agent.model.QueueState
@@ -232,6 +233,30 @@ object AgentEvents {
                 "trigger" to trigger,
                 "provider" to provider,
                 "cue_preview" to cuePreview
+            )
+        )
+
+    fun ambientContextSnapshot(
+        trigger: String,
+        usage: String,
+        ambientContext: AmbientContext,
+        sessionId: String? = null,
+        rootInputId: String? = null,
+    ): AgentEvent =
+        AgentEvent(
+            type = "ambient_context_snapshot",
+            data = mapOf(
+                "trigger" to trigger,
+                "usage" to usage,
+                "session_id" to sessionId,
+                "root_input_id" to rootInputId,
+                "is_empty" to ambientContext.isEmpty(),
+                "rendered_context" to ambientContext.render(),
+                "active_goals" to ambientContext.activeGoals,
+                "recent_scratchpad_themes" to ambientContext.recentScratchpadThemes,
+                "recent_useful_actions_updates" to ambientContext.recentUsefulActionsOrUpdates,
+                "unresolved_open_loops" to ambientContext.unresolvedOpenLoops,
+                "recent_exact_learning_topics" to ambientContext.recentExactLearningTopics,
             )
         )
 

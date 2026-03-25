@@ -60,6 +60,8 @@ object PromptBudgetAllocator {
                     )
                 }
             val degradation = if (degradationPath.isEmpty()) "none" else degradationPath.joinToString(",")
+            val emittedSectionKeys = sections.filter { it.emitted }.map { it.key }
+            val droppedSectionKeys = sections.filterNot { it.emitted }.map { it.key }
             return mapOf(
                 "call_site" to callSite,
                 "max_tokens" to maxTokens,
@@ -76,6 +78,8 @@ object PromptBudgetAllocator {
                 "dropped_section_count" to droppedSectionCount,
                 "floor_violation_count" to floorViolationCount,
                 "bands" to bandMap,
+                "emitted_section_keys" to emittedSectionKeys,
+                "dropped_section_keys" to droppedSectionKeys,
             )
         }
     }
