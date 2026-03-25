@@ -4,7 +4,6 @@ import mu.KotlinLogging
 import ai.neopsyke.config.AgentRuntimeSettingsLoader
 import ai.neopsyke.config.LlmRuntimeConfigLoader
 import ai.neopsyke.config.MemoryRuntimeConfigLoader
-import ai.neopsyke.config.McpRuntimeConfigLoader
 import ai.neopsyke.eval.ReasoningEvalMode
 
 private val logger = KotlinLogging.logger {}
@@ -52,7 +51,6 @@ fun main(args: Array<String>) {
 
     val runtimeSettings = AgentRuntimeSettingsLoader.load()
     val config = runtimeSettings.agentConfig
-    val mcpRuntimeConfig = McpRuntimeConfigLoader.load()
     val memoryRuntimeConfig = MemoryRuntimeConfigLoader.load()
     val llmRuntimeConfig = LlmRuntimeConfigLoader.load()
 
@@ -68,7 +66,6 @@ fun main(args: Array<String>) {
         AppModeRunners.runMemoryLiveEval(
             llm = llmRuntimeConfig,
             config = config,
-            mcpRuntimeConfig = mcpRuntimeConfig,
             memoryRuntimeConfig = memoryRuntimeConfig,
             cliOptions = cliOptions,
             runtimeSettings = runtimeSettings
@@ -80,7 +77,6 @@ fun main(args: Array<String>) {
         AppModeRunners.runFreudLiveMode(
             llm = llmRuntimeConfig,
             config = config,
-            mcpRuntimeConfig = mcpRuntimeConfig,
             memoryRuntimeConfig = memoryRuntimeConfig,
             runtimeSettings = runtimeSettings,
             cliOptions = cliOptions
@@ -91,7 +87,6 @@ fun main(args: Array<String>) {
     AppModeRunners.runInteractiveMode(
         llm = llmRuntimeConfig,
         config = config,
-        mcpRuntimeConfig = mcpRuntimeConfig,
         memoryRuntimeConfig = memoryRuntimeConfig,
         runtimeSettings = runtimeSettings,
         cliOptions = cliOptions

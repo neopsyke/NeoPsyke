@@ -15,7 +15,6 @@ import ai.neopsyke.agent.model.SuperegoContext
 import ai.neopsyke.agent.goal.NoopGoalsGateway
 import ai.neopsyke.agent.goal.GoalsGateway
 import ai.neopsyke.agent.tools.mcp.FetchTool
-import ai.neopsyke.agent.tools.mcp.McpTimeTool
 
 /**
  * Declares a broad behavioural trait of an action plugin.
@@ -28,7 +27,7 @@ enum class ActionCapability {
     /** Action produces output visible to the end user (e.g. ANSWER). */
     PRODUCES_USER_OUTPUT,
 
-    /** Action gathers external evidence for workspace synthesis (e.g. WEB_SEARCH, WEBSITE_FETCH, MCP_TIME). */
+    /** Action gathers external evidence for workspace synthesis (e.g. WEB_SEARCH, WEBSITE_FETCH). */
     GATHERS_EVIDENCE,
 }
 
@@ -140,7 +139,6 @@ object NoopReflectionMemoryRecorder : ReflectionMemoryRecorder {
 data class ActionPluginFactoryContext(
     val config: AgentConfig,
     val webSearchActionHandler: WebSearchActionHandler?,
-    val mcpTimeTool: McpTimeTool?,
     val fetchTool: FetchTool?,
     val output: (String) -> Unit,
     val env: Map<String, String> = System.getenv(),

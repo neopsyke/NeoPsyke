@@ -132,7 +132,6 @@ internal class SuperegoDeterministicConscience(
         private val ID_ALLOWED_ACTIONS: Set<ActionType> = setOf(
             ActionType.WEB_SEARCH,
             ActionType.WEBSITE_FETCH,
-            ActionType.MCP_TIME,
             ActionType.RESOLUTION_DRAFT,
             ActionType.CONTACT_USER,
             ActionType.REFLECT_INTERNAL,

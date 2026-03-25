@@ -32,7 +32,6 @@ import ai.neopsyke.agent.cortex.motor.MotorCortex
 import ai.neopsyke.agent.memory.longterm.NoopHippocampus
 import ai.neopsyke.agent.memory.longterm.ResetRequest
 import ai.neopsyke.agent.tools.mcp.NativeFetchTool
-import ai.neopsyke.agent.tools.mcp.SdkMcpTimeTool
 import ai.neopsyke.agent.superego.Superego
 import ai.neopsyke.agent.actions.websearch.WebSearchActionHandler
 import ai.neopsyke.agent.actions.websearch.WebSearchEngine
@@ -42,13 +41,11 @@ import ai.neopsyke.agent.actions.EnvActionSecretProvider
 import ai.neopsyke.agent.actions.RoutedConversationOutputGateway
 import ai.neopsyke.agent.actions.SecretHandle
 import ai.neopsyke.config.AgentRuntimeSettings
-import ai.neopsyke.config.McpCapabilityConfig
 import ai.neopsyke.config.LlmEndpointConfig
 import ai.neopsyke.config.LlmProvider
 import ai.neopsyke.config.LlmRuntimeConfig
 import ai.neopsyke.config.MemoryMode
 import ai.neopsyke.config.MemoryRuntimeConfig
-import ai.neopsyke.config.McpRuntimeConfig
 import ai.neopsyke.dashboard.DashboardServer
 import ai.neopsyke.dashboard.DashboardStateStore
 import ai.neopsyke.dashboard.ChatRuntimeBridge
@@ -133,7 +130,6 @@ import ai.neopsyke.integrations.telegram.TelegramWebhookBridge
 import ai.neopsyke.metrics.MetricsQueryProvider
 import ai.neopsyke.metrics.MetricsRuntimeFactory
 import ai.neopsyke.agent.tools.mcp.FetchTool
-import ai.neopsyke.agent.tools.mcp.McpTimeTool
 import ai.neopsyke.agent.tools.mcp.ToolHealthStatus
 import kotlin.system.exitProcess
 import java.net.InetSocketAddress
@@ -290,7 +286,6 @@ internal object AppModeRunners {
     internal fun runMemoryLiveEval(
         llm: LlmRuntimeConfig,
         config: AgentConfig,
-        mcpRuntimeConfig: McpRuntimeConfig,
         memoryRuntimeConfig: MemoryRuntimeConfig,
         cliOptions: AppCliOptions,
         runtimeSettings: AgentRuntimeSettings,
@@ -594,7 +589,6 @@ internal object AppModeRunners {
     internal fun runInteractiveMode(
         llm: LlmRuntimeConfig,
         config: AgentConfig,
-        mcpRuntimeConfig: McpRuntimeConfig,
         memoryRuntimeConfig: MemoryRuntimeConfig,
         runtimeSettings: AgentRuntimeSettings,
         cliOptions: AppCliOptions? = null,
@@ -856,8 +850,9 @@ internal object AppModeRunners {
                                 "max_thought_chars" to config.planner.maxThoughtChars,
                                 "max_action_payload_chars" to config.maxActionPayloadChars,
                                 "max_action_summary_chars" to config.maxActionSummaryChars,
-                                "mcp_call_timeout_ms" to config.mcpCallTimeoutMs,
-                                "fetch_max_chars" to config.fetchMaxChars,
+                                "website_fetch_enabled" to config.builtinTools.websiteFetch.enabled,
+                                "website_fetch_call_timeout_ms" to config.builtinTools.websiteFetch.callTimeoutMs,
+                                "website_fetch_max_chars" to config.builtinTools.websiteFetch.maxChars,
                                 "mcp_memory_call_timeout_ms" to config.memory.mcpMemoryCallTimeoutMs,
                                 "long_term_memory_recall_max_items" to config.memory.longTermMemoryRecallMaxItems,
                                 "long_term_memory_recall_max_chars" to config.memory.longTermMemoryRecallMaxChars,
@@ -1088,8 +1083,7 @@ internal object AppModeRunners {
                                                 "web_search=${llm.webSearch.providerLabel}/${llm.webSearch.model}"
                                         }
                                         try {
-                                            val mcpTimeTool = createMcpTimeTool(config, mcpRuntimeConfig.time, agentScope)
-                                            val fetchTool = createFetchTool(config, mcpRuntimeConfig.fetch)
+                                            val fetchTool = createFetchTool(config)
                                             val webSearchRuntime = createWebSearchRuntime(
                                                 llm = llm,
                                                 callObserver = webSearchCallObserver,
@@ -1099,7 +1093,6 @@ internal object AppModeRunners {
                                             )
 
                                             webSearchRuntime.use { runtime ->
-                                                val timeTool = mcpTimeTool
                                                 val activeFetchTool = fetchTool
                                                     val earlyMemoryStartup =
                                                         resolveInteractiveMemoryStartup(config, memoryRuntimeConfig)
@@ -1207,7 +1200,6 @@ internal object AppModeRunners {
                                                         logbook = logbook,
                                                         logbookSummarizer = logbookSummarizer,
                                                         webSearchActionHandler = webSearchActionHandler,
-                                                        mcpTimeTool = timeTool,
                                                         fetchTool = activeFetchTool,
                                                         goalsGateway = goalManager
                                                             ?: ai.neopsyke.agent.goal.NoopGoalsGateway,
@@ -1276,7 +1268,6 @@ internal object AppModeRunners {
                                                             register(logbook)
                                                             register(actionControlStore)
                                                             register(activeFetchTool)
-                                                            register(timeTool)
                                                         }
                                                         shutdownGuard.register(
                                                             createActionControlAutonomousWorker(
@@ -1343,7 +1334,6 @@ internal object AppModeRunners {
     internal fun runFreudLiveMode(
         llm: LlmRuntimeConfig,
         config: AgentConfig,
-        mcpRuntimeConfig: McpRuntimeConfig,
         memoryRuntimeConfig: MemoryRuntimeConfig,
         runtimeSettings: AgentRuntimeSettings,
         cliOptions: AppCliOptions,
@@ -1573,8 +1563,7 @@ internal object AppModeRunners {
                                         try {
                                         val actionAuthorizationPolicy = createActionAuthorizationPolicy(config)
                                         val actionControlStore = createActionControlStoreIfEnabled(config)
-                                        val mcpTimeTool = createMcpTimeTool(config, mcpRuntimeConfig.time, agentScope)
-                                        val fetchTool = createFetchTool(config, mcpRuntimeConfig.fetch)
+                                        val fetchTool = createFetchTool(config)
                                         val webSearchRuntime = createWebSearchRuntime(
                                             llm = llm,
                                             callObserver = callObserverForProvider(llm.webSearch.providerLabel),
@@ -1584,7 +1573,6 @@ internal object AppModeRunners {
                                         )
 
                                         webSearchRuntime.use { runtime ->
-                                            val timeTool = mcpTimeTool
                                             val activeFetchTool = fetchTool
                                                 val earlyMemoryStartup2 =
                                                     resolveInteractiveMemoryStartup(config, memoryRuntimeConfig)
@@ -1669,7 +1657,6 @@ internal object AppModeRunners {
                                                     logbook = logbook,
                                                     logbookSummarizer = logbookSummarizer,
                                                     webSearchActionHandler = webSearchActionHandler,
-                                                    mcpTimeTool = timeTool,
                                                     fetchTool = activeFetchTool,
                                                     goalsGateway = goalManager
                                                         ?: ai.neopsyke.agent.goal.NoopGoalsGateway,
@@ -1703,7 +1690,6 @@ internal object AppModeRunners {
                                                         register(logbook)
                                                         register(actionControlStore)
                                                         register(activeFetchTool)
-                                                        register(timeTool)
                                                     }
                                                     shutdownGuard.register(
                                                         createActionControlAutonomousWorker(
@@ -2129,34 +2115,17 @@ internal object AppModeRunners {
         return mode to file
     }
 
-    private fun createMcpTimeTool(
-        config: AgentConfig,
-        capability: McpCapabilityConfig,
-        scope: kotlinx.coroutines.CoroutineScope? = null,
-    ): McpTimeTool {
-        val command = resolveMcpCommand(capability)
-        if (command == null) {
-            val reason = disabledReason("time", capability)
-            logger.info { reason }
-            return DisabledMcpTimeTool(reason)
-        }
-        return SdkMcpTimeTool(
-            command = command,
-            callTimeoutMs = config.mcpCallTimeoutMs,
-            scope = scope
-        )
-    }
-    
-    private fun createFetchTool(config: AgentConfig, capability: McpCapabilityConfig): FetchTool {
-        if (!capability.enabled) {
-            val reason = "Fetch capability disabled by configuration."
+    private fun createFetchTool(config: AgentConfig): FetchTool {
+        val fetchConfig = config.builtinTools.websiteFetch
+        if (!fetchConfig.enabled) {
+            val reason = "Built-in website fetch disabled by configuration."
             logger.info { reason }
             return DisabledFetchTool(reason)
         }
         logger.info { "Using native JVM fetch tool (OkHttp + Jsoup). No external process." }
         return NativeFetchTool(
-            callTimeoutMs = config.mcpCallTimeoutMs,
-            maxChars = config.fetchMaxChars
+            callTimeoutMs = fetchConfig.callTimeoutMs,
+            maxChars = fetchConfig.maxChars
         )
     }
     
@@ -2288,39 +2257,6 @@ internal object AppModeRunners {
         }
     }
     
-    private fun resolveMcpCommand(capability: McpCapabilityConfig): List<String>? {
-        if (!capability.enabled) {
-            return null
-        }
-        if (!capability.mode.equals("stdio", ignoreCase = true)) {
-            return null
-        }
-    
-        val candidateCommands = buildList {
-            val primary = capability.command.trim()
-            if (primary.isNotBlank()) {
-                add(primary)
-            }
-            capability.fallbackCommands.map { it.trim() }.filter { it.isNotBlank() }.forEach { add(it) }
-        }
-        if (candidateCommands.isEmpty()) {
-            return null
-        }
-    
-        val parsedCandidates = candidateCommands
-            .map { McpStdioClient.parseCommand(it) }
-            .filter { it.isNotEmpty() }
-        if (parsedCandidates.isEmpty()) {
-            return null
-        }
-    
-        val available = parsedCandidates.firstOrNull { command -> isExecutableAvailable(command.first()) }
-        if (available != null) {
-            return available
-        }
-        return null
-    }
-    
     private fun isExecutableAvailable(binary: String): Boolean {
         val candidate = binary.trim()
         if (candidate.isBlank()) {
@@ -2341,21 +2277,6 @@ internal object AppModeRunners {
             }
             Files.isExecutable(Paths.get(base, candidate))
         }
-    }
-    
-    private fun disabledReason(capabilityName: String, capability: McpCapabilityConfig): String {
-        if (!capability.enabled) {
-            return "MCP $capabilityName capability disabled by configuration."
-        }
-        if (!capability.mode.equals("stdio", ignoreCase = true)) {
-            return "MCP $capabilityName mode '${capability.mode}' is not supported in this runtime (only stdio)."
-        }
-        val configured = listOf(capability.command) + capability.fallbackCommands
-        val nonBlank = configured.map { it.trim() }.filter { it.isNotBlank() }
-        if (nonBlank.isEmpty()) {
-            return "MCP $capabilityName command is not configured."
-        }
-        return "MCP $capabilityName command is configured but not executable in PATH: ${nonBlank.joinToString(" | ")}"
     }
     
     private fun createLogbookIfEnabled(config: AgentConfig): Logbook? {
@@ -2553,21 +2474,6 @@ internal object AppModeRunners {
         val detail: String,
     )
     
-    private class DisabledMcpTimeTool(
-        private val reason: String,
-    ) : McpTimeTool, AutoCloseable {
-        override suspend fun getCurrentTime(payload: String): String =
-            "MCP time unavailable: $reason"
-
-        override suspend fun healthCheck(): ToolHealthStatus =
-            ToolHealthStatus(
-                available = false,
-                detail = reason
-            )
-
-        override fun close() {}
-    }
-
     private class DisabledFetchTool(
         private val reason: String,
     ) : FetchTool, AutoCloseable {

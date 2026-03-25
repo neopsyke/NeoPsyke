@@ -25,7 +25,6 @@ class SuperegoGatekeeperTest {
             ActionPluginFactoryContext(
                 config = config,
                 webSearchActionHandler = null,
-                mcpTimeTool = null,
                 fetchTool = null,
                 output = {},
                 reflectionMemoryRecorder = NoopReflectionMemoryRecorder,
@@ -255,31 +254,6 @@ class SuperegoGatekeeperTest {
 
         assertFalse(decision.allow)
         assertTrue(decision.reason.contains("website_fetch_payload_invalid_json", ignoreCase = true))
-        assertEquals(0, llm.calls.size)
-    }
-
-    @Test
-    fun `gatekeeper hard denies mcp time payload when timezone is missing`() {
-        val llm = StubChatModelClient().apply {
-            enqueueRawResponse("""{"allow":true}""")
-        }
-        val gatekeeper = Superego(
-            modelClient = llm,
-            config = AgentConfig(),
-            actionRegistry = testRegistry()
-        )
-        val mcpTimeAction = PendingAction(
-            id = 101,
-            urgency = Urgency.MEDIUM,
-            type = ActionType.MCP_TIME,
-            payload = "{}",
-            summary = "lookup current time"
-        )
-
-        val decision = gatekeeper.review(mcpTimeAction, snapshot)
-
-        assertFalse(decision.allow)
-        assertTrue(decision.reason.contains("mcp_time_timezone_missing", ignoreCase = true))
         assertEquals(0, llm.calls.size)
     }
 

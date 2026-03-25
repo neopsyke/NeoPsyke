@@ -147,9 +147,9 @@ Then send the bot a message and call `getUpdates` again.
 
 NeoPsyke reads Telegram config from:
 
-- [agent-runtime.yaml](/Users/victor.toral/atomitl/ai/psyke/config/agent-runtime.yaml)
+- [config/agent-runtime.yaml](../config/agent-runtime.yaml)
 
-Current Telegram section:
+Bundled default Telegram section:
 
 ```yaml
 agent:
@@ -158,17 +158,19 @@ agent:
       enabled: true
       mode: polling
       webhook_path: /api/channels/telegram/webhook
-      owner_chat_id: "123456789"
-      owner_user_id: "123456789"
+      owner_chat_id: ""
+      owner_user_id: ""
       bot_token_handle: TELEGRAM_BOT_TOKEN
       webhook_secret_handle: TELEGRAM_WEBHOOK_SECRET
       policy_scope_id: telegram-owner
       session_id_prefix: telegram
       require_direct_chat: true
-      drop_unauthorized_messages: true
+      drop_unauthorized_messages: false
       poll_timeout_seconds: 25
       poll_retry_delay_ms: 1000
 ```
+
+If you create a local `agent-runtime.yaml` overlay in the repo root, or point `NEOPSYKE_AGENT_CONFIG_FILE` at another file, that overlay overrides the bundled defaults above. The snippets later in this guide are meant to be values you set in your own overlay, not a claim that the committed defaults already contain your owner ids or secrets.
 
 Field meanings:
 

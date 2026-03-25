@@ -1,7 +1,6 @@
 ai.neopsyke.agent.actions.builtin.ContactUserActionPluginFactory
 ai.neopsyke.agent.actions.builtin.ResolutionDraftActionPluginFactory
 ai.neopsyke.agent.actions.builtin.WebSearchActionPluginFactory
-ai.neopsyke.agent.actions.builtin.McpTimeActionPluginFactory
 ai.neopsyke.agent.actions.builtin.WebsiteFetchActionPluginFactory
 ai.neopsyke.agent.actions.builtin.ReflectInternalActionPluginFactory
 ai.neopsyke.agent.actions.builtin.ReflectEvidenceActionPluginFactory

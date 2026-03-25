@@ -38,7 +38,6 @@ data class ActionType(
         val WEB_SEARCH: ActionType = ActionType("web_search")
         val CONTACT_USER: ActionType = ActionType("contact_user")
         val RESOLUTION_DRAFT: ActionType = ActionType("resolution_draft")
-        val MCP_TIME: ActionType = ActionType("mcp_time")
         val WEBSITE_FETCH: ActionType = ActionType("website_fetch")
         val REFLECT_INTERNAL: ActionType = ActionType("reflect_internal")
         val REFLECT_EVIDENCE: ActionType = ActionType("reflect_evidence")
@@ -49,7 +48,6 @@ data class ActionType(
             WEB_SEARCH,
             CONTACT_USER,
             RESOLUTION_DRAFT,
-            MCP_TIME,
             WEBSITE_FETCH,
             REFLECT_INTERNAL,
             REFLECT_EVIDENCE,

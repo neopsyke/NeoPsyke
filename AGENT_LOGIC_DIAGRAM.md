@@ -363,7 +363,7 @@ stateDiagram-v2
     ActionDisabled --> ThoughtQueued: planner uses remaining available actions
 
     Processing --> HighPressure: pressure threshold reached
-    HighPressure --> ForcedTerminal: force answer enqueue
+    HighPressure --> ForcedTerminal: force terminal contact_user enqueue
     ForcedTerminal --> Executing
 
     Processing --> StepLimit: max loop steps with pending work
@@ -371,7 +371,7 @@ stateDiagram-v2
     StepLimit --> Complete: force-deny active impulse lifecycles
     FallbackAttempt --> Executing
 
-    Executing --> CleanupResolvedInput: action=answer clears same-input queued work + destroys scratchpad
+    Executing --> CleanupResolvedInput: action=contact_user clears same-input queued work + destroys scratchpad
     CleanupResolvedInput --> Complete
     Processing --> Complete: queues drained
     Complete --> [*]
