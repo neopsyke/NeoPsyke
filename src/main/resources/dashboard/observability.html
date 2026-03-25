@@ -2142,6 +2142,61 @@
       });
     }
 
+    const usingShellTransport = window.self !== window.top;
+    let dashboardSource = null;
+    let idCountdownTimer = null;
+    let embeddedVisible = !usingShellTransport;
+    let bootComplete = false;
+    const pendingShellEvents = [];
+
+    function handleShellDashboardEvent(eventName, payload) {
+      if (eventName !== "agent") return;
+      try {
+        applyEvent(JSON.parse(payload));
+      } catch (err) {
+        console.error("[dashboard] failed to parse shell payload", err, payload);
+      }
+    }
+
+    function flushPendingShellEvents() {
+      if (!bootComplete) return;
+      while (pendingShellEvents.length > 0) {
+        const item = pendingShellEvents.shift();
+        handleShellDashboardEvent(item.eventName, item.payload);
+      }
+    }
+
+    function connectDashboardStream() {
+      const status = document.getElementById("status");
+      if (usingShellTransport || dashboardSource || !embeddedVisible) return;
+      const es = new EventSource("/api/dashboard/events");
+      dashboardSource = es;
+      es.addEventListener("open", () => { status.textContent = "connected"; });
+      es.addEventListener("error", () => { status.textContent = "reconnecting..."; });
+      es.addEventListener("agent", (msg) => {
+        try {
+          applyEvent(JSON.parse(msg.data));
+        } catch (err) {
+          console.error("[dashboard] failed to parse SSE payload", err, msg && msg.data);
+        }
+      });
+    }
+
+    function disconnectDashboardStream() {
+      if (!dashboardSource) return;
+      dashboardSource.close();
+      dashboardSource = null;
+    }
+
+    function setEmbeddedVisibility(visible) {
+      embeddedVisible = visible;
+      if (embeddedVisible) {
+        connectDashboardStream();
+      } else {
+        disconnectDashboardStream();
+      }
+    }
+
     async function boot() {
       const status = document.getElementById("status");
       try {
@@ -2191,25 +2246,34 @@
         renderScratchpadDrawer();
       });
       render();
-      setInterval(tickIdCountdowns, 1000);
-
-      const es = new EventSource("/api/obs/events");
-      es.addEventListener("open", () => { status.textContent = "connected"; });
-      es.addEventListener("error", () => { status.textContent = "reconnecting..."; });
-      es.addEventListener("agent", (msg) => {
-        try {
-          applyEvent(JSON.parse(msg.data));
-        } catch (err) {
-          console.error("[dashboard] failed to parse SSE payload", err, msg && msg.data);
-        }
-      });
-      window.addEventListener("beforeunload", () => { es.close(); });
-      window.addEventListener("pagehide", () => { es.close(); });
+      idCountdownTimer = setInterval(tickIdCountdowns, 1000);
+      bootComplete = true;
+      flushPendingShellEvents();
+      connectDashboardStream();
+      window.addEventListener("beforeunload", () => { disconnectDashboardStream(); });
+      window.addEventListener("pagehide", () => { disconnectDashboardStream(); });
     }
 
     if (window.self !== window.top) {
       document.body.classList.add("embedded");
     }
+    window.addEventListener("message", (event) => {
+      if (event.origin !== window.location.origin) return;
+      if (!event.data || typeof event.data.type !== "string") return;
+      if (event.data.type === "neopsyke-shell-visibility") {
+        setEmbeddedVisibility(Boolean(event.data.visible));
+        return;
+      }
+      if (event.data.type === "neopsyke-dashboard-bootstrap") {
+        pendingShellEvents.push(...(event.data.events || []));
+        flushPendingShellEvents();
+        return;
+      }
+      if (event.data.type === "neopsyke-dashboard-event") {
+        pendingShellEvents.push({ eventName: event.data.eventName, payload: event.data.payload });
+        flushPendingShellEvents();
+      }
+    });
 
     boot();
   </script>

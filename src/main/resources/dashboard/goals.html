@@ -168,6 +168,12 @@
     let selectedId = null;
     let eventLog = []; // recent goal events from SSE
     let refreshTimer = null;
+    let goalsSource = null;
+    let pollTimer = null;
+    const usingShellTransport = window.self !== window.top;
+    let embeddedVisible = !usingShellTransport;
+    let bootComplete = false;
+    const pendingShellEvents = [];
 
     // ── Fetch initial data ──────────────────────────────────────
     async function fetchGoals() {
@@ -189,7 +195,9 @@
 
     // ── SSE for live updates ────────────────────────────────────
     function connectSSE() {
-      const es = new EventSource('/api/goals/events');
+      if (usingShellTransport || goalsSource || !embeddedVisible) return;
+      const es = new EventSource('/api/dashboard/events');
+      goalsSource = es;
       es.addEventListener('ready', () => {
         connDot.classList.add('connected');
         connDot.title = 'SSE connected';
@@ -208,6 +216,57 @@
         connDot.classList.remove('connected');
         connDot.title = 'SSE disconnected';
       });
+    }
+
+    function disconnectSSE() {
+      if (!goalsSource) return;
+      goalsSource.close();
+      goalsSource = null;
+      connDot.classList.remove('connected');
+      connDot.title = 'SSE disconnected';
+    }
+
+    function startPolling() {
+      if (pollTimer !== null || !embeddedVisible) return;
+      pollTimer = setInterval(fetchGoals, 15000);
+    }
+
+    function stopPolling() {
+      if (pollTimer === null) return;
+      clearInterval(pollTimer);
+      pollTimer = null;
+    }
+
+    function setEmbeddedVisibility(visible) {
+      embeddedVisible = visible;
+      if (embeddedVisible) {
+        fetchGoals();
+        connectSSE();
+        startPolling();
+      } else {
+        disconnectSSE();
+        stopPolling();
+      }
+    }
+
+    function handleShellDashboardEvent(eventName, payload) {
+      if (eventName !== 'agent') return;
+      try {
+        const ev = JSON.parse(payload);
+        if (ev.type && ev.type.startsWith('goal_')) {
+          eventLog.unshift(ev);
+          if (eventLog.length > 200) eventLog.length = 200;
+          scheduleRefresh();
+        }
+      } catch (_) {}
+    }
+
+    function flushPendingShellEvents() {
+      if (!bootComplete) return;
+      while (pendingShellEvents.length > 0) {
+        const item = pendingShellEvents.shift();
+        handleShellDashboardEvent(item.eventName, item.payload);
+      }
     }
 
     function scheduleRefresh() {
@@ -333,12 +392,31 @@
     if (window.self !== window.top) {
       document.body.classList.add('embedded');
     }
+    window.addEventListener('message', (event) => {
+      if (event.origin !== window.location.origin) return;
+      if (!event.data || typeof event.data.type !== 'string') return;
+      if (event.data.type === 'neopsyke-shell-visibility') {
+        setEmbeddedVisibility(Boolean(event.data.visible));
+        return;
+      }
+      if (event.data.type === 'neopsyke-dashboard-bootstrap') {
+        pendingShellEvents.push(...(event.data.events || []));
+        flushPendingShellEvents();
+        return;
+      }
+      if (event.data.type === 'neopsyke-dashboard-event') {
+        pendingShellEvents.push({ eventName: event.data.eventName, payload: event.data.payload });
+        flushPendingShellEvents();
+      }
+    });
 
     // ── Init ────────────────────────────────────────────────────
-    fetchGoals();
+    fetchGoals().finally(() => {
+      bootComplete = true;
+      flushPendingShellEvents();
+    });
     connectSSE();
-    // Periodic refresh fallback
-    setInterval(fetchGoals, 15000);
+    startPolling();
   </script>
 </body>
 </html>

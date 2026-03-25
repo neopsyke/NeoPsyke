@@ -166,6 +166,15 @@ class DashboardServer(
                 handleSse(exchange)
             }
         }
+        server.createContext("/api/dashboard/events") { exchange ->
+            withRequestGuard(exchange, "dashboard_events_sse") {
+                if (exchange.requestMethod != "GET") {
+                    respondText(exchange, 405, "Method not allowed", "text/plain; charset=utf-8")
+                    return@withRequestGuard
+                }
+                handleDashboardEventsSse(exchange)
+            }
+        }
         server.createContext("/api/obs/scratchpad") { exchange ->
             withRequestGuard(exchange, "obs_scratchpad") {
                 if (exchange.requestMethod != "GET") {
@@ -309,6 +318,66 @@ class DashboardServer(
             streamName = "action_control_events_sse",
             eventName = "action-control",
         )
+    }
+
+    private fun handleDashboardEventsSse(exchange: HttpExchange) {
+        val agentSubscription = store.subscribe()
+        val actionControlSubscription = store.subscribeActionControl()
+        val idThinkingSubscription = innerVoiceStore?.subscribeIdGlobal()
+
+        exchange.responseHeaders.add("Content-Type", "text/event-stream")
+        exchange.responseHeaders.add("Cache-Control", "no-cache")
+        exchange.responseHeaders.add("Connection", "keep-alive")
+        recordResponseStatus(exchange, 200)
+        exchange.sendResponseHeaders(200, 0)
+
+        val output = exchange.responseBody.bufferedWriter(StandardCharsets.UTF_8)
+        val agentChannel = agentSubscription.asReceiveChannel()
+        val actionControlChannel = actionControlSubscription.asReceiveChannel()
+        val idThinkingChannel = idThinkingSubscription?.asReceiveChannel()
+        try {
+            output.write("event: ready\n")
+            output.write("data: {\"status\":\"connected\"}\n\n")
+            output.flush()
+            runBlocking {
+                while (true) {
+                    val nextEvent = withTimeoutOrNull(SSE_HEARTBEAT_TIMEOUT_MS) {
+                        select<NamedSseEvent> {
+                            agentChannel.onReceiveCatching { result ->
+                                NamedSseEvent(eventName = "agent", payload = result.getOrThrow())
+                            }
+                            actionControlChannel.onReceiveCatching { result ->
+                                NamedSseEvent(eventName = "action-control", payload = result.getOrThrow())
+                            }
+                            if (idThinkingChannel != null) {
+                                idThinkingChannel.onReceiveCatching { result ->
+                                    NamedSseEvent(eventName = "id-thinking", payload = result.getOrThrow())
+                                }
+                            }
+                        }
+                    }
+                    if (nextEvent != null) {
+                        output.write("event: ${nextEvent.eventName}\n")
+                        output.write("data: ${nextEvent.payload}\n\n")
+                        output.flush()
+                    } else {
+                        output.write(": heartbeat\n\n")
+                        output.flush()
+                    }
+                }
+            }
+        } catch (ex: Exception) {
+            if (isExpectedClientDisconnect(ex)) {
+                logger.debug { "Dashboard multiplexed SSE client disconnected." }
+            } else {
+                logger.warn(ex) { "Dashboard multiplexed SSE stream terminated unexpectedly." }
+            }
+        } finally {
+            agentSubscription.close()
+            actionControlSubscription.close()
+            idThinkingSubscription?.close()
+            closeStreamQuietly(output, streamName = "dashboard_events_sse")
+        }
     }
 
     private fun handleSubscriptionSse(
@@ -866,13 +935,13 @@ class DashboardServer(
             runBlocking {
                 while (true) {
                     val nextEvent = withTimeoutOrNull(SSE_HEARTBEAT_TIMEOUT_MS) {
-                        select<SessionSseEvent> {
+                        select<NamedSseEvent> {
                             chatChannel.onReceiveCatching { result ->
-                                SessionSseEvent(eventName = "chat", payload = result.getOrThrow())
+                                NamedSseEvent(eventName = "chat", payload = result.getOrThrow())
                             }
                             if (thinkingChannel != null) {
                                 thinkingChannel.onReceiveCatching { result ->
-                                    SessionSseEvent(eventName = "thinking", payload = result.getOrThrow())
+                                    NamedSseEvent(eventName = "thinking", payload = result.getOrThrow())
                                 }
                             }
                         }
@@ -945,7 +1014,7 @@ class DashboardServer(
         }
     }
 
-    private data class SessionSseEvent(
+    private data class NamedSseEvent(
         val eventName: String,
         val payload: String,
     )

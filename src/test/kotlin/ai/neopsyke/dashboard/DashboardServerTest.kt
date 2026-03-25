@@ -189,6 +189,54 @@ class DashboardServerTest {
     }
 
     @Test
+    fun `dashboard stream multiplexes agent action-control and id-thinking events`() {
+        startServer().use { started ->
+            val stream = openSse("http://127.0.0.1:${started.port}/api/dashboard/events")
+
+            stream.use {
+                readNextEvent(stream)
+
+                started.store.onEvent(
+                    AgentEvent(
+                        id = 1,
+                        type = "goal_started",
+                        data = mapOf("goal_id" to "goal-1")
+                    )
+                )
+                val agentEvent = readNextEventNamed(stream, "agent", timeoutMs = 2_000)
+                assertNotNull(agentEvent)
+                assertTrue(agentEvent.second.contains("\"type\":\"goal_started\""))
+
+                started.store.onEvent(
+                    AgentEvent(
+                        id = 2,
+                        type = "action_denied",
+                        data = mapOf("reason_code" to "TEST_DENY")
+                    )
+                )
+                val actionControlEvent = readNextEventNamed(stream, "action-control", timeoutMs = 2_000)
+                assertNotNull(actionControlEvent)
+                assertTrue(actionControlEvent.second.contains("\"type\":\"action_denied\""))
+
+                started.innerVoiceStore.emit(
+                    InnerVoiceEvent(
+                        id = 3,
+                        type = InnerVoiceEventType.OBSERVATION,
+                        content = "id-pulse",
+                        rootInputId = "root-id",
+                        sessionId = "default",
+                        ts = System.currentTimeMillis(),
+                        origin = "id",
+                    )
+                )
+                val idThinkingEvent = readNextEventNamed(stream, "id-thinking", timeoutMs = 2_000)
+                assertNotNull(idThinkingEvent)
+                assertTrue(idThinkingEvent.second.contains("id-pulse"))
+            }
+        }
+    }
+
+    @Test
     fun `goals sse only emits goal events`() {
         startServer().use { started ->
             val goals = openSse("http://127.0.0.1:${started.port}/api/goals/events")
@@ -342,6 +390,22 @@ class DashboardServerTest {
         } catch (_: SocketTimeoutException) {
             return null
         }
+    }
+
+    private fun readNextEventNamed(
+        connection: SseConnection,
+        expectedEventName: String,
+        timeoutMs: Int = 1_000,
+    ): Pair<String, String>? {
+        val deadline = System.nanoTime() + timeoutMs.toLong() * 1_000_000L
+        while (System.nanoTime() < deadline) {
+            val remainingMs = ((deadline - System.nanoTime()) / 1_000_000L).toInt().coerceAtLeast(100)
+            val event = readNextEvent(connection, timeoutMs = remainingMs) ?: return null
+            if (event.first == expectedEventName) {
+                return event
+            }
+        }
+        return null
     }
 
     private fun startServer(): StartedServer {

@@ -346,6 +346,10 @@
     let actionControlSource = null;
     let refreshScheduled = false;
     let refreshInFlight = false;
+    const usingShellTransport = window.self !== window.top;
+    let embeddedVisible = !usingShellTransport;
+    let bootComplete = false;
+    const pendingShellEvents = [];
     const actionMutationState = Object.create(null);
 
     function formatTimestamp(ms) {
@@ -684,10 +688,10 @@
     }
 
     function connectActionControlEvents() {
-      if (actionControlSource) {
-        actionControlSource.close();
+      if (usingShellTransport || actionControlSource || !embeddedVisible) {
+        return;
       }
-      actionControlSource = new EventSource('/api/action-control/events');
+      actionControlSource = new EventSource('/api/dashboard/events');
       actionControlSource.addEventListener('ready', () => {
         liveStatusEl.textContent = 'Live updates connected';
       });
@@ -698,6 +702,36 @@
       actionControlSource.addEventListener('error', () => {
         liveStatusEl.textContent = 'Live updates reconnecting...';
       });
+    }
+
+    function disconnectActionControlEvents() {
+      if (!actionControlSource) return;
+      actionControlSource.close();
+      actionControlSource = null;
+      liveStatusEl.textContent = 'Live updates disconnected';
+    }
+
+    function setEmbeddedVisibility(visible) {
+      embeddedVisible = visible;
+      if (embeddedVisible) {
+        refreshAll('resume');
+        connectActionControlEvents();
+      } else {
+        disconnectActionControlEvents();
+      }
+    }
+
+    function handleShellDashboardEvent(eventName, payload) {
+      if (eventName !== 'action-control') return;
+      scheduleRefresh('live');
+    }
+
+    function flushPendingShellEvents() {
+      if (!bootComplete) return;
+      while (pendingShellEvents.length > 0) {
+        const item = pendingShellEvents.shift();
+        handleShellDashboardEvent(item.eventName, item.payload);
+      }
     }
 
     function handleSelectionClick(event) {
@@ -735,8 +769,28 @@
     if (window.self !== window.top) {
       document.body.classList.add('embedded');
     }
+    window.addEventListener('message', (event) => {
+      if (event.origin !== window.location.origin) return;
+      if (!event.data || typeof event.data.type !== 'string') return;
+      if (event.data.type === 'neopsyke-shell-visibility') {
+        setEmbeddedVisibility(Boolean(event.data.visible));
+        return;
+      }
+      if (event.data.type === 'neopsyke-dashboard-bootstrap') {
+        pendingShellEvents.push(...(event.data.events || []));
+        flushPendingShellEvents();
+        return;
+      }
+      if (event.data.type === 'neopsyke-dashboard-event') {
+        pendingShellEvents.push({ eventName: event.data.eventName, payload: event.data.payload });
+        flushPendingShellEvents();
+      }
+    });
 
-    refreshAll('initial');
+    refreshAll('initial').finally(() => {
+      bootComplete = true;
+      flushPendingShellEvents();
+    });
     connectActionControlEvents();
   </script>
 </body>

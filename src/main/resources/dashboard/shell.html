@@ -83,6 +83,7 @@
     .frame-wrap {
       min-height: 0;
       padding: 12px;
+      position: relative;
     }
     .frame {
       width: 100%;
@@ -90,6 +91,10 @@
       border: 1px solid var(--line);
       border-radius: 10px;
       background: rgba(15, 26, 31, 0.6);
+      display: none;
+    }
+    .frame.active {
+      display: block;
     }
     @media (max-width: 900px) {
       header {
@@ -116,9 +121,7 @@
     <a class="tab-link" data-tab="action-control" href="/action-control">Action Control</a>
   </nav>
 
-  <div class="frame-wrap">
-    <iframe id="tab-frame" class="frame" title="NeoPsyke Dashboard Tab"></iframe>
-  </div>
+  <div id="frame-wrap" class="frame-wrap"></div>
 
   <script>
     const TAB_CONFIG = {
@@ -166,10 +169,159 @@
       }
     }
 
-    const frame = document.getElementById("tab-frame");
+    const frameWrap = document.getElementById("frame-wrap");
     const status = document.getElementById("shell-status");
     const nav = document.getElementById("tab-nav");
+    const framesByTab = new Map();
+    const dashboardEventBuffer = [];
+    const conversationEventBuffer = new Map();
+    const DASHBOARD_BUFFER_LIMIT = 400;
+    const CONVERSATION_BUFFER_LIMIT = 200;
     let activeTab = null;
+    let dashboardSource = null;
+    let conversationSource = null;
+    let selectedConversationSessionId = null;
+
+    function pushLimited(buffer, item, limit) {
+      buffer.push(item);
+      if (buffer.length > limit) {
+        buffer.splice(0, buffer.length - limit);
+      }
+    }
+
+    function postToFrame(frame, message) {
+      if (!frame || !frame.contentWindow) return;
+      frame.contentWindow.postMessage(message, window.location.origin);
+    }
+
+    function broadcastToFrames(message, targetTabs) {
+      framesByTab.forEach((frame, frameTab) => {
+        if (targetTabs && !targetTabs.includes(frameTab)) return;
+        postToFrame(frame, message);
+      });
+    }
+
+    function sendDashboardBootstrap(frame) {
+      postToFrame(frame, {
+        type: "neopsyke-dashboard-bootstrap",
+        events: dashboardEventBuffer.slice()
+      });
+    }
+
+    function sendConversationBootstrap(sessionId) {
+      if (!sessionId) return;
+      const events = conversationEventBuffer.get(sessionId);
+      if (!events || !events.length) return;
+      const frame = framesByTab.get("conversations");
+      if (!frame) return;
+      postToFrame(frame, {
+        type: "neopsyke-conversation-bootstrap",
+        sessionId: sessionId,
+        events: events.slice()
+      });
+    }
+
+    function forwardDashboardEvent(eventName, payload) {
+      const message = { eventName, payload };
+      pushLimited(dashboardEventBuffer, message, DASHBOARD_BUFFER_LIMIT);
+      broadcastToFrames({
+        type: "neopsyke-dashboard-event",
+        eventName: eventName,
+        payload: payload
+      });
+    }
+
+    function connectDashboardStream() {
+      if (dashboardSource) return;
+      const es = new EventSource("/api/dashboard/events");
+      dashboardSource = es;
+      es.addEventListener("open", () => {
+        const activeConfig = TAB_CONFIG[activeTab] || TAB_CONFIG.conversations;
+        status.textContent = "Active tab: " + activeConfig.title;
+      });
+      es.addEventListener("error", () => {
+        status.textContent = "Dashboard stream reconnecting...";
+      });
+      ["agent", "action-control", "id-thinking"].forEach((eventName) => {
+        es.addEventListener(eventName, (event) => {
+          forwardDashboardEvent(eventName, event.data);
+        });
+      });
+    }
+
+    function disconnectConversationStream() {
+      if (!conversationSource) return;
+      conversationSource.close();
+      conversationSource = null;
+    }
+
+    function forwardConversationEvent(sessionId, eventName, payload) {
+      const message = { eventName, payload };
+      const buffer = conversationEventBuffer.get(sessionId) || [];
+      pushLimited(buffer, message, CONVERSATION_BUFFER_LIMIT);
+      conversationEventBuffer.set(sessionId, buffer);
+      broadcastToFrames({
+        type: "neopsyke-conversation-event",
+        sessionId: sessionId,
+        eventName: eventName,
+        payload: payload
+      }, ["conversations"]);
+    }
+
+    function connectConversationStream(sessionId) {
+      if (!sessionId) {
+        selectedConversationSessionId = null;
+        disconnectConversationStream();
+        return;
+      }
+      if (selectedConversationSessionId === sessionId && conversationSource) {
+        return;
+      }
+      selectedConversationSessionId = sessionId;
+      disconnectConversationStream();
+      const es = new EventSource("/api/chat/sessions/" + encodeURIComponent(sessionId) + "/stream");
+      conversationSource = es;
+      es.addEventListener("chat", (event) => {
+        forwardConversationEvent(sessionId, "chat", event.data);
+      });
+      es.addEventListener("thinking", (event) => {
+        forwardConversationEvent(sessionId, "thinking", event.data);
+      });
+    }
+
+    function postVisibility(frame, visible) {
+      postToFrame(
+        frame,
+        { type: "neopsyke-shell-visibility", visible: visible },
+      );
+    }
+
+    function ensureFrame(tab) {
+      if (framesByTab.has(tab)) {
+        return framesByTab.get(tab);
+      }
+      const config = TAB_CONFIG[tab];
+      const frame = document.createElement("iframe");
+      frame.className = "frame";
+      frame.title = config.title;
+      frame.dataset.tab = tab;
+      frame.src = config.framePath;
+      frame.addEventListener("load", () => {
+        sendDashboardBootstrap(frame);
+        if (tab === "conversations" && selectedConversationSessionId) {
+          sendConversationBootstrap(selectedConversationSessionId);
+        }
+        if (activeTab === tab) {
+          postVisibility(frame, true);
+          status.textContent = "Active tab: " + config.title;
+        } else {
+          postVisibility(frame, false);
+        }
+      });
+      framesByTab.set(tab, frame);
+      frameWrap.appendChild(frame);
+      return frame;
+    }
 
     function renderTabs() {
       nav.querySelectorAll("[data-tab]").forEach((link) => {
@@ -183,9 +335,12 @@
       renderTabs();
       status.textContent = "Active tab: " + config.title;
       document.title = config.title;
-      if (frame.getAttribute("src") !== config.framePath) {
-        frame.setAttribute("src", config.framePath);
-      }
+      ensureFrame(activeTab);
+      framesByTab.forEach((frame, frameTab) => {
+        const visible = frameTab === activeTab;
+        frame.classList.toggle("active", visible);
+        postVisibility(frame, visible);
+      });
       if (updateHistory) {
         history.pushState({ tab: activeTab }, "", config.path);
       }
@@ -204,11 +359,16 @@
       loadTab(tabFromPath(window.location.pathname), false);
     });
 
-    frame.addEventListener("load", () => {
-      const config = TAB_CONFIG[activeTab] || TAB_CONFIG.conversations;
-      status.textContent = "Active tab: " + config.title;
+    window.addEventListener("message", (event) => {
+      if (event.origin !== window.location.origin) return;
+      if (!event.data || typeof event.data.type !== "string") return;
+      if (event.data.type === "neopsyke-conversation-select") {
+        connectConversationStream(event.data.sessionId || null);
+        sendConversationBootstrap(event.data.sessionId || null);
+      }
     });
 
+    connectDashboardStream();
     loadTab(tabFromPath(window.location.pathname), false);
   </script>
 </body>
