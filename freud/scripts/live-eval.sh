@@ -428,6 +428,13 @@ if [[ -f "$RUN_DIR/logs/events.jsonl" ]]; then
     > "$RUN_DIR/artifacts/cache-stats.json" 2>/dev/null || true
 fi
 
+# Run session replay telemetry if event log exists and session replay was used
+if [[ -n "$SESSION_REPLAY_DIR" && -f "$RUN_DIR/logs/events.jsonl" ]]; then
+  log_info "Analyzing session replay telemetry..."
+  PYTHONPATH="$REPO_ROOT" python3 -m freud.py.telemetry.session_replay "$RUN_DIR/logs/events.jsonl" \
+    > "$RUN_DIR/artifacts/session-replay-stats.json" 2>/dev/null || true
+fi
+
 # Run summarize
 if [[ -f "$RUN_DIR/artifacts/verdict.json" ]]; then
   log_info "Generating summary..."
@@ -447,6 +454,9 @@ log_info "Duration: ${DURATION}s"
 log_info "Artifacts: $RUN_DIR/artifacts/"
 if [[ -f "$RUN_DIR/artifacts/cache-stats.json" ]]; then
   log_info "Cache stats: $(cat "$RUN_DIR/artifacts/cache-stats.json")"
+fi
+if [[ -f "$RUN_DIR/artifacts/session-replay-stats.json" ]]; then
+  log_info "Session replay stats: $(cat "$RUN_DIR/artifacts/session-replay-stats.json")"
 fi
 log_info ""
 
