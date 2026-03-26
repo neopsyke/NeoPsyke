@@ -120,6 +120,9 @@ import ai.neopsyke.llm.ProviderStatus
 import ai.neopsyke.llm.TokenBudgetGuardedChatClient
 import ai.neopsyke.llm.LlmCacheMode
 import ai.neopsyke.llm.LlmCacheManager
+import ai.neopsyke.session.RecordingSignalSource
+import ai.neopsyke.session.SessionRecordingManager
+import ai.neopsyke.session.SessionRecordingMode
 import ai.neopsyke.llm.combineChatCallObservers
 import ai.neopsyke.llm.isRetryableProviderHealthFailure
 import ai.neopsyke.llm.reportProviderStatusAndDecide
@@ -618,9 +621,17 @@ internal object AppModeRunners {
             prompt = { print("control> ") },
             scope = agentScope
         )
+        val sessionRecordingManager = SessionRecordingManager.fromEnvironment()
+        val signalSource: ai.neopsyke.agent.cortex.sensory.SignalSource =
+            if (sessionRecordingManager != null && sessionRecordingManager.mode == SessionRecordingMode.RECORD) {
+                logger.info { "Session recording enabled for interactive mode" }
+                RecordingSignalSource(delegate = sensoryInput, channel = sessionRecordingManager.signals)
+            } else {
+                sensoryInput
+            }
         val sensoryCortex = SensoryCortex(
             config = config,
-            source = sensoryInput,
+            source = signalSource,
             interlocutorResolver = interlocutorResolver
         )
         val secretProvider = EnvActionSecretProvider(System.getenv())
@@ -1338,6 +1349,7 @@ internal object AppModeRunners {
             telegramPollingBridge?.close()
             idInnerVoiceFileSink?.close()
             innerVoiceStore?.close()
+            sessionRecordingManager?.close()
             sensoryInput.close()
             agentScope.cancel()
         }
@@ -1355,13 +1367,24 @@ internal object AppModeRunners {
         }
         val metaReasonerFallbackEndpoint = startupConfig.metaReasonerFallback
 
-        val stdinContent = System.`in`.bufferedReader().readText().trim()
-        if (stdinContent.isBlank()) {
+        val sessionRecordingManager = SessionRecordingManager.fromEnvironment()
+        val isSessionReplay = sessionRecordingManager?.mode == SessionRecordingMode.REPLAY
+
+        val stdinContent = if (isSessionReplay) {
+            // In session replay mode, signals come from the recording — stdin is not needed.
+            logger.info { "freud-live: session replay mode — skipping stdin read" }
+            ""
+        } else {
+            System.`in`.bufferedReader().readText().trim()
+        }
+        if (!isSessionReplay && stdinContent.isBlank()) {
             logger.warn { "No input provided on stdin for freud-live mode." }
             output.error("freud-live: no input on stdin.")
             exitProcess(1)
         }
-        logger.info { "freud-live: read ${stdinContent.length} chars from stdin" }
+        if (stdinContent.isNotBlank()) {
+            logger.info { "freud-live: read ${stdinContent.length} chars from stdin" }
+        }
 
         val answerDeferred = CompletableDeferred<String>()
         val liveOutput: (String) -> Unit = { msg ->
@@ -1378,9 +1401,16 @@ internal object AppModeRunners {
             scope = agentScope
         )
         val interlocutorResolver = ai.neopsyke.agent.config.DefaultInterlocutorResolver()
+        val signalSource: ai.neopsyke.agent.cortex.sensory.SignalSource =
+            if (sessionRecordingManager != null && isSessionReplay) {
+                logger.info { "Session replay enabled for freud-live mode" }
+                RecordingSignalSource(delegate = sensoryInput, channel = sessionRecordingManager.signals)
+            } else {
+                sensoryInput
+            }
         val sensoryCortex = SensoryCortex(
             config = config,
-            source = sensoryInput,
+            source = signalSource,
             interlocutorResolver = interlocutorResolver
         )
         val sidecarPath = resolveEvalEventSidecarPath()
@@ -1731,11 +1761,13 @@ internal object AppModeRunners {
                                                         )
                                                     )
 
-                                                    sensoryInput.submitInput(
-                                                        content = stdinContent,
-                                                        source = "freud-live",
-                                                        conversationContext = freudLiveConversationContext(),
-                                                    )
+                                                    if (!isSessionReplay) {
+                                                        sensoryInput.submitInput(
+                                                            content = stdinContent,
+                                                            source = "freud-live",
+                                                            conversationContext = freudLiveConversationContext(),
+                                                        )
+                                                    }
 
                                                     val watchdog = launch {
                                                         answerDeferred.await()
@@ -1783,6 +1815,7 @@ internal object AppModeRunners {
                                                         answerDeferred.isCompleted -> 0
                                                         else -> 2
                                                     }
+                                                    sessionRecordingManager?.close()
                                                     llmCacheManager?.close()
                                                     dumpEndOfRunMetrics(metrics)
                                                     instrumentation.emit(

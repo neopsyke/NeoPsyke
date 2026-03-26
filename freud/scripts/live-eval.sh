@@ -7,6 +7,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 INPUT_FILE=""
 EXPECTED_FILE=""
 CACHE_REPLAY_FILE=""
+SESSION_REPLAY_DIR=""
 CONFIG_PATH="${FREUD_CONFIG:-$REPO_ROOT/freud/config/default.env}"
 
 if [[ -f "$CONFIG_PATH" ]]; then
@@ -59,6 +60,7 @@ Options:
   --input <file>          Input file containing the user message (required)
   --expected <file>       Expected answer file for acceptance check
   --cache-replay <file>   JSONL cache file to replay (enables replay mode)
+  --session-replay <dir>  Replay a recorded interactive session directory
   --timeout <seconds>     Timeout for the live eval run (default: 120)
   --preserve-memory       Do not clear Freud-isolated memory before the run
   --goals                 Enable the goals subsystem for this eval
@@ -102,16 +104,33 @@ search_logs_with_fallback() {
   done
 }
 
-prime_gradle_wrapper_cache() {
+prime_gradle_build_cache() {
   [[ -z "${GRADLE_USER_HOME:-}" ]] && return 0
+  mkdir -p "$GRADLE_USER_HOME"
+
+  # 1. Prime wrapper dists (fast copy if available locally)
   local local_dists="$GRADLE_USER_HOME/wrapper/dists"
   local home_dists="$HOME/.gradle/wrapper/dists"
-  if compgen -G "$local_dists/gradle-*-bin/*" >/dev/null; then
+  if ! compgen -G "$local_dists/gradle-*-bin/*" >/dev/null 2>&1; then
+    if [[ -d "$home_dists" ]]; then
+      mkdir -p "$local_dists"
+      cp -R "$home_dists"/gradle-*-bin "$local_dists"/ 2>/dev/null || true
+    fi
+  fi
+
+  # 2. Prime build plugins + dependencies (Kotlin plugin, etc.)
+  local marker="$GRADLE_USER_HOME/.build-cache-primed"
+  if [[ -f "$marker" ]]; then
     return 0
   fi
-  if [[ -d "$home_dists" ]]; then
-    mkdir -p "$local_dists"
-    cp -R "$home_dists"/gradle-*-bin "$local_dists"/ 2>/dev/null || true
+  echo "Priming isolated Gradle home with build plugins and dependencies..." >&2
+  if GRADLE_USER_HOME="$GRADLE_USER_HOME" "$REPO_ROOT/gradlew" \
+      --no-daemon --no-problems-report \
+      compileKotlin compileTestKotlin >/dev/null 2>&1; then
+    touch "$marker"
+    echo "Isolated Gradle home primed successfully." >&2
+  else
+    echo "WARNING: Failed to prime Gradle build cache. First build may be slow or fail offline." >&2
   fi
 }
 
@@ -184,6 +203,10 @@ while [[ $# -gt 0 ]]; do
       [[ $# -lt 2 ]] && { log_error "Missing value for $1"; exit 1; }
       CACHE_REPLAY_FILE="$2"; shift 2 ;;
     --cache-replay=*) CACHE_REPLAY_FILE="${1#*=}"; shift ;;
+    --session-replay)
+      [[ $# -lt 2 ]] && { log_error "Missing value for $1"; exit 1; }
+      SESSION_REPLAY_DIR="$2"; shift 2 ;;
+    --session-replay=*) SESSION_REPLAY_DIR="${1#*=}"; shift ;;
     --timeout)
       [[ $# -lt 2 ]] && { log_error "Missing value for $1"; exit 1; }
       TIMEOUT="$2"; shift 2 ;;
@@ -196,13 +219,13 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ -z "$INPUT_FILE" ]]; then
-  log_error "Error: --input is required."
+if [[ -z "$INPUT_FILE" && -z "$SESSION_REPLAY_DIR" ]]; then
+  log_error "Error: --input is required (unless using --session-replay)."
   usage
   exit 1
 fi
 
-if [[ ! -f "$INPUT_FILE" ]]; then
+if [[ -n "$INPUT_FILE" && ! -f "$INPUT_FILE" ]]; then
   log_error "Error: input file not found: $INPUT_FILE"
   exit 1
 fi
@@ -210,6 +233,20 @@ fi
 if [[ -n "$CACHE_REPLAY_FILE" && ! -f "$CACHE_REPLAY_FILE" ]]; then
   log_error "Error: cache replay file not found: $CACHE_REPLAY_FILE"
   exit 1
+fi
+
+if [[ -n "$SESSION_REPLAY_DIR" && ! -d "$SESSION_REPLAY_DIR" ]]; then
+  log_error "Error: session replay directory not found: $SESSION_REPLAY_DIR"
+  exit 1
+fi
+
+# --session-replay implies --cache-replay from the same session directory
+if [[ -n "$SESSION_REPLAY_DIR" && -z "$CACHE_REPLAY_FILE" ]]; then
+  SESSION_REPLAY_DIR="$(cd "$SESSION_REPLAY_DIR" && pwd)"
+  SESSION_LLM_CACHE="$SESSION_REPLAY_DIR/llm-cache.jsonl"
+  if [[ -f "$SESSION_LLM_CACHE" ]]; then
+    CACHE_REPLAY_FILE="$SESSION_LLM_CACHE"
+  fi
 fi
 
 # Resolve paths from config/env the same way feature-loop.sh does.
@@ -227,7 +264,7 @@ if [[ -n "$GRADLE_USER_HOME_CFG" ]]; then
   fi
   mkdir -p "$GRADLE_USER_HOME"
   export GRADLE_USER_HOME
-  prime_gradle_wrapper_cache
+  prime_gradle_build_cache
 fi
 
 mkdir -p "$RUN_ROOT_ABS"
@@ -256,7 +293,9 @@ else
 fi
 
 # Copy input to artifacts for reference
-cp "$INPUT_FILE" "$RUN_DIR/artifacts/input.txt"
+if [[ -n "$INPUT_FILE" ]]; then
+  cp "$INPUT_FILE" "$RUN_DIR/artifacts/input.txt"
+fi
 
 log_info "=== Freud Live Eval ==="
 log_info "Run directory: $RUN_DIR"
@@ -272,6 +311,12 @@ log_info ""
 # Set environment for the run
 export NEOPSYKE_LLM_CACHE_MODE="$CACHE_MODE"
 export NEOPSYKE_LLM_CACHE_FILE="$CACHE_FILE"
+
+if [[ -n "$SESSION_REPLAY_DIR" ]]; then
+  export NEOPSYKE_SESSION_RECORDING_MODE="replay"
+  export NEOPSYKE_SESSION_RECORDING_DIR="$SESSION_REPLAY_DIR"
+  log_info "Session replay: $SESSION_REPLAY_DIR"
+fi
 export NEOPSYKE_LOG_FILE="$RUN_DIR/logs/neopsyke.log"
 export NEOPSYKE_EVENT_LOG_FILE="$RUN_DIR/logs/events.jsonl"
 export EGO_SCRATCHPAD_DEBUG_CAPTURE_ENABLED="true"
@@ -292,10 +337,18 @@ if [[ "$PRESERVE_MEMORY" == "true" ]]; then
   clear_memory_arg=""
 fi
 set +e
-cat "$INPUT_FILE" \
-  | "$NEOPSYKE_CMD" --freud-live --freud-live-timeout "$TIMEOUT" ${clear_memory_arg:+"$clear_memory_arg"} --no-id \
-  2>"$RUN_DIR/logs/stderr.log" \
-  | tee "$RAW_STDOUT_FILE"
+if [[ -n "$SESSION_REPLAY_DIR" && -z "$INPUT_FILE" ]]; then
+  # Session replay mode: no stdin input needed — signals come from the recording
+  "$NEOPSYKE_CMD" --freud-live --freud-live-timeout "$TIMEOUT" ${clear_memory_arg:+"$clear_memory_arg"} --no-id \
+    </dev/null \
+    2>"$RUN_DIR/logs/stderr.log" \
+    | tee "$RAW_STDOUT_FILE"
+else
+  cat "$INPUT_FILE" \
+    | "$NEOPSYKE_CMD" --freud-live --freud-live-timeout "$TIMEOUT" ${clear_memory_arg:+"$clear_memory_arg"} --no-id \
+    2>"$RUN_DIR/logs/stderr.log" \
+    | tee "$RAW_STDOUT_FILE"
+fi
 EXIT_CODE="${PIPESTATUS[1]:-$?}"
 set -e
 ANSWER_OUTPUT="$(extract_answer_line "$RAW_STDOUT_FILE")"

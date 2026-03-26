@@ -116,9 +116,15 @@ while [[ $# -gt 0 ]]; do
       CLEAR_ACTION_CONTROL=1
       shift
       ;;
+    --record-session)
+      SESSION_RECORD_DIR="$ROOT_DIR/.neopsyke/runs/freud/$(date -u +%Y%m%dT%H%M%SZ)-session"
+      export NEOPSYKE_SESSION_RECORDING_MODE="record"
+      export NEOPSYKE_SESSION_RECORDING_DIR="$SESSION_RECORD_DIR"
+      shift
+      ;;
     -h|--help)
       cat <<'EOF'
-Usage: ./run-neopsyke.sh [--log-level LEVEL] [--loop-delay-ms MS|--no-delay] [--no-id] [--goals|--no-goals] [--clear-memory-*] [--clear-action-control] [--] [app-args...]
+Usage: ./run-neopsyke.sh [--log-level LEVEL] [--loop-delay-ms MS|--no-delay] [--no-id] [--goals|--no-goals] [--clear-memory-*] [--clear-action-control] [--record-session] [--] [app-args...]
 
 Options:
   -l, --log-level LEVEL   SLF4J simple logger level (default: warning)
@@ -135,6 +141,9 @@ Memory clearing (applied before agent startup):
       --clear-memory-episodic    Clear episodic logbook memory before starting
       --clear-memory-lessons     Clear lessons from vector memory before starting
       --clear-action-control     Delete the active action-control SQLite store before starting
+
+Session recording:
+      --record-session           Record all signals to a session directory for later replay via Freud
 
 Environment:
   NEOPSYKE_LLM_CONFIG_FILE   Optional path to LLM runtime YAML (otherwise use bundled config/llm-runtime.yaml)
@@ -166,6 +175,8 @@ Environment:
   NEOPSYKE_GOALS_ENABLED         Override goals subsystem enabled state (true/false, launcher default: true)
   NEOPSYKE_LLM_CACHE_MODE       LLM response cache mode: record, replay, or off (default: off)
   NEOPSYKE_LLM_CACHE_FILE       Path to LLM cache JSONL file (required when cache mode is record or replay)
+  NEOPSYKE_SESSION_RECORDING_MODE  Session recording mode: record, replay, or off (default: off)
+  NEOPSYKE_SESSION_RECORDING_DIR   Path to session recording directory
   NEOPSYKE_EVAL_TRANSPORT_DEBUG  Set to true to keep low-level LLM transport debug lines in eval mode
   NEOPSYKE_EVAL_MAX_RAW_RESPONSE_CHARS  Max chars stored per raw eval thought (default: unlimited)
 
@@ -264,6 +275,14 @@ if [[ "$CLEAR_ACTION_CONTROL" -eq 1 ]]; then
   log_info "Cleared action-control store at $ACTION_CONTROL_DB_PATH"
 fi
 export NEOPSYKE_ACTION_CONTROL_DB_PATH="$ACTION_CONTROL_DB_PATH"
+
+if [[ "${NEOPSYKE_SESSION_RECORDING_MODE:-off}" == "record" ]]; then
+  mkdir -p "${NEOPSYKE_SESSION_RECORDING_DIR}"
+  log_info "Session recording enabled; signals will be written to ${NEOPSYKE_SESSION_RECORDING_DIR}"
+  # Also enable LLM cache recording into the session directory
+  export NEOPSYKE_LLM_CACHE_MODE="${NEOPSYKE_LLM_CACHE_MODE:-record}"
+  export NEOPSYKE_LLM_CACHE_FILE="${NEOPSYKE_LLM_CACHE_FILE:-${NEOPSYKE_SESSION_RECORDING_DIR}/llm-cache.jsonl}"
+fi
 
 if [[ "$DISABLE_ID" -eq 1 ]]; then
   export NEOPSYKE_ID_ENABLED="false"
