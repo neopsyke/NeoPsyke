@@ -1,7 +1,7 @@
 package ai.neopsyke.agent.memory.provider
 
 import ai.neopsyke.config.DefaultMemoryProviderConfig
-import ai.neopsyke.agent.tools.mcp.McpStdioClient
+import ai.neopsyke.agent.cortex.motor.actions.mcp.McpStdioClient
 import com.fasterxml.jackson.annotation.JsonProperty
 import com.fasterxml.jackson.databind.DeserializationFeature
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper

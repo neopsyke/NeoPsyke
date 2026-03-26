@@ -21,8 +21,8 @@ import ai.neopsyke.agent.model.SourceDescriptor
 import ai.neopsyke.agent.model.SuperegoContext
 import ai.neopsyke.agent.support.ExternalContentPipeline
 import ai.neopsyke.agent.support.PromptInjectionDefense
-import ai.neopsyke.agent.tools.mcp.McpStdioClient
-import ai.neopsyke.agent.tools.mcp.McpToolCallResult
+import ai.neopsyke.agent.cortex.motor.actions.mcp.McpStdioClient
+import ai.neopsyke.agent.cortex.motor.actions.mcp.McpToolCallResult
 import kotlinx.coroutines.runBlocking
 import java.nio.file.Paths
 import java.util.concurrent.atomic.AtomicBoolean

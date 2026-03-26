@@ -1,8 +1,8 @@
 package ai.neopsyke.agent.cortex.connectors
 
-import ai.neopsyke.agent.tools.mcp.LazyMcpClientHolder
-import ai.neopsyke.agent.tools.mcp.McpToolCallResult
-import ai.neopsyke.agent.tools.mcp.McpToolDescriptor
+import ai.neopsyke.agent.cortex.motor.actions.mcp.LazyMcpClientHolder
+import ai.neopsyke.agent.cortex.motor.actions.mcp.McpToolCallResult
+import ai.neopsyke.agent.cortex.motor.actions.mcp.McpToolDescriptor
 import kotlinx.coroutines.CoroutineScope
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest

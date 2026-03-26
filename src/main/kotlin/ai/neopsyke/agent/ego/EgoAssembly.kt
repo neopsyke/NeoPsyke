@@ -23,7 +23,7 @@ import ai.neopsyke.agent.memory.scratchpad.ScratchpadStore
 import ai.neopsyke.agent.goal.NoopGoalsGateway
 import ai.neopsyke.agent.goal.GoalsGateway
 import ai.neopsyke.agent.superego.Superego
-import ai.neopsyke.agent.tools.mcp.FetchTool
+import ai.neopsyke.agent.cortex.motor.actions.fetch.FetchTool
 import ai.neopsyke.instrumentation.AgentInstrumentation
 import ai.neopsyke.instrumentation.NoopAgentInstrumentation
 

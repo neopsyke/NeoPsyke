@@ -320,12 +320,8 @@ src/main/kotlin/ai/neopsyke/
     cortex/motor/    # Action execution (MotorCortex)
     memory/          # Short-term, long-term (Hippocampus), episodic (Logbook)
     goal/            # Durable goal lifecycle and execution
-    actions/         # Action plugin registry and built-in plugins
-    actioncontrol/   # Staged action storage, authorization, receipts
-    connectors/      # External connector runtime and catalog
     model/           # Domain models (security, cognitive, actions)
     support/         # Prompt injection defense, text security, payload validation
-    tools/mcp/       # MCP tool integration
   config/            # Runtime configuration loaders
   llm/               # LLM provider clients (Anthropic, OpenAI, Groq, Mistral, Google, Ollama)
   integrations/      # Telegram, Google Workspace, email

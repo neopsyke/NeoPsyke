@@ -19,7 +19,7 @@ import ai.neopsyke.agent.model.CommitAuthorization
 import ai.neopsyke.agent.model.PendingAction
 import ai.neopsyke.agent.goal.NoopGoalsGateway
 import ai.neopsyke.agent.goal.GoalsGateway
-import ai.neopsyke.agent.tools.mcp.FetchTool
+import ai.neopsyke.agent.cortex.motor.actions.fetch.FetchTool
 
 data class ActionImplementationStatus(
     val actionType: ActionType,

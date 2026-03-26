@@ -20,7 +20,7 @@ import ai.neopsyke.agent.memory.provider.HttpMemoryProviderClient
 import ai.neopsyke.agent.memory.provider.DefaultMemoryProviderInstaller
 import ai.neopsyke.agent.memory.provider.ManagedHttpMemoryProviderProcess
 import ai.neopsyke.agent.memory.provider.ProviderBackedHippocampus
-import ai.neopsyke.agent.tools.mcp.McpStdioClient
+import ai.neopsyke.agent.cortex.motor.actions.mcp.McpStdioClient
 import ai.neopsyke.agent.model.ConversationContext
 import ai.neopsyke.agent.model.ConversationSecurityContexts
 import ai.neopsyke.agent.model.Interlocutor
@@ -28,7 +28,7 @@ import ai.neopsyke.agent.cortex.sensory.AsyncSignalSource
 import ai.neopsyke.agent.cortex.sensory.SensoryCortex
 import ai.neopsyke.agent.memory.longterm.NoopHippocampus
 import ai.neopsyke.agent.memory.longterm.ResetRequest
-import ai.neopsyke.agent.tools.mcp.NativeFetchTool
+import ai.neopsyke.agent.cortex.motor.actions.fetch.NativeFetchTool
 import ai.neopsyke.agent.superego.Superego
 import ai.neopsyke.agent.cortex.motor.actions.websearch.WebSearchActionHandler
 import ai.neopsyke.agent.cortex.motor.actions.websearch.WebSearchEngine
@@ -134,8 +134,8 @@ import ai.neopsyke.integrations.telegram.TelegramUpdateProcessor
 import ai.neopsyke.integrations.telegram.TelegramWebhookBridge
 import ai.neopsyke.metrics.MetricsQueryProvider
 import ai.neopsyke.metrics.MetricsRuntimeFactory
-import ai.neopsyke.agent.tools.mcp.FetchTool
-import ai.neopsyke.agent.tools.mcp.ToolHealthStatus
+import ai.neopsyke.agent.cortex.motor.actions.fetch.FetchTool
+import ai.neopsyke.agent.cortex.motor.actions.fetch.ToolHealthStatus
 import kotlin.system.exitProcess
 import java.util.concurrent.Executors
 import java.util.concurrent.CopyOnWriteArrayList

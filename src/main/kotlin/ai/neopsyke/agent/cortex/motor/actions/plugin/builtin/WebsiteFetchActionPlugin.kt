@@ -24,8 +24,8 @@ import ai.neopsyke.agent.model.SourceDescriptor
 import ai.neopsyke.agent.model.SuperegoContext
 import ai.neopsyke.agent.support.ActionPayloadSecurity
 import ai.neopsyke.agent.support.ExternalContentPipeline
-import ai.neopsyke.agent.tools.mcp.FetchErrorCategory
-import ai.neopsyke.agent.tools.mcp.FetchTool
+import ai.neopsyke.agent.cortex.motor.actions.fetch.FetchErrorCategory
+import ai.neopsyke.agent.cortex.motor.actions.fetch.FetchTool
 
 class WebsiteFetchActionPlugin(
     private val tool: FetchTool?,
