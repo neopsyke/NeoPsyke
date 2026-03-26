@@ -35,7 +35,7 @@ tasks.withType<JavaCompile>().configureEach {
 }
 
 application {
-    mainClass.set("freudian.poc.ApplicationKt")
+    mainClass.set("ai.neopsyke.poc.ApplicationKt")
 }
 
 tasks.test {

@@ -35,16 +35,16 @@ ego:
   include_noop_thought_branch: true
 
 superego:
-  allow_id_user_messages: false
+  allow_id_contact_user: false
   allowed_id_action_types:
-    - INTERNAL_REFLECTION
-    - WEB_LOOKUP
+    - REFLECT_INTERNAL
+    - WEB_SEARCH
 
 motor:
   executable_action_types:
-    - INTERNAL_REFLECTION
-    - WEB_LOOKUP
-    - USER_MESSAGE
+    - REFLECT_INTERNAL
+    - WEB_SEARCH
+    - CONTACT_USER
 
 logging:
   events_path: "build/poc-events.jsonl"
