@@ -15,7 +15,7 @@ For the full configuration reference, see [configuration.md](configuration.md).
 ## Install and build
 
 ```bash
-git clone https://github.com/atomitl/neopsyke.git
+git clone https://github.com/neopsyke/neopsyke.git
 cd neopsyke
 ./gradlew installDist
 ```
