@@ -820,6 +820,7 @@ internal object AppModeRunners {
                 criticalSinks = listOfNotNull(sidecarSink),
                 scope = agentScope
             ).use { instrumentation ->
+                sessionRecordingManager?.setInstrumentation(instrumentation)
                 val actionAuthorizationPolicy = createActionAuthorizationPolicy(config)
                 createActionControlStoreIfEnabled(config).use { actionControlStore ->
                     val dashboardServer = if (dashboardEnabled) {
@@ -1454,6 +1455,7 @@ internal object AppModeRunners {
                 criticalSinks = listOfNotNull(sidecarSink),
                 scope = agentScope
             ).use { instrumentation ->
+                sessionRecordingManager?.setInstrumentation(instrumentation)
                 instrumentation.emit(AgentEvents.loopStatus(status = "booting", message = "freud_live_start"))
 
                 val metricsProvider = resolveMetricsProviderLabel(llm)

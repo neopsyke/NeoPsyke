@@ -50,6 +50,14 @@ class SessionRecordingManager(
 
     private val channels: List<RecordReplayChannel> = listOf(signals, memoryRecall, webResults, actionControl)
 
+    /**
+     * Late-bind the instrumentation bus so session replay/hit events
+     * appear in events.jsonl. Call after the [InstrumentationBus] is created.
+     */
+    fun setInstrumentation(bus: AgentInstrumentation) {
+        channels.forEach { it.setInstrumentation(bus) }
+    }
+
     init {
         if (mode != SessionRecordingMode.OFF) {
             Files.createDirectories(sessionDir)

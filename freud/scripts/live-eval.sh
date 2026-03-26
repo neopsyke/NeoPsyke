@@ -8,6 +8,7 @@ INPUT_FILE=""
 EXPECTED_FILE=""
 CACHE_REPLAY_FILE=""
 SESSION_REPLAY_DIR=""
+RECORD_SESSION=false
 CONFIG_PATH="${FREUD_CONFIG:-$REPO_ROOT/freud/config/default.env}"
 
 if [[ -f "$CONFIG_PATH" ]]; then
@@ -60,7 +61,8 @@ Options:
   --input <file>          Input file containing the user message (required)
   --expected <file>       Expected answer file for acceptance check
   --cache-replay <file>   JSONL cache file to replay (enables replay mode)
-  --session-replay <dir>  Replay a recorded interactive session directory
+  --record-session        Record all signals for later replay via --session-replay
+  --session-replay <dir>  Replay a recorded session directory
   --timeout <seconds>     Timeout for the live eval run (default: 120)
   --goals                 Enable the goals subsystem for this eval
   --no-goals              Disable the goals subsystem for this eval
@@ -208,6 +210,7 @@ while [[ $# -gt 0 ]]; do
       [[ $# -lt 2 ]] && { log_error "Missing value for $1"; exit 1; }
       SESSION_REPLAY_DIR="$2"; shift 2 ;;
     --session-replay=*) SESSION_REPLAY_DIR="${1#*=}"; shift ;;
+    --record-session) RECORD_SESSION=true; shift ;;
     --timeout)
       [[ $# -lt 2 ]] && { log_error "Missing value for $1"; exit 1; }
       TIMEOUT="$2"; shift 2 ;;
@@ -241,9 +244,16 @@ if [[ -n "$SESSION_REPLAY_DIR" && ! -d "$SESSION_REPLAY_DIR" ]]; then
   exit 1
 fi
 
+# Resolve session replay dir: accept either the session/ subdir or the parent run dir.
+if [[ -n "$SESSION_REPLAY_DIR" ]]; then
+  SESSION_REPLAY_DIR="$(cd "$SESSION_REPLAY_DIR" && pwd)"
+  if [[ -d "$SESSION_REPLAY_DIR/session" && -f "$SESSION_REPLAY_DIR/session/signals.jsonl" ]]; then
+    SESSION_REPLAY_DIR="$SESSION_REPLAY_DIR/session"
+  fi
+fi
+
 # --session-replay implies --cache-replay from the same session directory
 if [[ -n "$SESSION_REPLAY_DIR" && -z "$CACHE_REPLAY_FILE" ]]; then
-  SESSION_REPLAY_DIR="$(cd "$SESSION_REPLAY_DIR" && pwd)"
   SESSION_LLM_CACHE="$SESSION_REPLAY_DIR/llm-cache.jsonl"
   if [[ -f "$SESSION_LLM_CACHE" ]]; then
     CACHE_REPLAY_FILE="$SESSION_LLM_CACHE"
@@ -284,10 +294,23 @@ export FREUD_RUN_DIR="$RUN_DIR"
 export FREUD_ARTIFACT_DIR="$RUN_DIR/artifacts"
 write_local_freud_pointers
 
+# Session recording: create session dir inside the run dir.
+# Routes the LLM cache into the session dir so --session-replay finds everything.
+SESSION_RECORD_DIR=""
+if [[ "$RECORD_SESSION" == "true" ]]; then
+  SESSION_RECORD_DIR="$RUN_DIR/session"
+  mkdir -p "$SESSION_RECORD_DIR"
+  export NEOPSYKE_SESSION_RECORDING_MODE="record"
+  export NEOPSYKE_SESSION_RECORDING_DIR="$SESSION_RECORD_DIR"
+fi
+
 # Determine cache mode
 if [[ -n "$CACHE_REPLAY_FILE" ]]; then
   CACHE_MODE="replay"
   CACHE_FILE="$(cd "$(dirname "$CACHE_REPLAY_FILE")" && pwd)/$(basename "$CACHE_REPLAY_FILE")"
+elif [[ -n "$SESSION_RECORD_DIR" ]]; then
+  CACHE_MODE="record"
+  CACHE_FILE="$SESSION_RECORD_DIR/llm-cache.jsonl"
 else
   CACHE_MODE="record"
   CACHE_FILE="$RUN_DIR/artifacts/llm-cache.jsonl"
@@ -329,6 +352,9 @@ log_info "Cache mode: $CACHE_MODE"
 log_info "Cache file: $CACHE_FILE"
 log_info "Timeout: ${TIMEOUT}s"
 log_info "Per-run namespace: ${PGVECTOR_NAMESPACE}"
+if [[ -n "$SESSION_RECORD_DIR" ]]; then
+  log_info "Session recording: $SESSION_RECORD_DIR"
+fi
 if [[ -n "$SESSION_REPLAY_DIR" ]]; then
   log_info "Session replay: $SESSION_REPLAY_DIR"
 fi

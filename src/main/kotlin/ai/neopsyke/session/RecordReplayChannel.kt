@@ -33,8 +33,11 @@ class RecordReplayChannel(
     val channelName: String,
     val mode: SessionRecordingMode,
     private val file: Path,
-    private val instrumentation: AgentInstrumentation = NoopAgentInstrumentation,
+    instrumentation: AgentInstrumentation = NoopAgentInstrumentation,
 ) : Closeable {
+
+    @Volatile
+    private var instrumentation: AgentInstrumentation = instrumentation
 
     private val sequenceCounter = AtomicInteger(0)
     private val cachedEntries: List<SessionRecordEntry>
@@ -43,6 +46,10 @@ class RecordReplayChannel(
     @Volatile
     var passthroughMode: Boolean = false
         private set
+
+    fun setInstrumentation(bus: AgentInstrumentation) {
+        instrumentation = bus
+    }
 
     init {
         val normalized = file.toAbsolutePath().normalize()
