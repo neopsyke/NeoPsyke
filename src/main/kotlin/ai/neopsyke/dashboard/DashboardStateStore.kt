@@ -1,10 +1,17 @@
 package ai.neopsyke.dashboard
 
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+import kotlinx.coroutines.CoroutineName
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.receiveAsFlow
+import kotlinx.coroutines.launch
 import ai.neopsyke.agent.model.ActionType
 import ai.neopsyke.agent.model.ConversationContext
 import ai.neopsyke.agent.model.Interlocutor
@@ -23,6 +30,19 @@ class DashboardStateStore(
     private val maxScratchpadSnapshots: Int = 120,
     private val scratchpadSnapshotTtlMs: Long = 15 * 60 * 1000L,
 ) : InstrumentationSink {
+    private sealed interface TransportMessage {
+        data class InstrumentationEvent(val event: AgentEvent) : TransportMessage
+        data class ChatEvent(val sessionId: String, val payload: Map<String, Any?>) : TransportMessage
+        data class ActionControlEvent(val payload: Map<String, Any?>) : TransportMessage
+    }
+
+    private data class EventSubscriber(
+        val channel: Channel<String>,
+        val eventFilter: ((AgentEvent) -> Boolean)? = null,
+    ) {
+        fun accepts(event: AgentEvent): Boolean = eventFilter?.invoke(event) ?: true
+    }
+
     private val mapper = jacksonObjectMapper()
     private val lock = Any()
     private val events = ArrayDeque<AgentEvent>()
@@ -58,16 +78,23 @@ class DashboardStateStore(
     private val latestScratchpadSnapshotByRoot = mutableMapOf<String, ScratchpadSnapshotRecord>()
     private val phaseTimings = ArrayDeque<Map<String, Any?>>()
     private var heapMetrics: Map<String, Any?>? = null
-    private val subscribers = mutableSetOf<Channel<String>>()
+    private val subscribers = mutableSetOf<EventSubscriber>()
     private val chatSessions = linkedMapOf<String, ChatSessionRecord>()
     private val rootInputSessionMap = mutableMapOf<String, String>()
     private val chatSubscribers = mutableMapOf<String, MutableSet<Channel<String>>>()
+    private val actionControlSubscribers = mutableSetOf<Channel<String>>()
     private var nextChatMessageId: Long = 1L
     private val sessionSequenceCounters = mutableMapOf<String, AtomicLong>()
     private val plannerStructuredOutputModes = mutableMapOf<PlannerStructuredOutputScope, String>()
+    private val transportScope = CoroutineScope(SupervisorJob() + Dispatchers.Default + CoroutineName("dashboard-transport"))
+    private val transportChannel = Channel<TransportMessage>(capacity = TRANSPORT_CHANNEL_CAPACITY)
+    private val transportJob: Job = transportScope.launch {
+        transportLoop()
+    }
 
     override fun onEvent(event: AgentEvent) {
-        var payloadJson: String? = null
+        var eventForBroadcast: AgentEvent? = null
+        var actionControlPayload: Map<String, Any?>? = null
         synchronized(lock) {
             val effectiveEvent = enrichPlannerStructuredOutputModeLocked(event)
             val isDebugScratchpadSnapshot = event.type == "scratchpad_debug_snapshot"
@@ -182,7 +209,6 @@ class DashboardStateStore(
                                 emitEvent = true
                             )
                         }
-                        rootInputSessionMap.remove(rootInputId)
                     }
                 }
 
@@ -294,10 +320,27 @@ class DashboardStateStore(
             }
 
             if (!isDebugScratchpadSnapshot) {
-                payloadJson = mapper.writeValueAsString(effectiveEvent)
+                if (subscribers.any { it.accepts(effectiveEvent) }) {
+                    eventForBroadcast = effectiveEvent
+                }
+                if (
+                    effectiveEvent.type in ACTION_CONTROL_STREAM_EVENT_TYPES &&
+                    actionControlSubscribers.isNotEmpty()
+                ) {
+                    actionControlPayload = mapOf(
+                        "type" to effectiveEvent.type,
+                        "ts" to effectiveEvent.ts,
+                        "data" to effectiveEvent.data,
+                    )
+                }
             }
         }
-        payloadJson?.let { broadcastToSubscribers(it) }
+        if (eventForBroadcast != null) {
+            enqueueTransport(TransportMessage.InstrumentationEvent(eventForBroadcast!!))
+        }
+        if (actionControlPayload != null) {
+            enqueueTransport(TransportMessage.ActionControlEvent(actionControlPayload!!))
+        }
     }
 
     private fun enrichPlannerStructuredOutputModeLocked(event: AgentEvent): AgentEvent {
@@ -475,7 +518,7 @@ class DashboardStateStore(
         if (totalDroppedEvents < 0) {
             return
         }
-        var payloadJson: String? = null
+        var healthEventForBroadcast: AgentEvent? = null
         synchronized(lock) {
             droppedEvents = max(droppedEvents, totalDroppedEvents)
             val nextId = (events.maxOfOrNull { it.id } ?: 0L) + 1L
@@ -488,27 +531,42 @@ class DashboardStateStore(
                 events.removeFirst()
             }
             events.addLast(healthEvent)
-            payloadJson = mapper.writeValueAsString(healthEvent)
+            if (subscribers.any { it.accepts(healthEvent) }) {
+                healthEventForBroadcast = healthEvent
+            }
         }
-        payloadJson?.let { broadcastToSubscribers(it) }
+        if (healthEventForBroadcast != null) {
+            enqueueTransport(TransportMessage.InstrumentationEvent(healthEventForBroadcast!!))
+        }
     }
 
-    fun subscribe(): DashboardFlowSubscription {
+    fun subscribe(eventFilter: ((AgentEvent) -> Boolean)? = null): DashboardFlowSubscription {
         val channel = Channel<String>(SUBSCRIBER_CHANNEL_CAPACITY)
+        val registration = EventSubscriber(channel = channel, eventFilter = eventFilter)
         synchronized(lock) {
-            subscribers.add(channel)
+            subscribers.add(registration)
         }
         return DashboardFlowSubscription(channel) {
             synchronized(lock) {
-                subscribers.remove(channel)
+                subscribers.remove(registration)
             }
             channel.close()
         }
     }
 
-    fun ensureChatSession(sessionId: String = DEFAULT_SESSION_ID, title: String? = null): ChatSessionSummary {
+    fun ensureChatSession(
+        sessionId: String = DEFAULT_SESSION_ID,
+        title: String? = null,
+        interlocutor: Interlocutor? = null,
+    ): ChatSessionSummary {
         synchronized(lock) {
-            return toSummary(ensureChatSessionLocked(sessionId = sanitizeSessionId(sessionId), title = title))
+            return toSummary(
+                ensureChatSessionLocked(
+                    sessionId = sanitizeSessionId(sessionId),
+                    title = title,
+                    interlocutor = interlocutor,
+                )
+            )
         }
     }
 
@@ -547,6 +605,35 @@ class DashboardStateStore(
     }
 
     fun addUserMessage(sessionId: String, content: String, source: String = "web"): ChatMessage? {
+        return addChatMessage(
+            sessionId = sessionId,
+            role = "user",
+            content = content,
+            source = source,
+        )
+    }
+
+    fun addAssistantMessage(
+        sessionId: String,
+        content: String,
+        source: String = "agent",
+        interlocutorName: String? = null,
+    ): ChatMessage? =
+        addChatMessage(
+            sessionId = sessionId,
+            role = "assistant",
+            content = content,
+            source = source,
+            interlocutorName = interlocutorName,
+        )
+
+    private fun addChatMessage(
+        sessionId: String,
+        role: String,
+        content: String,
+        source: String,
+        interlocutorName: String? = null,
+    ): ChatMessage? {
         val sanitizedSessionId = sanitizeSessionId(sessionId)
         val sanitizedContent = content.trim()
         if (sanitizedContent.isBlank()) {
@@ -558,9 +645,10 @@ class DashboardStateStore(
             }
             addChatMessageLocked(
                 sessionId = sanitizedSessionId,
-                role = "user",
+                role = role,
                 content = sanitizedContent,
                 source = source,
+                interlocutorName = interlocutorName,
                 emitEvent = true
             )
         }
@@ -568,6 +656,24 @@ class DashboardStateStore(
 
     fun resolveSessionForRootInput(rootInputId: String): String? =
         synchronized(lock) { rootInputSessionMap[rootInputId] }
+
+    fun clearSessionForRootInput(rootInputId: String) {
+        synchronized(lock) {
+            rootInputSessionMap.remove(rootInputId)
+        }
+    }
+
+    fun publishActionControlUpdate(type: String, data: Map<String, Any?> = emptyMap()) {
+        enqueueTransport(
+            TransportMessage.ActionControlEvent(
+                payload = mapOf(
+                    "type" to type,
+                    "ts" to System.currentTimeMillis(),
+                    "data" to data,
+                )
+            )
+        )
+    }
 
     fun nextSequenceNumber(sessionId: String): Long {
         synchronized(lock) {
@@ -598,12 +704,44 @@ class DashboardStateStore(
         }
     }
 
-    override fun close() {
+    fun subscribeActionControl(): DashboardFlowSubscription {
+        val channel = Channel<String>(SUBSCRIBER_CHANNEL_CAPACITY)
         synchronized(lock) {
-            subscribers.forEach { it.close() }
+            actionControlSubscribers.add(channel)
+        }
+        return DashboardFlowSubscription(channel) {
+            synchronized(lock) {
+                actionControlSubscribers.remove(channel)
+            }
+            channel.close()
+        }
+    }
+
+    fun chatMessagePayload(message: ChatMessage): Map<String, Any?> =
+        mapOf(
+            "id" to message.id,
+            "role" to message.role,
+            "content" to message.content,
+            "source" to message.source,
+            "created_at_ms" to message.createdAtMs,
+            "interlocutor" to message.interlocutor,
+            "sequence" to message.sequence
+        )
+
+    override fun close() {
+        transportChannel.close()
+        @Suppress("BlockingMethodInNonBlockingContext")
+        kotlinx.coroutines.runBlocking {
+            transportJob.join()
+        }
+        transportScope.cancel()
+        synchronized(lock) {
+            subscribers.forEach { it.channel.close() }
             subscribers.clear()
             chatSubscribers.values.forEach { set -> set.forEach { it.close() } }
             chatSubscribers.clear()
+            actionControlSubscribers.forEach { it.close() }
+            actionControlSubscribers.clear()
         }
     }
 
@@ -656,22 +794,25 @@ class DashboardStateStore(
         }
     }
 
-    private fun broadcastToSubscribers(payloadJson: String) {
+    private fun broadcastToSubscribers(event: AgentEvent, payloadJson: String) {
         val subscriberSnapshot = synchronized(lock) { subscribers.toList() }
         if (subscriberSnapshot.isEmpty()) {
             return
         }
-        val staleSubscribers = mutableListOf<Channel<String>>()
-        subscriberSnapshot.forEach { channel ->
-            val result = channel.trySend(payloadJson)
+        val staleSubscribers = mutableListOf<EventSubscriber>()
+        subscriberSnapshot.forEach { subscriber ->
+            if (!subscriber.accepts(event)) {
+                return@forEach
+            }
+            val result = subscriber.channel.trySend(payloadJson)
             if (result.isFailure && result.isClosed) {
-                staleSubscribers.add(channel)
+                staleSubscribers.add(subscriber)
             } else if (result.isFailure) {
                 // Buffer full — drop oldest and retry
-                channel.tryReceive()
-                val retryResult = channel.trySend(payloadJson)
+                subscriber.channel.tryReceive()
+                val retryResult = subscriber.channel.trySend(payloadJson)
                 if (retryResult.isFailure && retryResult.isClosed) {
-                    staleSubscribers.add(channel)
+                    staleSubscribers.add(subscriber)
                 }
             }
         }
@@ -737,19 +878,21 @@ class DashboardStateStore(
         session.messages.addLast(message)
         chatSessions[sessionId] = session.copy(updatedAtMs = now)
         if (emitEvent) {
-            broadcastChatEvent(
-                sessionId = sessionId,
-                payload = mapOf(
-                    "type" to "message",
-                    "session_id" to sessionId,
-                    "message" to mapOf(
-                        "id" to message.id,
-                        "role" to message.role,
-                        "content" to message.content,
-                        "source" to message.source,
-                        "created_at_ms" to message.createdAtMs,
-                        "interlocutor" to message.interlocutor,
-                        "sequence" to message.sequence
+            enqueueTransport(
+                TransportMessage.ChatEvent(
+                    sessionId = sessionId,
+                    payload = mapOf(
+                        "type" to "message",
+                        "session_id" to sessionId,
+                        "message" to mapOf(
+                            "id" to message.id,
+                            "role" to message.role,
+                            "content" to message.content,
+                            "source" to message.source,
+                            "created_at_ms" to message.createdAtMs,
+                            "interlocutor" to message.interlocutor,
+                            "sequence" to message.sequence
+                        )
                     )
                 )
             )
@@ -795,9 +938,36 @@ class DashboardStateStore(
             messageCount = session.messages.size
         )
 
-    private fun broadcastChatEvent(sessionId: String, payload: Map<String, Any?>) {
-        val payloadJson = mapper.writeValueAsString(payload)
-        val sessionSubscribers = chatSubscribers[sessionId] ?: return
+    private fun enqueueTransport(message: TransportMessage) {
+        val result = transportChannel.trySend(message)
+        if (result.isSuccess) {
+            return
+        }
+        transportChannel.tryReceive()
+        transportChannel.trySend(message)
+    }
+
+    private suspend fun transportLoop() {
+        for (message in transportChannel) {
+            when (message) {
+                is TransportMessage.InstrumentationEvent -> {
+                    val payloadJson = mapper.writeValueAsString(message.event)
+                    broadcastToSubscribers(message.event, payloadJson)
+                }
+                is TransportMessage.ChatEvent -> {
+                    val payloadJson = mapper.writeValueAsString(message.payload)
+                    broadcastChatPayload(message.sessionId, payloadJson)
+                }
+                is TransportMessage.ActionControlEvent -> {
+                    val payloadJson = mapper.writeValueAsString(message.payload)
+                    broadcastActionControlPayload(payloadJson)
+                }
+            }
+        }
+    }
+
+    private fun broadcastChatPayload(sessionId: String, payloadJson: String) {
+        val sessionSubscribers = synchronized(lock) { chatSubscribers[sessionId]?.toSet() } ?: return
         val staleSubscribers = mutableListOf<Channel<String>>()
         sessionSubscribers.forEach { channel ->
             val result = channel.trySend(payloadJson)
@@ -808,9 +978,38 @@ class DashboardStateStore(
                 channel.trySend(payloadJson)
             }
         }
-        sessionSubscribers.removeAll(staleSubscribers.toSet())
-        if (sessionSubscribers.isEmpty()) {
-            chatSubscribers.remove(sessionId)
+        if (staleSubscribers.isNotEmpty()) {
+            synchronized(lock) {
+                chatSubscribers[sessionId]?.removeAll(staleSubscribers.toSet())
+                if (chatSubscribers[sessionId].isNullOrEmpty()) {
+                    chatSubscribers.remove(sessionId)
+                }
+            }
+        }
+    }
+
+    private fun broadcastActionControlPayload(payloadJson: String) {
+        val subscriberSnapshot = synchronized(lock) { actionControlSubscribers.toSet() }
+        if (subscriberSnapshot.isEmpty()) {
+            return
+        }
+        val staleSubscribers = mutableListOf<Channel<String>>()
+        subscriberSnapshot.forEach { channel ->
+            val result = channel.trySend(payloadJson)
+            if (result.isFailure && result.isClosed) {
+                staleSubscribers.add(channel)
+            } else if (result.isFailure) {
+                channel.tryReceive()
+                val retryResult = channel.trySend(payloadJson)
+                if (retryResult.isFailure && retryResult.isClosed) {
+                    staleSubscribers.add(channel)
+                }
+            }
+        }
+        if (staleSubscribers.isNotEmpty()) {
+            synchronized(lock) {
+                actionControlSubscribers.removeAll(staleSubscribers.toSet())
+            }
         }
     }
 
@@ -1006,8 +1205,14 @@ class DashboardStateStore(
         const val MAX_SESSION_TITLE_CHARS: Int = 80
         const val MAX_SESSION_ID_GENERATION_ATTEMPTS: Int = 4
         const val SUBSCRIBER_CHANNEL_CAPACITY: Int = 1_000
+        const val TRANSPORT_CHANNEL_CAPACITY: Int = 2_048
         const val MAX_PHASE_TIMINGS: Int = 200
         val PLANNER_CALL_SITES: Set<String> = setOf("input", "thought", "impulse")
+        val ACTION_CONTROL_STREAM_EVENT_TYPES: Set<String> = setOf(
+            "action_staged",
+            "action_executed",
+            "action_denied",
+        )
         val SNAPSHOT_HEAVY_EVENT_TYPES: Set<String> = setOf(
             "llm_raw_response",
         )
@@ -1069,6 +1274,8 @@ class DashboardFlowSubscription(
     private val onClose: () -> Unit,
 ) : Closeable {
     fun asFlow(): Flow<String> = channel.receiveAsFlow()
+
+    internal fun asReceiveChannel(): ReceiveChannel<String> = channel
 
     suspend fun receive(): String = channel.receive()
 

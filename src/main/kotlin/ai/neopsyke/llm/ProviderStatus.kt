@@ -36,13 +36,14 @@ interface LlmProviderStatusChecker {
 
 private class HttpModelsProviderStatusChecker(
     private val providerLabel: String,
-    private val missingApiKeyEnvVar: String,
+    private val missingApiKeyEnvVar: String?,
     private val apiKey: String,
     private val baseUrl: String,
     private val timeoutMs: Long,
     private val modelsPath: String = "models",
-    private val apiKeyHeaderName: String = "Authorization",
+    private val apiKeyHeaderName: String? = "Authorization",
     private val apiKeyHeaderValuePrefix: String = "Bearer ",
+    private val apiKeyRequired: Boolean = true,
     private val extraHeaders: Map<String, String> = emptyMap(),
 ) : LlmProviderStatusChecker {
     override fun check(): ProviderStatus {
@@ -53,22 +54,23 @@ private class HttpModelsProviderStatusChecker(
             return unavailable("Invalid $providerLabel base URL: $baseUrl")
         }
 
-        if (apiKey.isBlank()) {
-            return unavailable("$missingApiKeyEnvVar is missing.")
+        if (apiKeyRequired && apiKey.isBlank()) {
+            return unavailable("${missingApiKeyEnvVar ?: "API key"} is missing.")
         }
 
         val httpClient = OkHttpClient.Builder()
             .callTimeout(Duration.ofMillis(timeoutMs))
             .build()
-        val request = Request.Builder()
+        val requestBuilder = Request.Builder()
             .url(buildHealthModelsUrl(baseUrl = normalizedBaseUrl, modelsPath = modelsPath))
-            .header(apiKeyHeaderName, "$apiKeyHeaderValuePrefix$apiKey")
             .header("Accept", "application/json")
             .apply {
                 extraHeaders.forEach { (name, value) -> header(name, value) }
             }
-            .get()
-            .build()
+        if (apiKey.isNotBlank() && !apiKeyHeaderName.isNullOrBlank()) {
+            requestBuilder.header(apiKeyHeaderName, "$apiKeyHeaderValuePrefix$apiKey")
+        }
+        val request = requestBuilder.get().build()
 
         return try {
             httpClient.newCall(request).execute().use { response ->
@@ -123,6 +125,24 @@ class MistralProviderStatusChecker(
             apiKey = apiKey,
             baseUrl = baseUrl,
             timeoutMs = timeoutMs
+        ).check()
+}
+
+class AnthropicProviderStatusChecker(
+    private val apiKey: String,
+    private val baseUrl: String = "https://api.anthropic.com/v1",
+    private val timeoutMs: Long = 4_000,
+) : LlmProviderStatusChecker {
+    override fun check(): ProviderStatus =
+        HttpModelsProviderStatusChecker(
+            providerLabel = "anthropic",
+            missingApiKeyEnvVar = "ANTHROPIC_API_KEY",
+            apiKey = apiKey,
+            baseUrl = baseUrl,
+            timeoutMs = timeoutMs,
+            apiKeyHeaderName = "x-api-key",
+            apiKeyHeaderValuePrefix = "",
+            extraHeaders = mapOf("anthropic-version" to "2023-06-01")
         ).check()
 }
 
@@ -187,6 +207,23 @@ class OpenAiProviderStatusChecker(
             apiKey = apiKey,
             baseUrl = baseUrl,
             timeoutMs = timeoutMs
+        ).check()
+}
+
+class OllamaProviderStatusChecker(
+    private val apiKey: String,
+    private val baseUrl: String = "http://localhost:11434/api",
+    private val timeoutMs: Long = 4_000,
+) : LlmProviderStatusChecker {
+    override fun check(): ProviderStatus =
+        HttpModelsProviderStatusChecker(
+            providerLabel = "ollama",
+            missingApiKeyEnvVar = null,
+            apiKey = apiKey,
+            baseUrl = baseUrl,
+            timeoutMs = timeoutMs,
+            modelsPath = "tags",
+            apiKeyRequired = false
         ).check()
 }
 

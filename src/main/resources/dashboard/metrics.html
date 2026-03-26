@@ -49,6 +49,7 @@
       text-decoration: none;
     }
     .ghost-btn:hover { border-color: var(--accent); color: var(--accent); }
+    body.embedded .nav-links a.ghost-btn { display: none; }
     .status { font-size: 12px; color: var(--muted); }
 
     .main-scroll {
@@ -174,6 +175,7 @@
       <a class="ghost-btn" href="/" target="_blank" rel="noopener noreferrer">Conversations</a>
       <a class="ghost-btn" href="/dashboard" target="_blank" rel="noopener noreferrer">Observability</a>
       <a class="ghost-btn" href="/goals" target="_blank" rel="noopener noreferrer">Goals</a>
+      <a class="ghost-btn" href="/action-control" target="_blank" rel="noopener noreferrer">Action Control</a>
       <div class="status" id="status">connecting...</div>
     </div>
   </header>
@@ -1037,8 +1039,31 @@
       }
     }
 
+    const usingShellTransport = window.self !== window.top;
+    let dashboardSource = null;
+    let embeddedVisible = !usingShellTransport;
+    let bootComplete = false;
+    const pendingShellEvents = [];
+
+    function handleShellDashboardEvent(eventName, payload) {
+      if (eventName !== "agent") return;
+      try {
+        applyEvent(JSON.parse(payload));
+      } catch (err) {
+        console.error("[metrics] failed to parse shell payload", err, payload);
+      }
+    }
+
+    function flushPendingShellEvents() {
+      if (!bootComplete) return;
+      while (pendingShellEvents.length > 0) {
+        const item = pendingShellEvents.shift();
+        handleShellDashboardEvent(item.eventName, item.payload);
+      }
+    }
+
     async function pollLlmStats(force = false) {
-      if (document.visibilityState === "hidden" && !force) {
+      if ((document.visibilityState === "hidden" || !embeddedVisible) && !force) {
         llmStatsStatus = "paused";
         updateLlmStatsPollingStatus();
         clearLlmStatsTimer();
@@ -1059,6 +1084,12 @@
     }
 
     function scheduleLlmStatsFetch(immediate = true) {
+      if (!embeddedVisible) {
+        clearLlmStatsTimer();
+        llmStatsStatus = "paused";
+        updateLlmStatsPollingStatus();
+        return;
+      }
       llmStatsPollingPaused = false;
       updateLlmStatsPollingStatus();
       clearLlmStatsTimer();
@@ -1066,6 +1097,43 @@
         pollLlmStats();
       } else {
         scheduleNextLlmStatsPoll(LLM_STATS_BASE_POLL_MS);
+      }
+    }
+
+    function connectDashboardStream() {
+      const statusEl = document.getElementById("status");
+      if (usingShellTransport || dashboardSource || !embeddedVisible) return;
+      const es = new EventSource("/api/dashboard/events");
+      dashboardSource = es;
+      es.addEventListener("open", () => { statusEl.textContent = "connected"; });
+      es.addEventListener("error", () => { statusEl.textContent = "reconnecting..."; });
+      es.addEventListener("agent", (msg) => {
+        try {
+          applyEvent(JSON.parse(msg.data));
+        } catch (err) {
+          console.error("[metrics] failed to parse SSE payload", err, msg && msg.data);
+        }
+      });
+    }
+
+    function disconnectDashboardStream() {
+      if (!dashboardSource) return;
+      dashboardSource.close();
+      dashboardSource = null;
+    }
+
+    function setEmbeddedVisibility(visible) {
+      embeddedVisible = visible;
+      if (embeddedVisible) {
+        connectDashboardStream();
+        if (!llmStatsPollingPaused) {
+          scheduleLlmStatsFetch(true);
+        }
+      } else {
+        disconnectDashboardStream();
+        clearLlmStatsTimer();
+        llmStatsStatus = "paused";
+        updateLlmStatsPollingStatus();
       }
     }
 
@@ -1087,10 +1155,13 @@
         state.limits = snapshot.limits || {};
         state.storeStats = snapshot.storeStats || {};
       } catch (err) {
+        statusEl.textContent = "failed to load snapshot: " + (err && err.message ? err.message : "unknown");
         console.error("[metrics] failed to load initial snapshot", err);
       }
 
       render();
+      bootComplete = true;
+      flushPendingShellEvents();
       scheduleLlmStatsFetch();
 
       // Event listeners for controls
@@ -1113,7 +1184,7 @@
         scheduleLlmStatsFetch(true);
       });
       document.addEventListener("visibilitychange", () => {
-        if (document.visibilityState === "hidden") {
+        if (document.visibilityState === "hidden" || !embeddedVisible) {
           clearLlmStatsTimer();
           llmStatsStatus = "paused";
           updateLlmStatsPollingStatus();
@@ -1126,22 +1197,33 @@
         }
       });
 
-      // SSE connection
-      const es = new EventSource("/api/obs/events");
-      es.addEventListener("open", () => { statusEl.textContent = "connected"; });
-      es.addEventListener("error", () => { statusEl.textContent = "reconnecting..."; });
-      es.addEventListener("agent", (msg) => {
-        try {
-          applyEvent(JSON.parse(msg.data));
-        } catch (err) {
-          console.error("[metrics] failed to parse SSE payload", err, msg && msg.data);
-        }
-      });
-      window.addEventListener("beforeunload", () => { es.close(); });
-      window.addEventListener("pagehide", () => { es.close(); });
+      connectDashboardStream();
+      window.addEventListener("beforeunload", () => { disconnectDashboardStream(); });
+      window.addEventListener("pagehide", () => { disconnectDashboardStream(); });
     }
 
     window.addEventListener("resize", () => renderStmChart());
+    if (window.self !== window.top) {
+      document.body.classList.add("embedded");
+    }
+    window.addEventListener("message", (event) => {
+      if (event.origin !== window.location.origin) return;
+      if (!event.data || typeof event.data.type !== "string") return;
+      if (event.data.type === "neopsyke-shell-visibility") {
+        setEmbeddedVisibility(Boolean(event.data.visible));
+        return;
+      }
+      if (event.data.type === "neopsyke-dashboard-bootstrap") {
+        pendingShellEvents.push(...(event.data.events || []));
+        flushPendingShellEvents();
+        return;
+      }
+      if (event.data.type === "neopsyke-dashboard-event") {
+        pendingShellEvents.push({ eventName: event.data.eventName, payload: event.data.payload });
+        flushPendingShellEvents();
+      }
+    });
+
     boot();
   </script>
 </body>

@@ -1,0 +1,35 @@
+connector_id: gmail
+display_name: Gmail
+vendor: pending-review
+description: >
+  Curated Gmail connector definition. The concrete external connector command and
+  pinned tool-description digest are intentionally unset until a secure
+  published connector is selected and reviewed.
+mode: stdio
+command: ""
+allowed_tools:
+  - gmail.search_messages
+  - gmail.get_message
+secret_handles:
+  - GMAIL_CLIENT_ID
+  - GMAIL_CLIENT_SECRET
+  - GMAIL_REFRESH_TOKEN
+action_manifests:
+  - action_type: gmail_observe_search
+    tool_name: gmail.search_messages
+    planner_description: "gmail_observe_search: search Gmail messages with a JSON query payload."
+    payload_guidance: >
+      JSON object with search criteria such as query, label_ids, max_results, or
+      thread filters.
+    payload_schema_example: '{"query":"from:alice newer_than:7d","max_results":10}'
+    effect_class: OBSERVE
+    requires_follow_up_thought: true
+    follow_up_prefix: Gmail search completed.
+  - action_type: gmail_observe_message
+    tool_name: gmail.get_message
+    planner_description: "gmail_observe_message: fetch a Gmail message by id."
+    payload_guidance: JSON object with a required message_id field.
+    payload_schema_example: '{"message_id":"185f6ab42b9"}'
+    effect_class: OBSERVE
+    requires_follow_up_thought: true
+    follow_up_prefix: Gmail message retrieval completed.

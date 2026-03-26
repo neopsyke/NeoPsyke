@@ -32,6 +32,7 @@ enum class RecallIntent {
     GENERAL,
     EPISODIC,
     LESSON,
+    EVIDENCE,
     USER_PREFERENCE,
     FACT,
     GOAL,

@@ -1,8 +1,12 @@
 package ai.neopsyke.agent.superego
 
-import ai.neopsyke.agent.actions.ActionRegistry
+import ai.neopsyke.agent.cortex.motor.actions.control.ActionAuthorizationPolicy
+import ai.neopsyke.agent.cortex.motor.actions.control.ConfiguredActionAuthorizationPolicy
+import ai.neopsyke.agent.cortex.motor.actions.ActionRegistry
 import ai.neopsyke.agent.model.ActionType
 import ai.neopsyke.agent.config.AgentConfig
+import ai.neopsyke.agent.model.AuthorizationDecision
+import ai.neopsyke.agent.model.AuthorizationProgress
 import ai.neopsyke.agent.model.DialogueRole
 import ai.neopsyke.agent.model.GateDecision
 import ai.neopsyke.agent.model.OriginSource
@@ -14,14 +18,13 @@ import ai.neopsyke.instrumentation.AgentEvent
 import ai.neopsyke.instrumentation.AgentEvents
 import ai.neopsyke.instrumentation.AgentInstrumentation
 import ai.neopsyke.instrumentation.NoopAgentInstrumentation
-import ai.neopsyke.llm.ChatMessage
 import ai.neopsyke.llm.ChatModelClient
 import ai.neopsyke.llm.ChatRole
 
 class Superego(
     private val modelClient: ChatModelClient,
     private val config: AgentConfig,
-    private val actionRegistry: ActionRegistry = ActionRegistry.empty(),
+    actionRegistry: ActionRegistry = ActionRegistry.empty(),
     private val modelTokenWeight: Double = DEFAULT_MODEL_TOKEN_WEIGHT,
     private val modelContextWindow: Int? = null,
     private val modelReasoningOverhead: Double = DEFAULT_REASONING_OVERHEAD,
@@ -30,13 +33,36 @@ class Superego(
     private val escalationModelContextWindow: Int? = null,
     private val escalationModelReasoningOverhead: Double = DEFAULT_REASONING_OVERHEAD,
     private val policy: SuperegoPolicy = SuperegoPolicy,
+    private val authorizationPolicy: ActionAuthorizationPolicy = ConfiguredActionAuthorizationPolicy(),
     private val instrumentation: AgentInstrumentation = NoopAgentInstrumentation,
 ) {
-    private val deterministicConscience = SuperegoDeterministicConscience(config, actionRegistry)
+    @Volatile
+    private var actionRegistry: ActionRegistry = actionRegistry
     private val primaryEngine: SingleStageSuperegoReviewEngine = buildPrimaryEngine()
     private val reviewEngine: SuperegoReviewEngine = buildReviewEngine(primaryEngine)
 
+    fun setActionRegistry(actionRegistry: ActionRegistry) {
+        this.actionRegistry = actionRegistry
+    }
+
     fun review(action: PendingAction, context: SuperegoContext): GateDecision {
+        val authorizationDecision = reviewAuthorization(action, context)
+        return GateDecision(
+            allow = authorizationDecision.progress != AuthorizationProgress.DENY,
+            reason = if (authorizationDecision.progress == AuthorizationProgress.DENY) {
+                authorizationDecision.reason
+            } else {
+                ""
+            },
+            reasonCode = if (authorizationDecision.progress == AuthorizationProgress.DENY) {
+                authorizationDecision.reasonCode
+            } else {
+                null
+            },
+        )
+    }
+
+    fun reviewAuthorization(action: PendingAction, context: SuperegoContext): AuthorizationDecision {
         val resolvedDirectives = policy.forAction(action.type, actionRegistry, origin = context.origin).all
         val lastUserTurn = context.recentDialogue.lastOrNull { it.role == DialogueRole.USER }?.content ?: "none"
         instrumentation.emit(
@@ -54,7 +80,7 @@ class Superego(
             )
             instrumentation.emit(
                 AgentEvent(
-                    type = "superego_deterministic_review",
+                    type = "superego_deterministic_judgement",
                     data = mapOf(
                         "action_id" to action.id,
                         "allow" to false,
@@ -72,15 +98,33 @@ class Superego(
                     reasonCode = deterministicDecision.reasonCode
                 )
             )
-            return GateDecision(
-                allow = false,
+            return AuthorizationDecision(
+                progress = AuthorizationProgress.DENY,
+                commitMode = ai.neopsyke.agent.model.CommitMode.NOT_APPLICABLE,
                 reason = reason,
                 reasonCode = deterministicDecision.reasonCode
             )
         }
+        val policyAuthorization = policy.authorize(
+            action = action,
+            conversationContext = context.conversationContext,
+            actionRegistry = actionRegistry,
+            authorizationPolicy = authorizationPolicy,
+        )
+        if (policyAuthorization.progress == AuthorizationProgress.DENY) {
+            instrumentation.emit(
+                AgentEvents.superegoReviewOutput(
+                    actionId = action.id,
+                    allow = false,
+                    reason = policyAuthorization.reason,
+                    reasonCode = policyAuthorization.reasonCode
+                )
+            )
+            return policyAuthorization
+        }
         instrumentation.emit(
             AgentEvent(
-                type = "superego_deterministic_review",
+                type = "superego_deterministic_judgement",
                 data = mapOf(
                     "action_id" to action.id,
                     "allow" to true
@@ -105,7 +149,7 @@ class Superego(
                     reasonCode = null
                 )
             )
-            return GateDecision(allow = true, reason = "")
+            return policyAuthorization
         }
 
         val promptAllocation = buildMessages(action, context, resolvedDirectives)
@@ -126,11 +170,20 @@ class Superego(
             AgentEvents.superegoReviewOutput(
                 actionId = action.id,
                 allow = decision.allow,
-                reason = decision.reason,
-                reasonCode = decision.reasonCode
+                reason = if (decision.allow) policyAuthorization.reason else decision.reason,
+                reasonCode = if (decision.allow) policyAuthorization.reasonCode else decision.reasonCode
             )
         )
-        return decision
+        return if (!decision.allow) {
+            AuthorizationDecision(
+                progress = AuthorizationProgress.DENY,
+                commitMode = ai.neopsyke.agent.model.CommitMode.NOT_APPLICABLE,
+                reason = decision.reason,
+                reasonCode = decision.reasonCode,
+            )
+        } else {
+            policyAuthorization
+        }
     }
 
     private fun buildPrimaryEngine(): SingleStageSuperegoReviewEngine =
@@ -176,6 +229,9 @@ class Superego(
             instrumentation = instrumentation
         )
     }
+
+    private val deterministicConscience: SuperegoDeterministicConscience
+        get() = SuperegoDeterministicConscience(config, actionRegistry)
 
     private fun buildMessages(
         action: PendingAction,
@@ -274,5 +330,5 @@ class Superego(
     }
 
     private fun shouldBypassLlmReview(action: PendingAction, context: SuperegoContext): Boolean =
-        action.type == ActionType.REFLECT && context.origin?.source == OriginSource.ID
+        action.type == ActionType.REFLECT_INTERNAL && context.origin?.source == OriginSource.ID
 }

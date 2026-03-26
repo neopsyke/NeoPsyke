@@ -7,10 +7,12 @@ import com.fasterxml.jackson.databind.node.ObjectNode
 import java.util.concurrent.ConcurrentHashMap
 
 internal enum class LlmProvider {
+    ANTHROPIC,
     OPENAI,
     GROQ,
     GEMINI,
     MISTRAL,
+    OLLAMA,
 }
 
 internal data class StructuredOutputAdaptation(
@@ -234,10 +236,12 @@ private data class StructuredOutputModelCapabilities(
     companion object {
         fun forProvider(provider: LlmProvider, @Suppress("UNUSED_PARAMETER") modelName: String): StructuredOutputModelCapabilities {
             return when (provider) {
+                LlmProvider.ANTHROPIC -> nativeJsonSchemaDefaults()
                 LlmProvider.OPENAI -> openAiCompatibleDefaults()
                 LlmProvider.GROQ -> openAiCompatibleDefaults()
                 LlmProvider.GEMINI -> openAiCompatibleDefaults()
                 LlmProvider.MISTRAL -> openAiCompatibleDefaults()
+                LlmProvider.OLLAMA -> nativeJsonSchemaDefaults()
             }
         }
 
@@ -247,6 +251,14 @@ private data class StructuredOutputModelCapabilities(
                 supportsStrictJsonSchema = true,
                 disallowedSchemaKeywords = OPENAI_COMPAT_DISALLOWED_SCHEMA_KEYWORDS,
                 requiresAllObjectPropertiesRequired = true
+            )
+
+        private fun nativeJsonSchemaDefaults(): StructuredOutputModelCapabilities =
+            StructuredOutputModelCapabilities(
+                supportsJsonSchema = true,
+                supportsStrictJsonSchema = true,
+                disallowedSchemaKeywords = emptySet(),
+                requiresAllObjectPropertiesRequired = false
             )
 
         private val OPENAI_COMPAT_DISALLOWED_SCHEMA_KEYWORDS: Set<String> = setOf(

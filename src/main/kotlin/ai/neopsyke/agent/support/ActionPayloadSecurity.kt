@@ -71,7 +71,7 @@ object ActionPayloadSecurity {
         }
     }
 
-    // ── MCP-time timezone validation ─────────────────────────────────
+    // ── Timezone validation ───────────────────────────────────────────
 
     val TIMEZONE_REGEX: Regex = Regex("""^[A-Za-z0-9_\-+/]{1,80}$""")
 

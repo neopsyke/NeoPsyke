@@ -3,14 +3,14 @@ package ai.neopsyke.agent.goal
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import ai.neopsyke.agent.actions.async.AsyncActionHandle
-import ai.neopsyke.agent.actions.async.AsyncActionWait
-import ai.neopsyke.agent.actions.async.AsyncOperationEvent
-import ai.neopsyke.agent.actions.async.AsyncOperationEventStatus
-import ai.neopsyke.agent.actions.async.AsyncOperationProvider
-import ai.neopsyke.agent.actions.async.AsyncOperationRegistry
-import ai.neopsyke.agent.actions.async.AsyncOperationStatus
-import ai.neopsyke.agent.actions.async.AsyncResumeMode
+import ai.neopsyke.agent.cortex.motor.actions.async.AsyncActionHandle
+import ai.neopsyke.agent.cortex.motor.actions.async.AsyncActionWait
+import ai.neopsyke.agent.cortex.motor.actions.async.AsyncOperationEvent
+import ai.neopsyke.agent.cortex.motor.actions.async.AsyncOperationEventStatus
+import ai.neopsyke.agent.cortex.motor.actions.async.AsyncOperationProvider
+import ai.neopsyke.agent.cortex.motor.actions.async.AsyncOperationRegistry
+import ai.neopsyke.agent.cortex.motor.actions.async.AsyncOperationStatus
+import ai.neopsyke.agent.cortex.motor.actions.async.AsyncResumeMode
 import ai.neopsyke.agent.cortex.sensory.GoalRuntimeCue
 import ai.neopsyke.agent.model.ActionExecutionStatus
 import ai.neopsyke.agent.model.ActionOutcome
@@ -123,7 +123,7 @@ class GoalManagerTest {
                 action = PendingAction(
                     id = 1L,
                     urgency = Urgency.MEDIUM,
-                    type = ActionType.REFLECT,
+                    type = ActionType.REFLECT_INTERNAL,
                     payload = """{"note":"done"}""",
                     summary = "done",
                     rootInputId = work.rootInputId,
@@ -244,6 +244,36 @@ class GoalManagerTest {
                         (it.data["message"] as? String)?.contains("WAITING without async handles") == true
                 }
             )
+
+            manager.stop()
+        } finally {
+            root.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `delete all operation removes all goals and workspaces`() {
+        val root = Files.createTempDirectory("psyke-pm-delete-all")
+        try {
+            val manager = GoalManager(
+                config = testConfig(root),
+                store = GoalStore(root),
+                planner = DeterministicGoalPlanner(),
+            )
+            manager.start(testScope())
+
+            val firstId = manager.createGoal("Delete me first")
+            val secondId = manager.createGoal("Delete me second")
+            assertTrue(Files.exists(root.resolve(firstId)))
+            assertTrue(Files.exists(root.resolve(secondId)))
+
+            val result = manager.executeOperation(GoalOperationRequest(operation = GoalOperation.DELETE_ALL))
+
+            assertTrue(result.success)
+            assertEquals("Deleted 2 goals.", result.message)
+            assertTrue(manager.allGoals().isEmpty())
+            assertFalse(Files.exists(root.resolve(firstId)))
+            assertFalse(Files.exists(root.resolve(secondId)))
 
             manager.stop()
         } finally {
@@ -423,7 +453,7 @@ class GoalManagerTest {
                 action = PendingAction(
                     id = 2L,
                     urgency = Urgency.MEDIUM,
-                    type = ActionType.REFLECT,
+                    type = ActionType.REFLECT_INTERNAL,
                     payload = """{"note":"done"}""",
                     summary = "done",
                     rootInputId = work.rootInputId,
@@ -884,6 +914,55 @@ class GoalManagerTest {
         }
     }
 
+    @Test
+    fun `cron timer wake on ACTIVE goal with READY step emits work-ready cue`() {
+        val root = Files.createTempDirectory("psyke-pm-cron-wake-active")
+        try {
+            val signals = CopyOnWriteArrayList<GoalRuntimeCue>()
+            val manager = GoalManager(
+                config = testConfig(root),
+                store = GoalStore(root),
+                planner = DeterministicGoalPlanner(),
+                cueEmitter = { cue -> signals += cue },
+            )
+            manager.start(testScope())
+            // Use a far-future cron so it doesn't fire on its own during the test
+            val future = ZonedDateTime.now().plusHours(2).withSecond(0).withNano(0)
+            val cronExpression = "${future.minute} ${future.hour} * * *"
+
+            val id = manager.createGoal(
+                instruction = "Send weather report on cron schedule",
+                title = "Weather cron test",
+                cronExpression = cronExpression,
+            )
+            assertTrue(id.isNotBlank())
+            val state = manager.goalStatus(id)
+            assertNotNull(state)
+            assertEquals(GoalStatus.ACTIVE, state.goal.status)
+            assertEquals(StepStatus.READY, state.goal.plan.steps.first().status)
+
+            // No work-ready cue should have been emitted at creation for a cron goal
+            assertTrue(signals.none { it.goalId == id })
+
+            // Simulate the cron timer firing by invoking onTimerWake reflectively
+            val onTimerWake = GoalManager::class.java.getDeclaredMethod(
+                "onTimerWake", String::class.java, Long::class.javaPrimitiveType
+            )
+            onTimerWake.isAccessible = true
+            onTimerWake.invoke(manager, id, System.currentTimeMillis())
+
+            // Now a work-ready cue should have been emitted
+            val cue = signals.firstOrNull { it.goalId == id }
+            assertNotNull(cue, "Expected work-ready cue after cron timer wake on ACTIVE goal")
+            assertEquals("cron_wake_active", cue.reason)
+            assertEquals(state.goal.plan.steps.first().id, cue.stepId)
+
+            manager.stop()
+        } finally {
+            root.toFile().deleteRecursively()
+        }
+    }
+
     private fun waitUntil(timeoutMs: Long = 2_500, predicate: () -> Boolean) {
         val deadline = System.currentTimeMillis() + timeoutMs
         while (System.currentTimeMillis() < deadline) {
@@ -896,7 +975,7 @@ class GoalManagerTest {
     private fun projectAction(rootInputId: String) = PendingAction(
         id = 99L,
         urgency = Urgency.MEDIUM,
-        type = ActionType.REFLECT,
+        type = ActionType.REFLECT_INTERNAL,
         payload = """{"summary":"async start","keywords":["async"]}""",
         summary = "start async operation",
         rootInputId = rootInputId,

@@ -32,6 +32,9 @@
       align-items: center;
       justify-content: space-between;
     }
+    body.embedded header a.ghost-btn {
+      display: none;
+    }
     .status { font-size: 12px; color: var(--muted); }
 
     /* Header loop pills */
@@ -751,6 +754,7 @@
       <a class="ghost-btn" href="/" target="_blank" rel="noopener noreferrer">Conversations</a>
       <a class="ghost-btn" href="/metrics" target="_blank" rel="noopener noreferrer">Metrics</a>
       <a class="ghost-btn" href="/goals" target="_blank" rel="noopener noreferrer">Goals</a>
+      <a class="ghost-btn" href="/action-control" target="_blank" rel="noopener noreferrer">Action Control</a>
       <div class="status" id="status">connecting...</div>
     </div>
   </header>
@@ -851,6 +855,7 @@
       inFlight: { active: false, taskType: null, detail: null },
       queues: { inputs: [], thoughts: [], actions: [] },
       recentEvents: [],
+      expandedEventDetails: new Set(),
       lastSuperegoInput: null,
       lastSuperegoOutput: null,
       actionCapabilities: [],
@@ -880,7 +885,7 @@
         lastImpulseEvent: null,
         triggerThreshold: 0.5,
         pulseIntervalMs: 30000,
-        thresholdOnUrgency: true,
+        thresholdOnTension: true,
         lastPulseAt: 0
       }
     };
@@ -933,7 +938,7 @@
       "memory_consolidation_assessment", "long_term_memory_assessment",
       "convergence_thought_enqueued", "warning",
       "long_term_memory_explicit_intent_detected",
-      "memory_recall_failure",
+      "memory_recall_failure", "ambient_context_snapshot",
       "impulse_processing", "impulse_noop", "impulse_lifecycle_finalized",
       "id_impulse_fired", "id_impulse_accepted", "id_impulse_completed",
       "id_impulse_denied", "id_pregate_blocked"
@@ -985,6 +990,7 @@
       const type = String(event?.type || "");
       if (type.startsWith("id_") || type.startsWith("impulse_")) return "id";
       if (type.startsWith("planner") || type === "plan_created" || type === "plan_steps_enqueued" || type === "duplicate_plan_suppressed") return "planner";
+      if (type === "ambient_context_snapshot") return "planner";
       if (type.startsWith("superego") || type === "action_review_result" || type === "action_denied") return "superego";
       if (type.startsWith("action_")) return "action";
       if (type.includes("thought") || type === "input_processing" || type === "input_queued") return "thought";
@@ -1078,6 +1084,23 @@
         }
         case "memory_recall_start":
           return (d.provider || "") + " — " + (d.cue_preview || "");
+        case "ambient_context_snapshot": {
+          const usage = String(d.usage || "unknown");
+          const trigger = String(d.trigger || "unknown");
+          const rendered = String(d.rendered_context || "");
+          const sectionCounts = [
+            ["goals", Array.isArray(d.active_goals) ? d.active_goals.length : 0],
+            ["themes", Array.isArray(d.recent_scratchpad_themes) ? d.recent_scratchpad_themes.length : 0],
+            ["updates", Array.isArray(d.recent_useful_actions_updates) ? d.recent_useful_actions_updates.length : 0],
+            ["loops", Array.isArray(d.unresolved_open_loops) ? d.unresolved_open_loops.length : 0],
+            ["topics", Array.isArray(d.recent_exact_learning_topics) ? d.recent_exact_learning_topics.length : 0]
+          ]
+            .filter(function(entry) { return entry[1] > 0; })
+            .map(function(entry) { return entry[0] + "=" + entry[1]; })
+            .join(", ");
+          const header = usage + " / " + trigger + (sectionCounts ? " — " + sectionCounts : "");
+          return rendered ? header + "\n" + rendered : header;
+        }
         case "memory_recall_result": {
           const header = (d.hit_count || 0) + " hits, " +
             (d.recall_chars || 0) + " chars" +
@@ -1124,14 +1147,14 @@
         }
         // ── Id / Impulse events ──────────────────────────
         case "impulse_processing":
-          return (d.need_id || "impulse") + " (urg " + (d.urgency != null ? Number(d.urgency).toFixed(3) : "?") + ")" +
+          return (d.need_id || "impulse") + " (tension " + (d.tension != null ? Number(d.tension).toFixed(3) : "?") + ")" +
             (d.prompt ? "\n" + d.prompt : "");
         case "impulse_noop":
           return "noop — " + (d.need_id || "?");
         case "impulse_lifecycle_finalized":
           return (d.need_id || "?") + " — " + (d.result || "?");
         case "id_impulse_fired":
-          return (d.need_id || "?") + " urg=" + (d.urgency != null ? Number(d.urgency).toFixed(3) : "?") +
+          return (d.need_id || "?") + " tension=" + (d.tension != null ? Number(d.tension).toFixed(3) : "?") +
             " raw=" + (d.raw_value != null ? Number(d.raw_value).toFixed(3) : "?");
         case "id_impulse_accepted":
           return d.need_id || "?";
@@ -1141,6 +1164,18 @@
           return (d.need_id || "?") + " denials=" + (d.consecutive_denials || 0);
         case "id_pregate_blocked":
           return (d.need_id || "?") + " — " + (d.reason || "?");
+        case "prompt_budget_allocation": {
+          const callSite = String(d.call_site || "unknown");
+          const dropped = Number(d.dropped_section_count || 0);
+          const emitted = Array.isArray(d.emitted_section_keys) ? d.emitted_section_keys : [];
+          const droppedKeys = Array.isArray(d.dropped_section_keys) ? d.dropped_section_keys : [];
+          const ambientKept = emitted.includes("planner_ambient_context");
+          const ambientDropped = droppedKeys.includes("planner_ambient_context");
+          let line = callSite + " — dropped=" + dropped;
+          if (ambientKept) line += " ambient=kept";
+          else if (ambientDropped) line += " ambient=dropped";
+          return line;
+        }
         case "id_activity_decay":
           return (d.need_id || "?") + " " + (d.event_type || "") + " -" + (d.decay || 0) + " (" + (d.before != null ? Number(d.before).toFixed(3) : "?") + "→" + (d.after != null ? Number(d.after).toFixed(3) : "?") + ")";
         default:
@@ -1171,17 +1206,18 @@
           ? "<div class=\"tl-content\">" + escapeHtml(short(content, 300)) + "</div>"
           : "";
         let detailsHtml;
+        const detailsKey = eventDetailsKey(event, "timeline-primary");
         if (event.type === "plan_created" && Array.isArray((event.data || {}).steps) && event.data.steps.length) {
           const stepsHtml = event.data.steps
             .map((s, i) => escapeHtml((i + 1) + ". " + s))
             .join("\n");
           detailsHtml =
-            "<details class=\"tl-raw\"><summary>plan steps</summary>" +
+            "<details class=\"tl-raw\" data-event-details-key=\"" + escapeHtml(detailsKey) + "\"" + detailsOpenAttr(detailsKey) + "><summary>plan steps</summary>" +
               "<pre>" + stepsHtml + "</pre>" +
             "</details>";
         } else {
           detailsHtml =
-            "<details class=\"tl-raw\"><summary>raw</summary>" +
+            "<details class=\"tl-raw\" data-event-details-key=\"" + escapeHtml(detailsKey) + "\"" + detailsOpenAttr(detailsKey) + "><summary>raw</summary>" +
               "<pre>" + escapeHtml(fmt(event.data || {})) + "</pre>" +
             "</details>";
         }
@@ -1197,8 +1233,9 @@
         "</div>";
       }
 
+      const detailsKey = eventDetailsKey(event, "timeline-secondary");
       return "<div class=\"tl-row tl-secondary" + catClass + criticalClass + "\">" +
-        "<details>" +
+        "<details data-event-details-key=\"" + escapeHtml(detailsKey) + "\"" + detailsOpenAttr(detailsKey) + ">" +
           "<summary>" +
             "<span class=\"tl-type\">" + escapeHtml(typeLabel) + "</span> " +
             sessionChip +
@@ -1360,8 +1397,35 @@
       return short(JSON.stringify(compact), 220);
     }
 
+    function eventBaseKey(event) {
+      if (event.id != null && event.id !== "") return String(event.id);
+      const ts = event.tsIso || event.ts || "unknown-ts";
+      return String(ts) + ":" + String(event.type || "unknown-type");
+    }
+
+    function eventDetailsKey(event, section) {
+      return String(section) + ":" + eventBaseKey(event);
+    }
+
+    function detailsOpenAttr(detailsKey) {
+      return state.expandedEventDetails.has(detailsKey) ? " open" : "";
+    }
+
+    function pruneExpandedDetailsState() {
+      const validKeys = new Set();
+      state.recentEvents.forEach(function(event) {
+        validKeys.add(eventDetailsKey(event, "action"));
+        validKeys.add(eventDetailsKey(event, "timeline-primary"));
+        validKeys.add(eventDetailsKey(event, "timeline-secondary"));
+      });
+      state.expandedEventDetails.forEach(function(detailsKey) {
+        if (!validKeys.has(detailsKey)) state.expandedEventDetails.delete(detailsKey);
+      });
+    }
+
     function renderEventItem(event) {
-      return "<div class=\"item\"><details>" +
+      const detailsKey = eventDetailsKey(event, "action");
+      return "<div class=\"item\"><details data-event-details-key=\"" + escapeHtml(detailsKey) + "\"" + detailsOpenAttr(detailsKey) + ">" +
         "<summary>" +
         "<span class=\"pill\">#" + escapeHtml(event.id || "?") + " " + escapeHtml(event.type) + "</span> " +
         "<span class=\"ts\">" + escapeHtml(event.tsIso || new Date(event.ts).toISOString()) + "</span> " +
@@ -1564,7 +1628,7 @@
       const runActionCalls = metrics?.runActionCallsByType || {};
       const allActionCalls = metrics?.persistentActionCallsByType || {};
 
-      const order = ["contact_user", "web_search", "mcp_time", "website_fetch", "memory"];
+      const order = ["contact_user", "web_search", "website_fetch", "memory"];
       const sorted = list
         .slice()
         .sort((a, b) => {
@@ -1757,19 +1821,65 @@
       return "<span class=\"eta-val\">" + h + ":" + mm + ":" + ss + "</span>";
     }
 
-    /** Compute ETA seconds for a need, accounting for elapsed wall-clock time since last pulse. */
+    function clamp01(value) {
+      if (!Number.isFinite(value)) return 0;
+      return Math.max(0, Math.min(1, value));
+    }
+
+    function inverseCurveUrgency(targetUrgency, curve) {
+      const target = clamp01(targetUrgency);
+      const cfg = curve || {};
+      const type = String(cfg.type || "linear").toLowerCase();
+      if (type === "power") {
+        const exponent = Number(cfg.exponent);
+        if (!(exponent > 0)) return target;
+        return clamp01(Math.pow(target, 1 / exponent));
+      }
+      if (type === "sigmoid") {
+        const steepness = Number(cfg.steepness);
+        const midpoint = clamp01(Number(cfg.midpoint));
+        if (!(steepness > 0)) return target;
+        const rawSigmoid = function(x) {
+          return 1 / (1 + Math.exp(-steepness * (x - midpoint)));
+        };
+        const f0 = rawSigmoid(0);
+        const f1 = rawSigmoid(1);
+        const range = f1 - f0;
+        if (!Number.isFinite(range) || range === 0) return target;
+        const rawTarget = clamp01(target * range + f0);
+        if (rawTarget <= 0 || rawTarget >= 1) return rawTarget <= 0 ? 0 : 1;
+        const logit = Math.log(rawTarget / (1 - rawTarget));
+        return clamp01(midpoint + (logit / steepness));
+      }
+      if (type === "logarithmic") {
+        const scale = Number(cfg.scale);
+        if (!(scale > 0)) return target;
+        return clamp01((Math.exp(target * Math.log(1 + scale)) - 1) / scale);
+      }
+      return target;
+    }
+
+    /** Compute ETA seconds for a need using the real growth rate, curve, and pulse-based gating. */
     function needEtaSec(n, elapsedMs) {
       const id = state.id;
       const threshold = id.triggerThreshold;
       const pulseMs = id.pulseIntervalMs;
-      const useUrgency = id.thresholdOnUrgency;
+      const useUrgency = id.thresholdOnTension;
       const raw = n.rawValue || 0;
-      const urg = n.urgency || 0;
       const growthRate = n.growthRate || 0;
-      const effectiveVal = useUrgency ? urg : raw;
-      if (effectiveVal >= threshold) return 0;
-      if (growthRate <= 0) return Infinity;
-      const pulsesNeeded = Math.ceil((threshold - raw) / growthRate);
+      const curve = n.responseCurve || null;
+      const rawThreshold = useUrgency ? inverseCurveUrgency(threshold, curve) : clamp01(threshold);
+      const pulsesUntilEligible = Math.max(
+        Number(n.cooldownRemaining) || 0,
+        Number(n.backoffPulsesRemaining) || 0,
+        Number(n.inFlightPulsesRemaining) || 0
+      );
+      let pulsesUntilThreshold = 0;
+      if (raw < rawThreshold) {
+        if (growthRate <= 0) return Infinity;
+        pulsesUntilThreshold = Math.ceil((rawThreshold - raw) / growthRate);
+      }
+      const pulsesNeeded = Math.max(pulsesUntilThreshold, pulsesUntilEligible);
       const totalSec = pulsesNeeded * (pulseMs / 1000);
       return Math.max(0, totalSec - (elapsedMs / 1000));
     }
@@ -1807,7 +1917,7 @@
 
       // Meta line: pulse count, threshold, interval
       const intervalSec = (id.pulseIntervalMs / 1000).toFixed(0);
-      const threshLabel = id.thresholdOnUrgency ? "urgency" : "raw";
+      const threshLabel = id.thresholdOnTension ? "tension" : "raw";
       metaEl.textContent = "pulse #" + id.pulse + " | thr " + id.triggerThreshold.toFixed(2) + " (" + threshLabel + ") | " + intervalSec + "s interval" + (id.egoBusy ? " | ego busy" : "");
 
       // Pending impulse bar
@@ -1816,7 +1926,7 @@
       if (imp) {
         impulseBar.style.display = "";
         impulseBar.className = "id-impulse-bar " + (imp.status === "fired" ? "fired" : "fired");
-        impulseBar.innerHTML = "IMPULSE " + escapeHtml(imp.status.toUpperCase()) + " \u2014 " + escapeHtml(imp.needId) + " (urg " + (imp.urgency != null ? imp.urgency.toFixed(3) : "?") + ")";
+        impulseBar.innerHTML = "IMPULSE " + escapeHtml(imp.status.toUpperCase()) + " \u2014 " + escapeHtml(imp.needId) + " (tension " + (imp.tension != null ? imp.tension.toFixed(3) : "?") + ")";
       } else if (lastImp && lastImp.type) {
         impulseBar.style.display = "";
         const cls = lastImp.type === "denied" || lastImp.type === "failed" ? "denied"
@@ -1835,15 +1945,15 @@
       // Legend + render each need
       const legendHtml = "<div class=\"id-legend\">"
         + "<span class=\"id-legend-swatch\" style=\"background:rgba(54,195,167,0.25)\"></span>raw"
-        + "<span class=\"id-legend-swatch\" style=\"background:var(--accent);opacity:0.7\"></span>urgency"
+        + "<span class=\"id-legend-swatch\" style=\"background:var(--accent);opacity:0.7\"></span>tension"
         + "<span class=\"id-legend-swatch\" style=\"background:#e8a735;width:4px;height:8px;border-radius:50%\"></span>threshold"
         + "</div>";
       const threshold = id.triggerThreshold;
       const pulseMs = id.pulseIntervalMs;
-      const useUrgency = id.thresholdOnUrgency;
+      const useUrgency = id.thresholdOnTension;
       const rows = id.needs.map(function(n) {
         const raw = n.rawValue || 0;
-        const urg = n.urgency || 0;
+        const urg = n.tension || 0;
         const growthRate = n.growthRate || 0;
         const thresholdPct = (threshold * 100).toFixed(1);
         const effectiveVal = useUrgency ? urg : raw;
@@ -1921,12 +2031,14 @@
           if (Array.isArray(d.needs)) state.id.needs = d.needs;
           if (d.trigger_threshold != null) state.id.triggerThreshold = d.trigger_threshold;
           if (d.pulse_interval_ms != null) state.id.pulseIntervalMs = d.pulse_interval_ms;
-          if (d.threshold_on_urgency != null) state.id.thresholdOnUrgency = d.threshold_on_urgency;
-          state.id.lastPulseAt = Date.now();
+          if (d.threshold_on_tension != null) state.id.thresholdOnTension = d.threshold_on_tension;
+          if (typeof event.ts === "number" && Number.isFinite(event.ts)) {
+            state.id.lastPulseAt = event.ts;
+          }
           break;
         }
         case "id_impulse_fired":
-          state.id.pendingImpulse = { needId: event.data.need_id, status: "fired", urgency: event.data.urgency };
+          state.id.pendingImpulse = { needId: event.data.need_id, status: "fired", tension: event.data.tension };
           state.id.lastImpulseEvent = { type: "fired", needId: event.data.need_id, ts: event.ts };
           break;
         case "id_impulse_accepted":
@@ -1950,6 +2062,7 @@
     function applyEvent(event) {
       state.recentEvents.push(event);
       if (state.recentEvents.length > 2000) state.recentEvents.shift();
+      pruneExpandedDetailsState();
 
       switch (event.type) {
         case "loop_status":
@@ -2090,6 +2203,61 @@
       });
     }
 
+    const usingShellTransport = window.self !== window.top;
+    let dashboardSource = null;
+    let idCountdownTimer = null;
+    let embeddedVisible = !usingShellTransport;
+    let bootComplete = false;
+    const pendingShellEvents = [];
+
+    function handleShellDashboardEvent(eventName, payload) {
+      if (eventName !== "agent") return;
+      try {
+        applyEvent(JSON.parse(payload));
+      } catch (err) {
+        console.error("[dashboard] failed to parse shell payload", err, payload);
+      }
+    }
+
+    function flushPendingShellEvents() {
+      if (!bootComplete) return;
+      while (pendingShellEvents.length > 0) {
+        const item = pendingShellEvents.shift();
+        handleShellDashboardEvent(item.eventName, item.payload);
+      }
+    }
+
+    function connectDashboardStream() {
+      const status = document.getElementById("status");
+      if (usingShellTransport || dashboardSource || !embeddedVisible) return;
+      const es = new EventSource("/api/dashboard/events");
+      dashboardSource = es;
+      es.addEventListener("open", () => { status.textContent = "connected"; });
+      es.addEventListener("error", () => { status.textContent = "reconnecting..."; });
+      es.addEventListener("agent", (msg) => {
+        try {
+          applyEvent(JSON.parse(msg.data));
+        } catch (err) {
+          console.error("[dashboard] failed to parse SSE payload", err, msg && msg.data);
+        }
+      });
+    }
+
+    function disconnectDashboardStream() {
+      if (!dashboardSource) return;
+      dashboardSource.close();
+      dashboardSource = null;
+    }
+
+    function setEmbeddedVisibility(visible) {
+      embeddedVisible = visible;
+      if (embeddedVisible) {
+        connectDashboardStream();
+      } else {
+        disconnectDashboardStream();
+      }
+    }
+
     async function boot() {
       const status = document.getElementById("status");
       try {
@@ -2113,17 +2281,15 @@
           detail: processingDetail(state.currentProcessing)
         };
         // Hydrate Id state from snapshot events (they aren't replayed through applyEvent).
-        // We replay all id_ events so needs/impulse state is current, then anchor
-        // lastPulseAt to now so the countdown starts from the freshest pulse data.
-        var hadIdPulse = false;
+        // We replay all id_ events so needs/impulse state is current and preserve
+        // the original pulse timestamp for countdown math.
         (state.recentEvents || []).forEach(function(evt) {
           if (typeof evt.type === "string" && evt.type.startsWith("id_")) {
             applyIdEvent(evt);
-            if (evt.type === "id_pulse") hadIdPulse = true;
           }
         });
-        if (hadIdPulse) state.id.lastPulseAt = Date.now();
       } catch (err) {
+        status.textContent = "failed to load snapshot: " + (err && err.message ? err.message : "unknown");
         console.error("[dashboard] failed to load initial snapshot", err);
       }
 
@@ -2140,22 +2306,44 @@
         state.scratchpad.activeTab = "raw";
         renderScratchpadDrawer();
       });
+      document.addEventListener("toggle", (event) => {
+        const detailsEl = event.target;
+        if (!(detailsEl instanceof HTMLDetailsElement)) return;
+        if (!detailsEl.closest("#timeline, #actions")) return;
+        const detailsKey = detailsEl.dataset.eventDetailsKey;
+        if (!detailsKey) return;
+        if (detailsEl.open) state.expandedEventDetails.add(detailsKey);
+        else state.expandedEventDetails.delete(detailsKey);
+      }, true);
       render();
-      setInterval(tickIdCountdowns, 1000);
-
-      const es = new EventSource("/api/obs/events");
-      es.addEventListener("open", () => { status.textContent = "connected"; });
-      es.addEventListener("error", () => { status.textContent = "reconnecting..."; });
-      es.addEventListener("agent", (msg) => {
-        try {
-          applyEvent(JSON.parse(msg.data));
-        } catch (err) {
-          console.error("[dashboard] failed to parse SSE payload", err, msg && msg.data);
-        }
-      });
-      window.addEventListener("beforeunload", () => { es.close(); });
-      window.addEventListener("pagehide", () => { es.close(); });
+      idCountdownTimer = setInterval(tickIdCountdowns, 1000);
+      bootComplete = true;
+      flushPendingShellEvents();
+      connectDashboardStream();
+      window.addEventListener("beforeunload", () => { disconnectDashboardStream(); });
+      window.addEventListener("pagehide", () => { disconnectDashboardStream(); });
     }
+
+    if (window.self !== window.top) {
+      document.body.classList.add("embedded");
+    }
+    window.addEventListener("message", (event) => {
+      if (event.origin !== window.location.origin) return;
+      if (!event.data || typeof event.data.type !== "string") return;
+      if (event.data.type === "neopsyke-shell-visibility") {
+        setEmbeddedVisibility(Boolean(event.data.visible));
+        return;
+      }
+      if (event.data.type === "neopsyke-dashboard-bootstrap") {
+        pendingShellEvents.push(...(event.data.events || []));
+        flushPendingShellEvents();
+        return;
+      }
+      if (event.data.type === "neopsyke-dashboard-event") {
+        pendingShellEvents.push({ eventName: event.data.eventName, payload: event.data.payload });
+        flushPendingShellEvents();
+      }
+    });
 
     boot();
   </script>

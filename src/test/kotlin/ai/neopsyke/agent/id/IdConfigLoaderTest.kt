@@ -5,6 +5,7 @@ import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
@@ -21,7 +22,7 @@ class IdConfigLoaderTest {
               enabled: true
               pulse_interval_ms: 5000
               trigger_threshold: 0.6
-              threshold_on_urgency: false
+              threshold_on_tension: false
               max_consecutive_denials: 3
               backoff_pulses: 5
               max_in_flight_pulses: 15
@@ -47,13 +48,13 @@ class IdConfigLoaderTest {
         assertTrue(config.enabled)
         assertEquals(5000L, config.pulseIntervalMs)
         assertEquals(0.6, config.triggerThreshold, epsilon)
-        assertFalse(config.thresholdOnUrgency)
+        assertFalse(config.thresholdOnTension)
         assertEquals(3, config.maxConsecutiveDenials)
         assertEquals(5, config.backoffPulses)
         assertEquals(15, config.maxInFlightPulses)
         assertEquals(2, config.maxPendingImpulses)
 
-        assertEquals(1, config.needs.size)
+        assertEquals(4, config.needs.size)
         val learn = config.needs["learn"]!!
         assertEquals("curiosity drive", learn.description)
         assertEquals(0.01, learn.growthRate, epsilon)
@@ -76,33 +77,34 @@ class IdConfigLoaderTest {
         val config = loadFromYaml(yaml)
 
         assertTrue(config.enabled)
-        assertEquals(30_000L, config.pulseIntervalMs) // default
-        assertEquals(0.7, config.triggerThreshold, epsilon) // default
-        assertTrue(config.thresholdOnUrgency) // default
-        assertEquals(5, config.maxConsecutiveDenials) // default
-        assertEquals(10, config.backoffPulses) // default
-        assertEquals(20, config.maxInFlightPulses) // default
-        assertEquals(1, config.maxPendingImpulses) // default
-        assertTrue(config.needs.isEmpty())
+        assertEquals(5000L, config.pulseIntervalMs)
+        assertEquals(0.5, config.triggerThreshold, epsilon)
+        assertTrue(config.thresholdOnTension)
+        assertEquals(5, config.maxConsecutiveDenials)
+        assertEquals(10, config.backoffPulses)
+        assertEquals(20, config.maxInFlightPulses)
+        assertEquals(1, config.maxPendingImpulses)
+        assertTrue(config.needs.containsKey("user-interaction"))
     }
 
     @Test
-    fun `missing file returns defaults`() {
+    fun `missing file returns bundled defaults`() {
         val config = IdRuntimeConfigLoader.load(
             env = emptyMap(),
             defaultPath = Path.of("/nonexistent/path/id-runtime.yaml"),
         )
 
-        assertFalse(config.enabled) // default is false
-        assertEquals(30_000L, config.pulseIntervalMs)
+        assertTrue(config.enabled)
+        assertEquals(5000L, config.pulseIntervalMs)
     }
 
     @Test
-    fun `empty YAML returns defaults`() {
-        val config = loadFromYaml("")
+    fun `empty YAML file fails validation`() {
+        val error = assertFailsWith<IllegalStateException> {
+            loadFromYaml("")
+        }
 
-        assertFalse(config.enabled) // default
-        assertEquals(30_000L, config.pulseIntervalMs)
+        assertTrue(error.message!!.contains("empty"))
     }
 
     // ── Env var overrides ───────────────────────────────────────────────
@@ -131,7 +133,7 @@ class IdConfigLoaderTest {
     @Test
     fun `env var boolean parsing accepts various formats`() {
         for (trueVal in listOf("true", "1", "yes", "TRUE", "Yes")) {
-            val config = loadFromYaml("", mapOf("NEOPSYKE_ID_ENABLED" to trueVal))
+            val config = loadFromYaml("id:\n  enabled: false", mapOf("NEOPSYKE_ID_ENABLED" to trueVal))
             assertTrue(config.enabled, "Should parse '$trueVal' as true")
         }
         for (falseVal in listOf("false", "0", "no", "FALSE", "No")) {
@@ -159,8 +161,8 @@ class IdConfigLoaderTest {
 
     @Test
     fun `negative pulse interval in env falls back`() {
-        val config = loadFromYaml("", mapOf("NEOPSYKE_ID_PULSE_INTERVAL_MS" to "-1"))
-        assertEquals(30_000L, config.pulseIntervalMs, "Negative should fall back to default")
+        val config = loadFromYaml("id:\n  enabled: true", mapOf("NEOPSYKE_ID_PULSE_INTERVAL_MS" to "-1"))
+        assertEquals(5000L, config.pulseIntervalMs, "Negative should fall back to bundled default")
     }
 
     @Test
@@ -215,7 +217,7 @@ class IdConfigLoaderTest {
         """.trimIndent()
         val config = loadFromYaml(yaml)
 
-        assertEquals(3, config.needs.size)
+        assertEquals(5, config.needs.size)
         assertEquals("power", config.needs["be-useful"]!!.responseCurve.type)
         assertEquals(3.0, config.needs["be-useful"]!!.responseCurve.exponent)
         assertEquals("sigmoid", config.needs["interact"]!!.responseCurve.type)
@@ -223,6 +225,40 @@ class IdConfigLoaderTest {
         assertEquals(0.5, config.needs["interact"]!!.responseCurve.midpoint)
         assertEquals("logarithmic", config.needs["learn"]!!.responseCurve.type)
         assertEquals(10.0, config.needs["learn"]!!.responseCurve.scale)
+    }
+
+    @Test
+    fun `partial external yaml overlays bundled id defaults`() {
+        val yaml = """
+            id:
+              trigger_threshold: 0.8
+              needs:
+                user-interaction:
+                  allow_escalation: true
+        """.trimIndent()
+        val config = loadFromYaml(yaml)
+
+        assertTrue(config.enabled)
+        assertEquals(5000L, config.pulseIntervalMs)
+        assertEquals(0.8, config.triggerThreshold, epsilon)
+        assertTrue(config.needs["user-interaction"]!!.allowEscalation)
+        assertEquals(
+            "Drive to proactively contact the user",
+            config.needs["user-interaction"]!!.description
+        )
+        assertTrue(config.needs.containsKey("learn-something"))
+    }
+
+    @Test
+    fun `missing explicit id config path fails validation`() {
+        val error = assertFailsWith<IllegalStateException> {
+            IdRuntimeConfigLoader.load(
+                env = mapOf("NEOPSYKE_ID_CONFIG_FILE" to "/nonexistent/id-runtime.yaml"),
+                defaultPath = Path.of("id-runtime.yaml"),
+            )
+        }
+
+        assertTrue(error.message!!.contains("NEOPSYKE_ID_CONFIG_FILE"))
     }
 
     @Test
@@ -256,5 +292,16 @@ class IdConfigLoaderTest {
         } finally {
             Files.deleteIfExists(tempFile)
         }
+    }
+
+    @Test
+    fun `external id example overlay loads`() {
+        val config = IdRuntimeConfigLoader.load(
+            env = emptyMap(),
+            defaultPath = Path.of("examples/runtime-config/id-runtime.external.example.yaml"),
+        )
+
+        assertFalse(config.enabled)
+        assertEquals(5000L, config.pulseIntervalMs)
     }
 }

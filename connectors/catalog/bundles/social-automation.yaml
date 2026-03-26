@@ -1,0 +1,8 @@
+bundle_id: social-automation
+display_name: Social Automation
+description: >
+  Curated starter bundle for newsletter and social automation. The first safe
+  slice is RSS/feed observation only; public posting remains disabled until
+  later phases.
+connector_ids:
+  - rss

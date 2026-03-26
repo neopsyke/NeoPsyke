@@ -46,7 +46,7 @@ class IdSuperegoDenialTest {
             enabled = true,
             pulseIntervalMs = 1000,
             triggerThreshold = 0.0,
-            thresholdOnUrgency = true,
+            thresholdOnTension = true,
             maxConsecutiveDenials = maxConsecutiveDenials,
             backoffPulses = backoffPulses,
             maxInFlightPulses = maxInFlightPulses,

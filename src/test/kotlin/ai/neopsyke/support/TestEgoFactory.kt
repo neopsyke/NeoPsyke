@@ -3,6 +3,8 @@ package ai.neopsyke.support
 import ai.neopsyke.agent.config.AgentConfig
 import ai.neopsyke.agent.cortex.motor.MotorCortex
 import ai.neopsyke.agent.cortex.sensory.SensoryCortex
+import ai.neopsyke.agent.cortex.motor.actions.control.ActionControlService
+import ai.neopsyke.agent.cortex.motor.actions.control.LegacyCompatibleActionControlService
 import ai.neopsyke.agent.ego.Ego
 import ai.neopsyke.agent.ego.EgoAssembler
 import ai.neopsyke.agent.ego.MetaReasoner
@@ -37,6 +39,7 @@ fun buildTestEgo(
     logbookSummarizer: LogbookSummarizer = DeterministicLogbookSummarizer(config.logbook),
     runId: String? = null,
     goalsGateway: GoalsGateway = NoopGoalsGateway,
+    actionControlService: ActionControlService? = null,
 ): Ego {
     val memory = EgoAssembler.buildMemorySystem(
         config = config,
@@ -57,6 +60,10 @@ fun buildTestEgo(
         sensoryCortex = sensoryCortex,
         scratchpadFinalizer = scratchpadFinalizer,
         instrumentation = instrumentation,
+        actionControlService = actionControlService
+            ?: LegacyCompatibleActionControlService { action, authorization ->
+                motorCortex.execute(action, config.searchResultCount, authorization)
+            },
         goalRegistry = goalsGateway,
         goalsGateway = goalsGateway,
     )

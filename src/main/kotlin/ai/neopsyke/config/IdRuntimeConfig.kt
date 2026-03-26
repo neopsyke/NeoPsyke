@@ -11,7 +11,6 @@ import ai.neopsyke.agent.id.IdConfig
 import ai.neopsyke.agent.id.NeedConfig
 import ai.neopsyke.agent.id.ResponseCurveConfig
 import ai.neopsyke.agent.model.ActionEffect
-import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
 
@@ -20,14 +19,14 @@ import java.nio.file.Paths
  * All fields nullable — missing values fall back to [IdConfig] defaults.
  */
 private data class IdRuntimeYamlConfig(
-    val id: IdRuntimeYamlId? = IdRuntimeYamlId(),
+    val id: IdRuntimeYamlId? = null,
 )
 
 private data class IdRuntimeYamlId(
     val enabled: Boolean? = null,
     val pulseIntervalMs: Long? = null,
     val triggerThreshold: Double? = null,
-    val thresholdOnUrgency: Boolean? = null,
+    val thresholdOnTension: Boolean? = null,
     val maxConsecutiveDenials: Int? = null,
     val backoffPulses: Int? = null,
     val maxInFlightPulses: Int? = null,
@@ -70,7 +69,14 @@ object IdRuntimeConfigLoader {
     ): IdConfig {
         val defaults = IdConfig()
         val defaultNeed = NeedConfig()
-        val yaml = readYaml(resolveConfigPath(env, defaultPath))?.id ?: IdRuntimeYamlId()
+        val yamlRoot = YamlConfigSources.loadYamlConfig<IdRuntimeYamlConfig>(
+            mapper = mapper,
+            env = env,
+            envKey = "NEOPSYKE_ID_CONFIG_FILE",
+            defaultPath = defaultPath,
+            bundledResourceName = "id-runtime.yaml",
+        ) ?: throw IllegalStateException("Missing bundled or external id-runtime.yaml configuration.")
+        val yaml = yamlRoot.id ?: throw IllegalStateException("id-runtime.yaml is missing required section: id")
 
         val needs = (yaml.needs ?: emptyMap()).mapValues { (_, yamlNeed) ->
             val curveYaml = yamlNeed.responseCurve
@@ -117,10 +123,10 @@ object IdRuntimeConfigLoader {
                 yaml.triggerThreshold,
                 defaults.triggerThreshold
             ),
-            thresholdOnUrgency = readBoolean(
-                env["NEOPSYKE_ID_THRESHOLD_ON_URGENCY"],
-                yaml.thresholdOnUrgency,
-                defaults.thresholdOnUrgency
+            thresholdOnTension = readBoolean(
+                env["NEOPSYKE_ID_THRESHOLD_ON_TENSION"],
+                yaml.thresholdOnTension,
+                defaults.thresholdOnTension
             ),
             maxConsecutiveDenials = readNonNegativeInt(
                 env["NEOPSYKE_ID_MAX_CONSECUTIVE_DENIALS"],
@@ -144,18 +150,6 @@ object IdRuntimeConfigLoader {
             ),
             needs = needs,
         )
-    }
-
-    private fun resolveConfigPath(env: Map<String, String>, defaultPath: Path): Path {
-        val configured = env["NEOPSYKE_ID_CONFIG_FILE"]?.trim().orEmpty()
-        return if (configured.isBlank()) defaultPath else Paths.get(configured)
-    }
-
-    private fun readYaml(path: Path): IdRuntimeYamlConfig? {
-        if (!Files.exists(path)) return null
-        val content = Files.readString(path).trim()
-        if (content.isEmpty()) return null
-        return mapper.readValue<IdRuntimeYamlConfig>(content)
     }
 
     private fun readPositiveInt(env: String?, yaml: Int?, fallback: Int): Int =

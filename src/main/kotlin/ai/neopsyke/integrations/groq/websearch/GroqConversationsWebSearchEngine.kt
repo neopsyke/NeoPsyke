@@ -1,6 +1,5 @@
 package ai.neopsyke.integrations.groq.websearch
 
-import com.fasterxml.jackson.annotation.JsonProperty
 import com.fasterxml.jackson.databind.DeserializationFeature
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
@@ -11,10 +10,10 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import ai.neopsyke.agent.support.TextSecurity
-import ai.neopsyke.agent.actions.websearch.WebSearchEngine
-import ai.neopsyke.agent.actions.websearch.WebSearchEngineHealth
-import ai.neopsyke.agent.actions.websearch.WebSearchResult
-import ai.neopsyke.agent.actions.websearch.WebSearchSource
+import ai.neopsyke.agent.cortex.motor.actions.websearch.WebSearchEngine
+import ai.neopsyke.agent.cortex.motor.actions.websearch.WebSearchEngineHealth
+import ai.neopsyke.agent.cortex.motor.actions.websearch.WebSearchResult
+import ai.neopsyke.agent.cortex.motor.actions.websearch.WebSearchSource
 import ai.neopsyke.instrumentation.AgentEvents
 import ai.neopsyke.instrumentation.AgentInstrumentation
 import ai.neopsyke.instrumentation.NoopAgentInstrumentation

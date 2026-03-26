@@ -41,7 +41,7 @@ class IdDeferredResetTest {
             enabled = true,
             pulseIntervalMs = 1000,
             triggerThreshold = 0.0,
-            thresholdOnUrgency = true,
+            thresholdOnTension = true,
             maxConsecutiveDenials = 5,
             backoffPulses = backoffPulses,
             maxInFlightPulses = maxInFlightPulses,

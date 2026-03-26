@@ -6,8 +6,17 @@ import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.selects.select
 import mu.KotlinLogging
+import ai.neopsyke.agent.cortex.motor.actions.control.ActionControlDecisionResult
+import ai.neopsyke.agent.cortex.motor.actions.control.ActionControlService
+import ai.neopsyke.agent.model.ActionType
+import ai.neopsyke.agent.model.ConversationSecurityContexts
+import ai.neopsyke.agent.model.StagedAction
+import ai.neopsyke.agent.model.StagedActionStatus
 import ai.neopsyke.agent.goal.GoalManager
+import ai.neopsyke.integrations.google.GoogleWorkspaceOAuthBridge
+import ai.neopsyke.integrations.telegram.TelegramWebhookBridge
 import ai.neopsyke.metrics.LlmCallStatsReport
 import java.nio.file.Files
 import java.nio.file.Path
@@ -29,14 +38,18 @@ private const val LLM_STATS_WARMUP_STATUS: Int = 202
 private const val LLM_STATS_MAX_PARALLEL_REFRESH: Int = 1
 private const val SNAPSHOT_DEFAULT_EVENTS_LIMIT: Int = 300
 private const val SNAPSHOT_MAX_EVENTS_LIMIT: Int = 1_000
+private const val RESPONSE_STATUS_ATTRIBUTE: String = "dashboard.response_status"
 
 class DashboardServer(
     private val store: DashboardStateStore,
     private val chatBridge: ChatRuntimeBridge? = null,
+    private val telegramWebhookBridge: TelegramWebhookBridge? = null,
+    private val googleOAuthBridge: GoogleWorkspaceOAuthBridge? = null,
     private val innerVoiceStore: InnerVoiceStore? = null,
     private val idInnerVoiceFilePath: Path? = null,
     @Volatile var metricsQueryProvider: MetricsQueryProvider? = null,
     @Volatile var goalManager: GoalManager? = null,
+    @Volatile var actionControlService: ActionControlService? = null,
     port: Int,
     host: String = "127.0.0.1",
 ) : Closeable {
@@ -57,7 +70,7 @@ class DashboardServer(
                     respondText(exchange, 404, "Not found", "text/plain; charset=utf-8")
                     return@withRequestGuard
                 }
-                respondText(exchange, 200, DashboardAssets.conversationsHtml, "text/html; charset=utf-8")
+                respondText(exchange, 200, DashboardAssets.shellHtml, "text/html; charset=utf-8")
             }
         }
         server.createContext("/dashboard") { exchange ->
@@ -66,7 +79,7 @@ class DashboardServer(
                     respondText(exchange, 404, "Not found", "text/plain; charset=utf-8")
                     return@withRequestGuard
                 }
-                respondText(exchange, 200, DashboardAssets.observabilityHtml, "text/html; charset=utf-8")
+                respondText(exchange, 200, DashboardAssets.shellHtml, "text/html; charset=utf-8")
             }
         }
         server.createContext("/metrics") { exchange ->
@@ -75,7 +88,7 @@ class DashboardServer(
                     respondText(exchange, 404, "Not found", "text/plain; charset=utf-8")
                     return@withRequestGuard
                 }
-                respondText(exchange, 200, DashboardAssets.metricsHtml, "text/html; charset=utf-8")
+                respondText(exchange, 200, DashboardAssets.shellHtml, "text/html; charset=utf-8")
             }
         }
         server.createContext("/goals") { exchange ->
@@ -84,12 +97,35 @@ class DashboardServer(
                     respondText(exchange, 404, "Not found", "text/plain; charset=utf-8")
                     return@withRequestGuard
                 }
-                respondText(exchange, 200, DashboardAssets.goalsHtml, "text/html; charset=utf-8")
+                respondText(exchange, 200, DashboardAssets.shellHtml, "text/html; charset=utf-8")
+            }
+        }
+        server.createContext("/action-control") { exchange ->
+            withRequestGuard(exchange, "action_control_page") {
+                if (exchange.requestURI.path != "/action-control") {
+                    respondText(exchange, 404, "Not found", "text/plain; charset=utf-8")
+                    return@withRequestGuard
+                }
+                respondText(exchange, 200, DashboardAssets.shellHtml, "text/html; charset=utf-8")
+            }
+        }
+        server.createContext("/__dashboard") { exchange ->
+            withRequestGuard(exchange, "embedded_dashboard_page") {
+                handleEmbeddedDashboardPage(exchange)
             }
         }
         server.createContext("/api/goals") { exchange ->
             withRequestGuard(exchange, "goals_api") {
                 handleGoalsApi(exchange)
+            }
+        }
+        server.createContext("/api/goals/events") { exchange ->
+            withRequestGuard(exchange, "goals_events_sse") {
+                if (exchange.requestMethod != "GET") {
+                    respondText(exchange, 405, "Method not allowed", "text/plain; charset=utf-8")
+                    return@withRequestGuard
+                }
+                handleGoalsSse(exchange)
             }
         }
         server.createContext("/api/obs/llm-stats") { exchange ->
@@ -130,6 +166,15 @@ class DashboardServer(
                 handleSse(exchange)
             }
         }
+        server.createContext("/api/dashboard/events") { exchange ->
+            withRequestGuard(exchange, "dashboard_events_sse") {
+                if (exchange.requestMethod != "GET") {
+                    respondText(exchange, 405, "Method not allowed", "text/plain; charset=utf-8")
+                    return@withRequestGuard
+                }
+                handleDashboardEventsSse(exchange)
+            }
+        }
         server.createContext("/api/obs/scratchpad") { exchange ->
             withRequestGuard(exchange, "obs_scratchpad") {
                 if (exchange.requestMethod != "GET") {
@@ -142,6 +187,30 @@ class DashboardServer(
         server.createContext("/api/chat/sessions") { exchange ->
             withRequestGuard(exchange, "chat_api") {
                 handleChatApi(exchange)
+            }
+        }
+        telegramWebhookBridge?.let { bridge ->
+            server.createContext(bridge.webhookPath()) { exchange ->
+                withRequestGuard(exchange, "telegram_webhook") {
+                    handleTelegramWebhook(exchange, bridge)
+                }
+            }
+        }
+        googleOAuthBridge?.let { bridge ->
+            server.createContext(bridge.startPath()) { exchange ->
+                withRequestGuard(exchange, "google_oauth_start") {
+                    handleGoogleOAuthStart(exchange, bridge)
+                }
+            }
+            server.createContext(bridge.callbackPath()) { exchange ->
+                withRequestGuard(exchange, "google_oauth_callback") {
+                    handleGoogleOAuthCallback(exchange, bridge)
+                }
+            }
+        }
+        server.createContext("/api/action-control") { exchange ->
+            withRequestGuard(exchange, "action_control_api") {
+                handleActionControlApi(exchange)
             }
         }
         server.createContext("/api/id-thinking/history") { exchange ->
@@ -200,12 +269,131 @@ class DashboardServer(
     }
 
     private fun handleSse(exchange: HttpExchange) {
+        handleSubscriptionSse(
+            exchange = exchange,
+            subscription = store.subscribe(),
+            expectedDisconnectMessage = "Observability SSE client disconnected.",
+            unexpectedDisconnectMessage = "Observability SSE stream terminated unexpectedly.",
+            streamName = "obs_events_sse"
+        )
+    }
+
+    private fun handleEmbeddedDashboardPage(exchange: HttpExchange) {
+        if (exchange.requestMethod.uppercase() != "GET") {
+            respondText(exchange, 405, "Method not allowed", "text/plain; charset=utf-8")
+            return
+        }
+        val path = exchange.requestURI.path.removePrefix("/__dashboard").trim()
+        val asset = when (path) {
+            "/conversations" -> DashboardAssets.conversationsHtml
+            "/observability" -> DashboardAssets.observabilityHtml
+            "/metrics" -> DashboardAssets.metricsHtml
+            "/goals" -> DashboardAssets.goalsHtml
+            "/action-control" -> DashboardAssets.actionControlHtml
+            else -> null
+        }
+        if (asset == null) {
+            respondText(exchange, 404, "Not found", "text/plain; charset=utf-8")
+            return
+        }
+        respondText(exchange, 200, asset, "text/html; charset=utf-8")
+    }
+
+    private fun handleGoalsSse(exchange: HttpExchange) {
+        handleSubscriptionSse(
+            exchange = exchange,
+            subscription = store.subscribe { event -> event.type.startsWith("goal_") },
+            expectedDisconnectMessage = "Goals SSE client disconnected.",
+            unexpectedDisconnectMessage = "Goals SSE stream terminated unexpectedly.",
+            streamName = "goals_events_sse"
+        )
+    }
+
+    private fun handleActionControlSse(exchange: HttpExchange) {
+        handleSubscriptionSse(
+            exchange = exchange,
+            subscription = store.subscribeActionControl(),
+            expectedDisconnectMessage = "Action-control SSE client disconnected.",
+            unexpectedDisconnectMessage = "Action-control SSE stream terminated unexpectedly.",
+            streamName = "action_control_events_sse",
+            eventName = "action-control",
+        )
+    }
+
+    private fun handleDashboardEventsSse(exchange: HttpExchange) {
+        val agentSubscription = store.subscribe()
+        val actionControlSubscription = store.subscribeActionControl()
+        val idThinkingSubscription = innerVoiceStore?.subscribeIdGlobal()
+
         exchange.responseHeaders.add("Content-Type", "text/event-stream")
         exchange.responseHeaders.add("Cache-Control", "no-cache")
         exchange.responseHeaders.add("Connection", "keep-alive")
+        recordResponseStatus(exchange, 200)
         exchange.sendResponseHeaders(200, 0)
 
-        val subscription = store.subscribe()
+        val output = exchange.responseBody.bufferedWriter(StandardCharsets.UTF_8)
+        val agentChannel = agentSubscription.asReceiveChannel()
+        val actionControlChannel = actionControlSubscription.asReceiveChannel()
+        val idThinkingChannel = idThinkingSubscription?.asReceiveChannel()
+        try {
+            output.write("event: ready\n")
+            output.write("data: {\"status\":\"connected\"}\n\n")
+            output.flush()
+            runBlocking {
+                while (true) {
+                    val nextEvent = withTimeoutOrNull(SSE_HEARTBEAT_TIMEOUT_MS) {
+                        select<NamedSseEvent> {
+                            agentChannel.onReceiveCatching { result ->
+                                NamedSseEvent(eventName = "agent", payload = result.getOrThrow())
+                            }
+                            actionControlChannel.onReceiveCatching { result ->
+                                NamedSseEvent(eventName = "action-control", payload = result.getOrThrow())
+                            }
+                            if (idThinkingChannel != null) {
+                                idThinkingChannel.onReceiveCatching { result ->
+                                    NamedSseEvent(eventName = "id-thinking", payload = result.getOrThrow())
+                                }
+                            }
+                        }
+                    }
+                    if (nextEvent != null) {
+                        output.write("event: ${nextEvent.eventName}\n")
+                        output.write("data: ${nextEvent.payload}\n\n")
+                        output.flush()
+                    } else {
+                        output.write(": heartbeat\n\n")
+                        output.flush()
+                    }
+                }
+            }
+        } catch (ex: Exception) {
+            if (isExpectedClientDisconnect(ex)) {
+                logger.debug { "Dashboard multiplexed SSE client disconnected." }
+            } else {
+                logger.warn(ex) { "Dashboard multiplexed SSE stream terminated unexpectedly." }
+            }
+        } finally {
+            agentSubscription.close()
+            actionControlSubscription.close()
+            idThinkingSubscription?.close()
+            closeStreamQuietly(output, streamName = "dashboard_events_sse")
+        }
+    }
+
+    private fun handleSubscriptionSse(
+        exchange: HttpExchange,
+        subscription: DashboardFlowSubscription,
+        expectedDisconnectMessage: String,
+        unexpectedDisconnectMessage: String,
+        streamName: String,
+        eventName: String = "agent",
+    ) {
+        exchange.responseHeaders.add("Content-Type", "text/event-stream")
+        exchange.responseHeaders.add("Cache-Control", "no-cache")
+        exchange.responseHeaders.add("Connection", "keep-alive")
+        recordResponseStatus(exchange, 200)
+        exchange.sendResponseHeaders(200, 0)
+
         val output = exchange.responseBody.bufferedWriter(StandardCharsets.UTF_8)
         try {
             output.write("event: ready\n")
@@ -217,7 +405,7 @@ class DashboardServer(
                         subscription.receive()
                     }
                     if (payload != null) {
-                        output.write("event: agent\n")
+                        output.write("event: $eventName\n")
                         output.write("data: $payload\n\n")
                         output.flush()
                     } else {
@@ -228,13 +416,13 @@ class DashboardServer(
             }
         } catch (ex: Exception) {
             if (isExpectedClientDisconnect(ex)) {
-                logger.debug { "Observability SSE client disconnected." }
+                logger.debug { expectedDisconnectMessage }
             } else {
-                logger.warn(ex) { "Observability SSE stream terminated unexpectedly." }
+                logger.warn(ex) { unexpectedDisconnectMessage }
             }
         } finally {
             subscription.close()
-            closeStreamQuietly(output, streamName = "obs_events_sse")
+            closeStreamQuietly(output, streamName = streamName)
         }
     }
 
@@ -321,6 +509,13 @@ class DashboardServer(
                 }
                 handleChatSse(exchange, chatBridge, sessionId)
             }
+            "stream" -> {
+                if (exchange.requestMethod.uppercase() != "GET") {
+                    respondText(exchange, 405, "Method not allowed", "text/plain; charset=utf-8")
+                    return
+                }
+                handleConversationStreamSse(exchange, chatBridge, sessionId)
+            }
             "thinking" -> {
                 if (exchange.requestMethod.uppercase() != "GET") {
                     respondText(exchange, 405, "Method not allowed", "text/plain; charset=utf-8")
@@ -330,6 +525,242 @@ class DashboardServer(
             }
             else -> respondText(exchange, 404, "Not found", "text/plain; charset=utf-8")
         }
+    }
+
+    private fun handleActionControlApi(exchange: HttpExchange) {
+        val service = actionControlService ?: run {
+            respondText(exchange, 503, """{"error":"Action control unavailable"}""", "application/json; charset=utf-8")
+            return
+        }
+        val path = exchange.requestURI.path
+        val basePath = "/api/action-control"
+        if (!(path == basePath || path.startsWith("$basePath/"))) {
+            respondText(exchange, 404, "Not found", "text/plain; charset=utf-8")
+            return
+        }
+        val suffix = path.removePrefix(basePath).trim()
+        if (suffix.isBlank()) {
+            respondText(
+                exchange,
+                200,
+                mapper.writeValueAsString(
+                    mapOf(
+                        "staged_path" to "/api/action-control/staged",
+                        "receipts_path" to "/api/action-control/receipts"
+                    )
+                ),
+                "application/json; charset=utf-8"
+            )
+            return
+        }
+        val parts = suffix.removePrefix("/").split("/").filter { it.isNotBlank() }
+        if (parts.isEmpty()) {
+            respondText(exchange, 404, "Not found", "text/plain; charset=utf-8")
+            return
+        }
+        when (parts.first()) {
+            "events" -> {
+                if (exchange.requestMethod.uppercase() != "GET") {
+                    respondText(exchange, 405, "Method not allowed", "text/plain; charset=utf-8")
+                    return
+                }
+                handleActionControlSse(exchange)
+            }
+            "staged" -> handleStagedActionApi(exchange, service, parts.drop(1))
+            "receipts" -> handleActionReceiptApi(exchange, service, parts.drop(1))
+            "ledger" -> handleActionLedgerApi(exchange, service, parts.drop(1))
+            else -> respondText(exchange, 404, "Not found", "text/plain; charset=utf-8")
+        }
+    }
+
+    private fun handleTelegramWebhook(exchange: HttpExchange, bridge: TelegramWebhookBridge) {
+        val result = bridge.handleWebhook(
+            requestMethod = exchange.requestMethod,
+            secretTokenHeader = exchange.requestHeaders.getFirst(TELEGRAM_SECRET_HEADER),
+            requestBody = readRawBody(exchange),
+        )
+        respondText(
+            exchange,
+            result.statusCode,
+            mapper.writeValueAsString(
+                mapOf(
+                    "accepted" to result.accepted,
+                    "detail" to result.detail,
+                )
+            ),
+            "application/json; charset=utf-8"
+        )
+    }
+
+    private fun handleGoogleOAuthStart(exchange: HttpExchange, bridge: GoogleWorkspaceOAuthBridge) {
+        if (exchange.requestMethod.uppercase() != "GET") {
+            respondText(exchange, 405, "Method not allowed", "text/plain; charset=utf-8")
+            return
+        }
+        val result = bridge.startAuthorization()
+        respondText(
+            exchange,
+            result.statusCode,
+            mapper.writeValueAsString(
+                mapOf(
+                    "ok" to result.ok,
+                    "detail" to result.detail,
+                    "authorization_url" to result.authorizationUrl,
+                )
+            ),
+            "application/json; charset=utf-8"
+        )
+    }
+
+    private fun handleGoogleOAuthCallback(exchange: HttpExchange, bridge: GoogleWorkspaceOAuthBridge) {
+        if (exchange.requestMethod.uppercase() != "GET") {
+            respondText(exchange, 405, "Method not allowed", "text/plain; charset=utf-8")
+            return
+        }
+        val result = bridge.completeAuthorization(
+            code = parseQueryParam(exchange.requestURI.query, "code"),
+            stateToken = parseQueryParam(exchange.requestURI.query, "state"),
+        )
+        respondText(
+            exchange,
+            result.statusCode,
+            mapper.writeValueAsString(
+                mapOf(
+                    "ok" to result.ok,
+                    "detail" to result.detail,
+                )
+            ),
+            "application/json; charset=utf-8"
+        )
+    }
+
+    private fun handleStagedActionApi(
+        exchange: HttpExchange,
+        service: ActionControlService,
+        suffixParts: List<String>,
+    ) {
+        if (suffixParts.isEmpty()) {
+            if (exchange.requestMethod.uppercase() != "GET") {
+                respondText(exchange, 405, "Method not allowed", "text/plain; charset=utf-8")
+                return
+            }
+            val limit = parseQueryParam(exchange.requestURI.query, "limit")?.toIntOrNull() ?: 50
+            val includeTerminal = parseBooleanQueryParam(exchange.requestURI.query, "include_terminal") ?: false
+            respondText(
+                exchange,
+                200,
+                mapper.writeValueAsString(service.stagedActions(limit, includeTerminal = includeTerminal)),
+                "application/json; charset=utf-8"
+            )
+            return
+        }
+        val stagedActionId = suffixParts.first()
+        if (suffixParts.size == 1) {
+            if (exchange.requestMethod.uppercase() != "GET") {
+                respondText(exchange, 405, "Method not allowed", "text/plain; charset=utf-8")
+                return
+            }
+            val staged = service.stagedAction(stagedActionId)
+            if (staged == null) {
+                respondText(exchange, 404, """{"error":"Staged action not found"}""", "application/json; charset=utf-8")
+                return
+            }
+            respondText(exchange, 200, mapper.writeValueAsString(staged), "application/json; charset=utf-8")
+            return
+        }
+        val action = suffixParts.getOrNull(1).orEmpty()
+        if (exchange.requestMethod.uppercase() != "POST" ||
+            (action != "authorize" && action != "deny")
+        ) {
+            respondText(exchange, 404, "Not found", "text/plain; charset=utf-8")
+            return
+        }
+        val requestBody = readJsonBody(exchange)
+        val result = runBlocking {
+            when (action) {
+                "authorize" -> service.authorizeStagedAction(
+                    stagedActionId = stagedActionId,
+                    grantedBy = ConversationSecurityContexts.ownerDirect(
+                        provider = "webapp",
+                        channelId = "dashboard-action-control",
+                    )
+                )
+
+                "deny" -> service.denyStagedAction(
+                    stagedActionId = stagedActionId,
+                    deniedBy = ConversationSecurityContexts.ownerDirect(
+                        provider = "webapp",
+                        channelId = "dashboard-action-control",
+                    ),
+                    reason = requestBody?.get("reason")?.toString()?.trim().takeUnless { it.isNullOrBlank() }
+                        ?: "Denied from dashboard.",
+                    reasonCode = requestBody?.get("reason_code")?.toString()?.trim().takeUnless { it.isNullOrBlank() }
+                )
+                else -> error("Unsupported staged action control verb: $action")
+            }
+        }
+        handleActionControlDecisionSideEffects(mutation = action, result = result)
+        val statusCode = when (result) {
+            is ActionControlDecisionResult.Refused -> 409
+            is ActionControlDecisionResult.Staged,
+            is ActionControlDecisionResult.Cancelled,
+            is ActionControlDecisionResult.Executed -> 200
+        }
+        respondText(exchange, statusCode, mapper.writeValueAsString(result), "application/json; charset=utf-8")
+    }
+
+    private fun handleActionReceiptApi(
+        exchange: HttpExchange,
+        service: ActionControlService,
+        suffixParts: List<String>,
+    ) {
+        if (exchange.requestMethod.uppercase() != "GET") {
+            respondText(exchange, 405, "Method not allowed", "text/plain; charset=utf-8")
+            return
+        }
+        if (suffixParts.isEmpty()) {
+            val limit = parseQueryParam(exchange.requestURI.query, "limit")?.toIntOrNull() ?: 50
+            respondText(
+                exchange,
+                200,
+                mapper.writeValueAsString(service.receipts(limit)),
+                "application/json; charset=utf-8"
+            )
+            return
+        }
+        val receipt = service.receipt(suffixParts.first())
+        if (receipt == null) {
+            respondText(exchange, 404, """{"error":"Action receipt not found"}""", "application/json; charset=utf-8")
+            return
+        }
+        respondText(exchange, 200, mapper.writeValueAsString(receipt), "application/json; charset=utf-8")
+    }
+
+    private fun handleActionLedgerApi(
+        exchange: HttpExchange,
+        service: ActionControlService,
+        suffixParts: List<String>,
+    ) {
+        if (exchange.requestMethod.uppercase() != "GET") {
+            respondText(exchange, 405, "Method not allowed", "text/plain; charset=utf-8")
+            return
+        }
+        if (suffixParts.isEmpty()) {
+            val limit = parseQueryParam(exchange.requestURI.query, "limit")?.toIntOrNull() ?: 100
+            respondText(
+                exchange,
+                200,
+                mapper.writeValueAsString(service.ledgerEntries(limit)),
+                "application/json; charset=utf-8"
+            )
+            return
+        }
+        val entry = service.ledgerEntry(suffixParts.first())
+        if (entry == null) {
+            respondText(exchange, 404, """{"error":"Action ledger entry not found"}""", "application/json; charset=utf-8")
+            return
+        }
+        respondText(exchange, 200, mapper.writeValueAsString(entry), "application/json; charset=utf-8")
     }
 
     private fun handleCreateChatSession(exchange: HttpExchange, bridge: ChatRuntimeBridge) {
@@ -357,18 +788,23 @@ class DashboardServer(
         }
         val content = body["content"]?.toString().orEmpty()
         val result = bridge.submitMessage(sessionId = sessionId, content = content)
-        if (!result.accepted) {
+        if (!result.recorded) {
             val statusCode = if (result.detail.contains("Unknown session", ignoreCase = true)) 404 else 400
             val payload = mapOf(
                 "accepted" to false,
+                "recorded" to false,
+                "enqueued" to false,
                 "detail" to result.detail
             )
             respondText(exchange, statusCode, mapper.writeValueAsString(payload), "application/json; charset=utf-8")
             return
         }
         val payload = mapOf(
-            "accepted" to true,
-            "detail" to result.detail
+            "accepted" to result.enqueued,
+            "recorded" to result.recorded,
+            "enqueued" to result.enqueued,
+            "detail" to result.detail,
+            "message" to result.message?.let(store::chatMessagePayload),
         )
         respondText(exchange, 202, mapper.writeValueAsString(payload), "application/json; charset=utf-8")
     }
@@ -387,6 +823,7 @@ class DashboardServer(
         exchange.responseHeaders.add("Content-Type", "text/event-stream")
         exchange.responseHeaders.add("Cache-Control", "no-cache")
         exchange.responseHeaders.add("Connection", "keep-alive")
+        recordResponseStatus(exchange, 200)
         exchange.sendResponseHeaders(200, 0)
 
         val output = exchange.responseBody.bufferedWriter(StandardCharsets.UTF_8)
@@ -436,6 +873,7 @@ class DashboardServer(
         exchange.responseHeaders.add("Content-Type", "text/event-stream")
         exchange.responseHeaders.add("Cache-Control", "no-cache")
         exchange.responseHeaders.add("Connection", "keep-alive")
+        recordResponseStatus(exchange, 200)
         exchange.sendResponseHeaders(200, 0)
 
         val output = exchange.responseBody.bufferedWriter(StandardCharsets.UTF_8)
@@ -467,6 +905,68 @@ class DashboardServer(
         } finally {
             subscription.close()
             closeStreamQuietly(output, streamName = "thinking_sse", context = "session=$sessionId")
+        }
+    }
+
+    private fun handleConversationStreamSse(
+        exchange: HttpExchange,
+        bridge: ChatRuntimeBridge,
+        sessionId: String,
+    ) {
+        val chatSubscription = bridge.subscribe(sessionId)
+        if (chatSubscription == null) {
+            respondText(exchange, 404, "Session not found", "text/plain; charset=utf-8")
+            return
+        }
+        val thinkingSubscription = innerVoiceStore?.subscribe(sessionId)
+
+        exchange.responseHeaders.add("Content-Type", "text/event-stream")
+        exchange.responseHeaders.add("Cache-Control", "no-cache")
+        exchange.responseHeaders.add("Connection", "keep-alive")
+        recordResponseStatus(exchange, 200)
+        exchange.sendResponseHeaders(200, 0)
+
+        val output = exchange.responseBody.bufferedWriter(StandardCharsets.UTF_8)
+        val chatChannel = chatSubscription.asReceiveChannel()
+        val thinkingChannel = thinkingSubscription?.asReceiveChannel()
+        try {
+            output.write("event: ready\n")
+            output.write("data: {\"status\":\"connected\",\"session_id\":\"$sessionId\"}\n\n")
+            output.flush()
+            runBlocking {
+                while (true) {
+                    val nextEvent = withTimeoutOrNull(SSE_HEARTBEAT_TIMEOUT_MS) {
+                        select<NamedSseEvent> {
+                            chatChannel.onReceiveCatching { result ->
+                                NamedSseEvent(eventName = "chat", payload = result.getOrThrow())
+                            }
+                            if (thinkingChannel != null) {
+                                thinkingChannel.onReceiveCatching { result ->
+                                    NamedSseEvent(eventName = "thinking", payload = result.getOrThrow())
+                                }
+                            }
+                        }
+                    }
+                    if (nextEvent != null) {
+                        output.write("event: ${nextEvent.eventName}\n")
+                        output.write("data: ${nextEvent.payload}\n\n")
+                        output.flush()
+                    } else {
+                        output.write(": heartbeat\n\n")
+                        output.flush()
+                    }
+                }
+            }
+        } catch (ex: Exception) {
+            if (isExpectedClientDisconnect(ex)) {
+                logger.debug { "Conversation SSE client disconnected for session=$sessionId." }
+            } else {
+                logger.warn(ex) { "Conversation SSE stream terminated unexpectedly for session=$sessionId." }
+            }
+        } finally {
+            chatSubscription.close()
+            thinkingSubscription?.close()
+            closeStreamQuietly(output, streamName = "conversation_stream_sse", context = "session=$sessionId")
         }
     }
 
@@ -514,6 +1014,11 @@ class DashboardServer(
             closeStreamQuietly(output, streamName = "id_thinking_sse")
         }
     }
+
+    private data class NamedSseEvent(
+        val eventName: String,
+        val payload: String,
+    )
 
     private fun handleIdThinkingHistory(exchange: HttpExchange) {
         val filePath = idInnerVoiceFilePath
@@ -749,7 +1254,7 @@ class DashboardServer(
 
     private fun readJsonBody(exchange: HttpExchange): Map<String, Any?>? {
         return try {
-            val bytes = exchange.requestBody.readBytes()
+            val bytes = readRawBody(exchange).toByteArray(StandardCharsets.UTF_8)
             if (bytes.isEmpty()) {
                 emptyMap()
             } else {
@@ -763,11 +1268,21 @@ class DashboardServer(
         }
     }
 
+    private fun readRawBody(exchange: HttpExchange): String =
+        exchange.requestBody.bufferedReader(StandardCharsets.UTF_8).use { it.readText() }
+
     private inline fun withRequestGuard(
         exchange: HttpExchange,
         handlerName: String,
         block: () -> Unit,
     ) {
+        val accessLogging = shouldLogAccess(exchange.requestURI.path)
+        val startedAtNs = if (accessLogging) System.nanoTime() else 0L
+        if (accessLogging) {
+            logger.info {
+                "Dashboard request started handler=$handlerName method=${exchange.requestMethod} path=${exchange.requestURI.path} query=${exchange.requestURI.query.orEmpty().ifBlank { "-" }}"
+            }
+        }
         try {
             block()
         } catch (ex: Exception) {
@@ -783,6 +1298,14 @@ class DashboardServer(
                 "Dashboard request handler failed handler=$handlerName request=$requestSummary"
             }
             writeFallbackInternalError(exchange, handlerName)
+        } finally {
+            if (accessLogging) {
+                val elapsedMs = (System.nanoTime() - startedAtNs) / 1_000_000L
+                val status = exchange.getAttribute(RESPONSE_STATUS_ATTRIBUTE) as? Int ?: -1
+                logger.info {
+                    "Dashboard request finished handler=$handlerName method=${exchange.requestMethod} path=${exchange.requestURI.path} status=$status duration_ms=$elapsedMs"
+                }
+            }
         }
     }
 
@@ -870,10 +1393,132 @@ class DashboardServer(
         exchange.responseHeaders.add("Content-Type", contentType)
         exchange.responseHeaders.add("Cache-Control", "no-store, no-cache, must-revalidate")
         exchange.responseHeaders.add("Pragma", "no-cache")
+        recordResponseStatus(exchange, status)
         exchange.sendResponseHeaders(status, bytes.size.toLong())
         exchange.responseBody.use { output ->
             output.write(bytes)
         }
+    }
+
+    private fun handleActionControlDecisionSideEffects(
+        mutation: String,
+        result: ActionControlDecisionResult,
+    ) {
+        when (result) {
+            is ActionControlDecisionResult.Executed -> {
+                maybeAppendDashboardApprovalMessage(result)
+                maybeClearRootInputSession(result.stagedAction)
+                store.publishActionControlUpdate(
+                    type = "action_control_state_changed",
+                    data = actionControlUpdatePayload(
+                        mutation = mutation,
+                        stagedAction = result.stagedAction,
+                        detail = result.receipt.statusSummary,
+                    ) + mapOf(
+                        "execution_status" to result.receipt.executionStatus.name,
+                        "receipt_id" to result.receipt.id,
+                        "authorization_id" to result.authorization.id,
+                    )
+                )
+            }
+            is ActionControlDecisionResult.Cancelled -> {
+                maybeClearRootInputSession(result.stagedAction)
+                store.publishActionControlUpdate(
+                    type = "action_control_state_changed",
+                    data = actionControlUpdatePayload(
+                        mutation = mutation,
+                        stagedAction = result.stagedAction,
+                        detail = result.ledgerEntry.summary,
+                    ) + mapOf(
+                        "ledger_id" to result.ledgerEntry.id,
+                    )
+                )
+            }
+            is ActionControlDecisionResult.Refused -> {
+                store.publishActionControlUpdate(
+                    type = "action_control_request_refused",
+                    data = mapOf(
+                        "mutation" to mutation,
+                        "reason" to result.reason,
+                        "reason_code" to result.reasonCode,
+                    )
+                )
+            }
+            is ActionControlDecisionResult.Staged -> {
+                store.publishActionControlUpdate(
+                    type = "action_control_state_changed",
+                    data = actionControlUpdatePayload(
+                        mutation = mutation,
+                        stagedAction = result.stagedAction,
+                        detail = result.authorizationDecision.reason,
+                    )
+                )
+            }
+        }
+    }
+
+    private fun maybeAppendDashboardApprovalMessage(result: ActionControlDecisionResult.Executed) {
+        val sessionId = result.stagedAction.rootInputId
+            ?.let(store::resolveSessionForRootInput)
+            ?: result.stagedAction.conversationContext.sessionId
+        if (sessionId.isBlank()) {
+            return
+        }
+        val content = if (result.executedAction.type == ActionType.CONTACT_USER) {
+            result.executedAction.payload.trim()
+        } else {
+            buildDashboardApprovalSummary(result)
+        }
+        if (content.isBlank()) {
+            return
+        }
+        store.addAssistantMessage(
+            sessionId = sessionId,
+            content = content,
+            source = "dashboard-action-control",
+        )
+    }
+
+    private fun buildDashboardApprovalSummary(result: ActionControlDecisionResult.Executed): String {
+        val actionType = result.executedAction.type.id
+        val summary = result.receipt.statusSummary.trim()
+        return when (result.stagedAction.status) {
+            StagedActionStatus.WAITING_EXTERNAL ->
+                "Dashboard-approved action '$actionType' is waiting on external completion: $summary"
+            StagedActionStatus.FAILED ->
+                "Dashboard-approved action '$actionType' failed: $summary"
+            else ->
+                "Dashboard-approved action '$actionType' completed: $summary"
+        }
+    }
+
+    private fun maybeClearRootInputSession(stagedAction: StagedAction) {
+        val rootInputId = stagedAction.rootInputId ?: return
+        if (stagedAction.status in TERMINAL_STAGED_ACTION_STATUSES) {
+            store.clearSessionForRootInput(rootInputId)
+        }
+    }
+
+    private fun actionControlUpdatePayload(
+        mutation: String,
+        stagedAction: StagedAction,
+        detail: String?,
+    ): Map<String, Any?> =
+        mapOf(
+            "mutation" to mutation,
+            "staged_action_id" to stagedAction.id,
+            "status" to stagedAction.status.name,
+            "action_type" to stagedAction.actionType.id,
+            "root_input_id" to stagedAction.rootInputId,
+            "session_id" to stagedAction.conversationContext.sessionId,
+            "detail" to detail,
+        )
+
+    private fun shouldLogAccess(path: String): Boolean =
+        path.startsWith("/api/chat/") || path.startsWith("/api/action-control")
+
+    private fun recordResponseStatus(exchange: HttpExchange, status: Int) {
+        exchange.setAttribute(RESPONSE_STATUS_ATTRIBUTE, status)
     }
 
     private data class LlmStatsQuery(
@@ -889,6 +1534,12 @@ class DashboardServer(
     )
 
     private companion object {
+        private const val TELEGRAM_SECRET_HEADER: String = "X-Telegram-Bot-Api-Secret-Token"
+        val TERMINAL_STAGED_ACTION_STATUSES: Set<StagedActionStatus> = setOf(
+            StagedActionStatus.COMPLETED,
+            StagedActionStatus.CANCELLED,
+            StagedActionStatus.FAILED,
+        )
         val EMPTY_LLM_STATS_REPORT = LlmCallStatsReport(
             byModel = emptyMap(),
             byRole = emptyMap(),

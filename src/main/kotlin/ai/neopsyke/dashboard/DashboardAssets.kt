@@ -3,6 +3,10 @@ package ai.neopsyke.dashboard
 import java.nio.charset.StandardCharsets
 
 object DashboardAssets {
+    val shellHtml: String by lazy {
+        loadText("/dashboard/shell.html")
+    }
+
     val conversationsHtml: String by lazy {
         loadText("/dashboard/conversations.html")
     }
@@ -17,6 +21,10 @@ object DashboardAssets {
 
     val goalsHtml: String by lazy {
         loadText("/dashboard/goals.html")
+    }
+
+    val actionControlHtml: String by lazy {
+        loadText("/dashboard/action-control.html")
     }
 
     private fun loadText(path: String): String {

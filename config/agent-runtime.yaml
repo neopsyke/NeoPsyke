@@ -1,0 +1,214 @@
+app:
+  dashboard_enabled: true
+  dashboard_port: 8787
+
+eval:
+  # Optional default stage label used when --eval-stage is omitted.
+  # default_stage: "local"
+  max_raw_response_chars: 2147483647
+
+agent:
+  planner:
+    max_loop_steps_per_input: 180
+    max_thought_passes: 5
+    max_thought_chars: 600
+    max_input_chars: 2000
+    max_action_payload_chars: 4000
+    max_action_summary_chars: 180
+    max_prompt_tokens: 2400
+    max_completion_tokens: 900
+    llm_retry_attempts: 2
+    max_run_total_tokens: 0
+    max_run_tokens_per_provider: 0
+    max_run_tokens_per_role: 0
+    max_plan_steps: 6
+    max_plan_step_description_chars: 120
+    max_plans_per_input: 2
+    action_retry_budget_non_retryable_failures: 3
+    action_retry_cooldown_steps: 10
+    action_verifier_enabled: false
+
+  superego:
+    max_completion_tokens: 192
+    dynamic_completion_enabled: true
+    dynamic_completion_hard_max_tokens: 640
+    dynamic_prompt_to_completion_ratio: 0.10
+    dynamic_completion_min_prompt_tokens: 160
+    two_stage_review_enabled: false
+    two_stage_low_confidence_threshold: 0.60
+    two_stage_escalate_on_medium_policy_risk: true
+    two_stage_skip_for_contact_user_actions: true
+    two_stage_skip_for_web_search_actions: true
+
+  memory:
+    max_short_term_context_chars: 20000
+    max_short_term_context_prompt_tokens: 384
+    long_term_memory_recall_max_items: 4
+    long_term_memory_recall_max_chars: 1200
+    long_term_memory_prompt_compression_enabled: true
+    long_term_memory_prompt_dialogue_max_chars: 1100
+    long_term_memory_prompt_recall_max_chars: 900
+    long_term_memory_assess_every_steps: 16
+    long_term_memory_assess_cooldown_steps: 8
+    long_term_memory_min_confidence: 0.65
+    long_term_memory_max_tokens: 320
+    long_term_memory_dynamic_completion_enabled: true
+    long_term_memory_dynamic_completion_hard_max_tokens: 512
+    long_term_memory_dynamic_prompt_to_completion_ratio: 0.08
+    long_term_memory_dynamic_completion_min_prompt_tokens: 160
+    long_term_memory_max_summary_chars: 320
+    long_term_memory_force_assess_on_allowed_action: false
+    long_term_memory_force_assess_on_terminal_answer: true
+    long_term_memory_parse_fallback_disable_after: 2
+    long_term_memory_recall_echo_min_summary_chars: 16
+    long_term_memory_recall_echo_min_token_length: 3
+    long_term_memory_recall_echo_min_token_count: 4
+    long_term_memory_recall_echo_token_overlap_threshold: 0.85
+    # Optional. Falls back to the MemoryConfig default when omitted.
+    # mcp_memory_call_timeout_ms: 8000
+
+    scratchpad:
+      enabled: true
+      activation_min_plan_steps: 2
+      max_prompt_tokens: 220
+      max_sections: 10
+      max_section_chars: 1200
+      max_section_summary_chars: 180
+      max_evidence_items: 8
+      max_evidence_chars: 220
+      final_compilation_max_chars: 2800
+      final_pass_rewrite_enabled: true
+      final_pass_max_tokens: 480
+      final_pass_min_workspace_confidence: 0.35
+      final_pass_min_model_confidence: 0.55
+      debug_capture_enabled: false
+      max_active_tasks: 32
+      digest_max_entries: 4
+      digest_max_chars: 800
+      digest_max_prompt_tokens: 160
+
+  meta_reasoner:
+    deliberation_pressure_assessment_min_step: 16
+    deliberation_pressure_assessment_every_steps: 8
+    deliberation_pressure_assessment_threshold: 0.68
+    cooldown_steps: 6
+    max_tokens: 512
+    dynamic_completion_enabled: true
+    dynamic_completion_hard_max_tokens: 640
+    dynamic_prompt_to_completion_ratio: 0.10
+    dynamic_completion_min_prompt_tokens: 160
+    forced_terminal_pressure_threshold: 0.98
+    forced_terminal_stale_streak_threshold: 8
+
+  logbook:
+    enabled: true
+    max_summary_chars: 200
+    max_keywords_per_entry: 12
+    max_entries_per_query: 20
+    retention_days: 90
+    db_path: ""
+    episodic_recall_max_chars: 1200
+    episodic_recall_max_results: 15
+    use_llm_summarizer: false
+
+  action_control:
+    enabled: true
+    db_path: .neopsyke/action-control.db
+    policy_path: action-security.yaml
+    authorization_ttl_ms: 86400000
+    max_inspect_results: 200
+    autonomous_worker_enabled: true
+    autonomous_worker_poll_ms: 500
+    autonomous_worker_batch_size: 16
+    observe_per_type_per_root_input: 10
+    contact_user_per_root_input: 5
+    reflection_family_per_root_input: 2
+    reflect_evidence_per_root_input: 1
+    goal_operation_per_root_input: 3
+    commit_private_per_type_per_root_input: 3
+    commit_stateful_per_type_per_root_input: 2
+    commit_public_per_type_per_root_input: 1
+    control_plane_per_type_per_root_input: 2
+
+  connectors:
+    enabled: false
+    curated_catalog_path: connectors/catalog
+    install_state_dir: .neopsyke/connectors
+    fail_closed: true
+    pinning_enabled: true
+    startup_timeout_ms: 5000
+    health_timeout_ms: 5000
+    call_timeout_ms: 8000
+    allowed_connector_ids: []
+    enabled_bundle_ids: []
+    allow_third_party_connectors: false
+
+  builtin_tools:
+    website_fetch:
+      enabled: true
+      call_timeout_ms: 8000
+      max_chars: 4000
+
+  inner_voice:
+    enabled: true
+    max_content_chars: 500
+    max_events_per_session: 100
+
+  goals:
+    enabled: true
+    workspace_root: .neopsyke/goals
+    max_active_goals: 10
+    max_steps_per_plan: 20
+    actions_per_cycle: 5
+    snapshot_every_n_events: 50
+    timer_resolution_ms: 5000
+    condition_check_interval_ms: 30000
+    completed_goal_retention_days: 30
+    max_workspace_bytes: 10485760
+
+  native_integrations:
+    telegram:
+      enabled: true
+      mode: polling
+      webhook_path: /api/channels/telegram/webhook
+      # Prefer env overrides for these if you do not want them visible in YAML:
+      #   NEOPSYKE_TELEGRAM_OWNER_CHAT_ID
+      #   NEOPSYKE_TELEGRAM_OWNER_USER_ID
+      owner_chat_id: ""
+      owner_user_id: ""
+      # These are secret handle names, not the secret values themselves.
+      # The current runtime resolves them from environment variables.
+      bot_token_handle: TELEGRAM_BOT_TOKEN
+      webhook_secret_handle: TELEGRAM_WEBHOOK_SECRET
+      policy_scope_id: telegram-owner
+      session_id_prefix: telegram
+      require_direct_chat: true
+      drop_unauthorized_messages: false
+      poll_timeout_seconds: 25
+      poll_retry_delay_ms: 1000
+    google_workspace:
+      enabled: false
+      token_store_dir: .neopsyke/auth/google
+      allowed_owner_email: ""
+      public_base_url: ""
+      oauth_start_path: /api/channels/google/oauth/start
+      oauth_client_id_handle: GOOGLE_OAUTH_CLIENT_ID
+      oauth_client_secret_handle: GOOGLE_OAUTH_CLIENT_SECRET
+      oauth_state_signing_secret_handle: GOOGLE_OAUTH_STATE_SIGNING_SECRET
+      oauth_token_encryption_secret_handle: GOOGLE_OAUTH_TOKEN_ENCRYPTION_SECRET
+      callback_path: /api/channels/google/oauth/callback
+      authorization_base_url: https://accounts.google.com/o/oauth2/v2/auth
+      token_base_url: https://oauth2.googleapis.com/token
+      require_pkce: true
+      require_refresh_token: true
+      oauth_state_ttl_seconds: 600
+      scopes:
+        - https://www.googleapis.com/auth/gmail.readonly
+        - https://www.googleapis.com/auth/calendar.readonly
+
+  runtime:
+    loop_delay_ms: 0
+    max_pending_thoughts: 64
+    max_pending_actions: 32
+    max_pending_inputs: 32
+    search_result_count: 5

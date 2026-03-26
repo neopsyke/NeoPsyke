@@ -41,6 +41,18 @@ tasks.test {
     environment("EGO_SCRATCHPAD_DEBUG_CAPTURE_ENABLED", "true")
 }
 
+tasks.processResources {
+    from(project.projectDir.resolve("config")) {
+        include(
+            "agent-runtime.yaml",
+            "id-runtime.yaml",
+            "llm-runtime.yaml",
+            "memory-runtime.yaml",
+        )
+        into("")
+    }
+}
+
 tasks.withType<KotlinCompile>().configureEach {
     compilerOptions {
         // Emit Java 21-compatible bytecode, even when Gradle runs on a newer JDK.

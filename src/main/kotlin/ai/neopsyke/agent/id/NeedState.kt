@@ -4,7 +4,7 @@ package ai.neopsyke.agent.id
  * Mutable runtime state for a single need (drive).
  *
  * [value] is the raw need intensity (0.0–1.0), growing by [NeedConfig.growthRate]
- * each pulse. Effective urgency for competition is computed via the [curve].
+ * each pulse. Effective tension for competition is computed via the [curve].
  */
 class NeedState(
     val name: String,
@@ -43,8 +43,8 @@ class NeedState(
     /** The change in value since the last pulse (positive = growing, negative = decaying). */
     val delta: Double get() = value - previousValue
 
-    /** Curve-transformed urgency in [0.0, 1.0]. */
-    val urgency: Double get() = curve.urgency(value)
+    /** Curve-transformed tension in [0.0, 1.0]. */
+    val tension: Double get() = curve.tension(value)
 
     // ── Pulse lifecycle ──────────────────────────────────────────────
 
@@ -150,9 +150,16 @@ class NeedState(
     fun snapshot(): Map<String, Any?> = mapOf(
         "name" to name,
         "rawValue" to value,
-        "urgency" to urgency,
+        "tension" to tension,
         "delta" to delta,
         "growthRate" to config.growthRate,
+        "responseCurve" to mapOf(
+            "type" to config.responseCurve.type,
+            "exponent" to config.responseCurve.exponent,
+            "steepness" to config.responseCurve.steepness,
+            "midpoint" to config.responseCurve.midpoint,
+            "scale" to config.responseCurve.scale,
+        ),
         "cooldownRemaining" to cooldownRemaining,
         "inFlight" to inFlight,
         "inFlightPulsesRemaining" to inFlightPulsesRemaining,

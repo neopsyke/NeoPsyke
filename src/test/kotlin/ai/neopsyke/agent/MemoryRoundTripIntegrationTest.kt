@@ -1,9 +1,9 @@
 package ai.neopsyke.agent
 
-import ai.neopsyke.agent.actions.websearch.WebSearchActionHandler
-import ai.neopsyke.agent.actions.websearch.WebSearchEngine
-import ai.neopsyke.agent.actions.websearch.WebSearchResult
-import ai.neopsyke.agent.actions.NoopReflectionMemoryRecorder
+import ai.neopsyke.agent.cortex.motor.actions.websearch.WebSearchActionHandler
+import ai.neopsyke.agent.cortex.motor.actions.websearch.WebSearchEngine
+import ai.neopsyke.agent.cortex.motor.actions.websearch.WebSearchResult
+import ai.neopsyke.agent.cortex.motor.actions.NoopReflectionMemoryRecorder
 import ai.neopsyke.support.buildTestEgo
 import ai.neopsyke.support.RecordingInstrumentation
 import ai.neopsyke.support.StubChatModelClient
@@ -80,7 +80,7 @@ class MemoryRoundTripIntegrationTest {
             assertTrue(hippocampus.imprints.single().summary.contains("favorite color is teal", ignoreCase = true))
             assertTrue(hippocampus.recallQueries.size >= 2)
             val lastPlannerPrompt = plannerLlm.lastMessages.last().content
-            assertTrue(lastPlannerPrompt.contains("Long-term memory recall:"))
+            assertTrue(lastPlannerPrompt.contains("Relevant long-term memory:"))
             assertTrue(lastPlannerPrompt.contains("favorite color is teal", ignoreCase = true))
             assertEquals(
                 listOf(

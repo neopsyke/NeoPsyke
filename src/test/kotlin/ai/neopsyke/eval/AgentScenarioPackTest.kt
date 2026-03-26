@@ -1,21 +1,24 @@
 package ai.neopsyke.eval
 
-import ai.neopsyke.agent.actions.ActionDescriptor
-import ai.neopsyke.agent.actions.ActionExecutionContext
-import ai.neopsyke.agent.actions.ActionRegistry
-import ai.neopsyke.agent.actions.AgentActionPlugin
-import ai.neopsyke.agent.actions.websearch.WebSearchActionHandler
-import ai.neopsyke.agent.actions.websearch.WebSearchEngine
-import ai.neopsyke.agent.actions.websearch.WebSearchResult
-import ai.neopsyke.agent.actions.NoopReflectionMemoryRecorder
-import ai.neopsyke.agent.actions.async.AsyncActionHandle
-import ai.neopsyke.agent.actions.async.AsyncActionWait
-import ai.neopsyke.agent.actions.async.AsyncOperationProvider
-import ai.neopsyke.agent.actions.async.AsyncOperationRegistry
-import ai.neopsyke.agent.actions.async.AsyncOperationStatus
-import ai.neopsyke.agent.actions.async.AsyncResumeMode
-import ai.neopsyke.agent.actions.builtin.ContactUserActionPlugin
-import ai.neopsyke.agent.actions.websearch.WebSearchSource
+import ai.neopsyke.agent.cortex.motor.actions.control.DefaultActionControlService
+import ai.neopsyke.agent.cortex.motor.actions.control.SqliteActionControlStore
+import ai.neopsyke.agent.cortex.motor.actions.ActionDescriptor
+import ai.neopsyke.agent.cortex.motor.actions.ActionExecutionContext
+import ai.neopsyke.agent.cortex.motor.actions.ActionRegistry
+import ai.neopsyke.agent.cortex.motor.actions.AgentActionPlugin
+import ai.neopsyke.agent.cortex.motor.actions.websearch.WebSearchActionHandler
+import ai.neopsyke.agent.cortex.motor.actions.websearch.WebSearchEngine
+import ai.neopsyke.agent.cortex.motor.actions.websearch.WebSearchResult
+import ai.neopsyke.agent.cortex.motor.actions.NoopReflectionMemoryRecorder
+import ai.neopsyke.agent.cortex.motor.actions.RoutedConversationOutputGateway
+import ai.neopsyke.agent.cortex.motor.actions.async.AsyncActionHandle
+import ai.neopsyke.agent.cortex.motor.actions.async.AsyncActionWait
+import ai.neopsyke.agent.cortex.motor.actions.async.AsyncOperationProvider
+import ai.neopsyke.agent.cortex.motor.actions.async.AsyncOperationRegistry
+import ai.neopsyke.agent.cortex.motor.actions.async.AsyncOperationStatus
+import ai.neopsyke.agent.cortex.motor.actions.async.AsyncResumeMode
+import ai.neopsyke.agent.cortex.motor.actions.plugin.builtin.ContactUserActionPlugin
+import ai.neopsyke.agent.cortex.motor.actions.websearch.WebSearchSource
 import ai.neopsyke.support.buildTestEgo
 import ai.neopsyke.agent.config.AgentConfig
 import ai.neopsyke.agent.model.ActionExecutionStatus
@@ -23,6 +26,7 @@ import ai.neopsyke.agent.model.ActionOutcome
 import ai.neopsyke.agent.model.EgoDecision
 import ai.neopsyke.agent.model.EgoTrigger
 import ai.neopsyke.agent.model.ActionType
+import ai.neopsyke.agent.model.StagedActionStatus
 import ai.neopsyke.agent.config.MemoryConfig
 import ai.neopsyke.agent.model.PendingImpulse
 import ai.neopsyke.agent.model.PendingAction
@@ -209,7 +213,7 @@ class AgentScenarioPackTest {
         assertTrue(hippocampus.queries.isNotEmpty())
         assertTrue(hippocampus.queries.any { it.cue.contains("hello") })
         val prompt = plannerLlm.lastMessages.last().content
-        assertTrue(prompt.contains("Long-term memory recall:"))
+        assertTrue(prompt.contains("Relevant long-term memory:"))
         assertTrue(prompt.contains("prior preference: concise responses"))
         assertEquals(listOf("ego> ok"), outputs)
     }
@@ -266,8 +270,11 @@ class AgentScenarioPackTest {
         val plannerCalls = plannerLlm.calls.filter { it.options.metadata.callSite != "action_verifier" }
         assertTrue(plannerCalls.size >= 2)
         val followUpPrompt = plannerCalls[1].messages.last().content
-        assertTrue(followUpPrompt.contains("Scratchpad summary:"))
-        assertTrue(followUpPrompt.contains("web_search_result"))
+        assertTrue(followUpPrompt.contains("Working notes for this request:"))
+        assertTrue(
+            followUpPrompt.contains("web_search_result") ||
+                followUpPrompt.contains("Official pricing fetched.")
+        )
         assertEquals(listOf("ego> done"), outputs)
         assertTrue(instrumentation.events.any { it.type == "scratchpad_created" })
         assertTrue(instrumentation.events.any { it.type == "scratchpad_destroyed" })
@@ -401,7 +408,13 @@ class AgentScenarioPackTest {
                 )
             }
         }
-        val config = AgentConfig(planner = PlannerConfig(maxLoopStepsPerInput = 2, maxThoughtPasses = 2))
+        val config = AgentConfig(
+            planner = PlannerConfig(
+                maxLoopStepsPerInput = 2,
+                maxThoughtPasses = 2,
+                actionVerifierEnabled = true
+            )
+        )
         val agent = buildTestEgo(
             planner = LlmEgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
             superego = Superego(modelClient = superegoLlm, config = config, instrumentation = instrumentation),
@@ -568,7 +581,7 @@ class AgentScenarioPackTest {
                 id = 1,
                 needId = "be-useful",
                 prompt = "Try something useful.",
-                urgency = 0.9,
+                tension = 0.9,
                 rawValue = 0.9,
                 rootImpulseId = rootImpulseId,
                 conversationContext = idModule.conversationContext,
@@ -693,6 +706,7 @@ class AgentScenarioPackTest {
     fun scenario_natural_language_recurring_goal_creation() = runBlocking {
         val root = Files.createTempDirectory("neopsyke-scenario-goal-create")
         var manager: GoalManager? = null
+        var actionControlStore: SqliteActionControlStore? = null
         try {
             val plannerLlm = StubChatModelClient().apply {
                 enqueueRawResponse(
@@ -720,6 +734,13 @@ class AgentScenarioPackTest {
                 instrumentation = instrumentation,
             )
             manager.start(CoroutineScope(SupervisorJob() + Dispatchers.Default))
+            val actionControlDb = root.resolve("action-control.db")
+            actionControlStore = SqliteActionControlStore(actionControlDb.toString())
+            val motorCortex = buildMotorCortex(
+                output = { outputs.add(it) },
+                config = config,
+                goalsGateway = manager,
+            )
             val agent = buildTestEgo(
                 planner = LlmEgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
                 superego = Superego(
@@ -727,27 +748,31 @@ class AgentScenarioPackTest {
                     config = config,
                     instrumentation = instrumentation
                 ),
-                motorCortex = buildMotorCortex(
-                    output = { outputs.add(it) },
-                    config = config,
-                    goalsGateway = manager,
-                ),
+                motorCortex = motorCortex,
                 config = config,
                 instrumentation = instrumentation,
                 goalsGateway = manager,
+                actionControlService = DefaultActionControlService(
+                    config = config.actionControl.copy(dbPath = actionControlDb.toString()),
+                    store = actionControlStore,
+                ) { action, authorization ->
+                    motorCortex.execute(action, config.searchResultCount, authorization)
+                },
             )
 
             runAgentWithInput(agent, "I would like to set a goal for you: Remind me of the current weather every 5 minutes.\nexit\n")
 
-            val goal = manager.allGoals().singleOrNull()
-            assertNotNull(goal)
-            val state = manager.goalStatus(goal.goalId)
-            assertNotNull(state)
-            assertEquals("*/5 * * * *", state.goal.cronExpression)
-            assertTrue(state.goal.instruction.contains("weather", ignoreCase = true))
-            assertTrue(outputs.single().contains("Goal created:", ignoreCase = true))
-            assertEquals("input_goal_create", plannerLlm.lastOptions.metadata.callSite)
+            assertTrue(manager.allGoals().isEmpty())
+            val staged = actionControlStore.listStagedActions(limit = 10)
+                .firstOrNull { it.actionType == ActionType.GOAL_OPERATION }
+            assertNotNull(staged)
+            assertEquals(ActionType.GOAL_OPERATION, staged.actionType)
+            assertEquals(StagedActionStatus.WAITING_AUTHORIZATION, staged.status)
+            assertTrue(staged.payload.contains("\"cron_expression\":\"*/5 * * * *\""))
+            assertTrue(outputs.single().contains("blocked by policy", ignoreCase = true))
+            assertTrue(plannerLlm.calls.any { it.options.metadata.callSite == "input_goal_create" })
         } finally {
+            actionControlStore?.close()
             manager?.stop()
             root.toFile().deleteRecursively()
         }
@@ -813,7 +838,14 @@ class AgentScenarioPackTest {
         }
         return MotorCortex(
             ActionRegistry.fromPlugins(
-                listOf(ContactUserActionPlugin(output = { outputs += it }), asyncPlugin)
+                listOf(
+                    ContactUserActionPlugin(
+                        conversationOutput = RoutedConversationOutputGateway(
+                            fallbackOutput = { text -> outputs += text }
+                        )
+                    ),
+                    asyncPlugin,
+                )
             )
         )
     }

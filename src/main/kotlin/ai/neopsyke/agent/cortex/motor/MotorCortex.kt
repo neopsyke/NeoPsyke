@@ -1,18 +1,25 @@
 package ai.neopsyke.agent.cortex.motor
 
-import ai.neopsyke.agent.actions.ActionCapability
-import ai.neopsyke.agent.actions.ActionRegistry
-import ai.neopsyke.agent.actions.ActionPluginFactoryContext
-import ai.neopsyke.agent.actions.ReflectionMemoryRecorder
-import ai.neopsyke.agent.actions.websearch.WebSearchActionHandler
+import ai.neopsyke.agent.cortex.motor.actions.ActionCapability
+import ai.neopsyke.agent.cortex.motor.actions.ConversationOutputGateway
+import ai.neopsyke.agent.cortex.motor.actions.RoutedConversationOutputGateway
+import ai.neopsyke.agent.cortex.motor.actions.ActionRegistry
+import ai.neopsyke.agent.cortex.motor.actions.ActionPluginFactoryContext
+import ai.neopsyke.agent.cortex.motor.actions.EvidenceArtifactStore
+import ai.neopsyke.agent.cortex.motor.actions.NoopEvidenceArtifactStore
+import ai.neopsyke.agent.cortex.motor.actions.ReflectionMemoryRecorder
+import ai.neopsyke.agent.cortex.motor.actions.websearch.WebSearchActionHandler
 import ai.neopsyke.agent.model.ActionOutcome
 import ai.neopsyke.agent.model.ActionType
 import ai.neopsyke.agent.config.AgentConfig
+import ai.neopsyke.agent.cortex.motor.actions.ActionDescriptor
+import ai.neopsyke.agent.model.ActionEffectClass
+import ai.neopsyke.agent.model.ActionExecutionStatus
+import ai.neopsyke.agent.model.CommitAuthorization
 import ai.neopsyke.agent.model.PendingAction
 import ai.neopsyke.agent.goal.NoopGoalsGateway
 import ai.neopsyke.agent.goal.GoalsGateway
-import ai.neopsyke.agent.tools.mcp.FetchTool
-import ai.neopsyke.agent.tools.mcp.McpTimeTool
+import ai.neopsyke.agent.cortex.motor.actions.fetch.FetchTool
 
 data class ActionImplementationStatus(
     val actionType: ActionType,
@@ -26,20 +33,22 @@ class MotorCortex(
 ) {
     constructor(
         webSearchActionHandler: WebSearchActionHandler,
-        mcpTimeTool: McpTimeTool? = null,
         fetchTool: FetchTool? = null,
         output: (String) -> Unit = ::println,
+        conversationOutput: ConversationOutputGateway = RoutedConversationOutputGateway(fallbackOutput = output),
         reflectionMemoryRecorder: ReflectionMemoryRecorder,
         config: AgentConfig = AgentConfig(),
         goalsGateway: GoalsGateway = NoopGoalsGateway,
+        evidenceArtifactStore: EvidenceArtifactStore = NoopEvidenceArtifactStore,
     ) : this(
         actionRegistry = ActionRegistry.discover(
             ActionPluginFactoryContext(
                 config = config,
                 webSearchActionHandler = webSearchActionHandler,
-                mcpTimeTool = mcpTimeTool,
                 fetchTool = fetchTool,
                 output = output,
+                conversationOutput = conversationOutput,
+                evidenceArtifactStore = evidenceArtifactStore,
                 reflectionMemoryRecorder = reflectionMemoryRecorder,
                 goalsGateway = goalsGateway,
             )
@@ -71,7 +80,7 @@ class MotorCortex(
             .map { it.actionType }
             .toSet()
 
-    fun plannerDescriptors(): List<ai.neopsyke.agent.actions.ActionDescriptor> =
+    fun plannerDescriptors(): List<ActionDescriptor> =
         actionRegistry.descriptors()
             .filter { it.dispatchable }
             .sortedBy { it.actionType.id }
@@ -91,8 +100,28 @@ class MotorCortex(
     fun actionTypesWithCapability(capability: ActionCapability): Set<ActionType> =
         actionRegistry.actionTypesWithCapability(capability)
 
-    suspend fun execute(action: PendingAction, searchResultCount: Int): ActionOutcome {
-        return actionRegistry.execute(action, searchResultCount)
+    fun actionRegistry(): ActionRegistry = actionRegistry
+
+    suspend fun execute(
+        action: PendingAction,
+        searchResultCount: Int,
+        authorization: CommitAuthorization? = null,
+    ): ActionOutcome {
+        val contract = actionRegistry.contract(action.type)
+        if (
+            contract != null &&
+            contract.effectClass != ActionEffectClass.OBSERVE &&
+            !contract.directCommitAllowed &&
+            authorization == null
+        ) {
+            return ActionOutcome(
+                statusSummary = "Action '${action.type.id}' requires commit authorization before execution.",
+                executionStatus = ActionExecutionStatus.FAILED,
+                actionErrorCategory = "commit_authorization_required",
+                plannerSignal = "commit authorization required for ${action.type.id}",
+            )
+        }
+        return actionRegistry.execute(action, searchResultCount, authorization)
     }
 
     private suspend fun buildStatusSnapshot(): List<ActionImplementationStatus> =

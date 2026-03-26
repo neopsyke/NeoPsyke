@@ -63,7 +63,7 @@ data class PendingImpulse(
     val id: Long,
     val needId: String,
     val prompt: String,
-    val urgency: Double,
+    val tension: Double,
     val rawValue: Double,
     val rootImpulseId: String = RootInputIds.next(),
     val receivedAtMs: Long = System.currentTimeMillis(),
@@ -83,6 +83,7 @@ data class PendingAction(
     val conversationContext: ConversationContext = ConversationContext.default(),
     val requiresFollowUpThought: Boolean = false,
     val followUpPrefix: String = "Action completed.",
+    val argumentDataTrust: DataTrust = DataTrust.TRUSTED_DATA,
     val origin: ActionOrigin = ActionOrigin.USER,
 )
 

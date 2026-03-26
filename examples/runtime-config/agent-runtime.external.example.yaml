@@ -1,0 +1,21 @@
+# Minimal local operator overlay.
+# Decisions made here:
+# - keep the dashboard on
+# - disable proactive goals
+# - disable autonomous background action-control work
+# - disable Telegram and Google Workspace until explicitly configured
+
+app:
+  dashboard_enabled: true
+  dashboard_port: 8787
+
+agent:
+  goals:
+    enabled: false
+  action_control:
+    autonomous_worker_enabled: false
+  native_integrations:
+    telegram:
+      enabled: false
+    google_workspace:
+      enabled: false

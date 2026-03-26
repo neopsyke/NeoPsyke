@@ -1,8 +1,9 @@
 package ai.neopsyke.agent.goal
 
-import ai.neopsyke.agent.actions.async.AsyncActionWait
+import ai.neopsyke.agent.cortex.motor.actions.async.AsyncActionWait
 import java.nio.file.Path
 import java.time.Instant
+import ai.neopsyke.agent.model.ConversationContext
 
 data class Goal(
     val id: String,
@@ -109,6 +110,7 @@ data class GoalRunActivation(
     val stepDescription: String,
     val acceptanceCriteria: String,
     val workingContext: String,
+    val conversationContext: ConversationContext,
     val actionSuggestion: String = "",
     val wakeReason: String = "",
 )
@@ -125,4 +127,5 @@ data class GoalTier1Summary(
     val currentStepDescription: String?,
     val blockers: List<String>,
     val lastWorkedAt: Instant?,
+    val cronExpression: String? = null,
 )

@@ -8,13 +8,12 @@ import ai.neopsyke.agent.config.AgentConfig
 import ai.neopsyke.agent.support.PromptBudgetAllocator
 import ai.neopsyke.agent.support.RetryPolicy
 import ai.neopsyke.agent.support.TextSecurity
-import ai.neopsyke.agent.actions.websearch.WebSearchEngine
-import ai.neopsyke.agent.actions.websearch.WebSearchResult
+import ai.neopsyke.agent.cortex.motor.actions.websearch.WebSearchEngine
+import ai.neopsyke.agent.cortex.motor.actions.websearch.WebSearchResult
 import ai.neopsyke.instrumentation.AgentEvent
 import ai.neopsyke.instrumentation.AgentInstrumentation
 import ai.neopsyke.instrumentation.NoopAgentInstrumentation
 import ai.neopsyke.llm.ChatCallMetadata
-import ai.neopsyke.llm.ChatMessage
 import ai.neopsyke.llm.ChatModelClient
 import ai.neopsyke.llm.ChatRequestOptions
 import ai.neopsyke.llm.ChatRole

@@ -68,7 +68,7 @@ class NeedStateTest {
         )
         state.grow() // value = 0.5
         // urgency = 0.5^2 = 0.25
-        assertEquals(0.25, state.urgency, epsilon)
+        assertEquals(0.25, state.tension, epsilon)
     }
 
     // ── Cooldown ────────────────────────────────────────────────────────
@@ -351,7 +351,7 @@ class NeedStateTest {
         val snap = state.snapshot()
         assertEquals("test", snap["name"])
         assertEquals(state.value, snap["rawValue"])
-        assertEquals(state.urgency, snap["urgency"])
+        assertEquals(state.tension, snap["tension"])
         assertEquals(state.delta, snap["delta"])
         assertEquals(state.cooldownRemaining, snap["cooldownRemaining"])
         assertEquals(state.inFlight, snap["inFlight"])

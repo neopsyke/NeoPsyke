@@ -294,6 +294,14 @@ and any future caller) must follow all three sub-rules:
 
 Do not add a new LLM caller without all three sub-rules in place.
 
+### No LLM-Relayed Internal Identifiers
+Never trust the LLM to relay internal identifiers. If it's resolvable from
+object metadata or scope, resolve it in the execution layer. LLMs hallucinate
+and mangle UUIDs; the action handler must derive system-internal references
+(artifact IDs, scope keys, etc.) from the action's own metadata
+(`rootInputId`, `conversationContext`) rather than parsing them from the
+planner payload.
+
 ### Named Constants for Numeric Thresholds
 Magic numbers (character limits, ratios, step counts, token caps) must be
 extracted to `const val` entries in the `companion object` of the class that
@@ -332,6 +340,22 @@ pattern `config.<domain>.<field>` (e.g. `config.planner.llmRetryAttempts`).
 - Prefer small, explicit functions and descriptive names.
 - Use existing abstractions (`SensoryCortex`, `MotorCortex`, `SuperegoGatekeeper`, instrumentation hooks) instead of duplicating logic.
 - Keep logging and metrics instrumentation consistent with existing patterns.
+
+### Zero Compiler Warnings Policy
+The build must produce **zero** Kotlin compiler warnings. Before opening a PR,
+run `./gradlew compileKotlin compileTestKotlin` and verify no `w:` lines appear.
+Common pitfalls and their fixes:
+
+- **Deprecated `JsonNode.asText(defaultValue)`** — use `node.path("key").asText()`
+  (returns `""` for missing nodes) or `.asText().ifEmpty { fallback }` when a
+  non-empty fallback is needed. For null-default cases use
+  `if (node.isTextual) node.asText() else null`.
+- **`@JsonProperty` on data-class constructor params** — always use the explicit
+  target `@param:JsonProperty("snake_name")` to silence KT-73255.
+- **`ObjectMapper.configure(MapperFeature, Boolean)`** — use the builder API:
+  `JsonMapper.builder(factory).enable(MapperFeature.X).disable(DeserializationFeature.Y).build()`.
+- When a new Jackson or Kotlin deprecation surfaces, fix it immediately rather
+  than suppressing the warning.
 
 ## Logging Practices (Required)
 - Log for diagnosis, not verbosity: every warning/error must include enough context to locate the failing path quickly.

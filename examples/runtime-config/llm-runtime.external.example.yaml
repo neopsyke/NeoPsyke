@@ -1,0 +1,36 @@
+# Minimal single-provider fast-start overlay.
+# Required env:
+#   GOOGLE_API_KEY
+#
+# Decisions made here:
+# - one provider for all cognitive roles
+# - cheap/fast model for routine roles
+# - stronger model for escalation
+# - the same provider handles web search
+
+cognitive_roles:
+  planner:
+    provider: google
+    model: gemini-2.5-flash
+  action_verifier:
+    provider: google
+    model: gemini-2.5-flash
+  superego_primary:
+    provider: google
+    model: gemini-2.5-flash
+  superego_escalation:
+    provider: google
+    model: gemini-2.5-pro
+  meta_reasoner:
+    provider: google
+    model: gemini-2.5-flash
+  meta_reasoner_fallback:
+    provider: google
+    model: gemini-2.5-pro
+  memory_advisor:
+    provider: google
+    model: gemini-2.5-flash
+
+web_search:
+  provider: google
+  model: gemini-2.5-flash

@@ -11,7 +11,7 @@ import kotlin.test.assertTrue
 
 class DecisionVerifierTest {
     private val verifier = DeterministicDecisionVerifier()
-    private val evidenceActionTypes = setOf(ActionType.WEB_SEARCH, ActionType.MCP_TIME, ActionType.WEBSITE_FETCH)
+    private val evidenceActionTypes = setOf(ActionType.WEB_SEARCH, ActionType.WEBSITE_FETCH)
 
     @Test
     fun `volatile factual answer requires evidence when tools are available`() {

@@ -1,5 +1,9 @@
-package ai.neopsyke.agent.actions.websearch
+package ai.neopsyke.agent.cortex.motor.actions.websearch
 
+import ai.neopsyke.agent.cortex.motor.actions.websearch.WebSearchActionHandler
+import ai.neopsyke.agent.cortex.motor.actions.websearch.WebSearchEngine
+import ai.neopsyke.agent.cortex.motor.actions.websearch.WebSearchResult
+import ai.neopsyke.agent.cortex.motor.actions.websearch.WebSearchSource
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue

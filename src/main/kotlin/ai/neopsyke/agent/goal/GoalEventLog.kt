@@ -90,6 +90,8 @@ internal data class EventWrapper(
     val summary: String? = null,
     // WorkCycleCompleted
     val actionsExecuted: Int? = null,
+    // Updated
+    val cronExpression: String? = null,
 ) {
     fun toEvent(): GoalEvent {
         val ts = java.time.Instant.parse(timestamp)
@@ -130,6 +132,15 @@ internal data class EventWrapper(
             "Failed" -> GoalEvent.Failed(goalId, reason ?: "", ts)
             "ContextUpdated" -> GoalEvent.ContextUpdated(goalId, tier ?: 1, summary ?: "", ts)
             "WorkCycleCompleted" -> GoalEvent.WorkCycleCompleted(goalId, stepId ?: "", actionsExecuted ?: 0, ts)
+            "Updated" -> GoalEvent.Updated(
+                goalId = goalId,
+                cronExpression = cronExpression,
+                title = title,
+                instruction = instruction,
+                completionCriteria = completionCriteria,
+                reason = reason,
+                timestamp = ts,
+            )
             else -> error("Unknown event type: $type")
         }
     }
@@ -173,6 +184,13 @@ internal data class EventWrapper(
                 is GoalEvent.Failed -> base.copy(reason = event.reason)
                 is GoalEvent.ContextUpdated -> base.copy(tier = event.tier, summary = event.summary)
                 is GoalEvent.WorkCycleCompleted -> base.copy(stepId = event.stepId, actionsExecuted = event.actionsExecuted)
+                is GoalEvent.Updated -> base.copy(
+                    title = event.title,
+                    instruction = event.instruction,
+                    completionCriteria = event.completionCriteria,
+                    cronExpression = event.cronExpression,
+                    reason = event.reason,
+                )
             }
         }
     }

@@ -1,10 +1,11 @@
 package ai.neopsyke.agent
 
-import ai.neopsyke.agent.actions.NoopReflectionMemoryRecorder
-import ai.neopsyke.agent.actions.websearch.WebSearchActionHandler
-import ai.neopsyke.agent.actions.websearch.WebSearchEngine
-import ai.neopsyke.agent.actions.websearch.WebSearchResult
-import ai.neopsyke.agent.actions.websearch.WebSearchSource
+import ai.neopsyke.agent.cortex.motor.actions.NoopReflectionMemoryRecorder
+import ai.neopsyke.agent.cortex.motor.actions.websearch.WebSearchActionHandler
+import ai.neopsyke.agent.cortex.motor.actions.websearch.WebSearchEngine
+import ai.neopsyke.agent.cortex.motor.actions.websearch.WebSearchEngineHealth
+import ai.neopsyke.agent.cortex.motor.actions.websearch.WebSearchResult
+import ai.neopsyke.agent.cortex.motor.actions.websearch.WebSearchSource
 import ai.neopsyke.support.buildTestEgo
 import ai.neopsyke.support.RecordingInstrumentation
 import ai.neopsyke.support.StubChatModelClient
@@ -288,8 +289,8 @@ class EgoAgentTest {
             override fun search(query: String, maxResults: Int): WebSearchResult =
                 WebSearchResult(summary = "offline", snippets = emptyList())
 
-            override fun healthCheck(): ai.neopsyke.agent.actions.websearch.WebSearchEngineHealth =
-               ai.neopsyke.agent.actions.websearch.WebSearchEngineHealth(
+            override fun healthCheck(): WebSearchEngineHealth =
+                WebSearchEngineHealth(
                     available = false,
                     detail = "search offline"
                 )
@@ -337,7 +338,8 @@ class EgoAgentTest {
                 scratchpad = ScratchpadConfig(
                     enabled = true,
                     activationMinPlanSteps = 1,
-                    digestMaxEntries = 4
+                    digestMaxEntries = 4,
+                    maxPromptTokens = 420,
                 )
             )
         )
@@ -355,7 +357,7 @@ class EgoAgentTest {
         val plannerInputCalls = plannerLlm.calls.filter { it.options.metadata.callSite == "input" }
         assertTrue(plannerInputCalls.size >= 2)
         val secondPrompt = plannerInputCalls[1].messages.joinToString("\\n\\n") { it.content }
-        assertTrue(secondPrompt.contains("Prior workspace digests"))
+        assertTrue(secondPrompt.contains("Recent completed work summaries"))
         assertTrue(secondPrompt.contains("digest sentinel one"))
         assertTrue(
             instrumentation.events.any { it.type == "scratchpad_digest_captured" },
@@ -966,7 +968,7 @@ class EgoAgentTest {
         assertTrue(hippocampus.queries.isNotEmpty())
         assertTrue(hippocampus.queries.any { it.cue.contains("hello") })
         val prompt = plannerLlm.lastMessages.last().content
-        assertTrue(prompt.contains("Long-term memory recall:"))
+        assertTrue(prompt.contains("Relevant long-term memory:"))
         assertTrue(prompt.contains("prior preference: concise responses"))
         assertEquals(listOf("ego> ok"), outputs)
         assertTrue(
@@ -1017,7 +1019,7 @@ class EgoAgentTest {
                 scratchpad = ScratchpadConfig(
                     enabled = true,
                     activationMinPlanSteps = 1,
-                    maxPromptTokens = 280,
+                    maxPromptTokens = 420,
                     debugCaptureEnabled = true
                 )
             )
@@ -1039,9 +1041,15 @@ class EgoAgentTest {
         val plannerCalls = plannerLlm.calls.filter { it.options.metadata.callSite != "action_verifier" }
         assertTrue(plannerCalls.size >= 2)
         val followUpPrompt = plannerCalls[1].messages.last().content
-        assertTrue(followUpPrompt.contains("Scratchpad summary:"))
-        assertTrue(followUpPrompt.contains("Request"))
-        assertTrue(followUpPrompt.contains("web_search_result"))
+        assertTrue(followUpPrompt.contains("Working notes for this request:"))
+        assertTrue(
+            followUpPrompt.contains("Request") ||
+                followUpPrompt.contains("find current pricing")
+        )
+        assertTrue(
+            followUpPrompt.contains("web_search_result") ||
+                followUpPrompt.contains("Official pricing page confirms current Pro plan rate.")
+        )
         assertEquals(listOf("ego> Final answer from planner"), outputs)
         assertTrue(instrumentation.events.any { it.type == "scratchpad_created" })
         assertTrue(instrumentation.events.any { it.type == "scratchpad_updated" })

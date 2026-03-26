@@ -4,10 +4,11 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.SupervisorJob
-import ai.neopsyke.agent.actions.ActionExecutionContext
-import ai.neopsyke.agent.actions.ActionPluginFactoryContext
-import ai.neopsyke.agent.actions.builtin.GoalOperationActionPlugin
+import ai.neopsyke.agent.cortex.motor.actions.ActionExecutionContext
+import ai.neopsyke.agent.cortex.motor.actions.ActionPluginFactoryContext
+import ai.neopsyke.agent.cortex.motor.actions.plugin.builtin.GoalOperationActionPlugin
 import ai.neopsyke.agent.config.AgentConfig
+import ai.neopsyke.agent.cortex.motor.actions.NoopReflectionMemoryRecorder
 import ai.neopsyke.agent.model.ActionExecutionStatus
 import ai.neopsyke.agent.model.ActionType
 import ai.neopsyke.agent.model.PendingAction
@@ -28,20 +29,18 @@ class GoalOperationActionPluginTest {
             ActionPluginFactoryContext(
                 config = AgentConfig(goals = GoalConfig(enabled = false)),
                 webSearchActionHandler = null,
-                mcpTimeTool = null,
                 fetchTool = null,
                 output = {},
-                reflectionMemoryRecorder = ai.neopsyke.agent.actions.NoopReflectionMemoryRecorder,
+                reflectionMemoryRecorder = NoopReflectionMemoryRecorder,
             )
         )
         val enabled = GoalOperationActionPlugin(
             ActionPluginFactoryContext(
                 config = AgentConfig(goals = GoalConfig(enabled = true)),
                 webSearchActionHandler = null,
-                mcpTimeTool = null,
                 fetchTool = null,
                 output = {},
-                reflectionMemoryRecorder = ai.neopsyke.agent.actions.NoopReflectionMemoryRecorder,
+                reflectionMemoryRecorder = NoopReflectionMemoryRecorder,
             )
         )
 
@@ -62,10 +61,9 @@ class GoalOperationActionPluginTest {
             ActionPluginFactoryContext(
                 config = AgentConfig(goals = GoalConfig(enabled = true)),
                 webSearchActionHandler = null,
-                mcpTimeTool = null,
                 fetchTool = null,
                 output = {},
-                reflectionMemoryRecorder = ai.neopsyke.agent.actions.NoopReflectionMemoryRecorder,
+                reflectionMemoryRecorder = NoopReflectionMemoryRecorder,
                 goalsGateway = gateway,
             )
         )
@@ -87,6 +85,77 @@ class GoalOperationActionPluginTest {
         assertEquals(GoalPriority.HIGH, capturedRequest?.priority)
         assertEquals("Inbox is triaged", capturedRequest?.completionCriteria)
         assertEquals("*/5 * * * *", capturedRequest?.cronExpression)
+    }
+
+    @Test
+    fun `plugin normalizes delete all intent from revise payload`() = runBlocking {
+        var capturedRequest: GoalOperationRequest? = null
+        val gateway = object : GoalsGateway by NoopGoalsGateway {
+            override fun executeOperation(request: GoalOperationRequest): GoalOperationResult {
+                capturedRequest = request
+                return GoalOperationResult(true, "deleted")
+            }
+        }
+        val plugin = GoalOperationActionPlugin(
+            ActionPluginFactoryContext(
+                config = AgentConfig(goals = GoalConfig(enabled = true)),
+                webSearchActionHandler = null,
+                fetchTool = null,
+                output = {},
+                reflectionMemoryRecorder = NoopReflectionMemoryRecorder,
+                goalsGateway = gateway,
+            )
+        )
+
+        val outcome = plugin.execute(
+            PendingAction(
+                id = 1L,
+                urgency = Urgency.MEDIUM,
+                type = ActionType.GOAL_OPERATION,
+                payload = """{"operation":"revise","instruction":"Delete all existing goals"}""",
+                summary = "delete goals",
+            ),
+            ActionExecutionContext(searchResultCount = 0)
+        )
+
+        assertEquals(ActionExecutionStatus.SUCCESS, outcome.executionStatus)
+        assertEquals(GoalOperation.DELETE_ALL, capturedRequest?.operation)
+    }
+
+    @Test
+    fun `plugin keeps ambiguous delete payload as single delete instead of delete all`() = runBlocking {
+        var capturedRequest: GoalOperationRequest? = null
+        val gateway = object : GoalsGateway by NoopGoalsGateway {
+            override fun executeOperation(request: GoalOperationRequest): GoalOperationResult {
+                capturedRequest = request
+                return GoalOperationResult(false, "Goal delete requires goalId.")
+            }
+        }
+        val plugin = GoalOperationActionPlugin(
+            ActionPluginFactoryContext(
+                config = AgentConfig(goals = GoalConfig(enabled = true)),
+                webSearchActionHandler = null,
+                fetchTool = null,
+                output = {},
+                reflectionMemoryRecorder = NoopReflectionMemoryRecorder,
+                goalsGateway = gateway,
+            )
+        )
+
+        val outcome = plugin.execute(
+            PendingAction(
+                id = 2L,
+                urgency = Urgency.MEDIUM,
+                type = ActionType.GOAL_OPERATION,
+                payload = """{"operation":"delete"}""",
+                summary = "delete goal ambiguously",
+            ),
+            ActionExecutionContext(searchResultCount = 0)
+        )
+
+        assertEquals(ActionExecutionStatus.FAILED, outcome.executionStatus)
+        assertEquals(GoalOperation.DELETE, capturedRequest?.operation)
+        assertEquals(null, capturedRequest?.goalId)
     }
 
     @Test
@@ -202,10 +271,9 @@ class GoalOperationActionPluginTest {
             ActionPluginFactoryContext(
                 config = AgentConfig(goals = GoalConfig(enabled = true, workspaceRoot = root)),
                 webSearchActionHandler = null,
-                mcpTimeTool = null,
                 fetchTool = null,
                 output = {},
-                reflectionMemoryRecorder = ai.neopsyke.agent.actions.NoopReflectionMemoryRecorder,
+                reflectionMemoryRecorder = NoopReflectionMemoryRecorder,
                 goalsGateway = gateway,
             )
         )

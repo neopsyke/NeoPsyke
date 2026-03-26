@@ -242,6 +242,21 @@ class DashboardStateStoreTest {
     }
 
     @Test
+    fun `filtered subscription only receives matching events`() = runBlocking {
+        val store = DashboardStateStore(maxEvents = 10)
+        val subscription = store.subscribe { event -> event.type.startsWith("goal_") }
+        store.onEvent(AgentEvent(id = 1, type = "warning", data = mapOf("message" to "ignore")))
+        store.onEvent(AgentEvent(id = 2, type = "goal_started", data = mapOf("goal_id" to "goal-1")))
+
+        val payload = withTimeoutOrNull(200) { subscription.receive() }
+        assertNotNull(payload)
+        assertTrue(payload.contains("\"type\":\"goal_started\""))
+        assertTrue(payload.contains("\"goal_id\":\"goal-1\""))
+        subscription.close()
+        store.close()
+    }
+
+    @Test
     fun `scratchpad debug snapshot is captured for api but not broadcast over sse`() {
         val store = DashboardStateStore(maxEvents = 20)
         val subscription = store.subscribe()
@@ -355,6 +370,64 @@ class DashboardStateStoreTest {
         assertEquals("assistant", messages[1]["role"])
         assertEquals("assistant reply", messages[1]["content"])
 
+        store.close()
+    }
+
+    @Test
+    fun `root input session mapping is retained through contact user execution and cleared on scratchpad destroy`() {
+        val store = DashboardStateStore(maxEvents = 20)
+        val sessionId = store.createChatSession(title = "Mapping Test").sessionId
+        val rootInputId = "root-retain-1"
+        val rootInputMs = 1234L
+        val conversationContext = ConversationContext(sessionId, Interlocutor.named("owner"))
+
+        store.onEvent(
+            AgentEvent(
+                id = 1,
+                type = "input_queued",
+                data = mapOf(
+                    "input" to PendingInput(
+                        id = 10L,
+                        content = "hello",
+                        source = "chat:$sessionId",
+                        rootInputId = rootInputId,
+                        conversationContext = conversationContext,
+                        receivedAtMs = rootInputMs,
+                    )
+                )
+            )
+        )
+        store.onEvent(
+            AgentEvent(
+                id = 2,
+                type = "action_executed",
+                data = mapOf(
+                    "action" to PendingAction(
+                        id = 11L,
+                        urgency = Urgency.MEDIUM,
+                        type = ActionType.CONTACT_USER,
+                        payload = "reply",
+                        summary = "summary",
+                        rootInputId = rootInputId,
+                        rootInputReceivedAtMs = rootInputMs,
+                        conversationContext = conversationContext,
+                    ),
+                    "outcome_summary" to "ok",
+                )
+            )
+        )
+
+        assertEquals(sessionId, store.resolveSessionForRootInput(rootInputId))
+
+        store.onEvent(
+            AgentEvent(
+                id = 3,
+                type = "scratchpad_destroyed",
+                data = mapOf("root_input_id" to rootInputId),
+            )
+        )
+
+        assertNull(store.resolveSessionForRootInput(rootInputId))
         store.close()
     }
 

@@ -2,6 +2,7 @@ package ai.neopsyke
 
 import mu.KotlinLogging
 import ai.neopsyke.agent.config.AgentConfig
+import ai.neopsyke.agent.config.TelegramIngressMode
 import ai.neopsyke.agent.ego.Ego
 import ai.neopsyke.agent.ego.EgoAssembler
 import ai.neopsyke.agent.ego.LlmEgoPlanner
@@ -19,29 +20,37 @@ import ai.neopsyke.agent.memory.provider.HttpMemoryProviderClient
 import ai.neopsyke.agent.memory.provider.DefaultMemoryProviderInstaller
 import ai.neopsyke.agent.memory.provider.ManagedHttpMemoryProviderProcess
 import ai.neopsyke.agent.memory.provider.ProviderBackedHippocampus
-import ai.neopsyke.agent.tools.mcp.McpStdioClient
-import ai.neopsyke.agent.model.ActionType
+import ai.neopsyke.agent.cortex.motor.actions.mcp.McpStdioClient
+import ai.neopsyke.agent.model.ConversationContext
+import ai.neopsyke.agent.model.ConversationSecurityContexts
+import ai.neopsyke.agent.model.Interlocutor
 import ai.neopsyke.agent.cortex.sensory.AsyncSignalSource
 import ai.neopsyke.agent.cortex.sensory.SensoryCortex
-import ai.neopsyke.agent.cortex.motor.ActionImplementationStatus
-import ai.neopsyke.agent.cortex.motor.MotorCortex
 import ai.neopsyke.agent.memory.longterm.NoopHippocampus
 import ai.neopsyke.agent.memory.longterm.ResetRequest
-import ai.neopsyke.agent.tools.mcp.NativeFetchTool
-import ai.neopsyke.agent.tools.mcp.SdkMcpTimeTool
+import ai.neopsyke.agent.cortex.motor.actions.fetch.NativeFetchTool
 import ai.neopsyke.agent.superego.Superego
-import ai.neopsyke.agent.actions.websearch.WebSearchActionHandler
-import ai.neopsyke.agent.actions.websearch.WebSearchEngine
-import ai.neopsyke.agent.actions.websearch.WebSearchEngineHealth
-import ai.neopsyke.agent.actions.websearch.WebSearchResult
+import ai.neopsyke.agent.cortex.motor.actions.websearch.WebSearchActionHandler
+import ai.neopsyke.agent.cortex.motor.actions.websearch.WebSearchEngine
+import ai.neopsyke.agent.cortex.motor.actions.websearch.WebSearchEngineHealth
+import ai.neopsyke.agent.cortex.motor.actions.websearch.WebSearchResult
+import ai.neopsyke.agent.cortex.motor.actions.EnvActionSecretProvider
+import ai.neopsyke.agent.cortex.motor.actions.RoutedConversationOutputGateway
+import ai.neopsyke.agent.cortex.motor.actions.SecretHandle
+import ai.neopsyke.agent.cortex.motor.actions.control.ActionAuthorizationPolicy
+import ai.neopsyke.agent.cortex.motor.actions.control.ActionControlAutonomousWorker
+import ai.neopsyke.agent.cortex.motor.actions.control.ActionControlStore
+import ai.neopsyke.agent.cortex.motor.actions.control.ActionSecurityPolicyLoader
+import ai.neopsyke.agent.cortex.motor.actions.control.ConfiguredActionAuthorizationPolicy
+import ai.neopsyke.agent.cortex.motor.actions.control.DefaultActionControlService
+import ai.neopsyke.agent.cortex.motor.actions.control.LegacyCompatibleActionControlService
+import ai.neopsyke.agent.cortex.motor.actions.control.SqliteActionControlStore
 import ai.neopsyke.config.AgentRuntimeSettings
-import ai.neopsyke.config.McpCapabilityConfig
 import ai.neopsyke.config.LlmEndpointConfig
 import ai.neopsyke.config.LlmProvider
 import ai.neopsyke.config.LlmRuntimeConfig
 import ai.neopsyke.config.MemoryMode
 import ai.neopsyke.config.MemoryRuntimeConfig
-import ai.neopsyke.config.McpRuntimeConfig
 import ai.neopsyke.dashboard.DashboardServer
 import ai.neopsyke.dashboard.DashboardStateStore
 import ai.neopsyke.dashboard.ChatRuntimeBridge
@@ -62,6 +71,7 @@ import ai.neopsyke.eval.ReasoningLogicHarnessClient
 import ai.neopsyke.eval.ReasoningSelfEvalRunner
 import ai.neopsyke.eval.UsageTrackingChatClient
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.ClosedReceiveChannelException
@@ -85,6 +95,13 @@ import ai.neopsyke.llm.AdaptiveStructuredOutputChatClient
 import ai.neopsyke.llm.InstrumentedChatModelClient
 import ai.neopsyke.llm.ChatModelClient
 import ai.neopsyke.integrations.google.websearch.GeminiWebSearchEngine
+import ai.neopsyke.integrations.google.GoogleWorkspaceApiClient
+import ai.neopsyke.integrations.google.GoogleWorkspaceCredentialStore
+import ai.neopsyke.integrations.google.GoogleWorkspaceOAuthBridge
+import ai.neopsyke.integrations.auth.OAuthPendingAuthorizationStore
+import ai.neopsyke.integrations.auth.OAuthStateCodec
+import ai.neopsyke.llm.AnthropicChatClient
+import ai.neopsyke.llm.AnthropicProviderStatusChecker
 import ai.neopsyke.llm.GeminiChatClient
 import ai.neopsyke.llm.GeminiProviderStatusChecker
 import ai.neopsyke.llm.GroqChatClient
@@ -96,6 +113,8 @@ import ai.neopsyke.llm.MistralChatClient
 import ai.neopsyke.llm.MistralProviderStatusChecker
 import ai.neopsyke.llm.OpenAiChatClient
 import ai.neopsyke.llm.OpenAiProviderStatusChecker
+import ai.neopsyke.llm.OllamaChatClient
+import ai.neopsyke.llm.OllamaProviderStatusChecker
 import ai.neopsyke.llm.ProviderHealthState
 import ai.neopsyke.llm.ProviderStatus
 import ai.neopsyke.llm.TokenBudgetGuardedChatClient
@@ -109,13 +128,15 @@ import ai.neopsyke.integrations.mistral.websearch.MistralConversationsWebSearchE
 import ai.neopsyke.integrations.mistral.websearch.MistralWebSearchMode
 import ai.neopsyke.integrations.mistral.websearch.MistralWebSearchProfile
 import ai.neopsyke.integrations.mistral.websearch.MistralWebSearchAgentSession
+import ai.neopsyke.integrations.telegram.TelegramBotApiClient
+import ai.neopsyke.integrations.telegram.TelegramPollingBridge
+import ai.neopsyke.integrations.telegram.TelegramUpdateProcessor
+import ai.neopsyke.integrations.telegram.TelegramWebhookBridge
 import ai.neopsyke.metrics.MetricsQueryProvider
 import ai.neopsyke.metrics.MetricsRuntimeFactory
-import ai.neopsyke.agent.tools.mcp.FetchTool
-import ai.neopsyke.agent.tools.mcp.McpTimeTool
-import ai.neopsyke.agent.tools.mcp.ToolHealthStatus
+import ai.neopsyke.agent.cortex.motor.actions.fetch.FetchTool
+import ai.neopsyke.agent.cortex.motor.actions.fetch.ToolHealthStatus
 import kotlin.system.exitProcess
-import java.net.InetSocketAddress
 import java.util.concurrent.Executors
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicBoolean
@@ -127,11 +148,25 @@ private val logger = KotlinLogging.logger {}
 private val output: ConsoleReporter = StdConsoleReporter
 private const val PROVIDER_HEALTH_CHECK_MAX_ATTEMPTS: Int = 2
 private const val PROVIDER_HEALTH_CHECK_RETRY_DELAY_MS: Long = 250L
+private const val FREUD_LIVE_SESSION_ID: String = "freud-live"
+private const val FREUD_LIVE_INTERLOCUTOR_ID: String = "freud-live-user"
 
 internal object AppModeRunners {
     private data class InteractiveLlmStartupConfig(
         val metaReasonerFallback: LlmEndpointConfig?,
     )
+
+    internal fun freudLiveConversationContext(
+        sessionId: String = FREUD_LIVE_SESSION_ID,
+    ): ConversationContext =
+        ConversationContext(
+            sessionId = sessionId,
+            interlocutor = Interlocutor.named(FREUD_LIVE_INTERLOCUTOR_ID),
+            security = ConversationSecurityContexts.ownerDirect(
+                provider = "freud-live",
+                channelId = sessionId,
+            ),
+        )
 
     internal fun runReasoningOnlyEval(
         llm: LlmRuntimeConfig,
@@ -255,7 +290,6 @@ internal object AppModeRunners {
     internal fun runMemoryLiveEval(
         llm: LlmRuntimeConfig,
         config: AgentConfig,
-        mcpRuntimeConfig: McpRuntimeConfig,
         memoryRuntimeConfig: MemoryRuntimeConfig,
         cliOptions: AppCliOptions,
         runtimeSettings: AgentRuntimeSettings,
@@ -420,7 +454,7 @@ internal object AppModeRunners {
         modeLabel: String,
         roleLabel: String,
     ): ProviderStatus {
-        if (endpoint.apiKey.isBlank()) {
+        if (endpoint.provider.requiresApiKey() && endpoint.apiKey.isBlank()) {
             return ProviderStatus(
                 provider = endpoint.providerLabel,
                 state = ProviderHealthState.UNAVAILABLE,
@@ -428,6 +462,11 @@ internal object AppModeRunners {
             )
         }
         val checker = when (endpoint.provider) {
+            LlmProvider.ANTHROPIC -> AnthropicProviderStatusChecker(
+                apiKey = endpoint.apiKey,
+                baseUrl = endpoint.baseUrl
+            )
+
             LlmProvider.GROQ -> GroqProviderStatusChecker(
                 apiKey = endpoint.apiKey,
                 baseUrl = endpoint.baseUrl
@@ -444,6 +483,11 @@ internal object AppModeRunners {
             )
 
             LlmProvider.OPENAI -> OpenAiProviderStatusChecker(
+                apiKey = endpoint.apiKey,
+                baseUrl = endpoint.baseUrl
+            )
+
+            LlmProvider.OLLAMA -> OllamaProviderStatusChecker(
                 apiKey = endpoint.apiKey,
                 baseUrl = endpoint.baseUrl
             )
@@ -549,7 +593,6 @@ internal object AppModeRunners {
     internal fun runInteractiveMode(
         llm: LlmRuntimeConfig,
         config: AgentConfig,
-        mcpRuntimeConfig: McpRuntimeConfig,
         memoryRuntimeConfig: MemoryRuntimeConfig,
         runtimeSettings: AgentRuntimeSettings,
         cliOptions: AppCliOptions? = null,
@@ -580,11 +623,136 @@ internal object AppModeRunners {
             source = sensoryInput,
             interlocutorResolver = interlocutorResolver
         )
+        val secretProvider = EnvActionSecretProvider(System.getenv())
+        val telegramConfig = config.nativeIntegrations.telegram
+        val telegramBotToken = secretProvider.read(SecretHandle(telegramConfig.botTokenHandle))
+        val telegramWebhookSecret = secretProvider.read(SecretHandle(telegramConfig.webhookSecretHandle))
+        if (telegramConfig.enabled) {
+            logger.info {
+                "Telegram integration config enabled=true mode=${telegramConfig.mode.name.lowercase()} bot_token_present=${!telegramBotToken.isNullOrBlank()} webhook_secret_present=${!telegramWebhookSecret.isNullOrBlank()} owner_chat_id=${telegramConfig.ownerChatId.ifBlank { "unset" }} owner_user_id=${telegramConfig.ownerUserId.ifBlank { "unset" }} require_direct_chat=${telegramConfig.requireDirectChat} drop_unauthorized_messages=${telegramConfig.dropUnauthorizedMessages}"
+            }
+            if (telegramBotToken.isNullOrBlank()) {
+                logger.warn {
+                    "Telegram integration is enabled but bot token handle '${telegramConfig.botTokenHandle}' resolved blank; ingress/egress will not start."
+                }
+            }
+            if (telegramConfig.mode == TelegramIngressMode.WEBHOOK && telegramWebhookSecret.isNullOrBlank()) {
+                logger.warn {
+                    "Telegram webhook mode is enabled but webhook secret handle '${telegramConfig.webhookSecretHandle}' resolved blank; inbound webhook auth will fail closed."
+                }
+            }
+        }
+        val telegramSink = if (telegramConfig.enabled && !telegramBotToken.isNullOrBlank()) {
+            TelegramBotApiClient(botToken = telegramBotToken)
+        } else {
+            null
+        }
+        val conversationOutput = RoutedConversationOutputGateway(
+            fallbackOutput = {},
+            telegramSink = telegramSink,
+        )
         val chatBridge = ChatRuntimeBridge(
             store = dashboardStore,
             sensoryInput = sensoryInput,
             interlocutorResolver = interlocutorResolver
         )
+        val telegramUpdateProcessor = if (telegramConfig.enabled) {
+            TelegramUpdateProcessor(
+                store = dashboardStore,
+                sensoryInput = sensoryInput,
+                config = telegramConfig,
+                interlocutorResolver = interlocutorResolver,
+            )
+        } else {
+            null
+        }
+        val telegramWebhookBridge = if (
+            telegramConfig.enabled &&
+            telegramConfig.mode == TelegramIngressMode.WEBHOOK
+        ) {
+            TelegramWebhookBridge(
+                store = dashboardStore,
+                sensoryInput = sensoryInput,
+                config = telegramConfig,
+                webhookSecret = telegramWebhookSecret,
+                interlocutorResolver = interlocutorResolver,
+            )
+        } else {
+            null
+        }
+        val telegramPollingBridge = if (
+            telegramConfig.enabled &&
+            telegramConfig.mode == TelegramIngressMode.POLLING &&
+            telegramSink != null &&
+            telegramUpdateProcessor != null
+        ) {
+            TelegramPollingBridge.create(
+                scope = agentScope,
+                config = telegramConfig,
+                apiClient = telegramSink,
+                processor = telegramUpdateProcessor,
+            ).also { it.start() }
+        } else {
+            if (telegramConfig.enabled && telegramConfig.mode == TelegramIngressMode.POLLING && telegramSink == null) {
+                logger.warn { "Telegram polling mode was requested but the polling bridge did not start because the bot token is unavailable." }
+            }
+            null
+        }
+        val googleConfig = config.nativeIntegrations.googleWorkspace
+        val googleClientId = secretProvider.read(SecretHandle(googleConfig.oauthClientIdHandle))
+        val googleClientSecret = secretProvider.read(SecretHandle(googleConfig.oauthClientSecretHandle))
+        val googleStateSigningSecret = secretProvider.read(SecretHandle(googleConfig.oauthStateSigningSecretHandle))
+        val googleTokenEncryptionSecret = secretProvider.read(SecretHandle(googleConfig.oauthTokenEncryptionSecretHandle))
+        val googleCredentialStore = if (
+            googleConfig.enabled &&
+            !googleTokenEncryptionSecret.isNullOrBlank()
+        ) {
+            GoogleWorkspaceCredentialStore(
+                rootDir = Paths.get(googleConfig.tokenStoreDir),
+                encryptionSecret = googleTokenEncryptionSecret,
+            )
+        } else {
+            null
+        }
+        val googleApiClient = if (
+            googleConfig.enabled &&
+            !googleClientId.isNullOrBlank() &&
+            !googleClientSecret.isNullOrBlank() &&
+            googleCredentialStore != null
+        ) {
+            GoogleWorkspaceApiClient(
+                clientId = googleClientId,
+                clientSecret = googleClientSecret,
+                tokenBaseUrl = googleConfig.tokenBaseUrl,
+                credentialStore = googleCredentialStore,
+            )
+        } else {
+            null
+        }
+        val googleOAuthBridge = if (
+            googleConfig.enabled &&
+            !googleClientId.isNullOrBlank() &&
+            !googleClientSecret.isNullOrBlank() &&
+            !googleStateSigningSecret.isNullOrBlank() &&
+            !googleTokenEncryptionSecret.isNullOrBlank() &&
+            googleApiClient != null &&
+            googleCredentialStore != null
+        ) {
+            GoogleWorkspaceOAuthBridge(
+                config = googleConfig,
+                clientId = googleClientId,
+                clientSecret = googleClientSecret,
+                stateCodec = OAuthStateCodec(signingSecret = googleStateSigningSecret),
+                pendingAuthorizationStore = OAuthPendingAuthorizationStore(
+                    rootDir = Paths.get(googleConfig.tokenStoreDir).resolve("pending"),
+                    encryptionSecret = googleTokenEncryptionSecret,
+                ),
+                credentialStore = googleCredentialStore,
+                apiClient = googleApiClient,
+            )
+        } else {
+            null
+        }
         val sidecarPath = resolveEvalEventSidecarPath()
         val sidecarSink = if (sidecarPath == null) {
             null
@@ -638,24 +806,28 @@ internal object AppModeRunners {
                 criticalSinks = listOfNotNull(sidecarSink),
                 scope = agentScope
             ).use { instrumentation ->
-                val dashboardServer = if (dashboardEnabled) {
-                    try {
-                        DashboardServer(
-                            store = dashboardStore,
-                            chatBridge = chatBridge,
-                            innerVoiceStore = innerVoiceStore,
-                            idInnerVoiceFilePath = idInnerVoiceFileSink?.path,
-                            port = dashboardPort
-                        ).also { it.start() }
-                    } catch (ex: Exception) {
-                        logger.warn(ex) { "Dashboard failed to start on port $dashboardPort. Continuing without dashboard server." }
+                val actionAuthorizationPolicy = createActionAuthorizationPolicy(config)
+                createActionControlStoreIfEnabled(config).use { actionControlStore ->
+                    val dashboardServer = if (dashboardEnabled) {
+                        try {
+                            DashboardServer(
+                                store = dashboardStore,
+                                chatBridge = chatBridge,
+                                telegramWebhookBridge = telegramWebhookBridge,
+                                googleOAuthBridge = googleOAuthBridge,
+                                innerVoiceStore = innerVoiceStore,
+                                idInnerVoiceFilePath = idInnerVoiceFileSink?.path,
+                                port = dashboardPort
+                            ).also { it.start() }
+                        } catch (ex: Exception) {
+                            logger.warn(ex) { "Dashboard failed to start on port $dashboardPort. Continuing without dashboard server." }
+                            null
+                        }
+                    } else {
                         null
                     }
-                } else {
-                    null
-                }
-    
-                dashboardServer.use {
+
+                    dashboardServer.use {
                     if (dashboardEnabled) {
                         logger.info { "Dashboard available at ${dashboardServer?.url}" }
                     }
@@ -682,8 +854,9 @@ internal object AppModeRunners {
                                 "max_thought_chars" to config.planner.maxThoughtChars,
                                 "max_action_payload_chars" to config.maxActionPayloadChars,
                                 "max_action_summary_chars" to config.maxActionSummaryChars,
-                                "mcp_call_timeout_ms" to config.mcpCallTimeoutMs,
-                                "fetch_max_chars" to config.fetchMaxChars,
+                                "website_fetch_enabled" to config.builtinTools.websiteFetch.enabled,
+                                "website_fetch_call_timeout_ms" to config.builtinTools.websiteFetch.callTimeoutMs,
+                                "website_fetch_max_chars" to config.builtinTools.websiteFetch.maxChars,
                                 "mcp_memory_call_timeout_ms" to config.memory.mcpMemoryCallTimeoutMs,
                                 "long_term_memory_recall_max_items" to config.memory.longTermMemoryRecallMaxItems,
                                 "long_term_memory_recall_max_chars" to config.memory.longTermMemoryRecallMaxChars,
@@ -914,8 +1087,7 @@ internal object AppModeRunners {
                                                 "web_search=${llm.webSearch.providerLabel}/${llm.webSearch.model}"
                                         }
                                         try {
-                                            val mcpTimeTool = createMcpTimeTool(config, mcpRuntimeConfig.time, agentScope)
-                                            val fetchTool = createFetchTool(config, mcpRuntimeConfig.fetch)
+                                            val fetchTool = createFetchTool(config)
                                             val webSearchRuntime = createWebSearchRuntime(
                                                 llm = llm,
                                                 callObserver = webSearchCallObserver,
@@ -925,7 +1097,6 @@ internal object AppModeRunners {
                                             )
 
                                             webSearchRuntime.use { runtime ->
-                                                val timeTool = mcpTimeTool
                                                 val activeFetchTool = fetchTool
                                                     val earlyMemoryStartup =
                                                         resolveInteractiveMemoryStartup(config, memoryRuntimeConfig)
@@ -1002,6 +1173,7 @@ internal object AppModeRunners {
                                                                     ?: superegoReviewRouting.primaryTokenWeight,
                                                                 escalationModelContextWindow = superegoReviewRouting.escalationContextWindow,
                                                                 escalationModelReasoningOverhead = superegoReviewRouting.escalationReasoningOverhead,
+                                                                authorizationPolicy = actionAuthorizationPolicy,
                                                                 instrumentation = instrumentation
                                                             )
                                                         },
@@ -1032,11 +1204,33 @@ internal object AppModeRunners {
                                                         logbook = logbook,
                                                         logbookSummarizer = logbookSummarizer,
                                                         webSearchActionHandler = webSearchActionHandler,
-                                                        mcpTimeTool = timeTool,
                                                         fetchTool = activeFetchTool,
                                                         goalsGateway = goalManager
                                                             ?: ai.neopsyke.agent.goal.NoopGoalsGateway,
+                                                        actionControlServiceFactory = { motorCortex ->
+                                                            actionControlStore?.let { store ->
+                                                                DefaultActionControlService(
+                                                                    config = config.actionControl,
+                                                                    store = store,
+                                                                    executeCommittedAction = { action, authorization ->
+                                                                        motorCortex.execute(
+                                                                            action,
+                                                                            config.searchResultCount,
+                                                                            authorization
+                                                                        )
+                                                                    },
+                                                                    actionRegistry = motorCortex.actionRegistry(),
+                                                                )
+                                                            } ?: LegacyCompatibleActionControlService { action, authorization ->
+                                                                motorCortex.execute(
+                                                                    action,
+                                                                    config.searchResultCount,
+                                                                    authorization
+                                                                )
+                                                            }
+                                                        },
                                                         output = {},
+                                                        conversationOutput = conversationOutput,
                                                     )
                                                     assembly.actionRegistry.loadWarnings.forEach { warning ->
                                                         instrumentation.emit(AgentEvents.warning(warning))
@@ -1047,6 +1241,7 @@ internal object AppModeRunners {
                                                         val registry = assembled.actionRegistry
                                                         val motorCortex = assembled.motorCortex
                                                         val ego = assembled.ego
+                                                        dashboardServer?.actionControlService = assembled.actionControlService
                                                         val actionStatuses = motorCortex.startupSmokeTest()
                                                         instrumentation.emit(AgentEvents.actionCapabilities(actionStatuses))
                                                         actionStatuses.filterNot { it.available }.forEach { status ->
@@ -1083,9 +1278,17 @@ internal object AppModeRunners {
                                                         val shutdownGuard = ShutdownCloseGuard("interactive-runtime").apply {
                                                             register(hippocampus)
                                                             register(logbook)
+                                                            register(actionControlStore)
                                                             register(activeFetchTool)
-                                                            register(timeTool)
                                                         }
+                                                        shutdownGuard.register(
+                                                            createActionControlAutonomousWorker(
+                                                                scope = this,
+                                                                ego = ego,
+                                                                config = config,
+                                                                instrumentation = instrumentation,
+                                                            )
+                                                        )
                                                         val idConfig = ai.neopsyke.config.IdRuntimeConfigLoader.load()
                                                         val idModule = if (idConfig.enabled) {
                                                            ai.neopsyke.agent.id.Id(
@@ -1129,8 +1332,10 @@ internal object AppModeRunners {
                     dumpEndOfRunMetrics(metrics)
                 }
             }
+                }
             }
         } finally {
+            telegramPollingBridge?.close()
             idInnerVoiceFileSink?.close()
             innerVoiceStore?.close()
             sensoryInput.close()
@@ -1141,7 +1346,6 @@ internal object AppModeRunners {
     internal fun runFreudLiveMode(
         llm: LlmRuntimeConfig,
         config: AgentConfig,
-        mcpRuntimeConfig: McpRuntimeConfig,
         memoryRuntimeConfig: MemoryRuntimeConfig,
         runtimeSettings: AgentRuntimeSettings,
         cliOptions: AppCliOptions,
@@ -1369,8 +1573,9 @@ internal object AppModeRunners {
                                                 "memory_advisor=${llm.memoryAdvisor.providerLabel}/${llm.memoryAdvisor.model}"
                                         }
                                         try {
-                                        val mcpTimeTool = createMcpTimeTool(config, mcpRuntimeConfig.time, agentScope)
-                                        val fetchTool = createFetchTool(config, mcpRuntimeConfig.fetch)
+                                        val actionAuthorizationPolicy = createActionAuthorizationPolicy(config)
+                                        val actionControlStore = createActionControlStoreIfEnabled(config)
+                                        val fetchTool = createFetchTool(config)
                                         val webSearchRuntime = createWebSearchRuntime(
                                             llm = llm,
                                             callObserver = callObserverForProvider(llm.webSearch.providerLabel),
@@ -1380,7 +1585,6 @@ internal object AppModeRunners {
                                         )
 
                                         webSearchRuntime.use { runtime ->
-                                            val timeTool = mcpTimeTool
                                             val activeFetchTool = fetchTool
                                                 val earlyMemoryStartup2 =
                                                     resolveInteractiveMemoryStartup(config, memoryRuntimeConfig)
@@ -1434,6 +1638,7 @@ internal object AppModeRunners {
                                                                 ?: superegoReviewRouting.primaryTokenWeight,
                                                             escalationModelContextWindow = superegoReviewRouting.escalationContextWindow,
                                                             escalationModelReasoningOverhead = superegoReviewRouting.escalationReasoningOverhead,
+                                                            authorizationPolicy = actionAuthorizationPolicy,
                                                             instrumentation = instrumentation
                                                         )
                                                     },
@@ -1464,10 +1669,31 @@ internal object AppModeRunners {
                                                     logbook = logbook,
                                                     logbookSummarizer = logbookSummarizer,
                                                     webSearchActionHandler = webSearchActionHandler,
-                                                    mcpTimeTool = timeTool,
                                                     fetchTool = activeFetchTool,
                                                     goalsGateway = goalManager
                                                         ?: ai.neopsyke.agent.goal.NoopGoalsGateway,
+                                                    actionControlServiceFactory = { motorCortex ->
+                                                        actionControlStore?.let { store ->
+                                                            DefaultActionControlService(
+                                                                config = config.actionControl,
+                                                                store = store,
+                                                                executeCommittedAction = { action, authorization ->
+                                                                    motorCortex.execute(
+                                                                        action,
+                                                                        config.searchResultCount,
+                                                                        authorization
+                                                                    )
+                                                                },
+                                                                actionRegistry = motorCortex.actionRegistry(),
+                                                            )
+                                                        } ?: LegacyCompatibleActionControlService { action, authorization ->
+                                                            motorCortex.execute(
+                                                                action,
+                                                                config.searchResultCount,
+                                                                authorization
+                                                            )
+                                                        }
+                                                    },
                                                     output = liveOutput,
                                                 )
                                                 assembly.actionRegistry.loadWarnings.forEach { warning ->
@@ -1482,9 +1708,17 @@ internal object AppModeRunners {
                                                     val shutdownGuard = ShutdownCloseGuard("freud-live-runtime").apply {
                                                         register(hippocampus)
                                                         register(logbook)
+                                                        register(actionControlStore)
                                                         register(activeFetchTool)
-                                                        register(timeTool)
                                                     }
+                                                    shutdownGuard.register(
+                                                        createActionControlAutonomousWorker(
+                                                            scope = this,
+                                                            ego = ego,
+                                                            config = config,
+                                                            instrumentation = instrumentation,
+                                                        )
+                                                    )
                                                     val actionStatuses = motorCortex.startupSmokeTest()
                                                     instrumentation.emit(AgentEvents.actionCapabilities(actionStatuses))
                                                     instrumentation.emit(
@@ -1499,7 +1733,8 @@ internal object AppModeRunners {
 
                                                     sensoryInput.submitInput(
                                                         content = stdinContent,
-                                                        source = "freud-live"
+                                                        source = "freud-live",
+                                                        conversationContext = freudLiveConversationContext(),
                                                     )
 
                                                     val watchdog = launch {
@@ -1600,6 +1835,12 @@ internal object AppModeRunners {
         val webSearch = llm.webSearch
         return try {
             when (webSearch.provider) {
+                LlmProvider.ANTHROPIC -> WebSearchRuntime(
+                    engine = UnavailableWebSearchEngine(
+                        "Web search provider 'anthropic' is not implemented. Use groq, mistral, or google for web_search."
+                    )
+                )
+
                 LlmProvider.MISTRAL -> {
                     val session = MistralWebSearchAgentSession.start(
                         apiKey = webSearch.apiKey,
@@ -1666,6 +1907,12 @@ internal object AppModeRunners {
                 LlmProvider.OPENAI -> WebSearchRuntime(
                     engine = UnavailableWebSearchEngine(
                         "Web search provider 'openai' is not implemented. Use groq, mistral, or google for web_search."
+                    )
+                )
+
+                LlmProvider.OLLAMA -> WebSearchRuntime(
+                    engine = UnavailableWebSearchEngine(
+                        "Web search provider 'ollama' is not implemented. Use groq, mistral, or google for web_search."
                     )
                 )
             }
@@ -1837,6 +2084,13 @@ internal object AppModeRunners {
         callObserver: ai.neopsyke.llm.ChatCallObserver? = null,
     ): ChatModelClient {
         return when (endpoint.provider) {
+            LlmProvider.ANTHROPIC -> AnthropicChatClient(
+                apiKey = endpoint.apiKey,
+                baseUrl = endpoint.baseUrl,
+                modelName = endpoint.model,
+                callObserver = callObserver
+            )
+
             LlmProvider.GROQ -> GroqChatClient(
                 apiKey = endpoint.apiKey,
                 baseUrl = endpoint.baseUrl,
@@ -1864,6 +2118,13 @@ internal object AppModeRunners {
                 modelName = endpoint.model,
                 callObserver = callObserver
             )
+
+            LlmProvider.OLLAMA -> OllamaChatClient(
+                apiKey = endpoint.apiKey,
+                baseUrl = endpoint.baseUrl,
+                modelName = endpoint.model,
+                callObserver = callObserver
+            )
         }
     }
     
@@ -1874,34 +2135,17 @@ internal object AppModeRunners {
         return mode to file
     }
 
-    private fun createMcpTimeTool(
-        config: AgentConfig,
-        capability: McpCapabilityConfig,
-        scope: kotlinx.coroutines.CoroutineScope? = null,
-    ): McpTimeTool {
-        val command = resolveMcpCommand(capability)
-        if (command == null) {
-            val reason = disabledReason("time", capability)
-            logger.info { reason }
-            return DisabledMcpTimeTool(reason)
-        }
-        return SdkMcpTimeTool(
-            command = command,
-            callTimeoutMs = config.mcpCallTimeoutMs,
-            scope = scope
-        )
-    }
-    
-    private fun createFetchTool(config: AgentConfig, capability: McpCapabilityConfig): FetchTool {
-        if (!capability.enabled) {
-            val reason = "Fetch capability disabled by configuration."
+    private fun createFetchTool(config: AgentConfig): FetchTool {
+        val fetchConfig = config.builtinTools.websiteFetch
+        if (!fetchConfig.enabled) {
+            val reason = "Built-in website fetch disabled by configuration."
             logger.info { reason }
             return DisabledFetchTool(reason)
         }
         logger.info { "Using native JVM fetch tool (OkHttp + Jsoup). No external process." }
         return NativeFetchTool(
-            callTimeoutMs = config.mcpCallTimeoutMs,
-            maxChars = config.fetchMaxChars
+            callTimeoutMs = fetchConfig.callTimeoutMs,
+            maxChars = fetchConfig.maxChars
         )
     }
     
@@ -2033,39 +2277,6 @@ internal object AppModeRunners {
         }
     }
     
-    private fun resolveMcpCommand(capability: McpCapabilityConfig): List<String>? {
-        if (!capability.enabled) {
-            return null
-        }
-        if (!capability.mode.equals("stdio", ignoreCase = true)) {
-            return null
-        }
-    
-        val candidateCommands = buildList {
-            val primary = capability.command.trim()
-            if (primary.isNotBlank()) {
-                add(primary)
-            }
-            capability.fallbackCommands.map { it.trim() }.filter { it.isNotBlank() }.forEach { add(it) }
-        }
-        if (candidateCommands.isEmpty()) {
-            return null
-        }
-    
-        val parsedCandidates = candidateCommands
-            .map { McpStdioClient.parseCommand(it) }
-            .filter { it.isNotEmpty() }
-        if (parsedCandidates.isEmpty()) {
-            return null
-        }
-    
-        val available = parsedCandidates.firstOrNull { command -> isExecutableAvailable(command.first()) }
-        if (available != null) {
-            return available
-        }
-        return null
-    }
-    
     private fun isExecutableAvailable(binary: String): Boolean {
         val candidate = binary.trim()
         if (candidate.isBlank()) {
@@ -2088,21 +2299,6 @@ internal object AppModeRunners {
         }
     }
     
-    private fun disabledReason(capabilityName: String, capability: McpCapabilityConfig): String {
-        if (!capability.enabled) {
-            return "MCP $capabilityName capability disabled by configuration."
-        }
-        if (!capability.mode.equals("stdio", ignoreCase = true)) {
-            return "MCP $capabilityName mode '${capability.mode}' is not supported in this runtime (only stdio)."
-        }
-        val configured = listOf(capability.command) + capability.fallbackCommands
-        val nonBlank = configured.map { it.trim() }.filter { it.isNotBlank() }
-        if (nonBlank.isEmpty()) {
-            return "MCP $capabilityName command is not configured."
-        }
-        return "MCP $capabilityName command is configured but not executable in PATH: ${nonBlank.joinToString(" | ")}"
-    }
-    
     private fun createLogbookIfEnabled(config: AgentConfig): Logbook? {
         if (!config.logbook.enabled) return null
         return try {
@@ -2111,6 +2307,42 @@ internal object AppModeRunners {
             logger.warn(ex) { "Episodic logbook initialization failed; continuing without." }
             null
         }
+    }
+
+    private fun createActionAuthorizationPolicy(config: AgentConfig): ActionAuthorizationPolicy =
+        ConfiguredActionAuthorizationPolicy(
+            ActionSecurityPolicyLoader.load(
+                Paths.get(config.actionControl.policyPath)
+            )
+        )
+
+    private fun createActionControlStoreIfEnabled(config: AgentConfig): ActionControlStore? {
+        if (!config.actionControl.enabled) {
+            return null
+        }
+        return try {
+            SqliteActionControlStore(config.actionControl.dbPath)
+        } catch (ex: Exception) {
+            logger.warn(ex) { "Action-control store initialization failed; continuing with legacy action control." }
+            null
+        }
+    }
+
+    private fun createActionControlAutonomousWorker(
+        scope: CoroutineScope,
+        ego: Ego,
+        config: AgentConfig,
+        instrumentation: ai.neopsyke.instrumentation.AgentInstrumentation,
+    ): AutoCloseable? {
+        if (!config.actionControl.enabled || !config.actionControl.autonomousWorkerEnabled) {
+            return null
+        }
+        return ActionControlAutonomousWorker(
+            scope = scope,
+            config = config.actionControl,
+            processBatch = { limit -> ego.processAutonomousStagedActions(limit) },
+            instrumentation = instrumentation,
+        )
     }
 
     private fun createLogbookSummarizer(
@@ -2262,21 +2494,6 @@ internal object AppModeRunners {
         val detail: String,
     )
     
-    private class DisabledMcpTimeTool(
-        private val reason: String,
-    ) : McpTimeTool, AutoCloseable {
-        override suspend fun getCurrentTime(payload: String): String =
-            "MCP time unavailable: $reason"
-
-        override suspend fun healthCheck(): ToolHealthStatus =
-            ToolHealthStatus(
-                available = false,
-                detail = reason
-            )
-
-        override fun close() {}
-    }
-
     private class DisabledFetchTool(
         private val reason: String,
     ) : FetchTool, AutoCloseable {

@@ -1,8 +1,9 @@
 package ai.neopsyke.agent.model
 
-import ai.neopsyke.agent.actions.async.AsyncActionWait
+import ai.neopsyke.agent.cortex.motor.actions.async.AsyncActionWait
 import ai.neopsyke.agent.id.ConvergenceMode
 import ai.neopsyke.agent.goal.GoalRunActivation
+import java.util.UUID
 
 /**
  * Snapshot of the Id's drive state, injected into [PlannerContext] when the
@@ -10,7 +11,7 @@ import ai.neopsyke.agent.goal.GoalRunActivation
  */
 data class IdStateSnapshot(
     val triggeringNeed: String,
-    val triggeringUrgency: Double,
+    val triggeringTension: Double,
     val allNeeds: Map<String, Double>,
     val convergence: ConvergenceMode = ConvergenceMode.CONTACT_USER,
     val allowEscalation: Boolean = false,
@@ -75,6 +76,9 @@ data class PlannerContext(
     val evidenceHints: String = "",
     val deliberation: DeliberationState = DeliberationState(),
     val metaGuidance: String = "",
+    val conversationSecuritySummary: String = "",
+    val threadSecuritySummary: String = "",
+    val triggerProvenanceSummary: String = "",
     val availableActions: Set<ActionType> = ActionType.entries.toSet(),
     val dispatchableActions: Set<ActionType> = availableActions,
     val actionDefinitions: List<ActionPlanningDefinition> = emptyList(),
@@ -88,12 +92,22 @@ data class ActionPlanningDefinition(
     val description: String,
     val payloadGuidance: String,
     val payloadSchemaExample: String? = null,
+    val effectClass: ActionEffectClass = ActionEffectClass.OBSERVE,
+    val directCommitAllowed: Boolean = false,
+    val supportsAutonomousCommit: Boolean = false,
+    val allowedInstructionTrust: Set<InstructionTrust> = setOf(
+        InstructionTrust.TRUSTED_INSTRUCTION,
+        InstructionTrust.UNTRUSTED_INSTRUCTION,
+    ),
 )
 
 data class SuperegoContext(
     val recentDialogue: List<DialogueTurn>,
     val shortTermContextSummary: String = "",
     val origin: ActionOrigin? = null,
+    val conversationContext: ConversationContext = ConversationContext.default(),
+    val threadSecurityContext: CognitiveThreadSecurityContext =
+        CognitiveThreadSecurityContext.fromConversation(ConversationContext.default().security),
 )
 
 sealed interface EgoTrigger {
@@ -155,12 +169,37 @@ data class ActionOutcome(
     val actionErrorCategory: String? = null,
     val fetchErrorCategory: String? = null,
     val asyncWait: AsyncActionWait? = null,
+    val resultArtifacts: List<ExternalContentArtifact> = emptyList(),
 ) {
     val successful: Boolean
         get() = executionStatus == ActionExecutionStatus.SUCCESS
 
     val waiting: Boolean
         get() = executionStatus == ActionExecutionStatus.WAITING || asyncWait != null
+}
+
+data class ExternalContentArtifact(
+    val id: String = UUID.randomUUID().toString(),
+    val content: String,
+    val provenance: Provenance,
+) {
+    val dataTrust: DataTrust
+        get() = provenance.dataTrust
+
+    fun taintSourceSummary(): String =
+        buildString {
+            append(provenance.source.provider)
+            append("/")
+            append(provenance.source.objectType)
+            provenance.source.part?.takeIf { it.isNotBlank() }?.let {
+                append(":")
+                append(it)
+            }
+            provenance.source.sourceRef?.takeIf { it.isNotBlank() }?.let {
+                append("#")
+                append(it)
+            }
+        }
 }
 
 data class DeliberationState(

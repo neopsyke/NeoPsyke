@@ -1,0 +1,22 @@
+connector_id: news
+display_name: News
+vendor: pending-review
+description: >
+  Curated news connector definition for morning briefing and current-events
+  workflows. The concrete connector command and digest remain unset until a
+  reviewed connector is chosen.
+mode: stdio
+command: ""
+allowed_tools:
+  - news.read
+secret_handles: []
+action_manifests:
+  - action_type: news_observe_read
+    tool_name: news.read
+    planner_description: "news_observe_read: retrieve current news summaries for a topic or feed."
+    payload_guidance: >
+      JSON object with optional topic, locale, sources, and max_results fields.
+    payload_schema_example: '{"topic":"ai safety","max_results":5}'
+    effect_class: OBSERVE
+    requires_follow_up_thought: true
+    follow_up_prefix: News retrieval completed.

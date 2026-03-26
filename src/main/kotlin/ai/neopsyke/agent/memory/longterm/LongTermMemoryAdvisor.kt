@@ -234,12 +234,14 @@ class LlmLongTermMemoryAdvisor(
                 content = """
                 You decide whether a durable long-term memory should be written.
                 Return STRICT JSON only.
-                If you save memory, write the summary in first person from the agent's perspective.
-                Good: "I learned that the user prefers concise answers."
-                Good: "I should remember that the user's name is Victor."
-                Good: "I want to remember that I feel curious about learning topics."
-                Bad: "User prefers concise answers."
-                Bad: "The agent learned the user's name is Victor."
+                If you save memory, write the summary as a factual declarative statement — a plain fact, not an instruction or a desire.
+                Good: "The user prefers concise answers."
+                Good: "The user's name is Victor."
+                Good: "The agent's name is Yoli."
+                Good: "The agent feels curious about learning topics."
+                Bad: "I should remember that..." (reads as instruction when recalled)
+                Bad: "I want to remember that..." (reads as instruction when recalled)
+                Bad: "I learned that..." (instruction-like phrasing)
                 If memory_subject=self:
                 - treat INTERNAL dialogue turns as the agent's own impulses or reflections
                 - never describe them as user preferences, user requests, or user intent

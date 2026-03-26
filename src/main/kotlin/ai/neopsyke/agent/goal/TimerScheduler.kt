@@ -83,7 +83,7 @@ class TimerScheduler(
         cronSchedules[goalId] = expression
         val ms = next.toInstant().toEpochMilli()
         timers.getOrPut(ms) { mutableSetOf() }.add(goalId)
-        logger.debug { "Cron registered: goal=$goalId, expr='$expression', next=$next" }
+        logger.info { "Cron registered: goal=$goalId, expr='$expression', next=$next" }
     }
 
     fun cancel(goalId: String) {
@@ -98,7 +98,7 @@ class TimerScheduler(
         val fired = firedEntries.flatMap { (ms, ids) -> ids.map { it to ms } }
         firedEntries.clear()
         for ((goalId, scheduledAtMs) in fired) {
-            logger.debug { "Timer fired: goal=$goalId" }
+            logger.info { "Timer fired: goal=$goalId" }
             onWakeUp(goalId, scheduledAtMs)
             // M1: Re-register next occurrence for cron schedules
             cronSchedules[goalId]?.let { expr ->
@@ -106,7 +106,7 @@ class TimerScheduler(
                 if (next != null) {
                     val nextMs = next.toInstant().toEpochMilli()
                     timers.getOrPut(nextMs) { mutableSetOf() }.add(goalId)
-                    logger.debug { "Cron rescheduled: goal=$goalId, next=$next" }
+                    logger.info { "Cron rescheduled: goal=$goalId, next=$next" }
                 } else {
                     logger.warn { "Could not reschedule cron for goal=$goalId — removing" }
                     cronSchedules.remove(goalId)

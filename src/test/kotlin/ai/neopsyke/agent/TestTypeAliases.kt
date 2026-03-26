@@ -76,17 +76,15 @@ typealias LongTermMemoryAssessmentDecision = ai.neopsyke.agent.memory.longterm.L
 typealias LongTermMemorySubject = ai.neopsyke.agent.memory.longterm.LongTermMemorySubject
 typealias LlmLongTermMemoryAdvisor = ai.neopsyke.agent.memory.longterm.LlmLongTermMemoryAdvisor
 
-typealias McpTimeTool = ai.neopsyke.agent.tools.mcp.McpTimeTool
-typealias FetchTool = ai.neopsyke.agent.tools.mcp.FetchTool
-typealias FetchOutcome = ai.neopsyke.agent.tools.mcp.FetchOutcome
-typealias FetchErrorCategory = ai.neopsyke.agent.tools.mcp.FetchErrorCategory
-typealias ToolHealthStatus = ai.neopsyke.agent.tools.mcp.ToolHealthStatus
-typealias McpStdioClient = ai.neopsyke.agent.tools.mcp.McpStdioClient
-typealias SdkMcpTimeTool = ai.neopsyke.agent.tools.mcp.SdkMcpTimeTool
-typealias NativeFetchTool = ai.neopsyke.agent.tools.mcp.NativeFetchTool
+typealias FetchTool = ai.neopsyke.agent.cortex.motor.actions.fetch.FetchTool
+typealias FetchOutcome = ai.neopsyke.agent.cortex.motor.actions.fetch.FetchOutcome
+typealias FetchErrorCategory = ai.neopsyke.agent.cortex.motor.actions.fetch.FetchErrorCategory
+typealias ToolHealthStatus = ai.neopsyke.agent.cortex.motor.actions.fetch.ToolHealthStatus
+typealias McpStdioClient = ai.neopsyke.agent.cortex.motor.actions.mcp.McpStdioClient
+typealias NativeFetchTool = ai.neopsyke.agent.cortex.motor.actions.fetch.NativeFetchTool
 
 typealias PromptBudgetAllocator = ai.neopsyke.agent.support.PromptBudgetAllocator
 typealias TextSecurity = ai.neopsyke.agent.support.TextSecurity
 
 fun encodeMcpArguments(arguments: Map<String, Any?>): Map<String, Any> =
-   ai.neopsyke.agent.tools.mcp.encodeMcpArguments(arguments)
+   ai.neopsyke.agent.cortex.motor.actions.mcp.encodeMcpArguments(arguments)

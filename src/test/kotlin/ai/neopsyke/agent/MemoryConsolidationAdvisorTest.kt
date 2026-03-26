@@ -143,8 +143,8 @@ class LongTermMemoryAdvisorTest {
         )
 
         val prompt = llm.lastMessages.first().content
-        assertTrue(prompt.contains("write the summary in first person from the agent's perspective"))
-        assertTrue(prompt.contains("Bad: \"User prefers concise answers.\""))
+        assertTrue(prompt.contains("write the summary as a factual declarative statement"))
+        assertTrue(prompt.contains("Bad: \"I should remember that...\""))
     }
 
     @Test

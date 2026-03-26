@@ -6,8 +6,8 @@ import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import mu.KotlinLogging
 import ai.neopsyke.agent.support.TextSecurity
 import kotlinx.coroutines.runBlocking
-import ai.neopsyke.agent.tools.mcp.LazyMcpClientHolder
-import ai.neopsyke.agent.tools.mcp.McpToolCallResult
+import ai.neopsyke.agent.cortex.motor.actions.mcp.LazyMcpClientHolder
+import ai.neopsyke.agent.cortex.motor.actions.mcp.McpToolCallResult
 import java.io.IOException
 import java.util.Locale
 import kotlin.math.max

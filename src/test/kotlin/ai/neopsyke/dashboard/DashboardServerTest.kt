@@ -2,7 +2,24 @@ package ai.neopsyke.dashboard
 
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
+import ai.neopsyke.agent.cortex.motor.actions.control.ActionControlDecisionResult
+import ai.neopsyke.agent.cortex.motor.actions.control.ActionControlService
+import ai.neopsyke.agent.model.ActionLedgerEntry
+import ai.neopsyke.agent.model.ActionLedgerKind
+import ai.neopsyke.agent.model.ActionRecordImportance
+import ai.neopsyke.agent.model.ActionExecutionStatus
+import ai.neopsyke.agent.model.ActionReceipt
+import ai.neopsyke.agent.model.ActionType
+import ai.neopsyke.agent.model.CommitAuthorization
+import ai.neopsyke.agent.model.CommitMode
+import ai.neopsyke.agent.model.ConversationContext
+import ai.neopsyke.agent.model.ConversationSecurityContext
 import ai.neopsyke.agent.cortex.sensory.AsyncSignalSource
+import ai.neopsyke.agent.model.ActionOutcome
+import ai.neopsyke.agent.model.PendingAction
+import ai.neopsyke.agent.model.StagedAction
+import ai.neopsyke.agent.model.StagedActionStatus
+import ai.neopsyke.agent.model.Urgency
 import ai.neopsyke.instrumentation.AgentEvent
 import ai.neopsyke.metrics.MetricsQueryProvider
 import java.io.BufferedReader
@@ -16,6 +33,7 @@ import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -25,16 +43,35 @@ class DashboardServerTest {
     private val client: HttpClient = HttpClient.newHttpClient()
 
     @Test
-    fun `routes serve split conversation and dashboard pages`() {
+    fun `public dashboard routes serve the shell with route-based tabs`() {
         startServer().use { started ->
             val root = get("http://127.0.0.1:${started.port}/")
             val dashboard = get("http://127.0.0.1:${started.port}/dashboard")
+            val actionControl = get("http://127.0.0.1:${started.port}/action-control")
 
             assertEquals(200, root.statusCode())
             assertEquals(200, dashboard.statusCode())
-            assertTrue(root.body().contains("NeoPsyke Conversations"))
-            assertTrue(dashboard.body().contains("NeoPsyke Realtime Dashboard"))
-            assertTrue(dashboard.body().contains("tl-structured-chip"))
+            assertEquals(200, actionControl.statusCode())
+            assertTrue(root.body().contains("NeoPsyke Dashboard"))
+            assertTrue(root.body().contains("href=\"/dashboard\""))
+            assertTrue(dashboard.body().contains("framePath: \"/__dashboard/observability\""))
+            assertTrue(actionControl.body().contains("framePath: \"/__dashboard/action-control\""))
+        }
+    }
+
+    @Test
+    fun `internal dashboard routes still serve the standalone page implementations`() {
+        startServer().use { started ->
+            val conversations = get("http://127.0.0.1:${started.port}/__dashboard/conversations")
+            val observability = get("http://127.0.0.1:${started.port}/__dashboard/observability")
+            val metrics = get("http://127.0.0.1:${started.port}/__dashboard/metrics")
+
+            assertEquals(200, conversations.statusCode())
+            assertEquals(200, observability.statusCode())
+            assertEquals(200, metrics.statusCode())
+            assertTrue(conversations.body().contains("NeoPsyke Conversations"))
+            assertTrue(observability.body().contains("NeoPsyke Realtime Dashboard"))
+            assertTrue(metrics.body().contains("NeoPsyke Metrics"))
         }
     }
 
@@ -64,6 +101,8 @@ class DashboardServerTest {
             )
             assertEquals(202, submitRes.statusCode())
             assertTrue(submitRes.body().contains("\"accepted\":true"))
+            assertTrue(submitRes.body().contains("\"recorded\":true"))
+            assertTrue(submitRes.body().contains("\"message\""))
         }
     }
 
@@ -72,8 +111,8 @@ class DashboardServerTest {
         startServer().use { started ->
             val s1 = createSession(started.port, "S1")
             val s2 = createSession(started.port, "S2")
-            val sse1 = openSse("http://127.0.0.1:${started.port}/api/chat/sessions/$s1/events")
-            val sse2 = openSse("http://127.0.0.1:${started.port}/api/chat/sessions/$s2/events")
+            val sse1 = openSse("http://127.0.0.1:${started.port}/api/chat/sessions/$s1/stream")
+            val sse2 = openSse("http://127.0.0.1:${started.port}/api/chat/sessions/$s2/stream")
             val obs = openSse("http://127.0.0.1:${started.port}/api/obs/events")
 
             sse1.use {
@@ -114,6 +153,125 @@ class DashboardServerTest {
     }
 
     @Test
+    fun `combined conversation stream emits chat and thinking over one connection`() {
+        startServer().use { started ->
+            val sessionId = createSession(started.port, "Combined")
+            val stream = openSse("http://127.0.0.1:${started.port}/api/chat/sessions/$sessionId/stream")
+
+            stream.use {
+                readNextEvent(stream)
+
+                started.innerVoiceStore.emit(
+                    InnerVoiceEvent(
+                        id = 7,
+                        type = InnerVoiceEventType.PLAN,
+                        content = "think-first",
+                        rootInputId = "root-7",
+                        sessionId = sessionId,
+                        ts = System.currentTimeMillis(),
+                        sequence = 1,
+                    )
+                )
+
+                val thinkingEvent = readNextEvent(stream, timeoutMs = 2_000)
+                assertNotNull(thinkingEvent)
+                assertEquals("thinking", thinkingEvent.first)
+                assertTrue(thinkingEvent.second.contains("think-first"))
+
+                postJson(
+                    "http://127.0.0.1:${started.port}/api/chat/sessions/$sessionId/messages",
+                    mapOf("content" to "hello-stream")
+                )
+
+                val chatEvent = readNextEvent(stream, timeoutMs = 2_000)
+                assertNotNull(chatEvent)
+                assertEquals("chat", chatEvent.first)
+                assertTrue(chatEvent.second.contains("hello-stream"))
+            }
+        }
+    }
+
+    @Test
+    fun `dashboard stream multiplexes agent action-control and id-thinking events`() {
+        startServer().use { started ->
+            val stream = openSse("http://127.0.0.1:${started.port}/api/dashboard/events")
+
+            stream.use {
+                readNextEvent(stream)
+
+                started.store.onEvent(
+                    AgentEvent(
+                        id = 1,
+                        type = "goal_started",
+                        data = mapOf("goal_id" to "goal-1")
+                    )
+                )
+                val agentEvent = readNextEventNamed(stream, "agent", timeoutMs = 2_000)
+                assertNotNull(agentEvent)
+                assertTrue(agentEvent.second.contains("\"type\":\"goal_started\""))
+
+                started.store.onEvent(
+                    AgentEvent(
+                        id = 2,
+                        type = "action_denied",
+                        data = mapOf("reason_code" to "TEST_DENY")
+                    )
+                )
+                val actionControlEvent = readNextEventNamed(stream, "action-control", timeoutMs = 2_000)
+                assertNotNull(actionControlEvent)
+                assertTrue(actionControlEvent.second.contains("\"type\":\"action_denied\""))
+
+                started.innerVoiceStore.emit(
+                    InnerVoiceEvent(
+                        id = 3,
+                        type = InnerVoiceEventType.OBSERVATION,
+                        content = "id-pulse",
+                        rootInputId = "root-id",
+                        sessionId = "default",
+                        ts = System.currentTimeMillis(),
+                        origin = "id",
+                    )
+                )
+                val idThinkingEvent = readNextEventNamed(stream, "id-thinking", timeoutMs = 2_000)
+                assertNotNull(idThinkingEvent)
+                assertTrue(idThinkingEvent.second.contains("id-pulse"))
+            }
+        }
+    }
+
+    @Test
+    fun `goals sse only emits goal events`() {
+        startServer().use { started ->
+            val goals = openSse("http://127.0.0.1:${started.port}/api/goals/events")
+            goals.use {
+                readNextEvent(goals)
+
+                started.store.onEvent(
+                    AgentEvent(
+                        id = 1,
+                        type = "warning",
+                        data = mapOf("message" to "not-a-goal-event")
+                    )
+                )
+                val nonGoalEvent = readNextEvent(goals, timeoutMs = 600)
+                assertNull(nonGoalEvent)
+
+                started.store.onEvent(
+                    AgentEvent(
+                        id = 2,
+                        type = "goal_started",
+                        data = mapOf("goal_id" to "goal-1")
+                    )
+                )
+                val goalEvent = readNextEvent(goals, timeoutMs = 2_000)
+                assertNotNull(goalEvent)
+                assertEquals("agent", goalEvent.first)
+                assertTrue(goalEvent.second.contains("\"type\":\"goal_started\""))
+            }
+        }
+    }
+
+    @Test
     fun `llm stats endpoint returns warmup payload immediately when provider throws`() {
         startServer().use { started ->
             started.server.metricsQueryProvider = object : MetricsQueryProvider {
@@ -125,6 +283,60 @@ class DashboardServerTest {
             assertEquals(202, response.statusCode())
             assertTrue(response.body().contains("\"warmup\":true"))
             assertTrue(response.body().contains("\"stale\":true"))
+        }
+    }
+
+    @Test
+    fun `action control page can inspect authorize and deny staged actions plus ledger activity`() {
+        startServer().use { started ->
+            started.server.actionControlService = TestActionControlService()
+            val actionEvents = openSse("http://127.0.0.1:${started.port}/api/action-control/events")
+
+            actionEvents.use {
+                readNextEvent(actionEvents)
+
+                val staged = get("http://127.0.0.1:${started.port}/api/action-control/staged")
+                assertEquals(200, staged.statusCode())
+                assertTrue(staged.body().contains("stage-1"))
+                assertTrue(staged.body().contains("WAITING_AUTHORIZATION"))
+                assertFalse(staged.body().contains("stage-2"))
+
+                val stagedWithTerminal = get("http://127.0.0.1:${started.port}/api/action-control/staged?include_terminal=true")
+                assertEquals(200, stagedWithTerminal.statusCode())
+                assertTrue(stagedWithTerminal.body().contains("stage-2"))
+                assertTrue(stagedWithTerminal.body().contains("COMPLETED"))
+
+                val ledgerBefore = get("http://127.0.0.1:${started.port}/api/action-control/ledger")
+                assertEquals(200, ledgerBefore.statusCode())
+                assertTrue(ledgerBefore.body().contains("\"SIGNAL\""))
+
+                val authorize = postJson(
+                    "http://127.0.0.1:${started.port}/api/action-control/staged/stage-1/authorize",
+                    emptyMap()
+                )
+                assertEquals(200, authorize.statusCode())
+                assertTrue(authorize.body().contains("\"Executed\"") || authorize.body().contains("\"receipt\""))
+
+                val event = readNextEvent(actionEvents, timeoutMs = 2_000)
+                assertNotNull(event)
+                assertEquals("action-control", event.first)
+                assertTrue(event.second.contains("\"action_control_state_changed\""))
+                assertTrue(event.second.contains("\"authorize\""))
+
+                val receipts = get("http://127.0.0.1:${started.port}/api/action-control/receipts")
+                assertEquals(200, receipts.statusCode())
+                assertTrue(receipts.body().contains("receipt-1"))
+
+                val defaultSession = get("http://127.0.0.1:${started.port}/api/chat/sessions/default")
+                assertEquals(200, defaultSession.statusCode())
+                assertTrue(defaultSession.body().contains("reply body"))
+
+                val deny = postJson(
+                    "http://127.0.0.1:${started.port}/api/action-control/staged/stage-1/deny",
+                    mapOf("reason" to "No longer needed")
+                )
+                assertEquals(409, deny.statusCode())
+            }
         }
     }
 
@@ -189,26 +401,53 @@ class DashboardServerTest {
         }
     }
 
+    private fun readNextEventNamed(
+        connection: SseConnection,
+        expectedEventName: String,
+        timeoutMs: Int = 1_000,
+    ): Pair<String, String>? {
+        val deadline = System.nanoTime() + timeoutMs.toLong() * 1_000_000L
+        while (System.nanoTime() < deadline) {
+            val remainingMs = ((deadline - System.nanoTime()) / 1_000_000L).toInt().coerceAtLeast(100)
+            val event = readNextEvent(connection, timeoutMs = remainingMs) ?: return null
+            if (event.first == expectedEventName) {
+                return event
+            }
+        }
+        return null
+    }
+
     private fun startServer(): StartedServer {
-        val port = ServerSocket(0).use { it.localPort }
-        val store = DashboardStateStore()
-        val sensory = AsyncSignalSource(
-            includeStdin = false,
-            emitStdinClosedSignal = false
-        )
-        val bridge = ChatRuntimeBridge(store = store, sensoryInput = sensory)
-        val server = DashboardServer(
-            store = store,
-            chatBridge = bridge,
-            port = port
-        )
-        server.start()
-        return StartedServer(
-            port = port,
-            store = store,
-            server = server,
-            sensory = sensory
-        )
+        repeat(5) { attempt ->
+            val port = ServerSocket(0).use { it.localPort }
+            val store = DashboardStateStore()
+            val sensory = AsyncSignalSource(
+                includeStdin = false,
+                emitStdinClosedSignal = false
+            )
+            val bridge = ChatRuntimeBridge(store = store, sensoryInput = sensory)
+            val innerVoiceStore = InnerVoiceStore()
+            try {
+                val server = DashboardServer(
+                    store = store,
+                    chatBridge = bridge,
+                    innerVoiceStore = innerVoiceStore,
+                    port = port
+                )
+                server.start()
+                return StartedServer(
+                    port = port,
+                    store = store,
+                    server = server,
+                    sensory = sensory,
+                    innerVoiceStore = innerVoiceStore,
+                )
+            } catch (ex: java.net.BindException) {
+                serverCloseQuietly(store, sensory, innerVoiceStore)
+                if (attempt == 4) throw ex
+            }
+        }
+        error("Unreachable")
     }
 
     private data class StartedServer(
@@ -216,12 +455,24 @@ class DashboardServerTest {
         val store: DashboardStateStore,
         val server: DashboardServer,
         val sensory: AsyncSignalSource,
+        val innerVoiceStore: InnerVoiceStore,
     ) : Closeable {
         override fun close() {
             server.close()
+            innerVoiceStore.close()
             sensory.close()
             store.close()
         }
+    }
+
+    private fun serverCloseQuietly(
+        store: DashboardStateStore,
+        sensory: AsyncSignalSource,
+        innerVoiceStore: InnerVoiceStore,
+    ) {
+        runCatching { innerVoiceStore.close() }
+        runCatching { sensory.close() }
+        runCatching { store.close() }
     }
 
     private data class SseConnection(
@@ -232,5 +483,172 @@ class DashboardServerTest {
             reader.close()
             connection.disconnect()
         }
+    }
+
+    private class TestActionControlService : ActionControlService {
+        private val context = ConversationContext.default()
+        private val ledgerEntries = mutableListOf(
+            ActionLedgerEntry(
+                id = "ledger-0",
+                kind = ActionLedgerKind.STAGED,
+                importance = ActionRecordImportance.SIGNAL,
+                actionType = ActionType.CONTACT_USER,
+                summary = "Approval needed for owner reply",
+                rootInputId = "root-1",
+                stagedActionId = "stage-1",
+                source = "stage",
+                conversationContext = context,
+            )
+        )
+        private var staged = StagedAction(
+            id = "stage-1",
+            preparedActionId = "prepared-1",
+            actionType = ActionType.CONTACT_USER,
+            summary = "Review and send owner reply",
+            payload = "reply body",
+            conversationContext = context,
+            status = StagedActionStatus.WAITING_AUTHORIZATION,
+            actionHash = "hash-1",
+            commitMode = CommitMode.APPROVAL_BACKED,
+        )
+        private val completedStage = StagedAction(
+            id = "stage-2",
+            preparedActionId = "prepared-2",
+            actionType = ActionType.CONTACT_USER,
+            summary = "Previously completed owner reply",
+            payload = "done",
+            conversationContext = context,
+            status = StagedActionStatus.COMPLETED,
+            actionHash = "hash-2",
+            commitMode = CommitMode.APPROVAL_BACKED,
+            receiptId = "receipt-0",
+            statusReason = "Completed earlier",
+        )
+        private var receipt: ActionReceipt? = null
+
+        override suspend fun handleAuthorizationDecision(
+            action: PendingAction,
+            decision: ai.neopsyke.agent.model.AuthorizationDecision,
+            conversationContext: ConversationContext,
+        ): ActionControlDecisionResult =
+            ActionControlDecisionResult.Refused("unused", "UNUSED")
+
+        override suspend fun authorizeStagedAction(
+            stagedActionId: String,
+            grantedBy: ConversationSecurityContext,
+        ): ActionControlDecisionResult {
+            val authorization = CommitAuthorization(
+                id = "auth-1",
+                stagedActionId = stagedActionId,
+                commitMode = CommitMode.APPROVAL_BACKED,
+                grantedByPrincipalId = grantedBy.principal.id,
+                grantedByChannelId = grantedBy.channel.channelId,
+                policyVersion = "test-v1",
+                actionHash = staged.actionHash,
+            )
+            receipt = ActionReceipt(
+                id = "receipt-1",
+                stagedActionId = stagedActionId,
+                authorizationId = authorization.id,
+                actionType = staged.actionType,
+                importance = ActionRecordImportance.BACKGROUND,
+                executionStatus = ActionExecutionStatus.SUCCESS,
+                statusSummary = "Authorized from dashboard",
+            )
+            staged = staged.copy(
+                status = StagedActionStatus.COMPLETED,
+                authorizationId = authorization.id,
+                receiptId = receipt?.id,
+            )
+            ledgerEntries += ActionLedgerEntry(
+                id = "ledger-1",
+                kind = ActionLedgerKind.AUTHORIZED,
+                importance = ActionRecordImportance.BACKGROUND,
+                actionType = staged.actionType,
+                summary = "Action authorized for commit.",
+                rootInputId = "root-1",
+                stagedActionId = stagedActionId,
+                authorizationId = authorization.id,
+                source = "authorize",
+                conversationContext = context,
+            )
+            return ActionControlDecisionResult.Executed(
+                stagedAction = staged,
+                authorization = authorization,
+                receipt = receipt ?: error("Receipt missing"),
+                outcome = ActionOutcome(
+                    statusSummary = "Authorized from dashboard",
+                    executionStatus = ActionExecutionStatus.SUCCESS,
+                ),
+                executedAction = PendingAction(
+                    id = 1,
+                    urgency = Urgency.MEDIUM,
+                    type = staged.actionType,
+                    payload = staged.payload,
+                    summary = staged.summary,
+                    conversationContext = staged.conversationContext,
+                ),
+            )
+        }
+
+        override suspend fun denyStagedAction(
+            stagedActionId: String,
+            deniedBy: ConversationSecurityContext,
+            reason: String,
+            reasonCode: String?,
+        ): ActionControlDecisionResult =
+            ActionControlDecisionResult.Refused(reason = "Stage already completed.", reasonCode = "STAGED_ACTION_NOT_DENYABLE")
+
+        override suspend fun processAutonomousStagedActions(limit: Int): List<ActionControlDecisionResult.Executed> = emptyList()
+
+        override suspend fun recordBypassExecution(
+            action: PendingAction,
+            conversationContext: ConversationContext,
+            outcome: ai.neopsyke.agent.model.ActionOutcome,
+            reason: String,
+            reasonCode: String?,
+        ): ActionReceipt? = null
+
+        override fun recordLedgerEntry(
+            action: PendingAction,
+            conversationContext: ConversationContext,
+            kind: ActionLedgerKind,
+            importance: ActionRecordImportance,
+            summary: String,
+            reasonCode: String?,
+            source: String?,
+            stagedActionId: String?,
+            authorizationId: String?,
+            receiptId: String?,
+        ): ActionLedgerEntry =
+            ActionLedgerEntry(
+                id = "ledger-dynamic",
+                kind = kind,
+                importance = importance,
+                actionType = action.type,
+                summary = summary,
+                rootInputId = action.rootInputId,
+                stagedActionId = stagedActionId,
+                authorizationId = authorizationId,
+                receiptId = receiptId,
+                reasonCode = reasonCode,
+                source = source,
+                conversationContext = conversationContext,
+            ).also { ledgerEntries += it }
+
+        override fun stagedActions(limit: Int, includeTerminal: Boolean): List<StagedAction> =
+            listOf(staged, completedStage)
+                .filter { includeTerminal || it.status !in setOf(StagedActionStatus.COMPLETED, StagedActionStatus.CANCELLED, StagedActionStatus.FAILED) }
+                .take(limit)
+        override fun stagedAction(id: String): StagedAction? =
+            when (id) {
+                staged.id -> staged
+                completedStage.id -> completedStage
+                else -> null
+            }
+        override fun receipts(limit: Int): List<ActionReceipt> = listOfNotNull(receipt)
+        override fun receipt(id: String): ActionReceipt? = receipt?.takeIf { it.id == id }
+        override fun ledgerEntries(limit: Int): List<ActionLedgerEntry> = ledgerEntries.takeLast(limit).reversed()
+        override fun ledgerEntry(id: String): ActionLedgerEntry? = ledgerEntries.lastOrNull { it.id == id }
     }
 }

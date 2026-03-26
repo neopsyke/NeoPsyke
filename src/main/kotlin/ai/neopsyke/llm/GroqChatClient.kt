@@ -219,15 +219,15 @@ private data class GroqChatCompletionRequest(
     val model: String,
     val messages: List<GroqChatMessage>,
     val temperature: Double? = null,
-    @JsonProperty("max_tokens")
+    @param:JsonProperty("max_tokens")
     val maxTokens: Int? = null,
-    @JsonProperty("response_format")
+    @param:JsonProperty("response_format")
     val responseFormat: GroqResponseFormat? = null,
 )
 
 private data class GroqResponseFormat(
     val type: String,
-    @JsonProperty("json_schema")
+    @param:JsonProperty("json_schema")
     val jsonSchema: GroqJsonSchemaFormat,
 )
 
@@ -244,7 +244,7 @@ private data class GroqChatMessage(
 
 private data class GroqChatCompletionResponse(
     val id: String?,
-    @JsonProperty("object")
+    @param:JsonProperty("object")
     val objectType: String? = null,
     val model: String?,
     val choices: List<GroqChoice> = emptyList(),
@@ -254,7 +254,7 @@ private data class GroqChatCompletionResponse(
 private data class GroqChoice(
     val index: Int? = null,
     val message: GroqResponseMessage,
-    @JsonProperty("finish_reason")
+    @param:JsonProperty("finish_reason")
     val finishReason: String? = null,
 )
 
@@ -264,11 +264,11 @@ private data class GroqResponseMessage(
 )
 
 private data class GroqUsage(
-    @JsonProperty("prompt_tokens")
+    @param:JsonProperty("prompt_tokens")
     val promptTokens: Int? = null,
-    @JsonProperty("completion_tokens")
+    @param:JsonProperty("completion_tokens")
     val completionTokens: Int? = null,
-    @JsonProperty("total_tokens")
+    @param:JsonProperty("total_tokens")
     val totalTokens: Int? = null,
 ) {
     fun toChatUsage(): ChatUsage =

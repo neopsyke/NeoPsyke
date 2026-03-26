@@ -1,8 +1,8 @@
 package ai.neopsyke.agent
 
-import ai.neopsyke.agent.actions.ActionPluginFactoryContext
-import ai.neopsyke.agent.actions.ActionRegistry
-import ai.neopsyke.agent.actions.NoopReflectionMemoryRecorder
+import ai.neopsyke.agent.cortex.motor.actions.ActionPluginFactoryContext
+import ai.neopsyke.agent.cortex.motor.actions.ActionRegistry
+import ai.neopsyke.agent.cortex.motor.actions.NoopReflectionMemoryRecorder
 import ai.neopsyke.agent.model.ActionOrigin
 import ai.neopsyke.agent.model.OriginSource
 import ai.neopsyke.llm.ChatRole
@@ -25,7 +25,6 @@ class SuperegoGatekeeperTest {
             ActionPluginFactoryContext(
                 config = config,
                 webSearchActionHandler = null,
-                mcpTimeTool = null,
                 fetchTool = null,
                 output = {},
                 reflectionMemoryRecorder = NoopReflectionMemoryRecorder,
@@ -259,31 +258,6 @@ class SuperegoGatekeeperTest {
     }
 
     @Test
-    fun `gatekeeper hard denies mcp time payload when timezone is missing`() {
-        val llm = StubChatModelClient().apply {
-            enqueueRawResponse("""{"allow":true}""")
-        }
-        val gatekeeper = Superego(
-            modelClient = llm,
-            config = AgentConfig(),
-            actionRegistry = testRegistry()
-        )
-        val mcpTimeAction = PendingAction(
-            id = 101,
-            urgency = Urgency.MEDIUM,
-            type = ActionType.MCP_TIME,
-            payload = "{}",
-            summary = "lookup current time"
-        )
-
-        val decision = gatekeeper.review(mcpTimeAction, snapshot)
-
-        assertFalse(decision.allow)
-        assertTrue(decision.reason.contains("mcp_time_timezone_missing", ignoreCase = true))
-        assertEquals(0, llm.calls.size)
-    }
-
-    @Test
     fun `gatekeeper hard denies secret exfil style web search payload before llm review`() {
         val llm = StubChatModelClient().apply {
             enqueueRawResponse("""{"allow":true}""")
@@ -380,7 +354,7 @@ class SuperegoGatekeeperTest {
         val reflectAction = PendingAction(
             id = 701,
             urgency = Urgency.MEDIUM,
-            type = ActionType.REFLECT,
+            type = ActionType.REFLECT_INTERNAL,
             payload = """{"summary":"I learned something useful","keywords":["learning"]}""",
             summary = "record internal reflection",
             origin = ActionOrigin(

@@ -8,6 +8,7 @@ import ai.neopsyke.instrumentation.AgentInstrumentation
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 class IdTest {
@@ -44,7 +45,7 @@ class IdTest {
     private fun defaultConfig(
         enabled: Boolean = true,
         triggerThreshold: Double = 0.5,
-        thresholdOnUrgency: Boolean = true,
+        thresholdOnTension: Boolean = true,
         maxInFlightPulses: Int = 20,
         backoffPulses: Int = 10,
         needs: Map<String, NeedConfig> = mapOf(
@@ -62,7 +63,7 @@ class IdTest {
         enabled = enabled,
         pulseIntervalMs = 1000,
         triggerThreshold = triggerThreshold,
-        thresholdOnUrgency = thresholdOnUrgency,
+        thresholdOnTension = thresholdOnTension,
         maxConsecutiveDenials = 5,
         backoffPulses = backoffPulses,
         maxInFlightPulses = maxInFlightPulses,
@@ -137,10 +138,10 @@ class IdTest {
     }
 
     @Test
-    fun `thresholdOnUrgency uses curve-transformed value`() {
+    fun `thresholdOnTension uses curve-transformed value`() {
         val config = defaultConfig(
             triggerThreshold = 0.3,
-            thresholdOnUrgency = true,
+            thresholdOnTension = true,
             needs = mapOf(
                 "power-need" to NeedConfig(
                     description = "power test",
@@ -164,11 +165,11 @@ class IdTest {
     }
 
     @Test
-    fun `thresholdOnUrgency false uses raw value`() {
+    fun `thresholdOnTension false uses raw value`() {
         // Use 0.25 growth rate so raw value at 2 pulses is exactly 0.5
         val config = defaultConfig(
             triggerThreshold = 0.5,
-            thresholdOnUrgency = false,
+            thresholdOnTension = false,
             needs = mapOf(
                 "power-need" to NeedConfig(
                     description = "power test",
@@ -191,7 +192,7 @@ class IdTest {
 
         // After 3 pulses: rawValue = 0.75 > 0.5 (urgency = 0.75^3 ≈ 0.42, but raw is used)
         id.pulse()
-        assertEquals(1, enqueuedImpulses.size, "rawValue 0.75 should fire with thresholdOnUrgency=false")
+        assertEquals(1, enqueuedImpulses.size, "rawValue 0.75 should fire with thresholdOnTension=false")
     }
 
     // ── Candidate selection (highest urgency wins) ──────────────────────
@@ -558,7 +559,7 @@ class IdTest {
         val impulse = enqueuedImpulses.first()
         assertEquals("be-useful", impulse.needId)
         assertEquals("Be useful!", impulse.prompt)
-        assertTrue(impulse.urgency > 0.0)
+        assertTrue(impulse.tension > 0.0)
         assertTrue(impulse.rawValue > 0.0)
         assertEquals(Id.SESSION_ID, impulse.conversationContext.sessionId)
         assertEquals(Id.INTERLOCUTOR, impulse.conversationContext.interlocutor)
@@ -587,10 +588,10 @@ class IdTest {
         val id = buildId(config = config)
         id.pulse()
 
-        val urgencies = id.needUrgencies()
-        assertEquals(2, urgencies.size)
-        assertEquals(0.1, urgencies["a"]!!, 1e-9)
-        assertEquals(0.2, urgencies["b"]!!, 1e-9)
+        val tensions = id.needTensions()
+        assertEquals(2, tensions.size)
+        assertEquals(0.1, tensions["a"]!!, 1e-9)
+        assertEquals(0.2, tensions["b"]!!, 1e-9)
     }
 
     // ── Conversation context ────────────────────────────────────────────
@@ -680,13 +681,38 @@ class IdTest {
     // ── id_pulse event includes config fields ─────────────────────────
 
     @Test
-    fun `id_pulse event includes trigger_threshold and pulse_interval_ms and threshold_on_urgency`() {
-        val id = buildId(config = defaultConfig(triggerThreshold = 0.42, thresholdOnUrgency = false))
+    fun `id_pulse event includes trigger_threshold and pulse_interval_ms and threshold_on_tension`() {
+        val id = buildId(
+            config = defaultConfig(
+                triggerThreshold = 0.42,
+                thresholdOnTension = false,
+                needs = mapOf(
+                    "be-useful" to NeedConfig(
+                        description = "test drive",
+                        growthRate = 0.1,
+                        satisfactionDecay = 0.8,
+                        cooldownPulses = 2,
+                        prompt = "Be useful!",
+                        responseCurve = ResponseCurveConfig(type = "sigmoid", steepness = 8.0, midpoint = 0.4),
+                        activityDecay = mapOf("action_executed" to 0.1),
+                    ),
+                ),
+            )
+        )
         id.pulse()
 
         val pulseEvent = events.first { it.type == "id_pulse" }
         assertEquals(0.42, pulseEvent.data["trigger_threshold"])
         assertEquals(1000L, pulseEvent.data["pulse_interval_ms"])
-        assertEquals(false, pulseEvent.data["threshold_on_urgency"])
+        assertEquals(false, pulseEvent.data["threshold_on_tension"])
+        @Suppress("UNCHECKED_CAST")
+        val needs = pulseEvent.data["needs"] as List<Map<String, Any?>>
+        val need = needs.single()
+        @Suppress("UNCHECKED_CAST")
+        val responseCurve = need["responseCurve"] as? Map<String, Any?>
+        assertNotNull(responseCurve)
+        assertEquals("sigmoid", responseCurve["type"])
+        assertEquals(8.0, responseCurve["steepness"])
+        assertEquals(0.4, responseCurve["midpoint"])
     }
 }

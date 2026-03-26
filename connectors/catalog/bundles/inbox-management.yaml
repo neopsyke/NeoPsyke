@@ -1,0 +1,8 @@
+bundle_id: inbox-management
+display_name: Inbox Management
+description: >
+  Curated starter bundle for inbox triage. The first safe slice is Gmail
+  observe/search only; send, unsubscribe, archive, and label mutation remain
+  disabled until later phases.
+connector_ids:
+  - gmail

@@ -30,7 +30,7 @@ data class IdConfig(
     val enabled: Boolean = false,
     val pulseIntervalMs: Long = 30_000,
     val triggerThreshold: Double = 0.7,
-    val thresholdOnUrgency: Boolean = true,
+    val thresholdOnTension: Boolean = true,
     val maxConsecutiveDenials: Int = 5,
     val backoffPulses: Int = 10,
     val maxInFlightPulses: Int = 20,

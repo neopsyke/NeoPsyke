@@ -50,13 +50,6 @@ internal class FallbackHandler(
             stepIndex = deliberation.snapshot().stepIndex
         )
 
-        // Id-origin denials are silently absorbed: the lesson is recorded above,
-        // and the Id's own backoff mechanism handles future impulses.
-        if (action.origin?.source == OriginSource.ID) {
-            telemetry.emitQueueSnapshot("action_denied_id_silent")
-            return
-        }
-
         val denialThought = TextSecurity.clamp(
             "Action denied by $source ($reason). " +
                 "Try a different safe action than the denied one. " +
@@ -73,7 +66,7 @@ internal class FallbackHandler(
             deniedActionPayload = TextSecurity.clamp(action.payload, 240),
             denialReason = reason,
             denialReasonCode = reasonCode,
-            allowFallbackExplanation = true,
+            allowFallbackExplanation = action.origin.source != OriginSource.ID,
             conversationContext = conversationContext,
             origin = action.origin,
         )
@@ -86,6 +79,49 @@ internal class FallbackHandler(
             )
         }
         telemetry.emitQueueSnapshot("action_denied")
+    }
+
+    fun handleStagedAction(
+        action: PendingAction,
+        stagedAction: StagedAction,
+        reason: String,
+        reasonCode: String?,
+        conversationContext: ConversationContext,
+        source: String,
+    ) {
+        instrumentation.emit(
+            AgentEvents.warning(
+                "Action '${action.type.id}' was staged by $source and now requires authorization or a safer alternative."
+            )
+        )
+        val stagedThought = TextSecurity.clamp(
+            "Action was staged by $source (${reason.ifBlank { "authorization required" }}). " +
+                "Choose the next best step: request approval, pick a lower-risk alternative, or explain the constraint to the interlocutor.",
+            config.planner.maxThoughtChars
+        )
+        val queued = scheduler.enqueueThought(
+            content = stagedThought,
+            urgency = action.urgency,
+            passes = action.attempts + 1,
+            rootInputId = action.rootInputId,
+            rootInputReceivedAtMs = action.rootInputReceivedAtMs,
+            deniedActionType = action.type,
+            deniedActionPayload = TextSecurity.clamp(action.payload, 240),
+            denialReason = "staged:${stagedAction.id}:$reason",
+            denialReasonCode = reasonCode ?: "ACTION_STAGED_REQUIRES_AUTH",
+            allowFallbackExplanation = action.origin.source != OriginSource.ID,
+            conversationContext = conversationContext,
+            origin = action.origin,
+        )
+        if (!queued) {
+            instrumentation.emit(AgentEvents.warning("Failed to enqueue staged-action follow-up thought."))
+            telemetry.recordQueueSaturation(
+                queueType = "thought",
+                capacity = config.maxPendingThoughts,
+                reason = "enqueue_staged_action_thought_failed_full"
+            )
+        }
+        telemetry.emitQueueSnapshot("action_staged")
     }
 
     suspend fun enqueueFallbackExplanation(thought: PendingThought) {

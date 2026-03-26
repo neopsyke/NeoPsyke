@@ -1,0 +1,6 @@
+# Minimal conservative overlay.
+# Decision made here:
+# - disable autonomous Id impulses until you intentionally tune them
+
+id:
+  enabled: false

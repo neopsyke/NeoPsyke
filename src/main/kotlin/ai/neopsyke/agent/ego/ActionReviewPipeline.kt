@@ -1,9 +1,14 @@
 package ai.neopsyke.agent.ego
 
 import mu.KotlinLogging
+import ai.neopsyke.agent.cortex.motor.actions.control.ActionControlDecisionResult
+import ai.neopsyke.agent.cortex.motor.actions.control.ActionControlService
+import ai.neopsyke.agent.cortex.motor.actions.control.LegacyCompatibleActionControlService
 import ai.neopsyke.agent.config.*
+import ai.neopsyke.agent.id.evaluateSatisfaction
 import ai.neopsyke.agent.model.*
 import ai.neopsyke.agent.cortex.motor.MotorCortex
+import ai.neopsyke.agent.cortex.motor.actions.ActionCapability
 import ai.neopsyke.agent.memory.longterm.MemoryEventType
 import ai.neopsyke.agent.memory.scratchpad.ScratchpadStore
 import ai.neopsyke.agent.support.PromptInjectionDefense
@@ -32,16 +37,20 @@ internal class ActionReviewPipeline(
     private val impulseTracker: ImpulseLifecycleTracker,
     private val dialogueFor: (String) -> ArrayDeque<DialogueTurn>,
     private val resolveSessionId: (ConversationContext) -> String,
-    private val superegoContext: (String, ActionOrigin) -> SuperegoContext,
+    private val superegoContext: (String, String?, ActionOrigin, ConversationContext) -> SuperegoContext,
     private val cleanupResolvedInputAfterAnswer: (PendingAction) -> Unit,
+    private val cleanupSatisfiedIdImpulse: (PendingAction) -> Unit,
     private val getId: () -> ai.neopsyke.agent.id.Id?,
+    private val actionControlService: ActionControlService = LegacyCompatibleActionControlService { action, authorization ->
+        motorCortex.execute(action, config.searchResultCount, authorization)
+    },
     private val actionLifecycleObserver: ActionLifecycleObserver = NoopActionLifecycleObserver,
 ) {
     suspend fun reviewAndExecute(action: PendingAction) {
         val timing = PhaseTimingCollector("action", action.rootInputId)
         val convCtx = action.conversationContext
         val sessionId = resolveSessionId(convCtx)
-        memory.setActiveSession(sessionId, convCtx.interlocutor)
+        memory.setActiveSession(sessionId, convCtx.interlocutor, convCtx.security)
         deliberation.setActiveSession(sessionId)
 
         timing.startPhase("scratchpad_final_pass")
@@ -57,13 +66,147 @@ internal class ActionReviewPipeline(
             return
         }
         timing.startPhase("superego_review")
-        if (!passesSuperego(resolvedAction, sessionId, convCtx)) {
+        val authorizationDecision = reviewSuperego(resolvedAction, sessionId, convCtx) ?: run {
             instrumentation.emit(AgentEvents.phaseTimings(timing.build()))
             return
         }
 
-        timing.startPhase("action_execute")
-        val outcome = executeActionSafely(resolvedAction)
+        timing.startPhase("action_control")
+        when (
+            val controlResult = actionControlService.handleAuthorizationDecision(
+                action = resolvedAction,
+                decision = authorizationDecision,
+                conversationContext = convCtx,
+            )
+        ) {
+            is ActionControlDecisionResult.Refused -> {
+                actionControlService.recordLedgerEntry(
+                    action = resolvedAction,
+                    conversationContext = convCtx,
+                    kind = ActionLedgerKind.REFUSED,
+                    importance = ActionRecordImportance.SIGNAL,
+                    summary = controlResult.reason,
+                    reasonCode = controlResult.reasonCode,
+                    source = "action_control",
+                )
+                actionLifecycleObserver.onActionBlocked(
+                    action = resolvedAction,
+                    reason = controlResult.reason,
+                    reasonCode = controlResult.reasonCode,
+                    source = "action_control"
+                )
+                fallbackHandler.handleDeniedAction(
+                    action = resolvedAction,
+                    reason = controlResult.reason,
+                    reasonCode = controlResult.reasonCode,
+                    conversationContext = convCtx,
+                    sessionId = sessionId,
+                    source = "action_control"
+                )
+                instrumentation.emit(AgentEvents.phaseTimings(timing.build()))
+                return
+            }
+
+            is ActionControlDecisionResult.Staged -> {
+                instrumentation.emit(
+                    AgentEvent(
+                        type = "action_staged",
+                        data = mapOf(
+                            "action_id" to resolvedAction.id,
+                            "staged_action_id" to controlResult.stagedAction.id,
+                            "action_type" to resolvedAction.type.id,
+                            "commit_mode" to controlResult.authorizationDecision.commitMode.name.lowercase(),
+                            "reason" to controlResult.authorizationDecision.reason,
+                            "reason_code" to controlResult.authorizationDecision.reasonCode,
+                        )
+                    )
+                )
+                if (controlResult.stagedAction.commitMode == CommitMode.POLICY_AUTONOMOUS) {
+                    instrumentation.emit(
+                        AgentEvents.warning(
+                            "Action '${resolvedAction.type.id}' was queued for autonomous staged execution."
+                        )
+                    )
+                    instrumentation.emit(AgentEvents.phaseTimings(timing.build()))
+                    return
+                }
+                fallbackHandler.handleStagedAction(
+                    action = resolvedAction,
+                    stagedAction = controlResult.stagedAction,
+                    reason = controlResult.authorizationDecision.reason,
+                    reasonCode = controlResult.authorizationDecision.reasonCode,
+                    conversationContext = convCtx,
+                    source = "action_control"
+                )
+                instrumentation.emit(AgentEvents.phaseTimings(timing.build()))
+                return
+            }
+
+            is ActionControlDecisionResult.Cancelled -> {
+                actionLifecycleObserver.onActionBlocked(
+                    action = resolvedAction,
+                    reason = controlResult.ledgerEntry.summary,
+                    reasonCode = controlResult.ledgerEntry.reasonCode,
+                    source = "action_control_cancelled"
+                )
+                fallbackHandler.handleDeniedAction(
+                    action = resolvedAction,
+                    reason = controlResult.ledgerEntry.summary,
+                    reasonCode = controlResult.ledgerEntry.reasonCode,
+                    conversationContext = convCtx,
+                    sessionId = sessionId,
+                    source = "action_control_cancelled"
+                )
+                instrumentation.emit(AgentEvents.phaseTimings(timing.build()))
+                return
+            }
+
+            is ActionControlDecisionResult.Executed -> {
+                timing.startPhase("action_execute")
+                processExecutedControlResult(controlResult, timing)
+                return
+            }
+        }
+    }
+
+    suspend fun processAutonomousStagedActions(limit: Int): Int {
+        val executed = actionControlService.processAutonomousStagedActions(limit)
+        executed.forEach { result ->
+            val timing = PhaseTimingCollector("action_worker", result.stagedAction.rootInputId)
+            timing.startPhase("worker_execute")
+            processExecutedControlResult(result, timing)
+        }
+        return executed.size
+    }
+
+    private fun processExecutedControlResult(
+        controlResult: ActionControlDecisionResult.Executed,
+        timing: PhaseTimingCollector,
+    ) {
+        val resolvedAction = controlResult.executedAction
+        val convCtx = resolvedAction.conversationContext
+        val sessionId = resolveSessionId(convCtx)
+        val outcome = controlResult.outcome
+        processExecutedAction(
+            resolvedAction = resolvedAction,
+            outcome = outcome,
+            sessionId = sessionId,
+            convCtx = convCtx,
+            timing = timing
+        )
+    }
+
+    private fun processExecutedAction(
+        resolvedAction: PendingAction,
+        outcome: ActionOutcome,
+        sessionId: String,
+        convCtx: ConversationContext,
+        timing: PhaseTimingCollector,
+    ) {
+        if (outcome.executionStatus == ActionExecutionStatus.FAILED) {
+            deliberation.markEvidenceFailure(resolvedAction)
+            instrumentation.emit(AgentEvents.warning("Action execution failed; action dropped."))
+        }
         impulseTracker.recordActionOutcome(resolvedAction, outcome)
         instrumentation.emit(AgentEvents.actionExecuted(resolvedAction, outcome.statusSummary))
         if (resolvedAction.origin.source != OriginSource.ID && outcome.successful) {
@@ -91,6 +234,12 @@ internal class ActionReviewPipeline(
             latestActionOutcome = outcome.plannerSignal,
             sessionId = sessionId
         )
+        maybeDeliverAssistantOutput(resolvedAction, outcome, convCtx)
+        if (shouldCleanupSatisfiedIdImpulse(resolvedAction, outcome)) {
+            cleanupSatisfiedIdImpulse(resolvedAction)
+            instrumentation.emit(AgentEvents.phaseTimings(timing.build()))
+            return
+        }
 
         timing.startPhase("follow_up")
         maybeEnqueueFollowUp(resolvedAction, outcome, observed, convCtx)
@@ -115,6 +264,13 @@ internal class ActionReviewPipeline(
             )
         )
         val outcome = executeActionSafely(resolvedAction)
+        actionControlService.recordBypassExecution(
+            action = resolvedAction,
+            conversationContext = convCtx,
+            outcome = outcome,
+            reason = "Fallback explanation bypass executed directly.",
+            reasonCode = "SYSTEM_FALLBACK_BYPASS",
+        )
         impulseTracker.recordActionOutcome(resolvedAction, outcome)
         instrumentation.emit(AgentEvents.actionExecuted(resolvedAction, outcome.statusSummary))
         if (resolvedAction.type == ActionType.CONTACT_USER) {
@@ -133,7 +289,25 @@ internal class ActionReviewPipeline(
         deliberation.onActionExecuted(resolvedAction, observed)
         maybeRecordScratchpadOutcome(resolvedAction, outcome, observed)
         maybeRunTerminalAnswerMemoryAssessment(resolvedAction, outcome, sessionId)
+        if (shouldCleanupSatisfiedIdImpulse(resolvedAction, outcome)) {
+            cleanupSatisfiedIdImpulse(resolvedAction)
+            instrumentation.emit(AgentEvents.phaseTimings(timing.build()))
+            return
+        }
         instrumentation.emit(AgentEvents.phaseTimings(timing.build()))
+    }
+
+    private fun shouldCleanupSatisfiedIdImpulse(
+        action: PendingAction,
+        outcome: ActionOutcome,
+    ): Boolean {
+        if (!outcome.successful) return false
+        if (action.type == ActionType.CONTACT_USER) return false
+        if (action.origin.source != OriginSource.ID) return false
+        val needId = action.origin.needId?.trim().orEmpty()
+        if (needId.isBlank()) return false
+        val needConfig = getId()?.needConfig(needId) ?: return false
+        return needConfig.evaluateSatisfaction(outcome.effects).satisfied
     }
 
     // ── Review gates ──
@@ -159,7 +333,7 @@ internal class ActionReviewPipeline(
                 externalEvidence = deliberation.evidenceFor(resolvedAction.rootInputId, sessionId),
                 availableActions = availableActionsForScope,
                 dispatchableActions = dispatchableActionsForScope,
-                evidenceActionTypes = motorCortex.actionTypesWithCapability(ai.neopsyke.agent.actions.ActionCapability.GATHERS_EVIDENCE),
+                evidenceActionTypes = motorCortex.actionTypesWithCapability(ActionCapability.GATHERS_EVIDENCE),
                 latestUserTurn = latestUserTurn
             )
         )
@@ -189,6 +363,15 @@ internal class ActionReviewPipeline(
             )
         )
         if (!taskVerificationDecision.allow) {
+            actionControlService.recordLedgerEntry(
+                action = resolvedAction,
+                conversationContext = convCtx,
+                kind = ActionLedgerKind.DENIED,
+                importance = ActionRecordImportance.SIGNAL,
+                summary = taskVerificationDecision.reason,
+                reasonCode = taskVerificationDecision.reasonCode,
+                source = "task_verifier",
+            )
             actionLifecycleObserver.onActionBlocked(
                 action = resolvedAction,
                 reason = taskVerificationDecision.reason,
@@ -216,12 +399,33 @@ internal class ActionReviewPipeline(
         return true
     }
 
-    private fun passesSuperego(
+    private fun reviewSuperego(
         resolvedAction: PendingAction,
         sessionId: String,
         convCtx: ConversationContext,
-    ): Boolean {
-        val gateDecision = superego.review(resolvedAction, superegoContext(sessionId, resolvedAction.origin))
+    ): AuthorizationDecision? {
+        val authorizationDecision = superego.reviewAuthorization(
+            resolvedAction,
+            superegoContext(sessionId, resolvedAction.rootInputId, resolvedAction.origin, convCtx)
+        )
+        instrumentation.emit(
+            AgentEvent(
+                type = "superego_authorization_decision",
+                data = mapOf(
+                    "action_id" to resolvedAction.id,
+                    "action_type" to resolvedAction.type.id,
+                    "progress" to authorizationDecision.progress.name.lowercase(),
+                    "commit_mode" to authorizationDecision.commitMode.name.lowercase(),
+                    "reason" to authorizationDecision.reason,
+                    "reason_code" to authorizationDecision.reasonCode,
+                )
+            )
+        )
+        val gateDecision = GateDecision(
+            allow = authorizationDecision.progress != AuthorizationProgress.DENY,
+            reason = authorizationDecision.reason,
+            reasonCode = authorizationDecision.reasonCode,
+        )
         instrumentation.emit(
             AgentEvents.actionReviewResult(
                 actionId = resolvedAction.id,
@@ -231,6 +435,15 @@ internal class ActionReviewPipeline(
             )
         )
         if (!gateDecision.allow) {
+            actionControlService.recordLedgerEntry(
+                action = resolvedAction,
+                conversationContext = convCtx,
+                kind = ActionLedgerKind.DENIED,
+                importance = ActionRecordImportance.SIGNAL,
+                summary = gateDecision.reason,
+                reasonCode = gateDecision.reasonCode,
+                source = "superego",
+            )
             actionLifecycleObserver.onActionBlocked(
                 action = resolvedAction,
                 reason = gateDecision.reason,
@@ -245,12 +458,10 @@ internal class ActionReviewPipeline(
                 sessionId = sessionId,
                 source = "superego"
             )
-            return false
+            return null
         }
-        return true
+        return authorizationDecision
     }
-
-    // ── Execution ──
 
     private suspend fun executeActionSafely(action: PendingAction): ActionOutcome {
         return try {
@@ -567,6 +778,36 @@ internal class ActionReviewPipeline(
     }
 
     // ── Follow-up ──
+
+    private fun maybeDeliverAssistantOutput(
+        resolvedAction: PendingAction,
+        outcome: ActionOutcome,
+        convCtx: ConversationContext,
+    ) {
+        val assistantOutput = outcome.assistantOutput?.trim().orEmpty()
+        if (assistantOutput.isBlank()) return
+        if (resolvedAction.type == ActionType.CONTACT_USER) return
+        if (resolvedAction.origin.source != OriginSource.USER) return
+        if (resolvedAction.requiresFollowUpThought) return
+        val queued = scheduler.enqueueAction(
+            type = ActionType.CONTACT_USER,
+            payload = assistantOutput,
+            summary = "Deliver action result to user",
+            urgency = resolvedAction.urgency,
+            rootInputId = resolvedAction.rootInputId,
+            rootInputReceivedAtMs = resolvedAction.rootInputReceivedAtMs,
+            conversationContext = convCtx,
+            origin = resolvedAction.origin,
+        )
+        if (!queued) {
+            instrumentation.emit(AgentEvents.warning("Failed to enqueue user-visible action result."))
+            telemetry.recordQueueSaturation(
+                queueType = "action",
+                capacity = config.maxPendingActions,
+                reason = "enqueue_user_visible_action_result_failed_full"
+            )
+        }
+    }
 
     private fun maybeEnqueueFollowUp(
         resolvedAction: PendingAction,

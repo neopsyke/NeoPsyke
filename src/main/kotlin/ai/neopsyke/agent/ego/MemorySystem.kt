@@ -1,23 +1,23 @@
 package ai.neopsyke.agent.ego
 
 import mu.KotlinLogging
-import ai.neopsyke.agent.actions.ReflectionMemoryRecorder
+import ai.neopsyke.agent.cortex.motor.actions.ReflectionMemoryRecorder
 import ai.neopsyke.agent.config.AgentConfig
 import ai.neopsyke.agent.model.ActionType
 import ai.neopsyke.agent.model.AmbientContext
 import ai.neopsyke.agent.model.ConversationContext
+import ai.neopsyke.agent.model.ConversationSecurityContext
+import ai.neopsyke.agent.model.ConversationSecurityContexts
 import ai.neopsyke.agent.model.DeliberationState
 import ai.neopsyke.agent.model.DialogueTurn
 import ai.neopsyke.agent.model.EgoTrigger
 import ai.neopsyke.agent.model.DialogueRole
+import ai.neopsyke.agent.model.ExternalContentArtifact
 import ai.neopsyke.agent.model.Interlocutor
 import ai.neopsyke.agent.model.PendingAction
-import ai.neopsyke.agent.memory.longterm.ConsolidationReason
 import ai.neopsyke.agent.memory.longterm.DeterministicLogbookSummarizer
-import ai.neopsyke.agent.memory.longterm.ForgetRequest
 import ai.neopsyke.agent.memory.longterm.Hippocampus
 import ai.neopsyke.agent.memory.longterm.HippocampusAdmin
-import ai.neopsyke.agent.memory.longterm.ImprintResult
 import ai.neopsyke.agent.memory.longterm.Logbook
 import ai.neopsyke.agent.memory.longterm.LogbookEntry
 import ai.neopsyke.agent.memory.longterm.LogbookNarrative
@@ -73,10 +73,16 @@ class MemorySystem(
         }
     private var activeSessionId: String = ConversationContext.DEFAULT_SESSION_ID
     private var activeInterlocutor: Interlocutor = Interlocutor.UNKNOWN
+    private var activeSecurityContext: ConversationSecurityContext = ConversationSecurityContexts.default()
 
-    fun setActiveSession(sessionId: String, interlocutor: Interlocutor = Interlocutor.UNKNOWN) {
+    fun setActiveSession(
+        sessionId: String,
+        interlocutor: Interlocutor = Interlocutor.UNKNOWN,
+        securityContext: ConversationSecurityContext = ConversationSecurityContexts.default(),
+    ) {
         activeSessionId = sessionId
         activeInterlocutor = interlocutor
+        activeSecurityContext = securityContext
     }
 
     private fun activeMemoryStore(): MemoryStore =
@@ -497,7 +503,7 @@ class MemorySystem(
         )
     }
 
-    override fun recordReflection(action: PendingAction, summary: String, keywords: List<String>): Boolean {
+    override fun recordInternalReflection(action: PendingAction, summary: String, keywords: List<String>): Boolean {
         val normalizedSummary = LogbookNarrative.normalizeSummary(MemoryEventType.SELF_INITIATED, summary)
         if (normalizedSummary.isBlank()) return false
 
@@ -545,6 +551,58 @@ class MemorySystem(
         if (savedToLongTermMemory && action.origin.needId == LEARNING_NEED_ID) {
             rememberLearningTopic(summary = normalizedSummary, keywords = normalizedKeywords)
         }
+        return savedToLongTermMemory
+    }
+
+    override fun recordEvidenceReflection(
+        action: PendingAction,
+        summaryHint: String,
+        keywords: List<String>,
+        artifacts: List<ExternalContentArtifact>,
+    ): Boolean {
+        if (artifacts.isEmpty()) return false
+        if (artifacts.any { PromptInjectionDefense.scan(it.content).suspicious }) {
+            logger.info { "Evidence reflection rejected due to injection signals in referenced artifacts." }
+            return false
+        }
+        val normalizedKeywords = keywords
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .distinct()
+        val compiledSummary = compileEvidenceReflectionSummary(summaryHint, normalizedKeywords, artifacts)
+        if (compiledSummary.isBlank()) return false
+        val normalizedSummary = LogbookNarrative.normalizeSummary(MemoryEventType.MEMORY_IMPRINT, compiledSummary)
+        val tags = buildEvidenceReflectionTags(action, normalizedKeywords, artifacts)
+        val metadata = buildEvidenceReflectionMetadata(action, artifacts)
+        val savedToLongTermMemory = if (hippocampus.enabled) {
+            try {
+                hippocampus.imprint(
+                    NarrativeImprint(
+                        summary = normalizedSummary,
+                        kind = MemoryKind.NARRATIVE,
+                        source = "evidence_backed_reflection",
+                        confidence = EVIDENCE_REFLECTION_DEFAULT_CONFIDENCE,
+                        tags = tags,
+                        context = MemoryContext(
+                            sessionId = activeSessionId,
+                            interlocutorId = activeInterlocutor.id,
+                        )
+                    )
+                ).accepted
+            } catch (ex: Exception) {
+                logger.debug(ex) { "Evidence reflection imprint failed for action_type=${action.type.id}." }
+                false
+            }
+        } else {
+            false
+        }
+        journalSafe(
+            eventType = MemoryEventType.MEMORY_IMPRINT,
+            summary = normalizedSummary,
+            keywords = normalizedKeywords,
+            actionType = action.type.id,
+            metadata = metadata,
+        )
         return savedToLongTermMemory
     }
 
@@ -762,6 +820,14 @@ class MemorySystem(
         if (normalizedSummary.isBlank()) return
         rememberAmbientUsefulUpdate(eventType, normalizedSummary)
         try {
+            val mergedMetadata = buildMap<String, Any?> {
+                put("principal_role", activeSecurityContext.principal.role.name.lowercase(Locale.ROOT))
+                put("channel_provider", activeSecurityContext.channel.provider)
+                put("channel_surface", activeSecurityContext.channel.surface.name.lowercase(Locale.ROOT))
+                put("instruction_trust", activeSecurityContext.instructionTrust.name.lowercase(Locale.ROOT))
+                put("policy_scope_id", activeSecurityContext.policyScopeId)
+                metadata?.forEach { (key, value) -> put(key, value) }
+            }
             lb.record(
                 LogbookEntry(
                     ts = Instant.now(),
@@ -770,7 +836,7 @@ class MemorySystem(
                     keywords = keywords,
                     actionType = actionType,
                     runId = runId,
-                    metadata = metadata,
+                    metadata = mergedMetadata,
                     sessionId = activeSessionId,
                     interlocutorId = activeInterlocutor.id,
                 )
@@ -838,6 +904,81 @@ class MemorySystem(
             action.rootInputId?.let { put("root_input_id", it) }
         }
 
+    private fun buildEvidenceReflectionTags(
+        action: PendingAction,
+        keywords: List<String>,
+        artifacts: List<ExternalContentArtifact>,
+    ): List<String> =
+        (
+            buildReflectionTags(action, keywords) + listOf(
+                "memory_lane:evidence_quarantine",
+                "memory_visibility:quarantined",
+                "evidence_backed",
+            ) + artifacts.map { artifact ->
+                "artifact_source:${artifact.provenance.source.provider}:${artifact.provenance.source.objectType}"
+            }
+        ).distinct()
+
+    private fun buildEvidenceReflectionMetadata(
+        action: PendingAction,
+        artifacts: List<ExternalContentArtifact>,
+    ): Map<String, Any?> =
+        buildReflectionMetadata(action) + mapOf(
+            "quarantined_evidence" to true,
+            "artifact_ids" to artifacts.map { it.id },
+            "artifact_sources" to artifacts.map { it.taintSourceSummary() },
+        )
+
+    private fun compileEvidenceReflectionSummary(
+        summaryHint: String,
+        keywords: List<String>,
+        artifacts: List<ExternalContentArtifact>,
+    ): String {
+        val normalizedHint = TextSecurity.preview(
+            PromptInjectionDefense.sanitizeExternalText(summaryHint, EVIDENCE_REFLECTION_HINT_MAX_CHARS),
+            EVIDENCE_REFLECTION_HINT_MAX_CHARS
+        )
+        val topic = when {
+            normalizedHint.isNotBlank() && !PromptInjectionDefense.scan(normalizedHint).suspicious -> normalizedHint
+            keywords.isNotEmpty() -> keywords.joinToString(", ")
+            else -> artifacts
+                .map { it.provenance.source.objectType }
+                .distinct()
+                .joinToString(", ")
+        }.ifBlank { "external evidence" }
+        return "I learned from quarantined external evidence about $topic."
+    }
+
+    private fun filterRecallForPlanner(
+        recall: ai.neopsyke.agent.memory.longterm.RecallResult,
+        intent: RecallIntent,
+    ): ai.neopsyke.agent.memory.longterm.RecallResult {
+        if (recall.items.isEmpty()) {
+            return recall
+        }
+        val filteredItems = when (intent) {
+            RecallIntent.EVIDENCE -> recall.items.filter { item ->
+                item.tags.contains("memory_visibility:quarantined") || item.tags.contains("memory_lane:evidence_quarantine")
+            }
+
+            else -> recall.items.filterNot { item ->
+                item.tags.contains("memory_visibility:quarantined") || item.tags.contains("memory_lane:evidence_quarantine")
+            }
+        }
+        if (filteredItems.size == recall.items.size) {
+            return recall
+        }
+        val renderedText = filteredItems.joinToString(separator = "\n") { item ->
+            item.content?.takeIf { it.isNotBlank() } ?: item.summary
+        }
+        return recall.copy(
+            items = filteredItems,
+            renderedText = renderedText,
+            hitCount = filteredItems.size,
+            truncated = recall.truncated || filteredItems.size < recall.items.size,
+        )
+    }
+
     fun resetForNewInput() {
         sessionStates.values.forEach { state ->
             state.lastConsolidationStep = 0
@@ -867,6 +1008,7 @@ class MemorySystem(
             is EgoTrigger.IncomingImpulse -> "impulse"
             is EgoTrigger.GoalWork -> "goal-work"
         }
+        var recallIntent = RecallIntent.GENERAL
         val cue = when (trigger) {
             is EgoTrigger.IncomingInput -> buildRecallCue(trigger, recentDialogue, episodicCues).trim()
             is EgoTrigger.GoalWork -> trigger.workUnit.stepDescription.trim()
@@ -883,6 +1025,9 @@ class MemorySystem(
                     return ""
                 }
                 val normalized = TextSecurity.clamp(query, config.planner.maxThoughtChars)
+                if (normalized.startsWith("evidence:", ignoreCase = true)) {
+                    recallIntent = RecallIntent.EVIDENCE
+                }
                 instrumentation.emit(
                     AgentEvents.longTermMemoryRecallRequested(
                         trigger = triggerLabel,
@@ -890,7 +1035,7 @@ class MemorySystem(
                         queryPreview = TextSecurity.preview(normalized, 180)
                     )
                 )
-                normalized
+                normalized.removePrefix("evidence:").trim()
             }
         }
         if (cue.isBlank()) return ""
@@ -906,7 +1051,7 @@ class MemorySystem(
             val recall = hippocampus.recall(
                 RecallRequest(
                     cue = cue,
-                    intent = RecallIntent.GENERAL,
+                    intent = recallIntent,
                     recentDialogue = recentDialogue,
                     shortTermContextSummary = shortTermSummary,
                     limits = RecallLimits(
@@ -915,11 +1060,12 @@ class MemorySystem(
                     )
                 )
             )
+            val filteredRecall = filterRecallForPlanner(recall, recallIntent)
             val recallText = PromptInjectionDefense.asUntrustedDataBlock(
-                text = recall.renderedText,
+                text = filteredRecall.renderedText,
                 maxChars = config.memory.longTermMemoryRecallMaxChars
             )
-            val recallScan = PromptInjectionDefense.scan(recall.renderedText)
+            val recallScan = PromptInjectionDefense.scan(filteredRecall.renderedText)
             val latencyMs = (System.nanoTime() - startedAt) / 1_000_000L
             val recallRootInputId = when (trigger) {
                 is EgoTrigger.IncomingInput -> trigger.input.rootInputId
@@ -930,13 +1076,14 @@ class MemorySystem(
             instrumentation.emit(
                 AgentEvents.memoryRecallResult(
                     trigger = triggerLabel,
-                    provider = recall.provider.ifBlank { hippocampus.providerName },
-                    hitCount = recall.hitCount,
+                    provider = filteredRecall.provider.ifBlank { hippocampus.providerName },
+                    hitCount = filteredRecall.hitCount,
                     latencyMs = latencyMs,
                     recallChars = recallText.length,
-                    truncated = recall.truncated,
+                    truncated = filteredRecall.truncated,
                     recallTextPreview = recallText,
                     rootInputId = recallRootInputId,
+                    intent = recallIntent.name.lowercase(Locale.ROOT),
                 )
             )
             if (recallScan.suspicious) {
@@ -998,6 +1145,15 @@ class MemorySystem(
             "Learning freshness guidance: avoid exact repeats from recent_exact_learning_topics, but deeper follow-up exploration remains valid."
         } else {
             null
+        }
+        if (!ambientContext.isEmpty()) {
+            instrumentation.emit(
+                AgentEvents.ambientContextSnapshot(
+                    trigger = "impulse",
+                    usage = "memory_recall_cue",
+                    ambientContext = ambientContext,
+                )
+            )
         }
         return listOfNotNull(
             baseCue.takeIf { it.isNotBlank() },
@@ -1428,6 +1584,8 @@ class MemorySystem(
         const val LEARNING_TOPIC_LABEL_MAX_CHARS: Int = 120
         const val LESSON_DEFAULT_CONFIDENCE: Double = 0.72
         const val REFLECTION_DEFAULT_CONFIDENCE: Double = 0.6
+        const val EVIDENCE_REFLECTION_DEFAULT_CONFIDENCE: Double = 0.35
+        const val EVIDENCE_REFLECTION_HINT_MAX_CHARS: Int = 120
         const val LEARNING_NEED_ID: String = "learn-something"
         const val SELF_MEMORY_ASSESSMENT_SOURCE: String = "ego_self_memory_assessment"
         const val MAX_AMBIENT_USEFUL_UPDATES: Int = 6

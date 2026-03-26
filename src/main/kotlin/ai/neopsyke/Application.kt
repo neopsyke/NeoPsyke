@@ -4,7 +4,6 @@ import mu.KotlinLogging
 import ai.neopsyke.config.AgentRuntimeSettingsLoader
 import ai.neopsyke.config.LlmRuntimeConfigLoader
 import ai.neopsyke.config.MemoryRuntimeConfigLoader
-import ai.neopsyke.config.McpRuntimeConfigLoader
 import ai.neopsyke.eval.ReasoningEvalMode
 
 private val logger = KotlinLogging.logger {}
@@ -52,14 +51,8 @@ fun main(args: Array<String>) {
 
     val runtimeSettings = AgentRuntimeSettingsLoader.load()
     val config = runtimeSettings.agentConfig
-    val mcpRuntimeConfig = McpRuntimeConfigLoader.load()
     val memoryRuntimeConfig = MemoryRuntimeConfigLoader.load()
     val llmRuntimeConfig = LlmRuntimeConfigLoader.load()
-    if (llmRuntimeConfig == null) {
-        output.error("Invalid llm-runtime.yaml configuration. Supported providers are: groq, mistral, google, openai.")
-        logger.warn { "Invalid llm-runtime.yaml configuration. Supported providers are: groq, mistral, google, openai." }
-        return
-    }
 
     if (cliOptions.evalReasoningOnly) {
         AppModeRunners.runReasoningOnlyEval(
@@ -73,7 +66,6 @@ fun main(args: Array<String>) {
         AppModeRunners.runMemoryLiveEval(
             llm = llmRuntimeConfig,
             config = config,
-            mcpRuntimeConfig = mcpRuntimeConfig,
             memoryRuntimeConfig = memoryRuntimeConfig,
             cliOptions = cliOptions,
             runtimeSettings = runtimeSettings
@@ -85,7 +77,6 @@ fun main(args: Array<String>) {
         AppModeRunners.runFreudLiveMode(
             llm = llmRuntimeConfig,
             config = config,
-            mcpRuntimeConfig = mcpRuntimeConfig,
             memoryRuntimeConfig = memoryRuntimeConfig,
             runtimeSettings = runtimeSettings,
             cliOptions = cliOptions
@@ -96,7 +87,6 @@ fun main(args: Array<String>) {
     AppModeRunners.runInteractiveMode(
         llm = llmRuntimeConfig,
         config = config,
-        mcpRuntimeConfig = mcpRuntimeConfig,
         memoryRuntimeConfig = memoryRuntimeConfig,
         runtimeSettings = runtimeSettings,
         cliOptions = cliOptions

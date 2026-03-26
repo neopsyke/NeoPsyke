@@ -25,7 +25,7 @@ enum class Urgency(val priority: Int) {
  * id can be instantiated to support plugin-discovered actions.
  *
  * Whether an action is dispatchable (i.e. the planner may propose it) is determined
- * by [ai.neopsyke.agent.actions.ActionDescriptor.dispatchable], not by the type itself.
+ * by [ai.neopsyke.agent.cortex.motor.actions.ActionDescriptor.dispatchable], not by the type itself.
  */
 data class ActionType(
     val id: String,
@@ -38,9 +38,9 @@ data class ActionType(
         val WEB_SEARCH: ActionType = ActionType("web_search")
         val CONTACT_USER: ActionType = ActionType("contact_user")
         val RESOLUTION_DRAFT: ActionType = ActionType("resolution_draft")
-        val MCP_TIME: ActionType = ActionType("mcp_time")
         val WEBSITE_FETCH: ActionType = ActionType("website_fetch")
-        val REFLECT: ActionType = ActionType("reflect")
+        val REFLECT_INTERNAL: ActionType = ActionType("reflect_internal")
+        val REFLECT_EVIDENCE: ActionType = ActionType("reflect_evidence")
         val GOAL_OPERATION: ActionType = ActionType("goal_operation")
 
         /** Built-in action set for compatibility with existing loops/tests. */
@@ -48,9 +48,9 @@ data class ActionType(
             WEB_SEARCH,
             CONTACT_USER,
             RESOLUTION_DRAFT,
-            MCP_TIME,
             WEBSITE_FETCH,
-            REFLECT,
+            REFLECT_INTERNAL,
+            REFLECT_EVIDENCE,
             GOAL_OPERATION,
         )
 

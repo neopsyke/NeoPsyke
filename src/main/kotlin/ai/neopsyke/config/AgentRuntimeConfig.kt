@@ -7,15 +7,22 @@ import com.fasterxml.jackson.dataformat.yaml.YAMLFactory
 import com.fasterxml.jackson.module.kotlin.readValue
 import com.fasterxml.jackson.module.kotlin.registerKotlinModule
 import ai.neopsyke.agent.config.AgentConfig
+import ai.neopsyke.agent.config.ActionControlConfig
+import ai.neopsyke.agent.config.BuiltinToolsConfig
+import ai.neopsyke.agent.config.ConnectorRuntimeConfig
 import ai.neopsyke.agent.config.LogbookConfig
 import ai.neopsyke.agent.config.MemoryConfig
 import ai.neopsyke.agent.config.MetaReasonerConfig
+import ai.neopsyke.agent.config.NativeIntegrationsConfig
+import ai.neopsyke.agent.config.GoogleWorkspaceConfig
+import ai.neopsyke.agent.config.TelegramChannelConfig
+import ai.neopsyke.agent.config.TelegramIngressMode
+import ai.neopsyke.agent.config.WebsiteFetchConfig
 import ai.neopsyke.dashboard.InnerVoiceConfig
 import ai.neopsyke.agent.config.PlannerConfig
 import ai.neopsyke.agent.goal.GoalConfig
 import ai.neopsyke.agent.config.SuperegoConfig
 import ai.neopsyke.agent.config.ScratchpadConfig
-import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
 
@@ -28,9 +35,9 @@ data class AgentRuntimeSettings(
 )
 
 private data class AgentRuntimeYamlConfig(
-    val app: AgentRuntimeYamlApp? = AgentRuntimeYamlApp(),
-    val eval: AgentRuntimeYamlEval? = AgentRuntimeYamlEval(),
-    val agent: AgentRuntimeYamlAgent? = AgentRuntimeYamlAgent(),
+    val app: AgentRuntimeYamlApp? = null,
+    val eval: AgentRuntimeYamlEval? = null,
+    val agent: AgentRuntimeYamlAgent? = null,
 )
 
 private data class AgentRuntimeYamlApp(
@@ -44,13 +51,18 @@ private data class AgentRuntimeYamlEval(
 )
 
 private data class AgentRuntimeYamlAgent(
-    val planner: AgentRuntimeYamlPlanner? = AgentRuntimeYamlPlanner(),
-    val superego: AgentRuntimeYamlSuperego? = AgentRuntimeYamlSuperego(),
-    val memory: AgentRuntimeYamlMemory? = AgentRuntimeYamlMemory(),
-    val metaReasoner: AgentRuntimeYamlMetaReasoner? = AgentRuntimeYamlMetaReasoner(),
-    val logbook: AgentRuntimeYamlLogbook? = AgentRuntimeYamlLogbook(),
-    val innerVoice: AgentRuntimeYamlInnerVoice? = AgentRuntimeYamlInnerVoice(),
-    val runtime: AgentRuntimeYamlRuntime? = AgentRuntimeYamlRuntime(),
+    val planner: AgentRuntimeYamlPlanner? = null,
+    val superego: AgentRuntimeYamlSuperego? = null,
+    val memory: AgentRuntimeYamlMemory? = null,
+    val metaReasoner: AgentRuntimeYamlMetaReasoner? = null,
+    val logbook: AgentRuntimeYamlLogbook? = null,
+    val actionControl: AgentRuntimeYamlActionControl? = null,
+    val connectors: AgentRuntimeYamlConnectors? = null,
+    val builtinTools: AgentRuntimeYamlBuiltinTools? = null,
+    val nativeIntegrations: AgentRuntimeYamlNativeIntegrations? = null,
+    val innerVoice: AgentRuntimeYamlInnerVoice? = null,
+    val goals: AgentRuntimeYamlGoals? = null,
+    val runtime: AgentRuntimeYamlRuntime? = null,
 )
 
 private data class AgentRuntimeYamlPlanner(
@@ -71,6 +83,7 @@ private data class AgentRuntimeYamlPlanner(
     val maxPlansPerInput: Int? = null,
     val actionRetryBudgetNonRetryableFailures: Int? = null,
     val actionRetryCooldownSteps: Int? = null,
+    val actionVerifierEnabled: Boolean? = null,
 )
 
 private data class AgentRuntimeYamlSuperego(
@@ -161,10 +174,107 @@ private data class AgentRuntimeYamlLogbook(
     val useLlmSummarizer: Boolean? = null,
 )
 
+private data class AgentRuntimeYamlActionControl(
+    val enabled: Boolean? = null,
+    val dbPath: String? = null,
+    val policyPath: String? = null,
+    val authorizationTtlMs: Long? = null,
+    val maxInspectResults: Int? = null,
+    val autonomousWorkerEnabled: Boolean? = null,
+    val autonomousWorkerPollMs: Long? = null,
+    val autonomousWorkerBatchSize: Int? = null,
+    val observePerTypePerRootInput: Int? = null,
+    val contactUserPerRootInput: Int? = null,
+    val reflectionFamilyPerRootInput: Int? = null,
+    val reflectEvidencePerRootInput: Int? = null,
+    val goalOperationPerRootInput: Int? = null,
+    val commitPrivatePerTypePerRootInput: Int? = null,
+    val commitStatefulPerTypePerRootInput: Int? = null,
+    val commitPublicPerTypePerRootInput: Int? = null,
+    val controlPlanePerTypePerRootInput: Int? = null,
+)
+
+private data class AgentRuntimeYamlConnectors(
+    val enabled: Boolean? = null,
+    val curatedCatalogPath: String? = null,
+    val installStateDir: String? = null,
+    val failClosed: Boolean? = null,
+    val pinningEnabled: Boolean? = null,
+    val startupTimeoutMs: Long? = null,
+    val healthTimeoutMs: Long? = null,
+    val callTimeoutMs: Long? = null,
+    val allowedConnectorIds: List<String>? = null,
+    val enabledBundleIds: List<String>? = null,
+    val allowThirdPartyConnectors: Boolean? = null,
+)
+
+private data class AgentRuntimeYamlBuiltinTools(
+    val websiteFetch: AgentRuntimeYamlWebsiteFetch? = null,
+)
+
+private data class AgentRuntimeYamlWebsiteFetch(
+    val enabled: Boolean? = null,
+    val callTimeoutMs: Long? = null,
+    val maxChars: Int? = null,
+)
+
+private data class AgentRuntimeYamlNativeIntegrations(
+    val telegram: AgentRuntimeYamlTelegram? = null,
+    val googleWorkspace: AgentRuntimeYamlGoogleWorkspace? = null,
+)
+
+private data class AgentRuntimeYamlTelegram(
+    val enabled: Boolean? = null,
+    val mode: String? = null,
+    val webhookPath: String? = null,
+    val ownerChatId: String? = null,
+    val ownerUserId: String? = null,
+    val botTokenHandle: String? = null,
+    val webhookSecretHandle: String? = null,
+    val policyScopeId: String? = null,
+    val sessionIdPrefix: String? = null,
+    val requireDirectChat: Boolean? = null,
+    val dropUnauthorizedMessages: Boolean? = null,
+    val pollTimeoutSeconds: Int? = null,
+    val pollRetryDelayMs: Long? = null,
+)
+
+private data class AgentRuntimeYamlGoogleWorkspace(
+    val enabled: Boolean? = null,
+    val tokenStoreDir: String? = null,
+    val allowedOwnerEmail: String? = null,
+    val publicBaseUrl: String? = null,
+    val oauthStartPath: String? = null,
+    val oauthClientIdHandle: String? = null,
+    val oauthClientSecretHandle: String? = null,
+    val oauthStateSigningSecretHandle: String? = null,
+    val oauthTokenEncryptionSecretHandle: String? = null,
+    val callbackPath: String? = null,
+    val authorizationBaseUrl: String? = null,
+    val tokenBaseUrl: String? = null,
+    val requirePkce: Boolean? = null,
+    val requireRefreshToken: Boolean? = null,
+    val oauthStateTtlSeconds: Long? = null,
+    val scopes: List<String>? = null,
+)
+
 private data class AgentRuntimeYamlInnerVoice(
     val enabled: Boolean? = null,
     val maxContentChars: Int? = null,
     val maxEventsPerSession: Int? = null,
+)
+
+private data class AgentRuntimeYamlGoals(
+    val enabled: Boolean? = null,
+    val workspaceRoot: String? = null,
+    val maxActiveGoals: Int? = null,
+    val maxStepsPerPlan: Int? = null,
+    val actionsPerCycle: Int? = null,
+    val snapshotEveryNEvents: Int? = null,
+    val timerResolutionMs: Long? = null,
+    val conditionCheckIntervalMs: Long? = null,
+    val completedGoalRetentionDays: Int? = null,
+    val maxWorkspaceBytes: Long? = null,
 )
 
 private data class AgentRuntimeYamlRuntime(
@@ -173,8 +283,6 @@ private data class AgentRuntimeYamlRuntime(
     val maxPendingActions: Int? = null,
     val maxPendingInputs: Int? = null,
     val searchResultCount: Int? = null,
-    val mcpCallTimeoutMs: Long? = null,
-    val fetchMaxChars: Int? = null,
 )
 
 object AgentRuntimeSettingsLoader {
@@ -190,24 +298,33 @@ object AgentRuntimeSettingsLoader {
         defaultPath: Path = Paths.get("agent-runtime.yaml"),
     ): AgentRuntimeSettings {
         val defaults = AgentConfig()
-        val yaml = readYaml(resolveConfigPath(env, defaultPath)) ?: AgentRuntimeYamlConfig()
-        val appYaml = yaml.app ?: AgentRuntimeYamlApp()
-        val evalYaml = yaml.eval ?: AgentRuntimeYamlEval()
-        val agentYaml = yaml.agent ?: AgentRuntimeYamlAgent()
-        val plannerYaml = agentYaml.planner ?: AgentRuntimeYamlPlanner()
-        val superegoYaml = agentYaml.superego ?: AgentRuntimeYamlSuperego()
-        val memoryYaml = agentYaml.memory ?: AgentRuntimeYamlMemory()
-        val scratchpadYaml = memoryYaml.scratchpad ?: AgentRuntimeYamlScratchpad()
-        val metaReasonerYaml = agentYaml.metaReasoner ?: AgentRuntimeYamlMetaReasoner()
-        val logbookYaml = agentYaml.logbook ?: AgentRuntimeYamlLogbook()
-        val innerVoiceYaml = agentYaml.innerVoice ?: AgentRuntimeYamlInnerVoice()
-        val runtimeYaml = agentYaml.runtime ?: AgentRuntimeYamlRuntime()
-
-        val mcpCallTimeoutMs = readPositiveLong(
-            env = env["MCP_CALL_TIMEOUT_MS"],
-            yaml = runtimeYaml.mcpCallTimeoutMs,
-            fallback = defaults.mcpCallTimeoutMs
-        )
+        val yaml = YamlConfigSources.loadYamlConfig<AgentRuntimeYamlConfig>(
+            mapper = mapper,
+            env = env,
+            envKey = "NEOPSYKE_AGENT_CONFIG_FILE",
+            defaultPath = defaultPath,
+            bundledResourceName = "agent-runtime.yaml",
+        ) ?: throw IllegalStateException("Missing bundled or external agent-runtime.yaml configuration.")
+        validate(yaml)
+        val appYaml = yaml.app!!
+        val evalYaml = yaml.eval!!
+        val agentYaml = yaml.agent!!
+        val plannerYaml = agentYaml.planner!!
+        val superegoYaml = agentYaml.superego!!
+        val memoryYaml = agentYaml.memory!!
+        val scratchpadYaml = memoryYaml.scratchpad!!
+        val metaReasonerYaml = agentYaml.metaReasoner!!
+        val logbookYaml = agentYaml.logbook!!
+        val actionControlYaml = agentYaml.actionControl!!
+        val connectorsYaml = agentYaml.connectors!!
+        val builtinToolsYaml = agentYaml.builtinTools!!
+        val websiteFetchYaml = builtinToolsYaml.websiteFetch!!
+        val nativeIntegrationsYaml = agentYaml.nativeIntegrations!!
+        val telegramYaml = nativeIntegrationsYaml.telegram!!
+        val googleWorkspaceYaml = nativeIntegrationsYaml.googleWorkspace!!
+        val innerVoiceYaml = agentYaml.innerVoice!!
+        val goalsYaml = agentYaml.goals!!
+        val runtimeYaml = agentYaml.runtime!!
 
         val agentConfig = AgentConfig(
             planner = PlannerConfig(
@@ -275,6 +392,11 @@ object AgentRuntimeSettingsLoader {
                     env["EGO_ACTION_RETRY_COOLDOWN_STEPS"],
                     plannerYaml.actionRetryCooldownSteps,
                     defaults.planner.actionRetryCooldownSteps
+                ),
+                actionVerifierEnabled = readBoolean(
+                    env["EGO_ACTION_VERIFIER_ENABLED"],
+                    plannerYaml.actionVerifierEnabled,
+                    defaults.planner.actionVerifierEnabled
                 ),
             ),
             superego = SuperegoConfig(
@@ -540,7 +662,7 @@ object AgentRuntimeSettingsLoader {
                 mcpMemoryCallTimeoutMs = readPositiveLong(
                     env = env["MCP_MEMORY_CALL_TIMEOUT_MS"],
                     yaml = memoryYaml.mcpMemoryCallTimeoutMs,
-                    fallback = mcpCallTimeoutMs
+                    fallback = defaults.memory.mcpMemoryCallTimeoutMs
                 ),
             ),
             metaReasoner = MetaReasonerConfig(
@@ -647,6 +769,320 @@ object AgentRuntimeSettingsLoader {
                     defaults.logbook.useLlmSummarizer
                 )
             ),
+            actionControl = ActionControlConfig(
+                enabled = readBoolean(
+                    env["NEOPSYKE_ACTION_CONTROL_ENABLED"],
+                    actionControlYaml.enabled,
+                    defaults.actionControl.enabled
+                ),
+                dbPath = readNonBlank(
+                    env["NEOPSYKE_ACTION_CONTROL_DB_PATH"],
+                    actionControlYaml.dbPath,
+                    defaults.actionControl.dbPath
+                ),
+                policyPath = readNonBlank(
+                    env["NEOPSYKE_ACTION_SECURITY_POLICY_FILE"],
+                    actionControlYaml.policyPath,
+                    defaults.actionControl.policyPath
+                ),
+                authorizationTtlMs = readPositiveLong(
+                    env["NEOPSYKE_ACTION_CONTROL_AUTH_TTL_MS"],
+                    actionControlYaml.authorizationTtlMs,
+                    defaults.actionControl.authorizationTtlMs
+                ),
+                maxInspectResults = readPositiveInt(
+                    env["NEOPSYKE_ACTION_CONTROL_MAX_INSPECT_RESULTS"],
+                    actionControlYaml.maxInspectResults,
+                    defaults.actionControl.maxInspectResults
+                ),
+                autonomousWorkerEnabled = readBoolean(
+                    env["NEOPSYKE_ACTION_CONTROL_AUTONOMOUS_WORKER_ENABLED"],
+                    actionControlYaml.autonomousWorkerEnabled,
+                    defaults.actionControl.autonomousWorkerEnabled
+                ),
+                autonomousWorkerPollMs = readPositiveLong(
+                    env["NEOPSYKE_ACTION_CONTROL_AUTONOMOUS_WORKER_POLL_MS"],
+                    actionControlYaml.autonomousWorkerPollMs,
+                    defaults.actionControl.autonomousWorkerPollMs
+                ),
+                autonomousWorkerBatchSize = readPositiveInt(
+                    env["NEOPSYKE_ACTION_CONTROL_AUTONOMOUS_WORKER_BATCH_SIZE"],
+                    actionControlYaml.autonomousWorkerBatchSize,
+                    defaults.actionControl.autonomousWorkerBatchSize
+                ),
+                observePerTypePerRootInput = readPositiveInt(
+                    env["NEOPSYKE_ACTION_CONTROL_OBSERVE_PER_TYPE_PER_ROOT_INPUT"],
+                    actionControlYaml.observePerTypePerRootInput,
+                    defaults.actionControl.observePerTypePerRootInput
+                ),
+                contactUserPerRootInput = readPositiveInt(
+                    env["NEOPSYKE_ACTION_CONTROL_CONTACT_USER_PER_ROOT_INPUT"],
+                    actionControlYaml.contactUserPerRootInput,
+                    defaults.actionControl.contactUserPerRootInput
+                ),
+                reflectionFamilyPerRootInput = readPositiveInt(
+                    env["NEOPSYKE_ACTION_CONTROL_REFLECTION_FAMILY_PER_ROOT_INPUT"],
+                    actionControlYaml.reflectionFamilyPerRootInput,
+                    defaults.actionControl.reflectionFamilyPerRootInput
+                ),
+                reflectEvidencePerRootInput = readPositiveInt(
+                    env["NEOPSYKE_ACTION_CONTROL_REFLECT_EVIDENCE_PER_ROOT_INPUT"],
+                    actionControlYaml.reflectEvidencePerRootInput,
+                    defaults.actionControl.reflectEvidencePerRootInput
+                ),
+                goalOperationPerRootInput = readPositiveInt(
+                    env["NEOPSYKE_ACTION_CONTROL_GOAL_OPERATION_PER_ROOT_INPUT"],
+                    actionControlYaml.goalOperationPerRootInput,
+                    defaults.actionControl.goalOperationPerRootInput
+                ),
+                commitPrivatePerTypePerRootInput = readPositiveInt(
+                    env["NEOPSYKE_ACTION_CONTROL_COMMIT_PRIVATE_PER_TYPE_PER_ROOT_INPUT"],
+                    actionControlYaml.commitPrivatePerTypePerRootInput,
+                    defaults.actionControl.commitPrivatePerTypePerRootInput
+                ),
+                commitStatefulPerTypePerRootInput = readPositiveInt(
+                    env["NEOPSYKE_ACTION_CONTROL_COMMIT_STATEFUL_PER_TYPE_PER_ROOT_INPUT"],
+                    actionControlYaml.commitStatefulPerTypePerRootInput,
+                    defaults.actionControl.commitStatefulPerTypePerRootInput
+                ),
+                commitPublicPerTypePerRootInput = readPositiveInt(
+                    env["NEOPSYKE_ACTION_CONTROL_COMMIT_PUBLIC_PER_TYPE_PER_ROOT_INPUT"],
+                    actionControlYaml.commitPublicPerTypePerRootInput,
+                    defaults.actionControl.commitPublicPerTypePerRootInput
+                ),
+                controlPlanePerTypePerRootInput = readPositiveInt(
+                    env["NEOPSYKE_ACTION_CONTROL_CONTROL_PLANE_PER_TYPE_PER_ROOT_INPUT"],
+                    actionControlYaml.controlPlanePerTypePerRootInput,
+                    defaults.actionControl.controlPlanePerTypePerRootInput
+                ),
+            ),
+            connectors = ConnectorRuntimeConfig(
+                enabled = readBoolean(
+                    env["NEOPSYKE_CONNECTORS_ENABLED"],
+                    connectorsYaml.enabled,
+                    defaults.connectors.enabled
+                ),
+                curatedCatalogPath = readNonBlank(
+                    env["NEOPSYKE_CONNECTORS_CATALOG_PATH"],
+                    connectorsYaml.curatedCatalogPath,
+                    defaults.connectors.curatedCatalogPath
+                ),
+                installStateDir = readNonBlank(
+                    env["NEOPSYKE_CONNECTORS_STATE_DIR"],
+                    connectorsYaml.installStateDir,
+                    defaults.connectors.installStateDir
+                ),
+                failClosed = readBoolean(
+                    env["NEOPSYKE_CONNECTORS_FAIL_CLOSED"],
+                    connectorsYaml.failClosed,
+                    defaults.connectors.failClosed
+                ),
+                pinningEnabled = readBoolean(
+                    env["NEOPSYKE_CONNECTORS_PINNING_ENABLED"],
+                    connectorsYaml.pinningEnabled,
+                    defaults.connectors.pinningEnabled
+                ),
+                startupTimeoutMs = readPositiveLong(
+                    env["NEOPSYKE_CONNECTORS_STARTUP_TIMEOUT_MS"],
+                    connectorsYaml.startupTimeoutMs,
+                    defaults.connectors.startupTimeoutMs
+                ),
+                healthTimeoutMs = readPositiveLong(
+                    env["NEOPSYKE_CONNECTORS_HEALTH_TIMEOUT_MS"],
+                    connectorsYaml.healthTimeoutMs,
+                    defaults.connectors.healthTimeoutMs
+                ),
+                callTimeoutMs = readPositiveLong(
+                    env["NEOPSYKE_CONNECTORS_CALL_TIMEOUT_MS"],
+                    connectorsYaml.callTimeoutMs,
+                    defaults.connectors.callTimeoutMs
+                ),
+                allowedConnectorIds = readStringSet(
+                    env["NEOPSYKE_CONNECTORS_ALLOWED_IDS"],
+                    connectorsYaml.allowedConnectorIds,
+                    defaults.connectors.allowedConnectorIds
+                ),
+                enabledBundleIds = readStringSet(
+                    env["NEOPSYKE_CONNECTORS_ENABLED_BUNDLES"],
+                    connectorsYaml.enabledBundleIds,
+                    defaults.connectors.enabledBundleIds
+                ),
+                allowThirdPartyConnectors = readBoolean(
+                    env["NEOPSYKE_CONNECTORS_ALLOW_THIRD_PARTY"],
+                    connectorsYaml.allowThirdPartyConnectors,
+                    defaults.connectors.allowThirdPartyConnectors
+                ),
+            ),
+            builtinTools = BuiltinToolsConfig(
+                websiteFetch = WebsiteFetchConfig(
+                    enabled = readBoolean(
+                        env["WEBSITE_FETCH_ENABLED"],
+                        websiteFetchYaml.enabled,
+                        defaults.builtinTools.websiteFetch.enabled
+                    ),
+                    callTimeoutMs = readPositiveLong(
+                        env["WEBSITE_FETCH_CALL_TIMEOUT_MS"],
+                        websiteFetchYaml.callTimeoutMs,
+                        defaults.builtinTools.websiteFetch.callTimeoutMs
+                    ),
+                    maxChars = readPositiveInt(
+                        env["WEBSITE_FETCH_MAX_CHARS"],
+                        websiteFetchYaml.maxChars,
+                        defaults.builtinTools.websiteFetch.maxChars
+                    ),
+                )
+            ),
+            nativeIntegrations = NativeIntegrationsConfig(
+                telegram = TelegramChannelConfig(
+                    enabled = readBoolean(
+                        env["NEOPSYKE_TELEGRAM_ENABLED"],
+                        telegramYaml.enabled,
+                        defaults.nativeIntegrations.telegram.enabled
+                    ),
+                    mode = readTelegramIngressMode(
+                        env["NEOPSYKE_TELEGRAM_MODE"],
+                        telegramYaml.mode,
+                        defaults.nativeIntegrations.telegram.mode
+                    ),
+                    webhookPath = readNonBlank(
+                        env["NEOPSYKE_TELEGRAM_WEBHOOK_PATH"],
+                        telegramYaml.webhookPath,
+                        defaults.nativeIntegrations.telegram.webhookPath
+                    ),
+                    ownerChatId = readNonBlank(
+                        env["NEOPSYKE_TELEGRAM_OWNER_CHAT_ID"],
+                        telegramYaml.ownerChatId,
+                        defaults.nativeIntegrations.telegram.ownerChatId
+                    ),
+                    ownerUserId = readNonBlank(
+                        env["NEOPSYKE_TELEGRAM_OWNER_USER_ID"],
+                        telegramYaml.ownerUserId,
+                        defaults.nativeIntegrations.telegram.ownerUserId
+                    ),
+                    botTokenHandle = readNonBlank(
+                        env["NEOPSYKE_TELEGRAM_BOT_TOKEN_HANDLE"],
+                        telegramYaml.botTokenHandle,
+                        defaults.nativeIntegrations.telegram.botTokenHandle
+                    ),
+                    webhookSecretHandle = readNonBlank(
+                        env["NEOPSYKE_TELEGRAM_WEBHOOK_SECRET_HANDLE"],
+                        telegramYaml.webhookSecretHandle,
+                        defaults.nativeIntegrations.telegram.webhookSecretHandle
+                    ),
+                    policyScopeId = readNonBlank(
+                        env["NEOPSYKE_TELEGRAM_POLICY_SCOPE_ID"],
+                        telegramYaml.policyScopeId,
+                        defaults.nativeIntegrations.telegram.policyScopeId
+                    ),
+                    sessionIdPrefix = readNonBlank(
+                        env["NEOPSYKE_TELEGRAM_SESSION_ID_PREFIX"],
+                        telegramYaml.sessionIdPrefix,
+                        defaults.nativeIntegrations.telegram.sessionIdPrefix
+                    ),
+                    requireDirectChat = readBoolean(
+                        env["NEOPSYKE_TELEGRAM_REQUIRE_DIRECT_CHAT"],
+                        telegramYaml.requireDirectChat,
+                        defaults.nativeIntegrations.telegram.requireDirectChat
+                    ),
+                    dropUnauthorizedMessages = readBoolean(
+                        env["NEOPSYKE_TELEGRAM_DROP_UNAUTHORIZED_MESSAGES"],
+                        telegramYaml.dropUnauthorizedMessages,
+                        defaults.nativeIntegrations.telegram.dropUnauthorizedMessages
+                    ),
+                    pollTimeoutSeconds = readPositiveInt(
+                        env["NEOPSYKE_TELEGRAM_POLL_TIMEOUT_SECONDS"],
+                        telegramYaml.pollTimeoutSeconds,
+                        defaults.nativeIntegrations.telegram.pollTimeoutSeconds
+                    ),
+                    pollRetryDelayMs = readPositiveLong(
+                        env["NEOPSYKE_TELEGRAM_POLL_RETRY_DELAY_MS"],
+                        telegramYaml.pollRetryDelayMs,
+                        defaults.nativeIntegrations.telegram.pollRetryDelayMs
+                    ),
+                ),
+                googleWorkspace = GoogleWorkspaceConfig(
+                    enabled = readBoolean(
+                        env["NEOPSYKE_GOOGLE_WORKSPACE_ENABLED"],
+                        googleWorkspaceYaml.enabled,
+                        defaults.nativeIntegrations.googleWorkspace.enabled
+                    ),
+                    tokenStoreDir = readNonBlank(
+                        env["NEOPSYKE_GOOGLE_TOKEN_STORE_DIR"],
+                        googleWorkspaceYaml.tokenStoreDir,
+                        defaults.nativeIntegrations.googleWorkspace.tokenStoreDir
+                    ),
+                    allowedOwnerEmail = readNonBlank(
+                        env["NEOPSYKE_GOOGLE_ALLOWED_OWNER_EMAIL"],
+                        googleWorkspaceYaml.allowedOwnerEmail,
+                        defaults.nativeIntegrations.googleWorkspace.allowedOwnerEmail
+                    ),
+                    publicBaseUrl = readNonBlank(
+                        env["NEOPSYKE_GOOGLE_PUBLIC_BASE_URL"],
+                        googleWorkspaceYaml.publicBaseUrl,
+                        defaults.nativeIntegrations.googleWorkspace.publicBaseUrl
+                    ),
+                    oauthStartPath = readNonBlank(
+                        env["NEOPSYKE_GOOGLE_OAUTH_START_PATH"],
+                        googleWorkspaceYaml.oauthStartPath,
+                        defaults.nativeIntegrations.googleWorkspace.oauthStartPath
+                    ),
+                    oauthClientIdHandle = readNonBlank(
+                        env["NEOPSYKE_GOOGLE_OAUTH_CLIENT_ID_HANDLE"],
+                        googleWorkspaceYaml.oauthClientIdHandle,
+                        defaults.nativeIntegrations.googleWorkspace.oauthClientIdHandle
+                    ),
+                    oauthClientSecretHandle = readNonBlank(
+                        env["NEOPSYKE_GOOGLE_OAUTH_CLIENT_SECRET_HANDLE"],
+                        googleWorkspaceYaml.oauthClientSecretHandle,
+                        defaults.nativeIntegrations.googleWorkspace.oauthClientSecretHandle
+                    ),
+                    oauthStateSigningSecretHandle = readNonBlank(
+                        env["NEOPSYKE_GOOGLE_OAUTH_STATE_SIGNING_SECRET_HANDLE"],
+                        googleWorkspaceYaml.oauthStateSigningSecretHandle,
+                        defaults.nativeIntegrations.googleWorkspace.oauthStateSigningSecretHandle
+                    ),
+                    oauthTokenEncryptionSecretHandle = readNonBlank(
+                        env["NEOPSYKE_GOOGLE_OAUTH_TOKEN_ENCRYPTION_SECRET_HANDLE"],
+                        googleWorkspaceYaml.oauthTokenEncryptionSecretHandle,
+                        defaults.nativeIntegrations.googleWorkspace.oauthTokenEncryptionSecretHandle
+                    ),
+                    callbackPath = readNonBlank(
+                        env["NEOPSYKE_GOOGLE_OAUTH_CALLBACK_PATH"],
+                        googleWorkspaceYaml.callbackPath,
+                        defaults.nativeIntegrations.googleWorkspace.callbackPath
+                    ),
+                    authorizationBaseUrl = readNonBlank(
+                        env["NEOPSYKE_GOOGLE_OAUTH_AUTH_BASE_URL"],
+                        googleWorkspaceYaml.authorizationBaseUrl,
+                        defaults.nativeIntegrations.googleWorkspace.authorizationBaseUrl
+                    ),
+                    tokenBaseUrl = readNonBlank(
+                        env["NEOPSYKE_GOOGLE_OAUTH_TOKEN_BASE_URL"],
+                        googleWorkspaceYaml.tokenBaseUrl,
+                        defaults.nativeIntegrations.googleWorkspace.tokenBaseUrl
+                    ),
+                    requirePkce = readBoolean(
+                        env["NEOPSYKE_GOOGLE_OAUTH_REQUIRE_PKCE"],
+                        googleWorkspaceYaml.requirePkce,
+                        defaults.nativeIntegrations.googleWorkspace.requirePkce
+                    ),
+                    requireRefreshToken = readBoolean(
+                        env["NEOPSYKE_GOOGLE_OAUTH_REQUIRE_REFRESH_TOKEN"],
+                        googleWorkspaceYaml.requireRefreshToken,
+                        defaults.nativeIntegrations.googleWorkspace.requireRefreshToken
+                    ),
+                    oauthStateTtlSeconds = readPositiveLong(
+                        env["NEOPSYKE_GOOGLE_OAUTH_STATE_TTL_SECONDS"],
+                        googleWorkspaceYaml.oauthStateTtlSeconds,
+                        defaults.nativeIntegrations.googleWorkspace.oauthStateTtlSeconds
+                    ),
+                    scopes = readStringSet(
+                        env["NEOPSYKE_GOOGLE_SCOPES"],
+                        googleWorkspaceYaml.scopes,
+                        defaults.nativeIntegrations.googleWorkspace.scopes
+                    ),
+                ),
+            ),
             innerVoice = InnerVoiceConfig(
                 enabled = readBoolean(
                     env["NEOPSYKE_INNER_VOICE_ENABLED"],
@@ -667,8 +1103,53 @@ object AgentRuntimeSettingsLoader {
             goals = GoalConfig(
                 enabled = readBoolean(
                     env["NEOPSYKE_GOALS_ENABLED"],
-                    yaml = null,
+                    yaml = goalsYaml.enabled,
                     fallback = defaults.goals.enabled
+                ),
+                workspaceRoot = readPath(
+                    env["NEOPSYKE_GOALS_WORKSPACE_ROOT"],
+                    yaml = goalsYaml.workspaceRoot,
+                    fallback = defaults.goals.workspaceRoot
+                ),
+                maxActiveGoals = readPositiveInt(
+                    env["NEOPSYKE_GOALS_MAX_ACTIVE_GOALS"],
+                    yaml = goalsYaml.maxActiveGoals,
+                    fallback = defaults.goals.maxActiveGoals
+                ),
+                maxStepsPerPlan = readPositiveInt(
+                    env["NEOPSYKE_GOALS_MAX_STEPS_PER_PLAN"],
+                    yaml = goalsYaml.maxStepsPerPlan,
+                    fallback = defaults.goals.maxStepsPerPlan
+                ),
+                actionsPerCycle = readPositiveInt(
+                    env["NEOPSYKE_GOALS_ACTIONS_PER_CYCLE"],
+                    yaml = goalsYaml.actionsPerCycle,
+                    fallback = defaults.goals.actionsPerCycle
+                ),
+                snapshotEveryNEvents = readPositiveInt(
+                    env["NEOPSYKE_GOALS_SNAPSHOT_EVERY_N_EVENTS"],
+                    yaml = goalsYaml.snapshotEveryNEvents,
+                    fallback = defaults.goals.snapshotEveryNEvents
+                ),
+                timerResolutionMs = readPositiveLong(
+                    env["NEOPSYKE_GOALS_TIMER_RESOLUTION_MS"],
+                    yaml = goalsYaml.timerResolutionMs,
+                    fallback = defaults.goals.timerResolutionMs
+                ),
+                conditionCheckIntervalMs = readPositiveLong(
+                    env["NEOPSYKE_GOALS_CONDITION_CHECK_INTERVAL_MS"],
+                    yaml = goalsYaml.conditionCheckIntervalMs,
+                    fallback = defaults.goals.conditionCheckIntervalMs
+                ),
+                completedGoalRetentionDays = readPositiveInt(
+                    env["NEOPSYKE_GOALS_COMPLETED_RETENTION_DAYS"],
+                    yaml = goalsYaml.completedGoalRetentionDays,
+                    fallback = defaults.goals.completedGoalRetentionDays
+                ),
+                maxWorkspaceBytes = readPositiveLong(
+                    env["NEOPSYKE_GOALS_MAX_WORKSPACE_BYTES"],
+                    yaml = goalsYaml.maxWorkspaceBytes,
+                    fallback = defaults.goals.maxWorkspaceBytes
                 ),
             ),
             loopDelayMs = readNonNegativeInt(
@@ -695,12 +1176,6 @@ object AgentRuntimeSettingsLoader {
                 env["EGO_SEARCH_RESULT_COUNT"],
                 runtimeYaml.searchResultCount,
                 defaults.searchResultCount
-            ),
-            mcpCallTimeoutMs = mcpCallTimeoutMs,
-            fetchMaxChars = readPositiveInt(
-                env["WEBSITE_FETCH_MAX_CHARS"],
-                runtimeYaml.fetchMaxChars,
-                defaults.fetchMaxChars
             ),
             maxActionPayloadChars = readPositiveInt(
                 env["EGO_MAX_ACTION_PAYLOAD_CHARS"],
@@ -745,20 +1220,33 @@ object AgentRuntimeSettingsLoader {
         )
     }
 
-    private fun resolveConfigPath(env: Map<String, String>, defaultPath: Path): Path {
-        val configured = env["NEOPSYKE_AGENT_CONFIG_FILE"]?.trim().orEmpty()
-        if (configured.isBlank()) {
-            return defaultPath
-        }
-        return Paths.get(configured)
+    private fun validate(yaml: AgentRuntimeYamlConfig) {
+        requireSection(yaml.app, "app")
+        requireSection(yaml.eval, "eval")
+        val agent = yaml.agent ?: throw IllegalStateException("agent-runtime.yaml is missing required section: agent")
+        requireSection(agent.planner, "agent.planner")
+        requireSection(agent.superego, "agent.superego")
+        val memory = agent.memory ?: throw IllegalStateException("agent-runtime.yaml is missing required section: agent.memory")
+        requireSection(memory.scratchpad, "agent.memory.scratchpad")
+        requireSection(agent.metaReasoner, "agent.meta_reasoner")
+        requireSection(agent.logbook, "agent.logbook")
+        requireSection(agent.actionControl, "agent.action_control")
+        requireSection(agent.connectors, "agent.connectors")
+        val builtinTools = agent.builtinTools
+            ?: throw IllegalStateException("agent-runtime.yaml is missing required section: agent.builtin_tools")
+        requireSection(builtinTools.websiteFetch, "agent.builtin_tools.website_fetch")
+        val nativeIntegrations = agent.nativeIntegrations
+            ?: throw IllegalStateException("agent-runtime.yaml is missing required section: agent.native_integrations")
+        requireSection(nativeIntegrations.telegram, "agent.native_integrations.telegram")
+        requireSection(nativeIntegrations.googleWorkspace, "agent.native_integrations.google_workspace")
+        requireSection(agent.innerVoice, "agent.inner_voice")
+        requireSection(agent.goals, "agent.goals")
+        requireSection(agent.runtime, "agent.runtime")
     }
 
-    private fun readYaml(path: Path): AgentRuntimeYamlConfig? {
-        if (!Files.exists(path)) {
-            return null
-        }
-        Files.newBufferedReader(path).use { reader ->
-            return mapper.readValue<AgentRuntimeYamlConfig>(reader)
+    private fun requireSection(value: Any?, path: String) {
+        if (value == null) {
+            throw IllegalStateException("agent-runtime.yaml is missing required section: $path")
         }
     }
 
@@ -777,8 +1265,31 @@ object AgentRuntimeSettingsLoader {
     private fun readBoolean(env: String?, yaml: Boolean?, fallback: Boolean): Boolean =
         parseBoolean(env) ?: yaml ?: fallback
 
+    private fun readPath(env: String?, yaml: String?, fallback: Path): Path {
+        val configured = firstNonBlank(env, yaml) ?: return fallback
+        return try {
+            Paths.get(configured)
+        } catch (_: Exception) {
+            fallback
+        }
+    }
+
     private fun readNonBlank(env: String?, yaml: String?, fallback: String): String =
         firstNonBlank(env, yaml) ?: fallback
+
+    private fun readStringSet(env: String?, yaml: List<String>?, fallback: Set<String>): Set<String> {
+        val envValues = env
+            ?.split(',')
+            ?.mapNotNull { value -> value.trim().takeIf { it.isNotEmpty() } }
+            ?.toSet()
+        if (!envValues.isNullOrEmpty()) {
+            return envValues
+        }
+        val yamlValues = yaml
+            ?.mapNotNull { value -> value.trim().takeIf { it.isNotEmpty() } }
+            ?.toSet()
+        return if (!yamlValues.isNullOrEmpty()) yamlValues else fallback
+    }
 
     private fun parseBoolean(raw: String?): Boolean? =
         when (raw?.trim()?.lowercase()) {
@@ -786,6 +1297,19 @@ object AgentRuntimeSettingsLoader {
             "0", "false", "no" -> false
             else -> null
         }
+
+    private fun readTelegramIngressMode(
+        env: String?,
+        yaml: String?,
+        fallback: TelegramIngressMode,
+    ): TelegramIngressMode {
+        val raw = firstNonBlank(env, yaml) ?: return fallback
+        return when (raw.trim().lowercase()) {
+            "webhook" -> TelegramIngressMode.WEBHOOK
+            "polling" -> TelegramIngressMode.POLLING
+            else -> fallback
+        }
+    }
 
     private fun firstNonBlank(vararg values: String?): String? =
         values.firstOrNull { !it.isNullOrBlank() }?.trim()

@@ -15,17 +15,25 @@ import ai.neopsyke.agent.memory.longterm.LongTermMemoryAdvisor
 import ai.neopsyke.agent.memory.longterm.LongTermMemoryAssessmentContext
 import ai.neopsyke.agent.memory.longterm.LongTermMemoryAssessmentDecision
 import ai.neopsyke.agent.memory.longterm.MemoryCapability
+import ai.neopsyke.agent.memory.longterm.MemoryItem
+import ai.neopsyke.agent.memory.longterm.MemoryKind
 import ai.neopsyke.agent.memory.longterm.MemoryImprint
 import ai.neopsyke.agent.memory.longterm.MemoryRecall
 import ai.neopsyke.agent.memory.longterm.MemoryRecallQuery
+import ai.neopsyke.agent.memory.longterm.RecallResult
 import ai.neopsyke.agent.model.ActionType
+import ai.neopsyke.agent.model.ContentKind
 import ai.neopsyke.agent.model.Interlocutor
 import ai.neopsyke.agent.model.DeliberationState
 import ai.neopsyke.agent.model.DialogueRole
 import ai.neopsyke.agent.model.DialogueTurn
 import ai.neopsyke.agent.model.OriginSource
 import ai.neopsyke.agent.model.PendingAction
+import ai.neopsyke.agent.model.PendingThought
+import ai.neopsyke.agent.model.Provenances
 import ai.neopsyke.agent.model.Urgency
+import ai.neopsyke.agent.model.ExternalContentArtifact
+import ai.neopsyke.agent.model.EgoTrigger
 import ai.neopsyke.instrumentation.NoopAgentInstrumentation
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -117,11 +125,11 @@ class MemorySystemLogbookNarrativeTest {
         )
         coordinator.setActiveSession("session-42", Interlocutor.named("Victor"))
 
-        val saved = coordinator.recordReflection(
+        val saved = coordinator.recordInternalReflection(
             action = PendingAction(
                 id = 7,
                 urgency = Urgency.MEDIUM,
-                type = ActionType.REFLECT,
+                type = ActionType.REFLECT_INTERNAL,
                 payload = """{"summary":"The agent learned about Kotlin"}""",
                 summary = "reflect",
                 rootInputId = "root-input-9",
@@ -139,7 +147,7 @@ class MemorySystemLogbookNarrativeTest {
         val entry = logbook.entries.single()
         assertEquals(EpisodicEventType.SELF_INITIATED, entry.eventType)
         assertEquals("I learned: The agent learned about Kotlin", entry.summary)
-        assertEquals("reflect", entry.actionType)
+        assertEquals("reflect_internal", entry.actionType)
         assertEquals("run-123", entry.runId)
         assertEquals("session-42", entry.sessionId)
         assertEquals("Victor", entry.interlocutorId)
@@ -174,11 +182,11 @@ class MemorySystemLogbookNarrativeTest {
             logbook = logbook,
         )
 
-        val saved = coordinator.recordReflection(
+        val saved = coordinator.recordInternalReflection(
             action = PendingAction(
                 id = 8,
                 urgency = Urgency.MEDIUM,
-                type = ActionType.REFLECT,
+                type = ActionType.REFLECT_INTERNAL,
                 payload = """{"summary":"Failed save"}""",
                 summary = "reflect",
             ),
@@ -188,6 +196,105 @@ class MemorySystemLogbookNarrativeTest {
 
         assertFalse(saved)
         assertEquals(1, logbook.entries.size, "Reflection should still be journaled for diagnostics")
+    }
+
+    @Test
+    fun `recordEvidenceReflection stores quarantined evidence memory with explicit tags`() {
+        val hippocampus = RecordingHippocampus()
+        val coordinator = MemorySystem(
+            hippocampus = hippocampus,
+            longTermMemoryAdvisor = object : LongTermMemoryAdvisor {
+                override fun assess(context: LongTermMemoryAssessmentContext): LongTermMemoryAssessmentDecision =
+                    LongTermMemoryAssessmentDecision(false, "", 0.0, "unused")
+            },
+            config = AgentConfig(),
+            instrumentation = NoopAgentInstrumentation,
+            logbook = RecordingLogbook(),
+        )
+
+        val saved = coordinator.recordEvidenceReflection(
+            action = PendingAction(
+                id = 19,
+                urgency = Urgency.MEDIUM,
+                type = ActionType.REFLECT_EVIDENCE,
+                payload = """{"artifact_ids":["artifact-1"],"summary_hint":"Kotlin coroutines are useful","keywords":["kotlin","coroutines"]}""",
+                summary = "reflect evidence",
+            ),
+            summaryHint = "Kotlin coroutines are useful",
+            keywords = listOf("kotlin", "coroutines"),
+            artifacts = listOf(
+                ExternalContentArtifact(
+                    id = "artifact-1",
+                    content = "Kotlin coroutines simplify async flows.",
+                    provenance = Provenances.sanitizedExternal(
+                        provider = "web",
+                        contentKind = ContentKind.DOCUMENT,
+                        objectType = "website",
+                        sourceRef = "https://kotlinlang.org",
+                    ),
+                )
+            ),
+        )
+
+        assertTrue(saved)
+        val imprint = hippocampus.imprints.single()
+        assertEquals("evidence_backed_reflection", imprint.source)
+        assertTrue(imprint.tags.contains("memory_visibility:quarantined"))
+        assertTrue(imprint.tags.contains("memory_lane:evidence_quarantine"))
+        assertTrue(imprint.tags.contains("artifact_source:web:website"))
+        assertTrue(imprint.summary.contains("quarantined external evidence"))
+    }
+
+    @Test
+    fun `evidence recall returns quarantined memories and filters trusted lane`() {
+        val recallResult = RecallResult(
+            provider = "recording",
+            items = listOf(
+                MemoryItem(
+                    id = "trusted-1",
+                    kind = MemoryKind.NARRATIVE,
+                    summary = "Trusted preference memory",
+                    content = "Trusted preference memory",
+                    tags = listOf("memory_visibility:normal"),
+                ),
+                MemoryItem(
+                    id = "evidence-1",
+                    kind = MemoryKind.NARRATIVE,
+                    summary = "External evidence memory",
+                    content = "External evidence memory",
+                    tags = listOf("memory_visibility:quarantined", "memory_lane:evidence_quarantine"),
+                ),
+            ),
+            renderedText = "Trusted preference memory\nExternal evidence memory",
+            hitCount = 2,
+            truncated = false,
+        )
+        val coordinator = MemorySystem(
+            hippocampus = RecordingHippocampus(recallResult = recallResult),
+            longTermMemoryAdvisor = object : LongTermMemoryAdvisor {
+                override fun assess(context: LongTermMemoryAssessmentContext): LongTermMemoryAssessmentDecision =
+                    LongTermMemoryAssessmentDecision(false, "", 0.0, "unused")
+            },
+            config = AgentConfig(),
+            instrumentation = NoopAgentInstrumentation,
+            logbook = RecordingLogbook(),
+        )
+
+        val recalled = coordinator.recall(
+            trigger = EgoTrigger.PendingThoughtInput(
+                PendingThought(
+                    id = 91,
+                    urgency = Urgency.MEDIUM,
+                    content = "review evidence",
+                    longTermMemoryRecallQuery = "evidence: gmail cleanup"
+                )
+            ),
+            shortTermSummary = "",
+            recentDialogue = emptyList(),
+        )
+
+        assertTrue(recalled.contains("External evidence memory"))
+        assertFalse(recalled.contains("Trusted preference memory"))
     }
 
     @Test
@@ -248,11 +355,11 @@ class MemorySystemLogbookNarrativeTest {
             needId = "learn-something",
             rootImpulseId = "impulse-learn",
         )
-        coordinator.recordReflection(
+        coordinator.recordInternalReflection(
             action = PendingAction(
                 id = 1,
                 urgency = Urgency.MEDIUM,
-                type = ActionType.REFLECT,
+                type = ActionType.REFLECT_INTERNAL,
                 payload = """{"summary":"I learned about Kotlin coroutines"}""",
                 summary = "reflect",
                 origin = learningOrigin,
@@ -260,11 +367,11 @@ class MemorySystemLogbookNarrativeTest {
             summary = "I learned about Kotlin coroutines",
             keywords = listOf("kotlin", "coroutines"),
         )
-        coordinator.recordReflection(
+        coordinator.recordInternalReflection(
             action = PendingAction(
                 id = 2,
                 urgency = Urgency.MEDIUM,
-                type = ActionType.REFLECT,
+                type = ActionType.REFLECT_INTERNAL,
                 payload = """{"summary":"I learned about Kotlin coroutines again"}""",
                 summary = "reflect",
                 origin = learningOrigin,
@@ -272,11 +379,11 @@ class MemorySystemLogbookNarrativeTest {
             summary = "I learned about Kotlin coroutines again",
             keywords = listOf("coroutines", "kotlin"),
         )
-        coordinator.recordReflection(
+        coordinator.recordInternalReflection(
             action = PendingAction(
                 id = 3,
                 urgency = Urgency.MEDIUM,
-                type = ActionType.REFLECT,
+                type = ActionType.REFLECT_INTERNAL,
                 payload = """{"summary":"I dug into coroutine cancellation"}""",
                 summary = "reflect",
                 origin = learningOrigin,
@@ -355,6 +462,7 @@ class MemorySystemLogbookNarrativeTest {
 
     private class RecordingHippocampus(
         private val imprintResult: Boolean = true,
+        private val recallResult: RecallResult = RecallResult(provider = "recording", text = ""),
     ) : Hippocampus {
         override val providerName: String = "recording"
         override val capabilities: Set<MemoryCapability> = setOf(
@@ -365,7 +473,13 @@ class MemorySystemLogbookNarrativeTest {
         val imprints = mutableListOf<MemoryImprint>()
 
         override fun recall(request: MemoryRecallQuery): MemoryRecall =
-            MemoryRecall(provider = providerName, text = "")
+            MemoryRecall(
+                provider = recallResult.provider,
+                items = recallResult.items,
+                renderedText = recallResult.renderedText,
+                hitCount = recallResult.hitCount,
+                truncated = recallResult.truncated,
+            )
 
         override fun imprint(request: ImprintRequest): ImprintResult {
             val narrative = request as? MemoryImprint

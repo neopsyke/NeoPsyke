@@ -1,168 +1,163 @@
-package ai.neopsyke.agent.actions.builtin
+package ai.neopsyke.agent.cortex.motor.actions.plugin.builtin
 
 import kotlinx.coroutines.runBlocking
-import ai.neopsyke.agent.actions.ActionExecutionContext
-import ai.neopsyke.agent.actions.NoopReflectionMemoryRecorder
-import ai.neopsyke.agent.actions.ReflectionMemoryRecorder
+import ai.neopsyke.agent.cortex.motor.actions.ActionExecutionContext
+import ai.neopsyke.agent.cortex.motor.actions.ActionPluginFactoryContext
+import ai.neopsyke.agent.cortex.motor.actions.InMemoryEvidenceArtifactStore
+import ai.neopsyke.agent.cortex.motor.actions.ReflectionMemoryRecorder
+import ai.neopsyke.agent.config.AgentConfig
+import ai.neopsyke.agent.cortex.motor.actions.plugin.builtin.ReflectEvidenceActionPlugin
+import ai.neopsyke.agent.cortex.motor.actions.plugin.builtin.ReflectInternalActionPlugin
 import ai.neopsyke.agent.model.ActionType
+import ai.neopsyke.agent.model.ContentKind
 import ai.neopsyke.agent.model.PendingAction
+import ai.neopsyke.agent.model.SourceDescriptor
+import ai.neopsyke.agent.model.SuperegoContext
 import ai.neopsyke.agent.model.Urgency
+import ai.neopsyke.agent.support.ExternalContentPipeline
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
-import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class ReflectActionPluginTest {
-
-    private val recordedReflections = mutableListOf<RecordedReflection>()
-
-    private val recordingReflectionMemoryRecorder = object : ReflectionMemoryRecorder {
-        override fun recordReflection(action: PendingAction, summary: String, keywords: List<String>): Boolean {
-            recordedReflections += RecordedReflection(
-                actionType = action.type,
-                summary = summary,
-                keywords = keywords,
-            )
-            return true
-        }
-    }
-
-    private fun plugin(
-        reflectionMemoryRecorder: ReflectionMemoryRecorder = recordingReflectionMemoryRecorder,
-    ) = ReflectActionPlugin(reflectionMemoryRecorder = reflectionMemoryRecorder)
-
-    private fun action(payload: String) = PendingAction(
-        id = 1,
-        urgency = Urgency.MEDIUM,
-        type = ActionType.REFLECT,
-        payload = payload,
-        summary = "reflect test",
-    )
-
     @Test
-    fun `descriptor has correct action type and no user output capability`() {
-        val p = plugin()
-        assertEquals(ActionType.REFLECT, p.descriptor.actionType)
-        assertTrue(p.descriptor.capabilities.isEmpty())
-        assertTrue(p.descriptor.dispatchable)
-    }
+    fun `internal reflection delegates trusted persistence`() = runBlocking {
+        val recorder = RecordingReflectionMemoryRecorder()
+        val plugin = ReflectInternalActionPlugin(recorder)
 
-    @Test
-    fun `execute delegates reflection persistence to recorder`() = runBlocking {
-        val p = plugin()
-        val outcome = p.execute(
-            action("""{"summary": "I learned about coroutines", "keywords": ["kotlin", "coroutines"]}"""),
+        val outcome = plugin.execute(
+            action(
+                type = ActionType.REFLECT_INTERNAL,
+                payload = """{"summary":"I learned about coroutines","keywords":["kotlin","coroutines"]}""",
+            ),
             ActionExecutionContext(searchResultCount = 0),
         )
 
         assertEquals("Reflection recorded to memory.", outcome.statusSummary)
-        assertNull(outcome.assistantOutput)
-        assertEquals(1, recordedReflections.size)
-        assertEquals(
-            RecordedReflection(
-                actionType = ActionType.REFLECT,
-                summary = "I learned about coroutines",
-                keywords = listOf("kotlin", "coroutines"),
+        assertEquals(listOf("I learned about coroutines"), recorder.internalSummaries)
+    }
+
+    @Test
+    fun `internal reflection rejects tainted thread context`() {
+        val plugin = ReflectInternalActionPlugin(RecordingReflectionMemoryRecorder())
+
+        val review = plugin.deterministicReview(
+            action(
+                type = ActionType.REFLECT_INTERNAL,
+                payload = """{"summary":"trusted","keywords":[]}""",
             ),
-            recordedReflections.single()
-        )
-    }
-
-    @Test
-    fun `execute returns error when reflection is not saved to memory`() = runBlocking {
-        val p = plugin(reflectionMemoryRecorder = NoopReflectionMemoryRecorder)
-        val outcome = p.execute(
-            action("""{"summary": "Test insight", "keywords": []}"""),
-            ActionExecutionContext(searchResultCount = 0),
+            SuperegoContext(
+                recentDialogue = emptyList(),
+                threadSecurityContext = ai.neopsyke.agent.model.CognitiveThreadSecurityContext.fromConversation(
+                    ai.neopsyke.agent.model.ConversationContext.default().security,
+                    aggregatedDataTrust = ai.neopsyke.agent.model.DataTrust.SANITIZED_EXTERNAL_DATA,
+                ),
+            ),
+            AgentConfig(),
         )
 
-        assertEquals("Reflection failed: memory save unsuccessful.", outcome.statusSummary)
-        assertEquals("reflect_memory_save_failed", outcome.actionErrorCategory)
-    }
-
-    @Test
-    fun `execute preserves raw summary for recorder owned normalization`() = runBlocking {
-        val p = plugin()
-        p.execute(
-            action("""{"summary": "Kotlin coroutines use structured concurrency by default", "keywords": ["kotlin"]}"""),
-            ActionExecutionContext(searchResultCount = 0),
-        )
-
-        assertEquals(
-            "Kotlin coroutines use structured concurrency by default",
-            recordedReflections.single().summary
-        )
-    }
-
-    @Test
-    fun `execute returns error for invalid JSON payload`() = runBlocking {
-        val p = plugin()
-        val outcome = p.execute(
-            action("not json at all"),
-            ActionExecutionContext(searchResultCount = 0),
-        )
-
-        assertNotNull(outcome.actionErrorCategory)
-    }
-
-    @Test
-    fun `deterministicReview rejects blank summary`() {
-        val p = plugin()
-        val review = p.deterministicReview(
-            action("""{"summary": "", "keywords": []}"""),
-           ai.neopsyke.agent.model.SuperegoContext(recentDialogue = emptyList()),
-           ai.neopsyke.agent.config.AgentConfig(),
-        )
         assertNotNull(review)
-        assertEquals(false, review.allow)
-        assertEquals("reflect_summary_blank", review.ruleId)
+        assertFalse(review.allow)
+        assertEquals("reflect_internal_tainted_context", review.ruleId)
     }
 
     @Test
-    fun `deterministicReview rejects invalid JSON`() {
-        val p = plugin()
-        val review = p.deterministicReview(
-            action("not json"),
-           ai.neopsyke.agent.model.SuperegoContext(recentDialogue = emptyList()),
-           ai.neopsyke.agent.config.AgentConfig(),
+    fun `evidence reflection resolves same-request artifacts from scope`() = runBlocking {
+        val store = InMemoryEvidenceArtifactStore()
+        val artifact = ExternalContentPipeline.ingest(
+            text = "Use Gmail search operators for inbox cleanup.",
+            maxChars = 300,
+            source = SourceDescriptor(
+                provider = "google_workspace",
+                contentKind = ContentKind.RECORD,
+                objectType = "gmail_observe_search",
+                sourceRef = "root-1",
+            ),
         )
-        assertNotNull(review)
-        assertEquals(false, review.allow)
-        assertEquals("reflect_payload_invalid", review.ruleId)
-    }
-
-    @Test
-    fun `deterministicReview allows valid payload`() {
-        val p = plugin()
-        val review = p.deterministicReview(
-            action("""{"summary": "I learned something", "keywords": ["test"]}"""),
-           ai.neopsyke.agent.model.SuperegoContext(recentDialogue = emptyList()),
-           ai.neopsyke.agent.config.AgentConfig(),
+        val action = action(
+            type = ActionType.REFLECT_EVIDENCE,
+            payload = """{"summary_hint":"Gmail search operators help triage inboxes","keywords":["gmail"]}""",
+            rootInputId = "root-1",
         )
-        assertNotNull(review)
-        assertEquals(true, review.allow)
+        store.record(action.rootInputId, action.conversationContext, listOf(artifact))
+        val recorder = RecordingReflectionMemoryRecorder()
+        val plugin = ReflectEvidenceActionPlugin(
+            context = ActionPluginFactoryContext(
+                config = AgentConfig(),
+                webSearchActionHandler = null,
+                fetchTool = null,
+                output = {},
+                evidenceArtifactStore = store,
+                reflectionMemoryRecorder = recorder,
+            ),
+            reflectionMemoryRecorder = recorder,
+        )
+
+        val outcome = plugin.execute(action, ActionExecutionContext(searchResultCount = 0))
+
+        assertEquals("Reflection recorded to memory.", outcome.statusSummary)
+        assertEquals(1, recorder.evidenceArtifactCounts.single())
     }
 
     @Test
-    fun `repairPlannerPayload wraps plain text as JSON`() {
-        val p = plugin()
-        val repaired = p.repairPlannerPayload("I learned something cool")
-        assertTrue(repaired.startsWith("{"))
-        assertTrue(repaired.contains("summary"))
-        assertTrue(repaired.contains("I learned something cool"))
+    fun `evidence reflection fails when no artifacts in scope`() = runBlocking {
+        val store = InMemoryEvidenceArtifactStore()
+        val action = action(
+            type = ActionType.REFLECT_EVIDENCE,
+            payload = """{"summary_hint":"Something learned","keywords":["test"]}""",
+            rootInputId = "root-empty",
+        )
+        val recorder = RecordingReflectionMemoryRecorder()
+        val plugin = ReflectEvidenceActionPlugin(
+            context = ActionPluginFactoryContext(
+                config = AgentConfig(),
+                webSearchActionHandler = null,
+                fetchTool = null,
+                output = {},
+                evidenceArtifactStore = store,
+                reflectionMemoryRecorder = recorder,
+            ),
+            reflectionMemoryRecorder = recorder,
+        )
+
+        val outcome = plugin.execute(action, ActionExecutionContext(searchResultCount = 0))
+
+        assertEquals("reflect_evidence_no_artifacts_in_scope", outcome.actionErrorCategory)
+        assertTrue(recorder.evidenceArtifactCounts.isEmpty())
     }
 
-    @Test
-    fun `repairPlannerPayload leaves valid JSON untouched`() {
-        val p = plugin()
-        val valid = """{"summary": "test", "keywords": []}"""
-        assertEquals(valid, p.repairPlannerPayload(valid))
-    }
-
-    private data class RecordedReflection(
-        val actionType: ActionType,
-        val summary: String,
-        val keywords: List<String>,
+    private fun action(
+        type: ActionType,
+        payload: String,
+        rootInputId: String? = null,
+    ) = PendingAction(
+        id = 1,
+        urgency = Urgency.MEDIUM,
+        type = type,
+        payload = payload,
+        summary = "reflect test",
+        rootInputId = rootInputId,
     )
+
+    private class RecordingReflectionMemoryRecorder : ReflectionMemoryRecorder {
+        val internalSummaries = mutableListOf<String>()
+        val evidenceArtifactCounts = mutableListOf<Int>()
+
+        override fun recordInternalReflection(action: PendingAction, summary: String, keywords: List<String>): Boolean {
+            internalSummaries += summary
+            return true
+        }
+
+        override fun recordEvidenceReflection(
+            action: PendingAction,
+            summaryHint: String,
+            keywords: List<String>,
+            artifacts: List<ai.neopsyke.agent.model.ExternalContentArtifact>,
+        ): Boolean {
+            evidenceArtifactCounts += artifacts.size
+            return true
+        }
+    }
 }

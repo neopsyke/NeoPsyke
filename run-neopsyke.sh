@@ -10,7 +10,8 @@ EVAL_MODE=0
 FREUD_LIVE_MODE=0
 DISABLE_ID=0
 GOALS_OVERRIDE=""
-LOOP_DELAY_MS="${EGO_LOOP_DELAY_MS:-1000}"
+CLEAR_ACTION_CONTROL=0
+LOOP_DELAY_MS="${EGO_LOOP_DELAY_MS:-0}"
 LOG_DIR="${NEOPSYKE_LOG_DIR:-$ROOT_DIR/.neopsyke/logs}"
 LOG_RETENTION="${NEOPSYKE_LOG_RETENTION:-30}"
 APP_ARGS=()
@@ -111,14 +112,18 @@ while [[ $# -gt 0 ]]; do
       APP_ARGS+=("$1")
       shift
       ;;
+    --clear-action-control)
+      CLEAR_ACTION_CONTROL=1
+      shift
+      ;;
     -h|--help)
       cat <<'EOF'
-Usage: ./run-neopsyke.sh [--log-level LEVEL] [--loop-delay-ms MS|--no-delay] [--no-id] [--goals|--no-goals] [--clear-memory-*] [--] [app-args...]
+Usage: ./run-neopsyke.sh [--log-level LEVEL] [--loop-delay-ms MS|--no-delay] [--no-id] [--goals|--no-goals] [--clear-memory-*] [--clear-action-control] [--] [app-args...]
 
 Options:
   -l, --log-level LEVEL   SLF4J simple logger level (default: warning)
-      --loop-delay-ms MS  Delay between interactive loop cycles (default: 1000)
-      --no-delay          Alias for --loop-delay-ms 0
+      --loop-delay-ms MS  Delay between ego loop cycles in ms (default: 0, no delay)
+      --no-delay          Alias for --loop-delay-ms 0 (already the default)
       --no-id             Disable the Id module (autonomous drives) for this run
       --goals             Enable the goals subsystem for this run
       --no-goals          Disable the goals subsystem for this run
@@ -129,16 +134,16 @@ Memory clearing (applied before agent startup):
       --clear-memory-vector      Clear vector/hippocampus memory before starting
       --clear-memory-episodic    Clear episodic logbook memory before starting
       --clear-memory-lessons     Clear lessons from vector memory before starting
+      --clear-action-control     Delete the active action-control SQLite store before starting
 
 Environment:
-  NEOPSYKE_LLM_CONFIG_FILE   Optional path to LLM runtime YAML (default: ./llm-runtime.yaml)
-  NEOPSYKE_AGENT_CONFIG_FILE Optional path to agent/app/eval runtime YAML (default: ./agent-runtime.yaml)
+  NEOPSYKE_LLM_CONFIG_FILE   Optional path to LLM runtime YAML (otherwise use bundled config/llm-runtime.yaml)
+  NEOPSYKE_AGENT_CONFIG_FILE Optional path to agent/app/eval runtime YAML (otherwise use bundled config/agent-runtime.yaml)
   GROQ_API_KEY            Required when a configured provider uses Groq
   MISTRAL_API_KEY         Required when a configured provider uses Mistral
   GOOGLE_API_KEY          Required when a configured provider uses Google
   OPENAI_API_KEY          Required when a configured provider uses OpenAI
-  NEOPSYKE_MCP_CONFIG_FILE      Optional path to MCP runtime YAML for time/fetch (default: ./mcp-runtime.yaml)
-  NEOPSYKE_MEMORY_CONFIG_FILE   Optional path to memory runtime YAML (default: ./memory-runtime.yaml)
+  NEOPSYKE_MEMORY_CONFIG_FILE   Optional path to memory runtime YAML (otherwise use bundled config/memory-runtime.yaml)
   NEOPSYKE_LOG_LEVEL         Default log level if --log-level is not provided
   NEOPSYKE_LOG_DIR           Directory for run logs (default: .neopsyke/logs)
   NEOPSYKE_LOG_RETENTION     Number of run log files to keep (default: 30)
@@ -154,8 +159,9 @@ Environment:
   MEMORY_DEFAULT_NAMESPACE  Namespace for long-term memory provider reads/writes (launcher default: neopsyke)
   NEOPSYKE_EVENT_LOG_FILE    Optional path override for instrumentation sidecar JSONL
   NEOPSYKE_METRICS_DB        SQLite path for persisted local metrics
-  EGO_LOOP_DELAY_MS       Delay between loop cycles in ms (default via launcher: 1000)
-  NEOPSYKE_ID_CONFIG_FILE       Optional path to Id runtime YAML (default: ./id-runtime.yaml)
+  NEOPSYKE_GOALS_WORKSPACE_ROOT  Optional goal workspace root override
+  EGO_LOOP_DELAY_MS       Delay between loop cycles in ms (default: 0, no delay)
+  NEOPSYKE_ID_CONFIG_FILE       Optional path to Id runtime YAML (otherwise use bundled config/id-runtime.yaml)
   NEOPSYKE_ID_ENABLED            Override Id module enabled state (true/false, overrides YAML)
   NEOPSYKE_GOALS_ENABLED         Override goals subsystem enabled state (true/false, launcher default: true)
   NEOPSYKE_LLM_CACHE_MODE       LLM response cache mode: record, replay, or off (default: off)
@@ -243,6 +249,22 @@ export NEOPSYKE_EVENT_LOG_FILE="$RUN_EVENT_FILE"
 export MEMORY_DEFAULT_NAMESPACE="${MEMORY_DEFAULT_NAMESPACE:-neopsyke}"
 export EGO_SCRATCHPAD_DEBUG_CAPTURE_ENABLED="true"
 
+ACTION_CONTROL_DB_PATH="${NEOPSYKE_ACTION_CONTROL_DB_PATH:-$ROOT_DIR/.neopsyke/action-control.db}"
+if [[ "$EVAL_MODE" -eq 1 ]] && [[ -z "${NEOPSYKE_ACTION_CONTROL_DB_PATH:-}" ]]; then
+  if [[ "$FREUD_LIVE_MODE" -eq 1 ]]; then
+    ACTION_CONTROL_DB_PATH="$ROOT_DIR/.neopsyke/freud-action-control/$RUN_ID.db"
+  else
+    ACTION_CONTROL_DB_PATH="$ROOT_DIR/.neopsyke/eval-action-control/$RUN_ID.db"
+  fi
+  log_info "Eval mode detected; isolating action-control store at $ACTION_CONTROL_DB_PATH"
+fi
+mkdir -p "$(dirname "$ACTION_CONTROL_DB_PATH")"
+if [[ "$CLEAR_ACTION_CONTROL" -eq 1 ]]; then
+  rm -f "$ACTION_CONTROL_DB_PATH"
+  log_info "Cleared action-control store at $ACTION_CONTROL_DB_PATH"
+fi
+export NEOPSYKE_ACTION_CONTROL_DB_PATH="$ACTION_CONTROL_DB_PATH"
+
 if [[ "$DISABLE_ID" -eq 1 ]]; then
   export NEOPSYKE_ID_ENABLED="false"
 fi
@@ -259,6 +281,9 @@ export NEOPSYKE_GOALS_ENABLED="$EFFECTIVE_GOALS_ENABLED"
 effective_goals_enabled_normalized="$(printf '%s' "$EFFECTIVE_GOALS_ENABLED" | tr '[:upper:]' '[:lower:]')"
 if [[ "$effective_goals_enabled_normalized" != "true" ]]; then
   log_info "Warning: goals subsystem is disabled for this run. Use --goals or set NEOPSYKE_GOALS_ENABLED=true to enable persistent goal creation."
+elif [[ "$EVAL_MODE" -eq 1 ]] && [[ -z "${NEOPSYKE_GOALS_WORKSPACE_ROOT:-}" ]]; then
+  export NEOPSYKE_GOALS_WORKSPACE_ROOT="$ROOT_DIR/.neopsyke/eval-goals/$RUN_ID"
+  log_info "Eval mode detected; isolating goals workspace at $NEOPSYKE_GOALS_WORKSPACE_ROOT"
 fi
 
 JAVA_OPTS_APPEND=" -Dorg.slf4j.simpleLogger.defaultLogLevel=${LOG_LEVEL} -Dorg.slf4j.simpleLogger.logFile=${RUN_LOG_FILE} -Dorg.slf4j.simpleLogger.showDateTime=true -Dorg.slf4j.simpleLogger.dateTimeFormat=yyyy-MM-dd_HH:mm:ss.SSSZ"
