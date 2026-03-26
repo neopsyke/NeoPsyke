@@ -62,22 +62,23 @@ Options:
   --cache-replay <file>   JSONL cache file to replay (enables replay mode)
   --session-replay <dir>  Replay a recorded interactive session directory
   --timeout <seconds>     Timeout for the live eval run (default: 120)
-  --preserve-memory       Do not clear Freud-isolated memory before the run
   --goals                 Enable the goals subsystem for this eval
   --no-goals              Disable the goals subsystem for this eval
   -h, --help              Show this help message
 
 Environment:
-  FREUD_LIVE_EVAL_TIMEOUT   Default timeout in seconds (default: 120)
-  FREUD_RUN_ROOT            Run artifact root (default: .neopsyke/runs/freud)
+  FREUD_LIVE_EVAL_TIMEOUT      Default timeout in seconds (default: 120)
+  FREUD_RUN_ROOT               Run artifact root (default: .neopsyke/runs/freud)
+  FREUD_RUN_RETENTION_DAYS     Delete run dirs older than this (default: 3)
 
-Memory isolation:
-  Uses namespace "freud-eval" (pgvector), .neopsyke/freud-logbook.db (episodic),
-  and .neopsyke/freud-metrics.db (usage metrics).
-  By default, all freud memory is cleared before each run (--clear-memory-all).
-  Use --preserve-memory when an eval sequence intentionally depends on prior
-  isolated freud memory within the same namespace/DBs.
-  User memory (namespace "neopsyke", .neopsyke/logbook.db, .neopsyke/metrics.db) is never touched.
+Per-run isolation:
+  Each run gets fully isolated persistent state inside its run directory:
+    $RUN_DIR/state/logbook.db        (episodic memory)
+    $RUN_DIR/state/metrics.db        (usage metrics)
+    $RUN_DIR/state/action-control.db (action staging)
+  pgvector uses a per-run namespace (freud-eval-{run-id}).
+  Parallel runs are safe. User data is never touched.
+  Run directories older than FREUD_RUN_RETENTION_DAYS are auto-deleted.
 
 First run (no --cache-replay): records all LLM responses to a cache file.
 Replay run (with --cache-replay): replays cached responses until divergence,
@@ -297,17 +298,6 @@ if [[ -n "$INPUT_FILE" ]]; then
   cp "$INPUT_FILE" "$RUN_DIR/artifacts/input.txt"
 fi
 
-log_info "=== Freud Live Eval ==="
-log_info "Run directory: $RUN_DIR"
-log_info "Cache mode: $CACHE_MODE"
-log_info "Cache file: $CACHE_FILE"
-log_info "Timeout: ${TIMEOUT}s"
-log_info "Preserve memory: ${PRESERVE_MEMORY}"
-if [[ -n "${GRADLE_USER_HOME:-}" ]]; then
-  log_info "Gradle user home: ${GRADLE_USER_HOME}"
-fi
-log_info ""
-
 # Set environment for the run
 export NEOPSYKE_LLM_CACHE_MODE="$CACHE_MODE"
 export NEOPSYKE_LLM_CACHE_FILE="$CACHE_FILE"
@@ -315,15 +305,37 @@ export NEOPSYKE_LLM_CACHE_FILE="$CACHE_FILE"
 if [[ -n "$SESSION_REPLAY_DIR" ]]; then
   export NEOPSYKE_SESSION_RECORDING_MODE="replay"
   export NEOPSYKE_SESSION_RECORDING_DIR="$SESSION_REPLAY_DIR"
-  log_info "Session replay: $SESSION_REPLAY_DIR"
 fi
 export NEOPSYKE_LOG_FILE="$RUN_DIR/logs/neopsyke.log"
 export NEOPSYKE_EVENT_LOG_FILE="$RUN_DIR/logs/events.jsonl"
 export EGO_SCRATCHPAD_DEBUG_CAPTURE_ENABLED="true"
-export MEMORY_DEFAULT_NAMESPACE="freud-eval"
-export NEOPSYKE_LOGBOOK_DB_PATH="$REPO_ROOT/.neopsyke/freud-logbook.db"
-export NEOPSYKE_METRICS_DB="$REPO_ROOT/.neopsyke/freud-metrics.db"
+
+# Per-run isolated state: all persistent data lives inside the run directory.
+# This ensures parallel runs never interfere and user data is never touched.
+RUN_SHORT_ID="$(basename "$RUN_DIR")"
+PGVECTOR_NAMESPACE="freud-eval-${RUN_SHORT_ID}"
+mkdir -p "$RUN_DIR/state"
+export MEMORY_DEFAULT_NAMESPACE="$PGVECTOR_NAMESPACE"
+export NEOPSYKE_LOGBOOK_DB_PATH="$RUN_DIR/state/logbook.db"
+export NEOPSYKE_METRICS_DB="$RUN_DIR/state/metrics.db"
+export NEOPSYKE_ACTION_CONTROL_DB_PATH="$RUN_DIR/state/action-control.db"
 export NEOPSYKE_GOALS_WORKSPACE_ROOT="${NEOPSYKE_GOALS_WORKSPACE_ROOT:-$RUN_DIR/artifacts/goals}"
+# Record namespace for cleanup
+printf '%s\n' "$PGVECTOR_NAMESPACE" > "$RUN_DIR/state/pgvector-namespace.txt"
+
+log_info "=== Freud Live Eval ==="
+log_info "Run directory: $RUN_DIR"
+log_info "Cache mode: $CACHE_MODE"
+log_info "Cache file: $CACHE_FILE"
+log_info "Timeout: ${TIMEOUT}s"
+log_info "Per-run namespace: ${PGVECTOR_NAMESPACE}"
+if [[ -n "$SESSION_REPLAY_DIR" ]]; then
+  log_info "Session replay: $SESSION_REPLAY_DIR"
+fi
+if [[ -n "${GRADLE_USER_HOME:-}" ]]; then
+  log_info "Gradle user home: ${GRADLE_USER_HOME}"
+fi
+log_info ""
 
 if [[ -n "$GOALS_OVERRIDE" ]]; then
   export NEOPSYKE_GOALS_ENABLED="$GOALS_OVERRIDE"
@@ -331,21 +343,17 @@ fi
 
 # Run NeoPsyke in freud-live mode
 RUN_START="$(date +%s)"
-clear_memory_arg="--clear-memory-all"
 RAW_STDOUT_FILE="$RUN_DIR/logs/stdout.log"
-if [[ "$PRESERVE_MEMORY" == "true" ]]; then
-  clear_memory_arg=""
-fi
 set +e
 if [[ -n "$SESSION_REPLAY_DIR" && -z "$INPUT_FILE" ]]; then
   # Session replay mode: no stdin input needed — signals come from the recording
-  "$NEOPSYKE_CMD" --freud-live --freud-live-timeout "$TIMEOUT" ${clear_memory_arg:+"$clear_memory_arg"} --no-id \
+  "$NEOPSYKE_CMD" --freud-live --freud-live-timeout "$TIMEOUT" --no-id \
     </dev/null \
     2>"$RUN_DIR/logs/stderr.log" \
     | tee "$RAW_STDOUT_FILE"
 else
   cat "$INPUT_FILE" \
-    | "$NEOPSYKE_CMD" --freud-live --freud-live-timeout "$TIMEOUT" ${clear_memory_arg:+"$clear_memory_arg"} --no-id \
+    | "$NEOPSYKE_CMD" --freud-live --freud-live-timeout "$TIMEOUT" --no-id \
     2>"$RUN_DIR/logs/stderr.log" \
     | tee "$RAW_STDOUT_FILE"
 fi
@@ -459,5 +467,33 @@ if [[ -f "$RUN_DIR/artifacts/session-replay-stats.json" ]]; then
   log_info "Session replay stats: $(cat "$RUN_DIR/artifacts/session-replay-stats.json")"
 fi
 log_info ""
+
+# ── Age-based run retention cleanup ──────────────────────────────────
+# Delete run directories (and their per-run state) older than the
+# configured retention period. pgvector namespaces recorded in
+# state/pgvector-namespace.txt are cleaned up best-effort via the
+# memory provider HTTP API.
+RETENTION_DAYS="${FREUD_RUN_RETENTION_DAYS:-3}"
+if [[ "$RETENTION_DAYS" -gt 0 ]]; then
+  deleted_count=0
+  while IFS= read -r old_run_dir; do
+    [[ -d "$old_run_dir" ]] || continue
+    # Best-effort pgvector namespace cleanup
+    ns_file="$old_run_dir/state/pgvector-namespace.txt"
+    if [[ -f "$ns_file" ]]; then
+      old_ns="$(cat "$ns_file" 2>/dev/null)"
+      if [[ -n "$old_ns" ]]; then
+        # Try to reset via the memory provider HTTP API (non-blocking, best-effort)
+        MEMORY_BASE_URL="${NEOPSYKE_MEMORY_DEFAULT_BASE_URL:-http://localhost:6333}"
+        curl -sf -X DELETE "${MEMORY_BASE_URL}/collections/${old_ns}" >/dev/null 2>&1 || true
+      fi
+    fi
+    rm -rf "$old_run_dir"
+    deleted_count=$((deleted_count + 1))
+  done < <(find "$RUN_ROOT_ABS" -maxdepth 1 -type d -name '*-live-eval-*' -mtime +"$RETENTION_DAYS" 2>/dev/null || true)
+  if [[ "$deleted_count" -gt 0 ]]; then
+    log_info "Retention cleanup: deleted $deleted_count run(s) older than ${RETENTION_DAYS} day(s)"
+  fi
+fi
 
 exit "$EXIT_CODE"
