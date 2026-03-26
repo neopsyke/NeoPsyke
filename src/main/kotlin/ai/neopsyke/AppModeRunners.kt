@@ -120,7 +120,9 @@ import ai.neopsyke.llm.ProviderStatus
 import ai.neopsyke.llm.TokenBudgetGuardedChatClient
 import ai.neopsyke.llm.LlmCacheMode
 import ai.neopsyke.llm.LlmCacheManager
+import ai.neopsyke.session.RecordingHippocampus
 import ai.neopsyke.session.RecordingSignalSource
+import ai.neopsyke.session.RecordingWebSearchEngine
 import ai.neopsyke.session.SessionRecordingManager
 import ai.neopsyke.session.SessionRecordingMode
 import ai.neopsyke.llm.combineChatCallObservers
@@ -1111,7 +1113,12 @@ internal object AppModeRunners {
                                                 val activeFetchTool = fetchTool
                                                     val earlyMemoryStartup =
                                                         resolveInteractiveMemoryStartup(config, memoryRuntimeConfig)
-                                                    val hippocampus = earlyMemoryStartup.hippocampus
+                                                    val rawHippocampus = earlyMemoryStartup.hippocampus
+                                                    val hippocampus = if (sessionRecordingManager != null) {
+                                                        RecordingHippocampus(delegate = rawHippocampus, channel = sessionRecordingManager.memoryRecall)
+                                                    } else {
+                                                        rawHippocampus
+                                                    }
                                                     val logbook = createLogbookIfEnabled(config)
                                                     val longTermMemoryAdvisor = LlmLongTermMemoryAdvisor(
                                                         modelClient = longTermMemoryClient,
@@ -1121,7 +1128,12 @@ internal object AppModeRunners {
                                                         instrumentation = instrumentation
                                                     )
                                                     val logbookSummarizer = createLogbookSummarizer(config, longTermMemoryClient)
-                                                    val webSearchActionHandler = WebSearchActionHandler(runtime.engine)
+                                                    val activeWebSearchEngine = if (sessionRecordingManager != null) {
+                                                        RecordingWebSearchEngine(delegate = runtime.engine, channel = sessionRecordingManager.webResults)
+                                                    } else {
+                                                        runtime.engine
+                                                    }
+                                                    val webSearchActionHandler = WebSearchActionHandler(activeWebSearchEngine)
                                                     val goalManager = if (config.goals.enabled) {
                                                         ai.neopsyke.agent.goal.GoalManager(
                                                             config = config.goals,
@@ -1618,7 +1630,12 @@ internal object AppModeRunners {
                                             val activeFetchTool = fetchTool
                                                 val earlyMemoryStartup2 =
                                                     resolveInteractiveMemoryStartup(config, memoryRuntimeConfig)
-                                                val hippocampus = earlyMemoryStartup2.hippocampus
+                                                val rawHippocampus2 = earlyMemoryStartup2.hippocampus
+                                                val hippocampus = if (sessionRecordingManager != null) {
+                                                    RecordingHippocampus(delegate = rawHippocampus2, channel = sessionRecordingManager.memoryRecall)
+                                                } else {
+                                                    rawHippocampus2
+                                                }
                                                 val logbook = createLogbookIfEnabled(config)
                                                 val longTermMemoryAdvisor = LlmLongTermMemoryAdvisor(
                                                     modelClient = longTermMemoryClient,
@@ -1628,7 +1645,12 @@ internal object AppModeRunners {
                                                     instrumentation = instrumentation
                                                 )
                                                 val logbookSummarizer = createLogbookSummarizer(config, longTermMemoryClient)
-                                                val webSearchActionHandler = WebSearchActionHandler(runtime.engine)
+                                                val activeWebSearchEngine2 = if (sessionRecordingManager != null) {
+                                                    RecordingWebSearchEngine(delegate = runtime.engine, channel = sessionRecordingManager.webResults)
+                                                } else {
+                                                    runtime.engine
+                                                }
+                                                val webSearchActionHandler = WebSearchActionHandler(activeWebSearchEngine2)
                                                 val goalManager = if (config.goals.enabled) {
                                                     ai.neopsyke.agent.goal.GoalManager(
                                                         config = config.goals,

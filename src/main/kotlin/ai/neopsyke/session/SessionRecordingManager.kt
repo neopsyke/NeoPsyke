@@ -44,8 +44,10 @@ class SessionRecordingManager(
 ) : Closeable {
 
     val signals: RecordReplayChannel = createChannel(CHANNEL_SIGNALS, SIGNALS_FILE)
+    val memoryRecall: RecordReplayChannel = createChannel(CHANNEL_MEMORY_RECALL, MEMORY_RECALL_FILE)
+    val webResults: RecordReplayChannel = createChannel(CHANNEL_WEB_RESULTS, WEB_RESULTS_FILE)
 
-    private val channels: List<RecordReplayChannel> = listOf(signals)
+    private val channels: List<RecordReplayChannel> = listOf(signals, memoryRecall, webResults)
 
     init {
         if (mode != SessionRecordingMode.OFF) {
@@ -98,7 +100,11 @@ class SessionRecordingManager(
         const val MANIFEST_VERSION: Int = 1
 
         const val CHANNEL_SIGNALS: String = "signals"
+        const val CHANNEL_MEMORY_RECALL: String = "memory_recall"
+        const val CHANNEL_WEB_RESULTS: String = "web_results"
         const val SIGNALS_FILE: String = "signals.jsonl"
+        const val MEMORY_RECALL_FILE: String = "memory-recall.jsonl"
+        const val WEB_RESULTS_FILE: String = "web-results.jsonl"
         const val MANIFEST_FILE: String = "session-manifest.json"
 
         /** Environment variable names. */
