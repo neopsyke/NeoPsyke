@@ -1,11 +1,13 @@
-package ai.neopsyke.agent.actions.builtin
+package ai.neopsyke.agent.cortex.motor.actions.plugin.builtin
 
 import kotlinx.coroutines.runBlocking
-import ai.neopsyke.agent.actions.ActionExecutionContext
-import ai.neopsyke.agent.actions.ActionPluginFactoryContext
-import ai.neopsyke.agent.actions.InMemoryEvidenceArtifactStore
-import ai.neopsyke.agent.actions.ReflectionMemoryRecorder
+import ai.neopsyke.agent.cortex.motor.actions.ActionExecutionContext
+import ai.neopsyke.agent.cortex.motor.actions.ActionPluginFactoryContext
+import ai.neopsyke.agent.cortex.motor.actions.InMemoryEvidenceArtifactStore
+import ai.neopsyke.agent.cortex.motor.actions.ReflectionMemoryRecorder
 import ai.neopsyke.agent.config.AgentConfig
+import ai.neopsyke.agent.cortex.motor.actions.plugin.builtin.ReflectEvidenceActionPlugin
+import ai.neopsyke.agent.cortex.motor.actions.plugin.builtin.ReflectInternalActionPlugin
 import ai.neopsyke.agent.model.ActionType
 import ai.neopsyke.agent.model.ContentKind
 import ai.neopsyke.agent.model.PendingAction

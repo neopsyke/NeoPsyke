@@ -1,13 +1,13 @@
 package ai.neopsyke.agent.ego
 
-import ai.neopsyke.agent.actioncontrol.ActionControlService
-import ai.neopsyke.agent.actioncontrol.NoopActionControlService
-import ai.neopsyke.agent.actions.ActionPluginFactoryContext
-import ai.neopsyke.agent.actions.InMemoryEvidenceArtifactStore
-import ai.neopsyke.agent.actions.ConversationOutputGateway
-import ai.neopsyke.agent.actions.RoutedConversationOutputGateway
-import ai.neopsyke.agent.actions.ActionRegistry
-import ai.neopsyke.agent.actions.websearch.WebSearchActionHandler
+import ai.neopsyke.agent.cortex.motor.actions.control.ActionControlService
+import ai.neopsyke.agent.cortex.motor.actions.control.NoopActionControlService
+import ai.neopsyke.agent.cortex.motor.actions.ActionPluginFactoryContext
+import ai.neopsyke.agent.cortex.motor.actions.InMemoryEvidenceArtifactStore
+import ai.neopsyke.agent.cortex.motor.actions.ConversationOutputGateway
+import ai.neopsyke.agent.cortex.motor.actions.RoutedConversationOutputGateway
+import ai.neopsyke.agent.cortex.motor.actions.ActionRegistry
+import ai.neopsyke.agent.cortex.motor.actions.websearch.WebSearchActionHandler
 import ai.neopsyke.agent.config.AgentConfig
 import ai.neopsyke.agent.cortex.motor.MotorCortex
 import ai.neopsyke.agent.cortex.sensory.SensoryCortex
@@ -23,7 +23,7 @@ import ai.neopsyke.agent.memory.scratchpad.ScratchpadStore
 import ai.neopsyke.agent.goal.NoopGoalsGateway
 import ai.neopsyke.agent.goal.GoalsGateway
 import ai.neopsyke.agent.superego.Superego
-import ai.neopsyke.agent.tools.mcp.FetchTool
+import ai.neopsyke.agent.cortex.motor.actions.fetch.FetchTool
 import ai.neopsyke.instrumentation.AgentInstrumentation
 import ai.neopsyke.instrumentation.NoopAgentInstrumentation
 

@@ -1,5 +1,6 @@
-package ai.neopsyke.agent.actioncontrol
+package ai.neopsyke.agent.cortex.motor.actions.control
 
+import ai.neopsyke.agent.cortex.motor.actions.control.SqliteActionControlStore
 import ai.neopsyke.agent.model.ActionExecutionStatus
 import ai.neopsyke.agent.model.ActionLedgerEntry
 import ai.neopsyke.agent.model.ActionLedgerKind

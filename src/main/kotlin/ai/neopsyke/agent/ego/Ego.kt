@@ -2,13 +2,14 @@ package ai.neopsyke.agent.ego
 
 import kotlinx.coroutines.delay
 import mu.KotlinLogging
-import ai.neopsyke.agent.actioncontrol.ActionControlService
-import ai.neopsyke.agent.actioncontrol.LegacyCompatibleActionControlService
+import ai.neopsyke.agent.cortex.motor.actions.control.ActionControlService
+import ai.neopsyke.agent.cortex.motor.actions.control.LegacyCompatibleActionControlService
 import ai.neopsyke.agent.config.*
-import ai.neopsyke.agent.actions.EvidenceArtifactStore
-import ai.neopsyke.agent.actions.InMemoryEvidenceArtifactStore
+import ai.neopsyke.agent.cortex.motor.actions.EvidenceArtifactStore
+import ai.neopsyke.agent.cortex.motor.actions.InMemoryEvidenceArtifactStore
 import ai.neopsyke.agent.model.*
 import ai.neopsyke.agent.cortex.motor.MotorCortex
+import ai.neopsyke.agent.cortex.motor.actions.ActionCapability
 import ai.neopsyke.agent.cortex.sensory.CognitiveCueMetadata
 import ai.neopsyke.agent.cortex.sensory.CognitiveSignal
 import ai.neopsyke.agent.cortex.sensory.GoalRuntimeCue
@@ -84,7 +85,7 @@ class Ego(
         }
     private val deliberation = DeliberationEngine(
         config, instrumentation, metaReasoner, evidenceArtifactStore,
-        isEvidenceActionType = { motorCortex.hasCapability(it, ai.neopsyke.agent.actions.ActionCapability.GATHERS_EVIDENCE) }
+        isEvidenceActionType = { motorCortex.hasCapability(it, ActionCapability.GATHERS_EVIDENCE) }
     )
     private val telemetry = EgoTelemetry(instrumentation, scheduler, memory, scratchpadStore, config)
     private val fallbackHandler = FallbackHandler(

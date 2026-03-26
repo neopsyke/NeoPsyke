@@ -1,5 +1,8 @@
-package ai.neopsyke.agent.actions
+package ai.neopsyke.agent.cortex.motor.actions
 
+import ai.neopsyke.agent.cortex.motor.actions.ConversationDeliveryResult
+import ai.neopsyke.agent.cortex.motor.actions.RoutedConversationOutputGateway
+import ai.neopsyke.agent.cortex.motor.actions.TelegramMessageSink
 import ai.neopsyke.agent.model.ConversationContext
 import ai.neopsyke.agent.model.ConversationSecurityContexts
 import ai.neopsyke.agent.model.Interlocutor

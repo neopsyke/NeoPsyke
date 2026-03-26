@@ -288,7 +288,7 @@ reviews what remains, and the MotorCortex enforces the final guard.
 ### 6.1 Action Contracts
 
 Each action descriptor exposes a security contract through
-[ActionPluginContracts.kt](src/main/kotlin/ai/neopsyke/agent/actions/ActionPluginContracts.kt).
+[ActionPluginContracts.kt](src/main/kotlin/ai/neopsyke/agent/cortex/motor/actions/ActionPluginContracts.kt).
 
 Current contract fields include:
 
@@ -349,10 +349,10 @@ Examples from current plugins:
 
 Relevant code:
 
-- [ContactUserActionPlugin.kt](src/main/kotlin/ai/neopsyke/agent/actions/builtin/ContactUserActionPlugin.kt)
-- [GoalOperationActionPlugin.kt](src/main/kotlin/ai/neopsyke/agent/actions/builtin/GoalOperationActionPlugin.kt)
-- [MicrosoftGraphEmailActionPlugin.kt](src/main/kotlin/ai/neopsyke/agent/actions/email/MicrosoftGraphEmailActionPlugin.kt)
-- [ReflectActionPlugin.kt](src/main/kotlin/ai/neopsyke/agent/actions/builtin/ReflectActionPlugin.kt)
+- [ContactUserActionPlugin.kt](src/main/kotlin/ai/neopsyke/agent/cortex/motor/actions/plugin/builtin/ContactUserActionPlugin.kt)
+- [GoalOperationActionPlugin.kt](src/main/kotlin/ai/neopsyke/agent/cortex/motor/actions/plugin/builtin/GoalOperationActionPlugin.kt)
+- [MicrosoftGraphEmailActionPlugin.kt](src/main/kotlin/ai/neopsyke/agent/cortex/motor/actions/plugin/email/MicrosoftGraphEmailActionPlugin.kt)
+- [ReflectActionPlugin.kt](src/main/kotlin/ai/neopsyke/agent/cortex/motor/actions/plugin/builtin/ReflectActionPlugin.kt)
 
 ---
 
@@ -419,7 +419,7 @@ Important properties:
 ### 7.3 Policy Authorization
 
 Authorization policy is implemented in
-[ActionAuthorizationPolicy.kt](src/main/kotlin/ai/neopsyke/agent/actioncontrol/ActionAuthorizationPolicy.kt).
+[ActionAuthorizationPolicy.kt](src/main/kotlin/ai/neopsyke/agent/cortex/motor/actions/control/ActionAuthorizationPolicy.kt).
 
 Current policy properties:
 
@@ -505,7 +505,7 @@ action is staged, the system can inspect:
 ### 8.3 Storage
 
 Durable action-control state is persisted in SQLite via
-[SqliteActionControlStore.kt](src/main/kotlin/ai/neopsyke/agent/actioncontrol/SqliteActionControlStore.kt).
+[SqliteActionControlStore.kt](src/main/kotlin/ai/neopsyke/agent/cortex/motor/actions/control/SqliteActionControlStore.kt).
 
 Current durable tables:
 
@@ -520,7 +520,7 @@ request memory.
 ### 8.4 Autonomous Worker
 
 Autonomous staged actions are processed by a runtime-owned background worker in
-[ActionControlAutonomousWorker.kt](src/main/kotlin/ai/neopsyke/agent/actioncontrol/ActionControlAutonomousWorker.kt).
+[ActionControlAutonomousWorker.kt](src/main/kotlin/ai/neopsyke/agent/cortex/motor/actions/control/ActionControlAutonomousWorker.kt).
 
 This means `READY` staged actions are not executed opportunistically inside a
 random interactive request path. They are drained by a dedicated runtime worker.
@@ -750,7 +750,7 @@ are current implementation boundaries.
 
 Action plugins are currently discovered with Java `ServiceLoader` and run
 in-process through
-[ActionRegistry.kt](src/main/kotlin/ai/neopsyke/agent/actions/ActionRegistry.kt).
+[ActionRegistry.kt](src/main/kotlin/ai/neopsyke/agent/cortex/motor/actions/ActionRegistry.kt).
 
 This means the current plugin model assumes trusted first-party code.
 
@@ -769,7 +769,7 @@ zero-trust model for third-party connectors.
 
 ### 14.3 Third-party connector isolation is only stubbed today
 
-[ConnectorBoundaryModels.kt](src/main/kotlin/ai/neopsyke/agent/actions/ConnectorBoundaryModels.kt)
+[ConnectorBoundaryModels.kt](src/main/kotlin/ai/neopsyke/agent/cortex/motor/actions/ConnectorBoundaryModels.kt)
 defines the concept of out-of-process isolation, but the actual runtime only
 implements `FIRST_PARTY_IN_PROCESS`.
 

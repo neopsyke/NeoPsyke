@@ -1,6 +1,9 @@
-package ai.neopsyke.agent.actioncontrol
+package ai.neopsyke.agent.cortex.motor.actions.control
 
 import ai.neopsyke.agent.config.ActionControlConfig
+import ai.neopsyke.agent.cortex.motor.actions.control.ActionControlDecisionResult
+import ai.neopsyke.agent.cortex.motor.actions.control.DefaultActionControlService
+import ai.neopsyke.agent.cortex.motor.actions.control.SqliteActionControlStore
 import ai.neopsyke.agent.model.ActionExecutionStatus
 import ai.neopsyke.agent.model.ActionLedgerKind
 import ai.neopsyke.agent.model.ActionOutcome
@@ -13,6 +16,7 @@ import ai.neopsyke.agent.model.ConversationSecurityContexts
 import ai.neopsyke.agent.model.PendingAction
 import ai.neopsyke.agent.model.StagedActionStatus
 import ai.neopsyke.agent.model.Urgency
+import kotlinx.coroutines.runBlocking
 import java.nio.file.Files
 import kotlin.test.assertContentEquals
 import kotlin.test.Test
@@ -38,7 +42,7 @@ class DefaultActionControlServiceTest {
                 )
             }
             val context = ConversationContext.default()
-            val stagedResult = kotlinx.coroutines.runBlocking {
+            val stagedResult = runBlocking {
                 service.handleAuthorizationDecision(
                     action = PendingAction(
                         id = 1,
@@ -62,7 +66,7 @@ class DefaultActionControlServiceTest {
             val staged = stagedResult as ActionControlDecisionResult.Staged
             assertEquals(StagedActionStatus.READY, staged.stagedAction.status)
 
-            val executed = kotlinx.coroutines.runBlocking {
+            val executed = runBlocking {
                 service.processAutonomousStagedActions(limit = 10)
             }
             assertEquals(1, executed.size)
@@ -94,7 +98,7 @@ class DefaultActionControlServiceTest {
             val context = ConversationContext.default()
             val rootInputId = "root-thread-order"
 
-            kotlinx.coroutines.runBlocking {
+            runBlocking {
                 service.handleAuthorizationDecision(
                     action = PendingAction(
                         id = 11,
@@ -135,14 +139,14 @@ class DefaultActionControlServiceTest {
                 )
             }
 
-            val firstBatch = kotlinx.coroutines.runBlocking {
+            val firstBatch = runBlocking {
                 service.processAutonomousStagedActions(limit = 10)
             }
             assertEquals(1, firstBatch.size)
             assertEquals("first action", firstBatch.single().stagedAction.summary)
             assertContentEquals(listOf("""{"operation":"revise","goal_id":"goal-1","step":"first"}"""), executedPayloads)
 
-            val secondBatch = kotlinx.coroutines.runBlocking {
+            val secondBatch = runBlocking {
                 service.processAutonomousStagedActions(limit = 10)
             }
             assertEquals(1, secondBatch.size)
@@ -182,7 +186,7 @@ class DefaultActionControlServiceTest {
                 plannerSignal = "fallback delivered",
             )
 
-            val receipt = kotlinx.coroutines.runBlocking {
+            val receipt = runBlocking {
                 service.recordBypassExecution(
                     action = action,
                     conversationContext = action.conversationContext,
@@ -225,7 +229,7 @@ class DefaultActionControlServiceTest {
             ) { _, _ ->
                 error("Denied staged action should not execute")
             }
-            val stagedResult = kotlinx.coroutines.runBlocking {
+            val stagedResult = runBlocking {
                 service.handleAuthorizationDecision(
                     action = PendingAction(
                         id = 21,
@@ -246,7 +250,7 @@ class DefaultActionControlServiceTest {
                 )
             } as ActionControlDecisionResult.Staged
 
-            val denied = kotlinx.coroutines.runBlocking {
+            val denied = runBlocking {
                 service.denyStagedAction(
                     stagedActionId = stagedResult.stagedAction.id,
                     deniedBy = ownerContext.security,
@@ -283,7 +287,7 @@ class DefaultActionControlServiceTest {
             val context = ConversationContext.default()
             val rootInputId = "root-reflect-rate-limit"
 
-            val first = kotlinx.coroutines.runBlocking {
+            val first = runBlocking {
                 service.handleAuthorizationDecision(
                     action = PendingAction(
                         id = 101,
@@ -306,7 +310,7 @@ class DefaultActionControlServiceTest {
             }
             assertTrue(first is ActionControlDecisionResult.Staged)
 
-            val second = kotlinx.coroutines.runBlocking {
+            val second = runBlocking {
                 service.handleAuthorizationDecision(
                     action = PendingAction(
                         id = 102,
@@ -329,7 +333,7 @@ class DefaultActionControlServiceTest {
             }
             assertTrue(second is ActionControlDecisionResult.Staged)
 
-            val third = kotlinx.coroutines.runBlocking {
+            val third = runBlocking {
                 service.handleAuthorizationDecision(
                     action = PendingAction(
                         id = 103,
@@ -376,7 +380,7 @@ class DefaultActionControlServiceTest {
             val context = ConversationContext.default()
             val rootInputId = "root-goal-rate-limit"
 
-            val listResult = kotlinx.coroutines.runBlocking {
+            val listResult = runBlocking {
                 service.handleAuthorizationDecision(
                     action = PendingAction(
                         id = 201,
@@ -399,7 +403,7 @@ class DefaultActionControlServiceTest {
             }
             assertTrue(listResult is ActionControlDecisionResult.Staged)
 
-            val createResult = kotlinx.coroutines.runBlocking {
+            val createResult = runBlocking {
                 service.handleAuthorizationDecision(
                     action = PendingAction(
                         id = 202,
@@ -422,7 +426,7 @@ class DefaultActionControlServiceTest {
             }
             assertTrue(createResult is ActionControlDecisionResult.Staged)
 
-            val secondCreate = kotlinx.coroutines.runBlocking {
+            val secondCreate = runBlocking {
                 service.handleAuthorizationDecision(
                     action = PendingAction(
                         id = 203,

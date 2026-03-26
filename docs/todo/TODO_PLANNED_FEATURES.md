@@ -23,6 +23,23 @@
 
 ---
 
+## 0. Extend the Freud record player to record and replay user interactive sessions, including any signals
+
+> Status: Backlog
+>
+> Added: 2026-03-24
+
+### Problem
+
+We need a cheaper faster way to debug live sessions when a bug is found. We need to allow the record player
+to record and replay user interactive sessions, including any signals (user input, Id impulses, etc).
+
+### Goal
+
+Better, faster, cheaper and deterministic debugging of live session artifacts.
+
+---
+
 ## 1. Extractable Agent Personality Configuration
 
 > Status: Backlog
@@ -615,17 +632,17 @@ builtin_tools:
 
 ### Files to Modify
 
-- `src/main/kotlin/ai/neopsyke/agent/actions/builtin/WebsiteFetchActionPlugin.kt`
+- `src/main/kotlin/ai/neopsyke/agent/cortex/motor/actions/plugin/builtin/WebsiteFetchActionPlugin.kt`
   -- cache full content after fetch
-- `src/main/kotlin/ai/neopsyke/agent/actions/builtin/WebsiteExtractActionPlugin.kt`
+- `src/main/kotlin/ai/neopsyke/agent/cortex/motor/actions/plugin/builtin/WebsiteExtractActionPlugin.kt`
   -- new file: extract action plugin + factory
-- `src/main/kotlin/ai/neopsyke/agent/actions/builtin/FetchContentCache.kt`
+- `src/main/kotlin/ai/neopsyke/agent/cortex/motor/actions/plugin/builtin/FetchContentCache.kt`
   -- new file: per-request content cache
 - `src/main/kotlin/ai/neopsyke/agent/config/BuiltinToolsConfig.kt`
   -- add `WebsiteExtractConfig`
 - `src/main/kotlin/ai/neopsyke/config/AgentRuntimeConfig.kt`
   -- parse `website_extract` YAML section
-- `src/main/kotlin/ai/neopsyke/agent/actions/ActionRegistry.kt`
+- `src/main/kotlin/ai/neopsyke/agent/cortex/motor/actions/ActionRegistry.kt`
   -- register new plugin
 - `src/main/kotlin/ai/neopsyke/agent/model/ActionType.kt`
   -- add `WEBSITE_EXTRACT` enum value

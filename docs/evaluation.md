@@ -4,6 +4,8 @@ NeoPsyke uses a multi-layered testing and evaluation approach, from fast unit te
 
 > **Terminology:** See the [Glossary](glossary.md) for definitions of all agent concepts used in this document.
 
+> **Token-saving tip:** Use [LLM response cache (record / replay)](#llm-response-cache-record--replay) to run live evals repeatedly without API calls. Record once, replay for free.
+
 ---
 
 ## Quick reference
@@ -126,17 +128,147 @@ Tests the real memory pipeline end-to-end: LLM memory advisor → Hippocampus im
 
 ### 8. Freud live eval (single-input)
 
-For testing individual inputs with LLM response caching for reproducibility:
+For testing individual inputs against the real agent:
 
 ```bash
-# Record a run
+freud/scripts/live-eval.sh --input input.txt
 freud/scripts/live-eval.sh --input input.txt --expected expected.txt --timeout 120
-
-# Replay from cache
-freud/scripts/live-eval.sh --input input.txt --cache-replay "$(cat .neopsyke/runs/freud/latest-run.txt)/artifacts/llm-cache.jsonl"
 ```
 
-The LLM cache uses sequential matching with SHA-256 hash validation for deterministic replay.
+---
+
+## LLM response cache (record / replay)
+
+Live evals cost tokens. Every cognitive role in the loop (Planner, Superego, Meta-Reasoner, Action Verifier, Memory Advisor) makes at least one LLM call per cycle, and a single input can trigger multiple cycles. For iterative development this adds up fast.
+
+The LLM response cache solves this: record one live run, then replay it as many times as needed with zero API calls — until your code changes actually affect what the agent sends to the LLM.
+
+### How it works
+
+1. **Record mode** — Every LLM response is captured to a JSONL file, one entry per call. Each entry stores a sequence index, a SHA-256 hash of the request messages, the model name, the full response content, finish reason, and token usage.
+
+2. **Replay mode** — The cache file is loaded at startup. On each LLM call, the system compares the current request's message hash against the cached entry at the same sequence index:
+   - **Hash matches** → the cached response is returned instantly, no API call.
+   - **Hash mismatch (divergence)** → the cache switches to **passthrough mode** and all subsequent calls go to the real LLM. The divergence point (sequence index, actor, call site) is logged as a telemetry event.
+   - **Index exhausted** → same as mismatch; passthrough kicks in.
+
+3. **Passthrough is sticky** — once divergence is detected, the rest of the run uses real LLM calls. There is no attempt to re-sync with the cache. This is deliberate: partial cache hits with silent mismatches would produce misleading results.
+
+### Quick start
+
+```bash
+# 1. Record a baseline run (makes real LLM calls, saves responses)
+freud/scripts/live-eval.sh \
+  --input input.txt \
+  --expected expected.txt \
+  --timeout 120
+
+# 2. Find the cache file from that run
+CACHE=$(cat .neopsyke/runs/freud/latest-run.txt)/artifacts/llm-cache.jsonl
+
+# 3. Replay — zero API calls if nothing changed
+freud/scripts/live-eval.sh \
+  --input input.txt \
+  --expected expected.txt \
+  --cache-replay "$CACHE"
+```
+
+### When to use replay
+
+| Scenario | What to do |
+|---|---|
+| Iterating on Superego policies | Record once, replay while tuning policy rules. Divergence only happens if your policy change alters what the Planner sees next. |
+| Refactoring prompt assembly | Replay detects immediately whether your refactor changed the actual messages sent to the LLM. No divergence = safe refactor. |
+| Tuning scoring or post-processing | Replay is free here — scoring happens after LLM calls, so the cache always hits 100%. |
+| Debugging a specific agent behavior | Replay the exact same LLM responses to reproduce the behavior deterministically. |
+| CI-like regression checks | Record a set of baseline caches. Replay them after code changes. Divergence = something changed that affects LLM interaction. |
+
+### What a cache file looks like
+
+Each line is a JSON object:
+
+```json
+{"seq":0,"hash":"a3f8...","actor":"planner","call_site":"PlannerPromptRunner","model":"claude-sonnet-4-20250514","content":"...","finish_reason":"end_turn","prompt_tokens":1842,"completion_tokens":312,"total_tokens":2154}
+{"seq":1,"hash":"e7b2...","actor":"superego","call_site":"SuperegoReviewer","model":"claude-sonnet-4-20250514","content":"...","finish_reason":"end_turn","prompt_tokens":956,"completion_tokens":87,"total_tokens":1043}
+{"seq":2,"hash":"c1d9...","actor":"action_verifier","call_site":"DecisionVerifier","model":"claude-sonnet-4-20250514","content":"...","finish_reason":"end_turn","prompt_tokens":1104,"completion_tokens":145,"total_tokens":1249}
+```
+
+The `seq` field is the global call order across all cognitive roles. The `hash` is what replay uses to detect divergence.
+
+### Cache telemetry
+
+After a replay run, inspect the cache performance:
+
+```bash
+python3 freud/py/telemetry/llm_cache.py .neopsyke/logs/latest-events.jsonl
+```
+
+Example output:
+
+```json
+{
+  "total_calls": 4,
+  "cached_calls": 4,
+  "real_calls": 0,
+  "hit_rate_percent": 100.0,
+  "divergence_count": 0,
+  "divergence_point": null,
+  "hits_by_actor": {
+    "planner": 1,
+    "superego": 1,
+    "action_verifier": 1,
+    "meta_reasoner": 1
+  },
+  "hints": ["All calls served from cache: fully deterministic replay."]
+}
+```
+
+A run with divergence looks like:
+
+```json
+{
+  "total_calls": 6,
+  "cached_calls": 2,
+  "real_calls": 4,
+  "hit_rate_percent": 33.33,
+  "divergence_count": 1,
+  "divergence_point": 2,
+  "divergence_actor": "superego",
+  "divergence_call_site": "SuperegoReviewer",
+  "hints": ["Divergence at seq 2 (superego/SuperegoReviewer): code change may have affected this call path."]
+}
+```
+
+This tells you exactly which cognitive role and call site were first affected by your code change.
+
+### Environment variables
+
+| Variable | Values | Description |
+|---|---|---|
+| `NEOPSYKE_LLM_CACHE_MODE` | `record`, `replay`, `off` | Controls caching behavior. Default: `off`. |
+| `NEOPSYKE_LLM_CACHE_FILE` | path | JSONL file to write (record) or read (replay). |
+
+You rarely need to set these directly — `live-eval.sh` handles them via the `--cache-replay` flag. But they are available for custom scripts or manual runs.
+
+### Manual usage (without live-eval.sh)
+
+```bash
+# Record
+NEOPSYKE_LLM_CACHE_MODE=record \
+NEOPSYKE_LLM_CACHE_FILE=my-cache.jsonl \
+./run-neopsyke.sh
+
+# Replay
+NEOPSYKE_LLM_CACHE_MODE=replay \
+NEOPSYKE_LLM_CACHE_FILE=my-cache.jsonl \
+./run-neopsyke.sh
+```
+
+### Token savings in practice
+
+A typical single-input eval with the full cognitive loop (Planner → Superego → Action Verifier → Meta-Reasoner) uses 4–8 LLM calls per cycle. With multi-cycle inputs or goal execution, a single run can make 10–20+ calls. At replay, all of those calls are served from cache until divergence.
+
+During iterative development — where you might run the same eval 10–20 times while tuning a feature — replay eliminates the cost of all runs after the first recording, as long as your changes do not affect the messages sent to the LLM. Changes to scoring logic, telemetry, dashboard rendering, prompt budget allocation, or post-processing are completely free to test.
 
 ---
 

@@ -1,9 +1,10 @@
-package ai.neopsyke.agent.actioncontrol
+package ai.neopsyke.agent.cortex.motor.actions.control
 
-import ai.neopsyke.agent.actions.ActionPluginFactoryContext
-import ai.neopsyke.agent.actions.ActionRegistry
-import ai.neopsyke.agent.actions.NoopReflectionMemoryRecorder
+import ai.neopsyke.agent.cortex.motor.actions.ActionPluginFactoryContext
+import ai.neopsyke.agent.cortex.motor.actions.ActionRegistry
+import ai.neopsyke.agent.cortex.motor.actions.NoopReflectionMemoryRecorder
 import ai.neopsyke.agent.config.AgentConfig
+import ai.neopsyke.agent.cortex.motor.actions.control.ConfiguredActionAuthorizationPolicy
 import ai.neopsyke.agent.model.ActionType
 import ai.neopsyke.agent.model.AuthorizationProgress
 import ai.neopsyke.agent.model.ChannelRef

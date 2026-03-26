@@ -1,6 +1,6 @@
 package ai.neopsyke.agent.model
 
-import ai.neopsyke.agent.actions.async.AsyncActionWait
+import ai.neopsyke.agent.cortex.motor.actions.async.AsyncActionWait
 import ai.neopsyke.agent.id.ConvergenceMode
 import ai.neopsyke.agent.goal.GoalRunActivation
 import java.util.UUID

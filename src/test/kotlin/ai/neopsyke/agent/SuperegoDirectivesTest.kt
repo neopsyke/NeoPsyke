@@ -1,11 +1,10 @@
 package ai.neopsyke.agent
 
-import ai.neopsyke.agent.actions.ActionPluginFactoryContext
-import ai.neopsyke.agent.actions.ActionRegistry
-import ai.neopsyke.agent.actions.NoopReflectionMemoryRecorder
+import ai.neopsyke.agent.cortex.motor.actions.ActionPluginFactoryContext
+import ai.neopsyke.agent.cortex.motor.actions.ActionRegistry
+import ai.neopsyke.agent.cortex.motor.actions.NoopReflectionMemoryRecorder
 import ai.neopsyke.agent.config.AgentConfig
 import kotlin.test.Test
-import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class SuperegoDirectivesTest {

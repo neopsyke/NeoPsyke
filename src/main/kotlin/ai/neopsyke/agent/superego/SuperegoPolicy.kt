@@ -1,15 +1,12 @@
 package ai.neopsyke.agent.superego
 
-import ai.neopsyke.agent.actioncontrol.ActionAuthorizationPolicy
-import ai.neopsyke.agent.actioncontrol.ConfiguredActionAuthorizationPolicy
-import ai.neopsyke.agent.actions.ActionRegistry
+import ai.neopsyke.agent.cortex.motor.actions.control.ActionAuthorizationPolicy
+import ai.neopsyke.agent.cortex.motor.actions.control.ConfiguredActionAuthorizationPolicy
+import ai.neopsyke.agent.cortex.motor.actions.ActionRegistry
 import ai.neopsyke.agent.model.AuthorizationDecision
-import ai.neopsyke.agent.model.AuthorizationProgress
 import ai.neopsyke.agent.model.ActionOrigin
 import ai.neopsyke.agent.model.ActionType
-import ai.neopsyke.agent.model.CommitMode
 import ai.neopsyke.agent.model.ConversationContext
-import ai.neopsyke.agent.model.InstructionTrust
 import ai.neopsyke.agent.model.OriginSource
 import ai.neopsyke.agent.model.PendingAction
 

@@ -1,5 +1,7 @@
 package ai.neopsyke.agent.model
 
+import ai.neopsyke.agent.cortex.motor.actions.async.AsyncActionWait
+
 enum class CommitMode {
     NOT_APPLICABLE,
     APPROVAL_BACKED,
@@ -112,7 +114,7 @@ data class ActionReceipt(
     val statusSummary: String,
     val plannerSignal: String = statusSummary,
     val effects: Set<ActionEffect> = emptySet(),
-    val asyncWait: ai.neopsyke.agent.actions.async.AsyncActionWait? = null,
+    val asyncWait: AsyncActionWait? = null,
     val createdAtMs: Long = System.currentTimeMillis(),
 )
 

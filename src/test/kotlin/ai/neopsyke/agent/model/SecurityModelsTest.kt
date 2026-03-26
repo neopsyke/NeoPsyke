@@ -1,7 +1,7 @@
 package ai.neopsyke.agent.model
 
-import ai.neopsyke.agent.actions.ActionCapability
-import ai.neopsyke.agent.actions.ActionContract
+import ai.neopsyke.agent.cortex.motor.actions.ActionCapability
+import ai.neopsyke.agent.cortex.motor.actions.ActionContract
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue

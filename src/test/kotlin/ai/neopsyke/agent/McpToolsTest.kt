@@ -5,7 +5,7 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
-import ai.neopsyke.agent.tools.mcp.NativeFetchTool.Companion.htmlToReadableText
+import ai.neopsyke.agent.cortex.motor.actions.fetch.NativeFetchTool.Companion.htmlToReadableText
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs

@@ -1,8 +1,8 @@
 package ai.neopsyke.agent.superego
 
-import ai.neopsyke.agent.actioncontrol.ActionAuthorizationPolicy
-import ai.neopsyke.agent.actioncontrol.ConfiguredActionAuthorizationPolicy
-import ai.neopsyke.agent.actions.ActionRegistry
+import ai.neopsyke.agent.cortex.motor.actions.control.ActionAuthorizationPolicy
+import ai.neopsyke.agent.cortex.motor.actions.control.ConfiguredActionAuthorizationPolicy
+import ai.neopsyke.agent.cortex.motor.actions.ActionRegistry
 import ai.neopsyke.agent.model.ActionType
 import ai.neopsyke.agent.config.AgentConfig
 import ai.neopsyke.agent.model.AuthorizationDecision
@@ -18,7 +18,6 @@ import ai.neopsyke.instrumentation.AgentEvent
 import ai.neopsyke.instrumentation.AgentEvents
 import ai.neopsyke.instrumentation.AgentInstrumentation
 import ai.neopsyke.instrumentation.NoopAgentInstrumentation
-import ai.neopsyke.llm.ChatMessage
 import ai.neopsyke.llm.ChatModelClient
 import ai.neopsyke.llm.ChatRole
 

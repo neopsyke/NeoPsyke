@@ -1,8 +1,9 @@
 package ai.neopsyke.agent.superego
 
-import ai.neopsyke.agent.actions.ActionRegistry
+import ai.neopsyke.agent.cortex.motor.actions.ActionRegistry
 import ai.neopsyke.agent.model.ActionType
 import ai.neopsyke.agent.config.AgentConfig
+import ai.neopsyke.agent.cortex.motor.actions.ActionDeterministicReview
 import ai.neopsyke.agent.model.OriginSource
 import ai.neopsyke.agent.model.PendingAction
 import ai.neopsyke.agent.model.SuperegoContext
@@ -12,7 +13,7 @@ import java.util.Locale
  * The superego's ethical/moral gate decision on whether the agent should be
  * *allowed* to take an action.
  *
- * This is distinct from [ai.neopsyke.agent.actions.ActionDeterministicReview], which
+ * This is distinct from [ai.neopsyke.agent.cortex.motor.actions.ActionDeterministicReview], which
  * is the plugin's conscious-level validity check ("is this payload well-formed
  * and safe?"). The superego maps plugin decisions into this type, framing the
  * verdict in ethical/moral terms. The two types are intentionally separate to
@@ -77,7 +78,7 @@ internal class SuperegoDeterministicConscience(
     }
 
     private fun mapPluginDecision(
-        decision: ai.neopsyke.agent.actions.ActionDeterministicReview,
+        decision: ActionDeterministicReview,
     ): SuperegoDeterministicDecision {
         if (decision.allow) {
             return allow()

@@ -1,8 +1,8 @@
 package ai.neopsyke.agent.ego
 
 import mu.KotlinLogging
-import ai.neopsyke.agent.actions.EvidenceArtifactStore
-import ai.neopsyke.agent.actions.NoopEvidenceArtifactStore
+import ai.neopsyke.agent.cortex.motor.actions.EvidenceArtifactStore
+import ai.neopsyke.agent.cortex.motor.actions.NoopEvidenceArtifactStore
 import ai.neopsyke.agent.model.ActionOutcome
 import ai.neopsyke.agent.model.ActionType
 import ai.neopsyke.agent.config.AgentConfig
