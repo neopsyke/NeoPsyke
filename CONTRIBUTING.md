@@ -74,15 +74,48 @@ Rules:
   the required credentials are available.
 - If you cannot run a relevant test, say so clearly in the pull request.
 
+## Branch Naming
+
+Use the format `<type>/<short-description>` with lowercase kebab-case:
+
+```
+feat/memory-recall-boost
+fix/planner-null-fallback
+refactor/prompt-budget
+docs/freud-workflow
+```
+
+Valid types: `feat`, `fix`, `refactor`, `docs`, `test`, `chore`, `ci`.
+
+## Commit Messages
+
+Follow [Conventional Commits](https://www.conventionalcommits.org/):
+
+```
+<type>(<scope>): <short summary>
+```
+
+- **type** (required): one of `feat`, `fix`, `refactor`, `docs`, `test`, `chore`, `ci`.
+- **scope** (optional but encouraged): the module or area touched (e.g. `memory`,
+  `planner`, `ego`, `freud`).
+- **summary**: imperative mood, lowercase, no trailing period, under 72 characters.
+- **Breaking changes**: append `!` after scope — `feat(planner)!: remove legacy
+  action format` — or add a `BREAKING CHANGE:` footer in the commit body.
+
+Examples:
+
+```
+feat(memory): add episodic recall confidence threshold
+fix(planner): handle null action in fallback path
+refactor(ego): simplify reset-for-new-input flow
+docs(freud): clarify deterministic workflow
+```
+
 ## Pull Request Guidance
 
 - Keep pull requests small enough to review.
 - Explain what changed, why it changed, and how you validated it.
 - Mention any risks, follow-ups, or intentionally deferred work.
-- Prefer clear commit messages with a short scope, for example:
-  - `fix(memory): tighten recall normalization`
-  - `refactor(prompt-budget): simplify allocation flow`
-  - `docs(freud): clarify deterministic workflow`
 
 ## Security
 

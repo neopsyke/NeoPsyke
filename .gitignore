@@ -17,7 +17,6 @@ freud/logs/latest
 
 # Claude Code
 .claude/
-!.claude/settings.json
 
 # OS files
 .DS_Store

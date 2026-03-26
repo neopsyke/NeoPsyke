@@ -28,6 +28,45 @@ Instructions for coding agents working in this repository (Codex, Claude, Gemini
 - Runtime needs `MISTRAL_API_KEY`.
 - Optional runtime flags and env vars are documented in `README.md`.
 
+## Branch Naming
+Use the format `<type>/<short-description>` with lowercase kebab-case:
+
+| Pattern | Example |
+|---|---|
+| `feat/<description>` | `feat/memory-recall-boost` |
+| `fix/<description>` | `fix/planner-null-fallback` |
+| `refactor/<description>` | `refactor/prompt-budget` |
+| `docs/<description>` | `docs/freud-workflow` |
+| `test/<description>` | `test/scenario-pack-coverage` |
+| `chore/<description>` | `chore/gradle-upgrade` |
+| `ci/<description>` | `ci/add-lint-step` |
+
+- Keep descriptions short (2-4 words).
+- Use the same type prefixes as commit messages (see below).
+
+## Commit Messages
+Follow [Conventional Commits](https://www.conventionalcommits.org/):
+
+```
+<type>(<scope>): <short summary>
+```
+
+- **type** (required): `feat`, `fix`, `refactor`, `docs`, `test`, `chore`, `ci`.
+- **scope** (optional but encouraged): the module or area touched — e.g. `memory`, `planner`, `ego`, `superego`, `freud`, `logbook`.
+- **summary**: imperative mood, lowercase, no trailing period, under 72 characters.
+- **Breaking changes**: use `!` after scope — `feat(planner)!: remove legacy action format` — or add a `BREAKING CHANGE:` footer.
+
+Good:
+- `feat(memory): add episodic recall confidence threshold`
+- `fix(planner): handle null action in fallback path`
+- `refactor(ego): simplify reset-for-new-input flow`
+- `test(scenarios): cover multi-fix convergence case`
+
+Bad:
+- `updated stuff` (no type, vague)
+- `Fix bug` (no scope, no detail, capitalized)
+- `feat: memory recall confidence threshold added for episodic memory to improve quality of recalls` (too long)
+
 ## Working Rules
 - Keep changes focused and minimal.
 - Do not make unrelated refactors.
