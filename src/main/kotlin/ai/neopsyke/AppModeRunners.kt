@@ -120,6 +120,7 @@ import ai.neopsyke.llm.ProviderStatus
 import ai.neopsyke.llm.TokenBudgetGuardedChatClient
 import ai.neopsyke.llm.LlmCacheMode
 import ai.neopsyke.llm.LlmCacheManager
+import ai.neopsyke.session.RecordingActionControlService
 import ai.neopsyke.session.RecordingHippocampus
 import ai.neopsyke.session.RecordingSignalSource
 import ai.neopsyke.session.RecordingWebSearchEngine
@@ -1231,7 +1232,7 @@ internal object AppModeRunners {
                                                         goalsGateway = goalManager
                                                             ?: ai.neopsyke.agent.goal.NoopGoalsGateway,
                                                         actionControlServiceFactory = { motorCortex ->
-                                                            actionControlStore?.let { store ->
+                                                            val rawService = actionControlStore?.let { store ->
                                                                 DefaultActionControlService(
                                                                     config = config.actionControl,
                                                                     store = store,
@@ -1250,6 +1251,11 @@ internal object AppModeRunners {
                                                                     config.searchResultCount,
                                                                     authorization
                                                                 )
+                                                            }
+                                                            if (sessionRecordingManager != null) {
+                                                                RecordingActionControlService(delegate = rawService, channel = sessionRecordingManager.actionControl)
+                                                            } else {
+                                                                rawService
                                                             }
                                                         },
                                                         output = {},
@@ -1725,7 +1731,7 @@ internal object AppModeRunners {
                                                     goalsGateway = goalManager
                                                         ?: ai.neopsyke.agent.goal.NoopGoalsGateway,
                                                     actionControlServiceFactory = { motorCortex ->
-                                                        actionControlStore?.let { store ->
+                                                        val rawService = actionControlStore?.let { store ->
                                                             DefaultActionControlService(
                                                                 config = config.actionControl,
                                                                 store = store,
@@ -1744,6 +1750,11 @@ internal object AppModeRunners {
                                                                 config.searchResultCount,
                                                                 authorization
                                                             )
+                                                        }
+                                                        if (sessionRecordingManager != null) {
+                                                            RecordingActionControlService(delegate = rawService, channel = sessionRecordingManager.actionControl)
+                                                        } else {
+                                                            rawService
                                                         }
                                                     },
                                                     output = liveOutput,
