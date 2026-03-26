@@ -122,6 +122,7 @@ import ai.neopsyke.llm.LlmCacheMode
 import ai.neopsyke.llm.LlmCacheManager
 import ai.neopsyke.session.RecordingActionControlService
 import ai.neopsyke.session.RecordingHippocampus
+import ai.neopsyke.session.RecordingLogbook
 import ai.neopsyke.session.RecordingSignalSource
 import ai.neopsyke.session.RecordingWebSearchEngine
 import ai.neopsyke.session.SessionRecordingManager
@@ -1121,7 +1122,12 @@ internal object AppModeRunners {
                                                     } else {
                                                         rawHippocampus
                                                     }
-                                                    val logbook = createLogbookIfEnabled(config)
+                                                    val rawLogbook = createLogbookIfEnabled(config)
+                                                    val logbook: Logbook? = if (sessionRecordingManager != null && rawLogbook != null) {
+                                                        RecordingLogbook(delegate = rawLogbook, channel = sessionRecordingManager.logbookRecall)
+                                                    } else {
+                                                        rawLogbook
+                                                    }
                                                     val longTermMemoryAdvisor = LlmLongTermMemoryAdvisor(
                                                         modelClient = longTermMemoryClient,
                                                         config = config,
@@ -1644,7 +1650,12 @@ internal object AppModeRunners {
                                                 } else {
                                                     rawHippocampus2
                                                 }
-                                                val logbook = createLogbookIfEnabled(config)
+                                                val rawLogbook2 = createLogbookIfEnabled(config)
+                                                val logbook: Logbook? = if (sessionRecordingManager != null && rawLogbook2 != null) {
+                                                    RecordingLogbook(delegate = rawLogbook2, channel = sessionRecordingManager.logbookRecall)
+                                                } else {
+                                                    rawLogbook2
+                                                }
                                                 val longTermMemoryAdvisor = LlmLongTermMemoryAdvisor(
                                                     modelClient = longTermMemoryClient,
                                                     config = config,

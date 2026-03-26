@@ -159,10 +159,31 @@ class LlmCacheManager(
 
         fun hashMessages(messages: List<ChatMessage>): String {
             val digest = MessageDigest.getInstance("SHA-256")
-            val content = messages.joinToString("\n") { "${it.role.apiValue}:${it.content}" }
+            val content = messages.joinToString("\n") { "${it.role.apiValue}:${stripVolatile(it.content)}" }
             val hashBytes = digest.digest(content.toByteArray(Charsets.UTF_8))
             return hashBytes.joinToString("") { "%02x".format(it) }
         }
+
+        /**
+         * Strip volatile tokens (UUIDs, ISO timestamps) from message content
+         * before hashing. This ensures that semantically identical prompts
+         * produce the same hash even when per-run IDs or wall-clock times differ.
+         */
+        private val UUID_PATTERN = Regex(
+            "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+        )
+        private val ISO_TIMESTAMP_PATTERN = Regex(
+            "\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}[.\\d]*Z?"
+        )
+        private val EPOCH_MS_PATTERN = Regex(
+            "(?<=\\D)1[6-9]\\d{11}(?=\\D|$)"
+        )
+
+        private fun stripVolatile(content: String): String =
+            content
+                .replace(UUID_PATTERN, "<UUID>")
+                .replace(ISO_TIMESTAMP_PATTERN, "<TS>")
+                .replace(EPOCH_MS_PATTERN, "<EPOCH>")
     }
 }
 

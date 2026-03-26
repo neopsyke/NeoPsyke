@@ -47,8 +47,9 @@ class SessionRecordingManager(
     val memoryRecall: RecordReplayChannel = createChannel(CHANNEL_MEMORY_RECALL, MEMORY_RECALL_FILE)
     val webResults: RecordReplayChannel = createChannel(CHANNEL_WEB_RESULTS, WEB_RESULTS_FILE)
     val actionControl: RecordReplayChannel = createChannel(CHANNEL_ACTION_CONTROL, ACTION_CONTROL_FILE)
+    val logbookRecall: RecordReplayChannel = createChannel(CHANNEL_LOGBOOK_RECALL, LOGBOOK_RECALL_FILE)
 
-    private val channels: List<RecordReplayChannel> = listOf(signals, memoryRecall, webResults, actionControl)
+    private val channels: List<RecordReplayChannel> = listOf(signals, memoryRecall, webResults, actionControl, logbookRecall)
 
     /**
      * Late-bind the instrumentation bus so session replay/hit events
@@ -112,10 +113,12 @@ class SessionRecordingManager(
         const val CHANNEL_MEMORY_RECALL: String = "memory_recall"
         const val CHANNEL_WEB_RESULTS: String = "web_results"
         const val CHANNEL_ACTION_CONTROL: String = "action_control"
+        const val CHANNEL_LOGBOOK_RECALL: String = "logbook_recall"
         const val SIGNALS_FILE: String = "signals.jsonl"
         const val MEMORY_RECALL_FILE: String = "memory-recall.jsonl"
         const val WEB_RESULTS_FILE: String = "web-results.jsonl"
         const val ACTION_CONTROL_FILE: String = "action-control.jsonl"
+        const val LOGBOOK_RECALL_FILE: String = "logbook-recall.jsonl"
         const val MANIFEST_FILE: String = "session-manifest.json"
 
         /** Environment variable names. */
