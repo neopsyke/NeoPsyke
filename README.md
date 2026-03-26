@@ -54,7 +54,7 @@ Most AI agent projects default to Python. This one uses Kotlin, and the choice i
 ### 1. Clone and build
 
 ```bash
-git clone https://github.com/atomitl/neopsyke.git
+git clone https://github.com/neopsyke/neopsyke.git
 cd neopsyke
 ./gradlew installDist
 ```
