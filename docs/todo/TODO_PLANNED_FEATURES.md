@@ -23,6 +23,23 @@
 
 ---
 
+## 0. Extend the Freud record player to record and replay user interactive sessions, including any signals
+
+> Status: Backlog
+>
+> Added: 2026-03-24
+
+### Problem
+
+We need a cheaper faster way to debug live sessions when a bug is found. We need to allow the record player
+to record and replay user interactive sessions, including any signals (user input, Id impulses, etc).
+
+### Goal
+
+Better, faster, cheaper and deterministic debugging of live session artifacts.
+
+---
+
 ## 1. Extractable Agent Personality Configuration
 
 > Status: Backlog
