@@ -157,33 +157,27 @@ class LlmCacheManager(
             return entries
         }
 
+        private val hashDumpCounter = AtomicInteger(0)
+
         fun hashMessages(messages: List<ChatMessage>): String {
             val digest = MessageDigest.getInstance("SHA-256")
-            val content = messages.joinToString("\n") { "${it.role.apiValue}:${stripVolatile(it.content)}" }
+            val content = messages.joinToString("\n") { "${it.role.apiValue}:${it.content}" }
             val hashBytes = digest.digest(content.toByteArray(Charsets.UTF_8))
-            return hashBytes.joinToString("") { "%02x".format(it) }
+            val hash = hashBytes.joinToString("") { "%02x".format(it) }
+            // Debug: dump full hash content to file for diffing
+            val dumpDir = System.getenv("NEOPSYKE_LLM_HASH_DUMP_DIR")
+            if (!dumpDir.isNullOrBlank()) {
+                try {
+                    val dir = Path.of(dumpDir)
+                    Files.createDirectories(dir)
+                    val seq = hashDumpCounter.getAndIncrement()
+                    Files.writeString(dir.resolve("hash-$seq-$hash.txt"), content)
+                } catch (ex: Exception) {
+                    logger.warn { "Failed to dump hash content: ${ex.message}" }
+                }
+            }
+            return hash
         }
-
-        /**
-         * Strip volatile tokens (UUIDs, ISO timestamps) from message content
-         * before hashing. This ensures that semantically identical prompts
-         * produce the same hash even when per-run IDs or wall-clock times differ.
-         */
-        private val UUID_PATTERN = Regex(
-            "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
-        )
-        private val ISO_TIMESTAMP_PATTERN = Regex(
-            "\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}[.\\d]*Z?"
-        )
-        private val EPOCH_MS_PATTERN = Regex(
-            "(?<=\\D)1[6-9]\\d{11}(?=\\D|$)"
-        )
-
-        private fun stripVolatile(content: String): String =
-            content
-                .replace(UUID_PATTERN, "<UUID>")
-                .replace(ISO_TIMESTAMP_PATTERN, "<TS>")
-                .replace(EPOCH_MS_PATTERN, "<EPOCH>")
     }
 }
 

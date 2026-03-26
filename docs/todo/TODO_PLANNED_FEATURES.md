@@ -687,4 +687,32 @@ builtin_tools:
 
 ---
 
+## 4. Investigate Temporal Reasoning in LLM Prompts
+
+> Status: Backlog
+>
+> Added: 2026-03-27
+
+### Problem
+
+Raw timestamps were removed from LLM prompts to enable deterministic
+session replay caching. However, temporal reasoning ("how long ago did
+the user ask this?", "is this information stale?") may be needed for
+some agent behaviors in the future.
+
+### Goal
+
+Investigate whether temporal context is needed for any current or planned
+agent behavior, and if so, design a deterministic representation (e.g.,
+relative time labels like "recent"/"earlier"/"stale" computed from stable
+thresholds, not wall-clock time) that doesn't break LLM cache replay.
+
+### Key Constraint
+
+Any temporal data sent to the LLM must be deterministic given the same
+input sequence. Avoid raw `Instant.now()`, epoch-ms, or ISO timestamps
+in prompt content. Use relative or bucketed representations instead.
+
+---
+
 <!-- Add new features below this line as ## N+1. Title -->

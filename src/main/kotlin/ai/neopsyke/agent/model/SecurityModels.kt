@@ -348,23 +348,21 @@ fun ConversationSecurityContext.renderSummary(): String =
     buildString {
         append("principal_role=")
         append(principal.role.name.lowercase())
-        append("\nchannel_provider=")
-        append(channel.provider)
+        // channel_provider excluded: contains mode-specific strings
+        // (freud-live, webapp, stdin) that the LLM does not need.
         append("\nchannel_surface=")
         append(channel.surface.name.lowercase())
         append("\ntransport_class=")
         append(channel.transport.name.lowercase())
         append("\ninstruction_trust=")
         append(instructionTrust.name.lowercase())
-        append("\npolicy_scope_id=")
-        append(policyScopeId)
+        // policy_scope_id excluded: contains session-derived IDs.
     }
 
 fun CognitiveThreadSecurityContext.renderSummary(): String =
     buildString {
-        append("policy_scope_id=")
-        append(policyScopeId)
-        append("\nprincipal_role=")
+        // policy_scope_id excluded: contains session-derived IDs.
+        append("principal_role=")
         append(principalRole.name.lowercase())
         append("\ninstruction_trust=")
         append(instructionTrust.name.lowercase())
@@ -394,10 +392,9 @@ fun Provenance.renderSummary(): String =
             append("\nsource_part=")
             append(source.part)
         }
-        if (!source.sourceRef.isNullOrBlank()) {
-            append("\nsource_ref=")
-            append(source.sourceRef)
-        }
+        // sourceRef excluded: contains volatile rootInputId/rootImpulseId
+        // that the LLM does not need for decision-making. These IDs are
+        // available in ChatCallMetadata for logging/tracing.
         sanitization?.let {
             append("\nsanitization_method=")
             append(it.method)

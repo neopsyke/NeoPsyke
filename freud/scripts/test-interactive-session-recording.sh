@@ -260,6 +260,20 @@ else
   echo "WARN: Answers differ (record='$RECORD_ANSWER' replay='$REPLAY_ANSWER') — may be LLM wording difference"
 fi
 
+# Check LLM cache stats — MUST have zero live calls (all cached)
+CACHE_STATS_FILE="$REPLAY_RUN_DIR/artifacts/cache-stats.json"
+if [[ -n "$REPLAY_RUN_DIR" && -f "$CACHE_STATS_FILE" ]]; then
+  LLM_CACHED="$(python3 -c "import json; print(json.load(open('$CACHE_STATS_FILE'))['cached_calls'])" 2>/dev/null || echo "0")"
+  LLM_REAL="$(python3 -c "import json; print(json.load(open('$CACHE_STATS_FILE'))['real_calls'])" 2>/dev/null || echo "?")"
+  LLM_DIV="$(python3 -c "import json; print(json.load(open('$CACHE_STATS_FILE'))['divergence_count'])" 2>/dev/null || echo "?")"
+  if [[ "$LLM_DIV" == "0" && "$LLM_CACHED" != "0" ]]; then
+    echo "PASS: LLM cache — $LLM_CACHED cached, $LLM_REAL live, 0 divergences"
+  else
+    echo "FAIL: LLM cache diverged — $LLM_CACHED cached, $LLM_REAL live, $LLM_DIV divergence(s)"
+    FAILURES=$((FAILURES + 1))
+  fi
+fi
+
 echo ""
 if [[ "$FAILURES" -gt 0 ]]; then
   echo "=== FAIL: $FAILURES check(s) failed ==="
