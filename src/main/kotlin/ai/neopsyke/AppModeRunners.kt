@@ -1420,8 +1420,8 @@ internal object AppModeRunners {
         )
         val interlocutorResolver = ai.neopsyke.agent.config.DefaultInterlocutorResolver()
         val signalSource: ai.neopsyke.agent.cortex.sensory.SignalSource =
-            if (sessionRecordingManager != null && isSessionReplay) {
-                logger.info { "Session replay enabled for freud-live mode" }
+            if (sessionRecordingManager != null) {
+                logger.info { "Session ${sessionRecordingManager.mode.name.lowercase()} enabled for freud-live mode" }
                 RecordingSignalSource(delegate = sensoryInput, channel = sessionRecordingManager.signals)
             } else {
                 sensoryInput
