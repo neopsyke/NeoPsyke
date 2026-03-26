@@ -115,25 +115,43 @@ Bad:
   - `freud/scripts/feature-loop.sh <feature-id> --live --config freud/config/live-prod-acceptance.env`
 - Resume from a specific step (skips earlier steps, preserves artifact record):
   - `freud/scripts/feature-loop.sh <feature-id> --from-step <step>`
-  - Valid step names: `preflight_compile targeted_tests full_tests scenario_pack reasoning_eval_logic reasoning_eval_model memory_live_smoke`
+  - Valid step names: `preflight_compile targeted_tests full_tests scenario_pack reasoning_eval_logic reasoning_eval_model memory_live_smoke session_replay_test`
 - Scenario-only run:
   - `freud/scripts/run-scenarios.sh --file freud/scenarios/v1/neopsyke-agent-scenarios.json`
 - Single-input live eval (pipe one input, get one answer):
   - Preferred wrapper: `freud/scripts/live-eval.sh --input <file> [--expected <file>] [--timeout <seconds>]`
   - Replay a cached run: `freud/scripts/live-eval.sh --input <file> --cache-replay <cache.jsonl>`
-  - Preserve isolated Freud memory for multi-step sequences: `freud/scripts/live-eval.sh --input <file> --preserve-memory`
+  - Record a session for replay: `freud/scripts/live-eval.sh --input <file> --record-session`
+  - Replay a recorded session: `freud/scripts/live-eval.sh --session-replay <run-dir>`
+- Session replay end-to-end test:
+  - `freud/scripts/test-session-replay.sh [--input <file>] [--timeout <seconds>]`
+  - Records a live-eval, replays it, compares answers and checks channel divergence.
 - Dry-run inspection:
   - `freud/scripts/feature-loop.sh <feature-id> --dry-run`
 
-### Live Eval Memory Isolation
-- `live-eval.sh` uses an isolated memory environment to avoid polluting user data:
-  - pgvector namespace: `freud-eval` (user default: `neopsyke`)
-  - Episodic logbook: `.neopsyke/freud-logbook.db` (user default: `.neopsyke/logbook.db`)
-  - Metrics DB: `.neopsyke/freud-metrics.db` (user default: `.neopsyke/metrics.db`)
-- By default, all Freud-isolated memory is cleared before each run (`--clear-memory-all`).
-- Use `--preserve-memory` or `FREUD_LIVE_EVAL_PRESERVE_MEMORY=true` only when a live eval intentionally depends on prior isolated Freud memory.
-- LLM response caching: first run records all LLM responses to a JSONL cache file; subsequent runs with `--cache-replay` replay cached responses until a hash mismatch (divergence), then switch to real LLM calls.
+### Live Eval Per-Run Isolation
+- Each `live-eval.sh` run gets fully isolated persistent state inside its run directory:
+  - `$RUN_DIR/state/logbook.db` (episodic memory)
+  - `$RUN_DIR/state/metrics.db` (usage metrics)
+  - `$RUN_DIR/state/action-control.db` (action staging)
+  - pgvector namespace: `freud-eval-{run-id}` (unique per run)
+- Every run starts with a clean state directory. No `--clear-memory-all` needed.
+- Parallel live-eval runs are safe: each has its own directory and namespace.
+- User data (namespace `neopsyke`, `.neopsyke/logbook.db`, `.neopsyke/metrics.db`) is never touched.
+- Run directories older than `FREUD_RUN_RETENTION_DAYS` (default 3, configurable in `freud/config/default.env`) are auto-deleted after each run. pgvector namespaces for deleted runs are cleaned up best-effort.
+- LLM response caching: first run records all LLM responses to a JSONL cache file; subsequent runs with `--cache-replay` replay cached responses until a hash mismatch (divergence), then switch to real LLM calls. The LLM cache hash strips volatile tokens (UUIDs, timestamps) to prevent false divergence.
 - Cache env vars: `NEOPSYKE_LLM_CACHE_MODE` (`record`/`replay`/`off`), `NEOPSYKE_LLM_CACHE_FILE`.
+
+### Session Recording and Replay
+- Record all non-deterministic inputs during a live-eval or interactive session for deterministic replay.
+- Recording captures 6 channels: signals, LLM calls, memory recall, logbook recall, web search results, action control decisions.
+- Each channel uses hash-based divergence detection. On mismatch, that channel switches to passthrough (live) independently.
+- Record: `freud/scripts/live-eval.sh --input <file> --record-session` or `./run-neopsyke.sh --record-session`
+- Replay: `freud/scripts/live-eval.sh --session-replay <run-dir>`
+- Session recording files live in `$RUN_DIR/session/`:
+  - `signals.jsonl`, `llm-cache.jsonl`, `memory-recall.jsonl`, `logbook-recall.jsonl`, `web-results.jsonl`, `action-control.jsonl`, `session-manifest.json`
+- Session replay telemetry: `artifacts/session-replay-stats.json` (per-channel hit/divergence counts)
+- Env vars: `NEOPSYKE_SESSION_RECORDING_MODE` (`record`/`replay`/`off`), `NEOPSYKE_SESSION_RECORDING_DIR`.
 
 ### Failure Semantics (Important)
 - `feature-loop.sh` runs one pass per invocation; it does not auto-fix or auto-iterate code.
@@ -161,16 +179,17 @@ Bad:
   - `freud/scripts/run-bbh-smoke.sh ...`
 - The live commands above may overlap only when all of these are true:
   - they are not running at the same time as any Gradle-backed command
-  - they are not intentionally sharing memory state (`--preserve-memory`, shared user memory, or other shared persistent memory modes are off)
   - you do not rely on shared `latest` pointers as stable ownership markers because the last writer wins
-- Concurrent memory-dependent live runs are not safe. They can contaminate recall/imprint state and should be serialized unless each run has fully isolated memory resources.
+- `live-eval.sh` runs are parallel-safe by default: each run has fully isolated per-run state (logbook, metrics, action-control DBs in `$RUN_DIR/state/`, unique pgvector namespace).
 
 ### Artifact Locations
 - Feature-loop run outputs are isolated per run under:
   - `.neopsyke/runs/freud/<timestamp>-<feature-id>/`
 - Live-eval run outputs under:
   - `.neopsyke/runs/freud/<timestamp>-live-eval/`
-  - Includes: `artifacts/answer.txt`, `artifacts/verdict.json`, `artifacts/cache-stats.json`, `artifacts/llm-cache.jsonl` (record mode)
+  - Includes: `artifacts/answer.txt`, `artifacts/verdict.json`, `artifacts/cache-stats.json`, `artifacts/session-replay-stats.json` (replay mode)
+  - Per-run state: `state/logbook.db`, `state/metrics.db`, `state/action-control.db`, `state/pgvector-namespace.txt`
+  - Session recording (when `--record-session`): `session/signals.jsonl`, `session/llm-cache.jsonl`, `session/memory-recall.jsonl`, `session/logbook-recall.jsonl`, `session/web-results.jsonl`, `session/action-control.jsonl`, `session/session-manifest.json`
 - BBH smoke aggregate artifacts are written under the active Freud run:
   - `artifacts/bbh-smoke-<lane>-summary.json`
   - `artifacts/bbh-smoke-<lane>-summary.md`
@@ -240,6 +259,8 @@ Bad:
 - `reasoning_eval_model` remains the live/manual lane and runs the BBH-style smoke suite through `freud/scripts/run-bbh-smoke.sh`.
 - BBH/live reasoning wrappers should call `freud/scripts/live-eval.sh`, which in turn uses `./run-neopsyke.sh --freud-live`.
 - Strict JSON support for planner/meta-reasoner is a hard requirement in live lanes; any structured-output downgrade is treated as a lane failure.
+- `session_replay_test` is an optional live step that runs `freud/scripts/test-session-replay.sh`: records a live-eval, replays it, verifies answer match and channel determinism. Configured via `FREUD_SESSION_REPLAY_TEST_CMD`.
+
 ### Summarization Policy
 - Use heuristic summarization: indexed artifacts first (`summary-compact.md`, `trail-index.tsv`, `step-index.tsv`, `anomalies.json`), then AI deep analysis and code edits last.
 - Avoid pasting full logs in prompts unless strictly needed.

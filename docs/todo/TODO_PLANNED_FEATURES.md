@@ -25,9 +25,11 @@
 
 ## 0. Extend the Freud record player to record and replay user interactive sessions, including any signals
 
-> Status: Backlog
+> Status: Done
 >
 > Added: 2026-03-24
+>
+> Completed: 2026-03-26
 
 ### Problem
 
@@ -37,6 +39,32 @@ to record and replay user interactive sessions, including any signals (user inpu
 ### Goal
 
 Better, faster, cheaper and deterministic debugging of live session artifacts.
+
+### Implementation
+
+Branch: `feat/freud-replay-interactive`
+
+Per-subsystem recording with independent divergence detection. Each non-deterministic
+boundary is wrapped with a record/replay channel (JSONL, hash-based divergence):
+
+| Channel | Wraps | Hash key |
+|---------|-------|----------|
+| `signals` | `SignalSource` (user inputs, Id cues, goal cues) | order-based |
+| `llm-cache` | `ChatModelClient` (existing, now with volatile-stripped hashes) | SHA-256 of semantic message content |
+| `memory-recall` | `Hippocampus` recall path | cue + intent + limits |
+| `logbook-recall` | `Logbook` query path | keywords + maxResults + eventTypes |
+| `web-results` | `WebSearchEngine` | query + maxResults |
+| `action-control` | `ActionControlService` authorization decisions | actionType + progress + commitMode |
+
+Recording: `./run-neopsyke.sh --record-session` or `freud/scripts/live-eval.sh --input X --record-session`
+Replay: `freud/scripts/live-eval.sh --session-replay <run-dir>`
+E2E test: `freud/scripts/test-session-replay.sh`
+
+Per-run isolation: all persistent state (logbook, metrics, action-control DBs) lives in
+`$RUN_DIR/state/`, pgvector uses per-run namespace. Parallel runs are safe.
+Age-based retention: run dirs older than `FREUD_RUN_RETENTION_DAYS` (default 3) auto-deleted.
+
+Key files: `src/main/kotlin/ai/neopsyke/session/` (6 files), `freud/scripts/test-session-replay.sh`
 
 ---
 
