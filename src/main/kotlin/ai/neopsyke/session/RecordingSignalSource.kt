@@ -116,7 +116,13 @@ class RecordingSignalSource(
             val ctx = signalMapper.createObjectNode()
             ctx.put("session_id", stimulus.conversationContext.sessionId)
             ctx.put("interlocutor_id", stimulus.conversationContext.interlocutor.id)
-            ctx.put("instruction_trust", stimulus.conversationContext.security.instructionTrust.name)
+            val sec = stimulus.conversationContext.security
+            ctx.put("instruction_trust", sec.instructionTrust.name)
+            ctx.put("principal_role", sec.principal.role.name)
+            ctx.put("channel_provider", sec.channel.provider)
+            ctx.put("channel_surface", sec.channel.surface.name)
+            ctx.put("channel_transport", sec.channel.transport.name)
+            ctx.put("policy_scope_id", sec.policyScopeId)
             node.set<ObjectNode>("conversation_context", ctx)
 
             val meta = signalMapper.createObjectNode()
@@ -146,11 +152,22 @@ class RecordingSignalSource(
                 ai.neopsyke.agent.model.InstructionTrust.TRUSTED_INSTRUCTION
             }
 
+            // Reconstruct the security context faithfully from recorded fields.
+            val channelProvider = ctxNode.path("channel_provider").asText().ifEmpty { source }
+            val policyScopeId = ctxNode.path("policy_scope_id").asText().ifEmpty { "default" }
             val security = when (instructionTrust) {
                 ai.neopsyke.agent.model.InstructionTrust.TRUSTED_INSTRUCTION ->
-                    ConversationSecurityContexts.ownerDirect(provider = source, channelId = sessionId)
+                    ConversationSecurityContexts.ownerDirect(
+                        provider = channelProvider,
+                        channelId = sessionId,
+                        policyScopeId = policyScopeId,
+                    )
                 ai.neopsyke.agent.model.InstructionTrust.UNTRUSTED_INSTRUCTION ->
-                    ConversationSecurityContexts.internalAutomation(provider = source, channelId = sessionId)
+                    ConversationSecurityContexts.internalAutomation(
+                        provider = channelProvider,
+                        channelId = sessionId,
+                        policyScopeId = policyScopeId,
+                    )
             }
 
             val metadata = buildMap {

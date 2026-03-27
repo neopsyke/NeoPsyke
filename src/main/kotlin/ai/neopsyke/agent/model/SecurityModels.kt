@@ -348,21 +348,23 @@ fun ConversationSecurityContext.renderSummary(): String =
     buildString {
         append("principal_role=")
         append(principal.role.name.lowercase())
-        // channel_provider excluded: contains mode-specific strings
-        // (freud-live, webapp, stdin) that the LLM does not need.
+        append("\nchannel_provider=")
+        append(channel.provider)
         append("\nchannel_surface=")
         append(channel.surface.name.lowercase())
         append("\ntransport_class=")
         append(channel.transport.name.lowercase())
         append("\ninstruction_trust=")
         append(instructionTrust.name.lowercase())
-        // policy_scope_id excluded: contains session-derived IDs.
+        append("\npolicy_scope_id=")
+        append(policyScopeId)
     }
 
 fun CognitiveThreadSecurityContext.renderSummary(): String =
     buildString {
-        // policy_scope_id excluded: contains session-derived IDs.
-        append("principal_role=")
+        append("policy_scope_id=")
+        append(policyScopeId)
+        append("\nprincipal_role=")
         append(principalRole.name.lowercase())
         append("\ninstruction_trust=")
         append(instructionTrust.name.lowercase())
