@@ -1,0 +1,14 @@
+# Profile: low-llm (formerly weak-structure)
+# Enables live steps with the low-cost LLM routing.
+
+live_eval:
+  llm_config_file: freud/config/llm-weak-structure.yaml
+  timeout: 120
+
+pipeline:
+  - name: reasoning_eval_model
+    cmd: "freud/scripts/run-bbh-smoke.sh --lane weak-structure"
+    live_only: true
+  - name: session_replay_test
+    cmd: "freud/scripts/test-session-replay.sh --timeout 60"
+    live_only: true

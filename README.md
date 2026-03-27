@@ -256,10 +256,10 @@ Some omissions are deliberate architectural decisions rather than missing checkl
 ./gradlew test
 
 # Full validation gate (used for PRs)
-freud/scripts/feature-loop.sh ci-pr
+./freud run ci-pr
 ```
 
-The project uses a multi-phase validation pipeline called **Freud**:
+The project uses a multi-phase validation pipeline called **Freud** (a single Go CLI at `freud/cli/`):
 
 1. **Preflight compile** -- fast build check
 2. **Targeted tests** -- tests related to the changed feature
@@ -267,7 +267,7 @@ The project uses a multi-phase validation pipeline called **Freud**:
 4. **Scenario pack** -- deterministic agent behavior scenarios (`freud/scenarios/v1/`) that exercise the cognitive loop end-to-end
 5. **Reasoning eval** -- logic gate tests (shape-lock, feedback-carry, multi-fix) that verify the planner produces structurally correct decisions
 
-Live evaluation lanes (weak-structure, prod-acceptance) and memory live eval are available for deeper validation during development.
+Live evaluation lanes (`--lane low-llm`, `--lane high-llm`) and memory live eval are available for deeper validation during development.
 
 ## Configuration
 

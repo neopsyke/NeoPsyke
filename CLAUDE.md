@@ -2,7 +2,7 @@
 
 ## Claude Code Specifics
 - Use `./gradlew test` for full verification.
-- When Freud is needed, use `freud/scripts/feature-loop.sh <feature-id>`.
+- When Freud is needed, use `./freud run <feature-id>` (build with `cd freud/cli && go build -o freud .`).
 - Commit only when explicitly asked.
 - Do not push to remote unless explicitly asked.
 - When resuming from a compacted session, read the transcript at the path provided before proceeding.

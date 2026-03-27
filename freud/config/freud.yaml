@@ -1,0 +1,61 @@
+# Freud unified configuration
+# All values overridable by FREUD_* env vars and CLI flags.
+# Precedence: CLI flag > env var > profile overlay > this file > built-in defaults
+
+project:
+  name: neopsyke
+  run_root: .neopsyke/runs/freud
+  retention_days: 3
+  gradle_home: .freud/gradle-home
+
+# Ordered pipeline steps for `freud run`.
+# Steps with live_only: true are skipped unless --live is passed.
+# Steps with empty cmd are skipped at runtime.
+pipeline:
+  - name: preflight_compile
+    cmd: "./gradlew compileKotlin compileTestKotlin"
+  - name: targeted_tests
+    cmd: "./gradlew :test --tests 'ai.neopsyke.agent.*'"
+  - name: full_tests
+    cmd: "./gradlew test"
+  - name: scenario_pack
+    cmd: "freud/scripts/run-scenarios.sh --file freud/scenarios/v1/neopsyke-agent-scenarios.json"
+  - name: reasoning_eval_logic
+    cmd: "freud/scripts/run-reasoning-pr-gate.sh"
+  - name: reasoning_eval_model
+    cmd: ""
+    live_only: true
+  - name: memory_live_smoke
+    cmd: ""
+    live_only: true
+  - name: session_replay_test
+    cmd: ""
+    live_only: true
+
+live_eval:
+  timeout: 120                       # seconds per eval
+  preserve_memory: false             # keep memory state across runs
+  goals_enabled: false               # goals subsystem
+  llm_config_file: ""                # LLM routing YAML (set by profile)
+  neopsyke_cmd: "./run-neopsyke.sh"  # NeoPsyke entry point
+
+session:
+  record: false                      # off by default; use --record-session
+
+bbh:
+  prompts_file: freud/evals/bbh-smoke/prompts.jsonl
+  answers_file: freud/evals/bbh-smoke/answers.jsonl
+  min_pass_rate: 100                 # gate: minimum pass percentage
+  max_timeouts: 0                    # gate: allowed timeout count
+  max_regression_percent: 0          # gate: max allowed regression
+  preserve_memory: false
+  memory_enabled: false
+  logbook_enabled: false
+
+runtime:
+  continue_on_fail: false            # stop on first step failure
+  scratchpad_debug: true             # keep debug dumps
+  id_enabled: false                  # autonomous impulses
+
+telemetry:
+  enabled: true
