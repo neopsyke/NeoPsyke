@@ -25,9 +25,11 @@
 
 ## 0. Extend the Freud record player to record and replay user interactive sessions, including any signals
 
-> Status: Backlog
+> Status: Done
 >
 > Added: 2026-03-24
+>
+> Completed: 2026-03-26
 
 ### Problem
 
@@ -37,6 +39,32 @@ to record and replay user interactive sessions, including any signals (user inpu
 ### Goal
 
 Better, faster, cheaper and deterministic debugging of live session artifacts.
+
+### Implementation
+
+Branch: `feat/freud-replay-interactive`
+
+Per-subsystem recording with independent divergence detection. Each non-deterministic
+boundary is wrapped with a record/replay channel (JSONL, hash-based divergence):
+
+| Channel | Wraps | Hash key |
+|---------|-------|----------|
+| `signals` | `SignalSource` (user inputs, Id cues, goal cues) | order-based |
+| `llm-cache` | `ChatModelClient` (existing, now with volatile-stripped hashes) | SHA-256 of semantic message content |
+| `memory-recall` | `Hippocampus` recall path | cue + intent + limits |
+| `logbook-recall` | `Logbook` query path | keywords + maxResults + eventTypes |
+| `web-results` | `WebSearchEngine` | query + maxResults |
+| `action-control` | `ActionControlService` authorization decisions | actionType + progress + commitMode |
+
+Recording: `./run-neopsyke.sh --record-session` or `freud/scripts/live-eval.sh --input X --record-session`
+Replay: `freud/scripts/live-eval.sh --session-replay <run-dir>`
+E2E test: `freud/scripts/test-session-replay.sh`
+
+Per-run isolation: all persistent state (logbook, metrics, action-control DBs) lives in
+`$RUN_DIR/state/`, pgvector uses per-run namespace. Parallel runs are safe.
+Age-based retention: run dirs older than `FREUD_RUN_RETENTION_DAYS` (default 3) auto-deleted.
+
+Key files: `src/main/kotlin/ai/neopsyke/session/` (6 files), `freud/scripts/test-session-replay.sh`
 
 ---
 
@@ -656,6 +684,34 @@ builtin_tools:
 - Prompt budget: `LlmEgoPlanner.buildMessages()` in `LlmEgoPlanner.kt`
 - Security checks: `ActionPayloadSecurity.kt`
 - Scratchpad lifecycle: `ScratchpadStore.kt`
+
+---
+
+## 4. Investigate Temporal Reasoning in LLM Prompts
+
+> Status: Backlog
+>
+> Added: 2026-03-27
+
+### Problem
+
+Raw timestamps were removed from LLM prompts to enable deterministic
+session replay caching. However, temporal reasoning ("how long ago did
+the user ask this?", "is this information stale?") may be needed for
+some agent behaviors in the future.
+
+### Goal
+
+Investigate whether temporal context is needed for any current or planned
+agent behavior, and if so, design a deterministic representation (e.g.,
+relative time labels like "recent"/"earlier"/"stale" computed from stable
+thresholds, not wall-clock time) that doesn't break LLM cache replay.
+
+### Key Constraint
+
+Any temporal data sent to the LLM must be deterministic given the same
+input sequence. Avoid raw `Instant.now()`, epoch-ms, or ISO timestamps
+in prompt content. Use relative or bucketed representations instead.
 
 ---
 

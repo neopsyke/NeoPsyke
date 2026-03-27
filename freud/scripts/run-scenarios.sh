@@ -15,20 +15,37 @@ EOF
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 gradle_user_home="${FREUD_GRADLE_USER_HOME:-}"
 
-prime_gradle_wrapper_cache() {
+prime_gradle_build_cache() {
   [[ -z "$gradle_user_home" ]] && return 0
+  mkdir -p "$gradle_user_home"
+
+  # 1. Prime wrapper dists (fast copy if available locally)
   local local_dists="$gradle_user_home/wrapper/dists"
   local home_dists="$HOME/.gradle/wrapper/dists"
-  if compgen -G "$local_dists/gradle-*-bin/*" >/dev/null; then
+  if ! compgen -G "$local_dists/gradle-*-bin/*" >/dev/null 2>&1; then
+    if [[ -d "$home_dists" ]]; then
+      mkdir -p "$local_dists"
+      cp -R "$home_dists"/gradle-*-bin "$local_dists"/ 2>/dev/null || true
+    fi
+  fi
+
+  # 2. Prime build plugins + dependencies (Kotlin plugin, etc.)
+  local marker="$gradle_user_home/.build-cache-primed"
+  if [[ -f "$marker" ]]; then
     return 0
   fi
-  if [[ -d "$home_dists" ]]; then
-    mkdir -p "$local_dists"
-    cp -R "$home_dists"/gradle-*-bin "$local_dists"/ 2>/dev/null || true
+  echo "Priming isolated Gradle home with build plugins and dependencies..." >&2
+  if GRADLE_USER_HOME="$gradle_user_home" "$repo_root/gradlew" \
+      --no-daemon --no-problems-report \
+      compileKotlin compileTestKotlin >/dev/null 2>&1; then
+    touch "$marker"
+    echo "Isolated Gradle home primed successfully." >&2
+  else
+    echo "WARNING: Failed to prime Gradle build cache. First build may be slow or fail offline." >&2
   fi
 }
 
-prime_gradle_wrapper_cache
+prime_gradle_build_cache
 
 scenario_file="$repo_root/freud/scenarios/v1/neopsyke-agent-scenarios.json"
 dry_run="false"

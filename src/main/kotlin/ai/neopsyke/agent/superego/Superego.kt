@@ -294,7 +294,6 @@ class Superego(
                         Action origin:
                         source=$originSource
                         need_id=$originNeedId
-                        root_impulse_id=$originRootImpulseId
                         Internally initiated actions may be valid even when the latest user message is irrelevant or empty.
                     """.trimIndent()
                 ),

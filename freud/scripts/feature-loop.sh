@@ -11,6 +11,7 @@ Usage:
 Step names for --from-step:
   preflight_compile  targeted_tests  full_tests  scenario_pack
   reasoning_eval_logic  reasoning_eval_model  memory_live_smoke
+  session_replay_test
 
 Description:
   Runs the primary deterministic Freud workflow and writes compact artifacts under:
@@ -130,6 +131,7 @@ scenario_pack_cmd="${FREUD_SCENARIO_PACK_CMD:-}"
 reasoning_logic_cmd="${FREUD_REASONING_EVAL_LOGIC_CMD:-}"
 reasoning_model_cmd="${FREUD_REASONING_EVAL_MODEL_CMD:-}"
 memory_smoke_cmd="${FREUD_MEMORY_SMOKE_CMD:-}"
+session_replay_test_cmd="${FREUD_SESSION_REPLAY_TEST_CMD:-}"
 run_root_cfg="${FREUD_RUN_ROOT:-.neopsyke/runs/freud}"
 gradle_user_home_cfg="${FREUD_GRADLE_USER_HOME:-}"
 
@@ -161,6 +163,7 @@ all_steps_ordered=(
   reasoning_eval_logic
   reasoning_eval_model
   memory_live_smoke
+  session_replay_test
 )
 
 # step_is_active <step_name>: returns 0 (active) or 1 (skip) based on --from-step.
@@ -195,8 +198,8 @@ validate_live_wiring() {
     return 1
   fi
 
-  if step_is_active "reasoning_eval_model" && [[ -z "$reasoning_model_cmd" ]] && step_is_active "memory_live_smoke" && [[ -z "$memory_smoke_cmd" ]]; then
-    echo "Live lane not configured: both FREUD_REASONING_EVAL_MODEL_CMD and FREUD_MEMORY_SMOKE_CMD are blank. Use a live config such as freud/config/live-weak-structure.env."
+  if step_is_active "reasoning_eval_model" && [[ -z "$reasoning_model_cmd" ]] && step_is_active "memory_live_smoke" && [[ -z "$memory_smoke_cmd" ]] && step_is_active "session_replay_test" && [[ -z "$session_replay_test_cmd" ]]; then
+    echo "Live lane not configured: FREUD_REASONING_EVAL_MODEL_CMD, FREUD_MEMORY_SMOKE_CMD, and FREUD_SESSION_REPLAY_TEST_CMD are all blank. Use a live config such as freud/config/live-weak-structure.env."
     return 1
   fi
 
@@ -207,6 +210,11 @@ validate_live_wiring() {
 
   if step_is_active "memory_live_smoke" && [[ "$from_step" == "memory_live_smoke" ]] && [[ -z "$memory_smoke_cmd" ]]; then
     echo "Live lane not configured: FREUD_MEMORY_SMOKE_CMD is blank for memory_live_smoke."
+    return 1
+  fi
+
+  if step_is_active "session_replay_test" && [[ "$from_step" == "session_replay_test" ]] && [[ -z "$session_replay_test_cmd" ]]; then
+    echo "Live lane not configured: FREUD_SESSION_REPLAY_TEST_CMD is blank for session_replay_test."
     return 1
   fi
 }
@@ -279,20 +287,37 @@ write_local_freud_pointers() {
   write_pointer_file "$run_dir" "$local_root/latest-run.txt"
 }
 
-prime_gradle_wrapper_cache() {
+prime_gradle_build_cache() {
   [[ -z "$gradle_user_home" ]] && return 0
+  mkdir -p "$gradle_user_home"
+
+  # 1. Prime wrapper dists (fast copy if available locally)
   local local_dists="$gradle_user_home/wrapper/dists"
   local home_dists="$HOME/.gradle/wrapper/dists"
-  if compgen -G "$local_dists/gradle-*-bin/*" >/dev/null; then
+  if ! compgen -G "$local_dists/gradle-*-bin/*" >/dev/null 2>&1; then
+    if [[ -d "$home_dists" ]]; then
+      mkdir -p "$local_dists"
+      cp -R "$home_dists"/gradle-*-bin "$local_dists"/ 2>/dev/null || true
+    fi
+  fi
+
+  # 2. Prime build plugins + dependencies (Kotlin plugin, etc.)
+  local marker="$gradle_user_home/.build-cache-primed"
+  if [[ -f "$marker" ]]; then
     return 0
   fi
-  if [[ -d "$home_dists" ]]; then
-    mkdir -p "$local_dists"
-    cp -R "$home_dists"/gradle-*-bin "$local_dists"/ 2>/dev/null || true
+  echo "Priming isolated Gradle home with build plugins and dependencies..." >&2
+  if GRADLE_USER_HOME="$gradle_user_home" "$repo_root/gradlew" \
+      --no-daemon --no-problems-report \
+      compileKotlin compileTestKotlin >/dev/null 2>&1; then
+    touch "$marker"
+    echo "Isolated Gradle home primed successfully." >&2
+  else
+    echo "WARNING: Failed to prime Gradle build cache. First build may be slow or fail offline." >&2
   fi
 }
 
-prime_gradle_wrapper_cache
+prime_gradle_build_cache
 
 : >"$steps_file"
 : >"$step_index_file"
@@ -401,7 +426,8 @@ write_run_config() {
     echo "    \"scenario_pack\": \"$(json_escape "$scenario_pack_cmd")\","
     echo "    \"reasoning_eval_logic\": \"$(json_escape "$reasoning_logic_cmd")\","
     echo "    \"reasoning_eval_model\": \"$(json_escape "$reasoning_model_cmd")\","
-    echo "    \"memory_live_smoke\": \"$(json_escape "$memory_smoke_cmd")\""
+    echo "    \"memory_live_smoke\": \"$(json_escape "$memory_smoke_cmd")\","
+    echo "    \"session_replay_test\": \"$(json_escape "$session_replay_test_cmd")\""
     echo "  }"
     echo "}"
   } >"$run_config_json"
@@ -772,6 +798,9 @@ if [[ "$should_stop" != "true" && "$mode" == "live" ]]; then
 fi
 if [[ "$should_stop" != "true" && "$mode" == "live" ]]; then
   run_step "memory_live_smoke" "$(step_cmd_for memory_live_smoke "$memory_smoke_cmd")" "$log_dir/06-memory-live-smoke.log" || should_stop="true"
+fi
+if [[ "$should_stop" != "true" && "$mode" == "live" ]]; then
+  run_step "session_replay_test" "$(step_cmd_for session_replay_test "$session_replay_test_cmd")" "$log_dir/07-session-replay-test.log" || should_stop="true"
 fi
 
 if "$repo_root/freud/scripts/triage-run.sh" "$run_dir" >/dev/null; then
