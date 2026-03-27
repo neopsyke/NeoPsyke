@@ -75,7 +75,11 @@ class RecordingLogbook(
             logger.info { "Logbook recall channel diverged at seq=$seq, switching to live" }
             return delegate.query(query)
         }
-        return deserializeRecall(data as ObjectNode)
+        val dataObj = data as? ObjectNode ?: run {
+            logger.info { "Logbook recall channel: unexpected data node type at seq=$seq, switching to live" }
+            return delegate.query(query)
+        }
+        return deserializeRecall(dataObj)
     }
 
     companion object {
@@ -107,6 +111,11 @@ class RecordingLogbook(
                 if (entry.runId != null) e.put("run_id", entry.runId)
                 if (entry.sessionId != null) e.put("session_id", entry.sessionId)
                 if (entry.interlocutorId != null) e.put("interlocutor_id", entry.interlocutorId)
+                if (!entry.metadata.isNullOrEmpty()) {
+                    e.set<com.fasterxml.jackson.databind.node.ObjectNode>(
+                        "metadata", mapper.valueToTree(entry.metadata)
+                    )
+                }
                 entries.add(e)
             }
             node.set<ObjectNode>("entries", entries)
@@ -136,6 +145,10 @@ class RecordingLogbook(
                         runId = if (e.has("run_id")) e.path("run_id").asText() else null,
                         sessionId = if (e.has("session_id")) e.path("session_id").asText() else null,
                         interlocutorId = if (e.has("interlocutor_id")) e.path("interlocutor_id").asText() else null,
+                        metadata = if (e.has("metadata") && e.path("metadata").isObject) {
+                            mapper.convertValue(e.path("metadata"), Map::class.java)
+                                ?.mapKeys { (k, _) -> k.toString() }
+                        } else null,
                     )
                 } else null
             }

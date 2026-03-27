@@ -88,7 +88,11 @@ class RecordingHippocampus(
             logger.info { "Memory recall channel diverged at seq=$seq, switching to live" }
             return delegate.recall(request)
         }
-        return deserializeRecallResult(data as ObjectNode)
+        val dataObj = data as? ObjectNode ?: run {
+            logger.info { "Memory recall channel: unexpected data node type at seq=$seq, switching to live" }
+            return delegate.recall(request)
+        }
+        return deserializeRecallResult(dataObj)
     }
 
     companion object {
@@ -147,7 +151,14 @@ class RecordingHippocampus(
                         content = if (itemNode.has("content")) itemNode.path("content").asText() else null,
                         score = if (itemNode.has("score")) itemNode.path("score").asDouble() else null,
                         confidence = if (itemNode.has("confidence")) itemNode.path("confidence").asDouble() else null,
+                        timestamp = if (itemNode.has("timestamp")) try {
+                            java.time.Instant.parse(itemNode.path("timestamp").asText())
+                        } catch (_: Exception) { null } else null,
                         tags = itemNode.path("tags").mapNotNull { it.asText() },
+                        eventType = if (itemNode.has("event_type")) try {
+                            ai.neopsyke.agent.memory.longterm.MemoryEventType.valueOf(itemNode.path("event_type").asText())
+                        } catch (_: Exception) { null } else null,
+                        actionType = if (itemNode.has("action_type")) itemNode.path("action_type").asText() else null,
                     )
                 } else null
             }

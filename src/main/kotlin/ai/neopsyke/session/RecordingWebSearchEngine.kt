@@ -65,7 +65,11 @@ class RecordingWebSearchEngine(
             logger.info { "Web search channel diverged at seq=$seq, switching to live" }
             return delegate.search(query, maxResults)
         }
-        return deserializeSearchResult(data as ObjectNode)
+        val dataObj = data as? ObjectNode ?: run {
+            logger.info { "Web search channel: unexpected data node type at seq=$seq, switching to live" }
+            return delegate.search(query, maxResults)
+        }
+        return deserializeSearchResult(dataObj)
     }
 
     companion object {

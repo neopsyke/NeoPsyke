@@ -8,6 +8,7 @@ import mu.KotlinLogging
 import ai.neopsyke.instrumentation.AgentInstrumentation
 import ai.neopsyke.instrumentation.NoopAgentInstrumentation
 import java.io.Closeable
+import java.util.concurrent.atomic.AtomicBoolean
 import java.nio.file.Files
 import java.nio.file.Path
 
@@ -80,17 +81,15 @@ class SessionRecordingManager(
         null
     }
 
-    @Volatile
-    private var contextCaptured = false
+    private val contextCaptured = AtomicBoolean(false)
 
     /**
      * Capture the conversation context from the first signal during
      * recording. Called by [RecordingSignalSource] on the first recorded
-     * stimulus. Subsequent calls are ignored.
+     * stimulus. Subsequent calls are ignored (atomic).
      */
     fun captureRecordingContext(context: RecordedContext) {
-        if (mode != SessionRecordingMode.RECORD || contextCaptured) return
-        contextCaptured = true
+        if (mode != SessionRecordingMode.RECORD || !contextCaptured.compareAndSet(false, true)) return
         try {
             val path = sessionDir.resolve(RECORDING_CONTEXT_FILE)
             Files.newBufferedWriter(path).use { w ->

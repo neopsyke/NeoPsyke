@@ -67,18 +67,21 @@ class RecordingSignalSource(
             )
         )
         // Capture the conversation context from the first signal for replay.
-        manager?.captureRecordingContext(
-            RecordedContext(
-                source = stimulus.source,
-                sessionId = stimulus.conversationContext.sessionId,
-                interlocutorId = stimulus.conversationContext.interlocutor.id,
-                instructionTrust = stimulus.conversationContext.security.instructionTrust.name,
-                channelSurface = stimulus.conversationContext.security.channel.surface.name,
-                channelTransport = stimulus.conversationContext.security.channel.transport.name,
-                principalRole = stimulus.conversationContext.security.principal.role.name,
-                goalsEnabled = System.getenv("NEOPSYKE_GOALS_ENABLED")?.trim()?.lowercase() != "false",
+        // captureRecordingContext is atomic — only the first call writes.
+        if (manager != null && manager.mode == SessionRecordingMode.RECORD) {
+            manager.captureRecordingContext(
+                RecordedContext(
+                    source = stimulus.source,
+                    sessionId = stimulus.conversationContext.sessionId,
+                    interlocutorId = stimulus.conversationContext.interlocutor.id,
+                    instructionTrust = stimulus.conversationContext.security.instructionTrust.name,
+                    channelSurface = stimulus.conversationContext.security.channel.surface.name,
+                    channelTransport = stimulus.conversationContext.security.channel.transport.name,
+                    principalRole = stimulus.conversationContext.security.principal.role.name,
+                    goalsEnabled = System.getenv("NEOPSYKE_GOALS_ENABLED")?.trim()?.lowercase() != "false",
+                )
             )
-        )
+        }
         return signal
     }
 
@@ -100,7 +103,11 @@ class RecordingSignalSource(
             logger.info { "Signal channel diverged at seq=$seq, switching to live source" }
             return delegate.nextSignal()
         }
-        return CognitiveSignal.StimulusReceived(deserializeStimulus(data as ObjectNode))
+        val dataObj = data as? ObjectNode ?: run {
+            logger.warn { "Signal channel: unexpected data node type at seq=$seq, switching to live source" }
+            return delegate.nextSignal()
+        }
+        return CognitiveSignal.StimulusReceived(deserializeStimulus(dataObj))
     }
 
     companion object {
