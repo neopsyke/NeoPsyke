@@ -629,7 +629,7 @@ internal object AppModeRunners {
         val signalSource: ai.neopsyke.agent.cortex.sensory.SignalSource =
             if (sessionRecordingManager != null && sessionRecordingManager.mode == SessionRecordingMode.RECORD) {
                 logger.info { "Session recording enabled for interactive mode" }
-                RecordingSignalSource(delegate = sensoryInput, channel = sessionRecordingManager.signals)
+                RecordingSignalSource(delegate = sensoryInput, channel = sessionRecordingManager.signals, manager = sessionRecordingManager)
             } else {
                 sensoryInput
             }
@@ -1429,7 +1429,7 @@ internal object AppModeRunners {
         val signalSource: ai.neopsyke.agent.cortex.sensory.SignalSource =
             if (sessionRecordingManager != null) {
                 logger.info { "Session ${sessionRecordingManager.mode.name.lowercase()} enabled for freud-live mode" }
-                RecordingSignalSource(delegate = sensoryInput, channel = sessionRecordingManager.signals)
+                RecordingSignalSource(delegate = sensoryInput, channel = sessionRecordingManager.signals, manager = sessionRecordingManager)
             } else {
                 sensoryInput
             }

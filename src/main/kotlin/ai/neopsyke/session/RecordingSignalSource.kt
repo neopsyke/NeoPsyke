@@ -41,6 +41,7 @@ private val signalMapper = jacksonObjectMapper()
 class RecordingSignalSource(
     private val delegate: SignalSource,
     private val channel: RecordReplayChannel,
+    private val manager: SessionRecordingManager? = null,
 ) : SignalSource {
 
     override suspend fun nextSignal(): Signal {
@@ -63,6 +64,19 @@ class RecordingSignalSource(
                 hash = hash,
                 channel = SessionRecordingManager.CHANNEL_SIGNALS,
                 data = data,
+            )
+        )
+        // Capture the conversation context from the first signal for replay.
+        manager?.captureRecordingContext(
+            RecordedContext(
+                source = stimulus.source,
+                sessionId = stimulus.conversationContext.sessionId,
+                interlocutorId = stimulus.conversationContext.interlocutor.id,
+                instructionTrust = stimulus.conversationContext.security.instructionTrust.name,
+                channelSurface = stimulus.conversationContext.security.channel.surface.name,
+                channelTransport = stimulus.conversationContext.security.channel.transport.name,
+                principalRole = stimulus.conversationContext.security.principal.role.name,
+                goalsEnabled = System.getenv("NEOPSYKE_GOALS_ENABLED")?.trim()?.lowercase() != "false",
             )
         )
         return signal

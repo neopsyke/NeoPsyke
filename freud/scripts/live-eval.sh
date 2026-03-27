@@ -328,6 +328,16 @@ export NEOPSYKE_LLM_CACHE_FILE="$CACHE_FILE"
 if [[ -n "$SESSION_REPLAY_DIR" ]]; then
   export NEOPSYKE_SESSION_RECORDING_MODE="replay"
   export NEOPSYKE_SESSION_RECORDING_DIR="$SESSION_REPLAY_DIR"
+  # Adopt runtime config from the recording so the replay environment matches.
+  RECORDING_CONTEXT_FILE="$SESSION_REPLAY_DIR/recording-context.json"
+  if [[ -f "$RECORDING_CONTEXT_FILE" ]]; then
+    RECORDED_GOALS="$(python3 -c "import json; print(json.load(open('$RECORDING_CONTEXT_FILE')).get('goals_enabled', False))" 2>/dev/null || echo "")"
+    if [[ "$RECORDED_GOALS" == "True" ]]; then
+      export NEOPSYKE_GOALS_ENABLED="true"
+    elif [[ "$RECORDED_GOALS" == "False" ]]; then
+      export NEOPSYKE_GOALS_ENABLED="false"
+    fi
+  fi
 fi
 export NEOPSYKE_LOG_FILE="$RUN_DIR/logs/neopsyke.log"
 export NEOPSYKE_EVENT_LOG_FILE="$RUN_DIR/logs/events.jsonl"
