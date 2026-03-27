@@ -256,7 +256,7 @@ Some omissions are deliberate architectural decisions rather than missing checkl
 ./gradlew test
 
 # Full validation gate (used for PRs)
-./freud run ci-pr
+./freud-cli run ci-pr
 ```
 
 The project uses a multi-phase validation pipeline called **Freud** (a single Go CLI at `freud/cli/`):

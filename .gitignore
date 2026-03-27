@@ -6,10 +6,8 @@ out/
 .neopsyke/
 .freud/
 .kotlin/
-freud/latest
-freud/latest-run.txt
-freud/artifacts-latest
-freud/logs/latest
+# Freud CLI binary
+freud-cli
 
 # IDE/editor files
 .idea/

@@ -160,7 +160,7 @@ func ContextPack(runDir string) (string, error) {
 		"2. Read files from **Start Here** in order (they are sorted cheapest-first).",
 		"3. For each failed step, read its `step-meta/<step>.json` for command, timing, and first error ref.",
 		"4. Only open raw `logs/<step>.log` if the indexed artifacts above are not enough.",
-		fmt.Sprintf("5. After fixing, re-run: `./freud run %s`", fid),
+		fmt.Sprintf("5. After fixing, re-run: `./freud-cli run %s`", fid),
 	)
 
 	os.WriteFile(contextMD, []byte(strings.Join(md, "\n")+"\n"), 0o644)
