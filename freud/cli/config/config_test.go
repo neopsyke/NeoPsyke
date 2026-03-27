@@ -129,22 +129,6 @@ live_eval:
 `
 	os.WriteFile(yamlPath, []byte(content), 0o644)
 
-	// Profile YAML
-	profileDir := filepath.Join(dir, "profiles")
-	os.MkdirAll(profileDir, 0o755)
-	profilePath := filepath.Join(profileDir, "low-llm.yaml")
-	profileContent := `
-live_eval:
-  llm_config_file: "freud/config/llm-weak-structure.yaml"
-pipeline:
-  - name: reasoning_eval_model
-    cmd: "freud/scripts/run-bbh-smoke.sh --lane weak-structure"
-    live_only: true
-`
-	os.WriteFile(profilePath, []byte(profileContent), 0o644)
-
-	// Temporarily override repo root detection for profile loading
-	// We test the merge logic directly using Viper
 	cfg, err := LoadConfig(yamlPath, "", nil)
 	if err != nil {
 		t.Fatalf("LoadConfig failed: %v", err)
@@ -195,11 +179,15 @@ func TestLoadConfigInvalidOverrideFormat(t *testing.T) {
 	}
 }
 
-func TestLaneMap(t *testing.T) {
-	if LaneMap["low-llm"] != "weak-structure" {
-		t.Errorf("expected low-llm -> weak-structure, got %s", LaneMap["low-llm"])
+func TestLaneNames(t *testing.T) {
+	if len(LaneNames) != 2 {
+		t.Errorf("expected 2 lane names, got %d", len(LaneNames))
 	}
-	if LaneMap["high-llm"] != "prod-acceptance" {
-		t.Errorf("expected high-llm -> prod-acceptance, got %s", LaneMap["high-llm"])
+	found := map[string]bool{}
+	for _, l := range LaneNames {
+		found[l] = true
+	}
+	if !found["low-llm"] || !found["high-llm"] {
+		t.Errorf("expected low-llm and high-llm, got %v", LaneNames)
 	}
 }

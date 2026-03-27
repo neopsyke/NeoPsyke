@@ -4,7 +4,7 @@ import (
 	"fmt"
 
 	"github.com/atomitl/neopsyke/freud/cli/analysis"
-	"github.com/atomitl/neopsyke/freud/cli/dispatch"
+	"github.com/atomitl/neopsyke/freud/cli/orchestrator"
 	"github.com/spf13/cobra"
 )
 
@@ -42,7 +42,7 @@ func resolveRunDir(args []string) (string, error) {
 	if len(args) > 0 {
 		return args[0], nil
 	}
-	dir, err := dispatch.LatestRunDir()
+	dir, err := orchestrator.LatestRunDir()
 	if err != nil {
 		return "", fmt.Errorf("no run_dir specified and %w", err)
 	}

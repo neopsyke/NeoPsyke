@@ -3,11 +3,10 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"strconv"
 	"strings"
 
 	"github.com/atomitl/neopsyke/freud/cli/config"
-	"github.com/atomitl/neopsyke/freud/cli/dispatch"
+	"github.com/atomitl/neopsyke/freud/cli/orchestrator"
 	"github.com/spf13/cobra"
 )
 
@@ -72,40 +71,28 @@ func runEval(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("config validation failed:\n  %s", strings.Join(msgs, "\n  "))
 	}
 
-	scriptPath, err := dispatch.ScriptPath("live-eval.sh")
+	result, err := orchestrator.LiveEval(orchestrator.LiveEvalOpts{
+		InputFile:        evalInput,
+		ExpectedFile:     evalExpected,
+		Timeout:          cfg.LiveEval.Timeout,
+		CacheReplayFile:  evalCacheReplay,
+		SessionReplayDir: evalSessionReplay,
+		RecordSession:    evalRecordSession,
+		GoalsEnabled:     goals,
+		PreserveMemory:   cfg.LiveEval.PreserveMemory,
+		NeopsykeCmd:      cfg.LiveEval.NeopsykeCmd,
+		RunRootAbs:       cfg.Project.RunRoot,
+		GradleUserHome:   cfg.Project.GradleHome,
+		LLMConfigFile:    cfg.LiveEval.LLMConfigFile,
+		RetentionDays:    cfg.Project.RetentionDays,
+		Verbose:          verbose,
+		DryRun:           dryRun,
+	})
 	if err != nil {
 		return err
 	}
-
-	scriptArgs := []string{"--input", evalInput}
-	if evalExpected != "" {
-		scriptArgs = append(scriptArgs, "--expected", evalExpected)
-	}
-	scriptArgs = append(scriptArgs, "--timeout", strconv.Itoa(cfg.LiveEval.Timeout))
-	if evalCacheReplay != "" {
-		scriptArgs = append(scriptArgs, "--cache-replay", evalCacheReplay)
-	}
-	if evalRecordSession {
-		scriptArgs = append(scriptArgs, "--record-session")
-	}
-	if evalSessionReplay != "" {
-		scriptArgs = append(scriptArgs, "--session-replay", evalSessionReplay)
-	}
-	if goals != nil {
-		if *goals {
-			scriptArgs = append(scriptArgs, "--goals")
-		} else {
-			scriptArgs = append(scriptArgs, "--no-goals")
-		}
-	}
-
-	env := dispatch.BuildEnv(cfg)
-	exitCode, err := dispatch.RunScript(scriptPath, scriptArgs, env, dryRun, verbose)
-	if err != nil {
-		return err
-	}
-	if exitCode != 0 {
-		os.Exit(exitCode)
+	if result.ExitCode != 0 {
+		os.Exit(result.ExitCode)
 	}
 	return nil
 }

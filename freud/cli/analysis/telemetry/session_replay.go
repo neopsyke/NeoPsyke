@@ -3,17 +3,23 @@ package telemetry
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 
 	"github.com/atomitl/neopsyke/freud/cli/analysis"
 )
 
-// SessionReplayTelemetry aggregates session replay stats from a JSONL events file.
-func SessionReplayTelemetry(inputPath string) error {
+type channelStat struct {
+	Hits            int         `json:"hits"`
+	Divergences     int         `json:"divergences"`
+	DivergencePoint interface{} `json:"divergence_point"`
+	ExpectedHash    string      `json:"expected_hash,omitempty"`
+	ActualHash      string      `json:"actual_hash,omitempty"`
+}
+
+// sessionReplayResult computes session replay telemetry and returns the result.
+func sessionReplayResult(inputPath string) (map[string]interface{}, error) {
 	if !analysis.FileExists(inputPath) {
-		result := map[string]interface{}{"error": fmt.Sprintf("Event log not found: %s", inputPath)}
-		data, _ := json.MarshalIndent(result, "", "  ")
-		fmt.Println(string(data))
-		return fmt.Errorf("event log not found: %s", inputPath)
+		return nil, fmt.Errorf("event log not found: %s", inputPath)
 	}
 
 	eventTypes := map[string]bool{
@@ -22,27 +28,16 @@ func SessionReplayTelemetry(inputPath string) error {
 	}
 	events, err := analysis.LoadJSONLMultiEvents(inputPath, eventTypes)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	if len(events) == 0 {
-		result := map[string]interface{}{
+		return map[string]interface{}{
 			"total_replay_hits": 0,
 			"total_divergences": 0,
 			"channels":          map[string]interface{}{},
 			"hints":             []string{"No session replay events found — this may be a record-only run."},
-		}
-		data, _ := json.MarshalIndent(result, "", "  ")
-		fmt.Println(string(data))
-		return nil
-	}
-
-	type channelStat struct {
-		Hits             int         `json:"hits"`
-		Divergences      int         `json:"divergences"`
-		DivergencePoint  interface{} `json:"divergence_point"`
-		ExpectedHash     string      `json:"expected_hash,omitempty"`
-		ActualHash       string      `json:"actual_hash,omitempty"`
+		}, nil
 	}
 
 	channelStats := map[string]*channelStat{}
@@ -101,18 +96,38 @@ func SessionReplayTelemetry(inputPath string) error {
 		hints = append(hints, "All channels served from cache: fully deterministic replay.")
 	}
 
-	result := map[string]interface{}{
-		"total_replay_hits":        totalHits,
-		"total_divergences":        totalDivergences,
-		"fully_replayed_channels":  fullyReplayed,
-		"diverged_channels":        diverged,
-		"channels":                 channelStats,
-		"hints":                    hints,
-	}
+	return map[string]interface{}{
+		"total_replay_hits":       totalHits,
+		"total_divergences":       totalDivergences,
+		"fully_replayed_channels": fullyReplayed,
+		"diverged_channels":       diverged,
+		"channels":                channelStats,
+		"hints":                   hints,
+	}, nil
+}
 
+// SessionReplayTelemetry aggregates session replay stats and prints to stdout.
+func SessionReplayTelemetry(inputPath string) error {
+	result, err := sessionReplayResult(inputPath)
+	if err != nil {
+		errResult := map[string]interface{}{"error": err.Error()}
+		data, _ := json.MarshalIndent(errResult, "", "  ")
+		fmt.Println(string(data))
+		return err
+	}
 	data, _ := json.MarshalIndent(result, "", "  ")
 	fmt.Println(string(data))
 	return nil
+}
+
+// SessionReplayTelemetryToFile aggregates session replay stats and writes to outputPath.
+func SessionReplayTelemetryToFile(inputPath, outputPath string) error {
+	result, err := sessionReplayResult(inputPath)
+	if err != nil {
+		return err
+	}
+	data, _ := json.MarshalIndent(result, "", "  ")
+	return os.WriteFile(outputPath, append(data, '\n'), 0o644)
 }
 
 func joinStrings(ss []string) string {

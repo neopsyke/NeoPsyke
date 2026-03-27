@@ -7,6 +7,7 @@ type FreudConfig struct {
 	Pipeline  []PipelineStep  `mapstructure:"pipeline"`
 	LiveEval  LiveEvalConfig  `mapstructure:"live_eval"`
 	Session   SessionConfig   `mapstructure:"session"`
+	Scenarios ScenariosConfig `mapstructure:"scenarios"`
 	BBH       BBHConfig       `mapstructure:"bbh"`
 	Runtime   RuntimeConfig   `mapstructure:"runtime"`
 	Telemetry TelemetryConfig `mapstructure:"telemetry"`
@@ -48,6 +49,10 @@ type BBHConfig struct {
 	LogbookEnabled       bool   `mapstructure:"logbook_enabled"`
 }
 
+type ScenariosConfig struct {
+	ManifestFile string `mapstructure:"manifest_file"`
+}
+
 type RuntimeConfig struct {
 	ContinueOnFail  bool `mapstructure:"continue_on_fail"`
 	ScratchpadDebug bool `mapstructure:"scratchpad_debug"`
@@ -71,11 +76,14 @@ func DefaultConfig() *FreudConfig {
 			{Name: "preflight_compile", Cmd: "./gradlew compileKotlin compileTestKotlin"},
 			{Name: "targeted_tests", Cmd: "./gradlew :test --tests 'ai.neopsyke.agent.*'"},
 			{Name: "full_tests", Cmd: "./gradlew test"},
-			{Name: "scenario_pack", Cmd: "freud/scripts/run-scenarios.sh --file freud/scenarios/v1/neopsyke-agent-scenarios.json"},
-			{Name: "reasoning_eval_logic", Cmd: "freud/scripts/run-reasoning-pr-gate.sh"},
-			{Name: "reasoning_eval_model", Cmd: "", LiveOnly: true},
-			{Name: "memory_live_smoke", Cmd: "", LiveOnly: true},
-			{Name: "session_replay_test", Cmd: "", LiveOnly: true},
+			{Name: "scenario_pack"},
+			{Name: "reasoning_eval_logic"},
+			{Name: "reasoning_eval_model", LiveOnly: true},
+			{Name: "memory_live_smoke", LiveOnly: true},
+			{Name: "test_replay_eval", LiveOnly: true},
+		},
+		Scenarios: ScenariosConfig{
+			ManifestFile: "freud/scenarios/v1/neopsyke-agent-scenarios.json",
 		},
 		LiveEval: LiveEvalConfig{
 			Timeout:        120,

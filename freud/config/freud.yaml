@@ -9,8 +9,9 @@ project:
   gradle_home: .freud/gradle-home
 
 # Ordered pipeline steps for `freud run`.
+# Steps with a cmd run that shell command.
+# Steps without a cmd are built-in (dispatched by name to native Go).
 # Steps with live_only: true are skipped unless --live is passed.
-# Steps with empty cmd are skipped at runtime.
 pipeline:
   - name: preflight_compile
     cmd: "./gradlew compileKotlin compileTestKotlin"
@@ -18,18 +19,13 @@ pipeline:
     cmd: "./gradlew :test --tests 'ai.neopsyke.agent.*'"
   - name: full_tests
     cmd: "./gradlew test"
-  - name: scenario_pack
-    cmd: "freud/scripts/run-scenarios.sh --file freud/scenarios/v1/neopsyke-agent-scenarios.json"
-  - name: reasoning_eval_logic
-    cmd: "freud/scripts/run-reasoning-pr-gate.sh"
-  - name: reasoning_eval_model
-    cmd: ""
+  - name: scenario_pack                 # built-in: runs scenario manifest
+  - name: reasoning_eval_logic          # built-in: deterministic reasoning gate
+  - name: reasoning_eval_model          # built-in: live BBH smoke suite
     live_only: true
   - name: memory_live_smoke
-    cmd: ""
     live_only: true
-  - name: session_replay_test
-    cmd: ""
+  - name: test_replay_eval              # built-in: session record/replay E2E test
     live_only: true
 
 live_eval:
@@ -41,6 +37,9 @@ live_eval:
 
 session:
   record: false                      # off by default; use --record-session
+
+scenarios:
+  manifest_file: freud/scenarios/v1/neopsyke-agent-scenarios.json
 
 bbh:
   prompts_file: freud/evals/bbh-smoke/prompts.jsonl

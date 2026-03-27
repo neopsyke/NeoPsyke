@@ -3,44 +3,46 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"strconv"
 	"strings"
 
 	"github.com/atomitl/neopsyke/freud/cli/config"
-	"github.com/atomitl/neopsyke/freud/cli/dispatch"
+	"github.com/atomitl/neopsyke/freud/cli/orchestrator"
 	"github.com/spf13/cobra"
 )
 
-var replayCmd = &cobra.Command{
-	Use:   "replay",
-	Short: "Replay a recorded session",
-	Long:  `Replay a previously recorded session to verify deterministic behavior.`,
-	RunE:  runReplay,
+var testReplayEvalCmd = &cobra.Command{
+	Use:   "test-replay-eval",
+	Short: "E2E test: record a live eval, replay it, verify determinism",
+	Long: `Records a live eval session, replays it from cache, and asserts that all
+LLM calls were served from cache (real_calls=0) and all session channels
+replayed without divergence. This is a determinism gate, not a standalone
+replay command. For standalone replay, use: freud eval --session-replay <run-dir>`,
+	RunE: runTestReplayEval,
 }
 
 var (
-	replayInput   string
-	replayTimeout int
+	testReplayInput   string
+	testReplayTimeout int
 )
 
 func init() {
-	rootCmd.AddCommand(replayCmd)
+	rootCmd.AddCommand(testReplayEvalCmd)
 
-	replayCmd.Flags().StringVar(&replayInput, "input", "", "input prompt file")
-	replayCmd.Flags().IntVar(&replayTimeout, "timeout", 0, "override timeout (seconds)")
+	testReplayEvalCmd.Flags().StringVar(&testReplayInput, "input", "", "input prompt file (default: 'What is 2 + 2?')")
+	testReplayEvalCmd.Flags().IntVar(&testReplayTimeout, "timeout", 0, "override timeout (seconds)")
 }
 
-func runReplay(cmd *cobra.Command, args []string) error {
+func runTestReplayEval(cmd *cobra.Command, args []string) error {
 	cfg, err := config.LoadConfig(cfgFile, "", overrides)
 	if err != nil {
 		return err
 	}
 
-	if replayTimeout > 0 {
-		cfg.LiveEval.Timeout = replayTimeout
+	if testReplayTimeout > 0 {
+		cfg.LiveEval.Timeout = testReplayTimeout
 	}
 
-	errs := config.Validate(cfg, "replay", nil)
+	errs := config.Validate(cfg, "test-replay-eval", nil)
 	if len(errs) > 0 {
 		msgs := make([]string, len(errs))
 		for i, e := range errs {
@@ -49,24 +51,18 @@ func runReplay(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("config validation failed:\n  %s", strings.Join(msgs, "\n  "))
 	}
 
-	scriptPath, err := dispatch.ScriptPath("test-session-replay.sh")
+	result, err := orchestrator.SessionReplayTest(orchestrator.SessionReplayTestOpts{
+		InputFile: testReplayInput,
+		Timeout:   cfg.LiveEval.Timeout,
+		Cfg:       cfg,
+		Verbose:   verbose,
+		DryRun:    dryRun,
+	})
 	if err != nil {
 		return err
 	}
-
-	var scriptArgs []string
-	if replayInput != "" {
-		scriptArgs = append(scriptArgs, "--input", replayInput)
-	}
-	scriptArgs = append(scriptArgs, "--timeout", strconv.Itoa(cfg.LiveEval.Timeout))
-
-	env := dispatch.BuildEnv(cfg)
-	exitCode, err := dispatch.RunScript(scriptPath, scriptArgs, env, dryRun, verbose)
-	if err != nil {
-		return err
-	}
-	if exitCode != 0 {
-		os.Exit(exitCode)
+	if result.ExitCode != 0 {
+		os.Exit(result.ExitCode)
 	}
 	return nil
 }

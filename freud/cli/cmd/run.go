@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/atomitl/neopsyke/freud/cli/config"
-	"github.com/atomitl/neopsyke/freud/cli/dispatch"
+	"github.com/atomitl/neopsyke/freud/cli/orchestrator"
 	"github.com/spf13/cobra"
 )
 
@@ -42,7 +42,6 @@ func init() {
 	runCmd.Flags().BoolVar(&runContinueOnFail, "continue-on-fail", false, "don't stop on first failure")
 	runCmd.Flags().IntVar(&runTimeout, "timeout", 0, "override live_eval.timeout (seconds)")
 
-	// --goals / --no-goals using a custom bool pointer
 	runCmd.Flags().Bool("goals", false, "enable goals subsystem")
 	runCmd.Flags().Bool("no-goals", false, "disable goals subsystem")
 }
@@ -50,13 +49,11 @@ func init() {
 func runRun(cmd *cobra.Command, args []string) error {
 	featureID := args[0]
 
-	// Load config with lane profile
 	cfg, err := config.LoadConfig(cfgFile, runLane, overrides)
 	if err != nil {
 		return err
 	}
 
-	// Apply CLI flag overrides
 	if runTimeout > 0 {
 		cfg.LiveEval.Timeout = runTimeout
 	}
@@ -64,13 +61,11 @@ func runRun(cmd *cobra.Command, args []string) error {
 		cfg.Runtime.ContinueOnFail = true
 	}
 
-	// Handle --goals / --no-goals
 	goals := resolveGoals(cmd)
 	if goals != nil {
 		cfg.LiveEval.GoalsEnabled = *goals
 	}
 
-	// Validate
 	errs := config.Validate(cfg, "run", &config.ValidationOpts{
 		Live:      runLive,
 		FromStep:  runFromStep,
@@ -85,41 +80,23 @@ func runRun(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("config validation failed:\n  %s", strings.Join(msgs, "\n  "))
 	}
 
-	// Build script args
-	scriptPath, err := dispatch.ScriptPath("feature-loop.sh")
+	result, err := orchestrator.FeatureLoop(orchestrator.FeatureLoopOpts{
+		FeatureID:      featureID,
+		Live:           runLive,
+		DryRun:         dryRun,
+		ContinueOnFail: cfg.Runtime.ContinueOnFail,
+		FromStep:       runFromStep,
+		OnlyStep:       runOnlyStep,
+		SkipSteps:      runSkipSteps,
+		GoalsEnabled:   goals,
+		Cfg:            cfg,
+		Verbose:        verbose,
+	})
 	if err != nil {
 		return err
 	}
-
-	scriptArgs := []string{featureID}
-	if runLive {
-		scriptArgs = append(scriptArgs, "--live")
-	}
-	if dryRun {
-		scriptArgs = append(scriptArgs, "--dry-run")
-	}
-	if cfg.Runtime.ContinueOnFail {
-		scriptArgs = append(scriptArgs, "--continue-on-fail")
-	}
-	if runFromStep != "" {
-		scriptArgs = append(scriptArgs, "--from-step", runFromStep)
-	}
-	if goals != nil {
-		if *goals {
-			scriptArgs = append(scriptArgs, "--goals")
-		} else {
-			scriptArgs = append(scriptArgs, "--no-goals")
-		}
-	}
-
-	// Build env and dispatch
-	env := dispatch.BuildEnv(cfg)
-	exitCode, err := dispatch.RunScript(scriptPath, scriptArgs, env, dryRun, verbose)
-	if err != nil {
-		return err
-	}
-	if exitCode != 0 {
-		os.Exit(exitCode)
+	if result.ExitCode != 0 {
+		os.Exit(result.ExitCode)
 	}
 	return nil
 }

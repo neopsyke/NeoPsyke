@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/atomitl/neopsyke/freud/cli/config"
-	"github.com/atomitl/neopsyke/freud/cli/dispatch"
+	"github.com/atomitl/neopsyke/freud/cli/orchestrator"
 	"github.com/spf13/cobra"
 )
 
@@ -53,37 +53,48 @@ func runBBH(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("config validation failed:\n  %s", strings.Join(msgs, "\n  "))
 	}
 
-	scriptPath, err := dispatch.ScriptPath("run-bbh-smoke.sh")
-	if err != nil {
-		return err
+	// Validate lane name
+	validLane := false
+	for _, l := range config.LaneNames {
+		if bbhLane == l {
+			validLane = true
+			break
+		}
 	}
-
-	// Map lane name to internal script name
-	internalLane, ok := config.LaneMap[bbhLane]
-	if !ok {
+	if !validLane {
 		return fmt.Errorf("unknown lane %q, valid lanes: %s", bbhLane, validLanes())
 	}
 
-	scriptArgs := []string{"--lane", internalLane}
-	if bbhBaseline != "" {
-		scriptArgs = append(scriptArgs, "--baseline", bbhBaseline)
-	}
-
-	env := dispatch.BuildEnv(cfg)
-	exitCode, err := dispatch.RunScript(scriptPath, scriptArgs, env, dryRun, verbose)
+	result, err := orchestrator.BBHSmoke(orchestrator.BBHOpts{
+		Lane:                 bbhLane,
+		PromptsFile:          cfg.BBH.PromptsFile,
+		AnswersFile:          cfg.BBH.AnswersFile,
+		MinPassRatePercent:   cfg.BBH.MinPassRate,
+		MaxTimeouts:          cfg.BBH.MaxTimeouts,
+		MaxRegressionPercent: cfg.BBH.MaxRegressionPercent,
+		BaselineFile:         bbhBaseline,
+		PreserveMemory:       cfg.BBH.PreserveMemory,
+		MemoryEnabled:        cfg.BBH.MemoryEnabled,
+		LogbookEnabled:       cfg.BBH.LogbookEnabled,
+		Timeout:              cfg.LiveEval.Timeout,
+		NeopsykeCmd:          cfg.LiveEval.NeopsykeCmd,
+		RunRootAbs:           cfg.Project.RunRoot,
+		GradleUserHome:       cfg.Project.GradleHome,
+		LLMConfigFile:        cfg.LiveEval.LLMConfigFile,
+		RetentionDays:        cfg.Project.RetentionDays,
+		RepoRoot:             "",
+		Verbose:              verbose,
+		DryRun:               dryRun,
+	})
 	if err != nil {
 		return err
 	}
-	if exitCode != 0 {
-		os.Exit(exitCode)
+	if result.ExitCode != 0 {
+		os.Exit(result.ExitCode)
 	}
 	return nil
 }
 
 func validLanes() string {
-	lanes := make([]string, 0, len(config.LaneMap))
-	for k := range config.LaneMap {
-		lanes = append(lanes, k)
-	}
-	return strings.Join(lanes, ", ")
+	return strings.Join(config.LaneNames, ", ")
 }

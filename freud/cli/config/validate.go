@@ -62,15 +62,15 @@ func Validate(cfg *FreudConfig, command string, opts *ValidationOpts) []error {
 	switch command {
 	case "run":
 		if opts.Live {
-			hasLiveCmd := false
+			hasLiveStep := false
 			for _, step := range cfg.Pipeline {
-				if step.LiveOnly && step.Cmd != "" {
-					hasLiveCmd = true
+				if step.LiveOnly && (step.Cmd != "" || isBuiltinStepName(step.Name)) {
+					hasLiveStep = true
 					break
 				}
 			}
-			if !hasLiveCmd {
-				errs = append(errs, fmt.Errorf("--live requires at least one live step with a non-empty cmd; use --lane low-llm or --lane high-llm"))
+			if !hasLiveStep {
+				errs = append(errs, fmt.Errorf("--live requires at least one live step configured; use --lane low-llm or --lane high-llm"))
 			}
 		}
 
@@ -120,4 +120,16 @@ type ValidationOpts struct {
 	OnlyStep  string
 	SkipSteps []string
 	InputFile string
+}
+
+// builtinStepNames lists pipeline steps dispatched to native Go functions.
+var builtinStepNames = map[string]bool{
+	"scenario_pack":        true,
+	"reasoning_eval_logic": true,
+	"reasoning_eval_model": true,
+	"test_replay_eval":     true,
+}
+
+func isBuiltinStepName(name string) bool {
+	return builtinStepNames[name]
 }

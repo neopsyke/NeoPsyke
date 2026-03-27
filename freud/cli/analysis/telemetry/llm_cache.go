@@ -3,16 +3,15 @@ package telemetry
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 
 	"github.com/atomitl/neopsyke/freud/cli/analysis"
 )
 
-// LLMCacheTelemetry aggregates LLM cache hit/miss/divergence stats from a JSONL events file.
-func LLMCacheTelemetry(inputPath string) error {
+// llmCacheResult computes LLM cache telemetry and returns the result as a map.
+func llmCacheResult(inputPath string) (map[string]interface{}, error) {
 	if !analysis.FileExists(inputPath) {
-		fmt.Printf(`{"error": "Event log not found: %s"}`, inputPath)
-		fmt.Println()
-		return fmt.Errorf("event log not found: %s", inputPath)
+		return nil, fmt.Errorf("event log not found: %s", inputPath)
 	}
 
 	eventTypes := map[string]bool{
@@ -22,7 +21,7 @@ func LLMCacheTelemetry(inputPath string) error {
 	}
 	events, err := analysis.LoadJSONLMultiEvents(inputPath, eventTypes)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	var hits, misses, divergences []map[string]interface{}
@@ -57,7 +56,6 @@ func LLMCacheTelemetry(inputPath string) error {
 		divergenceCallSite = analysis.GetString(data, "call_site")
 	}
 
-	// Hits by actor
 	actorHits := map[string]int{}
 	for _, e := range hits {
 		actor := analysis.GetString(analysis.GetData(e), "actor")
@@ -67,7 +65,6 @@ func LLMCacheTelemetry(inputPath string) error {
 		actorHits[actor]++
 	}
 
-	// Hints
 	var hints []string
 	if divergencePoint != nil {
 		hints = append(hints, fmt.Sprintf(
@@ -81,7 +78,7 @@ func LLMCacheTelemetry(inputPath string) error {
 		hints = append(hints, "All calls served from cache: fully deterministic replay.")
 	}
 
-	result := map[string]interface{}{
+	return map[string]interface{}{
 		"total_calls":          totalCalls,
 		"cached_calls":         totalCached,
 		"real_calls":           totalReal,
@@ -92,11 +89,30 @@ func LLMCacheTelemetry(inputPath string) error {
 		"divergence_call_site": divergenceCallSite,
 		"hits_by_actor":        actorHits,
 		"hints":                hints,
-	}
+	}, nil
+}
 
+// LLMCacheTelemetry aggregates LLM cache stats and prints to stdout.
+func LLMCacheTelemetry(inputPath string) error {
+	result, err := llmCacheResult(inputPath)
+	if err != nil {
+		fmt.Printf(`{"error": "%s"}`, err)
+		fmt.Println()
+		return err
+	}
 	data, _ := json.MarshalIndent(result, "", "  ")
 	fmt.Println(string(data))
 	return nil
+}
+
+// LLMCacheTelemetryToFile aggregates LLM cache stats and writes to outputPath.
+func LLMCacheTelemetryToFile(inputPath, outputPath string) error {
+	result, err := llmCacheResult(inputPath)
+	if err != nil {
+		return err
+	}
+	data, _ := json.MarshalIndent(result, "", "  ")
+	return os.WriteFile(outputPath, append(data, '\n'), 0o644)
 }
 
 func round2(f float64) float64 {

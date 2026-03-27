@@ -72,7 +72,11 @@ func TestValidateValidFromStep(t *testing.T) {
 
 func TestValidateLiveWithoutLiveSteps(t *testing.T) {
 	cfg := DefaultConfig()
-	// All live steps have empty cmds by default
+	// Replace pipeline with only non-live steps and unknown live steps (not built-in)
+	cfg.Pipeline = []PipelineStep{
+		{Name: "compile", Cmd: "echo ok"},
+		{Name: "unknown_live", LiveOnly: true}, // not a known built-in, no cmd
+	}
 	errs := Validate(cfg, "run", &ValidationOpts{Live: true})
 	found := false
 	for _, e := range errs {
@@ -85,17 +89,23 @@ func TestValidateLiveWithoutLiveSteps(t *testing.T) {
 	}
 }
 
-func TestValidateLiveWithLiveSteps(t *testing.T) {
+func TestValidateLiveWithBuiltinSteps(t *testing.T) {
 	cfg := DefaultConfig()
-	// Set a live step cmd
-	for i, step := range cfg.Pipeline {
-		if step.Name == "reasoning_eval_model" {
-			cfg.Pipeline[i].Cmd = "some-command"
-		}
+	// Default config has reasoning_eval_model (built-in, live_only) — should pass
+	errs := Validate(cfg, "run", &ValidationOpts{Live: true})
+	if len(errs) > 0 {
+		t.Errorf("expected no errors with built-in live steps, got: %v", errs)
+	}
+}
+
+func TestValidateLiveWithShellCmdSteps(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Pipeline = []PipelineStep{
+		{Name: "custom_live", Cmd: "echo live", LiveOnly: true},
 	}
 	errs := Validate(cfg, "run", &ValidationOpts{Live: true})
 	if len(errs) > 0 {
-		t.Errorf("expected no errors with live step configured, got: %v", errs)
+		t.Errorf("expected no errors with shell cmd live step, got: %v", errs)
 	}
 }
 

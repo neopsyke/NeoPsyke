@@ -93,6 +93,8 @@ func setDefaults(v *viper.Viper) {
 
 	v.SetDefault("session.record", d.Session.Record)
 
+	v.SetDefault("scenarios.manifest_file", d.Scenarios.ManifestFile)
+
 	v.SetDefault("bbh.prompts_file", d.BBH.PromptsFile)
 	v.SetDefault("bbh.answers_file", d.BBH.AnswersFile)
 	v.SetDefault("bbh.min_pass_rate", d.BBH.MinPassRate)
@@ -142,14 +144,26 @@ func mergeProfile(v *viper.Viper, lane string) error {
 		}
 	}
 
-	// Merge scalar config keys
+	// Save base pipeline before merge (MergeConfigMap replaces lists wholesale)
+	var basePipeline []interface{}
+	if raw := v.Get("pipeline"); raw != nil {
+		if sl, ok := raw.([]interface{}); ok {
+			basePipeline = make([]interface{}, len(sl))
+			copy(basePipeline, sl)
+		}
+	}
+
+	// Merge scalar config keys (this replaces the pipeline list)
 	if err := v.MergeConfigMap(profile.AllSettings()); err != nil {
 		return fmt.Errorf("merging profile: %w", err)
 	}
 
-	// Re-apply name-based pipeline step merge
-	if len(profileSteps) > 0 {
-		mergeStepsByName(v, profileSteps)
+	// Restore base pipeline and apply profile step overrides by name
+	if len(basePipeline) > 0 {
+		v.Set("pipeline", basePipeline)
+		if len(profileSteps) > 0 {
+			mergeStepsByName(v, profileSteps)
+		}
 	}
 
 	return nil

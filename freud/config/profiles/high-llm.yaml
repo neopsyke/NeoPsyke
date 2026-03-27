@@ -7,5 +7,4 @@ live_eval:
 
 pipeline:
   - name: reasoning_eval_model
-    cmd: "freud/scripts/run-bbh-smoke.sh --lane prod-acceptance"
     live_only: true

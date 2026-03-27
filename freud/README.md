@@ -368,7 +368,7 @@ Secrets (`MISTRAL_API_KEY` etc.) are never in config files — they pass through
 ## Layout
 
 - `freud/cli/`: Go CLI source (Cobra + Viper)
-  - `cmd/`: subcommand implementations (run, eval, bbh, replay, triage, summarize, context-pack)
+  - `cmd/`: subcommand implementations (run, eval, bbh, test-replay-eval, triage, summarize, context-pack)
   - `config/`: config loading, schema, validation, env var mapping
   - `dispatch/`: subprocess helpers for delegating to shell scripts
   - `analysis/`: native Go analysis modules (ported from Python)

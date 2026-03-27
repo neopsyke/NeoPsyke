@@ -116,7 +116,7 @@ Build the CLI first: `cd freud/cli && go build -o freud .`
   - `./freud run <feature-id> --live --lane high-llm`
 - Resume from a specific step (skips earlier steps, preserves artifact record):
   - `./freud run <feature-id> --from-step <step>`
-  - Valid step names: `preflight_compile targeted_tests full_tests scenario_pack reasoning_eval_logic reasoning_eval_model memory_live_smoke session_replay_test`
+  - Valid step names: `preflight_compile targeted_tests full_tests scenario_pack reasoning_eval_logic reasoning_eval_model memory_live_smoke test_replay_eval`
 - Run only a specific step:
   - `./freud run <feature-id> --only <step>`
 - Single-input live eval (pipe one input, get one answer):
@@ -124,8 +124,9 @@ Build the CLI first: `cd freud/cli && go build -o freud .`
   - Replay a cached run: `./freud eval --input <file> --cache-replay <cache.jsonl>`
   - Record a session for replay: `./freud eval --input <file> --record-session`
 - Session replay:
-  - `./freud replay [--input <file>] [--timeout <seconds>]`
-  - Records a live-eval, replays it, compares answers and checks channel divergence.
+  - `./freud test-replay-eval [--input <file>] [--timeout <seconds>]`
+  - E2E test: records a live-eval, replays it, asserts all LLM calls cached and zero divergences.
+  - For standalone replay of a recorded session: `./freud eval --session-replay <run-dir>`
 - BBH reasoning smoke suite:
   - `./freud bbh --lane low-llm`
   - `./freud bbh --lane high-llm`
@@ -156,7 +157,8 @@ Build the CLI first: `cd freud/cli && go build -o freud .`
 - Recording captures 6 channels: signals, LLM calls, memory recall, logbook recall, web search results, action control decisions.
 - Each channel uses hash-based divergence detection. On mismatch, that channel switches to passthrough (live) independently.
 - Record: `./freud eval --input <file> --record-session` or `./run-neopsyke.sh --record-session`
-- Replay: `./freud replay`
+- Replay: `./freud eval --session-replay <run-dir>`
+- E2E test: `./freud test-replay-eval`
 - Session recording files live in `$RUN_DIR/session/`:
   - `signals.jsonl`, `llm-cache.jsonl`, `memory-recall.jsonl`, `logbook-recall.jsonl`, `web-results.jsonl`, `action-control.jsonl`, `session-manifest.json`
 - Session replay telemetry: `artifacts/session-replay-stats.json` (per-channel hit/divergence counts)
@@ -265,7 +267,7 @@ Build the CLI first: `cd freud/cli && go build -o freud .`
   - logic behavioral pack (45 deterministic perturbation tasks)
 - `reasoning_eval_model` remains the live/manual lane and runs the BBH-style smoke suite via `./freud bbh --lane <name>`.
 - Strict JSON support for planner/meta-reasoner is a hard requirement in live lanes; any structured-output downgrade is treated as a lane failure.
-- `session_replay_test` is an optional live step that records a live-eval, replays it, verifies answer match and channel determinism.
+- `test_replay_eval` is an optional live step that records a live-eval, replays it, and asserts all LLM calls were cached and zero session channel divergences. Also available as standalone command: `./freud test-replay-eval`.
 
 ### Summarization Policy
 - Use heuristic summarization: indexed artifacts first (`summary-compact.md`, `trail-index.tsv`, `step-index.tsv`, `anomalies.json`), then AI deep analysis and code edits last.

@@ -5,10 +5,10 @@ live_eval:
   llm_config_file: freud/config/llm-weak-structure.yaml
   timeout: 120
 
+# Live steps are built-in — no cmd needed. Just mark them present so the
+# profile merge keeps them in the pipeline with live_only: true.
 pipeline:
   - name: reasoning_eval_model
-    cmd: "freud/scripts/run-bbh-smoke.sh --lane weak-structure"
     live_only: true
-  - name: session_replay_test
-    cmd: "freud/scripts/test-session-replay.sh --timeout 60"
+  - name: test_replay_eval
     live_only: true
