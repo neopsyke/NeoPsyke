@@ -157,11 +157,26 @@ class LlmCacheManager(
             return entries
         }
 
+        private val hashDumpCounter = AtomicInteger(0)
+
         fun hashMessages(messages: List<ChatMessage>): String {
             val digest = MessageDigest.getInstance("SHA-256")
             val content = messages.joinToString("\n") { "${it.role.apiValue}:${it.content}" }
             val hashBytes = digest.digest(content.toByteArray(Charsets.UTF_8))
-            return hashBytes.joinToString("") { "%02x".format(it) }
+            val hash = hashBytes.joinToString("") { "%02x".format(it) }
+            // Debug: dump full hash content to file for diffing
+            val dumpDir = System.getenv("NEOPSYKE_LLM_HASH_DUMP_DIR")
+            if (!dumpDir.isNullOrBlank()) {
+                try {
+                    val dir = Path.of(dumpDir)
+                    Files.createDirectories(dir)
+                    val seq = hashDumpCounter.getAndIncrement()
+                    Files.writeString(dir.resolve("hash-$seq-$hash.txt"), content)
+                } catch (ex: Exception) {
+                    logger.warn { "Failed to dump hash content: ${ex.message}" }
+                }
+            }
+            return hash
         }
     }
 }

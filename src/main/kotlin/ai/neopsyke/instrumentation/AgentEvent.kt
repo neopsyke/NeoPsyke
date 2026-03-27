@@ -580,6 +580,36 @@ object AgentEvents {
             )
         )
 
+    // ── Session recording events ────────────────────────────────────────
+
+    fun sessionChannelReplayHit(
+        channel: String,
+        sequenceIndex: Int,
+    ): AgentEvent =
+        AgentEvent(
+            type = "session_channel_replay_hit",
+            data = mapOf(
+                "channel" to channel,
+                "sequence_index" to sequenceIndex,
+            )
+        )
+
+    fun sessionChannelDivergence(
+        channel: String,
+        sequenceIndex: Int,
+        expectedHash: String,
+        actualHash: String,
+    ): AgentEvent =
+        AgentEvent(
+            type = "session_channel_divergence",
+            data = mapOf(
+                "channel" to channel,
+                "sequence_index" to sequenceIndex,
+                "expected_hash" to expectedHash,
+                "actual_hash" to actualHash,
+            )
+        )
+
     // ── Goal events ───────────────────────────────────────────────────
 
     fun goalCreated(goalId: String, title: String, priority: String): AgentEvent =

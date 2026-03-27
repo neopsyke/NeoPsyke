@@ -7,6 +7,8 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 INPUT_FILE=""
 EXPECTED_FILE=""
 CACHE_REPLAY_FILE=""
+SESSION_REPLAY_DIR=""
+RECORD_SESSION=false
 CONFIG_PATH="${FREUD_CONFIG:-$REPO_ROOT/freud/config/default.env}"
 
 if [[ -f "$CONFIG_PATH" ]]; then
@@ -59,23 +61,26 @@ Options:
   --input <file>          Input file containing the user message (required)
   --expected <file>       Expected answer file for acceptance check
   --cache-replay <file>   JSONL cache file to replay (enables replay mode)
+  --record-session        Record all signals for later replay via --session-replay
+  --session-replay <dir>  Replay a recorded session directory
   --timeout <seconds>     Timeout for the live eval run (default: 120)
-  --preserve-memory       Do not clear Freud-isolated memory before the run
   --goals                 Enable the goals subsystem for this eval
   --no-goals              Disable the goals subsystem for this eval
   -h, --help              Show this help message
 
 Environment:
-  FREUD_LIVE_EVAL_TIMEOUT   Default timeout in seconds (default: 120)
-  FREUD_RUN_ROOT            Run artifact root (default: .neopsyke/runs/freud)
+  FREUD_LIVE_EVAL_TIMEOUT      Default timeout in seconds (default: 120)
+  FREUD_RUN_ROOT               Run artifact root (default: .neopsyke/runs/freud)
+  FREUD_RUN_RETENTION_DAYS     Delete run dirs older than this (default: 3)
 
-Memory isolation:
-  Uses namespace "freud-eval" (pgvector), .neopsyke/freud-logbook.db (episodic),
-  and .neopsyke/freud-metrics.db (usage metrics).
-  By default, all freud memory is cleared before each run (--clear-memory-all).
-  Use --preserve-memory when an eval sequence intentionally depends on prior
-  isolated freud memory within the same namespace/DBs.
-  User memory (namespace "neopsyke", .neopsyke/logbook.db, .neopsyke/metrics.db) is never touched.
+Per-run isolation:
+  Each run gets fully isolated persistent state inside its run directory:
+    $RUN_DIR/state/logbook.db        (episodic memory)
+    $RUN_DIR/state/metrics.db        (usage metrics)
+    $RUN_DIR/state/action-control.db (action staging)
+  pgvector uses a per-run namespace (freud-eval-{run-id}).
+  Parallel runs are safe. User data is never touched.
+  Run directories older than FREUD_RUN_RETENTION_DAYS are auto-deleted.
 
 First run (no --cache-replay): records all LLM responses to a cache file.
 Replay run (with --cache-replay): replays cached responses until divergence,
@@ -102,16 +107,33 @@ search_logs_with_fallback() {
   done
 }
 
-prime_gradle_wrapper_cache() {
+prime_gradle_build_cache() {
   [[ -z "${GRADLE_USER_HOME:-}" ]] && return 0
+  mkdir -p "$GRADLE_USER_HOME"
+
+  # 1. Prime wrapper dists (fast copy if available locally)
   local local_dists="$GRADLE_USER_HOME/wrapper/dists"
   local home_dists="$HOME/.gradle/wrapper/dists"
-  if compgen -G "$local_dists/gradle-*-bin/*" >/dev/null; then
+  if ! compgen -G "$local_dists/gradle-*-bin/*" >/dev/null 2>&1; then
+    if [[ -d "$home_dists" ]]; then
+      mkdir -p "$local_dists"
+      cp -R "$home_dists"/gradle-*-bin "$local_dists"/ 2>/dev/null || true
+    fi
+  fi
+
+  # 2. Prime build plugins + dependencies (Kotlin plugin, etc.)
+  local marker="$GRADLE_USER_HOME/.build-cache-primed"
+  if [[ -f "$marker" ]]; then
     return 0
   fi
-  if [[ -d "$home_dists" ]]; then
-    mkdir -p "$local_dists"
-    cp -R "$home_dists"/gradle-*-bin "$local_dists"/ 2>/dev/null || true
+  echo "Priming isolated Gradle home with build plugins and dependencies..." >&2
+  if GRADLE_USER_HOME="$GRADLE_USER_HOME" "$REPO_ROOT/gradlew" \
+      --no-daemon --no-problems-report \
+      compileKotlin compileTestKotlin >/dev/null 2>&1; then
+    touch "$marker"
+    echo "Isolated Gradle home primed successfully." >&2
+  else
+    echo "WARNING: Failed to prime Gradle build cache. First build may be slow or fail offline." >&2
   fi
 }
 
@@ -184,6 +206,11 @@ while [[ $# -gt 0 ]]; do
       [[ $# -lt 2 ]] && { log_error "Missing value for $1"; exit 1; }
       CACHE_REPLAY_FILE="$2"; shift 2 ;;
     --cache-replay=*) CACHE_REPLAY_FILE="${1#*=}"; shift ;;
+    --session-replay)
+      [[ $# -lt 2 ]] && { log_error "Missing value for $1"; exit 1; }
+      SESSION_REPLAY_DIR="$2"; shift 2 ;;
+    --session-replay=*) SESSION_REPLAY_DIR="${1#*=}"; shift ;;
+    --record-session) RECORD_SESSION=true; shift ;;
     --timeout)
       [[ $# -lt 2 ]] && { log_error "Missing value for $1"; exit 1; }
       TIMEOUT="$2"; shift 2 ;;
@@ -196,13 +223,13 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ -z "$INPUT_FILE" ]]; then
-  log_error "Error: --input is required."
+if [[ -z "$INPUT_FILE" && -z "$SESSION_REPLAY_DIR" ]]; then
+  log_error "Error: --input is required (unless using --session-replay)."
   usage
   exit 1
 fi
 
-if [[ ! -f "$INPUT_FILE" ]]; then
+if [[ -n "$INPUT_FILE" && ! -f "$INPUT_FILE" ]]; then
   log_error "Error: input file not found: $INPUT_FILE"
   exit 1
 fi
@@ -210,6 +237,27 @@ fi
 if [[ -n "$CACHE_REPLAY_FILE" && ! -f "$CACHE_REPLAY_FILE" ]]; then
   log_error "Error: cache replay file not found: $CACHE_REPLAY_FILE"
   exit 1
+fi
+
+if [[ -n "$SESSION_REPLAY_DIR" && ! -d "$SESSION_REPLAY_DIR" ]]; then
+  log_error "Error: session replay directory not found: $SESSION_REPLAY_DIR"
+  exit 1
+fi
+
+# Resolve session replay dir: accept either the session/ subdir or the parent run dir.
+if [[ -n "$SESSION_REPLAY_DIR" ]]; then
+  SESSION_REPLAY_DIR="$(cd "$SESSION_REPLAY_DIR" && pwd)"
+  if [[ -d "$SESSION_REPLAY_DIR/session" && -f "$SESSION_REPLAY_DIR/session/signals.jsonl" ]]; then
+    SESSION_REPLAY_DIR="$SESSION_REPLAY_DIR/session"
+  fi
+fi
+
+# --session-replay implies --cache-replay from the same session directory
+if [[ -n "$SESSION_REPLAY_DIR" && -z "$CACHE_REPLAY_FILE" ]]; then
+  SESSION_LLM_CACHE="$SESSION_REPLAY_DIR/llm-cache.jsonl"
+  if [[ -f "$SESSION_LLM_CACHE" ]]; then
+    CACHE_REPLAY_FILE="$SESSION_LLM_CACHE"
+  fi
 fi
 
 # Resolve paths from config/env the same way feature-loop.sh does.
@@ -227,7 +275,7 @@ if [[ -n "$GRADLE_USER_HOME_CFG" ]]; then
   fi
   mkdir -p "$GRADLE_USER_HOME"
   export GRADLE_USER_HOME
-  prime_gradle_wrapper_cache
+  prime_gradle_build_cache
 fi
 
 mkdir -p "$RUN_ROOT_ABS"
@@ -246,39 +294,84 @@ export FREUD_RUN_DIR="$RUN_DIR"
 export FREUD_ARTIFACT_DIR="$RUN_DIR/artifacts"
 write_local_freud_pointers
 
+# Session recording: create session dir inside the run dir.
+# Routes the LLM cache into the session dir so --session-replay finds everything.
+SESSION_RECORD_DIR=""
+if [[ "$RECORD_SESSION" == "true" ]]; then
+  SESSION_RECORD_DIR="$RUN_DIR/session"
+  mkdir -p "$SESSION_RECORD_DIR"
+  export NEOPSYKE_SESSION_RECORDING_MODE="record"
+  export NEOPSYKE_SESSION_RECORDING_DIR="$SESSION_RECORD_DIR"
+fi
+
 # Determine cache mode
 if [[ -n "$CACHE_REPLAY_FILE" ]]; then
   CACHE_MODE="replay"
   CACHE_FILE="$(cd "$(dirname "$CACHE_REPLAY_FILE")" && pwd)/$(basename "$CACHE_REPLAY_FILE")"
+elif [[ -n "$SESSION_RECORD_DIR" ]]; then
+  CACHE_MODE="record"
+  CACHE_FILE="$SESSION_RECORD_DIR/llm-cache.jsonl"
 else
   CACHE_MODE="record"
   CACHE_FILE="$RUN_DIR/artifacts/llm-cache.jsonl"
 fi
 
 # Copy input to artifacts for reference
-cp "$INPUT_FILE" "$RUN_DIR/artifacts/input.txt"
+if [[ -n "$INPUT_FILE" ]]; then
+  cp "$INPUT_FILE" "$RUN_DIR/artifacts/input.txt"
+fi
+
+# Set environment for the run
+export NEOPSYKE_LLM_CACHE_MODE="$CACHE_MODE"
+export NEOPSYKE_LLM_CACHE_FILE="$CACHE_FILE"
+
+if [[ -n "$SESSION_REPLAY_DIR" ]]; then
+  export NEOPSYKE_SESSION_RECORDING_MODE="replay"
+  export NEOPSYKE_SESSION_RECORDING_DIR="$SESSION_REPLAY_DIR"
+  # Adopt runtime config from the recording so the replay environment matches.
+  RECORDING_CONTEXT_FILE="$SESSION_REPLAY_DIR/recording-context.json"
+  if [[ -f "$RECORDING_CONTEXT_FILE" ]]; then
+    RECORDED_GOALS="$(python3 -c "import json; print(json.load(open('$RECORDING_CONTEXT_FILE')).get('goals_enabled', False))" 2>/dev/null || echo "")"
+    if [[ "$RECORDED_GOALS" == "True" ]]; then
+      export NEOPSYKE_GOALS_ENABLED="true"
+    elif [[ "$RECORDED_GOALS" == "False" ]]; then
+      export NEOPSYKE_GOALS_ENABLED="false"
+    fi
+  fi
+fi
+export NEOPSYKE_LOG_FILE="$RUN_DIR/logs/neopsyke.log"
+export NEOPSYKE_EVENT_LOG_FILE="$RUN_DIR/logs/events.jsonl"
+export EGO_SCRATCHPAD_DEBUG_CAPTURE_ENABLED="true"
+
+# Per-run isolated state: all persistent data lives inside the run directory.
+# This ensures parallel runs never interfere and user data is never touched.
+RUN_SHORT_ID="$(basename "$RUN_DIR")"
+PGVECTOR_NAMESPACE="freud-eval-${RUN_SHORT_ID}"
+mkdir -p "$RUN_DIR/state"
+export MEMORY_DEFAULT_NAMESPACE="$PGVECTOR_NAMESPACE"
+export NEOPSYKE_LOGBOOK_DB_PATH="$RUN_DIR/state/logbook.db"
+export NEOPSYKE_METRICS_DB="$RUN_DIR/state/metrics.db"
+export NEOPSYKE_ACTION_CONTROL_DB_PATH="$RUN_DIR/state/action-control.db"
+export NEOPSYKE_GOALS_WORKSPACE_ROOT="${NEOPSYKE_GOALS_WORKSPACE_ROOT:-$RUN_DIR/artifacts/goals}"
+# Record namespace for cleanup
+printf '%s\n' "$PGVECTOR_NAMESPACE" > "$RUN_DIR/state/pgvector-namespace.txt"
 
 log_info "=== Freud Live Eval ==="
 log_info "Run directory: $RUN_DIR"
 log_info "Cache mode: $CACHE_MODE"
 log_info "Cache file: $CACHE_FILE"
 log_info "Timeout: ${TIMEOUT}s"
-log_info "Preserve memory: ${PRESERVE_MEMORY}"
+log_info "Per-run namespace: ${PGVECTOR_NAMESPACE}"
+if [[ -n "$SESSION_RECORD_DIR" ]]; then
+  log_info "Session recording: $SESSION_RECORD_DIR"
+fi
+if [[ -n "$SESSION_REPLAY_DIR" ]]; then
+  log_info "Session replay: $SESSION_REPLAY_DIR"
+fi
 if [[ -n "${GRADLE_USER_HOME:-}" ]]; then
   log_info "Gradle user home: ${GRADLE_USER_HOME}"
 fi
 log_info ""
-
-# Set environment for the run
-export NEOPSYKE_LLM_CACHE_MODE="$CACHE_MODE"
-export NEOPSYKE_LLM_CACHE_FILE="$CACHE_FILE"
-export NEOPSYKE_LOG_FILE="$RUN_DIR/logs/neopsyke.log"
-export NEOPSYKE_EVENT_LOG_FILE="$RUN_DIR/logs/events.jsonl"
-export EGO_SCRATCHPAD_DEBUG_CAPTURE_ENABLED="true"
-export MEMORY_DEFAULT_NAMESPACE="freud-eval"
-export NEOPSYKE_LOGBOOK_DB_PATH="$REPO_ROOT/.neopsyke/freud-logbook.db"
-export NEOPSYKE_METRICS_DB="$REPO_ROOT/.neopsyke/freud-metrics.db"
-export NEOPSYKE_GOALS_WORKSPACE_ROOT="${NEOPSYKE_GOALS_WORKSPACE_ROOT:-$RUN_DIR/artifacts/goals}"
 
 if [[ -n "$GOALS_OVERRIDE" ]]; then
   export NEOPSYKE_GOALS_ENABLED="$GOALS_OVERRIDE"
@@ -286,16 +379,20 @@ fi
 
 # Run NeoPsyke in freud-live mode
 RUN_START="$(date +%s)"
-clear_memory_arg="--clear-memory-all"
 RAW_STDOUT_FILE="$RUN_DIR/logs/stdout.log"
-if [[ "$PRESERVE_MEMORY" == "true" ]]; then
-  clear_memory_arg=""
-fi
 set +e
-cat "$INPUT_FILE" \
-  | "$NEOPSYKE_CMD" --freud-live --freud-live-timeout "$TIMEOUT" ${clear_memory_arg:+"$clear_memory_arg"} --no-id \
-  2>"$RUN_DIR/logs/stderr.log" \
-  | tee "$RAW_STDOUT_FILE"
+if [[ -n "$SESSION_REPLAY_DIR" && -z "$INPUT_FILE" ]]; then
+  # Session replay mode: no stdin input needed — signals come from the recording
+  "$NEOPSYKE_CMD" --freud-live --freud-live-timeout "$TIMEOUT" --no-id \
+    </dev/null \
+    2>"$RUN_DIR/logs/stderr.log" \
+    | tee "$RAW_STDOUT_FILE"
+else
+  cat "$INPUT_FILE" \
+    | "$NEOPSYKE_CMD" --freud-live --freud-live-timeout "$TIMEOUT" --no-id \
+    2>"$RUN_DIR/logs/stderr.log" \
+    | tee "$RAW_STDOUT_FILE"
+fi
 EXIT_CODE="${PIPESTATUS[1]:-$?}"
 set -e
 ANSWER_OUTPUT="$(extract_answer_line "$RAW_STDOUT_FILE")"
@@ -375,6 +472,13 @@ if [[ -f "$RUN_DIR/logs/events.jsonl" ]]; then
     > "$RUN_DIR/artifacts/cache-stats.json" 2>/dev/null || true
 fi
 
+# Run session replay telemetry if event log exists and session replay was used
+if [[ -n "$SESSION_REPLAY_DIR" && -f "$RUN_DIR/logs/events.jsonl" ]]; then
+  log_info "Analyzing session replay telemetry..."
+  PYTHONPATH="$REPO_ROOT" python3 -m freud.py.telemetry.session_replay "$RUN_DIR/logs/events.jsonl" \
+    > "$RUN_DIR/artifacts/session-replay-stats.json" 2>/dev/null || true
+fi
+
 # Run summarize
 if [[ -f "$RUN_DIR/artifacts/verdict.json" ]]; then
   log_info "Generating summary..."
@@ -395,6 +499,37 @@ log_info "Artifacts: $RUN_DIR/artifacts/"
 if [[ -f "$RUN_DIR/artifacts/cache-stats.json" ]]; then
   log_info "Cache stats: $(cat "$RUN_DIR/artifacts/cache-stats.json")"
 fi
+if [[ -f "$RUN_DIR/artifacts/session-replay-stats.json" ]]; then
+  log_info "Session replay stats: $(cat "$RUN_DIR/artifacts/session-replay-stats.json")"
+fi
 log_info ""
+
+# ── Age-based run retention cleanup ──────────────────────────────────
+# Delete run directories (and their per-run state) older than the
+# configured retention period. pgvector namespaces recorded in
+# state/pgvector-namespace.txt are cleaned up best-effort via the
+# memory provider HTTP API.
+RETENTION_DAYS="${FREUD_RUN_RETENTION_DAYS:-3}"
+if [[ "$RETENTION_DAYS" -gt 0 ]]; then
+  deleted_count=0
+  while IFS= read -r old_run_dir; do
+    [[ -d "$old_run_dir" ]] || continue
+    # Best-effort pgvector namespace cleanup
+    ns_file="$old_run_dir/state/pgvector-namespace.txt"
+    if [[ -f "$ns_file" ]]; then
+      old_ns="$(cat "$ns_file" 2>/dev/null)"
+      if [[ -n "$old_ns" ]]; then
+        # Try to reset via the memory provider HTTP API (non-blocking, best-effort)
+        MEMORY_BASE_URL="${NEOPSYKE_MEMORY_DEFAULT_BASE_URL:-http://localhost:6333}"
+        curl -sf -X DELETE "${MEMORY_BASE_URL}/collections/${old_ns}" >/dev/null 2>&1 || true
+      fi
+    fi
+    rm -rf "$old_run_dir"
+    deleted_count=$((deleted_count + 1))
+  done < <(find "$RUN_ROOT_ABS" -maxdepth 1 -type d -name '*-live-eval-*' -mtime +"$RETENTION_DAYS" 2>/dev/null || true)
+  if [[ "$deleted_count" -gt 0 ]]; then
+    log_info "Retention cleanup: deleted $deleted_count run(s) older than ${RETENTION_DAYS} day(s)"
+  fi
+fi
 
 exit "$EXIT_CODE"

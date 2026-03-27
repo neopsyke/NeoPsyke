@@ -394,10 +394,9 @@ fun Provenance.renderSummary(): String =
             append("\nsource_part=")
             append(source.part)
         }
-        if (!source.sourceRef.isNullOrBlank()) {
-            append("\nsource_ref=")
-            append(source.sourceRef)
-        }
+        // sourceRef excluded: contains volatile rootInputId/rootImpulseId
+        // that the LLM does not need for decision-making. These IDs are
+        // available in ChatCallMetadata for logging/tracing.
         sanitization?.let {
             append("\nsanitization_method=")
             append(it.method)
