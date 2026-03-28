@@ -1,7 +1,7 @@
 # CLAUDE.md
 
 ## Claude Code Specifics
-- Use `./gradlew test` for full verification.
+- Use `./freud/bootstrap.sh` and `./freud/bin/freud run ci-pr` for full verification.
 - When Freud is needed, run `./freud/bootstrap.sh` once, then use `./freud/bin/freud run <feature-id>`.
 - Commit only when explicitly asked.
 - Do not push to remote unless explicitly asked.

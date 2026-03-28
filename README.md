@@ -267,11 +267,20 @@ The project uses a multi-phase validation pipeline called **Freud**. The harness
 home lives under `freud/`, with the Cobra entrypoint at `freud/cli/`, shared Go
 packages under `freud/internal/`, and the local built binary at `./freud/bin/freud`.
 
+The normal deterministic developer loop is:
+
 1. **Preflight compile** -- fast build check
-2. **Targeted tests** -- tests related to the changed feature
+2. **Targeted tests** -- focused agent test subset for quick failure signal
 3. **Full test suite** -- all JUnit tests
 4. **Scenario pack** -- deterministic agent behavior scenarios (`freud/scenarios/v1/`) that exercise the cognitive loop end-to-end
 5. **Reasoning eval** -- logic gate tests (shape-lock, feedback-carry, multi-fix) that verify the planner produces structurally correct decisions
+
+The `ci-pr` signoff gate trims that to the non-redundant final gate:
+
+1. **Preflight compile**
+2. **Full test suite**
+3. **Scenario pack**
+4. **Reasoning eval**
 
 Live evaluation lanes (`--lane low-llm`, `--lane high-llm`) and memory live eval are available for deeper validation during development.
 

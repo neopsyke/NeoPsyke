@@ -203,6 +203,6 @@ Each section covers terms that appear together in the same area of the agent.
 ## Evaluation (Freud)
 
 - **Scenario** — A scripted test case for the agent, defined in `freud/scenarios/`. Specifies input stimuli, expected behavior, and success criteria. Used to evaluate reasoning quality, safety, and memory.
-- **FeatureLoop** — The `freud/scripts/feature-loop.sh` script that runs a feature through the eval harness: build, run scenarios, collect results, and report. Invoked as `freud/scripts/feature-loop.sh <feature-id>`.
+- **FeatureLoop** — The Freud pipeline runner implemented by `./freud/bin/freud run <feature-id>`. It executes the configured deterministic and optional live steps, writes indexed artifacts, and reports pass/fail status.
 - **LiveEval** — Real-time evaluation mode where the agent runs against live scenarios with instrumented metrics. Includes `MemoryLiveEval` (memory system) and reasoning self-evaluation.
 - **ReasoningEvalMode** — The evaluation strategy: `LOGIC` (pure logic test) or `MODEL` (model-based reasoning assessment).

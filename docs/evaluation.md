@@ -14,8 +14,11 @@ NeoPsyke uses a multi-layered testing and evaluation approach, from fast unit te
 # Unit tests only (fast, no LLM calls)
 ./gradlew test
 
+# Bootstrap Freud once per clone
+./freud/bootstrap.sh
+
 # Full validation gate (required for PRs)
-freud/scripts/feature-loop.sh ci-pr
+./freud/bin/freud run ci-pr
 
 # Deterministic reasoning eval only
 ./run-neopsyke --eval-reasoning-only
@@ -38,12 +41,12 @@ These are fast, deterministic, and require no API keys or external services.
 
 ### 2. Freud validation pipeline
 
-Freud is the project's multi-phase validation orchestrator. It lives under `freud/` and includes shell scripts, Python tooling, scenario packs, and reasoning eval harnesses.
+Freud is the project's validation orchestrator. The active harness lives under `freud/`, with the CLI entrypoint in `freud/cli/`, shared Go packages in `freud/internal/`, and the built local binary at `./freud/bin/freud`. Legacy shell/python tools remain under `freud/legacy/`.
 
-The default PR gate runs:
+Normal deterministic developer loop:
 
 ```bash
-freud/scripts/feature-loop.sh ci-pr
+./freud/bin/freud run my-change
 ```
 
 This executes five phases in order:
@@ -51,12 +54,27 @@ This executes five phases in order:
 | Phase | What it does |
 |---|---|
 | `preflight_compile` | Fast build check — catches compilation errors before running tests. |
-| `targeted_tests` | Runs tests related to the changed feature (when identifiable). |
+| `targeted_tests` | Focused agent test subset for quicker failure signal during iteration. |
 | `full_tests` | Full JUnit test suite. |
 | `scenario_pack` | Deterministic agent behavior scenarios that exercise the cognitive loop end-to-end. |
 | `reasoning_eval_logic` | Deterministic logic gate tests — no external LLM calls. |
 
-All five phases must pass for a PR to be considered ready.
+PR/signoff gate:
+
+```bash
+./freud/bin/freud run ci-pr
+```
+
+This trims the deterministic gate to the non-redundant final signoff path:
+
+| Phase | What it does |
+|---|---|
+| `preflight_compile` | Fast build check. |
+| `full_tests` | Full JUnit test suite. |
+| `scenario_pack` | Deterministic cognitive-loop scenarios. |
+| `reasoning_eval_logic` | Deterministic logic gate tests. |
+
+That `ci-pr` gate is the required non-live signoff path.
 
 ### 3. Scenario pack (`freud/scenarios/v1/`)
 
@@ -93,7 +111,8 @@ Live LLM-backed reasoning tests using a frozen BBH-style smoke slice (24 cases).
 
 ```bash
 # Live reasoning eval with real LLM calls
-./run-neopsyke --eval-reasoning-only --eval-reasoning-mode model
+./freud/bin/freud bbh --lane low-llm
+./freud/bin/freud bbh --lane high-llm
 ```
 
 This mode is for manual validation during development, not for CI.
@@ -103,14 +122,14 @@ This mode is for manual validation during development, not for CI.
 More comprehensive live evaluation using the Freud BBH smoke harness:
 
 ```bash
-# Weak-structure lane (more lenient scoring)
-freud/scripts/run-bbh-smoke.sh --lane weak-structure
+# Lower-cost live lane
+./freud/bin/freud bbh --lane low-llm
 
-# Production-acceptance lane (stricter scoring)
-freud/scripts/run-bbh-smoke.sh --lane prod-acceptance
+# Production-routing live lane
+./freud/bin/freud bbh --lane high-llm
 
 # Full orchestrated run: deterministic + live
-freud/scripts/feature-loop.sh reasoning-matrix --live --config freud/config/live-weak-structure.env
+./freud/bin/freud run my-change --live --lane low-llm
 ```
 
 Live lanes disable long-term memory and episodic logbook recall by default so they measure reasoning quality, not memory effects.
@@ -131,8 +150,8 @@ Tests the real memory pipeline end-to-end: LLM memory advisor → Hippocampus im
 For testing individual inputs against the real agent:
 
 ```bash
-freud/scripts/live-eval.sh --input input.txt
-freud/scripts/live-eval.sh --input input.txt --expected expected.txt --timeout 120
+./freud/bin/freud eval --input input.txt
+./freud/bin/freud eval --input input.txt --expected expected.txt --timeout 120
 ```
 
 ---
@@ -158,19 +177,13 @@ The LLM response cache solves this: record one live run, then replay it as many 
 
 ```bash
 # 1. Record a baseline run (makes real LLM calls, saves responses)
-freud/scripts/live-eval.sh \
-  --input input.txt \
-  --expected expected.txt \
-  --timeout 120
+./freud/bin/freud eval --input input.txt --expected expected.txt --timeout 120 --record-session
 
 # 2. Find the cache file from that run
-CACHE=$(cat .neopsyke/runs/freud/latest-run.txt)/artifacts/llm-cache.jsonl
+CACHE=$(tail -1 .neopsyke/runs/freud/run-index.tsv | cut -f3)/artifacts/llm-cache.jsonl
 
 # 3. Replay — zero API calls if nothing changed
-freud/scripts/live-eval.sh \
-  --input input.txt \
-  --expected expected.txt \
-  --cache-replay "$CACHE"
+./freud/bin/freud eval --input input.txt --expected expected.txt --cache-replay "$CACHE"
 ```
 
 ### When to use replay
@@ -200,7 +213,7 @@ The `seq` field is the global call order across all cognitive roles. The `hash` 
 After a replay run, inspect the cache performance:
 
 ```bash
-python3 freud/py/telemetry/llm_cache.py .neopsyke/logs/latest-events.jsonl
+python3 freud/legacy/py/telemetry/llm_cache.py .neopsyke/logs/latest-events.jsonl
 ```
 
 Example output:
@@ -248,9 +261,9 @@ This tells you exactly which cognitive role and call site were first affected by
 | `NEOPSYKE_LLM_CACHE_MODE` | `record`, `replay`, `off` | Controls caching behavior. Default: `off`. |
 | `NEOPSYKE_LLM_CACHE_FILE` | path | JSONL file to write (record) or read (replay). |
 
-You rarely need to set these directly — `live-eval.sh` handles them via the `--cache-replay` flag. But they are available for custom scripts or manual runs.
+You rarely need to set these directly — `./freud/bin/freud eval` handles them via the `--cache-replay` flag. But they are available for custom scripts or manual runs.
 
-### Manual usage (without live-eval.sh)
+### Manual usage (without `freud eval`)
 
 ```bash
 # Record
@@ -303,10 +316,10 @@ The `task_verifier_review` event captures how the DecisionVerifier evaluates can
 Aggregate from the event sidecar:
 
 ```bash
-freud/scripts/task-verifier-telemetry.sh .neopsyke/logs/latest-events.jsonl
+python3 freud/legacy/py/telemetry/task_verifier.py .neopsyke/logs/latest-events.jsonl
 
 # Or from a specific run:
-freud/scripts/task-verifier-telemetry.sh .neopsyke/logs/runs/<run-id>.events.jsonl
+python3 freud/legacy/py/telemetry/task_verifier.py .neopsyke/logs/runs/<run-id>.events.jsonl
 ```
 
 The dashboard snapshot (`/api/obs/snapshot`) also exposes aggregated `taskVerifierStats` counters and rates.
@@ -323,7 +336,7 @@ The `prompt_budget_allocation` event is emitted when prompts are assembled for e
 Aggregate from the event sidecar:
 
 ```bash
-freud/scripts/prompt-budget-telemetry.sh .neopsyke/logs/latest-events.jsonl
+python3 freud/legacy/py/telemetry/prompt_budget.py .neopsyke/logs/latest-events.jsonl
 ```
 
 The dashboard snapshot exposes aggregated `promptBudgetStats`.
@@ -419,7 +432,7 @@ This would produce a tuning guide grounded in data rather than intuition.
 GitHub pull requests run only the fast non-live path:
 
 ```bash
-freud/scripts/feature-loop.sh ci-pr
+./freud/bin/freud run ci-pr
 ```
 
-This includes Freud's own BATS and pytest suites in addition to the five main phases. Live reasoning lanes remain manual-only to avoid API key requirements and cost in CI.
+This covers the deterministic signoff path only. Live reasoning lanes remain manual-only to avoid API key requirements and cost in CI.
