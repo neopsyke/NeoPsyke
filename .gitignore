@@ -8,6 +8,12 @@ out/
 .kotlin/
 # Freud CLI binary
 freud-cli
+freud/bin/
+freud/.cache/
+freud/latest
+freud/latest-run.txt
+freud/artifacts-latest
+freud/logs/latest
 
 # IDE/editor files
 .idea/

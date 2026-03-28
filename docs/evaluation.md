@@ -18,10 +18,10 @@ NeoPsyke uses a multi-layered testing and evaluation approach, from fast unit te
 freud/scripts/feature-loop.sh ci-pr
 
 # Deterministic reasoning eval only
-./run-neopsyke.sh --eval-reasoning-only
+./run-neopsyke --eval-reasoning-only
 
 # Memory live eval (requires pgvector backend)
-./run-neopsyke.sh --eval-memory-live
+./run-neopsyke --eval-memory-live
 ```
 
 ---
@@ -81,10 +81,10 @@ The logic eval also includes a 45-case behavioral/perturbation pack that tests e
 
 ```bash
 # Run specific logic tasks
-./run-neopsyke.sh --eval-reasoning-only --eval-reasoning-tasks shape-lock,multi-fix
+./run-neopsyke --eval-reasoning-only --eval-reasoning-tasks shape-lock,multi-fix
 
 # Run all logic tasks
-./run-neopsyke.sh --eval-reasoning-only --eval-reasoning-mode logic
+./run-neopsyke --eval-reasoning-only --eval-reasoning-mode logic
 ```
 
 ### 5. Reasoning eval — model mode
@@ -93,7 +93,7 @@ Live LLM-backed reasoning tests using a frozen BBH-style smoke slice (24 cases).
 
 ```bash
 # Live reasoning eval with real LLM calls
-./run-neopsyke.sh --eval-reasoning-only --eval-reasoning-mode model
+./run-neopsyke --eval-reasoning-only --eval-reasoning-mode model
 ```
 
 This mode is for manual validation during development, not for CI.
@@ -120,10 +120,10 @@ Live lanes disable long-term memory and episodic logbook recall by default so th
 Tests the real memory pipeline end-to-end: LLM memory advisor → Hippocampus imprint → vector recall. Requires the pgvector backend running.
 
 ```bash
-./run-neopsyke.sh --eval-memory-live
+./run-neopsyke --eval-memory-live
 
 # Run specific memory tasks
-./run-neopsyke.sh --eval-memory-live --eval-memory-tasks user-preference-color,goal-constraint-timezone
+./run-neopsyke --eval-memory-live --eval-memory-tasks user-preference-color,goal-constraint-timezone
 ```
 
 ### 8. Freud live eval (single-input)
@@ -256,12 +256,12 @@ You rarely need to set these directly — `live-eval.sh` handles them via the `-
 # Record
 NEOPSYKE_LLM_CACHE_MODE=record \
 NEOPSYKE_LLM_CACHE_FILE=my-cache.jsonl \
-./run-neopsyke.sh
+./run-neopsyke
 
 # Replay
 NEOPSYKE_LLM_CACHE_MODE=replay \
 NEOPSYKE_LLM_CACHE_FILE=my-cache.jsonl \
-./run-neopsyke.sh
+./run-neopsyke
 ```
 
 ### Token savings in practice

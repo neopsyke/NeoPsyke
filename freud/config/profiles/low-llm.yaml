@@ -12,3 +12,6 @@ pipeline:
     live_only: true
   - name: test_replay_eval
     live_only: true
+
+session:
+  replay_test_enabled: true

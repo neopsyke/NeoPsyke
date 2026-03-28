@@ -89,7 +89,8 @@ This starts a PostgreSQL + pgvector instance. NeoPsyke will auto-bootstrap its m
 ### 4. Run
 
 ```bash
-./run-neopsyke.sh
+./run-neopsyke doctor
+./run-neopsyke
 ```
 
 The agent starts in interactive mode with a web dashboard at `http://localhost:8787`. Open the dashboard to begin a conversation.
@@ -255,11 +256,16 @@ Some omissions are deliberate architectural decisions rather than missing checkl
 # Unit tests
 ./gradlew test
 
+# Bootstrap Freud once per clone
+./freud/bootstrap.sh
+
 # Full validation gate (used for PRs)
-./freud-cli run ci-pr
+./freud/bin/freud run ci-pr
 ```
 
-The project uses a multi-phase validation pipeline called **Freud** (a single Go CLI at `freud/cli/`):
+The project uses a multi-phase validation pipeline called **Freud**. The harness
+home lives under `freud/`, with the Cobra entrypoint at `freud/cli/`, shared Go
+packages under `freud/internal/`, and the local built binary at `./freud/bin/freud`.
 
 1. **Preflight compile** -- fast build check
 2. **Targeted tests** -- tests related to the changed feature
