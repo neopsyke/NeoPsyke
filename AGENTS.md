@@ -73,11 +73,20 @@ Bad:
 - Do not commit secrets, API keys, or local machine paths.
 - Prefer ASCII in docs/code unless the file already uses Unicode.
 - Preserve existing behavior unless the user asked for behavior changes.
+- Commit only when explicitly asked.
+- Do not push to remote unless explicitly asked.
+- When resuming from a compacted session, read the transcript at the provided path before proceeding.
 - When fixing tests, always prioritize understanding the feature and making sure the root
   cause is addressed instead of making the test just pass.
 - If you find a failing test, flaky test, even if unrelated to current changes
   make sure to find the root cause and fix it. Every work session must end with all
   tests running and stable. 
+
+## Agent Memory Policy
+- Auto-memory is for personal or local preferences only, such as output style or terminal setup.
+- Never store project rules, architecture facts, or coding patterns in auto-memory.
+- Shared project knowledge belongs in `AGENTS.md`.
+- If you learn something worth remembering about the project, propose adding it to `AGENTS.md` instead of storing it privately.
 
 ## Agent Logic Docs Maintenance (Required)
 - Keep both `AGENT_LOGIC_SUMMARY.md` and `AGENT_LOGIC_DIAGRAM.md` accurate as living runtime logic docs.

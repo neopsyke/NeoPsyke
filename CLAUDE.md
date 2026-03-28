@@ -1,14 +1,7 @@
 # CLAUDE.md
 
-## Claude Code Specifics
-- Use `./freud/bootstrap.sh` and `./freud/bin/freud run ci-pr` for full verification.
-- When Freud is needed, run `./freud/bootstrap.sh` once, then use `./freud/bin/freud run <feature-id>`.
-- Commit only when explicitly asked.
-- Do not push to remote unless explicitly asked.
-- When resuming from a compacted session, read the transcript at the path provided before proceeding.
+All agent instructions for this repository live in `AGENTS.md`.
 
-## Memory Policy
-- Auto-memory is for **personal/local preferences only** (output style, terminal setup, etc.).
-- **Never** store project rules, architecture facts, or coding patterns in auto-memory.
-- All project knowledge belongs in `AGENTS.md` (shared across all coding agents).
-- If you learn something worth remembering about the project, propose adding it to `AGENTS.md` instead.
+Read `AGENTS.md` and treat it as the single source of truth.
+
+Do not add or maintain separate agent-specific instructions here. Keep shared agent guidance only in `AGENTS.md`.
