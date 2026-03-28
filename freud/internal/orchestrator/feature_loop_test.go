@@ -243,6 +243,64 @@ func TestFeatureLoopSkipSteps(t *testing.T) {
 	}
 }
 
+func TestFeatureLoopCiPrSkipsTargetedTests(t *testing.T) {
+	dir := t.TempDir()
+	cfg := testCfgWithSteps([]config.PipelineStep{
+		{Name: "preflight_compile", Cmd: "echo compile"},
+		{Name: "targeted_tests", Cmd: "echo targeted"},
+		{Name: "full_tests", Cmd: "echo full"},
+	})
+	cfg.Project.RunRoot = dir
+
+	result, err := FeatureLoop(FeatureLoopOpts{
+		FeatureID: "ci-pr",
+		DryRun:    true,
+		Cfg:       cfg,
+		RepoRoot:  dir,
+	})
+	if err != nil {
+		t.Fatalf("FeatureLoop ci-pr dry-run failed: %v", err)
+	}
+
+	data, _ := os.ReadFile(filepath.Join(result.RunDir, "artifacts", "steps.tsv"))
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("expected 2 step entries without targeted_tests, got %d: %v", len(lines), lines)
+	}
+	for _, line := range lines {
+		if strings.HasPrefix(line, "targeted_tests\t") {
+			t.Fatalf("ci-pr should skip targeted_tests, got steps.tsv line %q", line)
+		}
+	}
+}
+
+func TestFeatureLoopCiPrAllowsExplicitTargetedTests(t *testing.T) {
+	dir := t.TempDir()
+	cfg := testCfgWithSteps([]config.PipelineStep{
+		{Name: "preflight_compile", Cmd: "echo compile"},
+		{Name: "targeted_tests", Cmd: "echo targeted"},
+		{Name: "full_tests", Cmd: "echo full"},
+	})
+	cfg.Project.RunRoot = dir
+
+	result, err := FeatureLoop(FeatureLoopOpts{
+		FeatureID: "ci-pr",
+		OnlyStep:  "targeted_tests",
+		DryRun:    true,
+		Cfg:       cfg,
+		RepoRoot:  dir,
+	})
+	if err != nil {
+		t.Fatalf("FeatureLoop ci-pr only-step targeted_tests dry-run failed: %v", err)
+	}
+
+	data, _ := os.ReadFile(filepath.Join(result.RunDir, "artifacts", "steps.tsv"))
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) != 1 || !strings.HasPrefix(lines[0], "targeted_tests\t") {
+		t.Fatalf("expected only targeted_tests to run when explicitly selected, got %v", lines)
+	}
+}
+
 func TestFeatureLoopLiveOnlySkippedByDefault(t *testing.T) {
 	dir := t.TempDir()
 	cfg := testCfgWithSteps([]config.PipelineStep{

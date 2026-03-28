@@ -107,7 +107,7 @@ Bootstrap Freud first: `./freud/bootstrap.sh`
 
 - Default deterministic completion/signoff gate:
   - `./freud/bin/freud run ci-pr`
-  - This runs, in order: `preflight_compile`, `targeted_tests`, `full_tests`, `scenario_pack`, `reasoning_eval_logic`
+  - This runs, in order: `preflight_compile`, `full_tests`, `scenario_pack`, `reasoning_eval_logic`
   - No commit, no "done", and no claim of full validation until this command has been run non-dry and has passed.
 - Stub/deterministic-first run:
   - `./freud/bin/freud run <feature-id>`
@@ -288,7 +288,6 @@ Bootstrap Freud first: `./freud/bootstrap.sh`
   - `./freud/bin/freud run ci-pr`
 - Expected deterministic gate coverage/order:
   - `preflight_compile`
-  - `targeted_tests`
   - `full_tests`
   - `scenario_pack`
   - `reasoning_eval_logic`

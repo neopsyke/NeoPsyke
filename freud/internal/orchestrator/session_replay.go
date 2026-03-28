@@ -19,6 +19,7 @@ type SessionReplayTestOpts struct {
 	Cfg       *config.FreudConfig
 	Verbose   int
 	DryRun    bool
+	Progress  ProgressReporter
 }
 
 // SessionReplayTestResult holds the session replay E2E test outcome.
@@ -65,11 +66,19 @@ func SessionReplayTest(opts SessionReplayTestOpts) (*SessionReplayTestResult, er
 	}
 
 	if opts.DryRun {
+		opts.Progress.Emit(ProgressUpdate{
+			Phase:  "session_replay",
+			Status: "dry_run",
+		})
 		fmt.Println("[dry-run] session replay E2E test")
 		return &SessionReplayTestResult{Passed: true, ExitCode: 0}, nil
 	}
 
 	// Step 1: Record
+	opts.Progress.Emit(ProgressUpdate{
+		Phase:  "record",
+		Status: "start",
+	})
 	fmt.Println("[freud] session-replay: recording...")
 	recordResult, err := LiveEval(LiveEvalOpts{
 		InputFile:      inputFile,
@@ -89,6 +98,11 @@ func SessionReplayTest(opts SessionReplayTestOpts) (*SessionReplayTestResult, er
 
 	recordDir := recordResult.RunDir
 	sessionDir := filepath.Join(recordDir, "session")
+	opts.Progress.Emit(ProgressUpdate{
+		Phase:   "record",
+		Status:  "pass",
+		Message: filepath.Base(recordDir),
+	})
 
 	// Verify session files exist
 	if !analysis.FileExists(filepath.Join(sessionDir, "signals.jsonl")) {
@@ -116,6 +130,10 @@ func SessionReplayTest(opts SessionReplayTestOpts) (*SessionReplayTestResult, er
 	fmt.Printf("[freud] session-replay: recorded answer=%q\n", recordAnswer)
 
 	// Step 2: Replay
+	opts.Progress.Emit(ProgressUpdate{
+		Phase:  "replay",
+		Status: "start",
+	})
 	fmt.Println("[freud] session-replay: replaying...")
 	replayResult, err := LiveEval(LiveEvalOpts{
 		InputFile:        inputFile,
@@ -137,6 +155,11 @@ func SessionReplayTest(opts SessionReplayTestOpts) (*SessionReplayTestResult, er
 	replayDir := replayResult.RunDir
 	replayAnswer := ReadAnswerFile(filepath.Join(replayDir, "artifacts", "answer.txt"))
 	fmt.Printf("[freud] session-replay: replayed answer=%q\n", replayAnswer)
+	opts.Progress.Emit(ProgressUpdate{
+		Phase:   "replay",
+		Status:  "pass",
+		Message: filepath.Base(replayDir),
+	})
 
 	// Step 3: Compare and verify determinism
 	normalizedRecord := NormalizeAnswer(recordAnswer, false)
@@ -234,6 +257,16 @@ func SessionReplayTest(opts SessionReplayTestOpts) (*SessionReplayTestResult, er
 			fmt.Printf("  - %s\n", f)
 		}
 	}
+	finalStatus := "pass"
+	if !passed {
+		finalStatus = "fail"
+	}
+	opts.Progress.Emit(ProgressUpdate{
+		Phase:  "verify",
+		Status: finalStatus,
+		Message: fmt.Sprintf("record=%s replay=%s failures=%d",
+			filepath.Base(recordDir), filepath.Base(replayDir), len(failures)),
+	})
 
 	return &SessionReplayTestResult{
 		Passed:    passed,

@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -75,6 +76,7 @@ func FeatureLoop(opts FeatureLoopOpts) (*FeatureLoopResult, error) {
 	featureID := strings.ToLower(opts.FeatureID)
 	featureID = nonAlnum.ReplaceAllString(featureID, "-")
 	featureID = strings.Trim(featureID, "-")
+	pipeline := effectivePipeline(featureID, cfg.Pipeline, opts)
 
 	// Resolve paths
 	runRootAbs := ResolveAbsPath(cfg.Project.RunRoot, repoRoot)
@@ -118,7 +120,7 @@ func FeatureLoop(opts FeatureLoopOpts) (*FeatureLoopResult, error) {
 
 	// Write run-config.json
 	commands := map[string]string{}
-	for _, step := range cfg.Pipeline {
+	for _, step := range pipeline {
 		commands[step.Name] = step.Cmd
 	}
 	runConfig := map[string]interface{}{
@@ -154,7 +156,7 @@ func FeatureLoop(opts FeatureLoopOpts) (*FeatureLoopResult, error) {
 	shouldStop := false
 	fromStepReached := opts.FromStep == ""
 
-	for stepIdx, step := range cfg.Pipeline {
+	for stepIdx, step := range pipeline {
 		// from-step filtering
 		if !fromStepReached {
 			if step.Name == opts.FromStep {
@@ -408,6 +410,21 @@ func isBuiltinStep(name string) bool {
 	return builtinSteps[name]
 }
 
+func effectivePipeline(featureID string, pipeline []config.PipelineStep, opts FeatureLoopOpts) []config.PipelineStep {
+	if featureID != "ci-pr" || opts.OnlyStep == "targeted_tests" || opts.FromStep == "targeted_tests" {
+		return pipeline
+	}
+
+	filtered := make([]config.PipelineStep, 0, len(pipeline))
+	for _, step := range pipeline {
+		if step.Name == "targeted_tests" {
+			continue
+		}
+		filtered = append(filtered, step)
+	}
+	return filtered
+}
+
 // runBuiltinStep dispatches a built-in step by name to its Go implementation.
 // Output is captured to logPath. Returns exit code.
 func runBuiltinStep(name string, cfg *config.FreudConfig, repoRoot, gradleHome, logPath string, opts FeatureLoopOpts) int {
@@ -421,6 +438,7 @@ func runBuiltinStep(name string, cfg *config.FreudConfig, repoRoot, gradleHome, 
 	// Redirect stdout/stderr to the log file for the duration of this step
 	origStdout := os.Stdout
 	origStderr := os.Stderr
+	progress := newBuiltinStepReporter(name, origStdout)
 	os.Stdout = logFile
 	os.Stderr = logFile
 	defer func() {
@@ -473,6 +491,7 @@ func runBuiltinStep(name string, cfg *config.FreudConfig, repoRoot, gradleHome, 
 			RetentionDays:        cfg.Project.RetentionDays,
 			RepoRoot:             repoRoot,
 			Verbose:              opts.Verbose,
+			Progress:             progress,
 		})
 		if err != nil {
 			fmt.Fprintf(logFile, "error: %v\n", err)
@@ -491,6 +510,7 @@ func runBuiltinStep(name string, cfg *config.FreudConfig, repoRoot, gradleHome, 
 			LLMConfigFile:  cfg.LiveEval.LLMConfigFile,
 			RepoRoot:       repoRoot,
 			Verbose:        opts.Verbose,
+			Progress:       progress,
 		})
 		if err != nil {
 			fmt.Fprintf(logFile, "error: %v\n", err)
@@ -504,6 +524,7 @@ func runBuiltinStep(name string, cfg *config.FreudConfig, repoRoot, gradleHome, 
 			RepoRoot: repoRoot,
 			Cfg:      cfg,
 			Verbose:  opts.Verbose,
+			Progress: progress,
 		})
 		if err != nil {
 			fmt.Fprintf(logFile, "error: %v\n", err)
@@ -515,6 +536,10 @@ func runBuiltinStep(name string, cfg *config.FreudConfig, repoRoot, gradleHome, 
 		fmt.Fprintf(logFile, "unknown built-in step: %s\n", name)
 		return 1
 	}
+}
+
+func newBuiltinStepReporter(stepName string, w io.Writer) ProgressReporter {
+	return WithStepProgress(stepName, NewConsoleProgressReporter(w))
 }
 
 // runShellStep executes a shell command, capturing output to logPath. Returns exit code.

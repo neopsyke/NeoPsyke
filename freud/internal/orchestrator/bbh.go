@@ -31,6 +31,7 @@ type BBHOpts struct {
 	RunDirOverride       string
 	Verbose              int
 	DryRun               bool
+	Progress             ProgressReporter
 }
 
 // BBHResult holds the output of a BBH smoke suite run.
@@ -127,9 +128,23 @@ func BBHSmoke(opts BBHOpts) (*BBHResult, error) {
 
 	if opts.DryRun {
 		tsvFile.Close()
+		opts.Progress.Emit(ProgressUpdate{
+			Phase:   "suite",
+			Status:  "dry_run",
+			Current: len(prompts),
+			Total:   len(prompts),
+			Message: fmt.Sprintf("lane=%s", opts.Lane),
+		})
 		fmt.Printf("[dry-run] BBH smoke %s: %d cases\n", opts.Lane, len(prompts))
 		return &BBHResult{RunDir: runDir, ExitCode: 0}, nil
 	}
+
+	opts.Progress.Emit(ProgressUpdate{
+		Phase:   "suite",
+		Status:  "start",
+		Total:   len(prompts),
+		Message: fmt.Sprintf("lane=%s", opts.Lane),
+	})
 
 	// Run each case
 	var results []bbhCaseResult
@@ -155,6 +170,12 @@ func BBHSmoke(opts BBHOpts) (*BBHResult, error) {
 		expectedPath := filepath.Join(caseDir, "expected.txt")
 		os.WriteFile(expectedPath, []byte(expected+"\n"), 0o644)
 
+		opts.Progress.Emit(ProgressUpdate{
+			Phase:   "case_start",
+			Current: i + 1,
+			Total:   len(prompts),
+			Message: p.ID,
+		})
 		fmt.Printf("[freud] bbh %s case %d/%d: %s\n", opts.Lane, i+1, len(prompts), p.ID)
 
 		// Call LiveEval directly (in-process)
@@ -238,6 +259,13 @@ func BBHSmoke(opts BBHOpts) (*BBHResult, error) {
 
 		// Write progress
 		writeProgress(artifactsDir, opts.Lane, i+1, len(prompts), passCount, results)
+		opts.Progress.Emit(ProgressUpdate{
+			Phase:   "case_result",
+			Current: i + 1,
+			Total:   len(prompts),
+			Status:  cr.Status,
+			Message: fmt.Sprintf("%s pass=%d timeout=%d schema=%d", cr.ID, passCount, timeoutCount, schemaDowngradeCount),
+		})
 	}
 	tsvFile.Close()
 
@@ -338,6 +366,18 @@ func BBHSmoke(opts BBHOpts) (*BBHResult, error) {
 			fmt.Printf("[freud] cleaned %d old run(s) (retention=%d days)\n", cleaned, opts.RetentionDays)
 		}
 	}
+
+	finalStatus := "pass"
+	if exitCode != 0 {
+		finalStatus = "fail"
+	}
+	opts.Progress.Emit(ProgressUpdate{
+		Phase:   "suite",
+		Current: total,
+		Total:   total,
+		Status:  finalStatus,
+		Message: fmt.Sprintf("lane=%s pass=%d/%d pass_rate=%.1f%% timeouts=%d schema=%d", opts.Lane, passCount, total, exactMatchRate, timeoutCount, schemaDowngradeCount),
+	})
 
 	return &BBHResult{
 		RunDir:      runDir,

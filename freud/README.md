@@ -93,10 +93,9 @@ happen until non-dry `./freud/bin/freud run ci-pr` passes.
 The expected deterministic gate order is:
 
 1. `preflight_compile`
-2. `targeted_tests`
-3. `full_tests`
-4. `scenario_pack`
-5. `reasoning_eval_logic`
+2. `full_tests`
+3. `scenario_pack`
+4. `reasoning_eval_logic`
 
 ### I Want Deterministic Validation Only
 

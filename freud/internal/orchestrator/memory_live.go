@@ -19,6 +19,7 @@ type MemoryLiveSmokeOpts struct {
 	LLMConfigFile  string
 	RepoRoot       string
 	Verbose        int
+	Progress       ProgressReporter
 }
 
 // MemoryLiveSmokeResult holds the memory live smoke outcome.
@@ -71,6 +72,11 @@ func MemoryLiveSmoke(opts MemoryLiveSmokeOpts) (*MemoryLiveSmokeResult, error) {
 	if opts.Verbose > 0 {
 		fmt.Printf("[freud] exec: %s %s\n", neopsykeCmd, strings.Join(args, " "))
 	}
+	opts.Progress.Emit(ProgressUpdate{
+		Phase:   "run",
+		Status:  "start",
+		Message: fmt.Sprintf("tasks=%d stage=%s", len(taskIDs), stage),
+	})
 
 	cmd := exec.Command(neopsykeCmd, args...)
 	cmd.Dir = repoRoot
@@ -86,9 +92,19 @@ func MemoryLiveSmoke(opts MemoryLiveSmokeOpts) (*MemoryLiveSmokeResult, error) {
 
 	if err := cmd.Run(); err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
+			opts.Progress.Emit(ProgressUpdate{
+				Phase:   "run",
+				Status:  "fail",
+				Message: fmt.Sprintf("exit=%d", exitErr.ExitCode()),
+			})
 			return &MemoryLiveSmokeResult{ExitCode: exitErr.ExitCode()}, nil
 		}
 		return nil, err
 	}
+	opts.Progress.Emit(ProgressUpdate{
+		Phase:   "run",
+		Status:  "pass",
+		Message: fmt.Sprintf("tasks=%d", len(taskIDs)),
+	})
 	return &MemoryLiveSmokeResult{ExitCode: 0}, nil
 }
