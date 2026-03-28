@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -157,6 +158,44 @@ func TestBBHSmokeProgressArtifacts(t *testing.T) {
 		if !fileExists(filepath.Join(artDir, name)) {
 			t.Errorf("artifact %s should exist", name)
 		}
+	}
+}
+
+func TestBBHSmokeEmitsStructuredProgress(t *testing.T) {
+	dir := t.TempDir()
+	setupBBHFixtures(t, dir)
+	mockScript := createMockNeopsyke(dir, "4")
+	var updates []string
+
+	result, err := BBHSmoke(BBHOpts{
+		Lane:               "test-lane",
+		PromptsFile:        filepath.Join(dir, "prompts.jsonl"),
+		AnswersFile:        filepath.Join(dir, "answers.jsonl"),
+		MinPassRatePercent: 100,
+		Timeout:            10,
+		NeopsykeCmd:        mockScript,
+		RunRootAbs:         filepath.Join(dir, "runs"),
+		RepoRoot:           dir,
+		Progress: func(update ProgressUpdate) {
+			var buf bytes.Buffer
+			NewConsoleProgressReporter(&buf)(update)
+			updates = append(updates, strings.TrimSpace(buf.String()))
+		},
+	})
+	if err != nil {
+		t.Fatalf("BBHSmoke failed: %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("expected exit 0, got %d", result.ExitCode)
+	}
+	if len(updates) == 0 {
+		t.Fatal("expected structured progress updates")
+	}
+	if !strings.Contains(updates[0], "phase=suite") || !strings.Contains(updates[0], "status=start") {
+		t.Fatalf("expected first update to announce suite start, got %q", updates[0])
+	}
+	if !strings.Contains(updates[len(updates)-1], "status=pass") || !strings.Contains(updates[len(updates)-1], "pass=2/2") {
+		t.Fatalf("expected final update to announce pass summary, got %q", updates[len(updates)-1])
 	}
 }
 

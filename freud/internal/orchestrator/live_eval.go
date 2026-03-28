@@ -36,6 +36,7 @@ type LiveEvalOpts struct {
 	RepoRoot         string
 	Verbose          int
 	DryRun           bool
+	ConsoleWriter    io.Writer
 }
 
 // LiveEvalResult holds the output of a live eval run.
@@ -47,6 +48,11 @@ type LiveEvalResult struct {
 
 // LiveEval runs a single live evaluation. Replaces live-eval.sh.
 func LiveEval(opts LiveEvalOpts) (*LiveEvalResult, error) {
+	consoleWriter := opts.ConsoleWriter
+	if consoleWriter == nil {
+		consoleWriter = os.Stdout
+	}
+
 	repoRoot := opts.RepoRoot
 	if repoRoot == "" {
 		var err error
@@ -95,7 +101,7 @@ func LiveEval(opts LiveEvalOpts) (*LiveEvalResult, error) {
 	stateDir := filepath.Join(runDir, "state")
 
 	if opts.DryRun {
-		fmt.Printf("[dry-run] live-eval in %s\n", runDir)
+		fmt.Fprintf(consoleWriter, "[dry-run] live-eval in %s\n", runDir)
 		return &LiveEvalResult{RunDir: runDir, ExitCode: 0}, nil
 	}
 
@@ -223,7 +229,7 @@ func LiveEval(opts LiveEvalOpts) (*LiveEvalResult, error) {
 		return nil, fmt.Errorf("creating stdout log: %w", err)
 	}
 	defer stdoutFile.Close()
-	cmd.Stdout = io.MultiWriter(os.Stdout, stdoutFile)
+	cmd.Stdout = io.MultiWriter(consoleWriter, stdoutFile)
 
 	// Stderr: file only
 	stderrLogPath := filepath.Join(logsDir, "stderr.log")
@@ -235,10 +241,10 @@ func LiveEval(opts LiveEvalOpts) (*LiveEvalResult, error) {
 	cmd.Stderr = stderrFile
 
 	if opts.Verbose > 0 {
-		fmt.Printf("[freud] exec: %s %s\n", neopsykeCmd, strings.Join(cmdArgs, " "))
-		fmt.Printf("[freud] run_dir: %s\n", runDir)
+		fmt.Fprintf(consoleWriter, "[freud] exec: %s %s\n", neopsykeCmd, strings.Join(cmdArgs, " "))
+		fmt.Fprintf(consoleWriter, "[freud] run_dir: %s\n", runDir)
 	}
-	fmt.Printf("Run directory: %s\n", runDir)
+	fmt.Fprintf(consoleWriter, "Run directory: %s\n", runDir)
 
 	// Execute
 	startTime := time.Now()
@@ -332,7 +338,7 @@ func LiveEval(opts LiveEvalOpts) (*LiveEvalResult, error) {
 				realCalls, _ := cs["real_calls"].(float64)
 				hitRate, _ := cs["hit_rate_percent"].(float64)
 				divCount, _ := cs["divergence_count"].(float64)
-				fmt.Printf("\n[freud] LLM cache: total=%.0f cached=%.0f real=%.0f hit_rate=%.1f%% divergences=%.0f\n",
+				fmt.Fprintf(consoleWriter, "\n[freud] LLM cache: total=%.0f cached=%.0f real=%.0f hit_rate=%.1f%% divergences=%.0f\n",
 					totalCalls, cachedCalls, realCalls, hitRate, divCount)
 			}
 		}
@@ -345,13 +351,13 @@ func LiveEval(opts LiveEvalOpts) (*LiveEvalResult, error) {
 			if json.Unmarshal(data, &ss) == nil {
 				totalHits, _ := ss["total_replay_hits"].(float64)
 				totalDiv, _ := ss["total_divergences"].(float64)
-				fmt.Printf("[freud] session replay: hits=%.0f divergences=%.0f\n", totalHits, totalDiv)
+				fmt.Fprintf(consoleWriter, "[freud] session replay: hits=%.0f divergences=%.0f\n", totalHits, totalDiv)
 				if channels, ok := ss["channels"].(map[string]interface{}); ok {
 					for ch, v := range channels {
 						if chStats, ok := v.(map[string]interface{}); ok {
 							hits, _ := chStats["hits"].(float64)
 							divs, _ := chStats["divergences"].(float64)
-							fmt.Printf("[freud]   channel %-20s hits=%.0f divergences=%.0f\n", ch, hits, divs)
+							fmt.Fprintf(consoleWriter, "[freud]   channel %-20s hits=%.0f divergences=%.0f\n", ch, hits, divs)
 						}
 					}
 				}
@@ -360,15 +366,15 @@ func LiveEval(opts LiveEvalOpts) (*LiveEvalResult, error) {
 	}
 
 	// Print summary
-	fmt.Printf("\n[freud] verdict=%s exit=%d duration=%ds run_dir=%s\n",
+	fmt.Fprintf(consoleWriter, "\n[freud] verdict=%s exit=%d duration=%ds run_dir=%s\n",
 		verdict.Verdict, verdict.ExitCode, duration, runDir)
-	fmt.Printf("Verdict: %s\n", verdict.Verdict)
+	fmt.Fprintf(consoleWriter, "Verdict: %s\n", verdict.Verdict)
 
 	// Cleanup old runs
 	if opts.RunDirOverride == "" {
 		cleaned, _ := CleanupAllOldRuns(runRootAbs, opts.RetentionDays)
 		if cleaned > 0 && opts.Verbose > 0 {
-			fmt.Printf("[freud] cleaned %d old live-eval runs\n", cleaned)
+			fmt.Fprintf(consoleWriter, "[freud] cleaned %d old live-eval runs\n", cleaned)
 		}
 	}
 

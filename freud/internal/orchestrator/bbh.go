@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -176,7 +177,9 @@ func BBHSmoke(opts BBHOpts) (*BBHResult, error) {
 			Total:   len(prompts),
 			Message: p.ID,
 		})
-		fmt.Printf("[freud] bbh %s case %d/%d: %s\n", opts.Lane, i+1, len(prompts), p.ID)
+		if opts.Progress == nil {
+			fmt.Printf("[freud] bbh %s case %d/%d: %s\n", opts.Lane, i+1, len(prompts), p.ID)
+		}
 
 		// Call LiveEval directly (in-process)
 		goalsDisabled := false
@@ -194,6 +197,7 @@ func BBHSmoke(opts BBHOpts) (*BBHResult, error) {
 			RetentionDays:  0, // no cleanup per-case
 			RepoRoot:       repoRoot,
 			Verbose:        opts.Verbose,
+			ConsoleWriter:  bbhCaseConsoleWriter(opts.Progress),
 		})
 
 		exitCode := 1
@@ -384,6 +388,13 @@ func BBHSmoke(opts BBHOpts) (*BBHResult, error) {
 		SummaryJSON: summaryPath,
 		ExitCode:    exitCode,
 	}, nil
+}
+
+func bbhCaseConsoleWriter(progress ProgressReporter) io.Writer {
+	if progress != nil {
+		return io.Discard
+	}
+	return nil
 }
 
 func writeProgress(artifactsDir, lane string, done, total, passed int, results []bbhCaseResult) {

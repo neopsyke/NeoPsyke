@@ -85,6 +85,7 @@ func runBBH(cmd *cobra.Command, args []string) error {
 		RepoRoot:             "",
 		Verbose:              verbose,
 		DryRun:               dryRun,
+		Progress:             orchestrator.WithStepProgress("bbh", orchestrator.NewConsoleProgressReporter(os.Stdout)),
 	})
 	if err != nil {
 		return err
