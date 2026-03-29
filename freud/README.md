@@ -65,15 +65,17 @@ Use Freud for:
 | Run the full deterministic signoff gate before considering work complete | `./freud/bin/freud run signoff-gate` | 1. Runs the deterministic signoff gate.<br>2. Re-checks the full Gradle test suite, scenario pack, and reasoning gate.<br>3. Produces the final non-live run directory for the change. |
 | Run only a specific pipeline step | `./freud/bin/freud run <feature-id> --only scenario_pack` | 1. Skips the other steps in the pipeline.<br>2. Executes just the named step.<br>3. Still writes a normal run directory for that partial run. |
 | Inspect what would run without executing | `./freud/bin/freud run <feature-id> --dry-run` | 1. Resolves the pipeline and any step-selection options.<br>2. Writes a dry-run directory showing what would execute.<br>3. Does not run Gradle, evals, or live steps. |
+| Triage a failed run | `./freud/bin/freud triage` | Reads the latest run, scans indexed artifacts and logs for anomalies, and writes a focused failure triage report. |
+| Generate a compact summary | `./freud/bin/freud summarize` | Reads the latest run and produces a short operator-facing summary of what passed, failed, and where to look next. |
+| Package a run for LLM analysis | `./freud/bin/freud context-pack` | Bundles the key artifact paths and failure context from a run into a compact handoff package for deeper analysis. |
 | Run one live prompt through the real agent | `./freud/bin/freud eval --live --input <file>` | 1. Sends one real input through NeoPsyke.<br>2. Writes an isolated run with logs, a pass/fail result, and answer artifacts.<br>3. Does not create replay records unless you also pass `--record`. |
+| Record one Freud live eval for replay | `./freud/bin/freud eval --live --record --input <file>` | 1. Runs one real Freud live eval.<br>2. Writes the normal run directory plus replay artifacts for later cache or session replay.<br>3. Gives you a reusable baseline for iterative debugging. |
+| Record one NeoPsyke interactive session for replay | `./run-neopsyke --record-session` | 1. Starts a real interactive NeoPsyke session with recording enabled.<br>2. Lets you drive a multi-message conversation through the runtime and dashboard.<br>3. Produces a recorded interactive session for later replay and debugging. |
 | Replay a recorded session | `./freud/bin/freud eval --live --session-replay <run-dir>` | 1. Reuses a previously recorded session instead of starting from a fresh live run.<br>2. Replays cached channels and records divergence stats.<br>3. May still fall back to live calls after divergence, so `--live` stays explicit. |
 | Run the standalone live reasoning suite | `./freud/bin/freud bbh --live --lane low-llm` or `./freud/bin/freud bbh --live --lane high-llm` | 1. Runs the frozen multi-case reasoning smoke suite for the selected live lane.<br>2. Reports compact case-by-case progress while it runs.<br>3. Writes aggregate summary, progress, and per-case results artifacts. |
 | Orchestrate deterministic checks plus the live suite in one run | `./freud/bin/freud run <feature-id> --live --lane low-llm` | 1. Runs the deterministic workflow first.<br>2. Continues into the selected live lane only after those checks pass.<br>3. Keeps the full run directory in one place. |
 | Test Freud session replay (E2E) | `./freud/bin/freud test-freud-replay` | 1. Runs a real live eval while recording the session.<br>2. Replays that run from recorded artifacts.<br>3. Fails if replay diverges or falls back to uncached live calls. |
 | Test interactive session replay (E2E) | `./freud/bin/freud test-replay-interactive` | 1. Starts an interactive NeoPsyke session and dashboard flow.<br>2. Records a real chat interaction and replays it.<br>3. Verifies the interactive session replay path remains deterministic. |
-| Triage a failed run | `./freud/bin/freud triage` | Reads the latest run, scans indexed artifacts and logs for anomalies, and writes a focused failure triage report. |
-| Generate a compact summary | `./freud/bin/freud summarize` | Reads the latest run and produces a short operator-facing summary of what passed, failed, and where to look next. |
-| Package a run for LLM analysis | `./freud/bin/freud context-pack` | Bundles the key artifact paths and failure context from a run into a compact handoff package for deeper analysis. |
 
 ## What Each Workflow Runs
 
@@ -454,3 +456,7 @@ cd freud && GOOS=linux GOARCH=amd64 go build -o ./bin/freud-linux ./cli
 - pipeline steps without a `cmd` are built-in (dispatched to native Go by name)
 - run history in `run-index.tsv` (append-only, concurrent-safe)
 - latest pointers exist as convenience only; the printed run dir and `run-index.tsv` remain the source of truth
+
+## TODOs
+
+- [ ] Create a tool to automatically create a new permanent deterministic eval from a live recording.
