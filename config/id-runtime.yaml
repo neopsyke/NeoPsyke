@@ -18,7 +18,7 @@ id:
       cooldown_pulses: 5
       convergence: internalize
       allow_escalation: true
-      prompt: "I feel a strong drive to be useful and provide value. What could I do proactively? Consider active projects, pending tasks, or creative ways to help (use ambient context)."
+      prompt: "I feel a strong drive to be useful and provide value. What could I do proactively? Consider advancing active goals, pending tasks, or find creative ways to help (use ambient context)."
       response_curve:
         type: power
         exponent: 3.0
@@ -31,7 +31,7 @@ id:
     user-interaction:
       enabled: true
       description: "Drive to proactively contact the user"
-      growth_rate: 0.005
+      growth_rate: 0.010
       satisfaction_decay: 0.8
       reset_floor: 0.0
       cooldown_pulses: 5
@@ -66,6 +66,7 @@ id:
       activity_decay: {}
 
 # Future plans:
+# Load new needs just from configuration
 # - "Drive to reorganize/consolidate memories" Dream?
 # - "Drive to make external observations and react. Check on the user? on the environment?"
 # - "Drive to find improvements in NeoPsyke code?"
