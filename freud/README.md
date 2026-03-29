@@ -459,4 +459,8 @@ cd freud && GOOS=linux GOARCH=amd64 go build -o ./bin/freud-linux ./cli
 
 ## TODOs
 
-- [ ] Create a tool to automatically create a new permanent deterministic eval from a live recording.
+- [ ] Define one canonical deterministic eval schema for Freud, including case metadata, provenance from the source run, and grader type.
+- [ ] Add deterministic graders for promoted evals: normalized final-answer checks, required or forbidden actions, and simple trajectory checkpoints.
+- [ ] Create a tool to generate a candidate permanent deterministic eval from a live recording or session replay artifact.
+- [ ] Add a review-and-approve step before a generated eval becomes permanent.
+- [ ] Integrate promoted evals into the right Freud gates so important live failures become stable regression coverage.
