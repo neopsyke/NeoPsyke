@@ -13,8 +13,9 @@ import (
 var bbhCmd = &cobra.Command{
 	Use:   "bbh",
 	Short: "Run BBH reasoning smoke suite",
-	Long: `Run the frozen BBH-style reasoning smoke test suite. Requires --lane to
-select the LLM routing profile (low-llm for cheap models, high-llm for production).`,
+	Long: `Run the frozen BBH-style reasoning smoke test suite. Requires --live
+because it makes real provider-backed calls, and requires --lane to select
+the LLM routing profile (low-llm for cheap models, high-llm for production).`,
 	RunE: runBBH,
 }
 
@@ -22,6 +23,7 @@ var (
 	bbhLane     string
 	bbhTimeout  int
 	bbhBaseline string
+	bbhLive     bool
 )
 
 func init() {
@@ -30,6 +32,7 @@ func init() {
 	bbhCmd.Flags().StringVar(&bbhLane, "lane", "", "LLM profile: low-llm | high-llm (required)")
 	bbhCmd.Flags().IntVar(&bbhTimeout, "timeout", 0, "override live_eval.timeout (seconds)")
 	bbhCmd.Flags().StringVar(&bbhBaseline, "baseline", "", "regression baseline file")
+	bbhCmd.Flags().BoolVar(&bbhLive, "live", false, "allow provider-backed execution (may spend tokens)")
 
 	_ = bbhCmd.MarkFlagRequired("lane")
 }
@@ -44,7 +47,10 @@ func runBBH(cmd *cobra.Command, args []string) error {
 		cfg.LiveEval.Timeout = bbhTimeout
 	}
 
-	errs := config.Validate(cfg, "bbh", nil)
+	errs := config.Validate(cfg, "bbh", &config.ValidationOpts{
+		Live:   bbhLive,
+		DryRun: dryRun,
+	})
 	if len(errs) > 0 {
 		msgs := make([]string, len(errs))
 		for i, e := range errs {

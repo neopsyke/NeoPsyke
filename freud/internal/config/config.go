@@ -92,7 +92,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("live_eval.neopsyke_cmd", d.LiveEval.NeopsykeCmd)
 
 	v.SetDefault("session.record", d.Session.Record)
-	v.SetDefault("session.replay_test_enabled", d.Session.ReplayTestEnabled)
+	v.SetDefault("session.freud_replay_enabled", d.Session.FreudReplayEnabled)
 
 	v.SetDefault("scenarios.manifest_file", d.Scenarios.ManifestFile)
 

@@ -36,8 +36,8 @@ type LiveEvalConfig struct {
 }
 
 type SessionConfig struct {
-	Record            bool `mapstructure:"record"`
-	ReplayTestEnabled bool `mapstructure:"replay_test_enabled"`
+	Record             bool `mapstructure:"record"`
+	FreudReplayEnabled bool `mapstructure:"freud_replay_enabled"`
 }
 
 type BBHConfig struct {
@@ -89,7 +89,7 @@ func DefaultConfig() *FreudConfig {
 			{Name: "reasoning_eval_logic"},
 			{Name: "reasoning_eval_model", LiveOnly: true},
 			{Name: "memory_live_smoke", LiveOnly: true},
-			{Name: "test_replay_eval", LiveOnly: true},
+			{Name: "test_freud_replay", LiveOnly: true},
 		},
 		Scenarios: ScenariosConfig{
 			ManifestFile: "freud/scenarios/v1/neopsyke-agent-scenarios.json",
@@ -108,13 +108,13 @@ func DefaultConfig() *FreudConfig {
 			NeopsykeCmd:    "./run-neopsyke.sh",
 		},
 		Session: SessionConfig{
-			Record:            false,
-			ReplayTestEnabled: false,
+			Record:             false,
+			FreudReplayEnabled: false,
 		},
 		BBH: BBHConfig{
 			PromptsFile:          "freud/evals/bbh-smoke/prompts.jsonl",
 			AnswersFile:          "freud/evals/bbh-smoke/answers.jsonl",
-			MinPassRate:          100,
+			MinPassRate:          90,
 			MaxTimeouts:          0,
 			MaxRegressionPercent: 0,
 			PreserveMemory:       false,

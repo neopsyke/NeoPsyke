@@ -83,7 +83,7 @@ func SessionReplayTest(opts SessionReplayTestOpts) (*SessionReplayTestResult, er
 	recordResult, err := LiveEval(LiveEvalOpts{
 		InputFile:      inputFile,
 		Timeout:        timeout,
-		RecordSession:  true,
+		Record:         true,
 		NeopsykeCmd:    cfg.LiveEval.NeopsykeCmd,
 		RunRootAbs:     cfg.Project.RunRoot,
 		GradleUserHome: cfg.Project.GradleHome,

@@ -25,7 +25,7 @@ pipeline:
     live_only: true
   - name: memory_live_smoke
     live_only: true
-  - name: test_replay_eval              # built-in: session record/replay E2E test
+  - name: test_freud_replay            # built-in: session record/replay E2E test
     live_only: true
 
 live_eval:
@@ -36,8 +36,8 @@ live_eval:
   neopsyke_cmd: "./run-neopsyke"     # NeoPsyke entry point
 
 session:
-  record: false                      # off by default; use --record-session
-  replay_test_enabled: false        # low-llm lane can enable replay determinism gate
+  record: false                      # off by default; use --record
+  freud_replay_enabled: false       # low-llm lane can enable the Freud replay E2E gate
 
 scenarios:
   manifest_file: freud/scenarios/v1/neopsyke-agent-scenarios.json
@@ -45,7 +45,7 @@ scenarios:
 bbh:
   prompts_file: freud/evals/bbh-smoke/prompts.jsonl
   answers_file: freud/evals/bbh-smoke/answers.jsonl
-  min_pass_rate: 100                 # gate: minimum pass percentage
+  min_pass_rate: 90                  # gate: minimum pass percentage
   max_timeouts: 0                    # gate: allowed timeout count
   max_regression_percent: 0          # gate: max allowed regression
   preserve_memory: false

@@ -243,7 +243,7 @@ func TestFeatureLoopSkipSteps(t *testing.T) {
 	}
 }
 
-func TestFeatureLoopCiPrSkipsTargetedTests(t *testing.T) {
+func TestFeatureLoopSignoffGateSkipsTargetedTests(t *testing.T) {
 	dir := t.TempDir()
 	cfg := testCfgWithSteps([]config.PipelineStep{
 		{Name: "preflight_compile", Cmd: "echo compile"},
@@ -253,13 +253,13 @@ func TestFeatureLoopCiPrSkipsTargetedTests(t *testing.T) {
 	cfg.Project.RunRoot = dir
 
 	result, err := FeatureLoop(FeatureLoopOpts{
-		FeatureID: "ci-pr",
+		FeatureID: "signoff-gate",
 		DryRun:    true,
 		Cfg:       cfg,
 		RepoRoot:  dir,
 	})
 	if err != nil {
-		t.Fatalf("FeatureLoop ci-pr dry-run failed: %v", err)
+		t.Fatalf("FeatureLoop signoff-gate dry-run failed: %v", err)
 	}
 
 	data, _ := os.ReadFile(filepath.Join(result.RunDir, "artifacts", "steps.tsv"))
@@ -269,12 +269,12 @@ func TestFeatureLoopCiPrSkipsTargetedTests(t *testing.T) {
 	}
 	for _, line := range lines {
 		if strings.HasPrefix(line, "targeted_tests\t") {
-			t.Fatalf("ci-pr should skip targeted_tests, got steps.tsv line %q", line)
+			t.Fatalf("signoff-gate should skip targeted_tests, got steps.tsv line %q", line)
 		}
 	}
 }
 
-func TestFeatureLoopCiPrAllowsExplicitTargetedTests(t *testing.T) {
+func TestFeatureLoopSignoffGateAllowsExplicitTargetedTests(t *testing.T) {
 	dir := t.TempDir()
 	cfg := testCfgWithSteps([]config.PipelineStep{
 		{Name: "preflight_compile", Cmd: "echo compile"},
@@ -284,14 +284,14 @@ func TestFeatureLoopCiPrAllowsExplicitTargetedTests(t *testing.T) {
 	cfg.Project.RunRoot = dir
 
 	result, err := FeatureLoop(FeatureLoopOpts{
-		FeatureID: "ci-pr",
+		FeatureID: "signoff-gate",
 		OnlyStep:  "targeted_tests",
 		DryRun:    true,
 		Cfg:       cfg,
 		RepoRoot:  dir,
 	})
 	if err != nil {
-		t.Fatalf("FeatureLoop ci-pr only-step targeted_tests dry-run failed: %v", err)
+		t.Fatalf("FeatureLoop signoff-gate only-step targeted_tests dry-run failed: %v", err)
 	}
 
 	data, _ := os.ReadFile(filepath.Join(result.RunDir, "artifacts", "steps.tsv"))

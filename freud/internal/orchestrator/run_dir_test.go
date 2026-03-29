@@ -160,7 +160,7 @@ func TestCleanupAllOldRuns(t *testing.T) {
 	root := t.TempDir()
 
 	// Create old dirs of different types
-	for _, name := range []string{"20200101T000000Z-ci-pr-abc", "20200101T000000Z-live-eval-xyz", "20200101T000000Z-bbh-low-llm-def"} {
+	for _, name := range []string{"20200101T000000Z-signoff-gate-abc", "20200101T000000Z-live-eval-xyz", "20200101T000000Z-bbh-low-llm-def"} {
 		dir := filepath.Join(root, name)
 		os.MkdirAll(dir, 0o755)
 		oldTime := time.Now().Add(-10 * 24 * time.Hour)
@@ -168,7 +168,7 @@ func TestCleanupAllOldRuns(t *testing.T) {
 	}
 
 	// Create a new dir
-	newDir := filepath.Join(root, "20990101T000000Z-ci-pr-new")
+	newDir := filepath.Join(root, "20990101T000000Z-signoff-gate-new")
 	os.MkdirAll(newDir, 0o755)
 
 	cleaned, _ := CleanupAllOldRuns(root, 3)

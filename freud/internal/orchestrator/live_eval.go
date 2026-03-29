@@ -24,7 +24,7 @@ type LiveEvalOpts struct {
 	Timeout          int
 	CacheReplayFile  string
 	SessionReplayDir string
-	RecordSession    bool
+	Record           bool
 	GoalsEnabled     *bool
 	PreserveMemory   bool
 	RunDirOverride   string // if set, use this as the run dir (for BBH cases)
@@ -108,7 +108,7 @@ func LiveEval(opts LiveEvalOpts) (*LiveEvalResult, error) {
 	// Resolve session replay
 	sessionReplayDir := opts.SessionReplayDir
 	cacheReplayFile := opts.CacheReplayFile
-	recordSession := opts.RecordSession
+	record := opts.Record
 
 	if sessionReplayDir != "" {
 		// Check for session subdir
@@ -126,8 +126,11 @@ func LiveEval(opts LiveEvalOpts) (*LiveEvalResult, error) {
 	}
 
 	// Determine cache mode and file
-	cacheMode := "record"
+	cacheMode := "off"
 	cacheFile := filepath.Join(artifactsDir, "llm-cache.jsonl")
+	if record {
+		cacheMode = "record"
+	}
 	if cacheReplayFile != "" {
 		cacheMode = "replay"
 		cacheFile = cacheReplayFile
@@ -136,7 +139,7 @@ func LiveEval(opts LiveEvalOpts) (*LiveEvalResult, error) {
 	// Session recording setup
 	sessionDir := filepath.Join(runDir, "session")
 	sessionMode := "off"
-	if recordSession {
+	if record {
 		sessionMode = "record"
 		os.MkdirAll(sessionDir, 0o755)
 	} else if sessionReplayDir != "" {

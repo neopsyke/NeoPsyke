@@ -18,7 +18,7 @@ NeoPsyke uses a multi-layered testing and evaluation approach, from fast unit te
 ./freud/bootstrap.sh
 
 # Full validation gate (required for PRs)
-./freud/bin/freud run ci-pr
+./freud/bin/freud run signoff-gate
 
 # Deterministic reasoning eval only
 ./run-neopsyke --eval-reasoning-only
@@ -43,7 +43,7 @@ These are fast, deterministic, and require no API keys or external services.
 
 Freud is the project's validation orchestrator. The active harness lives under `freud/`, with the CLI entrypoint in `freud/cli/`, shared Go packages in `freud/internal/`, and the built local binary at `./freud/bin/freud`. Legacy shell/python tools remain under `freud/legacy/`.
 
-Normal deterministic developer loop:
+Normal deterministic workflow:
 
 ```bash
 ./freud/bin/freud run my-change
@@ -55,26 +55,26 @@ This executes five phases in order:
 |---|---|
 | `preflight_compile` | Fast build check — catches compilation errors before running tests. |
 | `targeted_tests` | Focused agent test subset for quicker failure signal during iteration. |
-| `full_tests` | Full JUnit test suite. |
+| `full_tests` | Full Gradle test suite. |
 | `scenario_pack` | Deterministic agent behavior scenarios that exercise the cognitive loop end-to-end. |
 | `reasoning_eval_logic` | Deterministic logic gate tests — no external LLM calls. |
 
-PR/signoff gate:
+Signoff gate:
 
 ```bash
-./freud/bin/freud run ci-pr
+./freud/bin/freud run signoff-gate
 ```
 
-This trims the deterministic gate to the non-redundant final signoff path:
+This trims the deterministic gate to the non-redundant final signoff gate:
 
 | Phase | What it does |
 |---|---|
 | `preflight_compile` | Fast build check. |
-| `full_tests` | Full JUnit test suite. |
+| `full_tests` | Full Gradle test suite. |
 | `scenario_pack` | Deterministic cognitive-loop scenarios. |
 | `reasoning_eval_logic` | Deterministic logic gate tests. |
 
-That `ci-pr` gate is the required non-live signoff path.
+That `signoff-gate` command is the required non-live signoff gate.
 
 ### 3. Scenario pack (`freud/scenarios/v1/`)
 
@@ -111,8 +111,8 @@ Live LLM-backed reasoning tests using a frozen BBH-style smoke slice (24 cases).
 
 ```bash
 # Live reasoning eval with real LLM calls
-./freud/bin/freud bbh --lane low-llm
-./freud/bin/freud bbh --lane high-llm
+./freud/bin/freud bbh --live --lane low-llm
+./freud/bin/freud bbh --live --lane high-llm
 ```
 
 This mode is for manual validation during development, not for CI.
@@ -123,10 +123,10 @@ More comprehensive live evaluation using the Freud BBH smoke harness:
 
 ```bash
 # Lower-cost live lane
-./freud/bin/freud bbh --lane low-llm
+./freud/bin/freud bbh --live --lane low-llm
 
 # Production-routing live lane
-./freud/bin/freud bbh --lane high-llm
+./freud/bin/freud bbh --live --lane high-llm
 
 # Full orchestrated run: deterministic + live
 ./freud/bin/freud run my-change --live --lane low-llm
@@ -150,9 +150,13 @@ Tests the real memory pipeline end-to-end: LLM memory advisor → Hippocampus im
 For testing individual inputs against the real agent:
 
 ```bash
-./freud/bin/freud eval --input input.txt
-./freud/bin/freud eval --input input.txt --expected expected.txt --timeout 120
+./freud/bin/freud eval --live --input input.txt
+./freud/bin/freud eval --live --input input.txt --expected expected.txt --timeout 120
 ```
+
+Provider-backed Freud evals require `--live`. Ordinary live evals still write
+the usual logs and artifacts, but replay material is only generated when you
+also pass `--record`.
 
 ---
 
@@ -177,13 +181,13 @@ The LLM response cache solves this: record one live run, then replay it as many 
 
 ```bash
 # 1. Record a baseline run (makes real LLM calls, saves responses)
-./freud/bin/freud eval --input input.txt --expected expected.txt --timeout 120 --record-session
+./freud/bin/freud eval --live --record --input input.txt --expected expected.txt --timeout 120
 
 # 2. Find the cache file from that run
 CACHE=$(tail -1 .neopsyke/runs/freud/run-index.tsv | cut -f3)/artifacts/llm-cache.jsonl
 
 # 3. Replay — zero API calls if nothing changed
-./freud/bin/freud eval --input input.txt --expected expected.txt --cache-replay "$CACHE"
+./freud/bin/freud eval --live --input input.txt --expected expected.txt --cache-replay "$CACHE"
 ```
 
 ### When to use replay
@@ -432,7 +436,7 @@ This would produce a tuning guide grounded in data rather than intuition.
 GitHub pull requests run only the fast non-live path:
 
 ```bash
-./freud/bin/freud run ci-pr
+./freud/bin/freud run signoff-gate
 ```
 
-This covers the deterministic signoff path only. Live reasoning lanes remain manual-only to avoid API key requirements and cost in CI.
+This covers the deterministic signoff gate only. Live reasoning lanes remain manual-only to avoid API key requirements and cost in CI.

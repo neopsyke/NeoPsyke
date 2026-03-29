@@ -260,27 +260,27 @@ Some omissions are deliberate architectural decisions rather than missing checkl
 ./freud/bootstrap.sh
 
 # Full validation gate (used for PRs)
-./freud/bin/freud run ci-pr
+./freud/bin/freud run signoff-gate
 ```
 
-The project uses a multi-phase validation pipeline called **Freud**. The harness
+The project uses a multi-phase validation harness called **Freud**. The harness
 home lives under `freud/`, with the Cobra entrypoint at `freud/cli/`, shared Go
 packages under `freud/internal/`, and the local built binary at `./freud/bin/freud`.
 
-The normal deterministic developer loop is:
+The normal deterministic workflow is:
 
 1. **Preflight compile** -- fast build check
 2. **Targeted tests** -- focused agent test subset for quick failure signal
-3. **Full test suite** -- all JUnit tests
+3. **Full Gradle test suite** -- the main `./gradlew test` run
 4. **Scenario pack** -- deterministic agent behavior scenarios (`freud/scenarios/v1/`) that exercise the cognitive loop end-to-end
-5. **Reasoning eval** -- logic gate tests (shape-lock, feedback-carry, multi-fix) that verify the planner produces structurally correct decisions
+5. **Reasoning gate** -- logic gate tests (shape-lock, feedback-carry, multi-fix) that verify the planner produces structurally correct decisions
 
-The `ci-pr` signoff gate trims that to the non-redundant final gate:
+The `signoff-gate` command trims that to the non-redundant final gate:
 
 1. **Preflight compile**
-2. **Full test suite**
+2. **Full Gradle test suite**
 3. **Scenario pack**
-4. **Reasoning eval**
+4. **Reasoning gate**
 
 Live evaluation lanes (`--lane low-llm`, `--lane high-llm`) and memory live eval are available for deeper validation during development.
 

@@ -10,8 +10,8 @@ live_eval:
 pipeline:
   - name: reasoning_eval_model
     live_only: true
-  - name: test_replay_eval
+  - name: test_freud_replay
     live_only: true
 
 session:
-  replay_test_enabled: true
+  freud_replay_enabled: true

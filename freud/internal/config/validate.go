@@ -81,8 +81,8 @@ func Validate(cfg *FreudConfig, command string, opts *ValidationOpts) []error {
 		if opts.OnlyStep == "memory_live_smoke" && !cfg.MemoryLive.Enabled {
 			errs = append(errs, fmt.Errorf("memory_live_smoke is disabled; set memory_live.enabled=true to run it"))
 		}
-		if opts.OnlyStep == "test_replay_eval" && !cfg.Session.ReplayTestEnabled {
-			errs = append(errs, fmt.Errorf("test_replay_eval is disabled; set session.replay_test_enabled=true to run it"))
+		if opts.OnlyStep == "test_freud_replay" && !cfg.Session.FreudReplayEnabled {
+			errs = append(errs, fmt.Errorf("test_freud_replay is disabled; set session.freud_replay_enabled=true to run it"))
 		}
 
 		if opts.OnlyStep != "" {
@@ -116,6 +116,12 @@ func Validate(cfg *FreudConfig, command string, opts *ValidationOpts) []error {
 		if opts.InputFile == "" && opts.SessionReplayDir == "" {
 			errs = append(errs, fmt.Errorf("either --input or --session-replay is required"))
 		}
+		if !opts.Live && !opts.DryRun {
+			errs = append(errs, fmt.Errorf("eval requires --live because provider-backed execution and replay may make real LLM calls"))
+		}
+		if opts.Record && (opts.CacheReplayFile != "" || opts.SessionReplayDir != "") {
+			errs = append(errs, fmt.Errorf("--record cannot be combined with --cache-replay or --session-replay"))
+		}
 		if opts.InputFile != "" {
 			if _, err := os.Stat(opts.InputFile); os.IsNotExist(err) {
 				errs = append(errs, fmt.Errorf("--input file does not exist: %s", opts.InputFile))
@@ -131,8 +137,14 @@ func Validate(cfg *FreudConfig, command string, opts *ValidationOpts) []error {
 				errs = append(errs, fmt.Errorf("--cache-replay file does not exist: %s", opts.CacheReplayFile))
 			}
 		}
+		if opts.Live && cfg.LiveEval.LLMConfigFile == "" {
+			errs = append(errs, fmt.Errorf("--live requires live_eval.llm_config_file; use --lane low-llm or --lane high-llm"))
+		}
 
 	case "bbh":
+		if !opts.Live && !opts.DryRun {
+			errs = append(errs, fmt.Errorf("bbh requires --live because it always runs the live reasoning suite"))
+		}
 		for _, attr := range []struct {
 			name string
 			path string
@@ -147,6 +159,9 @@ func Validate(cfg *FreudConfig, command string, opts *ValidationOpts) []error {
 			if _, err := os.Stat(p); os.IsNotExist(err) {
 				errs = append(errs, fmt.Errorf("%s does not exist: %s", attr.name, p))
 			}
+		}
+		if opts.Live && cfg.LiveEval.LLMConfigFile == "" {
+			errs = append(errs, fmt.Errorf("--live requires live_eval.llm_config_file; use --lane low-llm or --lane high-llm"))
 		}
 	}
 
@@ -167,6 +182,8 @@ func Validate(cfg *FreudConfig, command string, opts *ValidationOpts) []error {
 // ValidationOpts carries command-specific flags for validation.
 type ValidationOpts struct {
 	Live             bool
+	DryRun           bool
+	Record           bool
 	FromStep         string
 	OnlyStep         string
 	SkipSteps        []string
@@ -180,7 +197,7 @@ var builtinStepNames = map[string]bool{
 	"scenario_pack":        true,
 	"reasoning_eval_logic": true,
 	"reasoning_eval_model": true,
-	"test_replay_eval":     true,
+	"test_freud_replay":    true,
 }
 
 func isBuiltinStepName(name string) bool {
@@ -226,8 +243,8 @@ func RuntimeStepEnabled(cfg *FreudConfig, stepName string) bool {
 	switch stepName {
 	case "memory_live_smoke":
 		return cfg.MemoryLive.Enabled
-	case "test_replay_eval":
-		return cfg.Session.ReplayTestEnabled
+	case "test_freud_replay":
+		return cfg.Session.FreudReplayEnabled
 	default:
 		return true
 	}

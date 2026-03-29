@@ -13,8 +13,9 @@ import (
 var evalCmd = &cobra.Command{
 	Use:   "eval",
 	Short: "Run a single live evaluation",
-	Long: `Run a single live evaluation against NeoPsyke. Requires --input with a
-prompt file. Optionally compare against --expected for pass/fail scoring.`,
+	Long: `Run a single evaluation against NeoPsyke. Provider-backed execution requires
+--live. Replay modes may still fall back to live provider calls on divergence,
+so they also require --live unless you are using --dry-run for inspection only.`,
 	RunE: runEval,
 }
 
@@ -23,7 +24,8 @@ var (
 	evalExpected      string
 	evalTimeout       int
 	evalCacheReplay   string
-	evalRecordSession bool
+	evalLive          bool
+	evalRecord        bool
 	evalSessionReplay string
 	evalLane          string
 )
@@ -31,11 +33,12 @@ var (
 func init() {
 	rootCmd.AddCommand(evalCmd)
 
-	evalCmd.Flags().StringVar(&evalInput, "input", "", "input prompt file (required)")
+	evalCmd.Flags().StringVar(&evalInput, "input", "", "input prompt file (required unless --session-replay is used)")
 	evalCmd.Flags().StringVar(&evalExpected, "expected", "", "expected answer file for scoring")
 	evalCmd.Flags().IntVar(&evalTimeout, "timeout", 0, "override live_eval.timeout (seconds)")
+	evalCmd.Flags().BoolVar(&evalLive, "live", false, "allow provider-backed execution (may spend tokens)")
 	evalCmd.Flags().StringVar(&evalCacheReplay, "cache-replay", "", "JSONL cache file to replay")
-	evalCmd.Flags().BoolVar(&evalRecordSession, "record-session", false, "record all signals for replay")
+	evalCmd.Flags().BoolVar(&evalRecord, "record", false, "record replay artifacts for later cache/session replay")
 	evalCmd.Flags().StringVar(&evalSessionReplay, "session-replay", "", "replay a recorded session directory")
 	evalCmd.Flags().StringVar(&evalLane, "lane", "", "load profile for LLM routing: low-llm | high-llm")
 
@@ -59,6 +62,9 @@ func runEval(cmd *cobra.Command, args []string) error {
 	}
 
 	errs := config.Validate(cfg, "eval", &config.ValidationOpts{
+		Live:             evalLive,
+		DryRun:           dryRun,
+		Record:           evalRecord,
 		InputFile:        evalInput,
 		SessionReplayDir: evalSessionReplay,
 		CacheReplayFile:  evalCacheReplay,
@@ -77,7 +83,7 @@ func runEval(cmd *cobra.Command, args []string) error {
 		Timeout:          cfg.LiveEval.Timeout,
 		CacheReplayFile:  evalCacheReplay,
 		SessionReplayDir: evalSessionReplay,
-		RecordSession:    evalRecordSession,
+		Record:           evalRecord,
 		GoalsEnabled:     goals,
 		PreserveMemory:   cfg.LiveEval.PreserveMemory,
 		NeopsykeCmd:      cfg.LiveEval.NeopsykeCmd,

@@ -10,39 +10,39 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var testReplayEvalCmd = &cobra.Command{
-	Use:   "test-replay-eval",
-	Short: "E2E test: record a live eval, replay it, verify determinism",
-	Long: `Records a live eval session, replays it from cache, and asserts that all
+var testFreudReplayCmd = &cobra.Command{
+	Use:   "test-freud-replay",
+	Short: "E2E test: record a Freud live eval and replay it",
+	Long: `Records a Freud live eval session, replays it from cache, and asserts that all
 LLM calls were served from cache (real_calls=0) and all session channels
-replayed without divergence. This is a determinism gate, not a standalone
-replay command. For standalone replay, use: freud eval --session-replay <run-dir>`,
-	RunE: runTestReplayEval,
+replayed without divergence. This is an end-to-end Freud replay test, not a standalone
+replay command. For standalone replay, use: freud eval --live --session-replay <run-dir>`,
+	RunE: runTestFreudReplay,
 }
 
 var (
-	testReplayInput   string
-	testReplayTimeout int
+	testFreudReplayInput   string
+	testFreudReplayTimeout int
 )
 
 func init() {
-	rootCmd.AddCommand(testReplayEvalCmd)
+	rootCmd.AddCommand(testFreudReplayCmd)
 
-	testReplayEvalCmd.Flags().StringVar(&testReplayInput, "input", "", "input prompt file (default: 'What is 2 + 2?')")
-	testReplayEvalCmd.Flags().IntVar(&testReplayTimeout, "timeout", 0, "override timeout (seconds)")
+	testFreudReplayCmd.Flags().StringVar(&testFreudReplayInput, "input", "", "input prompt file (default: 'What is 2 + 2?')")
+	testFreudReplayCmd.Flags().IntVar(&testFreudReplayTimeout, "timeout", 0, "override timeout (seconds)")
 }
 
-func runTestReplayEval(cmd *cobra.Command, args []string) error {
+func runTestFreudReplay(cmd *cobra.Command, args []string) error {
 	cfg, err := config.LoadConfig(cfgFile, "", overrides)
 	if err != nil {
 		return err
 	}
 
-	if testReplayTimeout > 0 {
-		cfg.LiveEval.Timeout = testReplayTimeout
+	if testFreudReplayTimeout > 0 {
+		cfg.LiveEval.Timeout = testFreudReplayTimeout
 	}
 
-	errs := config.Validate(cfg, "test-replay-eval", nil)
+	errs := config.Validate(cfg, "test-freud-replay", nil)
 	if len(errs) > 0 {
 		msgs := make([]string, len(errs))
 		for i, e := range errs {
@@ -52,7 +52,7 @@ func runTestReplayEval(cmd *cobra.Command, args []string) error {
 	}
 
 	result, err := orchestrator.SessionReplayTest(orchestrator.SessionReplayTestOpts{
-		InputFile: testReplayInput,
+		InputFile: testFreudReplayInput,
 		Timeout:   cfg.LiveEval.Timeout,
 		Cfg:       cfg,
 		Verbose:   verbose,

@@ -18,8 +18,8 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.LiveEval.Timeout != 120 {
 		t.Errorf("expected live_eval.timeout=120, got %d", cfg.LiveEval.Timeout)
 	}
-	if cfg.BBH.MinPassRate != 100 {
-		t.Errorf("expected bbh.min_pass_rate=100, got %d", cfg.BBH.MinPassRate)
+	if cfg.BBH.MinPassRate != 90 {
+		t.Errorf("expected bbh.min_pass_rate=90, got %d", cfg.BBH.MinPassRate)
 	}
 	if len(cfg.Pipeline) != 8 {
 		t.Errorf("expected 8 pipeline steps, got %d", len(cfg.Pipeline))

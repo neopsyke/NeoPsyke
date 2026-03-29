@@ -34,12 +34,14 @@ func resetCLIState() {
 	bbhLane = ""
 	bbhTimeout = 0
 	bbhBaseline = ""
+	bbhLive = false
 
 	evalInput = ""
 	evalExpected = ""
 	evalTimeout = 0
+	evalLive = false
 	evalCacheReplay = ""
-	evalRecordSession = false
+	evalRecord = false
 	evalSessionReplay = ""
 	evalLane = ""
 
@@ -52,8 +54,8 @@ func resetCLIState() {
 	runTimeout = 0
 	runGoals = nil
 
-	testReplayInput = ""
-	testReplayTimeout = 0
+	testFreudReplayInput = ""
+	testFreudReplayTimeout = 0
 
 	tisTimeout = 60
 	tisDashboardPort = 8787
@@ -96,7 +98,7 @@ func TestRootCommandRegistersExpectedSubcommands(t *testing.T) {
 		"eval":                    true,
 		"run":                     true,
 		"summarize":               true,
-		"test-replay-eval":        true,
+		"test-freud-replay":       true,
 		"test-replay-interactive": true,
 		"triage":                  true,
 	}
@@ -121,6 +123,41 @@ func TestEvalSessionReplayDryRunWithoutInputSucceeds(t *testing.T) {
 	err := executeCLIForTest(t, "--config", cfgPath, "--dry-run", "eval", "--session-replay", runDir)
 	if err != nil {
 		t.Fatalf("eval replay dry-run failed: %v", err)
+	}
+}
+
+func TestEvalRequiresLiveByDefault(t *testing.T) {
+	cfgPath := writeCLIConfig(t, fmt.Sprintf("project:\n  run_root: %q\n", filepath.Join(t.TempDir(), "runs")))
+	inputPath := filepath.Join(t.TempDir(), "input.txt")
+	if err := os.WriteFile(inputPath, []byte("What is 2+2?\n"), 0o644); err != nil {
+		t.Fatalf("write input: %v", err)
+	}
+
+	err := executeCLIForTest(t, "--config", cfgPath, "eval", "--input", inputPath)
+	if err == nil {
+		t.Fatal("expected eval validation failure without --live")
+	}
+	if !strings.Contains(err.Error(), "eval requires --live") {
+		t.Fatalf("expected missing --live error, got: %v", err)
+	}
+}
+
+func TestBBHRequiresLiveByDefault(t *testing.T) {
+	tmp := t.TempDir()
+	cfgPath := writeCLIConfig(t, fmt.Sprintf("project:\n  run_root: %q\nbbh:\n  prompts_file: %q\n  answers_file: %q\n", filepath.Join(tmp, "runs"), filepath.Join(tmp, "prompts.jsonl"), filepath.Join(tmp, "answers.jsonl")))
+	if err := os.WriteFile(filepath.Join(tmp, "prompts.jsonl"), []byte("{}\n"), 0o644); err != nil {
+		t.Fatalf("write prompts: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tmp, "answers.jsonl"), []byte("{}\n"), 0o644); err != nil {
+		t.Fatalf("write answers: %v", err)
+	}
+
+	err := executeCLIForTest(t, "--config", cfgPath, "bbh", "--lane", "low-llm")
+	if err == nil {
+		t.Fatal("expected bbh validation failure without --live")
+	}
+	if !strings.Contains(err.Error(), "bbh requires --live") {
+		t.Fatalf("expected missing --live error, got: %v", err)
 	}
 }
 

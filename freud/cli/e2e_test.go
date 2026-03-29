@@ -181,7 +181,7 @@ live_eval:
   neopsyke_cmd: %q
 session:
   record: false
-  replay_test_enabled: false
+  freud_replay_enabled: false
 memory_live:
   enabled: false
   task_ids:
@@ -236,7 +236,7 @@ func TestEvalSessionReplayWithoutInputEndToEnd(t *testing.T) {
 	writeFile(t, filepath.Join(runDir, "session", "session-manifest.json"), `{"session":"ok"}`+"\n", 0o644)
 	writeFile(t, filepath.Join(runDir, "session", "llm-cache.jsonl"), `{"sequence_index":1}`+"\n", 0o644)
 
-	output, exitCode := runFreud(t, root, bin, []string{"FREUD_WRITE_LOCAL_POINTERS=false"}, "--config", cfg, "eval", "--session-replay", runDir)
+	output, exitCode := runFreud(t, root, bin, []string{"FREUD_WRITE_LOCAL_POINTERS=false"}, "--config", cfg, "eval", "--live", "--session-replay", runDir)
 	if exitCode != 0 {
 		t.Fatalf("eval replay failed (%d):\n%s", exitCode, output)
 	}
@@ -245,16 +245,16 @@ func TestEvalSessionReplayWithoutInputEndToEnd(t *testing.T) {
 	}
 }
 
-func TestReplayEvalCommandEndToEnd(t *testing.T) {
+func TestFreudReplayCommandEndToEnd(t *testing.T) {
 	root := repoRoot(t)
 	bin := buildFreudBinary(t, root)
 	tmp := t.TempDir()
 	mock := writeMockNeopsyke(t, tmp)
 	cfg := writeLiveConfig(t, tmp, mock, "")
 
-	output, exitCode := runFreud(t, root, bin, []string{"FREUD_WRITE_LOCAL_POINTERS=false"}, "--config", cfg, "test-replay-eval")
+	output, exitCode := runFreud(t, root, bin, []string{"FREUD_WRITE_LOCAL_POINTERS=false"}, "--config", cfg, "test-freud-replay")
 	if exitCode != 0 {
-		t.Fatalf("test-replay-eval failed (%d):\n%s", exitCode, output)
+		t.Fatalf("test-freud-replay failed (%d):\n%s", exitCode, output)
 	}
 	if !strings.Contains(output, "PASSED") {
 		t.Fatalf("expected pass output, got:\n%s", output)
@@ -303,7 +303,7 @@ live_eval:
   neopsyke_cmd: %q
 session:
   record: false
-  replay_test_enabled: false
+  freud_replay_enabled: false
 memory_live:
   enabled: true
   task_ids:

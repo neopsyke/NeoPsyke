@@ -403,7 +403,7 @@ var builtinSteps = map[string]bool{
 	"reasoning_eval_logic": true,
 	"reasoning_eval_model": true,
 	"memory_live_smoke":    true,
-	"test_replay_eval":     true,
+	"test_freud_replay":    true,
 }
 
 func isBuiltinStep(name string) bool {
@@ -411,7 +411,7 @@ func isBuiltinStep(name string) bool {
 }
 
 func effectivePipeline(featureID string, pipeline []config.PipelineStep, opts FeatureLoopOpts) []config.PipelineStep {
-	if featureID != "ci-pr" || opts.OnlyStep == "targeted_tests" || opts.FromStep == "targeted_tests" {
+	if featureID != "signoff-gate" || opts.OnlyStep == "targeted_tests" || opts.FromStep == "targeted_tests" {
 		return pipeline
 	}
 
@@ -518,7 +518,7 @@ func runBuiltinStep(name string, cfg *config.FreudConfig, repoRoot, gradleHome, 
 		}
 		return result.ExitCode
 
-	case "test_replay_eval":
+	case "test_freud_replay":
 		result, err := SessionReplayTest(SessionReplayTestOpts{
 			Timeout:  cfg.LiveEval.Timeout,
 			RepoRoot: repoRoot,
