@@ -12,6 +12,10 @@ For the full configuration reference, see [configuration.md](configuration.md).
 - **At least one LLM API key** — Anthropic, OpenAI, Groq, Mistral, Google, or local Ollama. Multiple providers can be used simultaneously for different cognitive roles.
 - **Docker** (optional but recommended) — for long-term vector memory via PostgreSQL + pgvector.
 
+For contributors using the Freud validation harness, also install:
+
+- **Go 1.26+** — required to build and run the Freud CLI.
+
 ## Install and build
 
 ```bash

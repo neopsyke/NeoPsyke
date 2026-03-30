@@ -51,6 +51,10 @@ Most AI agent projects default to Python. This one uses Kotlin, and the choice i
 - At least one LLM API key (Anthropic, OpenAI, Groq, Mistral, Google, or local Ollama)
 - Docker (optional but recommended, for long-term vector memory via pgvector)
 
+For contributors using the Freud validation harness, also install:
+
+- Go 1.26+
+
 ### 1. Clone and build
 
 ```bash
@@ -242,7 +246,8 @@ Some omissions are deliberate architectural decisions rather than missing checkl
 **Current risks and limitations:**
 
 - LLM quality directly affects planning and reasoning quality. The architecture mitigates but cannot eliminate model errors.
-- Long-running goal execution depends on external service availability and correct action contracts. Goals still needs a lot of testing and tuning.
+- Long-running goal execution depends on external service availability and correct action contracts. 
+- The goal subsystem works in basic scenarios but remains unstable and needs much broader testing. Work in progress.
 - The memory advisor's consolidation decisions are LLM-dependent and not yet formally evaluated.
 - The Id's drive model is simple by design (configurable state machine, not learned behavior). This mirrors the structural role of drives in the original model -- complexity is expected to emerge from the interaction between modules, not from the drive source itself.
 - The dashboard is basic and suitable only for local monitoring and debugging. It's not yet a production-ready multi-user tool.
