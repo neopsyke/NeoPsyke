@@ -1,0 +1,37 @@
+name: Freud CLI Tests
+
+on:
+  push:
+    branches:
+      - main
+      - dev
+    paths:
+      - "freud/cli/**"
+  pull_request:
+    paths:
+      - "freud/cli/**"
+
+concurrency:
+  group: freud-cli-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  cli-tests:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: freud/go.mod
+          cache: true
+          cache-dependency-path: freud/go.sum
+
+      - name: Freud CLI Go tests
+        run: cd freud && go test ./cli
