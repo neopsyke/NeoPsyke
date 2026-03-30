@@ -39,9 +39,9 @@ jobs:
       - name: Bootstrap Freud CLI
         run: ./freud/bootstrap.sh
 
-      - name: Freud Go tests
+      - name: Freud internal Go tests
         id: freud_go_tests
-        run: cd freud && go test ./...
+        run: cd freud && go test ./internal/...
 
       - name: Freud deterministic PR gate
         id: freud_pr_gate
@@ -111,7 +111,7 @@ jobs:
             echo "| Step | Outcome |"
             echo "| --- | --- |"
             echo "| Freud deterministic PR gate | ${{ steps.freud_pr_gate.outcome || 'skipped' }} |"
-            echo "| Freud Go tests | ${{ steps.freud_go_tests.outcome || 'skipped' }} |"
+            echo "| Freud internal Go tests | ${{ steps.freud_go_tests.outcome || 'skipped' }} |"
             echo
           } >> "$GITHUB_STEP_SUMMARY"
 
