@@ -109,6 +109,11 @@ class DashboardServer(
                 respondText(exchange, 200, DashboardAssets.shellHtml, "text/html; charset=utf-8")
             }
         }
+        server.createContext("/__dashboard/assets") { exchange ->
+            withRequestGuard(exchange, "dashboard_asset") {
+                handleDashboardAsset(exchange)
+            }
+        }
         server.createContext("/__dashboard") { exchange ->
             withRequestGuard(exchange, "embedded_dashboard_page") {
                 handleEmbeddedDashboardPage(exchange)
@@ -276,6 +281,37 @@ class DashboardServer(
             unexpectedDisconnectMessage = "Observability SSE stream terminated unexpectedly.",
             streamName = "obs_events_sse"
         )
+    }
+
+    private fun handleDashboardAsset(exchange: HttpExchange) {
+        if (exchange.requestMethod.uppercase() != "GET") {
+            respondText(exchange, 405, "Method not allowed", "text/plain; charset=utf-8")
+            return
+        }
+        val fileName = exchange.requestURI.path.removePrefix("/__dashboard/assets/").trim()
+        if (fileName.isEmpty() || fileName.contains("..") || fileName.contains("/")) {
+            respondText(exchange, 400, "Bad request", "text/plain; charset=utf-8")
+            return
+        }
+        val resourcePath = "/dashboard/assets/$fileName"
+        val stream = DashboardAssets::class.java.getResourceAsStream(resourcePath)
+        if (stream == null) {
+            respondText(exchange, 404, "Not found", "text/plain; charset=utf-8")
+            return
+        }
+        val bytes = stream.use { it.readBytes() }
+        val contentType = when {
+            fileName.endsWith(".png") -> "image/png"
+            fileName.endsWith(".jpg") || fileName.endsWith(".jpeg") -> "image/jpeg"
+            fileName.endsWith(".svg") -> "image/svg+xml"
+            fileName.endsWith(".ico") -> "image/x-icon"
+            else -> "application/octet-stream"
+        }
+        exchange.responseHeaders.add("Content-Type", contentType)
+        exchange.responseHeaders.add("Cache-Control", "public, max-age=86400")
+        recordResponseStatus(exchange, 200)
+        exchange.sendResponseHeaders(200, bytes.size.toLong())
+        exchange.responseBody.use { it.write(bytes) }
     }
 
     private fun handleEmbeddedDashboardPage(exchange: HttpExchange) {
