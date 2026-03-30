@@ -92,7 +92,7 @@ Variable names are configured in `config/llm-runtime.yaml` under `providers.<nam
 | `EGO_ACTION_RETRY_BUDGET_NON_RETRYABLE_FAILURES` | `3` | Non-retryable action failures before giving up. |
 | `EGO_ACTION_RETRY_COOLDOWN_STEPS` | `10` | Steps to wait before retrying a failed action type. |
 | `EGO_ACTION_VERIFIER_ENABLED` | `false` | Enable the planner-side action-verifier LLM pass before Superego review. |
-| `EGO_LOOP_DELAY_MS` | `0` | Delay between Ego loop iterations (ms). When `0` the delay is skipped entirely; `run-neopsyke.sh` defaults to `1000`. |
+| `EGO_LOOP_DELAY_MS` | `0` | Delay between Ego loop iterations (ms). When `0` the delay is skipped entirely; `run-neopsyke` defaults to `1000`. |
 | `EGO_MAX_ACTION_PAYLOAD_CHARS` | `4000` | Maximum action payload size (chars). |
 | `EGO_SEARCH_RESULT_COUNT` | `5` | Number of web search results to request. |
 
@@ -141,7 +141,7 @@ Variable names are configured in `config/llm-runtime.yaml` under `providers.<nam
 | `EGO_SCRATCHPAD_FINAL_PASS_MAX_TOKENS` | `260` | Final pass completion token budget. YAML may override higher (e.g., `480`). |
 | `EGO_SCRATCHPAD_FINAL_PASS_MIN_WORKSPACE_CONFIDENCE` | `0.35` | Minimum workspace confidence for final pass. |
 | `EGO_SCRATCHPAD_FINAL_PASS_MIN_MODEL_CONFIDENCE` | `0.55` | Minimum model confidence for final pass. |
-| `EGO_SCRATCHPAD_DEBUG_CAPTURE_ENABLED` | `false` | Enable debug snapshot capture. Forced `true` by `run-neopsyke.sh`, Gradle tests, and Freud. |
+| `EGO_SCRATCHPAD_DEBUG_CAPTURE_ENABLED` | `false` | Enable debug snapshot capture. Forced `true` by `run-neopsyke`, Gradle tests, and Freud. |
 | `EGO_SCRATCHPAD_MAX_ACTIVE_TASKS` | `32` | Maximum concurrent scratchpad tasks. |
 | `EGO_SCRATCHPAD_DIGEST_MAX_ENTRIES` | `4` | Maximum retained digest entries per session. |
 | `EGO_SCRATCHPAD_DIGEST_MAX_CHARS` | `800` | Maximum chars in one session digest entry. |
@@ -359,7 +359,7 @@ These apply to third-party connector action loading. They are separate from the 
 
 | Variable | Default | Description |
 |---|---|---|
-| `NEOPSYKE_LOG_LEVEL` | `warning` | Default log level (via `run-neopsyke.sh`). |
+| `NEOPSYKE_LOG_LEVEL` | `warning` | Default log level (via `run-neopsyke`). |
 | `NEOPSYKE_LOG_DIR` | `.neopsyke/logs` | Log directory. |
 | `NEOPSYKE_LOG_RETENTION` | `30` | Maximum number of run log files retained. |
 | `NEOPSYKE_METRICS_DB` | `.neopsyke/metrics.db` | SQLite metrics database path. |

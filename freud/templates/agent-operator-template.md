@@ -32,7 +32,7 @@ Constraints:
 Execution Plan:
 1. Implement the smallest useful slice for this feature.
 2. Run Freud:
-   freud/scripts/feature-loop.sh <feature-id-slug>
+   ./freud/bin/freud run <feature-id-slug>
 3. If run fails, triage in this order:
    a) .neopsyke/runs/freud/latest-run.txt
    b) artifacts/summary.json
@@ -55,7 +55,7 @@ Scenario Coverage:
 Run Modes:
 - Default: stub/deterministic only.
 - Use --live only when explicitly requested:
-  freud/scripts/feature-loop.sh <feature-id-slug> --live
+  ./freud/bin/freud run <feature-id-slug> --live --lane low-llm
 
 Output Format Required:
 1. What changed.

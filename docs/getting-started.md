@@ -78,7 +78,7 @@ Without Docker, long-term memory is disabled but everything else works normally.
 ## Run
 
 ```bash
-./run-neopsyke.sh
+./run-neopsyke
 ```
 
 NeoPsyke starts in interactive mode. On startup it will:
@@ -106,16 +106,16 @@ The terminal is reserved for runtime control commands only (e.g., `exit`).
 
 ```bash
 # Explicit log level
-./run-neopsyke.sh --log-level info
+./run-neopsyke --log-level info
 
 # Disable the loop delay for faster local interaction
-./run-neopsyke.sh --no-delay
+./run-neopsyke --no-delay
 
 # Disable the Id (no autonomous impulses)
-./run-neopsyke.sh --no-id
+./run-neopsyke --no-id
 
 # Run without goals
-NEOPSYKE_GOALS_ENABLED=false ./run-neopsyke.sh
+NEOPSYKE_GOALS_ENABLED=false ./run-neopsyke
 ```
 
 ---

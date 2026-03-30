@@ -20,15 +20,15 @@ tail -F .neopsyke/logs/latest-events.jsonl | jq -c 'select(.type=="task_verifier
 
 Aggregate latest run:
 ```bash
-freud/scripts/prompt-budget-telemetry.sh
-freud/scripts/task-verifier-telemetry.sh
+python3 freud/legacy/py/telemetry/prompt_budget.py
+python3 freud/legacy/py/telemetry/task_verifier.py
 ```
 
 Aggregate exact run file:
 ```bash
 source .neopsyke/logs/latest-run.env
-freud/scripts/prompt-budget-telemetry.sh "$NEOPSYKE_EVENT_LOG_FILE"
-freud/scripts/task-verifier-telemetry.sh "$NEOPSYKE_EVENT_LOG_FILE"
+python3 freud/legacy/py/telemetry/prompt_budget.py "$NEOPSYKE_EVENT_LOG_FILE"
+python3 freud/legacy/py/telemetry/task_verifier.py "$NEOPSYKE_EVENT_LOG_FILE"
 ```
 
 Dashboard snapshot:
@@ -88,12 +88,12 @@ tail -F .neopsyke/logs/latest-events.jsonl | jq -c '
 ## 4) Post-run aggregate summaries
 Prompt budget summary:
 ```bash
-freud/scripts/prompt-budget-telemetry.sh
+python3 freud/legacy/py/telemetry/prompt_budget.py
 ```
 
 Task verifier summary:
 ```bash
-freud/scripts/task-verifier-telemetry.sh
+python3 freud/legacy/py/telemetry/task_verifier.py
 ```
 
 Both scripts default to `.neopsyke/logs/latest-events.jsonl`.
@@ -102,8 +102,8 @@ Both scripts default to `.neopsyke/logs/latest-events.jsonl`.
 Use this when `latest` may have moved to another run:
 ```bash
 source .neopsyke/logs/latest-run.env
-freud/scripts/prompt-budget-telemetry.sh "$NEOPSYKE_EVENT_LOG_FILE"
-freud/scripts/task-verifier-telemetry.sh "$NEOPSYKE_EVENT_LOG_FILE"
+python3 freud/legacy/py/telemetry/prompt_budget.py "$NEOPSYKE_EVENT_LOG_FILE"
+python3 freud/legacy/py/telemetry/task_verifier.py "$NEOPSYKE_EVENT_LOG_FILE"
 ```
 
 ## 6) Dashboard checks

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Shared Bash helper functions used by feature-loop.sh and tested via BATS.
 # The data-processing scripts (triage, summarize, context-pack, telemetry) have
-# been migrated to Python under freud/py/. These helpers remain because
+# been migrated to Python under freud/legacy/py/. These helpers remain because
 # feature-loop.sh still uses them directly.
 
 json_escape() {

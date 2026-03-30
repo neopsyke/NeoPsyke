@@ -4,7 +4,7 @@ set -euo pipefail
 usage() {
   cat <<'EOF'
 Usage:
-  freud/scripts/feature-loop.sh <feature_id> [--live] [--dry-run] [--continue-on-fail]
+  freud/legacy/scripts/feature-loop.sh <feature_id> [--live] [--dry-run] [--continue-on-fail]
                                 [--config <path>] [--from-step <step>]
                                 [--goals] [--no-goals]
 
@@ -19,8 +19,8 @@ Description:
   Use --from-step to resume from a specific step, skipping earlier ones.
   With --live, this orchestrates the live commands configured for the selected
   Freud config; the direct live entrypoints remain:
-    freud/scripts/live-eval.sh --input ...
-    freud/scripts/run-bbh-smoke.sh --lane weak-structure|prod-acceptance
+    freud/legacy/scripts/live-eval.sh --input ...
+    freud/legacy/scripts/run-bbh-smoke.sh --lane weak-structure|prod-acceptance
 EOF
 }
 
@@ -803,7 +803,7 @@ if [[ "$should_stop" != "true" && "$mode" == "live" ]]; then
   run_step "session_replay_test" "$(step_cmd_for session_replay_test "$session_replay_test_cmd")" "$log_dir/07-session-replay-test.log" || should_stop="true"
 fi
 
-if "$repo_root/freud/scripts/triage-run.sh" "$run_dir" >/dev/null; then
+if "$repo_root/freud/legacy/scripts/triage-run.sh" "$run_dir" >/dev/null; then
   emit_trail "triage_complete" "" "ok" "triage artifacts generated" "" "$artifact_dir/anomalies.json" ""
 else
   echo "[freud] WARNING: triage-run.sh failed (exit $?)" >&2
@@ -973,10 +973,10 @@ failures_json="$artifact_dir/failures.json"
 } >"$failures_json"
 
 emit_trail "run_end" "" "$overall_status" "feature loop completed" "" "$summary_json" "${first_failed_step:-}"
-if ! "$repo_root/freud/scripts/summarize-run.sh" "$run_dir" >/dev/null; then
+if ! "$repo_root/freud/legacy/scripts/summarize-run.sh" "$run_dir" >/dev/null; then
   echo "[freud] WARNING: summarize-run.sh failed (exit $?)" >&2
 fi
-if ! "$repo_root/freud/scripts/context-pack.sh" "$run_dir" >/dev/null; then
+if ! "$repo_root/freud/legacy/scripts/context-pack.sh" "$run_dir" >/dev/null; then
   echo "[freud] WARNING: context-pack.sh failed (exit $?)" >&2
 fi
 build_run_index "$overall_status" "${first_failed_step:-}" "$steps_total" "$failed_test_count" "$eval_total_calls" "$eval_total_tokens"

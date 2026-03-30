@@ -1,0 +1,17 @@
+# Profile: low-llm (formerly weak-structure)
+# Enables live steps with the low-cost LLM routing.
+
+live_eval:
+  llm_config_file: freud/config/llm-weak-structure.yaml
+  timeout: 120
+
+# Live steps are built-in — no cmd needed. Just mark them present so the
+# profile merge keeps them in the pipeline with live_only: true.
+pipeline:
+  - name: reasoning_eval_model
+    live_only: true
+  - name: test_freud_replay
+    live_only: true
+
+session:
+  freud_replay_enabled: true

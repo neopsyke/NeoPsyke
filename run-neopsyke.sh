@@ -15,6 +15,294 @@ LOOP_DELAY_MS="${EGO_LOOP_DELAY_MS:-0}"
 LOG_DIR="${NEOPSYKE_LOG_DIR:-$ROOT_DIR/.neopsyke/logs}"
 LOG_RETENTION="${NEOPSYKE_LOG_RETENTION:-30}"
 APP_ARGS=()
+DOCTOR_FAILURES=0
+DOCTOR_WARNINGS=0
+
+doctor_info() {
+  printf 'INFO: %s\n' "$*"
+}
+
+doctor_pass() {
+  printf 'PASS: %s\n' "$*"
+}
+
+doctor_warn() {
+  DOCTOR_WARNINGS=$((DOCTOR_WARNINGS + 1))
+  printf 'WARN: %s\n' "$*"
+}
+
+doctor_fail() {
+  DOCTOR_FAILURES=$((DOCTOR_FAILURES + 1))
+  printf 'FAIL: %s\n' "$*" >&2
+}
+
+doctor_section() {
+  printf '\n[%s]\n' "$*"
+}
+
+resolve_runtime_config_path() {
+  local env_name="$1"
+  local overlay_name="$2"
+  local bundled_rel="$3"
+  local env_value="${!env_name:-}"
+  if [[ -n "$env_value" ]]; then
+    printf '%s\n' "$env_value"
+  elif [[ -f "$ROOT_DIR/$overlay_name" ]]; then
+    printf '%s\n' "$ROOT_DIR/$overlay_name"
+  else
+    printf '%s\n' "$ROOT_DIR/$bundled_rel"
+  fi
+}
+
+trim_yaml_value() {
+  local value="$1"
+  value="${value%%#*}"
+  value="${value#"${value%%[![:space:]]*}"}"
+  value="${value%"${value##*[![:space:]]}"}"
+  value="${value%\"}"
+  value="${value#\"}"
+  printf '%s\n' "$value"
+}
+
+java_major_version() {
+  local version="$1"
+  local first="${version%%.*}"
+  if [[ "$first" == "1" ]]; then
+    local rest="${version#*.}"
+    printf '%s\n' "${rest%%.*}"
+  else
+    printf '%s\n' "$first"
+  fi
+}
+
+yaml_top_level_scalar() {
+  local path="$1"
+  local key="$2"
+  awk -F':' -v target="$key" '
+    $0 ~ ("^" target ":[[:space:]]*") {
+      line = substr($0, index($0, ":") + 1)
+      sub(/[[:space:]]+#.*$/, "", line)
+      sub(/^[[:space:]]+/, "", line)
+      sub(/[[:space:]]+$/, "", line)
+      gsub(/^"/, "", line)
+      gsub(/"$/, "", line)
+      print line
+      exit
+    }
+  ' "$path"
+}
+
+llm_providers_in_use() {
+  local llm_config="$1"
+  awk '
+    function trim(s) {
+      sub(/^[[:space:]]+/, "", s)
+      sub(/[[:space:]]+$/, "", s)
+      sub(/[[:space:]]+#.*$/, "", s)
+      return s
+    }
+    /^[^[:space:]].*:$/ {
+      top = $0
+      sub(/:$/, "", top)
+    }
+    top == "cognitive_roles" && /^[[:space:]]+provider:[[:space:]]*/ {
+      line = $0
+      sub(/.*provider:[[:space:]]*/, "", line)
+      print trim(line)
+    }
+    top == "web_search" && /^[[:space:]]+provider:[[:space:]]*/ {
+      line = $0
+      sub(/.*provider:[[:space:]]*/, "", line)
+      print trim(line)
+    }
+  ' "$llm_config" | awk 'NF { seen[$0] = 1 } END { for (k in seen) print k }' | sort
+}
+
+provider_api_key_env() {
+  local llm_config="$1"
+  local target="$2"
+  awk -v target="$target" '
+    function trim(s) {
+      sub(/^[[:space:]]+/, "", s)
+      sub(/[[:space:]]+$/, "", s)
+      sub(/[[:space:]]+#.*$/, "", s)
+      return s
+    }
+    /^[^[:space:]].*:$/ {
+      top = $0
+      sub(/:$/, "", top)
+    }
+    top == "providers" && /^  [^[:space:]].*:$/ {
+      provider = $1
+      sub(/:$/, "", provider)
+    }
+    top == "providers" && provider == target && /^[[:space:]]+api_key_env:[[:space:]]*/ {
+      line = $0
+      sub(/.*api_key_env:[[:space:]]*/, "", line)
+      print trim(line)
+      exit
+    }
+  ' "$llm_config"
+}
+
+doctor_usage() {
+  cat <<'EOF'
+Usage: ./run-neopsyke doctor
+
+Checks:
+  - JDK present and JDK major version >= 21
+  - effective runtime config files resolve
+  - required provider API key env vars for the active live config are present
+  - Docker readiness for default long-term memory mode
+
+Exit status:
+  0 when all required checks pass
+  1 when one or more required checks fail
+EOF
+}
+
+run_doctor() {
+  if [[ $# -gt 0 ]]; then
+    case "$1" in
+      -h|--help)
+        doctor_usage
+        exit 0
+        ;;
+      *)
+        log_error "Unknown doctor option: $1"
+        doctor_usage >&2
+        exit 1
+        ;;
+    esac
+  fi
+
+  local llm_cfg agent_cfg memory_cfg id_cfg
+  local docker_container_name memory_mode
+
+  llm_cfg="$(resolve_runtime_config_path NEOPSYKE_LLM_CONFIG_FILE llm-runtime.yaml config/llm-runtime.yaml)"
+  agent_cfg="$(resolve_runtime_config_path NEOPSYKE_AGENT_CONFIG_FILE agent-runtime.yaml config/agent-runtime.yaml)"
+  memory_cfg="$(resolve_runtime_config_path NEOPSYKE_MEMORY_CONFIG_FILE memory-runtime.yaml config/memory-runtime.yaml)"
+  id_cfg="$(resolve_runtime_config_path NEOPSYKE_ID_CONFIG_FILE id-runtime.yaml config/id-runtime.yaml)"
+
+  printf 'NeoPsyke doctor\n'
+  printf 'Repo root: %s\n' "$ROOT_DIR"
+
+  doctor_section "JDK"
+  if ! command -v java >/dev/null 2>&1; then
+    doctor_fail "java not found in PATH"
+  else
+    local java_line java_version java_major
+    java_line="$(java -version 2>&1 | head -n 1)"
+    java_version="$(printf '%s\n' "$java_line" | awk -F'"' '/version/ {print $2}')"
+    java_major="$(java_major_version "$java_version")"
+    if [[ -z "$java_major" ]]; then
+      doctor_fail "could not parse java version from: $java_line"
+    elif [[ "$java_major" -lt 21 ]]; then
+      doctor_fail "JDK 21+ required, found: $java_line"
+    else
+      doctor_pass "java present and version OK: $java_line"
+    fi
+  fi
+
+  doctor_section "Config"
+  for spec in \
+    "LLM:$llm_cfg" \
+    "Agent:$agent_cfg" \
+    "Memory:$memory_cfg" \
+    "Id:$id_cfg"
+  do
+    local label="${spec%%:*}"
+    local path="${spec#*:}"
+    if [[ -f "$path" ]]; then
+      doctor_pass "$label config resolves: $path"
+    else
+      doctor_fail "$label config missing: $path"
+    fi
+  done
+
+  doctor_section "Live Env"
+  if [[ -f "$llm_cfg" ]]; then
+    local provider env_name env_value
+    while IFS= read -r provider; do
+      [[ -n "$provider" ]] || continue
+      env_name="$(provider_api_key_env "$llm_cfg" "$provider")"
+      if [[ -z "$env_name" ]]; then
+        doctor_warn "provider '$provider' is in use but no api_key_env mapping was found"
+        continue
+      fi
+      if [[ "$provider" == "ollama" ]]; then
+        if [[ -n "${!env_name:-}" ]]; then
+          doctor_pass "provider '$provider' optional auth env is set: $env_name"
+        else
+          doctor_info "provider '$provider' is configured; $env_name is optional for local Ollama"
+        fi
+        continue
+      fi
+      env_value="${!env_name:-}"
+      if [[ -n "$env_value" ]]; then
+        doctor_pass "provider '$provider' env is set: $env_name"
+      else
+        doctor_fail "provider '$provider' requires env var: $env_name"
+      fi
+    done < <(llm_providers_in_use "$llm_cfg")
+  fi
+
+  doctor_section "Long-Term Memory"
+  if [[ ! -f "$memory_cfg" ]]; then
+    doctor_fail "memory config missing; cannot determine long-term memory mode"
+  else
+    memory_mode="$(yaml_top_level_scalar "$memory_cfg" mode)"
+    case "$memory_mode" in
+      "" )
+        doctor_fail "memory config is missing top-level 'mode'"
+        ;;
+      off)
+        doctor_info "long-term memory mode is 'off'; Docker readiness check skipped"
+        ;;
+      external)
+        doctor_info "long-term memory mode is 'external'; Docker readiness check skipped"
+        ;;
+      default)
+        if ! command -v docker >/dev/null 2>&1; then
+          doctor_fail "memory mode is 'default' but docker is not installed"
+        elif ! docker info >/dev/null 2>&1; then
+          doctor_fail "memory mode is 'default' but Docker daemon is not reachable"
+        else
+          doctor_pass "docker is installed and daemon is reachable"
+          docker_container_name="$(awk '/container_name:/ {print $2; exit}' "$ROOT_DIR/docker-compose.yml" 2>/dev/null)"
+          if [[ -z "$docker_container_name" ]]; then
+            doctor_warn "could not resolve pgvector container name from docker-compose.yml"
+          elif ! docker inspect "$docker_container_name" >/dev/null 2>&1; then
+            doctor_fail "pgvector container '$docker_container_name' is not present; run 'docker compose up -d'"
+          else
+            local docker_state running health
+            docker_state="$(docker inspect --format '{{.State.Running}} {{if .State.Health}}{{.State.Health.Status}}{{else}}no-healthcheck{{end}}' "$docker_container_name" 2>/dev/null)"
+            running="${docker_state%% *}"
+            health="${docker_state#* }"
+            if [[ "$running" != "true" ]]; then
+              doctor_fail "pgvector container '$docker_container_name' is not running"
+            elif [[ "$health" != "healthy" && "$health" != "no-healthcheck" ]]; then
+              doctor_fail "pgvector container '$docker_container_name' is not ready (health=$health)"
+            else
+              doctor_pass "pgvector container '$docker_container_name' is ready (health=$health)"
+            fi
+          fi
+        fi
+        ;;
+      *)
+        doctor_warn "unknown memory mode '$memory_mode'; Docker readiness check skipped"
+        ;;
+    esac
+  fi
+
+  doctor_section "Summary"
+  if [[ "$DOCTOR_FAILURES" -gt 0 ]]; then
+    printf 'Doctor found %d failure(s) and %d warning(s).\n' "$DOCTOR_FAILURES" "$DOCTOR_WARNINGS"
+    exit 1
+  fi
+  printf 'Doctor passed with %d warning(s).\n' "$DOCTOR_WARNINGS"
+  exit 0
+}
 
 log_info() {
   if [[ "$FREUD_LIVE_MODE" -eq 1 ]]; then
@@ -30,6 +318,11 @@ log_error() {
 
 if [[ -n "${NEOPSYKE_LOG_LEVEL:-}" ]]; then
   LOG_LEVEL_FROM_ENV=1
+fi
+
+if [[ $# -gt 0 && "$1" == "doctor" ]]; then
+  shift
+  run_doctor "$@"
 fi
 
 if [[ -z "${NEOPSYKE_METRICS_DB:-}" ]]; then
@@ -124,7 +417,9 @@ while [[ $# -gt 0 ]]; do
       ;;
     -h|--help)
       cat <<'EOF'
-Usage: ./run-neopsyke.sh [--log-level LEVEL] [--loop-delay-ms MS|--no-delay] [--no-id] [--goals|--no-goals] [--clear-memory-*] [--clear-action-control] [--record-session] [--] [app-args...]
+Usage:
+  ./run-neopsyke doctor
+  ./run-neopsyke [--log-level LEVEL] [--loop-delay-ms MS|--no-delay] [--no-id] [--goals|--no-goals] [--clear-memory-*] [--clear-action-control] [--record-session] [--] [app-args...]
 
 Options:
   -l, --log-level LEVEL   SLF4J simple logger level (default: warning)
@@ -134,6 +429,7 @@ Options:
       --goals             Enable the goals subsystem for this run
       --no-goals          Disable the goals subsystem for this run
   -h, --help              Show this help message
+      doctor             Run environment diagnostics and exit
 
 Memory clearing (applied before agent startup):
       --clear-memory-all         Clear ALL long-term memory (vector + episodic) before starting

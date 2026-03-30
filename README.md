@@ -89,7 +89,8 @@ This starts a PostgreSQL + pgvector instance. NeoPsyke will auto-bootstrap its m
 ### 4. Run
 
 ```bash
-./run-neopsyke.sh
+./run-neopsyke doctor
+./run-neopsyke
 ```
 
 The agent starts in interactive mode with a web dashboard at `http://localhost:8787`. Open the dashboard to begin a conversation.
@@ -255,19 +256,33 @@ Some omissions are deliberate architectural decisions rather than missing checkl
 # Unit tests
 ./gradlew test
 
+# Bootstrap Freud once per clone
+./freud/bootstrap.sh
+
 # Full validation gate (used for PRs)
-freud/scripts/feature-loop.sh ci-pr
+./freud/bin/freud run signoff-gate
 ```
 
-The project uses a multi-phase validation pipeline called **Freud**:
+The project uses a multi-phase validation harness called **Freud**. The harness
+home lives under `freud/`, with the Cobra entrypoint at `freud/cli/`, shared Go
+packages under `freud/internal/`, and the local built binary at `./freud/bin/freud`.
+
+The normal deterministic workflow is:
 
 1. **Preflight compile** -- fast build check
-2. **Targeted tests** -- tests related to the changed feature
-3. **Full test suite** -- all JUnit tests
+2. **Targeted tests** -- focused agent test subset for quick failure signal
+3. **Full Gradle test suite** -- the main `./gradlew test` run
 4. **Scenario pack** -- deterministic agent behavior scenarios (`freud/scenarios/v1/`) that exercise the cognitive loop end-to-end
-5. **Reasoning eval** -- logic gate tests (shape-lock, feedback-carry, multi-fix) that verify the planner produces structurally correct decisions
+5. **Reasoning gate** -- logic gate tests (shape-lock, feedback-carry, multi-fix) that verify the planner produces structurally correct decisions
 
-Live evaluation lanes (weak-structure, prod-acceptance) and memory live eval are available for deeper validation during development.
+The `signoff-gate` command trims that to the non-redundant final gate:
+
+1. **Preflight compile**
+2. **Full Gradle test suite**
+3. **Scenario pack**
+4. **Reasoning gate**
+
+Live evaluation lanes (`--lane low-llm`, `--lane high-llm`) and memory live eval are available for deeper validation during development.
 
 ## Configuration
 

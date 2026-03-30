@@ -17,7 +17,7 @@
 
 ## Workflow
 1. Implement smallest useful slice.
-2. Run: `freud/scripts/feature-loop.sh <feature-id>`
+2. Run: `./freud/bin/freud run <feature-id>`
 3. Read:
    - `.neopsyke/runs/freud/<run>/artifacts/summary.json`
    - `.neopsyke/runs/freud/<run>/artifacts/anomalies.md`
