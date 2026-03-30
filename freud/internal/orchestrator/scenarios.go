@@ -7,9 +7,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
-
-	"github.com/atomitl/neopsyke/freud/internal/analysis"
 )
 
 // ScenariosOpts configures a scenario pack run.
@@ -115,7 +114,8 @@ func RunScenarios(opts ScenariosOpts) (*ScenariosResult, error) {
 
 // selectorExists checks if a test selector (package.Class.method or Class) exists in test source.
 func selectorExists(selector, testSrcDir string) bool {
-	if !analysis.DirExists(testSrcDir) {
+	info, err := os.Stat(testSrcDir)
+	if err != nil || !info.IsDir() {
 		return false
 	}
 	if strings.Contains(selector, "*") {
@@ -136,30 +136,39 @@ func selectorExists(selector, testSrcDir string) bool {
 		return false
 	}
 
-	raw := analysis.RgSearch(
-		fmt.Sprintf(`fun[[:space:]]+%s[[:space:]]*\(`, methodPart),
-		testSrcDir,
-		false,
-		false,
-		"",
-	)
-	for _, file := range analysis.NonEmptyLines(raw) {
-		filePath := file
-		if idx := strings.Index(file, ":"); idx >= 0 {
-			filePath = file[:idx]
-		}
-		classRaw := analysis.RgSearch(
-			fmt.Sprintf(`(class|object)[[:space:]]+%s\b`, classShort),
-			filePath,
-			false,
-			false,
-			"",
-		)
-		if len(analysis.NonEmptyLines(classRaw)) > 0 {
-			return true
-		}
+	classPattern := regexp.MustCompile(fmt.Sprintf(`\b(class|object)[[:space:]]+%s\b`, regexp.QuoteMeta(classShort)))
+	methodPatterns := []*regexp.Regexp{
+		regexp.MustCompile(fmt.Sprintf(`\bfun[[:space:]]+%s[[:space:]]*\(`, regexp.QuoteMeta(methodPart))),
+		regexp.MustCompile(fmt.Sprintf(`@[[:space:]]*Test[\s\S]*?\bfun[[:space:]]+%s[[:space:]]*\(`, regexp.QuoteMeta(methodPart))),
 	}
-	return false
+
+	found := false
+	_ = filepath.Walk(testSrcDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info == nil || info.IsDir() {
+			return nil
+		}
+		ext := strings.ToLower(filepath.Ext(path))
+		if ext != ".kt" && ext != ".java" {
+			return nil
+		}
+		data, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return nil
+		}
+		text := string(data)
+		if !classPattern.MatchString(text) {
+			return nil
+		}
+		for _, methodPattern := range methodPatterns {
+			if methodPattern.MatchString(text) {
+				found = true
+				return filepath.SkipAll
+			}
+		}
+		return nil
+	})
+
+	return found
 }
 
 func loadScenarioManifest(manifestPath string) (scenarioManifest, error) {
