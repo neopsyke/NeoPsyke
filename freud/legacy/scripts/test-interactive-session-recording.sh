@@ -13,7 +13,7 @@ set -euo pipefail
 # 8. Compares answers
 #
 # Usage:
-#   freud/scripts/test-interactive-session-recording.sh [--timeout <seconds>]
+#   freud/legacy/scripts/test-interactive-session-recording.sh [--timeout <seconds>]
 #
 # Requires a working LLM config (uses FREUD_CONFIG or default.env).
 
@@ -35,7 +35,7 @@ while [[ $# -gt 0 ]]; do
       TIMEOUT="$2"; shift 2 ;;
     --timeout=*) TIMEOUT="${1#*=}"; shift ;;
     -h|--help)
-      echo "Usage: freud/scripts/test-interactive-session-recording.sh [--timeout <seconds>]"
+      echo "Usage: freud/legacy/scripts/test-interactive-session-recording.sh [--timeout <seconds>]"
       exit 0 ;;
     *) echo "Unknown argument: $1" >&2; exit 1 ;;
   esac
@@ -234,7 +234,7 @@ if [[ -z "$LLM_CACHE" ]]; then
   exit 0
 fi
 
-REPLAY_OUTPUT="$(freud/scripts/live-eval.sh --session-replay "$SESSION_RECORD_DIR" --timeout "$TIMEOUT" 2>&1)" || true
+REPLAY_OUTPUT="$(freud/legacy/scripts/live-eval.sh --session-replay "$SESSION_RECORD_DIR" --timeout "$TIMEOUT" 2>&1)" || true
 REPLAY_RUN_DIR="$(echo "$REPLAY_OUTPUT" | grep "^Run directory:" | head -1 | sed 's/Run directory: //')"
 REPLAY_ANSWER=""
 if [[ -n "$REPLAY_RUN_DIR" && -f "$REPLAY_RUN_DIR/artifacts/answer.txt" ]]; then

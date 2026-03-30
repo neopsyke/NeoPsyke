@@ -9,7 +9,7 @@ set -euo pipefail
 # 4. Checks that session channels replayed without divergence
 #
 # Usage:
-#   freud/scripts/test-session-replay.sh [--input <file>] [--timeout <seconds>]
+#   freud/legacy/scripts/test-session-replay.sh [--input <file>] [--timeout <seconds>]
 #
 # Defaults to a simple arithmetic question if no input is provided.
 # Requires a working LLM config (uses FREUD_CONFIG or default.env).
@@ -24,7 +24,7 @@ cd "$REPO_ROOT"
 
 INPUT_FILE=""
 TIMEOUT="${FREUD_LIVE_EVAL_TIMEOUT:-60}"
-LIVE_EVAL="freud/scripts/live-eval.sh"
+LIVE_EVAL="freud/legacy/scripts/live-eval.sh"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -37,7 +37,7 @@ while [[ $# -gt 0 ]]; do
       TIMEOUT="$2"; shift 2 ;;
     --timeout=*) TIMEOUT="${1#*=}"; shift ;;
     -h|--help)
-      echo "Usage: freud/scripts/test-session-replay.sh [--input <file>] [--timeout <seconds>]"
+      echo "Usage: freud/legacy/scripts/test-session-replay.sh [--input <file>] [--timeout <seconds>]"
       echo ""
       echo "End-to-end test for session record → replay."
       echo "Defaults to 'What is 2 + 2?' if no input is provided."

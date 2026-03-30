@@ -1,0 +1,10 @@
+# Profile: high-llm (formerly prod-acceptance)
+# Enables live steps with the production LLM routing.
+
+live_eval:
+  llm_config_file: freud/config/llm-prod-acceptance.yaml
+  timeout: 120
+
+pipeline:
+  - name: reasoning_eval_model
+    live_only: true

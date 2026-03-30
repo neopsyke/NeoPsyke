@@ -1,30 +1,100 @@
 # Freud
 
-`Freud` is NeoPsyke's developer workflow layer. It gives you a small set of
-repeatable commands, isolated artifacts, and faster failure triage for both
-deterministic checks and optional live/provider-backed evals.
+`Freud` is NeoPsyke's test and evaluation harness. It provides one CLI for
+deterministic validation, live evals, session record/replay, and post-run
+analysis, with isolated run artifacts and a repeatable workflow.
+
+Freud is designed from the ground up to improve AI coding agent performance
+during bug investigation and fixing. Its feature loop, indexed artifacts, and
+replayable runs are optimized for fast feedback, precise failure localization,
+and efficient re-validation after changes.
+
+## Quick Start
+
+```bash
+# Build the CLI as ./freud/bin/freud (one time, from repo root)
+./freud/bootstrap.sh
+
+# Run the deterministic workflow
+./freud/bin/freud run my-change
+
+# Run one live eval explicitly
+./freud/bin/freud eval --live --input input.txt
+
+# See all commands
+./freud/bin/freud --help
+```
+
+`bootstrap.sh` creates `freud/bin/`, builds the CLI, and prints the next
+commands to run. The preferred local binary path is `./freud/bin/freud`.
+
+## When To Use Freud
+
+Use Freud when you want more than a raw runtime invocation.
+
+Freud runs NeoPsyke and adds the workflow around it: step-based validation,
+isolated run directories, replay support, indexed artifacts, summaries, and
+triage tools.
+
+Use Freud for:
+- validating a change
+- investigating failures
+- replaying previous runs
+- re-running specific validation steps
+- AI-coding-agent debugging loops
+
+## Short Glossary
+
+- **feature loop**: Freud's fast developer feedback loop for validating and debugging changes
+- **deterministic workflow**: a run that uses local code and tests only, with no real provider calls
+- **signoff gate**: the stricter deterministic run used before calling work complete
+- **pipeline**: the full ordered list of steps that `freud run` can execute
+- **step selection**: options like `--only`, `--from-step`, and `--skip` that narrow which steps run
+- **full Gradle test suite**: the main `./gradlew test` run for the NeoPsyke codebase
+- **scenario pack**: Freud's fixed set of deterministic agent scenarios
+- **reasoning gate**: Freud's deterministic reasoning eval step
+- **run directory**: the saved directory for one run, including logs, summaries, and artifacts
+- **interactive session**: a real chat-style NeoPsyke run where you exchange messages with the agent over time
+- **indexed artifacts**: the summary files and log indexes that help agents find failures quickly
 
 ## Which Command Do I Use?
 
-| If you want to... | Run this |
-|---|---|
-| Validate a code change with the normal deterministic workflow | `freud/scripts/feature-loop.sh <feature-id>` |
-| Run the full deterministic signoff gate before considering work complete | `freud/scripts/feature-loop.sh ci-pr` |
-| Run one live prompt through the real agent | `freud/scripts/live-eval.sh --input <file>` |
-| Run the advanced live reasoning suite | `freud/scripts/run-bbh-smoke.sh --lane weak-structure` or `freud/scripts/run-bbh-smoke.sh --lane prod-acceptance` |
-| Orchestrate deterministic checks plus the live suite in one run | `freud/scripts/feature-loop.sh <feature-id> --live --config freud/config/live-weak-structure.env` or `...live-prod-acceptance.env` |
-| Run the deterministic scenario pack only | `freud/scripts/run-scenarios.sh --file freud/scenarios/v1/neopsyke-agent-scenarios.json` |
+| If you want to... | Run this | What it does |
+|---|---|---|
+| Validate a code change with the normal deterministic workflow | `./freud/bin/freud run <feature-id>` | 1. Runs the normal deterministic workflow.<br>2. Stops on the first failing major step by default.<br>3. Writes indexed artifacts for debugging and re-runs. |
+| Run the full deterministic signoff gate before considering work complete | `./freud/bin/freud run signoff-gate` | 1. Runs the deterministic signoff gate.<br>2. Re-checks the full Gradle test suite, scenario pack, and reasoning gate.<br>3. Produces the final non-live run directory for the change. |
+| Run only a specific pipeline step | `./freud/bin/freud run <feature-id> --only scenario_pack` | 1. Skips the other steps in the pipeline.<br>2. Executes just the named step.<br>3. Still writes a normal run directory for that partial run. |
+| Inspect what would run without executing | `./freud/bin/freud run <feature-id> --dry-run` | 1. Resolves the pipeline and any step-selection options.<br>2. Writes a dry-run directory showing what would execute.<br>3. Does not run Gradle, evals, or live steps. |
+| Triage a failed run | `./freud/bin/freud triage` | Reads the latest run, scans indexed artifacts and logs for anomalies, and writes a focused failure triage report. |
+| Generate a compact summary | `./freud/bin/freud summarize` | Reads the latest run and produces a short operator-facing summary of what passed, failed, and where to look next. |
+| Package a run for LLM analysis | `./freud/bin/freud context-pack` | Bundles the key artifact paths and failure context from a run into a compact handoff package for deeper analysis. |
+| Run one live prompt through the real agent | `./freud/bin/freud eval --live --input <file>` | 1. Sends one real input through NeoPsyke.<br>2. Writes an isolated run with logs, a pass/fail result, and answer artifacts.<br>3. Does not create replay records unless you also pass `--record`. |
+| Record one Freud live eval for replay | `./freud/bin/freud eval --live --record --input <file>` | 1. Runs one real Freud live eval.<br>2. Writes the normal run directory plus replay artifacts for later cache or session replay.<br>3. Gives you a reusable baseline for iterative debugging. |
+| Record one NeoPsyke interactive session for replay | `./run-neopsyke --record-session` | 1. Starts a real interactive NeoPsyke session with recording enabled.<br>2. Lets you drive a multi-message conversation through the runtime and dashboard.<br>3. Produces a recorded interactive session for later replay and debugging. |
+| Replay a recorded session | `./freud/bin/freud eval --live --session-replay <run-dir>` | 1. Reuses a previously recorded session instead of starting from a fresh live run.<br>2. Replays cached channels and records divergence stats.<br>3. May still fall back to live calls after divergence, so `--live` stays explicit. |
+| Run the standalone live reasoning suite | `./freud/bin/freud bbh --live --lane low-llm` or `./freud/bin/freud bbh --live --lane high-llm` | 1. Runs the frozen multi-case reasoning smoke suite for the selected live lane.<br>2. Reports compact case-by-case progress while it runs.<br>3. Writes aggregate summary, progress, and per-case results artifacts. |
+| Orchestrate deterministic checks plus the live suite in one run | `./freud/bin/freud run <feature-id> --live --lane low-llm` | 1. Runs the deterministic workflow first.<br>2. Continues into the selected live lane only after those checks pass.<br>3. Keeps the full run directory in one place. |
+| Test Freud session replay (E2E) | `./freud/bin/freud test-freud-replay` | 1. Runs a real live eval while recording the session.<br>2. Replays that run from recorded artifacts.<br>3. Fails if replay diverges or falls back to uncached live calls. |
+| Test interactive session replay (E2E) | `./freud/bin/freud test-replay-interactive` | 1. Starts an interactive NeoPsyke session and dashboard flow.<br>2. Records a real chat interaction and replays it.<br>3. Verifies the interactive session replay path remains deterministic. |
 
-`feature-loop.sh --live` is an orchestrator over the other live commands. It
-is not a separate live system. The direct live entrypoints are:
+## What Each Workflow Runs
 
-- `freud/scripts/live-eval.sh --input ...`
-- `freud/scripts/run-bbh-smoke.sh --lane ...`
+| Term | What it runs | What its purpose is |
+|---|---|---|
+| `feature loop` | the deterministic workflow, plus the live lane when `--live` is supplied | Use it to fail fast and keep a quick feedback loop while debugging code or checking a feature for the first time after implementation. |
+| `pipeline` | `preflight_compile`, `targeted_tests`, `full_tests`, `scenario_pack`, `reasoning_eval_logic`, `reasoning_eval_model`, `memory_live_smoke`, `test_freud_replay` | Use it as the full step list behind `freud run`, before `--live` and step-selection options narrow it. |
+| `deterministic workflow` | `preflight_compile`, `targeted_tests`, `full_tests`, `scenario_pack`, `reasoning_eval_logic` | Use it for the same quick feedback-loop purpose as the feature loop, but without live calls so it stays faster. |
+| `signoff gate` | `preflight_compile`, `full_tests`, `scenario_pack`, `reasoning_eval_logic` | Use it for deterministic validation before commits, CI pull requests, or calling work complete. |
+| `scenario pack` | Freud's fixed deterministic agent scenario manifest | Use it to validate stable agent behaviors against a known scenario set. |
+| `reasoning gate` | the logic core and the logic behavioral pack | Use it to validate reasoning behavior independently from live model variance. |
+| `live lane` | `reasoning_eval_model`, `memory_live_smoke`, and `test_freud_replay`, depending on config and lane settings | Use it to test the agent end-to-end with live LLM calls when deterministic validation is not enough. |
+| `step selection` | `--only`, `--from-step`, and `--skip` | Use it to run only the specific parts you need. |
 
 ## Minimum Setup
 
 Deterministic Freud usage:
 
+- Go 1.21+ (for building the CLI)
 - JDK 21+
 - `./gradlew` works in this repo
 - no provider API keys required
@@ -33,13 +103,13 @@ Live Freud usage:
 
 - all of the above
 - provider API keys and routing config required for the lane you want to run
-- live commands may spend tokens and money
+- live commands require `--live` and may spend tokens and money
 
-By default, `freud/config/default.env` leaves live steps blank on purpose.
-Live commands are enabled by choosing a live config such as:
+By default, `freud/config/freud.yaml` leaves live steps blank on purpose.
+Live commands are enabled by choosing a lane profile:
 
-- `freud/config/live-weak-structure.env`
-- `freud/config/live-prod-acceptance.env`
+- `--lane low-llm` (low-cost LLM routing)
+- `--lane high-llm` (production LLM routing)
 
 ## Common Workflows
 
@@ -48,52 +118,40 @@ Live commands are enabled by choosing a live config such as:
 Start here:
 
 ```bash
-freud/scripts/feature-loop.sh my-change
+./freud/bin/freud run my-change
 ```
 
-This is the primary deterministic command. It runs the normal developer loop:
-
-- preflight compile
-- targeted tests
-- full tests
-- scenario pack
-- deterministic reasoning gate
+This is the primary deterministic command. It runs the normal deterministic workflow:
+see [What Each Workflow Runs](#what-each-workflow-runs) for the exact step list.
 
 Before considering the work fully validated, run the deterministic signoff
 gate:
 
 ```bash
-freud/scripts/feature-loop.sh ci-pr
+./freud/bin/freud run signoff-gate
 ```
 
 That is the command that should be treated as the default completion gate for
 non-live validation. `./gradlew test` alone is not enough because it does not
-exercise the Freud deterministic scenario pack or deterministic reasoning evals.
-`--dry-run` does not count. No commit and no "fully validated" claim should
-happen until non-dry `freud/scripts/feature-loop.sh ci-pr` passes.
-
-The expected deterministic gate order is:
-
-1. `preflight_compile`
-2. `targeted_tests`
-3. `full_tests`
-4. `scenario_pack`
-5. `reasoning_eval_logic`
+exercise the Freud scenario pack or reasoning gate. `--dry-run` does not
+count. No commit and no "fully validated" claim should happen until non-dry
+`./freud/bin/freud run signoff-gate` passes. See [What Each Workflow Runs](#what-each-workflow-runs)
+for the exact signoff-gate contents.
 
 ### I Want Deterministic Validation Only
 
 Use the same command:
 
 ```bash
-freud/scripts/feature-loop.sh my-change
+./freud/bin/freud run my-change
 ```
 
 Narrower options:
 
 ```bash
-freud/scripts/run-reasoning-pr-gate.sh
-freud/scripts/run-scenarios.sh --file freud/scenarios/v1/neopsyke-agent-scenarios.json
-freud/scripts/feature-loop.sh my-change --from-step scenario_pack
+./freud/bin/freud run my-change --only scenario_pack
+./freud/bin/freud run my-change --from-step scenario_pack
+./freud/bin/freud run my-change --skip preflight_compile,targeted_tests
 ```
 
 These narrower commands are for iteration speed. They are not the default
@@ -104,22 +162,28 @@ signoff gate.
 Use the single-input entrypoint:
 
 ```bash
-freud/scripts/live-eval.sh --input input.txt
-freud/scripts/live-eval.sh --input input.txt --expected expected.txt
+./freud/bin/freud eval --live --input input.txt
+./freud/bin/freud eval --live --input input.txt --expected expected.txt
 ```
 
 This is the primary live command for direct agent checks.
 
 ### I Want To Replay A Previous Run (No API Calls)
 
-Every live eval automatically records all LLM responses. Replay them to re-run the eval for free:
+Use `--record` when you want replay material from a live eval. Ordinary live evals still write the normal logs and artifacts, but they do not generate replay files unless you opt in:
 
 ```bash
-# Find the cache from your last run
-CACHE=$(cat .neopsyke/runs/freud/latest-run.txt)/artifacts/llm-cache.jsonl
+# Record one baseline run
+./freud/bin/freud eval --live --record --input input.txt --expected expected.txt
 
-# Replay — zero tokens, same result
-freud/scripts/live-eval.sh --input input.txt --cache-replay "$CACHE"
+# Then replay using the cache from that run
+./freud/bin/freud eval --live --input input.txt --cache-replay <run-dir>/artifacts/llm-cache.jsonl
+```
+
+Or replay a full recorded session (all channels, not just LLM):
+
+```bash
+./freud/bin/freud eval --live --session-replay <run-dir>
 ```
 
 Replay serves cached responses as long as the messages sent to the LLM haven't changed. When they diverge (because your code changed what the agent sends), it switches to real API calls from that point forward and logs exactly where divergence happened.
@@ -131,8 +195,8 @@ This is the recommended workflow for iterative development: record once, then re
 Run the live suite directly:
 
 ```bash
-freud/scripts/run-bbh-smoke.sh --lane weak-structure
-freud/scripts/run-bbh-smoke.sh --lane prod-acceptance
+./freud/bin/freud bbh --live --lane low-llm
+./freud/bin/freud bbh --live --lane high-llm
 ```
 
 Use these when you want the frozen live reasoning matrix, not just one prompt.
@@ -141,13 +205,13 @@ If you want one orchestrated run that includes the live suite after the
 deterministic checks:
 
 ```bash
-freud/scripts/feature-loop.sh my-change --live --config freud/config/live-weak-structure.env
-freud/scripts/feature-loop.sh my-change --live --config freud/config/live-prod-acceptance.env
+./freud/bin/freud run my-change --live --lane low-llm
+./freud/bin/freud run my-change --live --lane high-llm
 ```
 
 ### My Run Failed, Where Do I Look First?
 
-For any feature-loop run:
+For any pipeline run:
 
 1. `artifacts/summary.json`
 2. `artifacts/summary-compact.md`
@@ -155,6 +219,14 @@ For any feature-loop run:
 4. `artifacts/step-index.tsv`
 5. `artifacts/step-meta/<step>.json`
 6. only then `logs/<step>.log`
+
+Or use the built-in triage:
+
+```bash
+./freud/bin/freud triage           # anomaly detection on latest run
+./freud/bin/freud summarize        # compact summary of latest run
+./freud/bin/freud context-pack     # package for LLM analysis
+```
 
 For one-shot live evals:
 
@@ -185,9 +257,18 @@ Live-specific:
 - one-shot: `artifacts/verdict.json`, `artifacts/answer.txt`
 - BBH suite: `artifacts/bbh-smoke-<lane>-summary.json`, `artifacts/bbh-smoke-<lane>-results.tsv`
 
-For tools and scripts, prefer `.neopsyke/runs/freud/latest-run.txt` as the
-convenience pointer to the newest Freud run. Timestamped run directories remain
-the source of truth.
+### Finding Previous Runs
+
+All runs are indexed in `.neopsyke/runs/freud/run-index.tsv` (append-only, concurrent-safe):
+
+```
+timestamp       feature_id    run_dir                  status
+20260327T034201Z  signoff-gate  /full/path/to/run1       pass
+20260327T034500Z  live-eval   /full/path/to/run2       pass
+```
+
+Commands like `./freud/bin/freud triage` with no args read the last line automatically.
+Agents can grep for their feature ID to find their run.
 
 ## Concurrency
 
@@ -195,9 +276,7 @@ Concurrent Freud runs are only partly safe.
 
 Not safe in the same checkout/worktree:
 
-- `feature-loop.sh` runs
-- `run-scenarios.sh` runs
-- `run-reasoning-pr-gate.sh` runs
+- `./freud/bin/freud run ...` (invokes Gradle)
 - raw `./gradlew ...` runs
 
 Reason:
@@ -208,62 +287,50 @@ Reason:
 
 Conditionally safe in the same checkout:
 
-- `live-eval.sh` runs can overlap
-- `run-bbh-smoke.sh` runs can overlap
+- `./freud/bin/freud eval` runs can overlap
+- `./freud/bin/freud bbh` runs can overlap
 - mixing those live command families is fine only when they are not overlapping with any Gradle-backed command
+
+Always safe:
+
+- `./freud/bin/freud triage`, `./freud/bin/freud summarize`, `./freud/bin/freud context-pack` (read-only analysis)
+- `--dry-run` inspection commands
 
 Why the live-only case can work:
 
 - each run gets its own timestamped run directory
-- the shared `latest` pointers are now best-effort convenience pointers, not a hard dependency for execution
+- `run-index.tsv` uses atomic append (O_APPEND) — concurrent writers don't corrupt each other
+- the run dir printed in command output is always the source of truth
 
-What is still shared:
+### Live Isolation
 
-- `.neopsyke/runs/freud/latest`
-- `.neopsyke/runs/freud/latest-run.txt`
-- `freud/latest`
-- `freud/latest-run.txt`
+Freud live evals and BBH runs now use per-run isolated state by default.
 
-That means the last writer wins. During concurrent runs, do not treat those
-pointers as stable ownership markers for one specific run. Prefer:
+Each live run gets:
 
-- the explicit `run_dir` printed by the command
-- the timestamped run directory itself
-- a dedicated `FREUD_RUN_ROOT` when a tool needs strict isolation
+- a unique pgvector namespace: `freud-eval-<run-id>`
+- its own episodic logbook DB under `$RUN_DIR/state/logbook.db`
+- its own metrics DB under `$RUN_DIR/state/metrics.db`
+- its own action-control DB under `$RUN_DIR/state/action-control.db`
 
-### Important Memory Caveat
+That means concurrent live runs do not contaminate each other's isolated memory
+state. The practical concurrency rule is simpler:
 
-Concurrent memory-dependent live runs are still not safe.
+- concurrent deterministic or other Gradle-backed runs are still not safe in one checkout
+- concurrent live runs are fine as long as they are not overlapping with any Gradle-backed command
+- shared `latest` pointers are convenience only, not stable ownership markers
 
-By default, Freud live evals share these isolated-but-global memory resources:
-
-- pgvector namespace: `freud-eval`
-- episodic logbook: `.neopsyke/freud-logbook.db`
-- metrics DB: `.neopsyke/freud-metrics.db`
-
-So if two live runs use long-term memory at the same time, they can interfere
-with each other by:
-
-- clearing the same isolated memory state
-- contaminating recall with another run's imprints
-- mixing episodic/logbook state across runs
-
-Practical rule:
-
-- concurrent deterministic/Gradle-backed runs are not fine in one checkout
-- concurrent live runs are fine when memory is off or irrelevant
-- concurrent memory-dependent live runs are not safe and can contaminate each other
-
-This is one reason the BBH live suite disables long-term vector memory and
-episodic logbook recall by default.
+BBH still disables long-term vector memory and episodic logbook recall by
+default because the suite is meant to measure reasoning rather than memory
+side-effects.
 
 ## Live Runs And Cost
 
 Live commands are manual on purpose.
 
-- `live-eval.sh` runs a single real agent turn
-- `run-bbh-smoke.sh` runs a frozen multi-case live suite
-- `feature-loop.sh --live` just orchestrates those live steps after the deterministic ones
+- `./freud/bin/freud eval` runs a single real agent turn
+- `./freud/bin/freud bbh` runs a frozen multi-case live suite
+- `./freud/bin/freud run --live` just orchestrates those live steps after the deterministic ones
 
 Cost guidance:
 
@@ -275,7 +342,7 @@ Cost guidance:
 
 Memory behavior:
 
-- one-shot `live-eval.sh` uses isolated Freud memory by default
+- one-shot `./freud/bin/freud eval` uses isolated Freud memory by default
 - BBH smoke disables long-term vector memory and episodic logbook recall by default so the suite measures reasoning rather than memory side-effects
 
 ## Common Failure Modes
@@ -297,9 +364,10 @@ Freud live eval runs do not touch the user's default memory state.
 
 | Resource | Freud live eval | User default |
 |---|---|---|
-| pgvector namespace | `freud-eval` | `neopsyke` |
-| Episodic logbook | `.neopsyke/freud-logbook.db` | `.neopsyke/logbook.db` |
-| Metrics DB | `.neopsyke/freud-metrics.db` | `.neopsyke/metrics.db` |
+| pgvector namespace | `freud-eval-<run-id>` | `neopsyke` |
+| Episodic logbook | `$RUN_DIR/state/logbook.db` | `.neopsyke/logbook.db` |
+| Metrics DB | `$RUN_DIR/state/metrics.db` | `.neopsyke/metrics.db` |
+| Action-control DB | `$RUN_DIR/state/action-control.db` | `.neopsyke/action-control.db` |
 
 Defaults:
 
@@ -310,64 +378,89 @@ Defaults:
 
 ## Configuration
 
-`feature-loop.sh` reads config from:
+Freud uses a single YAML config file with optional lane profile overlays.
 
-1. `FREUD_CONFIG`, if set
-2. `freud/config/default.env`
+Config resolution order:
 
-Important overrides:
+1. `--config` CLI flag, if set
+2. `FREUD_CONFIG` env var, if set
+3. `freud/config/freud.yaml` (default)
 
-- `FREUD_TARGETED_TEST_CMD`
-- `FREUD_FULL_TEST_CMD`
-- `FREUD_SCENARIO_PACK_CMD`
-- `FREUD_REASONING_EVAL_LOGIC_CMD`
-- `FREUD_REASONING_EVAL_MODEL_CMD`
-- `FREUD_MEMORY_SMOKE_CMD`
-- `FREUD_LIVE_EVAL_TIMEOUT`
-- `FREUD_LIVE_EVAL_PRESERVE_MEMORY`
-- `FREUD_BBH_MIN_PASS_RATE_PERCENT`
-- `FREUD_BBH_MAX_TIMEOUTS`
-- `FREUD_BBH_PRESERVE_MEMORY`
-- `FREUD_BBH_MEMORY_ENABLED`
-- `FREUD_BBH_LOGBOOK_ENABLED`
-- `FREUD_RUN_ROOT`
-- `FREUD_GRADLE_USER_HOME`
+Precedence: CLI flag (`-o key=val`) > env var > profile overlay (`--lane`) > YAML config > built-in defaults.
 
-Project-specific command wiring belongs in `freud/config/*.env`, not inside the
-generic scripts.
+The config file (`freud/config/freud.yaml`) contains:
+
+- **project**: name, run_root, retention_days, gradle_home
+- **pipeline**: ordered list of steps (shell commands or built-in by name)
+- **live_eval**: timeout, preserve_memory, goals_enabled, llm_config_file
+- **session**: replay-artifact recording defaults and the Freud replay E2E gate toggle
+- **scenarios**: manifest_file
+- **bbh**: prompts_file, answers_file, min_pass_rate, max_timeouts
+- **runtime**: continue_on_fail, scratchpad_debug, id_enabled
+- **telemetry**: enabled
+
+Lane profiles (`freud/config/profiles/low-llm.yaml`, `high-llm.yaml`) override specific config keys for live evaluation:
+
+```bash
+# Use low-cost LLM routing
+./freud/bin/freud run my-change --live --lane low-llm
+
+# Override a single config key for this run
+./freud/bin/freud run my-change -o live_eval.timeout=60
+
+# Use a completely custom config
+./freud/bin/freud run my-change -c /path/to/custom.yaml
+```
+
+Secrets (`MISTRAL_API_KEY` etc.) are never in config files — they pass through from the host environment.
 
 ## Layout
 
-- `freud/scripts/feature-loop.sh`: deterministic-first orchestrator
-- `freud/scripts/live-eval.sh`: primary one-shot live entrypoint
-- `freud/scripts/run-bbh-smoke.sh`: advanced live reasoning suite
-- `freud/scripts/run-scenarios.sh`: deterministic scenario runner
-- `freud/scripts/run-reasoning-pr-gate.sh`: deterministic reasoning gate
-- `freud/py/`: Python data-processing helpers
-- `freud/tests/`: BATS and pytest coverage for the workflow tooling
+- `freud/cli/`: Cobra entrypoint and subcommands
+- `freud/internal/config/`: config loading, schema, validation
+- `freud/internal/orchestrator/`: pipeline orchestration, live eval, BBH, session replay, scenarios, reasoning gate
+- `freud/internal/analysis/`: native Go analysis modules (triage, summarize, context-pack, telemetry)
+- `freud/config/freud.yaml`: default YAML configuration
+- `freud/config/profiles/`: lane profile overlays (low-llm.yaml, high-llm.yaml)
+- `freud/legacy/scripts/`: legacy shell scripts (no longer called by the CLI)
+- `freud/legacy/py/`: legacy Python modules (superseded by Go analysis modules)
+- `freud/tests/`: legacy BATS and pytest tests (superseded by Go tests)
+- `freud/bin/`: local built binaries created by `bootstrap.sh`
 
-## Testing The Workflow Itself
-
-### BATS
-
-```bash
-brew install bats-core
-bats freud/tests/
-```
-
-### pytest
+## Building
 
 ```bash
-python3 -m venv freud/.venv
-freud/.venv/bin/pip install pytest
-PYTHONPATH=. freud/.venv/bin/pytest freud/tests/test_*_py.py freud/tests/test_common.py -v
+# From repo root
+./freud/bootstrap.sh
+
+# Run the default fast CLI/unit tests
+cd freud && go test ./... -v
+
+# Optional mocked command-path CLI E2Es
+cd freud && go test -tags=cli_e2e ./cli -v
+
+# Cross-compile for Linux
+cd freud && GOOS=linux GOARCH=amd64 go build -o ./bin/freud-linux ./cli
 ```
+
+`go build` produces an executable binary with no runtime dependencies — no Go, Python, or shell interpreter needed to run it.
 
 ## Design Rules
 
 - deterministic checks first
 - live/provider checks explicit and optional
-- a small number of clear entrypoints beats many overlapping wrappers
-- `live-eval.sh` is the primary live entrypoint
-- `run-bbh-smoke.sh` is the advanced live suite
-- `feature-loop.sh --live` orchestrates the above, it does not replace them
+- one CLI, one config file, clear subcommands
+- `./freud/bin/freud eval` is the primary live entrypoint
+- `./freud/bin/freud bbh` is the advanced live suite
+- `./freud/bin/freud run --live` orchestrates the above, it does not replace them
+- pipeline steps without a `cmd` are built-in (dispatched to native Go by name)
+- run history in `run-index.tsv` (append-only, concurrent-safe)
+- latest pointers exist as convenience only; the printed run dir and `run-index.tsv` remain the source of truth
+
+## TODOs
+
+- [ ] Define one canonical deterministic eval schema for Freud, including case metadata, provenance from the source run, and grader type.
+- [ ] Add deterministic graders for promoted evals: normalized final-answer checks, required or forbidden actions, and simple trajectory checkpoints.
+- [ ] Create a tool to generate a candidate permanent deterministic eval from a live recording or session replay artifact.
+- [ ] Add a review-and-approve step before a generated eval becomes permanent.
+- [ ] Integrate promoted evals into the right Freud gates so important live failures become stable regression coverage.

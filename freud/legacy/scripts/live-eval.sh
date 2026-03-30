@@ -52,7 +52,7 @@ extract_answer_line() {
 
 usage() {
   cat <<'EOF'
-Usage: freud/scripts/live-eval.sh --input <file> [options]
+Usage: freud/legacy/scripts/live-eval.sh --input <file> [options]
 
 Runs a single-input live eval against NeoPsyke with LLM response caching.
 This is the primary Freud live entrypoint for one-off real-agent checks.

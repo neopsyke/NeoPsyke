@@ -60,13 +60,13 @@ Follow `task_verifier_review` events and aggregated `taskVerifierStats`.
 Use:
 
 ```bash
-freud/scripts/task-verifier-telemetry.sh
+python3 freud/legacy/py/telemetry/task_verifier.py .neopsyke/logs/latest-events.jsonl
 ```
 
 Or with explicit run file:
 
 ```bash
-freud/scripts/task-verifier-telemetry.sh .neopsyke/logs/runs/<run-id>.events.jsonl
+python3 freud/legacy/py/telemetry/task_verifier.py .neopsyke/logs/runs/<run-id>.events.jsonl
 ```
 
 The script prints:
@@ -134,4 +134,4 @@ Use a staged loop and change one axis at a time.
 - Event emission: `src/main/kotlin/ai/neopsyke/agent/ego/Ego.kt`
 - Structured logs: `src/main/kotlin/ai/neopsyke/instrumentation/StructuredLogSink.kt`
 - Dashboard aggregates: `src/main/kotlin/ai/neopsyke/dashboard/DashboardStateStore.kt`
-- Analyzer script: `freud/scripts/task-verifier-telemetry.sh`
+- Analyzer script: `python3 freud/legacy/py/telemetry/task_verifier.py`

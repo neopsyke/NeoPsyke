@@ -11,6 +11,9 @@ concurrency:
   group: ci-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   build-and-test:
     runs-on: ubuntu-24.04
@@ -19,55 +22,43 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Set up JDK 23 (Corretto)
+      - name: Set up JDK 21
         uses: actions/setup-java@v5
         with:
-          distribution: corretto
-          java-version: "23"
+          distribution: temurin
+          java-version: "21"
           cache: gradle
 
-      - name: Set up Python 3
-        uses: actions/setup-python@v6
+      - name: Set up Go
+        uses: actions/setup-go@v6
         with:
-          python-version: "3.13"
+          go-version-file: freud/go.mod
+          cache: true
+          cache-dependency-path: freud/go.sum
 
-      - name: Install CI dependencies
-        run: sudo apt-get update && sudo apt-get install -y bats ripgrep
+      - name: Bootstrap Freud CLI
+        run: ./freud/bootstrap.sh
 
-      - name: Freud shell tests
-        id: freud_shell_tests
-        run: |
-          bats freud/tests/test_live_eval.bats \
-            freud/tests/test_feature_loop_env.bats \
-            freud/tests/test_reasoning_pr_gate.bats \
-            freud/tests/test_step_filtering.bats \
-            freud/tests/test_scenarios.bats \
-            freud/tests/test_context_pack.bats \
-            freud/tests/test_triage.bats \
-            freud/tests/test_summarize.bats \
-            freud/tests/test_telemetry.bats \
-            freud/tests/test_helpers.bats \
-            freud/tests/test_bbh_smoke.bats
-
-      - name: Freud Python tests
-        id: freud_python_tests
-        run: |
-          python3 -m venv freud/.venv
-          freud/.venv/bin/pip install pytest
-          PYTHONPATH=. freud/.venv/bin/pytest freud/tests/test_*_py.py freud/tests/test_common.py -v
+      - name: Freud internal Go tests
+        id: freud_go_tests
+        run: cd freud && go test ./internal/...
 
       - name: Freud deterministic PR gate
         id: freud_pr_gate
-        run: freud/scripts/feature-loop.sh ci-pr --config freud/config/ci-pr.env
+        run: ./freud/bin/freud run signoff-gate
 
       - name: Freud run summary
         if: always()
         run: |
-          if [[ ! -f .neopsyke/runs/freud/latest-run.txt ]]; then
+          if [[ ! -f .neopsyke/runs/freud/run-index.tsv ]]; then
             echo "No Freud run directory was produced."
             exit 0
           fi
-          run_dir="$(cat .neopsyke/runs/freud/latest-run.txt)"
+          run_dir="$(tail -n 1 .neopsyke/runs/freud/run-index.tsv | cut -f3)"
+          if [[ -z "$run_dir" ]]; then
+            echo "No Freud run directory was recorded in run-index.tsv."
+            exit 0
+          fi
           echo "FREUD_CI_RUN_DIR=$run_dir" >> "$GITHUB_ENV"
           echo "Freud run dir: $run_dir"
           if [[ -f "$run_dir/artifacts/summary-compact.md" ]]; then
@@ -78,17 +69,18 @@ jobs:
             cat "$run_dir/artifacts/summary.json"
           fi
           if [[ -f "$run_dir/artifacts/summary.json" ]]; then
-            first_failed_step="$(jq -r '.first_failed_step // empty' "$run_dir/artifacts/summary.json")"
+            first_failed_step="$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1], encoding="utf-8")).get("first_failed_step", "") or "")' "$run_dir/artifacts/summary.json")"
             if [[ -n "$first_failed_step" && "$first_failed_step" != "null" ]]; then
               echo "::error title=Freud step failed::$first_failed_step failed; inspect the uploaded freud artifact for the full run."
               step_log="$run_dir/logs/$(case "$first_failed_step" in \
-                preflight_compile) echo '00-preflight-compile.log' ;; \
-                targeted_tests) echo '01-targeted-tests.log' ;; \
-                full_tests) echo '02-full-tests.log' ;; \
-                scenario_pack) echo '03-scenario-pack.log' ;; \
-                reasoning_eval_logic) echo '04-reasoning-eval-logic.log' ;; \
-                reasoning_eval_model) echo '05-reasoning-eval-model.log' ;; \
-                memory_live_smoke) echo '06-memory-live-smoke.log' ;; \
+                preflight_compile) echo '00-preflight_compile.log' ;; \
+                targeted_tests) echo '01-targeted_tests.log' ;; \
+                full_tests) echo '02-full_tests.log' ;; \
+                scenario_pack) echo '03-scenario_pack.log' ;; \
+                reasoning_eval_logic) echo '04-reasoning_eval_logic.log' ;; \
+                reasoning_eval_model) echo '05-reasoning_eval_model.log' ;; \
+                memory_live_smoke) echo '06-memory_live_smoke.log' ;; \
+                test_freud_replay) echo '07-test_freud_replay.log' ;; \
                 *) echo '' ;; \
               esac)"
               if [[ -n "$step_log" && -f "$step_log" ]]; then
@@ -104,7 +96,7 @@ jobs:
         if: always() && env.FREUD_CI_RUN_DIR != ''
         uses: actions/upload-artifact@v6
         with:
-          name: freud-ci-pr-${{ github.run_id }}
+          name: freud-signoff-gate-${{ github.run_id }}
           path: ${{ env.FREUD_CI_RUN_DIR }}
           if-no-files-found: warn
           retention-days: 7
@@ -119,8 +111,7 @@ jobs:
             echo "| Step | Outcome |"
             echo "| --- | --- |"
             echo "| Freud deterministic PR gate | ${{ steps.freud_pr_gate.outcome || 'skipped' }} |"
-            echo "| Freud shell tests | ${{ steps.freud_shell_tests.outcome || 'skipped' }} |"
-            echo "| Freud Python tests | ${{ steps.freud_python_tests.outcome || 'skipped' }} |"
+            echo "| Freud internal Go tests | ${{ steps.freud_go_tests.outcome || 'skipped' }} |"
             echo
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -129,7 +120,7 @@ jobs:
               echo "## Freud Run"
               echo
               echo "- Run dir: \`${FREUD_CI_RUN_DIR}\`"
-              echo "- Uploaded artifact: \`freud-ci-pr-${{ github.run_id }}\`"
+              echo "- Uploaded artifact: \`freud-signoff-gate-${{ github.run_id }}\`"
               echo
             } >> "$GITHUB_STEP_SUMMARY"
             if [[ -f "${FREUD_CI_RUN_DIR}/artifacts/summary-compact.md" ]]; then
@@ -151,7 +142,7 @@ jobs:
             fi
           fi
 
-          for step_name in freud_pr_gate freud_shell_tests freud_python_tests; do
+          for step_name in freud_pr_gate freud_go_tests; do
             outcome="$(printenv "STEP_OUTCOME_${step_name^^}")"
             if [[ "$outcome" == "failure" ]]; then
               overall_status="fail"
@@ -166,5 +157,4 @@ jobs:
           fi
         env:
           STEP_OUTCOME_FREUD_PR_GATE: ${{ steps.freud_pr_gate.outcome || 'skipped' }}
-          STEP_OUTCOME_FREUD_SHELL_TESTS: ${{ steps.freud_shell_tests.outcome || 'skipped' }}
-          STEP_OUTCOME_FREUD_PYTHON_TESTS: ${{ steps.freud_python_tests.outcome || 'skipped' }}
+          STEP_OUTCOME_FREUD_GO_TESTS: ${{ steps.freud_go_tests.outcome || 'skipped' }}

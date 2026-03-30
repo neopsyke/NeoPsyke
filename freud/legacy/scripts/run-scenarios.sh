@@ -4,7 +4,7 @@ set -euo pipefail
 usage() {
   cat <<'EOF'
 Usage:
-  freud/scripts/run-scenarios.sh [--file <scenario_manifest>] [--dry-run]
+  freud/legacy/scripts/run-scenarios.sh [--file <scenario_manifest>] [--dry-run]
 
 Scenario formats:
   JSON (preferred): {"scenarios":[{"id":"...","selector":"...","description":"..."}]}

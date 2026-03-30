@@ -6,9 +6,9 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 usage() {
   cat <<'EOF'
-Usage: freud/scripts/run-bbh-smoke.sh [--lane <name>]
+Usage: freud/legacy/scripts/run-bbh-smoke.sh [--lane <name>]
 
-Runs the frozen BBH-style smoke manifest through freud/scripts/live-eval.sh and
+Runs the frozen BBH-style smoke manifest through freud/legacy/scripts/live-eval.sh and
 scores exact normalized answer matches.
 
 Lanes:
@@ -49,7 +49,7 @@ if ! command -v jq >/dev/null 2>&1; then
   exit 1
 fi
 
-LIVE_EVAL_CMD="${FREUD_BBH_LIVE_EVAL_CMD:-$REPO_ROOT/freud/scripts/live-eval.sh}"
+LIVE_EVAL_CMD="${FREUD_BBH_LIVE_EVAL_CMD:-$REPO_ROOT/freud/legacy/scripts/live-eval.sh}"
 PROMPTS_FILE="${FREUD_BBH_PROMPTS_FILE:-$REPO_ROOT/freud/evals/bbh-smoke/prompts.jsonl}"
 ANSWERS_FILE="${FREUD_BBH_ANSWERS_FILE:-$REPO_ROOT/freud/evals/bbh-smoke/answers.jsonl}"
 MIN_PASS_RATE_PERCENT="${FREUD_BBH_MIN_PASS_RATE_PERCENT:-100}"
