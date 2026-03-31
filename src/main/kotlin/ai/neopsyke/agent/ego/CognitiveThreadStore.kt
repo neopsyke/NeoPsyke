@@ -20,9 +20,16 @@ import ai.neopsyke.agent.support.TextSecurity
 import java.time.Instant
 
 internal class CognitiveThreadStore {
+    private sealed interface ContinuationState {
+        data class GoalActivation(
+            val work: GoalRunActivation,
+        ) : ContinuationState
+    }
+
     private data class ThreadRecord(
         val thread: CognitiveThread,
         val latestPercept: Percept? = null,
+        val continuation: ContinuationState? = null,
     )
 
     private val threadsByScope: MutableMap<InputScope, ThreadRecord> =
@@ -119,6 +126,20 @@ internal class CognitiveThreadStore {
             goalId = work.goalId,
         )
 
+    fun bindGoalWork(work: GoalRunActivation): CognitiveThread {
+        val thread = ensureForGoalWork(work)
+        update(work.rootInputId, work.conversationContext) { record ->
+            record.copy(
+                thread = record.thread.copy(
+                    status = CognitiveThreadStatus.ACTIVE,
+                    lastUpdatedAt = Instant.now(),
+                ),
+                continuation = ContinuationState.GoalActivation(work),
+            )
+        }
+        return thread
+    }
+
     fun goalOpportunity(work: GoalRunActivation): Opportunity {
         val thread = ensureForGoalWork(work)
         return opportunityFor(
@@ -153,6 +174,86 @@ internal class CognitiveThreadStore {
     ): CognitiveThreadSecurityContext =
         thread(rootInputId, conversationContext)?.securityContext
             ?: CognitiveThreadSecurityContext.fromConversation(conversationContext.security)
+
+    fun goalWork(rootInputId: String?, conversationContext: ConversationContext): GoalRunActivation? =
+        when (val continuation = record(rootInputId, conversationContext)?.continuation) {
+            is ContinuationState.GoalActivation -> continuation.work
+            null -> null
+        }
+
+    fun markWaiting(rootInputId: String?, conversationContext: ConversationContext, reason: String? = null) {
+        update(rootInputId, conversationContext) { record ->
+            record.copy(
+                thread = record.thread.copy(
+                    status = CognitiveThreadStatus.WAITING,
+                    lastUpdatedAt = Instant.now(),
+                    metadata = record.thread.metadata + listOfNotNull(
+                        reason?.takeIf { it.isNotBlank() }?.let { "thread_wait_reason" to it }
+                    ).toMap(),
+                )
+            )
+        }
+    }
+
+    fun markBlocked(rootInputId: String?, conversationContext: ConversationContext, reason: String? = null) {
+        update(rootInputId, conversationContext) { record ->
+            record.copy(
+                thread = record.thread.copy(
+                    status = CognitiveThreadStatus.BLOCKED,
+                    lastUpdatedAt = Instant.now(),
+                    metadata = record.thread.metadata + listOfNotNull(
+                        reason?.takeIf { it.isNotBlank() }?.let { "thread_block_reason" to it }
+                    ).toMap(),
+                )
+            )
+        }
+    }
+
+    fun markResolved(rootInputId: String?, conversationContext: ConversationContext) {
+        update(rootInputId, conversationContext) { record ->
+            record.copy(
+                thread = record.thread.copy(
+                    status = CognitiveThreadStatus.RESOLVED,
+                    lastUpdatedAt = Instant.now(),
+                ),
+                continuation = null,
+            )
+        }
+    }
+
+    fun markFailed(rootInputId: String?, conversationContext: ConversationContext, reason: String? = null) {
+        update(rootInputId, conversationContext) { record ->
+            record.copy(
+                thread = record.thread.copy(
+                    status = CognitiveThreadStatus.FAILED,
+                    lastUpdatedAt = Instant.now(),
+                    metadata = record.thread.metadata + listOfNotNull(
+                        reason?.takeIf { it.isNotBlank() }?.let { "thread_failure_reason" to it }
+                    ).toMap(),
+                ),
+                continuation = null,
+            )
+        }
+    }
+
+    fun retainedRootInputIds(): Set<String> =
+        threadsByScope.entries
+            .asSequence()
+            .filter { (_, record) ->
+                when (record.thread.status) {
+                    CognitiveThreadStatus.ACTIVE,
+                    CognitiveThreadStatus.WAITING,
+                    CognitiveThreadStatus.BLOCKED,
+                    -> true
+                    CognitiveThreadStatus.RESOLVED,
+                    CognitiveThreadStatus.FAILED,
+                    -> false
+                }
+            }
+            .mapNotNull { entry ->
+                entry.key.rootInputId?.takeIf { value -> value.isNotBlank() }
+            }
+            .toSet()
 
     fun observeArtifacts(
         rootInputId: String?,
@@ -223,6 +324,7 @@ internal class CognitiveThreadStore {
         threadsByScope[scope] = ThreadRecord(
             thread = thread,
             latestPercept = boundPercept ?: existing?.latestPercept,
+            continuation = existing?.continuation,
         )
         return thread
     }

@@ -9,7 +9,6 @@ import ai.neopsyke.agent.id.GoalCommitment
 import ai.neopsyke.agent.model.ActionOutcome
 import ai.neopsyke.agent.model.PendingAction
 import ai.neopsyke.agent.model.OriginSource
-import ai.neopsyke.agent.model.RootInputIds
 import ai.neopsyke.instrumentation.AgentEvents
 import ai.neopsyke.instrumentation.AgentInstrumentation
 import ai.neopsyke.instrumentation.NoopAgentInstrumentation
@@ -802,7 +801,7 @@ class GoalManager(
     }
 
     private fun buildGoalRootInputId(goalId: String, stepId: String): String =
-        "goal:$goalId:$stepId:${RootInputIds.next()}"
+        "goal:$goalId:$stepId"
 
     private fun refreshAmbientSnapshots() {
         val active = states.values

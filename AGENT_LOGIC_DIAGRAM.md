@@ -52,7 +52,7 @@ flowchart LR
     LB -.->|"event-type narrative normalization: User timeline vs agent first-person memory/reflection"| MC
     MC --> RL["Reflection Lessons (Recall + Imprint Filters)"]
     MC -.->|"temporal intent → episodic recall + vector cues"| LB
-    E --> TWS["ScratchpadStore (Ephemeral Per Request)"]
+    E --> TWS["ScratchpadStore (Thread Workspace + Intention Drafts)"]
     E --> TWF["ScratchpadFinalizer (Noop or LLM)"]
     E --> PG["GoalsGateway (optional goal runtime boundary)"]
     PG --> PM["GoalManager / Goal Runtime"]
@@ -142,13 +142,13 @@ sequenceDiagram
             Planner-->>Ego: thought/action/plan/noop
             Ego->>Sched: enqueue impulse-derived work with origin=ID
             Note over Ego,Sched: Impulse final result is deferred until all work for root_impulse_id drains
-        else Task = goal-work opportunity
+        else Task = thread continuation opportunity
             Ego->>PG: finalizeGoalCycle(rootInputId) after queues drain for that goal root
-            Note over Ego,PG: Goal runtime writes context/scratch/artifacts and may re-emit a goal runtime cue for resumable steps
+            Note over Ego,PG: Goal runtime now resumes from a stable per-step thread root and may re-emit a goal runtime cue for resumable steps
         else Task = input opportunity or thought
             Ego->>Mem: recall and short-term summary
             Note over Ego,Mem: Planner context now includes targeted reflection-lesson recall
-            Ego->>TWS: create or update request scratchpad and index summary
+            Ego->>TWS: create or update thread workspace and index summary
             Ego->>Dash: emit scratchpad_head (with optional debug snapshot)
             Note over Ego,Planner: For Id-origin thoughts, Ego reapplies Id convergence state and action filtering before planner decide internalize without escalation removes contact_user and reflect_internal so planner-visible terminal reflection stays evidence-bound
             Note over Ego,Planner: Planner-visible actions are prefiltered by conversation instruction trust, current thread data trust, and action contract metadata before prompt build
@@ -211,10 +211,10 @@ sequenceDiagram
                         end
                         alt allow
                             alt action = resolution_draft
-                                Ego->>TWS: record resolution_draft section (internal chunk)
-                                Note over Ego,TWS: Draft chunks are internal only no user-visible assistant turn
+                                Ego->>TWS: record intention-scoped draft chunk
+                                Note over Ego,TWS: Draft chunks are internal only, excluded from planner prompt summaries, and no user-visible assistant turn is emitted
                             else action = contact_user
-                                Ego->>TWS: final-pass compilation from workspace index/evidence
+                                Ego->>TWS: final-pass compilation from thread workspace + intention drafts
                                 Ego->>TWF: rewrite candidate payload (if enabled)
                                 Note over Ego,TWS: Final-pass skip requires both no evidence and insufficient drafts [less than max of 2 or activation_min_plan_steps]
                         Note over Ego,TWF: Apply workspace-confidence gate first, then model-confidence gate

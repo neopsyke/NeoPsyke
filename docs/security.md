@@ -232,6 +232,15 @@ thread's trust degrades and stays degraded for the lifetime of that root input.
 This ensures that externally tainted content cannot later be treated as trusted
 material within the same reasoning chain.
 
+Phase 5 extends that continuity model for goal-runtime work:
+
+- goal step resumptions now reuse a stable per-step root id
+- goal work is carried on thread continuations rather than a dedicated
+  goal-work queue category
+- waiting or blocked goal threads preserve their security frame across
+  suspend/resume cycles instead of rebuilding from scratch on every wake
+- terminal goal cycles resolve or fail the owning thread explicitly
+
 ### 5.4 Security Through the Cognitive Pipeline
 
 Security context flows through the full cognitive sequence, not just at the
@@ -280,6 +289,15 @@ Phase 4 now makes that split operational for normal action outcomes:
   before updating deliberation state and regenerating continuation work
 - queue-drain reset is delayed while pending feedback cues still exist, so
   scratchpad/thread state survives until feedback is actually consumed
+
+Phase 5 adds scratchpad boundary layering on top of that:
+
+- thread workspaces now preserve thread-scoped context and evidence across
+  wait/resume for active goal roots
+- intention drafts are isolated from normal planner prompt summaries and
+  session digests
+- terminal final-pass rewriting can still use recent intention drafts for the
+  same root without promoting them into durable thread context
 
 ### 5.5 Distributed Policy Enforcement
 

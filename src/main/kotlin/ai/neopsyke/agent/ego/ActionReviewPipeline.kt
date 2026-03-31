@@ -595,7 +595,8 @@ internal class ActionReviewPipeline(
         if (action.type == ActionType.RESOLUTION_DRAFT) {
             scratchpadStore.recordResolutionDraft(
                 rootInputId = action.rootInputId,
-                payload = action.payload
+                payload = action.payload,
+                intentionId = action.intentionId,
             )
             instrumentation.emit(
                 AgentEvent(
@@ -702,7 +703,8 @@ internal class ActionReviewPipeline(
         }
         scratchpadStore.recordResolutionDraft(
             rootInputId = action.rootInputId,
-            payload = action.payload
+            payload = action.payload,
+            intentionId = action.intentionId,
         )
         telemetry.emitScratchpadTelemetry(
             rootInputId = action.rootInputId,
@@ -712,7 +714,8 @@ internal class ActionReviewPipeline(
         val finalPassInput = scratchpadStore.buildFinalPassInput(
             rootInputId = action.rootInputId,
             candidateAnswer = action.payload,
-            maxChars = config.memory.scratchpad.finalCompilationMaxChars
+            maxChars = config.memory.scratchpad.finalCompilationMaxChars,
+            intentionId = action.intentionId,
         ) ?: return action
         val draftThreshold = maxOf(2, config.memory.scratchpad.activationMinPlanSteps)
         if (finalPassInput.evidenceCount == 0 && finalPassInput.resolutionDraftCount < draftThreshold) {

@@ -112,6 +112,13 @@ data class QueueState(
     val intentions: List<QueuedIntention> = emptyList(),
 )
 
+data class ThreadContinuation(
+    val rootInputId: String,
+    val conversationContext: ConversationContext,
+    val reason: String,
+    val receivedAtMs: Long? = null,
+)
+
 sealed interface OpportunityTrigger {
     val rootInputId: String
     val conversationContext: ConversationContext
@@ -129,10 +136,10 @@ sealed interface OpportunityTrigger {
         override val receivedAtMs: Long = impulse.receivedAtMs
     }
 
-    data class GoalWork(val workUnit: ai.neopsyke.agent.goal.GoalRunActivation) : OpportunityTrigger {
-        override val rootInputId: String = workUnit.rootInputId
-        override val conversationContext: ConversationContext = workUnit.conversationContext
-        override val receivedAtMs: Long? = null
+    data class ThreadWork(val continuation: ThreadContinuation) : OpportunityTrigger {
+        override val rootInputId: String = continuation.rootInputId
+        override val conversationContext: ConversationContext = continuation.conversationContext
+        override val receivedAtMs: Long? = continuation.receivedAtMs
     }
 }
 

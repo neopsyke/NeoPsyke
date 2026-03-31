@@ -316,27 +316,35 @@ internal class DeliberationEngine(
 
     // --- Reset ---
 
-    fun clearForInput(rootInputId: String?, sessionId: String) {
+    fun clearForInput(rootInputId: String?, sessionId: String, retainThreadContinuity: Boolean = false) {
         val scope = inputScope(rootInputId, sessionId) ?: return
         forcedTerminalAnswerQueuedByInput.remove(scope)
-        externalEvidence.remove(scope)
-        actionCooldownByScope.remove(scope)
-        cognitiveThreads.clearForInput(rootInputId, sessionId)
-        evidenceArtifactStore.clear(
-            rootInputId,
-            ConversationContext(
-                sessionId = sessionId,
-                interlocutor = ai.neopsyke.agent.model.Interlocutor.UNKNOWN,
+        if (!retainThreadContinuity) {
+            externalEvidence.remove(scope)
+            actionCooldownByScope.remove(scope)
+            cognitiveThreads.clearForInput(rootInputId, sessionId)
+            evidenceArtifactStore.clear(
+                rootInputId,
+                ConversationContext(
+                    sessionId = sessionId,
+                    interlocutor = ai.neopsyke.agent.model.Interlocutor.UNKNOWN,
+                )
             )
-        )
+        }
     }
 
     fun reset() {
+        reset(retainThreadContinuity = false)
+    }
+
+    fun reset(retainThreadContinuity: Boolean) {
         sessionStates.clear()
         forcedTerminalAnswerQueuedByInput.clear()
         externalEvidence.clear()
         actionCooldownByScope.clear()
-        cognitiveThreads.reset()
+        if (!retainThreadContinuity) {
+            cognitiveThreads.reset()
+        }
     }
 
     // --- Private helpers ---

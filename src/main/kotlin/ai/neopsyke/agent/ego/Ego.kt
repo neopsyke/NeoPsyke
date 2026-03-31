@@ -178,10 +178,19 @@ class Ego(
                                 kind = CognitiveThreadKind.GOAL_DIRECTED,
                                 title = work.stepDescription,
                             )
+                            cognitiveThreads.bindGoalWork(work)
+                            maybeCreateGoalScratchpad(work)
                             val opportunity = cognitiveThreads.goalOpportunity(work)
-                            scheduler.enqueueProjectWork(work, opportunity)
+                            scheduler.enqueueThreadContinuation(
+                                continuation = ThreadContinuation(
+                                    rootInputId = work.rootInputId,
+                                    conversationContext = work.conversationContext,
+                                    reason = goalCue.reason,
+                                ),
+                                opportunity = opportunity,
+                            )
                             runLoop()
-                            cleanupAfterProjectAdvance(work.rootInputId)
+                            cleanupAfterProjectAdvance(work.rootInputId, work.conversationContext)
                         }
                         continue
                     }
@@ -406,16 +415,19 @@ class Ego(
 
         if (!scheduler.hasPendingWork() && !sensoryCortex.hasPendingSyntheticSignals()) {
             impulseTracker.finalizeAllIdle()
-            deliberation.reset()
+            val retainedRootInputs = cognitiveThreads.retainedRootInputIds()
+            deliberation.reset(retainThreadContinuity = retainedRootInputs.isNotEmpty())
             memory.resetForNewInput()
             dispatcher.resetForNewInput()
-            val clearedScratchpads = scratchpadStore.clearActiveWorkspaces()
-            if (clearedScratchpads > 0) {
+            val clearedThreadScratchpads = scratchpadStore.clearOrphanedThreadWorkspaces(retainedRootInputs)
+            val clearedDrafts = scratchpadStore.clearIntentionDrafts()
+            if (clearedThreadScratchpads > 0 || clearedDrafts > 0) {
                 instrumentation.emit(
                     AgentEvent(
                         type = "scratchpad_cleared",
                         data = mapOf(
-                            "cleared_count" to clearedScratchpads,
+                            "cleared_count" to clearedThreadScratchpads,
+                            "cleared_drafts" to clearedDrafts,
                             "reason" to "queues_drained"
                         )
                     )
@@ -494,7 +506,7 @@ class Ego(
         when (val trigger = opportunity.trigger) {
             is OpportunityTrigger.Input -> processInput(trigger.input, opportunity.opportunity)
             is OpportunityTrigger.Impulse -> processImpulse(trigger.impulse, opportunity.opportunity)
-            is OpportunityTrigger.GoalWork -> processGoalWork(trigger.workUnit, opportunity.opportunity)
+            is OpportunityTrigger.ThreadWork -> processThreadContinuation(trigger.continuation, opportunity.opportunity)
         }
     }
 
@@ -720,12 +732,17 @@ class Ego(
         actionPipeline.reviewAndExecute(action)
     }
 
-    private suspend fun processGoalWork(work: GoalRunActivation, opportunity: Opportunity? = null) {
+    private suspend fun processThreadContinuation(
+        continuation: ThreadContinuation,
+        opportunity: Opportunity? = null,
+    ) {
+        val work = cognitiveThreads.goalWork(continuation.rootInputId, continuation.conversationContext)
+            ?: return
         val timing = PhaseTimingCollector("goal_work", "goal:${work.goalId}")
         val convCtx = work.conversationContext
         val sessionId = resolveSessionId(convCtx)
         activateSession(convCtx)
-        cognitiveThreads.ensureForGoalWork(work)
+        cognitiveThreads.bindGoalWork(work)
 
         timing.startPhase("goal_work_processing")
         instrumentation.emit(
@@ -794,6 +811,28 @@ class Ego(
             rootInputId = input.rootInputId,
             rootInputReceivedAtMs = input.receivedAtMs,
             updateType = "scratchpad_created"
+        )
+    }
+
+    private fun maybeCreateGoalScratchpad(work: GoalRunActivation) {
+        val created = scratchpadStore.ensureForGoalWork(work)
+        if (!created) return
+        instrumentation.emit(
+            AgentEvent(
+                type = "scratchpad_created",
+                data = mapOf(
+                    "root_input_id" to work.rootInputId,
+                    "root_input_received_at_ms" to System.currentTimeMillis(),
+                    "goal_preview" to TextSecurity.preview(work.stepDescription, 140),
+                    "active_tasks" to scratchpadStore.activeTaskCount(),
+                    "source" to "goal_runtime",
+                )
+            )
+        )
+        telemetry.emitScratchpadTelemetry(
+            rootInputId = work.rootInputId,
+            rootInputReceivedAtMs = System.currentTimeMillis(),
+            updateType = "goal_scratchpad_created"
         )
     }
 
@@ -1178,17 +1217,71 @@ class Ego(
         telemetry.emitQueueSnapshot("input_resolution_cleanup")
     }
 
-    private fun cleanupAfterProjectAdvance(rootInputId: String) {
-        val sessionId = ConversationContext.DEFAULT_SESSION_ID
+    private fun cleanupAfterProjectAdvance(rootInputId: String, conversationContext: ConversationContext) {
+        val sessionId = resolveSessionId(conversationContext)
+        val thread = cognitiveThreads.thread(rootInputId, conversationContext)
+        val goalId = thread?.goalId
+        val stepId = thread?.metadata?.get("goal_step_id")
         planner.resetForInput(rootInputId)
-        deliberation.clearForInput(rootInputId, sessionId)
-        dispatcher.clearExternalActionSignatures(InputScope(rootInputId, sessionId))
         goalsGateway.finalizeGoalCycle(rootInputId)
+        val goalState = goalId?.let { goalsGateway.goalStatus(it) }
+        val stepStatus = stepId?.let { id -> goalState?.goal?.plan?.steps?.firstOrNull { it.id == id }?.status }
+        val retainContinuity = when {
+            goalState == null -> false
+            goalState.goal.status == ai.neopsyke.agent.goal.GoalStatus.COMPLETED -> false
+            goalState.goal.status == ai.neopsyke.agent.goal.GoalStatus.FAILED -> false
+            stepStatus == ai.neopsyke.agent.goal.StepStatus.DONE -> false
+            stepStatus == ai.neopsyke.agent.goal.StepStatus.FAILED -> false
+            else -> true
+        }
+        if (retainContinuity) {
+            when {
+                stepStatus == ai.neopsyke.agent.goal.StepStatus.BLOCKED ||
+                    goalState?.goal?.status == ai.neopsyke.agent.goal.GoalStatus.BLOCKED ->
+                    cognitiveThreads.markBlocked(rootInputId, conversationContext, reason = "goal_blocked")
+                goalState?.goal?.status == ai.neopsyke.agent.goal.GoalStatus.SUSPENDED ->
+                    cognitiveThreads.markWaiting(rootInputId, conversationContext, reason = "goal_suspended")
+                else ->
+                    cognitiveThreads.markWaiting(rootInputId, conversationContext, reason = "goal_waiting_resume")
+            }
+            deliberation.clearForInput(rootInputId, sessionId, retainThreadContinuity = true)
+        } else {
+            if (goalState?.goal?.status == ai.neopsyke.agent.goal.GoalStatus.FAILED || stepStatus == ai.neopsyke.agent.goal.StepStatus.FAILED) {
+                cognitiveThreads.markFailed(rootInputId, conversationContext, reason = "goal_failed")
+            } else {
+                cognitiveThreads.markResolved(rootInputId, conversationContext)
+            }
+            deliberation.clearForInput(rootInputId, sessionId)
+            telemetry.emitScratchpadTelemetry(
+                rootInputId = rootInputId,
+                rootInputReceivedAtMs = System.currentTimeMillis(),
+                updateType = "before_destroy_goal_cycle"
+            )
+            val destroyedScratchpad = scratchpadStore.destroy(rootInputId)
+            if (destroyedScratchpad != null) {
+                instrumentation.emit(
+                    AgentEvent(
+                        type = "scratchpad_destroyed",
+                        data = mapOf(
+                            "root_input_id" to destroyedScratchpad.rootInputId,
+                            "root_input_received_at_ms" to destroyedScratchpad.rootInputReceivedAtMs,
+                            "section_count" to destroyedScratchpad.sectionCount,
+                            "evidence_count" to destroyedScratchpad.evidenceCount,
+                            "reason" to "goal_cycle_terminal"
+                        )
+                    )
+                )
+            }
+        }
+        dispatcher.clearExternalActionSignatures(InputScope(rootInputId, sessionId))
         instrumentation.emit(
             AgentEvent(
                 type = "goal_advance_cleanup",
                 data = mapOf(
                     "goal_root_id" to rootInputId,
+                    "retain_thread_continuity" to retainContinuity,
+                    "goal_status" to goalState?.goal?.status?.name?.lowercase(),
+                    "step_status" to stepStatus?.name?.lowercase(),
                 )
             )
         )
@@ -1199,7 +1292,7 @@ class Ego(
             is LoopTask.AttendOpportunity -> when (task.item.trigger) {
                 is OpportunityTrigger.Input -> "input"
                 is OpportunityTrigger.Impulse -> "impulse"
-                is OpportunityTrigger.GoalWork -> "goal_work"
+                is OpportunityTrigger.ThreadWork -> "thread_work"
             }
             is LoopTask.ProcessIntention -> "intention"
             is LoopTask.ProcessThought -> "thought"

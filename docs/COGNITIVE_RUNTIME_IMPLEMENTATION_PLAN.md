@@ -351,25 +351,49 @@ Open issues:
 ### Phase 5
 
 Status:
-- Not started
+- Completed
 
 Deterministic runs:
-- pending
+- `./gradlew --no-daemon compileKotlin compileTestKotlin`
+  - result: pass
+- `./gradlew --no-daemon test --tests 'ai.neopsyke.agent.ScratchpadStoreTest' --tests 'ai.neopsyke.agent.ego.CognitiveThreadStoreTest' --tests 'ai.neopsyke.agent.EgoProjectIntegrationTest' --tests 'ai.neopsyke.agent.goal.GoalManagerTest'`
+  - result: pass
+- `./freud/bin/freud run cognitive-runtime-p5-goals-scratchpad`
+  - result: pass
+  - run dir: `/Users/victor.toral/atomitl/ai/NeoPsyke/.neopsyke/runs/freud/20260331T041015Z-cognitive-runtime-p5-goals-scratchpad-1881091293`
 
 Recorded curated eval suites:
-- pending
+- `./freud/bin/freud eval --live --record --lane low-llm --input freud/evals/cognitive-runtime/phase-5-goal-runtime.txt --timeout 120`
+  - result: pass
+  - run dir: `/Users/victor.toral/atomitl/ai/NeoPsyke/.neopsyke/runs/freud/20260331T041107Z-live-eval-2367210087`
 
 Recorded BBH suites:
-- pending
+- `./freud/bin/freud bbh --live --lane low-llm --record`
+  - result: pass
+  - run dir: `/Users/victor.toral/atomitl/ai/NeoPsyke/.neopsyke/runs/freud/20260331T041122Z-bbh-low-llm-1810214536`
+  - pass rate: 24/24 (100.0%)
 
 Replay-debug sessions:
-- pending
+- none required; local regressions were fixed before the deterministic Freud gate and both recorded live validations passed without replay iteration
 
 Acceptance items closed:
-- pending
+- goal-runtime resumptions now enqueue generic thread continuations instead of a dedicated goal-work scheduler category
+- stable goal-step root ids (`goal:<goalId>:<stepId>`) now preserve thread continuity across wait/resume cycles
+- `CognitiveThreadStore` now retains goal activation continuation state and exposes explicit waiting/blocked/resolved/failed transitions for retained goal roots
+- queue-drain reset now preserves retained thread workspaces while clearing only orphaned thread scratchpads and ephemeral intention drafts
+- `ScratchpadStore` now separates thread-scoped workspace state from intention-scoped drafts
+- intention drafts are excluded from normal planner prompt summaries and session digests but remain available to terminal final-pass rewriting for the same root
+- goal-runtime cue handling now creates/resumes thread-scoped scratchpads for goal work with preserved working context
+- deterministic coverage now includes:
+  - stable goal-step root ids
+  - goal continuation retention across opportunity generation
+  - scratchpad layering between thread summaries and intention drafts
+  - goal-work thread workspace initialization
+- living runtime docs updated: `AGENT_LOGIC_SUMMARY.md`, `AGENT_LOGIC_DIAGRAM.md`, `docs/security.md`
 
 Open issues:
-- pending
+- full layered policy shaping remains for Phase 6
+- legacy deferred-thought helpers and remaining legacy queue-centric orchestration cleanup remain for Phase 7
 
 ### Phase 6
 

@@ -38,7 +38,7 @@ It is intentionally high-level and should stay aligned with the code.
   - `LlmLongTermMemoryAdvisor`
   - `Hippocampus` (cognitive long-term memory facade: `recall`, typed `imprint`, `health`, future `consolidate`)
     - operational/destructive controls are split behind `HippocampusAdmin`
-  - `ScratchpadStore` (ephemeral per-request notebook/workspace)
+  - `ScratchpadStore` (thread-scoped workspace + intention-scoped draft buffer)
   - `ScratchpadFinalizer` (noop or `LlmScratchpadFinalizer`)
   - `Id` (autonomous internal drive module; optional, loaded from `id-runtime.yaml`)
   - `GoalsGateway` (optional goal runtime boundary; also serves ambient active-goal queries)
@@ -97,8 +97,8 @@ It is intentionally high-level and should stay aligned with the code.
   - cue stimuli from goal-runtime work-ready cues
   - every accepted `StimulusReceived` now also carries an appraised `Percept`
   - Runs `runLoop()` while there is pending work.
-  - Appraises goal-runtime cue stimuli through `GoalsGateway.nextWorkFromCue(...)`, enqueueing goal work when runnable work exists.
-  - Binds accepted inputs, impulse cues, and goal work roots into `CognitiveThreadStore` before scheduler/planner work continues.
+  - Appraises goal-runtime cue stimuli through `GoalsGateway.nextWorkFromCue(...)`, binding resumable goal work onto a stable goal thread root before scheduler/planner work continues.
+  - Binds accepted inputs, impulse cues, and goal-runtime continuations into `CognitiveThreadStore` before scheduler/planner work continues.
   - Interactive wiring uses `AsyncSignalSource` with stdin enabled in control-only mode:
     - terminal `exit` emits `ExitRequested(source="stdin")` and stops the loop
     - non-command stdin text is ignored as chat input and never enqueued to the scheduler
@@ -121,7 +121,7 @@ It is intentionally high-level and should stay aligned with the code.
       - `processOpportunity`:
         - `OpportunityTrigger.Input` -> `processInput`
         - `OpportunityTrigger.Impulse` -> `processImpulse`
-        - `OpportunityTrigger.GoalWork` -> `processGoalWork` (goal-runtime execution path; method name still reflects current internal state-machine lineage)
+        - `OpportunityTrigger.ThreadWork` -> `processThreadContinuation` (goal-runtime resumptions now enter as thread continuations instead of a dedicated goal-work queue branch)
       - `processIntention`
       - `processThought`
       - `processAction`
@@ -136,7 +136,7 @@ It is intentionally high-level and should stay aligned with the code.
     - Finalize any idle Id impulse lifecycles (accepted or denied).
     - Reset deliberation state.
     - Reset per-input `MemorySystem` state.
-    - Clear active scratchpads and pending scratchpad gates, while preserving per-session scratchpad digests.
+    - Clear orphaned thread scratchpads plus all intention drafts, while preserving retained waiting/blocked thread workspaces and per-session scratchpad digests.
 
 ## Id Module and Impulse Lifecycle
 - Files:
@@ -226,10 +226,10 @@ It is intentionally high-level and should stay aligned with the code.
   - latest bound percept
   - root-scoped security/trust state
   - observed-artifact trust degradation
-- Phase 2 scheduling now uses real `Opportunity` objects generated from thread-bound triggers:
+- Phase 2/5 scheduling now uses real `Opportunity` objects generated from thread-bound triggers:
   - input roots generate `RESPOND` or `INTEGRATE_FEEDBACK` opportunities
   - Id roots generate `EXECUTE` opportunities
-  - goal-runtime roots generate `RESUME` opportunities
+  - goal-runtime roots generate `RESUME` opportunities from stable per-step thread roots
   - the queued scheduler item is now `ScheduledOpportunity(opportunity + trigger)`, not a source-category-only wrapper
 - `PendingInput` carries:
   - `source` metadata (for example `chat:<sessionId>`) so runtime telemetry can map root requests to conversation sessions.
@@ -298,10 +298,10 @@ It is intentionally high-level and should stay aligned with the code.
 
 ## Action Path
 - `processAction`:
-- For `resolution_draft` actions, records an internal draft section in the scratchpad and does not emit a user-visible assistant turn.
+- For `resolution_draft` actions, records an intention-scoped draft entry and does not emit a user-visible assistant turn.
 - For terminal `contact_user` actions, runs scratchpad final-pass processing before action execution:
-    - records candidate answer draft into the scratchpad
-    - builds final compilation from scratchpad sections/evidence
+    - records candidate answer draft into the intention draft buffer
+    - builds final compilation from thread workspace sections/evidence plus recent intention drafts for that root
     - skips final-pass only when both `evidenceCount == 0` and `answerDraftCount < max(2, activationMinPlanSteps)`
     - applies scratchpad-confidence gate (`finalPassMinWorkspaceConfidence`)
     - runs `ScratchpadFinalizer` rewrite when enabled
@@ -356,7 +356,7 @@ It is intentionally high-level and should stay aligned with the code.
 - For `contact_user`, response latency is emitted and per-input evidence cache is cleared.
 - After `contact_user`, pending intentions/thoughts/actions for the same `(root input, sessionId)` scope are pruned from queues
     (`input_resolution_cleanup`) so stale plan/follow-up work cannot continue cycling or leak across sessions.
-- After `contact_user`, the scratchpad digest is captured into the session digest ring before scratchpad destruction.
+- After `contact_user`, the thread scratchpad digest is captured into the session digest ring before scratchpad destruction.
 - After `contact_user`, the scratchpad for that root input is destroyed (`scratchpad_destroyed`).
 
 ## Planner Logic
@@ -418,6 +418,7 @@ It is intentionally high-level and should stay aligned with the code.
 - Ego-facing signal contract:
   - The runtime emits only `GoalRuntimeCue(goalId, stepId, reason)` into the cognitive stimulus plane.
   - Goal work activations reconstruct a trusted internal automation `ConversationContext`; goal-origin actions must not fall back to the default external conversation security context.
+  - Goal step roots are now stable per goal-step (`goal:<goalId>:<stepId>`) so thread continuity and scratchpad continuity survive wait/resume cycles.
   - Timer wakes, wait-condition satisfaction, new-goal planning, and resume reconciliation stay inside the goal subsystem and are translated into a work-ready cue when runnable work exists.
   - Async wait resolution is carried back as wake metadata plus step notes so resumed goal work can react to the completion state.
   - Decision types:
@@ -602,6 +603,9 @@ It is intentionally high-level and should stay aligned with the code.
   - File: `src/main/kotlin/ai/neopsyke/agent/memory/scratchpad/ScratchpadStore.kt`
   - Enabled by default via `MemoryConfig.scratchpad.enabled=true`.
   - Activation remains plan-gated with `MemoryConfig.scratchpad.activationMinPlanSteps=2`.
+  - Ownership is now layered:
+    - thread-scoped workspace sections/evidence persist for the active cognitive thread and survive wait/resume
+    - intention-scoped drafts are ephemeral, excluded from planner prompt summaries and digests, and cleared when queues drain
   - Scoped to root input; independent from short-term and long-term memory pipelines.
   - Stores compact sections/evidence for the active request only.
   - Evidence entries preserve trust/source labels from external artifacts instead of flattening them to anonymous strings at ingestion time.

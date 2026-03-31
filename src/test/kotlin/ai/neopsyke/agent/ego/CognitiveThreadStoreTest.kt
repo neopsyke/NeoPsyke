@@ -4,6 +4,7 @@ import ai.neopsyke.agent.goal.GoalRunActivation
 import ai.neopsyke.agent.model.ConversationContext
 import ai.neopsyke.agent.model.ConversationSecurityContexts
 import ai.neopsyke.agent.model.CognitiveThreadKind
+import ai.neopsyke.agent.model.CognitiveThreadStatus
 import ai.neopsyke.agent.model.DataTrust
 import ai.neopsyke.agent.model.ExternalContentArtifact
 import ai.neopsyke.agent.model.Interlocutor
@@ -125,5 +126,39 @@ class CognitiveThreadStoreTest {
         assertEquals(CognitiveThreadKind.DRIVE, impulseThread.kind)
         assertEquals(CognitiveThreadKind.GOAL_DIRECTED, goalThread.kind)
         assertNotNull(store.thread("goal-root-1", automationContext))
+    }
+
+    @Test
+    fun `goal continuation survives opportunity generation and thread status transitions`() {
+        val store = CognitiveThreadStore()
+        val automationContext = ConversationContext(
+            sessionId = "goal-session",
+            interlocutor = Interlocutor.named("goal-runtime"),
+            security = ConversationSecurityContexts.internalAutomation(
+                provider = "goal-runtime",
+                channelId = "goal-session",
+            ),
+        )
+        val work = GoalRunActivation(
+            goalId = "goal-1",
+            stepId = "step-1",
+            rootInputId = "goal:goal-1:step-1",
+            stepDescription = "Verify latest pricing",
+            acceptanceCriteria = "Provide verified pricing",
+            workingContext = "pricing",
+            conversationContext = automationContext,
+            wakeReason = "timer",
+        )
+
+        store.bindGoalWork(work)
+        store.goalOpportunity(work)
+        store.markWaiting(work.rootInputId, automationContext, reason = "await_timer")
+        val waiting = store.thread(work.rootInputId, automationContext)
+        val continuation = store.goalWork(work.rootInputId, automationContext)
+        store.markResolved(work.rootInputId, automationContext)
+
+        assertEquals(work, continuation)
+        assertEquals(CognitiveThreadStatus.WAITING, waiting?.status)
+        assertEquals(CognitiveThreadStatus.RESOLVED, store.thread(work.rootInputId, automationContext)?.status)
     }
 }
