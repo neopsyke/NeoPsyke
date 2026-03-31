@@ -144,13 +144,13 @@ The Ego runs in a bounded loop (configurable, default 180 steps per input) to pr
 
 **Autonomous motivation.** The Id maintains internal drives that accumulate pressure over time. When a drive crosses a threshold and the Ego is idle, the system can initiate proactive behavior. The agent is driven by generic internal prompts rather than narrowly predefined tasks, so it has to decide what deserves attention and what kind of work to pursue. Governance and action outcomes feed back into motivation: successful actions can discharge pressure, while denied or failed paths do not.
 
-**Durable goals.** Goals are first-class persistent objects with lifecycle management (`CREATED`, `PLANNING`, `ACTIVE`, `BLOCKED`, `SUSPENDED`, `COMPLETED`, `FAILED`). They can be triggered by schedules, events, polling, manual activation, or async resume. This is where NeoPsyke places explicit scheduled work: tasks that genuinely need reliability, timing, or frequency. Each goal can carry an execution plan with steps and acceptance criteria, or act as a standing monitor or recurring synthesis task. Goals also track novelty to avoid re-alerting on already-seen information.
+**Durable goals.** Goals are first-class persistent objects with lifecycle management (`CREATED`, `PLANNING`, `ACTIVE`, `BLOCKED`, `SUSPENDED`, `COMPLETED`, `FAILED`). They can be triggered by schedules, events, polling, manual activation, or async resume. This is where NeoPsyke places explicit scheduled work: tasks that genuinely need reliability, timing, or frequency. Each goal can carry an execution plan with steps and acceptance criteria, or act as a standing monitor or recurring synthesis task. Goals also track novelty to avoid re-alerting on already-seen information. Goals, however, remain unstable and require further debugging and testing. This is a current priority.
 
 **Three-tier memory.** Short-term memory maintains rolling context per conversation with automatic compaction. Episodic memory records narrative events in a SQLite FTS5 store with configurable retention. Long-term memory uses pgvector for semantic recall and imprint, guided by an LLM-based advisor that periodically assesses what is worth consolidating.
 
 **Web search and browsing.** Configurable web search (Groq, Mistral, or Google providers) and website content fetching, with prompt-injection defense applied to all external content before it reaches the planner.
 
-**Human-in-the-loop action control.** High-impact actions can be staged, reviewed, authorized, denied, and recorded through the dashboard instead of being executed immediately.
+**Human-in-the-loop action control.** High-impact actions can be staged, reviewed, authorized, denied, and recorded through the dashboard instead of being executed immediately. Better UX around this feature is still in progress.
 
 **External integrations.** Telegram bot support, Google Workspace read/observe integrations for Gmail and Calendar via OAuth with PKCE, and staged email sending through Microsoft Graph.
 
@@ -247,13 +247,14 @@ Some omissions are deliberate architectural decisions rather than missing checkl
 
 - LLM quality directly affects planning and reasoning quality. The architecture mitigates but cannot eliminate model errors.
 - Long-running goal execution depends on external service availability and correct action contracts. 
-- The goal subsystem works in basic scenarios but remains unstable and needs much broader testing. Work in progress.
+- The goal subsystem works in basic scenarios but remains unstable and needs much broader testing. This is a work in progress and a priority at the moment.
 - The memory advisor's consolidation decisions are LLM-dependent and not yet formally evaluated.
-- The Id's drive model is simple by design (configurable state machine, not learned behavior). This mirrors the structural role of drives in the original model -- complexity is expected to emerge from the interaction between modules, not from the drive source itself.
+- The Id's drive model is simple by design (configurable state machine, not learned behavior). This mirrors the structural role of drives in the original model -- complexity is expected to emerge from the interaction between modules, not from the drive source itself. However, different strategies can be still explored for need growth, urgency resolution by the Ego, interaction with the Ego, etc.
 - The dashboard is basic and suitable only for local monitoring and debugging. It's not yet a production-ready multi-user tool.
 - Prompt injection defense is heuristic, not a full sandbox, and plugins currently run in-process as trusted code.
 - Much testing and tuning is still required in the agent all-around.
 - The evals are still minimal and could use much improvement and expansion.
+- The implemented actions and tools are still not enough for the agent to be broadly useful. More will be added once the main reasoning loop and the goals are more stable.
 
 ## Testing and evaluation
 
