@@ -876,7 +876,11 @@ class AgentScenarioPackTest {
         output: (String) -> Unit,
         webSearchEngine: WebSearchEngine = object : WebSearchEngine {
             override fun search(query: String, maxResults: Int): WebSearchResult =
-                WebSearchResult(summary = "unused", snippets = emptyList(), sources = emptyList())
+                WebSearchResult(
+                    summary = "default result",
+                    snippets = listOf("default snippet"),
+                    sources = listOf(WebSearchSource(title = "Default", url = "https://example.com/default"))
+                )
         },
         config: AgentConfig = AgentConfig(),
         goalsGateway: GoalsGateway = NoopGoalsGateway,

@@ -187,6 +187,7 @@ Implemented examples in
 - stdin chat input is treated as an owner direct trusted instruction source
 - `id` cue signals are treated as trusted internal automation
 - `goal-runtime` cues are treated as trusted internal automation
+- `action-feedback` cues are treated as trusted internal automation bound to the originating root input
 
 `SensoryCortex.nextSignal()` is now the mandatory normalization boundary for
 cognitive signals:
@@ -194,6 +195,8 @@ cognitive signals:
 - runtime control signals bypass cognition unchanged
 - accepted cognitive stimuli are sanitized, session/interlocutor normalized, and
   appraised into a `Percept`
+- non-user action outcomes now re-enter through the same stimulus/percept path
+  instead of mutating deliberation follow-up state directly inside the executor
 - Ego no longer processes accepted cognitive stimuli without a percept
 
 The percept appraiser preserves provenance from the stimulus into the percept.
@@ -267,6 +270,16 @@ At each stage:
 - **Prepared/staged/committed action**: the action lifecycle enforces
   deterministic policy, Superego judgment, durable authorization, and final
   motor guard.
+
+Phase 4 now makes that split operational for normal action outcomes:
+
+- `ActionReviewPipeline` no longer queues follow-up continuation work directly
+  after execution
+- non-`contact_user` outcomes emit a typed `ActionFeedbackCue`
+- Ego integrates that cue through `Stimulus -> Percept -> CognitiveThread`
+  before updating deliberation state and regenerating continuation work
+- queue-drain reset is delayed while pending feedback cues still exist, so
+  scratchpad/thread state survives until feedback is actually consumed
 
 ### 5.5 Distributed Policy Enforcement
 

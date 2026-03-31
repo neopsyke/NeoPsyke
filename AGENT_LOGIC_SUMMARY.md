@@ -132,6 +132,7 @@ It is intentionally high-level and should stay aligned with the code.
     - Try to execute one fallback explanation action.
     - Any active Id impulse lifecycles are force-denied to avoid stale pending Id state.
   - If queues drain:
+    - Do not reset per-root state while `SensoryCortex` still has synthetic feedback cues waiting to re-enter cognition.
     - Finalize any idle Id impulse lifecycles (accepted or denied).
     - Reset deliberation state.
     - Reset per-input `MemorySystem` state.
@@ -213,6 +214,7 @@ It is intentionally high-level and should stay aligned with the code.
 - `SensoryCortex.nextSignal()` is now the mandatory `Stimulus -> Percept` boundary for cognitive work:
   - runtime control signals pass through unchanged
   - accepted cognitive stimuli are sanitized, conversation-normalized, and appraised into a `Percept` before Ego sees them
+  - internally generated action feedback also re-enters through this same boundary rather than mutating deliberation state directly in the executor
 - `PerceptualAppraiser` currently maps stimulus families into percept families:
   - `LINGUISTIC` -> `REQUEST`
   - `OBSERVATION` -> `OBSERVATION`
@@ -236,8 +238,9 @@ It is intentionally high-level and should stay aligned with the code.
   - bound `percept` for the request root
   - `cognitiveThreadId` for the owning live thread
 - `processInput`:
-  - Appends user turn to dialogue deque.
-  - Stores turn in short-term `MemoryStore`.
+  - Appends user turn to dialogue deque for request percepts.
+  - Stores request-turn content in short-term `MemoryStore`.
+  - Feedback percepts intentionally skip user-turn insertion and `Id.onActivity("input_received")`.
   - Creates/refreshes a task-scoped ephemeral scratchpad keyed by `rootInputId`; scratchpad telemetry also carries `root_input_received_at_ms` for latency/timing views.
   - Builds `PlannerContext`:
     - recent dialogue
@@ -291,6 +294,7 @@ It is intentionally high-level and should stay aligned with the code.
     - `STAGE`
     - `REQUEST_AUTHORIZATION`
     - `COMMIT`
+  - Action follow-up continuations are now regenerated as `DEFER` intentions only after the action outcome has re-entered through `SensoryCortex` as feedback.
 
 ## Action Path
 - `processAction`:
@@ -335,14 +339,19 @@ It is intentionally high-level and should stay aligned with the code.
       - Synchronous tools keep the existing immediate-completion path.
       - Async start actions do not enqueue ordinary follow-up thoughts on the start call.
       - For goal-origin actions, `WAITING` without async handles is treated as a contract violation and translated into a retry path instead of a fake generic wait.
-    - Record outcome + deliberation evidence.
+    - Record thread-artifact trust degradation at execution time.
+    - Emit an internal `ActionFeedbackCue` for non-`contact_user` outcomes.
+    - `Ego.processActionFeedback(...)` then:
+      - binds the feedback percept to the existing cognitive thread
+      - updates deliberation evidence/progress/cooldown state
+      - regenerates any required deferred continuation from the feedback cue instead of directly from the executor
     - Notify `ActionLifecycleObserver` subscribers after execution so goal-origin actions can update step acceptance/block/retry state.
     - Record non-`contact_user`/non-`resolution_draft` action outcomes into the scratchpad (when enabled).
       - external observe outputs are captured as typed result artifacts first
       - scratchpad evidence now retains trust/source labels instead of flattening everything to anonymous strings immediately
     - Store assistant output in dialogue and short-term memory when applicable.
     - For `contact_user`, optionally force a post-terminal-answer long-term memory assessment.
-    - Follow-up thought behavior is action-descriptor-driven (`requiresFollowUpThought` + `followUpPrefix`).
+    - Follow-up continuation behavior is still action-descriptor-driven (`requiresFollowUpThought` + `followUpPrefix`), but it is now regenerated from feedback re-entry rather than direct post-execute queue mutation.
     - Optionally run immediate post-allowed-action long-term memory assessment.
 - For `contact_user`, response latency is emitted and per-input evidence cache is cleared.
 - After `contact_user`, pending intentions/thoughts/actions for the same `(root input, sessionId)` scope are pruned from queues

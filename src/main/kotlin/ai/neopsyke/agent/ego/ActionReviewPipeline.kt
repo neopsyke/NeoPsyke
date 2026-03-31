@@ -4,6 +4,7 @@ import mu.KotlinLogging
 import ai.neopsyke.agent.cortex.motor.actions.control.ActionControlDecisionResult
 import ai.neopsyke.agent.cortex.motor.actions.control.ActionControlService
 import ai.neopsyke.agent.cortex.motor.actions.control.LegacyCompatibleActionControlService
+import ai.neopsyke.agent.cortex.sensory.ActionFeedbackCue
 import ai.neopsyke.agent.config.*
 import ai.neopsyke.agent.id.evaluateSatisfaction
 import ai.neopsyke.agent.model.*
@@ -11,7 +12,6 @@ import ai.neopsyke.agent.cortex.motor.MotorCortex
 import ai.neopsyke.agent.cortex.motor.actions.ActionCapability
 import ai.neopsyke.agent.memory.longterm.MemoryEventType
 import ai.neopsyke.agent.memory.scratchpad.ScratchpadStore
-import ai.neopsyke.agent.support.PromptInjectionDefense
 import ai.neopsyke.agent.support.TextSecurity
 import ai.neopsyke.agent.superego.Superego
 import ai.neopsyke.instrumentation.AgentEvent
@@ -46,6 +46,7 @@ internal class ActionReviewPipeline(
         motorCortex.execute(action, config.searchResultCount, authorization)
     },
     private val actionLifecycleObserver: ActionLifecycleObserver = NoopActionLifecycleObserver,
+    private val emitActionFeedback: (ActionFeedbackCue) -> Boolean = { false },
 ) {
     suspend fun reviewAndExecute(action: PendingAction) {
         val timing = PhaseTimingCollector("action", action.rootInputId)
@@ -238,22 +239,16 @@ internal class ActionReviewPipeline(
         convCtx: ConversationContext,
         timing: PhaseTimingCollector,
     ) {
-        if (outcome.executionStatus == ActionExecutionStatus.FAILED) {
-            deliberation.markEvidenceFailure(resolvedAction)
-            instrumentation.emit(AgentEvents.warning("Action execution failed; action dropped."))
-        }
         impulseTracker.recordActionOutcome(resolvedAction, outcome)
         instrumentation.emit(AgentEvents.actionExecuted(resolvedAction, outcome.statusSummary))
         if (resolvedAction.origin.source != OriginSource.ID && outcome.successful) {
             getId()?.onActivity("action_executed", resolvedAction.type.id)
         }
         journalActionExecution(resolvedAction, outcome)
+        deliberation.recordActionArtifacts(resolvedAction, outcome)
         timing.startPhase("post_execute")
-        val observed = deliberation.observedEvidence(resolvedAction, outcome)
-        deliberation.recordEvidenceProgress(resolvedAction, outcome, observed)
-        deliberation.onActionExecuted(resolvedAction, observed)
+        val observed = outcome.observedEvidence ?: deliberation.observedEvidence(resolvedAction, outcome)
         maybeRecordScratchpadOutcome(resolvedAction, outcome, observed)
-        deliberation.recordActionOutcome(resolvedAction, outcome, observed)
         actionLifecycleObserver.onActionExecuted(resolvedAction, outcome, observed)
         if (resolvedAction.type == ActionType.CONTACT_USER) {
             recordAnswerLatency(resolvedAction)
@@ -277,7 +272,7 @@ internal class ActionReviewPipeline(
         }
 
         timing.startPhase("follow_up")
-        maybeEnqueueFollowUp(resolvedAction, outcome, observed, convCtx)
+        maybeEmitActionFeedback(resolvedAction, outcome, observed, convCtx)
 
         instrumentation.emit(AgentEvents.phaseTimings(timing.build()))
     }
@@ -869,54 +864,58 @@ internal class ActionReviewPipeline(
         }
     }
 
-    private fun maybeEnqueueFollowUp(
+    private fun maybeEmitActionFeedback(
         resolvedAction: PendingAction,
         outcome: ActionOutcome,
         observed: Boolean,
         convCtx: ConversationContext,
     ) {
-        if (!resolvedAction.requiresFollowUpThought) return
-        if (!actionLifecycleObserver.allowFollowUp(resolvedAction)) return
-        val safePlannerSignal = PromptInjectionDefense.asUntrustedDataBlock(
-            text = outcome.plannerSignal,
-            maxChars = FOLLOW_UP_SIGNAL_MAX_CHARS
+        if (resolvedAction.type == ActionType.CONTACT_USER) return
+        val cue = ActionFeedbackCue(
+            rootInputId = resolvedAction.rootInputId ?: return,
+            actionType = resolvedAction.type,
+            actionSummary = resolvedAction.summary,
+            feedbackContent = if (outcome.plannerSignal.isNotBlank()) outcome.plannerSignal else outcome.statusSummary,
+            statusSummary = outcome.statusSummary,
+            plannerSignal = outcome.plannerSignal,
+            executionStatus = outcome.executionStatus,
+            conversationContext = convCtx,
+            observedEvidence = observed,
+            actionErrorCategory = outcome.actionErrorCategory,
+            fetchErrorCategory = outcome.fetchErrorCategory,
+            sourceActionId = resolvedAction.id.takeIf { it > 0L },
+            rootInputReceivedAtMs = resolvedAction.rootInputReceivedAtMs,
+            attempts = resolvedAction.attempts,
+            urgency = resolvedAction.urgency.name,
+            requiresFollowUpThought = resolvedAction.requiresFollowUpThought,
+            plannerContinuationRequired = (
+                resolvedAction.requiresFollowUpThought ||
+                    outcome.waiting ||
+                    !outcome.successful
+                ) && actionLifecycleObserver.allowFollowUp(resolvedAction),
+            origin = resolvedAction.origin,
         )
-        val followUpThought = TextSecurity.clamp(
-            "${resolvedAction.followUpPrefix}\n$safePlannerSignal\n" +
-                "Produce the next planner decision as one raw JSON object only. " +
-                "Do not use tool or function wrappers.",
-            config.planner.maxThoughtChars
-        )
-        val queued = scheduler.enqueueIntention(
-            QueuedIntention(
-                intention = Intention(
-                    id = RootInputIds.next(),
-                    cognitiveThreadId = resolvedAction.rootInputId ?: RootInputIds.next(),
-                    kind = IntentionKind.DEFER,
-                    summary = TextSecurity.preview(followUpThought, 160),
-                    createdAt = Instant.now(),
-                    conversationContext = convCtx,
-                    rootStimulusId = resolvedAction.rootInputId,
-                ),
-                urgency = resolvedAction.urgency,
-                rootInputReceivedAtMs = resolvedAction.rootInputReceivedAtMs,
-                origin = resolvedAction.origin,
-                deferredThoughtContent = followUpThought,
-                deferredThoughtPasses = resolvedAction.attempts,
-                deferredAllowFallbackExplanation = true,
-                deferredOriginActionType = resolvedAction.type,
-                deferredOriginActionObservedEvidence = observed,
-            )
-        )
-        if (!queued) {
-            instrumentation.emit(AgentEvents.warning("Failed to enqueue follow-up thought after action."))
+        if (!emitActionFeedback(cue)) {
+            instrumentation.emit(AgentEvents.warning("Failed to enqueue action feedback stimulus."))
             telemetry.recordQueueSaturation(
-                queueType = "thought",
-                capacity = config.maxPendingThoughts,
-                reason = "enqueue_followup_thought_failed_full"
+                queueType = "input",
+                capacity = config.maxPendingInputs,
+                reason = "enqueue_action_feedback_failed_full"
             )
+            return
         }
-        telemetry.emitQueueSnapshot("follow_up_thought_enqueued")
+        instrumentation.emit(
+            AgentEvent(
+                type = "action_feedback_emitted",
+                data = mapOf(
+                    "action_id" to resolvedAction.id,
+                    "action_type" to resolvedAction.type.id,
+                    "root_input_id" to resolvedAction.rootInputId,
+                    "continuation_required" to cue.plannerContinuationRequired,
+                    "execution_status" to outcome.executionStatus.name.lowercase(),
+                )
+            )
+        )
     }
 
     // ── Dialogue trim ──
@@ -929,7 +928,6 @@ internal class ActionReviewPipeline(
     }
 
     private companion object {
-        const val FOLLOW_UP_SIGNAL_MAX_CHARS: Int = 420
         const val JOURNAL_SUMMARY_PREVIEW_CHARS: Int = 160
         const val MAX_DIALOGUE_SIZE: Int = 20
     }

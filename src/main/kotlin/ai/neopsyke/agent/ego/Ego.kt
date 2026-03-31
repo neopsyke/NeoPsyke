@@ -12,6 +12,7 @@ import ai.neopsyke.agent.cortex.motor.MotorCortex
 import ai.neopsyke.agent.cortex.motor.actions.ActionCapability
 import ai.neopsyke.agent.cortex.sensory.CognitiveCueMetadata
 import ai.neopsyke.agent.cortex.sensory.CognitiveSignal
+import ai.neopsyke.agent.cortex.sensory.ActionFeedbackCue
 import ai.neopsyke.agent.cortex.sensory.GoalRuntimeCue
 import ai.neopsyke.agent.cortex.sensory.PerceptualAppraiser
 import ai.neopsyke.agent.cortex.sensory.RuntimeControlSignal
@@ -23,6 +24,7 @@ import ai.neopsyke.agent.id.GoalRegistry
 import ai.neopsyke.agent.goal.NoopGoalsGateway
 import ai.neopsyke.agent.goal.GoalRunActivation
 import ai.neopsyke.agent.goal.GoalsGateway
+import ai.neopsyke.agent.support.PromptInjectionDefense
 import ai.neopsyke.agent.support.TextSecurity
 import ai.neopsyke.agent.superego.Superego
 import ai.neopsyke.instrumentation.AgentEvent
@@ -119,6 +121,7 @@ class Ego(
         getId = { id },
         actionControlService = actionControlService,
         actionLifecycleObserver = goalsGateway,
+        emitActionFeedback = sensoryCortex::offerActionFeedback,
     )
 
     private fun dialogueFor(sessionId: String): ArrayDeque<DialogueTurn> =
@@ -194,6 +197,11 @@ class Ego(
                         runLoop()
                         continue
                     }
+                    val actionFeedbackCue = ActionFeedbackCue.fromStimulus(stimulus)
+                    if (actionFeedbackCue != null) {
+                        processActionFeedback(actionFeedbackCue, stimulus, percept)
+                        continue
+                    }
                     val thread = cognitiveThreads.bindPercept(
                         percept = percept,
                         rootInputId = stimulus.id,
@@ -243,6 +251,104 @@ class Ego(
                 }
             }
         }
+    }
+
+    private suspend fun processActionFeedback(
+        cue: ActionFeedbackCue,
+        stimulus: StimulusEnvelope,
+        percept: Percept,
+    ) {
+        val thread = cognitiveThreads.bindPercept(
+            percept = percept,
+            rootInputId = cue.rootInputId,
+            kind = CognitiveThreadKind.CONVERSATION,
+            title = cue.actionSummary.ifBlank { stimulus.content },
+        )
+        val feedbackAction = PendingAction(
+            id = cue.sourceActionId ?: 0L,
+            urgency = Urgency.fromRaw(cue.urgency),
+            type = cue.actionType,
+            payload = "",
+            summary = cue.actionSummary.ifBlank { cue.actionType.id },
+            rootInputId = cue.rootInputId,
+            rootInputReceivedAtMs = cue.rootInputReceivedAtMs,
+            conversationContext = cue.conversationContext,
+            requiresFollowUpThought = cue.requiresFollowUpThought,
+            followUpPrefix = motorCortex.followUpPrefix(cue.actionType),
+            origin = cue.origin,
+        )
+        val outcome = ActionOutcome(
+            statusSummary = cue.statusSummary,
+            plannerSignal = cue.plannerSignal.ifBlank { cue.feedbackContent },
+            executionStatus = cue.executionStatus,
+            observedEvidence = cue.observedEvidence,
+            actionErrorCategory = cue.actionErrorCategory,
+            fetchErrorCategory = cue.fetchErrorCategory,
+        )
+        val observed = cue.observedEvidence ?: deliberation.observedEvidence(feedbackAction, outcome)
+        if (cue.executionStatus == ActionExecutionStatus.FAILED) {
+            deliberation.markEvidenceFailure(feedbackAction)
+        }
+        deliberation.recordEvidenceProgress(feedbackAction, outcome, observed)
+        deliberation.onActionExecuted(feedbackAction, observed)
+        deliberation.recordActionOutcome(feedbackAction, outcome, observed)
+        instrumentation.emit(
+            AgentEvent(
+                type = "action_feedback_integrated",
+                data = mapOf(
+                    "action_type" to cue.actionType.id,
+                    "root_input_id" to cue.rootInputId,
+                    "execution_status" to cue.executionStatus.name.lowercase(),
+                    "continuation_required" to cue.plannerContinuationRequired,
+                )
+            )
+        )
+        if (!cue.plannerContinuationRequired) {
+            return
+        }
+
+        val safePlannerSignal = PromptInjectionDefense.asUntrustedDataBlock(
+            text = outcome.plannerSignal,
+            maxChars = FOLLOW_UP_SIGNAL_MAX_CHARS
+        )
+        val followUpThought = TextSecurity.clamp(
+            "${motorCortex.followUpPrefix(cue.actionType)}\n$safePlannerSignal\n" +
+                "Produce the next planner decision as one raw JSON object only. " +
+                "Do not use tool or function wrappers.",
+            config.planner.maxThoughtChars
+        )
+        val queued = scheduler.enqueueIntention(
+            QueuedIntention(
+                intention = Intention(
+                    id = RootInputIds.next(),
+                    cognitiveThreadId = thread.id,
+                    kind = IntentionKind.DEFER,
+                    summary = TextSecurity.preview(followUpThought, 160),
+                    createdAt = java.time.Instant.now(),
+                    conversationContext = cue.conversationContext,
+                    rootStimulusId = cue.rootInputId,
+                ),
+                urgency = Urgency.fromRaw(cue.urgency),
+                rootInputReceivedAtMs = cue.rootInputReceivedAtMs ?: stimulus.receivedAt.toEpochMilli(),
+                origin = cue.origin,
+                deferredThoughtContent = followUpThought,
+                deferredThoughtPasses = cue.attempts,
+                deferredAllowFallbackExplanation = true,
+                deferredOriginActionType = cue.actionType,
+                deferredOriginActionObservedEvidence = observed,
+            )
+        )
+        if (!queued) {
+            instrumentation.emit(AgentEvents.warning("Feedback queue full; dropping action feedback continuation."))
+            telemetry.recordQueueSaturation(
+                queueType = "thought",
+                capacity = config.maxPendingThoughts,
+                reason = "enqueue_feedback_followup_failed_full"
+            )
+            return
+        }
+        telemetry.emitQueueSnapshot("feedback_followup_enqueued")
+        runLoop()
     }
 
     private suspend fun runLoop() {
@@ -298,7 +404,7 @@ class Ego(
             }
         }
 
-        if (!scheduler.hasPendingWork()) {
+        if (!scheduler.hasPendingWork() && !sensoryCortex.hasPendingSyntheticSignals()) {
             impulseTracker.finalizeAllIdle()
             deliberation.reset()
             memory.resetForNewInput()
@@ -328,19 +434,24 @@ class Ego(
         val sessionId = resolveSessionId(convCtx)
         activateSession(convCtx)
         cognitiveThreads.bindInput(input)
-        id?.onActivity("input_received")
+        val isFeedbackInput = input.percept?.family == PerceptFamily.FEEDBACK
+        if (!isFeedbackInput) {
+            id?.onActivity("input_received")
+        }
 
         timing.startPhase("input_processing")
         instrumentation.emit(AgentEvents.inputProcessing(input))
-        val userTurn = DialogueTurn(
-            role = DialogueRole.USER,
-            content = input.content,
-            sessionId = sessionId,
-            interlocutor = convCtx.interlocutor,
-            timestamp = java.time.Instant.now()
-        )
-        dialogueFor(sessionId).addLast(userTurn)
-        memory.remember(userTurn)
+        if (!isFeedbackInput) {
+            val userTurn = DialogueTurn(
+                role = DialogueRole.USER,
+                content = input.content,
+                sessionId = sessionId,
+                interlocutor = convCtx.interlocutor,
+                timestamp = java.time.Instant.now()
+            )
+            dialogueFor(sessionId).addLast(userTurn)
+            memory.remember(userTurn)
+        }
         maybeCreateScratchpad(input)
         trimDialogue(sessionId)
 
@@ -1140,6 +1251,7 @@ class Ego(
     }
 
     private companion object {
+        const val FOLLOW_UP_SIGNAL_MAX_CHARS: Int = 420
         const val MAX_AMBIENT_PROJECTS: Int = 4
         const val AMBIENT_PROJECT_PREVIEW_CHARS: Int = 180
         const val MAX_AMBIENT_SCRATCHPAD_SIGNALS: Int = 6

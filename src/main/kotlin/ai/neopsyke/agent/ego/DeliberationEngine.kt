@@ -236,8 +236,11 @@ internal class DeliberationEngine(
 
     // --- Action retry budget / cooldown ---
 
-    fun recordActionOutcome(action: PendingAction, outcome: ActionOutcome, observed: Boolean) {
+    fun recordActionArtifacts(action: PendingAction, outcome: ActionOutcome) {
         updateThreadSecurityContext(action, outcome)
+    }
+
+    fun recordActionOutcome(action: PendingAction, outcome: ActionOutcome, observed: Boolean) {
         if (!isEvidenceAction(action)) return
         val scope = inputScope(action.rootInputId, action.conversationContext.sessionId) ?: return
         val failureBudget = config.planner.actionRetryBudgetNonRetryableFailures

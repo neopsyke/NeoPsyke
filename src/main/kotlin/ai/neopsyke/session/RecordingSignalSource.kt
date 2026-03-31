@@ -119,6 +119,8 @@ class RecordingSignalSource(
             node.put("content", stimulus.content)
             node.put("received_at", stimulus.receivedAt.toString())
             node.put("trust_level", stimulus.trustLevel.name)
+            stimulus.correlationId?.let { node.put("correlation_id", it) }
+            stimulus.causationId?.let { node.put("causation_id", it) }
 
             val ctx = signalMapper.createObjectNode()
             ctx.put("session_id", stimulus.conversationContext.sessionId)
@@ -194,6 +196,8 @@ class RecordingSignalSource(
                 } catch (_: Exception) {
                     Instant.now()
                 },
+                correlationId = node.path("correlation_id").asText().ifEmpty { null },
+                causationId = node.path("causation_id").asText().ifEmpty { null },
                 conversationContext = ConversationContext(
                     sessionId = sessionId,
                     interlocutor = Interlocutor.named(interlocutorId),

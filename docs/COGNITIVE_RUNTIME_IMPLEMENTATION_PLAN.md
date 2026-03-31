@@ -304,25 +304,49 @@ Open issues:
 ### Phase 4
 
 Status:
-- Not started
+- Completed
 
 Deterministic runs:
-- pending
+- `./gradlew --no-daemon compileKotlin compileTestKotlin`
+  - result: pass
+- `./gradlew --no-daemon test --tests 'ai.neopsyke.agent.SensoryCortexTest' --tests 'ai.neopsyke.session.RecordingSignalSourceTest' --tests 'ai.neopsyke.agent.id.IdEgoLifecycleIntegrationTest' --tests 'ai.neopsyke.eval.AgentScenarioPackTest'`
+  - result: pass
+- `./freud/bin/freud run cognitive-runtime-p4-feedback`
+  - result: pass
+  - run dir: `/Users/victor.toral/atomitl/ai/NeoPsyke/.neopsyke/runs/freud/20260331T033153Z-cognitive-runtime-p4-feedback-3345354404`
 
 Recorded curated eval suites:
-- pending
+- `./freud/bin/freud eval --live --record --lane low-llm --input freud/evals/cognitive-runtime/phase-4-feedback-reentry.txt --timeout 120`
+  - result: pass
+  - run dir: `/Users/victor.toral/atomitl/ai/NeoPsyke/.neopsyke/runs/freud/20260331T033238Z-live-eval-1219327235`
 
 Recorded BBH suites:
-- pending
+- `./freud/bin/freud bbh --live --lane low-llm --record`
+  - result: pass
+  - run dir: `/Users/victor.toral/atomitl/ai/NeoPsyke/.neopsyke/runs/freud/20260331T033252Z-bbh-low-llm-293923064`
+  - pass rate: 24/24 (100.0%)
 
 Replay-debug sessions:
-- pending
+- none required; the deterministic gate and both recorded live validations passed without replay iteration
 
 Acceptance items closed:
-- pending
+- non-`contact_user` action outcomes now emit typed `ActionFeedbackCue` stimuli through `SensoryCortex`
+- `ActionFeedbackCue` preserves root binding, causation, execution status, origin, and continuation metadata across the sensory boundary
+- `RecordingSignalSource` now records and replays feedback correlation/causation ids, so recorded sessions preserve feedback-root continuity
+- Ego now integrates action feedback through `Stimulus -> Percept -> CognitiveThread` before regenerating continuation work
+- direct follow-up continuation queueing was removed from `ActionReviewPipeline`; continuation is now regenerated from the feedback cue after sensory re-entry
+- deliberation evidence/progress/cooldown updates for follow-up actions are now applied on feedback integration rather than directly in the post-execute continuation path
+- queue-drain reset now waits for pending synthetic feedback signals, so thread/scratchpad state survives until feedback is consumed
+- deterministic regression coverage now includes:
+  - action feedback cue round-trip tests
+  - feedback signal replay tests for correlation/causation ids
+  - scenario coverage for feedback-driven continuation stability
+- living runtime docs updated: `AGENT_LOGIC_SUMMARY.md`, `AGENT_LOGIC_DIAGRAM.md`, `docs/security.md`
 
 Open issues:
-- pending
+- broader async completion unification still depends on later goal-runtime/scratchpad phases:
+  - external wait completions are still mediated by goal-runtime wait monitors and cues
+  - Phase 5 will finish folding resumable goal work and wait-resume ownership into thread continuity
 
 ### Phase 5
 

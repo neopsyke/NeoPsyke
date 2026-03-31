@@ -5,10 +5,15 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.runBlocking
 import ai.neopsyke.agent.cortex.sensory.CognitiveCueMetadata
 import ai.neopsyke.agent.cortex.sensory.CognitiveSignal
+import ai.neopsyke.agent.cortex.sensory.ActionFeedbackCue
 import ai.neopsyke.agent.cortex.sensory.PerceptualAppraiser
 import ai.neopsyke.agent.cortex.sensory.RuntimeControlSignal
+import ai.neopsyke.agent.model.ActionExecutionStatus
+import ai.neopsyke.agent.model.ActionOrigin
+import ai.neopsyke.agent.model.ActionType
 import ai.neopsyke.agent.model.ConversationContext
 import ai.neopsyke.agent.model.Interlocutor
+import ai.neopsyke.agent.model.OriginSource
 import ai.neopsyke.agent.model.PerceptFamily
 import ai.neopsyke.agent.model.RootInputIds
 import ai.neopsyke.agent.model.StimulusEnvelope
@@ -270,6 +275,77 @@ class SensoryCortexTest {
         val signal = cortex.nextSignal()
 
         assertEquals(controlSignal, signal)
+    }
+
+    @Test
+    fun `action feedback cue round-trips through feedback stimulus metadata`() {
+        val conversationContext = ConversationContext(
+            sessionId = "session-feedback",
+            interlocutor = Interlocutor.named("operator")
+        )
+        val cue = ActionFeedbackCue(
+            rootInputId = "root-123",
+            actionType = ActionType.WEB_SEARCH,
+            actionSummary = "search pricing",
+            feedbackContent = "web_search result: pricing found",
+            statusSummary = "pricing found",
+            plannerSignal = "web_search result: pricing found",
+            executionStatus = ActionExecutionStatus.SUCCESS,
+            conversationContext = conversationContext,
+            observedEvidence = true,
+            actionErrorCategory = "none",
+            sourceActionId = 42L,
+            rootInputReceivedAtMs = 1234L,
+            attempts = 2,
+            urgency = "high",
+            requiresFollowUpThought = true,
+            plannerContinuationRequired = true,
+            origin = ActionOrigin(
+                source = OriginSource.ID,
+                needId = "be-useful",
+                rootImpulseId = "imp-1",
+            ),
+        )
+
+        val parsed = ActionFeedbackCue.fromStimulus(cue.toStimulus())
+
+        assertNotNull(parsed)
+        assertEquals(cue.rootInputId, parsed.rootInputId)
+        assertEquals(cue.actionType, parsed.actionType)
+        assertEquals(cue.feedbackContent, parsed.feedbackContent)
+        assertEquals(cue.executionStatus, parsed.executionStatus)
+        assertEquals(cue.sourceActionId, parsed.sourceActionId)
+        assertEquals(cue.attempts, parsed.attempts)
+        assertEquals(cue.urgency, parsed.urgency)
+        assertEquals(cue.requiresFollowUpThought, parsed.requiresFollowUpThought)
+        assertEquals(cue.plannerContinuationRequired, parsed.plannerContinuationRequired)
+        assertEquals(cue.origin, parsed.origin)
+    }
+
+    @Test
+    fun `synthetic action feedback stays pending until consumed`() = runBlocking {
+        val cortex = SensoryCortex(
+            config = AgentConfig(),
+            source = SignalSource { RuntimeControlSignal.ExitRequested("test") }
+        )
+        val offered = cortex.offerActionFeedback(
+            ActionFeedbackCue(
+                rootInputId = "root-123",
+                actionType = ActionType.WEB_SEARCH,
+                actionSummary = "search pricing",
+                feedbackContent = "web_search result: pricing found",
+                statusSummary = "pricing found",
+                plannerSignal = "web_search result: pricing found",
+                executionStatus = ActionExecutionStatus.SUCCESS,
+                conversationContext = ConversationContext.default(),
+            )
+        )
+
+        assertTrue(offered)
+        assertTrue(cortex.hasPendingSyntheticSignals())
+        val signal = cortex.nextSignal()
+        assertIs<CognitiveSignal.StimulusReceived>(signal)
+        assertTrue(!cortex.hasPendingSyntheticSignals())
     }
 
     @Test

@@ -927,8 +927,12 @@ class EgoAgentTest {
 
         assertTrue(
             instrumentation.events.any {
-                it.type == "warning" &&
-                    (it.data["message"] as? String)?.contains("Action execution failed", ignoreCase = true) == true
+                it.type == "action_review_requested"
+            }
+        )
+        assertTrue(
+            instrumentation.events.any {
+                it.type == "action_executed"
             }
         )
         assertTrue(

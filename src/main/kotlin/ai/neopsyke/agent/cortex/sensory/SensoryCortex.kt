@@ -5,6 +5,10 @@ import ai.neopsyke.agent.config.DefaultInterlocutorResolver
 import ai.neopsyke.agent.config.InterlocutorResolver
 import ai.neopsyke.agent.model.ConversationContext
 import ai.neopsyke.agent.model.ConversationSecurityContexts
+import ai.neopsyke.agent.model.ActionExecutionStatus
+import ai.neopsyke.agent.model.ActionType
+import ai.neopsyke.agent.model.ActionOrigin
+import ai.neopsyke.agent.model.OriginSource
 import ai.neopsyke.agent.model.InputPriority
 import ai.neopsyke.agent.model.Interlocutor
 import ai.neopsyke.agent.model.Percept
@@ -18,6 +22,7 @@ import ai.neopsyke.agent.model.StimulusTrustLevel
 import ai.neopsyke.agent.support.TextSecurity
 import java.io.Closeable
 import java.time.Instant
+import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -97,15 +102,135 @@ data class GoalRuntimeCue(
     }
 }
 
+data class ActionFeedbackCue(
+    val rootInputId: String,
+    val actionType: ActionType,
+    val actionSummary: String,
+    val feedbackContent: String,
+    val statusSummary: String,
+    val plannerSignal: String,
+    val executionStatus: ActionExecutionStatus,
+    val conversationContext: ConversationContext,
+    val observedEvidence: Boolean? = null,
+    val actionErrorCategory: String? = null,
+    val fetchErrorCategory: String? = null,
+    val sourceActionId: Long? = null,
+    val rootInputReceivedAtMs: Long? = null,
+    val attempts: Int = 0,
+    val urgency: String? = null,
+    val requiresFollowUpThought: Boolean = false,
+    val plannerContinuationRequired: Boolean = false,
+    val origin: ActionOrigin = ActionOrigin.USER,
+) {
+    fun toStimulus(): StimulusEnvelope =
+        StimulusEnvelope(
+            id = RootInputIds.next(),
+            family = StimulusFamily.FEEDBACK,
+            source = SOURCE,
+            content = feedbackContent,
+            receivedAt = Instant.now(),
+            conversationContext = conversationContext,
+            correlationId = rootInputId,
+            causationId = sourceActionId?.toString(),
+            trustLevel = StimulusTrustLevel.TRUSTED_INTERNAL,
+            provenance = Provenances.trustedSystemSignal(provider = SOURCE, sourceRef = rootInputId),
+            metadata = buildMap {
+                put(METADATA_CUE_TYPE, CUE_TYPE_ACTION_FEEDBACK)
+                put(METADATA_ROOT_INPUT_ID, rootInputId)
+                put(METADATA_ACTION_TYPE, actionType.id)
+                put(METADATA_ACTION_SUMMARY, actionSummary)
+                put(METADATA_STATUS_SUMMARY, statusSummary)
+                put(METADATA_PLANNER_SIGNAL, plannerSignal)
+                put(METADATA_EXECUTION_STATUS, executionStatus.name)
+                observedEvidence?.let { put(METADATA_OBSERVED_EVIDENCE, it.toString()) }
+                actionErrorCategory?.takeIf { it.isNotBlank() }?.let { put(METADATA_ACTION_ERROR_CATEGORY, it) }
+                fetchErrorCategory?.takeIf { it.isNotBlank() }?.let { put(METADATA_FETCH_ERROR_CATEGORY, it) }
+                rootInputReceivedAtMs?.let { put(METADATA_ROOT_INPUT_RECEIVED_AT_MS, it.toString()) }
+                put(METADATA_ATTEMPTS, attempts.toString())
+                urgency?.takeIf { it.isNotBlank() }?.let { put(METADATA_URGENCY, it) }
+                put(METADATA_REQUIRES_FOLLOW_UP_THOUGHT, requiresFollowUpThought.toString())
+                put(METADATA_PLANNER_CONTINUATION_REQUIRED, plannerContinuationRequired.toString())
+                put(METADATA_ORIGIN_SOURCE, origin.source.name)
+                origin.needId?.takeIf { it.isNotBlank() }?.let { put(METADATA_ORIGIN_NEED_ID, it) }
+                origin.rootImpulseId?.takeIf { it.isNotBlank() }?.let { put(METADATA_ORIGIN_ROOT_IMPULSE_ID, it) }
+            },
+        )
+
+    companion object {
+        private const val SOURCE: String = "action-feedback"
+
+        fun fromStimulus(stimulus: StimulusEnvelope): ActionFeedbackCue? {
+            if (stimulus.family != StimulusFamily.FEEDBACK) return null
+            if (stimulus.metadata[METADATA_CUE_TYPE] != CUE_TYPE_ACTION_FEEDBACK) return null
+            val rootInputId = stimulus.metadata[METADATA_ROOT_INPUT_ID] ?: stimulus.correlationId ?: return null
+            val actionType = stimulus.metadata[METADATA_ACTION_TYPE]
+                ?.let { ActionType.fromRaw(it) }
+                ?: return null
+            val executionStatus = stimulus.metadata[METADATA_EXECUTION_STATUS]
+                ?.let { runCatching { ActionExecutionStatus.valueOf(it) }.getOrNull() }
+                ?: ActionExecutionStatus.SUCCESS
+            val originSource = stimulus.metadata[METADATA_ORIGIN_SOURCE]
+                ?.let { raw -> runCatching { OriginSource.valueOf(raw) }.getOrNull() }
+                ?: OriginSource.USER
+            return ActionFeedbackCue(
+                rootInputId = rootInputId,
+                actionType = actionType,
+                actionSummary = stimulus.metadata[METADATA_ACTION_SUMMARY].orEmpty(),
+                feedbackContent = stimulus.content,
+                statusSummary = stimulus.metadata[METADATA_STATUS_SUMMARY].orEmpty(),
+                plannerSignal = stimulus.metadata[METADATA_PLANNER_SIGNAL].orEmpty(),
+                executionStatus = executionStatus,
+                conversationContext = stimulus.conversationContext,
+                observedEvidence = stimulus.metadata[METADATA_OBSERVED_EVIDENCE]?.toBooleanStrictOrNull(),
+                actionErrorCategory = stimulus.metadata[METADATA_ACTION_ERROR_CATEGORY],
+                fetchErrorCategory = stimulus.metadata[METADATA_FETCH_ERROR_CATEGORY],
+                sourceActionId = stimulus.causationId?.toLongOrNull(),
+                rootInputReceivedAtMs = stimulus.metadata[METADATA_ROOT_INPUT_RECEIVED_AT_MS]?.toLongOrNull(),
+                attempts = stimulus.metadata[METADATA_ATTEMPTS]?.toIntOrNull() ?: 0,
+                urgency = stimulus.metadata[METADATA_URGENCY],
+                requiresFollowUpThought = stimulus.metadata[METADATA_REQUIRES_FOLLOW_UP_THOUGHT]
+                    ?.toBooleanStrictOrNull()
+                    ?: false,
+                plannerContinuationRequired = stimulus.metadata[METADATA_PLANNER_CONTINUATION_REQUIRED]
+                    ?.toBooleanStrictOrNull()
+                    ?: false,
+                origin = ActionOrigin(
+                    source = originSource,
+                    needId = stimulus.metadata[METADATA_ORIGIN_NEED_ID],
+                    rootImpulseId = stimulus.metadata[METADATA_ORIGIN_ROOT_IMPULSE_ID],
+                ),
+            )
+        }
+    }
+}
+
 object CognitiveCueMetadata {
     const val METADATA_CUE_TYPE: String = "cue_type"
     const val METADATA_GOAL_ID: String = "goal_id"
     const val METADATA_STEP_ID: String = "step_id"
     const val METADATA_REASON: String = "reason"
     const val METADATA_ROOT_IMPULSE_ID: String = "root_impulse_id"
+    const val METADATA_ROOT_INPUT_ID: String = "root_input_id"
+    const val METADATA_ACTION_TYPE: String = "action_type"
+    const val METADATA_ACTION_SUMMARY: String = "action_summary"
+    const val METADATA_STATUS_SUMMARY: String = "status_summary"
+    const val METADATA_PLANNER_SIGNAL: String = "planner_signal"
+    const val METADATA_EXECUTION_STATUS: String = "execution_status"
+    const val METADATA_OBSERVED_EVIDENCE: String = "observed_evidence"
+    const val METADATA_ACTION_ERROR_CATEGORY: String = "action_error_category"
+    const val METADATA_FETCH_ERROR_CATEGORY: String = "fetch_error_category"
+    const val METADATA_ROOT_INPUT_RECEIVED_AT_MS: String = "root_input_received_at_ms"
+    const val METADATA_ATTEMPTS: String = "attempts"
+    const val METADATA_URGENCY: String = "urgency"
+    const val METADATA_REQUIRES_FOLLOW_UP_THOUGHT: String = "requires_follow_up_thought"
+    const val METADATA_PLANNER_CONTINUATION_REQUIRED: String = "planner_continuation_required"
+    const val METADATA_ORIGIN_SOURCE: String = "origin_source"
+    const val METADATA_ORIGIN_NEED_ID: String = "origin_need_id"
+    const val METADATA_ORIGIN_ROOT_IMPULSE_ID: String = "origin_root_impulse_id"
 
     const val CUE_TYPE_ID_IMPULSE_READY: String = "id_impulse_ready"
     const val CUE_TYPE_WORK_READY: String = "goal_runtime_work_ready"
+    const val CUE_TYPE_ACTION_FEEDBACK: String = "action_feedback"
 }
 
 private const val METADATA_CUE_TYPE: String = CognitiveCueMetadata.METADATA_CUE_TYPE
@@ -113,8 +238,28 @@ private const val METADATA_GOAL_ID: String = CognitiveCueMetadata.METADATA_GOAL_
 private const val METADATA_STEP_ID: String = CognitiveCueMetadata.METADATA_STEP_ID
 private const val METADATA_REASON: String = CognitiveCueMetadata.METADATA_REASON
 private const val METADATA_ROOT_IMPULSE_ID: String = CognitiveCueMetadata.METADATA_ROOT_IMPULSE_ID
+private const val METADATA_ROOT_INPUT_ID: String = CognitiveCueMetadata.METADATA_ROOT_INPUT_ID
+private const val METADATA_ACTION_TYPE: String = CognitiveCueMetadata.METADATA_ACTION_TYPE
+private const val METADATA_ACTION_SUMMARY: String = CognitiveCueMetadata.METADATA_ACTION_SUMMARY
+private const val METADATA_STATUS_SUMMARY: String = CognitiveCueMetadata.METADATA_STATUS_SUMMARY
+private const val METADATA_PLANNER_SIGNAL: String = CognitiveCueMetadata.METADATA_PLANNER_SIGNAL
+private const val METADATA_EXECUTION_STATUS: String = CognitiveCueMetadata.METADATA_EXECUTION_STATUS
+private const val METADATA_OBSERVED_EVIDENCE: String = CognitiveCueMetadata.METADATA_OBSERVED_EVIDENCE
+private const val METADATA_ACTION_ERROR_CATEGORY: String = CognitiveCueMetadata.METADATA_ACTION_ERROR_CATEGORY
+private const val METADATA_FETCH_ERROR_CATEGORY: String = CognitiveCueMetadata.METADATA_FETCH_ERROR_CATEGORY
+private const val METADATA_ROOT_INPUT_RECEIVED_AT_MS: String = CognitiveCueMetadata.METADATA_ROOT_INPUT_RECEIVED_AT_MS
+private const val METADATA_ATTEMPTS: String = CognitiveCueMetadata.METADATA_ATTEMPTS
+private const val METADATA_URGENCY: String = CognitiveCueMetadata.METADATA_URGENCY
+private const val METADATA_REQUIRES_FOLLOW_UP_THOUGHT: String =
+    CognitiveCueMetadata.METADATA_REQUIRES_FOLLOW_UP_THOUGHT
+private const val METADATA_PLANNER_CONTINUATION_REQUIRED: String =
+    CognitiveCueMetadata.METADATA_PLANNER_CONTINUATION_REQUIRED
+private const val METADATA_ORIGIN_SOURCE: String = CognitiveCueMetadata.METADATA_ORIGIN_SOURCE
+private const val METADATA_ORIGIN_NEED_ID: String = CognitiveCueMetadata.METADATA_ORIGIN_NEED_ID
+private const val METADATA_ORIGIN_ROOT_IMPULSE_ID: String = CognitiveCueMetadata.METADATA_ORIGIN_ROOT_IMPULSE_ID
 private const val CUE_TYPE_ID_IMPULSE_READY: String = CognitiveCueMetadata.CUE_TYPE_ID_IMPULSE_READY
 private const val CUE_TYPE_WORK_READY: String = CognitiveCueMetadata.CUE_TYPE_WORK_READY
+private const val CUE_TYPE_ACTION_FEEDBACK: String = CognitiveCueMetadata.CUE_TYPE_ACTION_FEEDBACK
 
 fun interface SignalSource {
     suspend fun nextSignal(): Signal
@@ -324,7 +469,24 @@ class SensoryCortex(
     private val source: SignalSource,
     private val interlocutorResolver: InterlocutorResolver = DefaultInterlocutorResolver(),
 ) {
+    private val syntheticSignals = Channel<Signal>(SYNTHETIC_SIGNAL_QUEUE)
+    private val syntheticSignalCount = AtomicInteger(0)
+
+    fun offerActionFeedback(cue: ActionFeedbackCue): Boolean =
+        offerSyntheticSignal(CognitiveSignal.StimulusReceived(cue.toStimulus()))
+
+    fun hasPendingSyntheticSignals(): Boolean = syntheticSignalCount.get() > 0
+
     suspend fun nextSignal(): Signal {
+        syntheticSignals.tryReceive().getOrNull()?.let { signal ->
+            syntheticSignalCount.updateAndGet { current -> (current - 1).coerceAtLeast(0) }
+            val stimulusSignal = signal as? CognitiveSignal.StimulusReceived ?: return signal
+            val enrichedStimulus = enrichStimulus(stimulusSignal.stimulus) ?: return CognitiveSignal.NoStimulus
+            return CognitiveSignal.StimulusReceived(
+                stimulus = enrichedStimulus,
+                percept = PerceptualAppraiser().appraise(enrichedStimulus),
+            )
+        }
         val signal = source.nextSignal()
         val stimulusSignal = signal as? CognitiveSignal.StimulusReceived ?: return signal
         val enrichedStimulus = enrichStimulus(stimulusSignal.stimulus) ?: return CognitiveSignal.NoStimulus
@@ -374,7 +536,24 @@ class SensoryCortex(
         else -> ConversationContext.DEFAULT_SESSION_ID
     }
 
+    private fun offerSyntheticSignal(signal: Signal): Boolean {
+        val result = syntheticSignals.trySend(signal)
+        if (result.isSuccess) {
+            syntheticSignalCount.incrementAndGet()
+            return true
+        }
+        syntheticSignals.tryReceive().getOrNull()?.let {
+            syntheticSignalCount.updateAndGet { current -> (current - 1).coerceAtLeast(0) }
+        }
+        val retry = syntheticSignals.trySend(signal)
+        if (retry.isSuccess) {
+            syntheticSignalCount.incrementAndGet()
+        }
+        return retry.isSuccess
+    }
+
     companion object {
+        private const val SYNTHETIC_SIGNAL_QUEUE: Int = 1_024
         fun stdin(config: AgentConfig): SensoryCortex =
             SensoryCortex(
                 config = config,

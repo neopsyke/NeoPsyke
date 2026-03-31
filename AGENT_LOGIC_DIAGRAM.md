@@ -66,6 +66,7 @@ flowchart LR
     AP --> M
     %% Connector bundles are install presets only; goals compose primitive actions rather than executing bundle workflows directly
     AP -.->|"Actions emit structured effects; reflection emits durable-memory-save only on successful persistence"| MC
+    M --> SC
 
     M --> WS["Web Search Handler/Engine"]
     CfgWS["WebSearch Provider Config (provider/key/base/model)"] --> WS
@@ -227,14 +228,17 @@ sequenceDiagram
                                 Ego->>Sched: enqueue approval-or-alternative deferred intention
                                 Note over Dash,ACAPI: Dashboard action-control page watches a dedicated SSE lane and refreshes on staged/authorization lifecycle updates rather than polling
                                 Note over ACW,ACS: Background autonomous worker polls SQL-filtered runnable READY actions, preserving same-thread order [threadSequence] and same-target serialization [executionKey] before atomic claim + execute
-                            else direct commit allowed
+                        else direct commit allowed
                                 ACS->>ACDB: save staged action + authorization
                                 ACS->>Motor: execute(action, authorization)
                                 Motor-->>ACS: outcome
+                                Motor->>SC: emit ActionFeedbackCue (non-contact outcomes)
+                                SC->>Ego: StimulusReceived(feedback percept)
                                 ACS->>ACDB: save receipt + ledger + final staged status
                                 ACS-->>Ego: executed outcome
                             end
                             Note over Ego,Motor: Actions may complete immediately or return WAITING + async operation handles
+                            Note over SC,Ego: Feedback continuations are regenerated only after feedback re-enters through SensoryCortex, and queue-drain reset waits until pending feedback cues are consumed
                             Note over Ego,Motor: contact_user delivery is channel-aware. Telegram sessions send through Bot API, dashboard sessions continue through local/dashboard delivery
                             Note over ACAPI,Dash: Dashboard-approved staged executions can append a completion/answer message back into the originating chat session before root-session mapping is cleared
                             Note over Ego,PG: Goal-origin WAITING without handles is rejected as a contract violation

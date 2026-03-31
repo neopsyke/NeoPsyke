@@ -184,6 +184,52 @@ class RecordingSignalSourceTest {
     }
 
     @Test
+    fun `REPLAY preserves correlation and causation ids`() = runBlocking {
+        val file = Files.createTempFile("session-signal-correlation-", ".jsonl")
+        try {
+            val stimulus = StimulusEnvelope(
+                id = "feedback-id",
+                family = StimulusFamily.FEEDBACK,
+                source = "action-feedback",
+                content = "result ready",
+                receivedAt = Instant.parse("2026-03-26T14:30:00Z"),
+                correlationId = "root-123",
+                causationId = "77",
+                conversationContext = ConversationContext.default(),
+                trustLevel = StimulusTrustLevel.TRUSTED_INTERNAL,
+                provenance = Provenances.trustedSystemSignal(provider = "action-feedback", sourceRef = "root-123"),
+                metadata = mapOf("cue_type" to "action_feedback"),
+            )
+            val recordChannel = RecordReplayChannel(
+                channelName = "signals",
+                mode = SessionRecordingMode.RECORD,
+                file = file,
+            )
+            RecordingSignalSource(
+                delegate = QueuedSignalSource(listOf(CognitiveSignal.StimulusReceived(stimulus))),
+                channel = recordChannel,
+            ).nextSignal()
+            recordChannel.close()
+
+            val replayChannel = RecordReplayChannel(
+                channelName = "signals",
+                mode = SessionRecordingMode.REPLAY,
+                file = file,
+            )
+            val replayed = RecordingSignalSource(
+                delegate = QueuedSignalSource(emptyList()),
+                channel = replayChannel,
+            ).nextSignal()
+            val replayedStimulus = assertIs<CognitiveSignal.StimulusReceived>(replayed).stimulus
+            assertEquals("root-123", replayedStimulus.correlationId)
+            assertEquals("77", replayedStimulus.causationId)
+            replayChannel.close()
+        } finally {
+            Files.deleteIfExists(file)
+        }
+    }
+
+    @Test
     fun `NoStimulus signals are not recorded`() = runBlocking {
         val file = Files.createTempFile("session-signal-nostim-", ".jsonl")
         try {
