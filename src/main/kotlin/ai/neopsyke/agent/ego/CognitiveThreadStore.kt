@@ -66,7 +66,7 @@ internal class CognitiveThreadStore {
                 IntentionKind.PREPARE,
                 IntentionKind.DEFER,
             ),
-            allowedCommitModes = setOf(CommitMode.NOT_APPLICABLE),
+            allowedCommitModes = CognitivePolicyShaper.opportunityCommitModes(thread.securityContext),
         )
     }
 
@@ -107,7 +107,7 @@ internal class CognitiveThreadStore {
                 IntentionKind.PREPARE,
                 IntentionKind.DEFER,
             ),
-            allowedCommitModes = setOf(CommitMode.NOT_APPLICABLE),
+            allowedCommitModes = CognitivePolicyShaper.opportunityCommitModes(thread.securityContext),
         )
     }
 
@@ -154,11 +154,7 @@ internal class CognitiveThreadStore {
                 IntentionKind.COMMIT,
                 IntentionKind.DEFER,
             ),
-            allowedCommitModes = setOf(
-                CommitMode.NOT_APPLICABLE,
-                CommitMode.POLICY_AUTONOMOUS,
-                CommitMode.APPROVAL_BACKED,
-            ),
+            allowedCommitModes = CognitivePolicyShaper.opportunityCommitModes(thread.securityContext),
         )
     }
 

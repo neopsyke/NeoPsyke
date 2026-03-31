@@ -398,25 +398,50 @@ Open issues:
 ### Phase 6
 
 Status:
-- Not started
+- Completed
 
 Deterministic runs:
-- pending
+- `./gradlew --no-daemon compileKotlin compileTestKotlin`
+  - result: pass
+- `./gradlew --no-daemon test --tests 'ai.neopsyke.agent.ego.CognitivePolicyShaperTest' --tests 'ai.neopsyke.agent.actioncontrol.ConfiguredActionAuthorizationPolicyTest' --tests 'ai.neopsyke.agent.EgoPlannerTest' --tests 'ai.neopsyke.eval.AgentScenarioPackTest'`
+  - result: pass
+- `./freud/bin/freud run cognitive-runtime-p6-policy-control`
+  - result: pass
+  - run dir: `/Users/victor.toral/atomitl/ai/NeoPsyke/.neopsyke/runs/freud/20260331T042831Z-cognitive-runtime-p6-policy-control-2245002615`
 
 Recorded curated eval suites:
-- pending
+- `./freud/bin/freud eval --live --record --lane low-llm --input freud/evals/cognitive-runtime/phase-6-policy-control.txt --timeout 120`
+  - result: pass
+  - run dir: `/Users/victor.toral/atomitl/ai/NeoPsyke/.neopsyke/runs/freud/20260331T042921Z-live-eval-143965289`
 
 Recorded BBH suites:
-- pending
+- `./freud/bin/freud bbh --live --lane low-llm --record`
+  - result: pass
+  - run dir: `/Users/victor.toral/atomitl/ai/NeoPsyke/.neopsyke/runs/freud/20260331T042935Z-bbh-low-llm-2781806966`
+  - pass rate: 24/24 (100.0%)
 
 Replay-debug sessions:
-- pending
+- none required; deterministic and live validations passed without replay iteration
 
 Acceptance items closed:
-- pending
+- layered early policy shaping is now operational before planner choice through `CognitivePolicyShaper`
+- planner-visible action definitions now reflect:
+  - policy scope
+  - channel surface
+  - principal role
+  - action effect class
+- opportunity commit modes are now shaped from thread security context before planner choice
+- non-admin/non-internal planner surfaces no longer expose control-plane actions
+- external and restricted-scope contexts lose direct/autonomous non-observe commit semantics before proposal time
+- `deployment-restricted` and `emergency-override` policy scopes now produce materially different planner/action surfaces
+- deterministic coverage now includes:
+  - external/group control-plane hiding
+  - restricted-scope commit narrowing
+  - emergency-override control-plane exposure
+- living runtime docs updated: `AGENT_LOGIC_SUMMARY.md`, `AGENT_LOGIC_DIAGRAM.md`, `docs/security.md`
 
 Open issues:
-- pending
+- final legacy queue-centric cleanup, observability convergence, and acceptance reconciliation remain for Phase 7
 
 ### Phase 7
 

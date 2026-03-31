@@ -152,6 +152,7 @@ sequenceDiagram
             Ego->>Dash: emit scratchpad_head (with optional debug snapshot)
             Note over Ego,Planner: For Id-origin thoughts, Ego reapplies Id convergence state and action filtering before planner decide internalize without escalation removes contact_user and reflect_internal so planner-visible terminal reflection stays evidence-bound
             Note over Ego,Planner: Planner-visible actions are prefiltered by conversation instruction trust, current thread data trust, and action contract metadata before prompt build
+            Note over Ego,Planner: Layered early policy shaping now also applies policy-scope, channel-surface, principal-role, and action-effect rules before proposal time control-plane actions are hidden from non-admin/non-internal surfaces and restricted scopes lose direct/autonomous commit semantics early
             Ego->>Planner: decide(context)
             Note over Ego,Planner: PromptBudgetAllocator reserves required-core/context floors with message-overhead accounting, trims optional first, and emits prompt_budget_allocation
             Note over Ego,Planner: Planner prompt includes conversation security summary, thread trust state, percept summary/family, opportunity summary/kind, allowed intentions/commit modes, and trigger provenance summary untrusted external content is framed as data, not instruction

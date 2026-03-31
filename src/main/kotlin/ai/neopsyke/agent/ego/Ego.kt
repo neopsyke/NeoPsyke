@@ -880,23 +880,18 @@ class Ego(
                 descriptor.allowedInstructionTrust.contains(conversationContext.security.instructionTrust) &&
                     descriptor.allowedArgumentDataTrust.contains(threadSecurityContext.aggregatedDataTrust)
             }
-        val policyActionTypes = plannerDescriptors.map { it.actionType }.toSet()
-        val availableActions = (motorCortex.availableActionTypes() intersect policyActionTypes) - disabled
-        val dispatchableActions = (motorCortex.dispatchableActionTypes() intersect policyActionTypes) - disabled
-        val actionDefinitions = plannerDescriptors
-            .filter { descriptor -> descriptor.actionType in availableActions }
-            .map { descriptor ->
-                ActionPlanningDefinition(
-                    actionType = descriptor.actionType,
-                    description = descriptor.plannerDescription,
-                    payloadGuidance = descriptor.payloadGuidance,
-                    payloadSchemaExample = descriptor.payloadSchemaExample,
-                    effectClass = descriptor.effectClass,
-                    directCommitAllowed = descriptor.directCommitAllowed,
-                    supportsAutonomousCommit = descriptor.supportsAutonomousCommit,
-                    allowedInstructionTrust = descriptor.allowedInstructionTrust,
-                )
-            }
+        val implementedAvailableActions = motorCortex.availableActionTypes()
+        val implementedDispatchableActions = motorCortex.dispatchableActionTypes()
+        val shapedActionSurface = CognitivePolicyShaper.shapePlannerActions(
+            conversationContext = conversationContext,
+            threadSecurityContext = threadSecurityContext,
+            descriptors = plannerDescriptors,
+            disabledActions = disabled,
+        )
+        val availableActions = shapedActionSurface.availableActions intersect implementedAvailableActions
+        val dispatchableActions = shapedActionSurface.dispatchableActions intersect implementedDispatchableActions
+        val actionDefinitions = shapedActionSurface.actionDefinitions
+            .filter { definition -> definition.actionType in availableActions }
         val evidenceHints = buildEvidenceHints(rootInputId, sessionId)
         val goalSummary = buildNumberedGoalSummary()
         return PlannerContext(

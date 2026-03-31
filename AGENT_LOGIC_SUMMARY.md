@@ -231,6 +231,7 @@ It is intentionally high-level and should stay aligned with the code.
   - Id roots generate `EXECUTE` opportunities
   - goal-runtime roots generate `RESUME` opportunities from stable per-step thread roots
   - the queued scheduler item is now `ScheduledOpportunity(opportunity + trigger)`, not a source-category-only wrapper
+  - thread-level allowed commit modes are now shaped before planner choice from principal role, channel surface, and policy scope
 - `PendingInput` carries:
   - `source` metadata (for example `chat:<sessionId>`) so runtime telemetry can map root requests to conversation sessions.
   - `rootInputId` (UUID string identity for request-scoped orchestration)
@@ -241,7 +242,7 @@ It is intentionally high-level and should stay aligned with the code.
   - Appends user turn to dialogue deque for request percepts.
   - Stores request-turn content in short-term `MemoryStore`.
   - Feedback percepts intentionally skip user-turn insertion and `Id.onActivity("input_received")`.
-  - Creates/refreshes a task-scoped ephemeral scratchpad keyed by `rootInputId`; scratchpad telemetry also carries `root_input_received_at_ms` for latency/timing views.
+  - Creates/refreshes a thread-scoped workspace keyed by `rootInputId`; intention drafts remain separate and are not part of the planner-visible scratchpad summary.
   - Builds `PlannerContext`:
     - recent dialogue
     - queue snapshot
@@ -258,7 +259,14 @@ It is intentionally high-level and should stay aligned with the code.
     - current opportunity summary/kind plus allowed intentions and commit modes
     - currently available action types from `MotorCortex`
     - dispatchable action set + per-action planner definitions (description/payload guidance/example/effect class/commit capability/trust constraints)
-    - planner-visible action availability is prefiltered by conversation instruction trust and current thread data trust, so the planner only sees policy-shaped actions for the current thread
+    - planner-visible action availability is prefiltered by conversation instruction trust, current thread data trust, and layered early policy shaping (`CognitivePolicyShaper`)
+    - early policy shaping now operationalizes:
+      - policy scope (`default`, `deployment-restricted`, `emergency-override`)
+      - channel surface (`DIRECT`, `GROUP`, `SHARED_WORKSPACE`, `AUTOMATION`, `ADMIN`)
+      - principal role (owner/internal/admin vs external)
+      - action effect class (observe/private/public/stateful/control-plane)
+    - control-plane actions are removed from non-admin/non-internal planner surfaces before proposal time
+    - restricted scopes and external/group contexts lose direct/autonomous commit semantics before planning rather than discovering that only at final authorization
   - Runs planner (`LlmEgoPlanner`) and applies deliberation pressure override if needed.
   - Applies decision by enqueueing explicit intentions:
     - `OBSERVE` or `PREPARE` for action candidates, depending on action effect class

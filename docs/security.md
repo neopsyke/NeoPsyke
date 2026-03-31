@@ -331,6 +331,19 @@ This means that by the time the Ego forms an intention, the action surface has
 already been narrowed by multiple independent policy layers. The Superego
 reviews what remains, and the MotorCortex enforces the final guard.
 
+Phase 6 makes that earlier shaping materially visible in planner context:
+
+- `CognitivePolicyShaper` now shapes planner-visible action definitions before
+  proposal time
+- policy scope now affects early commit semantics:
+  - `deployment-restricted` removes direct/autonomous non-observe commit modes
+  - `emergency-override` re-enables trusted internal/admin control-plane
+    progression
+- channel surface and principal role now shape the planner surface:
+  - non-admin/non-internal contexts lose control-plane actions entirely
+  - external/group/shared contexts lose direct/autonomous commit semantics
+    before the planner chooses
+
 ---
 
 ## 6. Action Security Architecture
