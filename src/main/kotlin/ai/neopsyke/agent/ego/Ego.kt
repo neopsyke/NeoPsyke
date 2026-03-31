@@ -64,8 +64,8 @@ class Ego(
 
     /** Delegates to the attention scheduler's impulse enqueue. Used by the Id module. */
     fun enqueueImpulse(impulse: PendingImpulse, maxPendingImpulses: Int): Boolean {
-        cognitiveThreads.ensureForImpulse(impulse)
-        return scheduler.enqueueImpulse(impulse, maxPendingImpulses)
+        val opportunity = cognitiveThreads.impulseOpportunity(impulse)
+        return scheduler.enqueueImpulse(impulse, opportunity, maxPendingImpulses)
     }
 
     /** Checks whether the Ego has any pending work. Used by the Id module for idle detection. */
@@ -175,8 +175,8 @@ class Ego(
                                 kind = CognitiveThreadKind.GOAL_DIRECTED,
                                 title = work.stepDescription,
                             )
-                            cognitiveThreads.ensureForGoalWork(work)
-                            scheduler.enqueueProjectWork(work)
+                            val opportunity = cognitiveThreads.goalOpportunity(work)
+                            scheduler.enqueueProjectWork(work, opportunity)
                             runLoop()
                             cleanupAfterProjectAdvance(work.rootInputId)
                         }
@@ -200,18 +200,21 @@ class Ego(
                         kind = CognitiveThreadKind.CONVERSATION,
                         title = stimulus.content,
                     )
-                    if (!scheduler.enqueueInput(
-                            content = stimulus.content,
-                            priority = stimulus.metadata["priority"]
-                                ?.let { runCatching { InputPriority.valueOf(it) }.getOrNull() }
-                                ?: InputPriority.HIGH,
-                            source = stimulus.source,
-                            conversationContext = stimulus.conversationContext,
-                            rootInputId = stimulus.id,
-                            receivedAtMs = stimulus.receivedAt.toEpochMilli(),
-                            percept = percept.copy(cognitiveThreadId = thread.id),
-                            cognitiveThreadId = thread.id,
-                        )
+                    val input = PendingInput(
+                        id = 0L,
+                        content = stimulus.content,
+                        priority = stimulus.metadata["priority"]
+                            ?.let { runCatching { InputPriority.valueOf(it) }.getOrNull() }
+                            ?: InputPriority.HIGH,
+                        source = stimulus.source,
+                        rootInputId = stimulus.id,
+                        receivedAtMs = stimulus.receivedAt.toEpochMilli(),
+                        conversationContext = stimulus.conversationContext,
+                        percept = percept.copy(cognitiveThreadId = thread.id),
+                        cognitiveThreadId = thread.id,
+                    )
+                    val opportunity = cognitiveThreads.inputOpportunity(input)
+                    if (!scheduler.enqueueInput(input, opportunity)
                     ) {
                         logger.warn { "Input queue full; dropping input." }
                         instrumentation.emit(AgentEvents.warning("Input queue full; dropping input."))
@@ -255,6 +258,7 @@ class Ego(
             try {
                 when (task) {
                     is LoopTask.AttendOpportunity -> processOpportunity(task.item)
+                    is LoopTask.ProcessIntention -> processIntention(task.item)
                     is LoopTask.ProcessThought -> processThought(task.item)
                     is LoopTask.PerformAction -> processAction(task.item)
                 }
@@ -318,7 +322,7 @@ class Ego(
         }
     }
 
-    private suspend fun processInput(input: PendingInput) {
+    private suspend fun processInput(input: PendingInput, opportunity: Opportunity? = null) {
         val timing = PhaseTimingCollector("input", input.rootInputId)
         val convCtx = input.conversationContext
         val sessionId = resolveSessionId(convCtx)
@@ -346,7 +350,8 @@ class Ego(
             trigger = trigger,
             rootInputId = input.rootInputId,
             sessionId = sessionId,
-            conversationContext = convCtx
+            conversationContext = convCtx,
+            opportunity = opportunity,
         )
 
         timing.startPhase("meta_assessment")
@@ -374,11 +379,11 @@ class Ego(
         instrumentation.emit(AgentEvents.phaseTimings(timing.build()))
     }
 
-    private suspend fun processOpportunity(opportunity: OpportunityWorkItem) {
-        when (opportunity) {
-            is OpportunityWorkItem.InputOpportunity -> processInput(opportunity.input)
-            is OpportunityWorkItem.ImpulseOpportunity -> processImpulse(opportunity.impulse)
-            is OpportunityWorkItem.GoalWorkOpportunity -> processGoalWork(opportunity.workUnit)
+    private suspend fun processOpportunity(opportunity: ScheduledOpportunity) {
+        when (val trigger = opportunity.trigger) {
+            is OpportunityTrigger.Input -> processInput(trigger.input, opportunity.opportunity)
+            is OpportunityTrigger.Impulse -> processImpulse(trigger.impulse, opportunity.opportunity)
+            is OpportunityTrigger.GoalWork -> processGoalWork(trigger.workUnit, opportunity.opportunity)
         }
     }
 
@@ -451,7 +456,70 @@ class Ego(
         instrumentation.emit(AgentEvents.phaseTimings(timing.build()))
     }
 
-    private suspend fun processImpulse(impulse: PendingImpulse) {
+    private suspend fun processIntention(intention: QueuedIntention) {
+        instrumentation.emit(
+            AgentEvent(
+                type = "intention_processing",
+                data = mapOf(
+                    "intention_id" to intention.intention.id,
+                    "intention_kind" to intention.intention.kind.name.lowercase(),
+                    "action_type" to intention.proposedActionType?.id,
+                    "root_input_id" to intention.rootInputId,
+                )
+            )
+        )
+        when (intention.intention.kind) {
+            IntentionKind.DEFER -> {
+                processThought(
+                    PendingThought(
+                        id = intention.queueId,
+                        urgency = intention.urgency,
+                        content = intention.deferredThoughtContent ?: intention.intention.summary,
+                        passes = intention.deferredThoughtPasses,
+                        longTermMemoryRecallQuery = intention.deferredThoughtRecallQuery,
+                        rootInputId = intention.rootInputId,
+                        rootInputReceivedAtMs = intention.rootInputReceivedAtMs,
+                        deniedActionType = intention.deferredDeniedActionType,
+                        deniedActionPayload = intention.deferredDeniedActionPayload,
+                        denialReason = intention.deferredDenialReason,
+                        allowFallbackExplanation = intention.deferredAllowFallbackExplanation,
+                        planContext = intention.deferredPlanContext,
+                        denialReasonCode = intention.deferredDenialReasonCode,
+                        originActionType = intention.deferredOriginActionType,
+                        originActionObservedEvidence = intention.deferredOriginActionObservedEvidence,
+                        conversationContext = intention.conversationContext,
+                        origin = intention.origin,
+                    )
+                )
+            }
+
+            else -> {
+                val actionType = intention.proposedActionType ?: return
+                val payload = intention.proposedActionPayload ?: return
+                val summary = intention.proposedActionSummary ?: intention.intention.summary
+                val pendingAction = PendingAction(
+                    id = intention.queueId,
+                    urgency = intention.urgency,
+                    type = actionType,
+                    payload = payload,
+                    summary = summary,
+                    rootInputId = intention.rootInputId,
+                    rootInputReceivedAtMs = intention.rootInputReceivedAtMs,
+                    conversationContext = intention.conversationContext,
+                    requiresFollowUpThought = motorCortex.requiresFollowUpThought(actionType),
+                    followUpPrefix = motorCortex.followUpPrefix(actionType),
+                    argumentDataTrust = intention.argumentDataTrust,
+                    origin = intention.origin,
+                    intentionId = intention.intention.id,
+                    intentionKind = intention.intention.kind,
+                    requestedCommitMode = intention.intention.commitMode,
+                )
+                processAction(pendingAction)
+            }
+        }
+    }
+
+    private suspend fun processImpulse(impulse: PendingImpulse, opportunity: Opportunity? = null) {
         val timing = PhaseTimingCollector("impulse", impulse.rootImpulseId)
         val convCtx = impulse.conversationContext
         val sessionId = resolveSessionId(convCtx)
@@ -491,6 +559,7 @@ class Ego(
             rootInputId = impulse.rootImpulseId,
             sessionId = sessionId,
             conversationContext = convCtx,
+            opportunity = opportunity,
         )
         val idConstrainedContext = applyIdConvergenceContext(
             baseContext = baseContext,
@@ -540,7 +609,7 @@ class Ego(
         actionPipeline.reviewAndExecute(action)
     }
 
-    private suspend fun processGoalWork(work: GoalRunActivation) {
+    private suspend fun processGoalWork(work: GoalRunActivation, opportunity: Opportunity? = null) {
         val timing = PhaseTimingCollector("goal_work", "goal:${work.goalId}")
         val convCtx = work.conversationContext
         val sessionId = resolveSessionId(convCtx)
@@ -566,6 +635,7 @@ class Ego(
             rootInputId = work.rootInputId,
             sessionId = sessionId,
             conversationContext = convCtx,
+            opportunity = opportunity,
         )
 
         timing.startPhase("planner_decide")
@@ -621,6 +691,7 @@ class Ego(
         rootInputId: String? = null,
         sessionId: String = ConversationContext.DEFAULT_SESSION_ID,
         conversationContext: ConversationContext = ConversationContext.default(),
+        opportunity: Opportunity? = null,
     ): PlannerContext {
         val recentDialogue = dialogueFor(sessionId).takeLast(12)
         val shortTermSummary = memory.currentShortTermSummary()
@@ -698,6 +769,10 @@ class Ego(
             perceptFamily = latestPercept?.family,
             cognitiveThreadId = cognitiveThread?.id,
             cognitiveThreadStatus = cognitiveThread?.status,
+            opportunitySummary = opportunity?.summary.orEmpty(),
+            opportunityKind = opportunity?.kind,
+            allowedIntentions = opportunity?.allowedIntentions ?: setOf(IntentionKind.DEFER),
+            allowedCommitModes = opportunity?.allowedCommitModes ?: setOf(CommitMode.NOT_APPLICABLE),
             availableActions = availableActions,
             dispatchableActions = dispatchableActions,
             actionDefinitions = actionDefinitions,
@@ -1010,11 +1085,12 @@ class Ego(
 
     private fun taskType(task: LoopTask): String =
         when (task) {
-            is LoopTask.AttendOpportunity -> when (task.item) {
-                is OpportunityWorkItem.InputOpportunity -> "input"
-                is OpportunityWorkItem.ImpulseOpportunity -> "impulse"
-                is OpportunityWorkItem.GoalWorkOpportunity -> "goal_work"
+            is LoopTask.AttendOpportunity -> when (task.item.trigger) {
+                is OpportunityTrigger.Input -> "input"
+                is OpportunityTrigger.Impulse -> "impulse"
+                is OpportunityTrigger.GoalWork -> "goal_work"
             }
+            is LoopTask.ProcessIntention -> "intention"
             is LoopTask.ProcessThought -> "thought"
             is LoopTask.PerformAction -> "action"
         }
@@ -1022,17 +1098,15 @@ class Ego(
     private fun taskRootInputId(task: LoopTask): String? =
         when (task) {
             is LoopTask.AttendOpportunity -> task.item.rootInputId
+            is LoopTask.ProcessIntention -> task.item.rootInputId
             is LoopTask.ProcessThought -> task.item.rootInputId
             is LoopTask.PerformAction -> task.item.rootInputId
         }
 
     private fun taskRootInputReceivedAtMs(task: LoopTask): Long? =
         when (task) {
-            is LoopTask.AttendOpportunity -> when (val item = task.item) {
-                is OpportunityWorkItem.InputOpportunity -> item.input.receivedAtMs
-                is OpportunityWorkItem.ImpulseOpportunity -> item.impulse.receivedAtMs
-                is OpportunityWorkItem.GoalWorkOpportunity -> System.currentTimeMillis()
-            }
+            is LoopTask.AttendOpportunity -> task.item.receivedAtMs ?: System.currentTimeMillis()
+            is LoopTask.ProcessIntention -> task.item.rootInputReceivedAtMs
             is LoopTask.ProcessThought -> task.item.rootInputReceivedAtMs
             is LoopTask.PerformAction -> task.item.rootInputReceivedAtMs
         }
@@ -1040,6 +1114,7 @@ class Ego(
     private fun taskConversationContext(task: LoopTask): ConversationContext =
         when (task) {
             is LoopTask.AttendOpportunity -> task.item.conversationContext
+            is LoopTask.ProcessIntention -> task.item.conversationContext
             is LoopTask.ProcessThought -> task.item.conversationContext
             is LoopTask.PerformAction -> task.item.conversationContext
         }

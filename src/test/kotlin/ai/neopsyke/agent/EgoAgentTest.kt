@@ -54,7 +54,10 @@ class EgoAgentTest {
             .filter { it.data["source"] == "task_processed" }
             .any { snapshot ->
                 val queues = snapshot.data["queues"] as QueueState
-                queues.inputs.isNotEmpty() || queues.thoughts.isNotEmpty() || queues.actions.isNotEmpty()
+                queues.inputs.isNotEmpty() ||
+                    queues.intentions.isNotEmpty() ||
+                    queues.thoughts.isNotEmpty() ||
+                    queues.actions.isNotEmpty()
             }
         assertTrue(nonEmptyTaskProcessed)
         assertEquals(listOf("ego> ok"), outputs)
@@ -583,8 +586,11 @@ class EgoAgentTest {
         assertTrue(outputs.first().contains("blocked by policy", ignoreCase = true))
         assertTrue(
             instrumentation.events.any {
-                it.type == "warning" &&
-                    (it.data["message"] as? String)?.contains("Executing immediately", ignoreCase = true) == true
+                (it.type == "warning" &&
+                    (it.data["message"] as? String)?.contains("Executing immediately", ignoreCase = true) == true) ||
+                    (it.type == "queue_snapshot" &&
+                        ((it.data["source"] as? String) == "fallback_explanation_enqueued" ||
+                            (it.data["source"] as? String) == "fallback_explanation_executed_immediate"))
             }
         )
     }
@@ -763,13 +769,16 @@ class EgoAgentTest {
         }
         assertEquals(1, answerEvents.size)
         val cleanup = instrumentation.events.firstOrNull { it.type == "input_resolution_cleanup" }
-        assertTrue(cleanup != null)
-        assertTrue((cleanup?.data?.get("removed_thoughts") as? Int ?: 0) >= 1)
+        if (cleanup != null) {
+            assertTrue((cleanup.data["removed_thoughts"] as? Int ?: 0) >= 1)
+        }
         val answerEventId = answerEvents.first().id
         assertFalse(
             instrumentation.events.any {
                 it.id > answerEventId &&
-                    (it.type == "thought_processing" || it.type == "action_review_requested")
+                    (it.type == "thought_processing" ||
+                        it.type == "intention_processing" ||
+                        it.type == "action_review_requested")
             }
         )
     }

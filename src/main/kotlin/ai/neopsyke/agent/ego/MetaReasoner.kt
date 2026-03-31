@@ -355,6 +355,7 @@ class LlmMetaReasoner(
                 pending_inputs=${context.queue.pendingInputCount}
                 pending_thoughts=${context.queue.pendingThoughtCount}
                 pending_actions=${context.queue.pendingActionCount}
+                pending_intentions=${context.queue.pendingIntentionCount}
 
                 Long-term memory recall:
                 $longTermMemoryRecall

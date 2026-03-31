@@ -7,6 +7,7 @@ import ai.neopsyke.agent.memory.longterm.MemoryEventType
 import ai.neopsyke.agent.support.TextSecurity
 import ai.neopsyke.instrumentation.AgentEvents
 import ai.neopsyke.instrumentation.AgentInstrumentation
+import java.time.Instant
 
 private val logger = KotlinLogging.logger {}
 
@@ -21,6 +22,49 @@ internal class FallbackHandler(
     private val resolveSessionId: (ConversationContext) -> String,
     private val processActionFallback: suspend (PendingAction) -> Unit,
 ) {
+    private fun enqueueDeferredIntention(
+        content: String,
+        urgency: Urgency,
+        passes: Int,
+        rootInputId: String?,
+        rootInputReceivedAtMs: Long?,
+        deniedActionType: ActionType? = null,
+        deniedActionPayload: String? = null,
+        denialReason: String? = null,
+        denialReasonCode: String? = null,
+        allowFallbackExplanation: Boolean = false,
+        conversationContext: ConversationContext,
+        origin: ActionOrigin,
+        originActionType: ActionType? = null,
+        originActionObservedEvidence: Boolean? = null,
+    ): Boolean =
+        scheduler.enqueueIntention(
+            QueuedIntention(
+                intention = Intention(
+                    id = RootInputIds.next(),
+                    cognitiveThreadId = rootInputId ?: RootInputIds.next(),
+                    kind = IntentionKind.DEFER,
+                    summary = TextSecurity.preview(content, 160),
+                    createdAt = Instant.now(),
+                    conversationContext = conversationContext,
+                    commitMode = CommitMode.NOT_APPLICABLE,
+                    rootStimulusId = rootInputId,
+                ),
+                urgency = urgency,
+                rootInputReceivedAtMs = rootInputReceivedAtMs,
+                origin = origin,
+                deferredThoughtContent = content,
+                deferredThoughtPasses = passes,
+                deferredDeniedActionType = deniedActionType,
+                deferredDeniedActionPayload = deniedActionPayload,
+                deferredDenialReason = denialReason,
+                deferredDenialReasonCode = denialReasonCode,
+                deferredAllowFallbackExplanation = allowFallbackExplanation,
+                deferredOriginActionType = originActionType,
+                deferredOriginActionObservedEvidence = originActionObservedEvidence,
+            )
+        )
+
     fun handleDeniedAction(
         action: PendingAction,
         reason: String,
@@ -56,7 +100,7 @@ internal class FallbackHandler(
                 "If no safe alternative exists, prepare a concise explanation for the interlocutor.",
             config.planner.maxThoughtChars
         )
-        val queued = scheduler.enqueueThought(
+        val queued = enqueueDeferredIntention(
             content = denialThought,
             urgency = action.urgency,
             passes = action.attempts + 1,
@@ -69,6 +113,7 @@ internal class FallbackHandler(
             allowFallbackExplanation = action.origin.source != OriginSource.ID,
             conversationContext = conversationContext,
             origin = action.origin,
+            originActionType = action.type,
         )
         if (!queued) {
             instrumentation.emit(AgentEvents.warning("Failed to enqueue denial thought."))
@@ -99,7 +144,7 @@ internal class FallbackHandler(
                 "Choose the next best step: request approval, pick a lower-risk alternative, or explain the constraint to the interlocutor.",
             config.planner.maxThoughtChars
         )
-        val queued = scheduler.enqueueThought(
+        val queued = enqueueDeferredIntention(
             content = stagedThought,
             urgency = action.urgency,
             passes = action.attempts + 1,
@@ -112,6 +157,7 @@ internal class FallbackHandler(
             allowFallbackExplanation = action.origin.source != OriginSource.ID,
             conversationContext = conversationContext,
             origin = action.origin,
+            originActionType = action.type,
         )
         if (!queued) {
             instrumentation.emit(AgentEvents.warning("Failed to enqueue staged-action follow-up thought."))

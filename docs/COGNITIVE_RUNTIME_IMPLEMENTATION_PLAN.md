@@ -206,48 +206,100 @@ Open issues:
 ### Phase 2
 
 Status:
-- Not started
+- Completed
 
 Deterministic runs:
-- pending
+- `./gradlew --no-daemon compileKotlin compileTestKotlin`
+  - result: pass
+- `./gradlew --no-daemon test --tests 'ai.neopsyke.agent.AttentionSchedulerTest' --tests 'ai.neopsyke.agent.id.IdEgoIntegrationTest'`
+  - result: pass
+- `./gradlew --no-daemon test --tests 'ai.neopsyke.eval.AgentScenarioPackTest' --tests 'ai.neopsyke.agent.id.IdEgoLifecycleIntegrationTest'`
+  - result: pass
+- `./freud/bin/freud run cognitive-runtime-p2-opportunities`
+  - result: pass
+  - run dir: `/Users/victor.toral/atomitl/ai/NeoPsyke/.neopsyke/runs/freud/20260331T023023Z-cognitive-runtime-p2-opportunities-2666133191`
 
 Recorded curated eval suites:
-- pending
+- `./freud/bin/freud eval --live --record --lane low-llm --input freud/evals/cognitive-runtime/phase-2-opportunity-shaping.txt --timeout 120`
+  - result: pass
+  - run dir: `/Users/victor.toral/atomitl/ai/NeoPsyke/.neopsyke/runs/freud/20260331T023120Z-live-eval-541988224`
 
 Recorded BBH suites:
-- pending
+- `./freud/bin/freud bbh --live --lane low-llm --record`
+  - result: pass
+  - run dir: `/Users/victor.toral/atomitl/ai/NeoPsyke/.neopsyke/runs/freud/20260331T023132Z-bbh-low-llm-2439853818`
+  - pass rate: 24/24 (100.0%)
 
 Replay-debug sessions:
-- pending
+- none required; deterministic gate and both recorded live validations passed without replay iteration
 
 Acceptance items closed:
-- pending
+- scheduler queue items are now real `ScheduledOpportunity` instances carrying `Opportunity + OpportunityTrigger`
+- legacy `OpportunityWorkItem` category wrappers are removed from runtime scheduling
+- `CognitiveThreadStore` now generates policy-shaped `Opportunity` objects for input, impulse, and goal-work triggers
+- opportunity ordering now depends on `Opportunity.kind` and `Opportunity.salience`
+- planner context now includes opportunity summary/kind plus allowed intentions and commit modes
+- planner prompt now sees opportunity context explicitly
+- direct scheduler and Id integration tests updated to the new opportunity model
+- living runtime docs updated: `AGENT_LOGIC_SUMMARY.md`, `AGENT_LOGIC_DIAGRAM.md`, `docs/security.md`
 
 Open issues:
-- pending
+- resolved in Phase 3
 
 ### Phase 3
 
 Status:
-- Not started
+- Completed
 
 Deterministic runs:
-- pending
+- `./gradlew --no-daemon compileKotlin compileTestKotlin`
+  - result: pass
+- `./gradlew --no-daemon test --tests 'ai.neopsyke.agent.AttentionSchedulerTest' --tests 'ai.neopsyke.agent.id.IdEgoIntegrationTest' --tests 'ai.neopsyke.agent.id.IdEgoLifecycleIntegrationTest' --tests 'ai.neopsyke.eval.AgentScenarioPackTest'`
+  - result: pass
+- `./gradlew --no-daemon test --tests 'ai.neopsyke.agent.EgoPlannerTest' --tests 'ai.neopsyke.agent.actioncontrol.DefaultActionControlServiceTest' --tests 'ai.neopsyke.agent.actioncontrol.ConfiguredActionAuthorizationPolicyTest'`
+  - result: pass
+- `./gradlew --no-daemon test --tests 'ai.neopsyke.agent.EgoAgentTest'`
+  - result: pass
+- `./freud/bin/freud run cognitive-runtime-p3-intentions`
+  - result: pass
+  - run dir: `/Users/victor.toral/atomitl/ai/NeoPsyke/.neopsyke/runs/freud/20260331T030041Z-cognitive-runtime-p3-intentions-753093366`
 
 Recorded curated eval suites:
-- pending
+- `./freud/bin/freud eval --live --record --lane low-llm --input freud/evals/cognitive-runtime/phase-3-intentions.txt --timeout 120`
+  - result: pass
+  - run dir: `/Users/victor.toral/atomitl/ai/NeoPsyke/.neopsyke/runs/freud/20260331T030130Z-live-eval-1010125175`
 
 Recorded BBH suites:
-- pending
+- `./freud/bin/freud bbh --live --lane low-llm --record`
+  - result: pass
+  - run dir: `/Users/victor.toral/atomitl/ai/NeoPsyke/.neopsyke/runs/freud/20260331T030143Z-bbh-low-llm-2719313240`
+  - pass rate: 24/24 (100.0%)
 
 Replay-debug sessions:
-- pending
+- none required; the deterministic gate passed after local regression fixes, and both recorded live validations passed without replay iteration
 
 Acceptance items closed:
-- pending
+- attended opportunities now progress into explicit queued intentions before secure action execution
+- normal planner action proposals are now intention-shaped by effect class:
+  - `OBSERVE` for observe-class actions
+  - `PREPARE` for non-observe action candidates
+- deferred continuations are now represented as `IntentionKind.DEFER` queue items rather than first-class scheduler thoughts
+- plan steps, denial recovery, noop recovery, suppression recovery, and action follow-up continuations all flow through deferred intentions
+- normal runtime denial and staged-action recovery paths no longer enqueue `PendingThought` directly
+- `PendingThought` remains available as a deferred-continuation execution helper, but normal scheduling no longer depends on a thought queue category
+- action processing now carries intention metadata into review/execution via `PendingAction.intentionId`, `intentionKind`, and `requestedCommitMode`
+- action review now emits explicit intention progression for:
+  - requested review
+  - staged transitions
+  - authorization-request transitions
+  - final commit / observe execution transitions
+- scheduler priority now favors non-deferred intentions over equally urgent deferred continuations, preventing stale continuation work from outranking a chosen next move
+- root-scoped cleanup and pending-plan/convergence guards now understand deferred intentions as well as legacy thought helpers
+- living runtime docs updated: `AGENT_LOGIC_SUMMARY.md`, `AGENT_LOGIC_DIAGRAM.md`, `docs/security.md`
 
 Open issues:
-- pending
+- planner still returns legacy `EgoDecision` values; dispatcher translation is now the intention boundary
+- `PendingThought` still exists as an execution helper for deferred planner continuations, even though it is no longer the normal scheduler primitive
 
 ### Phase 4
 

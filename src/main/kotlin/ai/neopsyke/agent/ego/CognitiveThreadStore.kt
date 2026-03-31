@@ -1,12 +1,16 @@
 package ai.neopsyke.agent.ego
 
 import ai.neopsyke.agent.goal.GoalRunActivation
+import ai.neopsyke.agent.model.CommitMode
 import ai.neopsyke.agent.model.CognitiveThread
 import ai.neopsyke.agent.model.CognitiveThreadKind
 import ai.neopsyke.agent.model.CognitiveThreadSecurityContext
 import ai.neopsyke.agent.model.CognitiveThreadStatus
 import ai.neopsyke.agent.model.ConversationContext
 import ai.neopsyke.agent.model.ExternalContentArtifact
+import ai.neopsyke.agent.model.IntentionKind
+import ai.neopsyke.agent.model.Opportunity
+import ai.neopsyke.agent.model.OpportunityKind
 import ai.neopsyke.agent.model.PendingImpulse
 import ai.neopsyke.agent.model.PendingInput
 import ai.neopsyke.agent.model.Percept
@@ -37,6 +41,28 @@ internal class CognitiveThreadStore {
             percept = input.percept,
         )
 
+    fun inputOpportunity(input: PendingInput): Opportunity {
+        val thread = bindInput(input)
+        val percept = latestPercept(input.rootInputId, input.conversationContext)
+        return opportunityFor(
+            thread = thread,
+            kind = when (percept?.family) {
+                PerceptFamily.OBSERVATION -> OpportunityKind.INTEGRATE_FEEDBACK
+                PerceptFamily.FEEDBACK -> OpportunityKind.INTEGRATE_FEEDBACK
+                else -> OpportunityKind.RESPOND
+            },
+            summary = percept?.summary ?: input.content,
+            rootStimulusId = percept?.rootStimulusId ?: input.rootInputId,
+            salience = input.priority.level.toDouble(),
+            allowedIntentions = setOf(
+                IntentionKind.OBSERVE,
+                IntentionKind.PREPARE,
+                IntentionKind.DEFER,
+            ),
+            allowedCommitModes = setOf(CommitMode.NOT_APPLICABLE),
+        )
+    }
+
     fun bindPercept(
         percept: Percept,
         rootInputId: String = percept.rootStimulusId ?: RootInputIds.next(),
@@ -61,6 +87,23 @@ internal class CognitiveThreadStore {
             rootStimulusId = impulse.rootImpulseId,
         )
 
+    fun impulseOpportunity(impulse: PendingImpulse): Opportunity {
+        val thread = ensureForImpulse(impulse)
+        return opportunityFor(
+            thread = thread,
+            kind = OpportunityKind.EXECUTE,
+            summary = impulse.prompt,
+            rootStimulusId = impulse.rootImpulseId,
+            salience = impulse.tension,
+            allowedIntentions = setOf(
+                IntentionKind.OBSERVE,
+                IntentionKind.PREPARE,
+                IntentionKind.DEFER,
+            ),
+            allowedCommitModes = setOf(CommitMode.NOT_APPLICABLE),
+        )
+    }
+
     fun ensureForGoalWork(work: GoalRunActivation): CognitiveThread =
         ensureThread(
             rootInputId = work.rootInputId,
@@ -75,6 +118,28 @@ internal class CognitiveThreadStore {
             ),
             goalId = work.goalId,
         )
+
+    fun goalOpportunity(work: GoalRunActivation): Opportunity {
+        val thread = ensureForGoalWork(work)
+        return opportunityFor(
+            thread = thread,
+            kind = OpportunityKind.RESUME,
+            summary = work.stepDescription,
+            rootStimulusId = work.rootInputId,
+            salience = GOAL_SALIENCE,
+            allowedIntentions = setOf(
+                IntentionKind.PREPARE,
+                IntentionKind.STAGE,
+                IntentionKind.COMMIT,
+                IntentionKind.DEFER,
+            ),
+            allowedCommitModes = setOf(
+                CommitMode.NOT_APPLICABLE,
+                CommitMode.POLICY_AUTONOMOUS,
+                CommitMode.APPROVAL_BACKED,
+            ),
+        )
+    }
 
     fun thread(rootInputId: String?, conversationContext: ConversationContext): CognitiveThread? =
         record(rootInputId, conversationContext)?.thread
@@ -192,8 +257,35 @@ internal class CognitiveThreadStore {
 
     private fun previewTitle(value: String): String = TextSecurity.preview(value, MAX_TITLE_CHARS)
 
+    private fun opportunityFor(
+        thread: CognitiveThread,
+        kind: OpportunityKind,
+        summary: String,
+        rootStimulusId: String?,
+        salience: Double,
+        allowedIntentions: Set<IntentionKind>,
+        allowedCommitModes: Set<CommitMode>,
+    ): Opportunity =
+        Opportunity(
+            id = RootInputIds.next(),
+            cognitiveThreadId = thread.id,
+            kind = kind,
+            summary = previewTitle(summary),
+            salience = salience,
+            createdAt = Instant.now(),
+            conversationContext = thread.conversationContext,
+            securityContext = thread.securityContext,
+            rootStimulusId = rootStimulusId,
+            goalId = thread.goalId,
+            goalRunId = thread.goalRunId,
+            allowedIntentions = allowedIntentions,
+            allowedCommitModes = allowedCommitModes,
+            metadata = thread.metadata,
+        )
+
     private companion object {
         private const val MAX_THREADS: Int = 256
         private const val MAX_TITLE_CHARS: Int = 160
+        private const val GOAL_SALIENCE: Double = 0.75
     }
 }

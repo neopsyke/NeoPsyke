@@ -9,6 +9,7 @@ import ai.neopsyke.agent.support.TextSecurity
 import ai.neopsyke.instrumentation.AgentEvent
 import ai.neopsyke.instrumentation.AgentEvents
 import ai.neopsyke.instrumentation.AgentInstrumentation
+import java.time.Instant
 
 internal data class InputScope(
     val rootInputId: String?,
@@ -43,6 +44,53 @@ internal class DecisionDispatcher(
         externalActionSignatureHitsByInput.remove(scope)
     }
 
+    private fun enqueueDeferredIntention(
+        content: String,
+        urgency: Urgency,
+        nextPassCount: Int,
+        rootInputId: String?,
+        rootInputReceivedAtMs: Long?,
+        conversationContext: ConversationContext,
+        origin: ActionOrigin,
+        longTermMemoryRecallQuery: String? = null,
+        deniedActionType: ActionType? = null,
+        deniedActionPayload: String? = null,
+        denialReason: String? = null,
+        denialReasonCode: String? = null,
+        allowFallbackExplanation: Boolean = false,
+        planContext: PlanContext? = null,
+        originActionType: ActionType? = null,
+        originActionObservedEvidence: Boolean? = null,
+    ): Boolean =
+        scheduler.enqueueIntention(
+            QueuedIntention(
+                intention = Intention(
+                    id = RootInputIds.next(),
+                    cognitiveThreadId = rootInputId ?: RootInputIds.next(),
+                    kind = IntentionKind.DEFER,
+                    summary = TextSecurity.preview(content, 160),
+                    createdAt = Instant.now(),
+                    conversationContext = conversationContext,
+                    commitMode = CommitMode.NOT_APPLICABLE,
+                    rootStimulusId = rootInputId,
+                ),
+                urgency = urgency,
+                rootInputReceivedAtMs = rootInputReceivedAtMs,
+                origin = origin,
+                deferredThoughtContent = content,
+                deferredThoughtPasses = nextPassCount,
+                deferredThoughtRecallQuery = longTermMemoryRecallQuery,
+                deferredDeniedActionType = deniedActionType,
+                deferredDeniedActionPayload = deniedActionPayload,
+                deferredDenialReason = denialReason,
+                deferredAllowFallbackExplanation = allowFallbackExplanation,
+                deferredPlanContext = planContext,
+                deferredDenialReasonCode = denialReasonCode,
+                deferredOriginActionType = originActionType,
+                deferredOriginActionObservedEvidence = originActionObservedEvidence,
+            )
+        )
+
     suspend fun dispatch(
         decision: EgoDecision,
         nextPassCount: Int,
@@ -54,10 +102,10 @@ internal class DecisionDispatcher(
     ) {
         when (decision) {
             is EgoDecision.EnqueueThought -> {
-                val queued = scheduler.enqueueThought(
+                val queued = enqueueDeferredIntention(
                     content = decision.content,
                     urgency = decision.urgency,
-                    passes = nextPassCount,
+                    nextPassCount = nextPassCount,
                     longTermMemoryRecallQuery = decision.longTermMemoryRecallQuery,
                     rootInputId = rootInputId,
                     rootInputReceivedAtMs = rootInputReceivedAtMs,
@@ -125,10 +173,10 @@ internal class DecisionDispatcher(
                         "Previous proposed action repeats a denied action. Pick a materially different safe action.",
                         config.planner.maxThoughtChars
                     )
-                    val queuedRetry = scheduler.enqueueThought(
+                    val queuedRetry = enqueueDeferredIntention(
                         content = retryThought,
                         urgency = originThought.urgency,
-                        passes = nextPassCount,
+                        nextPassCount = nextPassCount,
                         rootInputId = rootInputId,
                         rootInputReceivedAtMs = rootInputReceivedAtMs,
                         deniedActionType = originThought.deniedActionType,
@@ -158,19 +206,27 @@ internal class DecisionDispatcher(
                     rootInputReceivedAtMs = rootInputReceivedAtMs,
                     conversationContext = conversationContext
                 )
-                val queued = scheduler.enqueueAction(
-                    type = decision.actionType,
-                    payload = decision.payload,
-                    summary = decision.summary,
-                    urgency = decision.urgency,
-                    requiresFollowUpThought = motorCortex.requiresFollowUpThought(decision.actionType),
-                    followUpPrefix = motorCortex.followUpPrefix(decision.actionType),
-                    attempts = nextPassCount,
-                    rootInputId = rootInputId,
-                    rootInputReceivedAtMs = rootInputReceivedAtMs,
-                    conversationContext = conversationContext,
-                    argumentDataTrust = deliberation.threadSecurityContext(rootInputId, conversationContext).aggregatedDataTrust,
-                    origin = origin,
+                val intentionKind = intentionKindFor(decision.actionType)
+                val queued = scheduler.enqueueIntention(
+                    QueuedIntention(
+                        intention = Intention(
+                            id = RootInputIds.next(),
+                            cognitiveThreadId = rootInputId ?: RootInputIds.next(),
+                            kind = intentionKind,
+                            summary = decision.summary,
+                            createdAt = Instant.now(),
+                            conversationContext = conversationContext,
+                            commitMode = CommitMode.NOT_APPLICABLE,
+                            rootStimulusId = rootInputId,
+                        ),
+                        urgency = decision.urgency,
+                        rootInputReceivedAtMs = rootInputReceivedAtMs,
+                        proposedActionType = decision.actionType,
+                        proposedActionPayload = decision.payload,
+                        proposedActionSummary = decision.summary,
+                        argumentDataTrust = deliberation.threadSecurityContext(rootInputId, conversationContext).aggregatedDataTrust,
+                        origin = origin,
+                    )
                 )
                 instrumentation.emit(
                     AgentEvents.actionProposed(
@@ -182,14 +238,14 @@ internal class DecisionDispatcher(
                     )
                 )
                 if (!queued) {
-                    instrumentation.emit(AgentEvents.warning("Failed to enqueue proposed action."))
+                    instrumentation.emit(AgentEvents.warning("Failed to enqueue proposed intention."))
                     telemetry.recordQueueSaturation(
                         queueType = "action",
                         capacity = config.maxPendingActions,
-                        reason = "enqueue_action_failed_full"
+                        reason = "enqueue_intention_failed_full"
                     )
                 }
-                telemetry.emitQueueSnapshot("decision_action")
+                telemetry.emitQueueSnapshot("decision_intention")
             }
 
             is EgoDecision.EnqueuePlan -> {
@@ -317,10 +373,10 @@ internal class DecisionDispatcher(
                         "Plan step ${index + 1}/${decision.steps.size}: $stepDescription",
                         config.planner.maxThoughtChars
                     )
-                    val queued = scheduler.enqueueThought(
+                    val queued = enqueueDeferredIntention(
                         content = stepContent,
                         urgency = decision.urgency,
-                        passes = nextPassCount,
+                        nextPassCount = nextPassCount,
                         rootInputId = rootInputId,
                         rootInputReceivedAtMs = rootInputReceivedAtMs,
                         planContext = PlanContext(
@@ -380,10 +436,10 @@ internal class DecisionDispatcher(
                     }
                     val denialReasonCode = decision.denialReasonCode ?: originThought?.denialReasonCode
                     val noopThought = TextSecurity.clamp("Noop decision: ${decision.reason}", config.planner.maxThoughtChars)
-                    val queued = scheduler.enqueueThought(
+                    val queued = enqueueDeferredIntention(
                         content = noopThought,
                         urgency = Urgency.LOW,
-                        passes = nextPassCount,
+                        nextPassCount = nextPassCount,
                         rootInputId = rootInputId,
                         rootInputReceivedAtMs = rootInputReceivedAtMs,
                         deniedActionType = deniedActionType,
@@ -450,10 +506,10 @@ internal class DecisionDispatcher(
                 "or provide a concise fallback explanation if completion is not possible.",
             config.planner.maxThoughtChars
         )
-        val queued = scheduler.enqueueThought(
+        val queued = enqueueDeferredIntention(
             content = convergenceThought,
             urgency = decision.urgency,
-            passes = nextPassCount,
+            nextPassCount = nextPassCount,
             rootInputId = rootInputId,
             rootInputReceivedAtMs = rootInputReceivedAtMs,
             allowFallbackExplanation = originThought?.allowFallbackExplanation ?: true,
@@ -520,6 +576,15 @@ internal class DecisionDispatcher(
         val normalized = (listOf(goal) + steps)
             .joinToString("|") { it.lowercase().replace(Regex("\\s+"), " ").trim() }
         return normalized.hashCode().toString(16)
+    }
+
+    private fun intentionKindFor(actionType: ActionType): IntentionKind {
+        val effectClass = motorCortex.actionRegistry().contract(actionType)?.effectClass
+        return if (effectClass == ActionEffectClass.OBSERVE) {
+            IntentionKind.OBSERVE
+        } else {
+            IntentionKind.PREPARE
+        }
     }
 
     private companion object {

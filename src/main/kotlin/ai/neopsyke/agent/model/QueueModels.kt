@@ -87,12 +87,16 @@ data class PendingAction(
     val followUpPrefix: String = "Action completed.",
     val argumentDataTrust: DataTrust = DataTrust.TRUSTED_DATA,
     val origin: ActionOrigin = ActionOrigin.USER,
+    val intentionId: String? = null,
+    val intentionKind: IntentionKind = IntentionKind.PREPARE,
+    val requestedCommitMode: CommitMode = CommitMode.NOT_APPLICABLE,
 )
 
 data class QueueSnapshot(
     val pendingInputCount: Int,
     val pendingThoughtCount: Int,
     val pendingActionCount: Int,
+    val pendingIntentionCount: Int = 0,
     val pendingImpulseCount: Int = 0,
 )
 
@@ -105,36 +109,75 @@ data class QueueState(
     val inputs: List<PendingInput>,
     val thoughts: List<PendingThought>,
     val actions: List<PendingAction>,
+    val intentions: List<QueuedIntention> = emptyList(),
 )
 
-sealed interface OpportunityWorkItem {
-    val id: Long
+sealed interface OpportunityTrigger {
     val rootInputId: String
     val conversationContext: ConversationContext
+    val receivedAtMs: Long?
 
-    data class InputOpportunity(val input: PendingInput) : OpportunityWorkItem {
-        override val id: Long = input.id
+    data class Input(val input: PendingInput) : OpportunityTrigger {
         override val rootInputId: String = input.rootInputId
         override val conversationContext: ConversationContext = input.conversationContext
+        override val receivedAtMs: Long = input.receivedAtMs
     }
 
-    data class ImpulseOpportunity(val impulse: PendingImpulse) : OpportunityWorkItem {
-        override val id: Long = impulse.id
+    data class Impulse(val impulse: PendingImpulse) : OpportunityTrigger {
         override val rootInputId: String = impulse.rootImpulseId
         override val conversationContext: ConversationContext = impulse.conversationContext
+        override val receivedAtMs: Long = impulse.receivedAtMs
     }
 
-    data class GoalWorkOpportunity(val workUnit: ai.neopsyke.agent.goal.GoalRunActivation) : OpportunityWorkItem {
-        override val id: Long = workUnit.rootInputId.hashCode().toLong()
+    data class GoalWork(val workUnit: ai.neopsyke.agent.goal.GoalRunActivation) : OpportunityTrigger {
         override val rootInputId: String = workUnit.rootInputId
-        override val conversationContext: ConversationContext = ConversationContext.default()
+        override val conversationContext: ConversationContext = workUnit.conversationContext
+        override val receivedAtMs: Long? = null
     }
 }
 
 sealed interface LoopTask {
-    data class AttendOpportunity(val item: OpportunityWorkItem) : LoopTask
+    data class AttendOpportunity(val item: ScheduledOpportunity) : LoopTask
+    data class ProcessIntention(val item: QueuedIntention) : LoopTask
     data class ProcessThought(val item: PendingThought) : LoopTask
     data class PerformAction(val item: PendingAction) : LoopTask
+}
+
+data class ScheduledOpportunity(
+    val queueId: Long,
+    val opportunity: Opportunity,
+    val trigger: OpportunityTrigger,
+) {
+    val id: Long get() = queueId
+    val rootInputId: String get() = trigger.rootInputId
+    val conversationContext: ConversationContext get() = trigger.conversationContext
+    val receivedAtMs: Long? get() = trigger.receivedAtMs
+}
+
+data class QueuedIntention(
+    val queueId: Long = 0,
+    val intention: Intention,
+    val urgency: Urgency,
+    val rootInputReceivedAtMs: Long? = null,
+    val proposedActionType: ActionType? = null,
+    val proposedActionPayload: String? = null,
+    val proposedActionSummary: String? = null,
+    val argumentDataTrust: DataTrust = DataTrust.TRUSTED_DATA,
+    val origin: ActionOrigin = ActionOrigin.USER,
+    val deferredThoughtContent: String? = null,
+    val deferredThoughtPasses: Int = 0,
+    val deferredThoughtRecallQuery: String? = null,
+    val deferredDeniedActionType: ActionType? = null,
+    val deferredDeniedActionPayload: String? = null,
+    val deferredDenialReason: String? = null,
+    val deferredAllowFallbackExplanation: Boolean = false,
+    val deferredPlanContext: PlanContext? = null,
+    val deferredDenialReasonCode: String? = null,
+    val deferredOriginActionType: ActionType? = null,
+    val deferredOriginActionObservedEvidence: Boolean? = null,
+) {
+    val rootInputId: String? get() = intention.rootStimulusId
+    val conversationContext: ConversationContext get() = intention.conversationContext
 }
 
 object RootInputIds {

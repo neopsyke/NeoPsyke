@@ -18,6 +18,7 @@ import ai.neopsyke.instrumentation.AgentEvent
 import ai.neopsyke.instrumentation.AgentEvents
 import ai.neopsyke.instrumentation.AgentInstrumentation
 import ai.neopsyke.instrumentation.PhaseTimingCollector
+import java.time.Instant
 
 private val logger = KotlinLogging.logger {}
 
@@ -56,6 +57,12 @@ internal class ActionReviewPipeline(
         timing.startPhase("scratchpad_final_pass")
         val resolvedAction = applyScratchpadFinalPass(action, sessionId)
         instrumentation.emit(AgentEvents.actionReviewRequested(resolvedAction))
+        emitIntentionTransition(
+            action = resolvedAction,
+            stage = "review_requested",
+            kind = resolvedAction.intentionKind,
+            commitMode = resolvedAction.requestedCommitMode,
+        )
         if (resolvedAction.isFallbackExplanation) {
             executeFallbackBypass(resolvedAction, sessionId, convCtx, timing)
             return
@@ -121,6 +128,13 @@ internal class ActionReviewPipeline(
                         )
                     )
                 )
+                emitIntentionTransition(
+                    action = resolvedAction,
+                    stage = "staged",
+                    kind = IntentionKind.STAGE,
+                    commitMode = controlResult.authorizationDecision.commitMode,
+                    extras = mapOf("staged_action_id" to controlResult.stagedAction.id)
+                )
                 if (controlResult.stagedAction.commitMode == CommitMode.POLICY_AUTONOMOUS) {
                     instrumentation.emit(
                         AgentEvents.warning(
@@ -130,6 +144,13 @@ internal class ActionReviewPipeline(
                     instrumentation.emit(AgentEvents.phaseTimings(timing.build()))
                     return
                 }
+                emitIntentionTransition(
+                    action = resolvedAction,
+                    stage = "request_authorization",
+                    kind = IntentionKind.REQUEST_AUTHORIZATION,
+                    commitMode = controlResult.authorizationDecision.commitMode,
+                    extras = mapOf("staged_action_id" to controlResult.stagedAction.id)
+                )
                 fallbackHandler.handleStagedAction(
                     action = resolvedAction,
                     stagedAction = controlResult.stagedAction,
@@ -187,6 +208,20 @@ internal class ActionReviewPipeline(
         val convCtx = resolvedAction.conversationContext
         val sessionId = resolveSessionId(convCtx)
         val outcome = controlResult.outcome
+        emitIntentionTransition(
+            action = resolvedAction,
+            stage = "commit",
+            kind = if (resolvedAction.intentionKind == IntentionKind.OBSERVE) {
+                IntentionKind.OBSERVE
+            } else {
+                IntentionKind.COMMIT
+            },
+            commitMode = controlResult.authorization.commitMode,
+            extras = mapOf(
+                "staged_action_id" to controlResult.stagedAction.id,
+                "authorization_id" to controlResult.authorization.id,
+            )
+        )
         processExecutedAction(
             resolvedAction = resolvedAction,
             outcome = outcome,
@@ -414,6 +449,8 @@ internal class ActionReviewPipeline(
                 data = mapOf(
                     "action_id" to resolvedAction.id,
                     "action_type" to resolvedAction.type.id,
+                    "intention_kind" to resolvedAction.intentionKind.name.lowercase(),
+                    "requested_commit_mode" to resolvedAction.requestedCommitMode.name.lowercase(),
                     "progress" to authorizationDecision.progress.name.lowercase(),
                     "commit_mode" to authorizationDecision.commitMode.name.lowercase(),
                     "reason" to authorizationDecision.reason,
@@ -476,6 +513,29 @@ internal class ActionReviewPipeline(
                 observedEvidence = false,
             )
         }
+    }
+
+    private fun emitIntentionTransition(
+        action: PendingAction,
+        stage: String,
+        kind: IntentionKind,
+        commitMode: CommitMode,
+        extras: Map<String, Any?> = emptyMap(),
+    ) {
+        instrumentation.emit(
+            AgentEvent(
+                type = "intention_transition",
+                data = mapOf(
+                    "action_id" to action.id,
+                    "intention_id" to action.intentionId,
+                    "intention_kind" to kind.name.lowercase(),
+                    "stage" to stage,
+                    "commit_mode" to commitMode.name.lowercase(),
+                    "action_type" to action.type.id,
+                    "root_input_id" to action.rootInputId,
+                ) + extras
+            )
+        )
     }
 
     // ── Post-execute bookkeeping ──
@@ -827,17 +887,26 @@ internal class ActionReviewPipeline(
                 "Do not use tool or function wrappers.",
             config.planner.maxThoughtChars
         )
-        val queued = scheduler.enqueueThought(
-            content = followUpThought,
-            urgency = resolvedAction.urgency,
-            passes = resolvedAction.attempts,
-            rootInputId = resolvedAction.rootInputId,
-            rootInputReceivedAtMs = resolvedAction.rootInputReceivedAtMs,
-            allowFallbackExplanation = true,
-            originActionType = resolvedAction.type,
-            originActionObservedEvidence = observed,
-            conversationContext = convCtx,
-            origin = resolvedAction.origin,
+        val queued = scheduler.enqueueIntention(
+            QueuedIntention(
+                intention = Intention(
+                    id = RootInputIds.next(),
+                    cognitiveThreadId = resolvedAction.rootInputId ?: RootInputIds.next(),
+                    kind = IntentionKind.DEFER,
+                    summary = TextSecurity.preview(followUpThought, 160),
+                    createdAt = Instant.now(),
+                    conversationContext = convCtx,
+                    rootStimulusId = resolvedAction.rootInputId,
+                ),
+                urgency = resolvedAction.urgency,
+                rootInputReceivedAtMs = resolvedAction.rootInputReceivedAtMs,
+                origin = resolvedAction.origin,
+                deferredThoughtContent = followUpThought,
+                deferredThoughtPasses = resolvedAction.attempts,
+                deferredAllowFallbackExplanation = true,
+                deferredOriginActionType = resolvedAction.type,
+                deferredOriginActionObservedEvidence = observed,
+            )
         )
         if (!queued) {
             instrumentation.emit(AgentEvents.warning("Failed to enqueue follow-up thought after action."))

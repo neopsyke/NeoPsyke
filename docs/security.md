@@ -255,8 +255,15 @@ At each stage:
   bounds.
 - **Opportunity**: prohibited or impossible next steps are pruned. Only actions
   allowed by policy and provenance are surfaced to the Ego.
+  Current runtime now materializes these as real scheduled `Opportunity`
+  objects carrying kind, salience, allowed intentions, and allowed commit modes
+  before planner choice.
 - **Intention**: the Ego selects from already policy-shaped opportunities. It
   cannot widen the action surface it receives.
+  Current runtime now materializes explicit queued intentions for normal
+  observe/prepare/defer progression, and action review emits explicit
+  stage/request-authorization/commit intention transitions as secure execution
+  advances.
 - **Prepared/staged/committed action**: the action lifecycle enforces
   deterministic policy, Superego judgment, durable authorization, and final
   motor guard.

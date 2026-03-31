@@ -70,7 +70,8 @@ class LlmEgoPlanner(
                     "trigger" to triggerLabel,
                     "pending_inputs" to context.queue.pendingInputCount,
                     "pending_thoughts" to context.queue.pendingThoughtCount,
-                    "pending_actions" to context.queue.pendingActionCount
+                    "pending_actions" to context.queue.pendingActionCount,
+                    "pending_intentions" to context.queue.pendingIntentionCount,
                 )
             )
         )
@@ -1584,6 +1585,18 @@ class LlmEgoPlanner(
         val perceptFamily = context.perceptFamily?.name?.lowercase() ?: "none"
         val cognitiveThreadId = context.cognitiveThreadId ?: "none"
         val cognitiveThreadStatus = context.cognitiveThreadStatus?.name?.lowercase() ?: "none"
+        val opportunitySummary = context.opportunitySummary.ifBlank { "none" }
+        val opportunityKind = context.opportunityKind?.name?.lowercase() ?: "none"
+        val allowedIntentions = context.allowedIntentions
+            .map { it.name.lowercase() }
+            .sorted()
+            .joinToString(", ")
+            .ifBlank { "none" }
+        val allowedCommitModes = context.allowedCommitModes
+            .map { it.name.lowercase() }
+            .sorted()
+            .joinToString(", ")
+            .ifBlank { "none" }
         val deliberation = context.deliberation
         val availableActionList = context.availableActions
             .map { it.id }
@@ -1718,6 +1731,7 @@ class LlmEgoPlanner(
                     pending_inputs=${context.queue.pendingInputCount}
                     pending_thoughts=${context.queue.pendingThoughtCount}
                     pending_actions=${context.queue.pendingActionCount}
+                    pending_intentions=${context.queue.pendingIntentionCount}
                     """.trimIndent()
                 ),
                 PromptBudgetAllocator.Section(
@@ -1758,6 +1772,19 @@ class LlmEgoPlanner(
                     percept_summary=$perceptSummary
                     cognitive_thread_id=$cognitiveThreadId
                     cognitive_thread_status=$cognitiveThreadStatus
+                    """.trimIndent()
+                ),
+                PromptBudgetAllocator.Section(
+                    key = "planner_opportunity_context",
+                    role = ChatRole.USER,
+                    band = PromptBudgetAllocator.Band.REQUIRED_CONTEXT,
+                    floorTokens = 18,
+                    content = """
+                    Opportunity context:
+                    opportunity_kind=$opportunityKind
+                    opportunity_summary=$opportunitySummary
+                    allowed_intentions=$allowedIntentions
+                    allowed_commit_modes=$allowedCommitModes
                     """.trimIndent()
                 ),
                 PromptBudgetAllocator.Section(

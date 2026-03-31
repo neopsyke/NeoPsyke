@@ -106,18 +106,23 @@ It is intentionally high-level and should stay aligned with the code.
   - Interactive startup requires dashboard mode enabled; without dashboard input path the loop does not start.
 - `runLoop()` (bounded by `config.planner.maxLoopStepsPerInput`):
   - Scheduler priority:
-    - Input opportunities first
-    - Then Id impulse opportunities
-    - Then goal-work opportunities
-    - Then highest-urgency between pending action and thought
+    - Scheduled cognitive opportunities first
+    - opportunity ordering is now driven by real `Opportunity.kind` + `Opportunity.salience`, not only by source category wrappers
+    - current runtime ranks:
+      - `RESPOND` / `INTEGRATE_FEEDBACK` before
+      - `EXECUTE` before
+      - `RESUME` / `CLARIFY` / `FINALIZE`
+    - then highest-urgency between pending intention, pending action, and legacy deferred-thought helper work
+    - at equal urgency, non-`DEFER` intentions outrank deferred continuations so a chosen next move beats stale backlog continuation work
   - Per task:
     - Activate session context for the task (`sessionId` + interlocutor) before deliberation/memory updates.
     - Advance deliberation step.
     - Dispatch one of:
       - `processOpportunity`:
-        - `InputOpportunity` -> `processInput`
-        - `ImpulseOpportunity` -> `processImpulse`
-        - `GoalWorkOpportunity` -> `processGoalWork` (goal-runtime execution path; method name still reflects current internal state-machine lineage)
+        - `OpportunityTrigger.Input` -> `processInput`
+        - `OpportunityTrigger.Impulse` -> `processImpulse`
+        - `OpportunityTrigger.GoalWork` -> `processGoalWork` (goal-runtime execution path; method name still reflects current internal state-machine lineage)
+      - `processIntention`
       - `processThought`
       - `processAction`
     - Catch task errors, emit warning, continue loop.
@@ -219,6 +224,11 @@ It is intentionally high-level and should stay aligned with the code.
   - latest bound percept
   - root-scoped security/trust state
   - observed-artifact trust degradation
+- Phase 2 scheduling now uses real `Opportunity` objects generated from thread-bound triggers:
+  - input roots generate `RESPOND` or `INTEGRATE_FEEDBACK` opportunities
+  - Id roots generate `EXECUTE` opportunities
+  - goal-runtime roots generate `RESUME` opportunities
+  - the queued scheduler item is now `ScheduledOpportunity(opportunity + trigger)`, not a source-category-only wrapper
 - `PendingInput` carries:
   - `source` metadata (for example `chat:<sessionId>`) so runtime telemetry can map root requests to conversation sessions.
   - `rootInputId` (UUID string identity for request-scoped orchestration)
@@ -242,14 +252,19 @@ It is intentionally high-level and should stay aligned with the code.
     - conversation security summary and trigger provenance summary
     - thread security summary derived from root-scoped aggregated data trust + taint sources
     - latest percept summary/family plus current cognitive thread id/status
+    - current opportunity summary/kind plus allowed intentions and commit modes
     - currently available action types from `MotorCortex`
     - dispatchable action set + per-action planner definitions (description/payload guidance/example/effect class/commit capability/trust constraints)
     - planner-visible action availability is prefiltered by conversation instruction trust and current thread data trust, so the planner only sees policy-shaped actions for the current thread
   - Runs planner (`LlmEgoPlanner`) and applies deliberation pressure override if needed.
-  - Applies decision by enqueueing thought/action/plan/noop-thought.
+  - Applies decision by enqueueing explicit intentions:
+    - `OBSERVE` or `PREPARE` for action candidates, depending on action effect class
+    - `DEFER` for planner continuations, plan steps, noop recovery, denial recovery, and action follow-up continuation
 
 ## Thought Path
 - `processThought`:
+  - No longer represents the normal scheduler primitive for runtime progression.
+  - Instead, it is the execution helper used when a queued `DEFER` intention is attended and converted back into planner-facing deferred continuation context.
   - Drops thought if `passes >= maxThoughtPasses`.
   - If dropped and fallback explanation is allowed, enqueue fallback `contact_user` action.
   - Duplicate fallback `contact_user` enqueues are suppressed per `(root input, sessionId)` scope so one session cannot block fallback for another.
@@ -259,6 +274,23 @@ It is intentionally high-level and should stay aligned with the code.
     - optional meta assessment/guidance
     - planner decision
     - decision application
+
+## Intention Path
+- `processIntention`:
+  - Emits `intention_processing` telemetry with root scope and action type when present.
+  - `DEFER` intentions reconstruct deferred continuation state and hand it to `processThought`.
+  - Action-carrying intentions become `PendingAction`s annotated with:
+    - `intentionId`
+    - `intentionKind`
+    - `requestedCommitMode`
+  - Current live intention kinds in normal runtime use:
+    - `OBSERVE` for observe-class actions such as search/fetch style evidence gathering
+    - `PREPARE` for non-observe action candidates before policy review
+    - `DEFER` for planner continuations and recovery/follow-up paths
+  - Later secure-action progression now records explicit intention transitions for:
+    - `STAGE`
+    - `REQUEST_AUTHORIZATION`
+    - `COMMIT`
 
 ## Action Path
 - `processAction`:
@@ -279,14 +311,17 @@ It is intentionally high-level and should stay aligned with the code.
     - External evidence is required only for volatile/unknown factual intents; transformation/personal-memory/subjective/static-reasoning intents bypass evidence requirement.
     - When volatile evidence is required but evidence actions are unavailable, verifier uses a graceful allow path (`TASK_EVIDENCE_UNAVAILABLE_GRACEFUL`) to avoid dead-loop retries.
                 - Forced-terminal system `contact_user` actions (decision-pressure safety path) are exempt from `DecisionVerifier` evidence requirement.
+  - Intention metadata is now carried into the review/execution half:
+    - Superego review telemetry includes the originating intention kind and requested commit mode
+    - action-review telemetry emits explicit `intention_transition` events as the action moves through requested review, staging, authorization-request, and final commit/observe execution
   - If denied:
     - Record denial metrics/evidence.
-    - Enqueue a new "find safe alternative" thought with denied-action context, including structured `reason_code`.
+    - Enqueue a new deferred intention carrying the denied-action context, including structured `reason_code`.
     - Attempt reflection-lesson persistence into long-term memory (filtered; technical/system failures are skipped).
     - Notify `ActionLifecycleObserver` subscribers so goal-origin actions can translate denials back into goal-step state.
   - If allowed:
     - Route into `ActionControlService`.
-    - `ALLOW_STAGE` persists a staged action and feeds a structured approval-or-alternative thought back into Ego.
+    - `ALLOW_STAGE` persists a staged action and feeds a structured deferred continuation back into Ego while also emitting explicit `STAGE` and `REQUEST_AUTHORIZATION` intention transitions when appropriate.
     - `ALLOW_COMMIT` persists a staged snapshot plus authorization artifact, then executes through `MotorCortex`.
     - `ActionControlService` refusals are treated as denials and fed back into Ego replanning.
     - `ActionControlService` also enforces centralized per-root-input rate limits across observe, messaging, reflection, goal-operation, and commit/control-plane action families.
@@ -310,7 +345,7 @@ It is intentionally high-level and should stay aligned with the code.
     - Follow-up thought behavior is action-descriptor-driven (`requiresFollowUpThought` + `followUpPrefix`).
     - Optionally run immediate post-allowed-action long-term memory assessment.
 - For `contact_user`, response latency is emitted and per-input evidence cache is cleared.
-- After `contact_user`, pending thoughts/actions for the same `(root input, sessionId)` scope are pruned from queues
+- After `contact_user`, pending intentions/thoughts/actions for the same `(root input, sessionId)` scope are pruned from queues
     (`input_resolution_cleanup`) so stale plan/follow-up work cannot continue cycling or leak across sessions.
 - After `contact_user`, the scratchpad digest is captured into the session digest ring before scratchpad destruction.
 - After `contact_user`, the scratchpad for that root input is destroyed (`scratchpad_destroyed`).
