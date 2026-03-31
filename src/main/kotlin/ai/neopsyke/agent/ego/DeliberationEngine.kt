@@ -6,11 +6,13 @@ import ai.neopsyke.agent.cortex.motor.actions.NoopEvidenceArtifactStore
 import ai.neopsyke.agent.model.ActionOutcome
 import ai.neopsyke.agent.model.ActionType
 import ai.neopsyke.agent.config.AgentConfig
+import ai.neopsyke.agent.model.CognitiveThreadSnapshot
 import ai.neopsyke.agent.model.CognitiveThreadSecurityContext
 import ai.neopsyke.agent.model.ConversationContext
 import ai.neopsyke.agent.model.DeliberationState
 import ai.neopsyke.agent.model.EgoDecision
 import ai.neopsyke.agent.model.EgoTrigger
+import ai.neopsyke.agent.model.Intention
 import ai.neopsyke.agent.model.PendingAction
 import ai.neopsyke.agent.model.PlannerContext
 import ai.neopsyke.agent.model.Urgency
@@ -233,6 +235,13 @@ internal class DeliberationEngine(
         conversationContext: ConversationContext,
     ): CognitiveThreadSecurityContext =
         cognitiveThreads.threadSecurityContext(rootInputId, conversationContext)
+
+    fun recordIntention(rootInputId: String?, conversationContext: ConversationContext, intention: Intention) {
+        cognitiveThreads.recordIntention(rootInputId, conversationContext, intention)
+    }
+
+    fun threadSnapshot(rootInputId: String?, conversationContext: ConversationContext): CognitiveThreadSnapshot? =
+        cognitiveThreads.snapshot(rootInputId, conversationContext)
 
     // --- Action retry budget / cooldown ---
 

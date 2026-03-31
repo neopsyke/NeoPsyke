@@ -98,6 +98,17 @@ func SessionReplayTest(opts SessionReplayTestOpts) (*SessionReplayTestResult, er
 
 	recordDir := recordResult.RunDir
 	sessionDir := filepath.Join(recordDir, "session")
+	if recordResult.ExitCode != 0 || recordResult.Verdict.Verdict == "error" || recordResult.Verdict.Verdict == "timeout" {
+		return &SessionReplayTestResult{
+			Passed:    false,
+			RecordDir: recordDir,
+			ExitCode:  1,
+		}, fmt.Errorf(
+			"record step failed before session artifacts were complete: verdict=%s detail=%s",
+			recordResult.Verdict.Verdict,
+			recordResult.Verdict.Detail,
+		)
+	}
 	opts.Progress.Emit(ProgressUpdate{
 		Phase:   "record",
 		Status:  "pass",

@@ -13,8 +13,14 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
 import ai.neopsyke.agent.model.ActionType
+import ai.neopsyke.agent.model.CognitiveThreadSnapshot
+import ai.neopsyke.agent.model.CognitiveThreadStatus
 import ai.neopsyke.agent.model.ConversationContext
 import ai.neopsyke.agent.model.Interlocutor
+import ai.neopsyke.agent.model.Intention
+import ai.neopsyke.agent.model.IntentionKind
+import ai.neopsyke.agent.model.Opportunity
+import ai.neopsyke.agent.model.OpportunityKind
 import ai.neopsyke.agent.model.PendingAction
 import ai.neopsyke.agent.model.PendingInput
 import ai.neopsyke.agent.model.QueueState
@@ -43,7 +49,7 @@ class DashboardStateStore(
         fun accepts(event: AgentEvent): Boolean = eventFilter?.invoke(event) ?: true
     }
 
-    private val mapper = jacksonObjectMapper()
+    private val mapper = jacksonObjectMapper().findAndRegisterModules()
     private val lock = Any()
     private val events = ArrayDeque<AgentEvent>()
     private var loopStatus: String = "idle"
@@ -76,6 +82,9 @@ class DashboardStateStore(
     private val promptBudgetByDegradationPath = mutableMapOf<String, Long>()
     private val scratchpadSnapshots = ArrayDeque<ScratchpadSnapshotRecord>()
     private val latestScratchpadSnapshotByRoot = mutableMapOf<String, ScratchpadSnapshotRecord>()
+    private val liveThreadsById = linkedMapOf<String, CognitiveThreadSnapshot>()
+    private val terminalThreadsById = linkedMapOf<String, CognitiveThreadSnapshot>()
+    private val threadIdByRootInput = mutableMapOf<String, String>()
     private val phaseTimings = ArrayDeque<Map<String, Any?>>()
     private var heapMetrics: Map<String, Any?>? = null
     private val subscribers = mutableSetOf<EventSubscriber>()
@@ -311,6 +320,22 @@ class DashboardStateStore(
                     heapMetrics = event.data
                 }
 
+                "cognitive_thread_updated" -> {
+                    mergeThreadSnapshotLocked(event.data)
+                }
+
+                "opportunity_enqueued" -> {
+                    mergeOpportunityLocked(event.data)
+                }
+
+                "intention_processing" -> {
+                    mergeIntentionLocked(event.data)
+                }
+
+                "intention_transition" -> {
+                    mergeIntentionTransitionLocked(event.data)
+                }
+
                 "scratchpad_destroyed" -> {
                     val rootId = event.data["root_input_id"].asString()
                     if (rootId != null) {
@@ -411,6 +436,7 @@ class DashboardStateStore(
                 instrumentationHealth = instrumentationHealthMap(),
                 taskVerifierStats = taskVerifierStatsMap(),
                 promptBudgetStats = promptBudgetStatsMap(),
+                cognitiveThreads = threadSnapshotsLocked(includeTerminal = true, limit = DEFAULT_THREAD_SNAPSHOT_LIMIT),
                 recentEvents = snapshotRecentEventsLocked(
                     eventsLimit = boundedEventLimit,
                     includeHeavyEvents = includeHeavyEvents
@@ -429,6 +455,26 @@ class DashboardStateStore(
         return mapper.writeValueAsString(snapshot)
     }
 
+    fun threadIndexJson(includeTerminal: Boolean = false, limit: Int = DEFAULT_THREAD_SNAPSHOT_LIMIT): String {
+        val payload = synchronized(lock) {
+            val items = threadSnapshotsLocked(includeTerminal = includeTerminal, limit = limit)
+            mapOf(
+                "generated_at" to System.currentTimeMillis(),
+                "count" to items.size,
+                "include_terminal" to includeTerminal,
+                "items" to items
+            )
+        }
+        return mapper.writeValueAsString(payload)
+    }
+
+    fun threadSnapshotJson(threadId: String): String? {
+        val payload = synchronized(lock) {
+            threadSnapshotLocked(threadId) ?: return null
+        }
+        return mapper.writeValueAsString(payload)
+    }
+
     private fun snapshotRecentEventsLocked(eventsLimit: Int, includeHeavyEvents: Boolean): List<AgentEvent> {
         if (eventsLimit <= 0) {
             return emptyList()
@@ -443,6 +489,22 @@ class DashboardStateStore(
         val ordered = filtered.sortedBy { it.id }
         return if (ordered.size <= eventsLimit) ordered else ordered.takeLast(eventsLimit)
     }
+
+    private fun threadSnapshotsLocked(includeTerminal: Boolean, limit: Int): List<CognitiveThreadSnapshot> {
+        val live = liveThreadsById.values.asSequence()
+        val terminal = if (includeTerminal) {
+            terminalThreadsById.values.asSequence()
+        } else {
+            emptySequence<CognitiveThreadSnapshot>()
+        }
+        return (live + terminal)
+            .sortedByDescending { it.thread.lastUpdatedAt }
+            .take(limit.coerceAtLeast(0))
+            .toList()
+    }
+
+    private fun threadSnapshotLocked(threadId: String): CognitiveThreadSnapshot? =
+        liveThreadsById[threadId] ?: terminalThreadsById[threadId]
 
     fun scratchpadIndexJson(): String {
         val payload = synchronized(lock) {
@@ -1059,6 +1121,124 @@ class DashboardStateStore(
         return "s-${System.nanoTime().toString(36)}"
     }
 
+    private fun mergeThreadSnapshotLocked(data: Map<String, Any?>) {
+        val providedSnapshot = data["thread_snapshot"] as? CognitiveThreadSnapshot
+        val snapshot = providedSnapshot ?: return
+        val threadId = snapshot.thread.id
+        val rootInputId = data["root_input_id"].asString()
+        if (rootInputId != null) {
+            threadIdByRootInput[rootInputId] = threadId
+        }
+        storeThreadSnapshotLocked(snapshot)
+    }
+
+    private fun mergeOpportunityLocked(data: Map<String, Any?>) {
+        val threadId = resolveThreadIdLocked(data) ?: return
+        val current = threadSnapshotLocked(threadId) ?: return
+        val rootInputId = data["root_input_id"].asString()
+        val opportunity = Opportunity(
+            id = data["opportunity_id"].asString() ?: return,
+            cognitiveThreadId = threadId,
+            kind = data["opportunity_kind"].asOpportunityKind() ?: OpportunityKind.RESPOND,
+            summary = data["summary"]?.toString().orEmpty(),
+            salience = 0.0,
+            createdAt = current.thread.lastUpdatedAt,
+            conversationContext = current.thread.conversationContext,
+            securityContext = current.thread.securityContext,
+            rootStimulusId = rootInputId,
+            goalId = current.thread.goalId,
+            goalRunId = current.thread.goalRunId,
+            allowedIntentions = emptySet(),
+            allowedCommitModes = emptySet(),
+            metadata = current.thread.metadata,
+        )
+        storeThreadSnapshotLocked(current.copy(latestOpportunity = opportunity))
+    }
+
+    private fun mergeIntentionLocked(data: Map<String, Any?>) {
+        val threadId = resolveThreadIdLocked(data) ?: return
+        val current = threadSnapshotLocked(threadId) ?: return
+        val intention = Intention(
+            id = data["intention_id"].asString() ?: return,
+            cognitiveThreadId = threadId,
+            kind = data["intention_kind"].asIntentionKind() ?: IntentionKind.DEFER,
+            summary = data["summary"]?.toString()?.ifBlank { null }
+                ?: data["action_type"]?.toString()
+                ?: current.latestIntention?.summary
+                ?: current.thread.title,
+            createdAt = current.thread.lastUpdatedAt,
+            conversationContext = current.thread.conversationContext,
+            commitMode = current.latestIntention?.commitMode ?: ai.neopsyke.agent.model.CommitMode.NOT_APPLICABLE,
+            rootStimulusId = data["root_input_id"].asString() ?: current.thread.rootStimulusId,
+            goalId = current.thread.goalId,
+            goalRunId = current.thread.goalRunId,
+            metadata = current.thread.metadata,
+        )
+        storeThreadSnapshotLocked(current.copy(latestIntention = intention))
+    }
+
+    private fun mergeIntentionTransitionLocked(data: Map<String, Any?>) {
+        val threadId = resolveThreadIdLocked(data) ?: return
+        val current = threadSnapshotLocked(threadId) ?: return
+        val stage = data["stage"]?.toString()?.trim().orEmpty()
+        val kind = data["intention_kind"].asIntentionKind() ?: current.latestIntention?.kind ?: IntentionKind.DEFER
+        val summary = listOfNotNull(
+            data["summary"]?.toString()?.trim()?.takeIf { it.isNotBlank() },
+            current.latestIntention?.summary,
+            stage.takeIf { it.isNotBlank() }?.replace('_', ' ')
+        ).firstOrNull().orEmpty()
+        val intention = Intention(
+            id = data["intention_id"].asString() ?: current.latestIntention?.id ?: return,
+            cognitiveThreadId = threadId,
+            kind = kind,
+            summary = summary,
+            createdAt = current.latestIntention?.createdAt ?: current.thread.lastUpdatedAt,
+            conversationContext = current.thread.conversationContext,
+            commitMode = current.latestIntention?.commitMode ?: ai.neopsyke.agent.model.CommitMode.NOT_APPLICABLE,
+            rootStimulusId = current.thread.rootStimulusId,
+            goalId = current.thread.goalId,
+            goalRunId = current.thread.goalRunId,
+            metadata = current.thread.metadata,
+        )
+        storeThreadSnapshotLocked(current.copy(latestIntention = intention))
+    }
+
+    private fun resolveThreadIdLocked(data: Map<String, Any?>): String? {
+        val direct = data["thread_id"].asString()
+        if (direct != null) {
+            return direct
+        }
+        val rootInputId = data["root_input_id"].asString() ?: return null
+        return threadIdByRootInput[rootInputId]
+    }
+
+    private fun storeThreadSnapshotLocked(snapshot: CognitiveThreadSnapshot) {
+        val threadId = snapshot.thread.id
+        if (snapshot.thread.status.isTerminalThreadStatus()) {
+            liveThreadsById.remove(threadId)
+            terminalThreadsById[threadId] = snapshot
+            trimThreadSnapshotsLocked(terminalThreadsById, MAX_TERMINAL_THREAD_SNAPSHOTS)
+        } else {
+            terminalThreadsById.remove(threadId)
+            liveThreadsById[threadId] = snapshot
+            trimThreadSnapshotsLocked(liveThreadsById, MAX_LIVE_THREAD_SNAPSHOTS)
+        }
+    }
+
+    private fun trimThreadSnapshotsLocked(
+        target: LinkedHashMap<String, CognitiveThreadSnapshot>,
+        limit: Int,
+    ) {
+        while (target.size > limit) {
+            val iterator = target.entries.iterator()
+            if (!iterator.hasNext()) {
+                return
+            }
+            iterator.next()
+            iterator.remove()
+        }
+    }
+
     private fun captureScratchpadSnapshot(data: Map<String, Any?>) {
         val rootInputId = data["root_input_id"].asString() ?: return
         val rootInputReceivedAtMs = data["root_input_received_at_ms"].asLong() ?: 0L
@@ -1173,6 +1353,23 @@ class DashboardStateStore(
             else -> 0.0
         }
 
+    private fun Any?.asOpportunityKind(): OpportunityKind? =
+        this?.toString()
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+            ?.uppercase()
+            ?.let { raw -> OpportunityKind.entries.firstOrNull { it.name == raw } }
+
+    private fun Any?.asIntentionKind(): IntentionKind? =
+        this?.toString()
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+            ?.uppercase()
+            ?.let { raw -> IntentionKind.entries.firstOrNull { it.name == raw } }
+
+    private fun CognitiveThreadStatus.isTerminalThreadStatus(): Boolean =
+        this == CognitiveThreadStatus.RESOLVED || this == CognitiveThreadStatus.FAILED
+
     private data class ScratchpadSnapshotRecord(
         val rootInputId: String,
         val rootInputReceivedAtMs: Long,
@@ -1207,6 +1404,9 @@ class DashboardStateStore(
         const val SUBSCRIBER_CHANNEL_CAPACITY: Int = 1_000
         const val TRANSPORT_CHANNEL_CAPACITY: Int = 2_048
         const val MAX_PHASE_TIMINGS: Int = 200
+        const val DEFAULT_THREAD_SNAPSHOT_LIMIT: Int = 100
+        const val MAX_LIVE_THREAD_SNAPSHOTS: Int = 256
+        const val MAX_TERMINAL_THREAD_SNAPSHOTS: Int = 512
         val PLANNER_CALL_SITES: Set<String> = setOf("input", "thought", "impulse")
         val ACTION_CONTROL_STREAM_EVENT_TYPES: Set<String> = setOf(
             "action_staged",
@@ -1263,6 +1463,7 @@ data class DashboardSnapshot(
     val instrumentationHealth: Map<String, Any?> = emptyMap(),
     val taskVerifierStats: Map<String, Any?> = emptyMap(),
     val promptBudgetStats: Map<String, Any?> = emptyMap(),
+    val cognitiveThreads: List<CognitiveThreadSnapshot> = emptyList(),
     val recentEvents: List<AgentEvent>,
     val phaseTimings: List<Map<String, Any?>> = emptyList(),
     val heapMetrics: Map<String, Any?>? = null,

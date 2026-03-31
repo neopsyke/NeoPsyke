@@ -171,6 +171,15 @@ class DashboardServer(
                 handleSse(exchange)
             }
         }
+        server.createContext("/api/obs/threads") { exchange ->
+            withRequestGuard(exchange, "obs_threads") {
+                if (exchange.requestMethod != "GET") {
+                    respondText(exchange, 405, "Method not allowed", "text/plain; charset=utf-8")
+                    return@withRequestGuard
+                }
+                handleThreadApi(exchange)
+            }
+        }
         server.createContext("/api/dashboard/events") { exchange ->
             withRequestGuard(exchange, "dashboard_events_sse") {
                 if (exchange.requestMethod != "GET") {
@@ -478,6 +487,33 @@ class DashboardServer(
         val snapshot = store.scratchpadSnapshotJson(rootInputId = rootId, version = version)
         if (snapshot == null) {
             respondText(exchange, 404, "Scratchpad snapshot not found", "text/plain; charset=utf-8")
+            return
+        }
+        respondText(exchange, 200, snapshot, "application/json; charset=utf-8")
+    }
+
+    private fun handleThreadApi(exchange: HttpExchange) {
+        val path = exchange.requestURI.path
+        if (path == "/api/obs/threads") {
+            val query = exchange.requestURI.query
+            val includeTerminal = parseBooleanQueryParam(query, "include_terminal") ?: false
+            val limit = parseQueryParam(query, "limit")?.toIntOrNull() ?: 100
+            respondText(
+                exchange,
+                200,
+                store.threadIndexJson(includeTerminal = includeTerminal, limit = limit),
+                "application/json; charset=utf-8"
+            )
+            return
+        }
+        val threadId = path.removePrefix("/api/obs/threads/").trim().takeIf { it.isNotBlank() }
+        if (threadId == null) {
+            respondText(exchange, 404, "Not found", "text/plain; charset=utf-8")
+            return
+        }
+        val snapshot = store.threadSnapshotJson(threadId)
+        if (snapshot == null) {
+            respondText(exchange, 404, "Cognitive thread not found", "text/plain; charset=utf-8")
             return
         }
         respondText(exchange, 200, snapshot, "application/json; charset=utf-8")

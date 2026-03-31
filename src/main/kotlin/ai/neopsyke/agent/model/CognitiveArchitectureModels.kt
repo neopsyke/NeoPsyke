@@ -65,6 +65,29 @@ data class CognitiveThread(
     val metadata: Map<String, String> = emptyMap(),
 )
 
+data class CognitiveThreadWaitState(
+    val status: CognitiveThreadStatus,
+    val reason: String? = null,
+    val since: Instant,
+    val resumeHint: String? = null,
+)
+
+data class CognitiveThreadTerminalState(
+    val status: CognitiveThreadStatus,
+    val summary: String,
+    val reason: String? = null,
+    val completedAt: Instant,
+)
+
+data class CognitiveThreadSnapshot(
+    val thread: CognitiveThread,
+    val latestPercept: Percept? = null,
+    val latestOpportunity: Opportunity? = null,
+    val latestIntention: Intention? = null,
+    val waitState: CognitiveThreadWaitState? = null,
+    val terminalState: CognitiveThreadTerminalState? = null,
+)
+
 enum class CognitiveThreadKind {
     CONVERSATION,
     DRIVE,

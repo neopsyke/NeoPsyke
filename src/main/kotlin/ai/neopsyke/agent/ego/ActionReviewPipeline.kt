@@ -524,6 +524,7 @@ internal class ActionReviewPipeline(
                     "action_id" to action.id,
                     "intention_id" to action.intentionId,
                     "intention_kind" to kind.name.lowercase(),
+                    "summary" to action.summary,
                     "stage" to stage,
                     "commit_mode" to commitMode.name.lowercase(),
                     "action_type" to action.type.id,

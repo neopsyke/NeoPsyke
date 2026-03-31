@@ -5,6 +5,8 @@ import ai.neopsyke.agent.model.ConversationContext
 import ai.neopsyke.agent.model.ConversationSecurityContexts
 import ai.neopsyke.agent.model.CognitiveThreadKind
 import ai.neopsyke.agent.model.CognitiveThreadStatus
+import ai.neopsyke.agent.model.Intention
+import ai.neopsyke.agent.model.IntentionKind
 import ai.neopsyke.agent.model.DataTrust
 import ai.neopsyke.agent.model.ExternalContentArtifact
 import ai.neopsyke.agent.model.Interlocutor
@@ -19,6 +21,7 @@ import java.time.Instant
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class CognitiveThreadStoreTest {
@@ -160,5 +163,67 @@ class CognitiveThreadStoreTest {
         assertEquals(work, continuation)
         assertEquals(CognitiveThreadStatus.WAITING, waiting?.status)
         assertEquals(CognitiveThreadStatus.RESOLVED, store.thread(work.rootInputId, automationContext)?.status)
+    }
+
+    @Test
+    fun `ordinary thread retains wait and terminal inspection state after cleanup`() {
+        val store = CognitiveThreadStore()
+        val context = ConversationContext.default()
+        val input = PendingInput(
+            id = 1L,
+            content = "Find the latest filing",
+            rootInputId = "root-user-1",
+            conversationContext = context,
+            percept = Percept(
+                id = RootInputIds.next(),
+                family = PerceptFamily.REQUEST,
+                summary = "Find the latest filing",
+                source = "chat:web",
+                occurredAt = Instant.now(),
+                conversationContext = context,
+                rootStimulusId = "root-user-1",
+            ),
+        )
+
+        store.bindInput(input)
+        val opportunity = store.inputOpportunity(input)
+        store.recordIntention(
+            rootInputId = input.rootInputId,
+            conversationContext = context,
+            intention = Intention(
+                id = "intention-1",
+                cognitiveThreadId = store.thread(input.rootInputId, context)!!.id,
+                kind = IntentionKind.OBSERVE,
+                summary = "Observe the filing source",
+                createdAt = Instant.now(),
+                conversationContext = context,
+                rootStimulusId = input.rootInputId,
+            ),
+        )
+
+        store.markWaiting(input.rootInputId, context, reason = "await_http", resumeHint = "website_fetch")
+        val waitingSnapshot = store.snapshot(input.rootInputId, context)
+        assertNotNull(waitingSnapshot)
+        assertEquals(CognitiveThreadStatus.WAITING, waitingSnapshot.thread.status)
+        assertEquals("await_http", waitingSnapshot.waitState?.reason)
+        assertEquals(opportunity.id, waitingSnapshot.latestOpportunity?.id)
+        assertEquals(IntentionKind.OBSERVE, waitingSnapshot.latestIntention?.kind)
+
+        store.markResolved(
+            rootInputId = input.rootInputId,
+            conversationContext = context,
+            reason = "input_resolved",
+            summary = "Delivered filing summary",
+        )
+        store.clearForInput(input.rootInputId, context.sessionId)
+
+        val terminalSnapshot = store.snapshot(input.rootInputId, context)
+        assertNotNull(terminalSnapshot)
+        assertEquals(CognitiveThreadStatus.RESOLVED, terminalSnapshot.thread.status)
+        assertEquals("Delivered filing summary", terminalSnapshot.terminalState?.summary)
+        assertEquals("input_resolved", terminalSnapshot.terminalState?.reason)
+        assertNull(terminalSnapshot.waitState)
+        assertTrue(store.retainedRootInputIds().isEmpty())
+        assertEquals(1, store.snapshots(includeTerminal = true).size)
     }
 }

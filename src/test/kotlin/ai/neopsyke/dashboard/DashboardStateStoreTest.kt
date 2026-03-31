@@ -5,16 +5,31 @@ import com.fasterxml.jackson.module.kotlin.readValue
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
 import ai.neopsyke.agent.model.ActionType
+import ai.neopsyke.agent.model.CognitiveThread
+import ai.neopsyke.agent.model.CognitiveThreadKind
+import ai.neopsyke.agent.model.CognitiveThreadSnapshot
+import ai.neopsyke.agent.model.CognitiveThreadStatus
+import ai.neopsyke.agent.model.CognitiveThreadTerminalState
+import ai.neopsyke.agent.model.CognitiveThreadWaitState
 import ai.neopsyke.agent.model.ConversationContext
+import ai.neopsyke.agent.model.ConversationSecurityContexts
 import ai.neopsyke.agent.model.Interlocutor
+import ai.neopsyke.agent.model.Intention
+import ai.neopsyke.agent.model.IntentionKind
+import ai.neopsyke.agent.model.Opportunity
+import ai.neopsyke.agent.model.OpportunityKind
 import ai.neopsyke.agent.model.PendingAction
 import ai.neopsyke.agent.model.PendingInput
 import ai.neopsyke.agent.model.PendingThought
+import ai.neopsyke.agent.model.Percept
+import ai.neopsyke.agent.model.PerceptFamily
 import ai.neopsyke.agent.model.QueueState
+import ai.neopsyke.agent.model.RootInputIds
 import ai.neopsyke.agent.model.Urgency
 import ai.neopsyke.instrumentation.AgentEvent
 import ai.neopsyke.metrics.MetricsSnapshot
 import ai.neopsyke.metrics.MetricsTotals
+import java.time.Instant
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
@@ -22,7 +37,7 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class DashboardStateStoreTest {
-    private val mapper = jacksonObjectMapper()
+    private val mapper = jacksonObjectMapper().findAndRegisterModules()
     private val nowMs = System.currentTimeMillis()
 
     @Test
@@ -262,6 +277,129 @@ class DashboardStateStoreTest {
         assertEquals("input_percept_bound", threadUpdate.data["reason"])
         assertEquals("opp-1", opportunity.data["opportunity_id"])
         assertEquals("input", opportunity.data["source"])
+    }
+
+    @Test
+    fun `thread inspection APIs retain live and terminal thread snapshots`() {
+        val store = DashboardStateStore(maxEvents = 20)
+        val context = ConversationContext(
+            sessionId = "thread-session",
+            interlocutor = Interlocutor.named("thread-user"),
+            security = ConversationSecurityContexts.ownerDirect(provider = "web", channelId = "thread-session"),
+        )
+        val snapshot = CognitiveThreadSnapshot(
+            thread = CognitiveThread(
+                id = "thread-1",
+                kind = CognitiveThreadKind.CONVERSATION,
+                status = CognitiveThreadStatus.WAITING,
+                title = "Find the filing",
+                conversationContext = context,
+                rootStimulusId = "root-1",
+                lastUpdatedAt = Instant.now(),
+            ),
+            latestPercept = Percept(
+                id = RootInputIds.next(),
+                family = PerceptFamily.REQUEST,
+                summary = "Find the filing",
+                source = "chat:web",
+                occurredAt = Instant.now(),
+                conversationContext = context,
+                rootStimulusId = "root-1",
+                cognitiveThreadId = "thread-1",
+            ),
+            latestOpportunity = Opportunity(
+                id = "opp-1",
+                cognitiveThreadId = "thread-1",
+                kind = OpportunityKind.RESPOND,
+                summary = "Respond with filing update",
+                salience = 0.9,
+                createdAt = Instant.now(),
+                conversationContext = context,
+                rootStimulusId = "root-1",
+            ),
+            latestIntention = Intention(
+                id = "intent-1",
+                cognitiveThreadId = "thread-1",
+                kind = IntentionKind.OBSERVE,
+                summary = "Observe the filing source",
+                createdAt = Instant.now(),
+                conversationContext = context,
+                rootStimulusId = "root-1",
+            ),
+            waitState = CognitiveThreadWaitState(
+                status = CognitiveThreadStatus.WAITING,
+                reason = "await_http",
+                since = Instant.now(),
+                resumeHint = "website_fetch",
+            ),
+        )
+        store.onEvent(
+            AgentEvent(
+                id = 1,
+                type = "cognitive_thread_updated",
+                data = mapOf(
+                    "root_input_id" to "root-1",
+                    "thread_id" to "thread-1",
+                    "thread_status" to "WAITING",
+                    "reason" to "feedback_bound",
+                    "thread_snapshot" to snapshot,
+                )
+            )
+        )
+        store.onEvent(
+            AgentEvent(
+                id = 2,
+                type = "intention_transition",
+                data = mapOf(
+                    "root_input_id" to "root-1",
+                    "thread_id" to "thread-1",
+                    "intention_id" to "intent-1",
+                    "intention_kind" to "commit",
+                    "stage" to "commit",
+                )
+            )
+        )
+        store.onEvent(
+            AgentEvent(
+                id = 3,
+                type = "cognitive_thread_updated",
+                data = mapOf(
+                    "root_input_id" to "root-1",
+                    "thread_id" to "thread-1",
+                    "thread_status" to "RESOLVED",
+                    "reason" to "input_terminal",
+                    "thread_snapshot" to snapshot.copy(
+                        thread = snapshot.thread.copy(
+                            status = CognitiveThreadStatus.RESOLVED,
+                            lastUpdatedAt = Instant.now(),
+                        ),
+                        waitState = null,
+                        terminalState = CognitiveThreadTerminalState(
+                            status = CognitiveThreadStatus.RESOLVED,
+                            summary = "Delivered filing summary",
+                            reason = "input_resolved",
+                            completedAt = Instant.now(),
+                        ),
+                    ),
+                )
+            )
+        )
+
+        val dashboardSnapshot: DashboardSnapshot = mapper.readValue(store.snapshotJson())
+        assertEquals(1, dashboardSnapshot.cognitiveThreads.size)
+        assertEquals(CognitiveThreadStatus.RESOLVED, dashboardSnapshot.cognitiveThreads.first().thread.status)
+        assertEquals("Delivered filing summary", dashboardSnapshot.cognitiveThreads.first().terminalState?.summary)
+
+        val index: Map<String, Any?> = mapper.readValue(store.threadIndexJson(includeTerminal = true))
+        val items = index["items"] as? List<*> ?: emptyList<Any?>()
+        assertEquals(1, items.size)
+
+        val detailJson = store.threadSnapshotJson("thread-1")
+        assertNotNull(detailJson)
+        val detail: Map<String, Any?> = mapper.readValue(detailJson)
+        @Suppress("UNCHECKED_CAST")
+        val terminalState = detail["terminalState"] as Map<String, Any?>
+        assertEquals("Delivered filing summary", terminalState["summary"])
     }
 
     @Test

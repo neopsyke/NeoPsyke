@@ -76,6 +76,30 @@ This trims the deterministic gate to the non-redundant final signoff gate:
 
 That `signoff-gate` command is the required non-live signoff gate.
 
+### Cognitive runtime phase gates
+
+The cognitive-runtime completion work uses named deterministic Freud gates so each phase can be validated against a narrower acceptance seam before the full signoff gate:
+
+```bash
+./freud/bin/freud run cognitive-runtime-p0-tests
+./freud/bin/freud run cognitive-runtime-p1-foundation
+./freud/bin/freud run cognitive-runtime-p2-opportunities
+./freud/bin/freud run cognitive-runtime-p3-intentions
+./freud/bin/freud run cognitive-runtime-p4-feedback
+./freud/bin/freud run cognitive-runtime-p5-goals-scratchpad
+./freud/bin/freud run cognitive-runtime-p6-policy-control
+./freud/bin/freud run cognitive-runtime-p7-convergence
+```
+
+Current deterministic gate shape:
+
+| Gate | Steps |
+|---|---|
+| `cognitive-runtime-p0-tests` | `preflight_compile`, `targeted_tests` |
+| `cognitive-runtime-p1-*` through `cognitive-runtime-p7-*` | `preflight_compile`, `full_tests`, `scenario_pack`, `reasoning_eval_logic` |
+
+These phase gates do not replace the final `signoff-gate`; they exist to make the architecture-completion loop enforceable phase by phase.
+
 ### 3. Scenario pack (`freud/scenarios/v1/`)
 
 A JSON-based pack of deterministic scenarios that test specific agent behaviors:
@@ -157,6 +181,22 @@ For testing individual inputs against the real agent:
 Provider-backed Freud evals require `--live`. Ordinary live evals still write
 the usual logs and artifacts, but replay material is only generated when you
 also pass `--record`.
+
+For the cognitive-runtime completion run, phase closure also requires recorded live validation:
+
+```bash
+./freud/bin/freud eval --live --record --lane low-llm --input freud/evals/cognitive-runtime/phase-1-thread-foundation.txt --timeout 120
+./freud/bin/freud bbh --live --lane low-llm --record
+```
+
+When a recorded live eval fails:
+
+```bash
+./freud/bin/freud eval --live --session-replay <run-dir>
+./freud/bin/freud eval --live --input <same-input> --cache-replay <run-dir>/session/llm-cache.jsonl
+```
+
+Use session replay to reproduce the full run-path deterministically and cache replay to isolate prompt/LLM divergence at the first changed call.
 
 ---
 

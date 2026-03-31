@@ -261,6 +261,22 @@ func TestFreudReplayCommandEndToEnd(t *testing.T) {
 	}
 }
 
+func TestFreudReplayCommandWithLaneEndToEnd(t *testing.T) {
+	root := repoRoot(t)
+	bin := buildFreudBinary(t, root)
+	tmp := t.TempDir()
+	mock := writeMockNeopsyke(t, tmp)
+	cfg := writeLiveConfig(t, tmp, mock, "")
+
+	output, exitCode := runFreud(t, root, bin, []string{"FREUD_WRITE_LOCAL_POINTERS=false"}, "--config", cfg, "test-freud-replay", "--lane", "low-llm")
+	if exitCode != 0 {
+		t.Fatalf("test-freud-replay --lane low-llm failed (%d):\n%s", exitCode, output)
+	}
+	if !strings.Contains(output, "PASSED") {
+		t.Fatalf("expected pass output, got:\n%s", output)
+	}
+}
+
 func TestReplayInteractiveCommandEndToEnd(t *testing.T) {
 	root := repoRoot(t)
 	bin := buildFreudBinary(t, root)

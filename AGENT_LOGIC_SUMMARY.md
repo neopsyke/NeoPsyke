@@ -137,6 +137,11 @@ It is intentionally high-level and should stay aligned with the code.
     - Reset deliberation state.
     - Reset per-input `MemorySystem` state.
     - Clear orphaned thread scratchpads plus all intention drafts, while preserving retained waiting/blocked thread workspaces and per-session scratchpad digests.
+    - Preserve bounded terminal thread snapshots for both goal and non-goal roots so completion/failure remains inspectable after ephemeral per-input state is cleared.
+  - Ordinary non-goal thread lifecycle now uses the same thread store semantics as goal roots:
+    - async waits update the owning thread to `WAITING` with resume metadata
+    - normal answer completion marks the owning thread `RESOLVED` before cleanup
+    - thread snapshots carry latest percept, latest opportunity, latest intention, wait state, and terminal summary
 
 ## Id Module and Impulse Lifecycle
 - Files:
@@ -638,6 +643,9 @@ It is intentionally high-level and should stay aligned with the code.
     - Chat control plane and session-scoped SSE: `/api/chat/*`
     - Observability snapshot/events/workspace: `/api/obs/*`
     - Action control inspection/approval/live updates: `/api/action-control/*`
+  - Observability snapshot payloads now include direct cognitive-thread inspection snapshots, and dedicated endpoints expose:
+    - `/api/obs/threads`
+    - `/api/obs/threads/{threadId}`
   - Workspace identity and timing are both exposed in telemetry/event payloads:
     - `root_input_id`: stable request identity key
     - `root_input_received_at_ms`: timing anchor used for latency/timeline correlation

@@ -61,19 +61,20 @@ internal class DecisionDispatcher(
         planContext: PlanContext? = null,
         originActionType: ActionType? = null,
         originActionObservedEvidence: Boolean? = null,
-    ): Boolean =
-        scheduler.enqueueIntention(
+    ): Boolean {
+        val intention = Intention(
+            id = RootInputIds.next(),
+            cognitiveThreadId = rootInputId ?: RootInputIds.next(),
+            kind = IntentionKind.DEFER,
+            summary = TextSecurity.preview(content, 160),
+            createdAt = Instant.now(),
+            conversationContext = conversationContext,
+            commitMode = CommitMode.NOT_APPLICABLE,
+            rootStimulusId = rootInputId,
+        )
+        val queued = scheduler.enqueueIntention(
             QueuedIntention(
-                intention = Intention(
-                    id = RootInputIds.next(),
-                    cognitiveThreadId = rootInputId ?: RootInputIds.next(),
-                    kind = IntentionKind.DEFER,
-                    summary = TextSecurity.preview(content, 160),
-                    createdAt = Instant.now(),
-                    conversationContext = conversationContext,
-                    commitMode = CommitMode.NOT_APPLICABLE,
-                    rootStimulusId = rootInputId,
-                ),
+                intention = intention,
                 urgency = urgency,
                 rootInputReceivedAtMs = rootInputReceivedAtMs,
                 origin = origin,
@@ -90,6 +91,11 @@ internal class DecisionDispatcher(
                 deferredOriginActionObservedEvidence = originActionObservedEvidence,
             )
         )
+        if (queued) {
+            deliberation.recordIntention(rootInputId, conversationContext, intention)
+        }
+        return queued
+    }
 
     suspend fun dispatch(
         decision: EgoDecision,
@@ -207,18 +213,19 @@ internal class DecisionDispatcher(
                     conversationContext = conversationContext
                 )
                 val intentionKind = intentionKindFor(decision.actionType)
+                val intention = Intention(
+                    id = RootInputIds.next(),
+                    cognitiveThreadId = rootInputId ?: RootInputIds.next(),
+                    kind = intentionKind,
+                    summary = decision.summary,
+                    createdAt = Instant.now(),
+                    conversationContext = conversationContext,
+                    commitMode = CommitMode.NOT_APPLICABLE,
+                    rootStimulusId = rootInputId,
+                )
                 val queued = scheduler.enqueueIntention(
                     QueuedIntention(
-                        intention = Intention(
-                            id = RootInputIds.next(),
-                            cognitiveThreadId = rootInputId ?: RootInputIds.next(),
-                            kind = intentionKind,
-                            summary = decision.summary,
-                            createdAt = Instant.now(),
-                            conversationContext = conversationContext,
-                            commitMode = CommitMode.NOT_APPLICABLE,
-                            rootStimulusId = rootInputId,
-                        ),
+                        intention = intention,
                         urgency = decision.urgency,
                         rootInputReceivedAtMs = rootInputReceivedAtMs,
                         proposedActionType = decision.actionType,
@@ -228,6 +235,9 @@ internal class DecisionDispatcher(
                         origin = origin,
                     )
                 )
+                if (queued) {
+                    deliberation.recordIntention(rootInputId, conversationContext, intention)
+                }
                 instrumentation.emit(
                     AgentEvents.actionProposed(
                         actionType = decision.actionType.id,

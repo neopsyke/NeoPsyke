@@ -5,9 +5,13 @@ import ai.neopsyke.agent.model.CommitMode
 import ai.neopsyke.agent.model.CognitiveThread
 import ai.neopsyke.agent.model.CognitiveThreadKind
 import ai.neopsyke.agent.model.CognitiveThreadSecurityContext
+import ai.neopsyke.agent.model.CognitiveThreadSnapshot
 import ai.neopsyke.agent.model.CognitiveThreadStatus
+import ai.neopsyke.agent.model.CognitiveThreadTerminalState
+import ai.neopsyke.agent.model.CognitiveThreadWaitState
 import ai.neopsyke.agent.model.ConversationContext
 import ai.neopsyke.agent.model.ExternalContentArtifact
+import ai.neopsyke.agent.model.Intention
 import ai.neopsyke.agent.model.IntentionKind
 import ai.neopsyke.agent.model.Opportunity
 import ai.neopsyke.agent.model.OpportunityKind
@@ -29,14 +33,27 @@ internal class CognitiveThreadStore {
     private data class ThreadRecord(
         val thread: CognitiveThread,
         val latestPercept: Percept? = null,
+        val latestOpportunity: Opportunity? = null,
+        val latestIntention: Intention? = null,
+        val waitState: CognitiveThreadWaitState? = null,
+        val terminalState: CognitiveThreadTerminalState? = null,
         val continuation: ContinuationState? = null,
-    )
+    ) {
+        fun snapshot(): CognitiveThreadSnapshot =
+            CognitiveThreadSnapshot(
+                thread = thread,
+                latestPercept = latestPercept,
+                latestOpportunity = latestOpportunity,
+                latestIntention = latestIntention,
+                waitState = waitState,
+                terminalState = terminalState,
+            )
+    }
 
-    private val threadsByScope: MutableMap<InputScope, ThreadRecord> =
-        object : LinkedHashMap<InputScope, ThreadRecord>(16, 0.75f, true) {
-            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<InputScope, ThreadRecord>): Boolean =
-                size > MAX_THREADS
-        }
+    private val activeThreadsByScope: MutableMap<InputScope, ThreadRecord> =
+        boundedRecordMap(MAX_ACTIVE_THREADS)
+    private val terminalThreadsByScope: MutableMap<InputScope, ThreadRecord> =
+        boundedRecordMap(MAX_TERMINAL_THREADS)
 
     fun bindInput(input: PendingInput): CognitiveThread =
         ensureThread(
@@ -54,8 +71,10 @@ internal class CognitiveThreadStore {
         return opportunityFor(
             thread = thread,
             kind = when (percept?.family) {
-                PerceptFamily.OBSERVATION -> OpportunityKind.INTEGRATE_FEEDBACK
-                PerceptFamily.FEEDBACK -> OpportunityKind.INTEGRATE_FEEDBACK
+                PerceptFamily.OBSERVATION,
+                PerceptFamily.FEEDBACK,
+                -> OpportunityKind.INTEGRATE_FEEDBACK
+
                 else -> OpportunityKind.RESPOND
             },
             summary = percept?.summary ?: input.content,
@@ -67,7 +86,9 @@ internal class CognitiveThreadStore {
                 IntentionKind.DEFER,
             ),
             allowedCommitModes = CognitivePolicyShaper.opportunityCommitModes(thread.securityContext),
-        )
+        ).also { opportunity ->
+            recordOpportunity(input.rootInputId, input.conversationContext, opportunity)
+        }
     }
 
     fun bindPercept(
@@ -108,7 +129,9 @@ internal class CognitiveThreadStore {
                 IntentionKind.DEFER,
             ),
             allowedCommitModes = CognitivePolicyShaper.opportunityCommitModes(thread.securityContext),
-        )
+        ).also { opportunity ->
+            recordOpportunity(impulse.rootImpulseId, impulse.conversationContext, opportunity)
+        }
     }
 
     fun ensureForGoalWork(work: GoalRunActivation): CognitiveThread =
@@ -134,6 +157,8 @@ internal class CognitiveThreadStore {
                     status = CognitiveThreadStatus.ACTIVE,
                     lastUpdatedAt = Instant.now(),
                 ),
+                waitState = null,
+                terminalState = null,
                 continuation = ContinuationState.GoalActivation(work),
             )
         }
@@ -155,7 +180,9 @@ internal class CognitiveThreadStore {
                 IntentionKind.DEFER,
             ),
             allowedCommitModes = CognitivePolicyShaper.opportunityCommitModes(thread.securityContext),
-        )
+        ).also { opportunity ->
+            recordOpportunity(work.rootInputId, work.conversationContext, opportunity)
+        }
     }
 
     fun thread(rootInputId: String?, conversationContext: ConversationContext): CognitiveThread? =
@@ -163,6 +190,35 @@ internal class CognitiveThreadStore {
 
     fun latestPercept(rootInputId: String?, conversationContext: ConversationContext): Percept? =
         record(rootInputId, conversationContext)?.latestPercept
+
+    fun latestOpportunity(rootInputId: String?, conversationContext: ConversationContext): Opportunity? =
+        record(rootInputId, conversationContext)?.latestOpportunity
+
+    fun latestIntention(rootInputId: String?, conversationContext: ConversationContext): Intention? =
+        record(rootInputId, conversationContext)?.latestIntention
+
+    fun snapshot(rootInputId: String?, conversationContext: ConversationContext): CognitiveThreadSnapshot? =
+        record(rootInputId, conversationContext)?.snapshot()
+
+    fun snapshotByThreadId(threadId: String): CognitiveThreadSnapshot? =
+        (activeThreadsByScope.values.asSequence() + terminalThreadsByScope.values.asSequence())
+            .firstOrNull { it.thread.id == threadId }
+            ?.snapshot()
+
+    fun snapshots(includeTerminal: Boolean = false, limit: Int = DEFAULT_SNAPSHOT_LIMIT): List<CognitiveThreadSnapshot> {
+        val active = activeThreadsByScope.values
+            .asSequence()
+            .map { it.snapshot() }
+        val terminal = if (includeTerminal) {
+            terminalThreadsByScope.values.asSequence().map { it.snapshot() }
+        } else {
+            emptySequence()
+        }
+        return (active + terminal)
+            .sortedByDescending { it.thread.lastUpdatedAt }
+            .take(limit.coerceAtLeast(0))
+            .toList()
+    }
 
     fun threadSecurityContext(
         rootInputId: String?,
@@ -177,16 +233,56 @@ internal class CognitiveThreadStore {
             null -> null
         }
 
-    fun markWaiting(rootInputId: String?, conversationContext: ConversationContext, reason: String? = null) {
+    fun recordOpportunity(rootInputId: String?, conversationContext: ConversationContext, opportunity: Opportunity) {
+        update(rootInputId, conversationContext) { record ->
+            record.copy(
+                latestOpportunity = opportunity,
+                thread = record.thread.copy(
+                    status = CognitiveThreadStatus.ACTIVE,
+                    lastUpdatedAt = Instant.now(),
+                ),
+                waitState = null,
+                terminalState = null,
+            )
+        }
+    }
+
+    fun recordIntention(rootInputId: String?, conversationContext: ConversationContext, intention: Intention) {
+        update(rootInputId, conversationContext) { record ->
+            record.copy(
+                latestIntention = intention,
+                thread = record.thread.copy(
+                    status = CognitiveThreadStatus.ACTIVE,
+                    lastUpdatedAt = Instant.now(),
+                ),
+                waitState = null,
+                terminalState = null,
+            )
+        }
+    }
+
+    fun markWaiting(
+        rootInputId: String?,
+        conversationContext: ConversationContext,
+        reason: String? = null,
+        resumeHint: String? = null,
+    ) {
         update(rootInputId, conversationContext) { record ->
             record.copy(
                 thread = record.thread.copy(
                     status = CognitiveThreadStatus.WAITING,
                     lastUpdatedAt = Instant.now(),
                     metadata = record.thread.metadata + listOfNotNull(
-                        reason?.takeIf { it.isNotBlank() }?.let { "thread_wait_reason" to it }
+                        reason?.takeIf { it.isNotBlank() }?.let { "thread_wait_reason" to it },
+                        resumeHint?.takeIf { it.isNotBlank() }?.let { "thread_resume_hint" to it },
                     ).toMap(),
-                )
+                ),
+                waitState = CognitiveThreadWaitState(
+                    status = CognitiveThreadStatus.WAITING,
+                    reason = reason,
+                    since = Instant.now(),
+                    resumeHint = resumeHint,
+                ),
             )
         }
     }
@@ -200,26 +296,53 @@ internal class CognitiveThreadStore {
                     metadata = record.thread.metadata + listOfNotNull(
                         reason?.takeIf { it.isNotBlank() }?.let { "thread_block_reason" to it }
                     ).toMap(),
-                )
+                ),
+                waitState = CognitiveThreadWaitState(
+                    status = CognitiveThreadStatus.BLOCKED,
+                    reason = reason,
+                    since = Instant.now(),
+                ),
             )
         }
     }
 
-    fun markResolved(rootInputId: String?, conversationContext: ConversationContext) {
+    fun markResolved(
+        rootInputId: String?,
+        conversationContext: ConversationContext,
+        reason: String? = null,
+        summary: String? = null,
+    ) {
         update(rootInputId, conversationContext) { record ->
-            record.copy(
+            val terminalRecord = record.copy(
                 thread = record.thread.copy(
                     status = CognitiveThreadStatus.RESOLVED,
                     lastUpdatedAt = Instant.now(),
+                    metadata = record.thread.metadata + listOfNotNull(
+                        reason?.takeIf { it.isNotBlank() }?.let { "thread_resolution_reason" to it }
+                    ).toMap(),
+                ),
+                waitState = null,
+                terminalState = CognitiveThreadTerminalState(
+                    status = CognitiveThreadStatus.RESOLVED,
+                    summary = summary ?: terminalSummaryFor(record),
+                    reason = reason,
+                    completedAt = Instant.now(),
                 ),
                 continuation = null,
             )
+            promoteToTerminal(rootInputId, conversationContext, terminalRecord)
+            terminalRecord
         }
     }
 
-    fun markFailed(rootInputId: String?, conversationContext: ConversationContext, reason: String? = null) {
+    fun markFailed(
+        rootInputId: String?,
+        conversationContext: ConversationContext,
+        reason: String? = null,
+        summary: String? = null,
+    ) {
         update(rootInputId, conversationContext) { record ->
-            record.copy(
+            val terminalRecord = record.copy(
                 thread = record.thread.copy(
                     status = CognitiveThreadStatus.FAILED,
                     lastUpdatedAt = Instant.now(),
@@ -227,13 +350,22 @@ internal class CognitiveThreadStore {
                         reason?.takeIf { it.isNotBlank() }?.let { "thread_failure_reason" to it }
                     ).toMap(),
                 ),
+                waitState = null,
+                terminalState = CognitiveThreadTerminalState(
+                    status = CognitiveThreadStatus.FAILED,
+                    summary = summary ?: terminalSummaryFor(record),
+                    reason = reason,
+                    completedAt = Instant.now(),
+                ),
                 continuation = null,
             )
+            promoteToTerminal(rootInputId, conversationContext, terminalRecord)
+            terminalRecord
         }
     }
 
     fun retainedRootInputIds(): Set<String> =
-        threadsByScope.entries
+        activeThreadsByScope.entries
             .asSequence()
             .filter { (_, record) ->
                 when (record.thread.status) {
@@ -241,6 +373,7 @@ internal class CognitiveThreadStore {
                     CognitiveThreadStatus.WAITING,
                     CognitiveThreadStatus.BLOCKED,
                     -> true
+
                     CognitiveThreadStatus.RESOLVED,
                     CognitiveThreadStatus.FAILED,
                     -> false
@@ -272,11 +405,19 @@ internal class CognitiveThreadStore {
     }
 
     fun clearForInput(rootInputId: String?, sessionId: String) {
-        scope(rootInputId, sessionId)?.let { threadsByScope.remove(it) }
+        val scope = scope(rootInputId, sessionId) ?: return
+        val activeRecord = activeThreadsByScope[scope]
+        if (activeRecord != null && activeRecord.thread.status.isTerminal()) {
+            promoteToTerminal(scope, activeRecord)
+            activeThreadsByScope.remove(scope)
+            return
+        }
+        activeThreadsByScope.remove(scope)
     }
 
     fun reset() {
-        threadsByScope.clear()
+        activeThreadsByScope.clear()
+        terminalThreadsByScope.clear()
     }
 
     private fun ensureThread(
@@ -292,15 +433,17 @@ internal class CognitiveThreadStore {
         val scope = scope(rootInputId, conversationContext.sessionId)
             ?: error("rootInputId must not be blank")
         val now = Instant.now()
-        val existing = threadsByScope[scope]
+        val existing = activeThreadsByScope[scope] ?: terminalThreadsByScope.remove(scope)
         val thread = if (existing != null) {
             existing.thread.copy(
+                kind = kind,
                 status = CognitiveThreadStatus.ACTIVE,
                 title = previewTitle(title),
                 securityContext = existing.thread.securityContext,
+                goalId = goalId ?: existing.thread.goalId,
+                rootStimulusId = rootStimulusId ?: existing.thread.rootStimulusId,
                 lastUpdatedAt = now,
                 metadata = existing.thread.metadata + metadata,
-                goalId = goalId ?: existing.thread.goalId,
             )
         } else {
             CognitiveThread(
@@ -317,9 +460,13 @@ internal class CognitiveThreadStore {
             )
         }
         val boundPercept = percept?.copy(cognitiveThreadId = thread.id)
-        threadsByScope[scope] = ThreadRecord(
+        activeThreadsByScope[scope] = ThreadRecord(
             thread = thread,
             latestPercept = boundPercept ?: existing?.latestPercept,
+            latestOpportunity = existing?.latestOpportunity,
+            latestIntention = existing?.latestIntention,
+            waitState = null,
+            terminalState = null,
             continuation = existing?.continuation,
         )
         return thread
@@ -331,12 +478,33 @@ internal class CognitiveThreadStore {
         transform: (ThreadRecord) -> ThreadRecord,
     ) {
         val scope = scope(rootInputId, conversationContext.sessionId) ?: return
-        val current = threadsByScope[scope] ?: return
-        threadsByScope[scope] = transform(current)
+        val current = activeThreadsByScope[scope] ?: terminalThreadsByScope[scope] ?: return
+        val updated = transform(current)
+        if (updated.thread.status.isTerminal()) {
+            promoteToTerminal(scope, updated)
+            activeThreadsByScope.remove(scope)
+        } else {
+            terminalThreadsByScope.remove(scope)
+            activeThreadsByScope[scope] = updated
+        }
     }
 
     private fun record(rootInputId: String?, conversationContext: ConversationContext): ThreadRecord? =
-        scope(rootInputId, conversationContext.sessionId)?.let { threadsByScope[it] }
+        scope(rootInputId, conversationContext.sessionId)?.let { activeThreadsByScope[it] ?: terminalThreadsByScope[it] }
+
+    private fun promoteToTerminal(
+        rootInputId: String?,
+        conversationContext: ConversationContext,
+        record: ThreadRecord,
+    ) {
+        val scope = scope(rootInputId, conversationContext.sessionId) ?: return
+        promoteToTerminal(scope, record)
+    }
+
+    private fun promoteToTerminal(scope: InputScope, record: ThreadRecord) {
+        activeThreadsByScope.remove(scope)
+        terminalThreadsByScope[scope] = record
+    }
 
     private fun scope(rootInputId: String?, sessionId: String): InputScope? {
         if (rootInputId.isNullOrBlank()) return null
@@ -345,10 +513,14 @@ internal class CognitiveThreadStore {
 
     private fun kindFor(percept: Percept): CognitiveThreadKind =
         when (percept.family) {
-            PerceptFamily.REQUEST, PerceptFamily.OBSERVATION, PerceptFamily.FEEDBACK ->
-                CognitiveThreadKind.CONVERSATION
+            PerceptFamily.REQUEST,
+            PerceptFamily.OBSERVATION,
+            PerceptFamily.FEEDBACK,
+            -> CognitiveThreadKind.CONVERSATION
+
             PerceptFamily.DRIVE_ACTIVATION ->
                 CognitiveThreadKind.DRIVE
+
             PerceptFamily.STATE_CHANGE ->
                 CognitiveThreadKind.GOAL_DIRECTED
         }
@@ -381,9 +553,26 @@ internal class CognitiveThreadStore {
             metadata = thread.metadata,
         )
 
+    private fun terminalSummaryFor(record: ThreadRecord): String =
+        record.latestIntention?.summary
+            ?: record.latestOpportunity?.summary
+            ?: record.latestPercept?.summary
+            ?: record.thread.title
+
+    private fun boundedRecordMap(limit: Int): MutableMap<InputScope, ThreadRecord> =
+        object : LinkedHashMap<InputScope, ThreadRecord>(16, 0.75f, true) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<InputScope, ThreadRecord>): Boolean =
+                size > limit
+        }
+
+    private fun CognitiveThreadStatus.isTerminal(): Boolean =
+        this == CognitiveThreadStatus.RESOLVED || this == CognitiveThreadStatus.FAILED
+
     private companion object {
-        private const val MAX_THREADS: Int = 256
+        private const val MAX_ACTIVE_THREADS: Int = 256
+        private const val MAX_TERMINAL_THREADS: Int = 512
         private const val MAX_TITLE_CHARS: Int = 160
         private const val GOAL_SALIENCE: Double = 0.75
+        private const val DEFAULT_SNAPSHOT_LIMIT: Int = 100
     }
 }

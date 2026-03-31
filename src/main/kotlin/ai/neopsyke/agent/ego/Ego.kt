@@ -281,7 +281,25 @@ class Ego(
             kind = CognitiveThreadKind.CONVERSATION,
             title = cue.actionSummary.ifBlank { stimulus.content },
         )
-        emitThreadUpdate(thread, cue.rootInputId, "feedback_bound")
+        when {
+            cue.executionStatus == ActionExecutionStatus.WAITING ->
+                cognitiveThreads.markWaiting(
+                    rootInputId = cue.rootInputId,
+                    conversationContext = cue.conversationContext,
+                    reason = cue.statusSummary.ifBlank { cue.actionSummary },
+                    resumeHint = cue.actionType.id,
+                )
+
+            cue.executionStatus == ActionExecutionStatus.FAILED && !cue.plannerContinuationRequired ->
+                cognitiveThreads.markFailed(
+                    rootInputId = cue.rootInputId,
+                    conversationContext = cue.conversationContext,
+                    reason = cue.actionErrorCategory ?: cue.fetchErrorCategory ?: cue.statusSummary,
+                    summary = cue.statusSummary.ifBlank { cue.actionSummary },
+                )
+        }
+        cognitiveThreads.thread(cue.rootInputId, cue.conversationContext)
+            ?.let { updated -> emitThreadUpdate(updated, cue.rootInputId, "feedback_bound") }
         val feedbackAction = PendingAction(
             id = cue.sourceActionId ?: 0L,
             urgency = Urgency.fromRaw(cue.urgency),
@@ -593,7 +611,9 @@ class Ego(
                 type = "intention_processing",
                 data = mapOf(
                     "intention_id" to intention.intention.id,
+                    "thread_id" to intention.intention.cognitiveThreadId,
                     "intention_kind" to intention.intention.kind.name.lowercase(),
+                    "summary" to intention.intention.summary,
                     "action_type" to intention.proposedActionType?.id,
                     "root_input_id" to intention.rootInputId,
                 )
@@ -1160,7 +1180,15 @@ class Ego(
         val sessionId = resolveSessionId(action.conversationContext)
         val scope = inputScope(rootInputId, action.conversationContext)
         planner.resetForInput(rootInputId)
-        deliberation.clearForInput(rootInputId, sessionId)
+        cognitiveThreads.markResolved(
+            rootInputId = rootInputId,
+            conversationContext = action.conversationContext,
+            reason = reason,
+            summary = action.summary,
+        )
+        cognitiveThreads.thread(rootInputId, action.conversationContext)
+            ?.let { updated -> emitThreadUpdate(updated, rootInputId, "input_terminal") }
+        deliberation.clearForInput(rootInputId, sessionId, retainThreadContinuity = true)
         evidenceArtifactStore.clear(rootInputId, action.conversationContext)
         dispatcher.clearExternalActionSignatures(scope)
         telemetry.emitScratchpadTelemetry(
@@ -1364,6 +1392,7 @@ class Ego(
         rootInputId: String?,
         reason: String,
     ) {
+        val snapshot = cognitiveThreads.snapshot(rootInputId, thread.conversationContext)
         instrumentation.emit(
             AgentEvent(
                 type = "cognitive_thread_updated",
@@ -1375,6 +1404,7 @@ class Ego(
                     "goal_id" to thread.goalId,
                     "policy_scope_id" to thread.securityContext.policyScopeId,
                     "reason" to reason,
+                    "thread_snapshot" to snapshot,
                 )
             )
         )
@@ -1390,12 +1420,14 @@ class Ego(
                 type = "opportunity_enqueued",
                 data = mapOf(
                     "opportunity_id" to opportunity.id,
+                    "thread_id" to opportunity.cognitiveThreadId,
                     "opportunity_kind" to opportunity.kind.name.lowercase(),
                     "summary" to opportunity.summary,
                     "root_input_id" to rootInputId,
                     "source" to source,
                     "allowed_intentions" to opportunity.allowedIntentions.map { it.name.lowercase() },
                     "allowed_commit_modes" to opportunity.allowedCommitModes.map { it.name.lowercase() },
+                    "thread_snapshot" to cognitiveThreads.snapshot(rootInputId, opportunity.conversationContext),
                 )
             )
         )

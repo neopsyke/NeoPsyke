@@ -96,6 +96,7 @@ flowchart LR
     I --> DS["DashboardStateStore"]
     DS --> CP["Conversations Page (`/`) + Chat API (`/api/chat/*`)"]
     DS --> OP["Observability Page (`/dashboard`) + Obs API (`/api/obs/*`)"]
+    DS --> OT["Thread Inspection (`/api/obs/threads*`)"]
     DS --> OX["Action Control Page (`/action-control`)"]
     DS --> ACAPI["Action Control API + SSE (`/api/action-control/*`)"]
     %% Action control UI defaults to SIGNAL activity items; can opt into BACKGROUND or TRACE ledger visibility; live updates replace polling
@@ -130,6 +131,7 @@ sequenceDiagram
     CTS-->>Ego: policy-shaped Opportunity
     Ego->>Sched: enqueue ScheduledOpportunity(opportunity + trigger)
     Ego->>Dash: emit opportunity_enqueued
+    Note over CTS,Dash: Thread snapshots are retained for live and terminal roots and exposed through `/api/obs/threads`
 
     loop While pending work and step limit not reached
         Ego->>Sched: nextTask()
@@ -146,7 +148,7 @@ sequenceDiagram
             Note over Ego,Sched: Impulse final result is deferred until all work for root_impulse_id drains
         else Task = thread continuation opportunity
             Ego->>PG: finalizeGoalCycle(rootInputId) after queues drain for that goal root
-            Note over Ego,PG: Goal runtime now resumes from a stable per-step thread root and may re-emit a goal runtime cue for resumable steps
+    Note over Ego,PG: Goal runtime now resumes from a stable per-step thread root and may re-emit a goal runtime cue for resumable steps
         else Task = input or feedback opportunity
             Ego->>Mem: recall and short-term summary
             Note over Ego,Mem: Planner context now includes targeted reflection-lesson recall
@@ -218,6 +220,7 @@ sequenceDiagram
                                 Note over Ego,TWS: Draft chunks are internal only, excluded from planner prompt summaries, and no user-visible assistant turn is emitted
                             else action = contact_user
                                 Ego->>TWS: final-pass compilation from thread workspace + intention drafts
+                                Note over Ego,CTS: Before clearing per-input ephemera, normal completion marks the owning cognitive thread RESOLVED and keeps a bounded terminal snapshot
                                 Ego->>TWF: rewrite candidate payload (if enabled)
                                 Note over Ego,TWS: Final-pass skip requires both no evidence and insufficient drafts [less than max of 2 or activation_min_plan_steps]
                         Note over Ego,TWF: Apply workspace-confidence gate first, then model-confidence gate
