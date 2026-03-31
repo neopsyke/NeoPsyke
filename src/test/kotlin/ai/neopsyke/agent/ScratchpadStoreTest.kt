@@ -187,6 +187,35 @@ class ScratchpadStoreTest {
     }
 
     @Test
+    fun `resolution drafts stay grouped across one active drafting sequence`() {
+        val store = ScratchpadStore(ScratchpadConfig(enabled = true, activationMinPlanSteps = 1))
+        val root = "root-intention-isolation"
+        store.ensureForInput(
+            PendingInput(
+                id = 1,
+                content = "prepare alternative final answers",
+                rootInputId = root,
+                receivedAtMs = 222L
+            )
+        )
+        store.recordResolutionDraft(root, "Draft for intent one", intentionId = "intent-1")
+        store.recordResolutionDraft(root, "Draft for intent two", intentionId = "intent-2")
+        val groupedFinalPass = store.buildFinalPassInput(root, "candidate one", 1200, intentionId = "intent-final")
+
+        assertEquals(2, groupedFinalPass?.resolutionDraftCount)
+        assertTrue(groupedFinalPass?.compilation?.contains("Draft for intent one") == true)
+        assertTrue(groupedFinalPass?.compilation?.contains("Draft for intent two") == true)
+
+        store.resetDraftSequence(root)
+        store.recordResolutionDraft(root, "Fresh draft after reset", intentionId = "intent-3")
+        val resetFinalPass = store.buildFinalPassInput(root, "candidate two", 1200, intentionId = "intent-4")
+
+        assertEquals(1, resetFinalPass?.resolutionDraftCount)
+        assertTrue(resetFinalPass?.compilation?.contains("Fresh draft after reset") == true)
+        assertFalse(resetFinalPass?.compilation?.contains("Draft for intent one") == true)
+    }
+
+    @Test
     fun `goal work creates thread-scoped workspace`() {
         val store = ScratchpadStore(ScratchpadConfig(enabled = true, activationMinPlanSteps = 1))
         val root = "goal:alpha:step-1"

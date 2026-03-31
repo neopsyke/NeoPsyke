@@ -29,7 +29,6 @@ internal class StimulusIngressCoordinator(
     private val goalsGateway: GoalsGateway,
     private val instrumentation: AgentInstrumentation,
     private val telemetry: EgoTelemetry,
-    private val maybeCreateGoalScratchpad: (GoalRunActivation) -> Unit,
     private val emitThreadUpdate: (CognitiveThread, String?, String) -> Unit,
     private val emitOpportunityEnqueued: (Opportunity, String?, String) -> Unit,
 ) {
@@ -71,7 +70,6 @@ internal class StimulusIngressCoordinator(
         )
         emitThreadUpdate(thread, work.rootInputId, "goal_percept_bound")
         cognitiveThreads.bindGoalWork(work)
-        maybeCreateGoalScratchpad(work)
         val opportunity = cognitiveThreads.goalOpportunity(work)
         scheduler.enqueueGoalWork(work, opportunity)
         emitOpportunityEnqueued(opportunity, work.rootInputId, "goal_runtime")

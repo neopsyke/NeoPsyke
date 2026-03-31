@@ -44,6 +44,9 @@ internal class DecisionDispatcher(
         externalActionSignatureHitsByInput.remove(scope)
     }
 
+    private fun preservesDraftSequence(actionType: ActionType): Boolean =
+        actionType == ActionType.RESOLUTION_DRAFT || actionType == ActionType.CONTACT_USER
+
     private fun enqueueDeferredIntention(
         content: String,
         urgency: Urgency,
@@ -109,6 +112,7 @@ internal class DecisionDispatcher(
     ) {
         when (decision) {
             is EgoDecision.EnqueueThought -> {
+                scratchpadStore.resetDraftSequence(rootInputId)
                 val queued = enqueueDeferredIntention(
                     content = decision.content,
                     urgency = decision.urgency,
@@ -157,6 +161,9 @@ internal class DecisionDispatcher(
             }
 
             is EgoDecision.FormIntention -> {
+                if (!preservesDraftSequence(decision.actionType)) {
+                    scratchpadStore.resetDraftSequence(rootInputId)
+                }
                 plannerContextViolationFor(decision, plannerContext)?.let { violation ->
                     instrumentation.emit(
                         AgentEvents.warning(
@@ -315,6 +322,7 @@ internal class DecisionDispatcher(
             }
 
             is EgoDecision.EnqueuePlan -> {
+                scratchpadStore.resetDraftSequence(rootInputId)
                 val scope = inputScope(rootInputId, conversationContext)
                 // ── Gate 1: plan budget per input ──
                 val currentPlanCount = planCountByInput.getOrDefault(scope, 0)
@@ -480,6 +488,7 @@ internal class DecisionDispatcher(
             }
 
             is EgoDecision.Noop -> {
+                scratchpadStore.resetDraftSequence(rootInputId)
                 if (decision.parseFailureShortCircuit) {
                     instrumentation.emit(
                         AgentEvents.warning("Parse-failure circuit breaker tripped; skipping noop re-enqueue and going to fallback.")

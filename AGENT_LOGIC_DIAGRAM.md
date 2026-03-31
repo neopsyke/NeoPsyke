@@ -148,7 +148,7 @@ sequenceDiagram
             Note over Ego,Sched: Impulse final result is deferred until all work for root_impulse_id drains
         else Task = goal work opportunity
             Ego->>PG: finalizeGoalCycle(rootInputId) after queues drain for that goal root
-    Note over Ego,PG: Goal runtime now resumes from a stable per-step thread root and may re-emit a goal runtime cue for resumable steps
+    Note over Ego,PG: Goal runtime now resumes from a stable per-step thread root, creates scratchpad state only when work is actually processed, and may re-emit a goal runtime cue for resumable steps
     Note over SC,Ego: StimulusIngressCoordinator classifies post-sensory stimuli into input, feedback, goal-work, or wake-only ingress before scheduler work begins
         else Task = input or feedback opportunity
             Ego->>Mem: recall and short-term summary
@@ -218,13 +218,13 @@ sequenceDiagram
                         end
                         alt allow
                             alt action = resolution_draft
-                                Ego->>TWS: record intention-scoped draft chunk
+                                Ego->>TWS: record active draft-sequence chunk
                                 Note over Ego,TWS: Draft chunks are internal only, excluded from planner prompt summaries, and no user-visible assistant turn is emitted
                             else action = contact_user
-                                Ego->>TWS: final-pass compilation from thread workspace + intention drafts
+                                Ego->>TWS: final-pass compilation from thread workspace + active draft sequence
                                 Note over Ego,CTS: Before clearing per-input ephemera, normal completion marks the owning cognitive thread RESOLVED and keeps a bounded terminal snapshot
                                 Ego->>TWF: rewrite candidate payload (if enabled)
-                                Note over Ego,TWS: Final-pass skip requires both no evidence and insufficient drafts [less than max of 2 or activation_min_plan_steps]
+                                Note over Ego,TWS: Final-pass skip requires both no evidence and insufficient drafts [less than max of 2 or activation_min_plan_steps]; draft sequence resets when cognition leaves answer-drafting work
                         Note over Ego,TWF: Apply workspace-confidence gate first, then model-confidence gate
                             end
                             Ego->>ACS: stage / authorize / commit

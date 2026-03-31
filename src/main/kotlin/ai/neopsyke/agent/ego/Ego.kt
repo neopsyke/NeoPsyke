@@ -132,7 +132,6 @@ class Ego(
         goalsGateway = goalsGateway,
         instrumentation = instrumentation,
         telemetry = telemetry,
-        maybeCreateGoalScratchpad = ::maybeCreateGoalScratchpad,
         emitThreadUpdate = ::emitThreadUpdate,
         emitOpportunityEnqueued = ::emitOpportunityEnqueued,
     )
@@ -757,6 +756,7 @@ class Ego(
         val sessionId = resolveSessionId(convCtx)
         activateSession(convCtx)
         cognitiveThreads.bindGoalWork(work)
+        maybeCreateGoalScratchpad(work)
 
         timing.startPhase("goal_work_processing")
         instrumentation.emit(
@@ -780,14 +780,22 @@ class Ego(
             opportunity = opportunity,
         )
 
+        timing.startPhase("meta_assessment")
+        val assessment = deliberation.maybeAssessAndUpdateGuidance(trigger, context)
+
         timing.startPhase("planner_decide")
-        val decision = planner.decide(trigger = trigger, context = context)
-        journalPlannerDecision(decision)
+        val decision = planner.decide(
+            trigger = trigger,
+            context = context.copy(metaGuidance = deliberation.guidance())
+        )
+        val finalDecision = deliberation.maybeApplyPressureOverride(decision, assessment)
+        deliberation.onPlannerDecision(finalDecision)
+        journalPlannerDecision(finalDecision)
 
         timing.startPhase("apply_decision")
         val origin = ActionOrigin(OriginSource.GOAL)
         dispatcher.dispatch(
-            decision = decision,
+            decision = finalDecision,
             nextPassCount = 0,
             originThought = null,
             rootInputId = work.rootInputId,
@@ -1297,6 +1305,21 @@ class Ego(
             cognitiveThreads.thread(rootInputId, conversationContext)
                 ?.let { updated -> emitThreadUpdate(updated, rootInputId, "goal_cycle_terminal") }
             deliberation.clearForInput(rootInputId, sessionId)
+            val digestEntry = scratchpadStore.captureDigest(rootInputId, sessionId)
+            if (digestEntry != null) {
+                instrumentation.emit(
+                    AgentEvent(
+                        type = "scratchpad_digest_captured",
+                        data = mapOf(
+                            "root_input_id" to rootInputId,
+                            "session_id" to sessionId,
+                            "goal_preview" to TextSecurity.preview(digestEntry.goal, 140),
+                            "section_count" to digestEntry.sectionIndex.size,
+                            "evidence_count" to digestEntry.keyEvidence.size,
+                        )
+                    )
+                )
+            }
             telemetry.emitScratchpadTelemetry(
                 rootInputId = rootInputId,
                 rootInputReceivedAtMs = System.currentTimeMillis(),

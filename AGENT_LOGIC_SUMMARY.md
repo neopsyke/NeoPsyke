@@ -38,7 +38,7 @@ It is intentionally high-level and should stay aligned with the code.
   - `LlmLongTermMemoryAdvisor`
   - `Hippocampus` (cognitive long-term memory facade: `recall`, typed `imprint`, `health`, future `consolidate`)
     - operational/destructive controls are split behind `HippocampusAdmin`
-  - `ScratchpadStore` (thread-scoped workspace + intention-scoped draft buffer)
+  - `ScratchpadStore` (thread-scoped workspace + answer-draft sequence buffer)
   - `ScratchpadFinalizer` (noop or `LlmScratchpadFinalizer`)
   - `Id` (autonomous internal drive module; optional, loaded from `id-runtime.yaml`)
   - `GoalsGateway` (optional goal runtime boundary; also serves ambient active-goal queries)
@@ -253,7 +253,8 @@ It is intentionally high-level and should stay aligned with the code.
   - Appends user turn to dialogue deque for request percepts.
   - Stores request-turn content in short-term `MemoryStore`.
   - Feedback percepts intentionally skip user-turn insertion and `Id.onActivity("input_received")`.
-  - Creates/refreshes a thread-scoped workspace keyed by `rootInputId`; intention drafts remain separate and are not part of the planner-visible scratchpad summary.
+  - Creates/refreshes a thread-scoped workspace keyed by `rootInputId`; answer drafts remain separate and are not part of the planner-visible scratchpad summary.
+  - Terminal-answer drafts are grouped into one active drafting sequence per thread and reset when cognition switches away from `resolution_draft` / `contact_user` work, so one answer attempt keeps its chunks together without leaking stale drafts into later attempts.
   - Builds `PlannerContext`:
     - recent dialogue
     - queue snapshot
@@ -326,10 +327,10 @@ It is intentionally high-level and should stay aligned with the code.
 
 ## Action Path
 - `processAction`:
-- For `resolution_draft` actions, records an intention-scoped draft entry and does not emit a user-visible assistant turn.
+- For `resolution_draft` actions, records an active draft-sequence entry and does not emit a user-visible assistant turn.
 - For terminal `contact_user` actions, runs scratchpad final-pass processing before action execution:
-    - records candidate answer draft into the intention draft buffer
-    - builds final compilation from thread workspace sections/evidence plus recent intention drafts for that root
+    - records candidate answer draft into the active draft-sequence buffer
+    - builds final compilation from thread workspace sections/evidence plus recent draft-sequence chunks for that root
     - skips final-pass only when both `evidenceCount == 0` and `answerDraftCount < max(2, activationMinPlanSteps)`
     - applies scratchpad-confidence gate (`finalPassMinWorkspaceConfidence`)
     - runs `ScratchpadFinalizer` rewrite when enabled
@@ -455,12 +456,13 @@ It is intentionally high-level and should stay aligned with the code.
   - The runtime emits only `GoalRuntimeCue(goalId, stepId, reason)` into the cognitive stimulus plane.
   - Goal work activations reconstruct a trusted internal automation `ConversationContext`; goal-origin actions must not fall back to the default external conversation security context.
   - Goal step roots are now stable per goal-step (`goal:<goalId>:<stepId>`) so thread continuity and scratchpad continuity survive wait/resume cycles.
+  - Goal scratchpads are created when queued goal work is actually processed, not when the cue is merely ingested.
   - Timer wakes, wait-condition satisfaction, new-goal planning, and resume reconciliation stay inside the goal subsystem and are translated into a work-ready cue when runnable work exists.
   - Async wait resolution is carried back as wake metadata plus step notes so resumed goal work can react to the completion state.
   - Decision types:
-    - `thought`
-    - `action`
-    - `plan` (decomposed into multiple thought steps)
+    - `defer`
+    - `intend`
+    - `plan` (decomposed into multiple deferred steps)
     - `noop`
   - Action proposal validation against runtime available actions.
   - Redundancy handling is planner-side and cost-oriented:
@@ -641,7 +643,7 @@ It is intentionally high-level and should stay aligned with the code.
   - Activation remains plan-gated with `MemoryConfig.scratchpad.activationMinPlanSteps=2`.
   - Ownership is now layered:
     - thread-scoped workspace sections/evidence persist for the active cognitive thread and survive wait/resume
-    - intention-scoped drafts are ephemeral, excluded from planner prompt summaries and digests, and cleared when queues drain
+    - transient answer drafts are grouped into one active draft sequence per thread, excluded from planner prompt summaries and digests, and reset when cognition leaves answer-drafting work or the root is torn down
   - Scoped to root input; independent from short-term and long-term memory pipelines.
   - Stores compact sections/evidence for the active request only.
   - Evidence entries preserve trust/source labels from external artifacts instead of flattening them to anonymous strings at ingestion time.
