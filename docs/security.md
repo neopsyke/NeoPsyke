@@ -675,10 +675,16 @@ Current cognitive-stage inspection surfaces:
 - dashboard recent-event stream now preserves `cognitive_thread_updated`
   events with root/thread/status/reason context
 - dashboard recent-event stream now preserves `opportunity_enqueued`
-  events with root/opportunity/source context
+  events with root/opportunity/source context plus shaped action surface and
+  opportunity metadata
+- thread snapshots now retain the latest opportunity/intention together with
+  last blocked and denied reason codes
+- `intention_transition` events now expose explicit `STAGE`,
+  `REQUEST_AUTHORIZATION`, and `COMMIT` progression
 - queue snapshots still expose deferred continuations as compatibility
-  `thoughts`, but normal scheduling no longer depends on a standalone thought
-  queue
+  `thoughts`, but primary runtime scheduling now runs through opportunities,
+  intentions, and secure action lifecycle objects rather than a standalone
+  thought queue
 
 Current UX behavior:
 

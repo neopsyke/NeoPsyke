@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -244,6 +245,68 @@ func TestLiveEvalRunDirOverride(t *testing.T) {
 	}
 	if result.RunDir != customRunDir {
 		t.Errorf("expected run dir %s, got %s", customRunDir, result.RunDir)
+	}
+}
+
+func TestLiveEvalSessionReplayFallsBackToArtifactsCache(t *testing.T) {
+	dir := t.TempDir()
+	recordDir := filepath.Join(dir, "recorded-run")
+	sessionDir := filepath.Join(recordDir, "session")
+	artifactsDir := filepath.Join(recordDir, "artifacts")
+	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
+		t.Fatalf("creating session dir: %v", err)
+	}
+	if err := os.MkdirAll(artifactsDir, 0o755); err != nil {
+		t.Fatalf("creating artifacts dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sessionDir, "signals.jsonl"), []byte("{\"type\":\"signal\"}\n"), 0o644); err != nil {
+		t.Fatalf("writing session signal: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(artifactsDir, "llm-cache.jsonl"), []byte("{\"sequence_index\":1}\n"), 0o644); err != nil {
+		t.Fatalf("writing artifacts cache: %v", err)
+	}
+
+	scriptPath := filepath.Join(dir, "mock-neopsyke.sh")
+	script := "#!/bin/bash\n" +
+		"echo 'ego> replay_ok'\n" +
+		"echo \"CACHE=$NEOPSYKE_LLM_CACHE_FILE\" >&2\n" +
+		"echo \"CACHE_MODE=$NEOPSYKE_LLM_CACHE_MODE\" >&2\n" +
+		"echo \"SESSION_MODE=$NEOPSYKE_SESSION_RECORDING_MODE\" >&2\n" +
+		"echo \"SESSION_DIR=$NEOPSYKE_SESSION_RECORDING_DIR\" >&2\n"
+	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("writing mock script: %v", err)
+	}
+
+	result, err := LiveEval(LiveEvalOpts{
+		SessionReplayDir: recordDir,
+		Timeout:          10,
+		NeopsykeCmd:      scriptPath,
+		RunRootAbs:       filepath.Join(dir, "runs"),
+		RepoRoot:         dir,
+	})
+	if err != nil {
+		t.Fatalf("LiveEval failed: %v", err)
+	}
+
+	stderrData, err := os.ReadFile(filepath.Join(result.RunDir, "logs", "stderr.log"))
+	if err != nil {
+		t.Fatalf("reading stderr log: %v", err)
+	}
+	stderrText := string(stderrData)
+
+	expectedCache := filepath.Join(recordDir, "artifacts", "llm-cache.jsonl")
+	expectedSession := filepath.Join(recordDir, "session")
+	if !strings.Contains(stderrText, "CACHE="+expectedCache) {
+		t.Fatalf("expected fallback cache path %q in stderr log, got: %s", expectedCache, stderrText)
+	}
+	if !strings.Contains(stderrText, "CACHE_MODE=replay") {
+		t.Fatalf("expected replay cache mode in stderr log, got: %s", stderrText)
+	}
+	if !strings.Contains(stderrText, "SESSION_MODE=replay") {
+		t.Fatalf("expected replay session mode in stderr log, got: %s", stderrText)
+	}
+	if !strings.Contains(stderrText, "SESSION_DIR="+expectedSession) {
+		t.Fatalf("expected replay session dir %q in stderr log, got: %s", expectedSession, stderrText)
 	}
 }
 

@@ -56,15 +56,15 @@ boundary is wrapped with a record/replay channel (JSONL, hash-based divergence):
 | `web-results` | `WebSearchEngine` | query + maxResults |
 | `action-control` | `ActionControlService` authorization decisions | actionType + progress + commitMode |
 
-Recording: `./run-neopsyke.sh --record-session` or `freud/scripts/live-eval.sh --input X --record-session`
-Replay: `freud/scripts/live-eval.sh --session-replay <run-dir>`
-E2E test: `freud/scripts/test-session-replay.sh`
+Recording: `./run-neopsyke --record-session` or `./freud/bin/freud eval --live --record --input X`
+Replay: `./freud/bin/freud eval --live --session-replay <run-dir>`
+E2E test: `./freud/bin/freud test-freud-replay`
 
 Per-run isolation: all persistent state (logbook, metrics, action-control DBs) lives in
 `$RUN_DIR/state/`, pgvector uses per-run namespace. Parallel runs are safe.
 Age-based retention: run dirs older than `FREUD_RUN_RETENTION_DAYS` (default 3) auto-deleted.
 
-Key files: `src/main/kotlin/ai/neopsyke/session/` (6 files), `freud/scripts/test-session-replay.sh`
+Key files: `src/main/kotlin/ai/neopsyke/session/`, `freud/internal/orchestrator/live_eval.go`, `freud/cli/`
 
 ---
 

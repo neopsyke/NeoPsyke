@@ -10,6 +10,7 @@ typealias Urgency = ai.neopsyke.agent.model.Urgency
 typealias ActionType = ai.neopsyke.agent.model.ActionType
 typealias ActionEffect = ai.neopsyke.agent.model.ActionEffect
 typealias ActionExecutionStatus = ai.neopsyke.agent.model.ActionExecutionStatus
+typealias CommitMode = ai.neopsyke.agent.model.CommitMode
 typealias InputPriority = ai.neopsyke.agent.model.InputPriority
 typealias PendingInput = ai.neopsyke.agent.model.PendingInput
 typealias PendingThought = ai.neopsyke.agent.model.PendingThought
@@ -17,6 +18,9 @@ typealias PendingAction = ai.neopsyke.agent.model.PendingAction
 typealias QueueState = ai.neopsyke.agent.model.QueueState
 typealias QueueSnapshot = ai.neopsyke.agent.model.QueueSnapshot
 typealias LoopTask = ai.neopsyke.agent.model.LoopTask
+typealias Intention = ai.neopsyke.agent.model.Intention
+typealias IntentionKind = ai.neopsyke.agent.model.IntentionKind
+typealias QueuedIntention = ai.neopsyke.agent.model.QueuedIntention
 typealias EgoTrigger = ai.neopsyke.agent.model.EgoTrigger
 typealias EgoDecision = ai.neopsyke.agent.model.EgoDecision
 typealias DialogueRole = ai.neopsyke.agent.model.DialogueRole
@@ -88,3 +92,34 @@ typealias TextSecurity = ai.neopsyke.agent.support.TextSecurity
 
 fun encodeMcpArguments(arguments: Map<String, Any?>): Map<String, Any> =
    ai.neopsyke.agent.cortex.motor.actions.mcp.encodeMcpArguments(arguments)
+
+fun deferredTrigger(thought: PendingThought): EgoTrigger =
+    ai.neopsyke.agent.model.EgoTrigger.DeferredIntention(
+        QueuedIntention(
+            queueId = thought.id,
+            intention = Intention(
+                id = ai.neopsyke.agent.model.RootInputIds.next(),
+                cognitiveThreadId = thought.rootInputId ?: ai.neopsyke.agent.model.RootInputIds.next(),
+                kind = IntentionKind.DEFER,
+                summary = thought.content.take(160),
+                createdAt = java.time.Instant.now(),
+                conversationContext = thought.conversationContext,
+                commitMode = CommitMode.NOT_APPLICABLE,
+                rootStimulusId = thought.rootInputId,
+            ),
+            urgency = thought.urgency,
+            rootInputReceivedAtMs = thought.rootInputReceivedAtMs,
+            origin = thought.origin,
+            deferredThoughtContent = thought.content,
+            deferredThoughtPasses = thought.passes,
+            deferredThoughtRecallQuery = thought.longTermMemoryRecallQuery,
+            deferredDeniedActionType = thought.deniedActionType,
+            deferredDeniedActionPayload = thought.deniedActionPayload,
+            deferredDenialReason = thought.denialReason,
+            deferredAllowFallbackExplanation = thought.allowFallbackExplanation,
+            deferredPlanContext = thought.planContext,
+            deferredDenialReasonCode = thought.denialReasonCode,
+            deferredOriginActionType = thought.originActionType,
+            deferredOriginActionObservedEvidence = thought.originActionObservedEvidence,
+        )
+    )

@@ -113,6 +113,8 @@ internal class DecisionDispatcher(
         when (decision) {
             is EgoDecision.EnqueueThought -> {
                 scratchpadStore.resetDraftSequence(rootInputId)
+                val allowFallbackExplanation =
+                    originThought?.allowFallbackExplanation ?: (origin.source != OriginSource.ID)
                 val queued = enqueueDeferredIntention(
                     content = decision.content,
                     urgency = decision.urgency,
@@ -124,7 +126,7 @@ internal class DecisionDispatcher(
                     deniedActionPayload = originThought?.deniedActionPayload,
                     denialReason = originThought?.denialReason,
                     denialReasonCode = originThought?.denialReasonCode,
-                    allowFallbackExplanation = originThought?.allowFallbackExplanation ?: false,
+                    allowFallbackExplanation = allowFallbackExplanation,
                     originActionType = originThought?.originActionType,
                     originActionObservedEvidence = originThought?.originActionObservedEvidence,
                     conversationContext = conversationContext,
@@ -511,6 +513,8 @@ internal class DecisionDispatcher(
                     }
                     val denialReasonCode = decision.denialReasonCode ?: originThought?.denialReasonCode
                     val noopThought = TextSecurity.clamp("Noop decision: ${decision.reason}", config.planner.maxThoughtChars)
+                    val allowFallbackExplanation =
+                        originThought?.allowFallbackExplanation ?: (origin.source != OriginSource.ID)
                     val queued = enqueueDeferredIntention(
                         content = noopThought,
                         urgency = Urgency.LOW,
@@ -521,7 +525,7 @@ internal class DecisionDispatcher(
                         deniedActionPayload = deniedActionPayload,
                         denialReason = denialReason,
                         denialReasonCode = denialReasonCode,
-                        allowFallbackExplanation = originThought?.allowFallbackExplanation ?: false,
+                        allowFallbackExplanation = allowFallbackExplanation,
                         originActionType = originThought?.originActionType,
                         originActionObservedEvidence = originThought?.originActionObservedEvidence,
                         conversationContext = conversationContext,

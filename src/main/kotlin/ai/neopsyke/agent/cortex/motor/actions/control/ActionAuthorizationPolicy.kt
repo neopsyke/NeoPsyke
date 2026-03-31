@@ -17,6 +17,7 @@ import ai.neopsyke.agent.model.ConversationContext
 import ai.neopsyke.agent.model.InstructionTrust
 import ai.neopsyke.agent.model.PendingAction
 import ai.neopsyke.agent.model.PrincipalRole
+import ai.neopsyke.agent.model.IntentionKind
 import java.nio.file.Files
 import java.nio.file.Path
 
@@ -215,6 +216,12 @@ class ConfiguredActionAuthorizationPolicy(
         }
 
         if (contract.effectClass == ActionEffectClass.OBSERVE) {
+            if (action.intentionKind == IntentionKind.REQUEST_AUTHORIZATION) {
+                return deny(
+                    reason = "Observe-class actions do not support explicit authorization requests.",
+                    reasonCode = "POLICY_OBSERVE_AUTHORIZATION_NOT_APPLICABLE",
+                )
+            }
             return AuthorizationDecision(
                 progress = AuthorizationProgress.ALLOW_COMMIT,
                 commitMode = CommitMode.POLICY_AUTONOMOUS,
@@ -226,6 +233,81 @@ class ConfiguredActionAuthorizationPolicy(
 
         val directCommitAllowed = rule?.directCommitEnabled ?: contract.directCommitAllowed
         val autonomousCommitEnabled = rule?.autonomousCommitEnabled ?: contract.supportsAutonomousCommit
+        val preferredStageMode = when (action.requestedCommitMode) {
+            CommitMode.POLICY_AUTONOMOUS ->
+                if (autonomousCommitEnabled) CommitMode.POLICY_AUTONOMOUS else CommitMode.APPROVAL_BACKED
+
+            CommitMode.APPROVAL_BACKED -> CommitMode.APPROVAL_BACKED
+            CommitMode.ADMIN_OVERRIDE ->
+                if (directCommitAllowed) CommitMode.ADMIN_OVERRIDE else CommitMode.APPROVAL_BACKED
+
+            CommitMode.NOT_APPLICABLE ->
+                if (autonomousCommitEnabled) CommitMode.POLICY_AUTONOMOUS else CommitMode.APPROVAL_BACKED
+        }
+
+        when (action.intentionKind) {
+            IntentionKind.REQUEST_AUTHORIZATION -> {
+                return stage(
+                    commitMode = CommitMode.APPROVAL_BACKED,
+                    reason = "Intention requested explicit authorization before commit.",
+                    reasonCode = "POLICY_INTENTION_REQUEST_AUTHORIZATION",
+                )
+            }
+
+            IntentionKind.STAGE -> {
+                return stage(
+                    commitMode = preferredStageMode,
+                    reason = "Intention requested staged progression before commit.",
+                    reasonCode = "POLICY_INTENTION_STAGE",
+                )
+            }
+
+            IntentionKind.COMMIT -> {
+                if (action.requestedCommitMode == CommitMode.APPROVAL_BACKED) {
+                    return deny(
+                        reason = "Commit intention cannot use approval_backed without staged authorization; use request_authorization.",
+                        reasonCode = "POLICY_COMMIT_INTENTION_REQUIRES_AUTHORIZATION",
+                    )
+                }
+                if (action.requestedCommitMode == CommitMode.ADMIN_OVERRIDE) {
+                    return if (directCommitAllowed) {
+                        AuthorizationDecision(
+                            progress = AuthorizationProgress.ALLOW_COMMIT,
+                            commitMode = CommitMode.ADMIN_OVERRIDE,
+                            policyVersion = policyVersion(),
+                            reason = "Commit intention requested admin override and policy allows direct commit.",
+                            reasonCode = "POLICY_COMMIT_INTENTION_ADMIN_OVERRIDE",
+                        )
+                    } else {
+                        deny(
+                            reason = "Commit intention requested admin override, but direct commit is not allowed for this action.",
+                            reasonCode = "POLICY_COMMIT_INTENTION_ADMIN_OVERRIDE_DENY",
+                        )
+                    }
+                }
+                if (autonomousCommitEnabled || directCommitAllowed) {
+                    return AuthorizationDecision(
+                        progress = AuthorizationProgress.ALLOW_COMMIT,
+                        commitMode = if (action.requestedCommitMode == CommitMode.POLICY_AUTONOMOUS &&
+                            autonomousCommitEnabled
+                        ) {
+                            CommitMode.POLICY_AUTONOMOUS
+                        } else {
+                            CommitMode.POLICY_AUTONOMOUS
+                        },
+                        policyVersion = policyVersion(),
+                        reason = "Commit intention requested immediate commit and policy allows it.",
+                        reasonCode = "POLICY_COMMIT_INTENTION_ALLOWED",
+                    )
+                }
+                return deny(
+                    reason = "Commit intention is not allowed for this action; use stage or request_authorization.",
+                    reasonCode = "POLICY_COMMIT_INTENTION_STAGE_REQUIRED",
+                )
+            }
+
+            else -> Unit
+        }
 
         return if (directCommitAllowed) {
             AuthorizationDecision(

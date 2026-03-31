@@ -111,16 +111,26 @@ func LiveEval(opts LiveEvalOpts) (*LiveEvalResult, error) {
 	record := opts.Record
 
 	if sessionReplayDir != "" {
+		recordDir := sessionReplayDir
 		// Check for session subdir
 		sessionSub := filepath.Join(sessionReplayDir, "session")
 		if analysis.DirExists(sessionSub) {
 			sessionReplayDir = sessionSub
 		}
-		// Auto-detect cache replay from session dir
+		if filepath.Base(sessionReplayDir) == "session" {
+			recordDir = filepath.Dir(sessionReplayDir)
+		}
+		// Auto-detect cache replay from session or recorded artifacts dir.
 		if cacheReplayFile == "" {
-			cacheInSession := filepath.Join(sessionReplayDir, "llm-cache.jsonl")
-			if analysis.FileExists(cacheInSession) {
-				cacheReplayFile = cacheInSession
+			cacheCandidates := []string{
+				filepath.Join(sessionReplayDir, "llm-cache.jsonl"),
+				filepath.Join(recordDir, "artifacts", "llm-cache.jsonl"),
+			}
+			for _, candidate := range cacheCandidates {
+				if analysis.FileExists(candidate) {
+					cacheReplayFile = candidate
+					break
+				}
 			}
 		}
 	}

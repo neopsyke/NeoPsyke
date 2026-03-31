@@ -8,6 +8,8 @@ import ai.neopsyke.agent.model.ChannelSurface
 import ai.neopsyke.agent.model.CognitiveThreadSecurityContext
 import ai.neopsyke.agent.model.CommitMode
 import ai.neopsyke.agent.model.ConversationContext
+import ai.neopsyke.agent.model.IntentionKind
+import ai.neopsyke.agent.model.Opportunity
 import ai.neopsyke.agent.model.PrincipalRole
 
 internal object CognitivePolicyShaper {
@@ -52,6 +54,45 @@ internal object CognitivePolicyShaper {
             availableActions = availableActions,
             dispatchableActions = dispatchableActions,
             actionDefinitions = visibleDefinitions,
+        )
+    }
+
+    fun shapeOpportunityContract(
+        opportunity: Opportunity,
+        plannerActionSurface: PlannerActionSurface,
+        implementedAvailableActions: Set<ActionType>,
+        implementedDispatchableActions: Set<ActionType>,
+    ): Opportunity {
+        val availableActions = plannerActionSurface.availableActions intersect implementedAvailableActions
+        val dispatchableActions = plannerActionSurface.dispatchableActions intersect implementedDispatchableActions
+        val actionDefinitions = plannerActionSurface.actionDefinitions
+            .filter { definition -> definition.actionType in availableActions }
+        val dispatchableDefinitions = actionDefinitions
+            .filter { definition -> definition.actionType in dispatchableActions }
+        val allowedCommitModes = shapeOpportunityCommitModes(
+            baseCommitModes = opportunity.allowedCommitModes,
+            dispatchableDefinitions = dispatchableDefinitions,
+        )
+        val allowedIntentions = shapeOpportunityIntentions(
+            baseIntentions = opportunity.allowedIntentions,
+            dispatchableDefinitions = dispatchableDefinitions,
+            allowedCommitModes = allowedCommitModes,
+        )
+        val metadata = opportunity.metadata + opportunityPolicyMetadata(
+            opportunity = opportunity,
+            availableActions = availableActions,
+            dispatchableActions = dispatchableActions,
+            dispatchableDefinitions = dispatchableDefinitions,
+            allowedIntentions = allowedIntentions,
+            allowedCommitModes = allowedCommitModes,
+        )
+        return opportunity.copy(
+            allowedIntentions = allowedIntentions,
+            allowedCommitModes = allowedCommitModes,
+            availableActions = availableActions,
+            dispatchableActions = dispatchableActions,
+            actionDefinitions = actionDefinitions,
+            metadata = metadata,
         )
     }
 
@@ -170,6 +211,84 @@ internal object CognitivePolicyShaper {
 
     private fun isRestrictedByPolicyScope(securityContext: CognitiveThreadSecurityContext): Boolean =
         securityContext.policyScopeId == POLICY_SCOPE_DEPLOYMENT_RESTRICTED
+
+    private fun shapeOpportunityIntentions(
+        baseIntentions: Set<IntentionKind>,
+        dispatchableDefinitions: List<ActionPlanningDefinition>,
+        allowedCommitModes: Set<CommitMode>,
+    ): Set<IntentionKind> {
+        if (dispatchableDefinitions.isEmpty()) {
+            return baseIntentions.intersect(setOf(IntentionKind.DEFER)).ifEmpty { setOf(IntentionKind.DEFER) }
+        }
+        val hasObserveOnly = dispatchableDefinitions.all { it.effectClass == ActionEffectClass.OBSERVE }
+        val hasSideEffecting = dispatchableDefinitions.any { it.effectClass != ActionEffectClass.OBSERVE }
+        val hasDirectCommit = dispatchableDefinitions.any { it.directCommitAllowed }
+        val hasAutonomousCommit = dispatchableDefinitions.any { it.supportsAutonomousCommit }
+        val approvalBackedAllowed = CommitMode.APPROVAL_BACKED in allowedCommitModes
+        return buildSet {
+            if (IntentionKind.OBSERVE in baseIntentions) add(IntentionKind.OBSERVE)
+            if (IntentionKind.DEFER in baseIntentions) add(IntentionKind.DEFER)
+            if (IntentionKind.PREPARE in baseIntentions && !hasObserveOnly) add(IntentionKind.PREPARE)
+            if (IntentionKind.STAGE in baseIntentions && hasSideEffecting && (approvalBackedAllowed || hasAutonomousCommit)) {
+                add(IntentionKind.STAGE)
+            }
+            if (IntentionKind.REQUEST_AUTHORIZATION in baseIntentions && hasSideEffecting && approvalBackedAllowed) {
+                add(IntentionKind.REQUEST_AUTHORIZATION)
+            }
+            if (IntentionKind.COMMIT in baseIntentions && (hasDirectCommit || hasAutonomousCommit || hasObserveOnly)) {
+                add(IntentionKind.COMMIT)
+            }
+        }.ifEmpty { baseIntentions.intersect(setOf(IntentionKind.DEFER)).ifEmpty { setOf(IntentionKind.DEFER) } }
+    }
+
+    private fun shapeOpportunityCommitModes(
+        baseCommitModes: Set<CommitMode>,
+        dispatchableDefinitions: List<ActionPlanningDefinition>,
+    ): Set<CommitMode> {
+        if (dispatchableDefinitions.isEmpty()) {
+            return baseCommitModes.intersect(setOf(CommitMode.NOT_APPLICABLE))
+                .ifEmpty { setOf(CommitMode.NOT_APPLICABLE) }
+        }
+        val hasSideEffecting = dispatchableDefinitions.any { it.effectClass != ActionEffectClass.OBSERVE }
+        val hasAutonomousCommit = dispatchableDefinitions.any { it.supportsAutonomousCommit }
+        val hasDirectCommit = dispatchableDefinitions.any { it.directCommitAllowed }
+        return buildSet {
+            if (CommitMode.NOT_APPLICABLE in baseCommitModes) add(CommitMode.NOT_APPLICABLE)
+            if (CommitMode.APPROVAL_BACKED in baseCommitModes && hasSideEffecting) add(CommitMode.APPROVAL_BACKED)
+            if (CommitMode.POLICY_AUTONOMOUS in baseCommitModes && hasAutonomousCommit) {
+                add(CommitMode.POLICY_AUTONOMOUS)
+            }
+            if (CommitMode.ADMIN_OVERRIDE in baseCommitModes && hasDirectCommit) add(CommitMode.ADMIN_OVERRIDE)
+        }.ifEmpty { baseCommitModes.intersect(setOf(CommitMode.NOT_APPLICABLE)).ifEmpty { setOf(CommitMode.NOT_APPLICABLE) } }
+    }
+
+    private fun opportunityPolicyMetadata(
+        opportunity: Opportunity,
+        availableActions: Set<ActionType>,
+        dispatchableActions: Set<ActionType>,
+        dispatchableDefinitions: List<ActionPlanningDefinition>,
+        allowedIntentions: Set<IntentionKind>,
+        allowedCommitModes: Set<CommitMode>,
+    ): Map<String, String> {
+        val hasSideEffecting = dispatchableDefinitions.any { it.effectClass != ActionEffectClass.OBSERVE }
+        val surfaceKind = when {
+            dispatchableDefinitions.isEmpty() -> "no_dispatchable_actions"
+            dispatchableDefinitions.all { it.effectClass == ActionEffectClass.OBSERVE } -> "observe_only"
+            hasSideEffecting -> "side_effecting"
+            else -> "mixed"
+        }
+        return mapOf(
+            "policy_scope_id" to opportunity.securityContext.policyScopeId,
+            "surface_kind" to surfaceKind,
+            "available_action_count" to availableActions.size.toString(),
+            "dispatchable_action_count" to dispatchableActions.size.toString(),
+            "direct_commit_available" to dispatchableDefinitions.any { it.directCommitAllowed }.toString(),
+            "autonomous_commit_available" to dispatchableDefinitions.any { it.supportsAutonomousCommit }.toString(),
+            "approval_backed_available" to (CommitMode.APPROVAL_BACKED in allowedCommitModes).toString(),
+            "allowed_intentions" to allowedIntentions.joinToString(",") { it.name.lowercase() },
+            "allowed_commit_modes" to allowedCommitModes.joinToString(",") { it.name.lowercase() },
+        )
+    }
 
     private const val POLICY_SCOPE_DEPLOYMENT_RESTRICTED: String = "deployment-restricted"
     private const val POLICY_SCOPE_EMERGENCY_OVERRIDE: String = "emergency-override"

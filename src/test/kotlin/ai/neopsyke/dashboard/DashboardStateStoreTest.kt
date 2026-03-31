@@ -316,6 +316,10 @@ class DashboardStateStoreTest {
                 createdAt = Instant.now(),
                 conversationContext = context,
                 rootStimulusId = "root-1",
+                metadata = mapOf(
+                    "surface_kind" to "side_effecting",
+                    "policy_scope_id" to "owner-direct",
+                ),
             ),
             latestIntention = Intention(
                 id = "intent-1",
@@ -332,6 +336,10 @@ class DashboardStateStoreTest {
                 since = Instant.now(),
                 resumeHint = "website_fetch",
             ),
+            lastBlockedReason = "owner approval required",
+            lastBlockedReasonCode = "POLICY_STAGE_REQUIRED",
+            lastDeniedReason = "not allowed",
+            lastDeniedReasonCode = "ACTION_DENIED",
         )
         store.onEvent(
             AgentEvent(
@@ -399,7 +407,16 @@ class DashboardStateStoreTest {
         val detail: Map<String, Any?> = mapper.readValue(detailJson)
         @Suppress("UNCHECKED_CAST")
         val terminalState = detail["terminalState"] as Map<String, Any?>
+        @Suppress("UNCHECKED_CAST")
+        val latestOpportunity = detail["latestOpportunity"] as Map<String, Any?>
+        @Suppress("UNCHECKED_CAST")
+        val opportunityMetadata = latestOpportunity["metadata"] as Map<String, Any?>
         assertEquals("Delivered filing summary", terminalState["summary"])
+        assertEquals("owner approval required", detail["lastBlockedReason"])
+        assertEquals("POLICY_STAGE_REQUIRED", detail["lastBlockedReasonCode"])
+        assertEquals("not allowed", detail["lastDeniedReason"])
+        assertEquals("ACTION_DENIED", detail["lastDeniedReasonCode"])
+        assertEquals("side_effecting", opportunityMetadata["surface_kind"])
     }
 
     @Test

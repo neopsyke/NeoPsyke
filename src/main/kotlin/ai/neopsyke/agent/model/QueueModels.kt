@@ -194,13 +194,15 @@ data class QueuedIntention(
 ) {
     val rootInputId: String? get() = intention.rootStimulusId
     val conversationContext: ConversationContext get() = intention.conversationContext
+    val deferredContent: String get() = deferredThoughtContent ?: intention.summary
+    val deferredPasses: Int get() = deferredThoughtPasses
 
     fun toPendingThought(): PendingThought =
         PendingThought(
             id = queueId,
             urgency = urgency,
-            content = deferredThoughtContent ?: intention.summary,
-            passes = deferredThoughtPasses,
+            content = deferredContent,
+            passes = deferredPasses,
             longTermMemoryRecallQuery = deferredThoughtRecallQuery,
             rootInputId = rootInputId,
             rootInputReceivedAtMs = rootInputReceivedAtMs,

@@ -172,8 +172,8 @@ class EgoAgentTest {
                         denialReasonCode = "ACTION_VERIFIER_REJECT"
                     )
 
-                    is ai.neopsyke.agent.model.EgoTrigger.PendingThoughtInput -> {
-                        val thought = trigger.thought
+                    is ai.neopsyke.agent.model.EgoTrigger.DeferredIntention -> {
+                        val thought = trigger.intention.toPendingThought()
                         sawVerifierDeniedThought =
                             thought.deniedActionType == ActionType.CONTACT_USER &&
                                 thought.deniedActionPayload == "Omar" &&
@@ -783,6 +783,103 @@ class EgoAgentTest {
                     (it.type == "thought_processing" ||
                         it.type == "intention_processing" ||
                         it.type == "action_review_requested")
+            }
+        )
+    }
+
+    @Test
+    fun `user defer loops end with fallback explanation when max passes are reached`() {
+        val plannerLlm = StubChatModelClient().apply {
+            enqueueRawResponse(
+                """
+                {"decision":"defer","urgency":"medium","defer_content":"External evidence is required before answering."}
+                """.trimIndent()
+            )
+            enqueueRawResponse(
+                """
+                {"decision":"defer","urgency":"medium","defer_content":"External evidence is required before answering."}
+                """.trimIndent()
+            )
+        }
+        val superegoLlm = StubChatModelClient().apply {
+            enqueueRawResponse("""{"allow":true}""")
+        }
+        val instrumentation = RecordingInstrumentation()
+        val outputs = mutableListOf<String>()
+        val config = AgentConfig(planner = PlannerConfig(maxLoopStepsPerInput = 4, maxThoughtPasses = 1))
+        val agent = buildTestEgo(
+            planner = LlmEgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
+            superego = Superego(
+                modelClient = superegoLlm,
+                config = config,
+                instrumentation = instrumentation
+            ),
+            motorCortex = buildMotorCortex(output = { outputs.add(it) }),
+            config = config,
+            instrumentation = instrumentation
+        )
+
+        runAgentWithInput(agent, "find official pricing\nexit\n")
+
+        assertEquals(1, outputs.size)
+        assertTrue(outputs.first().contains("could not complete this request reliably", ignoreCase = true))
+        assertTrue(outputs.first().contains("best-effort answer", ignoreCase = true))
+        assertTrue(
+            instrumentation.events.any {
+                it.type == "thought_dropped" && it.data["reason"] == "max_passes_reached"
+            }
+        )
+        assertTrue(
+            instrumentation.events.any {
+                it.type == "action_executed" &&
+                    ((it.data["action"] as? PendingAction)?.isFallbackExplanation == true)
+            }
+        )
+    }
+
+    @Test
+    fun `user noop loops end with fallback explanation when max passes are reached`() {
+        val plannerLlm = StubChatModelClient().apply {
+            enqueueRawResponse(
+                """
+                {"decision":"noop","reason":"no safe next move found"}
+                """.trimIndent()
+            )
+            enqueueRawResponse(
+                """
+                {"decision":"noop","reason":"no safe next move found"}
+                """.trimIndent()
+            )
+        }
+        val instrumentation = RecordingInstrumentation()
+        val outputs = mutableListOf<String>()
+        val config = AgentConfig(planner = PlannerConfig(maxLoopStepsPerInput = 4, maxThoughtPasses = 1))
+        val agent = buildTestEgo(
+            planner = LlmEgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
+            superego = Superego(
+                modelClient = StubChatModelClient(),
+                config = config,
+                instrumentation = instrumentation
+            ),
+            motorCortex = buildMotorCortex(output = { outputs.add(it) }),
+            config = config,
+            instrumentation = instrumentation
+        )
+
+        runAgentWithInput(agent, "do the impossible safely\nexit\n")
+
+        assertEquals(1, outputs.size)
+        assertTrue(outputs.first().contains("could not complete this request reliably", ignoreCase = true))
+        assertTrue(outputs.first().contains("best-effort answer", ignoreCase = true))
+        assertTrue(
+            instrumentation.events.any {
+                it.type == "thought_dropped" && it.data["reason"] == "max_passes_reached"
+            }
+        )
+        assertTrue(
+            instrumentation.events.any {
+                it.type == "action_executed" &&
+                    ((it.data["action"] as? PendingAction)?.isFallbackExplanation == true)
             }
         )
     }

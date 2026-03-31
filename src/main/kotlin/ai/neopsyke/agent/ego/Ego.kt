@@ -64,7 +64,11 @@ class Ego(
 
     /** Delegates to the attention scheduler's impulse enqueue. Used by the Id module. */
     fun enqueueImpulse(impulse: PendingImpulse, maxPendingImpulses: Int): Boolean {
-        val opportunity = cognitiveThreads.impulseOpportunity(impulse)
+        val opportunity = shapeOpportunityContract(
+            cognitiveThreads.impulseOpportunity(impulse),
+            impulse.rootImpulseId,
+            impulse.conversationContext,
+        )
         val queued = scheduler.enqueueImpulse(impulse, opportunity, maxPendingImpulses)
         if (queued) {
             emitOpportunityEnqueued(opportunity, impulse.rootImpulseId, "impulse")
@@ -121,6 +125,11 @@ class Ego(
         cleanupResolvedInputAfterAnswer = ::cleanupResolvedInputAfterAnswer,
         cleanupSatisfiedIdImpulse = ::cleanupSatisfiedIdImpulse,
         getId = { id },
+        recordThreadIntention = ::recordThreadIntentionTransition,
+        recordThreadBlocked = ::recordThreadBlocked,
+        recordThreadDenied = ::recordThreadDenied,
+        recordThreadWaiting = ::recordThreadWaiting,
+        emitThreadUpdate = ::emitThreadUpdateForRoot,
         actionControlService = actionControlService,
         actionLifecycleObserver = goalsGateway,
         emitActionFeedback = sensoryCortex::offerActionFeedback,
@@ -132,6 +141,7 @@ class Ego(
         goalsGateway = goalsGateway,
         instrumentation = instrumentation,
         telemetry = telemetry,
+        shapeOpportunityContract = ::shapeOpportunityContract,
         emitThreadUpdate = ::emitThreadUpdate,
         emitOpportunityEnqueued = ::emitOpportunityEnqueued,
     )
@@ -521,47 +531,48 @@ class Ego(
         }
     }
 
-    private suspend fun processThought(thought: PendingThought) {
-        val timing = PhaseTimingCollector("thought", thought.rootInputId)
-        val convCtx = thought.conversationContext
+    private suspend fun processDeferredIntention(intention: QueuedIntention) {
+        val deferred = intention.toPendingThought()
+        val timing = PhaseTimingCollector("deferred_intention", deferred.rootInputId)
+        val convCtx = deferred.conversationContext
         val sessionId = resolveSessionId(convCtx)
         activateSession(convCtx)
 
-        if (thought.passes >= config.planner.maxThoughtPasses) {
-            logger.info { "Dropping thought ${thought.id} due to max thought passes." }
-            instrumentation.emit(AgentEvents.thoughtDropped(thought = thought, reason = "max_passes_reached"))
-            if (thought.allowFallbackExplanation) {
-                fallbackHandler.enqueueFallbackExplanation(thought)
+        if (deferred.passes >= config.planner.maxThoughtPasses) {
+            logger.info { "Dropping deferred intention ${deferred.id} due to max defer passes." }
+            instrumentation.emit(AgentEvents.thoughtDropped(thought = deferred, reason = "max_passes_reached"))
+            if (deferred.allowFallbackExplanation) {
+                fallbackHandler.enqueueFallbackExplanation(deferred)
             }
             return
         }
 
-        timing.startPhase("thought_processing")
-        instrumentation.emit(AgentEvents.thoughtProcessing(thought))
-        thought.planContext?.let { planContext ->
+        timing.startPhase("deferred_intention_processing")
+        instrumentation.emit(AgentEvents.thoughtProcessing(deferred))
+        deferred.planContext?.let { planContext ->
             instrumentation.emit(
                 AgentEvents.planStepStarted(
                     planId = planContext.planId,
                     stepIndex = planContext.stepIndex,
                     totalSteps = planContext.totalSteps,
                     stepDescription = planContext.stepDescription,
-                    rootInputId = thought.rootInputId,
+                    rootInputId = deferred.rootInputId,
                 )
             )
         }
 
         timing.startPhase("planner_context")
-        val trigger = EgoTrigger.PendingThoughtInput(thought)
+        val trigger = EgoTrigger.DeferredIntention(intention)
         val baseContext = plannerContext(
             trigger,
-            rootInputId = thought.rootInputId,
+            rootInputId = deferred.rootInputId,
             sessionId = sessionId,
             conversationContext = convCtx
         )
         val context = applyIdConvergenceContextForOrigin(
             baseContext = baseContext,
-            origin = thought.origin,
-            triggeringTension = idNeedTension(thought.origin.needId),
+            origin = deferred.origin,
+            triggeringTension = idNeedTension(deferred.origin.needId),
         )
 
         timing.startPhase("meta_assessment")
@@ -579,13 +590,13 @@ class Ego(
         timing.startPhase("apply_decision")
         dispatcher.dispatch(
             finalDecision,
-            nextPassCount = thought.passes + 1,
-            originThought = thought,
-            rootInputId = thought.rootInputId,
-            rootInputReceivedAtMs = thought.rootInputReceivedAtMs,
+            nextPassCount = deferred.passes + 1,
+            originThought = deferred,
+            rootInputId = deferred.rootInputId,
+            rootInputReceivedAtMs = deferred.rootInputReceivedAtMs,
             conversationContext = convCtx,
             plannerContext = context,
-            origin = thought.origin,
+            origin = deferred.origin,
         )
 
         instrumentation.emit(AgentEvents.phaseTimings(timing.build()))
@@ -607,27 +618,7 @@ class Ego(
         )
         when (intention.intention.kind) {
             IntentionKind.DEFER -> {
-                processThought(
-                    PendingThought(
-                        id = intention.queueId,
-                        urgency = intention.urgency,
-                        content = intention.deferredThoughtContent ?: intention.intention.summary,
-                        passes = intention.deferredThoughtPasses,
-                        longTermMemoryRecallQuery = intention.deferredThoughtRecallQuery,
-                        rootInputId = intention.rootInputId,
-                        rootInputReceivedAtMs = intention.rootInputReceivedAtMs,
-                        deniedActionType = intention.deferredDeniedActionType,
-                        deniedActionPayload = intention.deferredDeniedActionPayload,
-                        denialReason = intention.deferredDenialReason,
-                        allowFallbackExplanation = intention.deferredAllowFallbackExplanation,
-                        planContext = intention.deferredPlanContext,
-                        denialReasonCode = intention.deferredDenialReasonCode,
-                        originActionType = intention.deferredOriginActionType,
-                        originActionObservedEvidence = intention.deferredOriginActionObservedEvidence,
-                        conversationContext = intention.conversationContext,
-                        origin = intention.origin,
-                    )
-                )
+                processDeferredIntention(intention)
             }
 
             else -> {
@@ -911,10 +902,30 @@ class Ego(
             descriptors = plannerDescriptors,
             disabledActions = disabled,
         )
-        val availableActions = shapedActionSurface.availableActions intersect implementedAvailableActions
-        val dispatchableActions = shapedActionSurface.dispatchableActions intersect implementedDispatchableActions
-        val actionDefinitions = shapedActionSurface.actionDefinitions
-            .filter { definition -> definition.actionType in availableActions }
+        val availableActions = if (opportunity?.availableActions?.isNotEmpty() == true) {
+            shapedActionSurface.availableActions
+                .intersect(implementedAvailableActions)
+                .intersect(opportunity.availableActions)
+        } else {
+            shapedActionSurface.availableActions intersect implementedAvailableActions
+        }
+        val dispatchableActions = if (opportunity?.dispatchableActions?.isNotEmpty() == true) {
+            shapedActionSurface.dispatchableActions
+                .intersect(implementedDispatchableActions)
+                .intersect(opportunity.dispatchableActions)
+        } else {
+            shapedActionSurface.dispatchableActions intersect implementedDispatchableActions
+        }
+        val actionDefinitions = if (opportunity?.actionDefinitions?.isNotEmpty() == true) {
+            shapedActionSurface.actionDefinitions
+                .filter { definition ->
+                    definition.actionType in availableActions &&
+                        opportunity.actionDefinitions.any { candidate -> candidate.actionType == definition.actionType }
+                }
+        } else {
+            shapedActionSurface.actionDefinitions
+                .filter { definition -> definition.actionType in availableActions }
+        }
         val evidenceHints = buildEvidenceHints(rootInputId, sessionId)
         val goalSummary = buildNumberedGoalSummary()
         return PlannerContext(
@@ -965,10 +976,10 @@ class Ego(
                     sourceRef = trigger.input.rootInputId,
                 ).renderSummary()
 
-            is EgoTrigger.PendingThoughtInput ->
+            is EgoTrigger.DeferredIntention ->
                 Provenances.trustedSystemSignal(
-                    provider = "planner_thought",
-                    sourceRef = trigger.thought.rootInputId,
+                    provider = "planner-deferred-intention",
+                    sourceRef = trigger.intention.rootInputId,
                 ).renderSummary()
 
             is EgoTrigger.ActionFeedback ->
@@ -1026,7 +1037,7 @@ class Ego(
             is EgoTrigger.ActionFeedback -> trigger.feedback.cue.origin.source == OriginSource.ID
             is EgoTrigger.IncomingImpulse -> true
             is EgoTrigger.GoalWork -> true
-            is EgoTrigger.PendingThoughtInput -> trigger.thought.origin.source == OriginSource.ID
+            is EgoTrigger.DeferredIntention -> trigger.intention.origin.source == OriginSource.ID
         }
 
     private fun emitAmbientContextSnapshot(
@@ -1051,7 +1062,7 @@ class Ego(
     private fun rootInputIdForTrigger(trigger: EgoTrigger): String? =
         when (trigger) {
             is EgoTrigger.IncomingInput -> trigger.input.rootInputId
-            is EgoTrigger.PendingThoughtInput -> trigger.thought.rootInputId
+            is EgoTrigger.DeferredIntention -> trigger.intention.rootInputId
             is EgoTrigger.ActionFeedback -> trigger.feedback.cue.rootInputId
             is EgoTrigger.IncomingImpulse -> trigger.impulse.rootImpulseId
             is EgoTrigger.GoalWork -> trigger.workUnit.rootInputId
@@ -1060,7 +1071,7 @@ class Ego(
     private fun triggerLabel(trigger: EgoTrigger): String =
         when (trigger) {
             is EgoTrigger.IncomingInput -> "input"
-            is EgoTrigger.PendingThoughtInput -> "thought"
+            is EgoTrigger.DeferredIntention -> "deferred-intention"
             is EgoTrigger.ActionFeedback -> "feedback"
             is EgoTrigger.IncomingImpulse -> "impulse"
             is EgoTrigger.GoalWork -> "goal-work"
@@ -1462,9 +1473,103 @@ class Ego(
                     "source" to source,
                     "allowed_intentions" to opportunity.allowedIntentions.map { it.name.lowercase() },
                     "allowed_commit_modes" to opportunity.allowedCommitModes.map { it.name.lowercase() },
+                    "available_actions" to opportunity.availableActions.map { it.id }.sorted(),
+                    "dispatchable_actions" to opportunity.dispatchableActions.map { it.id }.sorted(),
+                    "opportunity_metadata" to opportunity.metadata,
                     "thread_snapshot" to cognitiveThreads.snapshot(rootInputId, opportunity.conversationContext),
                 )
             )
         )
+    }
+
+    private fun shapeOpportunityContract(
+        opportunity: Opportunity,
+        rootInputId: String?,
+        conversationContext: ConversationContext,
+    ): Opportunity {
+        val sessionId = resolveSessionId(conversationContext)
+        val disabled = deliberation.disabledActionTypes(rootInputId, sessionId)
+        val threadSecurityContext = deliberation.threadSecurityContext(rootInputId, conversationContext)
+        val plannerDescriptors = motorCortex.plannerDescriptors()
+            .filter { descriptor ->
+                descriptor.allowedInstructionTrust.contains(conversationContext.security.instructionTrust) &&
+                    descriptor.allowedArgumentDataTrust.contains(threadSecurityContext.aggregatedDataTrust)
+            }
+        val shapedActionSurface = CognitivePolicyShaper.shapePlannerActions(
+            conversationContext = conversationContext,
+            threadSecurityContext = threadSecurityContext,
+            descriptors = plannerDescriptors,
+            disabledActions = disabled,
+        )
+        val shaped = CognitivePolicyShaper.shapeOpportunityContract(
+            opportunity = opportunity,
+            plannerActionSurface = shapedActionSurface,
+            implementedAvailableActions = motorCortex.actionRegistry().dispatchableActionTypes(),
+            implementedDispatchableActions = motorCortex.actionRegistry().dispatchableActionTypes(),
+        )
+        cognitiveThreads.recordOpportunity(rootInputId, conversationContext, shaped)
+        return shaped
+    }
+
+    private fun emitThreadUpdateForRoot(
+        rootInputId: String?,
+        conversationContext: ConversationContext,
+        reason: String,
+    ) {
+        cognitiveThreads.thread(rootInputId, conversationContext)
+            ?.let { emitThreadUpdate(it, rootInputId, reason) }
+    }
+
+    private fun recordThreadIntentionTransition(
+        rootInputId: String?,
+        conversationContext: ConversationContext,
+        intentionId: String?,
+        kind: IntentionKind,
+        summary: String,
+        commitMode: CommitMode,
+        metadata: Map<String, String>,
+    ) {
+        val thread = cognitiveThreads.thread(rootInputId, conversationContext) ?: return
+        val intention = Intention(
+            id = intentionId ?: RootInputIds.next(),
+            cognitiveThreadId = thread.id,
+            kind = kind,
+            summary = summary,
+            createdAt = java.time.Instant.now(),
+            conversationContext = conversationContext,
+            commitMode = commitMode,
+            rootStimulusId = rootInputId,
+            goalId = thread.goalId,
+            goalRunId = thread.goalRunId,
+            metadata = metadata,
+        )
+        cognitiveThreads.recordIntention(rootInputId, conversationContext, intention)
+    }
+
+    private fun recordThreadBlocked(
+        rootInputId: String?,
+        conversationContext: ConversationContext,
+        reason: String?,
+        reasonCode: String?,
+    ) {
+        cognitiveThreads.markBlocked(rootInputId, conversationContext, reason, reasonCode)
+    }
+
+    private fun recordThreadDenied(
+        rootInputId: String?,
+        conversationContext: ConversationContext,
+        reason: String?,
+        reasonCode: String?,
+    ) {
+        cognitiveThreads.recordDenied(rootInputId, conversationContext, reason, reasonCode)
+    }
+
+    private fun recordThreadWaiting(
+        rootInputId: String?,
+        conversationContext: ConversationContext,
+        reason: String?,
+        resumeHint: String?,
+    ) {
+        cognitiveThreads.markWaiting(rootInputId, conversationContext, reason, resumeHint)
     }
 }

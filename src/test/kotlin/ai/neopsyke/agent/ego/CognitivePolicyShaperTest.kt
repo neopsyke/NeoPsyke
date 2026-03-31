@@ -9,11 +9,16 @@ import ai.neopsyke.agent.model.CommitMode
 import ai.neopsyke.agent.model.ConversationContext
 import ai.neopsyke.agent.model.ConversationSecurityContext
 import ai.neopsyke.agent.model.InstructionTrust
+import ai.neopsyke.agent.model.IntentionKind
 import ai.neopsyke.agent.model.Interlocutor
+import ai.neopsyke.agent.model.Opportunity
+import ai.neopsyke.agent.model.OpportunityKind
 import ai.neopsyke.agent.model.PrincipalRef
 import ai.neopsyke.agent.model.PrincipalRole
+import ai.neopsyke.agent.model.RootInputIds
 import ai.neopsyke.agent.model.ChannelRef
 import ai.neopsyke.agent.model.TransportClass
+import java.time.Instant
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -97,6 +102,86 @@ class CognitivePolicyShaperTest {
         )
     }
 
+    @Test
+    fun `observe only opportunity contracts strip prepare and stage commit modes`() {
+        val context = conversationContext(
+            role = PrincipalRole.EXTERNAL_PARTICIPANT,
+            surface = ChannelSurface.GROUP,
+            instructionTrust = InstructionTrust.UNTRUSTED_INSTRUCTION,
+        )
+        val security = CognitiveThreadSecurityContext.fromConversation(context.security)
+
+        val plannerSurface = CognitivePolicyShaper.shapePlannerActions(
+            conversationContext = context,
+            threadSecurityContext = security,
+            descriptors = listOf(descriptors().first()),
+            disabledActions = emptySet(),
+        )
+        val shaped = CognitivePolicyShaper.shapeOpportunityContract(
+            opportunity = opportunity(
+                context = context,
+                security = security,
+                allowedIntentions = setOf(IntentionKind.OBSERVE, IntentionKind.PREPARE, IntentionKind.DEFER),
+                allowedCommitModes = setOf(CommitMode.NOT_APPLICABLE, CommitMode.APPROVAL_BACKED),
+            ),
+            plannerActionSurface = plannerSurface,
+            implementedAvailableActions = setOf(ActionType.WEB_SEARCH),
+            implementedDispatchableActions = setOf(ActionType.WEB_SEARCH),
+        )
+
+        assertEquals(setOf(ActionType.WEB_SEARCH), shaped.availableActions)
+        assertEquals(setOf(ActionType.WEB_SEARCH), shaped.dispatchableActions)
+        assertEquals(setOf(IntentionKind.OBSERVE, IntentionKind.DEFER), shaped.allowedIntentions)
+        assertEquals(setOf(CommitMode.NOT_APPLICABLE), shaped.allowedCommitModes)
+    }
+
+    @Test
+    fun `goal opportunity contracts keep commit progression when policy allows control plane work`() {
+        val context = conversationContext(
+            role = PrincipalRole.ADMIN_CONTROL,
+            surface = ChannelSurface.ADMIN,
+            instructionTrust = InstructionTrust.TRUSTED_INSTRUCTION,
+            policyScopeId = "emergency-override",
+        )
+        val security = CognitiveThreadSecurityContext.fromConversation(context.security)
+
+        val plannerSurface = CognitivePolicyShaper.shapePlannerActions(
+            conversationContext = context,
+            threadSecurityContext = security,
+            descriptors = descriptors(),
+            disabledActions = emptySet(),
+        )
+        val shaped = CognitivePolicyShaper.shapeOpportunityContract(
+            opportunity = opportunity(
+                context = context,
+                security = security,
+                kind = OpportunityKind.RESUME,
+                allowedIntentions = setOf(
+                    IntentionKind.PREPARE,
+                    IntentionKind.STAGE,
+                    IntentionKind.COMMIT,
+                    IntentionKind.DEFER,
+                ),
+                allowedCommitModes = setOf(
+                    CommitMode.APPROVAL_BACKED,
+                    CommitMode.POLICY_AUTONOMOUS,
+                ),
+            ),
+            plannerActionSurface = plannerSurface,
+            implementedAvailableActions = setOf(ActionType.GOAL_OPERATION),
+            implementedDispatchableActions = setOf(ActionType.GOAL_OPERATION),
+        )
+
+        assertEquals(setOf(ActionType.GOAL_OPERATION), shaped.dispatchableActions)
+        assertTrue(IntentionKind.PREPARE in shaped.allowedIntentions)
+        assertTrue(IntentionKind.STAGE in shaped.allowedIntentions)
+        assertTrue(IntentionKind.COMMIT in shaped.allowedIntentions)
+        assertEquals(
+            setOf(CommitMode.APPROVAL_BACKED, CommitMode.POLICY_AUTONOMOUS),
+            shaped.allowedCommitModes,
+        )
+    }
+
     private fun descriptors(): List<ActionDescriptor> =
         listOf(
             ActionDescriptor(
@@ -124,6 +209,26 @@ class CognitivePolicyShaperTest {
                 supportsAutonomousCommit = true,
                 allowedInstructionTrust = setOf(InstructionTrust.TRUSTED_INSTRUCTION),
             ),
+        )
+
+    private fun opportunity(
+        context: ConversationContext,
+        security: CognitiveThreadSecurityContext,
+        kind: OpportunityKind = OpportunityKind.RESPOND,
+        allowedIntentions: Set<IntentionKind>,
+        allowedCommitModes: Set<CommitMode>,
+    ): Opportunity =
+        Opportunity(
+            id = RootInputIds.next(),
+            cognitiveThreadId = RootInputIds.next(),
+            kind = kind,
+            summary = "test opportunity",
+            salience = 1.0,
+            createdAt = Instant.now(),
+            conversationContext = context,
+            securityContext = security,
+            allowedIntentions = allowedIntentions,
+            allowedCommitModes = allowedCommitModes,
         )
 
     private fun conversationContext(

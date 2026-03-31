@@ -123,13 +123,15 @@ These are already decided and should not be reopened casually:
   checked against trust policy.
 - Cannot rely on plugin-local discipline alone.
 
-### 4.5 Full IntentionKind/CommitMode split
+### 4.5 Keep the IntentionKind/CommitMode split aligned
 
-- The strategy spec proposed a richer intention model (`OBSERVE`, `PREPARE`,
-  `STAGE`, `REQUEST_AUTHORIZATION`, `COMMIT`, `DEFER`) with separate
-  `CommitMode` (`APPROVAL_BACKED`, `POLICY_AUTONOMOUS`, `ADMIN_OVERRIDE`).
-- Currently partially implemented. Full implementation would allow more
-  fine-grained loop behavior and cleaner lifecycle progression.
+- The richer intention model (`OBSERVE`, `PREPARE`, `STAGE`,
+  `REQUEST_AUTHORIZATION`, `COMMIT`, `DEFER`) and separate `CommitMode`
+  (`APPROVAL_BACKED`, `POLICY_AUTONOMOUS`, `ADMIN_OVERRIDE`) are now live in
+  the runtime.
+- Remaining security work is to keep future actions, policy rules, operator UX,
+  and tests aligned with that split so new capability families do not collapse
+  back into action-type-specific workflow aliases.
 
 ### 4.6 Finer policy scoping
 

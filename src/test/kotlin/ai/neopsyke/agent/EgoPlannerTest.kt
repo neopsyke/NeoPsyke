@@ -80,7 +80,7 @@ class EgoPlannerTest {
         )
 
         val decision = planner.decide(
-            trigger = ai.neopsyke.agent.model.EgoTrigger.PendingThoughtInput(PendingThought(7, Urgency.LOW, "think", 1)),
+            trigger = deferredTrigger(PendingThought(7, Urgency.LOW, "think", 1)),
             context = PlannerContext(
                 recentDialogue = listOf(
                     DialogueTurn(DialogueRole.USER, "u"),
@@ -98,7 +98,7 @@ class EgoPlannerTest {
         assertEquals(ActionType.CONTACT_USER, action.actionType)
         assertEquals("payload", action.payload)
         assertEquals("summary-", action.summary)
-        assertEquals("thought", llm.lastOptions.metadata.callSite)
+        assertEquals("deferred-intention", llm.lastOptions.metadata.callSite)
     }
 
     @Test
@@ -202,7 +202,7 @@ class EgoPlannerTest {
         )
 
         planner.decide(
-            trigger = ai.neopsyke.agent.model.EgoTrigger.PendingThoughtInput(thought),
+            trigger = deferredTrigger(thought),
             context = PlannerContext(
                 recentDialogue = emptyList(),
                 queue = QueueSnapshot(0, 1, 0),
@@ -213,8 +213,8 @@ class EgoPlannerTest {
         with(llm.lastOptions.metadata) {
             assertEquals("ego", actor)
             assertEquals("planner", cognitiveRole)
-            assertEquals("thought", callSite)
-            assertEquals("thought", trigger)
+            assertEquals("deferred-intention", callSite)
+            assertEquals("deferred-intention", trigger)
             assertEquals("id", originSource)
             assertEquals("learn-something", needId)
             assertEquals("impulse-42", rootImpulseId)
@@ -247,7 +247,7 @@ class EgoPlannerTest {
         )
 
         val decision = planner.decide(
-            trigger = ai.neopsyke.agent.model.EgoTrigger.PendingThoughtInput(PendingThought(7, Urgency.LOW, "think", 1)),
+            trigger = deferredTrigger(PendingThought(7, Urgency.LOW, "think", 1)),
             context = PlannerContext(
                 recentDialogue = emptyList(),
                 queue = QueueSnapshot(0, 0, 0)
@@ -657,7 +657,7 @@ class EgoPlannerTest {
         )
 
         val decision = planner.decide(
-            trigger = ai.neopsyke.agent.model.EgoTrigger.PendingThoughtInput(
+            trigger = deferredTrigger(
                 PendingThought(
                     id = 9,
                     urgency = Urgency.MEDIUM,
@@ -713,7 +713,7 @@ class EgoPlannerTest {
         )
 
         val decision = planner.decide(
-            trigger = ai.neopsyke.agent.model.EgoTrigger.PendingThoughtInput(
+            trigger = deferredTrigger(
                 PendingThought(
                     id = 10,
                     urgency = Urgency.MEDIUM,
@@ -923,7 +923,7 @@ class EgoPlannerTest {
         )
 
         val decision = planner.decide(
-            trigger = ai.neopsyke.agent.model.EgoTrigger.PendingThoughtInput(
+            trigger = deferredTrigger(
                 PendingThought(
                     id = 1,
                     urgency = Urgency.LOW,
@@ -1165,7 +1165,7 @@ class EgoPlannerTest {
             metaGuidance = "Finalize now with concise answer."
         )
 
-        planner.decide(ai.neopsyke.agent.model.EgoTrigger.PendingThoughtInput(PendingThought(1, Urgency.MEDIUM, "think")), context)
+        planner.decide(deferredTrigger(PendingThought(1, Urgency.MEDIUM, "think")), context)
 
         val prompt = llm.lastMessages.last().content
         assertTrue(prompt.contains("Deliberation pressure:"))

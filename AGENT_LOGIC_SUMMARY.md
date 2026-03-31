@@ -103,6 +103,7 @@ It is intentionally high-level and should stay aligned with the code.
     - appraises goal-runtime cues through `GoalsGateway.nextWorkFromCue(...)`
     - binds the owning thread/percept state
     - emits an `Opportunity` plus the correct scheduler trigger for user input, feedback, or goal work
+    - shapes the opportunity contract before enqueue time so `allowedIntentions`, `allowedCommitModes`, `availableActions`, `dispatchableActions`, and planner action definitions are already narrowed by the active thread security frame
     - leaves Id wake cues as trusted wake-only stimuli that bind thread state and then let already-queued impulse work run
   - Interactive wiring uses `AsyncSignalSource` with stdin enabled in control-only mode:
     - terminal `exit` emits `ExitRequested(source="stdin")` and stops the loop
@@ -243,6 +244,7 @@ It is intentionally high-level and should stay aligned with the code.
   - goal-runtime roots generate `RESUME` opportunities from stable per-step thread roots
   - the queued scheduler item is now `ScheduledOpportunity(opportunity + trigger)`, not a source-category-only wrapper
   - thread-level allowed commit modes are now shaped before planner choice from principal role, channel surface, and policy scope
+  - enqueue-time opportunity shaping now also carries planner-visible `availableActions`, `dispatchableActions`, and action definitions as part of the opportunity contract instead of leaving action-surface shaping only to later planner-context assembly
 - `PendingInput` carries:
   - `source` metadata (for example `chat:<sessionId>`) so runtime telemetry can map root requests to conversation sessions.
   - `rootInputId` (UUID string identity for request-scoped orchestration)
@@ -281,20 +283,21 @@ It is intentionally high-level and should stay aligned with the code.
     - restricted scopes and external/group contexts lose direct/autonomous commit semantics before planning rather than discovering that only at final authorization
   - Runs planner (`LlmEgoPlanner`) and applies deliberation pressure override if needed.
   - Applies decision by enqueueing explicit intentions:
-    - `OBSERVE` or `PREPARE` for action candidates, depending on action effect class
+    - `OBSERVE`, `PREPARE`, `STAGE`, `REQUEST_AUTHORIZATION`, or `COMMIT` for action candidates
     - `DEFER` for planner continuations, plan steps, noop recovery, denial recovery, and action follow-up continuation
   - Emits cognitive-stage observability events:
     - `cognitive_thread_updated` when a root input, feedback cue, or retained goal cycle updates thread state
     - `opportunity_enqueued` when an input, feedback item, goal work unit, or Id impulse becomes schedulable cognitive work
 
-## Thought Path
-- `processThought`:
-  - No longer represents the normal scheduler primitive for runtime progression.
-  - Instead, it is the execution helper used when a queued `DEFER` intention is attended and converted back into planner-facing deferred continuation context.
-  - Drops thought if `passes >= maxThoughtPasses`.
+## Deferred Continuation Path
+- `processDeferredIntention`:
+  - `DEFER` is the only normal continuation shape; there is no standalone thought scheduler lane anymore.
+  - When a queued `DEFER` intention is attended, Ego rebuilds deferred continuation context from that intention and replans immediately.
+  - Drops the deferred continuation if `passes >= maxThoughtPasses`.
   - If dropped and fallback explanation is allowed, enqueue fallback `contact_user` action.
+  - User/system/goal-origin defer chains default to `allowFallbackExplanation=true`, so repeated non-converging defer loops terminate with an explicit explanation instead of ending silently at max passes.
   - Duplicate fallback `contact_user` enqueues are suppressed per `(root input, sessionId)` scope so one session cannot block fallback for another.
-  - For Id-origin thoughts, planner context now rebuilds Id convergence state and applies the same convergence action filters used during impulse processing.
+  - For Id-origin deferred continuations, planner context rebuilds Id convergence state and applies the same convergence action filters used during impulse processing; those defer chains keep fallback disabled unless an earlier path explicitly enables it.
   - Otherwise mirrors input path:
     - build context
     - optional meta assessment/guidance
@@ -304,7 +307,7 @@ It is intentionally high-level and should stay aligned with the code.
 ## Intention Path
 - `processIntention`:
   - Emits `intention_processing` telemetry with root scope and action type when present.
-  - `DEFER` intentions reconstruct deferred continuation state and hand it to `processThought`.
+  - `DEFER` intentions are handled directly by `processDeferredIntention`.
   - Action-carrying intentions become `PendingAction`s annotated with:
     - `intentionId`
     - `intentionKind`
@@ -312,10 +315,13 @@ It is intentionally high-level and should stay aligned with the code.
   - Planner output is now intention-native instead of action-native:
     - `decision=defer` yields a queued `DEFER` intention
     - `decision=intend` must carry explicit `intention_kind` plus optional `commit_mode_preference`
-    - current planner-formed kinds are `OBSERVE` and `PREPARE`
+    - planner-formed kinds now include `OBSERVE`, `PREPARE`, `STAGE`, `REQUEST_AUTHORIZATION`, and `COMMIT`
   - Current live intention kinds in normal runtime use:
     - `OBSERVE` for read/observe and delivery actions that do not require secure commit progression
-    - `PREPARE` for commit-capable or goal-runtime action candidates before policy review
+    - `PREPARE` for side-effecting action candidates before policy review
+    - `STAGE` for explicit durable staging before commit
+    - `REQUEST_AUTHORIZATION` for explicit approval-backed progression
+    - `COMMIT` for explicit immediate-commit progression when the opportunity contract allows it
     - `DEFER` for planner continuations and recovery/follow-up paths
   - Later secure-action progression now records explicit intention transitions for:
     - `STAGE`
@@ -323,6 +329,7 @@ It is intentionally high-level and should stay aligned with the code.
     - `COMMIT`
   - Dispatcher no longer infers intention kind from action effect class.
     - Runtime rejects planner intentions whose `intention_kind`, `action_type`, or `commit_mode_preference` fall outside the current opportunity contract.
+  - Thread inspection now preserves the latest intention plus last blocked/denied reason and reason code.
   - Action follow-up continuations are now regenerated as `DEFER` intentions only after the action outcome has re-entered through `SensoryCortex` as feedback.
 
 ## Action Path
@@ -366,7 +373,7 @@ It is intentionally high-level and should stay aligned with the code.
     - native Google observe actions (`gmail_observe_search`, `gmail_observe_message`, `calendar_observe_events`) use encrypted local credentials plus on-demand access-token refresh and always stay in `OBSERVE` effect class
     - Actions may return either an immediate outcome or a generic async wait contract (`ActionOutcome.asyncWait`, typically with `executionStatus=WAITING`).
       - Synchronous tools keep the existing immediate-completion path.
-      - Async start actions do not enqueue ordinary follow-up thoughts on the start call.
+      - Async start actions do not enqueue ordinary follow-up deferred continuations on the start call.
       - For goal-origin actions, `WAITING` without async handles is treated as a contract violation and translated into a retry path instead of a fake generic wait.
     - Record thread-artifact trust degradation at execution time.
     - Emit an internal `ActionFeedbackCue` for non-`contact_user` outcomes.
@@ -384,8 +391,8 @@ It is intentionally high-level and should stay aligned with the code.
     - Store assistant output in dialogue and short-term memory when applicable.
     - For `contact_user`, optionally force a post-terminal-answer long-term memory assessment.
     - Follow-up continuation behavior is still action-descriptor-driven (`requiresFollowUpThought` + `followUpPrefix`), but it is now regenerated from feedback re-entry rather than direct post-execute queue mutation.
-      - async completion after a prior `WAITING` state is treated as a real resume signal even when the action descriptor itself does not request a follow-up thought
-      - `WAITING` outcomes are a hard suspend point for ordinary threads; they never generate an immediate feedback follow-up thought.
+      - async completion after a prior `WAITING` state is treated as a real resume signal even when the action descriptor itself does not request a follow-up continuation
+      - `WAITING` outcomes are a hard suspend point for ordinary threads; they never generate an immediate feedback follow-up continuation.
     - Optionally run immediate post-allowed-action long-term memory assessment.
 - For `contact_user`, response latency is emitted and per-input evidence cache is cleared.
 - After `contact_user`, pending intentions/thoughts/actions for the same `(root input, sessionId)` scope are pruned from queues
@@ -475,9 +482,9 @@ It is intentionally high-level and should stay aligned with the code.
     - one truncation retry with increased completion budget on likely-truncated output
     - one strict-JSON retry on parse failure
     - parse-failure circuit breaker (scoped by `root_input + action_type`) that bypasses verifier for one decision after repeated malformed verifier outputs
-    - reject propagation into noop-thoughts: verifier `reject` preserves denied action type/payload metadata so follow-up planning can see exactly which candidate was blocked
-    - repeated-answer disagreement override: if a follow-up thought repeats the same `contact_user` payload after a prior non-technical verifier reject and the verifier rejects it again, planner keeps the original answer and the dispatcher lets that output through instead of re-blocking it as an ordinary repeated denied action
-    - structured follow-up lineage guard: follow-up thoughts carry origin action metadata (`originActionType`, `originActionObservedEvidence`), and verifier `repair` back to the same evidence action is ignored when the candidate is `contact_user`, prior evidence succeeded, and user did not explicitly request refresh/retry
+    - reject propagation into noop-retry deferred continuations: verifier `reject` preserves denied action type/payload metadata so follow-up planning can see exactly which candidate was blocked
+    - repeated-answer disagreement override: if a follow-up deferred continuation repeats the same `contact_user` payload after a prior non-technical verifier reject and the verifier rejects it again, planner keeps the original answer and the dispatcher lets that output through instead of re-blocking it as an ordinary repeated denied action
+    - structured follow-up lineage guard: follow-up deferred continuations carry origin action metadata (`originActionType`, `originActionObservedEvidence`), and verifier `repair` back to the same evidence action is ignored when the candidate is `contact_user`, prior evidence succeeded, and user did not explicitly request refresh/retry
     - `contact_user` meaning guard: verifier repairs may clean up surface form, but repairs that would change the answer's meaning are ignored and the original answer is kept
     - no-op repair collapse: if verifier returns `repair` but action type/payload/summary are materially unchanged, planner treats it as `approve` instead of recording a repair
     - answer-action tuning: verifier instructions explicitly approve directly entailed exact-match answers when there is no contradictory evidence, and verifier sampling temperature is fixed at `0.0`
@@ -737,7 +744,7 @@ It is intentionally high-level and should stay aligned with the code.
 - File: `src/main/kotlin/ai/neopsyke/agent/ego/AttentionScheduler.kt`
 - Three bounded priority queues:
   - opportunities
-  - thoughts (`Urgency`)
+  - intentions (`Urgency`)
   - actions (`Urgency`)
 - Opportunity ordering:
   - input opportunity (`InputPriority`)
@@ -745,8 +752,8 @@ It is intentionally high-level and should stay aligned with the code.
   - goal-work opportunity
 - Supports root-input scoped queue operations used by convergence logic:
   - detect pending fallback explanation actions per `(rootInputId, sessionId)` scope
-  - detect pending plan-context or convergence thoughts per `(rootInputId, sessionId)` scope
-  - clear pending thoughts/actions for a resolved `(rootInputId, sessionId)` scope after terminal `contact_user`
+  - detect pending plan-context or convergence `DEFER` intentions per `(rootInputId, sessionId)` scope
+  - clear pending deferred intentions/actions for a resolved `(rootInputId, sessionId)` scope after terminal `contact_user`
 - Saturation leads to drop + instrumentation warning/event.
 
 ## Safety and Fallback Patterns

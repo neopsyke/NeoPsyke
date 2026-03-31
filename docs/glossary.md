@@ -61,15 +61,16 @@ Each section covers terms that appear together in the same area of the agent.
 - **ModelErrorStreak** — Consecutive LLM parsing or generation failures. Triggers fallback strategies when it grows.
 - **MetaReasoner** — A second-level LLM reasoning step that assesses whether deliberation should continue, be constrained, or be finalized. Returns a `MetaReasonerVerdict`. Has a circuit-breaker and an optional fallback provider.
 - **MetaReasonerVerdict** — The meta-reasoner's assessment: `CONTINUE`, `CONTINUE_WITH_CONSTRAINTS`, `FINALIZE_NOW`, or `REQUEST_TOOL_THEN_FINALIZE`.
-- **AttentionScheduler** — Priority queue that decides what the Ego works on next. Order: input opportunities first, then impulses (ranked by tension), then goal work, then the highest-priority item between pending actions and thoughts.
-- **LoopTask** — The unit of work the Ego executes in one step: `AttendOpportunity`, `ProcessThought`, or `PerformAction`. Pulled from the `AttentionScheduler`.
-- **OpportunityWorkItem** — A pending item that competes for the Ego's attention: `InputOpportunity`, `ImpulseOpportunity`, or `GoalWorkOpportunity`.
+- **AttentionScheduler** — Priority queue that decides what the Ego works on next. Opportunity work is scheduled first; after that the scheduler chooses between queued intentions and queued actions by urgency. `AttentionScheduler.kt`
+- **LoopTask** — The unit of work the Ego executes in one step: `AttendOpportunity`, `ProcessIntention`, or `PerformAction`. Pulled from the `AttentionScheduler`.
+- **ScheduledOpportunity** — A queued attention item pairing an `Opportunity` contract with its originating trigger (`Input`, `Impulse`, `Feedback`, or `GoalWork`). `QueueModels.kt`
+- **OpportunityTrigger** — Sealed type recording which runtime source produced a scheduled opportunity: `Input`, `Impulse`, `Feedback`, or `GoalWork`. `QueueModels.kt`
 - **AmbientContext** — Best-effort cached snapshot of active goals, recent scratchpad themes, useful recent actions, and open loops. Advisory only — biases recall and prompting toward relevant topics without blocking on state queries.
-- **EgoTrigger** — A sealed type representing what caused the Ego to run the current step. Four variants: `IncomingInput` (user/system message), `PendingThoughtInput` (follow-up reasoning), `IncomingImpulse` (Id-driven work), `GoalWork` (goal step activation). `CognitionModels.kt`
+- **EgoTrigger** — A sealed type representing what caused the Ego to run the current step. Five variants: `IncomingInput`, `DeferredIntention`, `ActionFeedback`, `IncomingImpulse`, and `GoalWork`. `CognitionModels.kt`
 - **ActionOrigin** — Provenance marker on pending thoughts and actions, tracking which source initiated the work (`USER`, `ID`, `SYSTEM`, `GOAL`) and optionally the `needId` and `rootImpulseId` for Id-originated work. `QueueModels.kt`
 - **OriginSource** — Enum identifying the source of work: `USER`, `ID`, `SYSTEM`, `GOAL`. Part of `ActionOrigin`.
 - **DecisionVerifier** — Pre-superego gate that validates whether a proposed action is grounded and ready to commit. Assesses task intent (personal memory, external observation, etc.), volatility, evidence requirements, and dispatch eligibility. `DecisionVerifier.kt`
-- **DecisionDispatcher** — Routes planner decisions into the appropriate queues. Handles thought and action enqueueing, plan suppression with dedup gates, and recovery from suppressed plans. `DecisionDispatcher.kt`
+- **DecisionDispatcher** — Routes planner decisions into the appropriate queues. Handles intention enqueueing, deferred continuation regeneration, plan suppression with dedup gates, and recovery from suppressed plans. `DecisionDispatcher.kt`
 - **FallbackHandler** — Manages fallback behavior when actions are denied or fail. Enqueues denial thoughts, staged-action follow-ups, and fallback explanations when the planner exhausts options. `FallbackHandler.kt`
 - **DeliberationEngine** — Manages deliberation state, external evidence tracking, action cooldown (retry budget), thread security context, and meta-reasoning pressure. Separate from `DeliberationProgressMonitor`. `DeliberationEngine.kt`
 - **ScratchpadFinalizer** — Optional LLM-backed pass that rewrites the final action payload using gathered evidence, scratchpad state, and dialogue history. Returns confidence and grounding assessment. `ScratchpadFinalizer.kt`
@@ -86,7 +87,7 @@ Each section covers terms that appear together in the same area of the agent.
 - **SuperegoPolicy** — Static directive sets that define what the superego should enforce. Includes `GENERAL_DIRECTIVES` (always applied) and `ID_ORIGIN_DIRECTIVES` (extra scrutiny for drive-initiated actions). Resolved per action via `forAction()`.
 - **TwoStageReview** — An optional mode where a cheaper primary superego model handles routine reviews and an escalation model handles uncertain cases. Configured via `SuperegoConfig.twoStageReviewEnabled`.
 - **AuthorizationDecision** — The full output of the action-control authorization step. Contains `progress` (how far the action is allowed to advance), `commitMode`, and reason/code.
-- **AuthorizationProgress** — How far an action is allowed to proceed: `DENY`, `ALLOW_PREPARE`, `ALLOW_STAGE`, or `ALLOW_COMMIT`. Determines which lifecycle stage the action reaches.
+- **AuthorizationProgress** — How far an action is allowed to proceed: `DENY`, `ALLOW_STAGE`, or `ALLOW_COMMIT`. Determines which lifecycle stage the action reaches.
 - **CommitMode** — How an action was authorized to execute: `NOT_APPLICABLE` (no commit needed), `APPROVAL_BACKED` (human approved), `POLICY_AUTONOMOUS` (policy allowed direct commit), `ADMIN_OVERRIDE` (administrative bypass).
 
 ---
@@ -132,9 +133,9 @@ Each section covers terms that appear together in the same area of the agent.
 ## Queue & Scheduling
 
 - **PendingInput** — A user message or external event waiting in the input queue. Carries content, `InputPriority`, `rootInputId`, and `ConversationContext`.
-- **PendingThought** — An internal reasoning item enqueued by the planner for further deliberation. Has an `urgency`, a `passes` counter (recursion depth), and optional denial context if it resulted from a denied action.
+- **PendingThought** — A reconstructed deferred-continuation payload used while processing a queued `IntentionKind.DEFER`. It carries urgency, pass count, denial context, and recall hints, but it is no longer a primary scheduler category by itself.
 - **PendingImpulse** — An Id impulse waiting in the impulse queue. Carries the triggering `needId`, tension, prompt hint, and `rootImpulseId`.
-- **QueueSnapshot** — A read-only view of queue depths: `pendingInputCount`, `pendingThoughtCount`, `pendingActionCount`, `pendingImpulseCount`. Injected into the planner context.
+- **QueueSnapshot** — A read-only view of queue depths: `pendingInputCount`, `pendingThoughtCount`, `pendingActionCount`, `pendingIntentionCount`, and `pendingImpulseCount`. Injected into the planner context.
 - **InputPriority** — Priority level for incoming inputs: `LOW`, `MEDIUM`, `HIGH`. Determines ordering in the scheduler. `Enums.kt`
 - **Urgency (queue sense)** — The `Urgency` enum (`LOW`, `MEDIUM`, `HIGH`) used to prioritize pending thoughts and actions in the attention scheduler. Distinct from the Id's continuous tension value. `Enums.kt`
 - **RootInputId** — A UUID string that uniquely identifies the originating request and follows it through every downstream thought, action, and lifecycle event. Generated by `RootInputIds.next()`. Used for tracing and scratchpad scoping.

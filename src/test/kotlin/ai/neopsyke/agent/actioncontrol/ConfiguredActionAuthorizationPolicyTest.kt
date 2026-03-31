@@ -15,6 +15,7 @@ import ai.neopsyke.agent.model.ConversationSecurityContext
 import ai.neopsyke.agent.model.ConversationSecurityContexts
 import ai.neopsyke.agent.model.DataTrust
 import ai.neopsyke.agent.model.Interlocutor
+import ai.neopsyke.agent.model.IntentionKind
 import ai.neopsyke.agent.model.PendingAction
 import ai.neopsyke.agent.model.PrincipalRef
 import ai.neopsyke.agent.model.PrincipalRole
@@ -221,6 +222,77 @@ class ConfiguredActionAuthorizationPolicyTest {
         assertEquals(AuthorizationProgress.ALLOW_STAGE, decision.progress)
         assertEquals(CommitMode.APPROVAL_BACKED, decision.commitMode)
         assertEquals("POLICY_GOAL_DELETE_ALL_STAGE_REQUIRED", decision.reasonCode)
+    }
+
+    @Test
+    fun `stage intention forces staged progression even when direct commit is otherwise allowed`() {
+        val policy = ConfiguredActionAuthorizationPolicy()
+        val context = ownerContext()
+        val decision = policy.authorize(
+            action = PendingAction(
+                id = 300,
+                urgency = Urgency.MEDIUM,
+                type = ActionType.GOAL_OPERATION,
+                payload = """{"operation":"delete","goal_id":"goal-123"}""",
+                summary = "stage goal delete",
+                conversationContext = context,
+                intentionKind = IntentionKind.STAGE,
+                requestedCommitMode = CommitMode.POLICY_AUTONOMOUS,
+            ),
+            conversationContext = context,
+            actionRegistry = registry(),
+        )
+
+        assertEquals(AuthorizationProgress.ALLOW_STAGE, decision.progress)
+        assertEquals(CommitMode.POLICY_AUTONOMOUS, decision.commitMode)
+        assertEquals("POLICY_INTENTION_STAGE", decision.reasonCode)
+    }
+
+    @Test
+    fun `request authorization intention stages approval backed authorization`() {
+        val policy = ConfiguredActionAuthorizationPolicy()
+        val context = ownerContext()
+        val decision = policy.authorize(
+            action = PendingAction(
+                id = 301,
+                urgency = Urgency.MEDIUM,
+                type = ActionType.GOAL_OPERATION,
+                payload = """{"operation":"delete","goal_id":"goal-123"}""",
+                summary = "request approval for goal delete",
+                conversationContext = context,
+                intentionKind = IntentionKind.REQUEST_AUTHORIZATION,
+                requestedCommitMode = CommitMode.APPROVAL_BACKED,
+            ),
+            conversationContext = context,
+            actionRegistry = registry(),
+        )
+
+        assertEquals(AuthorizationProgress.ALLOW_STAGE, decision.progress)
+        assertEquals(CommitMode.APPROVAL_BACKED, decision.commitMode)
+        assertEquals("POLICY_INTENTION_REQUEST_AUTHORIZATION", decision.reasonCode)
+    }
+
+    @Test
+    fun `commit intention rejects approval backed commit without prior authorization`() {
+        val policy = ConfiguredActionAuthorizationPolicy()
+        val context = ownerContext()
+        val decision = policy.authorize(
+            action = PendingAction(
+                id = 302,
+                urgency = Urgency.MEDIUM,
+                type = ActionType.GOAL_OPERATION,
+                payload = """{"operation":"delete","goal_id":"goal-123"}""",
+                summary = "commit goal delete without stage",
+                conversationContext = context,
+                intentionKind = IntentionKind.COMMIT,
+                requestedCommitMode = CommitMode.APPROVAL_BACKED,
+            ),
+            conversationContext = context,
+            actionRegistry = registry(),
+        )
+
+        assertEquals(AuthorizationProgress.DENY, decision.progress)
+        assertEquals("POLICY_COMMIT_INTENTION_REQUIRES_AUTHORIZATION", decision.reasonCode)
     }
 
     @Test

@@ -56,7 +56,7 @@ class IdEgoLifecycleIntegrationTest {
                         EgoDecision.Noop("search completed")
                     }
                     is EgoTrigger.GoalWork -> EgoDecision.Noop("ignore goal work in test")
-                    is EgoTrigger.PendingThoughtInput -> decisionForThought(trigger.thought)
+                    is EgoTrigger.DeferredIntention -> decisionForThought(trigger.intention.toPendingThought())
                 }
 
             private fun decisionForThought(thought: PendingThought): EgoDecision =
@@ -176,7 +176,7 @@ class IdEgoLifecycleIntegrationTest {
                         EgoDecision.Noop("done")
                     }
                     is EgoTrigger.GoalWork -> EgoDecision.Noop("ignore goal work in test")
-                    is EgoTrigger.PendingThoughtInput -> {
+                    is EgoTrigger.DeferredIntention -> {
                         EgoDecision.Noop("done")
                     }
                 }
@@ -260,8 +260,8 @@ class IdEgoLifecycleIntegrationTest {
                     )
                     is EgoTrigger.ActionFeedback -> EgoDecision.Noop("ignore feedback in test")
                     is EgoTrigger.GoalWork -> EgoDecision.Noop("ignore goal work in test")
-                    is EgoTrigger.PendingThoughtInput -> {
-                        if (trigger.thought.planContext != null) {
+                    is EgoTrigger.DeferredIntention -> {
+                        if (trigger.intention.deferredPlanContext != null) {
                             planStepHasReflectInternalAvailable = ActionType.REFLECT_INTERNAL in context.availableActions
                             planStepHasContactDispatchable = ActionType.CONTACT_USER in context.dispatchableActions
                             planStepHasReflectInternalDispatchable = ActionType.REFLECT_INTERNAL in context.dispatchableActions
@@ -363,8 +363,8 @@ class IdEgoLifecycleIntegrationTest {
                     )
                     is EgoTrigger.ActionFeedback -> EgoDecision.Noop("ignore feedback in test")
                     is EgoTrigger.GoalWork -> EgoDecision.Noop("ignore goal work in test")
-                    is EgoTrigger.PendingThoughtInput ->
-                        when (trigger.thought.planContext?.stepIndex) {
+                    is EgoTrigger.DeferredIntention ->
+                        when (trigger.intention.deferredPlanContext?.stepIndex) {
                             0 -> EgoDecision.FormIntention(
                                 urgency = Urgency.MEDIUM,
                                 intentionKind = IntentionKind.OBSERVE,
@@ -470,7 +470,7 @@ class IdEgoLifecycleIntegrationTest {
                     is EgoTrigger.IncomingImpulse -> EgoDecision.Noop("no useful action available")
                     is EgoTrigger.ActionFeedback -> EgoDecision.Noop("ignore feedback in test")
                     is EgoTrigger.GoalWork -> EgoDecision.Noop("ignore goal work in test")
-                    is EgoTrigger.PendingThoughtInput -> EgoDecision.Noop("done")
+                    is EgoTrigger.DeferredIntention -> EgoDecision.Noop("done")
                 }
         }
         val config = AgentConfig(
@@ -541,7 +541,7 @@ class IdEgoLifecycleIntegrationTest {
                     )
                     is EgoTrigger.ActionFeedback -> EgoDecision.Noop("ignore feedback in test")
                     is EgoTrigger.GoalWork -> EgoDecision.Noop("ignore goal work in test")
-                    is EgoTrigger.PendingThoughtInput -> EgoDecision.Noop("done")
+                    is EgoTrigger.DeferredIntention -> EgoDecision.Noop("done")
                 }
         }
         val config = AgentConfig(
@@ -620,7 +620,7 @@ class IdEgoLifecycleIntegrationTest {
                     )
                     is EgoTrigger.ActionFeedback -> EgoDecision.Noop("ignore feedback in test")
                     is EgoTrigger.GoalWork -> EgoDecision.Noop("ignore goal work in test")
-                    is EgoTrigger.PendingThoughtInput -> EgoDecision.Noop("done")
+                    is EgoTrigger.DeferredIntention -> EgoDecision.Noop("done")
                 }
         }
         val config = AgentConfig(

@@ -124,7 +124,7 @@ data class SuperegoContext(
 
 sealed interface EgoTrigger {
     data class IncomingInput(val input: PendingInput) : EgoTrigger
-    data class PendingThoughtInput(val thought: PendingThought) : EgoTrigger
+    data class DeferredIntention(val intention: QueuedIntention) : EgoTrigger
     data class ActionFeedback(val feedback: PendingFeedback) : EgoTrigger
     data class IncomingImpulse(val impulse: PendingImpulse) : EgoTrigger
     data class GoalWork(val workUnit: GoalRunActivation) : EgoTrigger

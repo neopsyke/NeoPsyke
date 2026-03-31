@@ -1148,9 +1148,19 @@ class DashboardStateStore(
             rootStimulusId = rootInputId,
             goalId = current.thread.goalId,
             goalRunId = current.thread.goalRunId,
-            allowedIntentions = emptySet(),
-            allowedCommitModes = emptySet(),
-            metadata = current.thread.metadata,
+            allowedIntentions = data["allowed_intentions"].asIntentionKindSet(),
+            allowedCommitModes = data["allowed_commit_modes"].asCommitModeSet(),
+            availableActions = data["available_actions"].asActionTypeSet(),
+            dispatchableActions = data["dispatchable_actions"].asActionTypeSet(),
+            metadata = (data["opportunity_metadata"] as? Map<*, *>)
+                ?.entries
+                ?.mapNotNull { (key, value) ->
+                    val normalizedKey = key?.toString()?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+                    normalizedKey to value?.toString().orEmpty()
+                }
+                ?.toMap()
+                ?: current.latestOpportunity?.metadata
+                ?: current.thread.metadata,
         )
         storeThreadSnapshotLocked(current.copy(latestOpportunity = opportunity))
     }
@@ -1194,7 +1204,9 @@ class DashboardStateStore(
             summary = summary,
             createdAt = current.latestIntention?.createdAt ?: current.thread.lastUpdatedAt,
             conversationContext = current.thread.conversationContext,
-            commitMode = current.latestIntention?.commitMode ?: ai.neopsyke.agent.model.CommitMode.NOT_APPLICABLE,
+            commitMode = data["commit_mode"].asCommitMode()
+                ?: current.latestIntention?.commitMode
+                ?: ai.neopsyke.agent.model.CommitMode.NOT_APPLICABLE,
             rootStimulusId = current.thread.rootStimulusId,
             goalId = current.thread.goalId,
             goalRunId = current.thread.goalRunId,
@@ -1366,6 +1378,31 @@ class DashboardStateStore(
             ?.takeIf { it.isNotBlank() }
             ?.uppercase()
             ?.let { raw -> IntentionKind.entries.firstOrNull { it.name == raw } }
+
+    private fun Any?.asCommitMode(): ai.neopsyke.agent.model.CommitMode? =
+        this?.toString()
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+            ?.uppercase()
+            ?.let { raw -> ai.neopsyke.agent.model.CommitMode.entries.firstOrNull { it.name == raw } }
+
+    private fun Any?.asIntentionKindSet(): Set<IntentionKind> =
+        (this as? List<*>)
+            ?.mapNotNull { it.asIntentionKind() }
+            ?.toSet()
+            ?: emptySet()
+
+    private fun Any?.asCommitModeSet(): Set<ai.neopsyke.agent.model.CommitMode> =
+        (this as? List<*>)
+            ?.mapNotNull { it.asCommitMode() }
+            ?.toSet()
+            ?: emptySet()
+
+    private fun Any?.asActionTypeSet(): Set<ai.neopsyke.agent.model.ActionType> =
+        (this as? List<*>)
+            ?.mapNotNull { entry -> ai.neopsyke.agent.model.ActionType.fromRaw(entry?.toString()) }
+            ?.toSet()
+            ?: emptySet()
 
     private fun CognitiveThreadStatus.isTerminalThreadStatus(): Boolean =
         this == CognitiveThreadStatus.RESOLVED || this == CognitiveThreadStatus.FAILED

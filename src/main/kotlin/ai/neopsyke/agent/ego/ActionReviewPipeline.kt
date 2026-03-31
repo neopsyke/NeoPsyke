@@ -42,6 +42,12 @@ internal class ActionReviewPipeline(
     private val cleanupResolvedInputAfterAnswer: (PendingAction) -> Unit,
     private val cleanupSatisfiedIdImpulse: (PendingAction) -> Unit,
     private val getId: () -> ai.neopsyke.agent.id.Id?,
+    private val recordThreadIntention: (String?, ConversationContext, String?, IntentionKind, String, CommitMode, Map<String, String>) -> Unit =
+        { _, _, _, _, _, _, _ -> },
+    private val recordThreadBlocked: (String?, ConversationContext, String?, String?) -> Unit = { _, _, _, _ -> },
+    private val recordThreadDenied: (String?, ConversationContext, String?, String?) -> Unit = { _, _, _, _ -> },
+    private val recordThreadWaiting: (String?, ConversationContext, String?, String?) -> Unit = { _, _, _, _ -> },
+    private val emitThreadUpdate: (String?, ConversationContext, String) -> Unit = { _, _, _ -> },
     private val actionControlService: ActionControlService = LegacyCompatibleActionControlService { action, authorization ->
         motorCortex.execute(action, config.searchResultCount, authorization)
     },
@@ -88,6 +94,13 @@ internal class ActionReviewPipeline(
             )
         ) {
             is ActionControlDecisionResult.Refused -> {
+                recordThreadDenied(
+                    resolvedAction.rootInputId,
+                    convCtx,
+                    controlResult.reason,
+                    controlResult.reasonCode,
+                )
+                emitThreadUpdate(resolvedAction.rootInputId, convCtx, "action_refused")
                 actionControlService.recordLedgerEntry(
                     action = resolvedAction,
                     conversationContext = convCtx,
@@ -137,6 +150,13 @@ internal class ActionReviewPipeline(
                     extras = mapOf("staged_action_id" to controlResult.stagedAction.id)
                 )
                 if (controlResult.stagedAction.commitMode == CommitMode.POLICY_AUTONOMOUS) {
+                    recordThreadWaiting(
+                        resolvedAction.rootInputId,
+                        convCtx,
+                        controlResult.authorizationDecision.reason,
+                        controlResult.stagedAction.id,
+                    )
+                    emitThreadUpdate(resolvedAction.rootInputId, convCtx, "action_staged_waiting")
                     instrumentation.emit(
                         AgentEvents.warning(
                             "Action '${resolvedAction.type.id}' was queued for autonomous staged execution."
@@ -152,6 +172,13 @@ internal class ActionReviewPipeline(
                     commitMode = controlResult.authorizationDecision.commitMode,
                     extras = mapOf("staged_action_id" to controlResult.stagedAction.id)
                 )
+                recordThreadBlocked(
+                    resolvedAction.rootInputId,
+                    convCtx,
+                    controlResult.authorizationDecision.reason,
+                    controlResult.authorizationDecision.reasonCode,
+                )
+                emitThreadUpdate(resolvedAction.rootInputId, convCtx, "action_staged_blocked")
                 fallbackHandler.handleStagedAction(
                     action = resolvedAction,
                     stagedAction = controlResult.stagedAction,
@@ -165,6 +192,13 @@ internal class ActionReviewPipeline(
             }
 
             is ActionControlDecisionResult.Cancelled -> {
+                recordThreadDenied(
+                    resolvedAction.rootInputId,
+                    convCtx,
+                    controlResult.ledgerEntry.summary,
+                    controlResult.ledgerEntry.reasonCode,
+                )
+                emitThreadUpdate(resolvedAction.rootInputId, convCtx, "action_cancelled")
                 actionLifecycleObserver.onActionBlocked(
                     action = resolvedAction,
                     reason = controlResult.ledgerEntry.summary,
@@ -223,6 +257,7 @@ internal class ActionReviewPipeline(
                 "authorization_id" to controlResult.authorization.id,
             )
         )
+        emitThreadUpdate(resolvedAction.rootInputId, convCtx, "action_commit")
         processExecutedAction(
             resolvedAction = resolvedAction,
             outcome = outcome,
@@ -393,6 +428,13 @@ internal class ActionReviewPipeline(
             )
         )
         if (!taskVerificationDecision.allow) {
+            recordThreadDenied(
+                resolvedAction.rootInputId,
+                convCtx,
+                taskVerificationDecision.reason,
+                taskVerificationDecision.reasonCode,
+            )
+            emitThreadUpdate(resolvedAction.rootInputId, convCtx, "action_denied_task_verifier")
             actionControlService.recordLedgerEntry(
                 action = resolvedAction,
                 conversationContext = convCtx,
@@ -467,6 +509,13 @@ internal class ActionReviewPipeline(
             )
         )
         if (!gateDecision.allow) {
+            recordThreadDenied(
+                resolvedAction.rootInputId,
+                convCtx,
+                gateDecision.reason,
+                gateDecision.reasonCode,
+            )
+            emitThreadUpdate(resolvedAction.rootInputId, convCtx, "action_denied_superego")
             actionControlService.recordLedgerEntry(
                 action = resolvedAction,
                 conversationContext = convCtx,
@@ -531,6 +580,15 @@ internal class ActionReviewPipeline(
                     "root_input_id" to action.rootInputId,
                 ) + extras
             )
+        )
+        recordThreadIntention(
+            action.rootInputId,
+            action.conversationContext,
+            action.intentionId,
+            kind,
+            action.summary,
+            commitMode,
+            extras.mapValues { (_, value) -> value?.toString().orEmpty() }
         )
     }
 

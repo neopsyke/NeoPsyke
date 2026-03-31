@@ -86,6 +86,10 @@ data class CognitiveThreadSnapshot(
     val latestIntention: Intention? = null,
     val waitState: CognitiveThreadWaitState? = null,
     val terminalState: CognitiveThreadTerminalState? = null,
+    val lastBlockedReason: String? = null,
+    val lastBlockedReasonCode: String? = null,
+    val lastDeniedReason: String? = null,
+    val lastDeniedReasonCode: String? = null,
 )
 
 enum class CognitiveThreadKind {
@@ -118,6 +122,9 @@ data class Opportunity(
     val goalRunId: String? = null,
     val allowedIntentions: Set<IntentionKind> = setOf(IntentionKind.DEFER),
     val allowedCommitModes: Set<CommitMode> = setOf(CommitMode.NOT_APPLICABLE),
+    val availableActions: Set<ActionType> = emptySet(),
+    val dispatchableActions: Set<ActionType> = emptySet(),
+    val actionDefinitions: List<ActionPlanningDefinition> = emptyList(),
     val metadata: Map<String, String> = emptyMap(),
 )
 

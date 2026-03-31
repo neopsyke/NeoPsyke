@@ -129,6 +129,7 @@ Every interaction follows this chain:
 3. The percept is attached to an existing **cognitive thread** or starts a new one. Cognitive threads persist across time and can suspend, resume, and accumulate context.
 4. The cognitive thread emits one or more **opportunity** items for the Ego's attention.
 5. The **Ego** attends to the highest-priority opportunity and forms an **intention** -- a candidate course of action.
+   Intention kind is explicit and distinct from commit mode: `OBSERVE`, `PREPARE`, `STAGE`, `REQUEST_AUTHORIZATION`, `COMMIT`, and `DEFER`.
 6. The **DecisionVerifier** checks whether the intention is grounded, sufficient, and ready to commit -- or whether more reasoning steps are needed.
 7. The **Superego** judges the candidate intention against policy and safety constraints.
 8. If allowed, the **MotorCortex** executes it through discovered action plugins.
@@ -167,10 +168,10 @@ Security is not an afterthought or a moderation layer bolted on top. It is a str
 The traditional agent model is `plan → review → execute`. NeoPsyke replaces this with a richer lifecycle:
 
 ```
-observe → prepare → stage → authorize → commit → record
+observe → prepare → stage → request_authorization → commit → record
 ```
 
-High-impact actions are not just "tool calls." They follow explicit lifecycle stages: actions can be direct-committed (low risk, opted in per action), staged for operator approval (higher risk), or denied outright. Authorization decisions are durable artifacts stored in SQLite, not conversational memories that can be forgotten or hallucinated.
+High-impact actions are not just "tool calls." They follow explicit lifecycle stages: actions can be direct-committed (low risk, opted in per action), staged for operator approval (higher risk), or denied outright. Planner intention kind and execution commit mode are separate runtime concepts, so the agent can request authorization without pretending that approval already exists. Authorization decisions are durable artifacts stored in SQLite, not conversational memories that can be forgotten or hallucinated.
 
 ### Distributed policy enforcement
 
@@ -289,6 +290,7 @@ The `signoff-gate` command trims that to the non-redundant final gate:
 4. **Reasoning gate**
 
 Live evaluation lanes (`--lane low-llm`, `--lane high-llm`) and memory live eval are available for deeper validation during development.
+Recorded live evals can be replayed with `./freud/bin/freud eval --live --session-replay <run-dir>`, and the live reasoning smoke suite is available through `./freud/bin/freud bbh --live --lane <lane>`.
 
 ## Configuration
 
@@ -315,7 +317,6 @@ Each cognitive role (planner, superego primary/escalation, action verifier, meta
 | [docs/configuration.md](docs/configuration.md) | Full configuration reference (YAML files, env vars, tuning) |
 | [docs/evaluation.md](docs/evaluation.md) | Testing layers, eval pipeline, and contributor directions |
 | [docs/env-reference.md](docs/env-reference.md) | Complete environment variable reference |
-| [docs/glossary.md](docs/glossary.md) | Core runtime terms and architecture vocabulary |
 | [docs/security.md](docs/security.md) | Security model: trust, policy enforcement, action lifecycle |
 | [docs/tuning/PROMPT_BUDGET_RUN_DIAGNOSTICS.md](docs/tuning/PROMPT_BUDGET_RUN_DIAGNOSTICS.md) | How to inspect prompt-budget run diagnostics |
 | [docs/tuning/PROMPT_BUDGET_TUNING_GUIDE.md](docs/tuning/PROMPT_BUDGET_TUNING_GUIDE.md) | Prompt-budget tuning guidance |

@@ -116,7 +116,7 @@ Scenarios are evaluated deterministically using recorded LLM responses, not live
 Deterministic tests that verify structural properties of planner output without making LLM calls:
 
 - **shape-lock** — Does the planner output conform to the expected JSON schema?
-- **feedback-carry** — Does the planner correctly incorporate denial feedback into the next thought?
+- **feedback-carry** — Does the planner correctly incorporate denial feedback into the next deferred continuation?
 - **multi-fix** — Can the planner recover from multiple consecutive failures?
 
 The logic eval also includes a 45-case behavioral/perturbation pack that tests edge cases and boundary conditions.
@@ -193,10 +193,10 @@ When a recorded live eval fails:
 
 ```bash
 ./freud/bin/freud eval --live --session-replay <run-dir>
-./freud/bin/freud eval --live --input <same-input> --cache-replay <run-dir>/session/llm-cache.jsonl
+./freud/bin/freud eval --live --input <same-input> --cache-replay <run-dir>/artifacts/llm-cache.jsonl
 ```
 
-Use session replay to reproduce the full run-path deterministically and cache replay to isolate prompt/LLM divergence at the first changed call.
+`eval --session-replay <run-dir>` auto-detects replay cache from either `session/llm-cache.jsonl` or `artifacts/llm-cache.jsonl`, so recorded runs remain replayable even when the cache file lives under artifacts. Use session replay to reproduce the full run-path deterministically and cache replay to isolate prompt/LLM divergence at the first changed call.
 
 ---
 
@@ -389,7 +389,7 @@ For detailed tuning workflows, see `PROMPT_BUDGET_TUNING_GUIDE.md` and `PROMPT_B
 
 ### Live dashboard observability
 
-The dashboard (`/dashboard`) provides live observability during interactive runs: thought chains, LLM call details, Superego decisions, memory operations, queue states, and scratchpad snapshots. All events are streamed as typed SSE events.
+The dashboard (`/dashboard`) provides live observability during interactive runs: deferred-intention chains, thread/opportunity/intention state, LLM call details, Superego decisions, memory operations, queue states, and scratchpad snapshots. All events are streamed as typed SSE events.
 
 ---
 

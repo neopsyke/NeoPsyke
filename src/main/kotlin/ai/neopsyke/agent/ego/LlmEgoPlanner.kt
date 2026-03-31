@@ -51,14 +51,14 @@ class LlmEgoPlanner(
     override fun decide(trigger: EgoTrigger, context: PlannerContext): EgoDecision {
         val triggerLabel = when (trigger) {
             is EgoTrigger.IncomingInput -> "input"
-            is EgoTrigger.PendingThoughtInput -> "thought"
+            is EgoTrigger.DeferredIntention -> "deferred-intention"
             is EgoTrigger.ActionFeedback -> "feedback"
             is EgoTrigger.IncomingImpulse -> "impulse"
             is EgoTrigger.GoalWork -> "goal-work"
         }
         val rootInputId = when (trigger) {
             is EgoTrigger.IncomingInput -> trigger.input.rootInputId
-            is EgoTrigger.PendingThoughtInput -> trigger.thought.rootInputId
+            is EgoTrigger.DeferredIntention -> trigger.intention.rootInputId
             is EgoTrigger.ActionFeedback -> trigger.feedback.cue.rootInputId
             is EgoTrigger.IncomingImpulse -> trigger.impulse.rootImpulseId
             is EgoTrigger.GoalWork -> trigger.workUnit.goalId
@@ -357,8 +357,8 @@ class LlmEgoPlanner(
                         EgoDecision.Noop("Planner formed resolution_draft intention outside active plan context.")
                     } else if (intentionKind == null || actionType == null || actionPayload.isBlank() || resolvedSummary.isBlank()) {
                         EgoDecision.Noop("Planner returned invalid intention payload.")
-                    } else if (intentionKind == IntentionKind.OBSERVE && commitModePreference != CommitMode.NOT_APPLICABLE) {
-                        EgoDecision.Noop("Observe intentions must use commit_mode_preference=not_applicable.")
+                    } else if (!isCommitModeValidForIntention(intentionKind, commitModePreference)) {
+                        EgoDecision.Noop("Planner returned an invalid commit_mode_preference for the chosen intention kind.")
                     } else if (!context.availableActions.contains(actionType)) {
                         EgoDecision.Noop(
                             "Planner formed unavailable action type: ${actionType.id}."
@@ -419,7 +419,33 @@ class LlmEgoPlanner(
         when (raw?.trim()?.uppercase()) {
             IntentionKind.OBSERVE.name -> IntentionKind.OBSERVE
             IntentionKind.PREPARE.name -> IntentionKind.PREPARE
+            IntentionKind.STAGE.name -> IntentionKind.STAGE
+            IntentionKind.REQUEST_AUTHORIZATION.name -> IntentionKind.REQUEST_AUTHORIZATION
+            IntentionKind.COMMIT.name -> IntentionKind.COMMIT
             else -> null
+        }
+
+    private fun isCommitModeValidForIntention(
+        intentionKind: IntentionKind,
+        commitModePreference: CommitMode,
+    ): Boolean =
+        when (intentionKind) {
+            IntentionKind.OBSERVE -> commitModePreference == CommitMode.NOT_APPLICABLE
+            IntentionKind.REQUEST_AUTHORIZATION -> commitModePreference == CommitMode.APPROVAL_BACKED
+            IntentionKind.STAGE ->
+                commitModePreference in setOf(
+                    CommitMode.APPROVAL_BACKED,
+                    CommitMode.POLICY_AUTONOMOUS,
+                    CommitMode.ADMIN_OVERRIDE,
+                )
+
+            IntentionKind.COMMIT ->
+                commitModePreference in setOf(
+                    CommitMode.POLICY_AUTONOMOUS,
+                    CommitMode.ADMIN_OVERRIDE,
+                )
+
+            IntentionKind.PREPARE, IntentionKind.DEFER -> commitModePreference != CommitMode.NOT_APPLICABLE
         }
 
     private fun resolveCommitModePreference(
@@ -478,7 +504,7 @@ class LlmEgoPlanner(
         json.replace(invalidJsonEscapeRegex, "")
 
     private fun isResolutionDraftAllowed(trigger: EgoTrigger): Boolean =
-        trigger is EgoTrigger.PendingThoughtInput && trigger.thought.planContext != null
+        trigger is EgoTrigger.DeferredIntention && trigger.intention.deferredPlanContext != null
 
     private fun shouldUseGoalCreationBranch(input: String): Boolean {
         val normalized = input.lowercase(Locale.ROOT)
@@ -740,8 +766,8 @@ class LlmEgoPlanner(
                     actionType = cue.actionType.id,
                 )
             }
-            is EgoTrigger.PendingThoughtInput -> {
-                val thought = trigger.thought
+            is EgoTrigger.DeferredIntention -> {
+                val thought = trigger.intention.toPendingThought()
                 val plan = thought.planContext
                 base.copy(
                     originSource = thought.origin.source.name.lowercase(Locale.ROOT),
@@ -944,7 +970,7 @@ class LlmEgoPlanner(
     }
 
     private fun resolveFollowUpOrigin(trigger: EgoTrigger): FollowUpOrigin? {
-        val thought = (trigger as? EgoTrigger.PendingThoughtInput)?.thought ?: return null
+        val thought = (trigger as? EgoTrigger.DeferredIntention)?.intention?.toPendingThought() ?: return null
         val actionType = thought.originActionType ?: return null
         val observedEvidence = thought.originActionObservedEvidence ?: return null
         return FollowUpOrigin(actionType = actionType, observedEvidence = observedEvidence)
@@ -1052,7 +1078,7 @@ class LlmEgoPlanner(
     ): ActionVerifierCircuitKey {
         val rootInputId = when (trigger) {
             is EgoTrigger.IncomingInput -> trigger.input.rootInputId
-            is EgoTrigger.PendingThoughtInput -> trigger.thought.rootInputId
+            is EgoTrigger.DeferredIntention -> trigger.intention.rootInputId
             is EgoTrigger.ActionFeedback -> trigger.feedback.cue.rootInputId
             is EgoTrigger.IncomingImpulse -> trigger.impulse.rootImpulseId
             is EgoTrigger.GoalWork -> trigger.workUnit.goalId
@@ -1118,7 +1144,7 @@ class LlmEgoPlanner(
                   "urgency":"low|medium|high",
                   "defer_content":"optional when decision=defer",
                   "long_term_memory_recall_query":"optional query string",
-                  "intention_kind":"observe|prepare",
+                  "intention_kind":"observe|prepare|stage|request_authorization|commit",
                   "commit_mode_preference":"not_applicable|approval_backed|policy_autonomous|admin_override",
                   "action_type":"$actionSchemaEnum",
                   "action_payload":"optional when decision=intend",
@@ -1158,7 +1184,7 @@ class LlmEgoPlanner(
                   "urgency":"low|medium|high",
                   "defer_content":"optional when decision=defer",
                   "long_term_memory_recall_query":"optional query string",
-                  "intention_kind":"observe|prepare",
+                  "intention_kind":"observe|prepare|stage|request_authorization|commit",
                   "commit_mode_preference":"not_applicable|approval_backed|policy_autonomous|admin_override",
                   "action_type":"$actionSchemaEnum",
                   "action_payload":"optional when decision=intend",
@@ -1465,7 +1491,7 @@ class LlmEgoPlanner(
         reason: String,
     ): Boolean {
         if (original.actionType != ActionType.CONTACT_USER) return false
-        val priorThought = (trigger as? EgoTrigger.PendingThoughtInput)?.thought ?: return false
+        val priorThought = (trigger as? EgoTrigger.DeferredIntention)?.intention?.toPendingThought() ?: return false
         if (priorThought.deniedActionType != ActionType.CONTACT_USER) return false
         if (priorThought.denialReasonCode != ACTION_VERIFIER_REJECT_REASON_CODE) return false
         if (DenialReasonClassifier.isLikelyTechnical(
@@ -1755,6 +1781,12 @@ class LlmEgoPlanner(
                     - intend: form one explicit intention for the next action.
                     - plan: decompose into ordered steps when the task needs multiple stages.
                     - noop: when no safe next step exists.
+                    Intention kinds:
+                    - observe: interpret or deliver without explicit commit progression.
+                    - prepare: propose the action and let runtime policy choose commit progression.
+                    - stage: explicitly request staged progression before commit.
+                    - request_authorization: explicitly request approval-backed staging.
+                    - commit: explicitly request immediate commit when policy allows it.
                     Never use noop when you can answer directly with action_type=contact_user.
                     For direct reasoning or exact-match tasks that can be solved from the current prompt,
                     return decision=intend with intention_kind=observe, commit_mode_preference=not_applicable,
@@ -1799,7 +1831,7 @@ class LlmEgoPlanner(
                       "urgency":"low|medium|high",
                       "defer_content":"... optional when decision=defer",
                       "long_term_memory_recall_query":"optional query string for explicit extra long-term recall",
-                      "intention_kind":"observe|prepare",
+                      "intention_kind":"observe|prepare|stage|request_authorization|commit",
                       "commit_mode_preference":"not_applicable|approval_backed|policy_autonomous|admin_override",
                       "action_type":"$actionSchemaEnum",
                       "action_payload":"... optional when decision=intend",
@@ -1819,6 +1851,8 @@ class LlmEgoPlanner(
                     Use action_type=resolution_draft only for intermediate plan-step synthesis.
                     Do not use resolution_draft for terminal delivery; terminal user response must use action_type=contact_user.
                     observe intentions must use commit_mode_preference=not_applicable.
+                    request_authorization intentions must use commit_mode_preference=approval_backed.
+                    commit intentions must use commit_mode_preference=policy_autonomous or admin_override.
                     Do not return decision=plan without both plan_goal and plan_steps.
                     Keep defer_content concise.
                     If the user requests an exact output format, action_payload must contain exactly that final output and nothing else.
@@ -1982,7 +2016,7 @@ class LlmEgoPlanner(
                     noop_streak=${deliberation.noopStreak}
                     Guidance:
                     - if decision_pressure >= 0.75, prefer a concrete action or final answer.
-                    - if decision_pressure >= 0.90, avoid new thought loops unless strictly necessary.
+                    - if decision_pressure >= 0.90, avoid new deferred-intention loops unless strictly necessary.
                     - if external evidence hints already contain useful signals, avoid repeating the same external call unless refresh/retry is explicitly requested.
                     """.trimIndent()
                 ),
@@ -2231,8 +2265,8 @@ class LlmEgoPlanner(
                     }
                 }
             }
-            is EgoTrigger.PendingThoughtInput -> {
-                val thought = trigger.thought
+            is EgoTrigger.DeferredIntention -> {
+                val thought = trigger.intention.toPendingThought()
                 val planInfo = thought.planContext?.let { ctx ->
                     """
                     Active plan context:
@@ -2263,7 +2297,7 @@ class LlmEgoPlanner(
                 } else {
                     "Denied action context: none"
                 }
-                val parts = listOf("THOUGHT(pass=${thought.passes}): ${thought.content}", planInfo, denialContext)
+                val parts = listOf("DEFERRED_INTENTION(pass=${thought.passes}): ${thought.content}", planInfo, denialContext)
                     .filter { it.isNotBlank() }
                 parts.joinToString("\n")
             }
@@ -2535,7 +2569,7 @@ class LlmEgoPlanner(
                 },
                 "intention_kind": {
                   "type": ["string", "null"],
-                  "enum": ["observe", "prepare", null]
+                  "enum": ["observe", "prepare", "stage", "request_authorization", "commit", null]
                 },
                 "commit_mode_preference": {
                   "type": ["string", "null"],
@@ -2606,7 +2640,7 @@ class LlmEgoPlanner(
                 },
                 "intention_kind": {
                   "type": ["string", "null"],
-                  "enum": ["observe", "prepare", null]
+                  "enum": ["observe", "prepare", "stage", "request_authorization", "commit", null]
                 },
                 "commit_mode_preference": {
                   "type": ["string", "null"],

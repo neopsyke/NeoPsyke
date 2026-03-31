@@ -29,6 +29,7 @@ internal class StimulusIngressCoordinator(
     private val goalsGateway: GoalsGateway,
     private val instrumentation: AgentInstrumentation,
     private val telemetry: EgoTelemetry,
+    private val shapeOpportunityContract: (Opportunity, String?, ai.neopsyke.agent.model.ConversationContext) -> Opportunity,
     private val emitThreadUpdate: (CognitiveThread, String?, String) -> Unit,
     private val emitOpportunityEnqueued: (Opportunity, String?, String) -> Unit,
 ) {
@@ -70,7 +71,11 @@ internal class StimulusIngressCoordinator(
         )
         emitThreadUpdate(thread, work.rootInputId, "goal_percept_bound")
         cognitiveThreads.bindGoalWork(work)
-        val opportunity = cognitiveThreads.goalOpportunity(work)
+        val opportunity = shapeOpportunityContract(
+            cognitiveThreads.goalOpportunity(work),
+            work.rootInputId,
+            work.conversationContext,
+        )
         scheduler.enqueueGoalWork(work, opportunity)
         emitOpportunityEnqueued(opportunity, work.rootInputId, "goal_runtime")
         return Outcome.RunLoop(
@@ -115,7 +120,11 @@ internal class StimulusIngressCoordinator(
             receivedAtMs = stimulus.receivedAt.toEpochMilli(),
             resumedFromWaitingThread = resumedFromWaitingThread,
         )
-        val opportunity = cognitiveThreads.feedbackOpportunity(feedback)
+        val opportunity = shapeOpportunityContract(
+            cognitiveThreads.feedbackOpportunity(feedback),
+            cue.rootInputId,
+            cue.conversationContext,
+        )
         if (!scheduler.enqueueFeedback(feedback, opportunity)) {
             ingressLogger.warn { "Input queue full; dropping feedback stimulus." }
             instrumentation.emit(AgentEvents.warning("Input queue full; dropping feedback stimulus."))
@@ -155,7 +164,11 @@ internal class StimulusIngressCoordinator(
             percept = percept.copy(cognitiveThreadId = thread.id),
             cognitiveThreadId = thread.id,
         )
-        val opportunity = cognitiveThreads.inputOpportunity(input)
+        val opportunity = shapeOpportunityContract(
+            cognitiveThreads.inputOpportunity(input),
+            input.rootInputId,
+            input.conversationContext,
+        )
         if (!scheduler.enqueueInput(input, opportunity)) {
             ingressLogger.warn { "Input queue full; dropping input." }
             instrumentation.emit(AgentEvents.warning("Input queue full; dropping input."))

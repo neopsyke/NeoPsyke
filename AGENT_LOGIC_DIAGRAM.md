@@ -128,7 +128,7 @@ sequenceDiagram
     Ego->>CTS: bind percept to root-scoped cognitive thread
     CTS-->>Ego: cognitiveThreadId + thread trust state
     Ego->>Dash: emit cognitive_thread_updated
-    CTS-->>Ego: policy-shaped Opportunity
+    CTS-->>Ego: policy-shaped Opportunity\n(intentions + commit modes + planner-visible action surface)
     Ego->>Sched: enqueue ScheduledOpportunity(opportunity + trigger)
     Ego->>Dash: emit opportunity_enqueued
     Note over CTS,Dash: Thread snapshots are retained for live and terminal roots and exposed through `/api/obs/threads`
@@ -167,19 +167,20 @@ sequenceDiagram
             Planner-->>Ego: defer/intend/plan/noop
             Ego->>Delib: maybeApplyPressureOverride
             Note over Ego: Runtime opportunity guard rejects invalid intention kind, action surface, or commit-mode violations before scheduling execution work
-            Ego->>Sched: enqueue explicit intentions (observe/prepare/defer)
-            Note over Ego,Sched: Planner now forms explicit observe/prepare intentions directly; plan steps and recovery/follow-up work become deferred intentions, not first-class thought queue items
+            Ego->>Sched: enqueue explicit intentions (observe/prepare/stage/request_authorization/commit/defer)
+            Note over Ego,Sched: Planner now forms explicit lifecycle-aware intentions directly; plan steps and recovery/follow-up work become deferred intentions, not first-class thought queue items
             Note over Ego,Sched: Plans gated by budget, pressure, hash dedup, pending-plan check
             Note over Ego,Planner: Redundancy is planner-side soft cost control [prompt and verifier], with telemetry event external_action_redundancy_signal
             Note over Ego,Planner: Action verifier is disabled by default and only runs when planner.actionVerifierEnabled is true. when enabled it uses strict json_schema with relaxed-schema fallback. parse failures do truncation-budget retry then strict retry and may trip temporary verifier bypass [scoped per root_input and action_type]
             Note over Ego,Planner: Follow-up thoughts carry structured origin metadata [originActionType + observedEvidence]. verifier repairs back to the same evidence action are ignored for evidence-backed answers unless user asked refresh/retry. no-op verifier repairs collapse to approve
             Note over Ego,Planner: For contact_user, verifier repairs are limited to meaning-preserving surface cleanup. semantic answer rewrites are ignored and the original answer is kept
-            Note over Ego,Planner: Verifier rejects now preserve denied action metadata in noop-thoughts repeated non-technical reject of the same answer payload on a follow-up thought is treated as verifier disagreement planner keeps the answer and dispatcher does not re-block it as a normal repeated denied action
+            Note over Ego,Planner: Verifier rejects now preserve denied action metadata in noop-retry deferred continuations repeated non-technical reject of the same answer payload on a follow-up defer is treated as verifier disagreement planner keeps the answer and dispatcher does not re-block it as a normal repeated denied action
             Note over Ego,Planner: Follow-up evidence thoughts explicitly request one raw JSON planner decision and forbid tool/function wrappers
         else Task = intention
             alt Deferred continuation
-                Ego->>Ego: reconstruct PendingThought helper from DEFER intention
+                Ego->>Ego: rebuild deferred continuation context from DEFER intention
                 Ego->>Planner: decide(context for deferred continuation)
+                Note over Ego,Sched: Non-Id defer chains carry fallback permission by default; if repeated defers hit max passes, Ego converts the chain into a fallback contact_user action instead of ending silently
             else Action-bearing intention
                 Ego->>Ego: materialize PendingAction with intention metadata
                 Note over Ego: PendingAction now carries intentionId, intentionKind, and requestedCommitMode
@@ -263,7 +264,7 @@ sequenceDiagram
                             Note over Ego,TWS: External evidence is stored as typed artifacts first and rendered into scratchpad with trust/source labels
                             Ego->>PG: onActionExecuted / allowFollowUp (generic action lifecycle observer)
                             Note over Ego,Sched: Id-origin satisfying actions clear remaining same-root queued work before any follow-up can be enqueued
-                            Ego->>Sched: enqueue follow-up thought (for evidence actions)
+                            Ego->>Sched: enqueue follow-up defer (for evidence actions)
                             Ego->>Mem: maybeAssessLongTermMemory(post_allowed_action, optional force)
                             Note over Ego,Mem: Blocked imprints emit long_term_memory_persistence_skipped [reason_code, reason_detail] for timeline visibility
                         else deny
@@ -362,10 +363,10 @@ flowchart LR
 stateDiagram-v2
     [*] --> Processing
 
-    Processing --> Planning: input/thought task
-    Planning --> ActionQueued: decision=action
-    Planning --> ThoughtQueued: decision=thought/plan/noop-thought
-    Planning --> ThoughtQueued: plan suppressed (budget/pressure/hash/pending) -> convergence/recovery thought
+    Processing --> Planning: input/deferred-intention task
+    Planning --> ActionQueued: decision=intend
+    Planning --> ThoughtQueued: decision=defer/plan/noop-retry
+    Planning --> ThoughtQueued: plan suppressed (budget/pressure/hash/pending) -> convergence/recovery defer
 
     ActionQueued --> TaskReview: non-fallback action
     ActionQueued --> Executing: fallback explanation action
@@ -373,7 +374,7 @@ stateDiagram-v2
 
     TaskReview --> PolicyReview: task verifier allow
     PolicyReview --> Denied: deterministic hard deny / contract deny / superego deny
-    Denied --> ThoughtQueued: enqueue safe alternative thought
+    Denied --> ThoughtQueued: enqueue safe alternative defer
     Note right of ThoughtQueued: Repeat-denied payload block is skipped for technical or transient denial reasons (prefer reason_code classification) reflection lessons persist only for non-technical and non-system denials
 
     PolicyReview --> Executing: allow_commit
@@ -383,8 +384,8 @@ stateDiagram-v2
     Executing --> EvidenceMissing: tool/provider failure
     Executing --> WebSearchUnavailable: web search init/config failure
     WebSearchUnavailable --> ThoughtQueued: planner uses remaining available actions
-    EvidenceObserved --> ThoughtQueued: follow-up thought
-    EvidenceMissing --> ThoughtQueued: retry/adjust path
+    EvidenceObserved --> ThoughtQueued: feedback-driven defer
+    EvidenceMissing --> ThoughtQueued: retry/adjust defer
     EvidenceMissing --> ActionDisabled: retry-budget cooldown trips (non-retryable action failures)
     ActionDisabled --> ThoughtQueued: planner uses remaining available actions
 

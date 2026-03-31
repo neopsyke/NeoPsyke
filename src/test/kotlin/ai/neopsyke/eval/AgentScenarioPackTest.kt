@@ -608,7 +608,7 @@ class AgentScenarioPackTest {
                         steps = listOf("discard branch", "execute branch")
                     )
                     is EgoTrigger.ActionFeedback -> EgoDecision.Noop("ignore feedback in test")
-                    is EgoTrigger.PendingThoughtInput -> decideThought(trigger.thought)
+                    is EgoTrigger.DeferredIntention -> decideThought(trigger.intention.toPendingThought())
                     is EgoTrigger.GoalWork -> EgoDecision.Noop("ignore goal work")
                 }
 

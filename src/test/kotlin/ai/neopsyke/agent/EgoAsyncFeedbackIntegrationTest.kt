@@ -48,6 +48,7 @@ import ai.neopsyke.support.buildTestEgo
 import java.time.Instant
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 import kotlin.test.fail
 import kotlinx.coroutines.channels.Channel
@@ -82,8 +83,8 @@ class EgoAsyncFeedbackIntegrationTest {
                         summary = "start async test operation",
                     )
 
-                    is EgoTrigger.PendingThoughtInput -> {
-                        pendingThoughts += trigger.thought.content
+                    is EgoTrigger.DeferredIntention -> {
+                        pendingThoughts += trigger.intention.deferredContent
                         EgoDecision.Noop("unexpected deferred continuation")
                     }
 
@@ -206,8 +207,8 @@ class EgoAsyncFeedbackIntegrationTest {
                         summary = "run background success action",
                     )
 
-                    is EgoTrigger.PendingThoughtInput -> {
-                        pendingThoughts += trigger.thought.content
+                    is EgoTrigger.DeferredIntention -> {
+                        pendingThoughts += trigger.intention.deferredContent
                         EgoDecision.Noop("unexpected deferred continuation")
                     }
 
@@ -295,8 +296,8 @@ class EgoAsyncFeedbackIntegrationTest {
                         summary = "illegal control-plane action",
                     )
 
-                    is EgoTrigger.PendingThoughtInput -> {
-                        retryThoughts += trigger.thought.content
+                    is EgoTrigger.DeferredIntention -> {
+                        retryThoughts += trigger.intention.deferredContent
                         EgoDecision.FormIntention(
                             urgency = Urgency.MEDIUM,
                             intentionKind = IntentionKind.OBSERVE,
@@ -333,10 +334,18 @@ class EgoAsyncFeedbackIntegrationTest {
             val blockedEvent = waitForValue("planner decision blocked event") {
                 instrumentation.events.firstOrNull { it.type == "planner_decision_blocked" }
             }
+            val opportunityEvent = waitForValue("opportunity contract event") {
+                instrumentation.events.firstOrNull { event ->
+                    event.type == "opportunity_enqueued" &&
+                        event.data["root_input_id"] == blockedEvent.data["root_input_id"]
+                }
+            }
 
             assertEquals("goal_operation", blockedEvent.data["action_type"])
             assertEquals("ACTION_TYPE_NOT_AVAILABLE", blockedEvent.data["reason_code"])
             assertTrue(retryThoughts.single().contains("Action 'goal_operation' is not available"))
+            assertFalse((opportunityEvent.data["available_actions"] as List<*>).contains("goal_operation"))
+            assertFalse((opportunityEvent.data["dispatchable_actions"] as List<*>).contains("goal_operation"))
             assertTrue(
                 instrumentation.events.none {
                     it.type == "action_proposed" && it.data["action_type"] == "goal_operation"

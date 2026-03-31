@@ -39,6 +39,10 @@ internal class CognitiveThreadStore {
         val latestIntention: Intention? = null,
         val waitState: CognitiveThreadWaitState? = null,
         val terminalState: CognitiveThreadTerminalState? = null,
+        val lastBlockedReason: String? = null,
+        val lastBlockedReasonCode: String? = null,
+        val lastDeniedReason: String? = null,
+        val lastDeniedReasonCode: String? = null,
         val continuation: ContinuationState? = null,
     ) {
         fun snapshot(): CognitiveThreadSnapshot =
@@ -49,6 +53,10 @@ internal class CognitiveThreadStore {
                 latestIntention = latestIntention,
                 waitState = waitState,
                 terminalState = terminalState,
+                lastBlockedReason = lastBlockedReason,
+                lastBlockedReasonCode = lastBlockedReasonCode,
+                lastDeniedReason = lastDeniedReason,
+                lastDeniedReasonCode = lastDeniedReasonCode,
             )
     }
 
@@ -85,6 +93,9 @@ internal class CognitiveThreadStore {
             allowedIntentions = setOf(
                 IntentionKind.OBSERVE,
                 IntentionKind.PREPARE,
+                IntentionKind.STAGE,
+                IntentionKind.REQUEST_AUTHORIZATION,
+                IntentionKind.COMMIT,
                 IntentionKind.DEFER,
             ),
             allowedCommitModes = CognitivePolicyShaper.opportunityCommitModes(thread.securityContext),
@@ -114,6 +125,9 @@ internal class CognitiveThreadStore {
             allowedIntentions = setOf(
                 IntentionKind.OBSERVE,
                 IntentionKind.PREPARE,
+                IntentionKind.STAGE,
+                IntentionKind.REQUEST_AUTHORIZATION,
+                IntentionKind.COMMIT,
                 IntentionKind.DEFER,
             ),
             allowedCommitModes = CognitivePolicyShaper.opportunityCommitModes(thread.securityContext),
@@ -157,6 +171,9 @@ internal class CognitiveThreadStore {
             allowedIntentions = setOf(
                 IntentionKind.OBSERVE,
                 IntentionKind.PREPARE,
+                IntentionKind.STAGE,
+                IntentionKind.REQUEST_AUTHORIZATION,
+                IntentionKind.COMMIT,
                 IntentionKind.DEFER,
             ),
             allowedCommitModes = CognitivePolicyShaper.opportunityCommitModes(thread.securityContext),
@@ -207,6 +224,7 @@ internal class CognitiveThreadStore {
             allowedIntentions = setOf(
                 IntentionKind.PREPARE,
                 IntentionKind.STAGE,
+                IntentionKind.REQUEST_AUTHORIZATION,
                 IntentionKind.COMMIT,
                 IntentionKind.DEFER,
             ),
@@ -274,6 +292,8 @@ internal class CognitiveThreadStore {
                 ),
                 waitState = null,
                 terminalState = null,
+                lastBlockedReason = null,
+                lastBlockedReasonCode = null,
             )
         }
     }
@@ -288,6 +308,8 @@ internal class CognitiveThreadStore {
                 ),
                 waitState = null,
                 terminalState = null,
+                lastBlockedReason = null,
+                lastBlockedReasonCode = null,
             )
         }
     }
@@ -319,13 +341,23 @@ internal class CognitiveThreadStore {
     }
 
     fun markBlocked(rootInputId: String?, conversationContext: ConversationContext, reason: String? = null) {
+        markBlocked(rootInputId, conversationContext, reason, null)
+    }
+
+    fun markBlocked(
+        rootInputId: String?,
+        conversationContext: ConversationContext,
+        reason: String? = null,
+        reasonCode: String? = null,
+    ) {
         update(rootInputId, conversationContext) { record ->
             record.copy(
                 thread = record.thread.copy(
                     status = CognitiveThreadStatus.BLOCKED,
                     lastUpdatedAt = Instant.now(),
                     metadata = record.thread.metadata + listOfNotNull(
-                        reason?.takeIf { it.isNotBlank() }?.let { "thread_block_reason" to it }
+                        reason?.takeIf { it.isNotBlank() }?.let { "thread_block_reason" to it },
+                        reasonCode?.takeIf { it.isNotBlank() }?.let { "thread_block_reason_code" to it },
                     ).toMap(),
                 ),
                 waitState = CognitiveThreadWaitState(
@@ -333,6 +365,29 @@ internal class CognitiveThreadStore {
                     reason = reason,
                     since = Instant.now(),
                 ),
+                lastBlockedReason = reason,
+                lastBlockedReasonCode = reasonCode,
+            )
+        }
+    }
+
+    fun recordDenied(
+        rootInputId: String?,
+        conversationContext: ConversationContext,
+        reason: String? = null,
+        reasonCode: String? = null,
+    ) {
+        update(rootInputId, conversationContext) { record ->
+            record.copy(
+                thread = record.thread.copy(
+                    lastUpdatedAt = Instant.now(),
+                    metadata = record.thread.metadata + listOfNotNull(
+                        reason?.takeIf { it.isNotBlank() }?.let { "thread_denial_reason" to it },
+                        reasonCode?.takeIf { it.isNotBlank() }?.let { "thread_denial_reason_code" to it },
+                    ).toMap(),
+                ),
+                lastDeniedReason = reason,
+                lastDeniedReasonCode = reasonCode,
             )
         }
     }
