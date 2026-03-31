@@ -67,7 +67,11 @@ class Ego(
     /** Delegates to the attention scheduler's impulse enqueue. Used by the Id module. */
     fun enqueueImpulse(impulse: PendingImpulse, maxPendingImpulses: Int): Boolean {
         val opportunity = cognitiveThreads.impulseOpportunity(impulse)
-        return scheduler.enqueueImpulse(impulse, opportunity, maxPendingImpulses)
+        val queued = scheduler.enqueueImpulse(impulse, opportunity, maxPendingImpulses)
+        if (queued) {
+            emitOpportunityEnqueued(opportunity, impulse.rootImpulseId, "impulse")
+        }
+        return queued
     }
 
     /** Checks whether the Ego has any pending work. Used by the Id module for idle detection. */
@@ -172,12 +176,13 @@ class Ego(
                         val work = goalsGateway.nextWorkFromCue(goalCue)
                         if (work != null) {
                             logger.info { "Goal work picked: ${work.goalId}/${work.stepId}" }
-                            cognitiveThreads.bindPercept(
+                            val thread = cognitiveThreads.bindPercept(
                                 percept = percept.copy(conversationContext = work.conversationContext),
                                 rootInputId = work.rootInputId,
                                 kind = CognitiveThreadKind.GOAL_DIRECTED,
                                 title = work.stepDescription,
                             )
+                            emitThreadUpdate(thread, work.rootInputId, "goal_percept_bound")
                             cognitiveThreads.bindGoalWork(work)
                             maybeCreateGoalScratchpad(work)
                             val opportunity = cognitiveThreads.goalOpportunity(work)
@@ -189,6 +194,7 @@ class Ego(
                                 ),
                                 opportunity = opportunity,
                             )
+                            emitOpportunityEnqueued(opportunity, work.rootInputId, "goal_runtime")
                             runLoop()
                             cleanupAfterProjectAdvance(work.rootInputId, work.conversationContext)
                         }
@@ -217,6 +223,7 @@ class Ego(
                         kind = CognitiveThreadKind.CONVERSATION,
                         title = stimulus.content,
                     )
+                    emitThreadUpdate(thread, stimulus.id, "input_percept_bound")
                     val input = PendingInput(
                         id = 0L,
                         content = stimulus.content,
@@ -245,6 +252,7 @@ class Ego(
                     scheduler.latestQueuedInput()?.let { queuedInput ->
                         instrumentation.emit(AgentEvents.inputQueued(queuedInput))
                     }
+                    emitOpportunityEnqueued(opportunity, input.rootInputId, "input")
                     telemetry.emitQueueSnapshot("input_enqueued")
                     runLoop()
                 }
@@ -273,6 +281,7 @@ class Ego(
             kind = CognitiveThreadKind.CONVERSATION,
             title = cue.actionSummary.ifBlank { stimulus.content },
         )
+        emitThreadUpdate(thread, cue.rootInputId, "feedback_bound")
         val feedbackAction = PendingAction(
             id = cue.sourceActionId ?: 0L,
             urgency = Urgency.fromRaw(cue.urgency),
@@ -374,7 +383,6 @@ class Ego(
                 when (task) {
                     is LoopTask.AttendOpportunity -> processOpportunity(task.item)
                     is LoopTask.ProcessIntention -> processIntention(task.item)
-                    is LoopTask.ProcessThought -> processThought(task.item)
                     is LoopTask.PerformAction -> processAction(task.item)
                 }
             } catch (ex: Exception) {
@@ -1239,6 +1247,8 @@ class Ego(
                 else ->
                     cognitiveThreads.markWaiting(rootInputId, conversationContext, reason = "goal_waiting_resume")
             }
+            cognitiveThreads.thread(rootInputId, conversationContext)
+                ?.let { updated -> emitThreadUpdate(updated, rootInputId, "goal_cycle_retained") }
             deliberation.clearForInput(rootInputId, sessionId, retainThreadContinuity = true)
         } else {
             if (goalState?.goal?.status == ai.neopsyke.agent.goal.GoalStatus.FAILED || stepStatus == ai.neopsyke.agent.goal.StepStatus.FAILED) {
@@ -1246,6 +1256,8 @@ class Ego(
             } else {
                 cognitiveThreads.markResolved(rootInputId, conversationContext)
             }
+            cognitiveThreads.thread(rootInputId, conversationContext)
+                ?.let { updated -> emitThreadUpdate(updated, rootInputId, "goal_cycle_terminal") }
             deliberation.clearForInput(rootInputId, sessionId)
             telemetry.emitScratchpadTelemetry(
                 rootInputId = rootInputId,
@@ -1290,7 +1302,6 @@ class Ego(
                 is OpportunityTrigger.ThreadWork -> "thread_work"
             }
             is LoopTask.ProcessIntention -> "intention"
-            is LoopTask.ProcessThought -> "thought"
             is LoopTask.PerformAction -> "action"
         }
 
@@ -1298,7 +1309,6 @@ class Ego(
         when (task) {
             is LoopTask.AttendOpportunity -> task.item.rootInputId
             is LoopTask.ProcessIntention -> task.item.rootInputId
-            is LoopTask.ProcessThought -> task.item.rootInputId
             is LoopTask.PerformAction -> task.item.rootInputId
         }
 
@@ -1306,7 +1316,6 @@ class Ego(
         when (task) {
             is LoopTask.AttendOpportunity -> task.item.receivedAtMs ?: System.currentTimeMillis()
             is LoopTask.ProcessIntention -> task.item.rootInputReceivedAtMs
-            is LoopTask.ProcessThought -> task.item.rootInputReceivedAtMs
             is LoopTask.PerformAction -> task.item.rootInputReceivedAtMs
         }
 
@@ -1314,7 +1323,6 @@ class Ego(
         when (task) {
             is LoopTask.AttendOpportunity -> task.item.conversationContext
             is LoopTask.ProcessIntention -> task.item.conversationContext
-            is LoopTask.ProcessThought -> task.item.conversationContext
             is LoopTask.PerformAction -> task.item.conversationContext
         }
 
@@ -1349,5 +1357,47 @@ class Ego(
         const val JOURNAL_SUMMARY_PREVIEW_CHARS: Int = 160
         const val MAX_TRACKED_SESSIONS: Int = 32
         const val HEAP_SNAPSHOT_INTERVAL: Int = 5
+    }
+
+    private fun emitThreadUpdate(
+        thread: CognitiveThread,
+        rootInputId: String?,
+        reason: String,
+    ) {
+        instrumentation.emit(
+            AgentEvent(
+                type = "cognitive_thread_updated",
+                data = mapOf(
+                    "thread_id" to thread.id,
+                    "thread_kind" to thread.kind.name.lowercase(),
+                    "thread_status" to thread.status.name.lowercase(),
+                    "root_input_id" to rootInputId,
+                    "goal_id" to thread.goalId,
+                    "policy_scope_id" to thread.securityContext.policyScopeId,
+                    "reason" to reason,
+                )
+            )
+        )
+    }
+
+    private fun emitOpportunityEnqueued(
+        opportunity: Opportunity,
+        rootInputId: String?,
+        source: String,
+    ) {
+        instrumentation.emit(
+            AgentEvent(
+                type = "opportunity_enqueued",
+                data = mapOf(
+                    "opportunity_id" to opportunity.id,
+                    "opportunity_kind" to opportunity.kind.name.lowercase(),
+                    "summary" to opportunity.summary,
+                    "root_input_id" to rootInputId,
+                    "source" to source,
+                    "allowed_intentions" to opportunity.allowedIntentions.map { it.name.lowercase() },
+                    "allowed_commit_modes" to opportunity.allowedCommitModes.map { it.name.lowercase() },
+                )
+            )
+        )
     }
 }

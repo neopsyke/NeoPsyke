@@ -93,7 +93,7 @@ Final signoff:
 - scratchpad boundaries: Phase 5
 - security distribution: Phase 6
 - observability and auditability: Phase 7
-- thought-model alignment: Phase 3
+- thought-model alignment: Phase 7
 - final architecture completion test: Phase 7 plus final `signoff-gate`
 
 ## Validation Ledger
@@ -446,22 +446,94 @@ Open issues:
 ### Phase 7
 
 Status:
-- Not started
+- Completed
 
 Deterministic runs:
-- pending
+- `./gradlew --no-daemon compileKotlin compileTestKotlin`
+  - result: pass
+- `./gradlew --no-daemon test --tests 'ai.neopsyke.agent.AttentionSchedulerTest' --tests 'ai.neopsyke.agent.id.IdEgoIntegrationTest' --tests 'ai.neopsyke.agent.EgoPlannerTest' --tests 'ai.neopsyke.eval.AgentScenarioPackTest' --tests 'ai.neopsyke.dashboard.DashboardStateStoreTest'`
+  - result: pass
+- `./gradlew --no-daemon test --tests 'ai.neopsyke.agent.EgoAgentTest' --tests 'ai.neopsyke.agent.AttentionSchedulerTest' --tests 'ai.neopsyke.eval.AgentScenarioPackTest' --tests 'ai.neopsyke.dashboard.DashboardStateStoreTest'`
+  - result: pass
+- `./freud/bin/freud run cognitive-runtime-p7-convergence`
+  - result: pass
+  - run dir: `/Users/victor.toral/atomitl/ai/NeoPsyke/.neopsyke/runs/freud/20260331T044224Z-cognitive-runtime-p7-convergence-4231494331`
+- `./freud/bin/freud run signoff-gate`
+  - result: pass
+  - run dir: `/Users/victor.toral/atomitl/ai/NeoPsyke/.neopsyke/runs/freud/20260331T045327Z-signoff-gate-1340287409`
 
 Recorded curated eval suites:
-- pending
+- `./freud/bin/freud eval --live --record --lane low-llm --input freud/evals/cognitive-runtime/phase-7-convergence.txt --timeout 120`
+  - first result: timeout
+  - first run dir: `/Users/victor.toral/atomitl/ai/NeoPsyke/.neopsyke/runs/freud/20260331T044332Z-live-eval-4069470155`
+  - final result after fix: pass
+  - final run dir: `/Users/victor.toral/atomitl/ai/NeoPsyke/.neopsyke/runs/freud/20260331T044903Z-live-eval-2724523314`
 
 Recorded BBH suites:
-- pending
+- `./freud/bin/freud bbh --live --lane low-llm --record`
+  - result: pass
+  - run dir: `/Users/victor.toral/atomitl/ai/NeoPsyke/.neopsyke/runs/freud/20260331T044936Z-bbh-low-llm-2537501677`
+  - pass rate: 24/24 (100.0%)
 
 Replay-debug sessions:
-- pending
+- `./freud/bin/freud eval --live --lane low-llm --session-replay .neopsyke/runs/freud/20260331T044332Z-live-eval-4069470155 --timeout 120`
+  - result: pass
+  - replay run dir: `/Users/victor.toral/atomitl/ai/NeoPsyke/.neopsyke/runs/freud/20260331T044830Z-live-eval-3002026370`
+  - replay stats: signals hit, logbook recall hit, action-control hit, web-results diverged once and then fell through live
+- root cause fixed before the final recorded live suite:
+  - suppressed-plan convergence thoughts were inheriting `allowFallbackExplanation=false` from plan-step continuations
+  - repeated suppressed plans could therefore end in `thought_dropped(max_passes_reached)` without a user-visible safe fallback
+  - `recoverFromSuppressedPlan(...)` now preserves fallback explanations for non-Id origins, and a regression test locks this behavior
 
 Acceptance items closed:
-- pending
+- legacy thought-lane scheduling removed:
+  - `LoopTask.ProcessThought` deleted
+  - scheduler now attends only opportunities, intentions, and actions
+  - deferred continuations live inside `QueuedIntention(IntentionKind.DEFER)` and are only reconstructed into `PendingThought` helpers at execution time
+- normal runtime progression no longer depends on a standalone thought queue category
+- scheduler queue-state compatibility views still expose `thoughts`, but they are now derived from deferred intentions rather than owned by a separate queue
+- cognitive-stage observability is now explicit:
+  - `cognitive_thread_updated` events expose thread id/status/reason/root scope
+  - `opportunity_enqueued` events expose opportunity id/kind/source/root scope
+  - dashboard snapshot coverage now verifies those events remain inspectable
+- living runtime docs updated to reflect the final non-hybrid runtime:
+  - `AGENT_LOGIC_SUMMARY.md`
+  - `AGENT_LOGIC_DIAGRAM.md`
+  - `docs/security.md`
+- final deterministic signoff gate passed after Phase 7 convergence work
 
 Open issues:
-- pending
+- none for the implemented target architecture
+
+### Final acceptance reconciliation
+
+Cross-check against frozen `docs/COGNITIVE_RUNTIME_ARCHITECTURE_STATUS.md` completed after Phase 7 and `signoff-gate`.
+
+Acceptance conclusions:
+
+- `Stimulus`: satisfied
+  - cognitive ingress is typed and control-plane signals stay separate
+- `Percept`: satisfied
+  - accepted cognitive work now crosses a mandatory `Stimulus -> Percept` boundary
+- `CognitiveThread`: satisfied
+  - real thread store owns live root continuity, trust state, and goal-runtime continuity
+- `Opportunity`: satisfied
+  - real scheduled opportunities are generated from thread-bound triggers and shaped before planner choice
+- `Intention`: satisfied
+  - attended opportunities now progress through explicit intention handling and secure-action transitions
+- secure action lifecycle: satisfied
+  - prepared/staged/authorized/receipt flow remained intact through the migration
+- uniform feedback: satisfied
+  - sync/async non-user action outcomes re-enter through `SensoryCortex`
+- goal-runtime integration: satisfied
+  - goal work now resumes as thread continuity rather than a separate top-level queue branch
+- scratchpad boundaries: satisfied
+  - thread-scoped continuity and intention-scoped drafts are separated
+- security distribution: satisfied
+  - early layered policy shaping now operates at thread/opportunity/planner surface time
+- observability and auditability: satisfied
+  - thread, opportunity, intention, staged-action, authorization, and receipt transitions are inspectable in runtime telemetry/dashboard surfaces
+- thought-model alignment: satisfied
+  - normal cognitive progression no longer depends on `PendingThought` as a first-class scheduler category
+- final architecture completion test: satisfied
+  - the runtime now operates primarily as `stimulus -> percept -> cognitive thread -> opportunity -> intention -> prepared action -> staged action -> authorized commit -> receipt`

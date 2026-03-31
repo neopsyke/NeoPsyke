@@ -85,7 +85,7 @@ class AttentionSchedulerTest {
     }
 
     @Test
-    fun `actions and thoughts are selected by urgency then insertion order`() {
+    fun `deferred continuations outrank equally urgent actions and keep urgency order`() {
         val scheduler = AttentionScheduler(config)
         scheduler.enqueueThought("low", Urgency.LOW)
         scheduler.enqueueThought("high", Urgency.HIGH)
@@ -95,11 +95,14 @@ class AttentionSchedulerTest {
         val second = scheduler.nextTask()
         val third = scheduler.nextTask()
 
-        assertIs<ai.neopsyke.agent.model.LoopTask.PerformAction>(first)
-        assertIs<ai.neopsyke.agent.model.LoopTask.ProcessThought>(second)
-        assertEquals("high", second.item.content)
-        assertIs<ai.neopsyke.agent.model.LoopTask.ProcessThought>(third)
-        assertEquals("low", third.item.content)
+        val firstIntention = assertIs<ai.neopsyke.agent.model.LoopTask.ProcessIntention>(first)
+        assertEquals(IntentionKind.DEFER, firstIntention.item.intention.kind)
+        assertEquals("high", firstIntention.item.deferredThoughtContent)
+        val secondIntention = assertIs<ai.neopsyke.agent.model.LoopTask.PerformAction>(second)
+        assertEquals(ActionType.WEB_SEARCH, secondIntention.item.type)
+        val thirdIntention = assertIs<ai.neopsyke.agent.model.LoopTask.ProcessIntention>(third)
+        assertEquals(IntentionKind.DEFER, thirdIntention.item.intention.kind)
+        assertEquals("low", thirdIntention.item.deferredThoughtContent)
     }
 
     @Test
@@ -153,7 +156,7 @@ class AttentionSchedulerTest {
 
         val snapshot = scheduler.queueSnapshot()
         assertEquals(1, snapshot.pendingInputCount)
-        assertEquals(1, snapshot.pendingIntentionCount)
+        assertEquals(2, snapshot.pendingIntentionCount)
         assertEquals(1, snapshot.pendingThoughtCount)
         assertEquals(1, snapshot.pendingActionCount)
     }

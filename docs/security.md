@@ -2,7 +2,7 @@
 
 > Status: Current implementation reference
 >
-> Last updated: 2026-03-24
+> Last updated: 2026-03-31
 >
 > Source of truth: current code under `src/main/kotlin/ai/neopsyke/**`
 
@@ -669,6 +669,16 @@ Current APIs:
 - `/api/action-control/ledger`
 - `POST /api/action-control/staged/{id}/authorize`
 - `POST /api/action-control/staged/{id}/deny`
+
+Current cognitive-stage inspection surfaces:
+
+- dashboard recent-event stream now preserves `cognitive_thread_updated`
+  events with root/thread/status/reason context
+- dashboard recent-event stream now preserves `opportunity_enqueued`
+  events with root/opportunity/source context
+- queue snapshots still expose deferred continuations as compatibility
+  `thoughts`, but normal scheduling no longer depends on a standalone thought
+  queue
 
 Current UX behavior:
 

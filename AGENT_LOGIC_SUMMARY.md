@@ -112,7 +112,8 @@ It is intentionally high-level and should stay aligned with the code.
       - `RESPOND` / `INTEGRATE_FEEDBACK` before
       - `EXECUTE` before
       - `RESUME` / `CLARIFY` / `FINALIZE`
-    - then highest-urgency between pending intention, pending action, and legacy deferred-thought helper work
+    - then highest-urgency between pending intentions and pending actions
+    - deferred continuations now live inside the intention queue as `IntentionKind.DEFER`, not as a separate scheduler lane
     - at equal urgency, non-`DEFER` intentions outrank deferred continuations so a chosen next move beats stale backlog continuation work
   - Per task:
     - Activate session context for the task (`sessionId` + interlocutor) before deliberation/memory updates.
@@ -123,7 +124,6 @@ It is intentionally high-level and should stay aligned with the code.
         - `OpportunityTrigger.Impulse` -> `processImpulse`
         - `OpportunityTrigger.ThreadWork` -> `processThreadContinuation` (goal-runtime resumptions now enter as thread continuations instead of a dedicated goal-work queue branch)
       - `processIntention`
-      - `processThought`
       - `processAction`
     - Catch task errors, emit warning, continue loop.
     - Optionally queue forced terminal `contact_user` delivery under high pressure (scoped to current root input when available).
@@ -271,6 +271,9 @@ It is intentionally high-level and should stay aligned with the code.
   - Applies decision by enqueueing explicit intentions:
     - `OBSERVE` or `PREPARE` for action candidates, depending on action effect class
     - `DEFER` for planner continuations, plan steps, noop recovery, denial recovery, and action follow-up continuation
+  - Emits cognitive-stage observability events:
+    - `cognitive_thread_updated` when a root input, feedback cue, or retained goal cycle updates thread state
+    - `opportunity_enqueued` when an input, goal continuation, or Id impulse becomes schedulable cognitive work
 
 ## Thought Path
 - `processThought`:

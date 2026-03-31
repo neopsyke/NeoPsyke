@@ -899,6 +899,68 @@ class EgoAgentTest {
     }
 
     @Test
+    fun `convergence fallback explanation survives suppressed plan loops`() {
+        val plannerLlm = StubChatModelClient().apply {
+            enqueueRawResponse(
+                """
+                {"decision":"plan","urgency":"medium","plan_goal":"Verify pricing info","plan_steps":["Search pricing page"]}
+                """.trimIndent()
+            )
+            enqueueRawResponse(
+                """
+                {"decision":"plan","urgency":"medium","plan_goal":"Verify pricing info","plan_steps":["Search pricing page","Summarize pricing"]}
+                """.trimIndent()
+            )
+            enqueueRawResponse(
+                """
+                {"decision":"plan","urgency":"medium","plan_goal":"Verify pricing info","plan_steps":["Search pricing page","Summarize pricing"]}
+                """.trimIndent()
+            )
+        }
+        val instrumentation = RecordingInstrumentation()
+        val outputs = mutableListOf<String>()
+        val config = AgentConfig(
+            planner = PlannerConfig(
+                maxLoopStepsPerInput = 8,
+                maxThoughtPasses = 2,
+                maxPlansPerInput = 1
+            )
+        )
+        val agent = buildTestEgo(
+            planner = LlmEgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
+            superego = Superego(
+                modelClient = StubChatModelClient(),
+                config = config,
+                instrumentation = instrumentation
+            ),
+            motorCortex = buildMotorCortex(output = { outputs.add(it) }),
+            config = config,
+            instrumentation = instrumentation
+        )
+
+        runAgentWithInput(agent, "verify pricing\nexit\n")
+
+        assertEquals(1, outputs.size)
+        assertTrue(outputs.first().contains("best-effort answer", ignoreCase = true))
+        assertTrue(
+            instrumentation.events.any {
+                it.type == "duplicate_plan_suppressed" && it.data["reason"] == "budget_exhausted"
+            }
+        )
+        assertTrue(
+            instrumentation.events.any {
+                it.type == "thought_dropped" && it.data["reason"] == "max_passes_reached"
+            }
+        )
+        assertTrue(
+            instrumentation.events.any {
+                it.type == "action_executed" &&
+                    ((it.data["action"] as? PendingAction)?.isFallbackExplanation == true)
+            }
+        )
+    }
+
+    @Test
     fun `agent keeps loop alive when action execution throws`() {
         val plannerLlm = StubChatModelClient().apply {
             enqueueRawResponse(

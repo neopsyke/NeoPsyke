@@ -512,7 +512,8 @@ internal class DecisionDispatcher(
             nextPassCount = nextPassCount,
             rootInputId = rootInputId,
             rootInputReceivedAtMs = rootInputReceivedAtMs,
-            allowFallbackExplanation = originThought?.allowFallbackExplanation ?: true,
+            allowFallbackExplanation =
+                originThought?.allowFallbackExplanation == true || origin.source != OriginSource.ID,
             originActionType = originThought?.originActionType,
             originActionObservedEvidence = originThought?.originActionObservedEvidence,
             conversationContext = conversationContext,

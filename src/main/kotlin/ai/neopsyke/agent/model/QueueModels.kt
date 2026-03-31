@@ -146,7 +146,6 @@ sealed interface OpportunityTrigger {
 sealed interface LoopTask {
     data class AttendOpportunity(val item: ScheduledOpportunity) : LoopTask
     data class ProcessIntention(val item: QueuedIntention) : LoopTask
-    data class ProcessThought(val item: PendingThought) : LoopTask
     data class PerformAction(val item: PendingAction) : LoopTask
 }
 
@@ -185,6 +184,27 @@ data class QueuedIntention(
 ) {
     val rootInputId: String? get() = intention.rootStimulusId
     val conversationContext: ConversationContext get() = intention.conversationContext
+
+    fun toPendingThought(): PendingThought =
+        PendingThought(
+            id = queueId,
+            urgency = urgency,
+            content = deferredThoughtContent ?: intention.summary,
+            passes = deferredThoughtPasses,
+            longTermMemoryRecallQuery = deferredThoughtRecallQuery,
+            rootInputId = rootInputId,
+            rootInputReceivedAtMs = rootInputReceivedAtMs,
+            deniedActionType = deferredDeniedActionType,
+            deniedActionPayload = deferredDeniedActionPayload,
+            denialReason = deferredDenialReason,
+            allowFallbackExplanation = deferredAllowFallbackExplanation,
+            planContext = deferredPlanContext,
+            denialReasonCode = deferredDenialReasonCode,
+            originActionType = deferredOriginActionType,
+            originActionObservedEvidence = deferredOriginActionObservedEvidence,
+            conversationContext = conversationContext,
+            origin = origin,
+        )
 }
 
 object RootInputIds {

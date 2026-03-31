@@ -228,6 +228,43 @@ class DashboardStateStoreTest {
     }
 
     @Test
+    fun `snapshot preserves cognitive stage observability events`() {
+        val store = DashboardStateStore(maxEvents = 20)
+        store.onEvent(
+            AgentEvent(
+                id = 1,
+                type = "cognitive_thread_updated",
+                data = mapOf(
+                    "root_input_id" to "root-1",
+                    "thread_id" to "thread-1",
+                    "thread_status" to "ACTIVE",
+                    "reason" to "input_percept_bound"
+                )
+            )
+        )
+        store.onEvent(
+            AgentEvent(
+                id = 2,
+                type = "opportunity_enqueued",
+                data = mapOf(
+                    "root_input_id" to "root-1",
+                    "opportunity_id" to "opp-1",
+                    "opportunity_kind" to "RESPOND",
+                    "source" to "input"
+                )
+            )
+        )
+
+        val snapshot: DashboardSnapshot = mapper.readValue(store.snapshotJson())
+        val threadUpdate = snapshot.recentEvents.single { it.type == "cognitive_thread_updated" }
+        val opportunity = snapshot.recentEvents.single { it.type == "opportunity_enqueued" }
+        assertEquals("thread-1", threadUpdate.data["thread_id"])
+        assertEquals("input_percept_bound", threadUpdate.data["reason"])
+        assertEquals("opp-1", opportunity.data["opportunity_id"])
+        assertEquals("input", opportunity.data["source"])
+    }
+
+    @Test
     fun `subscription receives json payload for incoming events`() = runBlocking {
         val store = DashboardStateStore(maxEvents = 10)
         val subscription = store.subscribe()

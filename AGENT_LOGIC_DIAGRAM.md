@@ -126,12 +126,14 @@ sequenceDiagram
     Note over SC,Ego: Stimulus carries ConversationContext [sessionId + security], provenance, rootInputId [identity], receivedAtMs [timing]
     Ego->>CTS: bind percept to root-scoped cognitive thread
     CTS-->>Ego: cognitiveThreadId + thread trust state
+    Ego->>Dash: emit cognitive_thread_updated
     CTS-->>Ego: policy-shaped Opportunity
     Ego->>Sched: enqueue ScheduledOpportunity(opportunity + trigger)
+    Ego->>Dash: emit opportunity_enqueued
 
     loop While pending work and step limit not reached
         Ego->>Sched: nextTask()
-        Sched-->>Ego: ScheduledOpportunity/intention/action/deferred-thought-helper
+        Sched-->>Ego: ScheduledOpportunity/intention/action
         Ego->>Ego: activateSession(task.conversationContext)
         Ego->>Delib: startStep()
 
@@ -145,7 +147,7 @@ sequenceDiagram
         else Task = thread continuation opportunity
             Ego->>PG: finalizeGoalCycle(rootInputId) after queues drain for that goal root
             Note over Ego,PG: Goal runtime now resumes from a stable per-step thread root and may re-emit a goal runtime cue for resumable steps
-        else Task = input opportunity or thought
+        else Task = input or feedback opportunity
             Ego->>Mem: recall and short-term summary
             Note over Ego,Mem: Planner context now includes targeted reflection-lesson recall
             Ego->>TWS: create or update thread workspace and index summary

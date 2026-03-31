@@ -10,7 +10,6 @@ class AttentionScheduler(
     private var idCounter = 0L
     private val opportunities = PriorityQueue<ScheduledOpportunity>(opportunityComparator)
     private val intentions = PriorityQueue<QueuedIntention>(intentionComparator)
-    private val thoughts = PriorityQueue<PendingThought>(thoughtComparator)
     private val actions = PriorityQueue<PendingAction>(actionComparator)
     private var latestQueuedInput: PendingInput? = null
 
@@ -49,31 +48,37 @@ class AttentionScheduler(
         conversationContext: ConversationContext = ConversationContext.default(),
         origin: ActionOrigin = ActionOrigin.USER,
     ): Boolean {
-        if (thoughts.size >= config.maxPendingThoughts) {
+        val deferredIntentions = intentions.count { it.intention.kind == IntentionKind.DEFER }
+        if (deferredIntentions >= config.maxPendingThoughts) {
             return false
         }
-        thoughts.add(
-            PendingThought(
-                id = nextId(),
+        return enqueueIntention(
+            QueuedIntention(
+                intention = Intention(
+                    id = RootInputIds.next(),
+                    cognitiveThreadId = rootInputId ?: RootInputIds.next(),
+                    kind = IntentionKind.DEFER,
+                    summary = content.take(160),
+                    createdAt = java.time.Instant.now(),
+                    conversationContext = conversationContext,
+                    rootStimulusId = rootInputId,
+                ),
                 urgency = urgency,
-                content = content,
-                passes = passes,
-                longTermMemoryRecallQuery = longTermMemoryRecallQuery,
-                rootInputId = rootInputId,
                 rootInputReceivedAtMs = rootInputReceivedAtMs,
-                deniedActionType = deniedActionType,
-                deniedActionPayload = deniedActionPayload,
-                denialReason = denialReason,
-                allowFallbackExplanation = allowFallbackExplanation,
-                planContext = planContext,
-                denialReasonCode = denialReasonCode,
-                originActionType = originActionType,
-                originActionObservedEvidence = originActionObservedEvidence,
-                conversationContext = conversationContext,
                 origin = origin,
+                deferredThoughtContent = content,
+                deferredThoughtPasses = passes,
+                deferredThoughtRecallQuery = longTermMemoryRecallQuery,
+                deferredDeniedActionType = deniedActionType,
+                deferredDeniedActionPayload = deniedActionPayload,
+                deferredDenialReason = denialReason,
+                deferredAllowFallbackExplanation = allowFallbackExplanation,
+                deferredPlanContext = planContext,
+                deferredDenialReasonCode = denialReasonCode,
+                deferredOriginActionType = originActionType,
+                deferredOriginActionObservedEvidence = originActionObservedEvidence,
             )
         )
-        return true
     }
 
     fun enqueueAction(
@@ -192,15 +197,7 @@ class AttentionScheduler(
         if (rootInputId.isNullOrBlank()) {
             return false
         }
-        return thoughts.any { thought ->
-            matchesInputScope(
-                itemRootInputId = thought.rootInputId,
-                itemConversationContext = thought.conversationContext,
-                rootInputId = rootInputId,
-                sessionId = sessionId
-            ) &&
-                thought.planContext != null
-        } || intentions.any { intention ->
+        return intentions.any { intention ->
             matchesInputScope(
                 itemRootInputId = intention.rootInputId,
                 itemConversationContext = intention.conversationContext,
@@ -216,15 +213,7 @@ class AttentionScheduler(
         if (rootInputId.isNullOrBlank()) {
             return false
         }
-        return thoughts.any { thought ->
-            matchesInputScope(
-                itemRootInputId = thought.rootInputId,
-                itemConversationContext = thought.conversationContext,
-                rootInputId = rootInputId,
-                sessionId = sessionId
-            ) &&
-                thought.content.startsWith(CONVERGENCE_THOUGHT_PREFIX)
-        } || intentions.any { intention ->
+        return intentions.any { intention ->
             matchesInputScope(
                 itemRootInputId = intention.rootInputId,
                 itemConversationContext = intention.conversationContext,
@@ -240,21 +229,12 @@ class AttentionScheduler(
         if (rootInputId.isNullOrBlank()) {
             return ClearedPendingWork()
         }
-        val thoughtBefore = thoughts.size
         val intentionBefore = intentions.size
         val actionBefore = actions.size
         intentions.removeIf { intention ->
             matchesInputScope(
                 itemRootInputId = intention.rootInputId,
                 itemConversationContext = intention.conversationContext,
-                rootInputId = rootInputId,
-                sessionId = sessionId
-            )
-        }
-        thoughts.removeIf { thought ->
-            matchesInputScope(
-                itemRootInputId = thought.rootInputId,
-                itemConversationContext = thought.conversationContext,
                 rootInputId = rootInputId,
                 sessionId = sessionId
             )
@@ -268,7 +248,7 @@ class AttentionScheduler(
             )
         }
         return ClearedPendingWork(
-            thoughtsRemoved = (thoughtBefore - thoughts.size) + (intentionBefore - intentions.size),
+            thoughtsRemoved = intentionBefore - intentions.size,
             actionsRemoved = actionBefore - actions.size
         )
     }
@@ -281,44 +261,20 @@ class AttentionScheduler(
 
         val topIntention = intentions.peek()
         val topAction = actions.peek()
-        val topThought = thoughts.peek()
-        if (topIntention == null && topAction == null && topThought == null) {
+        if (topIntention == null && topAction == null) {
             return null
         }
-        if (topIntention != null && topAction == null && topThought == null) {
+        if (topIntention != null && topAction == null) {
             return LoopTask.ProcessIntention(intentions.remove())
         }
-        if (topAction == null) {
-            if (topIntention != null && topThought == null) {
-                return LoopTask.ProcessIntention(intentions.remove())
-            }
-            if (topIntention != null && topIntention.urgency.priority >= topThought!!.urgency.priority) {
-                return LoopTask.ProcessIntention(intentions.remove())
-            }
-            return LoopTask.ProcessThought(thoughts.remove())
-        }
-        if (topThought == null) {
-            if (topIntention != null && topIntention.urgency.priority >= topAction.urgency.priority) {
-                return LoopTask.ProcessIntention(intentions.remove())
-            }
-            return LoopTask.PerformAction(actions.remove())
-        }
-        if (topIntention != null &&
-            topIntention.urgency.priority >= topAction.urgency.priority &&
-            topIntention.urgency.priority >= topThought.urgency.priority
-        ) {
+        if (topIntention != null && topIntention.urgency.priority >= topAction!!.urgency.priority) {
             return LoopTask.ProcessIntention(intentions.remove())
         }
-
-        return if (topAction.urgency.priority >= topThought.urgency.priority) {
-            LoopTask.PerformAction(actions.remove())
-        } else {
-            LoopTask.ProcessThought(thoughts.remove())
-        }
+        return LoopTask.PerformAction(actions.remove())
     }
 
     fun hasPendingWork(): Boolean =
-        opportunities.isNotEmpty() || intentions.isNotEmpty() || thoughts.isNotEmpty() || actions.isNotEmpty()
+        opportunities.isNotEmpty() || intentions.isNotEmpty() || actions.isNotEmpty()
 
     /**
      * Returns true when there is queued work (thought/action/impulse) for a specific root.
@@ -327,13 +283,12 @@ class AttentionScheduler(
     fun hasPendingWorkForRoot(rootInputId: String): Boolean =
         opportunities.any { it.rootInputId == rootInputId } ||
             intentions.any { it.rootInputId == rootInputId } ||
-            thoughts.any { it.rootInputId == rootInputId } ||
             actions.any { it.rootInputId == rootInputId }
 
     fun queueSnapshot(): QueueSnapshot =
         QueueSnapshot(
             pendingInputCount = pendingInputCount(),
-            pendingThoughtCount = thoughts.size,
+            pendingThoughtCount = intentions.count { it.intention.kind == IntentionKind.DEFER },
             pendingActionCount = actions.size,
             pendingIntentionCount = intentions.size,
             pendingImpulseCount = pendingImpulseCount(),
@@ -347,7 +302,10 @@ class AttentionScheduler(
                 }
                 .sortedWith(inputComparator),
             intentions = intentions.toList().sortedWith(intentionComparator),
-            thoughts = thoughts.toList().sortedWith(thoughtComparator),
+            thoughts = intentions
+                .filter { it.intention.kind == IntentionKind.DEFER }
+                .map { it.toPendingThought() }
+                .sortedWith(thoughtComparator),
             actions = actions.toList().sortedWith(actionComparator)
         )
 
