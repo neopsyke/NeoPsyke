@@ -126,7 +126,7 @@ internal class DeliberationEngine(
         val needsFinalization = assessment.verdict == MetaReasonerVerdict.FINALIZE_NOW ||
             assessment.verdict == MetaReasonerVerdict.REQUEST_TOOL_THEN_FINALIZE
         if (!needsFinalization) return decision
-        if (decision is EgoDecision.ProposeAction) return decision
+        if (decision is EgoDecision.FormIntention) return decision
         val pressuredThought = TextSecurity.clamp(
             "Decision pressure is high. Stop looping and provide a concise best-effort final answer now. " +
                 "If one decisive tool action is strictly necessary, do only one then answer.",

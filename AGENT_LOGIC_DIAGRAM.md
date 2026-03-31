@@ -143,12 +143,13 @@ sequenceDiagram
     Note over Ego,Mem: Id-driven recall/planning can see shared ambient context: goals, scratchpad themes, useful updates, open loops, and recent exact learning topics
     Note over Ego,Mem: Ambient context is a cached best-effort snapshot, not a real-time synchronized view
             Ego->>Planner: decide(context + idState)
-            Planner-->>Ego: thought/action/plan/noop
+            Planner-->>Ego: defer/intend/plan/noop
             Ego->>Sched: enqueue impulse-derived work with origin=ID
             Note over Ego,Sched: Impulse final result is deferred until all work for root_impulse_id drains
-        else Task = thread continuation opportunity
+        else Task = goal work opportunity
             Ego->>PG: finalizeGoalCycle(rootInputId) after queues drain for that goal root
     Note over Ego,PG: Goal runtime now resumes from a stable per-step thread root and may re-emit a goal runtime cue for resumable steps
+    Note over SC,Ego: StimulusIngressCoordinator classifies post-sensory stimuli into input, feedback, goal-work, or wake-only ingress before scheduler work begins
         else Task = input or feedback opportunity
             Ego->>Mem: recall and short-term summary
             Note over Ego,Mem: Planner context now includes targeted reflection-lesson recall
@@ -163,10 +164,11 @@ sequenceDiagram
             Note over Ego,Planner: Obvious persistent reminder / monitoring / goal-creation inputs route into a dedicated goal-creation branch before the generic planner path
             Note over Ego,Planner: Goal-creation branch uses a narrow schema prompt plus deterministic recurring schedule detection for supported forms like every N minutes / every N hours
             Note over Ego,Planner: Planner requests schema-enforced structured output. LLM layer owns compatibility degradation from strict to relaxed to prompt-only JSON. Parse failures do truncation-budget retry then strict-JSON retry before noop fallback
-            Planner-->>Ego: thought/action/plan/noop
+            Planner-->>Ego: defer/intend/plan/noop
             Ego->>Delib: maybeApplyPressureOverride
+            Note over Ego: Runtime opportunity guard rejects invalid intention kind, action surface, or commit-mode violations before scheduling execution work
             Ego->>Sched: enqueue explicit intentions (observe/prepare/defer)
-            Note over Ego,Sched: Normal action proposals become queued intentions before secure action review; plan steps and recovery/follow-up work become deferred intentions, not first-class thought queue items
+            Note over Ego,Sched: Planner now forms explicit observe/prepare intentions directly; plan steps and recovery/follow-up work become deferred intentions, not first-class thought queue items
             Note over Ego,Sched: Plans gated by budget, pressure, hash dedup, pending-plan check
             Note over Ego,Planner: Redundancy is planner-side soft cost control [prompt and verifier], with telemetry event external_action_redundancy_signal
             Note over Ego,Planner: Action verifier is disabled by default and only runs when planner.actionVerifierEnabled is true. when enabled it uses strict json_schema with relaxed-schema fallback. parse failures do truncation-budget retry then strict retry and may trip temporary verifier bypass [scoped per root_input and action_type]
@@ -244,7 +246,7 @@ sequenceDiagram
                                 ACS-->>Ego: executed outcome
                             end
                             Note over Ego,Motor: Actions may complete immediately or return WAITING + async operation handles
-                            Note over SC,Ego: Feedback continuations are regenerated only after feedback re-enters through SensoryCortex, and queue-drain reset waits until pending feedback cues are consumed
+                            Note over SC,Ego: Feedback continuations and terminal thread resolution are decided only after feedback re-enters through SensoryCortex, and WAITING outcomes suspend the thread instead of auto-queuing a continuation
                             Note over Ego,Motor: contact_user delivery is channel-aware. Telegram sessions send through Bot API, dashboard sessions continue through local/dashboard delivery
                             Note over ACAPI,Dash: Dashboard-approved staged executions can append a completion/answer message back into the originating chat session before root-session mapping is cleared
                             Note over Ego,PG: Goal-origin WAITING without handles is rejected as a contract violation

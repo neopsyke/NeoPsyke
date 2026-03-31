@@ -119,7 +119,6 @@ data class ActionFeedbackCue(
     val attempts: Int = 0,
     val urgency: String? = null,
     val requiresFollowUpThought: Boolean = false,
-    val plannerContinuationRequired: Boolean = false,
     val origin: ActionOrigin = ActionOrigin.USER,
 ) {
     fun toStimulus(): StimulusEnvelope =
@@ -149,7 +148,6 @@ data class ActionFeedbackCue(
                 put(METADATA_ATTEMPTS, attempts.toString())
                 urgency?.takeIf { it.isNotBlank() }?.let { put(METADATA_URGENCY, it) }
                 put(METADATA_REQUIRES_FOLLOW_UP_THOUGHT, requiresFollowUpThought.toString())
-                put(METADATA_PLANNER_CONTINUATION_REQUIRED, plannerContinuationRequired.toString())
                 put(METADATA_ORIGIN_SOURCE, origin.source.name)
                 origin.needId?.takeIf { it.isNotBlank() }?.let { put(METADATA_ORIGIN_NEED_ID, it) }
                 origin.rootImpulseId?.takeIf { it.isNotBlank() }?.let { put(METADATA_ORIGIN_ROOT_IMPULSE_ID, it) }
@@ -191,9 +189,6 @@ data class ActionFeedbackCue(
                 requiresFollowUpThought = stimulus.metadata[METADATA_REQUIRES_FOLLOW_UP_THOUGHT]
                     ?.toBooleanStrictOrNull()
                     ?: false,
-                plannerContinuationRequired = stimulus.metadata[METADATA_PLANNER_CONTINUATION_REQUIRED]
-                    ?.toBooleanStrictOrNull()
-                    ?: false,
                 origin = ActionOrigin(
                     source = originSource,
                     needId = stimulus.metadata[METADATA_ORIGIN_NEED_ID],
@@ -223,7 +218,6 @@ object CognitiveCueMetadata {
     const val METADATA_ATTEMPTS: String = "attempts"
     const val METADATA_URGENCY: String = "urgency"
     const val METADATA_REQUIRES_FOLLOW_UP_THOUGHT: String = "requires_follow_up_thought"
-    const val METADATA_PLANNER_CONTINUATION_REQUIRED: String = "planner_continuation_required"
     const val METADATA_ORIGIN_SOURCE: String = "origin_source"
     const val METADATA_ORIGIN_NEED_ID: String = "origin_need_id"
     const val METADATA_ORIGIN_ROOT_IMPULSE_ID: String = "origin_root_impulse_id"
@@ -252,8 +246,6 @@ private const val METADATA_ATTEMPTS: String = CognitiveCueMetadata.METADATA_ATTE
 private const val METADATA_URGENCY: String = CognitiveCueMetadata.METADATA_URGENCY
 private const val METADATA_REQUIRES_FOLLOW_UP_THOUGHT: String =
     CognitiveCueMetadata.METADATA_REQUIRES_FOLLOW_UP_THOUGHT
-private const val METADATA_PLANNER_CONTINUATION_REQUIRED: String =
-    CognitiveCueMetadata.METADATA_PLANNER_CONTINUATION_REQUIRED
 private const val METADATA_ORIGIN_SOURCE: String = CognitiveCueMetadata.METADATA_ORIGIN_SOURCE
 private const val METADATA_ORIGIN_NEED_ID: String = CognitiveCueMetadata.METADATA_ORIGIN_NEED_ID
 private const val METADATA_ORIGIN_ROOT_IMPULSE_ID: String = CognitiveCueMetadata.METADATA_ORIGIN_ROOT_IMPULSE_ID

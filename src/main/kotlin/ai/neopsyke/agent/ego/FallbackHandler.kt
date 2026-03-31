@@ -289,7 +289,7 @@ internal class FallbackHandler(
         telemetry.emitQueueSnapshot("fallback_explanation_circuit_breaker")
     }
 
-    fun isRepeatOfDeniedAction(thought: PendingThought, decision: EgoDecision.ProposeAction): Boolean {
+    fun isRepeatOfDeniedAction(thought: PendingThought, decision: EgoDecision.FormIntention): Boolean {
         val deniedType = thought.deniedActionType ?: return false
         val deniedPayload = thought.deniedActionPayload ?: return false
         if (decision.actionType != deniedType) return false

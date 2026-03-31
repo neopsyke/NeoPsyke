@@ -299,7 +299,6 @@ class SensoryCortexTest {
             attempts = 2,
             urgency = "high",
             requiresFollowUpThought = true,
-            plannerContinuationRequired = true,
             origin = ActionOrigin(
                 source = OriginSource.ID,
                 needId = "be-useful",
@@ -318,7 +317,6 @@ class SensoryCortexTest {
         assertEquals(cue.attempts, parsed.attempts)
         assertEquals(cue.urgency, parsed.urgency)
         assertEquals(cue.requiresFollowUpThought, parsed.requiresFollowUpThought)
-        assertEquals(cue.plannerContinuationRequired, parsed.plannerContinuationRequired)
         assertEquals(cue.origin, parsed.origin)
     }
 

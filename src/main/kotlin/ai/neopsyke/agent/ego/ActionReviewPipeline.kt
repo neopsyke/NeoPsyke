@@ -892,11 +892,6 @@ internal class ActionReviewPipeline(
             attempts = resolvedAction.attempts,
             urgency = resolvedAction.urgency.name,
             requiresFollowUpThought = resolvedAction.requiresFollowUpThought,
-            plannerContinuationRequired = (
-                resolvedAction.requiresFollowUpThought ||
-                    outcome.waiting ||
-                    !outcome.successful
-                ) && actionLifecycleObserver.allowFollowUp(resolvedAction),
             origin = resolvedAction.origin,
         )
         if (!emitActionFeedback(cue)) {
@@ -915,7 +910,6 @@ internal class ActionReviewPipeline(
                     "action_id" to resolvedAction.id,
                     "action_type" to resolvedAction.type.id,
                     "root_input_id" to resolvedAction.rootInputId,
-                    "continuation_required" to cue.plannerContinuationRequired,
                     "execution_status" to outcome.executionStatus.name.lowercase(),
                 )
             )

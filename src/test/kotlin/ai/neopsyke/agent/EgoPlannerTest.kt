@@ -18,7 +18,7 @@ class EgoPlannerTest {
     @Test
     fun `planner returns clamped thought decision and emits events`() {
         val llm = StubChatModelClient()
-        llm.enqueueRawResponse("""{"decision":"thought","urgency":"high","thought":"abcdefghi"}""")
+        llm.enqueueRawResponse("""{"decision":"defer","urgency":"high","defer_content":"abcdefghi"}""")
         val instrumentation = RecordingInstrumentation()
         val planner = LlmEgoPlanner(
             modelClient = llm,
@@ -49,7 +49,7 @@ class EgoPlannerTest {
         assertTrue(instrumentation.events.any { it.type == "planner_start" })
         assertTrue(
             instrumentation.events.any {
-                it.type == "planner_decision" && it.data["decision_type"] == "thought"
+                it.type == "planner_decision" && it.data["decision_type"] == "defer"
             }
         )
         assertTrue(
@@ -66,7 +66,7 @@ class EgoPlannerTest {
         llm.enqueueRawResponse(
             """
             {
-              "decision":"action",
+              "decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable",
               "urgency":"medium",
               "action_type":"contact_user",
               "action_payload":"payload-too-long",
@@ -94,7 +94,7 @@ class EgoPlannerTest {
             )
         )
 
-        val action = assertIs<ai.neopsyke.agent.model.EgoDecision.ProposeAction>(decision)
+        val action = assertIs<ai.neopsyke.agent.model.EgoDecision.FormIntention>(decision)
         assertEquals(ActionType.CONTACT_USER, action.actionType)
         assertEquals("payload", action.payload)
         assertEquals("summary-", action.summary)
@@ -135,7 +135,7 @@ class EgoPlannerTest {
             )
         )
 
-        val action = assertIs<ai.neopsyke.agent.model.EgoDecision.ProposeAction>(decision)
+        val action = assertIs<ai.neopsyke.agent.model.EgoDecision.FormIntention>(decision)
         assertEquals(ActionType.GOAL_OPERATION, action.actionType)
         assertTrue(action.payload.contains(""""operation":"create""""))
         assertTrue(action.payload.contains(""""cron_expression":"*/5 * * * *""""))
@@ -166,7 +166,7 @@ class EgoPlannerTest {
             )
         )
 
-        val action = assertIs<ai.neopsyke.agent.model.EgoDecision.ProposeAction>(decision)
+        val action = assertIs<ai.neopsyke.agent.model.EgoDecision.FormIntention>(decision)
         assertEquals(ActionType.CONTACT_USER, action.actionType)
         assertTrue(action.payload.contains("goals are unavailable", ignoreCase = true))
         assertEquals(0, llm.calls.size)
@@ -233,7 +233,7 @@ class EgoPlannerTest {
         llm.enqueueRawResponse(
             """
             {
-              "decision":"action",
+              "decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable",
               "urgency":"medium",
               "action_type":"website_fetch",
               "action_payload":{"url":"https://openai.com/pricing","max_chars":1200},
@@ -254,7 +254,7 @@ class EgoPlannerTest {
             )
         )
 
-        val action = assertIs<ai.neopsyke.agent.model.EgoDecision.ProposeAction>(decision)
+        val action = assertIs<ai.neopsyke.agent.model.EgoDecision.FormIntention>(decision)
         assertEquals(ActionType.WEBSITE_FETCH, action.actionType)
         assertTrue(action.payload.contains("\"url\":\"https://openai.com/pricing\""))
         assertTrue(action.payload.contains("\"max_chars\":1200"))
@@ -266,7 +266,7 @@ class EgoPlannerTest {
         llm.enqueueRawResponse(
             """
             {
-              "decision":"action",
+              "decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable",
               "urgency":"medium",
               "action_type":"website_fetch",
               "action_payload":"{\"url\":\"https://example.com\"}",
@@ -295,7 +295,7 @@ class EgoPlannerTest {
     @Test
     fun `planner converts invalid payload and parse failures to noop`() {
         val llm = StubChatModelClient()
-        llm.enqueueRawResponse("""{"decision":"action","action_type":"contact_user"}""")
+        llm.enqueueRawResponse("""{"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","action_type":"contact_user"}""")
         llm.enqueueRawResponse("not-json")
         llm.enqueueRawResponseForCallSite("input_json_retry", "still-not-json")
         val instrumentation = RecordingInstrumentation()
@@ -312,7 +312,7 @@ class EgoPlannerTest {
 
         val invalidAction = planner.decide(trigger, context)
         assertIs<ai.neopsyke.agent.model.EgoDecision.Noop>(invalidAction)
-        assertTrue(invalidAction.reason.contains("invalid action", ignoreCase = true))
+        assertTrue(invalidAction.reason.contains("invalid intention", ignoreCase = true))
 
         val invalidJson = planner.decide(trigger, context)
         assertIs<ai.neopsyke.agent.model.EgoDecision.Noop>(invalidJson)
@@ -435,7 +435,7 @@ class EgoPlannerTest {
         val llm = StubChatModelClient().apply {
             enqueueRawResponse(
                 """
-                {"decision":"action","urgency":"medium","action_type":"resolution_draft","action_payload":"chunk","action_summary":"draft chunk"}
+                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"resolution_draft","action_payload":"chunk","action_summary":"draft chunk"}
                 """.trimIndent()
             )
         }
@@ -459,7 +459,7 @@ class EgoPlannerTest {
         val llm = StubChatModelClient().apply {
             enqueueRawResponse(
                 """
-                {"decision":"action","urgency":"medium","action_type":"contact_user","action_payload":"Costs are \${'$'}20 per month","action_summary":"deliver answer"}
+                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"contact_user","action_payload":"Costs are \${'$'}20 per month","action_summary":"deliver answer"}
                 """.trimIndent()
             )
         }
@@ -480,7 +480,7 @@ class EgoPlannerTest {
             )
         )
 
-        val action = assertIs<ai.neopsyke.agent.model.EgoDecision.ProposeAction>(decision)
+        val action = assertIs<ai.neopsyke.agent.model.EgoDecision.FormIntention>(decision)
         assertEquals(ActionType.CONTACT_USER, action.actionType)
         assertTrue(action.payload.contains("\$20"))
         assertEquals(1, repairCount)
@@ -498,7 +498,7 @@ class EgoPlannerTest {
             enqueueRawResponse(
                 """
                 {
-                  "decision":"action",
+                  "decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable",
                   "urgency":"medium",
                   "action_type":"contact_user",
                   "action_payload":"first useful line\nsecond line"
@@ -523,7 +523,7 @@ class EgoPlannerTest {
             )
         )
 
-        val action = assertIs<ai.neopsyke.agent.model.EgoDecision.ProposeAction>(decision)
+        val action = assertIs<ai.neopsyke.agent.model.EgoDecision.FormIntention>(decision)
         assertEquals("first useful line", action.summary)
         assertEquals(1, repairCount)
         assertTrue(instrumentation.events.any { it.type == "planner_output_repaired" })
@@ -534,7 +534,7 @@ class EgoPlannerTest {
         val llm = StubChatModelClient().apply {
             enqueueRawResponse(
                 """
-                {"decision":"action","urgency":"medium","action_type":"contact_user","action_payload":"18","action_summary":"Return the computed integer"}
+                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"contact_user","action_payload":"18","action_summary":"Return the computed integer"}
                 """.trimIndent()
             )
             enqueueRawResponseForCallSite(
@@ -561,7 +561,7 @@ class EgoPlannerTest {
             )
         )
 
-        val action = assertIs<ai.neopsyke.agent.model.EgoDecision.ProposeAction>(decision)
+        val action = assertIs<ai.neopsyke.agent.model.EgoDecision.FormIntention>(decision)
         assertEquals(ActionType.CONTACT_USER, action.actionType)
         assertEquals("18", action.payload)
         assertEquals("Return the computed integer", action.summary)
@@ -588,7 +588,7 @@ class EgoPlannerTest {
         val llm = StubChatModelClient().apply {
             enqueueRawResponse(
                 """
-                {"decision":"action","urgency":"medium","action_type":"contact_user","action_payload":"  hello, world  ","action_summary":"reply"}
+                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"contact_user","action_payload":"  hello, world  ","action_summary":"reply"}
                 """.trimIndent()
             )
             enqueueRawResponseForCallSite(
@@ -615,7 +615,7 @@ class EgoPlannerTest {
             )
         )
 
-        val action = assertIs<ai.neopsyke.agent.model.EgoDecision.ProposeAction>(decision)
+        val action = assertIs<ai.neopsyke.agent.model.EgoDecision.FormIntention>(decision)
         assertEquals(ActionType.CONTACT_USER, action.actionType)
         assertEquals("Hello world.", action.payload)
         assertEquals(1, repairCount)
@@ -639,7 +639,7 @@ class EgoPlannerTest {
         val llm = StubChatModelClient().apply {
             enqueueRawResponse(
                 """
-                {"decision":"action","urgency":"medium","action_type":"contact_user","action_payload":"The page confirms the pricing details.","action_summary":"Provide fetched summary"}
+                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"contact_user","action_payload":"The page confirms the pricing details.","action_summary":"Provide fetched summary"}
                 """.trimIndent()
             )
             enqueueRawResponseForCallSite(
@@ -680,7 +680,7 @@ class EgoPlannerTest {
             )
         )
 
-        val action = assertIs<ai.neopsyke.agent.model.EgoDecision.ProposeAction>(decision)
+        val action = assertIs<ai.neopsyke.agent.model.EgoDecision.FormIntention>(decision)
         assertEquals(ActionType.CONTACT_USER, action.actionType)
         assertTrue(llm.calls.any { it.options.metadata.callSite == "action_verifier" })
         assertTrue(
@@ -697,7 +697,7 @@ class EgoPlannerTest {
         val llm = StubChatModelClient().apply {
             enqueueRawResponse(
                 """
-                {"decision":"action","urgency":"medium","action_type":"contact_user","action_payload":"The page confirms the pricing details.","action_summary":"Provide fetched summary"}
+                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"contact_user","action_payload":"The page confirms the pricing details.","action_summary":"Provide fetched summary"}
                 """.trimIndent()
             )
             enqueueRawResponseForCallSite(
@@ -729,7 +729,7 @@ class EgoPlannerTest {
             )
         )
 
-        val action = assertIs<ai.neopsyke.agent.model.EgoDecision.ProposeAction>(decision)
+        val action = assertIs<ai.neopsyke.agent.model.EgoDecision.FormIntention>(decision)
         assertEquals(ActionType.CONTACT_USER, action.actionType)
         assertEquals("The page confirms the pricing details.", action.payload)
         assertTrue(llm.calls.any { it.options.metadata.callSite == "action_verifier" })
@@ -740,7 +740,7 @@ class EgoPlannerTest {
         val llm = StubChatModelClient().apply {
             enqueueRawResponse(
                 """
-                {"decision":"action","urgency":"medium","action_type":"website_fetch","action_payload":"{\"url\":\"https://example.com/pricing\",\"max_chars\":900}","action_summary":"Fetch pricing page"}
+                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"website_fetch","action_payload":"{\"url\":\"https://example.com/pricing\",\"max_chars\":900}","action_summary":"Fetch pricing page"}
                 """.trimIndent()
             )
             enqueueRawResponseForCallSite(
@@ -767,7 +767,7 @@ class EgoPlannerTest {
             )
         )
 
-        val action = assertIs<ai.neopsyke.agent.model.EgoDecision.ProposeAction>(decision)
+        val action = assertIs<ai.neopsyke.agent.model.EgoDecision.FormIntention>(decision)
         assertEquals(ActionType.WEBSITE_FETCH, action.actionType)
         assertEquals("""{"url":"https://example.com/pricing","max_chars":900}""", action.payload)
         assertEquals(0, repairCount)
@@ -792,7 +792,7 @@ class EgoPlannerTest {
         val llm = StubChatModelClient().apply {
             enqueueRawResponse(
                 """
-                {"decision":"action","urgency":"medium","action_type":"website_fetch","action_payload":"{\"url\":\"https://example.com\"}","action_summary":"fetch"}
+                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"website_fetch","action_payload":"{\"url\":\"https://example.com\"}","action_summary":"fetch"}
                 """.trimIndent()
             )
             enqueueRawResponseForCallSite(
@@ -815,7 +815,7 @@ class EgoPlannerTest {
             )
         )
 
-        val action = assertIs<ai.neopsyke.agent.model.EgoDecision.ProposeAction>(decision)
+        val action = assertIs<ai.neopsyke.agent.model.EgoDecision.FormIntention>(decision)
         assertEquals(ActionType.WEBSITE_FETCH, action.actionType)
         assertEquals("""{"url":"https://example.com"}""", action.payload)
     }
@@ -825,7 +825,7 @@ class EgoPlannerTest {
         val llm = StubChatModelClient().apply {
             enqueueRawResponse(
                 """
-                {"decision":"action","urgency":"medium","action_type":"website_fetch","action_payload":"{\"url\":\"https://example.com\"}","action_summary":"fetch"}
+                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"website_fetch","action_payload":"{\"url\":\"https://example.com\"}","action_summary":"fetch"}
                 """.trimIndent()
             )
             enqueueRawResponseForCallSite(
@@ -850,7 +850,7 @@ class EgoPlannerTest {
             )
         )
 
-        val action = assertIs<ai.neopsyke.agent.model.EgoDecision.ProposeAction>(decision)
+        val action = assertIs<ai.neopsyke.agent.model.EgoDecision.FormIntention>(decision)
         assertEquals(ActionType.WEBSITE_FETCH, action.actionType)
         assertEquals("""{"url":"https://example.com"}""", action.payload)
         assertTrue(
@@ -866,7 +866,7 @@ class EgoPlannerTest {
         val llm = StubChatModelClient().apply {
             enqueueRawResponse(
                 """
-                {"decision":"action","urgency":"medium","action_type":"contact_user","action_payload":"unsafe","action_summary":"respond"}
+                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"contact_user","action_payload":"unsafe","action_summary":"respond"}
                 """.trimIndent()
             )
             enqueueRawResponseForCallSite(
@@ -907,7 +907,7 @@ class EgoPlannerTest {
         val llm = StubChatModelClient().apply {
             enqueueRawResponse(
                 """
-                {"decision":"action","urgency":"medium","action_type":"contact_user","action_payload":"Omar","action_summary":"respond"}
+                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"contact_user","action_payload":"Omar","action_summary":"respond"}
                 """.trimIndent()
             )
             enqueueRawResponseForCallSite(
@@ -940,7 +940,7 @@ class EgoPlannerTest {
             )
         )
 
-        val action = assertIs<ai.neopsyke.agent.model.EgoDecision.ProposeAction>(decision)
+        val action = assertIs<ai.neopsyke.agent.model.EgoDecision.FormIntention>(decision)
         assertEquals(ActionType.CONTACT_USER, action.actionType)
         assertEquals("Omar", action.payload)
         assertTrue(
@@ -956,7 +956,7 @@ class EgoPlannerTest {
         val llm = StubChatModelClient().apply {
             enqueueRawResponse(
                 """
-                {"decision":"action","urgency":"medium","action_type":"contact_user","action_payload":"unsafe","action_summary":"respond"}
+                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"contact_user","action_payload":"unsafe","action_summary":"respond"}
                 """.trimIndent()
             )
             enqueueRawResponseForCallSite(callSite = "action_verifier", content = "not-json")
@@ -990,9 +990,9 @@ class EgoPlannerTest {
     @Test
     fun `planner trips action verifier parse-failure circuit breaker and bypasses one decision`() {
         val llm = StubChatModelClient().apply {
-            enqueueRawResponse("""{"decision":"action","urgency":"medium","action_type":"contact_user","action_payload":"a1","action_summary":"s1"}""")
-            enqueueRawResponse("""{"decision":"action","urgency":"medium","action_type":"contact_user","action_payload":"a2","action_summary":"s2"}""")
-            enqueueRawResponse("""{"decision":"action","urgency":"medium","action_type":"contact_user","action_payload":"a3","action_summary":"s3"}""")
+            enqueueRawResponse("""{"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"contact_user","action_payload":"a1","action_summary":"s1"}""")
+            enqueueRawResponse("""{"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"contact_user","action_payload":"a2","action_summary":"s2"}""")
+            enqueueRawResponse("""{"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"contact_user","action_payload":"a3","action_summary":"s3"}""")
             enqueueRawResponseForCallSite(callSite = "action_verifier", content = "bad-1")
             enqueueRawResponseForCallSite(callSite = "action_verifier_json_retry", content = "bad-1-retry")
             enqueueRawResponseForCallSite(callSite = "action_verifier", content = "bad-2")
@@ -1007,9 +1007,9 @@ class EgoPlannerTest {
         val trigger = ai.neopsyke.agent.model.EgoTrigger.IncomingInput(PendingInput(1, "test"))
         val context = PlannerContext(recentDialogue = emptyList(), queue = QueueSnapshot(0, 0, 0))
 
-        assertIs<ai.neopsyke.agent.model.EgoDecision.ProposeAction>(planner.decide(trigger, context))
-        assertIs<ai.neopsyke.agent.model.EgoDecision.ProposeAction>(planner.decide(trigger, context))
-        assertIs<ai.neopsyke.agent.model.EgoDecision.ProposeAction>(planner.decide(trigger, context))
+        assertIs<ai.neopsyke.agent.model.EgoDecision.FormIntention>(planner.decide(trigger, context))
+        assertIs<ai.neopsyke.agent.model.EgoDecision.FormIntention>(planner.decide(trigger, context))
+        assertIs<ai.neopsyke.agent.model.EgoDecision.FormIntention>(planner.decide(trigger, context))
 
         val verifierCalls = llm.calls.count { it.options.metadata.callSite == "action_verifier" }
         val verifierRetryCalls = llm.calls.count { it.options.metadata.callSite == "action_verifier_json_retry" }
@@ -1027,10 +1027,10 @@ class EgoPlannerTest {
     @Test
     fun `planner action verifier bypass is scoped per input and action type`() {
         val llm = StubChatModelClient().apply {
-            enqueueRawResponse("""{"decision":"action","urgency":"medium","action_type":"contact_user","action_payload":"a1","action_summary":"s1"}""")
-            enqueueRawResponse("""{"decision":"action","urgency":"medium","action_type":"contact_user","action_payload":"a2","action_summary":"s2"}""")
-            enqueueRawResponse("""{"decision":"action","urgency":"medium","action_type":"contact_user","action_payload":"a3","action_summary":"s3"}""")
-            enqueueRawResponse("""{"decision":"action","urgency":"medium","action_type":"contact_user","action_payload":"b1","action_summary":"s4"}""")
+            enqueueRawResponse("""{"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"contact_user","action_payload":"a1","action_summary":"s1"}""")
+            enqueueRawResponse("""{"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"contact_user","action_payload":"a2","action_summary":"s2"}""")
+            enqueueRawResponse("""{"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"contact_user","action_payload":"a3","action_summary":"s3"}""")
+            enqueueRawResponse("""{"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"contact_user","action_payload":"b1","action_summary":"s4"}""")
             enqueueRawResponseForCallSite(callSite = "action_verifier", content = "bad-1")
             enqueueRawResponseForCallSite(callSite = "action_verifier_json_retry", content = "bad-1-retry")
             enqueueRawResponseForCallSite(callSite = "action_verifier", content = "bad-2")
@@ -1048,10 +1048,10 @@ class EgoPlannerTest {
             PendingInput(id = 2, content = "test-b", receivedAtMs = 2L)
         )
 
-        assertIs<ai.neopsyke.agent.model.EgoDecision.ProposeAction>(planner.decide(triggerA, context))
-        assertIs<ai.neopsyke.agent.model.EgoDecision.ProposeAction>(planner.decide(triggerA, context))
-        assertIs<ai.neopsyke.agent.model.EgoDecision.ProposeAction>(planner.decide(triggerA, context)) // bypassed
-        assertIs<ai.neopsyke.agent.model.EgoDecision.ProposeAction>(planner.decide(triggerB, context)) // verifier active again
+        assertIs<ai.neopsyke.agent.model.EgoDecision.FormIntention>(planner.decide(triggerA, context))
+        assertIs<ai.neopsyke.agent.model.EgoDecision.FormIntention>(planner.decide(triggerA, context))
+        assertIs<ai.neopsyke.agent.model.EgoDecision.FormIntention>(planner.decide(triggerA, context)) // bypassed
+        assertIs<ai.neopsyke.agent.model.EgoDecision.FormIntention>(planner.decide(triggerB, context)) // verifier active again
 
         val verifierCalls = llm.calls.count { it.options.metadata.callSite == "action_verifier" }
         val verifierRetryCalls = llm.calls.count { it.options.metadata.callSite == "action_verifier_json_retry" }
@@ -1252,8 +1252,8 @@ class EgoPlannerTest {
         )
 
         val systemPrompt = llm.lastMessages.first().content
-        assertTrue(systemPrompt.contains("Do not return decision=action without both action_payload and action_summary."))
-        assertTrue(systemPrompt.contains("\"action_summary\":\"required when decision=action"))
+        assertTrue(systemPrompt.contains("Do not return decision=intend without intention_kind, action_payload, and action_summary."))
+        assertTrue(systemPrompt.contains("\"action_summary\":\"required when decision=intend"))
     }
 
     @Test
@@ -1464,7 +1464,7 @@ class EgoPlannerTest {
             enqueueRawResponse(
                 """
                 {
-                  "decision":"action",
+                  "decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable",
                   "urgency":"medium",
                   "action_type":"website_fetch",
                   "action_payload":"https://example.com/pricing",
@@ -1490,7 +1490,7 @@ class EgoPlannerTest {
             )
         )
 
-        val action = assertIs<ai.neopsyke.agent.model.EgoDecision.ProposeAction>(decision)
+        val action = assertIs<ai.neopsyke.agent.model.EgoDecision.FormIntention>(decision)
         assertEquals(ActionType.WEBSITE_FETCH, action.actionType)
         assertTrue(action.payload.contains("\"url\":\"https://example.com/pricing\""))
         assertEquals(1, repairCount)

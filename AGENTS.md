@@ -191,12 +191,37 @@ Bootstrap Freud first: `./freud/bootstrap.sh`
 - Optional `--continue-on-fail` (or `runtime.continue_on_fail: true` in config) runs remaining steps for diagnostics, but run status is still `fail` if any step failed.
 - Scenario pack executes all listed scenarios in one run and reports aggregate pass/fail; it does not retry failing scenarios automatically.
 
+### Stuck Process Policy (Important)
+- If any Java, Gradle, or Kotlin process appears stuck, wedged, orphaned, or unexpectedly hot on CPU, stop implementation work immediately.
+- Do not keep editing code while a suspected stuck build/validation process is still running.
+- Gather the concrete facts first:
+  - PID
+  - parent PID
+  - `%CPU`
+  - elapsed time
+  - full command line
+  - whether it was launched by `./gradlew`, `./freud/bin/freud run`, `./freud/bin/freud eval`, `./freud/bin/freud bbh`, or `./freud/bin/freud test-freud-replay`
+- Prompt the user with that information plus clear options:
+  - wait longer
+  - terminate the specific process
+  - terminate the whole process tree
+  - stop the current validation lane and resume later
+- Do not resume normal work until the user has been informed and the stuck process has been resolved or explicitly waived by the user.
+- If process inspection or termination requires escalation, request it instead of guessing.
+
 ### Concurrency Policy (Important)
 - Never run overlapping Gradle-backed commands in the same checkout/worktree.
 - Treat all of these as Gradle-backed and therefore not parallel-safe in one checkout:
   - raw `./gradlew ...`
   - `./freud/bin/freud run ...`
-- `./freud/bin/freud run --live` is also not parallel-safe with other Gradle-backed commands because it still runs the deterministic Gradle phases before the live steps.
+  - `./freud/bin/freud run --live ...`
+- Treat these Freud commands as potentially Gradle-spawning in this repo unless you have verified otherwise for the exact invocation and current code path:
+  - `./freud/bin/freud eval ...`
+  - `./freud/bin/freud bbh ...`
+  - `./freud/bin/freud test-freud-replay ...`
+- Practical rule: if a Freud command may call `installDist`, `run-neopsyke`, any Gradle wrapper step, or any feature-loop step that shells out to Gradle, treat it as Gradle-backed and do not overlap it with any other Gradle/Freud validation in the same checkout.
+- `./freud/bin/freud run --live` is not parallel-safe with other Gradle-backed commands because it still runs the deterministic Gradle phases before the live steps.
+- If you start any potentially Gradle-spawning Freud command, do not begin code edits, other Gradle commands, or another Freud validation command in the same checkout until that command has clearly finished or been stopped.
 - If parallel validation is needed, use separate git worktrees or separate clones so each run has its own `build/` outputs and Gradle/Kotlin state.
 - Safe to overlap in the same checkout:
   - artifact/log inspection
@@ -208,6 +233,7 @@ Bootstrap Freud first: `./freud/bootstrap.sh`
 - The live commands above may overlap only when all of these are true:
   - they are not running at the same time as any Gradle-backed command
   - you do not rely on shared `latest` pointers as stable ownership markers because the last writer wins
+- If there is any uncertainty about whether a live Freud command has spawned Gradle or Kotlin compilation, treat it as not safe to overlap and verify process state first.
 - `./freud/bin/freud eval` runs are parallel-safe by default: each run has fully isolated per-run state (logbook, metrics, action-control DBs in `$RUN_DIR/state/`, unique pgvector namespace).
 
 ### Artifact Locations

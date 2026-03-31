@@ -1,5 +1,7 @@
 package ai.neopsyke.agent.model
 
+import ai.neopsyke.agent.cortex.sensory.ActionFeedbackCue
+import ai.neopsyke.agent.goal.GoalRunActivation
 import java.util.UUID
 
 data class PendingInput(
@@ -92,6 +94,15 @@ data class PendingAction(
     val requestedCommitMode: CommitMode = CommitMode.NOT_APPLICABLE,
 )
 
+data class PendingFeedback(
+    val cue: ActionFeedbackCue,
+    val percept: Percept,
+    val stimulusId: String,
+    val stimulusContent: String,
+    val receivedAtMs: Long,
+    val resumedFromWaitingThread: Boolean = false,
+)
+
 data class QueueSnapshot(
     val pendingInputCount: Int,
     val pendingThoughtCount: Int,
@@ -112,13 +123,6 @@ data class QueueState(
     val intentions: List<QueuedIntention> = emptyList(),
 )
 
-data class ThreadContinuation(
-    val rootInputId: String,
-    val conversationContext: ConversationContext,
-    val reason: String,
-    val receivedAtMs: Long? = null,
-)
-
 sealed interface OpportunityTrigger {
     val rootInputId: String
     val conversationContext: ConversationContext
@@ -136,10 +140,16 @@ sealed interface OpportunityTrigger {
         override val receivedAtMs: Long = impulse.receivedAtMs
     }
 
-    data class ThreadWork(val continuation: ThreadContinuation) : OpportunityTrigger {
-        override val rootInputId: String = continuation.rootInputId
-        override val conversationContext: ConversationContext = continuation.conversationContext
-        override val receivedAtMs: Long? = continuation.receivedAtMs
+    data class Feedback(val feedback: PendingFeedback) : OpportunityTrigger {
+        override val rootInputId: String = feedback.cue.rootInputId
+        override val conversationContext: ConversationContext = feedback.cue.conversationContext
+        override val receivedAtMs: Long = feedback.receivedAtMs
+    }
+
+    data class GoalWork(val work: GoalRunActivation) : OpportunityTrigger {
+        override val rootInputId: String = work.rootInputId
+        override val conversationContext: ConversationContext = work.conversationContext
+        override val receivedAtMs: Long? = null
     }
 }
 

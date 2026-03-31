@@ -1,6 +1,7 @@
 package ai.neopsyke.agent.ego
 
 import ai.neopsyke.agent.config.*
+import ai.neopsyke.agent.goal.GoalRunActivation
 import ai.neopsyke.agent.model.*
 import java.util.PriorityQueue
 
@@ -25,6 +26,20 @@ class AttentionScheduler(
             )
         )
         latestQueuedInput = input
+        return true
+    }
+
+    fun enqueueFeedback(feedback: PendingFeedback, opportunity: Opportunity): Boolean {
+        if (pendingInputCount() >= config.maxPendingInputs) {
+            return false
+        }
+        opportunities.add(
+            ScheduledOpportunity(
+                queueId = nextId(),
+                opportunity = opportunity,
+                trigger = OpportunityTrigger.Feedback(feedback),
+            )
+        )
         return true
     }
 
@@ -153,19 +168,19 @@ class AttentionScheduler(
         opportunities.removeIf { it.trigger is OpportunityTrigger.Impulse }
     }
 
-    fun enqueueThreadContinuation(continuation: ThreadContinuation, opportunity: Opportunity): Boolean {
+    fun enqueueGoalWork(work: GoalRunActivation, opportunity: Opportunity): Boolean {
         opportunities.add(
             ScheduledOpportunity(
                 queueId = nextId(),
                 opportunity = opportunity,
-                trigger = OpportunityTrigger.ThreadWork(continuation),
+                trigger = OpportunityTrigger.GoalWork(work),
             )
         )
         return true
     }
 
-    fun clearThreadContinuations() {
-        opportunities.removeIf { it.trigger is OpportunityTrigger.ThreadWork }
+    fun clearGoalWork() {
+        opportunities.removeIf { it.trigger is OpportunityTrigger.GoalWork }
     }
 
     fun dequeueFallbackExplanationAction(): PendingAction? {
@@ -363,7 +378,9 @@ class AttentionScheduler(
     }
 
     private fun pendingInputCount(): Int =
-        opportunities.count { it.trigger is OpportunityTrigger.Input }
+        opportunities.count { trigger ->
+            trigger.trigger is OpportunityTrigger.Input || trigger.trigger is OpportunityTrigger.Feedback
+        }
 
     private fun pendingImpulseCount(): Int =
         opportunities.count { it.trigger is OpportunityTrigger.Impulse }

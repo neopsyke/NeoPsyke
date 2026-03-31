@@ -104,6 +104,7 @@ internal class DecisionDispatcher(
         rootInputId: String?,
         rootInputReceivedAtMs: Long?,
         conversationContext: ConversationContext,
+        plannerContext: PlannerContext? = null,
         origin: ActionOrigin = ActionOrigin.USER,
     ) {
         when (decision) {
@@ -155,7 +156,61 @@ internal class DecisionDispatcher(
                 telemetry.emitQueueSnapshot("decision_thought")
             }
 
-            is EgoDecision.ProposeAction -> {
+            is EgoDecision.FormIntention -> {
+                plannerContextViolationFor(decision, plannerContext)?.let { violation ->
+                    instrumentation.emit(
+                        AgentEvents.warning(
+                            "Planner formed intention '${decision.intentionKind.name.lowercase()}/${decision.actionType.id}' outside the current opportunity contract; requesting an alternative."
+                        )
+                    )
+                    instrumentation.emit(
+                        AgentEvent(
+                            type = "planner_decision_blocked",
+                            data = mapOf(
+                                "intention_kind" to decision.intentionKind.name.lowercase(),
+                                "commit_mode_preference" to decision.commitModePreference.name.lowercase(),
+                                "action_type" to decision.actionType.id,
+                                "summary" to decision.summary,
+                                "reason_code" to violation.reasonCode,
+                                "reason" to violation.reason,
+                                "opportunity_kind" to plannerContext?.opportunityKind?.name?.lowercase(),
+                                "allowed_intentions" to plannerContext?.allowedIntentions?.map { it.name.lowercase() }.orEmpty(),
+                                "available_actions" to plannerContext?.availableActions?.map { it.id }?.sorted().orEmpty(),
+                                "dispatchable_actions" to plannerContext?.dispatchableActions?.map { it.id }?.sorted().orEmpty(),
+                                "root_input_id" to rootInputId,
+                            )
+                        )
+                    )
+                    val retryThought = TextSecurity.clamp(
+                        buildInvalidActionRetryThought(decision, plannerContext, violation),
+                        config.planner.maxThoughtChars
+                    )
+                    val queuedRetry = enqueueDeferredIntention(
+                        content = retryThought,
+                        urgency = decision.urgency,
+                        nextPassCount = nextPassCount,
+                        rootInputId = rootInputId,
+                        rootInputReceivedAtMs = rootInputReceivedAtMs,
+                        deniedActionType = decision.actionType,
+                        deniedActionPayload = decision.payload,
+                        denialReason = violation.reason,
+                        denialReasonCode = violation.reasonCode,
+                        conversationContext = conversationContext,
+                        origin = origin,
+                    )
+                    if (!queuedRetry) {
+                        instrumentation.emit(
+                            AgentEvents.warning("Failed to enqueue retry thought after blocking an invalid planner action.")
+                        )
+                        telemetry.recordQueueSaturation(
+                            queueType = "thought",
+                            capacity = config.maxPendingThoughts,
+                            reason = "enqueue_invalid_action_retry_thought_failed_full"
+                        )
+                    }
+                    telemetry.emitQueueSnapshot("decision_action_blocked")
+                    return
+                }
                 val repeatedDeniedAction = originThought != null && fallbackHandler.isRepeatOfDeniedAction(originThought, decision)
                 val technicalDenial = DenialReasonClassifier.isLikelyTechnical(
                     reasonCode = originThought?.denialReasonCode,
@@ -212,15 +267,14 @@ internal class DecisionDispatcher(
                     rootInputReceivedAtMs = rootInputReceivedAtMs,
                     conversationContext = conversationContext
                 )
-                val intentionKind = intentionKindFor(decision.actionType)
                 val intention = Intention(
                     id = RootInputIds.next(),
                     cognitiveThreadId = rootInputId ?: RootInputIds.next(),
-                    kind = intentionKind,
+                    kind = decision.intentionKind,
                     summary = decision.summary,
                     createdAt = Instant.now(),
                     conversationContext = conversationContext,
-                    commitMode = CommitMode.NOT_APPLICABLE,
+                    commitMode = decision.commitModePreference,
                     rootStimulusId = rootInputId,
                 )
                 val queued = scheduler.enqueueIntention(
@@ -241,6 +295,8 @@ internal class DecisionDispatcher(
                 instrumentation.emit(
                     AgentEvents.actionProposed(
                         actionType = decision.actionType.id,
+                        intentionKind = decision.intentionKind.name.lowercase(),
+                        commitModePreference = decision.commitModePreference.name.lowercase(),
                         urgency = decision.urgency.name.lowercase(),
                         payload = decision.payload,
                         summary = decision.summary,
@@ -484,7 +540,7 @@ internal class DecisionDispatcher(
 
     private fun shouldAllowRepeatedVerifierDisagreement(
         originThought: PendingThought?,
-        decision: EgoDecision.ProposeAction,
+        decision: EgoDecision.FormIntention,
     ): Boolean {
         val thought = originThought ?: return false
         if (thought.denialReasonCode != ACTION_VERIFIER_REJECT_REASON_CODE) return false
@@ -552,7 +608,7 @@ internal class DecisionDispatcher(
     }
 
     private fun emitExternalActionRedundancySignal(
-        decision: EgoDecision.ProposeAction,
+        decision: EgoDecision.FormIntention,
         rootInputId: String?,
         rootInputReceivedAtMs: Long?,
         conversationContext: ConversationContext,
@@ -589,14 +645,80 @@ internal class DecisionDispatcher(
         return normalized.hashCode().toString(16)
     }
 
-    private fun intentionKindFor(actionType: ActionType): IntentionKind {
-        val effectClass = motorCortex.actionRegistry().contract(actionType)?.effectClass
-        return if (effectClass == ActionEffectClass.OBSERVE) {
-            IntentionKind.OBSERVE
-        } else {
-            IntentionKind.PREPARE
+    private fun plannerContextViolationFor(
+        decision: EgoDecision.FormIntention,
+        plannerContext: PlannerContext?,
+    ): PlannerContextViolation? {
+        if (plannerContext == null) return null
+        if (plannerContext.opportunityKind == null) return null
+        return when {
+            decision.intentionKind !in plannerContext.allowedIntentions ->
+                PlannerContextViolation(
+                    reasonCode = "INTENTION_KIND_NOT_ALLOWED",
+                    reason = "Intention '${decision.intentionKind.name.lowercase()}' is not allowed in the current opportunity.",
+                )
+
+            decision.actionType !in plannerContext.availableActions ->
+                PlannerContextViolation(
+                    reasonCode = "ACTION_TYPE_NOT_AVAILABLE",
+                    reason = "Action '${decision.actionType.id}' is not available in the current opportunity.",
+                )
+
+            decision.actionType !in plannerContext.dispatchableActions ->
+                PlannerContextViolation(
+                    reasonCode = "ACTION_TYPE_NOT_DISPATCHABLE",
+                    reason = "Action '${decision.actionType.id}' is visible but not dispatchable in the current opportunity.",
+                )
+
+            decision.commitModePreference !in plannerContext.allowedCommitModes ->
+                PlannerContextViolation(
+                    reasonCode = "COMMIT_MODE_NOT_ALLOWED",
+                    reason = "Commit mode '${decision.commitModePreference.name.lowercase()}' is not allowed in the current opportunity.",
+                )
+
+            else -> null
         }
     }
+
+    private fun buildInvalidActionRetryThought(
+        decision: EgoDecision.FormIntention,
+        plannerContext: PlannerContext?,
+        violation: PlannerContextViolation,
+    ): String {
+        val allowedIntentions = plannerContext?.allowedIntentions
+            ?.map { it.name.lowercase() }
+            ?.sorted()
+            ?.joinToString(", ")
+            .orEmpty()
+        val dispatchableActions = plannerContext?.dispatchableActions
+            ?.map { it.id }
+            ?.sorted()
+            ?.joinToString(", ")
+            .orEmpty()
+        return buildString {
+            append(violation.reason)
+            append(' ')
+            append("Pick a different next move that fits the current opportunity.")
+            if (allowedIntentions.isNotBlank()) {
+                append(" Allowed intentions: ")
+                append(allowedIntentions)
+                append('.')
+            }
+            if (dispatchableActions.isNotBlank()) {
+                append(" Dispatchable actions: ")
+                append(dispatchableActions)
+                append('.')
+            }
+            append(" Do not repeat action '")
+            append(decision.actionType.id)
+            append("'.")
+        }
+    }
+
+    private data class PlannerContextViolation(
+        val reasonCode: String,
+        val reason: String,
+    )
 
     private companion object {
         const val PLAN_ID_LENGTH: Int = 8

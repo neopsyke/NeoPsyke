@@ -11,10 +11,12 @@ import ai.neopsyke.agent.model.CognitiveThreadTerminalState
 import ai.neopsyke.agent.model.CognitiveThreadWaitState
 import ai.neopsyke.agent.model.ConversationContext
 import ai.neopsyke.agent.model.ExternalContentArtifact
+import ai.neopsyke.agent.model.InputPriority
 import ai.neopsyke.agent.model.Intention
 import ai.neopsyke.agent.model.IntentionKind
 import ai.neopsyke.agent.model.Opportunity
 import ai.neopsyke.agent.model.OpportunityKind
+import ai.neopsyke.agent.model.PendingFeedback
 import ai.neopsyke.agent.model.PendingImpulse
 import ai.neopsyke.agent.model.PendingInput
 import ai.neopsyke.agent.model.Percept
@@ -88,6 +90,35 @@ internal class CognitiveThreadStore {
             allowedCommitModes = CognitivePolicyShaper.opportunityCommitModes(thread.securityContext),
         ).also { opportunity ->
             recordOpportunity(input.rootInputId, input.conversationContext, opportunity)
+        }
+    }
+
+    fun feedbackOpportunity(feedback: PendingFeedback): Opportunity {
+        val rootInputId = feedback.cue.rootInputId
+        val thread = ensureThread(
+            rootInputId = rootInputId,
+            conversationContext = feedback.cue.conversationContext,
+            kind = thread(rootInputId, feedback.cue.conversationContext)?.kind ?: CognitiveThreadKind.CONVERSATION,
+            title = feedback.cue.actionSummary.ifBlank { feedback.stimulusContent },
+            rootStimulusId = rootInputId,
+            percept = feedback.percept,
+        )
+        return opportunityFor(
+            thread = thread,
+            kind = OpportunityKind.INTEGRATE_FEEDBACK,
+            summary = feedback.cue.statusSummary.ifBlank {
+                feedback.cue.feedbackContent.ifBlank { feedback.cue.actionSummary }
+            },
+            rootStimulusId = rootInputId,
+            salience = InputPriority.HIGH.level.toDouble(),
+            allowedIntentions = setOf(
+                IntentionKind.OBSERVE,
+                IntentionKind.PREPARE,
+                IntentionKind.DEFER,
+            ),
+            allowedCommitModes = CognitivePolicyShaper.opportunityCommitModes(thread.securityContext),
+        ).also { opportunity ->
+            recordOpportunity(rootInputId, feedback.cue.conversationContext, opportunity)
         }
     }
 

@@ -52,12 +52,14 @@ class LlmEgoPlanner(
         val triggerLabel = when (trigger) {
             is EgoTrigger.IncomingInput -> "input"
             is EgoTrigger.PendingThoughtInput -> "thought"
+            is EgoTrigger.ActionFeedback -> "feedback"
             is EgoTrigger.IncomingImpulse -> "impulse"
             is EgoTrigger.GoalWork -> "goal-work"
         }
         val rootInputId = when (trigger) {
             is EgoTrigger.IncomingInput -> trigger.input.rootInputId
             is EgoTrigger.PendingThoughtInput -> trigger.thought.rootInputId
+            is EgoTrigger.ActionFeedback -> trigger.feedback.cue.rootInputId
             is EgoTrigger.IncomingImpulse -> trigger.impulse.rootImpulseId
             is EgoTrigger.GoalWork -> trigger.workUnit.goalId
         }
@@ -172,7 +174,7 @@ class LlmEgoPlanner(
 
         val decision = parseResponse(
             raw = response.content,
-            availableActions = context.availableActions,
+            context = context,
             emitParseWarning = false,
             allowResolutionDraft = allowResolutionDraft
         ) ?: run {
@@ -189,7 +191,7 @@ class LlmEgoPlanner(
                 truncationRetryResponse?.let {
                     parseResponse(
                         raw = it.content,
-                        availableActions = context.availableActions,
+                        context = context,
                         emitParseWarning = true,
                         allowResolutionDraft = allowResolutionDraft
                     )
@@ -209,7 +211,7 @@ class LlmEgoPlanner(
                 val repairedDecision = recovered?.let {
                     parseResponse(
                         raw = it.content,
-                        availableActions = context.availableActions,
+                        context = context,
                         emitParseWarning = true,
                         allowResolutionDraft = allowResolutionDraft
                     )
@@ -286,8 +288,13 @@ class LlmEgoPlanner(
             ),
             cronExpression = recurrence.cronExpression,
         )
-        return EgoDecision.ProposeAction(
+        return EgoDecision.FormIntention(
             urgency = Urgency.MEDIUM,
+            intentionKind = IntentionKind.PREPARE,
+            commitModePreference = preferredCommitMode(
+                allowedCommitModes = context.allowedCommitModes,
+                intentionKind = IntentionKind.PREPARE,
+            ),
             actionType = ActionType.GOAL_OPERATION,
             payload = TextSecurity.clamp(mapper.writeValueAsString(payload), config.maxActionPayloadChars),
             summary = buildGoalCreationSummary(payload)
@@ -296,21 +303,21 @@ class LlmEgoPlanner(
 
     private fun parseResponse(
         raw: String,
-        availableActions: Set<ActionType>,
+        context: PlannerContext,
         emitParseWarning: Boolean,
         allowResolutionDraft: Boolean,
     ): EgoDecision? {
         return try {
             val payload = parsePayloadWithRepair(raw)
             when (payload.decision?.trim()?.lowercase()) {
-                "thought" -> {
-                    val thought = payload.thought?.trim().orEmpty()
-                    if (thought.isBlank()) {
-                        EgoDecision.Noop("Planner returned empty thought.")
+                "defer" -> {
+                    val deferredContent = payload.deferContent?.trim().orEmpty()
+                    if (deferredContent.isBlank()) {
+                        EgoDecision.Noop("Planner returned empty deferred content.")
                     } else {
                         EgoDecision.EnqueueThought(
                             urgency = Urgency.fromRaw(payload.urgency),
-                            content = TextSecurity.clamp(thought, config.planner.maxThoughtChars),
+                            content = TextSecurity.clamp(deferredContent, config.planner.maxThoughtChars),
                             longTermMemoryRecallQuery = payload.longTermMemoryRecallQuery?.trim()?.ifBlank { null }?.let {
                                 TextSecurity.clamp(it, config.planner.maxThoughtChars)
                             }
@@ -318,7 +325,8 @@ class LlmEgoPlanner(
                     }
                 }
 
-                "action" -> {
+                "intend" -> {
+                    val intentionKind = plannerIntentionKindFromRaw(payload.intentionKind)
                     val actionType = ActionType.fromRaw(payload.actionType)
                     val rawPayload = normalizeActionPayload(payload.actionPayload)?.trim().orEmpty()
                     val actionPayload = actionType?.let { type -> actionPayloadRepair(type, rawPayload) } ?: rawPayload
@@ -339,18 +347,35 @@ class LlmEgoPlanner(
                     } else {
                         actionSummary
                     }
+                    val commitModePreference = resolveCommitModePreference(
+                        rawCommitMode = payload.commitModePreference,
+                        allowedCommitModes = context.allowedCommitModes,
+                        intentionKind = intentionKind,
+                    )
 
                     if (actionType == ActionType.RESOLUTION_DRAFT && !allowResolutionDraft) {
-                        EgoDecision.Noop("Planner proposed resolution_draft outside active plan context.")
-                    } else if (actionType == null || actionPayload.isBlank() || resolvedSummary.isBlank()) {
-                        EgoDecision.Noop("Planner returned invalid action payload.")
-                    } else if (!availableActions.contains(actionType)) {
+                        EgoDecision.Noop("Planner formed resolution_draft intention outside active plan context.")
+                    } else if (intentionKind == null || actionType == null || actionPayload.isBlank() || resolvedSummary.isBlank()) {
+                        EgoDecision.Noop("Planner returned invalid intention payload.")
+                    } else if (intentionKind == IntentionKind.OBSERVE && commitModePreference != CommitMode.NOT_APPLICABLE) {
+                        EgoDecision.Noop("Observe intentions must use commit_mode_preference=not_applicable.")
+                    } else if (!context.availableActions.contains(actionType)) {
                         EgoDecision.Noop(
-                            "Planner proposed unavailable action type: ${actionType.id}."
+                            "Planner formed unavailable action type: ${actionType.id}."
+                        )
+                    } else if (intentionKind !in context.allowedIntentions) {
+                        EgoDecision.Noop(
+                            "Planner formed unavailable intention kind: ${intentionKind.name.lowercase()}."
+                        )
+                    } else if (commitModePreference !in context.allowedCommitModes) {
+                        EgoDecision.Noop(
+                            "Planner formed unavailable commit mode preference: ${commitModePreference.name.lowercase()}."
                         )
                     } else {
-                        EgoDecision.ProposeAction(
+                        EgoDecision.FormIntention(
                             urgency = Urgency.fromRaw(payload.urgency),
+                            intentionKind = intentionKind,
+                            commitModePreference = commitModePreference,
                             actionType = actionType,
                             payload = TextSecurity.clamp(actionPayload, config.maxActionPayloadChars),
                             summary = TextSecurity.clamp(resolvedSummary, config.maxActionSummaryChars)
@@ -387,6 +412,40 @@ class LlmEgoPlanner(
                 instrumentation.emit(AgentEvents.warning("Failed to parse Ego planner response."))
             }
             null
+        }
+    }
+
+    private fun plannerIntentionKindFromRaw(raw: String?): IntentionKind? =
+        when (raw?.trim()?.uppercase()) {
+            IntentionKind.OBSERVE.name -> IntentionKind.OBSERVE
+            IntentionKind.PREPARE.name -> IntentionKind.PREPARE
+            else -> null
+        }
+
+    private fun resolveCommitModePreference(
+        rawCommitMode: String?,
+        allowedCommitModes: Set<CommitMode>,
+        intentionKind: IntentionKind?,
+    ): CommitMode {
+        if (intentionKind == IntentionKind.OBSERVE) {
+            return CommitMode.NOT_APPLICABLE
+        }
+        val explicit = CommitMode.entries.firstOrNull { it.name.equals(rawCommitMode?.trim(), ignoreCase = true) }
+        return explicit ?: preferredCommitMode(allowedCommitModes, intentionKind)
+    }
+
+    private fun preferredCommitMode(
+        allowedCommitModes: Set<CommitMode>,
+        intentionKind: IntentionKind?,
+    ): CommitMode {
+        if (intentionKind == null || intentionKind == IntentionKind.OBSERVE) {
+            return CommitMode.NOT_APPLICABLE
+        }
+        return when {
+            CommitMode.APPROVAL_BACKED in allowedCommitModes -> CommitMode.APPROVAL_BACKED
+            CommitMode.POLICY_AUTONOMOUS in allowedCommitModes -> CommitMode.POLICY_AUTONOMOUS
+            CommitMode.ADMIN_OVERRIDE in allowedCommitModes -> CommitMode.ADMIN_OVERRIDE
+            else -> CommitMode.NOT_APPLICABLE
         }
     }
 
@@ -626,16 +685,20 @@ class LlmEgoPlanner(
     }
 
     private fun unavailableGoalCreationDecision(): EgoDecision =
-        EgoDecision.ProposeAction(
+        EgoDecision.FormIntention(
             urgency = Urgency.MEDIUM,
+            intentionKind = IntentionKind.OBSERVE,
+            commitModePreference = CommitMode.NOT_APPLICABLE,
             actionType = ActionType.CONTACT_USER,
             payload = "Persistent goals are unavailable in this run. Restart with goals enabled to create recurring reminders or monitoring tasks.",
             summary = "Explain that persistent goals are disabled"
         )
 
     private fun unsupportedRecurringScheduleDecision(): EgoDecision =
-        EgoDecision.ProposeAction(
+        EgoDecision.FormIntention(
             urgency = Urgency.MEDIUM,
+            intentionKind = IntentionKind.OBSERVE,
+            commitModePreference = CommitMode.NOT_APPLICABLE,
             actionType = ActionType.CONTACT_USER,
             payload = "I can create recurring goals for schedules like every N minutes or every N hours, but I could not parse that schedule. Please restate it in one of those forms.",
             summary = "Ask user to restate unsupported recurring schedule"
@@ -668,6 +731,15 @@ class LlmEgoPlanner(
                 needId = trigger.impulse.needId,
                 rootImpulseId = trigger.impulse.rootImpulseId,
             )
+            is EgoTrigger.ActionFeedback -> {
+                val cue = trigger.feedback.cue
+                base.copy(
+                    originSource = cue.origin.source.name.lowercase(Locale.ROOT),
+                    needId = cue.origin.needId,
+                    rootImpulseId = cue.origin.rootImpulseId,
+                    actionType = cue.actionType.id,
+                )
+            }
             is EgoTrigger.PendingThoughtInput -> {
                 val thought = trigger.thought
                 val plan = thought.planContext
@@ -819,7 +891,7 @@ class LlmEgoPlanner(
         if (!config.planner.actionVerifierEnabled) {
             return decision
         }
-        if (decision !is EgoDecision.ProposeAction) {
+        if (decision !is EgoDecision.FormIntention) {
             return decision
         }
         if (decision.actionType == ActionType.GOAL_OPERATION) {
@@ -835,7 +907,7 @@ class LlmEgoPlanner(
         if (cb.isTripped()) {
             instrumentation.emit(
                 AgentEvents.warning(
-                    "Action verifier bypassed after repeated parse failures; keeping original action proposal."
+                    "Action verifier bypassed after repeated parse failures; keeping original intention."
                 )
             )
             emitActionVerifierCircuitBreakerEvent(
@@ -906,7 +978,7 @@ class LlmEgoPlanner(
             relaxedFormat = formats.relaxed,
         )
         if (response == null) {
-            instrumentation.emit(AgentEvents.warning("Action verifier unavailable; keeping original action proposal."))
+            instrumentation.emit(AgentEvents.warning("Action verifier unavailable; keeping original intention."))
             return ActionVerifierOutcome(payload = null, parseFailed = false)
         }
         val cb = actionVerifierCircuitBreakers.getOrPut(circuitKey) {
@@ -976,11 +1048,12 @@ class LlmEgoPlanner(
 
     private fun resolveActionVerifierCircuitKey(
         trigger: EgoTrigger,
-        decision: EgoDecision.ProposeAction,
+        decision: EgoDecision.FormIntention,
     ): ActionVerifierCircuitKey {
         val rootInputId = when (trigger) {
             is EgoTrigger.IncomingInput -> trigger.input.rootInputId
             is EgoTrigger.PendingThoughtInput -> trigger.thought.rootInputId
+            is EgoTrigger.ActionFeedback -> trigger.feedback.cue.rootInputId
             is EgoTrigger.IncomingImpulse -> trigger.impulse.rootImpulseId
             is EgoTrigger.GoalWork -> trigger.workUnit.goalId
         }
@@ -1041,13 +1114,15 @@ class LlmEgoPlanner(
                 Reply with STRICT JSON only and no markdown/code fences.
                 Use this exact schema:
                 {
-                  "decision":"thought|action|plan|noop",
+                  "decision":"defer|intend|plan|noop",
                   "urgency":"low|medium|high",
-                  "thought":"optional when decision=thought",
+                  "defer_content":"optional when decision=defer",
                   "long_term_memory_recall_query":"optional query string",
+                  "intention_kind":"observe|prepare",
+                  "commit_mode_preference":"not_applicable|approval_backed|policy_autonomous|admin_override",
                   "action_type":"$actionSchemaEnum",
-                  "action_payload":"optional when decision=action",
-                  "action_summary":"required when decision=action",
+                  "action_payload":"optional when decision=intend",
+                  "action_summary":"required when decision=intend",
                   "plan_goal":"required when decision=plan",
                   "plan_steps":["step 1","step 2"],
                   "reason":"optional short reason"
@@ -1079,13 +1154,15 @@ class LlmEgoPlanner(
                 Return one complete JSON object only and finish the response.
                 Use this exact schema:
                 {
-                  "decision":"thought|action|plan|noop",
+                  "decision":"defer|intend|plan|noop",
                   "urgency":"low|medium|high",
-                  "thought":"optional when decision=thought",
+                  "defer_content":"optional when decision=defer",
                   "long_term_memory_recall_query":"optional query string",
+                  "intention_kind":"observe|prepare",
+                  "commit_mode_preference":"not_applicable|approval_backed|policy_autonomous|admin_override",
                   "action_type":"$actionSchemaEnum",
-                  "action_payload":"optional when decision=action",
-                  "action_summary":"required when decision=action",
+                  "action_payload":"optional when decision=intend",
+                  "action_summary":"required when decision=intend",
                   "plan_goal":"required when decision=plan",
                   "plan_steps":["step 1","step 2"],
                   "reason":"optional short reason"
@@ -1196,7 +1273,7 @@ class LlmEgoPlanner(
 
     private fun resolveVerifierDecision(
         trigger: EgoTrigger,
-        original: EgoDecision.ProposeAction,
+        original: EgoDecision.FormIntention,
         payload: ActionVerifierPayload,
         availableActions: Set<ActionType>,
         followUpOrigin: FollowUpOrigin?,
@@ -1255,6 +1332,10 @@ class LlmEgoPlanner(
 
             "repair" -> {
                 val repairedActionType = ActionType.fromRaw(payload.actionType) ?: original.actionType
+                val repairedIntentionKind = plannerIntentionKindFromRaw(payload.intentionKind) ?: original.intentionKind
+                val repairedCommitModePreference = CommitMode.entries.firstOrNull {
+                    it.name.equals(payload.commitModePreference?.trim(), ignoreCase = true)
+                } ?: original.commitModePreference
                 if (!availableActions.contains(repairedActionType)) {
                     val reason = "Action verifier proposed unavailable action type: ${repairedActionType.name.lowercase()}."
                     emitVerifierResult(
@@ -1329,6 +1410,8 @@ class LlmEgoPlanner(
                 }
                 if (isNoOpVerifierRepair(
                         original = original,
+                        repairedIntentionKind = repairedIntentionKind,
+                        repairedCommitModePreference = repairedCommitModePreference,
                         repairedActionType = repairedActionType,
                         repairedPayload = repairedPayload,
                         repairedSummary = resolvedSummary
@@ -1357,8 +1440,10 @@ class LlmEgoPlanner(
                     repaired = true,
                     reason = payload.reason
                 )
-                EgoDecision.ProposeAction(
+                EgoDecision.FormIntention(
                     urgency = original.urgency,
+                    intentionKind = repairedIntentionKind,
+                    commitModePreference = repairedCommitModePreference,
                     actionType = repairedActionType,
                     payload = TextSecurity.clamp(repairedPayload, config.maxActionPayloadChars),
                     summary = TextSecurity.clamp(resolvedSummary, config.maxActionSummaryChars)
@@ -1376,7 +1461,7 @@ class LlmEgoPlanner(
 
     private fun shouldOverrideRepeatedAnswerReject(
         trigger: EgoTrigger,
-        original: EgoDecision.ProposeAction,
+        original: EgoDecision.FormIntention,
         reason: String,
     ): Boolean {
         if (original.actionType != ActionType.CONTACT_USER) return false
@@ -1423,7 +1508,7 @@ class LlmEgoPlanner(
     }
 
     private fun shouldIgnoreRepairForEvidenceBackedFollowUp(
-        original: EgoDecision.ProposeAction,
+        original: EgoDecision.FormIntention,
         repairedActionType: ActionType,
         followUpOrigin: FollowUpOrigin?,
         userRequestedRefresh: Boolean,
@@ -1442,11 +1527,19 @@ class LlmEgoPlanner(
     }
 
     private fun isNoOpVerifierRepair(
-        original: EgoDecision.ProposeAction,
+        original: EgoDecision.FormIntention,
+        repairedIntentionKind: IntentionKind,
+        repairedCommitModePreference: CommitMode,
         repairedActionType: ActionType,
         repairedPayload: String,
         repairedSummary: String,
     ): Boolean {
+        if (original.intentionKind != repairedIntentionKind) {
+            return false
+        }
+        if (original.commitModePreference != repairedCommitModePreference) {
+            return false
+        }
         if (original.actionType != repairedActionType) {
             return false
         }
@@ -1466,7 +1559,7 @@ class LlmEgoPlanner(
     }
 
     private fun shouldIgnoreMeaningChangingRepair(
-        original: EgoDecision.ProposeAction,
+        original: EgoDecision.FormIntention,
         repairedActionType: ActionType,
         repairedPayload: String,
     ): Boolean {
@@ -1502,7 +1595,7 @@ class LlmEgoPlanner(
                 instrumentation.emit(
                     AgentEvents.plannerDecision(
                         trigger = triggerLabel,
-                        decisionType = "thought",
+                        decisionType = "defer",
                         urgency = decision.urgency.name.lowercase(),
                         thought = decision.content,
                         sessionId = sessionId,
@@ -1511,12 +1604,14 @@ class LlmEgoPlanner(
                 )
             }
 
-            is EgoDecision.ProposeAction -> {
+            is EgoDecision.FormIntention -> {
                 instrumentation.emit(
                     AgentEvents.plannerDecision(
                         trigger = triggerLabel,
-                        decisionType = "action",
+                        decisionType = "intention",
                         urgency = decision.urgency.name.lowercase(),
+                        intentionKind = decision.intentionKind.name.lowercase(),
+                        commitModePreference = decision.commitModePreference.name.lowercase(),
                         actionType = decision.actionType.name.lowercase(),
                         payload = decision.payload,
                         summary = decision.summary,
@@ -1656,14 +1751,18 @@ class LlmEgoPlanner(
                     You are an action planner in a loop.
                     Return STRICT JSON only.
                     Decisions:
-                    - thought: create/refine a thought for future processing.
-                    - action: propose one action.
+                    - defer: create/refine a deferred continuation for future processing.
+                    - intend: form one explicit intention for the next action.
                     - plan: decompose into ordered steps when the task needs multiple stages.
                     - noop: when no safe next step exists.
+                    Never use noop when you can answer directly with action_type=contact_user.
+                    For direct reasoning or exact-match tasks that can be solved from the current prompt,
+                    return decision=intend with intention_kind=observe, commit_mode_preference=not_applicable,
+                    action_type=contact_user, and the exact final answer in action_payload.
                     Use plan when the task requires multiple sequential stages (e.g. search, then verify, then respond).
                     Each plan_step is a concise directive (<=120 chars). The planner re-evaluates each step.
-                    Use action=resolution_draft only for intermediate synthesis while executing active plan steps.
-                    The final user-visible response must use action=contact_user.
+                    Use action_type=resolution_draft only for intermediate synthesis while executing active plan steps.
+                    The final user-visible response must use action_type=contact_user.
                     Do not use plan for simple tasks solvable in one or two steps.
                     Return one raw JSON object only.
                     Never emit tool calls, function wrappers, named envelopes, markdown, or code fences.
@@ -1696,27 +1795,33 @@ class LlmEgoPlanner(
                     content = """
                     JSON schema:
                     {
-                      "decision":"thought|action|plan|noop",
+                      "decision":"defer|intend|plan|noop",
                       "urgency":"low|medium|high",
-                      "thought":"... optional when decision=thought",
+                      "defer_content":"... optional when decision=defer",
                       "long_term_memory_recall_query":"optional query string for explicit extra long-term recall",
+                      "intention_kind":"observe|prepare",
+                      "commit_mode_preference":"not_applicable|approval_backed|policy_autonomous|admin_override",
                       "action_type":"$actionSchemaEnum",
-                      "action_payload":"... optional when decision=action",
-                      "action_summary":"required when decision=action; <=180 chars context summary for action review",
+                      "action_payload":"... optional when decision=intend",
+                      "action_summary":"required when decision=intend; <=180 chars context summary for action review",
                       "plan_goal":"required when decision=plan; overall objective",
                       "plan_steps":["step 1 directive","step 2 directive","..."],
                       "reason":"... optional short reason"
                     }
-                    Valid action example:
-                    {"decision":"action","urgency":"medium","action_type":"contact_user","action_payload":"...","action_summary":"Deliver concise recommendation"}
+                    Valid intention example:
+                    {"decision":"intend","urgency":"medium","intention_kind":"observe","commit_mode_preference":"not_applicable","action_type":"contact_user","action_payload":"...","action_summary":"Deliver concise recommendation"}
+                    Valid exact-match example:
+                    {"decision":"intend","urgency":"medium","intention_kind":"observe","commit_mode_preference":"not_applicable","action_type":"contact_user","action_payload":"true","action_summary":"Return exact boolean answer"}
                     Valid plan example:
                     {"decision":"plan","urgency":"medium","plan_goal":"Find and verify current pricing","plan_steps":["Search for official pricing page","Fetch the pricing page content","Synthesize and respond with verified pricing"]}
-                    Do not return decision=action without both action_payload and action_summary.
+                    Do not return decision=intend without intention_kind, action_payload, and action_summary.
                     action_payload must always be a JSON string value; never return object/array directly.
                     Use action_type=resolution_draft only for intermediate plan-step synthesis.
                     Do not use resolution_draft for terminal delivery; terminal user response must use action_type=contact_user.
+                    observe intentions must use commit_mode_preference=not_applicable.
                     Do not return decision=plan without both plan_goal and plan_steps.
-                    Keep thought concise.
+                    Keep defer_content concise.
+                    If the user requests an exact output format, action_payload must contain exactly that final output and nothing else.
                     Prefer concise answer payloads by default.
                     Only produce a detailed answer payload when the user explicitly asks for detail.
                     Action summary must be at most 180 chars.
@@ -1956,7 +2061,7 @@ class LlmEgoPlanner(
     private fun buildActionVerifierMessages(
         trigger: EgoTrigger,
         context: PlannerContext,
-        decision: EgoDecision.ProposeAction,
+        decision: EgoDecision.FormIntention,
     ): PromptBudgetAllocator.AllocationResult {
         val triggerText = formatTriggerText(trigger)
         val dialogue = if (context.recentDialogue.isEmpty()) {
@@ -1993,6 +2098,8 @@ class LlmEgoPlanner(
                     Output schema:
                     {
                       "verdict":"approve|repair|reject",
+                      "intention_kind":"required when verdict=repair",
+                      "commit_mode_preference":"required when verdict=repair",
                       "action_type":"required when verdict=repair",
                       "action_payload":"required when verdict=repair",
                       "action_summary":"required when verdict=repair",
@@ -2077,6 +2184,8 @@ class LlmEgoPlanner(
                     
                     Candidate action:
                     urgency=${decision.urgency.name.lowercase()}
+                    intention_kind=${decision.intentionKind.name.lowercase()}
+                    commit_mode_preference=${decision.commitModePreference.name.lowercase()}
                     action_type=${decision.actionType.name.lowercase()}
                     action_payload=${decision.payload}
                     action_summary=${decision.summary}
@@ -2091,6 +2200,37 @@ class LlmEgoPlanner(
         when (trigger) {
             is EgoTrigger.IncomingInput -> "INPUT: ${trigger.input.content}"
             is EgoTrigger.IncomingImpulse -> "IMPULSE(need=${trigger.impulse.needId}): ${trigger.impulse.prompt}"
+            is EgoTrigger.ActionFeedback -> {
+                val cue = trigger.feedback.cue
+                buildString {
+                    append("ACTION_FEEDBACK(action=")
+                    append(cue.actionType.id)
+                    append(", status=")
+                    append(cue.executionStatus.name.lowercase())
+                    append("): ")
+                    append(cue.feedbackContent)
+                    if (cue.actionSummary.isNotBlank()) {
+                        append("\naction_summary=")
+                        append(cue.actionSummary)
+                    }
+                    if (cue.statusSummary.isNotBlank() && cue.statusSummary != cue.feedbackContent) {
+                        append("\nstatus_summary=")
+                        append(cue.statusSummary)
+                    }
+                    if (cue.plannerSignal.isNotBlank() && cue.plannerSignal != cue.feedbackContent) {
+                        append("\nplanner_signal=")
+                        append(cue.plannerSignal)
+                    }
+                    cue.actionErrorCategory?.takeIf { it.isNotBlank() }?.let {
+                        append("\naction_error_category=")
+                        append(it)
+                    }
+                    cue.fetchErrorCategory?.takeIf { it.isNotBlank() }?.let {
+                        append("\nfetch_error_category=")
+                        append(it)
+                    }
+                }
+            }
             is EgoTrigger.PendingThoughtInput -> {
                 val thought = trigger.thought
                 val planInfo = thought.planContext?.let { ctx ->
@@ -2150,29 +2290,38 @@ class LlmEgoPlanner(
     private data class EgoDecisionPayload(
         val decision: String? = null,
         val urgency: String? = null,
-        val thought: String? = null,
-        @field:JsonProperty("long_term_memory_recall_query")
+        @param:JsonProperty("defer_content")
+        val deferContent: String? = null,
+        @param:JsonProperty("long_term_memory_recall_query")
         val longTermMemoryRecallQuery: String? = null,
-        @field:JsonProperty("action_type")
+        @param:JsonProperty("intention_kind")
+        val intentionKind: String? = null,
+        @param:JsonProperty("commit_mode_preference")
+        val commitModePreference: String? = null,
+        @param:JsonProperty("action_type")
         val actionType: String? = null,
-        @field:JsonProperty("action_payload")
+        @param:JsonProperty("action_payload")
         val actionPayload: JsonNode? = null,
-        @field:JsonProperty("action_summary")
+        @param:JsonProperty("action_summary")
         val actionSummary: String? = null,
         val reason: String? = null,
-        @field:JsonProperty("plan_goal")
+        @param:JsonProperty("plan_goal")
         val planGoal: String? = null,
-        @field:JsonProperty("plan_steps")
+        @param:JsonProperty("plan_steps")
         val planSteps: List<String>? = null,
     )
 
     private data class ActionVerifierPayload(
         val verdict: String? = null,
-        @field:JsonProperty("action_type")
+        @param:JsonProperty("intention_kind")
+        val intentionKind: String? = null,
+        @param:JsonProperty("commit_mode_preference")
+        val commitModePreference: String? = null,
+        @param:JsonProperty("action_type")
         val actionType: String? = null,
-        @field:JsonProperty("action_payload")
+        @param:JsonProperty("action_payload")
         val actionPayload: JsonNode? = null,
-        @field:JsonProperty("action_summary")
+        @param:JsonProperty("action_summary")
         val actionSummary: String? = null,
         val reason: String? = null,
     )
@@ -2186,10 +2335,10 @@ class LlmEgoPlanner(
         val decision: String? = null,
         val title: String? = null,
         val instruction: String? = null,
-        @field:JsonProperty("completion_criteria")
+        @param:JsonProperty("completion_criteria")
         val completionCriteria: String? = null,
         val priority: String? = null,
-        @field:JsonProperty("assistant_response")
+        @param:JsonProperty("assistant_response")
         val assistantResponse: String? = null,
         val reason: String? = null,
     )
@@ -2356,8 +2505,10 @@ class LlmEgoPlanner(
               "required": [
                 "decision",
                 "urgency",
-                "thought",
+                "defer_content",
                 "long_term_memory_recall_query",
+                "intention_kind",
+                "commit_mode_preference",
                 "action_type",
                 "action_payload",
                 "action_summary",
@@ -2368,19 +2519,27 @@ class LlmEgoPlanner(
               "properties": {
                 "decision": {
                   "type": "string",
-                  "enum": ["thought", "action", "plan", "noop"]
+                  "enum": ["defer", "intend", "plan", "noop"]
                 },
                 "urgency": {
                   "type": ["string", "null"],
                   "enum": ["low", "medium", "high", null]
                 },
-                "thought": {
+                "defer_content": {
                   "type": ["string", "null"],
                   "maxLength": 600
                 },
                 "long_term_memory_recall_query": {
                   "type": ["string", "null"],
                   "maxLength": 600
+                },
+                "intention_kind": {
+                  "type": ["string", "null"],
+                  "enum": ["observe", "prepare", null]
+                },
+                "commit_mode_preference": {
+                  "type": ["string", "null"],
+                  "enum": ["not_applicable", "approval_backed", "policy_autonomous", "admin_override", null]
                 },
                 "action_type": {
                   "type": ["string", "null"]
@@ -2419,8 +2578,10 @@ class LlmEgoPlanner(
               "required": [
                 "decision",
                 "urgency",
-                "thought",
+                "defer_content",
                 "long_term_memory_recall_query",
+                "intention_kind",
+                "commit_mode_preference",
                 "action_type",
                 "action_payload",
                 "action_summary",
@@ -2431,17 +2592,25 @@ class LlmEgoPlanner(
               "properties": {
                 "decision": {
                   "type": "string",
-                  "enum": ["thought", "action", "plan", "noop"]
+                  "enum": ["defer", "intend", "plan", "noop"]
                 },
                 "urgency": {
                   "type": ["string", "null"],
                   "enum": ["low", "medium", "high", null]
                 },
-                "thought": {
+                "defer_content": {
                   "type": ["string", "null"]
                 },
                 "long_term_memory_recall_query": {
                   "type": ["string", "null"]
+                },
+                "intention_kind": {
+                  "type": ["string", "null"],
+                  "enum": ["observe", "prepare", null]
+                },
+                "commit_mode_preference": {
+                  "type": ["string", "null"],
+                  "enum": ["not_applicable", "approval_backed", "policy_autonomous", "admin_override", null]
                 },
                 "action_type": {
                   "type": ["string", "null"]

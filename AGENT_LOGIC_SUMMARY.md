@@ -90,15 +90,20 @@ It is intentionally high-level and should stay aligned with the code.
   - Accepts two signal planes:
     - `CognitiveSignal` for typed stimuli that the agent should perceive.
     - `RuntimeControlSignal` for runtime lifecycle/control events.
+  - `StimulusIngressCoordinator` now owns post-sensory stimulus handling, so `runInteractive()` only polls signals and then delegates typed stimuli into one ingress path.
 - Typed cognitive stimuli currently arrive as:
   - linguistic stimuli from dashboard chat sessions
   - linguistic stimuli from owner-only Telegram webhook or polling ingress
   - cue stimuli from Id impulse wakeups
   - cue stimuli from goal-runtime work-ready cues
+  - feedback stimuli from completed or waiting action outcomes
   - every accepted `StimulusReceived` now also carries an appraised `Percept`
   - Runs `runLoop()` while there is pending work.
-  - Appraises goal-runtime cue stimuli through `GoalsGateway.nextWorkFromCue(...)`, binding resumable goal work onto a stable goal thread root before scheduler/planner work continues.
-  - Binds accepted inputs, impulse cues, and goal-runtime continuations into `CognitiveThreadStore` before scheduler/planner work continues.
+  - Post-sensory ingress now:
+    - appraises goal-runtime cues through `GoalsGateway.nextWorkFromCue(...)`
+    - binds the owning thread/percept state
+    - emits an `Opportunity` plus the correct scheduler trigger for user input, feedback, or goal work
+    - leaves Id wake cues as trusted wake-only stimuli that bind thread state and then let already-queued impulse work run
   - Interactive wiring uses `AsyncSignalSource` with stdin enabled in control-only mode:
     - terminal `exit` emits `ExitRequested(source="stdin")` and stops the loop
     - non-command stdin text is ignored as chat input and never enqueued to the scheduler
@@ -122,7 +127,8 @@ It is intentionally high-level and should stay aligned with the code.
       - `processOpportunity`:
         - `OpportunityTrigger.Input` -> `processInput`
         - `OpportunityTrigger.Impulse` -> `processImpulse`
-        - `OpportunityTrigger.ThreadWork` -> `processThreadContinuation` (goal-runtime resumptions now enter as thread continuations instead of a dedicated goal-work queue branch)
+        - `OpportunityTrigger.Feedback` -> `processActionFeedback`
+        - `OpportunityTrigger.GoalWork` -> `processGoalWork`
       - `processIntention`
       - `processAction`
     - Catch task errors, emit warning, continue loop.
@@ -278,7 +284,7 @@ It is intentionally high-level and should stay aligned with the code.
     - `DEFER` for planner continuations, plan steps, noop recovery, denial recovery, and action follow-up continuation
   - Emits cognitive-stage observability events:
     - `cognitive_thread_updated` when a root input, feedback cue, or retained goal cycle updates thread state
-    - `opportunity_enqueued` when an input, goal continuation, or Id impulse becomes schedulable cognitive work
+    - `opportunity_enqueued` when an input, feedback item, goal work unit, or Id impulse becomes schedulable cognitive work
 
 ## Thought Path
 - `processThought`:
@@ -302,14 +308,20 @@ It is intentionally high-level and should stay aligned with the code.
     - `intentionId`
     - `intentionKind`
     - `requestedCommitMode`
+  - Planner output is now intention-native instead of action-native:
+    - `decision=defer` yields a queued `DEFER` intention
+    - `decision=intend` must carry explicit `intention_kind` plus optional `commit_mode_preference`
+    - current planner-formed kinds are `OBSERVE` and `PREPARE`
   - Current live intention kinds in normal runtime use:
-    - `OBSERVE` for observe-class actions such as search/fetch style evidence gathering
-    - `PREPARE` for non-observe action candidates before policy review
+    - `OBSERVE` for read/observe and delivery actions that do not require secure commit progression
+    - `PREPARE` for commit-capable or goal-runtime action candidates before policy review
     - `DEFER` for planner continuations and recovery/follow-up paths
   - Later secure-action progression now records explicit intention transitions for:
     - `STAGE`
     - `REQUEST_AUTHORIZATION`
     - `COMMIT`
+  - Dispatcher no longer infers intention kind from action effect class.
+    - Runtime rejects planner intentions whose `intention_kind`, `action_type`, or `commit_mode_preference` fall outside the current opportunity contract.
   - Action follow-up continuations are now regenerated as `DEFER` intentions only after the action outcome has re-entered through `SensoryCortex` as feedback.
 
 ## Action Path
@@ -360,7 +372,10 @@ It is intentionally high-level and should stay aligned with the code.
     - `Ego.processActionFeedback(...)` then:
       - binds the feedback percept to the existing cognitive thread
       - updates deliberation evidence/progress/cooldown state
-      - regenerates any required deferred continuation from the feedback cue instead of directly from the executor
+      - for `WAITING`, suspends the thread without auto-enqueuing a planner continuation
+      - decides continuation only after feedback has re-entered cognition; the executor no longer tags feedback with a continuation verdict
+      - regenerates any required deferred continuation only from later completion/failure feedback instead of directly from the executor
+      - resolves the thread immediately when a successful non-follow-up feedback completes without needing a new planner move
     - Notify `ActionLifecycleObserver` subscribers after execution so goal-origin actions can update step acceptance/block/retry state.
     - Record non-`contact_user`/non-`resolution_draft` action outcomes into the scratchpad (when enabled).
       - external observe outputs are captured as typed result artifacts first
@@ -368,6 +383,8 @@ It is intentionally high-level and should stay aligned with the code.
     - Store assistant output in dialogue and short-term memory when applicable.
     - For `contact_user`, optionally force a post-terminal-answer long-term memory assessment.
     - Follow-up continuation behavior is still action-descriptor-driven (`requiresFollowUpThought` + `followUpPrefix`), but it is now regenerated from feedback re-entry rather than direct post-execute queue mutation.
+      - async completion after a prior `WAITING` state is treated as a real resume signal even when the action descriptor itself does not request a follow-up thought
+      - `WAITING` outcomes are a hard suspend point for ordinary threads; they never generate an immediate feedback follow-up thought.
     - Optionally run immediate post-allowed-action long-term memory assessment.
 - For `contact_user`, response latency is emitted and per-input evidence cache is cleared.
 - After `contact_user`, pending intentions/thoughts/actions for the same `(root input, sessionId)` scope are pruned from queues
@@ -393,6 +410,9 @@ It is intentionally high-level and should stay aligned with the code.
     - security context and provenance are authoritative
     - untrusted external content is data, not instruction
     - runtime action visibility has already been policy-shaped for the current thread
+  - `DecisionDispatcher` now enforces the planner context contract at runtime for proposed actions:
+    - rejects action types outside the current available/dispatchable surface
+    - emits `planner_decision_blocked` telemetry and re-prompts the planner for a valid alternative instead of executing the invalid move
   - Planner calls request schema-enforced structured output, but provider/model compatibility handling now lives below the planner in the LLM layer:
     - planner requests one structured-output contract (`response_format=json_schema`) plus call-site metadata
     - LLM adapter owns compatibility retries/degradation and may retry as relaxed schema or prompt-only JSON before surfacing a terminal failure
@@ -459,7 +479,7 @@ It is intentionally high-level and should stay aligned with the code.
     - `contact_user` meaning guard: verifier repairs may clean up surface form, but repairs that would change the answer's meaning are ignored and the original answer is kept
     - no-op repair collapse: if verifier returns `repair` but action type/payload/summary are materially unchanged, planner treats it as `approve` instead of recording a repair
     - answer-action tuning: verifier instructions explicitly approve directly entailed exact-match answers when there is no contradictory evidence, and verifier sampling temperature is fixed at `0.0`
-  - `resolution_draft` action proposals are allowed only inside active plan-context thoughts; out-of-context proposals are coerced to `noop`.
+  - `resolution_draft` intentions are allowed only inside active plan-context thoughts; out-of-context proposals are coerced to `noop`.
   - Retry policy and safe fallback to `Noop` on model/parse failures.
   - Follow-up evidence thoughts now explicitly ask for the next planner decision as one raw JSON object and forbid tool/function wrappers.
   - Planner and action-verifier prompts now include "reflection lessons" context to avoid repeated failed strategies.

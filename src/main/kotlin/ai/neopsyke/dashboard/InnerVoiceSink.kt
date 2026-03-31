@@ -80,17 +80,17 @@ class InnerVoiceSink(
             // Id-origin roots are already activated in trackImpulseOrigin
             if (rootInputId !in activatedRoots) {
                 when (decisionType) {
-                    "thought", "plan" -> {
+                    "defer", "plan" -> {
                         // Multi-step reasoning detected: activate inner voice for this root
                         activatedRoots.add(rootInputId)
                     }
-                    "action" -> {
+                    "intention" -> {
                         val actionType = event.data["action_type"]?.toString()
-                        if (steps == 1 && actionType == "answer") {
+                        if (steps == 1 && actionType == ActionType.CONTACT_USER.id) {
                             // Simple single-step answer: don't activate
                             return
                         }
-                        if (actionType != "answer") {
+                        if (actionType != ActionType.CONTACT_USER.id) {
                             // Non-answer action implies multi-step: activate
                             activatedRoots.add(rootInputId)
                         }
@@ -102,7 +102,7 @@ class InnerVoiceSink(
         }
 
         when (decisionType) {
-            "thought" -> {
+            "defer" -> {
                 val thought = event.data["thought"]?.toString() ?: return
                 emitEvent(
                     type = InnerVoiceEventType.DELIBERATION,
@@ -114,9 +114,9 @@ class InnerVoiceSink(
                     }
                 )
             }
-            "action" -> {
+            "intention" -> {
                 val actionType = event.data["action_type"]?.toString() ?: return
-                if (actionType == "answer") return
+                if (actionType == ActionType.CONTACT_USER.id) return
                 val summary = event.data["summary"]?.toString()
                 val payload = event.data["payload"]?.toString()
                 val content = summary

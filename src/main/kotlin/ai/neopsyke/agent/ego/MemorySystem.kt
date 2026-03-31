@@ -1005,12 +1005,14 @@ class MemorySystem(
         val triggerLabel = when (trigger) {
             is EgoTrigger.IncomingInput -> "input"
             is EgoTrigger.PendingThoughtInput -> "thought"
+            is EgoTrigger.ActionFeedback -> "feedback"
             is EgoTrigger.IncomingImpulse -> "impulse"
             is EgoTrigger.GoalWork -> "goal-work"
         }
         var recallIntent = RecallIntent.GENERAL
         val cue = when (trigger) {
             is EgoTrigger.IncomingInput -> buildRecallCue(trigger, recentDialogue, episodicCues).trim()
+            is EgoTrigger.ActionFeedback -> buildRecallCue(trigger, recentDialogue, episodicCues).trim()
             is EgoTrigger.GoalWork -> trigger.workUnit.stepDescription.trim()
             is EgoTrigger.IncomingImpulse -> {
                 val baseCue = trigger.impulse.prompt.trim()
@@ -1070,6 +1072,7 @@ class MemorySystem(
             val recallRootInputId = when (trigger) {
                 is EgoTrigger.IncomingInput -> trigger.input.rootInputId
                 is EgoTrigger.PendingThoughtInput -> trigger.thought.rootInputId
+                is EgoTrigger.ActionFeedback -> trigger.feedback.cue.rootInputId
                 is EgoTrigger.IncomingImpulse -> trigger.impulse.rootImpulseId
                 is EgoTrigger.GoalWork -> trigger.workUnit.goalId
             }
@@ -1118,6 +1121,7 @@ class MemorySystem(
     ): String {
         val triggerCue = when (trigger) {
             is EgoTrigger.IncomingInput -> trigger.input.content.trim()
+            is EgoTrigger.ActionFeedback -> trigger.feedback.cue.feedbackContent.trim()
             is EgoTrigger.PendingThoughtInput -> ""
             is EgoTrigger.IncomingImpulse -> trigger.impulse.prompt.trim()
             is EgoTrigger.GoalWork -> trigger.workUnit.stepDescription.trim()
@@ -1227,6 +1231,7 @@ class MemorySystem(
             .orEmpty()
         val deniedContext = when (trigger) {
             is EgoTrigger.IncomingInput -> null
+            is EgoTrigger.ActionFeedback -> null
             is EgoTrigger.IncomingImpulse -> null
             is EgoTrigger.GoalWork -> null
             is EgoTrigger.PendingThoughtInput -> {
