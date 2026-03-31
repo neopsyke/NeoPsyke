@@ -1,0 +1,5 @@
+Pretend an earlier external operation just finished and produced this feedback:
+
+"Download completed successfully. The report is ready."
+
+Using that feedback, continue the task and tell me what the next best step is now.

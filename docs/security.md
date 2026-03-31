@@ -188,6 +188,14 @@ Implemented examples in
 - `id` cue signals are treated as trusted internal automation
 - `goal-runtime` cues are treated as trusted internal automation
 
+`SensoryCortex.nextSignal()` is now the mandatory normalization boundary for
+cognitive signals:
+
+- runtime control signals bypass cognition unchanged
+- accepted cognitive stimuli are sanitized, session/interlocutor normalized, and
+  appraised into a `Percept`
+- Ego no longer processes accepted cognitive stimuli without a percept
+
 The percept appraiser preserves provenance from the stimulus into the percept.
 
 ### 5.2 Why this matters
@@ -204,12 +212,16 @@ This is one of the system's strongest current architectural properties:
 
 ### 5.3 Cognitive Thread Security Context
 
-Each cognitive thread carries a security context established from its root input:
+Phase 1 now implements a real `CognitiveThreadStore` as the live owner for
+active root threads. Each cognitive thread carries a security context
+established from its root input:
 
 - root principal and channel
 - instruction trust
 - aggregated data trust with taint-source summaries
 - policy scope
+- thread identity and current status
+- latest bound percept
 - visible action-family bounds
 
 When observe-style actions ingest external artifacts during a thread, the

@@ -13,6 +13,7 @@ import ai.neopsyke.agent.cortex.motor.actions.ActionCapability
 import ai.neopsyke.agent.cortex.sensory.CognitiveCueMetadata
 import ai.neopsyke.agent.cortex.sensory.CognitiveSignal
 import ai.neopsyke.agent.cortex.sensory.GoalRuntimeCue
+import ai.neopsyke.agent.cortex.sensory.PerceptualAppraiser
 import ai.neopsyke.agent.cortex.sensory.RuntimeControlSignal
 import ai.neopsyke.agent.cortex.sensory.SensoryCortex
 import ai.neopsyke.agent.memory.longterm.MemoryEventType
@@ -62,8 +63,10 @@ class Ego(
     }
 
     /** Delegates to the attention scheduler's impulse enqueue. Used by the Id module. */
-    fun enqueueImpulse(impulse: PendingImpulse, maxPendingImpulses: Int): Boolean =
-        scheduler.enqueueImpulse(impulse, maxPendingImpulses)
+    fun enqueueImpulse(impulse: PendingImpulse, maxPendingImpulses: Int): Boolean {
+        cognitiveThreads.ensureForImpulse(impulse)
+        return scheduler.enqueueImpulse(impulse, maxPendingImpulses)
+    }
 
     /** Checks whether the Ego has any pending work. Used by the Id module for idle detection. */
     fun hasPendingWork(): Boolean = scheduler.hasPendingWork()
@@ -77,6 +80,8 @@ class Ego(
     }
 
     private val scheduler = AttentionScheduler(config)
+    private val cognitiveThreads = CognitiveThreadStore()
+    private val perceptualAppraiser = PerceptualAppraiser()
     private val impulseTracker = ImpulseLifecycleTracker(instrumentation, scheduler)
     private val dialogueBySession: MutableMap<String, ArrayDeque<DialogueTurn>> =
         object : LinkedHashMap<String, ArrayDeque<DialogueTurn>>(16, 0.75f, true) {
@@ -84,7 +89,7 @@ class Ego(
                 size > MAX_TRACKED_SESSIONS
         }
     private val deliberation = DeliberationEngine(
-        config, instrumentation, metaReasoner, evidenceArtifactStore,
+        config, instrumentation, metaReasoner, cognitiveThreads, evidenceArtifactStore,
         isEvidenceActionType = { motorCortex.hasCapability(it, ActionCapability.GATHERS_EVIDENCE) }
     )
     private val telemetry = EgoTelemetry(instrumentation, scheduler, memory, scratchpadStore, config)
@@ -158,11 +163,19 @@ class Ego(
 
                 is CognitiveSignal.StimulusReceived -> {
                     val stimulus = signal.stimulus
+                    val percept = signal.percept ?: perceptualAppraiser.appraise(stimulus)
                     val goalCue = GoalRuntimeCue.fromStimulus(stimulus)
                     if (goalCue != null) {
                         val work = goalsGateway.nextWorkFromCue(goalCue)
                         if (work != null) {
                             logger.info { "Goal work picked: ${work.goalId}/${work.stepId}" }
+                            cognitiveThreads.bindPercept(
+                                percept = percept.copy(conversationContext = work.conversationContext),
+                                rootInputId = work.rootInputId,
+                                kind = CognitiveThreadKind.GOAL_DIRECTED,
+                                title = work.stepDescription,
+                            )
+                            cognitiveThreads.ensureForGoalWork(work)
                             scheduler.enqueueProjectWork(work)
                             runLoop()
                             cleanupAfterProjectAdvance(work.rootInputId)
@@ -172,16 +185,32 @@ class Ego(
                     if (stimulus.metadata[CognitiveCueMetadata.METADATA_CUE_TYPE] ==
                         CognitiveCueMetadata.CUE_TYPE_ID_IMPULSE_READY
                     ) {
+                        cognitiveThreads.bindPercept(
+                            percept = percept,
+                            rootInputId = stimulus.metadata[CognitiveCueMetadata.METADATA_ROOT_IMPULSE_ID] ?: stimulus.id,
+                            kind = CognitiveThreadKind.DRIVE,
+                            title = stimulus.content,
+                        )
                         runLoop()
                         continue
                     }
+                    val thread = cognitiveThreads.bindPercept(
+                        percept = percept,
+                        rootInputId = stimulus.id,
+                        kind = CognitiveThreadKind.CONVERSATION,
+                        title = stimulus.content,
+                    )
                     if (!scheduler.enqueueInput(
                             content = stimulus.content,
                             priority = stimulus.metadata["priority"]
                                 ?.let { runCatching { InputPriority.valueOf(it) }.getOrNull() }
                                 ?: InputPriority.HIGH,
                             source = stimulus.source,
-                            conversationContext = stimulus.conversationContext
+                            conversationContext = stimulus.conversationContext,
+                            rootInputId = stimulus.id,
+                            receivedAtMs = stimulus.receivedAt.toEpochMilli(),
+                            percept = percept.copy(cognitiveThreadId = thread.id),
+                            cognitiveThreadId = thread.id,
                         )
                     ) {
                         logger.warn { "Input queue full; dropping input." }
@@ -294,6 +323,7 @@ class Ego(
         val convCtx = input.conversationContext
         val sessionId = resolveSessionId(convCtx)
         activateSession(convCtx)
+        cognitiveThreads.bindInput(input)
         id?.onActivity("input_received")
 
         timing.startPhase("input_processing")
@@ -426,6 +456,7 @@ class Ego(
         val convCtx = impulse.conversationContext
         val sessionId = resolveSessionId(convCtx)
         activateSession(convCtx)
+        cognitiveThreads.ensureForImpulse(impulse)
         impulseTracker.registerLifecycle(impulse.rootImpulseId, impulse.needId)
 
         timing.startPhase("impulse_processing")
@@ -514,6 +545,7 @@ class Ego(
         val convCtx = work.conversationContext
         val sessionId = resolveSessionId(convCtx)
         activateSession(convCtx)
+        cognitiveThreads.ensureForGoalWork(work)
 
         timing.startPhase("goal_work_processing")
         instrumentation.emit(
@@ -619,6 +651,8 @@ class Ego(
             maxTokens = config.memory.scratchpad.digestMaxPromptTokens
         )
         val threadSecurityContext = deliberation.threadSecurityContext(rootInputId, conversationContext)
+        val cognitiveThread = cognitiveThreads.thread(rootInputId, conversationContext)
+        val latestPercept = cognitiveThreads.latestPercept(rootInputId, conversationContext)
         val disabled = deliberation.disabledActionTypes(rootInputId, sessionId)
         val plannerDescriptors = motorCortex.plannerDescriptors()
             .filter { descriptor ->
@@ -660,6 +694,10 @@ class Ego(
             conversationSecuritySummary = conversationContext.security.renderSummary(),
             threadSecuritySummary = threadSecurityContext.renderSummary(),
             triggerProvenanceSummary = triggerProvenanceSummary(trigger),
+            perceptSummary = latestPercept?.summary.orEmpty(),
+            perceptFamily = latestPercept?.family,
+            cognitiveThreadId = cognitiveThread?.id,
+            cognitiveThreadStatus = cognitiveThread?.status,
             availableActions = availableActions,
             dispatchableActions = dispatchableActions,
             actionDefinitions = actionDefinitions,

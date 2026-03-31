@@ -19,6 +19,10 @@ class AttentionScheduler(
         priority: InputPriority = InputPriority.MEDIUM,
         source: String = "external",
         conversationContext: ConversationContext = ConversationContext.default(),
+        rootInputId: String = RootInputIds.next(),
+        receivedAtMs: Long = System.currentTimeMillis(),
+        percept: Percept? = null,
+        cognitiveThreadId: String? = null,
     ): Boolean {
         if (pendingInputCount() >= config.maxPendingInputs) {
             return false
@@ -28,7 +32,11 @@ class AttentionScheduler(
             content = content,
             priority = priority,
             source = source,
-            conversationContext = conversationContext
+            rootInputId = rootInputId,
+            receivedAtMs = receivedAtMs,
+            conversationContext = conversationContext,
+            percept = percept,
+            cognitiveThreadId = cognitiveThreadId,
         )
         opportunities.add(OpportunityWorkItem.InputOpportunity(input))
         latestQueuedInput = input

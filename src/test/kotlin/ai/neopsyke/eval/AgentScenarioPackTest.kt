@@ -90,6 +90,37 @@ import kotlin.test.fail
 
 class AgentScenarioPackTest {
     @Test
+    fun scenario_direct_answer_single_step() {
+        val plannerLlm = StubChatModelClient().apply {
+            enqueueRawResponse(
+                """
+                {"decision":"action","urgency":"medium","action_type":"contact_user","action_payload":"ok","action_summary":"respond directly"}
+                """.trimIndent()
+            )
+        }
+        val superegoLlm = StubChatModelClient().apply {
+            enqueueRawResponse("""{"allow":true}""")
+        }
+        val instrumentation = RecordingInstrumentation()
+        val outputs = mutableListOf<String>()
+        val config = AgentConfig(planner = PlannerConfig(maxLoopStepsPerInput = 4, maxThoughtPasses = 1))
+        val agent = buildTestEgo(
+            planner = LlmEgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
+            superego = Superego(modelClient = superegoLlm, config = config, instrumentation = instrumentation),
+            motorCortex = buildMotorCortex(output = { outputs.add(it) }),
+            config = config,
+            instrumentation = instrumentation
+        )
+
+        runAgentWithInput(agent, "hello\nexit\n")
+
+        assertEquals(listOf("ego> ok"), outputs)
+        val plannerCalls = plannerLlm.calls.filter { it.options.metadata.callSite != "action_verifier" }
+        assertEquals(1, plannerCalls.size)
+        assertTrue(instrumentation.events.none { it.type == "plan_created" })
+    }
+
+    @Test
     fun scenario_denial_alternative_action() {
         val plannerLlm = StubChatModelClient().apply {
             enqueueRawResponse(
@@ -507,6 +538,59 @@ class AgentScenarioPackTest {
                 it.type == "planner_decision" && it.data["decision_type"] == "plan"
             }
         )
+    }
+
+    @Test
+    fun scenario_search_then_answer() {
+        val plannerLlm = StubChatModelClient().apply {
+            enqueueRawResponse(
+                """
+                {"decision":"action","urgency":"medium","action_type":"web_search","action_payload":"official pricing","action_summary":"search pricing"}
+                """.trimIndent()
+            )
+            enqueueRawResponse(
+                """
+                {"decision":"action","urgency":"medium","action_type":"contact_user","action_payload":"Pricing is available on the official site.","action_summary":"respond with result"}
+                """.trimIndent()
+            )
+        }
+        val superegoLlm = StubChatModelClient().apply {
+            enqueueRawResponse("""{"allow":true}""")
+            enqueueRawResponse("""{"allow":true}""")
+        }
+        val instrumentation = RecordingInstrumentation()
+        val outputs = mutableListOf<String>()
+        val observedQueries = mutableListOf<String>()
+        val search = object : WebSearchEngine {
+            override fun search(query: String, maxResults: Int): WebSearchResult {
+                observedQueries += query
+                return WebSearchResult(
+                    summary = "Official pricing page located.",
+                    snippets = listOf("Pricing information published."),
+                    sources = listOf(
+                        WebSearchSource(
+                            title = "Pricing",
+                            url = "https://example.com/pricing"
+                        )
+                    )
+                )
+            }
+        }
+        val config = AgentConfig(planner = PlannerConfig(maxLoopStepsPerInput = 6, maxThoughtPasses = 2))
+        val agent = buildTestEgo(
+            planner = LlmEgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
+            superego = Superego(modelClient = superegoLlm, config = config, instrumentation = instrumentation),
+            motorCortex = buildMotorCortex(output = { outputs.add(it) }, webSearchEngine = search),
+            config = config,
+            instrumentation = instrumentation
+        )
+
+        runAgentWithInput(agent, "check pricing\nexit\n")
+
+        assertEquals(listOf("official pricing"), observedQueries)
+        assertEquals(listOf("ego> Pricing is available on the official site."), outputs)
+        val plannerCalls = plannerLlm.calls.filter { it.options.metadata.callSite != "action_verifier" }
+        assertTrue(plannerCalls.size >= 2)
     }
 
     @Test

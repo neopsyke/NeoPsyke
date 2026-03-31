@@ -39,7 +39,10 @@ data class SensoryInput(
 sealed interface Signal
 
 sealed interface CognitiveSignal : Signal {
-    data class StimulusReceived(val stimulus: StimulusEnvelope) : CognitiveSignal
+    data class StimulusReceived(
+        val stimulus: StimulusEnvelope,
+        val percept: Percept? = null,
+    ) : CognitiveSignal
     data object NoStimulus : CognitiveSignal
 }
 
@@ -325,7 +328,10 @@ class SensoryCortex(
         val signal = source.nextSignal()
         val stimulusSignal = signal as? CognitiveSignal.StimulusReceived ?: return signal
         val enrichedStimulus = enrichStimulus(stimulusSignal.stimulus) ?: return CognitiveSignal.NoStimulus
-        return CognitiveSignal.StimulusReceived(enrichedStimulus)
+        return CognitiveSignal.StimulusReceived(
+            stimulus = enrichedStimulus,
+            percept = PerceptualAppraiser().appraise(enrichedStimulus),
+        )
     }
 
     private fun enrichStimulus(stimulus: StimulusEnvelope): StimulusEnvelope? {

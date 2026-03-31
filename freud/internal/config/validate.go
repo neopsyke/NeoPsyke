@@ -145,6 +145,9 @@ func Validate(cfg *FreudConfig, command string, opts *ValidationOpts) []error {
 		if !opts.Live && !opts.DryRun {
 			errs = append(errs, fmt.Errorf("bbh requires --live because it always runs the live reasoning suite"))
 		}
+		if opts.Record && opts.SessionReplayDir != "" {
+			errs = append(errs, fmt.Errorf("--record cannot be combined with --session-replay"))
+		}
 		for _, attr := range []struct {
 			name string
 			path string
@@ -158,6 +161,11 @@ func Validate(cfg *FreudConfig, command string, opts *ValidationOpts) []error {
 			}
 			if _, err := os.Stat(p); os.IsNotExist(err) {
 				errs = append(errs, fmt.Errorf("%s does not exist: %s", attr.name, p))
+			}
+		}
+		if opts.SessionReplayDir != "" {
+			if _, err := os.Stat(opts.SessionReplayDir); os.IsNotExist(err) {
+				errs = append(errs, fmt.Errorf("--session-replay directory does not exist: %s", opts.SessionReplayDir))
 			}
 		}
 		if opts.Live && cfg.LiveEval.LLMConfigFile == "" {

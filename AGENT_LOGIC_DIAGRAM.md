@@ -115,13 +115,16 @@ sequenceDiagram
     participant Sup as Superego
     participant Motor as MotorCortex
     participant Delib as DeliberationEngine
+    participant CTS as CognitiveThreadStore
     participant Mem as MemorySystem
     participant TWS as ScratchpadStore
     participant Dash as DashboardStateStore/API
 
     User->>SC: Web chat input text
-    SC->>Ego: StimulusReceived (linguistic stimulus)
+    SC->>Ego: StimulusReceived (stimulus + percept)
     Note over SC,Ego: Stimulus carries ConversationContext [sessionId + security], provenance, rootInputId [identity], receivedAtMs [timing]
+    Ego->>CTS: bind percept to root-scoped cognitive thread
+    CTS-->>Ego: cognitiveThreadId + thread trust state
     Ego->>Sched: enqueue input opportunity
 
     loop While pending work and step limit not reached
@@ -149,7 +152,7 @@ sequenceDiagram
             Note over Ego,Planner: Planner-visible actions are prefiltered by conversation instruction trust, current thread data trust, and action contract metadata before prompt build
             Ego->>Planner: decide(context)
             Note over Ego,Planner: PromptBudgetAllocator reserves required-core/context floors with message-overhead accounting, trims optional first, and emits prompt_budget_allocation
-            Note over Ego,Planner: Planner prompt includes conversation security summary and trigger provenance summary untrusted external content is framed as data, not instruction
+            Note over Ego,Planner: Planner prompt includes conversation security summary, thread trust state, percept summary/family, and trigger provenance summary untrusted external content is framed as data, not instruction
             Note over Ego,Planner: Obvious persistent reminder / monitoring / goal-creation inputs route into a dedicated goal-creation branch before the generic planner path
             Note over Ego,Planner: Goal-creation branch uses a narrow schema prompt plus deterministic recurring schedule detection for supported forms like every N minutes / every N hours
             Note over Ego,Planner: Planner requests schema-enforced structured output. LLM layer owns compatibility degradation from strict to relaxed to prompt-only JSON. Parse failures do truncation-budget retry then strict-JSON retry before noop fallback

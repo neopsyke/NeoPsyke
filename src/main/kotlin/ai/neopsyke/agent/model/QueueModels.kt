@@ -10,6 +10,8 @@ data class PendingInput(
     val rootInputId: String = RootInputIds.next(),
     val receivedAtMs: Long = System.currentTimeMillis(),
     val conversationContext: ConversationContext = ConversationContext.default(),
+    val percept: Percept? = null,
+    val cognitiveThreadId: String? = null,
 )
 
 data class PlanContext(

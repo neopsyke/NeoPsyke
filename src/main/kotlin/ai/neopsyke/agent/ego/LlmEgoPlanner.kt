@@ -1580,6 +1580,10 @@ class LlmEgoPlanner(
         val conversationSecuritySummary = context.conversationSecuritySummary.ifBlank { "none" }
         val threadSecuritySummary = context.threadSecuritySummary.ifBlank { "none" }
         val triggerProvenanceSummary = context.triggerProvenanceSummary.ifBlank { "none" }
+        val perceptSummary = context.perceptSummary.ifBlank { "none" }
+        val perceptFamily = context.perceptFamily?.name?.lowercase() ?: "none"
+        val cognitiveThreadId = context.cognitiveThreadId ?: "none"
+        val cognitiveThreadStatus = context.cognitiveThreadStatus?.name?.lowercase() ?: "none"
         val deliberation = context.deliberation
         val availableActionList = context.availableActions
             .map { it.id }
@@ -1742,6 +1746,19 @@ class LlmEgoPlanner(
                     band = PromptBudgetAllocator.Band.REQUIRED_CONTEXT,
                     floorTokens = 18,
                     content = "Trigger provenance summary:\n$triggerProvenanceSummary"
+                ),
+                PromptBudgetAllocator.Section(
+                    key = "planner_percept_thread_context",
+                    role = ChatRole.USER,
+                    band = PromptBudgetAllocator.Band.REQUIRED_CONTEXT,
+                    floorTokens = 18,
+                    content = """
+                    Percept and thread state:
+                    percept_family=$perceptFamily
+                    percept_summary=$perceptSummary
+                    cognitive_thread_id=$cognitiveThreadId
+                    cognitive_thread_status=$cognitiveThreadStatus
+                    """.trimIndent()
                 ),
                 PromptBudgetAllocator.Section(
                     key = "planner_recent_dialogue",

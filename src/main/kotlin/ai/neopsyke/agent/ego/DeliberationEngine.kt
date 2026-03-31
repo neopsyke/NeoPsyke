@@ -29,6 +29,7 @@ internal class DeliberationEngine(
     private val config: AgentConfig,
     private val instrumentation: AgentInstrumentation,
     private val metaReasoner: MetaReasoner,
+    private val cognitiveThreads: CognitiveThreadStore = CognitiveThreadStore(),
     private val evidenceArtifactStore: EvidenceArtifactStore = NoopEvidenceArtifactStore,
     private val isEvidenceActionType: (ActionType) -> Boolean = { false },
 ) {
@@ -65,12 +66,6 @@ internal class DeliberationEngine(
             override fun removeEldestEntry(eldest: MutableMap.MutableEntry<InputScope, MutableMap<ActionType, ActionCooldownState>>): Boolean =
                 size > MAX_EVIDENCE_ENTRIES
         }
-    private val threadSecurityByScope: MutableMap<InputScope, CognitiveThreadSecurityContext> =
-        object : LinkedHashMap<InputScope, CognitiveThreadSecurityContext>(16, 0.75f, true) {
-            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<InputScope, CognitiveThreadSecurityContext>): Boolean =
-                size > MAX_EVIDENCE_ENTRIES
-        }
-
     private fun activeState(): SessionDeliberationState =
         sessionStates.getOrPut(activeSessionId) { SessionDeliberationState() }
 
@@ -236,13 +231,8 @@ internal class DeliberationEngine(
     fun threadSecurityContext(
         rootInputId: String?,
         conversationContext: ConversationContext,
-    ): CognitiveThreadSecurityContext {
-        val scope = inputScope(rootInputId, conversationContext.sessionId)
-            ?: return CognitiveThreadSecurityContext.fromConversation(conversationContext.security)
-        return threadSecurityByScope.getOrPut(scope) {
-            CognitiveThreadSecurityContext.fromConversation(conversationContext.security)
-        }
-    }
+    ): CognitiveThreadSecurityContext =
+        cognitiveThreads.threadSecurityContext(rootInputId, conversationContext)
 
     // --- Action retry budget / cooldown ---
 
@@ -328,7 +318,7 @@ internal class DeliberationEngine(
         forcedTerminalAnswerQueuedByInput.remove(scope)
         externalEvidence.remove(scope)
         actionCooldownByScope.remove(scope)
-        threadSecurityByScope.remove(scope)
+        cognitiveThreads.clearForInput(rootInputId, sessionId)
         evidenceArtifactStore.clear(
             rootInputId,
             ConversationContext(
@@ -343,7 +333,7 @@ internal class DeliberationEngine(
         forcedTerminalAnswerQueuedByInput.clear()
         externalEvidence.clear()
         actionCooldownByScope.clear()
-        threadSecurityByScope.clear()
+        cognitiveThreads.reset()
     }
 
     // --- Private helpers ---
@@ -437,17 +427,11 @@ internal class DeliberationEngine(
 
     private fun updateThreadSecurityContext(action: PendingAction, outcome: ActionOutcome) {
         if (outcome.resultArtifacts.isEmpty()) return
-        val scope = inputScope(action.rootInputId, action.conversationContext.sessionId) ?: return
-        val current = threadSecurityByScope.getOrPut(scope) {
-            CognitiveThreadSecurityContext.fromConversation(action.conversationContext.security)
-        }
-        val updated = outcome.resultArtifacts.fold(current) { acc, artifact ->
-            acc.withObservedArtifact(
-                sourceSummary = artifact.taintSourceSummary(),
-                dataTrust = artifact.dataTrust,
-            )
-        }
-        threadSecurityByScope[scope] = updated
+        cognitiveThreads.observeArtifacts(
+            rootInputId = action.rootInputId,
+            conversationContext = action.conversationContext,
+            artifacts = outcome.resultArtifacts,
+        )
         evidenceArtifactStore.record(action.rootInputId, action.conversationContext, outcome.resultArtifacts)
     }
 }

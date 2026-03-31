@@ -90,13 +90,15 @@ It is intentionally high-level and should stay aligned with the code.
   - Accepts two signal planes:
     - `CognitiveSignal` for typed stimuli that the agent should perceive.
     - `RuntimeControlSignal` for runtime lifecycle/control events.
-  - Typed cognitive stimuli currently arrive as:
-    - linguistic stimuli from dashboard chat sessions
-    - linguistic stimuli from owner-only Telegram webhook or polling ingress
-    - cue stimuli from Id impulse wakeups
-    - cue stimuli from goal-runtime work-ready cues
+- Typed cognitive stimuli currently arrive as:
+  - linguistic stimuli from dashboard chat sessions
+  - linguistic stimuli from owner-only Telegram webhook or polling ingress
+  - cue stimuli from Id impulse wakeups
+  - cue stimuli from goal-runtime work-ready cues
+  - every accepted `StimulusReceived` now also carries an appraised `Percept`
   - Runs `runLoop()` while there is pending work.
   - Appraises goal-runtime cue stimuli through `GoalsGateway.nextWorkFromCue(...)`, enqueueing goal work when runnable work exists.
+  - Binds accepted inputs, impulse cues, and goal work roots into `CognitiveThreadStore` before scheduler/planner work continues.
   - Interactive wiring uses `AsyncSignalSource` with stdin enabled in control-only mode:
     - terminal `exit` emits `ExitRequested(source="stdin")` and stops the loop
     - non-command stdin text is ignored as chat input and never enqueued to the scheduler
@@ -203,15 +205,26 @@ It is intentionally high-level and should stay aligned with the code.
   - callback handling verifies signed state, consumes the encrypted PKCE pending-auth record, exchanges the code, verifies the Gmail profile email against the configured owner, and then stores encrypted credentials locally
   - read-only Gmail/Calendar actions remain unavailable until this authorization completes successfully
 - `StimulusEnvelope` and `Percept` now carry provenance metadata (instruction trust, data trust, provider/object identity, sanitization record).
+- `SensoryCortex.nextSignal()` is now the mandatory `Stimulus -> Percept` boundary for cognitive work:
+  - runtime control signals pass through unchanged
+  - accepted cognitive stimuli are sanitized, conversation-normalized, and appraised into a `Percept` before Ego sees them
 - `PerceptualAppraiser` currently maps stimulus families into percept families:
   - `LINGUISTIC` -> `REQUEST`
   - `OBSERVATION` -> `OBSERVATION`
   - `FEEDBACK` -> `FEEDBACK`
   - `CUE` -> `DRIVE_ACTIVATION` for Id impulse cues, otherwise `STATE_CHANGE`
+- `CognitiveThreadStore` is now the live owner of Phase 1 thread state for active roots:
+  - thread identity
+  - thread kind/status
+  - latest bound percept
+  - root-scoped security/trust state
+  - observed-artifact trust degradation
 - `PendingInput` carries:
   - `source` metadata (for example `chat:<sessionId>`) so runtime telemetry can map root requests to conversation sessions.
   - `rootInputId` (UUID string identity for request-scoped orchestration)
   - `receivedAtMs` (request timing anchor, not an identity key)
+  - bound `percept` for the request root
+  - `cognitiveThreadId` for the owning live thread
 - `processInput`:
   - Appends user turn to dialogue deque.
   - Stores turn in short-term `MemoryStore`.
@@ -228,6 +241,7 @@ It is intentionally high-level and should stay aligned with the code.
     - deliberation state and meta-guidance
     - conversation security summary and trigger provenance summary
     - thread security summary derived from root-scoped aggregated data trust + taint sources
+    - latest percept summary/family plus current cognitive thread id/status
     - currently available action types from `MotorCortex`
     - dispatchable action set + per-action planner definitions (description/payload guidance/example/effect class/commit capability/trust constraints)
     - planner-visible action availability is prefiltered by conversation instruction trust and current thread data trust, so the planner only sees policy-shaped actions for the current thread
