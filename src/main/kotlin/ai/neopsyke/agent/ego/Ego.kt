@@ -64,8 +64,19 @@ class Ego(
 
     /** Delegates to the attention scheduler's impulse enqueue. Used by the Id module. */
     fun enqueueImpulse(impulse: PendingImpulse, maxPendingImpulses: Int): Boolean {
+        val percept = Percept(
+            id = RootInputIds.next(),
+            family = PerceptFamily.DRIVE_ACTIVATION,
+            summary = impulse.prompt,
+            source = "id",
+            occurredAt = java.time.Instant.ofEpochMilli(impulse.receivedAtMs),
+            conversationContext = impulse.conversationContext,
+            rootStimulusId = impulse.rootImpulseId,
+            provenance = Provenances.trustedSystemSignal("id", impulse.needId),
+            metadata = mapOf("need_id" to impulse.needId),
+        )
         val opportunity = shapeOpportunityContract(
-            cognitiveThreads.impulseOpportunity(impulse),
+            cognitiveThreads.impulseOpportunity(impulse, percept),
             impulse.rootImpulseId,
             impulse.conversationContext,
         )

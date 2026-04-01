@@ -30,6 +30,8 @@ internal class DecisionDispatcher(
     private val resolveSessionId: (ConversationContext) -> String,
     private val inputScope: (String?, ConversationContext) -> InputScope,
 ) {
+    // Coroutine-confined: accessed only from dispatch() within the single runLoop
+    // coroutine, and cleared by resetForNewInput() when the loop is idle.
     private val planCountByInput = mutableMapOf<InputScope, Int>()
     private val emittedPlanHashes = mutableMapOf<InputScope, MutableSet<String>>()
     private val externalActionSignatureHitsByInput = mutableMapOf<InputScope, MutableMap<String, Int>>()
@@ -65,39 +67,28 @@ internal class DecisionDispatcher(
         originActionType: ActionType? = null,
         originActionObservedEvidence: Boolean? = null,
     ): Boolean {
-        val intention = Intention(
-            id = RootInputIds.next(),
-            cognitiveThreadId = rootInputId ?: RootInputIds.next(),
-            kind = IntentionKind.DEFER,
-            summary = TextSecurity.preview(content, 160),
-            createdAt = Instant.now(),
+        val intention = scheduler.enqueueThought(
+            content = content,
+            urgency = urgency,
+            passes = nextPassCount,
+            longTermMemoryRecallQuery = longTermMemoryRecallQuery,
+            rootInputId = rootInputId,
+            rootInputReceivedAtMs = rootInputReceivedAtMs,
+            deniedActionType = deniedActionType,
+            deniedActionPayload = deniedActionPayload,
+            denialReason = denialReason,
+            allowFallbackExplanation = allowFallbackExplanation,
+            planContext = planContext,
+            denialReasonCode = denialReasonCode,
+            originActionType = originActionType,
+            originActionObservedEvidence = originActionObservedEvidence,
             conversationContext = conversationContext,
-            commitMode = CommitMode.NOT_APPLICABLE,
-            rootStimulusId = rootInputId,
+            origin = origin,
         )
-        val queued = scheduler.enqueueIntention(
-            QueuedIntention(
-                intention = intention,
-                urgency = urgency,
-                rootInputReceivedAtMs = rootInputReceivedAtMs,
-                origin = origin,
-                deferredThoughtContent = content,
-                deferredThoughtPasses = nextPassCount,
-                deferredThoughtRecallQuery = longTermMemoryRecallQuery,
-                deferredDeniedActionType = deniedActionType,
-                deferredDeniedActionPayload = deniedActionPayload,
-                deferredDenialReason = denialReason,
-                deferredAllowFallbackExplanation = allowFallbackExplanation,
-                deferredPlanContext = planContext,
-                deferredDenialReasonCode = denialReasonCode,
-                deferredOriginActionType = originActionType,
-                deferredOriginActionObservedEvidence = originActionObservedEvidence,
-            )
-        )
-        if (queued) {
+        if (intention != null) {
             deliberation.recordIntention(rootInputId, conversationContext, intention)
         }
-        return queued
+        return intention != null
     }
 
     suspend fun dispatch(

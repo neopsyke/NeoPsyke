@@ -311,7 +311,7 @@ class LlmMetaReasoner(
         }
         val triggerText = when (trigger) {
             is EgoTrigger.IncomingInput -> trigger.input.content
-            is EgoTrigger.DeferredIntention -> trigger.intention.deferredContent
+            is EgoTrigger.DeferredIntention -> trigger.intention.resolvedContent
             is EgoTrigger.ActionFeedback -> trigger.feedback.cue.feedbackContent
             is EgoTrigger.IncomingImpulse -> trigger.impulse.prompt
             is EgoTrigger.GoalWork -> trigger.workUnit.stepDescription
@@ -355,7 +355,7 @@ class LlmMetaReasoner(
 
                 Queue:
                 pending_inputs=${context.queue.pendingInputCount}
-                pending_thoughts=${context.queue.pendingThoughtCount}
+                pending_thoughts=${context.queue.deferredIntentionCount}
                 pending_actions=${context.queue.pendingActionCount}
                 pending_intentions=${context.queue.pendingIntentionCount}
 

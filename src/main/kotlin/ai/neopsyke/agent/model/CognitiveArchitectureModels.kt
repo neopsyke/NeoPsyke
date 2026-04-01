@@ -96,7 +96,6 @@ enum class CognitiveThreadKind {
     CONVERSATION,
     DRIVE,
     GOAL_DIRECTED,
-    ACTION_SUSPENSION,
 }
 
 enum class CognitiveThreadStatus {

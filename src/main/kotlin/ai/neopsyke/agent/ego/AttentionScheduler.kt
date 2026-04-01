@@ -8,11 +8,13 @@ import java.util.PriorityQueue
 class AttentionScheduler(
     private val config: AgentConfig,
 ) {
-    private var idCounter = 0L
+    // enqueueImpulse() can be called from the Id thread while the runLoop
+    // coroutine reads these structures, so cross-thread fields are @Volatile.
+    @Volatile private var idCounter = 0L
     private val opportunities = PriorityQueue<ScheduledOpportunity>(opportunityComparator)
     private val intentions = PriorityQueue<QueuedIntention>(intentionComparator)
     private val actions = PriorityQueue<PendingAction>(actionComparator)
-    private var latestQueuedInput: PendingInput? = null
+    @Volatile private var latestQueuedInput: PendingInput? = null
 
     fun enqueueInput(input: PendingInput, opportunity: Opportunity): Boolean {
         if (pendingInputCount() >= config.maxPendingInputs) {
@@ -45,6 +47,12 @@ class AttentionScheduler(
 
     fun latestQueuedInput(): PendingInput? = latestQueuedInput
 
+    /**
+     * Build a deferred [Intention] + [QueuedIntention] and enqueue it.
+     * Returns the [Intention] if successfully queued, null if the queue is full.
+     *
+     * Shared entry point for [DecisionDispatcher] and [FallbackHandler].
+     */
     fun enqueueThought(
         content: String,
         urgency: Urgency,
@@ -62,28 +70,29 @@ class AttentionScheduler(
         originActionObservedEvidence: Boolean? = null,
         conversationContext: ConversationContext = ConversationContext.default(),
         origin: ActionOrigin = ActionOrigin.USER,
-    ): Boolean {
+    ): Intention? {
         val deferredIntentions = intentions.count { it.intention.kind == IntentionKind.DEFER }
         if (deferredIntentions >= config.maxPendingThoughts) {
-            return false
+            return null
         }
-        return enqueueIntention(
+        val intention = Intention(
+            id = RootInputIds.next(),
+            cognitiveThreadId = rootInputId ?: RootInputIds.next(),
+            kind = IntentionKind.DEFER,
+            summary = content.take(160),
+            createdAt = java.time.Instant.now(),
+            conversationContext = conversationContext,
+            rootStimulusId = rootInputId,
+        )
+        val queued = enqueueIntention(
             QueuedIntention(
-                intention = Intention(
-                    id = RootInputIds.next(),
-                    cognitiveThreadId = rootInputId ?: RootInputIds.next(),
-                    kind = IntentionKind.DEFER,
-                    summary = content.take(160),
-                    createdAt = java.time.Instant.now(),
-                    conversationContext = conversationContext,
-                    rootStimulusId = rootInputId,
-                ),
+                intention = intention,
                 urgency = urgency,
                 rootInputReceivedAtMs = rootInputReceivedAtMs,
                 origin = origin,
-                deferredThoughtContent = content,
-                deferredThoughtPasses = passes,
-                deferredThoughtRecallQuery = longTermMemoryRecallQuery,
+                deferredContent = content,
+                deferredPasses = passes,
+                deferredRecallQuery = longTermMemoryRecallQuery,
                 deferredDeniedActionType = deniedActionType,
                 deferredDeniedActionPayload = deniedActionPayload,
                 deferredDenialReason = denialReason,
@@ -94,6 +103,7 @@ class AttentionScheduler(
                 deferredOriginActionObservedEvidence = originActionObservedEvidence,
             )
         )
+        return if (queued) intention else null
     }
 
     fun enqueueAction(
@@ -236,7 +246,7 @@ class AttentionScheduler(
                 sessionId = sessionId
             ) &&
                 intention.intention.kind == IntentionKind.DEFER &&
-                intention.deferredThoughtContent?.startsWith(CONVERGENCE_THOUGHT_PREFIX) == true
+                intention.deferredContent?.startsWith(CONVERGENCE_THOUGHT_PREFIX) == true
         }
     }
 
@@ -303,7 +313,7 @@ class AttentionScheduler(
     fun queueSnapshot(): QueueSnapshot =
         QueueSnapshot(
             pendingInputCount = pendingInputCount(),
-            pendingThoughtCount = intentions.count { it.intention.kind == IntentionKind.DEFER },
+            deferredIntentionCount = intentions.count { it.intention.kind == IntentionKind.DEFER },
             pendingActionCount = actions.size,
             pendingIntentionCount = intentions.size,
             pendingImpulseCount = pendingImpulseCount(),

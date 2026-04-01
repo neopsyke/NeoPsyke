@@ -12,6 +12,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class AttentionSchedulerTest {
@@ -97,12 +98,12 @@ class AttentionSchedulerTest {
 
         val firstIntention = assertIs<ai.neopsyke.agent.model.LoopTask.ProcessIntention>(first)
         assertEquals(IntentionKind.DEFER, firstIntention.item.intention.kind)
-        assertEquals("high", firstIntention.item.deferredThoughtContent)
+        assertEquals("high", firstIntention.item.deferredContent)
         val secondIntention = assertIs<ai.neopsyke.agent.model.LoopTask.PerformAction>(second)
         assertEquals(ActionType.WEB_SEARCH, secondIntention.item.type)
         val thirdIntention = assertIs<ai.neopsyke.agent.model.LoopTask.ProcessIntention>(third)
         assertEquals(IntentionKind.DEFER, thirdIntention.item.intention.kind)
-        assertEquals("low", thirdIntention.item.deferredThoughtContent)
+        assertEquals("low", thirdIntention.item.deferredContent)
     }
 
     @Test
@@ -136,9 +137,9 @@ class AttentionSchedulerTest {
         assertTrue(scheduler.enqueueInput(input2, testOpportunity(input2)))
         assertFalse(scheduler.enqueueInput(input3, testOpportunity(input3)))
 
-        assertTrue(scheduler.enqueueThought("t1", Urgency.MEDIUM))
-        assertTrue(scheduler.enqueueThought("t2", Urgency.MEDIUM))
-        assertFalse(scheduler.enqueueThought("t3", Urgency.MEDIUM))
+        assertNotNull(scheduler.enqueueThought("t1", Urgency.MEDIUM))
+        assertNotNull(scheduler.enqueueThought("t2", Urgency.MEDIUM))
+        assertNull(scheduler.enqueueThought("t3", Urgency.MEDIUM))
 
         assertTrue(scheduler.enqueueAction(ActionType.CONTACT_USER, "a1", "s1", Urgency.MEDIUM))
         assertTrue(scheduler.enqueueAction(ActionType.CONTACT_USER, "a2", "s2", Urgency.MEDIUM))
@@ -157,7 +158,7 @@ class AttentionSchedulerTest {
         val snapshot = scheduler.queueSnapshot()
         assertEquals(1, snapshot.pendingInputCount)
         assertEquals(2, snapshot.pendingIntentionCount)
-        assertEquals(1, snapshot.pendingThoughtCount)
+        assertEquals(1, snapshot.deferredIntentionCount)
         assertEquals(1, snapshot.pendingActionCount)
     }
 
@@ -188,7 +189,7 @@ class AttentionSchedulerTest {
                     rootStimulusId = rootInputId,
                 ),
                 urgency = Urgency.HIGH,
-                deferredThoughtContent = "continue thinking",
+                deferredContent = "continue thinking",
             )
         )
         scheduler.enqueueIntention(
@@ -222,7 +223,7 @@ class AttentionSchedulerTest {
                     rootStimulusId = rootInputId,
                 ),
                 urgency = Urgency.MEDIUM,
-                deferredThoughtContent = "Plan step 1/2: gather evidence",
+                deferredContent = "Plan step 1/2: gather evidence",
                 deferredPlanContext = ai.neopsyke.agent.model.PlanContext(
                     planId = "plan-1",
                     planGoal = "goal",

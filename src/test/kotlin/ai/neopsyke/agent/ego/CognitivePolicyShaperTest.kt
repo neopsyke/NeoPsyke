@@ -55,7 +55,7 @@ class CognitivePolicyShaperTest {
             role = PrincipalRole.OWNER,
             surface = ChannelSurface.DIRECT,
             instructionTrust = InstructionTrust.TRUSTED_INSTRUCTION,
-            policyScopeId = "deployment-restricted",
+            policyScopeId = CognitivePolicyShaper.POLICY_SCOPE_DEPLOYMENT_RESTRICTED,
         )
         val security = CognitiveThreadSecurityContext.fromConversation(context.security)
 
@@ -81,7 +81,7 @@ class CognitivePolicyShaperTest {
             role = PrincipalRole.ADMIN_CONTROL,
             surface = ChannelSurface.ADMIN,
             instructionTrust = InstructionTrust.TRUSTED_INSTRUCTION,
-            policyScopeId = "emergency-override",
+            policyScopeId = CognitivePolicyShaper.POLICY_SCOPE_EMERGENCY_OVERRIDE,
         )
         val security = CognitiveThreadSecurityContext.fromConversation(context.security)
 
@@ -141,7 +141,7 @@ class CognitivePolicyShaperTest {
             role = PrincipalRole.ADMIN_CONTROL,
             surface = ChannelSurface.ADMIN,
             instructionTrust = InstructionTrust.TRUSTED_INSTRUCTION,
-            policyScopeId = "emergency-override",
+            policyScopeId = CognitivePolicyShaper.POLICY_SCOPE_EMERGENCY_OVERRIDE,
         )
         val security = CognitiveThreadSecurityContext.fromConversation(context.security)
 

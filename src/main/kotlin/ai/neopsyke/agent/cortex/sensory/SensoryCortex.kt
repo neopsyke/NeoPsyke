@@ -20,6 +20,7 @@ import ai.neopsyke.agent.model.StimulusFamily
 import ai.neopsyke.agent.model.Provenances
 import ai.neopsyke.agent.model.StimulusTrustLevel
 import ai.neopsyke.agent.support.TextSecurity
+import mu.KotlinLogging
 import java.io.Closeable
 import java.time.Instant
 import java.util.concurrent.atomic.AtomicInteger
@@ -33,6 +34,8 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+
+private val sensoryCortexLogger = KotlinLogging.logger("SensoryCortex")
 
 data class SensoryInput(
     val content: String,
@@ -473,7 +476,11 @@ class SensoryCortex(
         syntheticSignals.tryReceive().getOrNull()?.let { signal ->
             syntheticSignalCount.updateAndGet { current -> (current - 1).coerceAtLeast(0) }
             val stimulusSignal = signal as? CognitiveSignal.StimulusReceived ?: return signal
-            val enrichedStimulus = enrichStimulus(stimulusSignal.stimulus) ?: return CognitiveSignal.NoStimulus
+            val enrichedStimulus = enrichStimulus(stimulusSignal.stimulus)
+            if (enrichedStimulus == null) {
+                sensoryCortexLogger.debug { "Synthetic stimulus dropped: blank content after sanitization" }
+                return CognitiveSignal.NoStimulus
+            }
             return CognitiveSignal.StimulusReceived(
                 stimulus = enrichedStimulus,
                 percept = PerceptualAppraiser().appraise(enrichedStimulus),
@@ -481,7 +488,11 @@ class SensoryCortex(
         }
         val signal = source.nextSignal()
         val stimulusSignal = signal as? CognitiveSignal.StimulusReceived ?: return signal
-        val enrichedStimulus = enrichStimulus(stimulusSignal.stimulus) ?: return CognitiveSignal.NoStimulus
+        val enrichedStimulus = enrichStimulus(stimulusSignal.stimulus)
+        if (enrichedStimulus == null) {
+            sensoryCortexLogger.debug { "Source stimulus dropped: blank content after sanitization" }
+            return CognitiveSignal.NoStimulus
+        }
         return CognitiveSignal.StimulusReceived(
             stimulus = enrichedStimulus,
             percept = PerceptualAppraiser().appraise(enrichedStimulus),
@@ -540,6 +551,9 @@ class SensoryCortex(
         val retry = syntheticSignals.trySend(signal)
         if (retry.isSuccess) {
             syntheticSignalCount.incrementAndGet()
+        }
+        if (!retry.isSuccess) {
+            sensoryCortexLogger.warn { "Synthetic signal queue full after retry; signal dropped" }
         }
         return retry.isSuccess
     }

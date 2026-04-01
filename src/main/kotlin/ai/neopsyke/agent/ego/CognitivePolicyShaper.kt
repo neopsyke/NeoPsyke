@@ -290,8 +290,8 @@ internal object CognitivePolicyShaper {
         )
     }
 
-    private const val POLICY_SCOPE_DEPLOYMENT_RESTRICTED: String = "deployment-restricted"
-    private const val POLICY_SCOPE_EMERGENCY_OVERRIDE: String = "emergency-override"
+    internal const val POLICY_SCOPE_DEPLOYMENT_RESTRICTED: String = "deployment-restricted"
+    internal const val POLICY_SCOPE_EMERGENCY_OVERRIDE: String = "emergency-override"
 }
 
 internal data class PlannerActionSurface(

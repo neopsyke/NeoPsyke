@@ -71,7 +71,7 @@ class LlmEgoPlanner(
                 data = mapOf(
                     "trigger" to triggerLabel,
                     "pending_inputs" to context.queue.pendingInputCount,
-                    "pending_thoughts" to context.queue.pendingThoughtCount,
+                    "pending_thoughts" to context.queue.deferredIntentionCount,
                     "pending_actions" to context.queue.pendingActionCount,
                     "pending_intentions" to context.queue.pendingIntentionCount,
                 )
@@ -1868,7 +1868,7 @@ class LlmEgoPlanner(
                     content = """
                     Queue snapshot:
                     pending_inputs=${context.queue.pendingInputCount}
-                    pending_thoughts=${context.queue.pendingThoughtCount}
+                    pending_thoughts=${context.queue.deferredIntentionCount}
                     pending_actions=${context.queue.pendingActionCount}
                     pending_intentions=${context.queue.pendingIntentionCount}
                     """.trimIndent()

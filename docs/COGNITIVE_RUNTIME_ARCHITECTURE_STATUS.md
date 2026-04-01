@@ -989,7 +989,23 @@ Done when:
 - this document can be updated from real code rather than from architectural
   aspiration
 
-### 4.4 Final architecture completion test
+### 4.4 Intentional architecture exceptions
+
+#### Deferred intentions skip percept/thread/opportunity stages
+
+Deferred intentions (`IntentionKind.DEFER`) re-enter the planner at the intention
+processing level without creating a new percept, cognitive thread, or opportunity.
+
+This is intentional. A deferred intention is not a new cognitive arrival — it is
+continued internal deliberation within an existing thread. The original thread's
+security context, percept binding, and opportunity constraints remain in effect.
+Opportunity-level policy shaping was applied when the thread was first created.
+
+If a future requirement demands re-shaping the opportunity surface on each
+deliberation pass (for example, if policy can change mid-turn), this exception
+should be revisited.
+
+### 4.5 Final architecture completion test
 
 The architecture should be considered fully implemented only when all of the
 following are true:

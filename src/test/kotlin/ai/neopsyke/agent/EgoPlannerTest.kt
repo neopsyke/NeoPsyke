@@ -32,7 +32,7 @@ class EgoPlannerTest {
                 recentDialogue = emptyList(),
                 queue = QueueSnapshot(
                     pendingInputCount = 1,
-                    pendingThoughtCount = 2,
+                    deferredIntentionCount = 2,
                     pendingActionCount = 3
                 )
             )
@@ -88,7 +88,7 @@ class EgoPlannerTest {
                 ),
                 queue = QueueSnapshot(
                     pendingInputCount = 0,
-                    pendingThoughtCount = 1,
+                    deferredIntentionCount = 1,
                     pendingActionCount = 0
                 )
             )
@@ -1077,7 +1077,7 @@ class EgoPlannerTest {
             },
             queue = QueueSnapshot(
                 pendingInputCount = 5,
-                pendingThoughtCount = 4,
+                deferredIntentionCount = 4,
                 pendingActionCount = 3
             )
         )
@@ -1102,7 +1102,7 @@ class EgoPlannerTest {
             recentDialogue = listOf(DialogueTurn(DialogueRole.USER, "hello")),
             queue = QueueSnapshot(
                 pendingInputCount = 1,
-                pendingThoughtCount = 0,
+                deferredIntentionCount = 0,
                 pendingActionCount = 0
             ),
             shortTermContextSummary = "Short-term context summary:\n- user likes concise answers"
@@ -1127,7 +1127,7 @@ class EgoPlannerTest {
             recentDialogue = listOf(DialogueTurn(DialogueRole.USER, "hello")),
             queue = QueueSnapshot(
                 pendingInputCount = 1,
-                pendingThoughtCount = 0,
+                deferredIntentionCount = 0,
                 pendingActionCount = 0
             ),
             shortTermContextSummary = "Short-term context summary:\n- user likes concise answers",

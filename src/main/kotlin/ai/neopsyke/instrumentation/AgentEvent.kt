@@ -673,4 +673,18 @@ object AgentEvents {
             type = "goal_completed",
             data = mapOf("goal_id" to goalId)
         )
+
+    // ── Cognitive pipeline observability ────────────────────────────────
+
+    fun stimulusDropped(reason: String): AgentEvent =
+        AgentEvent(
+            type = "stimulus_dropped",
+            data = mapOf("reason" to reason)
+        )
+
+    fun goalWorkUnavailable(cueType: String): AgentEvent =
+        AgentEvent(
+            type = "goal_work_unavailable",
+            data = mapOf("cue_type" to cueType)
+        )
 }

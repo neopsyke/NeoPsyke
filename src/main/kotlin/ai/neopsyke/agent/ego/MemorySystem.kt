@@ -1019,7 +1019,7 @@ class MemorySystem(
                 buildImpulseRecallCue(baseCue, trigger.impulse.needId, ambientContext)
             }
             is EgoTrigger.DeferredIntention -> {
-                val query = trigger.intention.deferredThoughtRecallQuery?.trim().orEmpty()
+                val query = trigger.intention.deferredRecallQuery?.trim().orEmpty()
                 if (query.isBlank()) {
                     instrumentation.emit(
                         AgentEvents.longTermMemoryRecallSkipped(trigger = triggerLabel, reason = "missing_explicit_query")

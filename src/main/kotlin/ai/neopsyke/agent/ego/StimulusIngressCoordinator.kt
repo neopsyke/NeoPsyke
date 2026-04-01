@@ -61,7 +61,11 @@ internal class StimulusIngressCoordinator(
         stimulus: StimulusEnvelope,
         percept: Percept,
     ): Outcome {
-        val work = goalsGateway.nextWorkFromCue(cue) ?: return Outcome.NoWork
+        val work = goalsGateway.nextWorkFromCue(cue)
+        if (work == null) {
+            instrumentation.emit(AgentEvents.goalWorkUnavailable(cue.reason))
+            return Outcome.NoWork
+        }
         ingressLogger.info { "Goal work picked: ${work.goalId}/${work.stepId}" }
         val thread = cognitiveThreads.bindPercept(
             percept = percept.copy(conversationContext = work.conversationContext),

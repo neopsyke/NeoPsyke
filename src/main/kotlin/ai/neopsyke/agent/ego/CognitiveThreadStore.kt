@@ -1,5 +1,6 @@
 package ai.neopsyke.agent.ego
 
+import mu.KotlinLogging
 import ai.neopsyke.agent.goal.GoalRunActivation
 import ai.neopsyke.agent.model.CommitMode
 import ai.neopsyke.agent.model.CognitiveThread
@@ -24,6 +25,8 @@ import ai.neopsyke.agent.model.PerceptFamily
 import ai.neopsyke.agent.model.RootInputIds
 import ai.neopsyke.agent.support.TextSecurity
 import java.time.Instant
+
+private val threadStoreLogger = KotlinLogging.logger("CognitiveThreadStore")
 
 internal class CognitiveThreadStore {
     private sealed interface ContinuationState {
@@ -151,17 +154,18 @@ internal class CognitiveThreadStore {
             percept = percept,
         )
 
-    fun ensureForImpulse(impulse: PendingImpulse): CognitiveThread =
+    fun ensureForImpulse(impulse: PendingImpulse, percept: Percept? = null): CognitiveThread =
         ensureThread(
             rootInputId = impulse.rootImpulseId,
             conversationContext = impulse.conversationContext,
             kind = CognitiveThreadKind.DRIVE,
             title = impulse.prompt,
             rootStimulusId = impulse.rootImpulseId,
+            percept = percept,
         )
 
-    fun impulseOpportunity(impulse: PendingImpulse): Opportunity {
-        val thread = ensureForImpulse(impulse)
+    fun impulseOpportunity(impulse: PendingImpulse, percept: Percept? = null): Opportunity {
+        val thread = ensureForImpulse(impulse, percept)
         return opportunityFor(
             thread = thread,
             kind = OpportunityKind.EXECUTE,
@@ -249,11 +253,18 @@ internal class CognitiveThreadStore {
     fun snapshot(rootInputId: String?, conversationContext: ConversationContext): CognitiveThreadSnapshot? =
         record(rootInputId, conversationContext)?.snapshot()
 
+    @Synchronized
     fun snapshotByThreadId(threadId: String): CognitiveThreadSnapshot? =
         (activeThreadsByScope.values.asSequence() + terminalThreadsByScope.values.asSequence())
             .firstOrNull { it.thread.id == threadId }
             ?.snapshot()
 
+    /**
+     * Returns thread snapshots for dashboard / external inspection.
+     * Synchronized because this may be called from outside the runLoop
+     * coroutine while mutations are in progress.
+     */
+    @Synchronized
     fun snapshots(includeTerminal: Boolean = false, limit: Int = DEFAULT_SNAPSHOT_LIMIT): List<CognitiveThreadSnapshot> {
         val active = activeThreadsByScope.values
             .asSequence()
@@ -593,7 +604,10 @@ internal class CognitiveThreadStore {
     }
 
     private fun scope(rootInputId: String?, sessionId: String): InputScope? {
-        if (rootInputId.isNullOrBlank()) return null
+        if (rootInputId.isNullOrBlank()) {
+            threadStoreLogger.debug { "Scope not created: blank rootInputId (session=$sessionId)" }
+            return null
+        }
         return InputScope(rootInputId = rootInputId, sessionId = sessionId)
     }
 

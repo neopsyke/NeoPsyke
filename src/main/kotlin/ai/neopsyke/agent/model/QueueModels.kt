@@ -105,7 +105,7 @@ data class PendingFeedback(
 
 data class QueueSnapshot(
     val pendingInputCount: Int,
-    val pendingThoughtCount: Int,
+    val deferredIntentionCount: Int,
     val pendingActionCount: Int,
     val pendingIntentionCount: Int = 0,
     val pendingImpulseCount: Int = 0,
@@ -180,9 +180,9 @@ data class QueuedIntention(
     val proposedActionSummary: String? = null,
     val argumentDataTrust: DataTrust = DataTrust.TRUSTED_DATA,
     val origin: ActionOrigin = ActionOrigin.USER,
-    val deferredThoughtContent: String? = null,
-    val deferredThoughtPasses: Int = 0,
-    val deferredThoughtRecallQuery: String? = null,
+    val deferredContent: String? = null,
+    val deferredPasses: Int = 0,
+    val deferredRecallQuery: String? = null,
     val deferredDeniedActionType: ActionType? = null,
     val deferredDeniedActionPayload: String? = null,
     val deferredDenialReason: String? = null,
@@ -194,16 +194,17 @@ data class QueuedIntention(
 ) {
     val rootInputId: String? get() = intention.rootStimulusId
     val conversationContext: ConversationContext get() = intention.conversationContext
-    val deferredContent: String get() = deferredThoughtContent ?: intention.summary
-    val deferredPasses: Int get() = deferredThoughtPasses
+
+    /** Resolved content: the deferred content if present, else the intention summary. */
+    val resolvedContent: String get() = deferredContent ?: intention.summary
 
     fun toPendingThought(): PendingThought =
         PendingThought(
             id = queueId,
             urgency = urgency,
-            content = deferredContent,
+            content = resolvedContent,
             passes = deferredPasses,
-            longTermMemoryRecallQuery = deferredThoughtRecallQuery,
+            longTermMemoryRecallQuery = deferredRecallQuery,
             rootInputId = rootInputId,
             rootInputReceivedAtMs = rootInputReceivedAtMs,
             deniedActionType = deferredDeniedActionType,

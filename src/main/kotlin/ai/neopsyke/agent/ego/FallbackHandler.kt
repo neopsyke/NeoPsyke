@@ -7,7 +7,6 @@ import ai.neopsyke.agent.memory.longterm.MemoryEventType
 import ai.neopsyke.agent.support.TextSecurity
 import ai.neopsyke.instrumentation.AgentEvents
 import ai.neopsyke.instrumentation.AgentInstrumentation
-import java.time.Instant
 
 private val logger = KotlinLogging.logger {}
 
@@ -38,32 +37,22 @@ internal class FallbackHandler(
         originActionType: ActionType? = null,
         originActionObservedEvidence: Boolean? = null,
     ): Boolean =
-        scheduler.enqueueIntention(
-            QueuedIntention(
-                intention = Intention(
-                    id = RootInputIds.next(),
-                    cognitiveThreadId = rootInputId ?: RootInputIds.next(),
-                    kind = IntentionKind.DEFER,
-                    summary = TextSecurity.preview(content, 160),
-                    createdAt = Instant.now(),
-                    conversationContext = conversationContext,
-                    commitMode = CommitMode.NOT_APPLICABLE,
-                    rootStimulusId = rootInputId,
-                ),
-                urgency = urgency,
-                rootInputReceivedAtMs = rootInputReceivedAtMs,
-                origin = origin,
-                deferredThoughtContent = content,
-                deferredThoughtPasses = passes,
-                deferredDeniedActionType = deniedActionType,
-                deferredDeniedActionPayload = deniedActionPayload,
-                deferredDenialReason = denialReason,
-                deferredDenialReasonCode = denialReasonCode,
-                deferredAllowFallbackExplanation = allowFallbackExplanation,
-                deferredOriginActionType = originActionType,
-                deferredOriginActionObservedEvidence = originActionObservedEvidence,
-            )
-        )
+        scheduler.enqueueThought(
+            content = content,
+            urgency = urgency,
+            passes = passes,
+            rootInputId = rootInputId,
+            rootInputReceivedAtMs = rootInputReceivedAtMs,
+            deniedActionType = deniedActionType,
+            deniedActionPayload = deniedActionPayload,
+            denialReason = denialReason,
+            denialReasonCode = denialReasonCode,
+            allowFallbackExplanation = allowFallbackExplanation,
+            conversationContext = conversationContext,
+            origin = origin,
+            originActionType = originActionType,
+            originActionObservedEvidence = originActionObservedEvidence,
+        ) != null
 
     fun handleDeniedAction(
         action: PendingAction,

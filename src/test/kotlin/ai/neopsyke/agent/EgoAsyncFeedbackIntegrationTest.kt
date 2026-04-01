@@ -84,7 +84,7 @@ class EgoAsyncFeedbackIntegrationTest {
                     )
 
                     is EgoTrigger.DeferredIntention -> {
-                        pendingThoughts += trigger.intention.deferredContent
+                        pendingThoughts += trigger.intention.resolvedContent
                         EgoDecision.Noop("unexpected deferred continuation")
                     }
 
@@ -208,7 +208,7 @@ class EgoAsyncFeedbackIntegrationTest {
                     )
 
                     is EgoTrigger.DeferredIntention -> {
-                        pendingThoughts += trigger.intention.deferredContent
+                        pendingThoughts += trigger.intention.resolvedContent
                         EgoDecision.Noop("unexpected deferred continuation")
                     }
 
@@ -297,7 +297,7 @@ class EgoAsyncFeedbackIntegrationTest {
                     )
 
                     is EgoTrigger.DeferredIntention -> {
-                        retryThoughts += trigger.intention.deferredContent
+                        retryThoughts += trigger.intention.resolvedContent
                         EgoDecision.FormIntention(
                             urgency = Urgency.MEDIUM,
                             intentionKind = IntentionKind.OBSERVE,
