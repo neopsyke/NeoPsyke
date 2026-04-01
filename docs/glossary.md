@@ -23,10 +23,40 @@ Each section covers terms that appear together in the same area of the agent.
   - **RuntimeControlSignal** — lifecycle and control events (`ExitRequested`, `ShutdownRequested`, `SourceClosed`, `ConfigReloaded`). Not perceived by the Ego — controls the runtime itself.
   In summary: a **stimulus** is *what* arrived; a **signal** is *how* it travels through the runtime. Both are defined in `SensoryCortex.kt`.
 - **StimulusEnvelope** — The typed wrapper around a stimulus. Carries the content plus metadata: family (`LINGUISTIC`, `OBSERVATION`, `FEEDBACK`, `CUE`), trust level, provenance, and conversation context. `CognitiveArchitectureModels.kt`
-- **Percept** — The internal representation of a stimulus after appraisal. A stimulus of family `LINGUISTIC` becomes a percept of family `REQUEST`; a `CUE` from the Id becomes `DRIVE_ACTIVATION`. The percept is what the Ego actually reasons about.
+- **StimulusFamily** — Top-level classification of a raw stimulus: `LINGUISTIC` (user messages), `OBSERVATION` (environmental observations), `FEEDBACK` (action outcomes), `CUE` (internal system cues from Id or goal runtime). Determines how the percept is appraised. `CognitiveArchitectureModels.kt`
+- **StimulusTrustLevel** — Trust classification assigned at the sensory boundary: `TRUSTED_INTERNAL`, `DEFAULT`, `UNTRUSTED_EXTERNAL`. Used to derive provenance before cognition begins. `CognitiveArchitectureModels.kt`
+- **Percept** — The internal representation of a stimulus after appraisal. A stimulus of family `LINGUISTIC` becomes a percept of family `REQUEST`; a `CUE` from the Id becomes `DRIVE_ACTIVATION`. The percept is what the Ego actually reasons about. Every cognitive arrival must be appraised into a percept before entering thread update logic. `CognitiveArchitectureModels.kt`
+- **PerceptFamily** — Classification of a percept's meaning: `REQUEST` (user asking for something), `OBSERVATION` (environmental data), `FEEDBACK` (action result), `STATE_CHANGE` (goal runtime event), `DRIVE_ACTIVATION` (Id impulse). Determines cognitive thread kind and opportunity kind. `CognitiveArchitectureModels.kt`
+- **PerceptualAppraiser** — Stateless mapper that converts a `StimulusEnvelope` into a `Percept` by mapping stimulus family to percept family and preserving provenance. Called by `SensoryCortex.nextSignal()` on every stimulus. `SensoryCortex.kt`
+- **StimulusIngressCoordinator** — Routes appraised stimuli into the cognitive pipeline. Creates or updates cognitive threads, generates shaped opportunities, and enqueues work into the attention scheduler. Handles input, feedback, impulse wake, and goal work ingress paths. `StimulusIngressCoordinator.kt`
 - **AsyncSignalSource** — The coroutine-backed signal bus that feeds stimuli into the Ego loop. Dashboard chat messages and terminal commands are enqueued here. `AsyncSignalSource.kt`
 - **Interlocutor** — The identity of whoever the agent is talking to in a given session. Carries an `id` (name, hash, or JWT subject) and optional display `label`. The sentinel `Interlocutor.UNKNOWN` is used before identity resolution.
 - **ConversationContext** — End-to-end metadata that travels with every input, thought, and action through the pipeline. Contains `sessionId`, `interlocutor`, and `security` (principal, channel, trust). Required to be non-blank everywhere.
+
+---
+
+## Cognitive Threads & Continuity
+
+- **CognitiveThread** — The live continuity owner for one root cognitive line. Tracks status, waits, resume points, security context, and thread identity. One thread exists per root input, impulse, or goal work activation. The primary unit of orchestration in the cognitive runtime. `CognitiveArchitectureModels.kt`
+- **CognitiveThreadKind** — What originated the thread: `CONVERSATION` (user input or feedback), `DRIVE` (Id impulse), `GOAL_DIRECTED` (goal work activation). Determines scheduling priority and allowed actions. `CognitiveArchitectureModels.kt`
+- **CognitiveThreadStatus** — Lifecycle state: `ACTIVE` (processing), `WAITING` (suspended for async action), `BLOCKED` (cannot proceed), `RESOLVED` (successfully completed), `FAILED` (terminated with error). `CognitiveArchitectureModels.kt`
+- **CognitiveThreadStore** — In-memory store managing active and terminal cognitive threads. Binds percepts to threads, tracks wait/resume/terminal states, records opportunities and intentions, and provides synchronized snapshots for dashboard inspection. `CognitiveThreadStore.kt`
+- **CognitiveThreadSecurityContext** — Per-thread security state derived from the conversation security context at thread creation time. Accumulates data-trust degradation as external artifacts are observed during the thread's lifetime. Used by `CognitivePolicyShaper` to shape the action surface.
+- **CognitiveThreadSnapshot** — Read-only view of a thread's complete state: the thread itself, latest percept, latest opportunity, latest intention, wait state, and terminal state. Used by the dashboard and telemetry. `CognitiveArchitectureModels.kt`
+- **CognitiveThreadWaitState** — Captures why a thread is waiting: the action that caused the wait, the expected completion signal, and when the wait began. `CognitiveArchitectureModels.kt`
+- **CognitiveThreadTerminalState** — Records how a thread ended: status (resolved or failed), summary, and timestamp. Preserved after cleanup for post-hoc inspection. `CognitiveArchitectureModels.kt`
+
+---
+
+## Opportunities & Intentions
+
+- **Opportunity** — An admissible next-move surface generated from a cognitive thread. Carries the set of allowed intentions, allowed commit modes, available and dispatchable actions, action definitions, security context, and policy metadata. Opportunities are shaped by `CognitivePolicyShaper` before the planner chooses, ensuring prohibited moves are absent before planner choice. `CognitiveArchitectureModels.kt`
+- **OpportunityKind** — What kind of cognitive move the opportunity represents: `RESPOND` (answer a user request), `INTEGRATE_FEEDBACK` (process action outcome), `EXECUTE` (perform a drive or goal action), `RESUME` (continue after suspension), `CLARIFY` (ask for more information), `FINALIZE` (wrap up a thread). Determines scheduling priority. `CognitiveArchitectureModels.kt`
+- **Intention** — The Ego's explicit choice of what to do next, formed from an attended opportunity. Separates intent kind from commit mode. The object that progresses through review, staging, and execution. `CognitiveArchitectureModels.kt`
+- **IntentionKind** — What the Ego intends: `OBSERVE` (read-only), `PREPARE` (gather evidence), `STAGE` (create a staged action), `REQUEST_AUTHORIZATION` (ask for approval), `COMMIT` (execute immediately), `DEFER` (think more before acting). `CognitiveArchitectureModels.kt`
+- **QueuedIntention** — A scheduler queue item wrapping an `Intention` with urgency, origin, and deferred-continuation state. For `DEFER` intentions, carries `deferredContent`, `deferredPasses`, `deferredRecallQuery`, denial context, and plan context. Replaces the old `PendingThought` as the primary scheduler type for deferred work. `QueueModels.kt`
+- **PendingFeedback** — An action feedback stimulus waiting to be processed. Carries the `ActionFeedbackCue`, appraised percept, stimulus identity, and a flag indicating whether it resumed a waiting thread. `QueueModels.kt`
+- **CognitivePolicyShaper** — Stateless policy engine that shapes the action surface of an opportunity based on security context. Determines which actions are visible to the planner, which commit modes are allowed, and enforces restrictions for control-plane actions, external users, and deployment-restricted scopes. `CognitivePolicyShaper.kt`
 
 ---
 
@@ -52,7 +82,7 @@ Each section covers terms that appear together in the same area of the agent.
 - **Planner** — The LLM-backed decision function inside the Ego. Given a `PlannerContext`, returns an `EgoDecision`: propose an action, enqueue a thought, produce a no-op, or enqueue a multi-step plan. `LlmEgoPlanner`
 - **PlannerContext** — The full context bundle passed to the planner on each step: recent dialogue, queue snapshot, short-term and long-term memory, lessons, scratchpad, evidence hints, deliberation state, meta-guidance, security summaries, available actions, and optionally the Id state snapshot.
 - **PlanningBranch** — Which reasoning path the planner uses. `GENERAL` is the default; `GOAL_CREATION` is a special branch for multi-step goal proposals.
-- **EgoDecision** — The planner's output. A sealed type with four variants: `ProposeAction` (do something), `EnqueueThought` (think more), `Noop` (decline with reason), `EnqueuePlan` (propose a multi-step goal).
+- **EgoDecision** — The planner's output. A sealed type with four variants: `FormIntention` (propose an action with intention kind and commit mode), `EnqueueThought` (defer and think more), `Noop` (decline with reason), `EnqueuePlan` (propose a multi-step goal).
 - **DeliberationState** — Accumulated counters that track how the current reasoning episode is going. Injected into the planner context so it can adapt behavior under pressure. `CognitionModels.kt`
 - **DecisionPressure** — A `[0,1]` score that rises with each deliberation step. When high, it signals the planner to stop deliberating and commit to an answer. Also used to trigger forced terminal answers.
 - **StaleStreak** — Consecutive steps where the planner repeated the same type of decision without progress. Indicates the agent may be stuck.
@@ -135,7 +165,7 @@ Each section covers terms that appear together in the same area of the agent.
 - **PendingInput** — A user message or external event waiting in the input queue. Carries content, `InputPriority`, `rootInputId`, and `ConversationContext`.
 - **PendingThought** — A reconstructed deferred-continuation payload used while processing a queued `IntentionKind.DEFER`. It carries urgency, pass count, denial context, and recall hints, but it is no longer a primary scheduler category by itself.
 - **PendingImpulse** — An Id impulse waiting in the impulse queue. Carries the triggering `needId`, tension, prompt hint, and `rootImpulseId`.
-- **QueueSnapshot** — A read-only view of queue depths: `pendingInputCount`, `pendingThoughtCount`, `pendingActionCount`, `pendingIntentionCount`, and `pendingImpulseCount`. Injected into the planner context.
+- **QueueSnapshot** — A read-only view of queue depths: `pendingInputCount`, `deferredIntentionCount`, `pendingActionCount`, `pendingIntentionCount`, and `pendingImpulseCount`. Injected into the planner context.
 - **InputPriority** — Priority level for incoming inputs: `LOW`, `MEDIUM`, `HIGH`. Determines ordering in the scheduler. `Enums.kt`
 - **Urgency (queue sense)** — The `Urgency` enum (`LOW`, `MEDIUM`, `HIGH`) used to prioritize pending thoughts and actions in the attention scheduler. Distinct from the Id's continuous tension value. `Enums.kt`
 - **RootInputId** — A UUID string that uniquely identifies the originating request and follows it through every downstream thought, action, and lifecycle event. Generated by `RootInputIds.next()`. Used for tracing and scratchpad scoping.
