@@ -30,4 +30,4 @@ The inputs intentionally target the architectural seams under migration:
 - `phase-6-policy-control.txt`
 - `phase-7-convergence.txt`
 
-The acceptance source of truth remains `docs/COGNITIVE_RUNTIME_ARCHITECTURE_STATUS.md`.
+The security architecture is documented in `docs/security.md`.

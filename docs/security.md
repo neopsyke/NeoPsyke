@@ -287,9 +287,8 @@ This is one of the system's strongest current architectural properties:
 
 ### 5.3 Cognitive Thread Security Context
 
-Phase 1 now implements a real `CognitiveThreadStore` as the live owner for
-active root threads. Each cognitive thread carries a security context
-established from its root input:
+`CognitiveThreadStore` is the live owner for active root threads. Each
+cognitive thread carries a security context established from its root input:
 
 - root principal and channel
 - instruction trust
@@ -304,7 +303,7 @@ thread's trust degrades and stays degraded for the lifetime of that root input.
 This ensures that externally tainted content cannot later be treated as trusted
 material within the same reasoning chain.
 
-Phase 5 extends that continuity model for goal-runtime work:
+The continuity model extends to goal-runtime work:
 
 - goal step resumptions now reuse a stable per-step root id
 - goal work is carried on thread continuations rather than a dedicated
@@ -352,7 +351,8 @@ At each stage:
   deterministic policy, Superego judgment, durable authorization, and final
   motor guard.
 
-Phase 4 now makes that split operational for normal action outcomes:
+Action feedback re-entry makes that split operational for normal action
+outcomes:
 
 - `ActionReviewPipeline` no longer queues follow-up continuation work directly
   after execution
@@ -362,7 +362,7 @@ Phase 4 now makes that split operational for normal action outcomes:
 - queue-drain reset is delayed while pending feedback cues still exist, so
   scratchpad/thread state survives until feedback is actually consumed
 
-Phase 5 adds scratchpad boundary layering on top of that:
+Scratchpad boundary layering adds:
 
 - thread workspaces now preserve thread-scoped context and evidence across
   wait/resume for active goal roots
@@ -403,7 +403,7 @@ This means that by the time the Ego forms an intention, the action surface has
 already been narrowed by multiple independent policy layers. The Superego
 reviews what remains, and the MotorCortex enforces the final guard.
 
-Phase 6 makes that earlier shaping materially visible in planner context:
+Early policy shaping is materially visible in planner context:
 
 - `CognitivePolicyShaper` now shapes planner-visible action definitions before
   proposal time

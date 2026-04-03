@@ -2,7 +2,7 @@
 
 > Status: In progress
 >
-> Last reviewed: 2026-03-24
+> Last reviewed: 2026-04-03
 >
 > Purpose: Track remaining security work across all areas: connector trust,
 > credential management, policy hardening, operator visibility, and future
@@ -123,23 +123,47 @@ These are already decided and should not be reopened casually:
   checked against trust policy.
 - Cannot rely on plugin-local discipline alone.
 
-### 4.5 Keep the IntentionKind/CommitMode split aligned
+### 4.5 Keep the IntentionKind/CommitMode split aligned (implemented)
 
-- The richer intention model (`OBSERVE`, `PREPARE`, `STAGE`,
-  `REQUEST_AUTHORIZATION`, `COMMIT`, `DEFER`) and separate `CommitMode`
-  (`APPROVAL_BACKED`, `POLICY_AUTONOMOUS`, `ADMIN_OVERRIDE`) are now live in
-  the runtime.
-- Remaining security work is to keep future actions, policy rules, operator UX,
-  and tests aligned with that split so new capability families do not collapse
-  back into action-type-specific workflow aliases.
+The richer intention model (`OBSERVE`, `PREPARE`, `STAGE`,
+`REQUEST_AUTHORIZATION`, `COMMIT`, `DEFER`) and separate `CommitMode`
+(`APPROVAL_BACKED`, `POLICY_AUTONOMOUS`, `ADMIN_OVERRIDE`) are now live in
+the runtime. `PolicyScope` is a typed enum (`DEFAULT`, `DEPLOYMENT_RESTRICTED`,
+`FULL_AUTONOMY`) configurable via YAML and env var.
 
-### 4.6 Finer policy scoping
+Remaining work: keep future actions, policy rules, operator UX, and tests
+aligned with that split so new capability families do not collapse back into
+action-type-specific workflow aliases.
 
-- The strategy spec proposed layered policy: deployment,
-  channel, principal, action, and full-autonomy.
-- Current implementation supports channel, principal, action, and
-  full-autonomy policy shaping. Deployment scope is a placeholder.
-- Channel and principal scoping would enable team/shared deployments.
+### 4.6 Policy scoping (implemented)
+
+Channel, principal, action, and full-autonomy policy shaping are operational.
+Deployment scope is a placeholder for future non-local deployments.
+See `docs/security.md` section 4.5 for full policy scope documentation.
+
+### 4.7 Cognitive runtime security (implemented)
+
+The cognitive runtime migration is complete. The following security-relevant
+stages are live runtime objects, not just type definitions:
+
+- `Percept`: normalizes trust/data/control semantics before cognition
+- `CognitiveThread`: owns live security frame, trust degradation, taint tracking
+- `Opportunity`: policy-shaped admissible moves pruned before Ego chooses
+- `Intention`: explicit lifecycle object separating intent from commit mode
+- Feedback re-entry: action outcomes re-enter as typed stimuli through
+  `SensoryCortex` for thread-aware cognitive processing
+- Scratchpad layering: thread-scoped context persists across suspension;
+  intention-scoped drafts are ephemeral
+
+Remaining cognitive-runtime gaps (not yet blocking, future work):
+
+- Feedback re-entry is not fully uniform: fallback-bypass and autonomous-worker
+  paths still update deliberation state directly without emitting feedback
+  stimuli through SensoryCortex.
+- Concurrency boundary: preparation is not yet parallelized; execution remains
+  mostly centralized.
+- Goal-thread continuity: goal work uses thread continuations but still enters
+  via a separate queue branch rather than fully unified thread orchestration.
 
 ---
 
@@ -269,7 +293,7 @@ constants for consistency with the `CognitiveCueMetadata` pattern.
 
 ---
 
-## 10. Open Questions
+## 11. Open Questions
 
 1. When to move from encrypted local token files to OS keychain-backed storage
    for all long-lived credentials.
@@ -284,7 +308,7 @@ constants for consistency with the `CognitiveCueMetadata` pattern.
 
 ---
 
-## 11. Guardrails for Future Work
+## 12. Guardrails for Future Work
 
 When continuing this work:
 
