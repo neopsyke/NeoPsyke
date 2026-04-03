@@ -93,6 +93,8 @@ object AgentEvents {
         decisionType: String,
         urgency: String? = null,
         thought: String? = null,
+        intentionKind: String? = null,
+        commitModePreference: String? = null,
         actionType: String? = null,
         payload: String? = null,
         summary: String? = null,
@@ -107,6 +109,8 @@ object AgentEvents {
                 "decision_type" to decisionType,
                 "urgency" to urgency,
                 "thought" to thought,
+                "intention_kind" to intentionKind,
+                "commit_mode_preference" to commitModePreference,
                 "action_type" to actionType,
                 "payload" to payload,
                 "summary" to summary,
@@ -118,6 +122,8 @@ object AgentEvents {
 
     fun actionProposed(
         actionType: String,
+        intentionKind: String,
+        commitModePreference: String,
         urgency: String,
         payload: String,
         summary: String,
@@ -127,6 +133,8 @@ object AgentEvents {
             type = "action_proposed",
             data = mapOf(
                 "action_type" to actionType,
+                "intention_kind" to intentionKind,
+                "commit_mode_preference" to commitModePreference,
                 "urgency" to urgency,
                 "payload" to payload,
                 "summary" to summary,
@@ -664,5 +672,19 @@ object AgentEvents {
         AgentEvent(
             type = "goal_completed",
             data = mapOf("goal_id" to goalId)
+        )
+
+    // ── Cognitive pipeline observability ────────────────────────────────
+
+    fun stimulusDropped(reason: String): AgentEvent =
+        AgentEvent(
+            type = "stimulus_dropped",
+            data = mapOf("reason" to reason)
+        )
+
+    fun goalWorkUnavailable(cueType: String): AgentEvent =
+        AgentEvent(
+            type = "goal_work_unavailable",
+            data = mapOf("cue_type" to cueType)
         )
 }

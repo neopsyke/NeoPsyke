@@ -51,6 +51,7 @@ private data class AgentRuntimeYamlEval(
 )
 
 private data class AgentRuntimeYamlAgent(
+    val policyScopeId: String? = null,
     val planner: AgentRuntimeYamlPlanner? = null,
     val superego: AgentRuntimeYamlSuperego? = null,
     val memory: AgentRuntimeYamlMemory? = null,
@@ -326,7 +327,16 @@ object AgentRuntimeSettingsLoader {
         val goalsYaml = agentYaml.goals!!
         val runtimeYaml = agentYaml.runtime!!
 
+        val policyScope = ai.neopsyke.agent.model.PolicyScope.fromId(
+            readNonBlank(
+                env["NEOPSYKE_POLICY_SCOPE_ID"],
+                agentYaml.policyScopeId,
+                defaults.policyScope.id,
+            ),
+        )
+
         val agentConfig = AgentConfig(
+            policyScope = policyScope,
             planner = PlannerConfig(
                 maxLoopStepsPerInput = readPositiveInt(
                     env["EGO_MAX_LOOP_STEPS"],
@@ -969,10 +979,12 @@ object AgentRuntimeSettingsLoader {
                         telegramYaml.webhookSecretHandle,
                         defaults.nativeIntegrations.telegram.webhookSecretHandle
                     ),
-                    policyScopeId = readNonBlank(
-                        env["NEOPSYKE_TELEGRAM_POLICY_SCOPE_ID"],
-                        telegramYaml.policyScopeId,
-                        defaults.nativeIntegrations.telegram.policyScopeId
+                    policyScope = ai.neopsyke.agent.model.PolicyScope.fromId(
+                        readNonBlank(
+                            env["NEOPSYKE_TELEGRAM_POLICY_SCOPE_ID"],
+                            telegramYaml.policyScopeId,
+                            policyScope.id, // inherit from top-level when not overridden
+                        ),
                     ),
                     sessionIdPrefix = readNonBlank(
                         env["NEOPSYKE_TELEGRAM_SESSION_ID_PREFIX"],

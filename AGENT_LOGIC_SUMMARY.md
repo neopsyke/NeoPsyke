@@ -38,7 +38,7 @@ It is intentionally high-level and should stay aligned with the code.
   - `LlmLongTermMemoryAdvisor`
   - `Hippocampus` (cognitive long-term memory facade: `recall`, typed `imprint`, `health`, future `consolidate`)
     - operational/destructive controls are split behind `HippocampusAdmin`
-  - `ScratchpadStore` (ephemeral per-request notebook/workspace)
+  - `ScratchpadStore` (thread-scoped workspace + answer-draft sequence buffer)
   - `ScratchpadFinalizer` (noop or `LlmScratchpadFinalizer`)
   - `Id` (autonomous internal drive module; optional, loaded from `id-runtime.yaml`)
   - `GoalsGateway` (optional goal runtime boundary; also serves ambient active-goal queries)
@@ -90,13 +90,21 @@ It is intentionally high-level and should stay aligned with the code.
   - Accepts two signal planes:
     - `CognitiveSignal` for typed stimuli that the agent should perceive.
     - `RuntimeControlSignal` for runtime lifecycle/control events.
-  - Typed cognitive stimuli currently arrive as:
-    - linguistic stimuli from dashboard chat sessions
-    - linguistic stimuli from owner-only Telegram webhook or polling ingress
-    - cue stimuli from Id impulse wakeups
-    - cue stimuli from goal-runtime work-ready cues
+  - `StimulusIngressCoordinator` now owns post-sensory stimulus handling, so `runInteractive()` only polls signals and then delegates typed stimuli into one ingress path.
+- Typed cognitive stimuli currently arrive as:
+  - linguistic stimuli from dashboard chat sessions
+  - linguistic stimuli from owner-only Telegram webhook or polling ingress
+  - cue stimuli from Id impulse wakeups
+  - cue stimuli from goal-runtime work-ready cues
+  - feedback stimuli from completed or waiting action outcomes
+  - every accepted `StimulusReceived` now also carries an appraised `Percept`
   - Runs `runLoop()` while there is pending work.
-  - Appraises goal-runtime cue stimuli through `GoalsGateway.nextWorkFromCue(...)`, enqueueing goal work when runnable work exists.
+  - Post-sensory ingress now:
+    - appraises goal-runtime cues through `GoalsGateway.nextWorkFromCue(...)`
+    - binds the owning thread/percept state
+    - emits an `Opportunity` plus the correct scheduler trigger for user input, feedback, or goal work
+    - shapes the opportunity contract before enqueue time so `allowedIntentions`, `allowedCommitModes`, `availableActions`, `dispatchableActions`, and planner action definitions are already narrowed by the active thread security frame
+    - leaves Id wake cues as trusted wake-only stimuli that bind thread state and then let already-queued impulse work run
   - Interactive wiring uses `AsyncSignalSource` with stdin enabled in control-only mode:
     - terminal `exit` emits `ExitRequested(source="stdin")` and stops the loop
     - non-command stdin text is ignored as chat input and never enqueued to the scheduler
@@ -104,19 +112,25 @@ It is intentionally high-level and should stay aligned with the code.
   - Interactive startup requires dashboard mode enabled; without dashboard input path the loop does not start.
 - `runLoop()` (bounded by `config.planner.maxLoopStepsPerInput`):
   - Scheduler priority:
-    - Input opportunities first
-    - Then Id impulse opportunities
-    - Then goal-work opportunities
-    - Then highest-urgency between pending action and thought
+    - Scheduled cognitive opportunities first
+    - opportunity ordering is now driven by real `Opportunity.kind` + `Opportunity.salience`, not only by source category wrappers
+    - current runtime ranks:
+      - `RESPOND` / `INTEGRATE_FEEDBACK` before
+      - `EXECUTE` before
+      - `RESUME` / `CLARIFY` / `FINALIZE`
+    - then highest-urgency between pending intentions and pending actions
+    - deferred continuations now live inside the intention queue as `IntentionKind.DEFER`, not as a separate scheduler lane
+    - at equal urgency, non-`DEFER` intentions outrank deferred continuations so a chosen next move beats stale backlog continuation work
   - Per task:
     - Activate session context for the task (`sessionId` + interlocutor) before deliberation/memory updates.
     - Advance deliberation step.
     - Dispatch one of:
       - `processOpportunity`:
-        - `InputOpportunity` -> `processInput`
-        - `ImpulseOpportunity` -> `processImpulse`
-        - `GoalWorkOpportunity` -> `processGoalWork` (goal-runtime execution path; method name still reflects current internal state-machine lineage)
-      - `processThought`
+        - `OpportunityTrigger.Input` -> `processInput`
+        - `OpportunityTrigger.Impulse` -> `processImpulse`
+        - `OpportunityTrigger.Feedback` -> `processActionFeedback`
+        - `OpportunityTrigger.GoalWork` -> `processGoalWork`
+      - `processIntention`
       - `processAction`
     - Catch task errors, emit warning, continue loop.
     - Optionally queue forced terminal `contact_user` delivery under high pressure (scoped to current root input when available).
@@ -125,10 +139,16 @@ It is intentionally high-level and should stay aligned with the code.
     - Try to execute one fallback explanation action.
     - Any active Id impulse lifecycles are force-denied to avoid stale pending Id state.
   - If queues drain:
+    - Do not reset per-root state while `SensoryCortex` still has synthetic feedback cues waiting to re-enter cognition.
     - Finalize any idle Id impulse lifecycles (accepted or denied).
     - Reset deliberation state.
     - Reset per-input `MemorySystem` state.
-    - Clear active scratchpads and pending scratchpad gates, while preserving per-session scratchpad digests.
+    - Clear orphaned thread scratchpads plus all intention drafts, while preserving retained waiting/blocked thread workspaces and per-session scratchpad digests.
+    - Preserve bounded terminal thread snapshots for both goal and non-goal roots so completion/failure remains inspectable after ephemeral per-input state is cleared.
+  - Ordinary non-goal thread lifecycle now uses the same thread store semantics as goal roots:
+    - async waits update the owning thread to `WAITING` with resume metadata
+    - normal answer completion marks the owning thread `RESOLVED` before cleanup
+    - thread snapshots carry latest percept, latest opportunity, latest intention, wait state, and terminal summary
 
 ## Id Module and Impulse Lifecycle
 - Files:
@@ -180,6 +200,8 @@ It is intentionally high-level and should stay aligned with the code.
   - channel provider/surface/transport
   - instruction trust
   - policy scope id
+- Session replay now reconstructs `ConversationContext.security` from the
+  recorded signal fields instead of inferring a fresh default security posture.
 - For incoming stimuli with `ConversationContext.interlocutor=UNKNOWN`, `SensoryCortex` resolves interlocutor via `InterlocutorResolver`.
 - Session id derivation from `source` (for example `chat:<sessionId>`) only applies when incoming context uses the default session id.
 - Current ingress defaults:
@@ -203,19 +225,40 @@ It is intentionally high-level and should stay aligned with the code.
   - callback handling verifies signed state, consumes the encrypted PKCE pending-auth record, exchanges the code, verifies the Gmail profile email against the configured owner, and then stores encrypted credentials locally
   - read-only Gmail/Calendar actions remain unavailable until this authorization completes successfully
 - `StimulusEnvelope` and `Percept` now carry provenance metadata (instruction trust, data trust, provider/object identity, sanitization record).
+- `SensoryCortex.nextSignal()` is now the mandatory `Stimulus -> Percept` boundary for cognitive work:
+  - runtime control signals pass through unchanged
+  - accepted cognitive stimuli are sanitized, conversation-normalized, and appraised into a `Percept` before Ego sees them
+  - internally generated action feedback also re-enters through this same boundary rather than mutating deliberation state directly in the executor
 - `PerceptualAppraiser` currently maps stimulus families into percept families:
   - `LINGUISTIC` -> `REQUEST`
   - `OBSERVATION` -> `OBSERVATION`
   - `FEEDBACK` -> `FEEDBACK`
   - `CUE` -> `DRIVE_ACTIVATION` for Id impulse cues, otherwise `STATE_CHANGE`
+- `CognitiveThreadStore` is now the live owner of Phase 1 thread state for active roots:
+  - thread identity
+  - thread kind/status
+  - latest bound percept
+  - root-scoped security/trust state
+  - observed-artifact trust degradation
+- Phase 2/5 scheduling now uses real `Opportunity` objects generated from thread-bound triggers:
+  - input roots generate `RESPOND` or `INTEGRATE_FEEDBACK` opportunities
+  - Id roots generate `EXECUTE` opportunities
+  - goal-runtime roots generate `RESUME` opportunities from stable per-step thread roots
+  - the queued scheduler item is now `ScheduledOpportunity(opportunity + trigger)`, not a source-category-only wrapper
+  - thread-level allowed commit modes are now shaped before planner choice from principal role, channel surface, and policy scope
+  - enqueue-time opportunity shaping now also carries planner-visible `availableActions`, `dispatchableActions`, and action definitions as part of the opportunity contract instead of leaving action-surface shaping only to later planner-context assembly
 - `PendingInput` carries:
   - `source` metadata (for example `chat:<sessionId>`) so runtime telemetry can map root requests to conversation sessions.
   - `rootInputId` (UUID string identity for request-scoped orchestration)
   - `receivedAtMs` (request timing anchor, not an identity key)
+  - bound `percept` for the request root
+  - `cognitiveThreadId` for the owning live thread
 - `processInput`:
-  - Appends user turn to dialogue deque.
-  - Stores turn in short-term `MemoryStore`.
-  - Creates/refreshes a task-scoped ephemeral scratchpad keyed by `rootInputId`; scratchpad telemetry also carries `root_input_received_at_ms` for latency/timing views.
+  - Appends user turn to dialogue deque for request percepts.
+  - Stores request-turn content in short-term `MemoryStore`.
+  - Feedback percepts intentionally skip user-turn insertion and `Id.onActivity("input_received")`.
+  - Creates/refreshes a thread-scoped workspace keyed by `rootInputId`; answer drafts remain separate and are not part of the planner-visible scratchpad summary.
+  - Terminal-answer drafts are grouped into one active drafting sequence per thread and reset when cognition switches away from `resolution_draft` / `contact_user` work, so one answer attempt keeps its chunks together without leaking stale drafts into later attempts.
   - Builds `PlannerContext`:
     - recent dialogue
     - queue snapshot
@@ -228,30 +271,75 @@ It is intentionally high-level and should stay aligned with the code.
     - deliberation state and meta-guidance
     - conversation security summary and trigger provenance summary
     - thread security summary derived from root-scoped aggregated data trust + taint sources
+    - latest percept summary/family plus current cognitive thread id/status
+    - current opportunity summary/kind plus allowed intentions and commit modes
     - currently available action types from `MotorCortex`
     - dispatchable action set + per-action planner definitions (description/payload guidance/example/effect class/commit capability/trust constraints)
-    - planner-visible action availability is prefiltered by conversation instruction trust and current thread data trust, so the planner only sees policy-shaped actions for the current thread
+    - planner-visible action availability is prefiltered by conversation instruction trust, current thread data trust, and layered early policy shaping (`CognitivePolicyShaper`)
+    - early policy shaping now operationalizes:
+      - policy scope (`default`, `deployment-restricted`, `full-autonomy`)
+      - channel surface (`DIRECT`, `GROUP`, `SHARED_WORKSPACE`, `AUTOMATION`, `ADMIN`)
+      - principal role (owner/internal/admin vs external)
+      - action effect class (observe/private/public/stateful/control-plane)
+    - control-plane actions are removed from non-admin/non-internal planner surfaces before proposal time
+    - restricted scopes and external/group contexts lose direct/autonomous commit semantics before planning rather than discovering that only at final authorization
   - Runs planner (`LlmEgoPlanner`) and applies deliberation pressure override if needed.
-  - Applies decision by enqueueing thought/action/plan/noop-thought.
+  - Applies decision by enqueueing explicit intentions:
+    - `OBSERVE`, `PREPARE`, `STAGE`, `REQUEST_AUTHORIZATION`, or `COMMIT` for action candidates
+    - `DEFER` for planner continuations, plan steps, noop recovery, denial recovery, and action follow-up continuation
+  - Emits cognitive-stage observability events:
+    - `cognitive_thread_updated` when a root input, feedback cue, or retained goal cycle updates thread state
+    - `opportunity_enqueued` when an input, feedback item, goal work unit, or Id impulse becomes schedulable cognitive work
 
-## Thought Path
-- `processThought`:
-  - Drops thought if `passes >= maxThoughtPasses`.
+## Deferred Continuation Path
+- `processDeferredIntention`:
+  - `DEFER` is the only normal continuation shape; there is no standalone thought scheduler lane anymore.
+  - When a queued `DEFER` intention is attended, Ego rebuilds deferred continuation context from that intention and replans immediately.
+  - Drops the deferred continuation if `passes >= maxThoughtPasses`.
   - If dropped and fallback explanation is allowed, enqueue fallback `contact_user` action.
+  - User/system/goal-origin defer chains default to `allowFallbackExplanation=true`, so repeated non-converging defer loops terminate with an explicit explanation instead of ending silently at max passes.
   - Duplicate fallback `contact_user` enqueues are suppressed per `(root input, sessionId)` scope so one session cannot block fallback for another.
-  - For Id-origin thoughts, planner context now rebuilds Id convergence state and applies the same convergence action filters used during impulse processing.
+  - For Id-origin deferred continuations, planner context rebuilds Id convergence state and applies the same convergence action filters used during impulse processing; those defer chains keep fallback disabled unless an earlier path explicitly enables it.
   - Otherwise mirrors input path:
     - build context
     - optional meta assessment/guidance
     - planner decision
     - decision application
 
+## Intention Path
+- `processIntention`:
+  - Emits `intention_processing` telemetry with root scope and action type when present.
+  - `DEFER` intentions are handled directly by `processDeferredIntention`.
+  - Action-carrying intentions become `PendingAction`s annotated with:
+    - `intentionId`
+    - `intentionKind`
+    - `requestedCommitMode`
+  - Planner output is now intention-native instead of action-native:
+    - `decision=defer` yields a queued `DEFER` intention
+    - `decision=intend` must carry explicit `intention_kind` plus optional `commit_mode_preference`
+    - planner-formed kinds now include `OBSERVE`, `PREPARE`, `STAGE`, `REQUEST_AUTHORIZATION`, and `COMMIT`
+  - Current live intention kinds in normal runtime use:
+    - `OBSERVE` for read/observe and delivery actions that do not require secure commit progression
+    - `PREPARE` for side-effecting action candidates before policy review
+    - `STAGE` for explicit durable staging before commit
+    - `REQUEST_AUTHORIZATION` for explicit approval-backed progression
+    - `COMMIT` for explicit immediate-commit progression when the opportunity contract allows it
+    - `DEFER` for planner continuations and recovery/follow-up paths
+  - Later secure-action progression now records explicit intention transitions for:
+    - `STAGE`
+    - `REQUEST_AUTHORIZATION`
+    - `COMMIT`
+  - Dispatcher no longer infers intention kind from action effect class.
+    - Runtime rejects planner intentions whose `intention_kind`, `action_type`, or `commit_mode_preference` fall outside the current opportunity contract.
+  - Thread inspection now preserves the latest intention plus last blocked/denied reason and reason code.
+  - Action follow-up continuations are now regenerated as `DEFER` intentions only after the action outcome has re-entered through `SensoryCortex` as feedback.
+
 ## Action Path
 - `processAction`:
-- For `resolution_draft` actions, records an internal draft section in the scratchpad and does not emit a user-visible assistant turn.
+- For `resolution_draft` actions, records an active draft-sequence entry and does not emit a user-visible assistant turn.
 - For terminal `contact_user` actions, runs scratchpad final-pass processing before action execution:
-    - records candidate answer draft into the scratchpad
-    - builds final compilation from scratchpad sections/evidence
+    - records candidate answer draft into the active draft-sequence buffer
+    - builds final compilation from thread workspace sections/evidence plus recent draft-sequence chunks for that root
     - skips final-pass only when both `evidenceCount == 0` and `answerDraftCount < max(2, activationMinPlanSteps)`
     - applies scratchpad-confidence gate (`finalPassMinWorkspaceConfidence`)
     - runs `ScratchpadFinalizer` rewrite when enabled
@@ -265,14 +353,17 @@ It is intentionally high-level and should stay aligned with the code.
     - External evidence is required only for volatile/unknown factual intents; transformation/personal-memory/subjective/static-reasoning intents bypass evidence requirement.
     - When volatile evidence is required but evidence actions are unavailable, verifier uses a graceful allow path (`TASK_EVIDENCE_UNAVAILABLE_GRACEFUL`) to avoid dead-loop retries.
                 - Forced-terminal system `contact_user` actions (decision-pressure safety path) are exempt from `DecisionVerifier` evidence requirement.
+  - Intention metadata is now carried into the review/execution half:
+    - Superego review telemetry includes the originating intention kind and requested commit mode
+    - action-review telemetry emits explicit `intention_transition` events as the action moves through requested review, staging, authorization-request, and final commit/observe execution
   - If denied:
     - Record denial metrics/evidence.
-    - Enqueue a new "find safe alternative" thought with denied-action context, including structured `reason_code`.
+    - Enqueue a new deferred intention carrying the denied-action context, including structured `reason_code`.
     - Attempt reflection-lesson persistence into long-term memory (filtered; technical/system failures are skipped).
     - Notify `ActionLifecycleObserver` subscribers so goal-origin actions can translate denials back into goal-step state.
   - If allowed:
     - Route into `ActionControlService`.
-    - `ALLOW_STAGE` persists a staged action and feeds a structured approval-or-alternative thought back into Ego.
+    - `ALLOW_STAGE` persists a staged action and feeds a structured deferred continuation back into Ego while also emitting explicit `STAGE` and `REQUEST_AUTHORIZATION` intention transitions when appropriate.
     - `ALLOW_COMMIT` persists a staged snapshot plus authorization artifact, then executes through `MotorCortex`.
     - `ActionControlService` refusals are treated as denials and fed back into Ego replanning.
     - `ActionControlService` also enforces centralized per-root-input rate limits across observe, messaging, reflection, goal-operation, and commit/control-plane action families.
@@ -284,21 +375,31 @@ It is intentionally high-level and should stay aligned with the code.
     - native Google observe actions (`gmail_observe_search`, `gmail_observe_message`, `calendar_observe_events`) use encrypted local credentials plus on-demand access-token refresh and always stay in `OBSERVE` effect class
     - Actions may return either an immediate outcome or a generic async wait contract (`ActionOutcome.asyncWait`, typically with `executionStatus=WAITING`).
       - Synchronous tools keep the existing immediate-completion path.
-      - Async start actions do not enqueue ordinary follow-up thoughts on the start call.
+      - Async start actions do not enqueue ordinary follow-up deferred continuations on the start call.
       - For goal-origin actions, `WAITING` without async handles is treated as a contract violation and translated into a retry path instead of a fake generic wait.
-    - Record outcome + deliberation evidence.
+    - Record thread-artifact trust degradation at execution time.
+    - Emit an internal `ActionFeedbackCue` for non-`contact_user` outcomes.
+    - `Ego.processActionFeedback(...)` then:
+      - binds the feedback percept to the existing cognitive thread
+      - updates deliberation evidence/progress/cooldown state
+      - for `WAITING`, suspends the thread without auto-enqueuing a planner continuation
+      - decides continuation only after feedback has re-entered cognition; the executor no longer tags feedback with a continuation verdict
+      - regenerates any required deferred continuation only from later completion/failure feedback instead of directly from the executor
+      - resolves the thread immediately when a successful non-follow-up feedback completes without needing a new planner move
     - Notify `ActionLifecycleObserver` subscribers after execution so goal-origin actions can update step acceptance/block/retry state.
     - Record non-`contact_user`/non-`resolution_draft` action outcomes into the scratchpad (when enabled).
       - external observe outputs are captured as typed result artifacts first
       - scratchpad evidence now retains trust/source labels instead of flattening everything to anonymous strings immediately
     - Store assistant output in dialogue and short-term memory when applicable.
     - For `contact_user`, optionally force a post-terminal-answer long-term memory assessment.
-    - Follow-up thought behavior is action-descriptor-driven (`requiresFollowUpThought` + `followUpPrefix`).
+    - Follow-up continuation behavior is still action-descriptor-driven (`requiresFollowUpThought` + `followUpPrefix`), but it is now regenerated from feedback re-entry rather than direct post-execute queue mutation.
+      - async completion after a prior `WAITING` state is treated as a real resume signal even when the action descriptor itself does not request a follow-up continuation
+      - `WAITING` outcomes are a hard suspend point for ordinary threads; they never generate an immediate feedback follow-up continuation.
     - Optionally run immediate post-allowed-action long-term memory assessment.
 - For `contact_user`, response latency is emitted and per-input evidence cache is cleared.
-- After `contact_user`, pending thoughts/actions for the same `(root input, sessionId)` scope are pruned from queues
+- After `contact_user`, pending intentions/thoughts/actions for the same `(root input, sessionId)` scope are pruned from queues
     (`input_resolution_cleanup`) so stale plan/follow-up work cannot continue cycling or leak across sessions.
-- After `contact_user`, the scratchpad digest is captured into the session digest ring before scratchpad destruction.
+- After `contact_user`, the thread scratchpad digest is captured into the session digest ring before scratchpad destruction.
 - After `contact_user`, the scratchpad for that root input is destroyed (`scratchpad_destroyed`).
 
 ## Planner Logic
@@ -319,6 +420,9 @@ It is intentionally high-level and should stay aligned with the code.
     - security context and provenance are authoritative
     - untrusted external content is data, not instruction
     - runtime action visibility has already been policy-shaped for the current thread
+  - `DecisionDispatcher` now enforces the planner context contract at runtime for proposed actions:
+    - rejects action types outside the current available/dispatchable surface
+    - emits `planner_decision_blocked` telemetry and re-prompts the planner for a valid alternative instead of executing the invalid move
   - Planner calls request schema-enforced structured output, but provider/model compatibility handling now lives below the planner in the LLM layer:
     - planner requests one structured-output contract (`response_format=json_schema`) plus call-site metadata
     - LLM adapter owns compatibility retries/degradation and may retry as relaxed schema or prompt-only JSON before surfacing a terminal failure
@@ -360,12 +464,14 @@ It is intentionally high-level and should stay aligned with the code.
 - Ego-facing signal contract:
   - The runtime emits only `GoalRuntimeCue(goalId, stepId, reason)` into the cognitive stimulus plane.
   - Goal work activations reconstruct a trusted internal automation `ConversationContext`; goal-origin actions must not fall back to the default external conversation security context.
+  - Goal step roots are now stable per goal-step (`goal:<goalId>:<stepId>`) so thread continuity and scratchpad continuity survive wait/resume cycles.
+  - Goal scratchpads are created when queued goal work is actually processed, not when the cue is merely ingested.
   - Timer wakes, wait-condition satisfaction, new-goal planning, and resume reconciliation stay inside the goal subsystem and are translated into a work-ready cue when runnable work exists.
   - Async wait resolution is carried back as wake metadata plus step notes so resumed goal work can react to the completion state.
   - Decision types:
-    - `thought`
-    - `action`
-    - `plan` (decomposed into multiple thought steps)
+    - `defer`
+    - `intend`
+    - `plan` (decomposed into multiple deferred steps)
     - `noop`
   - Action proposal validation against runtime available actions.
   - Redundancy handling is planner-side and cost-oriented:
@@ -378,13 +484,13 @@ It is intentionally high-level and should stay aligned with the code.
     - one truncation retry with increased completion budget on likely-truncated output
     - one strict-JSON retry on parse failure
     - parse-failure circuit breaker (scoped by `root_input + action_type`) that bypasses verifier for one decision after repeated malformed verifier outputs
-    - reject propagation into noop-thoughts: verifier `reject` preserves denied action type/payload metadata so follow-up planning can see exactly which candidate was blocked
-    - repeated-answer disagreement override: if a follow-up thought repeats the same `contact_user` payload after a prior non-technical verifier reject and the verifier rejects it again, planner keeps the original answer and the dispatcher lets that output through instead of re-blocking it as an ordinary repeated denied action
-    - structured follow-up lineage guard: follow-up thoughts carry origin action metadata (`originActionType`, `originActionObservedEvidence`), and verifier `repair` back to the same evidence action is ignored when the candidate is `contact_user`, prior evidence succeeded, and user did not explicitly request refresh/retry
+    - reject propagation into noop-retry deferred continuations: verifier `reject` preserves denied action type/payload metadata so follow-up planning can see exactly which candidate was blocked
+    - repeated-answer disagreement override: if a follow-up deferred continuation repeats the same `contact_user` payload after a prior non-technical verifier reject and the verifier rejects it again, planner keeps the original answer and the dispatcher lets that output through instead of re-blocking it as an ordinary repeated denied action
+    - structured follow-up lineage guard: follow-up deferred continuations carry origin action metadata (`originActionType`, `originActionObservedEvidence`), and verifier `repair` back to the same evidence action is ignored when the candidate is `contact_user`, prior evidence succeeded, and user did not explicitly request refresh/retry
     - `contact_user` meaning guard: verifier repairs may clean up surface form, but repairs that would change the answer's meaning are ignored and the original answer is kept
     - no-op repair collapse: if verifier returns `repair` but action type/payload/summary are materially unchanged, planner treats it as `approve` instead of recording a repair
     - answer-action tuning: verifier instructions explicitly approve directly entailed exact-match answers when there is no contradictory evidence, and verifier sampling temperature is fixed at `0.0`
-  - `resolution_draft` action proposals are allowed only inside active plan-context thoughts; out-of-context proposals are coerced to `noop`.
+  - `resolution_draft` intentions are allowed only inside active plan-context thoughts; out-of-context proposals are coerced to `noop`.
   - Retry policy and safe fallback to `Noop` on model/parse failures.
   - Follow-up evidence thoughts now explicitly ask for the next planner decision as one raw JSON object and forbid tool/function wrappers.
   - Planner and action-verifier prompts now include "reflection lessons" context to avoid repeated failed strategies.
@@ -544,6 +650,9 @@ It is intentionally high-level and should stay aligned with the code.
   - File: `src/main/kotlin/ai/neopsyke/agent/memory/scratchpad/ScratchpadStore.kt`
   - Enabled by default via `MemoryConfig.scratchpad.enabled=true`.
   - Activation remains plan-gated with `MemoryConfig.scratchpad.activationMinPlanSteps=2`.
+  - Ownership is now layered:
+    - thread-scoped workspace sections/evidence persist for the active cognitive thread and survive wait/resume
+    - transient answer drafts are grouped into one active draft sequence per thread, excluded from planner prompt summaries and digests, and reset when cognition leaves answer-drafting work or the root is torn down
   - Scoped to root input; independent from short-term and long-term memory pipelines.
   - Stores compact sections/evidence for the active request only.
   - Evidence entries preserve trust/source labels from external artifacts instead of flattening them to anonymous strings at ingestion time.
@@ -565,6 +674,9 @@ It is intentionally high-level and should stay aligned with the code.
     - Chat control plane and session-scoped SSE: `/api/chat/*`
     - Observability snapshot/events/workspace: `/api/obs/*`
     - Action control inspection/approval/live updates: `/api/action-control/*`
+  - Observability snapshot payloads now include direct cognitive-thread inspection snapshots, and dedicated endpoints expose:
+    - `/api/obs/threads`
+    - `/api/obs/threads/{threadId}`
   - Workspace identity and timing are both exposed in telemetry/event payloads:
     - `root_input_id`: stable request identity key
     - `root_input_received_at_ms`: timing anchor used for latency/timeline correlation
@@ -601,6 +713,8 @@ It is intentionally high-level and should stay aligned with the code.
   - are optional and fail-closed behind `config.connectors.enabled`
   - are loaded only from the shipped curated catalog plus local installed state
   - require local enablement, allowlisting, capability validation, and tool-description pinning before becoming planner-visible
+  - connector subprocesses launch with an explicit minimal runtime environment plus declared secret handles only; unrelated ambient process env vars are not inherited
+  - connector manifests do not grant direct/autonomous commit semantics; runtime derives observe-action commit behavior itself and treats non-observe connector actions as staged-by-default until stronger runtime policy support exists
   - remain primitive action surfaces; higher-level routines such as morning briefings or inbox cleanup should be modeled as goals that compose these actions, not as single workflow actions
 - Curated connector bundles are install presets only:
   - they can expand the connector allowlist for local enablement convenience
@@ -634,7 +748,7 @@ It is intentionally high-level and should stay aligned with the code.
 - File: `src/main/kotlin/ai/neopsyke/agent/ego/AttentionScheduler.kt`
 - Three bounded priority queues:
   - opportunities
-  - thoughts (`Urgency`)
+  - intentions (`Urgency`)
   - actions (`Urgency`)
 - Opportunity ordering:
   - input opportunity (`InputPriority`)
@@ -642,8 +756,8 @@ It is intentionally high-level and should stay aligned with the code.
   - goal-work opportunity
 - Supports root-input scoped queue operations used by convergence logic:
   - detect pending fallback explanation actions per `(rootInputId, sessionId)` scope
-  - detect pending plan-context or convergence thoughts per `(rootInputId, sessionId)` scope
-  - clear pending thoughts/actions for a resolved `(rootInputId, sessionId)` scope after terminal `contact_user`
+  - detect pending plan-context or convergence `DEFER` intentions per `(rootInputId, sessionId)` scope
+  - clear pending deferred intentions/actions for a resolved `(rootInputId, sessionId)` scope after terminal `contact_user`
 - Saturation leads to drop + instrumentation warning/event.
 
 ## Safety and Fallback Patterns

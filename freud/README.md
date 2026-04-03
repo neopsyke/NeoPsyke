@@ -94,7 +94,7 @@ Use Freud for:
 
 Deterministic Freud usage:
 
-- Go 1.21+ (for building the CLI)
+- Go 1.26+ (for building the CLI)
 - JDK 21+
 - `./gradlew` works in this repo
 - no provider API keys required
@@ -168,7 +168,7 @@ Use the single-input entrypoint:
 
 This is the primary live command for direct agent checks.
 
-### I Want To Replay A Previous Run (No API Calls)
+### I Want To Replay A Previous Run
 
 Use `--record` when you want replay material from a live eval. Ordinary live evals still write the normal logs and artifacts, but they do not generate replay files unless you opt in:
 
@@ -186,7 +186,7 @@ Or replay a full recorded session (all channels, not just LLM):
 ./freud/bin/freud eval --live --session-replay <run-dir>
 ```
 
-Replay serves cached responses as long as the messages sent to the LLM haven't changed. When they diverge (because your code changed what the agent sends), it switches to real API calls from that point forward and logs exactly where divergence happened.
+`eval --session-replay <run-dir>` auto-detects the replay cache from either `session/llm-cache.jsonl` or `artifacts/llm-cache.jsonl`. Replay serves cached responses as long as the messages sent to the LLM haven't changed. When they diverge (because your code changed what the agent sends), it switches to real API calls from that point forward and logs exactly where divergence happened.
 
 This is the recommended workflow for iterative development: record once, then replay while tuning policies, scoring, post-processing, or telemetry. See [LLM response cache](../docs/evaluation.md#llm-response-cache-record--replay) for the full reference.
 

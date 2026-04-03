@@ -35,6 +35,8 @@ func resetCLIState() {
 	bbhTimeout = 0
 	bbhBaseline = ""
 	bbhLive = false
+	bbhRecord = false
+	bbhSessionReplay = ""
 
 	evalInput = ""
 	evalExpected = ""
@@ -158,6 +160,32 @@ func TestBBHRequiresLiveByDefault(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "bbh requires --live") {
 		t.Fatalf("expected missing --live error, got: %v", err)
+	}
+}
+
+func TestBBHRejectsRecordWithSessionReplay(t *testing.T) {
+	tmp := t.TempDir()
+	replayDir := filepath.Join(tmp, "recorded-bbh")
+	if err := os.MkdirAll(replayDir, 0o755); err != nil {
+		t.Fatalf("mkdir replay dir: %v", err)
+	}
+	cfgPath := writeCLIConfig(t, fmt.Sprintf("project:\n  run_root: %q\nlive_eval:\n  llm_config_file: %q\nbbh:\n  prompts_file: %q\n  answers_file: %q\n", filepath.Join(tmp, "runs"), filepath.Join(tmp, "llm.yaml"), filepath.Join(tmp, "prompts.jsonl"), filepath.Join(tmp, "answers.jsonl")))
+	if err := os.WriteFile(filepath.Join(tmp, "prompts.jsonl"), []byte("{}\n"), 0o644); err != nil {
+		t.Fatalf("write prompts: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tmp, "answers.jsonl"), []byte("{}\n"), 0o644); err != nil {
+		t.Fatalf("write answers: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tmp, "llm.yaml"), []byte("routing: {}\n"), 0o644); err != nil {
+		t.Fatalf("write llm config: %v", err)
+	}
+
+	err := executeCLIForTest(t, "--config", cfgPath, "bbh", "--lane", "low-llm", "--live", "--record", "--session-replay", replayDir)
+	if err == nil {
+		t.Fatal("expected bbh validation failure for --record with --session-replay")
+	}
+	if !strings.Contains(err.Error(), "--record cannot be combined with --session-replay") {
+		t.Fatalf("expected incompatible replay flags error, got: %v", err)
 	}
 }
 

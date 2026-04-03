@@ -40,7 +40,7 @@ class MetaReasonerTest {
         )
     )
 
-    private fun thoughtTrigger() = ai.neopsyke.agent.model.EgoTrigger.PendingThoughtInput(
+    private fun thoughtTrigger() = deferredTrigger(
         PendingThought(id = 1, urgency = Urgency.MEDIUM, content = "keep thinking")
     )
 

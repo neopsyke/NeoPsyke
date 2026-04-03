@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 )
@@ -19,6 +20,8 @@ type BBHOpts struct {
 	MaxTimeouts          int
 	MaxRegressionPercent int
 	BaselineFile         string
+	Record               bool
+	SessionReplayDir     string
 	PreserveMemory       bool
 	MemoryEnabled        bool
 	LogbookEnabled       bool
@@ -37,9 +40,10 @@ type BBHOpts struct {
 
 // BBHResult holds the output of a BBH smoke suite run.
 type BBHResult struct {
-	RunDir      string
-	SummaryJSON string
-	ExitCode    int
+	RunDir          string
+	SummaryJSON     string
+	ReplayStatsJSON string
+	ExitCode        int
 }
 
 type bbhPrompt struct {
@@ -64,6 +68,17 @@ type bbhCaseResult struct {
 	Timeout         bool
 	SchemaDowngrade int
 	RunDir          string
+}
+
+type bbhReplayStats struct {
+	Mode                string                 `json:"mode"`
+	SessionReplaySource string                 `json:"session_replay_source,omitempty"`
+	RecordedCases       int                    `json:"recorded_cases"`
+	ReplayedCases       int                    `json:"replayed_cases"`
+	MissingReplayCases  []string               `json:"missing_replay_cases,omitempty"`
+	LLMCache            map[string]interface{} `json:"llm_cache"`
+	SessionReplay       map[string]interface{} `json:"session_replay"`
+	Hints               []string               `json:"hints,omitempty"`
 }
 
 // BBHSmoke runs the BBH reasoning smoke suite. Replaces run-bbh-smoke.sh.
@@ -118,6 +133,13 @@ func BBHSmoke(opts BBHOpts) (*BBHResult, error) {
 	artifactsDir := filepath.Join(runDir, "artifacts")
 	casesRoot := filepath.Join(runDir, "bbh-cases", opts.Lane)
 	os.MkdirAll(casesRoot, 0o755)
+	replayMode := "off"
+	if opts.Record {
+		replayMode = "record"
+	}
+	if opts.SessionReplayDir != "" {
+		replayMode = "replay"
+	}
 
 	// Initialize results TSV
 	resultsTSV := filepath.Join(artifactsDir, fmt.Sprintf("bbh-smoke-%s-results.tsv", opts.Lane))
@@ -171,6 +193,14 @@ func BBHSmoke(opts BBHOpts) (*BBHResult, error) {
 		expectedPath := filepath.Join(caseDir, "expected.txt")
 		os.WriteFile(expectedPath, []byte(expected+"\n"), 0o644)
 
+		caseReplayDir := ""
+		if opts.SessionReplayDir != "" {
+			caseReplayDir = resolveBBHReplayCaseDir(opts.SessionReplayDir, opts.Lane, p.ID)
+			if caseReplayDir == "" {
+				return nil, fmt.Errorf("bbh replay source is missing case %q for lane %q", p.ID, opts.Lane)
+			}
+		}
+
 		opts.Progress.Emit(ProgressUpdate{
 			Phase:   "case_start",
 			Current: i + 1,
@@ -184,20 +214,22 @@ func BBHSmoke(opts BBHOpts) (*BBHResult, error) {
 		// Call LiveEval directly (in-process)
 		goalsDisabled := false
 		evalResult, evalErr := LiveEval(LiveEvalOpts{
-			InputFile:      inputPath,
-			ExpectedFile:   expectedPath,
-			Timeout:        opts.Timeout,
-			GoalsEnabled:   &goalsDisabled,
-			PreserveMemory: opts.PreserveMemory,
-			RunDirOverride: caseDir,
-			NeopsykeCmd:    opts.NeopsykeCmd,
-			RunRootAbs:     runRootAbs,
-			GradleUserHome: opts.GradleUserHome,
-			LLMConfigFile:  opts.LLMConfigFile,
-			RetentionDays:  0, // no cleanup per-case
-			RepoRoot:       repoRoot,
-			Verbose:        opts.Verbose,
-			ConsoleWriter:  bbhCaseConsoleWriter(opts.Progress),
+			InputFile:        inputPath,
+			ExpectedFile:     expectedPath,
+			Timeout:          opts.Timeout,
+			SessionReplayDir: caseReplayDir,
+			Record:           opts.Record,
+			GoalsEnabled:     &goalsDisabled,
+			PreserveMemory:   opts.PreserveMemory,
+			RunDirOverride:   caseDir,
+			NeopsykeCmd:      opts.NeopsykeCmd,
+			RunRootAbs:       runRootAbs,
+			GradleUserHome:   opts.GradleUserHome,
+			LLMConfigFile:    opts.LLMConfigFile,
+			RetentionDays:    0, // no cleanup per-case
+			RepoRoot:         repoRoot,
+			Verbose:          opts.Verbose,
+			ConsoleWriter:    bbhCaseConsoleWriter(opts.Progress),
 		})
 
 		exitCode := 1
@@ -306,6 +338,8 @@ func BBHSmoke(opts BBHOpts) (*BBHResult, error) {
 		"baseline_file":                   opts.BaselineFile,
 		"max_regression_percent":          opts.MaxRegressionPercent,
 		"regression_fail":                 regressionFail,
+		"replay_mode":                     replayMode,
+		"session_replay_source":           opts.SessionReplayDir,
 		"results_tsv":                     resultsTSV,
 		"cases_root":                      casesRoot,
 	}
@@ -316,6 +350,16 @@ func BBHSmoke(opts BBHOpts) (*BBHResult, error) {
 
 	// Write summary MD
 	writeSummaryMD(artifactsDir, opts.Lane, summary, results)
+
+	replayStatsPath := ""
+	if replayMode != "off" {
+		replayStatsPath = writeReplayStats(artifactsDir, opts.Lane, replayMode, opts.SessionReplayDir, results)
+		if replayStatsPath != "" {
+			summary["replay_stats_json"] = replayStatsPath
+			summaryData, _ = json.MarshalIndent(summary, "", "  ")
+			os.WriteFile(summaryPath, append(summaryData, '\n'), 0o644)
+		}
+	}
 
 	// Gate checks
 	exitCode := 0
@@ -384,9 +428,10 @@ func BBHSmoke(opts BBHOpts) (*BBHResult, error) {
 	})
 
 	return &BBHResult{
-		RunDir:      runDir,
-		SummaryJSON: summaryPath,
-		ExitCode:    exitCode,
+		RunDir:          runDir,
+		SummaryJSON:     summaryPath,
+		ReplayStatsJSON: replayStatsPath,
+		ExitCode:        exitCode,
 	}, nil
 }
 
@@ -438,6 +483,149 @@ func writeSummaryMD(artifactsDir, lane string, summary map[string]interface{}, r
 	}
 	os.WriteFile(filepath.Join(artifactsDir, fmt.Sprintf("bbh-smoke-%s-summary.md", lane)),
 		[]byte(strings.Join(md, "\n")+"\n"), 0o644)
+}
+
+func writeReplayStats(artifactsDir, lane, mode, sessionReplaySource string, results []bbhCaseResult) string {
+	stats := bbhReplayStats{
+		Mode:                mode,
+		SessionReplaySource: sessionReplaySource,
+		LLMCache: map[string]interface{}{
+			"cases_with_stats": 0,
+			"total_calls":      0,
+			"cached_calls":     0,
+			"real_calls":       0,
+			"divergence_count": 0,
+		},
+		SessionReplay: map[string]interface{}{
+			"cases_with_stats":   0,
+			"total_replay_hits":  0,
+			"total_divergences":  0,
+			"diverged_channels":  []string{},
+			"fully_replayed_all": 0,
+		},
+	}
+
+	divergedChannels := map[string]struct{}{}
+	recordedCases := 0
+	replayedCases := 0
+	var missingReplayCases []string
+
+	for _, result := range results {
+		caseDir := result.RunDir
+		if analysisFileExists(filepath.Join(caseDir, "session", "session-manifest.json")) ||
+			analysisFileExists(filepath.Join(caseDir, "session", "llm-cache.jsonl")) ||
+			analysisFileExists(filepath.Join(caseDir, "artifacts", "llm-cache.jsonl")) {
+			recordedCases++
+		}
+
+		cacheStatsPath := filepath.Join(caseDir, "artifacts", "cache-stats.json")
+		if data := readJSONMap(cacheStatsPath); data != nil {
+			stats.LLMCache["cases_with_stats"] = intFromAny(stats.LLMCache["cases_with_stats"]) + 1
+			stats.LLMCache["total_calls"] = intFromAny(stats.LLMCache["total_calls"]) + intFromAny(data["total_calls"])
+			stats.LLMCache["cached_calls"] = intFromAny(stats.LLMCache["cached_calls"]) + intFromAny(data["cached_calls"])
+			stats.LLMCache["real_calls"] = intFromAny(stats.LLMCache["real_calls"]) + intFromAny(data["real_calls"])
+			stats.LLMCache["divergence_count"] = intFromAny(stats.LLMCache["divergence_count"]) + intFromAny(data["divergence_count"])
+		}
+
+		sessionStatsPath := filepath.Join(caseDir, "artifacts", "session-replay-stats.json")
+		if data := readJSONMap(sessionStatsPath); data != nil {
+			replayedCases++
+			stats.SessionReplay["cases_with_stats"] = intFromAny(stats.SessionReplay["cases_with_stats"]) + 1
+			stats.SessionReplay["total_replay_hits"] = intFromAny(stats.SessionReplay["total_replay_hits"]) + intFromAny(data["total_replay_hits"])
+			stats.SessionReplay["total_divergences"] = intFromAny(stats.SessionReplay["total_divergences"]) + intFromAny(data["total_divergences"])
+			if intFromAny(data["total_divergences"]) == 0 {
+				stats.SessionReplay["fully_replayed_all"] = intFromAny(stats.SessionReplay["fully_replayed_all"]) + 1
+			}
+			if channels, ok := data["diverged_channels"].([]interface{}); ok {
+				for _, channel := range channels {
+					if s, ok := channel.(string); ok && s != "" {
+						divergedChannels[s] = struct{}{}
+					}
+				}
+			}
+		} else if mode == "replay" {
+			missingReplayCases = append(missingReplayCases, filepath.Base(caseDir))
+		}
+	}
+
+	stats.RecordedCases = recordedCases
+	stats.ReplayedCases = replayedCases
+	if len(missingReplayCases) > 0 {
+		slices.Sort(missingReplayCases)
+		stats.MissingReplayCases = missingReplayCases
+	}
+	if len(divergedChannels) > 0 {
+		names := make([]string, 0, len(divergedChannels))
+		for channel := range divergedChannels {
+			names = append(names, channel)
+		}
+		slices.Sort(names)
+		stats.SessionReplay["diverged_channels"] = names
+	}
+	switch mode {
+	case "record":
+		stats.Hints = append(stats.Hints, fmt.Sprintf("Recorded replay artifacts for %d BBH case(s).", recordedCases))
+	case "replay":
+		stats.Hints = append(stats.Hints, fmt.Sprintf("Replayed %d BBH case(s) from %s.", replayedCases, sessionReplaySource))
+		if len(missingReplayCases) > 0 {
+			stats.Hints = append(stats.Hints, fmt.Sprintf("Missing replay stats for case(s): %s.", strings.Join(missingReplayCases, ", ")))
+		}
+	}
+
+	statsPath := filepath.Join(artifactsDir, fmt.Sprintf("bbh-smoke-%s-replay-stats.json", lane))
+	statsData, _ := json.MarshalIndent(stats, "", "  ")
+	os.WriteFile(statsPath, append(statsData, '\n'), 0o644)
+	return statsPath
+}
+
+func resolveBBHReplayCaseDir(baseDir, lane, caseID string) string {
+	for _, candidate := range []string{
+		filepath.Join(baseDir, "bbh-cases", lane, caseID),
+		filepath.Join(baseDir, caseID),
+	} {
+		if analysisFileExists(candidate) || analysisDirExists(candidate) {
+			return candidate
+		}
+	}
+	return ""
+}
+
+func readJSONMap(path string) map[string]interface{} {
+	if !analysisFileExists(path) {
+		return nil
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	var decoded map[string]interface{}
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return nil
+	}
+	return decoded
+}
+
+func intFromAny(value interface{}) int {
+	switch v := value.(type) {
+	case int:
+		return v
+	case int64:
+		return int(v)
+	case float64:
+		return int(v)
+	default:
+		return 0
+	}
+}
+
+func analysisFileExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && !info.IsDir()
+}
+
+func analysisDirExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
 }
 
 func readBaselinePassRate(path string) float64 {

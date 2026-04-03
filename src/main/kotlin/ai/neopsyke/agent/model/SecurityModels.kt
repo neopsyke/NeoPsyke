@@ -52,6 +52,36 @@ enum class DataTrust {
     SANITIZED_EXTERNAL_DATA,
 }
 
+/**
+ * Identifies the policy scope for a conversation or cognitive thread.
+ *
+ * | Scope | Behavior |
+ * |---|---|
+ * | [DEFAULT] | Normal local operation. Standard channel/principal/action rules apply. |
+ * | [DEPLOYMENT_RESTRICTED] | Future use: forces all commit modes to approval-backed only. Intended for non-local deployments where autonomous execution must be gated. |
+ * | [FULL_AUTONOMY] | Widens the autonomous action surface. May execute side-effecting actions without human approval. Use at your own risk — recommended to run sandboxed or containerised. |
+ *
+ * Configurable via `agent.policy_scope_id` in `agent-runtime.yaml` or the
+ * `NEOPSYKE_POLICY_SCOPE_ID` env var. Per-channel overrides (e.g.
+ * `NEOPSYKE_TELEGRAM_POLICY_SCOPE_ID`) take precedence for that channel.
+ */
+enum class PolicyScope {
+    DEFAULT,
+    DEPLOYMENT_RESTRICTED,
+    FULL_AUTONOMY;
+
+    /** Kebab-case identifier used in YAML, JSON, and env vars. */
+    val id: String get() = name.lowercase().replace('_', '-')
+
+    companion object {
+        fun fromId(value: String): PolicyScope =
+            entries.firstOrNull { it.id == value }
+                ?: throw IllegalArgumentException(
+                    "Unknown policy scope: '$value'. Valid values: ${entries.joinToString { it.id }}"
+                )
+    }
+}
+
 enum class ContentKind {
     MESSAGE,
     DOCUMENT,
@@ -87,15 +117,11 @@ data class ConversationSecurityContext(
     val principal: PrincipalRef,
     val channel: ChannelRef,
     val instructionTrust: InstructionTrust,
-    val policyScopeId: String = DEFAULT_POLICY_SCOPE_ID,
-) {
-    companion object {
-        const val DEFAULT_POLICY_SCOPE_ID: String = "default"
-    }
-}
+    val policyScope: PolicyScope = PolicyScope.DEFAULT,
+)
 
 data class CognitiveThreadSecurityContext(
-    val policyScopeId: String,
+    val policyScope: PolicyScope,
     val principalRole: PrincipalRole,
     val instructionTrust: InstructionTrust,
     val channelSurface: ChannelSurface,
@@ -110,7 +136,7 @@ data class CognitiveThreadSecurityContext(
             aggregatedDataTrust: DataTrust = DataTrust.TRUSTED_DATA,
         ): CognitiveThreadSecurityContext =
             CognitiveThreadSecurityContext(
-                policyScopeId = security.policyScopeId,
+                policyScope = security.policyScope,
                 principalRole = security.principal.role,
                 instructionTrust = security.instructionTrust,
                 channelSurface = security.channel.surface,
@@ -150,13 +176,10 @@ data class CognitiveThreadSecurityContext(
 }
 
 object ConversationSecurityContexts {
-    private const val DEFAULT_POLICY_SCOPE: String = ConversationSecurityContext.DEFAULT_POLICY_SCOPE_ID
-
     fun default(): ConversationSecurityContext =
         externalParticipant(
             provider = "unknown",
             channelId = ConversationContext.DEFAULT_SESSION_ID,
-            policyScopeId = DEFAULT_POLICY_SCOPE,
         )
 
     fun ownerDirect(
@@ -165,7 +188,7 @@ object ConversationSecurityContexts {
         accountId: String? = null,
         principalId: String = "owner",
         principalLabel: String? = "Owner",
-        policyScopeId: String = DEFAULT_POLICY_SCOPE,
+        policyScope: PolicyScope = PolicyScope.DEFAULT,
     ): ConversationSecurityContext =
         ConversationSecurityContext(
             principal = PrincipalRef(
@@ -181,7 +204,7 @@ object ConversationSecurityContexts {
                 accountId = accountId,
             ),
             instructionTrust = InstructionTrust.TRUSTED_INSTRUCTION,
-            policyScopeId = policyScopeId,
+            policyScope = policyScope,
         )
 
     fun externalParticipant(
@@ -189,7 +212,7 @@ object ConversationSecurityContexts {
         channelId: String,
         surface: ChannelSurface = ChannelSurface.GROUP,
         transport: TransportClass = TransportClass.CHAT,
-        policyScopeId: String = DEFAULT_POLICY_SCOPE,
+        policyScope: PolicyScope = PolicyScope.DEFAULT,
     ): ConversationSecurityContext =
         ConversationSecurityContext(
             principal = PrincipalRef(
@@ -204,14 +227,14 @@ object ConversationSecurityContexts {
                 channelId = channelId,
             ),
             instructionTrust = InstructionTrust.UNTRUSTED_INSTRUCTION,
-            policyScopeId = policyScopeId,
+            policyScope = policyScope,
         )
 
     fun internalAutomation(
         provider: String,
         channelId: String,
         principalId: String = provider,
-        policyScopeId: String = DEFAULT_POLICY_SCOPE,
+        policyScope: PolicyScope = PolicyScope.DEFAULT,
     ): ConversationSecurityContext =
         ConversationSecurityContext(
             principal = PrincipalRef(
@@ -226,14 +249,14 @@ object ConversationSecurityContexts {
                 channelId = channelId,
             ),
             instructionTrust = InstructionTrust.TRUSTED_INSTRUCTION,
-            policyScopeId = policyScopeId,
+            policyScope = policyScope,
         )
 
     fun adminControl(
         provider: String,
         channelId: String,
         principalId: String = "admin",
-        policyScopeId: String = DEFAULT_POLICY_SCOPE,
+        policyScope: PolicyScope = PolicyScope.DEFAULT,
     ): ConversationSecurityContext =
         ConversationSecurityContext(
             principal = PrincipalRef(
@@ -248,7 +271,7 @@ object ConversationSecurityContexts {
                 channelId = channelId,
             ),
             instructionTrust = InstructionTrust.TRUSTED_INSTRUCTION,
-            policyScopeId = policyScopeId,
+            policyScope = policyScope,
         )
 }
 
@@ -357,13 +380,13 @@ fun ConversationSecurityContext.renderSummary(): String =
         append("\ninstruction_trust=")
         append(instructionTrust.name.lowercase())
         append("\npolicy_scope_id=")
-        append(policyScopeId)
+        append(policyScope.id)
     }
 
 fun CognitiveThreadSecurityContext.renderSummary(): String =
     buildString {
         append("policy_scope_id=")
-        append(policyScopeId)
+        append(policyScope.id)
         append("\nprincipal_role=")
         append(principalRole.name.lowercase())
         append("\ninstruction_trust=")

@@ -8,6 +8,18 @@ eval:
   max_raw_response_chars: 2147483647
 
 agent:
+  # Policy scope: controls how much autonomy the agent gets.
+  # Channel, principal, and per-action rules always apply regardless of scope.
+  #
+  #   default               - normal operation; approval required where policy demands it
+  #   deployment-restricted  - all actions require explicit human approval
+  #   full-autonomy          - agent may execute without approval; use sandboxed
+  #
+  # Applies to all channels unless overridden per-channel (see native_integrations).
+  # Override via NEOPSYKE_POLICY_SCOPE_ID env var.
+  # See docs/security.md section 4.5 for full details.
+  policy_scope_id: default
+
   planner:
     max_loop_steps_per_input: 180
     max_thought_passes: 5
@@ -180,7 +192,9 @@ agent:
       # The current runtime resolves them from environment variables.
       bot_token_handle: TELEGRAM_BOT_TOKEN
       webhook_secret_handle: TELEGRAM_WEBHOOK_SECRET
-      policy_scope_id: telegram-owner
+      # Per-channel override; inherits from top-level policy_scope_id when omitted.
+      # Override via NEOPSYKE_TELEGRAM_POLICY_SCOPE_ID env var.
+      policy_scope_id: default
       session_id_prefix: telegram
       require_direct_chat: true
       drop_unauthorized_messages: false

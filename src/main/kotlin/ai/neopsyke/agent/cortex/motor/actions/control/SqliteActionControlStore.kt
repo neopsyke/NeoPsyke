@@ -1,5 +1,8 @@
 package ai.neopsyke.agent.cortex.motor.actions.control
 
+import com.fasterxml.jackson.databind.DeserializationFeature
+import com.fasterxml.jackson.databind.JsonNode
+import com.fasterxml.jackson.databind.node.ObjectNode
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
 import mu.KotlinLogging
@@ -7,6 +10,7 @@ import ai.neopsyke.agent.model.ActionLedgerEntry
 import ai.neopsyke.agent.model.ActionReceipt
 import ai.neopsyke.agent.model.CommitAuthorization
 import ai.neopsyke.agent.model.CommitMode
+import ai.neopsyke.agent.model.PolicyScope
 import ai.neopsyke.agent.model.StagedAction
 import ai.neopsyke.agent.model.StagedActionStatus
 import java.nio.file.Files
@@ -35,6 +39,8 @@ class SqliteActionControlStore(
 
     private val path: Path = resolveDbPath(dbPath)
     private val mapper = jacksonObjectMapper()
+    private val payloadReader = jacksonObjectMapper()
+        .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
     private val connection: Connection
 
     init {
@@ -156,7 +162,7 @@ class SqliteActionControlStore(
                     if (!rs.next()) {
                         return null
                     }
-                    mapper.readValue<StagedAction>(rs.getString("payload_json"))
+                    readPayload(rs.getString("payload_json"))
                 }
             }
         }
@@ -184,7 +190,7 @@ class SqliteActionControlStore(
                 statement.executeQuery().use { rs ->
                     buildList {
                         while (rs.next()) {
-                            add(mapper.readValue<StagedAction>(rs.getString("payload_json")))
+                            add(readPayload(rs.getString("payload_json")))
                         }
                     }
                 }
@@ -245,7 +251,7 @@ class SqliteActionControlStore(
                 statement.executeQuery().use { rs ->
                     buildList {
                         while (rs.next()) {
-                            add(mapper.readValue<StagedAction>(rs.getString("payload_json")))
+                            add(readPayload(rs.getString("payload_json")))
                         }
                     }
                 }
@@ -271,7 +277,7 @@ class SqliteActionControlStore(
                     return null
                 }
                 saveAuthorizationInternal(authorization)
-                val staged = mapper.readValue<StagedAction>(row.payloadJson).copy(
+                val staged = readPayload<StagedAction>(row.payloadJson).copy(
                     status = StagedActionStatus.EXECUTING,
                     authorizationId = authorization.id,
                     updatedAtMs = updatedAtMs,
@@ -304,7 +310,7 @@ class SqliteActionControlStore(
                     if (!rs.next()) {
                         return null
                     }
-                    mapper.readValue<CommitAuthorization>(rs.getString("payload_json"))
+                    readPayload(rs.getString("payload_json"))
                 }
             }
         }
@@ -341,7 +347,7 @@ class SqliteActionControlStore(
                     if (!rs.next()) {
                         return null
                     }
-                    mapper.readValue<ActionReceipt>(rs.getString("payload_json"))
+                    readPayload(rs.getString("payload_json"))
                 }
             }
         }
@@ -360,7 +366,7 @@ class SqliteActionControlStore(
                 statement.executeQuery().use { rs ->
                     buildList {
                         while (rs.next()) {
-                            add(mapper.readValue<ActionReceipt>(rs.getString("payload_json")))
+                            add(readPayload(rs.getString("payload_json")))
                         }
                     }
                 }
@@ -405,7 +411,7 @@ class SqliteActionControlStore(
                     if (!rs.next()) {
                         return null
                     }
-                    mapper.readValue<ActionLedgerEntry>(rs.getString("payload_json"))
+                    readPayload(rs.getString("payload_json"))
                 }
             }
         }
@@ -424,7 +430,7 @@ class SqliteActionControlStore(
                 statement.executeQuery().use { rs ->
                     buildList {
                         while (rs.next()) {
-                            add(mapper.readValue<ActionLedgerEntry>(rs.getString("payload_json")))
+                            add(readPayload(rs.getString("payload_json")))
                         }
                     }
                 }
@@ -650,4 +656,28 @@ class SqliteActionControlStore(
             createdAtMs = getLong("created_at_ms"),
             payloadJson = getString("payload_json"),
         )
+
+    private inline fun <reified T> readPayload(payloadJson: String): T =
+        payloadReader.readValue(normalizeLegacyActionPayload(payloadJson))
+
+    private fun normalizeLegacyActionPayload(payloadJson: String): String {
+        val root = payloadReader.readTree(payloadJson) as? ObjectNode ?: return payloadJson
+        val conversationContext = root.get("conversationContext") as? ObjectNode ?: return payloadJson
+        val security = conversationContext.get("security") as? ObjectNode ?: return payloadJson
+        if (security.has("policyScope") || !security.has("policyScopeId")) {
+            return payloadJson
+        }
+        val normalizedPolicyScope = normalizeLegacyPolicyScope(security.get("policyScopeId")) ?: return payloadJson
+        security.put("policyScope", normalizedPolicyScope)
+        security.remove("policyScopeId")
+        return payloadReader.writeValueAsString(root)
+    }
+
+    private fun normalizeLegacyPolicyScope(node: JsonNode?): String? {
+        val raw = node?.takeIf { it.isTextual }?.asText()?.trim().orEmpty()
+        if (raw.isBlank()) return null
+        val canonical = runCatching { PolicyScope.fromId(raw).name }.getOrNull()
+        if (canonical != null) return canonical
+        return PolicyScope.entries.firstOrNull { it.name == raw }?.name
+    }
 }

@@ -65,11 +65,37 @@ data class CognitiveThread(
     val metadata: Map<String, String> = emptyMap(),
 )
 
+data class CognitiveThreadWaitState(
+    val status: CognitiveThreadStatus,
+    val reason: String? = null,
+    val since: Instant,
+    val resumeHint: String? = null,
+)
+
+data class CognitiveThreadTerminalState(
+    val status: CognitiveThreadStatus,
+    val summary: String,
+    val reason: String? = null,
+    val completedAt: Instant,
+)
+
+data class CognitiveThreadSnapshot(
+    val thread: CognitiveThread,
+    val latestPercept: Percept? = null,
+    val latestOpportunity: Opportunity? = null,
+    val latestIntention: Intention? = null,
+    val waitState: CognitiveThreadWaitState? = null,
+    val terminalState: CognitiveThreadTerminalState? = null,
+    val lastBlockedReason: String? = null,
+    val lastBlockedReasonCode: String? = null,
+    val lastDeniedReason: String? = null,
+    val lastDeniedReasonCode: String? = null,
+)
+
 enum class CognitiveThreadKind {
     CONVERSATION,
     DRIVE,
     GOAL_DIRECTED,
-    ACTION_SUSPENSION,
 }
 
 enum class CognitiveThreadStatus {
@@ -95,6 +121,9 @@ data class Opportunity(
     val goalRunId: String? = null,
     val allowedIntentions: Set<IntentionKind> = setOf(IntentionKind.DEFER),
     val allowedCommitModes: Set<CommitMode> = setOf(CommitMode.NOT_APPLICABLE),
+    val availableActions: Set<ActionType> = emptySet(),
+    val dispatchableActions: Set<ActionType> = emptySet(),
+    val actionDefinitions: List<ActionPlanningDefinition> = emptyList(),
     val metadata: Map<String, String> = emptyMap(),
 )
 

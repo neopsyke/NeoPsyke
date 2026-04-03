@@ -2,6 +2,7 @@ package ai.neopsyke.dashboard
 
 import ai.neopsyke.agent.model.ConversationContext
 import ai.neopsyke.agent.model.ConversationSecurityContexts
+import ai.neopsyke.agent.model.PolicyScope
 import ai.neopsyke.agent.config.DefaultInterlocutorResolver
 import ai.neopsyke.agent.model.InputPriority
 import ai.neopsyke.agent.config.InterlocutorResolver
@@ -17,6 +18,7 @@ data class ChatSubmitResult(
 class ChatRuntimeBridge(
     private val store: DashboardStateStore,
     private val sensoryInput: AsyncSignalSource,
+    private val policyScope: PolicyScope = PolicyScope.DEFAULT,
     private val interlocutorResolver: InterlocutorResolver = DefaultInterlocutorResolver(),
 ) {
     init {
@@ -70,6 +72,7 @@ class ChatRuntimeBridge(
             security = ConversationSecurityContexts.ownerDirect(
                 provider = "webapp",
                 channelId = message.sessionId,
+                policyScope = policyScope,
             ),
         )
         val enqueued = sensoryInput.submitInput(

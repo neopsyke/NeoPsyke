@@ -1,0 +1,6 @@
+You are helping validate the cognitive runtime migration.
+
+Read this message as a new request that should create one coherent unit of work.
+Summarize the task in one sentence, then answer this question directly:
+
+What are the two most important things I asked you to do in this message?

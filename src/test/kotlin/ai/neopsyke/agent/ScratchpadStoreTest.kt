@@ -7,9 +7,11 @@ import ai.neopsyke.agent.model.ExternalContentArtifact
 import ai.neopsyke.agent.model.PendingAction
 import ai.neopsyke.agent.model.PendingInput
 import ai.neopsyke.agent.model.Provenances
+import ai.neopsyke.agent.goal.GoalRunActivation
 import ai.neopsyke.agent.config.ScratchpadConfig
 import ai.neopsyke.agent.model.Urgency
 import ai.neopsyke.agent.memory.scratchpad.ScratchpadStore
+import ai.neopsyke.agent.model.ConversationContext
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -49,7 +51,7 @@ class ScratchpadStoreTest {
         val summaryA = store.promptSummary(rootA, maxTokens = 400)
         val summaryB = store.promptSummary(rootB, maxTokens = 400)
 
-        assertTrue(summaryA.contains("Ephemeral scratchpad"))
+        assertTrue(summaryA.contains("Thread scratchpad"))
         assertTrue(summaryA.contains("Plan"))
         assertTrue(summaryA.contains("Research pricing", ignoreCase = true))
         assertTrue(summaryB.contains("Request"))
@@ -158,6 +160,83 @@ class ScratchpadStoreTest {
         )
 
         assertEquals(2, input?.resolutionDraftCount)
+    }
+
+    @Test
+    fun `resolution drafts stay out of thread prompt summary`() {
+        val store = ScratchpadStore(ScratchpadConfig(enabled = true, activationMinPlanSteps = 1))
+        val root = "root-thread-scope"
+        store.ensureForInput(
+            PendingInput(
+                id = 1,
+                content = "prepare final response",
+                rootInputId = root,
+                receivedAtMs = 111L
+            )
+        )
+        store.recordResolutionDraft(root, "Ephemeral draft one", intentionId = "intent-1")
+        store.recordResolutionDraft(root, "Ephemeral draft two", intentionId = "intent-1")
+
+        val summary = store.promptSummary(root, maxTokens = 400)
+        val finalPass = store.buildFinalPassInput(root, "candidate", 1200, intentionId = "intent-1")
+
+        assertFalse(summary.contains("Ephemeral draft one"))
+        assertFalse(summary.contains("Ephemeral draft two"))
+        assertEquals(2, finalPass?.resolutionDraftCount)
+        assertTrue(finalPass?.compilation?.contains("intention_drafts") == true)
+    }
+
+    @Test
+    fun `resolution drafts stay grouped across one active drafting sequence`() {
+        val store = ScratchpadStore(ScratchpadConfig(enabled = true, activationMinPlanSteps = 1))
+        val root = "root-intention-isolation"
+        store.ensureForInput(
+            PendingInput(
+                id = 1,
+                content = "prepare alternative final answers",
+                rootInputId = root,
+                receivedAtMs = 222L
+            )
+        )
+        store.recordResolutionDraft(root, "Draft for intent one", intentionId = "intent-1")
+        store.recordResolutionDraft(root, "Draft for intent two", intentionId = "intent-2")
+        val groupedFinalPass = store.buildFinalPassInput(root, "candidate one", 1200, intentionId = "intent-final")
+
+        assertEquals(2, groupedFinalPass?.resolutionDraftCount)
+        assertTrue(groupedFinalPass?.compilation?.contains("Draft for intent one") == true)
+        assertTrue(groupedFinalPass?.compilation?.contains("Draft for intent two") == true)
+
+        store.resetDraftSequence(root)
+        store.recordResolutionDraft(root, "Fresh draft after reset", intentionId = "intent-3")
+        val resetFinalPass = store.buildFinalPassInput(root, "candidate two", 1200, intentionId = "intent-4")
+
+        assertEquals(1, resetFinalPass?.resolutionDraftCount)
+        assertTrue(resetFinalPass?.compilation?.contains("Fresh draft after reset") == true)
+        assertFalse(resetFinalPass?.compilation?.contains("Draft for intent one") == true)
+    }
+
+    @Test
+    fun `goal work creates thread-scoped workspace`() {
+        val store = ScratchpadStore(ScratchpadConfig(enabled = true, activationMinPlanSteps = 1))
+        val root = "goal:alpha:step-1"
+
+        val created = store.ensureForGoalWork(
+            GoalRunActivation(
+                goalId = "goal-alpha",
+                stepId = "step-1",
+                rootInputId = root,
+                stepDescription = "Verify pricing",
+                acceptanceCriteria = "Confirm official price",
+                workingContext = "Previous attempt found conflicting pages",
+                conversationContext = ConversationContext.default(),
+                wakeReason = "timer",
+            )
+        )
+
+        val summary = store.promptSummary(root, maxTokens = 400)
+        assertTrue(created)
+        assertTrue(summary.contains("Goal step"))
+        assertTrue(summary.contains("Goal context"))
     }
 
     @Test
@@ -282,7 +361,7 @@ class ScratchpadStoreTest {
         assertTrue(activated)
         assertEquals(1, store.activeTaskCount())
         val summary = store.promptSummary(root, maxTokens = 400)
-        assertTrue(summary.contains("Ephemeral scratchpad"))
+        assertTrue(summary.contains("Thread scratchpad"))
         assertTrue(summary.contains("Request"))
         assertTrue(summary.contains("Plan"))
         assertTrue(summary.contains("research and compare options", ignoreCase = true))

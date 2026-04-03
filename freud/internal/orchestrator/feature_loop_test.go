@@ -301,6 +301,71 @@ func TestFeatureLoopSignoffGateAllowsExplicitTargetedTests(t *testing.T) {
 	}
 }
 
+func TestFeatureLoopCognitiveRuntimePhaseZeroUsesTargetedHarness(t *testing.T) {
+	dir := t.TempDir()
+	cfg := testCfgWithSteps([]config.PipelineStep{
+		{Name: "preflight_compile", Cmd: "echo compile"},
+		{Name: "targeted_tests", Cmd: "echo targeted"},
+		{Name: "full_tests", Cmd: "echo full"},
+		{Name: "scenario_pack"},
+		{Name: "reasoning_eval_logic"},
+	})
+	cfg.Project.RunRoot = dir
+
+	result, err := FeatureLoop(FeatureLoopOpts{
+		FeatureID: "cognitive-runtime-p0-tests",
+		DryRun:    true,
+		Cfg:       cfg,
+		RepoRoot:  dir,
+	})
+	if err != nil {
+		t.Fatalf("FeatureLoop cognitive-runtime-p0-tests dry-run failed: %v", err)
+	}
+
+	data, _ := os.ReadFile(filepath.Join(result.RunDir, "artifacts", "steps.tsv"))
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("expected p0 pipeline to contain 2 step entries, got %d: %v", len(lines), lines)
+	}
+	if !strings.HasPrefix(lines[0], "preflight_compile\t") || !strings.HasPrefix(lines[1], "targeted_tests\t") {
+		t.Fatalf("unexpected p0 step order: %v", lines)
+	}
+}
+
+func TestFeatureLoopCognitiveRuntimeFoundationUsesDeterministicGate(t *testing.T) {
+	dir := t.TempDir()
+	cfg := testCfgWithSteps([]config.PipelineStep{
+		{Name: "preflight_compile", Cmd: "echo compile"},
+		{Name: "targeted_tests", Cmd: "echo targeted"},
+		{Name: "full_tests", Cmd: "echo full"},
+		{Name: "scenario_pack"},
+		{Name: "reasoning_eval_logic"},
+	})
+	cfg.Project.RunRoot = dir
+
+	result, err := FeatureLoop(FeatureLoopOpts{
+		FeatureID: "cognitive-runtime-p1-foundation",
+		DryRun:    true,
+		Cfg:       cfg,
+		RepoRoot:  dir,
+	})
+	if err != nil {
+		t.Fatalf("FeatureLoop cognitive-runtime-p1-foundation dry-run failed: %v", err)
+	}
+
+	data, _ := os.ReadFile(filepath.Join(result.RunDir, "artifacts", "steps.tsv"))
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) != 4 {
+		t.Fatalf("expected p1 deterministic gate to contain 4 step entries, got %d: %v", len(lines), lines)
+	}
+	expected := []string{"preflight_compile\t", "full_tests\t", "scenario_pack\t", "reasoning_eval_logic\t"}
+	for idx, prefix := range expected {
+		if !strings.HasPrefix(lines[idx], prefix) {
+			t.Fatalf("unexpected p1 step order: %v", lines)
+		}
+	}
+}
+
 func TestFeatureLoopLiveOnlySkippedByDefault(t *testing.T) {
 	dir := t.TempDir()
 	cfg := testCfgWithSteps([]config.PipelineStep{

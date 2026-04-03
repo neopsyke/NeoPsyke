@@ -2,6 +2,11 @@
   "version": "v1",
   "scenarios": [
     {
+      "id": "direct_answer_single_step",
+      "selector": "ai.neopsyke.eval.AgentScenarioPackTest.scenario_direct_answer_single_step",
+      "description": "Simple low-risk requests still resolve in a single direct-answer step."
+    },
+    {
       "id": "denial_alternative",
       "selector": "ai.neopsyke.eval.AgentScenarioPackTest.scenario_denial_alternative_action",
       "description": "Denied action is replaced with a materially different safe action."
@@ -40,6 +45,11 @@
       "id": "plan_decomposition",
       "selector": "ai.neopsyke.eval.AgentScenarioPackTest.scenario_plan_decomposition_then_execute",
       "description": "Plan decision decomposes into step-thoughts that execute through normal Ego loop."
+    },
+    {
+      "id": "search_then_answer",
+      "selector": "ai.neopsyke.eval.AgentScenarioPackTest.scenario_search_then_answer",
+      "description": "Low-risk search-first requests still converge into a single final answer after observation."
     },
     {
       "id": "id_impulse_parallel_lifecycle",

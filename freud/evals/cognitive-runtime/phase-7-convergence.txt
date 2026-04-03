@@ -1,0 +1,5 @@
+Handle this in a stable way:
+
+I want an answer about pricing, but only after verification, and if verification fails I still want a useful fallback explanation instead of silence.
+
+Respond with the best next-step plan in 3 short bullets.

@@ -411,6 +411,10 @@ func isBuiltinStep(name string) bool {
 }
 
 func effectivePipeline(featureID string, pipeline []config.PipelineStep, opts FeatureLoopOpts) []config.PipelineStep {
+	if phasePipeline, ok := cognitiveRuntimePhasePipeline(featureID, pipeline); ok {
+		return phasePipeline
+	}
+
 	if featureID != "signoff-gate" || opts.OnlyStep == "targeted_tests" || opts.FromStep == "targeted_tests" {
 		return pipeline
 	}
@@ -423,6 +427,50 @@ func effectivePipeline(featureID string, pipeline []config.PipelineStep, opts Fe
 		filtered = append(filtered, step)
 	}
 	return filtered
+}
+
+func cognitiveRuntimePhasePipeline(featureID string, pipeline []config.PipelineStep) ([]config.PipelineStep, bool) {
+	stepByName := make(map[string]config.PipelineStep, len(pipeline))
+	for _, step := range pipeline {
+		stepByName[step.Name] = step
+	}
+
+	buildPipeline := func(stepNames ...string) ([]config.PipelineStep, bool) {
+		result := make([]config.PipelineStep, 0, len(stepNames))
+		for _, name := range stepNames {
+			step, ok := stepByName[name]
+			if !ok {
+				return nil, false
+			}
+			result = append(result, step)
+		}
+		return result, true
+	}
+
+	switch featureID {
+	case "cognitive-runtime-p0-tests":
+		result, ok := buildPipeline(
+			"preflight_compile",
+			"targeted_tests",
+		)
+		return result, ok
+	case "cognitive-runtime-p1-foundation",
+		"cognitive-runtime-p2-opportunities",
+		"cognitive-runtime-p3-intentions",
+		"cognitive-runtime-p4-feedback",
+		"cognitive-runtime-p5-goals-scratchpad",
+		"cognitive-runtime-p6-policy-control",
+		"cognitive-runtime-p7-convergence":
+		result, ok := buildPipeline(
+			"preflight_compile",
+			"full_tests",
+			"scenario_pack",
+			"reasoning_eval_logic",
+		)
+		return result, ok
+	default:
+		return nil, false
+	}
 }
 
 // runBuiltinStep dispatches a built-in step by name to its Go implementation.

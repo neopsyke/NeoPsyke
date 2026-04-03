@@ -52,7 +52,7 @@ flowchart LR
     LB -.->|"event-type narrative normalization: User timeline vs agent first-person memory/reflection"| MC
     MC --> RL["Reflection Lessons (Recall + Imprint Filters)"]
     MC -.->|"temporal intent → episodic recall + vector cues"| LB
-    E --> TWS["ScratchpadStore (Ephemeral Per Request)"]
+    E --> TWS["ScratchpadStore (Thread Workspace + Intention Drafts)"]
     E --> TWF["ScratchpadFinalizer (Noop or LLM)"]
     E --> PG["GoalsGateway (optional goal runtime boundary)"]
     PG --> PM["GoalManager / Goal Runtime"]
@@ -65,7 +65,9 @@ flowchart LR
     CR --> AP
     AP --> M
     %% Connector bundles are install presets only; goals compose primitive actions rather than executing bundle workflows directly
+    %% Connector subprocesses get an explicit minimal env + declared secret handles only; runtime ignores manifest commit/autonomy hints
     AP -.->|"Actions emit structured effects; reflection emits durable-memory-save only on successful persistence"| MC
+    M --> SC
 
     M --> WS["Web Search Handler/Engine"]
     CfgWS["WebSearch Provider Config (provider/key/base/model)"] --> WS
@@ -95,6 +97,7 @@ flowchart LR
     I --> DS["DashboardStateStore"]
     DS --> CP["Conversations Page (`/`) + Chat API (`/api/chat/*`)"]
     DS --> OP["Observability Page (`/dashboard`) + Obs API (`/api/obs/*`)"]
+    DS --> OT["Thread Inspection (`/api/obs/threads*`)"]
     DS --> OX["Action Control Page (`/action-control`)"]
     DS --> ACAPI["Action Control API + SSE (`/api/action-control/*`)"]
     %% Action control UI defaults to SIGNAL activity items; can opt into BACKGROUND or TRACE ledger visibility; live updates replace polling
@@ -115,18 +118,25 @@ sequenceDiagram
     participant Sup as Superego
     participant Motor as MotorCortex
     participant Delib as DeliberationEngine
+    participant CTS as CognitiveThreadStore
     participant Mem as MemorySystem
     participant TWS as ScratchpadStore
     participant Dash as DashboardStateStore/API
 
     User->>SC: Web chat input text
-    SC->>Ego: StimulusReceived (linguistic stimulus)
-    Note over SC,Ego: Stimulus carries ConversationContext [sessionId + security], provenance, rootInputId [identity], receivedAtMs [timing]
-    Ego->>Sched: enqueue input opportunity
+    SC->>Ego: StimulusReceived (stimulus + percept)
+    Note over SC,Ego: Stimulus carries ConversationContext [sessionId + security], provenance, rootInputId [identity], receivedAtMs [timing]; session replay restores the recorded security frame instead of inferring a fresh default
+    Ego->>CTS: bind percept to root-scoped cognitive thread
+    CTS-->>Ego: cognitiveThreadId + thread trust state
+    Ego->>Dash: emit cognitive_thread_updated
+    CTS-->>Ego: policy-shaped Opportunity\n(intentions + commit modes + planner-visible action surface)
+    Ego->>Sched: enqueue ScheduledOpportunity(opportunity + trigger)
+    Ego->>Dash: emit opportunity_enqueued
+    Note over CTS,Dash: Thread snapshots are retained for live and terminal roots and exposed through `/api/obs/threads`
 
     loop While pending work and step limit not reached
         Ego->>Sched: nextTask()
-        Sched-->>Ego: opportunity/thought/action
+        Sched-->>Ego: ScheduledOpportunity/intention/action
         Ego->>Ego: activateSession(task.conversationContext)
         Ego->>Delib: startStep()
 
@@ -134,35 +144,48 @@ sequenceDiagram
     Note over Ego,Mem: Id-driven recall/planning can see shared ambient context: goals, scratchpad themes, useful updates, open loops, and recent exact learning topics
     Note over Ego,Mem: Ambient context is a cached best-effort snapshot, not a real-time synchronized view
             Ego->>Planner: decide(context + idState)
-            Planner-->>Ego: thought/action/plan/noop
+            Planner-->>Ego: defer/intend/plan/noop
             Ego->>Sched: enqueue impulse-derived work with origin=ID
             Note over Ego,Sched: Impulse final result is deferred until all work for root_impulse_id drains
-        else Task = goal-work opportunity
+        else Task = goal work opportunity
             Ego->>PG: finalizeGoalCycle(rootInputId) after queues drain for that goal root
-            Note over Ego,PG: Goal runtime writes context/scratch/artifacts and may re-emit a goal runtime cue for resumable steps
-        else Task = input opportunity or thought
+    Note over Ego,PG: Goal runtime now resumes from a stable per-step thread root, creates scratchpad state only when work is actually processed, and may re-emit a goal runtime cue for resumable steps
+    Note over SC,Ego: StimulusIngressCoordinator classifies post-sensory stimuli into input, feedback, goal-work, or wake-only ingress before scheduler work begins
+        else Task = input or feedback opportunity
             Ego->>Mem: recall and short-term summary
             Note over Ego,Mem: Planner context now includes targeted reflection-lesson recall
-            Ego->>TWS: create or update request scratchpad and index summary
+            Ego->>TWS: create or update thread workspace and index summary
             Ego->>Dash: emit scratchpad_head (with optional debug snapshot)
             Note over Ego,Planner: For Id-origin thoughts, Ego reapplies Id convergence state and action filtering before planner decide internalize without escalation removes contact_user and reflect_internal so planner-visible terminal reflection stays evidence-bound
             Note over Ego,Planner: Planner-visible actions are prefiltered by conversation instruction trust, current thread data trust, and action contract metadata before prompt build
+            Note over Ego,Planner: Layered early policy shaping now also applies policy-scope, channel-surface, principal-role, and action-effect rules before proposal time control-plane actions are hidden from non-admin/non-internal surfaces and restricted scopes lose direct/autonomous commit semantics early
             Ego->>Planner: decide(context)
             Note over Ego,Planner: PromptBudgetAllocator reserves required-core/context floors with message-overhead accounting, trims optional first, and emits prompt_budget_allocation
-            Note over Ego,Planner: Planner prompt includes conversation security summary and trigger provenance summary untrusted external content is framed as data, not instruction
+            Note over Ego,Planner: Planner prompt includes conversation security summary, thread trust state, percept summary/family, opportunity summary/kind, allowed intentions/commit modes, and trigger provenance summary untrusted external content is framed as data, not instruction
             Note over Ego,Planner: Obvious persistent reminder / monitoring / goal-creation inputs route into a dedicated goal-creation branch before the generic planner path
             Note over Ego,Planner: Goal-creation branch uses a narrow schema prompt plus deterministic recurring schedule detection for supported forms like every N minutes / every N hours
             Note over Ego,Planner: Planner requests schema-enforced structured output. LLM layer owns compatibility degradation from strict to relaxed to prompt-only JSON. Parse failures do truncation-budget retry then strict-JSON retry before noop fallback
-            Planner-->>Ego: thought/action/plan/noop
+            Planner-->>Ego: defer/intend/plan/noop
             Ego->>Delib: maybeApplyPressureOverride
-            Ego->>Sched: enqueue thought/action/plan steps
+            Note over Ego: Runtime opportunity guard rejects invalid intention kind, action surface, or commit-mode violations before scheduling execution work
+            Ego->>Sched: enqueue explicit intentions (observe/prepare/stage/request_authorization/commit/defer)
+            Note over Ego,Sched: Planner now forms explicit lifecycle-aware intentions directly; plan steps and recovery/follow-up work become deferred intentions, not first-class thought queue items
             Note over Ego,Sched: Plans gated by budget, pressure, hash dedup, pending-plan check
             Note over Ego,Planner: Redundancy is planner-side soft cost control [prompt and verifier], with telemetry event external_action_redundancy_signal
             Note over Ego,Planner: Action verifier is disabled by default and only runs when planner.actionVerifierEnabled is true. when enabled it uses strict json_schema with relaxed-schema fallback. parse failures do truncation-budget retry then strict retry and may trip temporary verifier bypass [scoped per root_input and action_type]
             Note over Ego,Planner: Follow-up thoughts carry structured origin metadata [originActionType + observedEvidence]. verifier repairs back to the same evidence action are ignored for evidence-backed answers unless user asked refresh/retry. no-op verifier repairs collapse to approve
             Note over Ego,Planner: For contact_user, verifier repairs are limited to meaning-preserving surface cleanup. semantic answer rewrites are ignored and the original answer is kept
-            Note over Ego,Planner: Verifier rejects now preserve denied action metadata in noop-thoughts repeated non-technical reject of the same answer payload on a follow-up thought is treated as verifier disagreement planner keeps the answer and dispatcher does not re-block it as a normal repeated denied action
+            Note over Ego,Planner: Verifier rejects now preserve denied action metadata in noop-retry deferred continuations repeated non-technical reject of the same answer payload on a follow-up defer is treated as verifier disagreement planner keeps the answer and dispatcher does not re-block it as a normal repeated denied action
             Note over Ego,Planner: Follow-up evidence thoughts explicitly request one raw JSON planner decision and forbid tool/function wrappers
+        else Task = intention
+            alt Deferred continuation
+                Ego->>Ego: rebuild deferred continuation context from DEFER intention
+                Ego->>Planner: decide(context for deferred continuation)
+                Note over Ego,Sched: Non-Id defer chains carry fallback permission by default; if repeated defers hit max passes, Ego converts the chain into a fallback contact_user action instead of ending silently
+            else Action-bearing intention
+                Ego->>Ego: materialize PendingAction with intention metadata
+                Note over Ego: PendingAction now carries intentionId, intentionKind, and requestedCommitMode
+            end
         else Task = action
             alt Fallback explanation action
                 Ego->>Motor: execute (bypass Superego)
@@ -197,12 +220,13 @@ sequenceDiagram
                         end
                         alt allow
                             alt action = resolution_draft
-                                Ego->>TWS: record resolution_draft section (internal chunk)
-                                Note over Ego,TWS: Draft chunks are internal only no user-visible assistant turn
+                                Ego->>TWS: record active draft-sequence chunk
+                                Note over Ego,TWS: Draft chunks are internal only, excluded from planner prompt summaries, and no user-visible assistant turn is emitted
                             else action = contact_user
-                                Ego->>TWS: final-pass compilation from workspace index/evidence
+                                Ego->>TWS: final-pass compilation from thread workspace + active draft sequence
+                                Note over Ego,CTS: Before clearing per-input ephemera, normal completion marks the owning cognitive thread RESOLVED and keeps a bounded terminal snapshot
                                 Ego->>TWF: rewrite candidate payload (if enabled)
-                                Note over Ego,TWS: Final-pass skip requires both no evidence and insufficient drafts [less than max of 2 or activation_min_plan_steps]
+                                Note over Ego,TWS: Final-pass skip requires both no evidence and insufficient drafts [less than max of 2 or activation_min_plan_steps]; draft sequence resets when cognition leaves answer-drafting work
                         Note over Ego,TWF: Apply workspace-confidence gate first, then model-confidence gate
                             end
                             Ego->>ACS: stage / authorize / commit
@@ -210,17 +234,21 @@ sequenceDiagram
                                 ACS->>ACDB: save staged action
                                 ACS->>ACDB: save signal/background ledger entry
                                 ACS-->>Ego: staged action (`WAITING_AUTHORIZATION` or `READY`)
-                                Ego->>Sched: enqueue approval-or-alternative thought
+                                Note over Ego: Action review emits explicit intention transitions for STAGE and, when needed, REQUEST_AUTHORIZATION
+                                Ego->>Sched: enqueue approval-or-alternative deferred intention
                                 Note over Dash,ACAPI: Dashboard action-control page watches a dedicated SSE lane and refreshes on staged/authorization lifecycle updates rather than polling
                                 Note over ACW,ACS: Background autonomous worker polls SQL-filtered runnable READY actions, preserving same-thread order [threadSequence] and same-target serialization [executionKey] before atomic claim + execute
-                            else direct commit allowed
+                        else direct commit allowed
                                 ACS->>ACDB: save staged action + authorization
                                 ACS->>Motor: execute(action, authorization)
                                 Motor-->>ACS: outcome
+                                Motor->>SC: emit ActionFeedbackCue (non-contact outcomes)
+                                SC->>Ego: StimulusReceived(feedback percept)
                                 ACS->>ACDB: save receipt + ledger + final staged status
                                 ACS-->>Ego: executed outcome
                             end
                             Note over Ego,Motor: Actions may complete immediately or return WAITING + async operation handles
+                            Note over SC,Ego: Feedback continuations and terminal thread resolution are decided only after feedback re-enters through SensoryCortex, and WAITING outcomes suspend the thread instead of auto-queuing a continuation
                             Note over Ego,Motor: contact_user delivery is channel-aware. Telegram sessions send through Bot API, dashboard sessions continue through local/dashboard delivery
                             Note over ACAPI,Dash: Dashboard-approved staged executions can append a completion/answer message back into the originating chat session before root-session mapping is cleared
                             Note over Ego,PG: Goal-origin WAITING without handles is rejected as a contract violation
@@ -237,7 +265,7 @@ sequenceDiagram
                             Note over Ego,TWS: External evidence is stored as typed artifacts first and rendered into scratchpad with trust/source labels
                             Ego->>PG: onActionExecuted / allowFollowUp (generic action lifecycle observer)
                             Note over Ego,Sched: Id-origin satisfying actions clear remaining same-root queued work before any follow-up can be enqueued
-                            Ego->>Sched: enqueue follow-up thought (for evidence actions)
+                            Ego->>Sched: enqueue follow-up defer (for evidence actions)
                             Ego->>Mem: maybeAssessLongTermMemory(post_allowed_action, optional force)
                             Note over Ego,Mem: Blocked imprints emit long_term_memory_persistence_skipped [reason_code, reason_detail] for timeline visibility
                         else deny
@@ -336,10 +364,10 @@ flowchart LR
 stateDiagram-v2
     [*] --> Processing
 
-    Processing --> Planning: input/thought task
-    Planning --> ActionQueued: decision=action
-    Planning --> ThoughtQueued: decision=thought/plan/noop-thought
-    Planning --> ThoughtQueued: plan suppressed (budget/pressure/hash/pending) -> convergence/recovery thought
+    Processing --> Planning: input/deferred-intention task
+    Planning --> ActionQueued: decision=intend
+    Planning --> ThoughtQueued: decision=defer/plan/noop-retry
+    Planning --> ThoughtQueued: plan suppressed (budget/pressure/hash/pending) -> convergence/recovery defer
 
     ActionQueued --> TaskReview: non-fallback action
     ActionQueued --> Executing: fallback explanation action
@@ -347,7 +375,7 @@ stateDiagram-v2
 
     TaskReview --> PolicyReview: task verifier allow
     PolicyReview --> Denied: deterministic hard deny / contract deny / superego deny
-    Denied --> ThoughtQueued: enqueue safe alternative thought
+    Denied --> ThoughtQueued: enqueue safe alternative defer
     Note right of ThoughtQueued: Repeat-denied payload block is skipped for technical or transient denial reasons (prefer reason_code classification) reflection lessons persist only for non-technical and non-system denials
 
     PolicyReview --> Executing: allow_commit
@@ -357,8 +385,8 @@ stateDiagram-v2
     Executing --> EvidenceMissing: tool/provider failure
     Executing --> WebSearchUnavailable: web search init/config failure
     WebSearchUnavailable --> ThoughtQueued: planner uses remaining available actions
-    EvidenceObserved --> ThoughtQueued: follow-up thought
-    EvidenceMissing --> ThoughtQueued: retry/adjust path
+    EvidenceObserved --> ThoughtQueued: feedback-driven defer
+    EvidenceMissing --> ThoughtQueued: retry/adjust defer
     EvidenceMissing --> ActionDisabled: retry-budget cooldown trips (non-retryable action failures)
     ActionDisabled --> ThoughtQueued: planner uses remaining available actions
 

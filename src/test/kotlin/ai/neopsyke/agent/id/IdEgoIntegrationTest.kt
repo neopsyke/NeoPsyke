@@ -6,8 +6,12 @@ import ai.neopsyke.agent.model.ActionOrigin
 import ai.neopsyke.agent.model.ActionType
 import ai.neopsyke.agent.model.LoopTask
 import ai.neopsyke.agent.model.OriginSource
-import ai.neopsyke.agent.model.OpportunityWorkItem
+import ai.neopsyke.agent.model.Opportunity
+import ai.neopsyke.agent.model.OpportunityKind
+import ai.neopsyke.agent.model.OpportunityTrigger
 import ai.neopsyke.agent.model.PendingImpulse
+import ai.neopsyke.agent.model.PendingInput
+import ai.neopsyke.agent.model.RootInputIds
 import ai.neopsyke.agent.ego.AttentionScheduler
 import ai.neopsyke.agent.config.AgentConfig
 import ai.neopsyke.instrumentation.AgentEvent
@@ -37,6 +41,30 @@ class IdEgoIntegrationTest {
     }
 
     private fun defaultAgentConfig(): AgentConfig = AgentConfig()
+
+    private fun inputOpportunity(input: PendingInput): Opportunity =
+        Opportunity(
+            id = RootInputIds.next(),
+            cognitiveThreadId = RootInputIds.next(),
+            kind = OpportunityKind.RESPOND,
+            summary = input.content,
+            salience = input.priority.level.toDouble(),
+            createdAt = java.time.Instant.now(),
+            conversationContext = input.conversationContext,
+            rootStimulusId = input.rootInputId,
+        )
+
+    private fun impulseOpportunity(impulse: PendingImpulse): Opportunity =
+        Opportunity(
+            id = RootInputIds.next(),
+            cognitiveThreadId = RootInputIds.next(),
+            kind = OpportunityKind.EXECUTE,
+            summary = impulse.prompt,
+            salience = impulse.tension,
+            createdAt = java.time.Instant.now(),
+            conversationContext = impulse.conversationContext,
+            rootStimulusId = impulse.rootImpulseId,
+        )
 
     private fun buildSchedulerAndId(
         triggerThreshold: Double = 0.0,
@@ -75,7 +103,7 @@ class IdEgoIntegrationTest {
             config = idConfig,
             instrumentation = recordingInstrumentation,
             scope = CoroutineScope(Dispatchers.Unconfined),
-            enqueueImpulse = { impulse -> scheduler.enqueueImpulse(impulse, idConfig.maxPendingImpulses) },
+            enqueueImpulse = { impulse -> scheduler.enqueueImpulse(impulse, impulseOpportunity(impulse), idConfig.maxPendingImpulses) },
             hasPendingWork = { scheduler.hasPendingWork() },
         )
         return scheduler to id
@@ -92,9 +120,9 @@ class IdEgoIntegrationTest {
         val task = scheduler.nextTask()
         assertNotNull(task, "Scheduler should have a task")
         val opportunity = assertIs<LoopTask.AttendOpportunity>(task)
-        val impulse = assertIs<OpportunityWorkItem.ImpulseOpportunity>(opportunity.item)
-        assertEquals("test-need", impulse.impulse.needId)
-        assertEquals("Test impulse prompt", impulse.impulse.prompt)
+        val trigger = assertIs<OpportunityTrigger.Impulse>(opportunity.item.trigger)
+        assertEquals("test-need", trigger.impulse.needId)
+        assertEquals("Test impulse prompt", trigger.impulse.prompt)
     }
 
     @Test
@@ -125,18 +153,19 @@ class IdEgoIntegrationTest {
         assertEquals(1, scheduler.queueSnapshot().pendingImpulseCount)
 
         // Enqueue a user input after the impulse
-        scheduler.enqueueInput(content = "User says hello", source = "test")
+        val input = PendingInput(id = 1L, content = "User says hello", source = "test")
+        scheduler.enqueueInput(input, inputOpportunity(input))
         assertEquals(1, scheduler.queueSnapshot().pendingInputCount)
 
         // Input should be dequeued first
         val task1 = scheduler.nextTask()
         assertIs<LoopTask.AttendOpportunity>(task1, "Input should take priority over impulse")
-        assertIs<OpportunityWorkItem.InputOpportunity>(task1.item)
+        assertIs<OpportunityTrigger.Input>(task1.item.trigger)
 
         // Then impulse
         val task2 = scheduler.nextTask()
         assertIs<LoopTask.AttendOpportunity>(task2, "Impulse should come second")
-        assertIs<OpportunityWorkItem.ImpulseOpportunity>(task2.item)
+        assertIs<OpportunityTrigger.Impulse>(task2.item.trigger)
     }
 
     @Test
@@ -167,12 +196,12 @@ class IdEgoIntegrationTest {
                 interlocutor = Id.INTERLOCUTOR,
             ),
         )
-        scheduler.enqueueImpulse(impulse, maxPendingImpulses = 1)
+        scheduler.enqueueImpulse(impulse, impulseOpportunity(impulse), maxPendingImpulses = 1)
 
         // Impulse should come before thought and action
         val task1 = scheduler.nextTask()
         assertIs<LoopTask.AttendOpportunity>(task1, "Impulse should beat thoughts and actions")
-        assertIs<OpportunityWorkItem.ImpulseOpportunity>(task1.item)
+        assertIs<OpportunityTrigger.Impulse>(task1.item.trigger)
     }
 
     @Test
@@ -206,7 +235,7 @@ class IdEgoIntegrationTest {
         // 2. Dequeue impulse from scheduler
         val task = scheduler.nextTask()
         assertIs<LoopTask.AttendOpportunity>(task)
-        assertIs<OpportunityWorkItem.ImpulseOpportunity>(task.item)
+        assertIs<OpportunityTrigger.Impulse>(task.item.trigger)
 
         // 3. Ego accepts (planner produced a plan)
         id.onImpulseAccepted("test-need")
@@ -235,7 +264,7 @@ class IdEgoIntegrationTest {
 
         val task = scheduler.nextTask()
         assertIs<LoopTask.AttendOpportunity>(task)
-        assertIs<OpportunityWorkItem.ImpulseOpportunity>(task.item)
+        assertIs<OpportunityTrigger.Impulse>(task.item.trigger)
 
         // Planner returns Noop -> Ego calls onImpulseDenied
         id.onImpulseDenied("test-need")
@@ -269,9 +298,9 @@ class IdEgoIntegrationTest {
 
         val task = scheduler.nextTask()
         val opportunity = assertIs<LoopTask.AttendOpportunity>(task)
-        val impulse = assertIs<OpportunityWorkItem.ImpulseOpportunity>(opportunity.item)
-        assertEquals(Id.SESSION_ID, impulse.impulse.conversationContext.sessionId)
-        assertEquals(Id.INTERLOCUTOR, impulse.impulse.conversationContext.interlocutor)
+        val trigger = assertIs<OpportunityTrigger.Impulse>(opportunity.item.trigger)
+        assertEquals(Id.SESSION_ID, trigger.impulse.conversationContext.sessionId)
+        assertEquals(Id.INTERLOCUTOR, trigger.impulse.conversationContext.interlocutor)
     }
 
     @Test

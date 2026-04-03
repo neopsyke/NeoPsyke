@@ -58,6 +58,8 @@ web_search:
   provider: groq
   model: groq/compound-mini
 
+# Prices are just for keeping a quick reference at hand while testing, be aware prices will change
+# reasoning overhead multiplier is a guessed constant used to calculate reasonable token limits.
 model_catalog:
   anthropic:
     - model: claude-opus-4-5

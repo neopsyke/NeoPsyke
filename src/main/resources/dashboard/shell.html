@@ -4,6 +4,9 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>NeoPsyke Dashboard</title>
+  <link rel="icon" type="image/png" sizes="48x48" href="/__dashboard/assets/favicon48.png" />
+  <link rel="icon" type="image/png" sizes="96x96" href="/__dashboard/assets/favicon96.png" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/__dashboard/assets/favicon180.png" />
   <style>
     :root {
       --bg: #0f1a1f;
@@ -34,9 +37,15 @@
     }
     .title-wrap {
       display: flex;
-      align-items: baseline;
-      gap: 12px;
+      align-items: center;
+      gap: 10px;
       min-width: 0;
+    }
+    .shell-logo {
+      width: 28px;
+      height: 28px;
+      border-radius: 6px;
+      flex-shrink: 0;
     }
     .subtitle {
       font-size: 12px;
@@ -55,30 +64,31 @@
     }
     nav {
       display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 10px 18px 12px;
+      align-items: stretch;
+      gap: 0;
+      padding: 0 18px;
       border-bottom: 1px solid var(--line);
       overflow-x: auto;
     }
     .tab-link {
       text-decoration: none;
       color: var(--muted);
-      border: 1px solid var(--line);
-      border-radius: 999px;
-      padding: 7px 12px;
+      border: none;
+      border-bottom: 2px solid transparent;
+      padding: 10px 16px;
       font-size: 12px;
       white-space: nowrap;
-      background: rgba(15, 26, 31, 0.45);
+      background: none;
+      transition: color 0.15s, border-color 0.15s;
     }
     .tab-link:hover {
-      border-color: var(--accent);
-      color: var(--accent);
+      color: var(--text);
+      border-bottom-color: rgba(54, 195, 167, 0.4);
     }
     .tab-link.active {
       color: var(--accent);
-      border-color: rgba(54, 195, 167, 0.55);
-      background: rgba(54, 195, 167, 0.12);
+      border-bottom-color: var(--accent);
+      background: none;
     }
     .frame-wrap {
       min-height: 0;
@@ -107,8 +117,9 @@
 <body>
   <header>
     <div class="title-wrap">
+      <img class="shell-logo" src="/__dashboard/assets/neopsyke_galaxy_gradient4.png" alt="NeoPsyke" />
       <strong>NeoPsyke Dashboard</strong>
-      <span class="subtitle">Single-tab shell with route-based tabs</span>
+      <span class="subtitle">Experimental autonomous AI agent</span>
     </div>
     <div id="shell-status" class="shell-status">Loading tab...</div>
   </header>

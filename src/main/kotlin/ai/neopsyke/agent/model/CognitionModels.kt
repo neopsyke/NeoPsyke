@@ -79,6 +79,18 @@ data class PlannerContext(
     val conversationSecuritySummary: String = "",
     val threadSecuritySummary: String = "",
     val triggerProvenanceSummary: String = "",
+    val perceptSummary: String = "",
+    val perceptFamily: PerceptFamily? = null,
+    val cognitiveThreadId: String? = null,
+    val cognitiveThreadStatus: CognitiveThreadStatus? = null,
+    val opportunitySummary: String = "",
+    val opportunityKind: OpportunityKind? = null,
+    val allowedIntentions: Set<IntentionKind> = setOf(
+        IntentionKind.OBSERVE,
+        IntentionKind.PREPARE,
+        IntentionKind.DEFER,
+    ),
+    val allowedCommitModes: Set<CommitMode> = CommitMode.entries.toSet(),
     val availableActions: Set<ActionType> = ActionType.entries.toSet(),
     val dispatchableActions: Set<ActionType> = availableActions,
     val actionDefinitions: List<ActionPlanningDefinition> = emptyList(),
@@ -112,7 +124,8 @@ data class SuperegoContext(
 
 sealed interface EgoTrigger {
     data class IncomingInput(val input: PendingInput) : EgoTrigger
-    data class PendingThoughtInput(val thought: PendingThought) : EgoTrigger
+    data class DeferredIntention(val intention: QueuedIntention) : EgoTrigger
+    data class ActionFeedback(val feedback: PendingFeedback) : EgoTrigger
     data class IncomingImpulse(val impulse: PendingImpulse) : EgoTrigger
     data class GoalWork(val workUnit: GoalRunActivation) : EgoTrigger
 }
@@ -124,8 +137,10 @@ sealed interface EgoDecision {
         val longTermMemoryRecallQuery: String? = null,
     ) : EgoDecision
 
-    data class ProposeAction(
+    data class FormIntention(
         val urgency: Urgency,
+        val intentionKind: IntentionKind,
+        val commitModePreference: CommitMode = CommitMode.NOT_APPLICABLE,
         val actionType: ActionType,
         val payload: String,
         val summary: String,

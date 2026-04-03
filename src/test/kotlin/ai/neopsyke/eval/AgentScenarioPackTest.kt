@@ -23,9 +23,11 @@ import ai.neopsyke.support.buildTestEgo
 import ai.neopsyke.agent.config.AgentConfig
 import ai.neopsyke.agent.model.ActionExecutionStatus
 import ai.neopsyke.agent.model.ActionOutcome
+import ai.neopsyke.agent.model.CommitMode
 import ai.neopsyke.agent.model.EgoDecision
 import ai.neopsyke.agent.model.EgoTrigger
 import ai.neopsyke.agent.model.ActionType
+import ai.neopsyke.agent.model.IntentionKind
 import ai.neopsyke.agent.model.StagedActionStatus
 import ai.neopsyke.agent.config.MemoryConfig
 import ai.neopsyke.agent.model.PendingImpulse
@@ -90,21 +92,52 @@ import kotlin.test.fail
 
 class AgentScenarioPackTest {
     @Test
+    fun scenario_direct_answer_single_step() {
+        val plannerLlm = StubChatModelClient().apply {
+            enqueueRawResponse(
+                """
+                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"contact_user","action_payload":"ok","action_summary":"respond directly"}
+                """.trimIndent()
+            )
+        }
+        val superegoLlm = StubChatModelClient().apply {
+            enqueueRawResponse("""{"allow":true}""")
+        }
+        val instrumentation = RecordingInstrumentation()
+        val outputs = mutableListOf<String>()
+        val config = AgentConfig(planner = PlannerConfig(maxLoopStepsPerInput = 4, maxThoughtPasses = 1))
+        val agent = buildTestEgo(
+            planner = LlmEgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
+            superego = Superego(modelClient = superegoLlm, config = config, instrumentation = instrumentation),
+            motorCortex = buildMotorCortex(output = { outputs.add(it) }),
+            config = config,
+            instrumentation = instrumentation
+        )
+
+        runAgentWithInput(agent, "hello\nexit\n")
+
+        assertEquals(listOf("ego> ok"), outputs)
+        val plannerCalls = plannerLlm.calls.filter { it.options.metadata.callSite != "action_verifier" }
+        assertEquals(1, plannerCalls.size)
+        assertTrue(instrumentation.events.none { it.type == "plan_created" })
+    }
+
+    @Test
     fun scenario_denial_alternative_action() {
         val plannerLlm = StubChatModelClient().apply {
             enqueueRawResponse(
                 """
-                {"decision":"action","urgency":"high","action_type":"contact_user","action_payload":"bad idea","action_summary":"first answer attempt"}
+                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"high","action_type":"contact_user","action_payload":"bad idea","action_summary":"first answer attempt"}
                 """.trimIndent()
             )
             enqueueRawResponse(
                 """
-                {"decision":"action","urgency":"high","action_type":"contact_user","action_payload":"bad   idea","action_summary":"retrying same action"}
+                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"high","action_type":"contact_user","action_payload":"bad   idea","action_summary":"retrying same action"}
                 """.trimIndent()
             )
             enqueueRawResponse(
                 """
-                {"decision":"action","urgency":"high","action_type":"contact_user","action_payload":"safe alternative","action_summary":"different safe answer"}
+                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"high","action_type":"contact_user","action_payload":"safe alternative","action_summary":"different safe answer"}
                 """.trimIndent()
             )
         }
@@ -139,12 +172,12 @@ class AgentScenarioPackTest {
         val plannerLlm = StubChatModelClient().apply {
             enqueueRawResponse(
                 """
-                {"decision":"action","urgency":"medium","action_type":"web_search","action_payload":"latest pricing","action_summary":"search 1"}
+                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"web_search","action_payload":"latest pricing","action_summary":"search 1"}
                 """.trimIndent()
             )
             enqueueRawResponse(
                 """
-                {"decision":"action","urgency":"medium","action_type":"web_search","action_payload":"latest pricing retry","action_summary":"search 2"}
+                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"web_search","action_payload":"latest pricing retry","action_summary":"search 2"}
                 """.trimIndent()
             )
         }
@@ -182,7 +215,7 @@ class AgentScenarioPackTest {
         val plannerLlm = StubChatModelClient().apply {
             enqueueRawResponse(
                 """
-                {"decision":"action","urgency":"medium","action_type":"contact_user","action_payload":"ok","action_summary":"respond"}
+                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"contact_user","action_payload":"ok","action_summary":"respond"}
                 """.trimIndent()
             )
         }
@@ -223,12 +256,12 @@ class AgentScenarioPackTest {
         val plannerLlm = StubChatModelClient().apply {
             enqueueRawResponse(
                 """
-                {"decision":"action","urgency":"medium","action_type":"web_search","action_payload":"official pricing","action_summary":"search pricing"}
+                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"web_search","action_payload":"official pricing","action_summary":"search pricing"}
                 """.trimIndent()
             )
             enqueueRawResponse(
                 """
-                {"decision":"action","urgency":"medium","action_type":"contact_user","action_payload":"done","action_summary":"respond"}
+                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"contact_user","action_payload":"done","action_summary":"respond"}
                 """.trimIndent()
             )
         }
@@ -338,12 +371,12 @@ class AgentScenarioPackTest {
         val plannerLlm = StubChatModelClient().apply {
             enqueueRawResponse(
                 """
-                {"decision":"action","urgency":"medium","action_type":"website_fetch","action_payload":"{\"url\":\"https://example.com\"}","action_summary":"fetch docs"}
+                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"website_fetch","action_payload":"{\"url\":\"https://example.com\"}","action_summary":"fetch docs"}
                 """.trimIndent()
             )
             enqueueRawResponse(
                 """
-                {"decision":"action","urgency":"medium","action_type":"contact_user","action_payload":"using available tools only","action_summary":"respond"}
+                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"contact_user","action_payload":"using available tools only","action_summary":"respond"}
                 """.trimIndent()
             )
         }
@@ -378,7 +411,7 @@ class AgentScenarioPackTest {
         val plannerLlm = StubChatModelClient().apply {
             enqueueRawResponse(
                 """
-                {"decision":"action","urgency":"medium","action_type":"web_search","action_payload":"stale query","action_summary":"search old pricing"}
+                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"web_search","action_payload":"stale query","action_summary":"search old pricing"}
                 """.trimIndent()
             )
             enqueueRawResponseForCallSite(
@@ -454,13 +487,13 @@ class AgentScenarioPackTest {
             // Step-thought 1: planner decides to web_search
             enqueueRawResponse(
                 """
-                {"decision":"action","urgency":"medium","action_type":"web_search","action_payload":"official pricing 2025","action_summary":"search pricing"}
+                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"web_search","action_payload":"official pricing 2025","action_summary":"search pricing"}
                 """.trimIndent()
             )
             // Follow-up thought from search: planner decides to answer
             enqueueRawResponse(
                 """
-                {"decision":"action","urgency":"medium","action_type":"contact_user","action_payload":"Pricing is $20/month based on verified sources.","action_summary":"deliver verified answer"}
+                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"contact_user","action_payload":"Pricing is $20/month based on verified sources.","action_summary":"deliver verified answer"}
                 """.trimIndent()
             )
         }
@@ -510,6 +543,59 @@ class AgentScenarioPackTest {
     }
 
     @Test
+    fun scenario_search_then_answer() {
+        val plannerLlm = StubChatModelClient().apply {
+            enqueueRawResponse(
+                """
+                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"web_search","action_payload":"official pricing","action_summary":"search pricing"}
+                """.trimIndent()
+            )
+            enqueueRawResponse(
+                """
+                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"contact_user","action_payload":"Pricing is available on the official site.","action_summary":"respond with result"}
+                """.trimIndent()
+            )
+        }
+        val superegoLlm = StubChatModelClient().apply {
+            enqueueRawResponse("""{"allow":true}""")
+            enqueueRawResponse("""{"allow":true}""")
+        }
+        val instrumentation = RecordingInstrumentation()
+        val outputs = mutableListOf<String>()
+        val observedQueries = mutableListOf<String>()
+        val search = object : WebSearchEngine {
+            override fun search(query: String, maxResults: Int): WebSearchResult {
+                observedQueries += query
+                return WebSearchResult(
+                    summary = "Official pricing page located.",
+                    snippets = listOf("Pricing information published."),
+                    sources = listOf(
+                        WebSearchSource(
+                            title = "Pricing",
+                            url = "https://example.com/pricing"
+                        )
+                    )
+                )
+            }
+        }
+        val config = AgentConfig(planner = PlannerConfig(maxLoopStepsPerInput = 6, maxThoughtPasses = 2))
+        val agent = buildTestEgo(
+            planner = LlmEgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
+            superego = Superego(modelClient = superegoLlm, config = config, instrumentation = instrumentation),
+            motorCortex = buildMotorCortex(output = { outputs.add(it) }, webSearchEngine = search),
+            config = config,
+            instrumentation = instrumentation
+        )
+
+        runAgentWithInput(agent, "check pricing\nexit\n")
+
+        assertEquals(listOf("official pricing"), observedQueries)
+        assertEquals(listOf("ego> Pricing is available on the official site."), outputs)
+        val plannerCalls = plannerLlm.calls.filter { it.options.metadata.callSite != "action_verifier" }
+        assertTrue(plannerCalls.size >= 2)
+    }
+
+    @Test
     fun scenario_id_impulse_parallel_lifecycle() {
         val instrumentation = RecordingInstrumentation()
         val planner = object : Ego.Planner {
@@ -521,15 +607,17 @@ class AgentScenarioPackTest {
                         goal = "Evaluate impulse branches",
                         steps = listOf("discard branch", "execute branch")
                     )
-                    is EgoTrigger.PendingThoughtInput -> decideThought(trigger.thought)
+                    is EgoTrigger.ActionFeedback -> EgoDecision.Noop("ignore feedback in test")
+                    is EgoTrigger.DeferredIntention -> decideThought(trigger.intention.toPendingThought())
                     is EgoTrigger.GoalWork -> EgoDecision.Noop("ignore goal work")
                 }
 
             private fun decideThought(thought: PendingThought): EgoDecision =
                 when {
                     thought.planContext?.stepIndex == 0 -> EgoDecision.Noop("discard this branch")
-                    thought.planContext?.stepIndex == 1 -> EgoDecision.ProposeAction(
+                    thought.planContext?.stepIndex == 1 -> EgoDecision.FormIntention(
                         urgency = Urgency.HIGH,
+                        intentionKind = IntentionKind.OBSERVE,
                         actionType = ai.neopsyke.agent.model.ActionType.WEB_SEARCH,
                         payload = "official pricing",
                         summary = "gather evidence"
@@ -644,15 +732,19 @@ class AgentScenarioPackTest {
                     is EgoTrigger.GoalWork -> {
                         if (!startedAsync) {
                             startedAsync = true
-                            EgoDecision.ProposeAction(
+                            EgoDecision.FormIntention(
                                 urgency = Urgency.MEDIUM,
+                                intentionKind = IntentionKind.PREPARE,
+                                commitModePreference = CommitMode.APPROVAL_BACKED,
                                 actionType = ActionType("async_test"),
                                 payload = """{"operation_id":"scenario-op-1"}""",
                                 summary = "start async scenario operation"
                             )
                         } else {
-                            EgoDecision.ProposeAction(
+                            EgoDecision.FormIntention(
                                 urgency = Urgency.MEDIUM,
+                                intentionKind = IntentionKind.PREPARE,
+                                commitModePreference = CommitMode.APPROVAL_BACKED,
                                 actionType = ActionType.CONTACT_USER,
                                 payload = "scenario async goal done",
                                 summary = "report scenario completion"
@@ -792,7 +884,11 @@ class AgentScenarioPackTest {
         output: (String) -> Unit,
         webSearchEngine: WebSearchEngine = object : WebSearchEngine {
             override fun search(query: String, maxResults: Int): WebSearchResult =
-                WebSearchResult(summary = "unused", snippets = emptyList(), sources = emptyList())
+                WebSearchResult(
+                    summary = "default result",
+                    snippets = listOf("default snippet"),
+                    sources = listOf(WebSearchSource(title = "Default", url = "https://example.com/default"))
+                )
         },
         config: AgentConfig = AgentConfig(),
         goalsGateway: GoalsGateway = NoopGoalsGateway,

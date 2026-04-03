@@ -23,6 +23,7 @@ replay command. For standalone replay, use: freud eval --live --session-replay <
 var (
 	testFreudReplayInput   string
 	testFreudReplayTimeout int
+	testFreudReplayLane    string
 )
 
 func init() {
@@ -30,10 +31,11 @@ func init() {
 
 	testFreudReplayCmd.Flags().StringVar(&testFreudReplayInput, "input", "", "input prompt file (default: 'What is 2 + 2?')")
 	testFreudReplayCmd.Flags().IntVar(&testFreudReplayTimeout, "timeout", 0, "override timeout (seconds)")
+	testFreudReplayCmd.Flags().StringVar(&testFreudReplayLane, "lane", "", "load profile for LLM routing: low-llm | high-llm")
 }
 
 func runTestFreudReplay(cmd *cobra.Command, args []string) error {
-	cfg, err := config.LoadConfig(cfgFile, "", overrides)
+	cfg, err := config.LoadConfig(cfgFile, testFreudReplayLane, overrides)
 	if err != nil {
 		return err
 	}

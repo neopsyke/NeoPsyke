@@ -10,9 +10,15 @@ import ai.neopsyke.agent.model.ActionRecordImportance
 import ai.neopsyke.agent.model.ActionExecutionStatus
 import ai.neopsyke.agent.model.ActionReceipt
 import ai.neopsyke.agent.model.ActionType
+import ai.neopsyke.agent.model.CognitiveThread
+import ai.neopsyke.agent.model.CognitiveThreadKind
+import ai.neopsyke.agent.model.CognitiveThreadSnapshot
+import ai.neopsyke.agent.model.CognitiveThreadStatus
+import ai.neopsyke.agent.model.CognitiveThreadTerminalState
 import ai.neopsyke.agent.model.CommitAuthorization
 import ai.neopsyke.agent.model.CommitMode
 import ai.neopsyke.agent.model.ConversationContext
+import ai.neopsyke.agent.model.ConversationSecurityContexts
 import ai.neopsyke.agent.model.ConversationSecurityContext
 import ai.neopsyke.agent.cortex.sensory.AsyncSignalSource
 import ai.neopsyke.agent.model.ActionOutcome
@@ -22,6 +28,7 @@ import ai.neopsyke.agent.model.StagedActionStatus
 import ai.neopsyke.agent.model.Urgency
 import ai.neopsyke.instrumentation.AgentEvent
 import ai.neopsyke.metrics.MetricsQueryProvider
+import java.time.Instant
 import java.io.BufferedReader
 import java.io.Closeable
 import java.net.HttpURLConnection
@@ -103,6 +110,54 @@ class DashboardServerTest {
             assertTrue(submitRes.body().contains("\"accepted\":true"))
             assertTrue(submitRes.body().contains("\"recorded\":true"))
             assertTrue(submitRes.body().contains("\"message\""))
+        }
+    }
+
+    @Test
+    fun `obs thread endpoints expose retained cognitive thread snapshots`() {
+        startServer().use { started ->
+            val context = ConversationContext(
+                sessionId = "server-thread-session",
+                interlocutor = ai.neopsyke.agent.model.Interlocutor.named("dashboard-user"),
+                security = ConversationSecurityContexts.ownerDirect(provider = "web", channelId = "server-thread-session"),
+            )
+            started.store.onEvent(
+                AgentEvent(
+                    id = 1,
+                    type = "cognitive_thread_updated",
+                    data = mapOf(
+                        "root_input_id" to "root-thread-1",
+                        "thread_id" to "thread-server-1",
+                        "thread_status" to "resolved",
+                        "reason" to "input_terminal",
+                        "thread_snapshot" to CognitiveThreadSnapshot(
+                            thread = CognitiveThread(
+                                id = "thread-server-1",
+                                kind = CognitiveThreadKind.CONVERSATION,
+                                status = CognitiveThreadStatus.RESOLVED,
+                                title = "Find filing",
+                                conversationContext = context,
+                                rootStimulusId = "root-thread-1",
+                                lastUpdatedAt = Instant.now(),
+                            ),
+                            terminalState = CognitiveThreadTerminalState(
+                                status = CognitiveThreadStatus.RESOLVED,
+                                summary = "Delivered filing summary",
+                                reason = "input_resolved",
+                                completedAt = Instant.now(),
+                            ),
+                        ),
+                    )
+                )
+            )
+
+            val index = get("http://127.0.0.1:${started.port}/api/obs/threads?include_terminal=true")
+            assertEquals(200, index.statusCode())
+            assertTrue(index.body().contains("thread-server-1"))
+
+            val detail = get("http://127.0.0.1:${started.port}/api/obs/threads/thread-server-1")
+            assertEquals(200, detail.statusCode())
+            assertTrue(detail.body().contains("Delivered filing summary"))
         }
     }
 
