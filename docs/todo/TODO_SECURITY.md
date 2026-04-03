@@ -28,8 +28,8 @@ These are already decided and should not be reopened casually:
    closed.
 7. Connector outputs are external/untrusted by default unless NeoPsyke
    explicitly sanitizes and classifies them.
-8. Secret injection uses explicit handles only; no ambient `System.getenv()`
-   passthrough to connector processes.
+8. Connector subprocesses get an explicit environment: minimal runtime vars plus
+   declared secret handles only; no ambient `System.getenv()` passthrough.
 9. Workflow examples (Morning Briefing, Inbox Management) are goal compositions,
    not special workflow actions.
 10. Policy YAML is trusted operator configuration. The agent must not have write
@@ -258,7 +258,7 @@ not generalized yet.
 ### 8.3 Future plugin-host tests
 
 - Mutated connector metadata.
-- Connector attempts env access outside secret handles.
+- Connector attempts env access outside declared secret handles.
 - Connector returns prompt-injecting payload.
 
 ---
@@ -314,7 +314,9 @@ When continuing this work:
 
 - Do not treat raw MCP compatibility as trust.
 - Do not expose raw MCP tool names directly to the planner.
-- Do not let connectors define approval/autonomy policy.
+- Do not let connectors define approval/autonomy policy. Connector manifests may
+  describe effect class and trust bounds, but runtime-owned policy must decide
+  commit/autonomy behavior.
 - Do not widen outbound authority before stronger deterministic payload and
   approval UX exists.
 - Do not add high-risk capability families without a fresh security review.

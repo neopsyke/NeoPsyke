@@ -65,6 +65,7 @@ flowchart LR
     CR --> AP
     AP --> M
     %% Connector bundles are install presets only; goals compose primitive actions rather than executing bundle workflows directly
+    %% Connector subprocesses get an explicit minimal env + declared secret handles only; runtime ignores manifest commit/autonomy hints
     AP -.->|"Actions emit structured effects; reflection emits durable-memory-save only on successful persistence"| MC
     M --> SC
 
@@ -124,7 +125,7 @@ sequenceDiagram
 
     User->>SC: Web chat input text
     SC->>Ego: StimulusReceived (stimulus + percept)
-    Note over SC,Ego: Stimulus carries ConversationContext [sessionId + security], provenance, rootInputId [identity], receivedAtMs [timing]
+    Note over SC,Ego: Stimulus carries ConversationContext [sessionId + security], provenance, rootInputId [identity], receivedAtMs [timing]; session replay restores the recorded security frame instead of inferring a fresh default
     Ego->>CTS: bind percept to root-scoped cognitive thread
     CTS-->>Ego: cognitiveThreadId + thread trust state
     Ego->>Dash: emit cognitive_thread_updated

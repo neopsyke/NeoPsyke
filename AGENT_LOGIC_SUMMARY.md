@@ -200,6 +200,8 @@ It is intentionally high-level and should stay aligned with the code.
   - channel provider/surface/transport
   - instruction trust
   - policy scope id
+- Session replay now reconstructs `ConversationContext.security` from the
+  recorded signal fields instead of inferring a fresh default security posture.
 - For incoming stimuli with `ConversationContext.interlocutor=UNKNOWN`, `SensoryCortex` resolves interlocutor via `InterlocutorResolver`.
 - Session id derivation from `source` (for example `chat:<sessionId>`) only applies when incoming context uses the default session id.
 - Current ingress defaults:
@@ -711,6 +713,8 @@ It is intentionally high-level and should stay aligned with the code.
   - are optional and fail-closed behind `config.connectors.enabled`
   - are loaded only from the shipped curated catalog plus local installed state
   - require local enablement, allowlisting, capability validation, and tool-description pinning before becoming planner-visible
+  - connector subprocesses launch with an explicit minimal runtime environment plus declared secret handles only; unrelated ambient process env vars are not inherited
+  - connector manifests do not grant direct/autonomous commit semantics; runtime derives observe-action commit behavior itself and treats non-observe connector actions as staged-by-default until stronger runtime policy support exists
   - remain primitive action surfaces; higher-level routines such as morning briefings or inbox cleanup should be modeled as goals that compose these actions, not as single workflow actions
 - Curated connector bundles are install presets only:
   - they can expand the connector allowlist for local enablement convenience

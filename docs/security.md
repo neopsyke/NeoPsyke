@@ -905,21 +905,34 @@ This means the current plugin model assumes trusted first-party code.
 NeoPsyke does not yet implement a real third-party out-of-process connector
 runtime.
 
-### 14.2 Plugin factories still receive ambient environment-backed secrets
+### 14.2 First-party plugin factories still receive ambient environment-backed secrets
 
 `ActionPluginFactoryContext` currently exposes:
 
 - `env: Map<String, String> = System.getenv()`
 - `secretProvider = EnvActionSecretProvider(env)`
 
-This is acceptable for the current first-party runtime but is not a sufficient
-zero-trust model for third-party connectors.
+This is still acceptable only for the in-process first-party runtime. Connector
+subprocesses are launched through an explicit environment builder and no longer
+inherit the full ambient process environment.
 
-### 14.3 Third-party connector isolation is only stubbed today
+### 14.3 Third-party connector hosting exists, but isolation remains limited
 
 [ConnectorBoundaryModels.kt](src/main/kotlin/ai/neopsyke/agent/cortex/motor/actions/ConnectorBoundaryModels.kt)
-defines the concept of out-of-process isolation, but the actual runtime only
-implements `FIRST_PARTY_IN_PROCESS`.
+defines the concept of out-of-process isolation. NeoPsyke now also has a real
+local `stdio` connector host for curated connector actions.
+
+Current connector-host reality:
+
+- subprocesses are launched with an explicit minimal runtime environment plus
+  only declared secret handles
+- tool-description pinning and startup/capability checks fail closed
+- connector manifests do not control commit/autonomy policy; runtime derives
+  those semantics itself
+
+However, this is still not a hardened sandbox. Process separation exists, but
+there is no OS/container sandbox, remote operator auth, or mature hostile-host
+deployment model.
 
 ### 14.4 Dashboard approval currently assumes local owner trust
 
