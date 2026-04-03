@@ -1,6 +1,6 @@
 # NeoPsyke
 
-NeoPsyke is an autonomous AI agent built around a cognitive architecture inspired by Freud's structural model. It is designed to generate internal motivation, maintain durable goals and memory, do useful work through a full agent runtime, and route actions through explicit governance.
+NeoPsyke is an autonomous AI agent built around a cognitive architecture inspired by Freud's structural model. It is designed to generate internal motivation, maintain durable goals and memory, do useful work through a full agent runtime, and route actions through typed trust, durable approval, and explicit governance.
 
 The system is organized around three core modules:
 
@@ -8,7 +8,7 @@ The system is organized around three core modules:
 - **Ego** -- plans, reasons, and mediates between motivation, reality, and constraints.
 - **Superego** -- judges intentions and enforces governance, safety, and self-control.
 
-LLMs power the internal cognitive roles. Around that core, NeoPsyke provides short-term, long-term, and episodic memory, durable and recurring goals, and a layered security model built into the runtime.
+LLMs power the internal cognitive roles. Around that core, NeoPsyke provides short-term, long-term, and episodic memory, durable and recurring goals, and a layered security model built into the runtime from stimulus ingress to action execution.
 
 > **Status:** Experimental. The architecture is real and implemented, but the project is under active development. Expect rough edges.
 
@@ -37,7 +37,7 @@ It is trying to build a useful, capable cognitive architecture with clear intern
 - durable goals are separate from ephemeral turns
 - judgment and safety are first-class architectural functions
 
-Just as importantly, the goal is not a minimal theoretical demonstration. If the core mechanism were the only objective, it could be explored in a much smaller and simpler project. NeoPsyke is an attempt to embed that mechanism in a genuinely useful agent runtime.
+Just as importantly, the goal is not a minimal theoretical demonstration. If the core mechanism were the only objective, it could be explored in a much smaller and simpler project. NeoPsyke is an attempt to embed that mechanism in a genuinely useful agent runtime where authority, trust, and action control are first-class runtime concepts rather than prompt conventions.
 
 ## Why Kotlin?
 
@@ -155,13 +155,21 @@ The Ego runs in a bounded loop (configurable, default 180 steps per input) to pr
 
 **External integrations.** Telegram bot support, Google Workspace read/observe integrations for Gmail and Calendar via OAuth with PKCE, and staged email sending through Microsoft Graph.
 
-**Action plugin system.** Actions are discovered at startup via Java `ServiceLoader`. Built-in actions cover user communication (`contact_user`, `resolution_draft`), web research (`web_search`, `website_fetch`), internal reflection and memory capture (`reflect_internal`, `reflect_evidence`), goal management (`goal_operation`), outbound email (`email_send`), and Google Workspace observation (`gmail_observe_search`, `gmail_observe_message`, `calendar_observe_events`). New actions can be added by implementing the plugin interface and registering via `ServiceLoader`.
+**Action plugin system.** Actions are discovered at startup via Java `ServiceLoader`. Built-in actions cover user communication (`contact_user`, `resolution_draft`), web research (`web_search`, `website_fetch`), internal reflection and memory capture (`reflect_internal`, `reflect_evidence`), goal management (`goal_operation`), outbound email (`email_send`), and Google Workspace observation (`gmail_observe_search`, `gmail_observe_message`, `calendar_observe_events`). New actions can be added by implementing the plugin interface and registering via `ServiceLoader`. Runtime policy still owns whether an action can direct-commit, must stage for approval, or is denied outright.
 
 **Web dashboard.** Chat interface, observability dashboard with runtime metrics, and an action control panel for reviewing staged actions and approvals -- all served from a local web server.
 
 ## Security model
 
 Security is not an afterthought or a moderation layer bolted on top. It is a structural part of the cognitive loop, enforced at every stage from ingress to execution.
+
+### Security highlights
+
+- Every stimulus carries typed security metadata: principal role, channel identity, and instruction trust.
+- Policy is enforced in multiple deterministic layers before the model reaches execution.
+- High-impact actions use a durable approval ledger rather than conversational state.
+- Session replay preserves the recorded security frame for reproducibility and auditability.
+- Tool and connector execution can be constrained by runtime-owned action policy instead of trusting plugin-declared authority.
 
 ### Action lifecycle
 
@@ -197,6 +205,10 @@ Every stimulus entering the system carries explicit security metadata:
 
 Internal drives and user messages are never allowed to impersonate each other. This separation is enforced structurally, not by prompt.
 
+### Faithful session replay
+
+Recorded sessions are not only an eval convenience. Replay preserves the recorded security context of the original stimuli so audit, debugging, and reproducibility runs do not silently widen trust or authority compared with the original interaction.
+
 ### Prompt injection defense
 
 All external content (web search results, fetched pages, tool outputs) passes through a deterministic sanitization pipeline before reaching the planner.
@@ -221,9 +233,10 @@ Staged actions, approvals, denials, and execution receipts are durably recorded 
 
 ### Current limitations
 
-Prompt injection defense is heuristic, not a full sandbox.
-Plugins run in-process as trusted code -- third-party connector isolation is designed but not yet implemented.
-Dashboard approval assumes local owner trust.
+- Prompt injection defense is heuristic, not a full sandbox.
+- First-party plugins still run in-process as trusted code.
+- Connector-hosted subprocesses now run with explicit environment and secret scoping, but they are not yet isolated by an OS sandbox, container boundary, or separate trust domain.
+- Dashboard approval assumes local owner trust.
 
 These boundaries are documented and tracked.
 
@@ -252,7 +265,7 @@ Some omissions are deliberate architectural decisions rather than missing checkl
 - The memory advisor's consolidation decisions are LLM-dependent and not yet formally evaluated.
 - The Id's drive model is simple by design (configurable state machine, not learned behavior). This mirrors the structural role of drives in the original model -- complexity is expected to emerge from the interaction between modules, not from the drive source itself. However, different strategies can be still explored for need growth, urgency resolution by the Ego, interaction with the Ego, etc.
 - The dashboard is basic and suitable only for local monitoring and debugging. It's not yet a production-ready multi-user tool.
-- Prompt injection defense is heuristic, not a full sandbox, and plugins currently run in-process as trusted code.
+- Prompt injection defense is heuristic, not a full sandbox. First-party plugins still run in-process as trusted code, and connector hosts are only partially isolated today.
 - Much testing and tuning is still required in the agent all-around.
 - The evals are still minimal and could use much improvement and expansion.
 - The implemented actions and tools are still not enough for the agent to be broadly useful. More will be added once the main reasoning loop and the goals are more stable.
@@ -290,7 +303,7 @@ The `signoff-gate` command trims that to the non-redundant final gate:
 4. **Reasoning gate**
 
 Live evaluation lanes (`--lane low-llm`, `--lane high-llm`) and memory live eval are available for deeper validation during development.
-Recorded live evals can be replayed with `./freud/bin/freud eval --live --session-replay <run-dir>`, and the live reasoning smoke suite is available through `./freud/bin/freud bbh --live --lane <lane>`.
+Recorded live evals can be replayed with `./freud/bin/freud eval --live --session-replay <run-dir>`. That replay path is useful both for deterministic debugging and for verifying that the original interaction's security frame is preserved during reproduction. The live reasoning smoke suite is available through `./freud/bin/freud bbh --live --lane <lane>`.
 
 ## Configuration
 
