@@ -194,9 +194,9 @@ internal class CognitiveThreadStore {
             title = work.stepDescription,
             rootStimulusId = work.rootInputId,
             metadata = mapOf(
-                "goal_id" to work.goalId,
-                "goal_step_id" to work.stepId,
-                "goal_wake_reason" to work.wakeReason,
+                META_GOAL_ID to work.goalId,
+                META_GOAL_STEP_ID to work.stepId,
+                META_GOAL_WAKE_REASON to work.wakeReason,
             ),
             goalId = work.goalId,
         )
@@ -337,8 +337,8 @@ internal class CognitiveThreadStore {
                     status = CognitiveThreadStatus.WAITING,
                     lastUpdatedAt = Instant.now(),
                     metadata = record.thread.metadata + listOfNotNull(
-                        reason?.takeIf { it.isNotBlank() }?.let { "thread_wait_reason" to it },
-                        resumeHint?.takeIf { it.isNotBlank() }?.let { "thread_resume_hint" to it },
+                        reason?.takeIf { it.isNotBlank() }?.let { META_THREAD_WAIT_REASON to it },
+                        resumeHint?.takeIf { it.isNotBlank() }?.let { META_THREAD_RESUME_HINT to it },
                     ).toMap(),
                 ),
                 waitState = CognitiveThreadWaitState(
@@ -367,8 +367,8 @@ internal class CognitiveThreadStore {
                     status = CognitiveThreadStatus.BLOCKED,
                     lastUpdatedAt = Instant.now(),
                     metadata = record.thread.metadata + listOfNotNull(
-                        reason?.takeIf { it.isNotBlank() }?.let { "thread_block_reason" to it },
-                        reasonCode?.takeIf { it.isNotBlank() }?.let { "thread_block_reason_code" to it },
+                        reason?.takeIf { it.isNotBlank() }?.let { META_THREAD_BLOCK_REASON to it },
+                        reasonCode?.takeIf { it.isNotBlank() }?.let { META_THREAD_BLOCK_REASON_CODE to it },
                     ).toMap(),
                 ),
                 waitState = CognitiveThreadWaitState(
@@ -393,8 +393,8 @@ internal class CognitiveThreadStore {
                 thread = record.thread.copy(
                     lastUpdatedAt = Instant.now(),
                     metadata = record.thread.metadata + listOfNotNull(
-                        reason?.takeIf { it.isNotBlank() }?.let { "thread_denial_reason" to it },
-                        reasonCode?.takeIf { it.isNotBlank() }?.let { "thread_denial_reason_code" to it },
+                        reason?.takeIf { it.isNotBlank() }?.let { META_THREAD_DENIAL_REASON to it },
+                        reasonCode?.takeIf { it.isNotBlank() }?.let { META_THREAD_DENIAL_REASON_CODE to it },
                     ).toMap(),
                 ),
                 lastDeniedReason = reason,
@@ -415,7 +415,7 @@ internal class CognitiveThreadStore {
                     status = CognitiveThreadStatus.RESOLVED,
                     lastUpdatedAt = Instant.now(),
                     metadata = record.thread.metadata + listOfNotNull(
-                        reason?.takeIf { it.isNotBlank() }?.let { "thread_resolution_reason" to it }
+                        reason?.takeIf { it.isNotBlank() }?.let { META_THREAD_RESOLUTION_REASON to it }
                     ).toMap(),
                 ),
                 waitState = null,
@@ -444,7 +444,7 @@ internal class CognitiveThreadStore {
                     status = CognitiveThreadStatus.FAILED,
                     lastUpdatedAt = Instant.now(),
                     metadata = record.thread.metadata + listOfNotNull(
-                        reason?.takeIf { it.isNotBlank() }?.let { "thread_failure_reason" to it }
+                        reason?.takeIf { it.isNotBlank() }?.let { META_THREAD_FAILURE_REASON to it }
                     ).toMap(),
                 ),
                 waitState = null,
@@ -674,5 +674,17 @@ internal class CognitiveThreadStore {
         private const val MAX_TITLE_CHARS: Int = 160
         private const val GOAL_SALIENCE: Double = 0.75
         private const val DEFAULT_SNAPSHOT_LIMIT: Int = 100
+
+        private const val META_GOAL_ID: String = "goal_id"
+        private const val META_GOAL_STEP_ID: String = "goal_step_id"
+        private const val META_GOAL_WAKE_REASON: String = "goal_wake_reason"
+        private const val META_THREAD_WAIT_REASON: String = "thread_wait_reason"
+        private const val META_THREAD_RESUME_HINT: String = "thread_resume_hint"
+        private const val META_THREAD_BLOCK_REASON: String = "thread_block_reason"
+        private const val META_THREAD_BLOCK_REASON_CODE: String = "thread_block_reason_code"
+        private const val META_THREAD_DENIAL_REASON: String = "thread_denial_reason"
+        private const val META_THREAD_DENIAL_REASON_CODE: String = "thread_denial_reason_code"
+        private const val META_THREAD_RESOLUTION_REASON: String = "thread_resolution_reason"
+        private const val META_THREAD_FAILURE_REASON: String = "thread_failure_reason"
     }
 }

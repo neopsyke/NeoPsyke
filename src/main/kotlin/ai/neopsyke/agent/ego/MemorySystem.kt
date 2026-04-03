@@ -825,7 +825,7 @@ class MemorySystem(
                 put("channel_provider", activeSecurityContext.channel.provider)
                 put("channel_surface", activeSecurityContext.channel.surface.name.lowercase(Locale.ROOT))
                 put("instruction_trust", activeSecurityContext.instructionTrust.name.lowercase(Locale.ROOT))
-                put("policy_scope_id", activeSecurityContext.policyScopeId)
+                put("policy_scope_id", activeSecurityContext.policyScope.id)
                 metadata?.forEach { (key, value) -> put(key, value) }
             }
             lb.record(

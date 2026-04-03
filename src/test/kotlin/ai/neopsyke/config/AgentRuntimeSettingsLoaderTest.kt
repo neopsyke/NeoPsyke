@@ -155,7 +155,7 @@ class AgentRuntimeSettingsLoaderTest {
                   owner_user_id: 5678
                   bot_token_handle: TELEGRAM_TOKEN_HANDLE
                   webhook_secret_handle: TELEGRAM_SECRET_HANDLE
-                  policy_scope_id: telegram-owner-direct
+                  policy_scope_id: deployment-restricted
                   session_id_prefix: telegram-owner
                   require_direct_chat: true
                   drop_unauthorized_messages: false
@@ -290,7 +290,7 @@ class AgentRuntimeSettingsLoaderTest {
         assertEquals("5678", settings.agentConfig.nativeIntegrations.telegram.ownerUserId)
         assertEquals("TELEGRAM_TOKEN_HANDLE", settings.agentConfig.nativeIntegrations.telegram.botTokenHandle)
         assertEquals("TELEGRAM_SECRET_HANDLE", settings.agentConfig.nativeIntegrations.telegram.webhookSecretHandle)
-        assertEquals("telegram-owner-direct", settings.agentConfig.nativeIntegrations.telegram.policyScopeId)
+        assertEquals(ai.neopsyke.agent.model.PolicyScope.DEPLOYMENT_RESTRICTED, settings.agentConfig.nativeIntegrations.telegram.policyScope)
         assertEquals("telegram-owner", settings.agentConfig.nativeIntegrations.telegram.sessionIdPrefix)
         assertEquals(true, settings.agentConfig.nativeIntegrations.telegram.requireDirectChat)
         assertEquals(false, settings.agentConfig.nativeIntegrations.telegram.dropUnauthorizedMessages)

@@ -275,7 +275,7 @@ It is intentionally high-level and should stay aligned with the code.
     - dispatchable action set + per-action planner definitions (description/payload guidance/example/effect class/commit capability/trust constraints)
     - planner-visible action availability is prefiltered by conversation instruction trust, current thread data trust, and layered early policy shaping (`CognitivePolicyShaper`)
     - early policy shaping now operationalizes:
-      - policy scope (`default`, `deployment-restricted`, `emergency-override`)
+      - policy scope (`default`, `deployment-restricted`, `full-autonomy`)
       - channel surface (`DIRECT`, `GROUP`, `SHARED_WORKSPACE`, `AUTOMATION`, `ADMIN`)
       - principal role (owner/internal/admin vs external)
       - action effect class (observe/private/public/stateful/control-plane)

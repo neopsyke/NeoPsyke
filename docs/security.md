@@ -173,6 +173,78 @@ root input carries aggregated data trust plus taint-source summaries. When
 observe-style actions ingest external artifacts, the thread trust degrades and
 stays degraded for the lifetime of that root input.
 
+### 4.5 Policy Scope
+
+The policy scope controls how permissive the commit-mode rules are for a
+session. Channel, principal, and per-action policies always apply regardless of
+scope. The scope only adjusts how much autonomy the agent gets within those
+constraints.
+
+Configurable via `agent.policy_scope_id` in `agent-runtime.yaml` or
+`NEOPSYKE_POLICY_SCOPE_ID` env var. Per-channel overrides
+(e.g. `NEOPSYKE_TELEGRAM_POLICY_SCOPE_ID`) take precedence for that channel.
+
+#### `default` -- Normal operation
+
+The agent asks for human approval when the situation calls for it.
+
+- Owner on a direct channel can autonomously execute private and stateful
+  actions (contact user, reflect, goal operations) and directly commit
+  observe-class actions (web search, memory recall).
+- Group and shared-workspace channels force approval-backed commit for all
+  side-effecting actions.
+- External participants are always restricted to approval-backed commit.
+  Control-plane actions are hidden from the planner entirely.
+- Control-plane actions (goal mutations, runtime operations) are only visible
+  to owner, admin, or internal principals on direct, admin, or automation
+  channels with trusted instructions.
+
+#### `deployment-restricted` -- Everything needs approval
+
+Overrides all channel and principal permissiveness.
+
+- All autonomous commit is disabled, even for owner on a direct channel.
+- All direct commit is disabled.
+- Only approval-backed commit mode is available. Every side-effecting action
+  must be explicitly approved through the dashboard.
+- Control-plane actions are hidden from non-admin channels, even for owner.
+
+The agent can reason, plan, and propose actions, but cannot execute anything
+without a human clicking approve.
+
+Intended for future non-local deployments (staging, hosted) where autonomous
+execution must be gated by an operator.
+
+#### `full-autonomy` -- Minimal guardrails
+
+Overrides restrictions that would normally require approval.
+
+- Autonomous commit is enabled for control-plane actions (requires owner, admin,
+  or internal principal).
+- Direct commit is enabled for private and stateful actions even on non-direct
+  channels (group, shared workspace).
+- Both `POLICY_AUTONOMOUS` and `APPROVAL_BACKED` commit modes are available;
+  the agent chooses the fastest path.
+
+The Superego review, per-action policy, instruction trust, and data trust
+checks all still apply. External and unauthenticated principals remain
+restricted to approval-backed commit even in this scope.
+
+Be aware: depending on available actions and tools, the agent may spend
+significant tokens, execute destructive tasks, or disclose sensitive
+information without asking first. Running sandboxed or containerised is
+recommended.
+
+#### What stays constant across all scopes
+
+- Superego review always runs (deterministic conscience plus optional LLM
+  review).
+- Per-action policy in `action-security.yaml` always applies (e.g.
+  `email_send` stays disabled regardless of scope).
+- Instruction trust and data trust checks always apply.
+- External and unauthenticated principals are always restricted to
+  approval-backed commit.
+
 ---
 
 ## 5. Ingress Security Model
@@ -335,10 +407,7 @@ Phase 6 makes that earlier shaping materially visible in planner context:
 
 - `CognitivePolicyShaper` now shapes planner-visible action definitions before
   proposal time
-- policy scope now affects early commit semantics:
-  - `deployment-restricted` removes direct/autonomous non-observe commit modes
-  - `emergency-override` re-enables trusted internal/admin control-plane
-    progression
+- policy scope now affects early commit semantics (see section 4.5 for details)
 - channel surface and principal role now shape the planner surface:
   - non-admin/non-internal contexts lose control-plane actions entirely
   - external/group/shared contexts lose direct/autonomous commit semantics

@@ -433,11 +433,11 @@ Acceptance items closed:
 - opportunity commit modes are now shaped from thread security context before planner choice
 - non-admin/non-internal planner surfaces no longer expose control-plane actions
 - external and restricted-scope contexts lose direct/autonomous non-observe commit semantics before proposal time
-- `deployment-restricted` and `emergency-override` policy scopes now produce materially different planner/action surfaces
+- `deployment-restricted` and `full-autonomy` policy scopes now produce materially different planner/action surfaces
 - deterministic coverage now includes:
   - external/group control-plane hiding
   - restricted-scope commit narrowing
-  - emergency-override control-plane exposure
+  - full-autonomy control-plane exposure
 - living runtime docs updated: `AGENT_LOGIC_SUMMARY.md`, `AGENT_LOGIC_DIAGRAM.md`, `docs/security.md`
 
 Open issues:

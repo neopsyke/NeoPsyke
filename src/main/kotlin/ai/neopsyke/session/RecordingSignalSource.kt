@@ -131,7 +131,7 @@ class RecordingSignalSource(
             ctx.put("channel_provider", sec.channel.provider)
             ctx.put("channel_surface", sec.channel.surface.name)
             ctx.put("channel_transport", sec.channel.transport.name)
-            ctx.put("policy_scope_id", sec.policyScopeId)
+            ctx.put("policy_scope_id", sec.policyScope.id)
             node.set<ObjectNode>("conversation_context", ctx)
 
             val meta = signalMapper.createObjectNode()
@@ -163,19 +163,25 @@ class RecordingSignalSource(
 
             // Reconstruct the security context faithfully from recorded fields.
             val channelProvider = ctxNode.path("channel_provider").asText().ifEmpty { source }
-            val policyScopeId = ctxNode.path("policy_scope_id").asText().ifEmpty { "default" }
+            val policyScope = try {
+                ai.neopsyke.agent.model.PolicyScope.fromId(
+                    ctxNode.path("policy_scope_id").asText().ifEmpty { ai.neopsyke.agent.model.PolicyScope.DEFAULT.id }
+                )
+            } catch (_: Exception) {
+                ai.neopsyke.agent.model.PolicyScope.DEFAULT
+            }
             val security = when (instructionTrust) {
                 ai.neopsyke.agent.model.InstructionTrust.TRUSTED_INSTRUCTION ->
                     ConversationSecurityContexts.ownerDirect(
                         provider = channelProvider,
                         channelId = sessionId,
-                        policyScopeId = policyScopeId,
+                        policyScope = policyScope,
                     )
                 ai.neopsyke.agent.model.InstructionTrust.UNTRUSTED_INSTRUCTION ->
                     ConversationSecurityContexts.internalAutomation(
                         provider = channelProvider,
                         channelId = sessionId,
-                        policyScopeId = policyScopeId,
+                        policyScope = policyScope,
                     )
             }
 

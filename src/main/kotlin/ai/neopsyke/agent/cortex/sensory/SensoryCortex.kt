@@ -286,6 +286,7 @@ class PerceptualAppraiser {
 class StdinSignalSource(
     private val readLineFn: () -> String? = { readLine() },
     private val prompt: () -> Unit = { print("you> ") },
+    private val policyScope: ai.neopsyke.agent.model.PolicyScope = ai.neopsyke.agent.model.PolicyScope.DEFAULT,
 ) : SignalSource {
     override suspend fun nextSignal(): Signal = withContext(Dispatchers.IO) {
         prompt()
@@ -309,6 +310,7 @@ class StdinSignalSource(
                         security = ConversationSecurityContexts.ownerDirect(
                             provider = "stdin",
                             channelId = ConversationContext.DEFAULT_SESSION_ID,
+                            policyScope = policyScope,
                         ),
                     ),
                     trustLevel = StimulusTrustLevel.DEFAULT,
@@ -563,7 +565,7 @@ class SensoryCortex(
         fun stdin(config: AgentConfig): SensoryCortex =
             SensoryCortex(
                 config = config,
-                source = StdinSignalSource(),
+                source = StdinSignalSource(policyScope = config.policyScope),
             )
     }
 }

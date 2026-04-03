@@ -1459,7 +1459,7 @@ class Ego(
                     "thread_status" to thread.status.name.lowercase(),
                     "root_input_id" to rootInputId,
                     "goal_id" to thread.goalId,
-                    "policy_scope_id" to thread.securityContext.policyScopeId,
+                    "policy_scope_id" to thread.securityContext.policyScope.id,
                     "reason" to reason,
                     "thread_snapshot" to snapshot,
                 )

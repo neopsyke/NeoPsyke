@@ -104,9 +104,9 @@ internal class TelegramUpdateProcessor(
                 provider = "telegram",
                 channelId = message.chat.id.toString(),
                 accountId = config.ownerUserId.ifBlank { null },
-                principalId = fromId.ifBlank { "telegram-owner" },
+                principalId = fromId.ifBlank { TelegramChannelConfig.DEFAULT_PRINCIPAL_ID },
                 principalLabel = resolvedInterlocutor.displayName(),
-                policyScopeId = config.policyScopeId,
+                policyScope = config.policyScope,
             ),
         )
         val accepted = sensoryInput.submitInput(

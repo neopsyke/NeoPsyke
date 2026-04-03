@@ -263,12 +263,11 @@ execution continuity.
 
 The intended policy model answers questions at multiple scopes:
 
-- global runtime policy
 - deployment policy
 - channel policy
 - principal policy
 - action policy
-- emergency override policy
+- full-autonomy policy
 
 Thread and opportunity construction are expected to carry these bounds forward
 so the planner does not discover basic policy through trial and error.
@@ -500,8 +499,8 @@ Current gap:
 
 - actual authorization policy is still much narrower than the intended layered
   model
-- current runtime meaningfully supports global plus per-action behavior, but not
-  full deployment/channel/principal/emergency-override policy shaping
+- current runtime meaningfully supports channel, principal, action, and
+  full-autonomy policy shaping; deployment scope is a placeholder
 
 #### Secure action lifecycle
 
@@ -676,8 +675,8 @@ Current state:
 Gap:
 
 - opportunity construction does not yet carry full layered policy shaping
-- channel policy, principal policy, and emergency-override policy are not yet
-  first-class runtime shaping layers
+- channel policy, principal policy, and full-autonomy policy are now
+  operational runtime shaping layers; deployment scope remains a placeholder
 
 ### 3.6 Additional major gaps relative to the full target
 

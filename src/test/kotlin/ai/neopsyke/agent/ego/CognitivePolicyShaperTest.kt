@@ -13,6 +13,7 @@ import ai.neopsyke.agent.model.IntentionKind
 import ai.neopsyke.agent.model.Interlocutor
 import ai.neopsyke.agent.model.Opportunity
 import ai.neopsyke.agent.model.OpportunityKind
+import ai.neopsyke.agent.model.PolicyScope
 import ai.neopsyke.agent.model.PrincipalRef
 import ai.neopsyke.agent.model.PrincipalRole
 import ai.neopsyke.agent.model.RootInputIds
@@ -55,7 +56,7 @@ class CognitivePolicyShaperTest {
             role = PrincipalRole.OWNER,
             surface = ChannelSurface.DIRECT,
             instructionTrust = InstructionTrust.TRUSTED_INSTRUCTION,
-            policyScopeId = CognitivePolicyShaper.POLICY_SCOPE_DEPLOYMENT_RESTRICTED,
+            policyScope = PolicyScope.DEPLOYMENT_RESTRICTED,
         )
         val security = CognitiveThreadSecurityContext.fromConversation(context.security)
 
@@ -76,12 +77,12 @@ class CognitivePolicyShaperTest {
     }
 
     @Test
-    fun `emergency override exposes trusted control plane actions`() {
+    fun `full autonomy exposes trusted control plane actions`() {
         val context = conversationContext(
             role = PrincipalRole.ADMIN_CONTROL,
             surface = ChannelSurface.ADMIN,
             instructionTrust = InstructionTrust.TRUSTED_INSTRUCTION,
-            policyScopeId = CognitivePolicyShaper.POLICY_SCOPE_EMERGENCY_OVERRIDE,
+            policyScope = PolicyScope.FULL_AUTONOMY,
         )
         val security = CognitiveThreadSecurityContext.fromConversation(context.security)
 
@@ -141,7 +142,7 @@ class CognitivePolicyShaperTest {
             role = PrincipalRole.ADMIN_CONTROL,
             surface = ChannelSurface.ADMIN,
             instructionTrust = InstructionTrust.TRUSTED_INSTRUCTION,
-            policyScopeId = CognitivePolicyShaper.POLICY_SCOPE_EMERGENCY_OVERRIDE,
+            policyScope = PolicyScope.FULL_AUTONOMY,
         )
         val security = CognitiveThreadSecurityContext.fromConversation(context.security)
 
@@ -235,7 +236,7 @@ class CognitivePolicyShaperTest {
         role: PrincipalRole,
         surface: ChannelSurface,
         instructionTrust: InstructionTrust,
-        policyScopeId: String = ConversationSecurityContext.DEFAULT_POLICY_SCOPE_ID,
+        policyScope: PolicyScope = PolicyScope.DEFAULT,
     ): ConversationContext =
         ConversationContext(
             sessionId = "policy-test",
@@ -249,7 +250,7 @@ class CognitivePolicyShaperTest {
                     channelId = "policy-test",
                 ),
                 instructionTrust = instructionTrust,
-                policyScopeId = policyScopeId,
+                policyScope = policyScope,
             ),
         )
 }

@@ -10,14 +10,33 @@ import ai.neopsyke.agent.model.CommitMode
 import ai.neopsyke.agent.model.ConversationContext
 import ai.neopsyke.agent.model.IntentionKind
 import ai.neopsyke.agent.model.Opportunity
+import ai.neopsyke.agent.model.PolicyScope
 import ai.neopsyke.agent.model.PrincipalRole
 
+/**
+ * Shapes the action surface and commit-mode options available to Ego based on
+ * the thread's security context.
+ *
+ * ## Policy scopes
+ *
+ * | Scope | Purpose |
+ * |---|---|
+ * | `"default"` | Normal local operation. Standard channel/principal/action rules apply. |
+ * | `"deployment-restricted"` | Future use: restricts all commit modes to approval-backed only. Intended for non-local deployments (staging, hosted) where autonomous execution must be gated. Currently a single-value toggle; will be replaced with a richer deployment-level enum when deployment targets are introduced. |
+ * | `"full-autonomy"` | Widens the autonomous action surface. See [isFullAutonomy] for details and warnings. |
+ */
 internal object CognitivePolicyShaper {
+    /**
+     * Tracks whether the full-autonomy warning has already been emitted in this
+     * JVM session to avoid spamming stdout on every opportunity.
+     */
+    @Volatile private var fullAutonomyWarningEmitted: Boolean = false
+
     fun opportunityCommitModes(
         securityContext: CognitiveThreadSecurityContext,
     ): Set<CommitMode> {
         val nonObserveModes = when {
-            isEmergencyOverride(securityContext) -> setOf(
+            isFullAutonomy(securityContext) -> setOf(
                 CommitMode.POLICY_AUTONOMOUS,
                 CommitMode.APPROVAL_BACKED,
             )
@@ -148,13 +167,13 @@ internal object CognitivePolicyShaper {
         if (isExternal(securityContext.principalRole)) return false
         return when (descriptor.effectClass) {
             ActionEffectClass.CONTROL_PLANE ->
-                isEmergencyOverride(securityContext) ||
+                isFullAutonomy(securityContext) ||
                     securityContext.channelSurface == ChannelSurface.ADMIN
             ActionEffectClass.COMMIT_PUBLIC ->
                 securityContext.channelSurface == ChannelSurface.DIRECT && !isRestrictedByPolicyScope(securityContext)
             ActionEffectClass.COMMIT_PRIVATE,
             ActionEffectClass.COMMIT_STATEFUL,
-            -> securityContext.channelSurface == ChannelSurface.DIRECT || isEmergencyOverride(securityContext)
+            -> securityContext.channelSurface == ChannelSurface.DIRECT || isFullAutonomy(securityContext)
             ActionEffectClass.OBSERVE -> true
         }
     }
@@ -169,7 +188,7 @@ internal object CognitivePolicyShaper {
         if (isExternal(securityContext.principalRole)) return false
         return when (descriptor.effectClass) {
             ActionEffectClass.CONTROL_PLANE ->
-                isEmergencyOverride(securityContext) &&
+                isFullAutonomy(securityContext) &&
                     securityContext.principalRole in setOf(
                         PrincipalRole.SYSTEM_INTERNAL,
                         PrincipalRole.ADMIN_CONTROL,
@@ -180,7 +199,7 @@ internal object CognitivePolicyShaper {
             ActionEffectClass.COMMIT_PRIVATE,
             ActionEffectClass.COMMIT_STATEFUL,
             -> securityContext.channelSurface in setOf(ChannelSurface.DIRECT, ChannelSurface.AUTOMATION) ||
-                isEmergencyOverride(securityContext)
+                isFullAutonomy(securityContext)
             ActionEffectClass.OBSERVE -> true
         }
     }
@@ -206,11 +225,55 @@ internal object CognitivePolicyShaper {
         principalRole == PrincipalRole.EXTERNAL_PARTICIPANT ||
             principalRole == PrincipalRole.UNAUTHENTICATED_EXTERNAL
 
-    private fun isEmergencyOverride(securityContext: CognitiveThreadSecurityContext): Boolean =
-        securityContext.policyScopeId == POLICY_SCOPE_EMERGENCY_OVERRIDE
+    /**
+     * Full-autonomy mode widens the autonomous action surface beyond what the
+     * channel/principal combination would normally allow.
+     *
+     * **WARNING — USE AT YOUR OWN RISK:**
+     * - The agent may execute side-effecting actions without human approval.
+     * - Depending on available actions and tools, this could execute destructive
+     *   tasks, spend significant LLM tokens, or disclose sensitive information.
+     * - Recommended to run in a sandboxed or containerised environment when
+     *   this scope is active.
+     *
+     * A stdout notice is emitted the first time this scope is seen in a
+     * session so the operator is aware.
+     */
+    private fun isFullAutonomy(securityContext: CognitiveThreadSecurityContext): Boolean {
+        val active = securityContext.policyScope == PolicyScope.FULL_AUTONOMY
+        if (active && !fullAutonomyWarningEmitted) {
+            fullAutonomyWarningEmitted = true
+            println(
+                """
+                |
+                |  [!] Policy scope: full-autonomy
+                |
+                |  The agent may execute side-effecting and control-plane actions
+                |  without human approval. Channel, principal, and per-action
+                |  policies still apply.
+                |
+                |  Be aware: token spend, destructive tasks, and information
+                |  disclosure depend on available actions and tools.
+                |  Running sandboxed or containerised is recommended.
+                |
+                |  Change policy_scope_id in agent-runtime.yaml to disable.
+                |
+                """.trimMargin(),
+            )
+        }
+        return active
+    }
 
+    /**
+     * Deployment-restricted scope forces all commit modes to approval-backed
+     * only. Intended for future non-local deployments (staging, hosted) where
+     * autonomous execution must be gated by an operator.
+     *
+     * Currently a single-value toggle. Will be replaced with a richer
+     * deployment-level enum when deployment targets are introduced.
+     */
     private fun isRestrictedByPolicyScope(securityContext: CognitiveThreadSecurityContext): Boolean =
-        securityContext.policyScopeId == POLICY_SCOPE_DEPLOYMENT_RESTRICTED
+        securityContext.policyScope == PolicyScope.DEPLOYMENT_RESTRICTED
 
     private fun shapeOpportunityIntentions(
         baseIntentions: Set<IntentionKind>,
@@ -278,20 +341,27 @@ internal object CognitivePolicyShaper {
             else -> "mixed"
         }
         return mapOf(
-            "policy_scope_id" to opportunity.securityContext.policyScopeId,
-            "surface_kind" to surfaceKind,
-            "available_action_count" to availableActions.size.toString(),
-            "dispatchable_action_count" to dispatchableActions.size.toString(),
-            "direct_commit_available" to dispatchableDefinitions.any { it.directCommitAllowed }.toString(),
-            "autonomous_commit_available" to dispatchableDefinitions.any { it.supportsAutonomousCommit }.toString(),
-            "approval_backed_available" to (CommitMode.APPROVAL_BACKED in allowedCommitModes).toString(),
-            "allowed_intentions" to allowedIntentions.joinToString(",") { it.name.lowercase() },
-            "allowed_commit_modes" to allowedCommitModes.joinToString(",") { it.name.lowercase() },
+            META_POLICY_SCOPE_ID to opportunity.securityContext.policyScope.id,
+            META_SURFACE_KIND to surfaceKind,
+            META_AVAILABLE_ACTION_COUNT to availableActions.size.toString(),
+            META_DISPATCHABLE_ACTION_COUNT to dispatchableActions.size.toString(),
+            META_DIRECT_COMMIT_AVAILABLE to dispatchableDefinitions.any { it.directCommitAllowed }.toString(),
+            META_AUTONOMOUS_COMMIT_AVAILABLE to dispatchableDefinitions.any { it.supportsAutonomousCommit }.toString(),
+            META_APPROVAL_BACKED_AVAILABLE to (CommitMode.APPROVAL_BACKED in allowedCommitModes).toString(),
+            META_ALLOWED_INTENTIONS to allowedIntentions.joinToString(",") { it.name.lowercase() },
+            META_ALLOWED_COMMIT_MODES to allowedCommitModes.joinToString(",") { it.name.lowercase() },
         )
     }
 
-    internal const val POLICY_SCOPE_DEPLOYMENT_RESTRICTED: String = "deployment-restricted"
-    internal const val POLICY_SCOPE_EMERGENCY_OVERRIDE: String = "emergency-override"
+    private const val META_POLICY_SCOPE_ID: String = "policy_scope_id"
+    private const val META_SURFACE_KIND: String = "surface_kind"
+    private const val META_AVAILABLE_ACTION_COUNT: String = "available_action_count"
+    private const val META_DISPATCHABLE_ACTION_COUNT: String = "dispatchable_action_count"
+    private const val META_DIRECT_COMMIT_AVAILABLE: String = "direct_commit_available"
+    private const val META_AUTONOMOUS_COMMIT_AVAILABLE: String = "autonomous_commit_available"
+    private const val META_APPROVAL_BACKED_AVAILABLE: String = "approval_backed_available"
+    private const val META_ALLOWED_INTENTIONS: String = "allowed_intentions"
+    private const val META_ALLOWED_COMMIT_MODES: String = "allowed_commit_modes"
 }
 
 internal data class PlannerActionSurface(

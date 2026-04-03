@@ -135,9 +135,10 @@ These are already decided and should not be reopened casually:
 
 ### 4.6 Finer policy scoping
 
-- The strategy spec proposed layered policy: global runtime, deployment,
-  channel, principal, action, and emergency override.
-- Current implementation supports global + per-action policy.
+- The strategy spec proposed layered policy: deployment,
+  channel, principal, action, and full-autonomy.
+- Current implementation supports channel, principal, action, and
+  full-autonomy policy shaping. Deployment scope is a placeholder.
 - Channel and principal scoping would enable team/shared deployments.
 
 ---
@@ -251,6 +252,20 @@ These stay out of scope until the hardening above is stronger:
 - Arbitrary remote MCP servers
 
 These require a separate security review before implementation.
+
+---
+
+## 10. Code Quality: Hardcoded Provider and Telemetry Strings
+
+The `"stdin"`, `"webapp"`, `"id"` provider strings and the Ego telemetry keys
+are scattered as bare string literals. These predate the cognitive-security
+refactor and are not policy/security logic, but should be extracted to named
+constants for consistency with the `CognitiveCueMetadata` pattern.
+
+- `SensoryCortex.kt`: `"stdin"`, `"stdin-user"` repeated
+- `ChatRuntimeBridge.kt`, `DashboardServer.kt`: `"webapp"` repeated
+- `Ego.kt`: `"id"` source, 20+ event metadata key literals
+- `AppModeRunners.kt`: `"freud-live"` provider
 
 ---
 

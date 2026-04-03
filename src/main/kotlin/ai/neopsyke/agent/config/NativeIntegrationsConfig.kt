@@ -18,7 +18,7 @@ data class TelegramChannelConfig(
     val ownerUserId: String = "",
     val botTokenHandle: String = DEFAULT_BOT_TOKEN_HANDLE,
     val webhookSecretHandle: String = DEFAULT_WEBHOOK_SECRET_HANDLE,
-    val policyScopeId: String = DEFAULT_POLICY_SCOPE_ID,
+    val policyScope: ai.neopsyke.agent.model.PolicyScope = ai.neopsyke.agent.model.PolicyScope.DEFAULT,
     val sessionIdPrefix: String = DEFAULT_SESSION_ID_PREFIX,
     val requireDirectChat: Boolean = true,
     val dropUnauthorizedMessages: Boolean = true,
@@ -29,7 +29,9 @@ data class TelegramChannelConfig(
         const val DEFAULT_WEBHOOK_PATH: String = "/api/channels/telegram/webhook"
         const val DEFAULT_BOT_TOKEN_HANDLE: String = "TELEGRAM_BOT_TOKEN"
         const val DEFAULT_WEBHOOK_SECRET_HANDLE: String = "TELEGRAM_WEBHOOK_SECRET"
-        const val DEFAULT_POLICY_SCOPE_ID: String = "telegram-owner"
+        // Telegram inherits the top-level policyScope from AgentConfig by default.
+        // Override via NEOPSYKE_TELEGRAM_POLICY_SCOPE_ID env var or YAML.
+        const val DEFAULT_PRINCIPAL_ID: String = "telegram-owner"
         const val DEFAULT_SESSION_ID_PREFIX: String = "telegram"
         const val DEFAULT_POLL_TIMEOUT_SECONDS: Int = 25
         const val DEFAULT_POLL_RETRY_DELAY_MS: Long = 1_000L

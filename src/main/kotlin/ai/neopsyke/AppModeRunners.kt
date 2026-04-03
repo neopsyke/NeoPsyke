@@ -669,7 +669,8 @@ internal object AppModeRunners {
         val chatBridge = ChatRuntimeBridge(
             store = dashboardStore,
             sensoryInput = sensoryInput,
-            interlocutorResolver = interlocutorResolver
+            policyScope = config.policyScope,
+            interlocutorResolver = interlocutorResolver,
         )
         val telegramUpdateProcessor = if (telegramConfig.enabled) {
             TelegramUpdateProcessor(

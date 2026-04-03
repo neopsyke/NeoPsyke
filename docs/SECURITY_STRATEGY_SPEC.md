@@ -325,12 +325,11 @@ Policy must be first-class and explicit.
 
 Policy should be layered:
 
-- global runtime policy
 - deployment policy
 - channel policy
 - principal policy
 - action policy
-- emergency override policy
+- full-autonomy policy
 
 ### 8.2 Policy questions the system must answer
 
