@@ -911,7 +911,8 @@ private fun ApprovalRequestStatus.isTerminal(): Boolean =
         ApprovalRequestStatus.APPROVED,
         ApprovalRequestStatus.DENIED,
         ApprovalRequestStatus.DENIED_AND_REISSUED,
-        ApprovalRequestStatus.EXPIRED -> true
+        ApprovalRequestStatus.EXPIRED,
+        ApprovalRequestStatus.SUPERSEDED -> true
         ApprovalRequestStatus.QUEUED,
         ApprovalRequestStatus.PENDING -> false
     }

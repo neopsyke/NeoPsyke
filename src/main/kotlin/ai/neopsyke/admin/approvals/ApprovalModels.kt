@@ -12,6 +12,7 @@ enum class ApprovalRequestStatus {
     DENIED,
     DENIED_AND_REISSUED,
     EXPIRED,
+    SUPERSEDED,
 }
 
 enum class ApprovalClassificationKind {
@@ -81,6 +82,9 @@ data class OwnerMessageEnvelope(
     val conversationContext: ConversationContext,
     val receivedAtMs: Long,
     val eventId: String? = null,
+    val originApprovalRequestId: String? = null,
+    val originStagedActionId: String? = null,
+    val originApprovalSource: String? = null,
 )
 
 sealed interface OwnerIngressResult {
