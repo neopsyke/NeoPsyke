@@ -116,12 +116,14 @@ sequenceDiagram
     participant Sched as AttentionScheduler
     participant Planner as LlmEgoPlanner
     participant Sup as Superego
+    participant AIR as ApprovalRuntime
     participant Motor as MotorCortex
     participant Delib as DeliberationEngine
     participant CTS as CognitiveThreadStore
     participant Mem as MemorySystem
     participant TWS as ScratchpadStore
     participant Dash as DashboardStateStore/API
+    participant TG as Telegram Bot API
 
     User->>SC: Web chat input text
     SC->>Ego: StimulusReceived (stimulus + percept)
@@ -235,7 +237,11 @@ sequenceDiagram
                                 ACS->>ACDB: save signal/background ledger entry
                                 ACS-->>Ego: staged action (`WAITING_AUTHORIZATION` or `READY`)
                                 Note over Ego: Action review emits explicit intention transitions for STAGE and, when needed, REQUEST_AUTHORIZATION
-                                Ego->>Sched: enqueue approval-or-alternative deferred intention
+                                Ego->>AIR: notify approval runtime
+                                AIR->>ACDB: persist approval request + audit trail
+                                AIR->>Dash: deliver chat-native approval prompt
+                                AIR->>TG: deliver Telegram approval prompt (if selected channel)
+                                Note over Sched,Ego: Blocked roots are skipped by the scheduler until the approval runtime resolves the request
                                 Note over Dash,ACAPI: Dashboard action-control page watches a dedicated SSE lane and refreshes on staged/authorization lifecycle updates rather than polling
                                 Note over ACW,ACS: Background autonomous worker polls SQL-filtered runnable READY actions, preserving same-thread order [threadSequence] and same-target serialization [executionKey] before atomic claim + execute
                         else direct commit allowed

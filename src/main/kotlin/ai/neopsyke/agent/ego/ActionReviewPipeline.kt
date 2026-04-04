@@ -48,6 +48,8 @@ internal class ActionReviewPipeline(
     private val recordThreadDenied: (String?, ConversationContext, String?, String?) -> Unit = { _, _, _, _ -> },
     private val recordThreadWaiting: (String?, ConversationContext, String?, String?) -> Unit = { _, _, _, _ -> },
     private val emitThreadUpdate: (String?, ConversationContext, String) -> Unit = { _, _, _ -> },
+    private val onApprovalStaged: suspend (PendingAction, StagedAction, String, String?, ConversationContext) -> Unit =
+        { _, _, _, _, _ -> },
     private val actionControlService: ActionControlService = LegacyCompatibleActionControlService { action, authorization ->
         motorCortex.execute(action, config.searchResultCount, authorization)
     },
@@ -179,13 +181,12 @@ internal class ActionReviewPipeline(
                     controlResult.authorizationDecision.reasonCode,
                 )
                 emitThreadUpdate(resolvedAction.rootInputId, convCtx, "action_staged_blocked")
-                fallbackHandler.handleStagedAction(
-                    action = resolvedAction,
-                    stagedAction = controlResult.stagedAction,
-                    reason = controlResult.authorizationDecision.reason,
-                    reasonCode = controlResult.authorizationDecision.reasonCode,
-                    conversationContext = convCtx,
-                    source = "action_control"
+                onApprovalStaged(
+                    resolvedAction,
+                    controlResult.stagedAction,
+                    controlResult.authorizationDecision.reason,
+                    controlResult.authorizationDecision.reasonCode,
+                    convCtx,
                 )
                 instrumentation.emit(AgentEvents.phaseTimings(timing.build()))
                 return
@@ -233,6 +234,39 @@ internal class ActionReviewPipeline(
             processExecutedControlResult(result, timing)
         }
         return executed.size
+    }
+
+    fun processExternalApprovalExecuted(controlResult: ActionControlDecisionResult.Executed) {
+        val timing = PhaseTimingCollector("external_action_control", controlResult.stagedAction.rootInputId)
+        timing.startPhase("external_action_execute")
+        processExecutedControlResult(controlResult, timing)
+    }
+
+    fun processExternalApprovalDenied(controlResult: ActionControlDecisionResult.Cancelled) {
+        val action = controlResult.stagedAction.toPipelinePendingAction()
+        val convCtx = action.conversationContext
+        val sessionId = resolveSessionId(convCtx)
+        recordThreadDenied(
+            action.rootInputId,
+            convCtx,
+            controlResult.ledgerEntry.summary,
+            controlResult.ledgerEntry.reasonCode,
+        )
+        emitThreadUpdate(action.rootInputId, convCtx, "external_action_cancelled")
+        actionLifecycleObserver.onActionBlocked(
+            action = action,
+            reason = controlResult.ledgerEntry.summary,
+            reasonCode = controlResult.ledgerEntry.reasonCode,
+            source = "external_action_control_cancelled"
+        )
+        fallbackHandler.handleDeniedAction(
+            action = action,
+            reason = controlResult.ledgerEntry.summary,
+            reasonCode = controlResult.ledgerEntry.reasonCode,
+            conversationContext = convCtx,
+            sessionId = sessionId,
+            source = "external_action_control_cancelled"
+        )
     }
 
     private fun processExecutedControlResult(
@@ -988,3 +1022,17 @@ internal class ActionReviewPipeline(
         const val MAX_DIALOGUE_SIZE: Int = 20
     }
 }
+
+private fun StagedAction.toPipelinePendingAction(): PendingAction =
+    PendingAction(
+        id = -1L,
+        urgency = Urgency.MEDIUM,
+        type = actionType,
+        payload = payload,
+        summary = summary,
+        rootInputId = rootInputId,
+        rootInputReceivedAtMs = rootInputReceivedAtMs,
+        conversationContext = conversationContext,
+        argumentDataTrust = argumentDataTrust,
+        origin = origin,
+    )

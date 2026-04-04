@@ -50,6 +50,7 @@ class DashboardServer(
     @Volatile var metricsQueryProvider: MetricsQueryProvider? = null,
     @Volatile var goalManager: GoalManager? = null,
     @Volatile var actionControlService: ActionControlService? = null,
+    @Volatile var actionControlMutationHandler: ((String, ActionControlDecisionResult) -> Unit)? = null,
     port: Int,
     host: String = "127.0.0.1",
 ) : Closeable {
@@ -1476,9 +1477,12 @@ class DashboardServer(
         mutation: String,
         result: ActionControlDecisionResult,
     ) {
+        actionControlMutationHandler?.invoke(mutation, result)
         when (result) {
             is ActionControlDecisionResult.Executed -> {
-                maybeAppendDashboardApprovalMessage(result)
+                if (actionControlMutationHandler == null) {
+                    maybeAppendDashboardApprovalMessage(result)
+                }
                 maybeClearRootInputSession(result.stagedAction)
                 store.publishActionControlUpdate(
                     type = "action_control_state_changed",

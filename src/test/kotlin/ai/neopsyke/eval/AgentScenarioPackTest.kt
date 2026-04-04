@@ -1,5 +1,6 @@
 package ai.neopsyke.eval
 
+import ai.neopsyke.admin.approvals.ApprovalStagingHook
 import ai.neopsyke.agent.cortex.motor.actions.control.DefaultActionControlService
 import ai.neopsyke.agent.cortex.motor.actions.control.SqliteActionControlStore
 import ai.neopsyke.agent.cortex.motor.actions.ActionDescriptor
@@ -851,6 +852,20 @@ class AgentScenarioPackTest {
                     motorCortex.execute(action, config.searchResultCount, authorization)
                 },
             )
+            val approvalPrompts = mutableListOf<String>()
+            agent.setApprovalStagingHook(
+                object : ApprovalStagingHook {
+                    override suspend fun onApprovalStaged(
+                        actionSummary: String,
+                        stagedAction: ai.neopsyke.agent.model.StagedAction,
+                        reason: String,
+                        reasonCode: String?,
+                        conversationContext: ai.neopsyke.agent.model.ConversationContext,
+                    ) {
+                        approvalPrompts += "$reason | $actionSummary | ${stagedAction.actionType.id}"
+                    }
+                }
+            )
 
             runAgentWithInput(agent, "I would like to set a goal for you: Remind me of the current weather every 5 minutes.\nexit\n")
 
@@ -861,7 +876,10 @@ class AgentScenarioPackTest {
             assertEquals(ActionType.GOAL_OPERATION, staged.actionType)
             assertEquals(StagedActionStatus.WAITING_AUTHORIZATION, staged.status)
             assertTrue(staged.payload.contains("\"cron_expression\":\"*/5 * * * *\""))
-            assertTrue(outputs.single().contains("blocked by policy", ignoreCase = true))
+            assertTrue(outputs.isEmpty())
+            assertEquals(1, approvalPrompts.size)
+            assertTrue(approvalPrompts.single().contains("approval", ignoreCase = true))
+            assertTrue(approvalPrompts.single().contains(ActionType.GOAL_OPERATION.id, ignoreCase = true))
             assertTrue(plannerLlm.calls.any { it.options.metadata.callSite == "input_goal_create" })
         } finally {
             actionControlStore?.close()

@@ -210,6 +210,11 @@ It is intentionally high-level and should stay aligned with the code.
   - Telegram webhook ingress is treated as trusted owner direct-chat context only after webhook-secret validation and owner chat/user allowlist checks
   - Telegram polling ingress is treated as trusted owner direct-chat context only after the same private-chat and owner chat/user allowlist checks
   - Id and goal-runtime cues are treated as trusted internal automation context
+- Verified owner chat ingress now routes through a control-plane approval interceptor before normal sensory enqueue:
+  - if no live approval request is pending for the conversation, the message is forwarded unchanged into normal sensory ingress
+  - if a live approval request is pending, the message is consumed by the approval runtime and classified as approve / deny / deny-and-reissue / explain / unclear
+  - explain / unclear traffic stays outside Ego and uses admin-side metadata or clarification prompts only
+  - deny-and-reissue first cancels the staged action, then forwards the raw owner message back into normal sensory ingress as a fresh owner instruction
 - Telegram owner chat ingress specifics:
   - supports two transport modes:
     - `webhook`: Telegram delivers `POST` updates to the configured HTTPS path
@@ -363,7 +368,12 @@ It is intentionally high-level and should stay aligned with the code.
     - Notify `ActionLifecycleObserver` subscribers so goal-origin actions can translate denials back into goal-step state.
   - If allowed:
     - Route into `ActionControlService`.
-    - `ALLOW_STAGE` persists a staged action and feeds a structured deferred continuation back into Ego while also emitting explicit `STAGE` and `REQUEST_AUTHORIZATION` intention transitions when appropriate.
+    - `ALLOW_STAGE` persists a staged action and emits explicit `STAGE` and `REQUEST_AUTHORIZATION` intention transitions.
+    - Approval-backed staged actions no longer enqueue an Ego-managed “ask for approval” continuation. Instead, a separate approval runtime:
+      - creates a durable approval request artifact
+      - resolves the owner-facing delivery channel
+      - sends the approval prompt directly through dashboard chat or Telegram
+      - keeps the issuing root blocked until the approval request reaches a terminal state
     - `ALLOW_COMMIT` persists a staged snapshot plus authorization artifact, then executes through `MotorCortex`.
     - `ActionControlService` refusals are treated as denials and fed back into Ego replanning.
     - `ActionControlService` also enforces centralized per-root-input rate limits across observe, messaging, reflection, goal-operation, and commit/control-plane action families.
@@ -750,6 +760,9 @@ It is intentionally high-level and should stay aligned with the code.
   - opportunities
   - intentions (`Urgency`)
   - actions (`Urgency`)
+- `nextTask(...)` is now blocked-root-aware:
+  - blocked roots are skipped without being dropped from the queues
+  - once the corresponding approval request resolves, the skipped work becomes schedulable again
 - Opportunity ordering:
   - input opportunity (`InputPriority`)
   - impulse opportunity (urgency-derived priority)

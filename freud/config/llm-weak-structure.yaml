@@ -52,6 +52,9 @@ cognitive_roles:
   memory_advisor:
     provider: openai
     model: gpt-4.1-mini
+  approval_interpreter:
+    provider: openai
+    model: gpt-5-nano
 
 web_search:
   provider: groq

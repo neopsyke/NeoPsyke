@@ -20,6 +20,8 @@ class LlmRuntimeConfigLoaderTest {
         assertEquals(LlmProvider.GROQ, resolved.planner.provider)
         assertEquals("openai/gpt-oss-120b", resolved.planner.model)
         assertEquals(LlmProvider.OPENAI, resolved.actionVerifier.provider)
+        assertEquals(LlmProvider.OPENAI, resolved.approvalInterpreter.provider)
+        assertEquals("gpt-5-nano", resolved.approvalInterpreter.model)
         assertEquals(LlmProvider.GROQ, resolved.webSearch.provider)
         assertTrue(resolved.modelCatalog.profiles(LlmProvider.ANTHROPIC).isNotEmpty())
     }
@@ -95,6 +97,8 @@ class LlmRuntimeConfigLoaderTest {
         assertEquals("openai/gpt-oss-20b", resolved.memoryAdvisor.model)
         assertEquals(LlmProvider.OPENAI, resolved.metaReasonerFallback?.provider)
         assertEquals("gpt-5-mini", resolved.metaReasonerFallback?.model)
+        assertEquals(LlmProvider.OPENAI, resolved.approvalInterpreter.provider)
+        assertEquals("gpt-5-nano", resolved.approvalInterpreter.model)
 
         assertEquals(LlmProvider.GROQ, resolved.webSearch.provider)
         assertEquals("groq/compound-mini", resolved.webSearch.model)

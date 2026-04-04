@@ -766,6 +766,9 @@ class DashboardStateStore(
         }
     }
 
+    fun hasActiveChatSubscriber(sessionId: String): Boolean =
+        synchronized(lock) { !chatSubscribers[sanitizeSessionId(sessionId)].isNullOrEmpty() }
+
     fun subscribeActionControl(): DashboardFlowSubscription {
         val channel = Channel<String>(SUBSCRIBER_CHANNEL_CAPACITY)
         synchronized(lock) {

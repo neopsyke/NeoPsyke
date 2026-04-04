@@ -2,6 +2,8 @@ package ai.neopsyke.agent.ego
 
 import kotlinx.coroutines.delay
 import mu.KotlinLogging
+import ai.neopsyke.admin.approvals.ApprovalStagingHook
+import ai.neopsyke.agent.cortex.motor.actions.control.ActionControlDecisionResult
 import ai.neopsyke.agent.cortex.motor.actions.control.ActionControlService
 import ai.neopsyke.agent.cortex.motor.actions.control.LegacyCompatibleActionControlService
 import ai.neopsyke.agent.config.*
@@ -52,6 +54,7 @@ class Ego(
     private val evidenceArtifactStore: EvidenceArtifactStore = InMemoryEvidenceArtifactStore(),
 ) {
     @Volatile private var id: ai.neopsyke.agent.id.Id? = null
+    @Volatile private var approvalStagingHook: ApprovalStagingHook? = null
 
     init {
         superego.setActionRegistry(motorCortex.actionRegistry())
@@ -60,6 +63,10 @@ class Ego(
     fun setId(id: ai.neopsyke.agent.id.Id) {
         this.id = id
         impulseTracker.setId(id)
+    }
+
+    fun setApprovalStagingHook(hook: ApprovalStagingHook?) {
+        approvalStagingHook = hook
     }
 
     /** Delegates to the attention scheduler's impulse enqueue. Used by the Id module. */
@@ -141,6 +148,15 @@ class Ego(
         recordThreadDenied = ::recordThreadDenied,
         recordThreadWaiting = ::recordThreadWaiting,
         emitThreadUpdate = ::emitThreadUpdateForRoot,
+        onApprovalStaged = { action, stagedAction, reason, reasonCode, conversationContext ->
+            approvalStagingHook?.onApprovalStaged(
+                actionSummary = action.summary,
+                stagedAction = stagedAction,
+                reason = reason,
+                reasonCode = reasonCode,
+                conversationContext = conversationContext,
+            )
+        },
         actionControlService = actionControlService,
         actionLifecycleObserver = goalsGateway,
         emitActionFeedback = sensoryCortex::offerActionFeedback,
@@ -223,6 +239,14 @@ class Ego(
                 }
             }
         }
+    }
+
+    fun processExternalApprovalExecuted(result: ActionControlDecisionResult.Executed) {
+        actionPipeline.processExternalApprovalExecuted(result)
+    }
+
+    fun processExternalApprovalDenied(result: ActionControlDecisionResult.Cancelled) {
+        actionPipeline.processExternalApprovalDenied(result)
     }
 
     private suspend fun processActionFeedback(
@@ -394,7 +418,7 @@ class Ego(
     private suspend fun runLoop() {
         var steps = 0
         while (steps < config.planner.maxLoopStepsPerInput) {
-            val task = scheduler.nextTask() ?: break
+            val task = scheduler.nextTask(cognitiveThreads::isBlocked) ?: break
             steps += 1
             instrumentation.emit(AgentEvents.loopStep(step = steps, taskType = taskType(task)))
             val taskConversationContext = taskConversationContext(task)

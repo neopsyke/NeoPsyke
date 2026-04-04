@@ -107,6 +107,23 @@ class AttentionSchedulerTest {
     }
 
     @Test
+    fun `blocked roots are skipped until unblocked`() {
+        val scheduler = AttentionScheduler(config.copy(maxPendingThoughts = 4, maxPendingActions = 4))
+        val blockedRoot = "blocked-root"
+        val freeRoot = "free-root"
+        scheduler.enqueueThought("blocked", Urgency.HIGH, rootInputId = blockedRoot)
+        scheduler.enqueueAction(ActionType.CONTACT_USER, "free", "free", Urgency.MEDIUM, rootInputId = freeRoot)
+
+        val first = scheduler.nextTask { rootInputId, _ -> rootInputId == blockedRoot }
+        val second = scheduler.nextTask { _, _ -> false }
+
+        val firstAction = assertIs<ai.neopsyke.agent.model.LoopTask.PerformAction>(first)
+        assertEquals("free", firstAction.item.payload)
+        val secondThought = assertIs<ai.neopsyke.agent.model.LoopTask.ProcessIntention>(second)
+        assertEquals("blocked", secondThought.item.deferredContent)
+    }
+
+    @Test
     fun `inputs are selected by priority then insertion order`() {
         val scheduler = AttentionScheduler(config)
         val medium = testInput("medium-first")
