@@ -12,9 +12,14 @@ import java.sql.DriverManager
 interface ApprovalStore : AutoCloseable {
     fun saveRequest(request: ApprovalRequest): ApprovalRequest
     fun updateRequest(request: ApprovalRequest): ApprovalRequest
+    fun transitionRequest(
+        request: ApprovalRequest,
+        expectedStatuses: Set<ApprovalRequestStatus>,
+    ): Boolean
     fun request(id: String): ApprovalRequest?
     fun requestByStagedActionId(stagedActionId: String): ApprovalRequest?
     fun activeRequestForSession(sessionId: String): ApprovalRequest?
+    fun latestRequestForSession(sessionId: String): ApprovalRequest?
     fun queuedRequestsForSession(sessionId: String): List<ApprovalRequest>
     fun pendingRequests(nowMs: Long): List<ApprovalRequest>
     fun saveAudit(entry: ApprovalAuditEntry): ApprovalAuditEntry
@@ -97,6 +102,34 @@ class SqliteApprovalStore(
 
     override fun updateRequest(request: ApprovalRequest): ApprovalRequest = saveRequest(request)
 
+    override fun transitionRequest(
+        request: ApprovalRequest,
+        expectedStatuses: Set<ApprovalRequestStatus>,
+    ): Boolean {
+        if (expectedStatuses.isEmpty()) return false
+        val placeholders = expectedStatuses.joinToString(separator = ",") { "?" }
+        synchronized(connection) {
+            connection.prepareStatement(
+                """
+                UPDATE approval_requests
+                SET target_session_id = ?, status = ?, updated_at_ms = ?, payload_json = ?
+                WHERE id = ?
+                  AND status IN ($placeholders)
+                """.trimIndent()
+            ).use { statement ->
+                statement.setString(1, request.target.sessionId)
+                statement.setString(2, request.status.name)
+                statement.setLong(3, request.updatedAtMs)
+                statement.setString(4, mapper.writeValueAsString(request))
+                statement.setString(5, request.id)
+                expectedStatuses.forEachIndexed { index, status ->
+                    statement.setString(6 + index, status.name)
+                }
+                return statement.executeUpdate() == 1
+            }
+        }
+    }
+
     override fun request(id: String): ApprovalRequest? =
         synchronized(connection) {
             connection.prepareStatement(
@@ -131,6 +164,25 @@ class SqliteApprovalStore(
                 FROM approval_requests
                 WHERE target_session_id = ?
                   AND status = 'PENDING'
+                ORDER BY updated_at_ms DESC
+                LIMIT 1
+                """.trimIndent()
+            ).use { statement ->
+                statement.setString(1, sessionId)
+                statement.executeQuery().use { rs ->
+                    if (!rs.next()) return null
+                    mapper.readValue(rs.getString("payload_json"))
+                }
+            }
+        }
+
+    override fun latestRequestForSession(sessionId: String): ApprovalRequest? =
+        synchronized(connection) {
+            connection.prepareStatement(
+                """
+                SELECT payload_json
+                FROM approval_requests
+                WHERE target_session_id = ?
                 ORDER BY updated_at_ms DESC
                 LIMIT 1
                 """.trimIndent()

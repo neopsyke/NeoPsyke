@@ -124,6 +124,7 @@ internal class TelegramUpdateProcessor(
                 priority = InputPriority.HIGH,
                 conversationContext = conversationContext,
                 receivedAtMs = System.currentTimeMillis(),
+                eventId = "telegram-update:$updateId",
             )
         ) ?: if (
             sensoryInput.submitInput(

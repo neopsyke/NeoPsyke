@@ -14,6 +14,7 @@ import java.io.ByteArrayInputStream
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 class EgoAgentTest {
@@ -2374,6 +2375,89 @@ class EgoAgentTest {
             instrumentation.events.any { it.type == "action_type_circuit_breaker_tripped" },
             "MALFORMED_REQUEST should NOT trigger circuit breaker"
         )
+    }
+
+    @Test
+    fun `terminal approval denial resolves blocked root`() {
+        val planner = object : ai.neopsyke.agent.ego.Ego.Planner {
+            override fun decide(
+                trigger: ai.neopsyke.agent.model.EgoTrigger,
+                context: PlannerContext
+            ): EgoDecision =
+                when (trigger) {
+                    is ai.neopsyke.agent.model.EgoTrigger.IncomingInput -> ai.neopsyke.agent.model.EgoDecision.FormIntention(
+                        urgency = Urgency.HIGH,
+                        intentionKind = IntentionKind.REQUEST_AUTHORIZATION,
+                        commitModePreference = CommitMode.APPROVAL_BACKED,
+                        actionType = ActionType.CONTACT_USER,
+                        payload = "Need approval",
+                        summary = "request approval",
+                    )
+
+                    else -> ai.neopsyke.agent.model.EgoDecision.Noop("no follow-up")
+                }
+        }
+        val superegoLlm = StubChatModelClient().apply {
+            enqueueRawResponse("""{"allow":true}""")
+        }
+        val instrumentation = RecordingInstrumentation()
+        val agent = buildTestEgo(
+            planner = planner,
+            superego = Superego(
+                modelClient = superegoLlm,
+                config = AgentConfig(),
+                instrumentation = instrumentation,
+            ),
+            motorCortex = buildMotorCortex(output = {}),
+            config = AgentConfig(planner = PlannerConfig(maxLoopStepsPerInput = 4, maxThoughtPasses = 1)),
+            instrumentation = instrumentation,
+        )
+
+        runAgentWithInput(agent, "hello\nexit\n")
+
+        val blockedEvent = instrumentation.events.lastOrNull {
+            it.type == "cognitive_thread_updated" && it.data["reason"] == "action_staged_blocked"
+        }
+        assertNotNull(blockedEvent)
+        val rootInputId = blockedEvent.data["root_input_id"]?.toString()
+        assertNotNull(rootInputId)
+        val conversationContext = ai.neopsyke.agent.model.ConversationContext.default()
+        agent.processExternalApprovalDenied(
+            ai.neopsyke.agent.cortex.motor.actions.control.ActionControlDecisionResult.Cancelled(
+                stagedAction = ai.neopsyke.agent.model.StagedAction(
+                    id = "staged-terminal-denial",
+                    preparedActionId = "prepared-terminal-denial",
+                    rootInputId = rootInputId,
+                    actionType = ai.neopsyke.agent.model.ActionType.CONTACT_USER,
+                    summary = "request approval",
+                    payload = "Need approval",
+                    conversationContext = conversationContext,
+                    origin = ai.neopsyke.agent.model.ActionOrigin.USER,
+                    commitMode = ai.neopsyke.agent.model.CommitMode.APPROVAL_BACKED,
+                    status = ai.neopsyke.agent.model.StagedActionStatus.CANCELLED,
+                    actionHash = "hash-terminal-denial",
+                ),
+                ledgerEntry = ai.neopsyke.agent.model.ActionLedgerEntry(
+                    id = "ledger-terminal-denial",
+                    kind = ai.neopsyke.agent.model.ActionLedgerKind.CANCELLED,
+                    importance = ai.neopsyke.agent.model.ActionRecordImportance.SIGNAL,
+                    actionType = ai.neopsyke.agent.model.ActionType.CONTACT_USER,
+                    summary = "Approval expired.",
+                    rootInputId = rootInputId,
+                    stagedActionId = "staged-terminal-denial",
+                    reasonCode = "APPROVAL_EXPIRED",
+                    conversationContext = conversationContext,
+                )
+            )
+        )
+
+        val resolvedEvent = instrumentation.events.lastOrNull {
+            it.type == "cognitive_thread_updated" &&
+                it.data["root_input_id"]?.toString() == rootInputId &&
+                it.data["reason"] == "external_action_terminal_denied"
+        }
+        assertNotNull(resolvedEvent)
+        assertEquals("resolved", resolvedEvent.data["thread_status"])
     }
 
     private fun runAgentWithInput(agent: Ego, stdinContent: String) {

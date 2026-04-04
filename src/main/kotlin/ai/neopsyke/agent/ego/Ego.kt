@@ -146,6 +146,7 @@ class Ego(
         recordThreadIntention = ::recordThreadIntentionTransition,
         recordThreadBlocked = ::recordThreadBlocked,
         recordThreadDenied = ::recordThreadDenied,
+        resolveTerminalControlPlaneDenial = ::resolveTerminalControlPlaneDenial,
         recordThreadWaiting = ::recordThreadWaiting,
         emitThreadUpdate = ::emitThreadUpdateForRoot,
         onApprovalStaged = { action, stagedAction, reason, reasonCode, conversationContext ->
@@ -1606,5 +1607,19 @@ class Ego(
         resumeHint: String?,
     ) {
         cognitiveThreads.markWaiting(rootInputId, conversationContext, reason, resumeHint)
+    }
+
+    private fun resolveTerminalControlPlaneDenial(
+        rootInputId: String?,
+        conversationContext: ConversationContext,
+        reason: String?,
+        reasonCode: String?,
+    ) {
+        cognitiveThreads.markResolved(
+            rootInputId = rootInputId,
+            conversationContext = conversationContext,
+            reason = reasonCode ?: "approval_terminal_denied",
+            summary = reason,
+        )
     }
 }

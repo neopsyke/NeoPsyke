@@ -11,6 +11,7 @@ import ai.neopsyke.llm.ChatRequestOptions
 import ai.neopsyke.llm.ChatResponseFormat
 import ai.neopsyke.llm.ChatRole
 import mu.KotlinLogging
+import java.text.Normalizer
 
 private val logger = KotlinLogging.logger {}
 
@@ -31,16 +32,29 @@ class DefaultApprovalInterpreter(
     private val llmClient: ChatModelClient? = null,
 ) : ApprovalInterpreter {
     override fun classify(input: ApprovalInterpreterInput): ApprovalClassification {
-        deterministic(input.reply)?.let { return ApprovalClassification(it, usedModelAssistance = false) }
-        return llmFallback(input)
+        val normalizedReply = normalize(input.reply, stripTerminalQuestion = false)
+            .take(MAX_REPLY_CHARS)
+        val canonicalReply = stripTerminalQuestionMarker(normalizedReply)
+        deterministic(canonicalReply, normalizedReply)?.let {
+            return ApprovalClassification(it, usedModelAssistance = false)
+        }
+        return llmFallback(
+            input.copy(
+                reply = canonicalReply,
+                promptSummary = canonicalizeSummary(input.promptSummary),
+                actionSummary = canonicalizeSummary(input.actionSummary),
+            )
+        )
     }
 
-    private fun deterministic(reply: String): ApprovalClassificationKind? {
-        val normalized = normalize(reply)
+    private fun deterministic(
+        normalized: String,
+        normalizedWithQuestion: String,
+    ): ApprovalClassificationKind? {
         if (normalized.isBlank()) return ApprovalClassificationKind.UNCLEAR
         if (normalized in APPROVE_EXACT) return ApprovalClassificationKind.APPROVE
         if (normalized in DENY_EXACT) return ApprovalClassificationKind.DENY
-        if (isExplanationQuestion(normalized)) return ApprovalClassificationKind.EXPLAIN
+        if (isExplanationQuestion(normalized, normalizedWithQuestion)) return ApprovalClassificationKind.EXPLAIN
         if (startsWithDecisionAndMore(normalized)) return ApprovalClassificationKind.DENY_AND_REISSUE
         return null
     }
@@ -58,7 +72,7 @@ class DefaultApprovalInterpreter(
                             content = """
                             You classify owner replies for an approval control plane.
                             Return strict JSON with one field: decision.
-                            Allowed values: approve, deny, deny_and_reissue, explain, unclear.
+                            Allowed values: approve, deny, deny_and_reissue, unclear.
                             Approve only if the reply clearly authorizes the exact staged action.
                             If the reply changes timing, target, or instructions, return deny_and_reissue.
                             """.trimIndent()
@@ -91,11 +105,14 @@ class DefaultApprovalInterpreter(
                 )
                 val payload = mapper.readValue<ApprovalDecisionPayload>(completion.content)
                 val decision = payload.decision?.trim()?.lowercase()
+                if (decision.isNullOrBlank()) {
+                    logger.warn { "Approval interpreter returned missing required field 'decision'; falling back to unclear." }
+                    return ApprovalClassification(ApprovalClassificationKind.UNCLEAR, usedModelAssistance = true)
+                }
                 val mapped = when (decision) {
                     "approve" -> ApprovalClassificationKind.APPROVE
                     "deny" -> ApprovalClassificationKind.DENY
                     "deny_and_reissue" -> ApprovalClassificationKind.DENY_AND_REISSUE
-                    "explain" -> ApprovalClassificationKind.EXPLAIN
                     "unclear" -> ApprovalClassificationKind.UNCLEAR
                     else -> ApprovalClassificationKind.UNCLEAR
                 }
@@ -113,15 +130,34 @@ class DefaultApprovalInterpreter(
         return ApprovalClassification(ApprovalClassificationKind.UNCLEAR, usedModelAssistance = true)
     }
 
-    private fun normalize(raw: String): String =
-        raw.trim()
+    private fun canonicalizeSummary(raw: String): String =
+        normalize(raw)
+            .take(MAX_SUMMARY_CHARS)
+
+    private fun normalize(raw: String, stripTerminalQuestion: Boolean = true): String {
+        val normalized = Normalizer.normalize(raw, Normalizer.Form.NFKC)
+            .trim()
             .lowercase()
             .replace(Regex("\\s+"), " ")
-            .replace(Regex("[.!]+$"), "")
+            .replace(Regex("\\s+([,;:!?])"), "$1")
+            .replace(Regex("[“”„‟]"), "\"")
+            .replace(Regex("[‘’‚‛]"), "'")
+            .replace(Regex("[‐‑‒–—]"), "-")
+        return if (stripTerminalQuestion) {
+            stripTerminalQuestionMarker(normalized)
+        } else {
+            normalized
+        }
+    }
 
-    private fun isExplanationQuestion(normalized: String): Boolean =
-        normalized.endsWith("?") ||
-            QUESTION_PREFIXES.any { normalized.startsWith(it) }
+    private fun stripTerminalQuestionMarker(raw: String): String =
+        Normalizer.normalize(raw, Normalizer.Form.NFKC)
+            .replace(Regex("\\s*[.!?]+$"), "")
+
+    private fun isExplanationQuestion(normalized: String, normalizedWithQuestion: String): Boolean =
+        normalizedWithQuestion.endsWith("?") ||
+            QUESTION_PREFIXES.any { normalized.startsWith(it) } ||
+            EXPLANATION_MARKERS.any { normalized.contains(it) }
 
     private fun startsWithDecisionAndMore(normalized: String): Boolean =
         DECISION_PREFIXES.any { prefix ->
@@ -137,8 +173,11 @@ class DefaultApprovalInterpreter(
         private val APPROVE_EXACT = setOf("yes", "approve", "approved", "ok", "okay", "sure", "do it", "go ahead", "proceed")
         private val DENY_EXACT = setOf("no", "deny", "denied", "cancel", "stop", "don't", "do not")
         private val QUESTION_PREFIXES = listOf("what ", "what is", "what exactly", "who ", "why ", "how ", "when ", "is this", "which ")
+        private val EXPLANATION_MARKERS = listOf("explain", "clarify", "details", "detail", "more context", "more info", "more information")
         private val DECISION_PREFIXES = listOf("yes", "approve", "ok", "okay", "sure", "no", "deny", "cancel")
+        private const val MAX_REPLY_CHARS: Int = 400
+        private const val MAX_SUMMARY_CHARS: Int = 240
         private const val APPROVAL_SCHEMA_JSON: String =
-            """{"type":"object","additionalProperties":false,"properties":{"decision":{"type":"string","enum":["approve","deny","deny_and_reissue","explain","unclear"]}},"required":["decision"]}"""
+            """{"type":"object","additionalProperties":false,"properties":{"decision":{"type":"string","enum":["approve","deny","deny_and_reissue","unclear"]}},"required":["decision"]}"""
     }
 }

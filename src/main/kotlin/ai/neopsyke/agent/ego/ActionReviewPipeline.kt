@@ -46,6 +46,8 @@ internal class ActionReviewPipeline(
         { _, _, _, _, _, _, _ -> },
     private val recordThreadBlocked: (String?, ConversationContext, String?, String?) -> Unit = { _, _, _, _ -> },
     private val recordThreadDenied: (String?, ConversationContext, String?, String?) -> Unit = { _, _, _, _ -> },
+    private val resolveTerminalControlPlaneDenial: (String?, ConversationContext, String?, String?) -> Unit =
+        { _, _, _, _ -> },
     private val recordThreadWaiting: (String?, ConversationContext, String?, String?) -> Unit = { _, _, _, _ -> },
     private val emitThreadUpdate: (String?, ConversationContext, String) -> Unit = { _, _, _ -> },
     private val onApprovalStaged: suspend (PendingAction, StagedAction, String, String?, ConversationContext) -> Unit =
@@ -246,23 +248,34 @@ internal class ActionReviewPipeline(
         val action = controlResult.stagedAction.toPipelinePendingAction()
         val convCtx = action.conversationContext
         val sessionId = resolveSessionId(convCtx)
+        val reasonCode = controlResult.ledgerEntry.reasonCode
         recordThreadDenied(
             action.rootInputId,
             convCtx,
             controlResult.ledgerEntry.summary,
-            controlResult.ledgerEntry.reasonCode,
+            reasonCode,
         )
         emitThreadUpdate(action.rootInputId, convCtx, "external_action_cancelled")
         actionLifecycleObserver.onActionBlocked(
             action = action,
             reason = controlResult.ledgerEntry.summary,
-            reasonCode = controlResult.ledgerEntry.reasonCode,
+            reasonCode = reasonCode,
             source = "external_action_control_cancelled"
         )
+        if (reasonCode in CONTROL_PLANE_TERMINAL_DENIAL_CODES) {
+            resolveTerminalControlPlaneDenial(
+                action.rootInputId,
+                convCtx,
+                controlResult.ledgerEntry.summary,
+                reasonCode,
+            )
+            emitThreadUpdate(action.rootInputId, convCtx, "external_action_terminal_denied")
+            return
+        }
         fallbackHandler.handleDeniedAction(
             action = action,
             reason = controlResult.ledgerEntry.summary,
-            reasonCode = controlResult.ledgerEntry.reasonCode,
+            reasonCode = reasonCode,
             conversationContext = convCtx,
             sessionId = sessionId,
             source = "external_action_control_cancelled"
@@ -1020,6 +1033,12 @@ internal class ActionReviewPipeline(
     private companion object {
         const val JOURNAL_SUMMARY_PREVIEW_CHARS: Int = 160
         const val MAX_DIALOGUE_SIZE: Int = 20
+        val CONTROL_PLANE_TERMINAL_DENIAL_CODES = setOf(
+            "OWNER_DENIED_FROM_CHAT",
+            "APPROVAL_EXPIRED",
+            "APPROVAL_CLARIFICATION_EXHAUSTED",
+            "APPROVAL_HASH_MISMATCH",
+        )
     }
 }
 

@@ -44,6 +44,7 @@ class RecordingActionControlServiceTest {
         override suspend fun authorizeStagedAction(
             stagedActionId: String,
             grantedBy: ConversationSecurityContext,
+            expectedActionHash: String?,
         ) = ActionControlDecisionResult.Refused("not implemented", null)
 
         override suspend fun denyStagedAction(

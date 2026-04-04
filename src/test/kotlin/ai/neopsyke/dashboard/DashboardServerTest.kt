@@ -591,6 +591,7 @@ class DashboardServerTest {
         override suspend fun authorizeStagedAction(
             stagedActionId: String,
             grantedBy: ConversationSecurityContext,
+            expectedActionHash: String?,
         ): ActionControlDecisionResult {
             val authorization = CommitAuthorization(
                 id = "auth-1",

@@ -91,6 +91,7 @@ class ChatRuntimeBridge(
                 priority = InputPriority.HIGH,
                 conversationContext = conversationContext,
                 receivedAtMs = message.createdAtMs,
+                eventId = "dashboard-chat:${message.id}",
             )
         ) ?: if (
             sensoryInput.submitInput(

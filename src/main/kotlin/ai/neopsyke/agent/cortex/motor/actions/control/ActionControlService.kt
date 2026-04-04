@@ -66,6 +66,7 @@ interface ActionControlService {
     suspend fun authorizeStagedAction(
         stagedActionId: String,
         grantedBy: ConversationSecurityContext,
+        expectedActionHash: String? = null,
     ): ActionControlDecisionResult
 
     suspend fun denyStagedAction(
@@ -120,6 +121,7 @@ object NoopActionControlService : ActionControlService {
     override suspend fun authorizeStagedAction(
         stagedActionId: String,
         grantedBy: ConversationSecurityContext,
+        expectedActionHash: String?,
     ): ActionControlDecisionResult =
         ActionControlDecisionResult.Refused(
             reason = "Action control is not configured.",
@@ -283,6 +285,7 @@ class LegacyCompatibleActionControlService(
     override suspend fun authorizeStagedAction(
         stagedActionId: String,
         grantedBy: ConversationSecurityContext,
+        expectedActionHash: String?,
     ): ActionControlDecisionResult =
         ActionControlDecisionResult.Refused(
             reason = "Legacy action control does not persist staged actions.",
@@ -417,6 +420,7 @@ class DefaultActionControlService(
     override suspend fun authorizeStagedAction(
         stagedActionId: String,
         grantedBy: ConversationSecurityContext,
+        expectedActionHash: String?,
     ): ActionControlDecisionResult {
         if (grantedBy.principal.role != PrincipalRole.OWNER &&
             grantedBy.principal.role != PrincipalRole.ADMIN_CONTROL
@@ -437,6 +441,12 @@ class DefaultActionControlService(
             return ActionControlDecisionResult.Refused(
                 reason = "Staged action '${staged.id}' is not awaiting authorization.",
                 reasonCode = "STAGED_ACTION_NOT_WAITING_AUTH",
+            )
+        }
+        if (!expectedActionHash.isNullOrBlank() && staged.actionHash != expectedActionHash) {
+            return ActionControlDecisionResult.Refused(
+                reason = "Staged action '${staged.id}' no longer matches the approved action identity.",
+                reasonCode = "STAGED_ACTION_HASH_MISMATCH",
             )
         }
         val authorization = store.saveAuthorization(

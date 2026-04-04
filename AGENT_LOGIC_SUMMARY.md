@@ -213,8 +213,11 @@ It is intentionally high-level and should stay aligned with the code.
 - Verified owner chat ingress now routes through a control-plane approval interceptor before normal sensory enqueue:
   - if no live approval request is pending for the conversation, the message is forwarded unchanged into normal sensory ingress
   - if a live approval request is pending, the message is consumed by the approval runtime and classified as approve / deny / deny-and-reissue / explain / unclear
+  - before classification, the approval runtime rejects duplicate inbound owner events and enforces provider/channel/principal binding against the active approval request
+  - refreshed approval prompts carry an explicit short approval ref; later replies must bind to the current prompt instance, and stale/mismatched refs are rejected before normal ingress
+  - stale replies are still rejected against the latest live prompt instance timestamp/version, but refreshed prompts now also require the current approval ref rather than relying on timestamps alone
   - explain / unclear traffic stays outside Ego and uses admin-side metadata or clarification prompts only
-  - deny-and-reissue first cancels the staged action, then forwards the raw owner message back into normal sensory ingress as a fresh owner instruction
+  - deny-and-reissue first cancels the staged action, then forwards the raw owner message back into normal sensory ingress as a fresh owner instruction tagged with approval provenance attributes (`approval_request_id`, `approval_staged_action_id`, `approval_reissue`, `approval_prompt_instance_id`)
 - Telegram owner chat ingress specifics:
   - supports two transport modes:
     - `webhook`: Telegram delivers `POST` updates to the configured HTTPS path
@@ -371,9 +374,16 @@ It is intentionally high-level and should stay aligned with the code.
     - `ALLOW_STAGE` persists a staged action and emits explicit `STAGE` and `REQUEST_AUTHORIZATION` intention transitions.
     - Approval-backed staged actions no longer enqueue an Ego-managed “ask for approval” continuation. Instead, a separate approval runtime:
       - creates a durable approval request artifact
-      - resolves the owner-facing delivery channel
-      - sends the approval prompt directly through dashboard chat or Telegram
+      - resolves the owner-facing delivery channel through a shared approval channel resolver plus channel-status provider
+      - same-channel owner conversations route back to their originating verified owner chat
+      - non-conversation-origin approvals prefer the highest-priority live+deliverable verified owner channel, then fall back to the configured default deliverable channel
+      - Telegram only becomes deliverable/live for non-conversation-origin routing after outbound delivery evidence exists (for example via startup ACK or a successful prior send)
+      - if no eligible verified owner channel exists, the runtime persists an unrouted fail-closed approval artifact instead of guessing a target
+      - sends the approval prompt directly through dashboard chat or Telegram and records the last delivery outcome/detail on the approval request
       - keeps the issuing root blocked until the approval request reaches a terminal state
+      - terminal chat-side denials resolve the blocked root out of `BLOCKED`, so scheduler suppression ends when the approval request is terminal
+      - expiry and clarification exhaustion deny the staged action through action control before unblocking the root
+      - approval authorization verifies the staged action hash captured in the approval request before commit
     - `ALLOW_COMMIT` persists a staged snapshot plus authorization artifact, then executes through `MotorCortex`.
     - `ActionControlService` refusals are treated as denials and fed back into Ego replanning.
     - `ActionControlService` also enforces centralized per-root-input rate limits across observe, messaging, reflection, goal-operation, and commit/control-plane action families.
