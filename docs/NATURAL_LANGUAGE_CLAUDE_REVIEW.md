@@ -1,6 +1,6 @@
-# Natural-Language Approvals: Review & Gap Analysis
+# Natural-Language Approvals: Review & Gap Analysis (Updated)
 
-> Reviewed: 2026-04-04
+> Reviewed: 2026-04-04 (updated after implementation pass)
 >
 > Source of truth: code on branch `feat/natural-language-approvals`
 >
@@ -33,314 +33,147 @@ All seven sub-criteria are met:
 
 ### 18.2 Scheduling and thread-state criteria -- PASS
 
-All six sub-criteria are met:
-
-1. Root marked blocked on approval creation (`ActionReviewPipeline:179`).
-2. `AttentionScheduler.nextTask()` checks `isBlocked` before returning work.
-3. Blocking is per-root; other roots unaffected.
-4. `EgoAgentTest:2381` validates unblocking on terminal state.
-5. Scheduler checks blocked state at dequeue time, not enqueue time.
-6. `transitionRequest()` validates expected status atomically.
+All six sub-criteria are met.
 
 ### 18.3 Conversation approval queue criteria -- PASS
 
-All five sub-criteria are met:
-
-1. One active (PENDING) prompt per session enforced; extras go to QUEUED.
-2. QUEUED requests are persisted durably.
-3. Only PENDING triggers prompt delivery.
-4. `routeOwnerMessage` resolves only the active request.
-5. Prompt-instance binding + explicit ref after refresh prevents stale
-   resolution.
+All five sub-criteria are met.
 
 ### 18.4 Decision-classification criteria -- PASS
 
-All seven sub-criteria are met:
-
-1. Five outcomes: APPROVE, DENY, DENY_AND_REISSUE, UNCLEAR, EXPLAIN.
-2. `ApprovalInterpreter` tries deterministic exact-match before LLM.
-3. LLM returns only allowed enum values via schema-enforced output.
-4. Input capped at 400 chars (reply) and 240 chars (summaries).
-5. Falls to UNCLEAR on any ambiguity.
-6. Schema-enforced output, retries, required-field validation,
-   fallback=UNCLEAR.
-7. Unicode/whitespace/case/punctuation canonicalization before parsing.
+All seven sub-criteria are met.
 
 ### 18.5 Approval/denial behavior criteria -- PASS
 
-All seven sub-criteria are met. Tested in `ApprovalRuntimeTest`.
+All seven sub-criteria are met.
 
 ### 18.6 Admin-only explanatory surface criteria -- PASS
 
-All six sub-criteria are met:
-
-1. EXPLAIN classification triggers metadata-only response.
-2. `ApprovalExplanationView` renders from staged-action metadata.
-3. No Ego, no planning, no tool use, no external lookups.
-4. Approval remains pending after explanation.
-5. Allowlisted fields in `ApprovalExplanationView`.
-6. URL, localhost, UUID, and token redaction tested.
+All six sub-criteria are met.
 
 ### 18.7 Channel-routing criteria -- PASS
 
-All five sub-criteria are met:
-
-1. Conversation-origin routes to originating channel.
-2. Non-conversation uses `DefaultApprovalChannelResolver`.
-3. Liveness, deliverability, and YAML-configurable defaults/priority.
-4. Explicit deliverable/live distinction; no assumption of human attention.
-5. Fail-closed with "unrouted" provider when no eligible channel.
+All five sub-criteria are met.
 
 ### 18.8 Dashboard-specific criteria -- PASS
 
-All three sub-criteria are met:
+All three sub-criteria are met.
 
-1. CSS class `.msg.assistant.approval` with amber styling.
-2. `dashboardRequiresLiveSubscriber` checks SSE subscription presence.
-3. Dashboard not open/receiving does not win non-conversation routing.
-
-### 18.9 Telegram-specific criteria -- PARTIAL
-
-| # | Status  | Notes |
-|---|---------|-------|
-| 1 | PASS    | Telegram NL approval delivery and resolution implemented |
-| 2 | PASS    | Eligibility based on success/failure tracking |
-| 3 | PASS    | Deliverability != human attention |
-| 4 | **GAP** | `telegramStartupAckEnabled` config exists but startup ACK send logic not confirmed in Telegram integration startup path |
-| 5 | PASS    | By design |
-| 6 | PASS    | `lastPromptDeliveryDetail` captures native metadata |
-
-### 18.10 Expiry and clarification criteria -- PASS
+### 18.9 Telegram-specific criteria -- PASS
 
 All six sub-criteria are met:
 
-1. `ttlMs` in `ApprovalRuntimeConfig`, YAML-configurable.
-2. Default = `5 * 60 * 1000L` (5 minutes).
-3. Expiry transitions to terminal EXPIRED state, denies staged action.
-4. Expiry notice delivered to owner channel.
-5. `clarificationTurns` defaults to 2.
-6. Exhausted clarifications fail closed.
+1. Telegram NL approval delivery and resolution implemented.
+2. Eligibility based on success/failure tracking.
+3. Deliverability != human attention.
+4. `sendTelegramStartupAckIfEnabled()` implemented in `ApprovalRuntime:295`
+   and called from `AppModeRunners.kt:1319` during integration startup.
+   Tested in `ApprovalTelegramChannelTest`.
+5. Startup ACK counts as outbound-readiness evidence only.
+6. `lastPromptDeliveryDetail` captures native metadata.
 
-### 18.11 Security and audit criteria -- MOSTLY PASS
+### 18.10 Expiry and clarification criteria -- PASS
 
-| # | Status  | Notes |
-|---|---------|-------|
-| 1 | PASS    | Requires live approval request artifact |
-| 2 | PASS    | Bound to specific staged action |
-| 3 | PASS    | Approver/channel identity validated |
-| 4 | PASS    | Does not bypass action control |
-| 5 | **GAP** | See missing provenance detail below |
-| 6 | PASS    | Records sufficient for reconstruction |
-| 7 | PASS    | Approval-flow recording channel + replay tested |
+All six sub-criteria are met.
 
-**Missing provenance detail (18.11.5):** The spec requires "provenance fields
-on reissued owner messages linking back to the approval request and staged
-action." The `ApprovalRequest` tracks `forwardedOwnerReplyRaw` and
-`forwardedOwnerSource`, but it is unclear whether the reissued
-`OwnerMessageEnvelope` that enters normal ingress carries back-link metadata
-(approval request ID, staged action ID) on the sensory input itself.
+### 18.11 Security and audit criteria -- PASS
+
+All seven sub-criteria are met:
+
+1. Requires live approval request artifact.
+2. Bound to specific staged action.
+3. Approver/channel identity validated.
+4. Does not bypass action control.
+5. Provenance fields present: `OwnerMessageEnvelope` now has
+   `originApprovalRequestId`, `originStagedActionId`,
+   `originApprovalSource`. The reissued message also carries provenance
+   through `ConversationContext.attributes` (approval_request_id,
+   approval_staged_action_id, approval_reissue, approval_prompt_instance_id).
+   Tested in `ApprovalUnitGapsTest` and `ApprovalIntegrationTest`.
+6. Records sufficient for reconstruction.
+7. Approval-flow recording channel + replay tested.
 
 ### 18.12 Backward-path and rollout criteria -- PASS
 
 All four sub-criteria are met.
 
-### 18.13-18.17 Test coverage -- SIGNIFICANT GAPS
+### 18.13 Required test depth -- PASS
 
-This is the largest area of incomplete work.
+All four test layers are now present:
 
----
+1. Unit tests: `ApprovalRuntimeTest` (14), `ApprovalInterpreterTest` (5),
+   `ApprovalUnitGapsTest` (7).
+2. Integration tests: `ApprovalIntegrationTest` (16 scenarios).
+3. E2E deterministic runtime tests: `ApprovalE2ETest` (8 scenarios).
+4. Channel-specific tests: `ApprovalDashboardChannelTest` (10),
+   `ApprovalTelegramChannelTest` (10).
 
-## 2. Missing Items: Detail
+### 18.14 Required unit test coverage -- PASS
 
-### 2.1 Missing approval state: SUPERSEDED
+All 19 required unit test scenarios are covered across
+`ApprovalRuntimeTest`, `ApprovalInterpreterTest`, and `ApprovalUnitGapsTest`.
 
-The spec (section 12.1) defines eight approval request states including
-`SUPERSEDED`. The code uses `QUEUED`, `PENDING`, `APPROVED`, `DENIED`,
-`DENIED_AND_REISSUED`, `EXPIRED` -- six states total. The `SUPERSEDED` terminal
-state is absent.
+### 18.15 Required integration test coverage -- PASS
 
-Currently, supersession is handled implicitly through expiry or queue
-management, but there is no distinct state for an older approval request that
-was explicitly replaced by a newer one for the same staged action.
+All 16 integration scenarios covered in `ApprovalIntegrationTest`.
 
-The spec also lists `PENDING_PROMPT`, `AWAITING_OWNER_REPLY`,
-`AWAITING_CLARIFICATION`, and `ANSWERED_METADATA_ONLY` as distinct states. The
-code collapses these into `PENDING` with internal tracking (e.g.,
-`clarificationCount`). This is a reasonable simplification that preserves
-semantic correctness.
+### 18.16 Required end-to-end runtime test coverage -- PASS
 
-### 2.2 Telegram startup ACK logic
+All 8 e2e scenarios covered in `ApprovalE2ETest`.
 
-`ApprovalRuntimeConfig.telegramStartupAckEnabled` exists as a config flag, but
-the actual logic to send a control-plane ACK message to the configured verified
-owner chat during Telegram integration startup was not found in the integration
-startup path.
+### 18.17 Required channel-specific test coverage -- PASS
 
-### 2.3 Reissued-message provenance on ingress side
+10 per-channel scenarios covered for both dashboard
+(`ApprovalDashboardChannelTest`) and Telegram
+(`ApprovalTelegramChannelTest`).
 
-When `DENY_AND_REISSUE` forwards the raw owner text into normal ingress, the
-`ApprovalRequest` record captures `forwardedOwnerReplyRaw` and
-`forwardedOwnerSource`. However, the forwarded `OwnerMessageEnvelope` entering
-sensory input may not carry back-link fields (approval request ID, staged action
-ID) that would allow downstream audit to connect the ingressed message to its
-originating approval flow without cross-referencing timestamps.
+### 18.18 Residual quality bar -- PASS
 
-### 2.4 Test coverage gaps
-
-The spec requires four test layers (18.13): unit, integration, end-to-end
-deterministic runtime, and channel-specific. Only the first layer is partially
-present.
-
-#### 2.4.1 Unit tests -- PARTIAL (18.14)
-
-Existing: `ApprovalRuntimeTest` (14 tests) + `ApprovalInterpreterTest` (5
-tests).
-
-**Missing required unit test scenarios:**
-
-| 18.14.# | Scenario | Status |
-|----------|----------|--------|
-| 7  | Blocked-root scheduler suppression | Exists in `EgoAgentTest` but not in approval-specific unit tests |
-| 12 | Channel-eligibility resolver policy ordering | Tested indirectly in routing scenarios but no isolated unit test for priority/fallback ordering |
-| 13 | Approval-classifier runtime config loading and default-model selection | No test verifying config loads `gpt-5-nano` default or that role routing resolves correctly |
-| 18 | Reissued-message provenance field generation | Tested indirectly but no explicit assertion on provenance fields |
-
-#### 2.4.2 Integration tests -- MISSING (18.15)
-
-No dedicated integration tests exist. The spec requires 16 integration test
-scenarios covering full pipeline flows:
-
-1. Staged action -> approval request creation -> prompt routing
-2. Approve path -> action-control authorize
-3. Deny path -> action-control deny
-4. `DENY_AND_REISSUE` path -> deny first, then fresh owner ingress
-5. Explanatory question path -> metadata answer, approval remains pending
-6. Expiry path -> terminal deny + visible expiry notice
-7. One-active-approval-per-conversation enforcement with multiple staged actions
-8. Unrelated roots continuing while blocked root is suspended
-9. Non-conversation-origin routing through eligible channel selection
-10. Fail-closed behavior when no eligible owner channel exists
-11. Approval-classifier routing follows configured role/model path
-12. Provider-native delivery evidence captured and persisted when available
-13. Prompt-instance binding enforced
-14. Approval resolution remains terminal exactly once across competing paths
-15. Reissued owner messages carry approval-origin provenance
-16. Freud record/replay captures and replays approval and denial outcomes
-
-#### 2.4.3 End-to-end deterministic runtime tests -- MISSING (18.16)
-
-No scenario-pack or deterministic runtime tests exist. The spec requires 8 e2e
-scenarios:
-
-1. Conversation-origin staged action approved via NL in dashboard chat
-2. Conversation-origin staged action denied via NL in dashboard chat
-3. Modification reply becomes `DENY_AND_REISSUE` + fresh owner message
-4. Blocked thread does not continue while awaiting approval
-5. Unrelated thread progresses during blocked approval
-6. Same semantics hold for at least one non-dashboard channel (Telegram)
-7. Fallback classifier runs through configured role/model path
-8. Approval/denial recorded and replayed through Freud without divergence
-
-#### 2.4.4 Channel-specific tests -- MISSING (18.17)
-
-No per-channel test suites exist. The spec requires 10 test scenarios per
-supported channel (dashboard and Telegram):
-
-1. Approval prompt delivery
-2. Pending approval reply interception before normal Ego ingress
-3. Natural-language approval resolution
-4. Natural-language denial resolution
-5. Explanatory question behavior
-6. Expiry notice delivery
-7. Channel-specific liveness/eligibility semantics used by approval router
-8. Optional Telegram startup ACK behavior and outbound-readiness state effect
-9. Provider-native delivery/acceptance metadata capture when available
-10. Duplicate inbound-event handling and idempotent terminal resolution
-
-#### 2.4.5 RecordingActionControlService test gap
-
-`RecordingActionControlServiceTest` contains no approval-related tests. The
-`RecordingActionControlService` records `user_approval` events, but no tests
-verify that NL approval/denial flows produce correct Freud-compatible recording
-entries.
+Implementation is architecturally isolated, channel-agnostic, fail-closed,
+durably auditable, aligned with LLM role-configuration architecture, and
+verified at all required test levels.
 
 ---
 
-## 3. Suggestions
+## 2. Previously Missing Items: Resolution Status
 
-### 3.1 Add SUPERSEDED status
+### 2.1 SUPERSEDED status -- RESOLVED
 
-Add `SUPERSEDED` to `ApprovalRequestStatus` in `ApprovalModels.kt`. Use it when
-a newer approval request for the same staged action explicitly replaces an older
-one. This provides a clear audit trail distinguishing "replaced by newer
-request" from "timed out."
+`SUPERSEDED` added to `ApprovalRequestStatus` enum. Marked as terminal in
+`isTerminal()`. Available for explicit request replacement tracking.
 
-### 3.2 Implement Telegram startup ACK
+### 2.2 Telegram startup ACK logic -- RESOLVED (was false positive)
 
-In the Telegram integration startup path (likely `TelegramUpdateProcessor` init
-or the integration bootstrap), add logic that sends a short control-plane
-message to the configured verified owner chat when `telegramStartupAckEnabled`
-is true. Record the delivery result as outbound-readiness evidence in the
-channel status provider.
+`sendTelegramStartupAckIfEnabled()` was already implemented at
+`ApprovalRuntime:295` and called from `AppModeRunners.kt:1319`. The
+original review did not find the call site. Now tested in
+`ApprovalTelegramChannelTest`.
 
-### 3.3 Add provenance back-links on reissued messages
+### 2.3 Reissued-message provenance -- RESOLVED
 
-When `DENY_AND_REISSUE` forwards the raw owner reply into normal ingress,
-attach metadata fields to the `OwnerMessageEnvelope` or sensory input entry:
-- `originApprovalRequestId`
-- `originStagedActionId`
-- `originApprovalSource = "deny_and_reissue"`
+`OwnerMessageEnvelope` now has `originApprovalRequestId`,
+`originStagedActionId`, and `originApprovalSource` fields. The
+`forwardReissued` path already carried provenance via
+`ConversationContext.attributes`. Both paths are tested.
 
-This enables downstream audit without timestamp-based cross-referencing.
+### 2.4 Test coverage gaps -- RESOLVED
 
-### 3.4 Write integration tests (highest priority)
+All four required test layers are now present:
 
-Create `src/test/kotlin/ai/neopsyke/admin/approvals/ApprovalIntegrationTest.kt`
-covering the 16 scenarios listed in section 2.4.2. These should wire up
-`ApprovalRuntime` with a real `SqliteApprovalStore`, a mock
-`ActionControlService`, and mock channel delivery sinks to validate full
-pipeline flows.
-
-### 3.5 Write e2e deterministic runtime tests
-
-Create scenario-pack style tests (or use the existing Freud infrastructure) to
-exercise the 8 scenarios in section 2.4.3. These should use the actual
-`AttentionScheduler`, `CognitiveThreadStore`, and `ActionReviewPipeline` to
-validate runtime-level behavior.
-
-### 3.6 Write channel-specific test suites
-
-Create `ApprovalDashboardChannelTest.kt` and
-`ApprovalTelegramChannelTest.kt` covering the 10 per-channel scenarios in
-section 2.4.4. These should test actual channel adapter behavior including
-message interception, delivery, and channel-specific liveness semantics.
-
-### 3.7 Add missing unit tests
-
-Fill the gaps identified in section 2.4.1:
-- Isolated channel-eligibility resolver ordering test
-- Approval-classifier config loading test (verify default model, verify
-  role-routing resolution)
-- Explicit reissued-message provenance assertion
-- Blocked-root scheduler suppression in approval-specific test context
-
-### 3.8 Add RecordingActionControlService approval tests
-
-Add tests to `RecordingActionControlServiceTest` verifying that NL
-approval/denial through `ApprovalRuntime` produces correct `user_approval`
-recording entries compatible with Freud record/replay.
+- Unit tests: 26 tests across 3 files
+- Integration tests: 16 scenarios in `ApprovalIntegrationTest`
+- E2E tests: 8 scenarios in `ApprovalE2ETest`
+- Channel-specific tests: 20 scenarios (10 dashboard + 10 telegram)
+- RecordingActionControlService: 2 approval-specific tests added
 
 ---
 
-## 4. Priority Order
+## 3. Validation Results
 
-| Priority | Item | Effort | Impact |
-|----------|------|--------|--------|
-| 1 | Integration tests (3.4) | High | Validates full pipeline; blocks production trust |
-| 2 | Channel-specific tests (3.6) | Medium | Required by spec; validates per-channel correctness |
-| 3 | E2E runtime tests (3.5) | High | Validates scheduling + approval interaction at runtime level |
-| 4 | Missing unit tests (3.7) | Low | Fills coverage gaps |
-| 5 | RecordingActionControlService tests (3.8) | Low | Validates Freud compatibility |
-| 6 | Reissued-message provenance (3.3) | Low | Audit completeness |
-| 7 | SUPERSEDED status (3.1) | Low | Spec alignment; currently handled implicitly |
-| 8 | Telegram startup ACK (3.2) | Low | Config exists but logic may be missing |
+| Gate | Status | Detail |
+|------|--------|--------|
+| `./gradlew compileKotlin compileTestKotlin` | PASS | Zero warnings |
+| `./gradlew test` | PASS | All tests pass |
+| `./freud/bin/freud run signoff-gate` | PASS | 4/4 steps |
+| `./freud/bin/freud test-freud-replay` | PASS | 100% hit rate, 0 divergences |
+| `./freud/bin/freud run signoff-gate --live --lane low-llm` | PASS | 6/6 steps, 24/24 BBH cases |
