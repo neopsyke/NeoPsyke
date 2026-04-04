@@ -401,11 +401,16 @@ while [[ $# -gt 0 ]]; do
       GOALS_OVERRIDE="false"
       shift
       ;;
-    --clear-memory-all|--clear-memory-vector|--clear-memory-episodic|--clear-memory-lessons)
+    --clear-memory-all|--clear-memory-vector|--clear-memory-episodic|--clear-memory-lessons|--clear-goals)
       APP_ARGS+=("$1")
       shift
       ;;
     --clear-action-control)
+      CLEAR_ACTION_CONTROL=1
+      shift
+      ;;
+    --clear-state)
+      APP_ARGS+=("--clear-memory-all" "--clear-goals")
       CLEAR_ACTION_CONTROL=1
       shift
       ;;
@@ -436,7 +441,9 @@ Memory clearing (applied before agent startup):
       --clear-memory-vector      Clear vector/hippocampus memory before starting
       --clear-memory-episodic    Clear episodic logbook memory before starting
       --clear-memory-lessons     Clear lessons from vector memory before starting
+      --clear-goals              Clear all persisted goals and workspace data before starting
       --clear-action-control     Delete the active action-control SQLite store before starting
+      --clear-state              Clear ALL behavior-affecting state (memory + goals + action-control)
 
 Session recording:
       --record-session           Record all signals to a session directory for later replay via Freud

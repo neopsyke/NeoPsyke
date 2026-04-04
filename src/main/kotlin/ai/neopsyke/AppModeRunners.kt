@@ -1159,6 +1159,9 @@ internal object AppModeRunners {
                                                         runtime.engine
                                                     }
                                                     val webSearchActionHandler = WebSearchActionHandler(activeWebSearchEngine)
+                                                    if (cliOptions?.clearGoals == true) {
+                                                        executeGoalsClear(config, instrumentation)
+                                                    }
                                                     val goalManager = if (config.goals.enabled) {
                                                         ai.neopsyke.agent.goal.GoalManager(
                                                             config = config.goals,
@@ -1725,6 +1728,9 @@ internal object AppModeRunners {
                                                     runtime.engine
                                                 }
                                                 val webSearchActionHandler = WebSearchActionHandler(activeWebSearchEngine2)
+                                                if (cliOptions.clearGoals) {
+                                                    executeGoalsClear(config, instrumentation)
+                                                }
                                                 val goalManager = if (config.goals.enabled) {
                                                     ai.neopsyke.agent.goal.GoalManager(
                                                         config = config.goals,
@@ -2604,6 +2610,38 @@ internal object AppModeRunners {
             } else {
                 output.info("Episodic logbook is not enabled; skipping --clear-memory-episodic.")
             }
+        }
+    }
+
+    private fun executeGoalsClear(
+        config: AgentConfig,
+        instrumentation: ai.neopsyke.instrumentation.AgentInstrumentation,
+    ) {
+        val goalsRoot = config.goals.workspaceRoot
+        if (!java.nio.file.Files.isDirectory(goalsRoot)) {
+            output.info("Goals workspace does not exist; nothing to clear.")
+            return
+        }
+        try {
+            var deleted = 0
+            java.nio.file.Files.list(goalsRoot).use { stream ->
+                stream.filter { java.nio.file.Files.isDirectory(it) }.forEach { goalDir ->
+                    java.nio.file.Files.walk(goalDir)
+                        .sorted(Comparator.reverseOrder())
+                        .forEach { java.nio.file.Files.deleteIfExists(it) }
+                    deleted++
+                }
+            }
+            output.info("Goals cleared ($deleted goal(s) removed).")
+            logger.info { "CLI --clear-goals: $deleted goal workspace(s) removed from $goalsRoot." }
+            instrumentation.emit(
+                ai.neopsyke.instrumentation.AgentEvents.warning(
+                    "Goals cleared via CLI: $deleted goal(s) removed."
+                )
+            )
+        } catch (ex: Exception) {
+            output.error("Failed to clear goals: ${ex.message}")
+            logger.warn(ex) { "CLI --clear-goals: failed to clear goals workspace at $goalsRoot." }
         }
     }
 
