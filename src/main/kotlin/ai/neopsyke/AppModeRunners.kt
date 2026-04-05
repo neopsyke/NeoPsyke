@@ -305,9 +305,19 @@ internal object AppModeRunners {
         runtimeSettings: AgentRuntimeSettings,
     ) {
         output.info("Running memory live eval (real LLM + real long-term memory provider)...")
-        val resolvedApiKey = llm.planner.apiKey.trim()
-        if (resolvedApiKey.isBlank()) {
-            val message = "${llm.planner.apiKeyEnvVar} is required for --eval-memory-live."
+        val resolvedAdvisorKey = llm.memoryAdvisor.apiKey.trim()
+        if (resolvedAdvisorKey.isBlank()) {
+            val message = "${llm.memoryAdvisor.apiKeyEnvVar} is required for --eval-memory-live (memory_advisor role)."
+            output.error(message)
+            logger.warn { message }
+            return
+        }
+        if (!checkProviderHealth(endpoint = llm.memoryAdvisor, modeLabel = "eval_memory_live", roleLabel = "memory_advisor")) {
+            return
+        }
+        val resolvedPlannerKey = llm.planner.apiKey.trim()
+        if (resolvedPlannerKey.isBlank()) {
+            val message = "${llm.planner.apiKeyEnvVar} is required for --eval-memory-live (judge/planner role)."
             output.error(message)
             logger.warn { message }
             return
@@ -359,48 +369,56 @@ internal object AppModeRunners {
             scope = evalScope
         ).use { instrumentation ->
             MetricsRuntimeFactory.create(
-                provider = llm.planner.providerLabel,
-                apiKey = llm.planner.apiKey,
-                egoModel = llm.planner.model,
+                provider = llm.memoryAdvisor.providerLabel,
+                apiKey = llm.memoryAdvisor.apiKey,
+                egoModel = llm.memoryAdvisor.model,
                 superegoModel = llm.superego.model
             ).use { metrics ->
-                val llmCallObserver = LlmCallEventObserver(
-                    provider = llm.planner.providerLabel,
-                    instrumentation = instrumentation
-                )
-                val metricsSnapshotObserver = MetricsSnapshotObserver(
-                    metricsRuntime = metrics,
-                    instrumentation = instrumentation
-                )
-                val callObserver = combineChatCallObservers(
-                    metrics.chatCallObserver(provider = llm.planner.providerLabel),
-                    llmCallObserver,
-                    metricsSnapshotObserver
-                )
                 val rawResponseHook = LlmRawResponseEventHook(
                     instrumentation = instrumentation,
                     maxRawResponseChars = evalRawResponseCharLimit
                 )
+                fun callObserverFor(endpoint: LlmEndpointConfig) = combineChatCallObservers(
+                    metrics.chatCallObserver(provider = endpoint.providerLabel),
+                    LlmCallEventObserver(provider = endpoint.providerLabel, instrumentation = instrumentation),
+                    MetricsSnapshotObserver(metricsRuntime = metrics, instrumentation = instrumentation)
+                )
+                // Memory advisor client — uses the memory_advisor cognitive role.
+                UsageTrackingChatClient(
+                    delegate = InstrumentedChatModelClient(
+                        delegate = createChatClient(
+                            endpoint = llm.memoryAdvisor,
+                            callObserver = callObserverFor(llm.memoryAdvisor)
+                        ),
+                        hooks = listOf(rawResponseHook)
+                    )
+                ).use { advisorClient ->
+                // Judge client — uses the planner cognitive role for recall evaluation.
                 UsageTrackingChatClient(
                     delegate = InstrumentedChatModelClient(
                         delegate = createChatClient(
                             endpoint = llm.planner,
-                            callObserver = callObserver
+                            callObserver = callObserverFor(llm.planner)
                         ),
                         hooks = listOf(rawResponseHook)
                     )
-                ).use { client ->
+                ).use { judgeClient ->
+                    logger.info {
+                        "Memory live eval role routing: " +
+                            "memory_advisor=${llm.memoryAdvisor.providerLabel}/${llm.memoryAdvisor.model}, " +
+                            "judge=${llm.planner.providerLabel}/${llm.planner.model}"
+                    }
                     val stage = cliOptions.evalStage
                         ?: runtimeSettings.evalDefaultStage
                         ?: java.time.LocalDate.now(java.time.ZoneOffset.UTC).toString()
                     hippocampus.use { activeHippocampus ->
                         val report = MemoryLiveEvalRunner(
-                            client = client,
+                            client = judgeClient,
                             longTermMemoryAdvisor = LlmLongTermMemoryAdvisor(
-                                modelClient = client,
+                                modelClient = advisorClient,
                                 config = config,
-                                modelTokenWeight = llm.modelCatalog.tokenWeightFor(llm.planner),
-                                modelContextWindow = llm.modelCatalog.contextWindowFor(llm.planner),
+                                modelTokenWeight = llm.modelCatalog.tokenWeightFor(llm.memoryAdvisor),
+                                modelContextWindow = llm.modelCatalog.contextWindowFor(llm.memoryAdvisor),
                                 instrumentation = instrumentation
                             ),
                             hippocampus = activeHippocampus,
@@ -419,6 +437,7 @@ internal object AppModeRunners {
                         output.info("Run report: $runPath")
                         output.info("History: .neopsyke/evals/memory-live/history.jsonl")
                     }
+                }
                 }
             }
         }

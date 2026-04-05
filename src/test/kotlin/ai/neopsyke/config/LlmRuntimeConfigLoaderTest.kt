@@ -409,7 +409,7 @@ class LlmRuntimeConfigLoaderTest {
             ),
             defaultPath = Path.of("config/llm-runtime.yaml")
         )
-        val weakStructureConfig = LlmRuntimeConfigLoader.load(
+        val lowLlmConfig = LlmRuntimeConfigLoader.load(
             env = mapOf(
                 "ANTHROPIC_API_KEY" to "anthropic-key",
                 "GROQ_API_KEY" to "groq-key",
@@ -417,9 +417,9 @@ class LlmRuntimeConfigLoaderTest {
                 "MISTRAL_API_KEY" to "mistral-key",
                 "OPENAI_API_KEY" to "openai-key"
             ),
-            defaultPath = Path.of("freud/config/llm-weak-structure.yaml")
+            defaultPath = Path.of("freud/config/llm-low-llm.yaml")
         )
-        val prodAcceptanceConfig = LlmRuntimeConfigLoader.load(
+        val highLlmConfig = LlmRuntimeConfigLoader.load(
             env = mapOf(
                 "ANTHROPIC_API_KEY" to "anthropic-key",
                 "GROQ_API_KEY" to "groq-key",
@@ -427,13 +427,13 @@ class LlmRuntimeConfigLoaderTest {
                 "MISTRAL_API_KEY" to "mistral-key",
                 "OPENAI_API_KEY" to "openai-key"
             ),
-            defaultPath = Path.of("freud/config/llm-prod-acceptance.yaml")
+            defaultPath = Path.of("freud/config/llm-high-llm.yaml")
         )
 
         assertTrue(appConfig.modelCatalog.profiles(LlmProvider.ANTHROPIC).isNotEmpty())
         assertTrue(appConfig.modelCatalog.profiles(LlmProvider.OLLAMA).isNotEmpty())
-        assertTrue(weakStructureConfig.modelCatalog.profiles(LlmProvider.ANTHROPIC).isNotEmpty())
-        assertTrue(prodAcceptanceConfig.modelCatalog.profiles(LlmProvider.OLLAMA).isNotEmpty())
+        assertTrue(lowLlmConfig.modelCatalog.profiles(LlmProvider.ANTHROPIC).isNotEmpty())
+        assertTrue(highLlmConfig.modelCatalog.profiles(LlmProvider.OLLAMA).isNotEmpty())
     }
 
     @Test

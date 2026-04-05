@@ -301,8 +301,8 @@ Bootstrap Freud first: `./freud/bootstrap.sh`
   - `freud/config/profiles/low-llm.yaml` (low-cost LLM routing)
   - `freud/config/profiles/high-llm.yaml` (production LLM routing)
 - Frozen LLM routing snapshots for live lanes:
-  - `freud/config/llm-weak-structure.yaml`
-  - `freud/config/llm-prod-acceptance.yaml`
+  - `freud/config/llm-low-llm.yaml`
+  - `freud/config/llm-high-llm.yaml`
 
 ### Reasoning Eval Matrix
 - Freud owns the reasoning eval matrix for NeoPsyke:
