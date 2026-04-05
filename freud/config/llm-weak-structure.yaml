@@ -48,10 +48,13 @@ cognitive_roles:
     model: openai/gpt-oss-20b
   meta_reasoner_fallback:
     provider: openai
-    model: gpt-5-mini
+    model: gpt-4o-mini
   memory_advisor:
     provider: openai
     model: gpt-4.1-mini
+  approval_interpreter:
+    provider: openai
+    model: gpt-5-nano
 
 web_search:
   provider: groq

@@ -1,5 +1,7 @@
 package ai.neopsyke.integrations.telegram
 
+import ai.neopsyke.admin.approvals.ApprovalRuntime
+import ai.neopsyke.admin.approvals.OwnerMessageEnvelope
 import mu.KotlinLogging
 import ai.neopsyke.agent.config.DefaultInterlocutorResolver
 import ai.neopsyke.agent.config.InterlocutorResolver
@@ -25,9 +27,15 @@ internal data class TelegramIngressDisposition(
 internal class TelegramUpdateProcessor(
     private val store: DashboardStateStore,
     private val sensoryInput: AsyncSignalSource,
+    approvalRuntime: ApprovalRuntime? = null,
     private val config: TelegramChannelConfig,
     private val interlocutorResolver: InterlocutorResolver = DefaultInterlocutorResolver(),
 ) {
+    @Volatile private var approvalRuntime: ApprovalRuntime? = approvalRuntime
+
+    fun setApprovalRuntime(runtime: ApprovalRuntime?) {
+        approvalRuntime = runtime
+    }
     fun handle(update: TelegramUpdate): TelegramIngressDisposition {
         val updateId = update.updateId
         val message = update.message ?: update.editedMessage
@@ -109,20 +117,44 @@ internal class TelegramUpdateProcessor(
                 policyScope = config.policyScope,
             ),
         )
-        val accepted = sensoryInput.submitInput(
-            content = stored.content,
-            source = source,
-            priority = InputPriority.HIGH,
-            conversationContext = conversationContext,
-        )
-        return if (accepted) {
+        val ingressResult = approvalRuntime?.routeOwnerMessage(
+            OwnerMessageEnvelope(
+                content = stored.content,
+                source = source,
+                priority = InputPriority.HIGH,
+                conversationContext = conversationContext,
+                receivedAtMs = System.currentTimeMillis(),
+                eventId = "telegram-update:$updateId",
+            )
+        ) ?: if (
+            sensoryInput.submitInput(
+                content = stored.content,
+                source = source,
+                priority = InputPriority.HIGH,
+                conversationContext = conversationContext,
+            )
+        ) {
+            ai.neopsyke.admin.approvals.OwnerIngressResult.Forwarded(true, "Telegram message enqueued.")
+        } else {
+            ai.neopsyke.admin.approvals.OwnerIngressResult.Forwarded(false, "Telegram input queue is full.")
+        }
+        return if (ingressResult is ai.neopsyke.admin.approvals.OwnerIngressResult.Forwarded && ingressResult.enqueued) {
             logger.info {
                 "Telegram ingress accepted reason_code=accepted update_id=$updateId chat_id=$chatId from_user_id=${fromId.ifBlank { "unknown" }} session_id=$sessionId"
             }
             TelegramIngressDisposition(
                 accepted = true,
-                detail = "Telegram message enqueued.",
+                detail = ingressResult.detail,
                 reasonCode = "accepted",
+                updateId = updateId,
+                chatId = chatId,
+                fromUserId = fromId,
+            )
+        } else if (ingressResult is ai.neopsyke.admin.approvals.OwnerIngressResult.Consumed) {
+            TelegramIngressDisposition(
+                accepted = true,
+                detail = ingressResult.detail,
+                reasonCode = "approval_consumed",
                 updateId = updateId,
                 chatId = chatId,
                 fromUserId = fromId,
@@ -130,7 +162,7 @@ internal class TelegramUpdateProcessor(
         } else {
             reject(
                 reasonCode = "queue_full",
-                detail = "Telegram input queue is full.",
+                detail = (ingressResult as ai.neopsyke.admin.approvals.OwnerIngressResult.Forwarded).detail,
                 updateId = updateId,
                 chatId = chatId,
                 fromUserId = fromId,

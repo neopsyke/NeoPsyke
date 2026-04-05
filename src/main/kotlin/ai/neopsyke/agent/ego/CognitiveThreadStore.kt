@@ -253,6 +253,9 @@ internal class CognitiveThreadStore {
     fun snapshot(rootInputId: String?, conversationContext: ConversationContext): CognitiveThreadSnapshot? =
         record(rootInputId, conversationContext)?.snapshot()
 
+    fun isBlocked(rootInputId: String?, conversationContext: ConversationContext): Boolean =
+        record(rootInputId, conversationContext)?.thread?.status == CognitiveThreadStatus.BLOCKED
+
     @Synchronized
     fun snapshotByThreadId(threadId: String): CognitiveThreadSnapshot? =
         (activeThreadsByScope.values.asSequence() + terminalThreadsByScope.values.asSequence())

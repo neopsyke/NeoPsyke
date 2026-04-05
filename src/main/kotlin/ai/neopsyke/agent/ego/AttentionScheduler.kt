@@ -278,24 +278,26 @@ class AttentionScheduler(
         )
     }
 
-    fun nextTask(): LoopTask? {
-        val opportunity = opportunities.poll()
+    fun nextTask(
+        isBlocked: (rootInputId: String?, conversationContext: ConversationContext) -> Boolean = { _, _ -> false },
+    ): LoopTask? {
+        val opportunity = pollNextOpportunity(isBlocked)
         if (opportunity != null) {
             return LoopTask.AttendOpportunity(opportunity)
         }
 
-        val topIntention = intentions.peek()
-        val topAction = actions.peek()
+        val topIntention = peekNextIntention(isBlocked)
+        val topAction = peekNextAction(isBlocked)
         if (topIntention == null && topAction == null) {
             return null
         }
         if (topIntention != null && topAction == null) {
-            return LoopTask.ProcessIntention(intentions.remove())
+            return LoopTask.ProcessIntention(removeNextIntention(isBlocked) ?: return null)
         }
         if (topIntention != null && topIntention.urgency.priority >= topAction!!.urgency.priority) {
-            return LoopTask.ProcessIntention(intentions.remove())
+            return LoopTask.ProcessIntention(removeNextIntention(isBlocked) ?: return null)
         }
-        return LoopTask.PerformAction(actions.remove())
+        return LoopTask.PerformAction(removeNextAction(isBlocked) ?: return null)
     }
 
     fun hasPendingWork(): Boolean =
@@ -349,6 +351,107 @@ class AttentionScheduler(
             return false
         }
         return itemConversationContext.sessionId == sessionId
+    }
+
+    private fun pollNextOpportunity(
+        isBlocked: (rootInputId: String?, conversationContext: ConversationContext) -> Boolean,
+    ): ScheduledOpportunity? {
+        val deferred = mutableListOf<ScheduledOpportunity>()
+        var selected: ScheduledOpportunity? = null
+        while (true) {
+            val next = opportunities.poll() ?: break
+            if (isBlocked(next.rootInputId, next.conversationContext)) {
+                deferred += next
+                continue
+            }
+            selected = next
+            break
+        }
+        deferred.forEach(opportunities::add)
+        return selected
+    }
+
+    private fun peekNextIntention(
+        isBlocked: (rootInputId: String?, conversationContext: ConversationContext) -> Boolean,
+    ): QueuedIntention? =
+        peekAvailableFromQueue(
+            queue = intentions,
+            isBlocked = isBlocked,
+            rootInputId = { it.rootInputId },
+            conversationContext = { it.conversationContext },
+        )
+
+    private fun peekNextAction(
+        isBlocked: (rootInputId: String?, conversationContext: ConversationContext) -> Boolean,
+    ): PendingAction? =
+        peekAvailableFromQueue(
+            queue = actions,
+            isBlocked = isBlocked,
+            rootInputId = { it.rootInputId },
+            conversationContext = { it.conversationContext },
+        )
+
+    private fun removeNextIntention(
+        isBlocked: (rootInputId: String?, conversationContext: ConversationContext) -> Boolean,
+    ): QueuedIntention? =
+        removeAvailableFromQueue(
+            queue = intentions,
+            isBlocked = isBlocked,
+            rootInputId = { it.rootInputId },
+            conversationContext = { it.conversationContext },
+        )
+
+    private fun removeNextAction(
+        isBlocked: (rootInputId: String?, conversationContext: ConversationContext) -> Boolean,
+    ): PendingAction? =
+        removeAvailableFromQueue(
+            queue = actions,
+            isBlocked = isBlocked,
+            rootInputId = { it.rootInputId },
+            conversationContext = { it.conversationContext },
+        )
+
+    private fun <T> peekAvailableFromQueue(
+        queue: PriorityQueue<T>,
+        isBlocked: (rootInputId: String?, conversationContext: ConversationContext) -> Boolean,
+        rootInputId: (T) -> String?,
+        conversationContext: (T) -> ConversationContext,
+    ): T? {
+        val deferred = mutableListOf<T>()
+        var selected: T? = null
+        while (true) {
+            val next = queue.poll() ?: break
+            if (isBlocked(rootInputId(next), conversationContext(next))) {
+                deferred += next
+                continue
+            }
+            selected = next
+            break
+        }
+        selected?.let(queue::add)
+        deferred.forEach(queue::add)
+        return selected
+    }
+
+    private fun <T> removeAvailableFromQueue(
+        queue: PriorityQueue<T>,
+        isBlocked: (rootInputId: String?, conversationContext: ConversationContext) -> Boolean,
+        rootInputId: (T) -> String?,
+        conversationContext: (T) -> ConversationContext,
+    ): T? {
+        val deferred = mutableListOf<T>()
+        var selected: T? = null
+        while (true) {
+            val next = queue.poll() ?: break
+            if (isBlocked(rootInputId(next), conversationContext(next))) {
+                deferred += next
+                continue
+            }
+            selected = next
+            break
+        }
+        deferred.forEach(queue::add)
+        return selected
     }
 
     companion object {

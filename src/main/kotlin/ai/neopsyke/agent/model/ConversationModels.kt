@@ -39,6 +39,7 @@ data class ConversationContext(
     val sessionId: String,
     val interlocutor: Interlocutor,
     val security: ConversationSecurityContext = ConversationSecurityContexts.default(),
+    val attributes: Map<String, String> = emptyMap(),
 ) {
     init {
         require(sessionId.isNotBlank()) { "sessionId must not be blank." }

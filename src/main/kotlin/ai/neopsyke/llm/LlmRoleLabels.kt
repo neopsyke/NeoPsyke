@@ -6,6 +6,7 @@ object LlmRoleLabels {
     const val SUPEREGO: String = "superego"
     const val META_REASONER: String = "meta_reasoner"
     const val MEMORY_ADVISOR: String = "memory_advisor"
+    const val APPROVAL_INTERPRETER: String = "approval_interpreter"
     const val WEB_SEARCH: String = "web_search"
     const val UNKNOWN: String = "unknown"
 
@@ -23,6 +24,7 @@ object LlmRoleLabels {
             normalizedCallSite.startsWith("action_verifier") -> ACTION_VERIFIER
             normalizedCallSite.startsWith("meta_reasoner") -> META_REASONER
             normalizedCallSite.startsWith("long_term_memory_assessment") -> MEMORY_ADVISOR
+            normalizedCallSite.startsWith("approval_interpreter") -> APPROVAL_INTERPRETER
             normalizedCallSite.startsWith("web_search") || normalizedActionType == WEB_SEARCH -> WEB_SEARCH
             normalizedActor == "ego" -> PLANNER
             else -> UNKNOWN

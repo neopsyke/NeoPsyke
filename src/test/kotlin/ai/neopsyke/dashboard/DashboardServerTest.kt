@@ -591,6 +591,7 @@ class DashboardServerTest {
         override suspend fun authorizeStagedAction(
             stagedActionId: String,
             grantedBy: ConversationSecurityContext,
+            expectedActionHash: String?,
         ): ActionControlDecisionResult {
             val authorization = CommitAuthorization(
                 id = "auth-1",
@@ -651,6 +652,7 @@ class DashboardServerTest {
             deniedBy: ConversationSecurityContext,
             reason: String,
             reasonCode: String?,
+        expectedActionHash: String?,
         ): ActionControlDecisionResult =
             ActionControlDecisionResult.Refused(reason = "Stage already completed.", reasonCode = "STAGED_ACTION_NOT_DENYABLE")
 

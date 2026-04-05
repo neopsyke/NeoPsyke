@@ -24,6 +24,9 @@ class AgentRuntimeSettingsLoaderTest {
         assertEquals(true, settings.agentConfig.memory.longTermMemoryPromptCompressionEnabled)
         assertEquals(true, settings.agentConfig.logbook.enabled)
         assertEquals(true, settings.agentConfig.actionControl.enabled)
+        assertEquals(true, settings.agentConfig.approvals.enabled)
+        assertEquals(300_000L, settings.agentConfig.approvals.ttlMs)
+        assertEquals(2, settings.agentConfig.approvals.clarificationTurns)
         assertEquals(false, settings.agentConfig.connectors.enabled)
         assertEquals(true, settings.agentConfig.nativeIntegrations.telegram.enabled)
         assertEquals(TelegramIngressMode.POLLING, settings.agentConfig.nativeIntegrations.telegram.mode)
@@ -126,6 +129,16 @@ class AgentRuntimeSettingsLoaderTest {
                 commit_stateful_per_type_per_root_input: 3
                 commit_public_per_type_per_root_input: 2
                 control_plane_per_type_per_root_input: 4
+              approvals:
+                enabled: true
+                ttl_ms: 123000
+                clarification_turns: 4
+                default_channel: telegram
+                channel_priority:
+                  - telegram
+                  - dashboard
+                dashboard_requires_live_subscriber: false
+                telegram_startup_ack_enabled: true
               connectors:
                 enabled: true
                 curated_catalog_path: /tmp/neopsyke-connectors/catalog
@@ -269,6 +282,13 @@ class AgentRuntimeSettingsLoaderTest {
         assertEquals(3, settings.agentConfig.actionControl.commitStatefulPerTypePerRootInput)
         assertEquals(2, settings.agentConfig.actionControl.commitPublicPerTypePerRootInput)
         assertEquals(4, settings.agentConfig.actionControl.controlPlanePerTypePerRootInput)
+        assertEquals(true, settings.agentConfig.approvals.enabled)
+        assertEquals(123000L, settings.agentConfig.approvals.ttlMs)
+        assertEquals(4, settings.agentConfig.approvals.clarificationTurns)
+        assertEquals("telegram", settings.agentConfig.approvals.defaultChannel)
+        assertEquals(listOf("telegram", "dashboard"), settings.agentConfig.approvals.channelPriority)
+        assertEquals(false, settings.agentConfig.approvals.dashboardRequiresLiveSubscriber)
+        assertEquals(true, settings.agentConfig.approvals.telegramStartupAckEnabled)
         assertEquals(true, settings.agentConfig.connectors.enabled)
         assertEquals("/tmp/neopsyke-connectors/catalog", settings.agentConfig.connectors.curatedCatalogPath)
         assertEquals("/tmp/neopsyke-connectors/state", settings.agentConfig.connectors.installStateDir)

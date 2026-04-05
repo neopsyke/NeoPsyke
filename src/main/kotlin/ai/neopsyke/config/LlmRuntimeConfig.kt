@@ -44,6 +44,7 @@ data class LlmCognitiveRolesConfig(
     val metaReasoner: LlmEndpointConfig,
     val metaReasonerFallback: LlmEndpointConfig? = null,
     val memoryAdvisor: LlmEndpointConfig,
+    val approvalInterpreter: LlmEndpointConfig,
     val superegoPrimary: LlmEndpointConfig? = null,
     val superegoEscalation: LlmEndpointConfig? = null,
 )
@@ -70,6 +71,9 @@ data class LlmRuntimeConfig(
 
     val memoryAdvisor: LlmEndpointConfig
         get() = cognitiveRoles.memoryAdvisor
+
+    val approvalInterpreter: LlmEndpointConfig
+        get() = cognitiveRoles.approvalInterpreter
 
     // Legacy aliases retained for existing call sites.
     val provider: LlmProvider
@@ -144,6 +148,8 @@ private data class LlmRuntimeYamlCognitiveRoles(
     val metaReasonerFallback: LlmRuntimeYamlRole? = null,
     @param:JsonProperty("memory_advisor")
     val memoryAdvisor: LlmRuntimeYamlRole? = null,
+    @param:JsonProperty("approval_interpreter")
+    val approvalInterpreter: LlmRuntimeYamlRole? = null,
 )
 
 private data class LlmRuntimeYamlProvider(
@@ -272,6 +278,13 @@ object LlmRuntimeConfigLoader {
             role = yaml.cognitiveRoles?.memoryAdvisor,
         )
 
+        val approvalInterpreter = resolveRoleEndpoint(
+            env = env,
+            yaml = yaml,
+            roleName = "cognitive_roles.approval_interpreter",
+            role = yaml.cognitiveRoles?.approvalInterpreter,
+        )
+
         val metaReasonerFallback = yaml.cognitiveRoles?.metaReasonerFallback?.let { role ->
             resolveRoleEndpoint(
                 env = env,
@@ -331,6 +344,7 @@ object LlmRuntimeConfigLoader {
                 metaReasoner = metaReasoner,
                 metaReasonerFallback = metaReasonerFallback,
                 memoryAdvisor = memoryAdvisor,
+                approvalInterpreter = approvalInterpreter,
                 superegoPrimary = superegoPrimary,
                 superegoEscalation = superegoEscalation
             ),
@@ -349,6 +363,7 @@ object LlmRuntimeConfigLoader {
         requireRole(name = "cognitive_roles.action_verifier", role = roles.actionVerifier)
         requireRole(name = "cognitive_roles.meta_reasoner", role = roles.metaReasoner)
         requireRole(name = "cognitive_roles.memory_advisor", role = roles.memoryAdvisor)
+        requireRole(name = "cognitive_roles.approval_interpreter", role = roles.approvalInterpreter)
         if (roles.superego == null && roles.superegoPrimary == null) {
             throw IllegalStateException(
                 "llm-runtime.yaml must define either cognitive_roles.superego or cognitive_roles.superego_primary"
@@ -362,6 +377,7 @@ object LlmRuntimeConfigLoader {
         validateRoleProvider("cognitive_roles.meta_reasoner", roles.metaReasoner, providers)
         validateRoleProvider("cognitive_roles.meta_reasoner_fallback", roles.metaReasonerFallback, providers)
         validateRoleProvider("cognitive_roles.memory_advisor", roles.memoryAdvisor, providers)
+        validateRoleProvider("cognitive_roles.approval_interpreter", roles.approvalInterpreter, providers)
 
         val webSearch = yaml.webSearch
             ?: throw IllegalStateException("llm-runtime.yaml is missing required section: web_search")

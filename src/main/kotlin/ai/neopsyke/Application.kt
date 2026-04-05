@@ -23,6 +23,7 @@ internal data class AppCliOptions(
     val clearMemoryVector: Boolean = false,
     val clearMemoryEpisodic: Boolean = false,
     val clearMemoryLessons: Boolean = false,
+    val clearGoals: Boolean = false,
     val freudLive: Boolean = false,
     val freudLiveTimeoutSeconds: Int = 120,
     val unknownArgs: List<String>,
@@ -30,6 +31,8 @@ internal data class AppCliOptions(
 ) {
     val hasClearMemoryRequest: Boolean
         get() = clearMemoryAll || clearMemoryVector || clearMemoryEpisodic || clearMemoryLessons
+    val hasClearRequest: Boolean
+        get() = hasClearMemoryRequest || clearGoals
 }
 
 fun main(args: Array<String>) {
@@ -109,6 +112,7 @@ private fun printAppHelp() {
           --clear-memory-vector           Clear vector/hippocampus memory before starting
           --clear-memory-episodic         Clear episodic logbook memory before starting
           --clear-memory-lessons         Clear lessons from vector memory before starting
+          --clear-goals                  Clear all persisted goals and workspace data before starting
           --freud-live                    Run single-input live eval (reads stdin, writes answer to stdout)
           --freud-live-timeout N          Timeout in seconds for freud-live mode (default: 120)
           -h, --help                      Show this help message
@@ -130,6 +134,7 @@ private fun parseCliOptions(args: Array<String>): AppCliOptions {
     var clearMemoryVector = false
     var clearMemoryEpisodic = false
     var clearMemoryLessons = false
+    var clearGoals = false
     var freudLive = false
     var freudLiveTimeoutSeconds = 120
     val unknownArgs = mutableListOf<String>()
@@ -304,7 +309,10 @@ private fun parseCliOptions(args: Array<String>): AppCliOptions {
                 clearMemoryLessons = true
                 index += 1
             }
-
+            arg == "--clear-goals" -> {
+                clearGoals = true
+                index += 1
+            }
             else -> {
                 unknownArgs += arg
                 index += 1
@@ -331,6 +339,7 @@ private fun parseCliOptions(args: Array<String>): AppCliOptions {
         clearMemoryVector = clearMemoryVector,
         clearMemoryEpisodic = clearMemoryEpisodic,
         clearMemoryLessons = clearMemoryLessons,
+        clearGoals = clearGoals,
         freudLive = freudLive,
         freudLiveTimeoutSeconds = freudLiveTimeoutSeconds,
         unknownArgs = unknownArgs,

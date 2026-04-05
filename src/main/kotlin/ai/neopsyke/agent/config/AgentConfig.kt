@@ -13,6 +13,7 @@ data class AgentConfig(
     val metaReasoner: MetaReasonerConfig = MetaReasonerConfig(),
     val logbook: LogbookConfig = LogbookConfig(),
     val actionControl: ActionControlConfig = ActionControlConfig(),
+    val approvals: ApprovalRuntimeConfig = ApprovalRuntimeConfig(),
     val connectors: ConnectorRuntimeConfig = ConnectorRuntimeConfig(),
     val builtinTools: BuiltinToolsConfig = BuiltinToolsConfig(),
     val nativeIntegrations: NativeIntegrationsConfig = NativeIntegrationsConfig(),
