@@ -1,6 +1,9 @@
 package ai.neopsyke.eval
 
 import ai.neopsyke.admin.approvals.ApprovalStagingHook
+import ai.neopsyke.agent.cortex.motor.actions.control.ActionSecurityActionRule
+import ai.neopsyke.agent.cortex.motor.actions.control.ActionSecurityPolicyConfig
+import ai.neopsyke.agent.cortex.motor.actions.control.ConfiguredActionAuthorizationPolicy
 import ai.neopsyke.agent.cortex.motor.actions.control.DefaultActionControlService
 import ai.neopsyke.agent.cortex.motor.actions.control.SqliteActionControlStore
 import ai.neopsyke.agent.cortex.motor.actions.ActionDescriptor
@@ -809,7 +812,10 @@ class AgentScenarioPackTest {
                       "title":"Weather reminder",
                       "instruction":"Check the current weather and send the user an update for this scheduled run.",
                       "completion_criteria":"A weather update is delivered to the user for the current scheduled run.",
-                      "priority":"medium"
+                      "priority":"medium",
+                      "cron_expression":"*/5 * * * *",
+                      "assistant_response":null,
+                      "reason":null
                     }
                     """.trimIndent()
                 )
@@ -883,6 +889,232 @@ class AgentScenarioPackTest {
             assertTrue(plannerLlm.calls.any { it.options.metadata.callSite == "input_goal_create" })
         } finally {
             actionControlStore?.close()
+            manager?.stop()
+            root.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
+    fun scenario_llm_driven_daily_cron_goal_creation() = runBlocking {
+        val root = Files.createTempDirectory("neopsyke-scenario-daily-goal")
+        var manager: GoalManager? = null
+        var actionControlStore: SqliteActionControlStore? = null
+        try {
+            val plannerLlm = StubChatModelClient().apply {
+                enqueueRawResponse(
+                    """
+                    {
+                      "decision":"create_goal",
+                      "title":"Daily weather forecast",
+                      "instruction":"Fetch the weather forecast for Hamburg and send the user a summary for this scheduled run.",
+                      "completion_criteria":"The weather forecast is delivered to the user for the current scheduled run.",
+                      "priority":"medium",
+                      "cron_expression":"5 5 * * *",
+                      "assistant_response":null,
+                      "reason":null
+                    }
+                    """.trimIndent()
+                )
+            }
+            val instrumentation = RecordingInstrumentation()
+            val outputs = mutableListOf<String>()
+            val config = AgentConfig(
+                planner = PlannerConfig(maxLoopStepsPerInput = 4, maxThoughtPasses = 2),
+                goals = GoalConfig(enabled = true, workspaceRoot = root),
+            )
+            manager = GoalManager(
+                config = config.goals,
+                store = GoalStore(root),
+                planner = DeterministicGoalPlanner(),
+                instrumentation = instrumentation,
+            )
+            manager.start(CoroutineScope(SupervisorJob() + Dispatchers.Default))
+            val actionControlDb = root.resolve("action-control.db")
+            actionControlStore = SqliteActionControlStore(actionControlDb.toString())
+            val motorCortex = buildMotorCortex(
+                output = { outputs.add(it) },
+                config = config,
+                goalsGateway = manager,
+            )
+            val agent = buildTestEgo(
+                planner = LlmEgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
+                superego = Superego(
+                    modelClient = StubChatModelClient().apply { enqueueRawResponse("""{"allow":true}""") },
+                    config = config,
+                    instrumentation = instrumentation
+                ),
+                motorCortex = motorCortex,
+                config = config,
+                instrumentation = instrumentation,
+                goalsGateway = manager,
+                actionControlService = DefaultActionControlService(
+                    config = config.actionControl.copy(dbPath = actionControlDb.toString()),
+                    store = actionControlStore,
+                ) { action, authorization ->
+                    motorCortex.execute(action, config.searchResultCount, authorization)
+                },
+            )
+            val approvalPrompts = mutableListOf<String>()
+            agent.setApprovalStagingHook(
+                object : ApprovalStagingHook {
+                    override suspend fun onApprovalStaged(
+                        actionSummary: String,
+                        stagedAction: ai.neopsyke.agent.model.StagedAction,
+                        reason: String,
+                        reasonCode: String?,
+                        conversationContext: ai.neopsyke.agent.model.ConversationContext,
+                    ) {
+                        approvalPrompts += "$reason | $actionSummary | ${stagedAction.actionType.id}"
+                    }
+                }
+            )
+
+            runAgentWithInput(agent, "Create a new goal. It's purpose should be to remind me of the weather forecast for the day, every day at 5:05 am hamburg time.\nexit\n")
+
+            // Goal not yet created (waiting for approval)
+            assertTrue(manager.allGoals().isEmpty())
+            val staged = actionControlStore.listStagedActions(limit = 10)
+                .firstOrNull { it.actionType == ActionType.GOAL_OPERATION }
+            assertNotNull(staged, "Expected a staged goal_operation action")
+            assertEquals(ActionType.GOAL_OPERATION, staged.actionType)
+            assertEquals(StagedActionStatus.WAITING_AUTHORIZATION, staged.status)
+            // Cron comes from the LLM, not regex
+            assertTrue(staged.payload.contains("\"cron_expression\":\"5 5 * * *\""),
+                "Expected daily 5:05 cron from LLM; payload=${staged.payload}")
+            assertTrue(staged.payload.contains("Daily weather forecast"))
+            // Planner was invoked via the goal creation branch
+            assertTrue(plannerLlm.calls.any { it.options.metadata.callSite == "input_goal_create" })
+            // The LLM prompt should include recurring_intent=true
+            val goalCreationCall = plannerLlm.calls.first { it.options.metadata.callSite == "input_goal_create" }
+            assertTrue(
+                goalCreationCall.messages.any { it.content.contains("recurring_intent=true") },
+                "Expected recurring_intent=true in prompt"
+            )
+        } finally {
+            actionControlStore?.close()
+            manager?.stop()
+            root.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
+    fun scenario_goal_creation_bad_cron_triggers_feedback_retry() = runBlocking {
+        val root = Files.createTempDirectory("neopsyke-scenario-goal-retry")
+        var manager: GoalManager? = null
+        try {
+            val plannerLlm = StubChatModelClient().apply {
+                // First call: goal creation branch returns an invalid cron
+                enqueueRawResponseForCallSite("input_goal_create",
+                    """
+                    {
+                      "decision":"create_goal",
+                      "title":"Weekly standup",
+                      "instruction":"Remind the user about their weekly standup meeting.",
+                      "completion_criteria":"Standup reminder delivered.",
+                      "priority":"medium",
+                      "cron_expression":"bad-cron",
+                      "assistant_response":null,
+                      "reason":null
+                    }
+                    """.trimIndent()
+                )
+                // Second call: feedback triggers general branch — planner responds to the user
+                enqueueRawResponse(
+                    """
+                    {
+                      "decision":"intend",
+                      "urgency":"medium",
+                      "defer_content":null,
+                      "long_term_memory_recall_query":null,
+                      "intention_kind":"observe",
+                      "commit_mode_preference":"not_applicable",
+                      "action_type":"contact_user",
+                      "action_payload":"I corrected the schedule. Your weekly standup reminder is set for Mondays at 9 AM.",
+                      "action_summary":"Confirm corrected goal schedule",
+                      "plan_goal":null,
+                      "plan_steps":null,
+                      "reason":"Retrying with corrected cron expression"
+                    }
+                    """.trimIndent()
+                )
+            }
+            val instrumentation = RecordingInstrumentation()
+            val outputs = mutableListOf<String>()
+            val config = AgentConfig(
+                planner = PlannerConfig(maxLoopStepsPerInput = 6, maxThoughtPasses = 3),
+                goals = GoalConfig(enabled = true, workspaceRoot = root),
+            )
+            manager = GoalManager(
+                config = config.goals,
+                store = GoalStore(root),
+                planner = DeterministicGoalPlanner(),
+                instrumentation = instrumentation,
+            )
+            manager.start(CoroutineScope(SupervisorJob() + Dispatchers.Default))
+            val motorCortex = buildMotorCortex(
+                output = { outputs.add(it) },
+                config = config,
+                goalsGateway = manager,
+            )
+            val superEgoLlm = StubChatModelClient().apply {
+                // Enqueue enough superego approvals for all action reviews
+                repeat(6) { enqueueRawResponse("""{"allow":true}""") }
+            }
+            // Use a policy that allows autonomous commit for recurring goals so the bad cron
+            // reaches GoalManager.executeOperation() and triggers the feedback loop.
+            val autoCommitPolicy = ConfiguredActionAuthorizationPolicy(
+                ActionSecurityPolicyConfig(
+                    actions = mapOf(
+                        ActionType.GOAL_OPERATION.id to ActionSecurityActionRule(
+                            directCommitEnabled = true,
+                            autonomousCommitEnabled = true,
+                            recurringRequiresApproval = false,
+                        ),
+                        ActionType.CONTACT_USER.id to ActionSecurityActionRule(
+                            directCommitEnabled = true,
+                            autonomousCommitEnabled = true,
+                        ),
+                    ),
+                )
+            )
+            val agent = buildTestEgo(
+                planner = LlmEgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
+                superego = Superego(
+                    modelClient = superEgoLlm,
+                    config = config,
+                    instrumentation = instrumentation,
+                    authorizationPolicy = autoCommitPolicy,
+                ),
+                motorCortex = motorCortex,
+                config = config,
+                instrumentation = instrumentation,
+                goalsGateway = manager,
+            )
+
+            runAgentWithInput(agent, "Create a goal to remind me every Monday at 9am about our standup.\nexit\n")
+
+            // The bad cron should have caused at least one execution failure output
+            assertTrue(outputs.any { it.contains("valid 5-field cron_expression", ignoreCase = true) },
+                "Expected cron validation error in outputs; got $outputs")
+
+            // A feedback-triggered planner call should have occurred after bad cron execution failure
+            val feedbackPlannerCalls = instrumentation.events.filter {
+                it.type == "planner_start" && it.data["trigger"] == "feedback"
+            }
+            assertTrue(feedbackPlannerCalls.isNotEmpty(), "Expected planner re-invocation via feedback trigger after bad cron")
+
+            // The feedback planner call should go through the general branch (not goal_creation)
+            assertTrue(
+                instrumentation.events.any {
+                    it.type == "planner_branch_selected" && it.data["branch"] == "general" && it.data["trigger"] == "feedback"
+                },
+                "Expected feedback to route through general branch"
+            )
+
+            // The planner should have been called at least twice: once for goal creation, once for feedback
+            assertTrue(plannerLlm.calls.size >= 2,
+                "Expected at least 2 planner calls (creation + feedback), got ${plannerLlm.calls.size}")
+        } finally {
             manager?.stop()
             root.toFile().deleteRecursively()
         }

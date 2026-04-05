@@ -111,7 +111,10 @@ class EgoPlannerTest {
                   "title":"Weather reminder",
                   "instruction":"Check the current weather and send the user an update for this scheduled run.",
                   "completion_criteria":"A weather update is delivered to the user for the current scheduled run.",
-                  "priority":"medium"
+                  "priority":"medium",
+                  "cron_expression":"*/5 * * * *",
+                  "assistant_response":null,
+                  "reason":null
                 }
                 """.trimIndent()
             )
@@ -147,6 +150,89 @@ class EgoPlannerTest {
                 it.type == "planner_branch_selected" && it.data["branch"] == "goal_creation"
             }
         )
+    }
+
+    @Test
+    fun `planner uses llm-provided cron for daily-at-time goal creation`() {
+        val llm = StubChatModelClient().apply {
+            enqueueRawResponse(
+                """
+                {
+                  "decision":"create_goal",
+                  "title":"Daily weather forecast",
+                  "instruction":"Fetch and deliver the weather forecast for the day.",
+                  "completion_criteria":"The weather forecast is delivered to the user for the current scheduled run.",
+                  "priority":"medium",
+                  "cron_expression":"5 5 * * *",
+                  "assistant_response":null,
+                  "reason":null
+                }
+                """.trimIndent()
+            )
+        }
+        val planner = LlmEgoPlanner(
+            modelClient = llm,
+            config = AgentConfig()
+        )
+
+        val decision = planner.decide(
+            trigger = ai.neopsyke.agent.model.EgoTrigger.IncomingInput(
+                PendingInput(10, "Create a new goal. It's purpose should be to remind me of the weather forecast for the day, every day at 5:05 am hamburg time.")
+            ),
+            context = PlannerContext(
+                recentDialogue = emptyList(),
+                queue = QueueSnapshot(0, 0, 0),
+                availableActions = setOf(ActionType.CONTACT_USER, ActionType.GOAL_OPERATION),
+                dispatchableActions = setOf(ActionType.CONTACT_USER, ActionType.GOAL_OPERATION)
+            )
+        )
+
+        val action = assertIs<ai.neopsyke.agent.model.EgoDecision.FormIntention>(decision)
+        assertEquals(ActionType.GOAL_OPERATION, action.actionType)
+        assertTrue(action.payload.contains(""""operation":"create""""))
+        assertTrue(action.payload.contains(""""cron_expression":"5 5 * * *""""))
+        assertEquals("input_goal_create", llm.lastOptions.metadata.callSite)
+        assertEquals(1, llm.calls.size)
+    }
+
+    @Test
+    fun `planner creates non-recurring goal when llm returns null cron`() {
+        val llm = StubChatModelClient().apply {
+            enqueueRawResponse(
+                """
+                {
+                  "decision":"create_goal",
+                  "title":"Learn Spanish",
+                  "instruction":"Track progress on learning Spanish vocabulary.",
+                  "completion_criteria":"User confirms progress.",
+                  "priority":"medium",
+                  "cron_expression":null,
+                  "assistant_response":null,
+                  "reason":null
+                }
+                """.trimIndent()
+            )
+        }
+        val planner = LlmEgoPlanner(
+            modelClient = llm,
+            config = AgentConfig()
+        )
+
+        val decision = planner.decide(
+            trigger = ai.neopsyke.agent.model.EgoTrigger.IncomingInput(
+                PendingInput(11, "Create a goal to learn Spanish")
+            ),
+            context = PlannerContext(
+                recentDialogue = emptyList(),
+                queue = QueueSnapshot(0, 0, 0),
+                availableActions = setOf(ActionType.CONTACT_USER, ActionType.GOAL_OPERATION),
+                dispatchableActions = setOf(ActionType.CONTACT_USER, ActionType.GOAL_OPERATION)
+            )
+        )
+
+        val action = assertIs<ai.neopsyke.agent.model.EgoDecision.FormIntention>(decision)
+        assertEquals(ActionType.GOAL_OPERATION, action.actionType)
+        assertFalse(action.payload.contains(""""cron_expression":""""))
     }
 
     @Test
