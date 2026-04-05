@@ -286,7 +286,6 @@ Bootstrap Freud first: `./freud/bootstrap.sh`
 - Shared Go libraries live under `freud/internal/` (`analysis`, `config`, `orchestrator`).
 - All orchestration is native Go. Pipeline steps are either shell commands (e.g. `./gradlew test`) or built-in functions dispatched by name (e.g. `scenario_pack`, `reasoning_eval_logic`).
 - Analysis subcommands (`triage`, `summarize`, `context-pack`) are native Go.
-- The shell scripts in `freud/legacy/scripts/` and Python modules in `freud/legacy/py/` are legacy code, no longer called by the CLI.
 - Configuration is a single YAML file (`freud/config/freud.yaml`) with optional profile overlays (`freud/config/profiles/*.yaml`). Precedence: CLI flag > env var > profile > YAML > built-in defaults.
 
 ### Configuration Rules
