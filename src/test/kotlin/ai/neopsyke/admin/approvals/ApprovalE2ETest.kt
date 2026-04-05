@@ -90,6 +90,7 @@ class ApprovalE2ETest {
 
         override suspend fun denyStagedAction(
             stagedActionId: String, deniedBy: ConversationSecurityContext, reason: String, reasonCode: String?,
+        expectedActionHash: String?,
         ): ActionControlDecisionResult {
             denyCalls += 1
             val staged = stagedActions[stagedActionId]
@@ -258,7 +259,7 @@ class ApprovalE2ETest {
 
             val request = store.requestByStagedActionId(staged.id)
             assertNotNull(request)
-            assertEquals(ApprovalRequestStatus.PENDING, request.status)
+            assertEquals(ApprovalRequestStatus.AWAITING_OWNER_REPLY, request.status)
             assertEquals(staged.rootInputId, request.rootInputId)
             assertEquals(0, actionControl.authorizeCalls)
             assertEquals(0, actionControl.denyCalls)

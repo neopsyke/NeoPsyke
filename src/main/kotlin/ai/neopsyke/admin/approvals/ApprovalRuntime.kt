@@ -66,7 +66,12 @@ class ApprovalRuntime(
     ) {
         if (!config.approvals.enabled) return
         val existing = store.requestByStagedActionId(stagedAction.id)
-        if (existing != null) return
+        if (existing != null &&
+            existing.actionHash == stagedAction.actionHash &&
+            !existing.status.isTerminal()
+        ) {
+            return
+        }
         expirePendingRequests()
         val nowMs = System.currentTimeMillis()
         val routing = channelResolver.resolve(stagedAction)
@@ -80,13 +85,14 @@ class ApprovalRuntime(
             originalSessionId = stagedAction.conversationContext.sessionId,
             target = target,
             status = if (routing.target == null || activeForConversation == null) {
-                ApprovalRequestStatus.PENDING
+                ApprovalRequestStatus.AWAITING_OWNER_REPLY
             } else {
                 ApprovalRequestStatus.QUEUED
             },
             actionType = stagedAction.actionType.id,
             summary = actionSummary.ifBlank { stagedAction.summary },
             reason = reason,
+            canonicalSummary = ApprovalCanonicalSummary.from(stagedAction, reason).renderForInterpreter(),
             reasonCode = reasonCode,
             promptVersion = 1,
             promptInstanceId = newPromptInstanceId(),
@@ -108,7 +114,7 @@ class ApprovalRuntime(
             )
             return
         }
-        if (request.status == ApprovalRequestStatus.PENDING) {
+        if (request.status == ApprovalRequestStatus.AWAITING_OWNER_REPLY) {
             deliverPrompt(request, stagedAction)
         } else {
             audit(request.id, "request_queued", "Approval request queued behind an active request.")
@@ -155,8 +161,7 @@ class ApprovalRuntime(
         val classification = replayedClassification ?: interpreter.classify(
             ApprovalInterpreterInput(
                 reply = message.content,
-                promptSummary = request.reason,
-                actionSummary = request.summary,
+                canonicalSummary = request.canonicalSummary,
                 sessionId = message.conversationContext.sessionId,
                 rootInputId = request.rootInputId,
             )
@@ -256,7 +261,7 @@ class ApprovalRuntime(
                             resolutionPrincipalId = "approval-runtime",
                             resolutionReason = denyResult.reason,
                         ),
-                        expectedStatuses = ACTIVE_REQUEST_STATUSES,
+                        expectedStatuses = MUTABLE_REQUEST_STATUSES,
                     )
                     if (transitioned) {
                         audit(request.id, "request_expired", "Approval request expired without a denyable staged action.")
@@ -327,28 +332,12 @@ class ApprovalRuntime(
             return false
         }
         if (current.actionHash != request.actionHash) {
-            val denyResult = runCatching {
-                kotlinx.coroutines.runBlocking {
-                    actionControlService.denyStagedAction(
-                        stagedActionId = request.stagedActionId,
-                        deniedBy = message.conversationContext.security,
-                        reason = "Approval request is stale because the staged action changed after prompting.",
-                        reasonCode = "APPROVAL_HASH_MISMATCH",
-                    )
-                }
-            }.getOrNull()
-            if (denyResult is ActionControlDecisionResult.Cancelled) {
-                onApprovalDenied(denyResult)
-                resolveRequest(
-                    request = request,
-                    status = ApprovalRequestStatus.DENIED,
-                    conversationContext = message.conversationContext,
-                    usedModelAssistance = classification.usedModelAssistance,
-                    resolutionReason = "Staged action hash mismatch.",
-                    lastInboundEventId = message.eventId,
-                )
-            }
-            deliverText(request.target, "Approval request was denied because the staged action changed after prompting.", "approval-refused")
+            supersedeAndRefreshOnHashMismatch(request, current, message)
+            deliverText(
+                request.target,
+                "Approval request is stale because the staged action changed. I sent a refreshed approval prompt.",
+                "approval-refreshed"
+            )
             return false
         }
         when (
@@ -391,6 +380,20 @@ class ApprovalRuntime(
         forwardedOwnerReplyRaw: String? = null,
         forwardedOwnerSource: String? = null,
     ): Boolean {
+        val current = actionControlService.stagedAction(request.stagedActionId)
+        if (current == null) {
+            deliverText(request.target, "Denial could not be applied because the staged action no longer exists.", "approval-refused")
+            return false
+        }
+        if (current.actionHash != request.actionHash) {
+            supersedeAndRefreshOnHashMismatch(request, current, message)
+            deliverText(
+                request.target,
+                "Approval request is stale because the staged action changed. I sent a refreshed approval prompt.",
+                "approval-refreshed"
+            )
+            return false
+        }
         when (
             val result = runCatching {
                 kotlinx.coroutines.runBlocking {
@@ -399,6 +402,7 @@ class ApprovalRuntime(
                         deniedBy = message.conversationContext.security,
                         reason = reason,
                         reasonCode = "OWNER_DENIED_FROM_CHAT",
+                        expectedActionHash = request.actionHash,
                     )
                 }
             }.getOrElse {
@@ -429,6 +433,7 @@ class ApprovalRuntime(
         val stagedAction = actionControlService.stagedAction(request.stagedActionId) ?: return
         val view = ApprovalExplanationView.from(stagedAction, request.reason, request.expiresAtMs)
         val updated = request.copy(
+            status = ApprovalRequestStatus.AWAITING_OWNER_REPLY,
             promptVersion = request.promptVersion + 1,
             promptInstanceId = newPromptInstanceId(),
             lastPromptAtMs = System.currentTimeMillis(),
@@ -481,7 +486,7 @@ class ApprovalRuntime(
                         resolutionPrincipalId = "approval-runtime",
                         resolutionReason = "Clarification limit exhausted.",
                     ),
-                    expectedStatuses = ACTIVE_REQUEST_STATUSES,
+                    expectedStatuses = MUTABLE_REQUEST_STATUSES,
                 )
             } else {
                 store.transitionRequest(
@@ -496,7 +501,7 @@ class ApprovalRuntime(
                         resolutionPrincipalId = "approval-runtime",
                         resolutionReason = if (denyResult is ActionControlDecisionResult.Refused) denyResult.reason else "Clarification limit exhausted.",
                     ),
-                    expectedStatuses = ACTIVE_REQUEST_STATUSES,
+                    expectedStatuses = MUTABLE_REQUEST_STATUSES,
                 )
             }
             deliverText(
@@ -509,6 +514,7 @@ class ApprovalRuntime(
             return
         }
         val updated = request.copy(
+            status = ApprovalRequestStatus.AWAITING_CLARIFICATION,
             clarificationCount = nextClarification,
             promptVersion = request.promptVersion + 1,
             promptInstanceId = newPromptInstanceId(),
@@ -552,7 +558,7 @@ class ApprovalRuntime(
                 lastInboundEventId = lastInboundEventId,
                 usedModelAssistance = usedModelAssistance,
             ),
-            expectedStatuses = ACTIVE_REQUEST_STATUSES,
+            expectedStatuses = MUTABLE_REQUEST_STATUSES,
         )
         if (!transitioned) return false
         audit(request.id, "request_resolved", "Approval request resolved as ${status.name.lowercase()}.")
@@ -569,7 +575,7 @@ class ApprovalRuntime(
                 updatedAtMs = nowMs,
                 resolutionAtMs = nowMs,
             ),
-            expectedStatuses = ACTIVE_REQUEST_STATUSES,
+            expectedStatuses = MUTABLE_REQUEST_STATUSES,
         )
         if (!transitioned) return false
         audit(request.id, "legacy_resolution", "Resolved via legacy action-control mutation '$mutation'.")
@@ -580,12 +586,14 @@ class ApprovalRuntime(
     private fun activateNextQueued(sessionId: String) {
         val next = store.queuedRequestsForSession(sessionId).firstOrNull() ?: return
         val stagedAction = actionControlService.stagedAction(next.stagedActionId) ?: return
+        val nowMs = System.currentTimeMillis()
         val activated = next.copy(
-            status = ApprovalRequestStatus.PENDING,
+            status = ApprovalRequestStatus.AWAITING_OWNER_REPLY,
             promptVersion = next.promptVersion + 1,
             promptInstanceId = newPromptInstanceId(),
-            lastPromptAtMs = System.currentTimeMillis(),
-            updatedAtMs = System.currentTimeMillis(),
+            lastPromptAtMs = nowMs,
+            expiresAtMs = nowMs + config.approvals.ttlMs,
+            updatedAtMs = nowMs,
         )
         store.updateRequest(activated)
         deliverPrompt(activated, stagedAction)
@@ -635,8 +643,67 @@ class ApprovalRuntime(
             }
             else -> ConversationDeliveryResult(delivered = false, detail = "Unsupported approval provider '${target.provider}'.")
         }
-        channelStatusProvider.recordDelivery(target, delivery)
+        channelStatusProvider.recordDelivery(target, delivery, source)
         return delivery
+    }
+
+    private fun supersedeAndRefreshOnHashMismatch(
+        request: ApprovalRequest,
+        current: StagedAction,
+        message: OwnerMessageEnvelope,
+    ) {
+        // Hash drift means owner intent no longer binds to the same staged side effect.
+        // Supersede the old request and issue a fresh prompt instead of applying approve/deny.
+        val nowMs = System.currentTimeMillis()
+        val superseded = request.copy(
+            status = ApprovalRequestStatus.SUPERSEDED,
+            updatedAtMs = nowMs,
+            resolutionProvider = message.conversationContext.security.channel.provider,
+            resolutionChannelId = message.conversationContext.security.channel.channelId,
+            resolutionSessionId = message.conversationContext.sessionId,
+            resolutionPrincipalId = message.conversationContext.security.principal.id,
+            resolutionAtMs = nowMs,
+            resolutionReason = "Approval prompt superseded because staged action hash changed.",
+            lastInboundEventId = message.eventId,
+        )
+        val transitioned = store.transitionRequest(
+            request = superseded,
+            expectedStatuses = LIVE_REQUEST_STATUSES,
+        )
+        if (!transitioned) return
+        audit(request.id, "request_superseded", "Approval request superseded due to staged action hash mismatch.")
+
+        val activeForConversation = store.activeRequestForSession(request.target.sessionId)
+        val replacement = ApprovalRequest(
+            id = UUID.randomUUID().toString(),
+            stagedActionId = current.id,
+            actionHash = current.actionHash,
+            rootInputId = current.rootInputId,
+            originalSessionId = current.conversationContext.sessionId,
+            target = request.target,
+            status = if (activeForConversation == null) ApprovalRequestStatus.AWAITING_OWNER_REPLY else ApprovalRequestStatus.QUEUED,
+            actionType = current.actionType.id,
+            summary = current.summary,
+            reason = request.reason,
+            canonicalSummary = ApprovalCanonicalSummary.from(current, request.reason).renderForInterpreter(),
+            reasonCode = request.reasonCode,
+            promptVersion = 1,
+            promptInstanceId = newPromptInstanceId(),
+            clarificationCount = 0,
+            lastPromptAtMs = nowMs,
+            expiresAtMs = nowMs + config.approvals.ttlMs,
+            createdAtMs = nowMs,
+            updatedAtMs = nowMs,
+            routingScope = request.routingScope,
+            routingFailureReason = null,
+        )
+        store.saveRequest(replacement)
+        audit(replacement.id, "request_created", "Replacement approval request created.", payload = replacement.status.name)
+        if (replacement.status == ApprovalRequestStatus.AWAITING_OWNER_REPLY) {
+            deliverPrompt(replacement, current)
+        } else {
+            audit(replacement.id, "request_queued", "Replacement approval request queued behind an active request.")
+        }
     }
 
     private fun audit(requestId: String, kind: String, summary: String, payload: String? = null) {
@@ -772,7 +839,11 @@ class ApprovalRuntime(
 
     private companion object {
         val mapper = jacksonObjectMapper()
-        val ACTIVE_REQUEST_STATUSES = setOf(ApprovalRequestStatus.PENDING, ApprovalRequestStatus.QUEUED)
+        val LIVE_REQUEST_STATUSES = setOf(
+            ApprovalRequestStatus.AWAITING_OWNER_REPLY,
+            ApprovalRequestStatus.AWAITING_CLARIFICATION,
+        )
+        val MUTABLE_REQUEST_STATUSES = LIVE_REQUEST_STATUSES + ApprovalRequestStatus.QUEUED
         const val UNROUTED_PROVIDER: String = "unrouted"
         const val PROMPT_REFERENCE_CHARS: Int = 8
         val APPROVAL_REF_REGEX: Regex = Regex("""(?:approval\s*ref|ref)\s*[:#]?\s*([a-z0-9]{8})""")
@@ -790,7 +861,7 @@ class ApprovalRuntime(
                 resolutionPrincipalId = "approval-runtime",
                 resolutionReason = "Approval expired.",
             ),
-            expectedStatuses = ACTIVE_REQUEST_STATUSES,
+            expectedStatuses = MUTABLE_REQUEST_STATUSES,
         )
         if (!transitioned) return
         audit(request.id, "request_expired", "Approval request expired.")
@@ -914,5 +985,7 @@ private fun ApprovalRequestStatus.isTerminal(): Boolean =
         ApprovalRequestStatus.EXPIRED,
         ApprovalRequestStatus.SUPERSEDED -> true
         ApprovalRequestStatus.QUEUED,
-        ApprovalRequestStatus.PENDING -> false
+        ApprovalRequestStatus.AWAITING_OWNER_REPLY,
+        ApprovalRequestStatus.AWAITING_CLARIFICATION,
+        -> false
     }

@@ -92,6 +92,7 @@ class ApprovalUnitGapsTest {
 
         override suspend fun denyStagedAction(
             stagedActionId: String, deniedBy: ConversationSecurityContext, reason: String, reasonCode: String?,
+        expectedActionHash: String?,
         ): ActionControlDecisionResult {
             denyCalls += 1
             currentStagedAction = currentStagedAction.copy(status = StagedActionStatus.CANCELLED, statusReason = reason, statusReasonCode = reasonCode)
@@ -167,6 +168,7 @@ class ApprovalUnitGapsTest {
         statusProvider.recordDelivery(
             ApprovalTarget(provider = "telegram", sessionId = "telegram:tg-owner", channelId = "tg-owner"),
             ConversationDeliveryResult(delivered = true, detail = "ok"),
+            "approval-startup-ack",
         )
 
         val resolver = DefaultApprovalChannelResolver(approvals = approvalConfig, statusProvider = statusProvider)
@@ -265,7 +267,7 @@ class ApprovalUnitGapsTest {
         assertEquals(true, config.enabled)
         assertEquals(5 * 60 * 1000L, config.ttlMs)
         assertEquals(2, config.clarificationTurns)
-        assertEquals(false, config.telegramStartupAckEnabled)
+        assertEquals(true, config.telegramStartupAckEnabled)
         assertEquals(true, config.dashboardRequiresLiveSubscriber)
     }
 
@@ -336,7 +338,7 @@ class ApprovalUnitGapsTest {
 
             val request = store.requestByStagedActionId(staged.id)
             assertNotNull(request)
-            assertEquals(ApprovalRequestStatus.PENDING, request.status)
+            assertEquals(ApprovalRequestStatus.AWAITING_OWNER_REPLY, request.status)
             assertEquals(staged.rootInputId, request.rootInputId)
 
             val audit = store.listAudit(request.id)
@@ -364,7 +366,8 @@ class ApprovalUnitGapsTest {
         )
         val nonTerminalStatuses = setOf(
             ApprovalRequestStatus.QUEUED,
-            ApprovalRequestStatus.PENDING,
+            ApprovalRequestStatus.AWAITING_OWNER_REPLY,
+            ApprovalRequestStatus.AWAITING_CLARIFICATION,
         )
         assertEquals(terminalStatuses.size + nonTerminalStatuses.size, statuses.size)
     }

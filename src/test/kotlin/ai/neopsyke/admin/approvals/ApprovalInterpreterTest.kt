@@ -15,8 +15,7 @@ class ApprovalInterpreterTest {
         val result = interpreter.classify(
             ApprovalInterpreterInput(
                 reply = "  YES\u00A0!!!  ",
-                promptSummary = "prompt",
-                actionSummary = "action",
+                canonicalSummary = "action: contact_user",
                 sessionId = "chat-1",
                 rootInputId = "root-1",
             )
@@ -33,14 +32,57 @@ class ApprovalInterpreterTest {
         val result = interpreter.classify(
             ApprovalInterpreterInput(
                 reply = "Okay, send it tomorrow instead",
-                promptSummary = "prompt",
-                actionSummary = "action",
+                canonicalSummary = "action: contact_user",
                 sessionId = "chat-1",
                 rootInputId = "root-1",
             )
         )
 
         assertEquals(ApprovalClassificationKind.DENY_AND_REISSUE, result.kind)
+        assertFalse(result.usedModelAssistance)
+    }
+
+    @Test
+    fun `polite deterministic approvals and denials remain bounded`() {
+        val interpreter = DefaultApprovalInterpreter(AgentConfig())
+
+        val approve = interpreter.classify(
+            ApprovalInterpreterInput(
+                reply = "yes please",
+                canonicalSummary = "action: contact_user",
+                sessionId = "chat-1",
+                rootInputId = "root-1",
+            )
+        )
+        val deny = interpreter.classify(
+            ApprovalInterpreterInput(
+                reply = "no thanks",
+                canonicalSummary = "action: contact_user",
+                sessionId = "chat-1",
+                rootInputId = "root-1",
+            )
+        )
+
+        assertEquals(ApprovalClassificationKind.APPROVE, approve.kind)
+        assertEquals(ApprovalClassificationKind.DENY, deny.kind)
+        assertFalse(approve.usedModelAssistance)
+        assertFalse(deny.usedModelAssistance)
+    }
+
+    @Test
+    fun `question-like approval phrase fails closed`() {
+        val interpreter = DefaultApprovalInterpreter(AgentConfig())
+
+        val result = interpreter.classify(
+            ApprovalInterpreterInput(
+                reply = "sure?",
+                canonicalSummary = "action: contact_user",
+                sessionId = "chat-1",
+                rootInputId = "root-1",
+            )
+        )
+
+        assertEquals(ApprovalClassificationKind.UNCLEAR, result.kind)
         assertFalse(result.usedModelAssistance)
     }
 
@@ -54,8 +96,7 @@ class ApprovalInterpreterTest {
         val result = interpreter.classify(
             ApprovalInterpreterInput(
                 reply = "Can you explain the target?",
-                promptSummary = "prompt",
-                actionSummary = "action",
+                canonicalSummary = "action: contact_user",
                 sessionId = "chat-1",
                 rootInputId = "root-1",
             )
@@ -74,9 +115,8 @@ class ApprovalInterpreterTest {
 
         val result = interpreter.classify(
             ApprovalInterpreterInput(
-                reply = "“Maybe” " + "x".repeat(800),
-                promptSummary = "prompt " + "p".repeat(400),
-                actionSummary = "action " + "a".repeat(400),
+                reply = "acknowledged " + "x".repeat(800),
+                canonicalSummary = "action: contact_user\nsummary: " + "p".repeat(600),
                 sessionId = "chat-1",
                 rootInputId = "root-1",
             )
@@ -86,7 +126,7 @@ class ApprovalInterpreterTest {
         val schema = client.lastOptions.responseFormat
         assertEquals(ApprovalClassificationKind.DENY_AND_REISSUE, result.kind)
         assertTrue(userPrompt.length < 1000)
-        assertTrue(userPrompt.contains("maybe"))
+        assertTrue(userPrompt.contains("acknowledged"))
         assertTrue(schema.toString().contains("deny_and_reissue"))
         assertFalse(schema.toString().contains("explain"))
     }
@@ -101,8 +141,7 @@ class ApprovalInterpreterTest {
         val result = interpreter.classify(
             ApprovalInterpreterInput(
                 reply = "uncertain",
-                promptSummary = "prompt",
-                actionSummary = "action",
+                canonicalSummary = "action: contact_user",
                 sessionId = "chat-1",
                 rootInputId = "root-1",
             )

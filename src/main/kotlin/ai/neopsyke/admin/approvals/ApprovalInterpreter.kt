@@ -17,8 +17,7 @@ private val logger = KotlinLogging.logger {}
 
 data class ApprovalInterpreterInput(
     val reply: String,
-    val promptSummary: String,
-    val actionSummary: String,
+    val canonicalSummary: String,
     val sessionId: String,
     val rootInputId: String?,
 )
@@ -32,19 +31,14 @@ class DefaultApprovalInterpreter(
     private val llmClient: ChatModelClient? = null,
 ) : ApprovalInterpreter {
     override fun classify(input: ApprovalInterpreterInput): ApprovalClassification {
-        val normalizedReply = normalize(input.reply, stripTerminalQuestion = false)
-            .take(MAX_REPLY_CHARS)
-        val canonicalReply = stripTerminalQuestionMarker(normalizedReply)
-        deterministic(canonicalReply, normalizedReply)?.let {
+        val canonical = canonicalize(input)
+        // Keep deterministic resolution in the same canonical pipeline as LLM fallback.
+        // This makes audit/replay stable and prevents raw planner text from becoming
+        // hidden interpreter input later.
+        deterministic(canonical.reply, canonical.replyWithTerminalPunctuation)?.let {
             return ApprovalClassification(it, usedModelAssistance = false)
         }
-        return llmFallback(
-            input.copy(
-                reply = canonicalReply,
-                promptSummary = canonicalizeSummary(input.promptSummary),
-                actionSummary = canonicalizeSummary(input.actionSummary),
-            )
-        )
+        return llmFallback(canonical)
     }
 
     private fun deterministic(
@@ -52,14 +46,15 @@ class DefaultApprovalInterpreter(
         normalizedWithQuestion: String,
     ): ApprovalClassificationKind? {
         if (normalized.isBlank()) return ApprovalClassificationKind.UNCLEAR
-        if (normalized in APPROVE_EXACT) return ApprovalClassificationKind.APPROVE
-        if (normalized in DENY_EXACT) return ApprovalClassificationKind.DENY
         if (isExplanationQuestion(normalized, normalizedWithQuestion)) return ApprovalClassificationKind.EXPLAIN
-        if (startsWithDecisionAndMore(normalized)) return ApprovalClassificationKind.DENY_AND_REISSUE
+        if (looksLikeQuestion(normalizedWithQuestion)) return ApprovalClassificationKind.UNCLEAR
+        parseDecisionWithTail(normalized)?.let { return it }
+        if (containsRedirectCue(normalized)) return ApprovalClassificationKind.DENY_AND_REISSUE
+        if (containsAmbiguityCue(normalized)) return ApprovalClassificationKind.UNCLEAR
         return null
     }
 
-    private fun llmFallback(input: ApprovalInterpreterInput): ApprovalClassification {
+    private fun llmFallback(input: CanonicalApprovalInput): ApprovalClassification {
         val client = llmClient ?: return ApprovalClassification(ApprovalClassificationKind.UNCLEAR, usedModelAssistance = false)
         val retryAttempts = maxOf(1, config.llmRetryAttempts)
         var lastError: Exception? = null
@@ -80,8 +75,8 @@ class DefaultApprovalInterpreter(
                         ChatMessage(
                             role = ChatRole.USER,
                             content = """
-                            Prompt summary: ${input.promptSummary}
-                            Action summary: ${input.actionSummary}
+                            Canonical approval summary:
+                            ${input.canonicalSummary}
                             Raw reply: ${input.reply}
                             """.trimIndent()
                         )
@@ -134,6 +129,19 @@ class DefaultApprovalInterpreter(
         normalize(raw)
             .take(MAX_SUMMARY_CHARS)
 
+    private fun canonicalize(input: ApprovalInterpreterInput): CanonicalApprovalInput {
+        val replyWithTerminalPunctuation = normalize(input.reply, stripTerminalQuestion = false)
+            .take(MAX_REPLY_CHARS)
+        val reply = stripTerminalQuestionMarker(replyWithTerminalPunctuation)
+        return CanonicalApprovalInput(
+            reply = reply,
+            replyWithTerminalPunctuation = replyWithTerminalPunctuation,
+            canonicalSummary = canonicalizeSummary(input.canonicalSummary),
+            sessionId = input.sessionId,
+            rootInputId = input.rootInputId,
+        )
+    }
+
     private fun normalize(raw: String, stripTerminalQuestion: Boolean = true): String {
         val normalized = Normalizer.normalize(raw, Normalizer.Form.NFKC)
             .trim()
@@ -155,14 +163,78 @@ class DefaultApprovalInterpreter(
             .replace(Regex("\\s*[.!?]+$"), "")
 
     private fun isExplanationQuestion(normalized: String, normalizedWithQuestion: String): Boolean =
-        normalizedWithQuestion.endsWith("?") ||
-            QUESTION_PREFIXES.any { normalized.startsWith(it) } ||
-            EXPLANATION_MARKERS.any { normalized.contains(it) }
+        (looksLikeQuestion(normalizedWithQuestion) &&
+            (QUESTION_PREFIXES.any { normalized.startsWith(it) } ||
+                EXPLANATION_MARKERS.any { normalized.contains(it) })) ||
+            EXPLANATION_MARKERS.any { normalized.startsWith(it) }
 
-    private fun startsWithDecisionAndMore(normalized: String): Boolean =
-        DECISION_PREFIXES.any { prefix ->
-            normalized.startsWith(prefix) && normalized != prefix
+    private fun looksLikeQuestion(normalizedWithQuestion: String): Boolean =
+        normalizedWithQuestion.endsWith("?")
+
+    private fun parseDecisionWithTail(normalized: String): ApprovalClassificationKind? {
+        if (normalized in APPROVE_EXACT || normalized in APPROVE_POLITE) {
+            return ApprovalClassificationKind.APPROVE
         }
+        if (normalized in DENY_EXACT || normalized in DENY_POLITE) {
+            return ApprovalClassificationKind.DENY
+        }
+
+        val approveTail = tailAfterPrefix(normalized, APPROVE_PREFIXES) ?: return parseDenyWithTail(normalized)
+        if (approveTail.isBlank() || approveTail in COURTESY_TAILS) {
+            return ApprovalClassificationKind.APPROVE
+        }
+        if (containsRedirectCue(approveTail)) {
+            return ApprovalClassificationKind.DENY_AND_REISSUE
+        }
+        if (containsAmbiguityCue(approveTail)) {
+            return ApprovalClassificationKind.UNCLEAR
+        }
+        return ApprovalClassificationKind.APPROVE
+    }
+
+    private fun parseDenyWithTail(normalized: String): ApprovalClassificationKind? {
+        val denyTail = tailAfterPrefix(normalized, DENY_PREFIXES) ?: return null
+        if (denyTail.isBlank() || denyTail in COURTESY_TAILS) {
+            return ApprovalClassificationKind.DENY
+        }
+        if (containsRedirectCue(denyTail)) {
+            return ApprovalClassificationKind.DENY_AND_REISSUE
+        }
+        if (containsAmbiguityCue(denyTail)) {
+            return ApprovalClassificationKind.UNCLEAR
+        }
+        return ApprovalClassificationKind.DENY
+    }
+
+    private fun tailAfterPrefix(normalized: String, prefixes: Set<String>): String? {
+        prefixes.forEach { prefix ->
+            if (normalized == prefix) {
+                return ""
+            }
+            if (normalized.startsWith("$prefix ") || normalized.startsWith("$prefix,")) {
+                return normalized.removePrefix(prefix).trimStart(' ', ',', '-', ':')
+            }
+        }
+        return null
+    }
+
+    private fun containsRedirectCue(text: String): Boolean =
+        REDIRECT_MARKERS.any { marker ->
+            text.contains(marker)
+        }
+
+    private fun containsAmbiguityCue(text: String): Boolean =
+        AMBIGUITY_MARKERS.any { marker ->
+            text.contains(marker)
+        }
+
+    private data class CanonicalApprovalInput(
+        val reply: String,
+        val replyWithTerminalPunctuation: String,
+        val canonicalSummary: String,
+        val sessionId: String,
+        val rootInputId: String?,
+    )
 
     private data class ApprovalDecisionPayload(
         val decision: String? = null,
@@ -171,10 +243,35 @@ class DefaultApprovalInterpreter(
     companion object {
         private val mapper = jacksonObjectMapper()
         private val APPROVE_EXACT = setOf("yes", "approve", "approved", "ok", "okay", "sure", "do it", "go ahead", "proceed")
+        private val APPROVE_POLITE = setOf("yes please", "approve it", "please approve", "please proceed", "go ahead please")
         private val DENY_EXACT = setOf("no", "deny", "denied", "cancel", "stop", "don't", "do not")
-        private val QUESTION_PREFIXES = listOf("what ", "what is", "what exactly", "who ", "why ", "how ", "when ", "is this", "which ")
+        private val DENY_POLITE = setOf("no thanks", "deny it", "please deny", "cancel it")
+        private val APPROVE_PREFIXES = APPROVE_EXACT + APPROVE_POLITE
+        private val DENY_PREFIXES = DENY_EXACT + DENY_POLITE
+        private val COURTESY_TAILS = setOf("please", "thanks", "thank you", "thx", "pls")
+        private val QUESTION_PREFIXES = listOf("what ", "what is", "what exactly", "who ", "why ", "how ", "when ", "is this", "which ", "can you ")
         private val EXPLANATION_MARKERS = listOf("explain", "clarify", "details", "detail", "more context", "more info", "more information")
-        private val DECISION_PREFIXES = listOf("yes", "approve", "ok", "okay", "sure", "no", "deny", "cancel")
+        private val REDIRECT_MARKERS = listOf(
+            "instead",
+            "not now",
+            "ask ",
+            "draft ",
+            "first",
+            "before",
+            "after",
+            "tomorrow",
+            "later",
+            "change",
+            "different",
+        )
+        private val AMBIGUITY_MARKERS = listOf(
+            "maybe",
+            "probably",
+            "perhaps",
+            "i think",
+            "not sure",
+            "unsure",
+        )
         private const val MAX_REPLY_CHARS: Int = 400
         private const val MAX_SUMMARY_CHARS: Int = 240
         private const val APPROVAL_SCHEMA_JSON: String =

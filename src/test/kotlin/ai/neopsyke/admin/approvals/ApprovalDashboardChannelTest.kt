@@ -110,6 +110,7 @@ class ApprovalDashboardChannelTest {
             deniedBy: ConversationSecurityContext,
             reason: String,
             reasonCode: String?,
+        expectedActionHash: String?,
         ): ActionControlDecisionResult {
             denyCalls += 1
             currentStagedAction = currentStagedAction.copy(status = StagedActionStatus.CANCELLED, statusReason = reason, statusReasonCode = reasonCode)
@@ -198,7 +199,7 @@ class ApprovalDashboardChannelTest {
             )
             val request = store.requestByStagedActionId(staged.id)
             assertNotNull(request)
-            assertEquals(ApprovalRequestStatus.PENDING, request.status)
+            assertEquals(ApprovalRequestStatus.AWAITING_OWNER_REPLY, request.status)
             assertEquals("webapp", request.target.provider)
             assertTrue(store.listAudit(request.id).any { it.kind == "prompt_sent" })
         }
@@ -275,7 +276,7 @@ class ApprovalDashboardChannelTest {
                 conversationContext = staged.conversationContext,
             )
             runtime.routeOwnerMessage(envelope("what does this action do?"))
-            assertEquals(ApprovalRequestStatus.PENDING, store.requestByStagedActionId(staged.id)?.status)
+            assertEquals(ApprovalRequestStatus.AWAITING_OWNER_REPLY, store.requestByStagedActionId(staged.id)?.status)
             assertEquals(0, actionControl.authorizeCalls)
             assertEquals(0, actionControl.denyCalls)
             assertTrue(store.listAudit(store.requestByStagedActionId(staged.id)!!.id).any { it.kind == "explanation_sent" })

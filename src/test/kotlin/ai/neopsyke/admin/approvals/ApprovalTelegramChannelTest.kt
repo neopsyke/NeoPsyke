@@ -92,6 +92,7 @@ class ApprovalTelegramChannelTest {
 
         override suspend fun denyStagedAction(
             stagedActionId: String, deniedBy: ConversationSecurityContext, reason: String, reasonCode: String?,
+        expectedActionHash: String?,
         ): ActionControlDecisionResult {
             denyCalls += 1
             currentStagedAction = currentStagedAction.copy(status = StagedActionStatus.CANCELLED, statusReason = reason, statusReasonCode = reasonCode)
@@ -272,7 +273,7 @@ class ApprovalTelegramChannelTest {
                 conversationContext = staged.conversationContext,
             )
             runtime.routeOwnerMessage(envelope("what is this action?"))
-            assertEquals(ApprovalRequestStatus.PENDING, store.requestByStagedActionId(staged.id)?.status)
+            assertEquals(ApprovalRequestStatus.AWAITING_OWNER_REPLY, store.requestByStagedActionId(staged.id)?.status)
             assertEquals(0, actionControl.authorizeCalls)
             assertTrue(telegramSink.messages.any { it.second.contains("Approval details:") })
         }

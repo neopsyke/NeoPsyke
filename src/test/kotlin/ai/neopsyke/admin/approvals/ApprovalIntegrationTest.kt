@@ -129,6 +129,7 @@ class ApprovalIntegrationTest {
             deniedBy: ConversationSecurityContext,
             reason: String,
             reasonCode: String?,
+        expectedActionHash: String?,
         ): ActionControlDecisionResult {
             denyCalls += 1
             currentStagedAction = currentStagedAction.copy(
@@ -315,7 +316,7 @@ class ApprovalIntegrationTest {
 
             val request = h.store.activeRequestForSession(staged.conversationContext.sessionId)
             assertNotNull(request)
-            assertEquals(ApprovalRequestStatus.PENDING, request.status)
+            assertEquals(ApprovalRequestStatus.AWAITING_OWNER_REPLY, request.status)
             assertEquals(staged.id, request.stagedActionId)
             assertEquals("webapp", request.target.provider)
 
@@ -386,7 +387,7 @@ class ApprovalIntegrationTest {
 
             val request = h.store.requestByStagedActionId(staged.id)
             assertNotNull(request)
-            assertEquals(ApprovalRequestStatus.PENDING, request.status)
+            assertEquals(ApprovalRequestStatus.AWAITING_OWNER_REPLY, request.status)
             assertEquals(0, h.actionControl.authorizeCalls)
             assertEquals(0, h.actionControl.denyCalls)
 
@@ -435,7 +436,7 @@ class ApprovalIntegrationTest {
             val req2 = h.store.requestByStagedActionId("staged-2")
             assertNotNull(req1)
             assertNotNull(req2)
-            assertEquals(ApprovalRequestStatus.PENDING, req1.status)
+            assertEquals(ApprovalRequestStatus.AWAITING_OWNER_REPLY, req1.status)
             assertEquals(ApprovalRequestStatus.QUEUED, req2.status)
 
             // Approve the first — queued should activate
@@ -495,7 +496,7 @@ class ApprovalIntegrationTest {
 
             val req1 = store.activeRequestForSession("chat-1")
             assertNotNull(req1)
-            assertEquals(ApprovalRequestStatus.PENDING, req1.status)
+            assertEquals(ApprovalRequestStatus.AWAITING_OWNER_REPLY, req1.status)
 
             assertNull(store.activeRequestForSession("chat-2"))
 

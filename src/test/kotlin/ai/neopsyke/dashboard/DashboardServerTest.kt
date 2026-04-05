@@ -652,6 +652,7 @@ class DashboardServerTest {
             deniedBy: ConversationSecurityContext,
             reason: String,
             reasonCode: String?,
+        expectedActionHash: String?,
         ): ActionControlDecisionResult =
             ActionControlDecisionResult.Refused(reason = "Stage already completed.", reasonCode = "STAGED_ACTION_NOT_DENYABLE")
 

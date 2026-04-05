@@ -46,6 +46,7 @@ class ApprovalRuntimeTest {
         var authorizeCalls: Int = 0
         var denyCalls: Int = 0
         var lastExpectedActionHash: String? = null
+        var lastExpectedDeniedActionHash: String? = null
 
         override suspend fun handleAuthorizationDecision(
             action: PendingAction,
@@ -124,8 +125,16 @@ class ApprovalRuntimeTest {
             deniedBy: ConversationSecurityContext,
             reason: String,
             reasonCode: String?,
+            expectedActionHash: String?,
         ): ActionControlDecisionResult {
             denyCalls += 1
+            lastExpectedDeniedActionHash = expectedActionHash
+            if (!expectedActionHash.isNullOrBlank() && expectedActionHash != currentStagedAction.actionHash) {
+                return ActionControlDecisionResult.Refused(
+                    reason = "hash mismatch",
+                    reasonCode = "STAGED_ACTION_HASH_MISMATCH",
+                )
+            }
             currentStagedAction = currentStagedAction.copy(
                 status = StagedActionStatus.CANCELLED,
                 statusReason = reason,
@@ -265,6 +274,89 @@ class ApprovalRuntimeTest {
     }
 
     @Test
+    fun `approve on hash drift supersedes request and refreshes prompt`() = runBlocking {
+        withRuntime(testStagedAction()) { runtime, store, dashboardStore, actionControl, _, _, _, _ ->
+            runtime.onApprovalStaged(
+                actionSummary = actionControl.currentStagedAction.summary,
+                stagedAction = actionControl.currentStagedAction,
+                reason = "Owner approval required.",
+                reasonCode = "NEEDS_APPROVAL",
+                conversationContext = actionControl.currentStagedAction.conversationContext,
+            )
+            val initial = store.requestByStagedActionId(actionControl.currentStagedAction.id)!!
+            actionControl.currentStagedAction = actionControl.currentStagedAction.copy(
+                actionHash = "hash-2",
+                summary = "Send updated message",
+            )
+
+            val result = runtime.routeOwnerMessage(
+                OwnerMessageEnvelope(
+                    content = "yes",
+                    source = "chat:test",
+                    priority = InputPriority.HIGH,
+                    conversationContext = actionControl.currentStagedAction.conversationContext,
+                    receivedAtMs = System.currentTimeMillis(),
+                    eventId = "evt-hash-approve-1",
+                )
+            )
+
+            val replacement = store.activeRequestForSession(actionControl.currentStagedAction.conversationContext.sessionId)
+            val sessionJson = dashboardStore.chatSessionJson(actionControl.currentStagedAction.conversationContext.sessionId).orEmpty()
+            assertTrue(result is OwnerIngressResult.Consumed)
+            assertEquals(0, actionControl.authorizeCalls)
+            assertEquals(0, actionControl.denyCalls)
+            assertEquals(ApprovalRequestStatus.SUPERSEDED, store.request(initial.id)?.status)
+            assertNotNull(replacement)
+            assertEquals(ApprovalRequestStatus.AWAITING_OWNER_REPLY, replacement.status)
+            assertEquals("hash-2", replacement.actionHash)
+            assertTrue(replacement.id != initial.id)
+            assertTrue(sessionJson.contains("stale because the staged action changed"))
+        }
+    }
+
+    @Test
+    fun `deny and reissue on hash drift supersedes request without forwarding`() = runBlocking {
+        var forwarded = 0
+        withRuntime(
+            stagedAction = testStagedAction(),
+            forwardNormalInput = { _, _, _, _ ->
+                forwarded += 1
+                true
+            }
+        ) { runtime, store, _, actionControl, _, _, _, _ ->
+            runtime.onApprovalStaged(
+                actionSummary = actionControl.currentStagedAction.summary,
+                stagedAction = actionControl.currentStagedAction,
+                reason = "Owner approval required.",
+                reasonCode = "NEEDS_APPROVAL",
+                conversationContext = actionControl.currentStagedAction.conversationContext,
+            )
+            val initial = store.requestByStagedActionId(actionControl.currentStagedAction.id)!!
+            actionControl.currentStagedAction = actionControl.currentStagedAction.copy(actionHash = "hash-2")
+
+            val result = runtime.routeOwnerMessage(
+                OwnerMessageEnvelope(
+                    content = "no, send it tomorrow instead",
+                    source = "chat:test",
+                    priority = InputPriority.HIGH,
+                    conversationContext = actionControl.currentStagedAction.conversationContext,
+                    receivedAtMs = System.currentTimeMillis(),
+                    eventId = "evt-hash-reissue-1",
+                )
+            )
+
+            val replacement = store.activeRequestForSession(actionControl.currentStagedAction.conversationContext.sessionId)
+            assertTrue(result is OwnerIngressResult.Consumed)
+            assertEquals(0, actionControl.denyCalls)
+            assertEquals(0, forwarded)
+            assertEquals(ApprovalRequestStatus.SUPERSEDED, store.request(initial.id)?.status)
+            assertNotNull(replacement)
+            assertEquals(ApprovalRequestStatus.AWAITING_OWNER_REPLY, replacement.status)
+            assertEquals("hash-2", replacement.actionHash)
+        }
+    }
+
+    @Test
     fun `stale reply is ignored after clarification refresh`() = runBlocking {
         withRuntime(testStagedAction()) { runtime, store, _, actionControl, _, _, _, _ ->
             runtime.onApprovalStaged(
@@ -301,7 +393,7 @@ class ApprovalRuntimeTest {
 
             assertTrue(stale is OwnerIngressResult.Consumed)
             assertEquals(0, actionControl.authorizeCalls)
-            assertEquals(ApprovalRequestStatus.PENDING, store.requestByStagedActionId(actionControl.currentStagedAction.id)?.status)
+            assertEquals(ApprovalRequestStatus.AWAITING_CLARIFICATION, store.requestByStagedActionId(actionControl.currentStagedAction.id)?.status)
         }
     }
 
@@ -375,7 +467,7 @@ class ApprovalRuntimeTest {
 
             assertTrue(mismatched is OwnerIngressResult.Consumed)
             assertEquals(0, actionControl.authorizeCalls)
-            assertEquals(ApprovalRequestStatus.PENDING, store.requestByStagedActionId(actionControl.currentStagedAction.id)?.status)
+            assertEquals(ApprovalRequestStatus.AWAITING_OWNER_REPLY, store.requestByStagedActionId(actionControl.currentStagedAction.id)?.status)
         }
     }
 
@@ -514,7 +606,7 @@ class ApprovalRuntimeTest {
 
             val sessionJson = dashboardStore.chatSessionJson(actionControl.currentStagedAction.conversationContext.sessionId).orEmpty()
             assertTrue(result is OwnerIngressResult.Consumed)
-            assertEquals(ApprovalRequestStatus.PENDING, store.requestByStagedActionId(actionControl.currentStagedAction.id)?.status)
+            assertEquals(ApprovalRequestStatus.AWAITING_OWNER_REPLY, store.requestByStagedActionId(actionControl.currentStagedAction.id)?.status)
             assertTrue(sessionJson.contains("Approval details:"))
             assertTrue(sessionJson.contains("[redacted-host]"))
             assertTrue(sessionJson.contains("[redacted-id]"))
@@ -558,7 +650,7 @@ class ApprovalRuntimeTest {
 
             assertTrue(stale is OwnerIngressResult.Consumed)
             assertEquals(0, actionControl.authorizeCalls)
-            assertEquals(ApprovalRequestStatus.PENDING, store.requestByStagedActionId(actionControl.currentStagedAction.id)?.status)
+            assertEquals(ApprovalRequestStatus.AWAITING_CLARIFICATION, store.requestByStagedActionId(actionControl.currentStagedAction.id)?.status)
         }
     }
 
@@ -597,7 +689,7 @@ class ApprovalRuntimeTest {
 
             assertTrue(missingRef is OwnerIngressResult.Consumed)
             assertEquals(0, actionControl.authorizeCalls)
-            assertEquals(ApprovalRequestStatus.PENDING, store.requestByStagedActionId(actionControl.currentStagedAction.id)?.status)
+            assertEquals(ApprovalRequestStatus.AWAITING_OWNER_REPLY, store.requestByStagedActionId(actionControl.currentStagedAction.id)?.status)
             assertTrue(
                 dashboardStore.chatSessionJson(actionControl.currentStagedAction.conversationContext.sessionId)
                     .orEmpty()
@@ -639,7 +731,7 @@ class ApprovalRuntimeTest {
             runtime.onApprovalStaged("First", firstAction, "Owner approval required.", "NEEDS_APPROVAL", firstAction.conversationContext)
             runtime.onApprovalStaged("Second", secondAction, "Owner approval required.", "NEEDS_APPROVAL", secondAction.conversationContext)
 
-            assertEquals(ApprovalRequestStatus.PENDING, store.requestByStagedActionId("staged-1")?.status)
+            assertEquals(ApprovalRequestStatus.AWAITING_OWNER_REPLY, store.requestByStagedActionId("staged-1")?.status)
             assertEquals(ApprovalRequestStatus.QUEUED, store.requestByStagedActionId("staged-2")?.status)
 
             runtime.routeOwnerMessage(
@@ -654,7 +746,7 @@ class ApprovalRuntimeTest {
             )
 
             assertEquals(ApprovalRequestStatus.APPROVED, store.requestByStagedActionId("staged-1")?.status)
-            assertEquals(ApprovalRequestStatus.PENDING, store.requestByStagedActionId("staged-2")?.status)
+            assertEquals(ApprovalRequestStatus.AWAITING_OWNER_REPLY, store.requestByStagedActionId("staged-2")?.status)
             runtime.close()
             dashboardStore.close()
         }

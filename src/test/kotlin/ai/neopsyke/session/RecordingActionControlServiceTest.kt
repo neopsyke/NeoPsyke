@@ -58,6 +58,7 @@ class RecordingActionControlServiceTest {
             deniedBy: ConversationSecurityContext,
             reason: String,
             reasonCode: String?,
+            expectedActionHash: String?,
         ) = ActionControlDecisionResult.Refused("not implemented", null)
 
         override suspend fun processAutonomousStagedActions(limit: Int) = emptyList<ActionControlDecisionResult.Executed>()
@@ -277,6 +278,7 @@ class RecordingActionControlServiceTest {
             deniedBy: ConversationSecurityContext,
             reason: String,
             reasonCode: String?,
+        expectedActionHash: String?,
         ): ActionControlDecisionResult {
             denyCallCount++
             return ActionControlDecisionResult.Cancelled(
@@ -366,7 +368,7 @@ class RecordingActionControlServiceTest {
             val deniedBy = ConversationSecurityContexts.ownerDirect(
                 provider = "webapp", channelId = "chat-1", principalId = "owner",
             )
-            val result = recording.denyStagedAction("staged-1", deniedBy, "Owner denied from chat.", "OWNER_DENIED")
+            val result = recording.denyStagedAction("staged-1", deniedBy, "Owner denied from chat.", "OWNER_DENIED", null)
             assertTrue(result is ActionControlDecisionResult.Cancelled)
             assertEquals(1, fake.denyCallCount)
 

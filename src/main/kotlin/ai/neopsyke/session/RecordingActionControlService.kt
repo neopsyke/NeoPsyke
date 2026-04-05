@@ -109,8 +109,9 @@ class RecordingActionControlService(
         deniedBy: ConversationSecurityContext,
         reason: String,
         reasonCode: String?,
+        expectedActionHash: String?,
     ): ActionControlDecisionResult {
-        val result = delegate.denyStagedAction(stagedActionId, deniedBy, reason, reasonCode)
+        val result = delegate.denyStagedAction(stagedActionId, deniedBy, reason, reasonCode, expectedActionHash)
         if (channel.mode == SessionRecordingMode.RECORD) {
             val seq = channel.nextSequenceIndex()
             channel.recordEntry(

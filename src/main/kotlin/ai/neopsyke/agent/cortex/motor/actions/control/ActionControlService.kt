@@ -74,6 +74,7 @@ interface ActionControlService {
         deniedBy: ConversationSecurityContext,
         reason: String = "Denied from dashboard.",
         reasonCode: String? = null,
+        expectedActionHash: String? = null,
     ): ActionControlDecisionResult
 
     suspend fun processAutonomousStagedActions(limit: Int = 10): List<ActionControlDecisionResult.Executed>
@@ -133,6 +134,7 @@ object NoopActionControlService : ActionControlService {
         deniedBy: ConversationSecurityContext,
         reason: String,
         reasonCode: String?,
+        expectedActionHash: String?,
     ): ActionControlDecisionResult =
         ActionControlDecisionResult.Refused(
             reason = "Action control is not configured.",
@@ -297,6 +299,7 @@ class LegacyCompatibleActionControlService(
         deniedBy: ConversationSecurityContext,
         reason: String,
         reasonCode: String?,
+        expectedActionHash: String?,
     ): ActionControlDecisionResult =
         ActionControlDecisionResult.Refused(
             reason = "Legacy action control does not persist staged actions.",
@@ -475,6 +478,7 @@ class DefaultActionControlService(
         deniedBy: ConversationSecurityContext,
         reason: String,
         reasonCode: String?,
+        expectedActionHash: String?,
     ): ActionControlDecisionResult {
         if (deniedBy.principal.role != PrincipalRole.OWNER &&
             deniedBy.principal.role != PrincipalRole.ADMIN_CONTROL
@@ -495,6 +499,12 @@ class DefaultActionControlService(
             return ActionControlDecisionResult.Refused(
                 reason = "Staged action '${staged.id}' is not pending authorization or autonomous execution.",
                 reasonCode = "STAGED_ACTION_NOT_DENYABLE",
+            )
+        }
+        if (!expectedActionHash.isNullOrBlank() && staged.actionHash != expectedActionHash) {
+            return ActionControlDecisionResult.Refused(
+                reason = "Staged action '${staged.id}' no longer matches the approved action identity.",
+                reasonCode = "STAGED_ACTION_HASH_MISMATCH",
             )
         }
         val cancelled = store.updateStagedAction(

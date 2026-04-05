@@ -917,11 +917,18 @@ object AgentRuntimeSettingsLoader {
                     approvalsYaml.dashboardRequiresLiveSubscriber,
                     defaults.approvals.dashboardRequiresLiveSubscriber
                 ),
-                telegramStartupAckEnabled = readBoolean(
-                    env["NEOPSYKE_APPROVALS_TELEGRAM_STARTUP_ACK_ENABLED"],
-                    approvalsYaml.telegramStartupAckEnabled,
-                    defaults.approvals.telegramStartupAckEnabled
-                ),
+                telegramStartupAckEnabled = parseBoolean(env["NEOPSYKE_APPROVALS_TELEGRAM_STARTUP_ACK_ENABLED"])
+                    ?: approvalsYaml.telegramStartupAckEnabled
+                    ?: run {
+                        val telegramEnabled = readBoolean(
+                            env["NEOPSYKE_TELEGRAM_ENABLED"],
+                            telegramYaml.enabled,
+                            defaults.nativeIntegrations.telegram.enabled
+                        )
+                        // Keep startup ACK on by default when Telegram is enabled, so
+                        // non-conversation approval routing has an explicit deliverability proof.
+                        if (telegramEnabled) true else defaults.approvals.telegramStartupAckEnabled
+                    },
             ),
             connectors = ConnectorRuntimeConfig(
                 enabled = readBoolean(

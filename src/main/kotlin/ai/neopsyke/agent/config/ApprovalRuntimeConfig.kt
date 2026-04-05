@@ -7,7 +7,7 @@ data class ApprovalRuntimeConfig(
     val defaultChannel: String = DEFAULT_CHANNEL_DASHBOARD,
     val channelPriority: List<String> = listOf(DEFAULT_CHANNEL_DASHBOARD, DEFAULT_CHANNEL_TELEGRAM),
     val dashboardRequiresLiveSubscriber: Boolean = true,
-    val telegramStartupAckEnabled: Boolean = false,
+    val telegramStartupAckEnabled: Boolean = true,
 ) {
     companion object {
         const val DEFAULT_CHANNEL_DASHBOARD: String = "dashboard"

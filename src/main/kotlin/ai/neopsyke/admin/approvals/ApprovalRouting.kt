@@ -27,7 +27,7 @@ fun interface ApprovalChannelResolver {
 
 interface ApprovalChannelStatusProvider {
     fun statuses(): Map<String, ApprovalChannelStatus>
-    fun recordDelivery(target: ApprovalTarget, delivery: ConversationDeliveryResult)
+    fun recordDelivery(target: ApprovalTarget, delivery: ConversationDeliveryResult, source: String)
 }
 
 class DefaultApprovalChannelStatusProvider(
@@ -36,8 +36,7 @@ class DefaultApprovalChannelStatusProvider(
     private val telegramConfig: TelegramChannelConfig,
     private val telegramSink: TelegramMessageSink?,
 ) : ApprovalChannelStatusProvider {
-    @Volatile private var lastTelegramSuccessAtMs: Long? = null
-    @Volatile private var lastTelegramFailureAtMs: Long? = null
+    @Volatile private var telegramStartupAckDelivered: Boolean = false
 
     override fun statuses(): Map<String, ApprovalChannelStatus> {
         val candidates = linkedMapOf<String, ApprovalChannelStatus>()
@@ -46,16 +45,12 @@ class DefaultApprovalChannelStatusProvider(
         return candidates
     }
 
-    override fun recordDelivery(target: ApprovalTarget, delivery: ConversationDeliveryResult) {
+    override fun recordDelivery(target: ApprovalTarget, delivery: ConversationDeliveryResult, source: String) {
         if (target.provider != "telegram") return
+        if (source != "approval-startup-ack") return
         val ownerChatId = telegramConfig.ownerChatId.trim()
         if (ownerChatId.isBlank() || target.channelId != ownerChatId) return
-        val nowMs = System.currentTimeMillis()
-        if (delivery.delivered) {
-            lastTelegramSuccessAtMs = nowMs
-        } else {
-            lastTelegramFailureAtMs = nowMs
-        }
+        telegramStartupAckDelivered = delivery.delivered
     }
 
     private fun dashboardStatus(): ApprovalChannelStatus? {
@@ -81,19 +76,14 @@ class DefaultApprovalChannelStatusProvider(
             principalId = telegramConfig.ownerUserId.ifBlank { "telegram-owner" },
             principalLabel = "Telegram owner",
         )
-        val lastSuccess = lastTelegramSuccessAtMs
-        val lastFailure = lastTelegramFailureAtMs
-        val deliverable = lastSuccess != null && (lastFailure == null || lastSuccess >= lastFailure)
-        val live = deliverable && System.currentTimeMillis() - lastSuccess <= TELEGRAM_LIVE_WINDOW_MS
+        // Startup ACK is the current source-of-truth for non-conversation Telegram routing.
+        val deliverable = telegramStartupAckDelivered
+        val live = telegramStartupAckDelivered
         return ApprovalChannelStatus(
             target = target,
             deliverable = deliverable,
             live = live,
         )
-    }
-
-    private companion object {
-        const val TELEGRAM_LIVE_WINDOW_MS: Long = 15 * 60 * 1000L
     }
 }
 

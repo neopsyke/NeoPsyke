@@ -45,7 +45,7 @@ class SqliteApprovalStore(
                 """
                 CREATE TABLE IF NOT EXISTS approval_requests (
                   id TEXT PRIMARY KEY,
-                  staged_action_id TEXT NOT NULL UNIQUE,
+                  staged_action_id TEXT NOT NULL,
                   target_session_id TEXT NOT NULL,
                   status TEXT NOT NULL,
                   created_at_ms INTEGER NOT NULL,
@@ -54,8 +54,14 @@ class SqliteApprovalStore(
                 );
                 """.trimIndent()
             )
+        }
+        migrateApprovalRequestsTableIfNeeded()
+        connection.createStatement().use { statement ->
             statement.execute(
                 "CREATE INDEX IF NOT EXISTS idx_approval_requests_target_session ON approval_requests(target_session_id, status, updated_at_ms DESC);"
+            )
+            statement.execute(
+                "CREATE INDEX IF NOT EXISTS idx_approval_requests_staged_action ON approval_requests(staged_action_id, updated_at_ms DESC);"
             )
             statement.execute(
                 """
@@ -146,7 +152,13 @@ class SqliteApprovalStore(
     override fun requestByStagedActionId(stagedActionId: String): ApprovalRequest? =
         synchronized(connection) {
             connection.prepareStatement(
-                "SELECT payload_json FROM approval_requests WHERE staged_action_id = ?"
+                """
+                SELECT payload_json
+                FROM approval_requests
+                WHERE staged_action_id = ?
+                ORDER BY updated_at_ms DESC
+                LIMIT 1
+                """.trimIndent()
             ).use { statement ->
                 statement.setString(1, stagedActionId)
                 statement.executeQuery().use { rs ->
@@ -163,7 +175,7 @@ class SqliteApprovalStore(
                 SELECT payload_json
                 FROM approval_requests
                 WHERE target_session_id = ?
-                  AND status = 'PENDING'
+                  AND status IN ('AWAITING_OWNER_REPLY', 'AWAITING_CLARIFICATION')
                 ORDER BY updated_at_ms DESC
                 LIMIT 1
                 """.trimIndent()
@@ -223,7 +235,7 @@ class SqliteApprovalStore(
                 """
                 SELECT payload_json
                 FROM approval_requests
-                WHERE status = 'PENDING'
+                WHERE status IN ('AWAITING_OWNER_REPLY', 'AWAITING_CLARIFICATION')
                 ORDER BY updated_at_ms ASC
                 """.trimIndent()
             ).use { statement ->
@@ -284,9 +296,94 @@ class SqliteApprovalStore(
     }
 
     companion object {
+        private const val LEGACY_TABLE_NAME: String = "approval_requests_legacy"
+
         private fun resolveDbPath(raw: String): Path {
             val candidate = Paths.get(raw)
             return if (candidate.isAbsolute) candidate else Paths.get("").resolve(candidate).normalize()
         }
     }
+
+    private fun migrateApprovalRequestsTableIfNeeded() {
+        synchronized(connection) {
+            if (!tableExists("approval_requests")) return
+            if (!hasUniqueStagedActionConstraint()) return
+            val priorAutoCommit = connection.autoCommit
+            connection.autoCommit = false
+            try {
+                connection.createStatement().use { statement ->
+                    statement.execute("ALTER TABLE approval_requests RENAME TO $LEGACY_TABLE_NAME;")
+                    statement.execute(
+                        """
+                        CREATE TABLE approval_requests (
+                          id TEXT PRIMARY KEY,
+                          staged_action_id TEXT NOT NULL,
+                          target_session_id TEXT NOT NULL,
+                          status TEXT NOT NULL,
+                          created_at_ms INTEGER NOT NULL,
+                          updated_at_ms INTEGER NOT NULL,
+                          payload_json TEXT NOT NULL
+                        );
+                        """.trimIndent()
+                    )
+                    statement.execute(
+                        """
+                        INSERT INTO approval_requests(id, staged_action_id, target_session_id, status, created_at_ms, updated_at_ms, payload_json)
+                        SELECT id, staged_action_id, target_session_id, status, created_at_ms, updated_at_ms, payload_json
+                        FROM $LEGACY_TABLE_NAME
+                        ORDER BY created_at_ms ASC;
+                        """.trimIndent()
+                    )
+                    statement.execute("DROP TABLE $LEGACY_TABLE_NAME;")
+                }
+                connection.commit()
+            } catch (ex: Exception) {
+                connection.rollback()
+                throw ex
+            } finally {
+                connection.autoCommit = priorAutoCommit
+            }
+        }
+    }
+
+    private fun tableExists(name: String): Boolean =
+        connection.prepareStatement(
+            """
+            SELECT 1
+            FROM sqlite_master
+            WHERE type = 'table' AND name = ?
+            LIMIT 1
+            """.trimIndent()
+        ).use { statement ->
+            statement.setString(1, name)
+            statement.executeQuery().use { rs -> rs.next() }
+        }
+
+    private fun hasUniqueStagedActionConstraint(): Boolean =
+        connection.createStatement().use { statement ->
+            statement.executeQuery("PRAGMA index_list('approval_requests')").use { rs ->
+                while (rs.next()) {
+                    if (rs.getInt("unique") != 1) continue
+                    val indexName = rs.getString("name")
+                    if (indexName.isNullOrBlank()) continue
+                    if (isSingleColumnIndex(indexName, "staged_action_id")) {
+                        return true
+                    }
+                }
+                false
+            }
+        }
+
+    private fun isSingleColumnIndex(indexName: String, column: String): Boolean =
+        connection.createStatement().use { statement ->
+            statement.executeQuery("PRAGMA index_info('$indexName')").use { rs ->
+                var count = 0
+                var seenColumn = false
+                while (rs.next()) {
+                    count += 1
+                    seenColumn = rs.getString("name") == column
+                }
+                count == 1 && seenColumn
+            }
+        }
 }
