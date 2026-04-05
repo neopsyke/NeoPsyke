@@ -663,9 +663,9 @@ class EgoPlannerTest {
                     urgency = Urgency.MEDIUM,
                     content = """
                     Website fetch completed.
-                    UNTRUSTED_EXTERNAL_DATA_BEGIN
+                    RECALLED_MEMORY_BEGIN
                     Fetch completed for https://example.com/pricing. Extracted 612 chars. Preview: Pricing page with current plans and rates.
-                    UNTRUSTED_EXTERNAL_DATA_END
+                    RECALLED_MEMORY_END
                     Produce the next planner decision as one raw JSON object only.
                     Do not use tool or function wrappers.
                     """.trimIndent(),

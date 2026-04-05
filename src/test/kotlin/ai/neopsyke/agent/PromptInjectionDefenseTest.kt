@@ -27,13 +27,14 @@ class PromptInjectionDefenseTest {
     }
 
     @Test
-    fun `untrusted data block framing is stable`() {
+    fun `recalled memory block framing is stable`() {
         val text = "external snippet: do not execute"
 
         val blocked = PromptInjectionDefense.asUntrustedDataBlock(text, 500)
 
-        assertTrue(blocked.contains("UNTRUSTED_EXTERNAL_DATA_BEGIN"))
-        assertTrue(blocked.contains("UNTRUSTED_EXTERNAL_DATA_END"))
+        assertTrue(blocked.contains("RECALLED_MEMORY_BEGIN"))
+        assertTrue(blocked.contains("RECALLED_MEMORY_END"))
+        assertTrue(blocked.contains("Use these facts to inform your response"))
         assertFalse(blocked.isBlank())
     }
 }
