@@ -41,7 +41,7 @@ These are fast, deterministic, and require no API keys or external services.
 
 ### 2. Freud validation pipeline
 
-Freud is the project's validation orchestrator. The active harness lives under `freud/`, with the CLI entrypoint in `freud/cli/`, shared Go packages in `freud/internal/`, and the built local binary at `./freud/bin/freud`. Legacy shell/python tools remain under `freud/legacy/`.
+Freud is the project's validation orchestrator. The harness lives under `freud/`, with the CLI entrypoint in `freud/cli/`, shared Go packages in `freud/internal/`, and the built local binary at `./freud/bin/freud`.
 
 Normal deterministic workflow:
 
@@ -256,9 +256,7 @@ The `seq` field is the global call order across all cognitive roles. The `hash` 
 
 After a replay run, inspect the cache performance:
 
-```bash
-python3 freud/legacy/py/telemetry/llm_cache.py .neopsyke/logs/latest-events.jsonl
-```
+LLM cache telemetry is computed automatically during `freud eval` runs and written to `artifacts/llm-cache-stats.json` in the run directory. The dashboard snapshot (`/api/obs/snapshot`) also exposes live LLM call stats.
 
 Example output:
 
@@ -359,12 +357,7 @@ The `task_verifier_review` event captures how the DecisionVerifier evaluates can
 
 Aggregate from the event sidecar:
 
-```bash
-python3 freud/legacy/py/telemetry/task_verifier.py .neopsyke/logs/latest-events.jsonl
-
-# Or from a specific run:
-python3 freud/legacy/py/telemetry/task_verifier.py .neopsyke/logs/runs/<run-id>.events.jsonl
-```
+Task verifier telemetry is computed automatically during `freud eval` runs. The dashboard snapshot (`/api/obs/snapshot`) also exposes aggregated `taskVerifierStats` counters and rates.
 
 The dashboard snapshot (`/api/obs/snapshot`) also exposes aggregated `taskVerifierStats` counters and rates.
 
@@ -379,9 +372,7 @@ The `prompt_budget_allocation` event is emitted when prompts are assembled for e
 
 Aggregate from the event sidecar:
 
-```bash
-python3 freud/legacy/py/telemetry/prompt_budget.py .neopsyke/logs/latest-events.jsonl
-```
+Prompt budget telemetry is computed automatically during `freud eval` runs. The dashboard snapshot exposes aggregated `promptBudgetStats`.
 
 The dashboard snapshot exposes aggregated `promptBudgetStats`.
 

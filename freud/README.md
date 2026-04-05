@@ -422,9 +422,7 @@ Secrets (`MISTRAL_API_KEY` etc.) are never in config files — they pass through
 - `freud/internal/analysis/`: native Go analysis modules (triage, summarize, context-pack, telemetry)
 - `freud/config/freud.yaml`: default YAML configuration
 - `freud/config/profiles/`: lane profile overlays (low-llm.yaml, high-llm.yaml)
-- `freud/legacy/scripts/`: legacy shell scripts (no longer called by the CLI)
-- `freud/legacy/py/`: legacy Python modules (superseded by Go analysis modules)
-- `freud/tests/`: legacy BATS and pytest tests (superseded by Go tests)
+- `freud/tests/`: BATS and pytest tests (supplementary to Go tests)
 - `freud/bin/`: local built binaries created by `bootstrap.sh`
 
 ## Building
