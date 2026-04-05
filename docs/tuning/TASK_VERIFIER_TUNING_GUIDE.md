@@ -55,21 +55,11 @@ Follow `task_verifier_review` events and aggregated `taskVerifierStats`.
 3. Structured logs:
 - `StructuredLogSink` emits `task_verifier.review ...` lines with intent and volatility details.
 
-## Aggregation Script
+## Aggregation
 
-Use:
+Task verifier telemetry is computed automatically during `freud eval` runs. The dashboard snapshot (`/api/obs/snapshot`) also exposes aggregated `taskVerifierStats`.
 
-```bash
-python3 freud/legacy/py/telemetry/task_verifier.py .neopsyke/logs/latest-events.jsonl
-```
-
-Or with explicit run file:
-
-```bash
-python3 freud/legacy/py/telemetry/task_verifier.py .neopsyke/logs/runs/<run-id>.events.jsonl
-```
-
-The script prints:
+The telemetry reports:
 
 - total reviews
 - allow/deny rates
@@ -134,4 +124,4 @@ Use a staged loop and change one axis at a time.
 - Event emission: `src/main/kotlin/ai/neopsyke/agent/ego/Ego.kt`
 - Structured logs: `src/main/kotlin/ai/neopsyke/instrumentation/StructuredLogSink.kt`
 - Dashboard aggregates: `src/main/kotlin/ai/neopsyke/dashboard/DashboardStateStore.kt`
-- Analyzer script: `python3 freud/legacy/py/telemetry/task_verifier.py`
+- Go telemetry module: `freud/internal/analysis/telemetry/task_verifier.go`

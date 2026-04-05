@@ -18,18 +18,7 @@ Live task-verifier events:
 tail -F .neopsyke/logs/latest-events.jsonl | jq -c 'select(.type=="task_verifier_review") | {ts:.tsIso,allow:.data.allow,reason_code:.data.reason_code,intent:.data.intent_category,volatility:.data.volatility_level}'
 ```
 
-Aggregate latest run:
-```bash
-python3 freud/legacy/py/telemetry/prompt_budget.py
-python3 freud/legacy/py/telemetry/task_verifier.py
-```
-
-Aggregate exact run file:
-```bash
-source .neopsyke/logs/latest-run.env
-python3 freud/legacy/py/telemetry/prompt_budget.py "$NEOPSYKE_EVENT_LOG_FILE"
-python3 freud/legacy/py/telemetry/task_verifier.py "$NEOPSYKE_EVENT_LOG_FILE"
-```
+Prompt budget and task verifier telemetry are computed automatically during `freud eval` runs.
 
 Dashboard snapshot:
 ```bash
@@ -86,27 +75,10 @@ tail -F .neopsyke/logs/latest-events.jsonl | jq -c '
 ```
 
 ## 4) Post-run aggregate summaries
-Prompt budget summary:
-```bash
-python3 freud/legacy/py/telemetry/prompt_budget.py
-```
 
-Task verifier summary:
-```bash
-python3 freud/legacy/py/telemetry/task_verifier.py
-```
+Prompt budget and task verifier telemetry are computed automatically during `freud eval` runs and written to the run artifacts directory.
 
-Both scripts default to `.neopsyke/logs/latest-events.jsonl`.
-
-## 5) Analyze an exact run file
-Use this when `latest` may have moved to another run:
-```bash
-source .neopsyke/logs/latest-run.env
-python3 freud/legacy/py/telemetry/prompt_budget.py "$NEOPSYKE_EVENT_LOG_FILE"
-python3 freud/legacy/py/telemetry/task_verifier.py "$NEOPSYKE_EVENT_LOG_FILE"
-```
-
-## 6) Dashboard checks
+## 5) Dashboard checks
 Open dashboard:
 - `http://127.0.0.1:8787/dashboard`
 

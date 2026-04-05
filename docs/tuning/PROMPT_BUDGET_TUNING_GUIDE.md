@@ -40,10 +40,7 @@ Dashboard snapshot (`/api/obs/snapshot`) includes `promptBudgetStats`:
 - `by_degradation_path`
 
 Offline log aggregation:
-```bash
-python3 freud/legacy/py/telemetry/prompt_budget.py .neopsyke/logs/latest-events.jsonl
-python3 freud/legacy/py/telemetry/prompt_budget.py .neopsyke/logs/runs/<run-id>.events.jsonl
-```
+Prompt budget telemetry is computed automatically during `freud eval` runs. The dashboard snapshot (`/api/obs/snapshot`) also exposes aggregated `promptBudgetStats`.
 
 ## Recommended thresholds
 Use these as initial guardrails per call site:
