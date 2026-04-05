@@ -560,7 +560,12 @@ done < <(ls -1t "$LOG_DIR"/runs/*.log 2>/dev/null || true)
 export EGO_LOOP_DELAY_MS="${LOOP_DELAY_MS}"
 export NEOPSYKE_LOG_FILE="$RUN_LOG_FILE"
 export NEOPSYKE_EVENT_LOG_FILE="$RUN_EVENT_FILE"
-export MEMORY_DEFAULT_NAMESPACE="${MEMORY_DEFAULT_NAMESPACE:-neopsyke}"
+if [[ "$EVAL_MODE" -eq 1 ]] && [[ -z "${MEMORY_DEFAULT_NAMESPACE:-}" ]]; then
+  export MEMORY_DEFAULT_NAMESPACE="eval-${RUN_ID}"
+  log_info "Eval mode detected; isolating memory namespace at $MEMORY_DEFAULT_NAMESPACE"
+else
+  export MEMORY_DEFAULT_NAMESPACE="${MEMORY_DEFAULT_NAMESPACE:-neopsyke}"
+fi
 export EGO_SCRATCHPAD_DEBUG_CAPTURE_ENABLED="true"
 
 ACTION_CONTROL_DB_PATH="${NEOPSYKE_ACTION_CONTROL_DB_PATH:-$ROOT_DIR/.neopsyke/action-control.db}"
