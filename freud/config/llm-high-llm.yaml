@@ -38,8 +38,8 @@ cognitive_roles:
     provider: openai
     model: gpt-4o-mini
   superego_primary:
-    provider: openai
-    model: gpt-4o-mini
+    provider: groq
+    model: openai/gpt-oss-120b
   superego_escalation:
     provider: openai
     model: gpt-4.1-mini

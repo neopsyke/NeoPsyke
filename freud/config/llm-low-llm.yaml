@@ -38,8 +38,8 @@ cognitive_roles:
     provider: openai
     model: gpt-4o-mini
   superego_primary:
-    provider: openai
-    model: gpt-4o-mini
+    provider: groq
+    model: openai/gpt-oss-120b
   superego_escalation:
     provider: openai
     model: gpt-4.1-mini
@@ -48,7 +48,7 @@ cognitive_roles:
     model: openai/gpt-oss-120b
   meta_reasoner_fallback:
     provider: openai
-    model: gpt-4o-mini
+    model: gpt-4.1-mini
   memory_advisor:
     provider: groq
     model: openai/gpt-oss-120b
