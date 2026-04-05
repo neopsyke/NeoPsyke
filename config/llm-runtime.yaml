@@ -123,6 +123,7 @@ model_catalog:
       context_window: 400000
       input_cost_per_million_tokens_usd: 0.05
       output_cost_per_million_tokens_usd: 0.4
+      reasoning_overhead_multiplier: 3.0
       metadata_updated_at: 2026-03-24
     - model: gpt-4.1-mini
       tier: medium

@@ -419,6 +419,7 @@ internal object AppModeRunners {
                                 config = config,
                                 modelTokenWeight = llm.modelCatalog.tokenWeightFor(llm.memoryAdvisor),
                                 modelContextWindow = llm.modelCatalog.contextWindowFor(llm.memoryAdvisor),
+                                modelReasoningOverhead = llm.modelCatalog.reasoningOverheadFor(llm.memoryAdvisor),
                                 instrumentation = instrumentation
                             ),
                             hippocampus = activeHippocampus,
@@ -1169,6 +1170,7 @@ internal object AppModeRunners {
                                                         config = config,
                                                         modelTokenWeight = llm.modelCatalog.tokenWeightFor(llm.memoryAdvisor),
                                                         modelContextWindow = llm.modelCatalog.contextWindowFor(llm.memoryAdvisor),
+                                                        modelReasoningOverhead = llm.modelCatalog.reasoningOverheadFor(llm.memoryAdvisor),
                                                         instrumentation = instrumentation
                                                     )
                                                     val logbookSummarizer = createLogbookSummarizer(config, longTermMemoryClient)
@@ -1738,6 +1740,7 @@ internal object AppModeRunners {
                                                     config = config,
                                                     modelTokenWeight = llm.modelCatalog.tokenWeightFor(llm.memoryAdvisor),
                                                     modelContextWindow = llm.modelCatalog.contextWindowFor(llm.memoryAdvisor),
+                                                    modelReasoningOverhead = llm.modelCatalog.reasoningOverheadFor(llm.memoryAdvisor),
                                                     instrumentation = instrumentation
                                                 )
                                                 val logbookSummarizer = createLogbookSummarizer(config, longTermMemoryClient)

@@ -74,6 +74,7 @@ class LlmLongTermMemoryAdvisor(
     private val config: AgentConfig,
     private val modelTokenWeight: Double = DEFAULT_MODEL_TOKEN_WEIGHT,
     private val modelContextWindow: Int? = null,
+    private val modelReasoningOverhead: Double = 1.0,
     private val instrumentation: AgentInstrumentation = NoopAgentInstrumentation,
 ) : LongTermMemoryAdvisor {
     override fun assess(context: LongTermMemoryAssessmentContext): LongTermMemoryAssessmentDecision {
@@ -131,7 +132,8 @@ class LlmLongTermMemoryAdvisor(
                 promptToCompletionRatio = config.memory.longTermMemoryDynamicPromptToCompletionRatio,
                 minPromptTokensForScaling = config.memory.longTermMemoryDynamicCompletionMinPromptTokens,
                 modelTokenWeight = modelTokenWeight,
-                modelContextWindow = modelContextWindow
+                modelContextWindow = modelContextWindow,
+                reasoningOverheadMultiplier = modelReasoningOverhead
             )
         )
         if (resolution.contextClamped) {
