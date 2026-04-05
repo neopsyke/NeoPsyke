@@ -2,8 +2,8 @@ providers:
   anthropic:
     api_key_env: ANTHROPIC_API_KEY
     base_url: https://api.anthropic.com/v1
-    default_model: claude-sonnet-4-20250514
-    default_web_search_model: claude-sonnet-4-20250514
+    default_model: claude-haiku-4-5
+    default_web_search_model: claude-haiku-4-5
   groq:
     api_key_env: GROQ_API_KEY
     base_url: https://api.groq.com/openai/v1
@@ -64,60 +64,41 @@ web_search:
 # Prices are just for keeping a quick reference at hand while testing, be aware prices will change
 # reasoning overhead multiplier is a guessed constant used to calculate reasonable token limits.
 model_catalog:
-  anthropic:
-    - model: claude-opus-4-5
+  groq:
+    - model: openai/gpt-oss-120b
       tier: medium_high
-      token_weight: 2.75
-      context_window: 200000
-      input_cost_per_million_tokens_usd: 5.0
-      output_cost_per_million_tokens_usd: 25.0
-      reasoning_overhead_multiplier: 3.0
+      token_weight: 1.15
+      context_window: 131072
+      input_cost_per_million_tokens_usd: 0.15
+      output_cost_per_million_tokens_usd: 0.60
       metadata_updated_at: 2026-03-24
-    - model: claude-opus-4-1-20250805
-      tier: medium_high
-      token_weight: 2.90
-      context_window: 200000
-      input_cost_per_million_tokens_usd: 15.0
-      output_cost_per_million_tokens_usd: 75.0
-      reasoning_overhead_multiplier: 3.0
-      metadata_updated_at: 2026-03-24
-    - model: claude-sonnet-4-5
-      tier: medium_high
-      token_weight: 2.20
-      context_window: 200000
-      input_cost_per_million_tokens_usd: 3.0
-      output_cost_per_million_tokens_usd: 15.0
-      reasoning_overhead_multiplier: 2.3
-      metadata_updated_at: 2026-03-24
-    - model: claude-sonnet-4-20250514
-      tier: medium_high
-      token_weight: 2.15
-      context_window: 200000
-      input_cost_per_million_tokens_usd: 3.0
-      output_cost_per_million_tokens_usd: 15.0
-      reasoning_overhead_multiplier: 2.2
-      metadata_updated_at: 2026-03-24
-    - model: claude-3-7-sonnet-20250219
+    - model: openai/gpt-oss-20b
       tier: medium
-      token_weight: 1.90
-      context_window: 200000
-      input_cost_per_million_tokens_usd: 3.0
-      output_cost_per_million_tokens_usd: 15.0
-      reasoning_overhead_multiplier: 2.0
+      token_weight: 0.75
+      context_window: 131072
+      input_cost_per_million_tokens_usd: 0.075
+      output_cost_per_million_tokens_usd: 0.30
       metadata_updated_at: 2026-03-24
-    - model: claude-haiku-4-5
-      tier: light
-      token_weight: 1.00
-      context_window: 200000
-      input_cost_per_million_tokens_usd: 1.0
-      output_cost_per_million_tokens_usd: 5.0
+    - model: llama-3.3-70b-versatile
+      tier: medium
+      token_weight: 1.45
+      context_window: 131072
+      input_cost_per_million_tokens_usd: 0.59
+      output_cost_per_million_tokens_usd: 0.79
       metadata_updated_at: 2026-03-24
-    - model: claude-3-5-haiku-20241022
+    - model: qwen/qwen3-32b
+      tier: medium
+      token_weight: 0.95
+      context_window: 131072
+      input_cost_per_million_tokens_usd: 0.29
+      output_cost_per_million_tokens_usd: 0.59
+      metadata_updated_at: 2026-03-24
+    - model: llama-3.1-8b-instant
       tier: light
-      token_weight: 1.10
-      context_window: 200000
-      input_cost_per_million_tokens_usd: 0.8
-      output_cost_per_million_tokens_usd: 4.0
+      token_weight: 0.60
+      context_window: 131072
+      input_cost_per_million_tokens_usd: 0.05
+      output_cost_per_million_tokens_usd: 0.08
       metadata_updated_at: 2026-03-24
   openai:
     - model: gpt-5
@@ -192,42 +173,6 @@ model_catalog:
       context_window: 1048576
       input_cost_per_million_tokens_usd: 0.075
       output_cost_per_million_tokens_usd: 0.30
-      metadata_updated_at: 2026-03-24
-  groq:
-    - model: openai/gpt-oss-120b
-      tier: medium_high
-      token_weight: 1.15
-      context_window: 131072
-      input_cost_per_million_tokens_usd: 0.15
-      output_cost_per_million_tokens_usd: 0.60
-      metadata_updated_at: 2026-03-24
-    - model: openai/gpt-oss-20b
-      tier: medium
-      token_weight: 0.75
-      context_window: 131072
-      input_cost_per_million_tokens_usd: 0.075
-      output_cost_per_million_tokens_usd: 0.30
-      metadata_updated_at: 2026-03-24
-    - model: llama-3.3-70b-versatile
-      tier: medium
-      token_weight: 1.45
-      context_window: 131072
-      input_cost_per_million_tokens_usd: 0.59
-      output_cost_per_million_tokens_usd: 0.79
-      metadata_updated_at: 2026-03-24
-    - model: qwen/qwen3-32b
-      tier: medium
-      token_weight: 0.95
-      context_window: 131072
-      input_cost_per_million_tokens_usd: 0.29
-      output_cost_per_million_tokens_usd: 0.59
-      metadata_updated_at: 2026-03-24
-    - model: llama-3.1-8b-instant
-      tier: light
-      token_weight: 0.60
-      context_window: 131072
-      input_cost_per_million_tokens_usd: 0.05
-      output_cost_per_million_tokens_usd: 0.08
       metadata_updated_at: 2026-03-24
   mistral:
     - model: mistral-large-2512
@@ -305,4 +250,59 @@ model_catalog:
       tier: light
       token_weight: 0.75
       context_window: 128000
+      metadata_updated_at: 2026-03-24
+  anthropic:
+    - model: claude-opus-4-5
+      tier: medium_high
+      token_weight: 2.75
+      context_window: 200000
+      input_cost_per_million_tokens_usd: 5.0
+      output_cost_per_million_tokens_usd: 25.0
+      reasoning_overhead_multiplier: 3.0
+      metadata_updated_at: 2026-03-24
+    - model: claude-opus-4-1-20250805
+      tier: medium_high
+      token_weight: 2.90
+      context_window: 200000
+      input_cost_per_million_tokens_usd: 15.0
+      output_cost_per_million_tokens_usd: 75.0
+      reasoning_overhead_multiplier: 3.0
+      metadata_updated_at: 2026-03-24
+    - model: claude-sonnet-4-5
+      tier: medium_high
+      token_weight: 2.20
+      context_window: 200000
+      input_cost_per_million_tokens_usd: 3.0
+      output_cost_per_million_tokens_usd: 15.0
+      reasoning_overhead_multiplier: 2.3
+      metadata_updated_at: 2026-03-24
+    - model: claude-sonnet-4-20250514
+      tier: medium_high
+      token_weight: 2.15
+      context_window: 200000
+      input_cost_per_million_tokens_usd: 3.0
+      output_cost_per_million_tokens_usd: 15.0
+      reasoning_overhead_multiplier: 2.2
+      metadata_updated_at: 2026-03-24
+    - model: claude-3-7-sonnet-20250219
+      tier: medium
+      token_weight: 1.90
+      context_window: 200000
+      input_cost_per_million_tokens_usd: 3.0
+      output_cost_per_million_tokens_usd: 15.0
+      reasoning_overhead_multiplier: 2.0
+      metadata_updated_at: 2026-03-24
+    - model: claude-haiku-4-5
+      tier: light
+      token_weight: 1.00
+      context_window: 200000
+      input_cost_per_million_tokens_usd: 1.0
+      output_cost_per_million_tokens_usd: 5.0
+      metadata_updated_at: 2026-03-24
+    - model: claude-3-5-haiku-20241022
+      tier: light
+      token_weight: 1.10
+      context_window: 200000
+      input_cost_per_million_tokens_usd: 0.8
+      output_cost_per_million_tokens_usd: 4.0
       metadata_updated_at: 2026-03-24
