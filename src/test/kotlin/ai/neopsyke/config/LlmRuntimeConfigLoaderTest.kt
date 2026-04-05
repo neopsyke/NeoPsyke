@@ -180,7 +180,7 @@ class LlmRuntimeConfigLoaderTest {
         assertEquals("gpt-4o-mini", config.superego.model)
         assertEquals(LlmProvider.ANTHROPIC, config.metaReasoner.provider)
         assertEquals("claude-sonnet-4-20250514", config.metaReasoner.model)
-        assertEquals(LlmProvider.OPENAI, config.memoryAdvisor.provider)
+        assertEquals(LlmProvider.GROQ, config.memoryAdvisor.provider)
         assertEquals(LlmProvider.GROQ, config.webSearch.provider)
         assertEquals("groq/compound-mini", config.webSearch.model)
     }

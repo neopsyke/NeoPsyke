@@ -50,8 +50,8 @@ cognitive_roles:
     provider: openai
     model: gpt-5-mini
   memory_advisor:
-    provider: openai
-    model: gpt-4o-mini
+    provider: groq
+    model: openai/gpt-oss-120b
   approval_interpreter:
     provider: openai
     model: gpt-5-nano
