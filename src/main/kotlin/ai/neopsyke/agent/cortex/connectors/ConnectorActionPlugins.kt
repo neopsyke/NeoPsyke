@@ -6,9 +6,12 @@ import ai.neopsyke.agent.cortex.motor.actions.ActionDescriptor
 import ai.neopsyke.agent.cortex.motor.actions.ActionDeterministicReview
 import ai.neopsyke.agent.cortex.motor.actions.ActionExecutionContext
 import ai.neopsyke.agent.cortex.motor.actions.ActionPluginHealth
+import ai.neopsyke.agent.cortex.motor.actions.ActionSecretProvider
 import ai.neopsyke.agent.cortex.motor.actions.AgentActionPlugin
 import ai.neopsyke.agent.cortex.motor.actions.ConnectorActionBinding
 import ai.neopsyke.agent.cortex.motor.actions.ConnectorRuntimeBoundary
+import ai.neopsyke.agent.cortex.motor.actions.EnvActionSecretProvider
+import ai.neopsyke.agent.cortex.motor.actions.SecretHandle
 import ai.neopsyke.agent.model.ActionEffect
 import ai.neopsyke.agent.model.ActionExecutionStatus
 import ai.neopsyke.agent.model.ActionOutcome
@@ -42,8 +45,8 @@ internal class ConnectorActionPlugin(
         requiresFollowUpThought = actionManifest.requiresFollowUpThought,
         followUpPrefix = actionManifest.followUpPrefix,
         effectClass = actionManifest.effectClass,
-        directCommitAllowed = actionManifest.directCommitAllowed,
-        supportsAutonomousCommit = actionManifest.supportsAutonomousCommit,
+        directCommitAllowed = ConnectorRuntimePolicy.directCommitAllowed(actionManifest.effectClass),
+        supportsAutonomousCommit = ConnectorRuntimePolicy.supportsAutonomousCommit(actionManifest.effectClass),
         allowedInstructionTrust = actionManifest.allowedInstructionTrust,
         allowedArgumentDataTrust = actionManifest.allowedArgumentDataTrust,
         connectorRuntime = ConnectorRuntimeBoundary.thirdPartyHosted(
@@ -181,7 +184,11 @@ data class ConnectorPluginLoadResult(
 )
 
 object ConnectorActionPluginLoader {
-    fun load(config: AgentConfig): ConnectorPluginLoadResult {
+    fun load(
+        config: AgentConfig,
+        secretProvider: ActionSecretProvider = EnvActionSecretProvider(System.getenv()),
+        baseEnv: Map<String, String> = System.getenv(),
+    ): ConnectorPluginLoadResult {
         if (!config.connectors.enabled) {
             return ConnectorPluginLoadResult(
                 plugins = emptyList(),
@@ -236,12 +243,18 @@ object ConnectorActionPluginLoader {
                     warnings += "Connector ${state.connectorId} has no executable command configured; skipping."
                     return@forEach
                 }
+                val environment = ConnectorProcessEnvironment.build(
+                    manifest = manifest,
+                    secretProvider = secretProvider,
+                    baseEnv = baseEnv,
+                )
 
                 val host = hosts.getOrPut(state.connectorId) {
                     SharedConnectorHost(
                         delegate = McpConnectorHostClient(
                             connectorId = state.connectorId,
                             command = command,
+                            environment = environment,
                         )
                     )
                 }
@@ -290,6 +303,9 @@ object ConnectorActionPluginLoader {
                     if (actionManifest.toolName !in capabilityNames) {
                         return@forEach
                     }
+                    if (actionManifest.directCommitAllowed || actionManifest.supportsAutonomousCommit) {
+                        warnings += "Connector ${state.connectorId} action ${actionManifest.actionType} declares connector-defined commit semantics; runtime ignores them."
+                    }
                     plugins += ConnectorActionPlugin(
                         connectorManifest = manifest,
                         actionManifest = actionManifest,
@@ -330,6 +346,52 @@ object ConnectorActionPluginLoader {
         val raw = state.commandOverride?.trim().orEmpty().ifBlank { manifest.command.trim() }
         return McpStdioClient.parseCommand(raw)
     }
+}
+
+internal object ConnectorProcessEnvironment {
+    private val inheritedKeys: Set<String> = setOf(
+        "PATH",
+        "HOME",
+        "LANG",
+        "LC_ALL",
+        "LC_CTYPE",
+        "TERM",
+        "TMPDIR",
+        "TMP",
+        "TEMP",
+        "JAVA_HOME",
+        "SYSTEMROOT",
+        "WINDIR",
+        "COMSPEC",
+        "PATHEXT",
+    )
+
+    fun build(
+        manifest: CuratedConnectorManifest,
+        secretProvider: ActionSecretProvider,
+        baseEnv: Map<String, String>,
+    ): Map<String, String> {
+        val env = linkedMapOf<String, String>()
+        inheritedKeys.forEach { key ->
+            baseEnv[key]?.takeIf { it.isNotBlank() }?.let { value -> env[key] = value }
+            baseEnv[key.lowercase()]?.takeIf { it.isNotBlank() }?.let { value -> env[key.lowercase()] = value }
+        }
+        manifest.secretHandles.forEach { handleName ->
+            val value = secretProvider.read(SecretHandle(handleName)).orEmpty()
+            if (value.isNotBlank()) {
+                env[handleName] = value
+            }
+        }
+        return env.toMap()
+    }
+}
+
+internal object ConnectorRuntimePolicy {
+    fun directCommitAllowed(effectClass: ActionEffectClass): Boolean =
+        effectClass == ActionEffectClass.OBSERVE
+
+    fun supportsAutonomousCommit(effectClass: ActionEffectClass): Boolean =
+        effectClass == ActionEffectClass.OBSERVE
 }
 
 internal class SharedConnectorHost(

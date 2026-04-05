@@ -36,8 +36,10 @@ import ai.neopsyke.agent.ego.Ego
 import ai.neopsyke.agent.model.ActionType
 import ai.neopsyke.agent.model.ActionOutcome
 import ai.neopsyke.agent.model.ActionExecutionStatus
+import ai.neopsyke.agent.model.CommitMode
 import ai.neopsyke.agent.model.EgoDecision
 import ai.neopsyke.agent.model.EgoTrigger
+import ai.neopsyke.agent.model.IntentionKind
 import ai.neopsyke.agent.model.PlannerContext
 import ai.neopsyke.agent.model.PendingAction
 import ai.neopsyke.agent.model.Urgency
@@ -157,15 +159,19 @@ class EgoProjectIntegrationTest {
                     is EgoTrigger.GoalWork -> {
                         if (!startedAsync) {
                             startedAsync = true
-                            EgoDecision.ProposeAction(
+                            EgoDecision.FormIntention(
                                 urgency = Urgency.MEDIUM,
+                                intentionKind = IntentionKind.PREPARE,
+                                commitModePreference = CommitMode.APPROVAL_BACKED,
                                 actionType = ActionType("async_test"),
                                 payload = """{"operation_id":"async-op-1"}""",
                                 summary = "start async test operation"
                             )
                         } else {
-                            EgoDecision.ProposeAction(
+                            EgoDecision.FormIntention(
                                 urgency = Urgency.MEDIUM,
+                                intentionKind = IntentionKind.PREPARE,
+                                commitModePreference = CommitMode.APPROVAL_BACKED,
                                 actionType = ActionType.CONTACT_USER,
                                 payload = "async goal done",
                                 summary = "report completion"
@@ -198,6 +204,12 @@ class EgoProjectIntegrationTest {
             assertEquals(GoalStatus.COMPLETED, state.goal.status)
             assertTrue(state.goal.plan.steps.first().notes.contains("async_status=succeeded"))
             assertEquals(listOf("ego> async goal done"), outputs)
+            assertTrue(
+                instrumentation.events.any {
+                    it.type == "opportunity_enqueued" &&
+                        it.data["source"] == "goal_runtime"
+                }
+            )
         } finally {
             manager.stop()
             loop.cancel()
@@ -230,8 +242,10 @@ class EgoProjectIntegrationTest {
         val planner = object : Ego.Planner {
             override fun decide(trigger: EgoTrigger, context: PlannerContext): EgoDecision =
                 when (trigger) {
-                    is EgoTrigger.GoalWork -> EgoDecision.ProposeAction(
+                    is EgoTrigger.GoalWork -> EgoDecision.FormIntention(
                         urgency = Urgency.MEDIUM,
+                        intentionKind = IntentionKind.PREPARE,
+                        commitModePreference = CommitMode.APPROVAL_BACKED,
                         actionType = ActionType.CONTACT_USER,
                         payload = actionPayloads.removeFirst(),
                         summary = "goal step"
@@ -307,8 +321,10 @@ class EgoProjectIntegrationTest {
         val planner = object : Ego.Planner {
             override fun decide(trigger: EgoTrigger, context: PlannerContext): EgoDecision =
                 when (trigger) {
-                    is EgoTrigger.GoalWork -> EgoDecision.ProposeAction(
+                    is EgoTrigger.GoalWork -> EgoDecision.FormIntention(
                         urgency = Urgency.MEDIUM,
+                        intentionKind = IntentionKind.PREPARE,
+                        commitModePreference = CommitMode.APPROVAL_BACKED,
                         actionType = ActionType.CONTACT_USER,
                         payload = actionPayloads.removeFirst(),
                         summary = "goal step"
@@ -402,8 +418,10 @@ class EgoProjectIntegrationTest {
         val planner = object : Ego.Planner {
             override fun decide(trigger: EgoTrigger, context: PlannerContext): EgoDecision =
                 when (trigger) {
-                    is EgoTrigger.GoalWork -> EgoDecision.ProposeAction(
+                    is EgoTrigger.GoalWork -> EgoDecision.FormIntention(
                         urgency = Urgency.MEDIUM,
+                        intentionKind = IntentionKind.PREPARE,
+                        commitModePreference = CommitMode.APPROVAL_BACKED,
                         actionType = ActionType.CONTACT_USER,
                         payload = actionPayloads.removeFirst(),
                         summary = "goal step"
@@ -447,8 +465,10 @@ class EgoProjectIntegrationTest {
         object : Ego.Planner {
             override fun decide(trigger: EgoTrigger, context: PlannerContext): EgoDecision =
                 when (trigger) {
-                    is EgoTrigger.GoalWork -> EgoDecision.ProposeAction(
+                    is EgoTrigger.GoalWork -> EgoDecision.FormIntention(
                         urgency = Urgency.MEDIUM,
+                        intentionKind = IntentionKind.PREPARE,
+                        commitModePreference = CommitMode.APPROVAL_BACKED,
                         actionType = ActionType.CONTACT_USER,
                         payload = response,
                         summary = "complete goal"

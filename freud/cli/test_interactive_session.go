@@ -31,7 +31,7 @@ var (
 func init() {
 	rootCmd.AddCommand(testInteractiveSessionCmd)
 
-	testInteractiveSessionCmd.Flags().IntVar(&tisTimeout, "timeout", 60, "timeout in seconds")
+	testInteractiveSessionCmd.Flags().IntVar(&tisTimeout, "timeout", 60, "timeout in seconds for the interactive response wait and replay run")
 	testInteractiveSessionCmd.Flags().IntVar(&tisDashboardPort, "dashboard-port", 8787, "dashboard port")
 	testInteractiveSessionCmd.Flags().StringVar(&tisDashboardHost, "dashboard-host", "127.0.0.1", "dashboard host")
 }

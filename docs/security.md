@@ -2,7 +2,7 @@
 
 > Status: Current implementation reference
 >
-> Last updated: 2026-03-24
+> Last updated: 2026-03-31
 >
 > Source of truth: current code under `src/main/kotlin/ai/neopsyke/**`
 
@@ -173,6 +173,78 @@ root input carries aggregated data trust plus taint-source summaries. When
 observe-style actions ingest external artifacts, the thread trust degrades and
 stays degraded for the lifetime of that root input.
 
+### 4.5 Policy Scope
+
+The policy scope controls how permissive the commit-mode rules are for a
+session. Channel, principal, and per-action policies always apply regardless of
+scope. The scope only adjusts how much autonomy the agent gets within those
+constraints.
+
+Configurable via `agent.policy_scope_id` in `agent-runtime.yaml` or
+`NEOPSYKE_POLICY_SCOPE_ID` env var. Per-channel overrides
+(e.g. `NEOPSYKE_TELEGRAM_POLICY_SCOPE_ID`) take precedence for that channel.
+
+#### `default` -- Normal operation
+
+The agent asks for human approval when the situation calls for it.
+
+- Owner on a direct channel can autonomously execute private and stateful
+  actions (contact user, reflect, goal operations) and directly commit
+  observe-class actions (web search, memory recall).
+- Group and shared-workspace channels force approval-backed commit for all
+  side-effecting actions.
+- External participants are always restricted to approval-backed commit.
+  Control-plane actions are hidden from the planner entirely.
+- Control-plane actions (goal mutations, runtime operations) are only visible
+  to owner, admin, or internal principals on direct, admin, or automation
+  channels with trusted instructions.
+
+#### `deployment-restricted` -- Everything needs approval
+
+Overrides all channel and principal permissiveness.
+
+- All autonomous commit is disabled, even for owner on a direct channel.
+- All direct commit is disabled.
+- Only approval-backed commit mode is available. Every side-effecting action
+  must be explicitly approved through the dashboard.
+- Control-plane actions are hidden from non-admin channels, even for owner.
+
+The agent can reason, plan, and propose actions, but cannot execute anything
+without a human clicking approve.
+
+Intended for future non-local deployments (staging, hosted) where autonomous
+execution must be gated by an operator.
+
+#### `full-autonomy` -- Minimal guardrails
+
+Overrides restrictions that would normally require approval.
+
+- Autonomous commit is enabled for control-plane actions (requires owner, admin,
+  or internal principal).
+- Direct commit is enabled for private and stateful actions even on non-direct
+  channels (group, shared workspace).
+- Both `POLICY_AUTONOMOUS` and `APPROVAL_BACKED` commit modes are available;
+  the agent chooses the fastest path.
+
+The Superego review, per-action policy, instruction trust, and data trust
+checks all still apply. External and unauthenticated principals remain
+restricted to approval-backed commit even in this scope.
+
+Be aware: depending on available actions and tools, the agent may spend
+significant tokens, execute destructive tasks, or disclose sensitive
+information without asking first. Running sandboxed or containerised is
+recommended.
+
+#### What stays constant across all scopes
+
+- Superego review always runs (deterministic conscience plus optional LLM
+  review).
+- Per-action policy in `action-security.yaml` always applies (e.g.
+  `email_send` stays disabled regardless of scope).
+- Instruction trust and data trust checks always apply.
+- External and unauthenticated principals are always restricted to
+  approval-backed commit.
+
 ---
 
 ## 5. Ingress Security Model
@@ -187,6 +259,17 @@ Implemented examples in
 - stdin chat input is treated as an owner direct trusted instruction source
 - `id` cue signals are treated as trusted internal automation
 - `goal-runtime` cues are treated as trusted internal automation
+- `action-feedback` cues are treated as trusted internal automation bound to the originating root input
+
+`SensoryCortex.nextSignal()` is now the mandatory normalization boundary for
+cognitive signals:
+
+- runtime control signals bypass cognition unchanged
+- accepted cognitive stimuli are sanitized, session/interlocutor normalized, and
+  appraised into a `Percept`
+- non-user action outcomes now re-enter through the same stimulus/percept path
+  instead of mutating deliberation follow-up state directly inside the executor
+- Ego no longer processes accepted cognitive stimuli without a percept
 
 The percept appraiser preserves provenance from the stimulus into the percept.
 
@@ -204,18 +287,30 @@ This is one of the system's strongest current architectural properties:
 
 ### 5.3 Cognitive Thread Security Context
 
-Each cognitive thread carries a security context established from its root input:
+`CognitiveThreadStore` is the live owner for active root threads. Each
+cognitive thread carries a security context established from its root input:
 
 - root principal and channel
 - instruction trust
 - aggregated data trust with taint-source summaries
 - policy scope
+- thread identity and current status
+- latest bound percept
 - visible action-family bounds
 
 When observe-style actions ingest external artifacts during a thread, the
 thread's trust degrades and stays degraded for the lifetime of that root input.
 This ensures that externally tainted content cannot later be treated as trusted
 material within the same reasoning chain.
+
+The continuity model extends to goal-runtime work:
+
+- goal step resumptions now reuse a stable per-step root id
+- goal work is carried on thread continuations rather than a dedicated
+  goal-work queue category
+- waiting or blocked goal threads preserve their security frame across
+  suspend/resume cycles instead of rebuilding from scratch on every wake
+- terminal goal cycles resolve or fail the owning thread explicitly
 
 ### 5.4 Security Through the Cognitive Pipeline
 
@@ -243,11 +338,38 @@ At each stage:
   bounds.
 - **Opportunity**: prohibited or impossible next steps are pruned. Only actions
   allowed by policy and provenance are surfaced to the Ego.
+  Current runtime now materializes these as real scheduled `Opportunity`
+  objects carrying kind, salience, allowed intentions, and allowed commit modes
+  before planner choice.
 - **Intention**: the Ego selects from already policy-shaped opportunities. It
   cannot widen the action surface it receives.
+  Current runtime now materializes explicit queued intentions for normal
+  observe/prepare/defer progression, and action review emits explicit
+  stage/request-authorization/commit intention transitions as secure execution
+  advances.
 - **Prepared/staged/committed action**: the action lifecycle enforces
   deterministic policy, Superego judgment, durable authorization, and final
   motor guard.
+
+Action feedback re-entry makes that split operational for normal action
+outcomes:
+
+- `ActionReviewPipeline` no longer queues follow-up continuation work directly
+  after execution
+- non-`contact_user` outcomes emit a typed `ActionFeedbackCue`
+- Ego integrates that cue through `Stimulus -> Percept -> CognitiveThread`
+  before updating deliberation state and regenerating continuation work
+- queue-drain reset is delayed while pending feedback cues still exist, so
+  scratchpad/thread state survives until feedback is actually consumed
+
+Scratchpad boundary layering adds:
+
+- thread workspaces now preserve thread-scoped context and evidence across
+  wait/resume for active goal roots
+- intention drafts are isolated from normal planner prompt summaries and
+  session digests
+- terminal final-pass rewriting can still use recent intention drafts for the
+  same root without promoting them into durable thread context
 
 ### 5.5 Distributed Policy Enforcement
 
@@ -280,6 +402,16 @@ cognitive pipeline:
 This means that by the time the Ego forms an intention, the action surface has
 already been narrowed by multiple independent policy layers. The Superego
 reviews what remains, and the MotorCortex enforces the final guard.
+
+Early policy shaping is materially visible in planner context:
+
+- `CognitivePolicyShaper` now shapes planner-visible action definitions before
+  proposal time
+- policy scope now affects early commit semantics (see section 4.5 for details)
+- channel surface and principal role now shape the planner surface:
+  - non-admin/non-internal contexts lose control-plane actions entirely
+  - external/group/shared contexts lose direct/autonomous commit semantics
+    before the planner chooses
 
 ---
 
@@ -607,6 +739,22 @@ Current APIs:
 - `POST /api/action-control/staged/{id}/authorize`
 - `POST /api/action-control/staged/{id}/deny`
 
+Current cognitive-stage inspection surfaces:
+
+- dashboard recent-event stream now preserves `cognitive_thread_updated`
+  events with root/thread/status/reason context
+- dashboard recent-event stream now preserves `opportunity_enqueued`
+  events with root/opportunity/source context plus shaped action surface and
+  opportunity metadata
+- thread snapshots now retain the latest opportunity/intention together with
+  last blocked and denied reason codes
+- `intention_transition` events now expose explicit `STAGE`,
+  `REQUEST_AUTHORIZATION`, and `COMMIT` progression
+- queue snapshots still expose deferred continuations as compatibility
+  `thoughts`, but primary runtime scheduling now runs through opportunities,
+  intentions, and secure action lifecycle objects rather than a standalone
+  thought queue
+
 Current UX behavior:
 
 - UI defaults to important activity
@@ -757,21 +905,34 @@ This means the current plugin model assumes trusted first-party code.
 NeoPsyke does not yet implement a real third-party out-of-process connector
 runtime.
 
-### 14.2 Plugin factories still receive ambient environment-backed secrets
+### 14.2 First-party plugin factories still receive ambient environment-backed secrets
 
 `ActionPluginFactoryContext` currently exposes:
 
 - `env: Map<String, String> = System.getenv()`
 - `secretProvider = EnvActionSecretProvider(env)`
 
-This is acceptable for the current first-party runtime but is not a sufficient
-zero-trust model for third-party connectors.
+This is still acceptable only for the in-process first-party runtime. Connector
+subprocesses are launched through an explicit environment builder and no longer
+inherit the full ambient process environment.
 
-### 14.3 Third-party connector isolation is only stubbed today
+### 14.3 Third-party connector hosting exists, but isolation remains limited
 
 [ConnectorBoundaryModels.kt](src/main/kotlin/ai/neopsyke/agent/cortex/motor/actions/ConnectorBoundaryModels.kt)
-defines the concept of out-of-process isolation, but the actual runtime only
-implements `FIRST_PARTY_IN_PROCESS`.
+defines the concept of out-of-process isolation. NeoPsyke now also has a real
+local `stdio` connector host for curated connector actions.
+
+Current connector-host reality:
+
+- subprocesses are launched with an explicit minimal runtime environment plus
+  only declared secret handles
+- tool-description pinning and startup/capability checks fail closed
+- connector manifests do not control commit/autonomy policy; runtime derives
+  those semantics itself
+
+However, this is still not a hardened sandbox. Process separation exists, but
+there is no OS/container sandbox, remote operator auth, or mature hostile-host
+deployment model.
 
 ### 14.4 Dashboard approval currently assumes local owner trust
 

@@ -21,6 +21,39 @@ internal class FallbackHandler(
     private val resolveSessionId: (ConversationContext) -> String,
     private val processActionFallback: suspend (PendingAction) -> Unit,
 ) {
+    private fun enqueueDeferredIntention(
+        content: String,
+        urgency: Urgency,
+        passes: Int,
+        rootInputId: String?,
+        rootInputReceivedAtMs: Long?,
+        deniedActionType: ActionType? = null,
+        deniedActionPayload: String? = null,
+        denialReason: String? = null,
+        denialReasonCode: String? = null,
+        allowFallbackExplanation: Boolean = false,
+        conversationContext: ConversationContext,
+        origin: ActionOrigin,
+        originActionType: ActionType? = null,
+        originActionObservedEvidence: Boolean? = null,
+    ): Boolean =
+        scheduler.enqueueThought(
+            content = content,
+            urgency = urgency,
+            passes = passes,
+            rootInputId = rootInputId,
+            rootInputReceivedAtMs = rootInputReceivedAtMs,
+            deniedActionType = deniedActionType,
+            deniedActionPayload = deniedActionPayload,
+            denialReason = denialReason,
+            denialReasonCode = denialReasonCode,
+            allowFallbackExplanation = allowFallbackExplanation,
+            conversationContext = conversationContext,
+            origin = origin,
+            originActionType = originActionType,
+            originActionObservedEvidence = originActionObservedEvidence,
+        ) != null
+
     fun handleDeniedAction(
         action: PendingAction,
         reason: String,
@@ -56,7 +89,7 @@ internal class FallbackHandler(
                 "If no safe alternative exists, prepare a concise explanation for the interlocutor.",
             config.planner.maxThoughtChars
         )
-        val queued = scheduler.enqueueThought(
+        val queued = enqueueDeferredIntention(
             content = denialThought,
             urgency = action.urgency,
             passes = action.attempts + 1,
@@ -69,6 +102,7 @@ internal class FallbackHandler(
             allowFallbackExplanation = action.origin.source != OriginSource.ID,
             conversationContext = conversationContext,
             origin = action.origin,
+            originActionType = action.type,
         )
         if (!queued) {
             instrumentation.emit(AgentEvents.warning("Failed to enqueue denial thought."))
@@ -99,7 +133,7 @@ internal class FallbackHandler(
                 "Choose the next best step: request approval, pick a lower-risk alternative, or explain the constraint to the interlocutor.",
             config.planner.maxThoughtChars
         )
-        val queued = scheduler.enqueueThought(
+        val queued = enqueueDeferredIntention(
             content = stagedThought,
             urgency = action.urgency,
             passes = action.attempts + 1,
@@ -112,6 +146,7 @@ internal class FallbackHandler(
             allowFallbackExplanation = action.origin.source != OriginSource.ID,
             conversationContext = conversationContext,
             origin = action.origin,
+            originActionType = action.type,
         )
         if (!queued) {
             instrumentation.emit(AgentEvents.warning("Failed to enqueue staged-action follow-up thought."))
@@ -243,7 +278,7 @@ internal class FallbackHandler(
         telemetry.emitQueueSnapshot("fallback_explanation_circuit_breaker")
     }
 
-    fun isRepeatOfDeniedAction(thought: PendingThought, decision: EgoDecision.ProposeAction): Boolean {
+    fun isRepeatOfDeniedAction(thought: PendingThought, decision: EgoDecision.FormIntention): Boolean {
         val deniedType = thought.deniedActionType ?: return false
         val deniedPayload = thought.deniedActionPayload ?: return false
         if (decision.actionType != deniedType) return false

@@ -45,7 +45,7 @@ class TelegramWebhookBridgeTest {
                 assertEquals("telegram", stimulus.conversationContext.security.channel.provider)
                 assertEquals("1234", stimulus.conversationContext.security.channel.channelId)
                 assertEquals(PrincipalRole.OWNER, stimulus.conversationContext.security.principal.role)
-                assertEquals("telegram-owner", stimulus.conversationContext.security.policyScopeId)
+                assertEquals(ai.neopsyke.agent.model.PolicyScope.DEFAULT, stimulus.conversationContext.security.policyScope)
                 assertEquals("Need the morning briefing", stimulus.content)
             }
         }
@@ -133,7 +133,7 @@ class TelegramWebhookBridgeTest {
             ownerUserId = "42",
             botTokenHandle = "TELEGRAM_BOT_TOKEN",
             webhookSecretHandle = "TELEGRAM_WEBHOOK_SECRET",
-            policyScopeId = "telegram-owner",
+            policyScope = ai.neopsyke.agent.model.PolicyScope.DEFAULT,
             sessionIdPrefix = "telegram",
             requireDirectChat = true,
             dropUnauthorizedMessages = dropUnauthorizedMessages,

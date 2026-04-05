@@ -32,13 +32,14 @@ data class Interlocutor(
  * Carries session identity and interlocutor through the entire processing pipeline.
  *
  * Created at the sensory boundary (SensoryCortex / ChatRuntimeBridge), propagated
- * through PendingInput → PendingThought → PendingAction, and used by every
+ * through PendingInput → Opportunity/Intention → PendingAction, and used by every
  * stateful subsystem to scope or tag its operations.
  */
 data class ConversationContext(
     val sessionId: String,
     val interlocutor: Interlocutor,
     val security: ConversationSecurityContext = ConversationSecurityContexts.default(),
+    val attributes: Map<String, String> = emptyMap(),
 ) {
     init {
         require(sessionId.isNotBlank()) { "sessionId must not be blank." }

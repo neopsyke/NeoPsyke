@@ -62,7 +62,7 @@ class InnerVoiceSinkTest {
         sink.onEvent(
             AgentEvents.plannerDecision(
                 trigger = "input",
-                decisionType = "thought",
+                decisionType = "defer",
                 thought = "I need to search for recent information about this topic.",
                 rootInputId = "root-1",
             )
@@ -94,8 +94,8 @@ class InnerVoiceSinkTest {
         sink.onEvent(
             AgentEvents.plannerDecision(
                 trigger = "input",
-                decisionType = "action",
-                actionType = "answer",
+                decisionType = "intention",
+                actionType = "contact_user",
                 summary = "Direct answer",
                 rootInputId = "root-1",
             )
@@ -120,7 +120,7 @@ class InnerVoiceSinkTest {
         sink.onEvent(
             AgentEvents.plannerDecision(
                 trigger = "input",
-                decisionType = "action",
+                decisionType = "intention",
                 actionType = "web_search",
                 summary = "Searching for latest news",
                 payload = "latest news",
@@ -188,7 +188,7 @@ class InnerVoiceSinkTest {
         sink.onEvent(
             AgentEvents.plannerDecision(
                 trigger = "input",
-                decisionType = "thought",
+                decisionType = "defer",
                 thought = "Let me think...",
                 rootInputId = "root-1",
             )
@@ -323,7 +323,7 @@ class InnerVoiceSinkTest {
         sink.onEvent(
             AgentEvents.plannerDecision(
                 trigger = "input",
-                decisionType = "thought",
+                decisionType = "defer",
                 thought = "Let me search...",
                 rootInputId = "root-1",
             )
@@ -366,7 +366,7 @@ class InnerVoiceSinkTest {
         sink.onEvent(
             AgentEvents.plannerDecision(
                 trigger = "input",
-                decisionType = "thought",
+                decisionType = "defer",
                 thought = "This is a very long thought that exceeds the maximum content character limit.",
                 rootInputId = "root-1",
             )
@@ -398,7 +398,7 @@ class InnerVoiceSinkTest {
         sink.onEvent(
             AgentEvents.plannerDecision(
                 trigger = "input",
-                decisionType = "thought",
+                decisionType = "defer",
                 thought = "Should not appear",
                 rootInputId = "root-1",
             )
@@ -447,7 +447,7 @@ class InnerVoiceSinkTest {
         sink.onEvent(
             AgentEvents.plannerDecision(
                 trigger = "input",
-                decisionType = "thought",
+                decisionType = "defer",
                 thought = "Let me think about this.",
                 rootInputId = "root-1",
             )
@@ -573,7 +573,7 @@ class InnerVoiceSinkTest {
         sink.onEvent(
             AgentEvents.plannerDecision(
                 trigger = "impulse",
-                decisionType = "thought",
+                decisionType = "defer",
                 thought = "Id-driven thought about a need.",
                 rootInputId = "impulse-1",
             )
@@ -608,7 +608,7 @@ class InnerVoiceSinkTest {
         sink.onEvent(
             AgentEvents.plannerDecision(
                 trigger = "impulse",
-                decisionType = "thought",
+                decisionType = "defer",
                 thought = "Id thought that should not be in conversation.",
                 rootInputId = "impulse-2",
             )
@@ -633,7 +633,7 @@ class InnerVoiceSinkTest {
         sink.onEvent(
             AgentEvents.plannerDecision(
                 trigger = "input",
-                decisionType = "thought",
+                decisionType = "defer",
                 thought = "User-driven thought.",
                 rootInputId = "root-1",
             )
@@ -697,7 +697,7 @@ class InnerVoiceSinkTest {
         sink.onEvent(
             AgentEvents.plannerDecision(
                 trigger = "input",
-                decisionType = "thought",
+                decisionType = "defer",
                 thought = "thinking...",
                 rootInputId = "root-1",
             )

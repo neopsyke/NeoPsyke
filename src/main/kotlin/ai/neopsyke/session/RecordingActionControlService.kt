@@ -86,9 +86,10 @@ class RecordingActionControlService(
     override suspend fun authorizeStagedAction(
         stagedActionId: String,
         grantedBy: ConversationSecurityContext,
+        expectedActionHash: String?,
     ): ActionControlDecisionResult {
         // User approval — record for replay
-        val result = delegate.authorizeStagedAction(stagedActionId, grantedBy)
+        val result = delegate.authorizeStagedAction(stagedActionId, grantedBy, expectedActionHash)
         if (channel.mode == SessionRecordingMode.RECORD) {
             val seq = channel.nextSequenceIndex()
             channel.recordEntry(
@@ -108,8 +109,9 @@ class RecordingActionControlService(
         deniedBy: ConversationSecurityContext,
         reason: String,
         reasonCode: String?,
+        expectedActionHash: String?,
     ): ActionControlDecisionResult {
-        val result = delegate.denyStagedAction(stagedActionId, deniedBy, reason, reasonCode)
+        val result = delegate.denyStagedAction(stagedActionId, deniedBy, reason, reasonCode, expectedActionHash)
         if (channel.mode == SessionRecordingMode.RECORD) {
             val seq = channel.nextSequenceIndex()
             channel.recordEntry(

@@ -40,6 +40,7 @@ private val logger = KotlinLogging.logger {}
 
 class LazyMcpClientHolder(
     private val command: List<String>,
+    private val environment: Map<String, String> = emptyMap(),
     private val serverLabel: String,
     private val scope: CoroutineScope? = null,
 ) : AutoCloseable {
@@ -60,7 +61,7 @@ class LazyMcpClientHolder(
     private suspend fun ensureClient(): McpStdioClient {
         client?.let { return it }
         return mutex.withLock {
-            client ?: McpStdioClient.start(command, serverLabel, scope).also { created ->
+            client ?: McpStdioClient.start(command, environment, serverLabel, scope).also { created ->
                 client = created
             }
         }
@@ -141,12 +142,17 @@ class McpStdioClient private constructor(
     }
 
     companion object {
-        suspend fun start(command: List<String>, serverLabel: String, scope: CoroutineScope? = null): McpStdioClient {
+        suspend fun start(
+            command: List<String>,
+            environment: Map<String, String> = emptyMap(),
+            serverLabel: String,
+            scope: CoroutineScope? = null,
+        ): McpStdioClient {
             require(command.isNotEmpty()) { "MCP command cannot be empty." }
             var lastError: Exception? = null
             for (attempt in 1..START_MAX_ATTEMPTS) {
                 try {
-                    return startOnce(command = command, serverLabel = serverLabel, scope = scope)
+                    return startOnce(command = command, environment = environment, serverLabel = serverLabel, scope = scope)
                 } catch (ex: Exception) {
                     lastError = ex
                     if (attempt < START_MAX_ATTEMPTS) {
@@ -168,9 +174,19 @@ class McpStdioClient private constructor(
             )
         }
 
-        private suspend fun startOnce(command: List<String>, serverLabel: String, scope: CoroutineScope? = null): McpStdioClient {
+        private suspend fun startOnce(
+            command: List<String>,
+            environment: Map<String, String>,
+            serverLabel: String,
+            scope: CoroutineScope? = null,
+        ): McpStdioClient {
             require(command.isNotEmpty()) { "MCP command cannot be empty." }
             val processBuilder = ProcessBuilder(command)
+            if (environment.isNotEmpty()) {
+                val env = processBuilder.environment()
+                env.clear()
+                env.putAll(environment)
+            }
             NpmCommandIsolation.apply(processBuilder, command, serverLabel)
             val process = processBuilder.start()
 

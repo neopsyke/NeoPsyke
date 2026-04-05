@@ -5,6 +5,7 @@ import ai.neopsyke.agent.model.DataTrust
 import ai.neopsyke.agent.model.ExternalContentArtifact
 import ai.neopsyke.agent.model.PendingAction
 import ai.neopsyke.agent.model.PendingInput
+import ai.neopsyke.agent.goal.GoalRunActivation
 import ai.neopsyke.agent.config.ScratchpadConfig
 import ai.neopsyke.agent.support.TextSecurity
 import kotlin.math.max
@@ -104,6 +105,36 @@ class ScratchpadStore(
     }
 
     @Synchronized
+    fun ensureForGoalWork(work: GoalRunActivation): Boolean {
+        if (!config.enabled) return false
+        val rootId = work.rootInputId
+        if (workspaces.containsKey(rootId)) return false
+        evictOldestIfNeeded()
+        val workspace = Scratchpad(
+            rootInputId = rootId,
+            rootInputReceivedAtMs = System.currentTimeMillis(),
+            goal = TextSecurity.preview(work.stepDescription, MAX_GOAL_CHARS)
+        )
+        workspace.addSection(
+            title = "Goal step",
+            summary = TextSecurity.preview(work.stepDescription, config.maxSectionSummaryChars),
+            content = TextSecurity.preview(work.acceptanceCriteria, config.maxSectionChars),
+            source = SOURCE_GOAL_STEP
+        )
+        if (work.workingContext.isNotBlank()) {
+            workspace.addSection(
+                title = "Goal context",
+                summary = TextSecurity.preview(work.workingContext, config.maxSectionSummaryChars),
+                content = TextSecurity.preview(work.workingContext, config.maxSectionChars),
+                source = SOURCE_GOAL_CONTEXT
+            )
+        }
+        workspaces[rootId] = workspace
+        refreshAmbientSnapshotsLocked()
+        return true
+    }
+
+    @Synchronized
     fun recordPlan(rootInputId: String?, goal: String, steps: List<String>): Boolean {
         val workspace = lookup(rootInputId)
         if (workspace != null) {
@@ -176,16 +207,22 @@ class ScratchpadStore(
     }
 
     @Synchronized
-    fun recordResolutionDraft(rootInputId: String?, payload: String) {
-        val workspace = lookup(rootInputId) ?: return
+    fun recordResolutionDraft(rootInputId: String?, payload: String, intentionId: String? = null) {
+        if (!config.enabled || rootInputId.isNullOrBlank()) return
         val normalized = TextSecurity.preview(payload, config.maxSectionChars)
         if (normalized.isBlank()) return
-        workspace.addSection(
-            title = "Resolution draft",
-            summary = TextSecurity.preview(normalized, config.maxSectionSummaryChars),
-            content = normalized,
-            source = SOURCE_RESOLUTION_DRAFT
+        val draftsByIntention = intentionDraftsByRootInput.getOrPut(rootInputId) { LinkedHashMap() }
+        val drafts = draftsByIntention.getOrPut(draftBucketKeyForWrite(rootInputId, intentionId)) { ArrayDeque() }
+        drafts.addLast(
+            ScratchpadDraft(
+                intentionId = intentionId,
+                content = normalized,
+                createdAtMs = System.currentTimeMillis(),
+            )
         )
+        while (drafts.size > max(1, config.maxSections)) {
+            drafts.removeFirst()
+        }
     }
 
     @Synchronized
@@ -202,13 +239,15 @@ class ScratchpadStore(
         rootInputId: String?,
         candidateAnswer: String,
         maxChars: Int,
+        intentionId: String? = null,
     ): String {
         val workspace = lookup(rootInputId) ?: return ""
         val cap = minOf(config.finalCompilationMaxChars, maxChars)
         if (cap <= 0) return ""
         val sections = workspace.sections.takeLast(FINAL_COMPILATION_SECTION_LIMIT)
         val evidence = workspace.evidence.takeLast(FINAL_COMPILATION_EVIDENCE_LIMIT)
-        if (sections.isEmpty() && evidence.isEmpty()) return ""
+        val drafts = recentDrafts(rootInputId, intentionId).takeLast(FINAL_COMPILATION_DRAFT_LIMIT)
+        if (sections.isEmpty() && evidence.isEmpty() && drafts.isEmpty()) return ""
         val compiled = buildString {
             append("Scratchpad final compilation:\n")
             append("goal: ")
@@ -236,6 +275,14 @@ class ScratchpadStore(
                     append('\n')
                 }
             }
+            if (drafts.isNotEmpty()) {
+                append("intention_drafts:\n")
+                drafts.forEachIndexed { index, draft ->
+                    append("${index + 1}. ")
+                    append(draft.content)
+                    append('\n')
+                }
+            }
             val normalizedCandidate = candidateAnswer.trim()
             if (normalizedCandidate.isNotEmpty()) {
                 append("candidate_answer:\n")
@@ -250,9 +297,10 @@ class ScratchpadStore(
         rootInputId: String?,
         candidateAnswer: String,
         maxChars: Int,
+        intentionId: String? = null,
     ): ScratchpadFinalPassInput? {
         val workspace = lookup(rootInputId) ?: return null
-        val compilation = buildFinalCompilation(rootInputId, candidateAnswer, maxChars)
+        val compilation = buildFinalCompilation(rootInputId, candidateAnswer, maxChars, intentionId)
         if (compilation.isBlank()) return null
         val confidence = workspace.estimateConfidence()
         return ScratchpadFinalPassInput(
@@ -260,7 +308,7 @@ class ScratchpadStore(
             workspaceConfidence = confidence,
             sectionCount = workspace.sections.size,
             evidenceCount = workspace.evidence.size,
-            resolutionDraftCount = workspace.resolutionDraftCount()
+            resolutionDraftCount = recentDrafts(rootInputId, intentionId).size
         )
     }
 
@@ -338,8 +386,48 @@ class ScratchpadStore(
         val cleared = workspaces.size
         workspaces.clear()
         pendingInputs.clear()
+        intentionDraftsByRootInput.clear()
+        activeDraftBucketByRootInput.clear()
         refreshAmbientSnapshotsLocked()
         return cleared
+    }
+
+    @Synchronized
+    fun clearOrphanedThreadWorkspaces(activeRootInputIds: Set<String>): Int {
+        if (!config.enabled) return 0
+        val active = activeRootInputIds.filter { it.isNotBlank() }.toSet()
+        val before = workspaces.size
+        workspaces.entries.removeIf { (rootInputId, _) -> rootInputId !in active }
+        pendingInputs.entries.removeIf { (rootInputId, _) -> rootInputId !in active }
+        intentionDraftsByRootInput.entries.removeIf { (rootInputId, _) -> rootInputId !in active }
+        activeDraftBucketByRootInput.entries.removeIf { (rootInputId, _) -> rootInputId !in active }
+        refreshAmbientSnapshotsLocked()
+        return before - workspaces.size
+    }
+
+    @Synchronized
+    fun clearIntentionDrafts(rootInputId: String? = null): Int {
+        if (!config.enabled) return 0
+        return if (rootInputId.isNullOrBlank()) {
+            val cleared = intentionDraftsByRootInput.values.sumOf { draftsByIntention ->
+                draftsByIntention.values.sumOf { it.size }
+            }
+            intentionDraftsByRootInput.clear()
+            activeDraftBucketByRootInput.clear()
+            cleared
+        } else {
+            activeDraftBucketByRootInput.remove(rootInputId)
+            intentionDraftsByRootInput.remove(rootInputId)
+                ?.values
+                ?.sumOf { it.size }
+                ?: 0
+        }
+    }
+
+    @Synchronized
+    fun resetDraftSequence(rootInputId: String?) {
+        if (!config.enabled || rootInputId.isNullOrBlank()) return
+        activeDraftBucketByRootInput.remove(rootInputId)
     }
 
     @Synchronized
@@ -354,6 +442,8 @@ class ScratchpadStore(
     fun destroy(rootInputId: String?): ScratchpadDestroyed? {
         if (!config.enabled || rootInputId.isNullOrBlank()) return null
         pendingInputs.remove(rootInputId)
+        activeDraftBucketByRootInput.remove(rootInputId)
+        intentionDraftsByRootInput.remove(rootInputId)
         val removed = workspaces.remove(rootInputId) ?: return null
         refreshAmbientSnapshotsLocked()
         return ScratchpadDestroyed(
@@ -378,6 +468,19 @@ class ScratchpadStore(
     private fun lookup(rootInputId: String?): Scratchpad? {
         if (!config.enabled || rootInputId.isNullOrBlank()) return null
         return workspaces[rootInputId]
+    }
+
+    private fun recentDrafts(rootInputId: String?, _intentionId: String?): List<ScratchpadDraft> {
+        if (!config.enabled || rootInputId.isNullOrBlank()) return emptyList()
+        val draftsByIntention = intentionDraftsByRootInput[rootInputId] ?: return emptyList()
+        val explicitBucket = draftBucketKey(_intentionId)
+        val activeBucket = activeDraftBucketByRootInput[rootInputId]
+        val bucketKey = when {
+            explicitBucket in draftsByIntention -> explicitBucket
+            !activeBucket.isNullOrBlank() && activeBucket in draftsByIntention -> activeBucket
+            else -> explicitBucket
+        }
+        return draftsByIntention[bucketKey].orEmpty().toList()
     }
 
     private fun isGateEnabled(): Boolean =
@@ -526,7 +629,7 @@ class ScratchpadStore(
                 return ""
             }
             return buildString {
-                append("Ephemeral scratchpad (scoped to current request only):\n")
+                append("Thread scratchpad (persists for this cognitive thread across resume/wait):\n")
                 append("goal: ")
                 append(goal.ifBlank { "none" })
                 append('\n')
@@ -567,9 +670,6 @@ class ScratchpadStore(
                 (evidenceSignal * EVIDENCE_SIGNAL_WEIGHT) +
                 (goalSignal * GOAL_SIGNAL_WEIGHT)
         }
-
-        fun resolutionDraftCount(): Int =
-            sections.count { section -> section.source == SOURCE_RESOLUTION_DRAFT }
 
         fun debugHead(): ScratchpadDebugHead =
             ScratchpadDebugHead(
@@ -625,11 +725,13 @@ class ScratchpadStore(
         const val MAX_PLAN_STEP_CHARS: Int = 160
         const val FINAL_COMPILATION_SECTION_LIMIT: Int = 6
         const val FINAL_COMPILATION_EVIDENCE_LIMIT: Int = 6
+        const val FINAL_COMPILATION_DRAFT_LIMIT: Int = 4
         const val FINAL_COMPILATION_SECTION_CONTENT_PREVIEW_CHARS: Int = 220
         const val SOURCE_INPUT: String = "input"
+        const val SOURCE_GOAL_STEP: String = "goal_step"
+        const val SOURCE_GOAL_CONTEXT: String = "goal_context"
         const val SOURCE_PLAN: String = "plan"
         const val SOURCE_ACTION: String = "action_outcome"
-        const val SOURCE_RESOLUTION_DRAFT: String = "resolution_draft"
         const val SECTION_SIGNAL_WEIGHT: Double = 0.45
         const val EVIDENCE_SIGNAL_WEIGHT: Double = 0.45
         const val GOAL_SIGNAL_WEIGHT: Double = 0.10
@@ -637,6 +739,7 @@ class ScratchpadStore(
         const val MAX_DIGEST_TRACKED_SESSIONS: Int = 32
         const val CROSS_SESSION_ACTIVE_WORKSPACE_LIMIT: Int = 4
         const val CROSS_SESSION_DIGEST_LIMIT: Int = 6
+        const val DEFAULT_INTENTION_DRAFT_BUCKET: String = "__default__"
     }
 
     private data class PendingInputRecord(
@@ -645,12 +748,32 @@ class ScratchpadStore(
         val contentPreview: String,
     )
 
+    private data class ScratchpadDraft(
+        val intentionId: String?,
+        val content: String,
+        val createdAtMs: Long,
+    )
+
     private val workspaces = LinkedHashMap<String, Scratchpad>()
     private val pendingInputs = LinkedHashMap<String, PendingInputRecord>()
+    private val intentionDraftsByRootInput =
+        LinkedHashMap<String, LinkedHashMap<String, ArrayDeque<ScratchpadDraft>>>()
+    private val activeDraftBucketByRootInput = LinkedHashMap<String, String>()
     private val digestsBySession: MutableMap<String, ArrayDeque<WorkspaceDigestEntry>> =
         object : LinkedHashMap<String, ArrayDeque<WorkspaceDigestEntry>>(16, 0.75f, true) {
             override fun removeEldestEntry(
                 eldest: MutableMap.MutableEntry<String, ArrayDeque<WorkspaceDigestEntry>>
             ): Boolean = size > MAX_DIGEST_TRACKED_SESSIONS
         }
+
+    private fun draftBucketKey(intentionId: String?): String =
+        intentionId?.trim()?.takeIf { it.isNotBlank() } ?: DEFAULT_INTENTION_DRAFT_BUCKET
+
+    private fun draftBucketKeyForWrite(rootInputId: String, intentionId: String?): String {
+        val existing = activeDraftBucketByRootInput[rootInputId]
+        if (!existing.isNullOrBlank()) {
+            return existing
+        }
+        return draftBucketKey(intentionId).also { activeDraftBucketByRootInput[rootInputId] = it }
+    }
 }

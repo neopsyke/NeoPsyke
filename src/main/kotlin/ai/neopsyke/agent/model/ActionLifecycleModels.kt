@@ -19,7 +19,6 @@ enum class ActionEffectClass {
 
 enum class AuthorizationProgress {
     DENY,
-    ALLOW_PREPARE,
     ALLOW_STAGE,
     ALLOW_COMMIT,
 }

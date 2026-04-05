@@ -63,7 +63,12 @@ internal class EgoTelemetry(
             ))
             put("attention_queues", mapOf(
                 "label" to "Attention queues",
-                "item_count" to (queueSnap.pendingInputCount + queueSnap.pendingThoughtCount + queueSnap.pendingActionCount),
+                "item_count" to (
+                    queueSnap.pendingInputCount +
+                        queueSnap.deferredIntentionCount +
+                        queueSnap.pendingActionCount +
+                        queueSnap.pendingIntentionCount
+                    ),
                 "chars_or_bytes" to 0L,
                 "unit" to "items",
             ))
@@ -137,8 +142,8 @@ internal class EgoTelemetry(
         val pending = scheduler.queueSnapshot().let { snapshot ->
             when (queueType) {
                 "input" -> snapshot.pendingInputCount
-                "thought" -> snapshot.pendingThoughtCount
-                "action" -> snapshot.pendingActionCount
+                "thought" -> snapshot.deferredIntentionCount
+                "action" -> snapshot.pendingActionCount + snapshot.pendingIntentionCount
                 else -> 0
             }
         }

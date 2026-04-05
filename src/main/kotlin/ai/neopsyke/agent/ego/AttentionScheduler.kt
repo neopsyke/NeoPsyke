@@ -1,42 +1,58 @@
 package ai.neopsyke.agent.ego
 
 import ai.neopsyke.agent.config.*
-import ai.neopsyke.agent.model.*
 import ai.neopsyke.agent.goal.GoalRunActivation
+import ai.neopsyke.agent.model.*
 import java.util.PriorityQueue
 
 class AttentionScheduler(
     private val config: AgentConfig,
 ) {
-    private var idCounter = 0L
-    private val opportunities = PriorityQueue<OpportunityWorkItem>(opportunityComparator)
-    private val thoughts = PriorityQueue<PendingThought>(thoughtComparator)
+    // enqueueImpulse() can be called from the Id thread while the runLoop
+    // coroutine reads these structures, so cross-thread fields are @Volatile.
+    @Volatile private var idCounter = 0L
+    private val opportunities = PriorityQueue<ScheduledOpportunity>(opportunityComparator)
+    private val intentions = PriorityQueue<QueuedIntention>(intentionComparator)
     private val actions = PriorityQueue<PendingAction>(actionComparator)
-    private var latestQueuedInput: PendingInput? = null
+    @Volatile private var latestQueuedInput: PendingInput? = null
 
-    fun enqueueInput(
-        content: String,
-        priority: InputPriority = InputPriority.MEDIUM,
-        source: String = "external",
-        conversationContext: ConversationContext = ConversationContext.default(),
-    ): Boolean {
+    fun enqueueInput(input: PendingInput, opportunity: Opportunity): Boolean {
         if (pendingInputCount() >= config.maxPendingInputs) {
             return false
         }
-        val input = PendingInput(
-            id = nextId(),
-            content = content,
-            priority = priority,
-            source = source,
-            conversationContext = conversationContext
+        opportunities.add(
+            ScheduledOpportunity(
+                queueId = nextId(),
+                opportunity = opportunity,
+                trigger = OpportunityTrigger.Input(input),
+            )
         )
-        opportunities.add(OpportunityWorkItem.InputOpportunity(input))
         latestQueuedInput = input
+        return true
+    }
+
+    fun enqueueFeedback(feedback: PendingFeedback, opportunity: Opportunity): Boolean {
+        if (pendingInputCount() >= config.maxPendingInputs) {
+            return false
+        }
+        opportunities.add(
+            ScheduledOpportunity(
+                queueId = nextId(),
+                opportunity = opportunity,
+                trigger = OpportunityTrigger.Feedback(feedback),
+            )
+        )
         return true
     }
 
     fun latestQueuedInput(): PendingInput? = latestQueuedInput
 
+    /**
+     * Build a deferred [Intention] + [QueuedIntention] and enqueue it.
+     * Returns the [Intention] if successfully queued, null if the queue is full.
+     *
+     * Shared entry point for [DecisionDispatcher] and [FallbackHandler].
+     */
     fun enqueueThought(
         content: String,
         urgency: Urgency,
@@ -54,32 +70,40 @@ class AttentionScheduler(
         originActionObservedEvidence: Boolean? = null,
         conversationContext: ConversationContext = ConversationContext.default(),
         origin: ActionOrigin = ActionOrigin.USER,
-    ): Boolean {
-        if (thoughts.size >= config.maxPendingThoughts) {
-            return false
+    ): Intention? {
+        val deferredIntentions = intentions.count { it.intention.kind == IntentionKind.DEFER }
+        if (deferredIntentions >= config.maxPendingThoughts) {
+            return null
         }
-        thoughts.add(
-            PendingThought(
-                id = nextId(),
+        val intention = Intention(
+            id = RootInputIds.next(),
+            cognitiveThreadId = rootInputId ?: RootInputIds.next(),
+            kind = IntentionKind.DEFER,
+            summary = content.take(160),
+            createdAt = java.time.Instant.now(),
+            conversationContext = conversationContext,
+            rootStimulusId = rootInputId,
+        )
+        val queued = enqueueIntention(
+            QueuedIntention(
+                intention = intention,
                 urgency = urgency,
-                content = content,
-                passes = passes,
-                longTermMemoryRecallQuery = longTermMemoryRecallQuery,
-                rootInputId = rootInputId,
                 rootInputReceivedAtMs = rootInputReceivedAtMs,
-                deniedActionType = deniedActionType,
-                deniedActionPayload = deniedActionPayload,
-                denialReason = denialReason,
-                allowFallbackExplanation = allowFallbackExplanation,
-                planContext = planContext,
-                denialReasonCode = denialReasonCode,
-                originActionType = originActionType,
-                originActionObservedEvidence = originActionObservedEvidence,
-                conversationContext = conversationContext,
                 origin = origin,
+                deferredContent = content,
+                deferredPasses = passes,
+                deferredRecallQuery = longTermMemoryRecallQuery,
+                deferredDeniedActionType = deniedActionType,
+                deferredDeniedActionPayload = deniedActionPayload,
+                deferredDenialReason = denialReason,
+                deferredAllowFallbackExplanation = allowFallbackExplanation,
+                deferredPlanContext = planContext,
+                deferredDenialReasonCode = denialReasonCode,
+                deferredOriginActionType = originActionType,
+                deferredOriginActionObservedEvidence = originActionObservedEvidence,
             )
         )
-        return true
+        return if (queued) intention else null
     }
 
     fun enqueueAction(
@@ -121,6 +145,14 @@ class AttentionScheduler(
         return true
     }
 
+    fun enqueueIntention(intention: QueuedIntention): Boolean {
+        if (actions.size + intentions.size >= config.maxPendingActions) {
+            return false
+        }
+        intentions.add(intention.copy(queueId = nextId()))
+        return true
+    }
+
     /**
      * Enqueue an impulse from the Id module.
      * Impulses are processed after inputs but before actions/thoughts (Ego idle).
@@ -129,24 +161,36 @@ class AttentionScheduler(
      * @param maxPendingImpulses maximum impulse queue depth (from [IdConfig])
      * @return true if enqueued, false if at capacity
      */
-    fun enqueueImpulse(impulse: PendingImpulse, maxPendingImpulses: Int): Boolean {
+    fun enqueueImpulse(impulse: PendingImpulse, opportunity: Opportunity, maxPendingImpulses: Int): Boolean {
         if (pendingImpulseCount() >= maxPendingImpulses) return false
-        opportunities.add(OpportunityWorkItem.ImpulseOpportunity(impulse))
+        opportunities.add(
+            ScheduledOpportunity(
+                queueId = nextId(),
+                opportunity = opportunity,
+                trigger = OpportunityTrigger.Impulse(impulse),
+            )
+        )
         return true
     }
 
     /** Remove all pending impulses. */
     fun clearPendingImpulses() {
-        opportunities.removeIf { it is OpportunityWorkItem.ImpulseOpportunity }
+        opportunities.removeIf { it.trigger is OpportunityTrigger.Impulse }
     }
 
-    fun enqueueProjectWork(workUnit: GoalRunActivation): Boolean {
-        opportunities.add(OpportunityWorkItem.GoalWorkOpportunity(workUnit))
+    fun enqueueGoalWork(work: GoalRunActivation, opportunity: Opportunity): Boolean {
+        opportunities.add(
+            ScheduledOpportunity(
+                queueId = nextId(),
+                opportunity = opportunity,
+                trigger = OpportunityTrigger.GoalWork(work),
+            )
+        )
         return true
     }
 
-    fun clearProjectWork() {
-        opportunities.removeIf { it is OpportunityWorkItem.GoalWorkOpportunity }
+    fun clearGoalWork() {
+        opportunities.removeIf { it.trigger is OpportunityTrigger.GoalWork }
     }
 
     fun dequeueFallbackExplanationAction(): PendingAction? {
@@ -178,14 +222,15 @@ class AttentionScheduler(
         if (rootInputId.isNullOrBlank()) {
             return false
         }
-        return thoughts.any { thought ->
+        return intentions.any { intention ->
             matchesInputScope(
-                itemRootInputId = thought.rootInputId,
-                itemConversationContext = thought.conversationContext,
+                itemRootInputId = intention.rootInputId,
+                itemConversationContext = intention.conversationContext,
                 rootInputId = rootInputId,
                 sessionId = sessionId
             ) &&
-                thought.planContext != null
+                intention.intention.kind == IntentionKind.DEFER &&
+                intention.deferredPlanContext != null
         }
     }
 
@@ -193,14 +238,15 @@ class AttentionScheduler(
         if (rootInputId.isNullOrBlank()) {
             return false
         }
-        return thoughts.any { thought ->
+        return intentions.any { intention ->
             matchesInputScope(
-                itemRootInputId = thought.rootInputId,
-                itemConversationContext = thought.conversationContext,
+                itemRootInputId = intention.rootInputId,
+                itemConversationContext = intention.conversationContext,
                 rootInputId = rootInputId,
                 sessionId = sessionId
             ) &&
-                thought.content.startsWith(CONVERGENCE_THOUGHT_PREFIX)
+                intention.intention.kind == IntentionKind.DEFER &&
+                intention.deferredContent?.startsWith(CONVERGENCE_THOUGHT_PREFIX) == true
         }
     }
 
@@ -208,12 +254,12 @@ class AttentionScheduler(
         if (rootInputId.isNullOrBlank()) {
             return ClearedPendingWork()
         }
-        val thoughtBefore = thoughts.size
+        val intentionBefore = intentions.size
         val actionBefore = actions.size
-        thoughts.removeIf { thought ->
+        intentions.removeIf { intention ->
             matchesInputScope(
-                itemRootInputId = thought.rootInputId,
-                itemConversationContext = thought.conversationContext,
+                itemRootInputId = intention.rootInputId,
+                itemConversationContext = intention.conversationContext,
                 rootInputId = rootInputId,
                 sessionId = sessionId
             )
@@ -227,38 +273,35 @@ class AttentionScheduler(
             )
         }
         return ClearedPendingWork(
-            thoughtsRemoved = thoughtBefore - thoughts.size,
+            thoughtsRemoved = intentionBefore - intentions.size,
             actionsRemoved = actionBefore - actions.size
         )
     }
 
-    fun nextTask(): LoopTask? {
-        val opportunity = opportunities.poll()
+    fun nextTask(
+        isBlocked: (rootInputId: String?, conversationContext: ConversationContext) -> Boolean = { _, _ -> false },
+    ): LoopTask? {
+        val opportunity = pollNextOpportunity(isBlocked)
         if (opportunity != null) {
             return LoopTask.AttendOpportunity(opportunity)
         }
 
-        val topAction = actions.peek()
-        val topThought = thoughts.peek()
-        if (topAction == null && topThought == null) {
+        val topIntention = peekNextIntention(isBlocked)
+        val topAction = peekNextAction(isBlocked)
+        if (topIntention == null && topAction == null) {
             return null
         }
-        if (topAction == null) {
-            return LoopTask.ProcessThought(thoughts.remove())
+        if (topIntention != null && topAction == null) {
+            return LoopTask.ProcessIntention(removeNextIntention(isBlocked) ?: return null)
         }
-        if (topThought == null) {
-            return LoopTask.PerformAction(actions.remove())
+        if (topIntention != null && topIntention.urgency.priority >= topAction!!.urgency.priority) {
+            return LoopTask.ProcessIntention(removeNextIntention(isBlocked) ?: return null)
         }
-
-        return if (topAction.urgency.priority >= topThought.urgency.priority) {
-            LoopTask.PerformAction(actions.remove())
-        } else {
-            LoopTask.ProcessThought(thoughts.remove())
-        }
+        return LoopTask.PerformAction(removeNextAction(isBlocked) ?: return null)
     }
 
     fun hasPendingWork(): Boolean =
-        opportunities.isNotEmpty() || thoughts.isNotEmpty() || actions.isNotEmpty()
+        opportunities.isNotEmpty() || intentions.isNotEmpty() || actions.isNotEmpty()
 
     /**
      * Returns true when there is queued work (thought/action/impulse) for a specific root.
@@ -266,24 +309,30 @@ class AttentionScheduler(
      */
     fun hasPendingWorkForRoot(rootInputId: String): Boolean =
         opportunities.any { it.rootInputId == rootInputId } ||
-            thoughts.any { it.rootInputId == rootInputId } ||
+            intentions.any { it.rootInputId == rootInputId } ||
             actions.any { it.rootInputId == rootInputId }
 
     fun queueSnapshot(): QueueSnapshot =
         QueueSnapshot(
             pendingInputCount = pendingInputCount(),
-            pendingThoughtCount = thoughts.size,
+            deferredIntentionCount = intentions.count { it.intention.kind == IntentionKind.DEFER },
             pendingActionCount = actions.size,
+            pendingIntentionCount = intentions.size,
             pendingImpulseCount = pendingImpulseCount(),
         )
 
     fun queueState(): QueueState =
         QueueState(
             inputs = opportunities
-                .filterIsInstance<OpportunityWorkItem.InputOpportunity>()
-                .map { it.input }
+                .mapNotNull { scheduled ->
+                    (scheduled.trigger as? OpportunityTrigger.Input)?.input
+                }
                 .sortedWith(inputComparator),
-            thoughts = thoughts.toList().sortedWith(thoughtComparator),
+            intentions = intentions.toList().sortedWith(intentionComparator),
+            thoughts = intentions
+                .filter { it.intention.kind == IntentionKind.DEFER }
+                .map { it.toPendingThought() }
+                .sortedWith(thoughtComparator),
             actions = actions.toList().sortedWith(actionComparator)
         )
 
@@ -304,6 +353,107 @@ class AttentionScheduler(
         return itemConversationContext.sessionId == sessionId
     }
 
+    private fun pollNextOpportunity(
+        isBlocked: (rootInputId: String?, conversationContext: ConversationContext) -> Boolean,
+    ): ScheduledOpportunity? {
+        val deferred = mutableListOf<ScheduledOpportunity>()
+        var selected: ScheduledOpportunity? = null
+        while (true) {
+            val next = opportunities.poll() ?: break
+            if (isBlocked(next.rootInputId, next.conversationContext)) {
+                deferred += next
+                continue
+            }
+            selected = next
+            break
+        }
+        deferred.forEach(opportunities::add)
+        return selected
+    }
+
+    private fun peekNextIntention(
+        isBlocked: (rootInputId: String?, conversationContext: ConversationContext) -> Boolean,
+    ): QueuedIntention? =
+        peekAvailableFromQueue(
+            queue = intentions,
+            isBlocked = isBlocked,
+            rootInputId = { it.rootInputId },
+            conversationContext = { it.conversationContext },
+        )
+
+    private fun peekNextAction(
+        isBlocked: (rootInputId: String?, conversationContext: ConversationContext) -> Boolean,
+    ): PendingAction? =
+        peekAvailableFromQueue(
+            queue = actions,
+            isBlocked = isBlocked,
+            rootInputId = { it.rootInputId },
+            conversationContext = { it.conversationContext },
+        )
+
+    private fun removeNextIntention(
+        isBlocked: (rootInputId: String?, conversationContext: ConversationContext) -> Boolean,
+    ): QueuedIntention? =
+        removeAvailableFromQueue(
+            queue = intentions,
+            isBlocked = isBlocked,
+            rootInputId = { it.rootInputId },
+            conversationContext = { it.conversationContext },
+        )
+
+    private fun removeNextAction(
+        isBlocked: (rootInputId: String?, conversationContext: ConversationContext) -> Boolean,
+    ): PendingAction? =
+        removeAvailableFromQueue(
+            queue = actions,
+            isBlocked = isBlocked,
+            rootInputId = { it.rootInputId },
+            conversationContext = { it.conversationContext },
+        )
+
+    private fun <T> peekAvailableFromQueue(
+        queue: PriorityQueue<T>,
+        isBlocked: (rootInputId: String?, conversationContext: ConversationContext) -> Boolean,
+        rootInputId: (T) -> String?,
+        conversationContext: (T) -> ConversationContext,
+    ): T? {
+        val deferred = mutableListOf<T>()
+        var selected: T? = null
+        while (true) {
+            val next = queue.poll() ?: break
+            if (isBlocked(rootInputId(next), conversationContext(next))) {
+                deferred += next
+                continue
+            }
+            selected = next
+            break
+        }
+        selected?.let(queue::add)
+        deferred.forEach(queue::add)
+        return selected
+    }
+
+    private fun <T> removeAvailableFromQueue(
+        queue: PriorityQueue<T>,
+        isBlocked: (rootInputId: String?, conversationContext: ConversationContext) -> Boolean,
+        rootInputId: (T) -> String?,
+        conversationContext: (T) -> ConversationContext,
+    ): T? {
+        val deferred = mutableListOf<T>()
+        var selected: T? = null
+        while (true) {
+            val next = queue.poll() ?: break
+            if (isBlocked(rootInputId(next), conversationContext(next))) {
+                deferred += next
+                continue
+            }
+            selected = next
+            break
+        }
+        deferred.forEach(queue::add)
+        return selected
+    }
+
     companion object {
         const val CONVERGENCE_THOUGHT_PREFIX: String = "[convergence] "
 
@@ -316,29 +466,35 @@ class AttentionScheduler(
         internal val actionComparator = compareByDescending<PendingAction> { it.urgency.priority }
             .thenBy { it.id }
 
+        internal val intentionComparator = compareByDescending<QueuedIntention> { it.urgency.priority }
+            .thenBy { if (it.intention.kind == IntentionKind.DEFER) 1 else 0 }
+            .thenBy { it.intention.createdAt }
+            .thenBy { it.queueId }
+
         internal val opportunityComparator =
-            compareBy<OpportunityWorkItem> { opportunityRank(it) }
+            compareBy<ScheduledOpportunity> { opportunityRank(it) }
                 .thenByDescending { opportunityPriority(it) }
                 .thenBy { it.id }
 
-        private fun opportunityRank(item: OpportunityWorkItem): Int =
-            when (item) {
-                is OpportunityWorkItem.InputOpportunity -> 0
-                is OpportunityWorkItem.ImpulseOpportunity -> 1
-                is OpportunityWorkItem.GoalWorkOpportunity -> 2
+        private fun opportunityRank(item: ScheduledOpportunity): Int =
+            when (item.opportunity.kind) {
+                OpportunityKind.RESPOND -> 0
+                OpportunityKind.INTEGRATE_FEEDBACK -> 0
+                OpportunityKind.EXECUTE -> 1
+                OpportunityKind.RESUME -> 2
+                OpportunityKind.CLARIFY -> 2
+                OpportunityKind.FINALIZE -> 2
             }
 
-        private fun opportunityPriority(item: OpportunityWorkItem): Int =
-            when (item) {
-                is OpportunityWorkItem.InputOpportunity -> item.input.priority.level
-                is OpportunityWorkItem.ImpulseOpportunity -> (item.impulse.tension * 1000).toInt()
-                is OpportunityWorkItem.GoalWorkOpportunity -> 0
-            }
+        private fun opportunityPriority(item: ScheduledOpportunity): Int =
+            (item.opportunity.salience * 1000).toInt()
     }
 
     private fun pendingInputCount(): Int =
-        opportunities.count { it is OpportunityWorkItem.InputOpportunity }
+        opportunities.count { trigger ->
+            trigger.trigger is OpportunityTrigger.Input || trigger.trigger is OpportunityTrigger.Feedback
+        }
 
     private fun pendingImpulseCount(): Int =
-        opportunities.count { it is OpportunityWorkItem.ImpulseOpportunity }
+        opportunities.count { it.trigger is OpportunityTrigger.Impulse }
 }

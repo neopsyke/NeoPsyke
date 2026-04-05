@@ -2,19 +2,29 @@ package ai.neopsyke.agent.cortex.connectors
 
 import ai.neopsyke.agent.config.AgentConfig
 import ai.neopsyke.agent.config.ConnectorRuntimeConfig
+import ai.neopsyke.agent.cortex.motor.actions.ActionSecretProvider
 import ai.neopsyke.agent.cortex.connectors.ConnectorActionPluginLoader
 import ai.neopsyke.agent.cortex.connectors.ConnectorCapabilityDescriptor
 import ai.neopsyke.agent.cortex.connectors.ConnectorRuntimePaths
 import ai.neopsyke.agent.cortex.connectors.ConnectorToolDescriptorPinning
 import ai.neopsyke.agent.cortex.connectors.CuratedConnectorCatalogLoader
 import ai.neopsyke.agent.cortex.connectors.InstalledConnectorStateLoader
+import ai.neopsyke.agent.cortex.motor.actions.SecretHandle
+import ai.neopsyke.agent.model.ActionEffectClass
 import java.nio.file.Files
 import java.nio.file.Paths
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class ConnectorCatalogLoaderTest {
+    private class MapSecretProvider(
+        private val values: Map<String, String>,
+    ) : ActionSecretProvider {
+        override fun read(handle: SecretHandle): String? = values[handle.name]
+    }
+
     @Test
     fun `catalog loader reads curated connectors and bundles`() {
         val tempDir = Files.createTempDirectory("neopsyke-connector-catalog")
@@ -219,5 +229,47 @@ class ConnectorCatalogLoaderTest {
                 setOf("morning-briefing", "inbox-management", "social-automation")
             )
         )
+    }
+
+    @Test
+    fun `connector subprocess environment includes only declared secrets and minimal runtime vars`() {
+        val manifest = CuratedConnectorManifest(
+            connectorId = "gmail",
+            vendor = "google",
+            command = "uvx gmail-connector",
+            secretHandles = setOf("GOOGLE_TOKEN", "GOOGLE_CLIENT_SECRET"),
+        )
+
+        val env = ConnectorProcessEnvironment.build(
+            manifest = manifest,
+            secretProvider = MapSecretProvider(
+                mapOf(
+                    "GOOGLE_TOKEN" to "token-123",
+                    "GOOGLE_CLIENT_SECRET" to "client-secret-456",
+                )
+            ),
+            baseEnv = mapOf(
+                "PATH" to "/usr/bin:/bin",
+                "HOME" to "/tmp/home",
+                "LANG" to "en_US.UTF-8",
+                "OPENAI_API_KEY" to "should-not-leak",
+                "MISTRAL_API_KEY" to "should-not-leak",
+            ),
+        )
+
+        assertEquals("/usr/bin:/bin", env["PATH"])
+        assertEquals("/tmp/home", env["HOME"])
+        assertEquals("token-123", env["GOOGLE_TOKEN"])
+        assertEquals("client-secret-456", env["GOOGLE_CLIENT_SECRET"])
+        assertFalse(env.containsKey("OPENAI_API_KEY"))
+        assertFalse(env.containsKey("MISTRAL_API_KEY"))
+    }
+
+    @Test
+    fun `connector runtime policy ignores manifest commit semantics for non observe actions`() {
+        assertTrue(ConnectorRuntimePolicy.directCommitAllowed(ActionEffectClass.OBSERVE))
+        assertTrue(ConnectorRuntimePolicy.supportsAutonomousCommit(ActionEffectClass.OBSERVE))
+        assertFalse(ConnectorRuntimePolicy.directCommitAllowed(ActionEffectClass.COMMIT_PRIVATE))
+        assertFalse(ConnectorRuntimePolicy.supportsAutonomousCommit(ActionEffectClass.CONTROL_PLANE))
     }
 }

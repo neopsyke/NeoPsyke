@@ -304,13 +304,15 @@ class LlmMetaReasoner(
     private fun buildMessages(trigger: EgoTrigger, context: PlannerContext): List<ChatMessage> {
         val triggerLabel = when (trigger) {
             is EgoTrigger.IncomingInput -> "input"
-            is EgoTrigger.PendingThoughtInput -> "thought"
+            is EgoTrigger.DeferredIntention -> "deferred-intention"
+            is EgoTrigger.ActionFeedback -> "feedback"
             is EgoTrigger.IncomingImpulse -> "impulse"
             is EgoTrigger.GoalWork -> "goal-work"
         }
         val triggerText = when (trigger) {
             is EgoTrigger.IncomingInput -> trigger.input.content
-            is EgoTrigger.PendingThoughtInput -> trigger.thought.content
+            is EgoTrigger.DeferredIntention -> trigger.intention.resolvedContent
+            is EgoTrigger.ActionFeedback -> trigger.feedback.cue.feedbackContent
             is EgoTrigger.IncomingImpulse -> trigger.impulse.prompt
             is EgoTrigger.GoalWork -> trigger.workUnit.stepDescription
         }
@@ -327,7 +329,7 @@ class LlmMetaReasoner(
             ChatMessage(
                 role = ChatRole.SYSTEM,
                 content = """
-                You are MetaReasoner for Ego's thought loop.
+                You are MetaReasoner for Ego's deferred-intention loop.
                 Decide if continued deliberation is productive or stale.
                 Return only data that matches the response format schema.
                 Use finalize_now when repeated loops or high pressure suggest diminishing returns.
@@ -353,8 +355,9 @@ class LlmMetaReasoner(
 
                 Queue:
                 pending_inputs=${context.queue.pendingInputCount}
-                pending_thoughts=${context.queue.pendingThoughtCount}
+                pending_thoughts=${context.queue.deferredIntentionCount}
                 pending_actions=${context.queue.pendingActionCount}
+                pending_intentions=${context.queue.pendingIntentionCount}
 
                 Long-term memory recall:
                 $longTermMemoryRecall

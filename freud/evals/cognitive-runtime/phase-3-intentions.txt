@@ -1,0 +1,7 @@
+Before doing anything irreversible, think through the next move.
+
+I want to send a message to a user, but first tell me:
+1. what you need to observe or verify before preparing the message
+2. when you would defer instead of committing
+
+Keep the answer concise.

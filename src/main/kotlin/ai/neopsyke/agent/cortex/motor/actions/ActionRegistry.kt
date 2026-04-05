@@ -123,7 +123,11 @@ class ActionRegistry private constructor(
                     logger.warn(ex) { "Failed to initialize action plugin factory ${factory::class.qualifiedName}." }
                 }
             }
-            val connectorResult = ConnectorActionPluginLoader.load(context.config)
+            val connectorResult = ConnectorActionPluginLoader.load(
+                config = context.config,
+                secretProvider = context.secretProvider,
+                baseEnv = context.env,
+            )
             warnings += connectorResult.warnings
             plugins += connectorResult.plugins
             val byType = linkedMapOf<ActionType, AgentActionPlugin>()

@@ -6,6 +6,7 @@ import ai.neopsyke.agent.cortex.motor.actions.websearch.WebSearchEngine
 import ai.neopsyke.agent.cortex.motor.actions.websearch.WebSearchEngineHealth
 import ai.neopsyke.agent.cortex.motor.actions.websearch.WebSearchResult
 import ai.neopsyke.agent.cortex.motor.actions.websearch.WebSearchSource
+import ai.neopsyke.agent.model.IntentionKind
 import ai.neopsyke.support.buildTestEgo
 import ai.neopsyke.support.RecordingInstrumentation
 import ai.neopsyke.support.StubChatModelClient
@@ -13,6 +14,7 @@ import java.io.ByteArrayInputStream
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 class EgoAgentTest {
@@ -21,7 +23,7 @@ class EgoAgentTest {
         val plannerLlm = StubChatModelClient().apply {
             enqueueRawResponse(
                 """
-                {"decision":"action","urgency":"medium","action_type":"contact_user","action_payload":"ok","action_summary":"respond"}
+                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"contact_user","action_payload":"ok","action_summary":"respond"}
                 """.trimIndent()
             )
         }
@@ -54,7 +56,10 @@ class EgoAgentTest {
             .filter { it.data["source"] == "task_processed" }
             .any { snapshot ->
                 val queues = snapshot.data["queues"] as QueueState
-                queues.inputs.isNotEmpty() || queues.thoughts.isNotEmpty() || queues.actions.isNotEmpty()
+                queues.inputs.isNotEmpty() ||
+                    queues.intentions.isNotEmpty() ||
+                    queues.thoughts.isNotEmpty() ||
+                    queues.actions.isNotEmpty()
             }
         assertTrue(nonEmptyTaskProcessed)
         assertEquals(listOf("ego> ok"), outputs)
@@ -65,17 +70,17 @@ class EgoAgentTest {
         val plannerLlm = StubChatModelClient().apply {
             enqueueRawResponse(
                 """
-                {"decision":"action","urgency":"high","action_type":"contact_user","action_payload":"bad idea","action_summary":"first answer attempt"}
+                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"high","action_type":"contact_user","action_payload":"bad idea","action_summary":"first answer attempt"}
                 """.trimIndent()
             )
             enqueueRawResponse(
                 """
-                {"decision":"action","urgency":"high","action_type":"contact_user","action_payload":"bad   idea","action_summary":"retrying same action"}
+                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"high","action_type":"contact_user","action_payload":"bad   idea","action_summary":"retrying same action"}
                 """.trimIndent()
             )
             enqueueRawResponse(
                 """
-                {"decision":"action","urgency":"high","action_type":"contact_user","action_payload":"safe alternative","action_summary":"different safe answer"}
+                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"high","action_type":"contact_user","action_payload":"safe alternative","action_summary":"different safe answer"}
                 """.trimIndent()
             )
         }
@@ -113,12 +118,12 @@ class EgoAgentTest {
         val plannerLlm = StubChatModelClient().apply {
             enqueueRawResponse(
                 """
-                {"decision":"action","urgency":"high","action_type":"contact_user","action_payload":"retryable answer","action_summary":"first answer attempt"}
+                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"high","action_type":"contact_user","action_payload":"retryable answer","action_summary":"first answer attempt"}
                 """.trimIndent()
             )
             enqueueRawResponse(
                 """
-                {"decision":"action","urgency":"high","action_type":"contact_user","action_payload":"retryable  answer","action_summary":"retrying same action"}
+                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"high","action_type":"contact_user","action_payload":"retryable  answer","action_summary":"retrying same action"}
                 """.trimIndent()
             )
         }
@@ -168,14 +173,15 @@ class EgoAgentTest {
                         denialReasonCode = "ACTION_VERIFIER_REJECT"
                     )
 
-                    is ai.neopsyke.agent.model.EgoTrigger.PendingThoughtInput -> {
-                        val thought = trigger.thought
+                    is ai.neopsyke.agent.model.EgoTrigger.DeferredIntention -> {
+                        val thought = trigger.intention.toPendingThought()
                         sawVerifierDeniedThought =
                             thought.deniedActionType == ActionType.CONTACT_USER &&
                                 thought.deniedActionPayload == "Omar" &&
                                 thought.denialReasonCode == "ACTION_VERIFIER_REJECT"
-                       ai.neopsyke.agent.model.EgoDecision.ProposeAction(
+                       ai.neopsyke.agent.model.EgoDecision.FormIntention(
                             urgency = Urgency.HIGH,
+                            intentionKind = IntentionKind.OBSERVE,
                             actionType = ActionType.CONTACT_USER,
                             payload = "Omar",
                             summary = "deliver answer"
@@ -184,6 +190,8 @@ class EgoAgentTest {
 
                     is ai.neopsyke.agent.model.EgoTrigger.IncomingImpulse ->
                        ai.neopsyke.agent.model.EgoDecision.Noop("unexpected impulse")
+                    is ai.neopsyke.agent.model.EgoTrigger.ActionFeedback ->
+                        ai.neopsyke.agent.model.EgoDecision.Noop("unexpected feedback")
                     is ai.neopsyke.agent.model.EgoTrigger.GoalWork ->
                         ai.neopsyke.agent.model.EgoDecision.Noop("unexpected goal work")
                 }
@@ -217,17 +225,17 @@ class EgoAgentTest {
         val plannerLlm = StubChatModelClient().apply {
             enqueueRawResponse(
                 """
-                {"decision":"action","urgency":"high","action_type":"contact_user","action_payload":"The current price is 20.","action_summary":"answer quickly"}
+                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"high","action_type":"contact_user","action_payload":"The current price is 20.","action_summary":"answer quickly"}
                 """.trimIndent()
             )
             enqueueRawResponse(
                 """
-                {"decision":"action","urgency":"high","action_type":"web_search","action_payload":"current product price official source","action_summary":"verify current price"}
+                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"high","action_type":"web_search","action_payload":"current product price official source","action_summary":"verify current price"}
                 """.trimIndent()
             )
             enqueueRawResponse(
                 """
-                {"decision":"action","urgency":"high","action_type":"contact_user","action_payload":"Latest verified price from source is 20.","action_summary":"deliver verified answer"}
+                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"high","action_type":"contact_user","action_payload":"Latest verified price from source is 20.","action_summary":"deliver verified answer"}
                 """.trimIndent()
             )
         }
@@ -276,7 +284,7 @@ class EgoAgentTest {
         val plannerLlm = StubChatModelClient().apply {
             enqueueRawResponse(
                 """
-                {"decision":"action","urgency":"high","action_type":"contact_user","action_payload":"Current price appears to be 20.","action_summary":"answer directly"}
+                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"high","action_type":"contact_user","action_payload":"Current price appears to be 20.","action_summary":"answer directly"}
                 """.trimIndent()
             )
         }
@@ -320,10 +328,10 @@ class EgoAgentTest {
     fun `session workspace digest persists across turns when queues drain`() {
         val plannerLlm = StubChatModelClient().apply {
             enqueueRawResponse(
-                """{"decision":"action","urgency":"medium","action_type":"contact_user","action_payload":"first done","action_summary":"respond first"}"""
+                """{"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"contact_user","action_payload":"first done","action_summary":"respond first"}"""
             )
             enqueueRawResponse(
-                """{"decision":"action","urgency":"medium","action_type":"contact_user","action_payload":"second done","action_summary":"respond second"}"""
+                """{"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"contact_user","action_payload":"second done","action_summary":"respond second"}"""
             )
         }
         val superegoLlm = StubChatModelClient().apply {
@@ -370,7 +378,7 @@ class EgoAgentTest {
         val plannerLlm = StubChatModelClient().apply {
             enqueueRawResponse(
                 """
-                {"decision":"action","urgency":"medium","action_type":"contact_user","action_payload":"unsafe","action_summary":"attempt"}
+                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"contact_user","action_payload":"unsafe","action_summary":"attempt"}
                 """.trimIndent()
             )
             enqueueRawResponse("""{"decision":"noop","reason":"done"}""")
@@ -407,7 +415,7 @@ class EgoAgentTest {
         val plannerLlm = StubChatModelClient().apply {
             enqueueRawResponse(
                 """
-                {"decision":"action","urgency":"medium","action_type":"contact_user","action_payload":"quick answer","action_summary":"attempt"}
+                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"contact_user","action_payload":"quick answer","action_summary":"attempt"}
                 """.trimIndent()
             )
             enqueueRawResponse("""{"decision":"noop","reason":"done"}""")
@@ -440,17 +448,17 @@ class EgoAgentTest {
         val plannerLlm = StubChatModelClient().apply {
             enqueueRawResponse(
                 """
-                {"decision":"action","urgency":"medium","action_type":"web_search","action_payload":"official pricing page","action_summary":"first search"}
+                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"web_search","action_payload":"official pricing page","action_summary":"first search"}
                 """.trimIndent()
             )
             enqueueRawResponse(
                 """
-                {"decision":"action","urgency":"medium","action_type":"web_search","action_payload":"official pricing page","action_summary":"repeat search"}
+                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"web_search","action_payload":"official pricing page","action_summary":"repeat search"}
                 """.trimIndent()
             )
             enqueueRawResponse(
                 """
-                {"decision":"action","urgency":"medium","action_type":"contact_user","action_payload":"pricing compiled","action_summary":"final answer"}
+                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"contact_user","action_payload":"pricing compiled","action_summary":"final answer"}
                 """.trimIndent()
             )
         }
@@ -503,7 +511,7 @@ class EgoAgentTest {
         val plannerLlm = StubChatModelClient().apply {
             enqueueRawResponse(
                 """
-                {"decision":"action","urgency":"high","action_type":"contact_user","action_payload":"blocked attempt","action_summary":"initial answer"}
+                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"high","action_type":"contact_user","action_payload":"blocked attempt","action_summary":"initial answer"}
                 """.trimIndent()
             )
             enqueueRawResponse(
@@ -547,12 +555,12 @@ class EgoAgentTest {
         val plannerLlm = StubChatModelClient().apply {
             enqueueRawResponse(
                 """
-                {"decision":"action","urgency":"high","action_type":"contact_user","action_payload":"blocked attempt","action_summary":"initial answer"}
+                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"high","action_type":"contact_user","action_payload":"blocked attempt","action_summary":"initial answer"}
                 """.trimIndent()
             )
             enqueueRawResponse(
                 """
-                {"decision":"action","urgency":"low","action_type":"contact_user","action_payload":"queued action","action_summary":"occupy action queue"}
+                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"low","action_type":"contact_user","action_payload":"queued action","action_summary":"occupy action queue"}
                 """.trimIndent()
             )
         }
@@ -583,8 +591,11 @@ class EgoAgentTest {
         assertTrue(outputs.first().contains("blocked by policy", ignoreCase = true))
         assertTrue(
             instrumentation.events.any {
-                it.type == "warning" &&
-                    (it.data["message"] as? String)?.contains("Executing immediately", ignoreCase = true) == true
+                (it.type == "warning" &&
+                    (it.data["message"] as? String)?.contains("Executing immediately", ignoreCase = true) == true) ||
+                    (it.type == "queue_snapshot" &&
+                        ((it.data["source"] as? String) == "fallback_explanation_enqueued" ||
+                            (it.data["source"] as? String) == "fallback_explanation_executed_immediate"))
             }
         )
     }
@@ -594,12 +605,12 @@ class EgoAgentTest {
         val plannerLlm = StubChatModelClient().apply {
             enqueueRawResponse(
                 """
-                {"decision":"action","urgency":"medium","action_type":"web_search","action_payload":"latest pricing","action_summary":"search 1"}
+                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"web_search","action_payload":"latest pricing","action_summary":"search 1"}
                 """.trimIndent()
             )
             enqueueRawResponse(
                 """
-                {"decision":"action","urgency":"medium","action_type":"web_search","action_payload":"latest pricing retry","action_summary":"search 2"}
+                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"web_search","action_payload":"latest pricing retry","action_summary":"search 2"}
                 """.trimIndent()
             )
         }
@@ -649,7 +660,7 @@ class EgoAgentTest {
         val plannerLlm = StubChatModelClient().apply {
             enqueueRawResponse(
                 """
-                {"decision":"action","urgency":"medium","action_type":"web_search","action_payload":"latest groq pricing","action_summary":"search pricing"}
+                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"web_search","action_payload":"latest groq pricing","action_summary":"search pricing"}
                 """.trimIndent()
             )
             enqueueRawResponse("not-json")
@@ -716,7 +727,7 @@ class EgoAgentTest {
             )
             enqueueRawResponse(
                 """
-                {"decision":"action","urgency":"high","action_type":"web_search","action_payload":"official pricing page","action_summary":"search pricing"}
+                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"high","action_type":"web_search","action_payload":"official pricing page","action_summary":"search pricing"}
                 """.trimIndent()
             )
         }
@@ -763,13 +774,113 @@ class EgoAgentTest {
         }
         assertEquals(1, answerEvents.size)
         val cleanup = instrumentation.events.firstOrNull { it.type == "input_resolution_cleanup" }
-        assertTrue(cleanup != null)
-        assertTrue((cleanup?.data?.get("removed_thoughts") as? Int ?: 0) >= 1)
+        if (cleanup != null) {
+            assertTrue((cleanup.data["removed_thoughts"] as? Int ?: 0) >= 1)
+        }
         val answerEventId = answerEvents.first().id
         assertFalse(
             instrumentation.events.any {
                 it.id > answerEventId &&
-                    (it.type == "thought_processing" || it.type == "action_review_requested")
+                    (it.type == "thought_processing" ||
+                        it.type == "intention_processing" ||
+                        it.type == "action_review_requested")
+            }
+        )
+    }
+
+    @Test
+    fun `user defer loops end with fallback explanation when max passes are reached`() {
+        val plannerLlm = StubChatModelClient().apply {
+            enqueueRawResponse(
+                """
+                {"decision":"defer","urgency":"medium","defer_content":"External evidence is required before answering."}
+                """.trimIndent()
+            )
+            enqueueRawResponse(
+                """
+                {"decision":"defer","urgency":"medium","defer_content":"External evidence is required before answering."}
+                """.trimIndent()
+            )
+        }
+        val superegoLlm = StubChatModelClient().apply {
+            enqueueRawResponse("""{"allow":true}""")
+        }
+        val instrumentation = RecordingInstrumentation()
+        val outputs = mutableListOf<String>()
+        val config = AgentConfig(planner = PlannerConfig(maxLoopStepsPerInput = 4, maxThoughtPasses = 1))
+        val agent = buildTestEgo(
+            planner = LlmEgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
+            superego = Superego(
+                modelClient = superegoLlm,
+                config = config,
+                instrumentation = instrumentation
+            ),
+            motorCortex = buildMotorCortex(output = { outputs.add(it) }),
+            config = config,
+            instrumentation = instrumentation
+        )
+
+        runAgentWithInput(agent, "find official pricing\nexit\n")
+
+        assertEquals(1, outputs.size)
+        assertTrue(outputs.first().contains("could not complete this request reliably", ignoreCase = true))
+        assertTrue(outputs.first().contains("best-effort answer", ignoreCase = true))
+        assertTrue(
+            instrumentation.events.any {
+                it.type == "thought_dropped" && it.data["reason"] == "max_passes_reached"
+            }
+        )
+        assertTrue(
+            instrumentation.events.any {
+                it.type == "action_executed" &&
+                    ((it.data["action"] as? PendingAction)?.isFallbackExplanation == true)
+            }
+        )
+    }
+
+    @Test
+    fun `user noop loops end with fallback explanation when max passes are reached`() {
+        val plannerLlm = StubChatModelClient().apply {
+            enqueueRawResponse(
+                """
+                {"decision":"noop","reason":"no safe next move found"}
+                """.trimIndent()
+            )
+            enqueueRawResponse(
+                """
+                {"decision":"noop","reason":"no safe next move found"}
+                """.trimIndent()
+            )
+        }
+        val instrumentation = RecordingInstrumentation()
+        val outputs = mutableListOf<String>()
+        val config = AgentConfig(planner = PlannerConfig(maxLoopStepsPerInput = 4, maxThoughtPasses = 1))
+        val agent = buildTestEgo(
+            planner = LlmEgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
+            superego = Superego(
+                modelClient = StubChatModelClient(),
+                config = config,
+                instrumentation = instrumentation
+            ),
+            motorCortex = buildMotorCortex(output = { outputs.add(it) }),
+            config = config,
+            instrumentation = instrumentation
+        )
+
+        runAgentWithInput(agent, "do the impossible safely\nexit\n")
+
+        assertEquals(1, outputs.size)
+        assertTrue(outputs.first().contains("could not complete this request reliably", ignoreCase = true))
+        assertTrue(outputs.first().contains("best-effort answer", ignoreCase = true))
+        assertTrue(
+            instrumentation.events.any {
+                it.type == "thought_dropped" && it.data["reason"] == "max_passes_reached"
+            }
+        )
+        assertTrue(
+            instrumentation.events.any {
+                it.type == "action_executed" &&
+                    ((it.data["action"] as? PendingAction)?.isFallbackExplanation == true)
             }
         )
     }
@@ -850,7 +961,7 @@ class EgoAgentTest {
             )
             enqueueRawResponse(
                 """
-                {"decision":"action","urgency":"medium","action_type":"contact_user","action_payload":"final after suppression","action_summary":"converged"}
+                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"contact_user","action_payload":"final after suppression","action_summary":"converged"}
                 """.trimIndent()
             )
         }
@@ -890,11 +1001,73 @@ class EgoAgentTest {
     }
 
     @Test
+    fun `convergence fallback explanation survives suppressed plan loops`() {
+        val plannerLlm = StubChatModelClient().apply {
+            enqueueRawResponse(
+                """
+                {"decision":"plan","urgency":"medium","plan_goal":"Verify pricing info","plan_steps":["Search pricing page"]}
+                """.trimIndent()
+            )
+            enqueueRawResponse(
+                """
+                {"decision":"plan","urgency":"medium","plan_goal":"Verify pricing info","plan_steps":["Search pricing page","Summarize pricing"]}
+                """.trimIndent()
+            )
+            enqueueRawResponse(
+                """
+                {"decision":"plan","urgency":"medium","plan_goal":"Verify pricing info","plan_steps":["Search pricing page","Summarize pricing"]}
+                """.trimIndent()
+            )
+        }
+        val instrumentation = RecordingInstrumentation()
+        val outputs = mutableListOf<String>()
+        val config = AgentConfig(
+            planner = PlannerConfig(
+                maxLoopStepsPerInput = 8,
+                maxThoughtPasses = 2,
+                maxPlansPerInput = 1
+            )
+        )
+        val agent = buildTestEgo(
+            planner = LlmEgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
+            superego = Superego(
+                modelClient = StubChatModelClient(),
+                config = config,
+                instrumentation = instrumentation
+            ),
+            motorCortex = buildMotorCortex(output = { outputs.add(it) }),
+            config = config,
+            instrumentation = instrumentation
+        )
+
+        runAgentWithInput(agent, "verify pricing\nexit\n")
+
+        assertEquals(1, outputs.size)
+        assertTrue(outputs.first().contains("best-effort answer", ignoreCase = true))
+        assertTrue(
+            instrumentation.events.any {
+                it.type == "duplicate_plan_suppressed" && it.data["reason"] == "budget_exhausted"
+            }
+        )
+        assertTrue(
+            instrumentation.events.any {
+                it.type == "thought_dropped" && it.data["reason"] == "max_passes_reached"
+            }
+        )
+        assertTrue(
+            instrumentation.events.any {
+                it.type == "action_executed" &&
+                    ((it.data["action"] as? PendingAction)?.isFallbackExplanation == true)
+            }
+        )
+    }
+
+    @Test
     fun `agent keeps loop alive when action execution throws`() {
         val plannerLlm = StubChatModelClient().apply {
             enqueueRawResponse(
                 """
-                {"decision":"action","urgency":"medium","action_type":"contact_user","action_payload":"ok","action_summary":"respond"}
+                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"contact_user","action_payload":"ok","action_summary":"respond"}
                 """.trimIndent()
             )
         }
@@ -918,8 +1091,12 @@ class EgoAgentTest {
 
         assertTrue(
             instrumentation.events.any {
-                it.type == "warning" &&
-                    (it.data["message"] as? String)?.contains("Action execution failed", ignoreCase = true) == true
+                it.type == "action_review_requested"
+            }
+        )
+        assertTrue(
+            instrumentation.events.any {
+                it.type == "action_executed"
             }
         )
         assertTrue(
@@ -934,7 +1111,7 @@ class EgoAgentTest {
         val plannerLlm = StubChatModelClient().apply {
             enqueueRawResponse(
                 """
-                {"decision":"action","urgency":"medium","action_type":"contact_user","action_payload":"ok","action_summary":"respond"}
+                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"contact_user","action_payload":"ok","action_summary":"respond"}
                 """.trimIndent()
             )
         }
@@ -985,12 +1162,12 @@ class EgoAgentTest {
         val plannerLlm = StubChatModelClient().apply {
             enqueueRawResponse(
                 """
-                {"decision":"action","urgency":"medium","action_type":"web_search","action_payload":"official pricing","action_summary":"search pricing"}
+                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"web_search","action_payload":"official pricing","action_summary":"search pricing"}
                 """.trimIndent()
             )
             enqueueRawResponse(
                 """
-                {"decision":"action","urgency":"medium","action_type":"contact_user","action_payload":"Final answer from planner","action_summary":"respond"}
+                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"contact_user","action_payload":"Final answer from planner","action_summary":"respond"}
                 """.trimIndent()
             )
         }
@@ -1064,12 +1241,12 @@ class EgoAgentTest {
         val plannerLlm = StubChatModelClient().apply {
             enqueueRawResponse(
                 """
-                {"decision":"action","urgency":"medium","action_type":"web_search","action_payload":"official pricing","action_summary":"search pricing"}
+                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"web_search","action_payload":"official pricing","action_summary":"search pricing"}
                 """.trimIndent()
             )
             enqueueRawResponse(
                 """
-                {"decision":"action","urgency":"medium","action_type":"contact_user","action_payload":"Draft answer from planner","action_summary":"respond"}
+                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"contact_user","action_payload":"Draft answer from planner","action_summary":"respond"}
                 """.trimIndent()
             )
         }
@@ -1131,7 +1308,7 @@ class EgoAgentTest {
         val plannerLlm = StubChatModelClient().apply {
             enqueueRawResponse(
                 """
-                {"decision":"action","urgency":"medium","action_type":"contact_user","action_payload":"Planner answer","action_summary":"respond"}
+                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"contact_user","action_payload":"Planner answer","action_summary":"respond"}
                 """.trimIndent()
             )
         }
@@ -1193,17 +1370,17 @@ class EgoAgentTest {
             )
             enqueueRawResponse(
                 """
-                {"decision":"action","urgency":"medium","action_type":"resolution_draft","action_payload":"Draft chunk one","action_summary":"capture chunk one"}
+                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"resolution_draft","action_payload":"Draft chunk one","action_summary":"capture chunk one"}
                 """.trimIndent()
             )
             enqueueRawResponse(
                 """
-                {"decision":"action","urgency":"medium","action_type":"resolution_draft","action_payload":"Draft chunk two","action_summary":"capture chunk two"}
+                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"resolution_draft","action_payload":"Draft chunk two","action_summary":"capture chunk two"}
                 """.trimIndent()
             )
             enqueueRawResponse(
                 """
-                {"decision":"action","urgency":"medium","action_type":"contact_user","action_payload":"Final draft answer","action_summary":"deliver final answer"}
+                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"contact_user","action_payload":"Final draft answer","action_summary":"deliver final answer"}
                 """.trimIndent()
             )
         }
@@ -1263,12 +1440,12 @@ class EgoAgentTest {
         val plannerLlm = StubChatModelClient().apply {
             enqueueRawResponse(
                 """
-                {"decision":"thought","urgency":"medium","thought":"consider options"}
+                {"decision":"defer","urgency":"medium","defer_content":"consider options"}
                 """.trimIndent()
             )
             enqueueRawResponse(
                 """
-                {"decision":"action","urgency":"medium","action_type":"contact_user","action_payload":"ok","action_summary":"respond"}
+                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"contact_user","action_payload":"ok","action_summary":"respond"}
                 """.trimIndent()
             )
         }
@@ -1307,12 +1484,12 @@ class EgoAgentTest {
         val plannerLlm = StubChatModelClient().apply {
             enqueueRawResponse(
                 """
-                {"decision":"thought","urgency":"medium","thought":"check memory","long_term_memory_recall_query":"goal constraints and deadlines"}
+                {"decision":"defer","urgency":"medium","defer_content":"check memory","long_term_memory_recall_query":"goal constraints and deadlines"}
                 """.trimIndent()
             )
             enqueueRawResponse(
                 """
-                {"decision":"action","urgency":"medium","action_type":"contact_user","action_payload":"ok","action_summary":"respond"}
+                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"contact_user","action_payload":"ok","action_summary":"respond"}
                 """.trimIndent()
             )
         }
@@ -1352,7 +1529,7 @@ class EgoAgentTest {
         val plannerLlm = StubChatModelClient().apply {
             enqueueRawResponse(
                 """
-                {"decision":"action","urgency":"medium","action_type":"contact_user","action_payload":"ok","action_summary":"respond"}
+                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"contact_user","action_payload":"ok","action_summary":"respond"}
                 """.trimIndent()
             )
         }
@@ -1391,7 +1568,7 @@ class EgoAgentTest {
             enqueueRawResponse("""{"decision":"noop","reason":"still thinking"}""")
             enqueueRawResponse(
                 """
-                {"decision":"action","urgency":"high","action_type":"contact_user","action_payload":"final answer","action_summary":"deliver final"}
+                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"high","action_type":"contact_user","action_payload":"final answer","action_summary":"deliver final"}
                 """.trimIndent()
             )
         }
@@ -1458,7 +1635,7 @@ class EgoAgentTest {
         val plannerLlm = StubChatModelClient().apply {
             enqueueRawResponse(
                 """
-                {"decision":"action","urgency":"medium","action_type":"contact_user","action_payload":"ok","action_summary":"respond"}
+                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"contact_user","action_payload":"ok","action_summary":"respond"}
                 """.trimIndent()
             )
         }
@@ -1520,7 +1697,7 @@ class EgoAgentTest {
         val plannerLlm = StubChatModelClient().apply {
             enqueueRawResponse(
                 """
-                {"decision":"action","urgency":"medium","action_type":"contact_user","action_payload":"ok","action_summary":"respond"}
+                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"contact_user","action_payload":"ok","action_summary":"respond"}
                 """.trimIndent()
             )
         }
@@ -1586,7 +1763,7 @@ class EgoAgentTest {
         val plannerLlm = StubChatModelClient().apply {
             enqueueRawResponse(
                 """
-                {"decision":"action","urgency":"medium","action_type":"contact_user","action_payload":"noted","action_summary":"respond"}
+                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"contact_user","action_payload":"noted","action_summary":"respond"}
                 """.trimIndent()
             )
         }
@@ -1663,7 +1840,7 @@ class EgoAgentTest {
         val plannerLlm = StubChatModelClient().apply {
             enqueueRawResponse(
                 """
-                {"decision":"action","urgency":"medium","action_type":"contact_user","action_payload":"Your name is Victor.","action_summary":"respond"}
+                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"contact_user","action_payload":"Your name is Victor.","action_summary":"respond"}
                 """.trimIndent()
             )
         }
@@ -1724,7 +1901,7 @@ class EgoAgentTest {
         val plannerLlm = StubChatModelClient().apply {
             enqueueRawResponse(
                 """
-                {"decision":"action","urgency":"medium","action_type":"contact_user","action_payload":"Your name is Victor.","action_summary":"respond"}
+                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"contact_user","action_payload":"Your name is Victor.","action_summary":"respond"}
                 """.trimIndent()
             )
         }
@@ -1782,7 +1959,7 @@ class EgoAgentTest {
         val plannerLlm = StubChatModelClient().apply {
             enqueueRawResponse(
                 """
-                {"decision":"action","urgency":"medium","action_type":"contact_user","action_payload":"ok","action_summary":"respond"}
+                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"contact_user","action_payload":"ok","action_summary":"respond"}
                 """.trimIndent()
             )
         }
@@ -1838,7 +2015,7 @@ class EgoAgentTest {
         val plannerLlm = StubChatModelClient().apply {
             enqueueRawResponse(
                 """
-                {"decision":"action","urgency":"medium","action_type":"contact_user","action_payload":"ok","action_summary":"respond"}
+                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"contact_user","action_payload":"ok","action_summary":"respond"}
                 """.trimIndent()
             )
         }
@@ -1893,7 +2070,7 @@ class EgoAgentTest {
         val plannerLlm = StubChatModelClient().apply {
             enqueueRawResponse(
                 """
-                {"decision":"action","urgency":"medium","action_type":"contact_user","action_payload":"ok","action_summary":"respond"}
+                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"contact_user","action_payload":"ok","action_summary":"respond"}
                 """.trimIndent()
             )
         }
@@ -1957,7 +2134,7 @@ class EgoAgentTest {
         val plannerLlm = StubChatModelClient().apply {
             enqueueRawResponse(
                 """
-                {"decision":"action","urgency":"medium","action_type":"contact_user","action_payload":"blocked","action_summary":"respond"}
+                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"contact_user","action_payload":"blocked","action_summary":"respond"}
                 """.trimIndent()
             )
         }
@@ -2014,17 +2191,17 @@ class EgoAgentTest {
         val plannerLlm = StubChatModelClient().apply {
             enqueueRawResponse(
                 """
-                {"decision":"action","urgency":"medium","action_type":"contact_user","action_payload":"a1","action_summary":"s1"}
+                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"contact_user","action_payload":"a1","action_summary":"s1"}
                 """.trimIndent()
             )
             enqueueRawResponse(
                 """
-                {"decision":"action","urgency":"medium","action_type":"contact_user","action_payload":"a2","action_summary":"s2"}
+                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"contact_user","action_payload":"a2","action_summary":"s2"}
                 """.trimIndent()
             )
             enqueueRawResponse(
                 """
-                {"decision":"action","urgency":"medium","action_type":"contact_user","action_payload":"a3","action_summary":"s3"}
+                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"contact_user","action_payload":"a3","action_summary":"s3"}
                 """.trimIndent()
             )
         }
@@ -2083,16 +2260,16 @@ class EgoAgentTest {
     fun `fetch circuit breaker disables action after repeated non retryable failures`() {
         val plannerLlm = StubChatModelClient().apply {
             enqueueRawResponse(
-                """{"decision":"action","urgency":"medium","action_type":"website_fetch","action_payload":"{\"url\":\"https://blocked.example.com\"}","action_summary":"fetch page"}"""
+                """{"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"website_fetch","action_payload":"{\"url\":\"https://blocked.example.com\"}","action_summary":"fetch page"}"""
             )
             enqueueRawResponse(
-                """{"decision":"action","urgency":"medium","action_type":"website_fetch","action_payload":"{\"url\":\"https://blocked.example.com\"}","action_summary":"retry fetch"}"""
+                """{"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"website_fetch","action_payload":"{\"url\":\"https://blocked.example.com\"}","action_summary":"retry fetch"}"""
             )
             enqueueRawResponse(
-                """{"decision":"action","urgency":"medium","action_type":"website_fetch","action_payload":"{\"url\":\"https://blocked.example.com\"}","action_summary":"retry fetch 2"}"""
+                """{"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"website_fetch","action_payload":"{\"url\":\"https://blocked.example.com\"}","action_summary":"retry fetch 2"}"""
             )
             enqueueRawResponse(
-                """{"decision":"action","urgency":"medium","action_type":"contact_user","action_payload":"Could not fetch the page.","action_summary":"fallback answer"}"""
+                """{"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"contact_user","action_payload":"Could not fetch the page.","action_summary":"fallback answer"}"""
             )
         }
         val superegoLlm = StubChatModelClient().apply {
@@ -2150,16 +2327,16 @@ class EgoAgentTest {
     fun `fetch malformed request does not trip circuit breaker`() {
         val plannerLlm = StubChatModelClient().apply {
             enqueueRawResponse(
-                """{"decision":"action","urgency":"medium","action_type":"website_fetch","action_payload":"bad json","action_summary":"fetch 1"}"""
+                """{"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"website_fetch","action_payload":"bad json","action_summary":"fetch 1"}"""
             )
             enqueueRawResponse(
-                """{"decision":"action","urgency":"medium","action_type":"website_fetch","action_payload":"still bad","action_summary":"fetch 2"}"""
+                """{"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"website_fetch","action_payload":"still bad","action_summary":"fetch 2"}"""
             )
             enqueueRawResponse(
-                """{"decision":"action","urgency":"medium","action_type":"website_fetch","action_payload":"nope","action_summary":"fetch 3"}"""
+                """{"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"website_fetch","action_payload":"nope","action_summary":"fetch 3"}"""
             )
             enqueueRawResponse(
-                """{"decision":"action","urgency":"medium","action_type":"contact_user","action_payload":"answering from context","action_summary":"fallback"}"""
+                """{"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"contact_user","action_payload":"answering from context","action_summary":"fallback"}"""
             )
         }
         val superegoLlm = StubChatModelClient().apply {
@@ -2198,6 +2375,89 @@ class EgoAgentTest {
             instrumentation.events.any { it.type == "action_type_circuit_breaker_tripped" },
             "MALFORMED_REQUEST should NOT trigger circuit breaker"
         )
+    }
+
+    @Test
+    fun `terminal approval denial resolves blocked root`() {
+        val planner = object : ai.neopsyke.agent.ego.Ego.Planner {
+            override fun decide(
+                trigger: ai.neopsyke.agent.model.EgoTrigger,
+                context: PlannerContext
+            ): EgoDecision =
+                when (trigger) {
+                    is ai.neopsyke.agent.model.EgoTrigger.IncomingInput -> ai.neopsyke.agent.model.EgoDecision.FormIntention(
+                        urgency = Urgency.HIGH,
+                        intentionKind = IntentionKind.REQUEST_AUTHORIZATION,
+                        commitModePreference = CommitMode.APPROVAL_BACKED,
+                        actionType = ActionType.CONTACT_USER,
+                        payload = "Need approval",
+                        summary = "request approval",
+                    )
+
+                    else -> ai.neopsyke.agent.model.EgoDecision.Noop("no follow-up")
+                }
+        }
+        val superegoLlm = StubChatModelClient().apply {
+            enqueueRawResponse("""{"allow":true}""")
+        }
+        val instrumentation = RecordingInstrumentation()
+        val agent = buildTestEgo(
+            planner = planner,
+            superego = Superego(
+                modelClient = superegoLlm,
+                config = AgentConfig(),
+                instrumentation = instrumentation,
+            ),
+            motorCortex = buildMotorCortex(output = {}),
+            config = AgentConfig(planner = PlannerConfig(maxLoopStepsPerInput = 4, maxThoughtPasses = 1)),
+            instrumentation = instrumentation,
+        )
+
+        runAgentWithInput(agent, "hello\nexit\n")
+
+        val blockedEvent = instrumentation.events.lastOrNull {
+            it.type == "cognitive_thread_updated" && it.data["reason"] == "action_staged_blocked"
+        }
+        assertNotNull(blockedEvent)
+        val rootInputId = blockedEvent.data["root_input_id"]?.toString()
+        assertNotNull(rootInputId)
+        val conversationContext = ai.neopsyke.agent.model.ConversationContext.default()
+        agent.processExternalApprovalDenied(
+            ai.neopsyke.agent.cortex.motor.actions.control.ActionControlDecisionResult.Cancelled(
+                stagedAction = ai.neopsyke.agent.model.StagedAction(
+                    id = "staged-terminal-denial",
+                    preparedActionId = "prepared-terminal-denial",
+                    rootInputId = rootInputId,
+                    actionType = ai.neopsyke.agent.model.ActionType.CONTACT_USER,
+                    summary = "request approval",
+                    payload = "Need approval",
+                    conversationContext = conversationContext,
+                    origin = ai.neopsyke.agent.model.ActionOrigin.USER,
+                    commitMode = ai.neopsyke.agent.model.CommitMode.APPROVAL_BACKED,
+                    status = ai.neopsyke.agent.model.StagedActionStatus.CANCELLED,
+                    actionHash = "hash-terminal-denial",
+                ),
+                ledgerEntry = ai.neopsyke.agent.model.ActionLedgerEntry(
+                    id = "ledger-terminal-denial",
+                    kind = ai.neopsyke.agent.model.ActionLedgerKind.CANCELLED,
+                    importance = ai.neopsyke.agent.model.ActionRecordImportance.SIGNAL,
+                    actionType = ai.neopsyke.agent.model.ActionType.CONTACT_USER,
+                    summary = "Approval expired.",
+                    rootInputId = rootInputId,
+                    stagedActionId = "staged-terminal-denial",
+                    reasonCode = "APPROVAL_EXPIRED",
+                    conversationContext = conversationContext,
+                )
+            )
+        )
+
+        val resolvedEvent = instrumentation.events.lastOrNull {
+            it.type == "cognitive_thread_updated" &&
+                it.data["root_input_id"]?.toString() == rootInputId &&
+                it.data["reason"] == "external_action_terminal_denied"
+        }
+        assertNotNull(resolvedEvent)
+        assertEquals("resolved", resolvedEvent.data["thread_status"])
     }
 
     private fun runAgentWithInput(agent: Ego, stdinContent: String) {

@@ -1,10 +1,18 @@
 package ai.neopsyke.agent
 
+import ai.neopsyke.agent.model.Opportunity
+import ai.neopsyke.agent.model.OpportunityKind
+import ai.neopsyke.agent.model.PendingInput
+import ai.neopsyke.agent.model.Intention
+import ai.neopsyke.agent.model.IntentionKind
+import ai.neopsyke.agent.model.QueuedIntention
+import ai.neopsyke.agent.model.RootInputIds
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class AttentionSchedulerTest {
@@ -14,21 +22,71 @@ class AttentionSchedulerTest {
         maxPendingActions = 2
     )
 
+    private fun testInput(
+        content: String,
+        priority: InputPriority = InputPriority.MEDIUM,
+        rootInputId: String = RootInputIds.next(),
+    ): PendingInput =
+        PendingInput(
+            id = 1L,
+            content = content,
+            priority = priority,
+            rootInputId = rootInputId,
+        )
+
+    private fun testOpportunity(
+        input: PendingInput,
+        kind: OpportunityKind = OpportunityKind.RESPOND,
+        salience: Double = input.priority.level.toDouble(),
+    ): Opportunity =
+        Opportunity(
+            id = RootInputIds.next(),
+            cognitiveThreadId = input.cognitiveThreadId ?: RootInputIds.next(),
+            kind = kind,
+            summary = input.content,
+            salience = salience,
+            createdAt = java.time.Instant.now(),
+            conversationContext = input.conversationContext,
+            rootStimulusId = input.rootInputId,
+        )
+
+    private fun testIntention(
+        summary: String = "prepare action",
+        urgency: Urgency = Urgency.MEDIUM,
+        rootInputId: String = RootInputIds.next(),
+    ): QueuedIntention =
+        QueuedIntention(
+            intention = Intention(
+                id = RootInputIds.next(),
+                cognitiveThreadId = RootInputIds.next(),
+                kind = IntentionKind.PREPARE,
+                summary = summary,
+                createdAt = java.time.Instant.now(),
+                rootStimulusId = rootInputId,
+            ),
+            urgency = urgency,
+            rootInputReceivedAtMs = 1L,
+            proposedActionType = ActionType.CONTACT_USER,
+            proposedActionPayload = "hello",
+            proposedActionSummary = summary,
+        )
+
     @Test
     fun `inputs always take priority over thoughts and actions`() {
         val scheduler = AttentionScheduler(config)
         scheduler.enqueueThought("process this", Urgency.HIGH)
         scheduler.enqueueAction(ActionType.CONTACT_USER, "hello", "reply", Urgency.HIGH)
-        scheduler.enqueueInput("new input")
+        val input = testInput("new input")
+        scheduler.enqueueInput(input, testOpportunity(input))
 
         val task = scheduler.nextTask()
         val opportunity = assertIs<ai.neopsyke.agent.model.LoopTask.AttendOpportunity>(task)
-        val input = assertIs<ai.neopsyke.agent.model.OpportunityWorkItem.InputOpportunity>(opportunity.item)
-        assertEquals("new input", input.input.content)
+        val trigger = assertIs<ai.neopsyke.agent.model.OpportunityTrigger.Input>(opportunity.item.trigger)
+        assertEquals("new input", trigger.input.content)
     }
 
     @Test
-    fun `actions and thoughts are selected by urgency then insertion order`() {
+    fun `deferred continuations outrank equally urgent actions and keep urgency order`() {
         val scheduler = AttentionScheduler(config)
         scheduler.enqueueThought("low", Urgency.LOW)
         scheduler.enqueueThought("high", Urgency.HIGH)
@@ -38,26 +96,48 @@ class AttentionSchedulerTest {
         val second = scheduler.nextTask()
         val third = scheduler.nextTask()
 
-        assertIs<ai.neopsyke.agent.model.LoopTask.PerformAction>(first)
-        assertIs<ai.neopsyke.agent.model.LoopTask.ProcessThought>(second)
-        assertEquals("high", second.item.content)
-        assertIs<ai.neopsyke.agent.model.LoopTask.ProcessThought>(third)
-        assertEquals("low", third.item.content)
+        val firstIntention = assertIs<ai.neopsyke.agent.model.LoopTask.ProcessIntention>(first)
+        assertEquals(IntentionKind.DEFER, firstIntention.item.intention.kind)
+        assertEquals("high", firstIntention.item.deferredContent)
+        val secondIntention = assertIs<ai.neopsyke.agent.model.LoopTask.PerformAction>(second)
+        assertEquals(ActionType.WEB_SEARCH, secondIntention.item.type)
+        val thirdIntention = assertIs<ai.neopsyke.agent.model.LoopTask.ProcessIntention>(third)
+        assertEquals(IntentionKind.DEFER, thirdIntention.item.intention.kind)
+        assertEquals("low", thirdIntention.item.deferredContent)
+    }
+
+    @Test
+    fun `blocked roots are skipped until unblocked`() {
+        val scheduler = AttentionScheduler(config.copy(maxPendingThoughts = 4, maxPendingActions = 4))
+        val blockedRoot = "blocked-root"
+        val freeRoot = "free-root"
+        scheduler.enqueueThought("blocked", Urgency.HIGH, rootInputId = blockedRoot)
+        scheduler.enqueueAction(ActionType.CONTACT_USER, "free", "free", Urgency.MEDIUM, rootInputId = freeRoot)
+
+        val first = scheduler.nextTask { rootInputId, _ -> rootInputId == blockedRoot }
+        val second = scheduler.nextTask { _, _ -> false }
+
+        val firstAction = assertIs<ai.neopsyke.agent.model.LoopTask.PerformAction>(first)
+        assertEquals("free", firstAction.item.payload)
+        val secondThought = assertIs<ai.neopsyke.agent.model.LoopTask.ProcessIntention>(second)
+        assertEquals("blocked", secondThought.item.deferredContent)
     }
 
     @Test
     fun `inputs are selected by priority then insertion order`() {
         val scheduler = AttentionScheduler(config)
-        scheduler.enqueueInput("medium-first")
-        scheduler.enqueueInput("high-second", InputPriority.HIGH)
+        val medium = testInput("medium-first")
+        val high = testInput("high-second", InputPriority.HIGH)
+        scheduler.enqueueInput(medium, testOpportunity(medium))
+        scheduler.enqueueInput(high, testOpportunity(high))
 
         val first = scheduler.nextTask()
         val second = scheduler.nextTask()
 
         val firstOpportunity = assertIs<ai.neopsyke.agent.model.LoopTask.AttendOpportunity>(first)
         val secondOpportunity = assertIs<ai.neopsyke.agent.model.LoopTask.AttendOpportunity>(second)
-        val firstInput = assertIs<ai.neopsyke.agent.model.OpportunityWorkItem.InputOpportunity>(firstOpportunity.item)
-        val secondInput = assertIs<ai.neopsyke.agent.model.OpportunityWorkItem.InputOpportunity>(secondOpportunity.item)
+        val firstInput = assertIs<ai.neopsyke.agent.model.OpportunityTrigger.Input>(firstOpportunity.item.trigger)
+        val secondInput = assertIs<ai.neopsyke.agent.model.OpportunityTrigger.Input>(secondOpportunity.item.trigger)
         assertEquals("high-second", firstInput.input.content)
         assertEquals(InputPriority.HIGH, firstInput.input.priority)
         assertEquals("medium-first", secondInput.input.content)
@@ -67,13 +147,16 @@ class AttentionSchedulerTest {
     fun `queue limits are enforced`() {
         val scheduler = AttentionScheduler(config)
 
-        assertTrue(scheduler.enqueueInput("1"))
-        assertTrue(scheduler.enqueueInput("2"))
-        assertFalse(scheduler.enqueueInput("3"))
+        val input1 = testInput("1")
+        val input2 = testInput("2")
+        val input3 = testInput("3")
+        assertTrue(scheduler.enqueueInput(input1, testOpportunity(input1)))
+        assertTrue(scheduler.enqueueInput(input2, testOpportunity(input2)))
+        assertFalse(scheduler.enqueueInput(input3, testOpportunity(input3)))
 
-        assertTrue(scheduler.enqueueThought("t1", Urgency.MEDIUM))
-        assertTrue(scheduler.enqueueThought("t2", Urgency.MEDIUM))
-        assertFalse(scheduler.enqueueThought("t3", Urgency.MEDIUM))
+        assertNotNull(scheduler.enqueueThought("t1", Urgency.MEDIUM))
+        assertNotNull(scheduler.enqueueThought("t2", Urgency.MEDIUM))
+        assertNull(scheduler.enqueueThought("t3", Urgency.MEDIUM))
 
         assertTrue(scheduler.enqueueAction(ActionType.CONTACT_USER, "a1", "s1", Urgency.MEDIUM))
         assertTrue(scheduler.enqueueAction(ActionType.CONTACT_USER, "a2", "s2", Urgency.MEDIUM))
@@ -83,21 +166,101 @@ class AttentionSchedulerTest {
     @Test
     fun `queue snapshot reports current queue counts`() {
         val scheduler = AttentionScheduler(config)
-        scheduler.enqueueInput("line-1")
+        val input = testInput("line-1")
+        scheduler.enqueueInput(input, testOpportunity(input))
+        scheduler.enqueueIntention(testIntention())
         scheduler.enqueueThought("line-2", Urgency.HIGH)
         scheduler.enqueueAction(ActionType.CONTACT_USER, "line-3", "summary", Urgency.MEDIUM)
 
         val snapshot = scheduler.queueSnapshot()
         assertEquals(1, snapshot.pendingInputCount)
-        assertEquals(1, snapshot.pendingThoughtCount)
+        assertEquals(2, snapshot.pendingIntentionCount)
+        assertEquals(1, snapshot.deferredIntentionCount)
         assertEquals(1, snapshot.pendingActionCount)
+    }
+
+    @Test
+    fun `intentions are processed before lower priority thoughts`() {
+        val scheduler = AttentionScheduler(config)
+        scheduler.enqueueThought("low-thought", Urgency.LOW)
+        scheduler.enqueueIntention(testIntention(summary = "prepare reply", urgency = Urgency.HIGH))
+
+        val first = scheduler.nextTask()
+
+        val intention = assertIs<ai.neopsyke.agent.model.LoopTask.ProcessIntention>(first)
+        assertEquals("prepare reply", intention.item.intention.summary)
+    }
+
+    @Test
+    fun `non defer intentions outrank equally urgent deferred continuations`() {
+        val scheduler = AttentionScheduler(config)
+        val rootInputId = "root-priority"
+        scheduler.enqueueIntention(
+            QueuedIntention(
+                intention = Intention(
+                    id = RootInputIds.next(),
+                    cognitiveThreadId = RootInputIds.next(),
+                    kind = IntentionKind.DEFER,
+                    summary = "continue thinking",
+                    createdAt = java.time.Instant.now(),
+                    rootStimulusId = rootInputId,
+                ),
+                urgency = Urgency.HIGH,
+                deferredContent = "continue thinking",
+            )
+        )
+        scheduler.enqueueIntention(
+            testIntention(
+                summary = "execute chosen move",
+                urgency = Urgency.HIGH,
+                rootInputId = rootInputId,
+            )
+        )
+
+        val first = assertIs<ai.neopsyke.agent.model.LoopTask.ProcessIntention>(scheduler.nextTask())
+
+        assertEquals(IntentionKind.PREPARE, first.item.intention.kind)
+        assertEquals("execute chosen move", first.item.intention.summary)
+    }
+
+    @Test
+    fun `deferred plan intentions count as pending plan follow up for root`() {
+        val scheduler = AttentionScheduler(config)
+        val rootInputId = "root-plan"
+        val sessionId = "default"
+        scheduler.enqueueIntention(
+            QueuedIntention(
+                intention = Intention(
+                    id = RootInputIds.next(),
+                    cognitiveThreadId = RootInputIds.next(),
+                    kind = IntentionKind.DEFER,
+                    summary = "step 1",
+                    createdAt = java.time.Instant.now(),
+                    conversationContext = ai.neopsyke.agent.model.ConversationContext.default().copy(sessionId = sessionId),
+                    rootStimulusId = rootInputId,
+                ),
+                urgency = Urgency.MEDIUM,
+                deferredContent = "Plan step 1/2: gather evidence",
+                deferredPlanContext = ai.neopsyke.agent.model.PlanContext(
+                    planId = "plan-1",
+                    planGoal = "goal",
+                    stepIndex = 0,
+                    totalSteps = 2,
+                    stepDescription = "gather evidence",
+                ),
+            )
+        )
+
+        assertTrue(scheduler.hasPendingPlanThoughtsForInput(rootInputId, sessionId))
     }
 
     @Test
     fun `queue state returns sorted thoughts and actions`() {
         val scheduler = AttentionScheduler(config)
-        scheduler.enqueueInput("medium-input", InputPriority.MEDIUM)
-        scheduler.enqueueInput("high-input", InputPriority.HIGH)
+        val medium = testInput("medium-input", InputPriority.MEDIUM)
+        val high = testInput("high-input", InputPriority.HIGH)
+        scheduler.enqueueInput(medium, testOpportunity(medium))
+        scheduler.enqueueInput(high, testOpportunity(high))
         scheduler.enqueueThought("low", Urgency.LOW)
         scheduler.enqueueThought("high", Urgency.HIGH)
         scheduler.enqueueAction(ActionType.CONTACT_USER, "low-action", "s1", Urgency.LOW)

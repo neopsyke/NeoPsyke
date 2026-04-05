@@ -4,6 +4,9 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>NeoPsyke Conversations</title>
+  <link rel="icon" type="image/png" sizes="48x48" href="/__dashboard/assets/favicon48.png" />
+  <link rel="icon" type="image/png" sizes="96x96" href="/__dashboard/assets/favicon96.png" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/__dashboard/assets/favicon180.png" />
   <style>
     :root {
       --bg: #0e171c;
@@ -157,6 +160,11 @@
     .msg.assistant {
       background: rgba(43, 68, 48, 0.5);
       border-color: rgba(90, 164, 104, 0.45);
+    }
+    .msg.assistant.approval {
+      background: rgba(94, 73, 24, 0.52);
+      border-color: rgba(212, 168, 67, 0.62);
+      box-shadow: inset 0 0 0 1px rgba(237, 203, 116, 0.28);
     }
     .msg.pending {
       box-shadow: inset 0 0 0 1px rgba(212, 168, 67, 0.24);
@@ -638,6 +646,8 @@
           : "";
         const pendingLabel = m._failed ? "failed to send" : (m._pending ? "sending" : role);
         const msgClasses = ["msg", role];
+        const isApprovalMessage = role === "assistant" && typeof m.source === "string" && m.source.indexOf("approval-") === 0;
+        if (isApprovalMessage) msgClasses.push("approval");
         if (m._pending) msgClasses.push("pending");
         if (m._failed) msgClasses.push("failed");
         return (

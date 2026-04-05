@@ -1,5 +1,6 @@
 package ai.neopsyke.agent
 
+import ai.neopsyke.agent.model.IntentionKind
 import kotlin.test.Test
 import kotlin.test.assertTrue
 
@@ -29,8 +30,9 @@ class DeliberationProgressMonitorTest {
 
         monitor.startStep()
         monitor.onPlannerDecision(
-           ai.neopsyke.agent.model.EgoDecision.ProposeAction(
+           ai.neopsyke.agent.model.EgoDecision.FormIntention(
                 urgency = Urgency.HIGH,
+                intentionKind = IntentionKind.OBSERVE,
                 actionType = ActionType.WEB_SEARCH,
                 payload = "query",
                 summary = "search"
@@ -86,8 +88,9 @@ class DeliberationProgressMonitorTest {
 
         monitor.startStep()
         monitor.onPlannerDecision(
-           ai.neopsyke.agent.model.EgoDecision.ProposeAction(
+           ai.neopsyke.agent.model.EgoDecision.FormIntention(
                 urgency = Urgency.MEDIUM,
+                intentionKind = IntentionKind.OBSERVE,
                 actionType = ActionType.WEB_SEARCH,
                 payload = "query",
                 summary = "search"

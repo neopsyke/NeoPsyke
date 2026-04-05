@@ -21,10 +21,12 @@ data class ConnectorHealthStatus(
 class McpConnectorHostClient(
     private val connectorId: String,
     command: List<String>,
+    environment: Map<String, String> = emptyMap(),
     scope: CoroutineScope? = null,
 ) : AutoCloseable {
     private val clientHolder = LazyMcpClientHolder(
         command = command,
+        environment = environment,
         serverLabel = "connector-$connectorId",
         scope = scope,
     )

@@ -5,9 +5,16 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.runBlocking
 import ai.neopsyke.agent.cortex.sensory.CognitiveCueMetadata
 import ai.neopsyke.agent.cortex.sensory.CognitiveSignal
+import ai.neopsyke.agent.cortex.sensory.ActionFeedbackCue
+import ai.neopsyke.agent.cortex.sensory.PerceptualAppraiser
 import ai.neopsyke.agent.cortex.sensory.RuntimeControlSignal
+import ai.neopsyke.agent.model.ActionExecutionStatus
+import ai.neopsyke.agent.model.ActionOrigin
+import ai.neopsyke.agent.model.ActionType
 import ai.neopsyke.agent.model.ConversationContext
 import ai.neopsyke.agent.model.Interlocutor
+import ai.neopsyke.agent.model.OriginSource
+import ai.neopsyke.agent.model.PerceptFamily
 import ai.neopsyke.agent.model.RootInputIds
 import ai.neopsyke.agent.model.StimulusEnvelope
 import ai.neopsyke.agent.model.StimulusFamily
@@ -17,6 +24,7 @@ import java.time.Instant
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 class SensoryCortexTest {
@@ -67,6 +75,33 @@ class SensoryCortexTest {
         assertEquals("x".repeat(12), stimulus.content)
         assertEquals(InputPriority.LOW.name, stimulus.metadata["priority"])
         assertEquals("webhook", stimulus.source)
+    }
+
+    @Test
+    fun `sensory cortex appraises percepts for cognitive signals`() = runBlocking {
+        val source = SignalSource {
+            CognitiveSignal.StimulusReceived(
+                StimulusEnvelope(
+                    id = RootInputIds.next(),
+                    family = StimulusFamily.LINGUISTIC,
+                    source = "chat:web",
+                    content = "Need a summary",
+                    receivedAt = Instant.now(),
+                    trustLevel = StimulusTrustLevel.DEFAULT,
+                )
+            )
+        }
+        val cortex = SensoryCortex(
+            config = AgentConfig(),
+            source = source
+        )
+
+        val signal = assertIs<CognitiveSignal.StimulusReceived>(cortex.nextSignal())
+        val percept = assertNotNull(signal.percept)
+
+        assertEquals(PerceptFamily.REQUEST, percept.family)
+        assertEquals(signal.stimulus.id, percept.rootStimulusId)
+        assertEquals(signal.stimulus.content, percept.summary)
     }
 
     @Test
@@ -181,6 +216,134 @@ class SensoryCortexTest {
         } finally {
             source.close()
         }
+    }
+
+    @Test
+    fun `perceptual appraiser maps linguistic stimulus into request percept and preserves provenance`() {
+        val stimulus = StimulusEnvelope(
+            id = RootInputIds.next(),
+            family = StimulusFamily.LINGUISTIC,
+            source = "chat:web",
+            content = "Summarize this",
+            receivedAt = Instant.now(),
+            trustLevel = StimulusTrustLevel.DEFAULT,
+        )
+
+        val percept = PerceptualAppraiser().appraise(stimulus)
+
+        assertEquals(PerceptFamily.REQUEST, percept.family)
+        assertEquals(stimulus.id, percept.rootStimulusId)
+        assertEquals(stimulus.source, percept.source)
+        assertEquals(stimulus.provenance, percept.provenance)
+        assertEquals(stimulus.content, percept.summary)
+    }
+
+    @Test
+    fun `perceptual appraiser distinguishes id cues from goal-runtime cues`() {
+        val idCue = StimulusEnvelope(
+            id = RootInputIds.next(),
+            family = StimulusFamily.CUE,
+            source = "id",
+            content = CognitiveCueMetadata.CUE_TYPE_ID_IMPULSE_READY,
+            receivedAt = Instant.now(),
+            trustLevel = StimulusTrustLevel.TRUSTED_INTERNAL,
+            metadata = mapOf(CognitiveCueMetadata.METADATA_CUE_TYPE to CognitiveCueMetadata.CUE_TYPE_ID_IMPULSE_READY),
+        )
+        val goalCue = GoalRuntimeCue(
+            goalId = "goal-1",
+            stepId = "step-1",
+            reason = "resume",
+        ).toStimulus()
+
+        val appraiser = PerceptualAppraiser()
+        val idPercept = appraiser.appraise(idCue)
+        val goalPercept = appraiser.appraise(goalCue)
+
+        assertEquals(PerceptFamily.DRIVE_ACTIVATION, idPercept.family)
+        assertEquals(PerceptFamily.STATE_CHANGE, goalPercept.family)
+        assertEquals(goalCue.id, goalPercept.rootStimulusId)
+    }
+
+    @Test
+    fun `sensory cortex returns runtime control signals unchanged`() = runBlocking {
+        val controlSignal = RuntimeControlSignal.ConfigReloaded("planner.maxLoopStepsPerInput")
+        val cortex = SensoryCortex(
+            config = AgentConfig(),
+            source = SignalSource { controlSignal }
+        )
+
+        val signal = cortex.nextSignal()
+
+        assertEquals(controlSignal, signal)
+    }
+
+    @Test
+    fun `action feedback cue round-trips through feedback stimulus metadata`() {
+        val conversationContext = ConversationContext(
+            sessionId = "session-feedback",
+            interlocutor = Interlocutor.named("operator")
+        )
+        val cue = ActionFeedbackCue(
+            rootInputId = "root-123",
+            actionType = ActionType.WEB_SEARCH,
+            actionSummary = "search pricing",
+            feedbackContent = "web_search result: pricing found",
+            statusSummary = "pricing found",
+            plannerSignal = "web_search result: pricing found",
+            executionStatus = ActionExecutionStatus.SUCCESS,
+            conversationContext = conversationContext,
+            observedEvidence = true,
+            actionErrorCategory = "none",
+            sourceActionId = 42L,
+            rootInputReceivedAtMs = 1234L,
+            attempts = 2,
+            urgency = "high",
+            requiresFollowUpThought = true,
+            origin = ActionOrigin(
+                source = OriginSource.ID,
+                needId = "be-useful",
+                rootImpulseId = "imp-1",
+            ),
+        )
+
+        val parsed = ActionFeedbackCue.fromStimulus(cue.toStimulus())
+
+        assertNotNull(parsed)
+        assertEquals(cue.rootInputId, parsed.rootInputId)
+        assertEquals(cue.actionType, parsed.actionType)
+        assertEquals(cue.feedbackContent, parsed.feedbackContent)
+        assertEquals(cue.executionStatus, parsed.executionStatus)
+        assertEquals(cue.sourceActionId, parsed.sourceActionId)
+        assertEquals(cue.attempts, parsed.attempts)
+        assertEquals(cue.urgency, parsed.urgency)
+        assertEquals(cue.requiresFollowUpThought, parsed.requiresFollowUpThought)
+        assertEquals(cue.origin, parsed.origin)
+    }
+
+    @Test
+    fun `synthetic action feedback stays pending until consumed`() = runBlocking {
+        val cortex = SensoryCortex(
+            config = AgentConfig(),
+            source = SignalSource { RuntimeControlSignal.ExitRequested("test") }
+        )
+        val offered = cortex.offerActionFeedback(
+            ActionFeedbackCue(
+                rootInputId = "root-123",
+                actionType = ActionType.WEB_SEARCH,
+                actionSummary = "search pricing",
+                feedbackContent = "web_search result: pricing found",
+                statusSummary = "pricing found",
+                plannerSignal = "web_search result: pricing found",
+                executionStatus = ActionExecutionStatus.SUCCESS,
+                conversationContext = ConversationContext.default(),
+            )
+        )
+
+        assertTrue(offered)
+        assertTrue(cortex.hasPendingSyntheticSignals())
+        val signal = cortex.nextSignal()
+        assertIs<CognitiveSignal.StimulusReceived>(signal)
+        assertTrue(!cortex.hasPendingSyntheticSignals())
     }
 
     @Test

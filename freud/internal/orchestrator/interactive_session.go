@@ -38,6 +38,16 @@ type InteractiveSessionTestResult struct {
 	ExitCode  int
 }
 
+func resolveInteractiveResponseWait(timeout int, responseWait int) int {
+	if responseWait > 0 {
+		return responseWait
+	}
+	if timeout > 0 {
+		return timeout
+	}
+	return 60
+}
+
 // InteractiveSessionTest runs the interactive mode session recording E2E test.
 // Replaces test-interactive-session-recording.sh.
 func InteractiveSessionTest(opts InteractiveSessionTestOpts) (*InteractiveSessionTestResult, error) {
@@ -73,9 +83,7 @@ func InteractiveSessionTest(opts InteractiveSessionTestOpts) (*InteractiveSessio
 		startupWait = 30
 	}
 	responseWait := opts.ResponseWaitMax
-	if responseWait <= 0 {
-		responseWait = 30
-	}
+	responseWait = resolveInteractiveResponseWait(timeout, responseWait)
 	inputText := opts.InputText
 	if inputText == "" {
 		inputText = "What is 2 + 2?"

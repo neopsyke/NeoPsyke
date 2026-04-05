@@ -2,6 +2,7 @@ package ai.neopsyke.integrations.telegram
 
 import com.fasterxml.jackson.module.kotlin.readValue
 import mu.KotlinLogging
+import ai.neopsyke.admin.approvals.ApprovalRuntime
 import ai.neopsyke.agent.config.DefaultInterlocutorResolver
 import ai.neopsyke.agent.config.InterlocutorResolver
 import ai.neopsyke.agent.config.TelegramChannelConfig
@@ -19,6 +20,7 @@ data class TelegramWebhookResult(
 class TelegramWebhookBridge(
     private val store: DashboardStateStore,
     private val sensoryInput: AsyncSignalSource,
+    approvalRuntime: ApprovalRuntime? = null,
     private val config: TelegramChannelConfig,
     private val webhookSecret: String?,
     private val interlocutorResolver: InterlocutorResolver = DefaultInterlocutorResolver(),
@@ -26,9 +28,14 @@ class TelegramWebhookBridge(
     private val processor = TelegramUpdateProcessor(
         store = store,
         sensoryInput = sensoryInput,
+        approvalRuntime = approvalRuntime,
         config = config,
         interlocutorResolver = interlocutorResolver,
     )
+
+    fun setApprovalRuntime(runtime: ApprovalRuntime?) {
+        processor.setApprovalRuntime(runtime)
+    }
 
     fun webhookPath(): String = config.webhookPath
 

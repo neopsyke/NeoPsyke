@@ -4,6 +4,9 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>NeoPsyke Observability</title>
+  <link rel="icon" type="image/png" sizes="48x48" href="/__dashboard/assets/favicon48.png" />
+  <link rel="icon" type="image/png" sizes="96x96" href="/__dashboard/assets/favicon96.png" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/__dashboard/assets/favicon180.png" />
   <style>
     :root {
       --bg: #0f1a1f;
@@ -183,6 +186,19 @@
       width: var(--left-width);
       min-width: 260px;
       padding-right: 8px;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .left-col-fixed {
+      flex: 0 0 auto;
+      overflow: hidden;
+    }
+    .left-col-scroll {
+      flex: 1 1 0;
+      min-height: 0;
+      overflow-y: auto;
+      overflow-x: hidden;
     }
     .right-col {
       flex: 1;
@@ -232,6 +248,33 @@
     }
     .panel-head h3 {
       margin: 0;
+    }
+
+    /* Collapsible panels */
+    .panel.collapsible > .panel-head {
+      cursor: pointer;
+      user-select: none;
+      margin-bottom: 8px;
+    }
+    .panel.collapsible.collapsed > .panel-head {
+      margin-bottom: 0;
+    }
+    .panel-head .collapse-arrow {
+      display: inline-block;
+      font-size: 10px;
+      color: var(--muted);
+      transition: transform 0.15s;
+      margin-right: 4px;
+    }
+    .panel.collapsed .collapse-arrow {
+      transform: rotate(-90deg);
+    }
+    .panel.collapsible > .panel-body {
+      overflow: hidden;
+      transition: none;
+    }
+    .panel.collapsible.collapsed > .panel-body {
+      display: none;
     }
     .ghost-btn {
       border: 1px solid var(--line);
@@ -744,7 +787,7 @@
 </head>
 <body>
   <header>
-    <div style="display:flex;align-items:center;gap:12px;">
+    <div style="display:flex;align-items:center;gap:10px;">
       <strong>NeoPsyke Realtime Dashboard</strong>
       <span class="header-pill" id="hdr-loop-status">idle</span>
       <span class="header-pill" id="hdr-loop-step" style="display:none"></span>
@@ -761,26 +804,36 @@
 
   <div class="layout" id="layout">
     <section class="left-col" id="left-col">
-      <div class="panel" id="id-panel">
-        <div class="panel-head">
-          <h3>Id Drives</h3>
-          <span class="id-meta" id="id-meta"></span>
+      <div class="left-col-fixed">
+        <div class="panel collapsible" id="id-panel">
+          <div class="panel-head" onclick="toggleCollapse('id-panel')">
+            <h3><span class="collapse-arrow">&#9660;</span> Id Drives</h3>
+            <span class="id-meta" id="id-meta"></span>
+          </div>
+          <div class="panel-body">
+            <div id="id-impulse-bar" class="id-impulse-bar" style="display:none"></div>
+            <div id="id-needs"></div>
+            <div id="id-empty" class="id-empty">No Id pulse data yet</div>
+          </div>
         </div>
-        <div id="id-impulse-bar" class="id-impulse-bar" style="display:none"></div>
-        <div id="id-needs"></div>
-        <div id="id-empty" class="id-empty">No Id pulse data yet</div>
-      </div>
-      <div class="panel">
-        <h3>Queues</h3>
-        <div class="grid3">
-          <div class="card"><div class="pill" title="Pending inputs">Inputs <span class="q-count" id="q-inputs-count">0</span></div><div id="q-inputs"></div></div>
-          <div class="card"><div class="pill" title="Pending thoughts">Thoughts <span class="q-count" id="q-thoughts-count">0</span></div><div id="q-thoughts"></div></div>
-          <div class="card"><div class="pill" title="Pending actions">Actions <span class="q-count" id="q-actions-count">0</span></div><div id="q-actions"></div></div>
+        <div class="panel collapsible" id="queues-panel">
+          <div class="panel-head" onclick="toggleCollapse('queues-panel')">
+            <h3><span class="collapse-arrow">&#9660;</span> Queues</h3>
+          </div>
+          <div class="panel-body">
+            <div class="grid3">
+              <div class="card"><div class="pill" title="Pending inputs">Inputs <span class="q-count" id="q-inputs-count">0</span></div><div id="q-inputs"></div></div>
+              <div class="card"><div class="pill" title="Pending thoughts">Thoughts <span class="q-count" id="q-thoughts-count">0</span></div><div id="q-thoughts"></div></div>
+              <div class="card"><div class="pill" title="Pending actions">Actions <span class="q-count" id="q-actions-count">0</span></div><div id="q-actions"></div></div>
+            </div>
+          </div>
         </div>
       </div>
-      <div class="panel">
-        <h3>Thought Chain / Timeline</h3>
-        <div class="list" id="timeline"></div>
+      <div class="left-col-scroll">
+        <div class="panel">
+          <h3>Thought Chain / Timeline</h3>
+          <div class="list" id="timeline"></div>
+        </div>
       </div>
     </section>
 
@@ -845,6 +898,11 @@
   <div class="status-bar" id="status-bar"></div>
 
   <script>
+    function toggleCollapse(panelId) {
+      const panel = document.getElementById(panelId);
+      if (panel) panel.classList.toggle("collapsed");
+    }
+
     const REQUEST_TIMEOUT_MS = 8000;
 
     const state = {

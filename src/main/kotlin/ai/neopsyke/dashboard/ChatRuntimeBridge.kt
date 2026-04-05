@@ -1,7 +1,10 @@
 package ai.neopsyke.dashboard
 
+import ai.neopsyke.admin.approvals.ApprovalRuntime
+import ai.neopsyke.admin.approvals.OwnerMessageEnvelope
 import ai.neopsyke.agent.model.ConversationContext
 import ai.neopsyke.agent.model.ConversationSecurityContexts
+import ai.neopsyke.agent.model.PolicyScope
 import ai.neopsyke.agent.config.DefaultInterlocutorResolver
 import ai.neopsyke.agent.model.InputPriority
 import ai.neopsyke.agent.config.InterlocutorResolver
@@ -17,10 +20,18 @@ data class ChatSubmitResult(
 class ChatRuntimeBridge(
     private val store: DashboardStateStore,
     private val sensoryInput: AsyncSignalSource,
+    approvalRuntime: ApprovalRuntime? = null,
+    private val policyScope: PolicyScope = PolicyScope.DEFAULT,
     private val interlocutorResolver: InterlocutorResolver = DefaultInterlocutorResolver(),
 ) {
+    @Volatile private var approvalRuntime: ApprovalRuntime? = approvalRuntime
+
     init {
         store.ensureChatSession()
+    }
+
+    fun setApprovalRuntime(runtime: ApprovalRuntime?) {
+        approvalRuntime = runtime
     }
 
     fun createSession(title: String? = null): ChatSessionSummary =
@@ -70,28 +81,53 @@ class ChatRuntimeBridge(
             security = ConversationSecurityContexts.ownerDirect(
                 provider = "webapp",
                 channelId = message.sessionId,
+                policyScope = policyScope,
             ),
         )
-        val enqueued = sensoryInput.submitInput(
-            content = message.content,
-            source = source,
-            priority = InputPriority.HIGH,
-            conversationContext = conversationContext
-        )
-        return if (enqueued) {
+        val ingressResult = approvalRuntime?.routeOwnerMessage(
+            OwnerMessageEnvelope(
+                content = message.content,
+                source = source,
+                priority = InputPriority.HIGH,
+                conversationContext = conversationContext,
+                receivedAtMs = message.createdAtMs,
+                eventId = "dashboard-chat:${message.id}",
+            )
+        ) ?: if (
+            sensoryInput.submitInput(
+                content = message.content,
+                source = source,
+                priority = InputPriority.HIGH,
+                conversationContext = conversationContext
+            )
+        ) {
+            ai.neopsyke.admin.approvals.OwnerIngressResult.Forwarded(true, "Message recorded and enqueued.")
+        } else {
+            ai.neopsyke.admin.approvals.OwnerIngressResult.Forwarded(false, "Message recorded, but the input queue is full.")
+        }
+        return when (ingressResult) {
+            is ai.neopsyke.admin.approvals.OwnerIngressResult.Forwarded -> if (ingressResult.enqueued) {
             ChatSubmitResult(
                 recorded = true,
                 enqueued = true,
-                detail = "Message recorded and enqueued.",
+                detail = ingressResult.detail,
                 message = message,
             )
         } else {
             ChatSubmitResult(
                 recorded = true,
                 enqueued = false,
-                detail = "Message recorded, but the input queue is full.",
+                detail = ingressResult.detail,
                 message = message,
             )
+        }
+            is ai.neopsyke.admin.approvals.OwnerIngressResult.Consumed ->
+                ChatSubmitResult(
+                    recorded = true,
+                    enqueued = false,
+                    detail = ingressResult.detail,
+                    message = message,
+                )
         }
     }
 

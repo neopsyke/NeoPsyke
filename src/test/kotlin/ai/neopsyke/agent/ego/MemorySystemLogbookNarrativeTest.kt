@@ -1,5 +1,6 @@
 package ai.neopsyke.agent.ego
 
+import ai.neopsyke.agent.deferredTrigger
 import ai.neopsyke.agent.config.AgentConfig
 import ai.neopsyke.agent.config.MemoryConfig
 import ai.neopsyke.agent.model.ActionOrigin
@@ -281,7 +282,7 @@ class MemorySystemLogbookNarrativeTest {
         )
 
         val recalled = coordinator.recall(
-            trigger = EgoTrigger.PendingThoughtInput(
+            trigger = deferredTrigger(
                 PendingThought(
                     id = 91,
                     urgency = Urgency.MEDIUM,

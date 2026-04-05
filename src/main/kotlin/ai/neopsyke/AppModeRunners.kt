@@ -1,6 +1,9 @@
 package ai.neopsyke
 
 import mu.KotlinLogging
+import ai.neopsyke.admin.approvals.ApprovalRuntime
+import ai.neopsyke.admin.approvals.DefaultApprovalInterpreter
+import ai.neopsyke.admin.approvals.SqliteApprovalStore
 import ai.neopsyke.agent.config.AgentConfig
 import ai.neopsyke.agent.config.TelegramIngressMode
 import ai.neopsyke.agent.ego.Ego
@@ -669,7 +672,8 @@ internal object AppModeRunners {
         val chatBridge = ChatRuntimeBridge(
             store = dashboardStore,
             sensoryInput = sensoryInput,
-            interlocutorResolver = interlocutorResolver
+            policyScope = config.policyScope,
+            interlocutorResolver = interlocutorResolver,
         )
         val telegramUpdateProcessor = if (telegramConfig.enabled) {
             TelegramUpdateProcessor(
@@ -1091,6 +1095,18 @@ internal object AppModeRunners {
                                         ),
                                         hooks = listOf(rawResponseHook)
                                     ).use { longTermMemoryClient ->
+                                        val approvalInterpreterClient = InstrumentedChatModelClient(
+                                            delegate = TokenBudgetGuardedChatClient(
+                                                delegate = maybeCacheWrap(createChatClient(
+                                                    endpoint = llm.approvalInterpreter,
+                                                    callObserver = callObserverForProvider(llm.approvalInterpreter.providerLabel)
+                                                )),
+                                                budgetGate = tokenBudgetGate,
+                                                provider = llm.approvalInterpreter.providerLabel,
+                                                role = LlmRoleLabels.APPROVAL_INTERPRETER
+                                            ),
+                                            hooks = listOf(rawResponseHook)
+                                        )
                                         logger.info {
                                             "Cognitive role routing: " +
                                                 "planner=${llm.planner.providerLabel}/${llm.planner.model}, " +
@@ -1100,6 +1116,7 @@ internal object AppModeRunners {
                                                 "meta_reasoner=${llm.metaReasoner.providerLabel}/${llm.metaReasoner.model}, " +
                                                 "meta_reasoner_fallback=${metaReasonerFallbackEndpoint?.let { "${it.providerLabel}/${it.model}" } ?: "disabled"}, " +
                                                 "memory_advisor=${llm.memoryAdvisor.providerLabel}/${llm.memoryAdvisor.model}, " +
+                                                "approval_interpreter=${llm.approvalInterpreter.providerLabel}/${llm.approvalInterpreter.model}, " +
                                                 "web_search=${llm.webSearch.providerLabel}/${llm.webSearch.model}"
                                         }
                                         try {
@@ -1142,6 +1159,9 @@ internal object AppModeRunners {
                                                         runtime.engine
                                                     }
                                                     val webSearchActionHandler = WebSearchActionHandler(activeWebSearchEngine)
+                                                    if (cliOptions?.clearGoals == true) {
+                                                        executeGoalsClear(config, instrumentation)
+                                                    }
                                                     val goalManager = if (config.goals.enabled) {
                                                         ai.neopsyke.agent.goal.GoalManager(
                                                             config = config.goals,
@@ -1272,6 +1292,42 @@ internal object AppModeRunners {
                                                         instrumentation.emit(AgentEvents.warning(warning))
                                                     }
                                                     assembly.use { assembled ->
+                                                        val approvalRuntime = createApprovalRuntime(
+                                                            config = config,
+                                                            actionControlService = assembled.actionControlService,
+                                                            dashboardStore = dashboardStore,
+                                                            telegramConfig = telegramConfig,
+                                                            telegramSink = telegramSink,
+                                                            sessionRecordingManager = sessionRecordingManager,
+                                                            forwardNormalInput = { content, source, priority, conversationContext ->
+                                                                sensoryInput.submitInput(
+                                                                    content = content,
+                                                                    source = source,
+                                                                    priority = priority,
+                                                                    conversationContext = conversationContext,
+                                                                )
+                                                            },
+                                                            onApprovalExecuted = assembled.ego::processExternalApprovalExecuted,
+                                                            onApprovalDenied = assembled.ego::processExternalApprovalDenied,
+                                                            approvalInterpreterClient = approvalInterpreterClient,
+                                                        )
+                                                        approvalRuntime?.let { runtime ->
+                                                            assembled.ego.setApprovalStagingHook(runtime)
+                                                            chatBridge.setApprovalRuntime(runtime)
+                                                            telegramUpdateProcessor?.setApprovalRuntime(runtime)
+                                                            telegramWebhookBridge?.setApprovalRuntime(runtime)
+                                                            dashboardServer?.actionControlMutationHandler =
+                                                                runtime::handleLegacyActionControlMutation
+                                                            agentScope.launch {
+                                                                runtime.sendTelegramStartupAckIfEnabled()
+                                                            }
+                                                            agentScope.launch {
+                                                                while (true) {
+                                                                    kotlinx.coroutines.delay(1_000L)
+                                                                    runtime.expirePendingRequests()
+                                                                }
+                                                            }
+                                                        }
                                                         val egoDispatcher = Executors.newSingleThreadExecutor { Thread(it, "neopsyke-ego") }.asCoroutineDispatcher()
                                                         try { runBlocking(egoDispatcher) {
                                                         val registry = assembled.actionRegistry
@@ -1351,11 +1407,13 @@ internal object AppModeRunners {
                                                         }
                                                         } } finally {
                                                             goalManager?.stop()
+                                                            approvalRuntime?.close()
                                                             egoDispatcher.close()
                                                         }
                                                     }
                                             }
                                         } finally {
+                                            approvalInterpreterClient.close()
                                             superegoEscalationClient?.close()
                                             metaReasonerFallbackClient?.close()
                                         }
@@ -1670,6 +1728,9 @@ internal object AppModeRunners {
                                                     runtime.engine
                                                 }
                                                 val webSearchActionHandler = WebSearchActionHandler(activeWebSearchEngine2)
+                                                if (cliOptions.clearGoals) {
+                                                    executeGoalsClear(config, instrumentation)
+                                                }
                                                 val goalManager = if (config.goals.enabled) {
                                                     ai.neopsyke.agent.goal.GoalManager(
                                                         config = config.goals,
@@ -2407,6 +2468,45 @@ internal object AppModeRunners {
         }
     }
 
+    private fun createApprovalRuntime(
+        config: AgentConfig,
+        actionControlService: ai.neopsyke.agent.cortex.motor.actions.control.ActionControlService,
+        dashboardStore: DashboardStateStore,
+        telegramConfig: ai.neopsyke.agent.config.TelegramChannelConfig,
+        telegramSink: ai.neopsyke.agent.cortex.motor.actions.TelegramMessageSink?,
+        sessionRecordingManager: SessionRecordingManager? = null,
+        forwardNormalInput: (String, String, ai.neopsyke.agent.model.InputPriority, ConversationContext) -> Boolean,
+        onApprovalExecuted: (ai.neopsyke.agent.cortex.motor.actions.control.ActionControlDecisionResult.Executed) -> Unit,
+        onApprovalDenied: (ai.neopsyke.agent.cortex.motor.actions.control.ActionControlDecisionResult.Cancelled) -> Unit,
+        approvalInterpreterClient: ChatModelClient? = null,
+    ): ApprovalRuntime? {
+        if (!config.approvals.enabled || !config.actionControl.enabled) {
+            return null
+        }
+        val store = try {
+            SqliteApprovalStore(config.actionControl.dbPath)
+        } catch (ex: Exception) {
+            logger.warn(ex) { "Approval store initialization failed; approval router disabled." }
+            return null
+        }
+        return ApprovalRuntime(
+            config = config,
+            store = store,
+            actionControlService = actionControlService,
+            dashboardStore = dashboardStore,
+            telegramConfig = telegramConfig,
+            telegramSink = telegramSink,
+            interpreter = DefaultApprovalInterpreter(
+                config = config,
+                llmClient = approvalInterpreterClient,
+            ),
+            forwardNormalInput = forwardNormalInput,
+            onApprovalExecuted = onApprovalExecuted,
+            onApprovalDenied = onApprovalDenied,
+            sessionRecordingManager = sessionRecordingManager,
+        )
+    }
+
     private fun createActionControlAutonomousWorker(
         scope: CoroutineScope,
         ego: Ego,
@@ -2510,6 +2610,38 @@ internal object AppModeRunners {
             } else {
                 output.info("Episodic logbook is not enabled; skipping --clear-memory-episodic.")
             }
+        }
+    }
+
+    private fun executeGoalsClear(
+        config: AgentConfig,
+        instrumentation: ai.neopsyke.instrumentation.AgentInstrumentation,
+    ) {
+        val goalsRoot = config.goals.workspaceRoot
+        if (!java.nio.file.Files.isDirectory(goalsRoot)) {
+            output.info("Goals workspace does not exist; nothing to clear.")
+            return
+        }
+        try {
+            var deleted = 0
+            java.nio.file.Files.list(goalsRoot).use { stream ->
+                stream.filter { java.nio.file.Files.isDirectory(it) }.forEach { goalDir ->
+                    java.nio.file.Files.walk(goalDir)
+                        .sorted(Comparator.reverseOrder())
+                        .forEach { java.nio.file.Files.deleteIfExists(it) }
+                    deleted++
+                }
+            }
+            output.info("Goals cleared ($deleted goal(s) removed).")
+            logger.info { "CLI --clear-goals: $deleted goal workspace(s) removed from $goalsRoot." }
+            instrumentation.emit(
+                ai.neopsyke.instrumentation.AgentEvents.warning(
+                    "Goals cleared via CLI: $deleted goal(s) removed."
+                )
+            )
+        } catch (ex: Exception) {
+            output.error("Failed to clear goals: ${ex.message}")
+            logger.warn(ex) { "CLI --clear-goals: failed to clear goals workspace at $goalsRoot." }
         }
     }
 

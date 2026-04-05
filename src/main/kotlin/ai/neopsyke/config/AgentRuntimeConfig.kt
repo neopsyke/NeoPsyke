@@ -1,5 +1,6 @@
 package ai.neopsyke.config
 
+import com.fasterxml.jackson.annotation.JsonProperty
 import com.fasterxml.jackson.databind.DeserializationFeature
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.databind.PropertyNamingStrategies
@@ -8,6 +9,7 @@ import com.fasterxml.jackson.module.kotlin.readValue
 import com.fasterxml.jackson.module.kotlin.registerKotlinModule
 import ai.neopsyke.agent.config.AgentConfig
 import ai.neopsyke.agent.config.ActionControlConfig
+import ai.neopsyke.agent.config.ApprovalRuntimeConfig
 import ai.neopsyke.agent.config.BuiltinToolsConfig
 import ai.neopsyke.agent.config.ConnectorRuntimeConfig
 import ai.neopsyke.agent.config.LogbookConfig
@@ -51,12 +53,14 @@ private data class AgentRuntimeYamlEval(
 )
 
 private data class AgentRuntimeYamlAgent(
+    val policyScopeId: String? = null,
     val planner: AgentRuntimeYamlPlanner? = null,
     val superego: AgentRuntimeYamlSuperego? = null,
     val memory: AgentRuntimeYamlMemory? = null,
     val metaReasoner: AgentRuntimeYamlMetaReasoner? = null,
     val logbook: AgentRuntimeYamlLogbook? = null,
     val actionControl: AgentRuntimeYamlActionControl? = null,
+    val approvals: AgentRuntimeYamlApprovals? = null,
     val connectors: AgentRuntimeYamlConnectors? = null,
     val builtinTools: AgentRuntimeYamlBuiltinTools? = null,
     val nativeIntegrations: AgentRuntimeYamlNativeIntegrations? = null,
@@ -194,6 +198,22 @@ private data class AgentRuntimeYamlActionControl(
     val controlPlanePerTypePerRootInput: Int? = null,
 )
 
+private data class AgentRuntimeYamlApprovals(
+    val enabled: Boolean? = null,
+    @param:JsonProperty("ttl_ms")
+    val ttlMs: Long? = null,
+    @param:JsonProperty("clarification_turns")
+    val clarificationTurns: Int? = null,
+    @param:JsonProperty("default_channel")
+    val defaultChannel: String? = null,
+    @param:JsonProperty("channel_priority")
+    val channelPriority: List<String>? = null,
+    @param:JsonProperty("dashboard_requires_live_subscriber")
+    val dashboardRequiresLiveSubscriber: Boolean? = null,
+    @param:JsonProperty("telegram_startup_ack_enabled")
+    val telegramStartupAckEnabled: Boolean? = null,
+)
+
 private data class AgentRuntimeYamlConnectors(
     val enabled: Boolean? = null,
     val curatedCatalogPath: String? = null,
@@ -316,6 +336,7 @@ object AgentRuntimeSettingsLoader {
         val metaReasonerYaml = agentYaml.metaReasoner!!
         val logbookYaml = agentYaml.logbook!!
         val actionControlYaml = agentYaml.actionControl!!
+        val approvalsYaml = agentYaml.approvals ?: AgentRuntimeYamlApprovals()
         val connectorsYaml = agentYaml.connectors!!
         val builtinToolsYaml = agentYaml.builtinTools!!
         val websiteFetchYaml = builtinToolsYaml.websiteFetch!!
@@ -326,7 +347,16 @@ object AgentRuntimeSettingsLoader {
         val goalsYaml = agentYaml.goals!!
         val runtimeYaml = agentYaml.runtime!!
 
+        val policyScope = ai.neopsyke.agent.model.PolicyScope.fromId(
+            readNonBlank(
+                env["NEOPSYKE_POLICY_SCOPE_ID"],
+                agentYaml.policyScopeId,
+                defaults.policyScope.id,
+            ),
+        )
+
         val agentConfig = AgentConfig(
+            policyScope = policyScope,
             planner = PlannerConfig(
                 maxLoopStepsPerInput = readPositiveInt(
                     env["EGO_MAX_LOOP_STEPS"],
@@ -856,6 +886,50 @@ object AgentRuntimeSettingsLoader {
                     defaults.actionControl.controlPlanePerTypePerRootInput
                 ),
             ),
+            approvals = ApprovalRuntimeConfig(
+                enabled = readBoolean(
+                    env["NEOPSYKE_APPROVALS_ENABLED"],
+                    approvalsYaml.enabled,
+                    defaults.approvals.enabled
+                ),
+                ttlMs = readPositiveLong(
+                    env["NEOPSYKE_APPROVALS_TTL_MS"],
+                    approvalsYaml.ttlMs,
+                    defaults.approvals.ttlMs
+                ),
+                clarificationTurns = readPositiveInt(
+                    env["NEOPSYKE_APPROVALS_CLARIFICATION_TURNS"],
+                    approvalsYaml.clarificationTurns,
+                    defaults.approvals.clarificationTurns
+                ),
+                defaultChannel = readNonBlank(
+                    env["NEOPSYKE_APPROVALS_DEFAULT_CHANNEL"],
+                    approvalsYaml.defaultChannel,
+                    defaults.approvals.defaultChannel
+                ),
+                channelPriority = readStringList(
+                    env["NEOPSYKE_APPROVALS_CHANNEL_PRIORITY"],
+                    approvalsYaml.channelPriority,
+                    defaults.approvals.channelPriority
+                ),
+                dashboardRequiresLiveSubscriber = readBoolean(
+                    env["NEOPSYKE_APPROVALS_DASHBOARD_REQUIRES_LIVE_SUBSCRIBER"],
+                    approvalsYaml.dashboardRequiresLiveSubscriber,
+                    defaults.approvals.dashboardRequiresLiveSubscriber
+                ),
+                telegramStartupAckEnabled = parseBoolean(env["NEOPSYKE_APPROVALS_TELEGRAM_STARTUP_ACK_ENABLED"])
+                    ?: approvalsYaml.telegramStartupAckEnabled
+                    ?: run {
+                        val telegramEnabled = readBoolean(
+                            env["NEOPSYKE_TELEGRAM_ENABLED"],
+                            telegramYaml.enabled,
+                            defaults.nativeIntegrations.telegram.enabled
+                        )
+                        // Keep startup ACK on by default when Telegram is enabled, so
+                        // non-conversation approval routing has an explicit deliverability proof.
+                        if (telegramEnabled) true else defaults.approvals.telegramStartupAckEnabled
+                    },
+            ),
             connectors = ConnectorRuntimeConfig(
                 enabled = readBoolean(
                     env["NEOPSYKE_CONNECTORS_ENABLED"],
@@ -969,10 +1043,12 @@ object AgentRuntimeSettingsLoader {
                         telegramYaml.webhookSecretHandle,
                         defaults.nativeIntegrations.telegram.webhookSecretHandle
                     ),
-                    policyScopeId = readNonBlank(
-                        env["NEOPSYKE_TELEGRAM_POLICY_SCOPE_ID"],
-                        telegramYaml.policyScopeId,
-                        defaults.nativeIntegrations.telegram.policyScopeId
+                    policyScope = ai.neopsyke.agent.model.PolicyScope.fromId(
+                        readNonBlank(
+                            env["NEOPSYKE_TELEGRAM_POLICY_SCOPE_ID"],
+                            telegramYaml.policyScopeId,
+                            policyScope.id, // inherit from top-level when not overridden
+                        ),
                     ),
                     sessionIdPrefix = readNonBlank(
                         env["NEOPSYKE_TELEGRAM_SESSION_ID_PREFIX"],
@@ -1288,6 +1364,18 @@ object AgentRuntimeSettingsLoader {
         val yamlValues = yaml
             ?.mapNotNull { value -> value.trim().takeIf { it.isNotEmpty() } }
             ?.toSet()
+        return if (!yamlValues.isNullOrEmpty()) yamlValues else fallback
+    }
+
+    private fun readStringList(env: String?, yaml: List<String>?, fallback: List<String>): List<String> {
+        val envValues = env
+            ?.split(',')
+            ?.mapNotNull { value -> value.trim().takeIf { it.isNotEmpty() } }
+        if (!envValues.isNullOrEmpty()) {
+            return envValues
+        }
+        val yamlValues = yaml
+            ?.mapNotNull { value -> value.trim().takeIf { it.isNotEmpty() } }
         return if (!yamlValues.isNullOrEmpty()) yamlValues else fallback
     }
 

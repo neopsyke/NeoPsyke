@@ -98,6 +98,17 @@ func SessionReplayTest(opts SessionReplayTestOpts) (*SessionReplayTestResult, er
 
 	recordDir := recordResult.RunDir
 	sessionDir := filepath.Join(recordDir, "session")
+	if recordResult.ExitCode != 0 || recordResult.Verdict.Verdict == "error" || recordResult.Verdict.Verdict == "timeout" {
+		return &SessionReplayTestResult{
+			Passed:    false,
+			RecordDir: recordDir,
+			ExitCode:  1,
+		}, fmt.Errorf(
+			"record step failed before session artifacts were complete: verdict=%s detail=%s",
+			recordResult.Verdict.Verdict,
+			recordResult.Verdict.Detail,
+		)
+	}
 	opts.Progress.Emit(ProgressUpdate{
 		Phase:   "record",
 		Status:  "pass",
@@ -196,9 +207,11 @@ func SessionReplayTest(opts SessionReplayTestOpts) (*SessionReplayTestResult, er
 				fmt.Printf("  hit_rate:         %.1f%%\n", hitRate)
 				fmt.Printf("  divergences:      %.0f\n", divCount)
 
-				if divCount > 0 {
+				if divCount > 0 && !isZeroCallCacheDivergence(totalCalls, cachedCalls, realCalls, divCount) {
 					passed = false
 					failures = append(failures, fmt.Sprintf("LLM cache divergences: %.0f", divCount))
+				} else if isZeroCallCacheDivergence(totalCalls, cachedCalls, realCalls, divCount) {
+					fmt.Println("  note: ignoring zero-call cache divergence because replay made no cached or live LLM calls")
 				}
 				if realCalls > 0 {
 					passed = false
@@ -274,4 +287,8 @@ func SessionReplayTest(opts SessionReplayTestOpts) (*SessionReplayTestResult, er
 		ReplayDir: replayDir,
 		ExitCode:  exitCode,
 	}, nil
+}
+
+func isZeroCallCacheDivergence(totalCalls, cachedCalls, realCalls, divCount float64) bool {
+	return divCount > 0 && totalCalls == 0 && cachedCalls == 0 && realCalls == 0
 }

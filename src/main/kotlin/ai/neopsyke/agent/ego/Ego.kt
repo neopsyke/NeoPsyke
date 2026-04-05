@@ -2,6 +2,8 @@ package ai.neopsyke.agent.ego
 
 import kotlinx.coroutines.delay
 import mu.KotlinLogging
+import ai.neopsyke.admin.approvals.ApprovalStagingHook
+import ai.neopsyke.agent.cortex.motor.actions.control.ActionControlDecisionResult
 import ai.neopsyke.agent.cortex.motor.actions.control.ActionControlService
 import ai.neopsyke.agent.cortex.motor.actions.control.LegacyCompatibleActionControlService
 import ai.neopsyke.agent.config.*
@@ -10,9 +12,9 @@ import ai.neopsyke.agent.cortex.motor.actions.InMemoryEvidenceArtifactStore
 import ai.neopsyke.agent.model.*
 import ai.neopsyke.agent.cortex.motor.MotorCortex
 import ai.neopsyke.agent.cortex.motor.actions.ActionCapability
-import ai.neopsyke.agent.cortex.sensory.CognitiveCueMetadata
 import ai.neopsyke.agent.cortex.sensory.CognitiveSignal
-import ai.neopsyke.agent.cortex.sensory.GoalRuntimeCue
+import ai.neopsyke.agent.cortex.sensory.ActionFeedbackCue
+import ai.neopsyke.agent.cortex.sensory.PerceptualAppraiser
 import ai.neopsyke.agent.cortex.sensory.RuntimeControlSignal
 import ai.neopsyke.agent.cortex.sensory.SensoryCortex
 import ai.neopsyke.agent.memory.longterm.MemoryEventType
@@ -22,6 +24,7 @@ import ai.neopsyke.agent.id.GoalRegistry
 import ai.neopsyke.agent.goal.NoopGoalsGateway
 import ai.neopsyke.agent.goal.GoalRunActivation
 import ai.neopsyke.agent.goal.GoalsGateway
+import ai.neopsyke.agent.support.PromptInjectionDefense
 import ai.neopsyke.agent.support.TextSecurity
 import ai.neopsyke.agent.superego.Superego
 import ai.neopsyke.instrumentation.AgentEvent
@@ -51,6 +54,7 @@ class Ego(
     private val evidenceArtifactStore: EvidenceArtifactStore = InMemoryEvidenceArtifactStore(),
 ) {
     @Volatile private var id: ai.neopsyke.agent.id.Id? = null
+    @Volatile private var approvalStagingHook: ApprovalStagingHook? = null
 
     init {
         superego.setActionRegistry(motorCortex.actionRegistry())
@@ -61,9 +65,34 @@ class Ego(
         impulseTracker.setId(id)
     }
 
+    fun setApprovalStagingHook(hook: ApprovalStagingHook?) {
+        approvalStagingHook = hook
+    }
+
     /** Delegates to the attention scheduler's impulse enqueue. Used by the Id module. */
-    fun enqueueImpulse(impulse: PendingImpulse, maxPendingImpulses: Int): Boolean =
-        scheduler.enqueueImpulse(impulse, maxPendingImpulses)
+    fun enqueueImpulse(impulse: PendingImpulse, maxPendingImpulses: Int): Boolean {
+        val percept = Percept(
+            id = RootInputIds.next(),
+            family = PerceptFamily.DRIVE_ACTIVATION,
+            summary = impulse.prompt,
+            source = "id",
+            occurredAt = java.time.Instant.ofEpochMilli(impulse.receivedAtMs),
+            conversationContext = impulse.conversationContext,
+            rootStimulusId = impulse.rootImpulseId,
+            provenance = Provenances.trustedSystemSignal("id", impulse.needId),
+            metadata = mapOf("need_id" to impulse.needId),
+        )
+        val opportunity = shapeOpportunityContract(
+            cognitiveThreads.impulseOpportunity(impulse, percept),
+            impulse.rootImpulseId,
+            impulse.conversationContext,
+        )
+        val queued = scheduler.enqueueImpulse(impulse, opportunity, maxPendingImpulses)
+        if (queued) {
+            emitOpportunityEnqueued(opportunity, impulse.rootImpulseId, "impulse")
+        }
+        return queued
+    }
 
     /** Checks whether the Ego has any pending work. Used by the Id module for idle detection. */
     fun hasPendingWork(): Boolean = scheduler.hasPendingWork()
@@ -77,6 +106,8 @@ class Ego(
     }
 
     private val scheduler = AttentionScheduler(config)
+    private val cognitiveThreads = CognitiveThreadStore()
+    private val perceptualAppraiser = PerceptualAppraiser()
     private val impulseTracker = ImpulseLifecycleTracker(instrumentation, scheduler)
     private val dialogueBySession: MutableMap<String, ArrayDeque<DialogueTurn>> =
         object : LinkedHashMap<String, ArrayDeque<DialogueTurn>>(16, 0.75f, true) {
@@ -84,7 +115,7 @@ class Ego(
                 size > MAX_TRACKED_SESSIONS
         }
     private val deliberation = DeliberationEngine(
-        config, instrumentation, metaReasoner, evidenceArtifactStore,
+        config, instrumentation, metaReasoner, cognitiveThreads, evidenceArtifactStore,
         isEvidenceActionType = { motorCortex.hasCapability(it, ActionCapability.GATHERS_EVIDENCE) }
     )
     private val telemetry = EgoTelemetry(instrumentation, scheduler, memory, scratchpadStore, config)
@@ -112,8 +143,35 @@ class Ego(
         cleanupResolvedInputAfterAnswer = ::cleanupResolvedInputAfterAnswer,
         cleanupSatisfiedIdImpulse = ::cleanupSatisfiedIdImpulse,
         getId = { id },
+        recordThreadIntention = ::recordThreadIntentionTransition,
+        recordThreadBlocked = ::recordThreadBlocked,
+        recordThreadDenied = ::recordThreadDenied,
+        resolveTerminalControlPlaneDenial = ::resolveTerminalControlPlaneDenial,
+        recordThreadWaiting = ::recordThreadWaiting,
+        emitThreadUpdate = ::emitThreadUpdateForRoot,
+        onApprovalStaged = { action, stagedAction, reason, reasonCode, conversationContext ->
+            approvalStagingHook?.onApprovalStaged(
+                actionSummary = action.summary,
+                stagedAction = stagedAction,
+                reason = reason,
+                reasonCode = reasonCode,
+                conversationContext = conversationContext,
+            )
+        },
         actionControlService = actionControlService,
         actionLifecycleObserver = goalsGateway,
+        emitActionFeedback = sensoryCortex::offerActionFeedback,
+    )
+    private val stimulusIngress = StimulusIngressCoordinator(
+        config = config,
+        scheduler = scheduler,
+        cognitiveThreads = cognitiveThreads,
+        goalsGateway = goalsGateway,
+        instrumentation = instrumentation,
+        telemetry = telemetry,
+        shapeOpportunityContract = ::shapeOpportunityContract,
+        emitThreadUpdate = ::emitThreadUpdate,
+        emitOpportunityEnqueued = ::emitOpportunityEnqueued,
     )
 
     private fun dialogueFor(sessionId: String): ArrayDeque<DialogueTurn> =
@@ -158,46 +216,17 @@ class Ego(
 
                 is CognitiveSignal.StimulusReceived -> {
                     val stimulus = signal.stimulus
-                    val goalCue = GoalRuntimeCue.fromStimulus(stimulus)
-                    if (goalCue != null) {
-                        val work = goalsGateway.nextWorkFromCue(goalCue)
-                        if (work != null) {
-                            logger.info { "Goal work picked: ${work.goalId}/${work.stepId}" }
-                            scheduler.enqueueProjectWork(work)
+                    val percept = signal.percept ?: perceptualAppraiser.appraise(stimulus)
+                    when (val outcome = stimulusIngress.ingest(stimulus, percept)) {
+                        StimulusIngressCoordinator.Outcome.NoWork -> continue
+                        is StimulusIngressCoordinator.Outcome.RunLoop -> {
                             runLoop()
-                            cleanupAfterProjectAdvance(work.rootInputId)
+                            outcome.cleanupRootInputId?.let { rootInputId ->
+                                val cleanupContext = outcome.cleanupConversationContext ?: stimulus.conversationContext
+                                cleanupAfterProjectAdvance(rootInputId, cleanupContext)
+                            }
                         }
-                        continue
                     }
-                    if (stimulus.metadata[CognitiveCueMetadata.METADATA_CUE_TYPE] ==
-                        CognitiveCueMetadata.CUE_TYPE_ID_IMPULSE_READY
-                    ) {
-                        runLoop()
-                        continue
-                    }
-                    if (!scheduler.enqueueInput(
-                            content = stimulus.content,
-                            priority = stimulus.metadata["priority"]
-                                ?.let { runCatching { InputPriority.valueOf(it) }.getOrNull() }
-                                ?: InputPriority.HIGH,
-                            source = stimulus.source,
-                            conversationContext = stimulus.conversationContext
-                        )
-                    ) {
-                        logger.warn { "Input queue full; dropping input." }
-                        instrumentation.emit(AgentEvents.warning("Input queue full; dropping input."))
-                        telemetry.recordQueueSaturation(
-                            queueType = "input",
-                            capacity = config.maxPendingInputs,
-                            reason = "enqueue_input_failed_full"
-                        )
-                        continue
-                    }
-                    scheduler.latestQueuedInput()?.let { queuedInput ->
-                        instrumentation.emit(AgentEvents.inputQueued(queuedInput))
-                    }
-                    telemetry.emitQueueSnapshot("input_enqueued")
-                    runLoop()
                 }
 
                 RuntimeControlSignal.ShutdownRequested -> {
@@ -213,10 +242,184 @@ class Ego(
         }
     }
 
+    fun processExternalApprovalExecuted(result: ActionControlDecisionResult.Executed) {
+        actionPipeline.processExternalApprovalExecuted(result)
+    }
+
+    fun processExternalApprovalDenied(result: ActionControlDecisionResult.Cancelled) {
+        actionPipeline.processExternalApprovalDenied(result)
+    }
+
+    private suspend fun processActionFeedback(
+        feedback: PendingFeedback,
+        opportunity: Opportunity? = null,
+    ) {
+        val cue = feedback.cue
+        val percept = feedback.percept
+        val timing = PhaseTimingCollector("feedback", cue.rootInputId)
+        val convCtx = cue.conversationContext
+        val sessionId = resolveSessionId(convCtx)
+        activateSession(convCtx)
+        val resumedFromWait = feedback.resumedFromWaitingThread
+        cognitiveThreads.bindPercept(
+            percept = percept,
+            rootInputId = cue.rootInputId,
+            kind = resolveFeedbackThreadKind(feedback),
+            title = cue.actionSummary.ifBlank { feedback.stimulusContent },
+        )
+        timing.startPhase("feedback_processing")
+        val feedbackAction = PendingAction(
+            id = cue.sourceActionId ?: 0L,
+            urgency = Urgency.fromRaw(cue.urgency),
+            type = cue.actionType,
+            payload = "",
+            summary = cue.actionSummary.ifBlank { cue.actionType.id },
+            rootInputId = cue.rootInputId,
+            rootInputReceivedAtMs = cue.rootInputReceivedAtMs,
+            conversationContext = cue.conversationContext,
+            requiresFollowUpThought = cue.requiresFollowUpThought,
+            followUpPrefix = motorCortex.followUpPrefix(cue.actionType),
+            origin = cue.origin,
+        )
+        val outcome = ActionOutcome(
+            statusSummary = cue.statusSummary,
+            plannerSignal = cue.plannerSignal.ifBlank { cue.feedbackContent },
+            executionStatus = cue.executionStatus,
+            observedEvidence = cue.observedEvidence,
+            actionErrorCategory = cue.actionErrorCategory,
+            fetchErrorCategory = cue.fetchErrorCategory,
+        )
+        val observed = cue.observedEvidence ?: deliberation.observedEvidence(feedbackAction, outcome)
+        val dispatcherOriginThought = PendingThought(
+            id = cue.sourceActionId ?: 0L,
+            urgency = Urgency.fromRaw(cue.urgency),
+            content = cue.feedbackContent,
+            passes = cue.attempts,
+            rootInputId = cue.rootInputId,
+            rootInputReceivedAtMs = cue.rootInputReceivedAtMs ?: feedback.receivedAtMs,
+            allowFallbackExplanation = cue.origin.source != OriginSource.ID,
+            originActionType = cue.actionType,
+            originActionObservedEvidence = observed,
+            conversationContext = convCtx,
+            origin = cue.origin,
+        )
+        if (cue.executionStatus == ActionExecutionStatus.FAILED) {
+            deliberation.markEvidenceFailure(feedbackAction)
+        }
+        deliberation.recordEvidenceProgress(feedbackAction, outcome, observed)
+        deliberation.onActionExecuted(feedbackAction, observed)
+        deliberation.recordActionOutcome(feedbackAction, outcome, observed)
+        val continuationRequired = shouldContinueAfterFeedback(
+            cue = cue,
+            feedbackAction = feedbackAction,
+            resumedFromWait = resumedFromWait,
+        )
+        val threadUpdateReason = when {
+            cue.executionStatus == ActionExecutionStatus.WAITING -> {
+                cognitiveThreads.markWaiting(
+                    rootInputId = cue.rootInputId,
+                    conversationContext = convCtx,
+                    reason = cue.statusSummary.ifBlank { cue.actionSummary },
+                    resumeHint = cue.actionType.id,
+                )
+                "feedback_waiting"
+            }
+
+            !continuationRequired && cue.executionStatus == ActionExecutionStatus.FAILED -> {
+                cognitiveThreads.markFailed(
+                    rootInputId = cue.rootInputId,
+                    conversationContext = convCtx,
+                    reason = cue.actionErrorCategory ?: cue.fetchErrorCategory ?: cue.statusSummary,
+                    summary = cue.statusSummary.ifBlank { cue.actionSummary },
+                )
+                "feedback_terminal_failed"
+            }
+
+            !continuationRequired -> {
+                cognitiveThreads.markResolved(
+                    rootInputId = cue.rootInputId,
+                    conversationContext = convCtx,
+                    reason = cue.statusSummary.ifBlank { cue.actionSummary },
+                    summary = cue.statusSummary.ifBlank { cue.actionSummary },
+                )
+                "feedback_terminal_resolved"
+            }
+
+            else -> "feedback_bound"
+        }
+        cognitiveThreads.thread(cue.rootInputId, convCtx)
+            ?.let { updated -> emitThreadUpdate(updated, cue.rootInputId, threadUpdateReason) }
+        instrumentation.emit(
+            AgentEvent(
+                type = "action_feedback_integrated",
+                data = mapOf(
+                    "action_type" to cue.actionType.id,
+                    "root_input_id" to cue.rootInputId,
+                    "execution_status" to cue.executionStatus.name.lowercase(),
+                    "continuation_required" to continuationRequired,
+                )
+            )
+        )
+        if (!continuationRequired) {
+            instrumentation.emit(AgentEvents.phaseTimings(timing.build()))
+            return
+        }
+
+        timing.startPhase("planner_context")
+        val trigger = EgoTrigger.ActionFeedback(feedback)
+        val baseContext = plannerContext(
+            trigger = trigger,
+            rootInputId = cue.rootInputId,
+            sessionId = sessionId,
+            conversationContext = convCtx,
+            opportunity = opportunity,
+        )
+        val context = applyIdConvergenceContextForOrigin(
+            baseContext = baseContext,
+            origin = cue.origin,
+            triggeringTension = idNeedTension(cue.origin.needId),
+        )
+        timing.startPhase("meta_assessment")
+        val assessment = deliberation.maybeAssessAndUpdateGuidance(trigger, context)
+
+        timing.startPhase("planner_decide")
+        val decision = planner.decide(
+            trigger = trigger,
+            context = context.copy(metaGuidance = deliberation.guidance())
+        )
+        val finalDecision = deliberation.maybeApplyPressureOverride(decision, assessment)
+        deliberation.onPlannerDecision(finalDecision)
+        journalPlannerDecision(finalDecision)
+
+        timing.startPhase("apply_decision")
+        dispatcher.dispatch(
+            decision = finalDecision,
+            nextPassCount = cue.attempts,
+            originThought = dispatcherOriginThought,
+            rootInputId = cue.rootInputId,
+            rootInputReceivedAtMs = cue.rootInputReceivedAtMs ?: feedback.receivedAtMs,
+            conversationContext = convCtx,
+            plannerContext = context,
+            origin = cue.origin,
+        )
+
+        instrumentation.emit(AgentEvents.phaseTimings(timing.build()))
+    }
+
+    private fun shouldContinueAfterFeedback(
+        cue: ActionFeedbackCue,
+        feedbackAction: PendingAction,
+        resumedFromWait: Boolean,
+    ): Boolean {
+        if (!goalsGateway.allowFollowUp(feedbackAction)) return false
+        if (cue.executionStatus == ActionExecutionStatus.WAITING) return false
+        return resumedFromWait || cue.requiresFollowUpThought || cue.executionStatus != ActionExecutionStatus.SUCCESS
+    }
+
     private suspend fun runLoop() {
         var steps = 0
         while (steps < config.planner.maxLoopStepsPerInput) {
-            val task = scheduler.nextTask() ?: break
+            val task = scheduler.nextTask(cognitiveThreads::isBlocked) ?: break
             steps += 1
             instrumentation.emit(AgentEvents.loopStep(step = steps, taskType = taskType(task)))
             val taskConversationContext = taskConversationContext(task)
@@ -226,7 +429,7 @@ class Ego(
             try {
                 when (task) {
                     is LoopTask.AttendOpportunity -> processOpportunity(task.item)
-                    is LoopTask.ProcessThought -> processThought(task.item)
+                    is LoopTask.ProcessIntention -> processIntention(task.item)
                     is LoopTask.PerformAction -> processAction(task.item)
                 }
             } catch (ex: Exception) {
@@ -265,18 +468,21 @@ class Ego(
             }
         }
 
-        if (!scheduler.hasPendingWork()) {
+        if (!scheduler.hasPendingWork() && !sensoryCortex.hasPendingSyntheticSignals()) {
             impulseTracker.finalizeAllIdle()
-            deliberation.reset()
+            val retainedRootInputs = cognitiveThreads.retainedRootInputIds()
+            deliberation.reset(retainThreadContinuity = retainedRootInputs.isNotEmpty())
             memory.resetForNewInput()
             dispatcher.resetForNewInput()
-            val clearedScratchpads = scratchpadStore.clearActiveWorkspaces()
-            if (clearedScratchpads > 0) {
+            val clearedThreadScratchpads = scratchpadStore.clearOrphanedThreadWorkspaces(retainedRootInputs)
+            val clearedDrafts = scratchpadStore.clearIntentionDrafts()
+            if (clearedThreadScratchpads > 0 || clearedDrafts > 0) {
                 instrumentation.emit(
                     AgentEvent(
                         type = "scratchpad_cleared",
                         data = mapOf(
-                            "cleared_count" to clearedScratchpads,
+                            "cleared_count" to clearedThreadScratchpads,
+                            "cleared_drafts" to clearedDrafts,
                             "reason" to "queues_drained"
                         )
                     )
@@ -289,24 +495,30 @@ class Ego(
         }
     }
 
-    private suspend fun processInput(input: PendingInput) {
+    private suspend fun processInput(input: PendingInput, opportunity: Opportunity? = null) {
         val timing = PhaseTimingCollector("input", input.rootInputId)
         val convCtx = input.conversationContext
         val sessionId = resolveSessionId(convCtx)
         activateSession(convCtx)
-        id?.onActivity("input_received")
+        cognitiveThreads.bindInput(input)
+        val isFeedbackInput = input.percept?.family == PerceptFamily.FEEDBACK
+        if (!isFeedbackInput) {
+            id?.onActivity("input_received")
+        }
 
         timing.startPhase("input_processing")
         instrumentation.emit(AgentEvents.inputProcessing(input))
-        val userTurn = DialogueTurn(
-            role = DialogueRole.USER,
-            content = input.content,
-            sessionId = sessionId,
-            interlocutor = convCtx.interlocutor,
-            timestamp = java.time.Instant.now()
-        )
-        dialogueFor(sessionId).addLast(userTurn)
-        memory.remember(userTurn)
+        if (!isFeedbackInput) {
+            val userTurn = DialogueTurn(
+                role = DialogueRole.USER,
+                content = input.content,
+                sessionId = sessionId,
+                interlocutor = convCtx.interlocutor,
+                timestamp = java.time.Instant.now()
+            )
+            dialogueFor(sessionId).addLast(userTurn)
+            memory.remember(userTurn)
+        }
         maybeCreateScratchpad(input)
         trimDialogue(sessionId)
 
@@ -316,7 +528,8 @@ class Ego(
             trigger = trigger,
             rootInputId = input.rootInputId,
             sessionId = sessionId,
-            conversationContext = convCtx
+            conversationContext = convCtx,
+            opportunity = opportunity,
         )
 
         timing.startPhase("meta_assessment")
@@ -338,61 +551,64 @@ class Ego(
             originThought = null,
             rootInputId = input.rootInputId,
             rootInputReceivedAtMs = input.receivedAtMs,
-            conversationContext = convCtx
+            conversationContext = convCtx,
+            plannerContext = context,
         )
 
         instrumentation.emit(AgentEvents.phaseTimings(timing.build()))
     }
 
-    private suspend fun processOpportunity(opportunity: OpportunityWorkItem) {
-        when (opportunity) {
-            is OpportunityWorkItem.InputOpportunity -> processInput(opportunity.input)
-            is OpportunityWorkItem.ImpulseOpportunity -> processImpulse(opportunity.impulse)
-            is OpportunityWorkItem.GoalWorkOpportunity -> processGoalWork(opportunity.workUnit)
+    private suspend fun processOpportunity(opportunity: ScheduledOpportunity) {
+        when (val trigger = opportunity.trigger) {
+            is OpportunityTrigger.Input -> processInput(trigger.input, opportunity.opportunity)
+            is OpportunityTrigger.Impulse -> processImpulse(trigger.impulse, opportunity.opportunity)
+            is OpportunityTrigger.Feedback -> processActionFeedback(trigger.feedback, opportunity.opportunity)
+            is OpportunityTrigger.GoalWork -> processGoalWork(trigger.work, opportunity.opportunity)
         }
     }
 
-    private suspend fun processThought(thought: PendingThought) {
-        val timing = PhaseTimingCollector("thought", thought.rootInputId)
-        val convCtx = thought.conversationContext
+    private suspend fun processDeferredIntention(intention: QueuedIntention) {
+        val deferred = intention.toPendingThought()
+        val timing = PhaseTimingCollector("deferred_intention", deferred.rootInputId)
+        val convCtx = deferred.conversationContext
         val sessionId = resolveSessionId(convCtx)
         activateSession(convCtx)
 
-        if (thought.passes >= config.planner.maxThoughtPasses) {
-            logger.info { "Dropping thought ${thought.id} due to max thought passes." }
-            instrumentation.emit(AgentEvents.thoughtDropped(thought = thought, reason = "max_passes_reached"))
-            if (thought.allowFallbackExplanation) {
-                fallbackHandler.enqueueFallbackExplanation(thought)
+        if (deferred.passes >= config.planner.maxThoughtPasses) {
+            logger.info { "Dropping deferred intention ${deferred.id} due to max defer passes." }
+            instrumentation.emit(AgentEvents.thoughtDropped(thought = deferred, reason = "max_passes_reached"))
+            if (deferred.allowFallbackExplanation) {
+                fallbackHandler.enqueueFallbackExplanation(deferred)
             }
             return
         }
 
-        timing.startPhase("thought_processing")
-        instrumentation.emit(AgentEvents.thoughtProcessing(thought))
-        thought.planContext?.let { planContext ->
+        timing.startPhase("deferred_intention_processing")
+        instrumentation.emit(AgentEvents.thoughtProcessing(deferred))
+        deferred.planContext?.let { planContext ->
             instrumentation.emit(
                 AgentEvents.planStepStarted(
                     planId = planContext.planId,
                     stepIndex = planContext.stepIndex,
                     totalSteps = planContext.totalSteps,
                     stepDescription = planContext.stepDescription,
-                    rootInputId = thought.rootInputId,
+                    rootInputId = deferred.rootInputId,
                 )
             )
         }
 
         timing.startPhase("planner_context")
-        val trigger = EgoTrigger.PendingThoughtInput(thought)
+        val trigger = EgoTrigger.DeferredIntention(intention)
         val baseContext = plannerContext(
             trigger,
-            rootInputId = thought.rootInputId,
+            rootInputId = deferred.rootInputId,
             sessionId = sessionId,
             conversationContext = convCtx
         )
         val context = applyIdConvergenceContextForOrigin(
             baseContext = baseContext,
-            origin = thought.origin,
-            triggeringTension = idNeedTension(thought.origin.needId),
+            origin = deferred.origin,
+            triggeringTension = idNeedTension(deferred.origin.needId),
         )
 
         timing.startPhase("meta_assessment")
@@ -410,22 +626,69 @@ class Ego(
         timing.startPhase("apply_decision")
         dispatcher.dispatch(
             finalDecision,
-            nextPassCount = thought.passes + 1,
-            originThought = thought,
-            rootInputId = thought.rootInputId,
-            rootInputReceivedAtMs = thought.rootInputReceivedAtMs,
+            nextPassCount = deferred.passes + 1,
+            originThought = deferred,
+            rootInputId = deferred.rootInputId,
+            rootInputReceivedAtMs = deferred.rootInputReceivedAtMs,
             conversationContext = convCtx,
-            origin = thought.origin,
+            plannerContext = context,
+            origin = deferred.origin,
         )
 
         instrumentation.emit(AgentEvents.phaseTimings(timing.build()))
     }
 
-    private suspend fun processImpulse(impulse: PendingImpulse) {
+    private suspend fun processIntention(intention: QueuedIntention) {
+        instrumentation.emit(
+            AgentEvent(
+                type = "intention_processing",
+                data = mapOf(
+                    "intention_id" to intention.intention.id,
+                    "thread_id" to intention.intention.cognitiveThreadId,
+                    "intention_kind" to intention.intention.kind.name.lowercase(),
+                    "summary" to intention.intention.summary,
+                    "action_type" to intention.proposedActionType?.id,
+                    "root_input_id" to intention.rootInputId,
+                )
+            )
+        )
+        when (intention.intention.kind) {
+            IntentionKind.DEFER -> {
+                processDeferredIntention(intention)
+            }
+
+            else -> {
+                val actionType = intention.proposedActionType ?: return
+                val payload = intention.proposedActionPayload ?: return
+                val summary = intention.proposedActionSummary ?: intention.intention.summary
+                val pendingAction = PendingAction(
+                    id = intention.queueId,
+                    urgency = intention.urgency,
+                    type = actionType,
+                    payload = payload,
+                    summary = summary,
+                    rootInputId = intention.rootInputId,
+                    rootInputReceivedAtMs = intention.rootInputReceivedAtMs,
+                    conversationContext = intention.conversationContext,
+                    requiresFollowUpThought = motorCortex.requiresFollowUpThought(actionType),
+                    followUpPrefix = motorCortex.followUpPrefix(actionType),
+                    argumentDataTrust = intention.argumentDataTrust,
+                    origin = intention.origin,
+                    intentionId = intention.intention.id,
+                    intentionKind = intention.intention.kind,
+                    requestedCommitMode = intention.intention.commitMode,
+                )
+                processAction(pendingAction)
+            }
+        }
+    }
+
+    private suspend fun processImpulse(impulse: PendingImpulse, opportunity: Opportunity? = null) {
         val timing = PhaseTimingCollector("impulse", impulse.rootImpulseId)
         val convCtx = impulse.conversationContext
         val sessionId = resolveSessionId(convCtx)
         activateSession(convCtx)
+        cognitiveThreads.ensureForImpulse(impulse)
         impulseTracker.registerLifecycle(impulse.rootImpulseId, impulse.needId)
 
         timing.startPhase("impulse_processing")
@@ -460,6 +723,7 @@ class Ego(
             rootInputId = impulse.rootImpulseId,
             sessionId = sessionId,
             conversationContext = convCtx,
+            opportunity = opportunity,
         )
         val idConstrainedContext = applyIdConvergenceContext(
             baseContext = baseContext,
@@ -497,6 +761,7 @@ class Ego(
                     rootInputId = impulse.rootImpulseId,
                     rootInputReceivedAtMs = impulse.receivedAtMs,
                     conversationContext = convCtx,
+                    plannerContext = context,
                     origin = origin,
                 )
             }
@@ -509,11 +774,16 @@ class Ego(
         actionPipeline.reviewAndExecute(action)
     }
 
-    private suspend fun processGoalWork(work: GoalRunActivation) {
+    private suspend fun processGoalWork(
+        work: GoalRunActivation,
+        opportunity: Opportunity? = null,
+    ) {
         val timing = PhaseTimingCollector("goal_work", "goal:${work.goalId}")
         val convCtx = work.conversationContext
         val sessionId = resolveSessionId(convCtx)
         activateSession(convCtx)
+        cognitiveThreads.bindGoalWork(work)
+        maybeCreateGoalScratchpad(work)
 
         timing.startPhase("goal_work_processing")
         instrumentation.emit(
@@ -534,21 +804,31 @@ class Ego(
             rootInputId = work.rootInputId,
             sessionId = sessionId,
             conversationContext = convCtx,
+            opportunity = opportunity,
         )
 
+        timing.startPhase("meta_assessment")
+        val assessment = deliberation.maybeAssessAndUpdateGuidance(trigger, context)
+
         timing.startPhase("planner_decide")
-        val decision = planner.decide(trigger = trigger, context = context)
-        journalPlannerDecision(decision)
+        val decision = planner.decide(
+            trigger = trigger,
+            context = context.copy(metaGuidance = deliberation.guidance())
+        )
+        val finalDecision = deliberation.maybeApplyPressureOverride(decision, assessment)
+        deliberation.onPlannerDecision(finalDecision)
+        journalPlannerDecision(finalDecision)
 
         timing.startPhase("apply_decision")
         val origin = ActionOrigin(OriginSource.GOAL)
         dispatcher.dispatch(
-            decision = decision,
+            decision = finalDecision,
             nextPassCount = 0,
             originThought = null,
             rootInputId = work.rootInputId,
             rootInputReceivedAtMs = System.currentTimeMillis(),
             conversationContext = convCtx,
+            plannerContext = context,
             origin = origin,
         )
 
@@ -584,11 +864,34 @@ class Ego(
         )
     }
 
+    private fun maybeCreateGoalScratchpad(work: GoalRunActivation) {
+        val created = scratchpadStore.ensureForGoalWork(work)
+        if (!created) return
+        instrumentation.emit(
+            AgentEvent(
+                type = "scratchpad_created",
+                data = mapOf(
+                    "root_input_id" to work.rootInputId,
+                    "root_input_received_at_ms" to System.currentTimeMillis(),
+                    "goal_preview" to TextSecurity.preview(work.stepDescription, 140),
+                    "active_tasks" to scratchpadStore.activeTaskCount(),
+                    "source" to "goal_runtime",
+                )
+            )
+        )
+        telemetry.emitScratchpadTelemetry(
+            rootInputId = work.rootInputId,
+            rootInputReceivedAtMs = System.currentTimeMillis(),
+            updateType = "goal_scratchpad_created"
+        )
+    }
+
     private suspend fun plannerContext(
         trigger: EgoTrigger,
         rootInputId: String? = null,
         sessionId: String = ConversationContext.DEFAULT_SESSION_ID,
         conversationContext: ConversationContext = ConversationContext.default(),
+        opportunity: Opportunity? = null,
     ): PlannerContext {
         val recentDialogue = dialogueFor(sessionId).takeLast(12)
         val shortTermSummary = memory.currentShortTermSummary()
@@ -619,29 +922,46 @@ class Ego(
             maxTokens = config.memory.scratchpad.digestMaxPromptTokens
         )
         val threadSecurityContext = deliberation.threadSecurityContext(rootInputId, conversationContext)
+        val cognitiveThread = cognitiveThreads.thread(rootInputId, conversationContext)
+        val latestPercept = cognitiveThreads.latestPercept(rootInputId, conversationContext)
         val disabled = deliberation.disabledActionTypes(rootInputId, sessionId)
         val plannerDescriptors = motorCortex.plannerDescriptors()
             .filter { descriptor ->
                 descriptor.allowedInstructionTrust.contains(conversationContext.security.instructionTrust) &&
                     descriptor.allowedArgumentDataTrust.contains(threadSecurityContext.aggregatedDataTrust)
             }
-        val policyActionTypes = plannerDescriptors.map { it.actionType }.toSet()
-        val availableActions = (motorCortex.availableActionTypes() intersect policyActionTypes) - disabled
-        val dispatchableActions = (motorCortex.dispatchableActionTypes() intersect policyActionTypes) - disabled
-        val actionDefinitions = plannerDescriptors
-            .filter { descriptor -> descriptor.actionType in availableActions }
-            .map { descriptor ->
-                ActionPlanningDefinition(
-                    actionType = descriptor.actionType,
-                    description = descriptor.plannerDescription,
-                    payloadGuidance = descriptor.payloadGuidance,
-                    payloadSchemaExample = descriptor.payloadSchemaExample,
-                    effectClass = descriptor.effectClass,
-                    directCommitAllowed = descriptor.directCommitAllowed,
-                    supportsAutonomousCommit = descriptor.supportsAutonomousCommit,
-                    allowedInstructionTrust = descriptor.allowedInstructionTrust,
-                )
-            }
+        val implementedAvailableActions = motorCortex.availableActionTypes()
+        val implementedDispatchableActions = motorCortex.dispatchableActionTypes()
+        val shapedActionSurface = CognitivePolicyShaper.shapePlannerActions(
+            conversationContext = conversationContext,
+            threadSecurityContext = threadSecurityContext,
+            descriptors = plannerDescriptors,
+            disabledActions = disabled,
+        )
+        val availableActions = if (opportunity?.availableActions?.isNotEmpty() == true) {
+            shapedActionSurface.availableActions
+                .intersect(implementedAvailableActions)
+                .intersect(opportunity.availableActions)
+        } else {
+            shapedActionSurface.availableActions intersect implementedAvailableActions
+        }
+        val dispatchableActions = if (opportunity?.dispatchableActions?.isNotEmpty() == true) {
+            shapedActionSurface.dispatchableActions
+                .intersect(implementedDispatchableActions)
+                .intersect(opportunity.dispatchableActions)
+        } else {
+            shapedActionSurface.dispatchableActions intersect implementedDispatchableActions
+        }
+        val actionDefinitions = if (opportunity?.actionDefinitions?.isNotEmpty() == true) {
+            shapedActionSurface.actionDefinitions
+                .filter { definition ->
+                    definition.actionType in availableActions &&
+                        opportunity.actionDefinitions.any { candidate -> candidate.actionType == definition.actionType }
+                }
+        } else {
+            shapedActionSurface.actionDefinitions
+                .filter { definition -> definition.actionType in availableActions }
+        }
         val evidenceHints = buildEvidenceHints(rootInputId, sessionId)
         val goalSummary = buildNumberedGoalSummary()
         return PlannerContext(
@@ -660,6 +980,18 @@ class Ego(
             conversationSecuritySummary = conversationContext.security.renderSummary(),
             threadSecuritySummary = threadSecurityContext.renderSummary(),
             triggerProvenanceSummary = triggerProvenanceSummary(trigger),
+            perceptSummary = latestPercept?.summary.orEmpty(),
+            perceptFamily = latestPercept?.family,
+            cognitiveThreadId = cognitiveThread?.id,
+            cognitiveThreadStatus = cognitiveThread?.status,
+            opportunitySummary = opportunity?.summary.orEmpty(),
+            opportunityKind = opportunity?.kind,
+            allowedIntentions = opportunity?.allowedIntentions ?: setOf(
+                IntentionKind.OBSERVE,
+                IntentionKind.PREPARE,
+                IntentionKind.DEFER,
+            ),
+            allowedCommitModes = opportunity?.allowedCommitModes ?: CommitMode.entries.toSet(),
             availableActions = availableActions,
             dispatchableActions = dispatchableActions,
             actionDefinitions = actionDefinitions,
@@ -680,10 +1012,16 @@ class Ego(
                     sourceRef = trigger.input.rootInputId,
                 ).renderSummary()
 
-            is EgoTrigger.PendingThoughtInput ->
+            is EgoTrigger.DeferredIntention ->
                 Provenances.trustedSystemSignal(
-                    provider = "planner_thought",
-                    sourceRef = trigger.thought.rootInputId,
+                    provider = "planner-deferred-intention",
+                    sourceRef = trigger.intention.rootInputId,
+                ).renderSummary()
+
+            is EgoTrigger.ActionFeedback ->
+                Provenances.trustedSystemSignal(
+                    provider = "action-feedback",
+                    sourceRef = trigger.feedback.cue.rootInputId,
                 ).renderSummary()
 
             is EgoTrigger.IncomingImpulse ->
@@ -732,9 +1070,10 @@ class Ego(
     private fun shouldAttachAmbientContext(trigger: EgoTrigger): Boolean =
         when (trigger) {
             is EgoTrigger.IncomingInput -> false
+            is EgoTrigger.ActionFeedback -> trigger.feedback.cue.origin.source == OriginSource.ID
             is EgoTrigger.IncomingImpulse -> true
             is EgoTrigger.GoalWork -> true
-            is EgoTrigger.PendingThoughtInput -> trigger.thought.origin.source == OriginSource.ID
+            is EgoTrigger.DeferredIntention -> trigger.intention.origin.source == OriginSource.ID
         }
 
     private fun emitAmbientContextSnapshot(
@@ -759,7 +1098,8 @@ class Ego(
     private fun rootInputIdForTrigger(trigger: EgoTrigger): String? =
         when (trigger) {
             is EgoTrigger.IncomingInput -> trigger.input.rootInputId
-            is EgoTrigger.PendingThoughtInput -> trigger.thought.rootInputId
+            is EgoTrigger.DeferredIntention -> trigger.intention.rootInputId
+            is EgoTrigger.ActionFeedback -> trigger.feedback.cue.rootInputId
             is EgoTrigger.IncomingImpulse -> trigger.impulse.rootImpulseId
             is EgoTrigger.GoalWork -> trigger.workUnit.rootInputId
         }
@@ -767,10 +1107,21 @@ class Ego(
     private fun triggerLabel(trigger: EgoTrigger): String =
         when (trigger) {
             is EgoTrigger.IncomingInput -> "input"
-            is EgoTrigger.PendingThoughtInput -> "thought"
+            is EgoTrigger.DeferredIntention -> "deferred-intention"
+            is EgoTrigger.ActionFeedback -> "feedback"
             is EgoTrigger.IncomingImpulse -> "impulse"
             is EgoTrigger.GoalWork -> "goal-work"
         }
+
+    private fun resolveFeedbackThreadKind(feedback: PendingFeedback): CognitiveThreadKind =
+        cognitiveThreads.thread(feedback.cue.rootInputId, feedback.cue.conversationContext)?.kind
+            ?: when (feedback.cue.origin.source) {
+                OriginSource.GOAL -> CognitiveThreadKind.GOAL_DIRECTED
+                OriginSource.ID -> CognitiveThreadKind.DRIVE
+                OriginSource.SYSTEM,
+                OriginSource.USER,
+                -> CognitiveThreadKind.CONVERSATION
+            }
 
     private fun applyIdConvergenceContextForOrigin(
         baseContext: PlannerContext,
@@ -894,7 +1245,15 @@ class Ego(
         val sessionId = resolveSessionId(action.conversationContext)
         val scope = inputScope(rootInputId, action.conversationContext)
         planner.resetForInput(rootInputId)
-        deliberation.clearForInput(rootInputId, sessionId)
+        cognitiveThreads.markResolved(
+            rootInputId = rootInputId,
+            conversationContext = action.conversationContext,
+            reason = reason,
+            summary = action.summary,
+        )
+        cognitiveThreads.thread(rootInputId, action.conversationContext)
+            ?.let { updated -> emitThreadUpdate(updated, rootInputId, "input_terminal") }
+        deliberation.clearForInput(rootInputId, sessionId, retainThreadContinuity = true)
         evidenceArtifactStore.clear(rootInputId, action.conversationContext)
         dispatcher.clearExternalActionSignatures(scope)
         telemetry.emitScratchpadTelemetry(
@@ -954,17 +1313,90 @@ class Ego(
         telemetry.emitQueueSnapshot("input_resolution_cleanup")
     }
 
-    private fun cleanupAfterProjectAdvance(rootInputId: String) {
-        val sessionId = ConversationContext.DEFAULT_SESSION_ID
+    private fun cleanupAfterProjectAdvance(rootInputId: String, conversationContext: ConversationContext) {
+        val sessionId = resolveSessionId(conversationContext)
+        val thread = cognitiveThreads.thread(rootInputId, conversationContext)
+        val goalId = thread?.goalId
+        val stepId = thread?.metadata?.get("goal_step_id")
         planner.resetForInput(rootInputId)
-        deliberation.clearForInput(rootInputId, sessionId)
-        dispatcher.clearExternalActionSignatures(InputScope(rootInputId, sessionId))
         goalsGateway.finalizeGoalCycle(rootInputId)
+        val goalState = goalId?.let { goalsGateway.goalStatus(it) }
+        val stepStatus = stepId?.let { id -> goalState?.goal?.plan?.steps?.firstOrNull { it.id == id }?.status }
+        val retainContinuity = when {
+            goalState == null -> false
+            goalState.goal.status == ai.neopsyke.agent.goal.GoalStatus.COMPLETED -> false
+            goalState.goal.status == ai.neopsyke.agent.goal.GoalStatus.FAILED -> false
+            stepStatus == ai.neopsyke.agent.goal.StepStatus.DONE -> false
+            stepStatus == ai.neopsyke.agent.goal.StepStatus.FAILED -> false
+            else -> true
+        }
+        if (retainContinuity) {
+            when {
+                stepStatus == ai.neopsyke.agent.goal.StepStatus.BLOCKED ||
+                    goalState?.goal?.status == ai.neopsyke.agent.goal.GoalStatus.BLOCKED ->
+                    cognitiveThreads.markBlocked(rootInputId, conversationContext, reason = "goal_blocked")
+                goalState?.goal?.status == ai.neopsyke.agent.goal.GoalStatus.SUSPENDED ->
+                    cognitiveThreads.markWaiting(rootInputId, conversationContext, reason = "goal_suspended")
+                else ->
+                    cognitiveThreads.markWaiting(rootInputId, conversationContext, reason = "goal_waiting_resume")
+            }
+            cognitiveThreads.thread(rootInputId, conversationContext)
+                ?.let { updated -> emitThreadUpdate(updated, rootInputId, "goal_cycle_retained") }
+            deliberation.clearForInput(rootInputId, sessionId, retainThreadContinuity = true)
+        } else {
+            if (goalState?.goal?.status == ai.neopsyke.agent.goal.GoalStatus.FAILED || stepStatus == ai.neopsyke.agent.goal.StepStatus.FAILED) {
+                cognitiveThreads.markFailed(rootInputId, conversationContext, reason = "goal_failed")
+            } else {
+                cognitiveThreads.markResolved(rootInputId, conversationContext)
+            }
+            cognitiveThreads.thread(rootInputId, conversationContext)
+                ?.let { updated -> emitThreadUpdate(updated, rootInputId, "goal_cycle_terminal") }
+            deliberation.clearForInput(rootInputId, sessionId)
+            val digestEntry = scratchpadStore.captureDigest(rootInputId, sessionId)
+            if (digestEntry != null) {
+                instrumentation.emit(
+                    AgentEvent(
+                        type = "scratchpad_digest_captured",
+                        data = mapOf(
+                            "root_input_id" to rootInputId,
+                            "session_id" to sessionId,
+                            "goal_preview" to TextSecurity.preview(digestEntry.goal, 140),
+                            "section_count" to digestEntry.sectionIndex.size,
+                            "evidence_count" to digestEntry.keyEvidence.size,
+                        )
+                    )
+                )
+            }
+            telemetry.emitScratchpadTelemetry(
+                rootInputId = rootInputId,
+                rootInputReceivedAtMs = System.currentTimeMillis(),
+                updateType = "before_destroy_goal_cycle"
+            )
+            val destroyedScratchpad = scratchpadStore.destroy(rootInputId)
+            if (destroyedScratchpad != null) {
+                instrumentation.emit(
+                    AgentEvent(
+                        type = "scratchpad_destroyed",
+                        data = mapOf(
+                            "root_input_id" to destroyedScratchpad.rootInputId,
+                            "root_input_received_at_ms" to destroyedScratchpad.rootInputReceivedAtMs,
+                            "section_count" to destroyedScratchpad.sectionCount,
+                            "evidence_count" to destroyedScratchpad.evidenceCount,
+                            "reason" to "goal_cycle_terminal"
+                        )
+                    )
+                )
+            }
+        }
+        dispatcher.clearExternalActionSignatures(InputScope(rootInputId, sessionId))
         instrumentation.emit(
             AgentEvent(
                 type = "goal_advance_cleanup",
                 data = mapOf(
                     "goal_root_id" to rootInputId,
+                    "retain_thread_continuity" to retainContinuity,
+                    "goal_status" to goalState?.goal?.status?.name?.lowercase(),
+                    "step_status" to stepStatus?.name?.lowercase(),
                 )
             )
         )
@@ -972,49 +1404,48 @@ class Ego(
 
     private fun taskType(task: LoopTask): String =
         when (task) {
-            is LoopTask.AttendOpportunity -> when (task.item) {
-                is OpportunityWorkItem.InputOpportunity -> "input"
-                is OpportunityWorkItem.ImpulseOpportunity -> "impulse"
-                is OpportunityWorkItem.GoalWorkOpportunity -> "goal_work"
+            is LoopTask.AttendOpportunity -> when (task.item.trigger) {
+                is OpportunityTrigger.Input -> "input"
+                is OpportunityTrigger.Impulse -> "impulse"
+                is OpportunityTrigger.Feedback -> "feedback"
+                is OpportunityTrigger.GoalWork -> "goal_work"
             }
-            is LoopTask.ProcessThought -> "thought"
+            is LoopTask.ProcessIntention -> "intention"
             is LoopTask.PerformAction -> "action"
         }
 
     private fun taskRootInputId(task: LoopTask): String? =
         when (task) {
             is LoopTask.AttendOpportunity -> task.item.rootInputId
-            is LoopTask.ProcessThought -> task.item.rootInputId
+            is LoopTask.ProcessIntention -> task.item.rootInputId
             is LoopTask.PerformAction -> task.item.rootInputId
         }
 
     private fun taskRootInputReceivedAtMs(task: LoopTask): Long? =
         when (task) {
-            is LoopTask.AttendOpportunity -> when (val item = task.item) {
-                is OpportunityWorkItem.InputOpportunity -> item.input.receivedAtMs
-                is OpportunityWorkItem.ImpulseOpportunity -> item.impulse.receivedAtMs
-                is OpportunityWorkItem.GoalWorkOpportunity -> System.currentTimeMillis()
-            }
-            is LoopTask.ProcessThought -> task.item.rootInputReceivedAtMs
+            is LoopTask.AttendOpportunity -> task.item.receivedAtMs ?: System.currentTimeMillis()
+            is LoopTask.ProcessIntention -> task.item.rootInputReceivedAtMs
             is LoopTask.PerformAction -> task.item.rootInputReceivedAtMs
         }
 
     private fun taskConversationContext(task: LoopTask): ConversationContext =
         when (task) {
             is LoopTask.AttendOpportunity -> task.item.conversationContext
-            is LoopTask.ProcessThought -> task.item.conversationContext
+            is LoopTask.ProcessIntention -> task.item.conversationContext
             is LoopTask.PerformAction -> task.item.conversationContext
         }
 
     private fun journalPlannerDecision(decision: EgoDecision) {
         val (label, actionType) = when (decision) {
             is EgoDecision.EnqueueThought -> "thought" to null
-            is EgoDecision.ProposeAction -> "action: ${decision.actionType.name.lowercase()}" to decision.actionType.name.lowercase()
+            is EgoDecision.FormIntention ->
+                "intention: ${decision.intentionKind.name.lowercase()} ${decision.actionType.name.lowercase()}" to
+                    decision.actionType.name.lowercase()
             is EgoDecision.EnqueuePlan -> "plan" to null
             is EgoDecision.Noop -> "noop" to null
         }
         val summary = when (decision) {
-            is EgoDecision.ProposeAction ->
+            is EgoDecision.FormIntention ->
                 "Decision: $label — ${TextSecurity.preview(decision.summary, JOURNAL_SUMMARY_PREVIEW_CHARS)}"
             is EgoDecision.EnqueueThought ->
                 "Decision: $label — ${TextSecurity.preview(decision.content, JOURNAL_SUMMARY_PREVIEW_CHARS)}"
@@ -1036,5 +1467,159 @@ class Ego(
         const val JOURNAL_SUMMARY_PREVIEW_CHARS: Int = 160
         const val MAX_TRACKED_SESSIONS: Int = 32
         const val HEAP_SNAPSHOT_INTERVAL: Int = 5
+    }
+
+    private fun emitThreadUpdate(
+        thread: CognitiveThread,
+        rootInputId: String?,
+        reason: String,
+    ) {
+        val snapshot = cognitiveThreads.snapshot(rootInputId, thread.conversationContext)
+        instrumentation.emit(
+            AgentEvent(
+                type = "cognitive_thread_updated",
+                data = mapOf(
+                    "thread_id" to thread.id,
+                    "thread_kind" to thread.kind.name.lowercase(),
+                    "thread_status" to thread.status.name.lowercase(),
+                    "root_input_id" to rootInputId,
+                    "goal_id" to thread.goalId,
+                    "policy_scope_id" to thread.securityContext.policyScope.id,
+                    "reason" to reason,
+                    "thread_snapshot" to snapshot,
+                )
+            )
+        )
+    }
+
+    private fun emitOpportunityEnqueued(
+        opportunity: Opportunity,
+        rootInputId: String?,
+        source: String,
+    ) {
+        instrumentation.emit(
+            AgentEvent(
+                type = "opportunity_enqueued",
+                data = mapOf(
+                    "opportunity_id" to opportunity.id,
+                    "thread_id" to opportunity.cognitiveThreadId,
+                    "opportunity_kind" to opportunity.kind.name.lowercase(),
+                    "summary" to opportunity.summary,
+                    "root_input_id" to rootInputId,
+                    "source" to source,
+                    "allowed_intentions" to opportunity.allowedIntentions.map { it.name.lowercase() },
+                    "allowed_commit_modes" to opportunity.allowedCommitModes.map { it.name.lowercase() },
+                    "available_actions" to opportunity.availableActions.map { it.id }.sorted(),
+                    "dispatchable_actions" to opportunity.dispatchableActions.map { it.id }.sorted(),
+                    "opportunity_metadata" to opportunity.metadata,
+                    "thread_snapshot" to cognitiveThreads.snapshot(rootInputId, opportunity.conversationContext),
+                )
+            )
+        )
+    }
+
+    private fun shapeOpportunityContract(
+        opportunity: Opportunity,
+        rootInputId: String?,
+        conversationContext: ConversationContext,
+    ): Opportunity {
+        val sessionId = resolveSessionId(conversationContext)
+        val disabled = deliberation.disabledActionTypes(rootInputId, sessionId)
+        val threadSecurityContext = deliberation.threadSecurityContext(rootInputId, conversationContext)
+        val plannerDescriptors = motorCortex.plannerDescriptors()
+            .filter { descriptor ->
+                descriptor.allowedInstructionTrust.contains(conversationContext.security.instructionTrust) &&
+                    descriptor.allowedArgumentDataTrust.contains(threadSecurityContext.aggregatedDataTrust)
+            }
+        val shapedActionSurface = CognitivePolicyShaper.shapePlannerActions(
+            conversationContext = conversationContext,
+            threadSecurityContext = threadSecurityContext,
+            descriptors = plannerDescriptors,
+            disabledActions = disabled,
+        )
+        val shaped = CognitivePolicyShaper.shapeOpportunityContract(
+            opportunity = opportunity,
+            plannerActionSurface = shapedActionSurface,
+            implementedAvailableActions = motorCortex.actionRegistry().dispatchableActionTypes(),
+            implementedDispatchableActions = motorCortex.actionRegistry().dispatchableActionTypes(),
+        )
+        cognitiveThreads.recordOpportunity(rootInputId, conversationContext, shaped)
+        return shaped
+    }
+
+    private fun emitThreadUpdateForRoot(
+        rootInputId: String?,
+        conversationContext: ConversationContext,
+        reason: String,
+    ) {
+        cognitiveThreads.thread(rootInputId, conversationContext)
+            ?.let { emitThreadUpdate(it, rootInputId, reason) }
+    }
+
+    private fun recordThreadIntentionTransition(
+        rootInputId: String?,
+        conversationContext: ConversationContext,
+        intentionId: String?,
+        kind: IntentionKind,
+        summary: String,
+        commitMode: CommitMode,
+        metadata: Map<String, String>,
+    ) {
+        val thread = cognitiveThreads.thread(rootInputId, conversationContext) ?: return
+        val intention = Intention(
+            id = intentionId ?: RootInputIds.next(),
+            cognitiveThreadId = thread.id,
+            kind = kind,
+            summary = summary,
+            createdAt = java.time.Instant.now(),
+            conversationContext = conversationContext,
+            commitMode = commitMode,
+            rootStimulusId = rootInputId,
+            goalId = thread.goalId,
+            goalRunId = thread.goalRunId,
+            metadata = metadata,
+        )
+        cognitiveThreads.recordIntention(rootInputId, conversationContext, intention)
+    }
+
+    private fun recordThreadBlocked(
+        rootInputId: String?,
+        conversationContext: ConversationContext,
+        reason: String?,
+        reasonCode: String?,
+    ) {
+        cognitiveThreads.markBlocked(rootInputId, conversationContext, reason, reasonCode)
+    }
+
+    private fun recordThreadDenied(
+        rootInputId: String?,
+        conversationContext: ConversationContext,
+        reason: String?,
+        reasonCode: String?,
+    ) {
+        cognitiveThreads.recordDenied(rootInputId, conversationContext, reason, reasonCode)
+    }
+
+    private fun recordThreadWaiting(
+        rootInputId: String?,
+        conversationContext: ConversationContext,
+        reason: String?,
+        resumeHint: String?,
+    ) {
+        cognitiveThreads.markWaiting(rootInputId, conversationContext, reason, resumeHint)
+    }
+
+    private fun resolveTerminalControlPlaneDenial(
+        rootInputId: String?,
+        conversationContext: ConversationContext,
+        reason: String?,
+        reasonCode: String?,
+    ) {
+        cognitiveThreads.markResolved(
+            rootInputId = rootInputId,
+            conversationContext = conversationContext,
+            reason = reasonCode ?: "approval_terminal_denied",
+            summary = reason,
+        )
     }
 }

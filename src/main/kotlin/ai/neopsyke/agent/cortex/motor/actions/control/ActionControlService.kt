@@ -66,6 +66,7 @@ interface ActionControlService {
     suspend fun authorizeStagedAction(
         stagedActionId: String,
         grantedBy: ConversationSecurityContext,
+        expectedActionHash: String? = null,
     ): ActionControlDecisionResult
 
     suspend fun denyStagedAction(
@@ -73,6 +74,7 @@ interface ActionControlService {
         deniedBy: ConversationSecurityContext,
         reason: String = "Denied from dashboard.",
         reasonCode: String? = null,
+        expectedActionHash: String? = null,
     ): ActionControlDecisionResult
 
     suspend fun processAutonomousStagedActions(limit: Int = 10): List<ActionControlDecisionResult.Executed>
@@ -120,6 +122,7 @@ object NoopActionControlService : ActionControlService {
     override suspend fun authorizeStagedAction(
         stagedActionId: String,
         grantedBy: ConversationSecurityContext,
+        expectedActionHash: String?,
     ): ActionControlDecisionResult =
         ActionControlDecisionResult.Refused(
             reason = "Action control is not configured.",
@@ -131,6 +134,7 @@ object NoopActionControlService : ActionControlService {
         deniedBy: ConversationSecurityContext,
         reason: String,
         reasonCode: String?,
+        expectedActionHash: String?,
     ): ActionControlDecisionResult =
         ActionControlDecisionResult.Refused(
             reason = "Action control is not configured.",
@@ -283,6 +287,7 @@ class LegacyCompatibleActionControlService(
     override suspend fun authorizeStagedAction(
         stagedActionId: String,
         grantedBy: ConversationSecurityContext,
+        expectedActionHash: String?,
     ): ActionControlDecisionResult =
         ActionControlDecisionResult.Refused(
             reason = "Legacy action control does not persist staged actions.",
@@ -294,6 +299,7 @@ class LegacyCompatibleActionControlService(
         deniedBy: ConversationSecurityContext,
         reason: String,
         reasonCode: String?,
+        expectedActionHash: String?,
     ): ActionControlDecisionResult =
         ActionControlDecisionResult.Refused(
             reason = "Legacy action control does not persist staged actions.",
@@ -417,6 +423,7 @@ class DefaultActionControlService(
     override suspend fun authorizeStagedAction(
         stagedActionId: String,
         grantedBy: ConversationSecurityContext,
+        expectedActionHash: String?,
     ): ActionControlDecisionResult {
         if (grantedBy.principal.role != PrincipalRole.OWNER &&
             grantedBy.principal.role != PrincipalRole.ADMIN_CONTROL
@@ -437,6 +444,12 @@ class DefaultActionControlService(
             return ActionControlDecisionResult.Refused(
                 reason = "Staged action '${staged.id}' is not awaiting authorization.",
                 reasonCode = "STAGED_ACTION_NOT_WAITING_AUTH",
+            )
+        }
+        if (!expectedActionHash.isNullOrBlank() && staged.actionHash != expectedActionHash) {
+            return ActionControlDecisionResult.Refused(
+                reason = "Staged action '${staged.id}' no longer matches the approved action identity.",
+                reasonCode = "STAGED_ACTION_HASH_MISMATCH",
             )
         }
         val authorization = store.saveAuthorization(
@@ -465,6 +478,7 @@ class DefaultActionControlService(
         deniedBy: ConversationSecurityContext,
         reason: String,
         reasonCode: String?,
+        expectedActionHash: String?,
     ): ActionControlDecisionResult {
         if (deniedBy.principal.role != PrincipalRole.OWNER &&
             deniedBy.principal.role != PrincipalRole.ADMIN_CONTROL
@@ -485,6 +499,12 @@ class DefaultActionControlService(
             return ActionControlDecisionResult.Refused(
                 reason = "Staged action '${staged.id}' is not pending authorization or autonomous execution.",
                 reasonCode = "STAGED_ACTION_NOT_DENYABLE",
+            )
+        }
+        if (!expectedActionHash.isNullOrBlank() && staged.actionHash != expectedActionHash) {
+            return ActionControlDecisionResult.Refused(
+                reason = "Staged action '${staged.id}' no longer matches the approved action identity.",
+                reasonCode = "STAGED_ACTION_HASH_MISMATCH",
             )
         }
         val cancelled = store.updateStagedAction(

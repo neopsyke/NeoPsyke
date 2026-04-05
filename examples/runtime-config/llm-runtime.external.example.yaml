@@ -30,6 +30,9 @@ cognitive_roles:
   memory_advisor:
     provider: google
     model: gemini-2.5-flash
+  approval_interpreter:
+    provider: openai
+    model: gpt-5-nano
 
 web_search:
   provider: google

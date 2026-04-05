@@ -7,14 +7,21 @@ import ai.neopsyke.agent.cortex.sensory.CognitiveSignal
 import ai.neopsyke.agent.cortex.sensory.RuntimeControlSignal
 import ai.neopsyke.agent.cortex.sensory.Signal
 import ai.neopsyke.agent.cortex.sensory.SignalSource
+import ai.neopsyke.agent.model.ChannelRef
+import ai.neopsyke.agent.model.ChannelSurface
 import ai.neopsyke.agent.model.ConversationContext
+import ai.neopsyke.agent.model.ConversationSecurityContext
 import ai.neopsyke.agent.model.ConversationSecurityContexts
 import ai.neopsyke.agent.model.Interlocutor
+import ai.neopsyke.agent.model.PolicyScope
+import ai.neopsyke.agent.model.PrincipalRef
+import ai.neopsyke.agent.model.PrincipalRole
 import ai.neopsyke.agent.model.Provenances
 import ai.neopsyke.agent.model.RootInputIds
 import ai.neopsyke.agent.model.StimulusEnvelope
 import ai.neopsyke.agent.model.StimulusFamily
 import ai.neopsyke.agent.model.StimulusTrustLevel
+import ai.neopsyke.agent.model.TransportClass
 import java.time.Instant
 
 private val logger = KotlinLogging.logger {}
@@ -119,17 +126,23 @@ class RecordingSignalSource(
             node.put("content", stimulus.content)
             node.put("received_at", stimulus.receivedAt.toString())
             node.put("trust_level", stimulus.trustLevel.name)
+            stimulus.correlationId?.let { node.put("correlation_id", it) }
+            stimulus.causationId?.let { node.put("causation_id", it) }
 
             val ctx = signalMapper.createObjectNode()
             ctx.put("session_id", stimulus.conversationContext.sessionId)
             ctx.put("interlocutor_id", stimulus.conversationContext.interlocutor.id)
             val sec = stimulus.conversationContext.security
             ctx.put("instruction_trust", sec.instructionTrust.name)
+            ctx.put("principal_id", sec.principal.id)
             ctx.put("principal_role", sec.principal.role.name)
+            sec.principal.label?.let { ctx.put("principal_label", it) }
             ctx.put("channel_provider", sec.channel.provider)
+            ctx.put("channel_id", sec.channel.channelId)
+            sec.channel.accountId?.let { ctx.put("channel_account_id", it) }
             ctx.put("channel_surface", sec.channel.surface.name)
             ctx.put("channel_transport", sec.channel.transport.name)
-            ctx.put("policy_scope_id", sec.policyScopeId)
+            ctx.put("policy_scope_id", sec.policyScope.id)
             node.set<ObjectNode>("conversation_context", ctx)
 
             val meta = signalMapper.createObjectNode()
@@ -151,31 +164,12 @@ class RecordingSignalSource(
                 ConversationContext.DEFAULT_SESSION_ID
             }
             val interlocutorId = ctxNode.path("interlocutor_id").asText().ifEmpty { source }
-            val instructionTrust = try {
-                ai.neopsyke.agent.model.InstructionTrust.valueOf(
-                    ctxNode.path("instruction_trust").asText()
-                )
-            } catch (_: Exception) {
-                ai.neopsyke.agent.model.InstructionTrust.TRUSTED_INSTRUCTION
-            }
-
-            // Reconstruct the security context faithfully from recorded fields.
-            val channelProvider = ctxNode.path("channel_provider").asText().ifEmpty { source }
-            val policyScopeId = ctxNode.path("policy_scope_id").asText().ifEmpty { "default" }
-            val security = when (instructionTrust) {
-                ai.neopsyke.agent.model.InstructionTrust.TRUSTED_INSTRUCTION ->
-                    ConversationSecurityContexts.ownerDirect(
-                        provider = channelProvider,
-                        channelId = sessionId,
-                        policyScopeId = policyScopeId,
-                    )
-                ai.neopsyke.agent.model.InstructionTrust.UNTRUSTED_INSTRUCTION ->
-                    ConversationSecurityContexts.internalAutomation(
-                        provider = channelProvider,
-                        channelId = sessionId,
-                        policyScopeId = policyScopeId,
-                    )
-            }
+            val security = deserializeSecurityContext(
+                ctxNode = ctxNode as? ObjectNode,
+                source = source,
+                sessionId = sessionId,
+                trustLevel = trustLevel,
+            )
 
             val metadata = buildMap {
                 val metaNode = node.path("metadata")
@@ -194,6 +188,8 @@ class RecordingSignalSource(
                 } catch (_: Exception) {
                     Instant.now()
                 },
+                correlationId = node.path("correlation_id").asText().ifEmpty { null },
+                causationId = node.path("causation_id").asText().ifEmpty { null },
                 conversationContext = ConversationContext(
                     sessionId = sessionId,
                     interlocutor = Interlocutor.named(interlocutorId),
@@ -207,6 +203,126 @@ class RecordingSignalSource(
                 ),
                 metadata = metadata,
             )
+        }
+
+        private fun deserializeSecurityContext(
+            ctxNode: ObjectNode?,
+            source: String,
+            sessionId: String,
+            trustLevel: StimulusTrustLevel,
+        ): ConversationSecurityContext {
+            if (ctxNode == null) {
+                return defaultSecurityFor(
+                    source = source,
+                    sessionId = sessionId,
+                    instructionTrustRaw = "",
+                    principalRoleRaw = "",
+                    trustLevel = trustLevel,
+                )
+            }
+
+            val instructionTrustRaw = ctxNode.path("instruction_trust").asText()
+            val principalRoleRaw = ctxNode.path("principal_role").asText()
+            val defaultSecurity = defaultSecurityFor(
+                source = source,
+                sessionId = sessionId,
+                instructionTrustRaw = instructionTrustRaw,
+                principalRoleRaw = principalRoleRaw,
+                trustLevel = trustLevel,
+            )
+
+            val instructionTrust = runCatching {
+                ai.neopsyke.agent.model.InstructionTrust.valueOf(instructionTrustRaw)
+            }.getOrElse { defaultSecurity.instructionTrust }
+            val principalRole = runCatching {
+                PrincipalRole.valueOf(principalRoleRaw)
+            }.getOrElse { defaultSecurity.principal.role }
+            val channelSurface = runCatching {
+                ChannelSurface.valueOf(ctxNode.path("channel_surface").asText())
+            }.getOrElse { defaultSecurity.channel.surface }
+            val channelTransport = runCatching {
+                TransportClass.valueOf(ctxNode.path("channel_transport").asText())
+            }.getOrElse { defaultSecurity.channel.transport }
+            val policyScope = runCatching {
+                PolicyScope.fromId(
+                    ctxNode.path("policy_scope_id").asText().ifEmpty { PolicyScope.DEFAULT.id }
+                )
+            }.getOrElse { defaultSecurity.policyScope }
+            val principalId = ctxNode.path("principal_id").asText().ifEmpty { defaultSecurity.principal.id }
+            val principalLabel = ctxNode.path("principal_label").asText().ifEmpty { defaultSecurity.principal.label }
+            val channelProvider = ctxNode.path("channel_provider").asText().ifEmpty { defaultSecurity.channel.provider }
+            val channelId = ctxNode.path("channel_id").asText().ifEmpty { defaultSecurity.channel.channelId }
+            val channelAccountId = ctxNode.path("channel_account_id").asText().ifEmpty { defaultSecurity.channel.accountId }
+
+            return ConversationSecurityContext(
+                principal = PrincipalRef(
+                    id = principalId,
+                    role = principalRole,
+                    label = principalLabel,
+                ),
+                channel = ChannelRef(
+                    provider = channelProvider,
+                    surface = channelSurface,
+                    transport = channelTransport,
+                    channelId = channelId,
+                    accountId = channelAccountId,
+                ),
+                instructionTrust = instructionTrust,
+                policyScope = policyScope,
+            )
+        }
+
+        private fun defaultSecurityFor(
+            source: String,
+            sessionId: String,
+            instructionTrustRaw: String,
+            principalRoleRaw: String,
+            trustLevel: StimulusTrustLevel,
+        ): ConversationSecurityContext {
+            val principalRole = runCatching {
+                PrincipalRole.valueOf(principalRoleRaw)
+            }.getOrElse {
+                when {
+                    instructionTrustRaw == ai.neopsyke.agent.model.InstructionTrust.UNTRUSTED_INSTRUCTION.name ->
+                        PrincipalRole.EXTERNAL_PARTICIPANT
+                    trustLevel == StimulusTrustLevel.TRUSTED_INTERNAL ->
+                        PrincipalRole.SYSTEM_INTERNAL
+                    else -> PrincipalRole.OWNER
+                }
+            }
+
+            return when (principalRole) {
+                PrincipalRole.EXTERNAL_PARTICIPANT,
+                PrincipalRole.UNAUTHENTICATED_EXTERNAL,
+                -> ConversationSecurityContexts.externalParticipant(
+                    provider = source,
+                    channelId = sessionId,
+                    policyScope = PolicyScope.DEFAULT,
+                )
+
+                PrincipalRole.SYSTEM_INTERNAL,
+                PrincipalRole.APPROVED_AUTOMATION,
+                -> ConversationSecurityContexts.internalAutomation(
+                    provider = source,
+                    channelId = sessionId,
+                    principalId = source,
+                    policyScope = PolicyScope.DEFAULT,
+                )
+
+                PrincipalRole.ADMIN_CONTROL ->
+                    ConversationSecurityContexts.adminControl(
+                        provider = source,
+                        channelId = sessionId,
+                        policyScope = PolicyScope.DEFAULT,
+                    )
+
+                PrincipalRole.OWNER ->
+                    ConversationSecurityContexts.ownerDirect(
+                        provider = source,
+                        channelId = sessionId,
+                        policyScope = PolicyScope.DEFAULT,
+                    )
+            }
         }
     }
 }

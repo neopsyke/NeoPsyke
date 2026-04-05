@@ -2,7 +2,7 @@
 
 > Status: In progress
 >
-> Last reviewed: 2026-03-24
+> Last reviewed: 2026-04-03
 >
 > Purpose: Track remaining security work across all areas: connector trust,
 > credential management, policy hardening, operator visibility, and future
@@ -28,8 +28,8 @@ These are already decided and should not be reopened casually:
    closed.
 7. Connector outputs are external/untrusted by default unless NeoPsyke
    explicitly sanitizes and classifies them.
-8. Secret injection uses explicit handles only; no ambient `System.getenv()`
-   passthrough to connector processes.
+8. Connector subprocesses get an explicit environment: minimal runtime vars plus
+   declared secret handles only; no ambient `System.getenv()` passthrough.
 9. Workflow examples (Morning Briefing, Inbox Management) are goal compositions,
    not special workflow actions.
 10. Policy YAML is trusted operator configuration. The agent must not have write
@@ -123,20 +123,47 @@ These are already decided and should not be reopened casually:
   checked against trust policy.
 - Cannot rely on plugin-local discipline alone.
 
-### 4.5 Full IntentionKind/CommitMode split
+### 4.5 Keep the IntentionKind/CommitMode split aligned (implemented)
 
-- The strategy spec proposed a richer intention model (`OBSERVE`, `PREPARE`,
-  `STAGE`, `REQUEST_AUTHORIZATION`, `COMMIT`, `DEFER`) with separate
-  `CommitMode` (`APPROVAL_BACKED`, `POLICY_AUTONOMOUS`, `ADMIN_OVERRIDE`).
-- Currently partially implemented. Full implementation would allow more
-  fine-grained loop behavior and cleaner lifecycle progression.
+The richer intention model (`OBSERVE`, `PREPARE`, `STAGE`,
+`REQUEST_AUTHORIZATION`, `COMMIT`, `DEFER`) and separate `CommitMode`
+(`APPROVAL_BACKED`, `POLICY_AUTONOMOUS`, `ADMIN_OVERRIDE`) are now live in
+the runtime. `PolicyScope` is a typed enum (`DEFAULT`, `DEPLOYMENT_RESTRICTED`,
+`FULL_AUTONOMY`) configurable via YAML and env var.
 
-### 4.6 Finer policy scoping
+Remaining work: keep future actions, policy rules, operator UX, and tests
+aligned with that split so new capability families do not collapse back into
+action-type-specific workflow aliases.
 
-- The strategy spec proposed layered policy: global runtime, deployment,
-  channel, principal, action, and emergency override.
-- Current implementation supports global + per-action policy.
-- Channel and principal scoping would enable team/shared deployments.
+### 4.6 Policy scoping (implemented)
+
+Channel, principal, action, and full-autonomy policy shaping are operational.
+Deployment scope is a placeholder for future non-local deployments.
+See `docs/security.md` section 4.5 for full policy scope documentation.
+
+### 4.7 Cognitive runtime security (implemented)
+
+The cognitive runtime migration is complete. The following security-relevant
+stages are live runtime objects, not just type definitions:
+
+- `Percept`: normalizes trust/data/control semantics before cognition
+- `CognitiveThread`: owns live security frame, trust degradation, taint tracking
+- `Opportunity`: policy-shaped admissible moves pruned before Ego chooses
+- `Intention`: explicit lifecycle object separating intent from commit mode
+- Feedback re-entry: action outcomes re-enter as typed stimuli through
+  `SensoryCortex` for thread-aware cognitive processing
+- Scratchpad layering: thread-scoped context persists across suspension;
+  intention-scoped drafts are ephemeral
+
+Remaining cognitive-runtime gaps (not yet blocking, future work):
+
+- Feedback re-entry is not fully uniform: fallback-bypass and autonomous-worker
+  paths still update deliberation state directly without emitting feedback
+  stimuli through SensoryCortex.
+- Concurrency boundary: preparation is not yet parallelized; execution remains
+  mostly centralized.
+- Goal-thread continuity: goal work uses thread continuations but still enters
+  via a separate queue branch rather than fully unified thread orchestration.
 
 ---
 
@@ -231,7 +258,7 @@ not generalized yet.
 ### 8.3 Future plugin-host tests
 
 - Mutated connector metadata.
-- Connector attempts env access outside secret handles.
+- Connector attempts env access outside declared secret handles.
 - Connector returns prompt-injecting payload.
 
 ---
@@ -252,7 +279,21 @@ These require a separate security review before implementation.
 
 ---
 
-## 10. Open Questions
+## 10. Code Quality: Hardcoded Provider and Telemetry Strings
+
+The `"stdin"`, `"webapp"`, `"id"` provider strings and the Ego telemetry keys
+are scattered as bare string literals. These predate the cognitive-security
+refactor and are not policy/security logic, but should be extracted to named
+constants for consistency with the `CognitiveCueMetadata` pattern.
+
+- `SensoryCortex.kt`: `"stdin"`, `"stdin-user"` repeated
+- `ChatRuntimeBridge.kt`, `DashboardServer.kt`: `"webapp"` repeated
+- `Ego.kt`: `"id"` source, 20+ event metadata key literals
+- `AppModeRunners.kt`: `"freud-live"` provider
+
+---
+
+## 11. Open Questions
 
 1. When to move from encrypted local token files to OS keychain-backed storage
    for all long-lived credentials.
@@ -267,13 +308,15 @@ These require a separate security review before implementation.
 
 ---
 
-## 11. Guardrails for Future Work
+## 12. Guardrails for Future Work
 
 When continuing this work:
 
 - Do not treat raw MCP compatibility as trust.
 - Do not expose raw MCP tool names directly to the planner.
-- Do not let connectors define approval/autonomy policy.
+- Do not let connectors define approval/autonomy policy. Connector manifests may
+  describe effect class and trust bounds, but runtime-owned policy must decide
+  commit/autonomy behavior.
 - Do not widen outbound authority before stronger deterministic payload and
   approval UX exists.
 - Do not add high-risk capability families without a fresh security review.

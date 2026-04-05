@@ -20,10 +20,12 @@ the LLM routing profile (low-llm for cheap models, high-llm for production).`,
 }
 
 var (
-	bbhLane     string
-	bbhTimeout  int
-	bbhBaseline string
-	bbhLive     bool
+	bbhLane          string
+	bbhTimeout       int
+	bbhBaseline      string
+	bbhLive          bool
+	bbhRecord        bool
+	bbhSessionReplay string
 )
 
 func init() {
@@ -33,6 +35,8 @@ func init() {
 	bbhCmd.Flags().IntVar(&bbhTimeout, "timeout", 0, "override live_eval.timeout (seconds)")
 	bbhCmd.Flags().StringVar(&bbhBaseline, "baseline", "", "regression baseline file")
 	bbhCmd.Flags().BoolVar(&bbhLive, "live", false, "allow provider-backed execution (may spend tokens)")
+	bbhCmd.Flags().BoolVar(&bbhRecord, "record", false, "record per-case replay artifacts for later BBH replay/debugging")
+	bbhCmd.Flags().StringVar(&bbhSessionReplay, "session-replay", "", "replay a recorded BBH run directory")
 
 	_ = bbhCmd.MarkFlagRequired("lane")
 }
@@ -48,8 +52,10 @@ func runBBH(cmd *cobra.Command, args []string) error {
 	}
 
 	errs := config.Validate(cfg, "bbh", &config.ValidationOpts{
-		Live:   bbhLive,
-		DryRun: dryRun,
+		Live:             bbhLive,
+		DryRun:           dryRun,
+		Record:           bbhRecord,
+		SessionReplayDir: bbhSessionReplay,
 	})
 	if len(errs) > 0 {
 		msgs := make([]string, len(errs))
@@ -79,6 +85,8 @@ func runBBH(cmd *cobra.Command, args []string) error {
 		MaxTimeouts:          cfg.BBH.MaxTimeouts,
 		MaxRegressionPercent: cfg.BBH.MaxRegressionPercent,
 		BaselineFile:         bbhBaseline,
+		Record:               bbhRecord,
+		SessionReplayDir:     bbhSessionReplay,
 		PreserveMemory:       cfg.BBH.PreserveMemory,
 		MemoryEnabled:        cfg.BBH.MemoryEnabled,
 		LogbookEnabled:       cfg.BBH.LogbookEnabled,

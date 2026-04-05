@@ -103,6 +103,32 @@ class GoalManagerTest {
     }
 
     @Test
+    fun `nextWorkFromCue reuses stable root input id for the same goal step`() {
+        val root = Files.createTempDirectory("psyke-pm-stable-root")
+        try {
+            val manager = GoalManager(
+                config = testConfig(root),
+                store = GoalStore(root),
+                planner = DeterministicGoalPlanner(),
+            )
+            manager.start(testScope())
+            val id = manager.createGoal("Persistent task")
+
+            val first = manager.nextWorkFromCue(GoalRuntimeCue(id, "step-1", "test"))
+            val second = manager.nextWorkFromCue(GoalRuntimeCue(id, "step-1", "resume"))
+
+            assertNotNull(first)
+            assertNotNull(second)
+            assertEquals(first.rootInputId, second.rootInputId)
+            assertEquals("goal:$id:step-1", first.rootInputId)
+
+            manager.stop()
+        } finally {
+            root.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
     fun `goal-origin action outcome completes final step and goal`() {
         val root = Files.createTempDirectory("psyke-pm-complete")
         try {

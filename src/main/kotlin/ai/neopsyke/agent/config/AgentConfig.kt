@@ -1,15 +1,19 @@
 package ai.neopsyke.agent.config
 
 import ai.neopsyke.agent.goal.GoalConfig
+import ai.neopsyke.agent.model.PolicyScope
 import ai.neopsyke.dashboard.InnerVoiceConfig
 
 data class AgentConfig(
+    /** Top-level policy scope applied to all channels unless overridden per-channel. */
+    val policyScope: PolicyScope = PolicyScope.DEFAULT,
     val planner: PlannerConfig = PlannerConfig(),
     val superego: SuperegoConfig = SuperegoConfig(),
     val memory: MemoryConfig = MemoryConfig(),
     val metaReasoner: MetaReasonerConfig = MetaReasonerConfig(),
     val logbook: LogbookConfig = LogbookConfig(),
     val actionControl: ActionControlConfig = ActionControlConfig(),
+    val approvals: ApprovalRuntimeConfig = ApprovalRuntimeConfig(),
     val connectors: ConnectorRuntimeConfig = ConnectorRuntimeConfig(),
     val builtinTools: BuiltinToolsConfig = BuiltinToolsConfig(),
     val nativeIntegrations: NativeIntegrationsConfig = NativeIntegrationsConfig(),

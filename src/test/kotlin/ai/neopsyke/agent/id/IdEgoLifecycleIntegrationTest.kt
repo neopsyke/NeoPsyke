@@ -14,6 +14,7 @@ import ai.neopsyke.agent.config.AgentConfig
 import ai.neopsyke.agent.model.ConversationContext
 import ai.neopsyke.agent.model.EgoDecision
 import ai.neopsyke.agent.model.EgoTrigger
+import ai.neopsyke.agent.model.IntentionKind
 import ai.neopsyke.agent.model.OriginSource
 import ai.neopsyke.agent.model.ActionEffect
 import ai.neopsyke.agent.model.PendingImpulse
@@ -38,6 +39,7 @@ class IdEgoLifecycleIntegrationTest {
     @Test
     fun `impulse lifecycle waits for all branches and keeps id origin in downstream thoughts and actions`() {
         val instrumentation = RecordingInstrumentation()
+        var followUpFeedbackOrigin: OriginSource? = null
         val planner = object : Ego.Planner {
             override fun decide(trigger: EgoTrigger, context: PlannerContext): EgoDecision =
                 when (trigger) {
@@ -47,15 +49,22 @@ class IdEgoLifecycleIntegrationTest {
                         goal = "Evaluate two branches",
                         steps = listOf("noop branch", "search branch")
                     )
+                    is EgoTrigger.ActionFeedback -> {
+                        if (trigger.feedback.cue.actionType == ActionType.WEB_SEARCH) {
+                            followUpFeedbackOrigin = trigger.feedback.cue.origin.source
+                        }
+                        EgoDecision.Noop("search completed")
+                    }
                     is EgoTrigger.GoalWork -> EgoDecision.Noop("ignore goal work in test")
-                    is EgoTrigger.PendingThoughtInput -> decisionForThought(trigger.thought)
+                    is EgoTrigger.DeferredIntention -> decisionForThought(trigger.intention.toPendingThought())
                 }
 
             private fun decisionForThought(thought: PendingThought): EgoDecision =
                 when {
                     thought.planContext?.stepIndex == 0 -> EgoDecision.Noop("drop this branch")
-                    thought.planContext?.stepIndex == 1 -> EgoDecision.ProposeAction(
+                    thought.planContext?.stepIndex == 1 -> EgoDecision.FormIntention(
                         urgency = Urgency.HIGH,
+                        intentionKind = IntentionKind.OBSERVE,
                         actionType = ActionType.WEB_SEARCH,
                         payload = "official pricing",
                         summary = "search for pricing"
@@ -129,14 +138,7 @@ class IdEgoLifecycleIntegrationTest {
         assertNotNull(idOriginAction, "Expected a WEB_SEARCH action for the impulse root")
         assertEquals(OriginSource.ID, idOriginAction.origin.source)
 
-        val followUpThought = instrumentation.events
-            .mapNotNull { it.data["thought"] as? PendingThought }
-            .firstOrNull {
-                it.rootInputId == rootImpulseId &&
-                    it.originActionType == ActionType.WEB_SEARCH
-            }
-        assertNotNull(followUpThought, "Expected follow-up thought from WEB_SEARCH branch")
-        assertEquals(OriginSource.ID, followUpThought.origin.source)
+        assertEquals(OriginSource.ID, followUpFeedbackOrigin, "Expected WEB_SEARCH feedback trigger to preserve ID origin")
     }
 
     @Test
@@ -153,15 +155,15 @@ class IdEgoLifecycleIntegrationTest {
             override fun decide(trigger: EgoTrigger, context: PlannerContext): EgoDecision =
                 when (trigger) {
                     is EgoTrigger.IncomingInput -> EgoDecision.Noop("ignore user test input")
-                    is EgoTrigger.IncomingImpulse -> EgoDecision.ProposeAction(
+                    is EgoTrigger.IncomingImpulse -> EgoDecision.FormIntention(
                         urgency = Urgency.MEDIUM,
+                        intentionKind = IntentionKind.OBSERVE,
                         actionType = ActionType.WEB_SEARCH,
                         payload = "emerging learning topics",
                         summary = "gather evidence"
                     )
-                    is EgoTrigger.GoalWork -> EgoDecision.Noop("ignore goal work in test")
-                    is EgoTrigger.PendingThoughtInput -> {
-                        if (trigger.thought.originActionType == ActionType.WEB_SEARCH) {
+                    is EgoTrigger.ActionFeedback -> {
+                        if (trigger.feedback.cue.actionType == ActionType.WEB_SEARCH) {
                             followUpHasReflectInternalAvailable = ActionType.REFLECT_INTERNAL in context.availableActions
                             followUpHasContactDispatchable = ActionType.CONTACT_USER in context.dispatchableActions
                             followUpHasReflectInternalDispatchable = ActionType.REFLECT_INTERNAL in context.dispatchableActions
@@ -171,6 +173,10 @@ class IdEgoLifecycleIntegrationTest {
                             }
                             followUpConvergence = context.idState?.convergence
                         }
+                        EgoDecision.Noop("done")
+                    }
+                    is EgoTrigger.GoalWork -> EgoDecision.Noop("ignore goal work in test")
+                    is EgoTrigger.DeferredIntention -> {
                         EgoDecision.Noop("done")
                     }
                 }
@@ -252,9 +258,10 @@ class IdEgoLifecycleIntegrationTest {
                         goal = "learn",
                         steps = listOf("collect insight")
                     )
+                    is EgoTrigger.ActionFeedback -> EgoDecision.Noop("ignore feedback in test")
                     is EgoTrigger.GoalWork -> EgoDecision.Noop("ignore goal work in test")
-                    is EgoTrigger.PendingThoughtInput -> {
-                        if (trigger.thought.planContext != null) {
+                    is EgoTrigger.DeferredIntention -> {
+                        if (trigger.intention.deferredPlanContext != null) {
                             planStepHasReflectInternalAvailable = ActionType.REFLECT_INTERNAL in context.availableActions
                             planStepHasContactDispatchable = ActionType.CONTACT_USER in context.dispatchableActions
                             planStepHasReflectInternalDispatchable = ActionType.REFLECT_INTERNAL in context.dispatchableActions
@@ -354,11 +361,13 @@ class IdEgoLifecycleIntegrationTest {
                         goal = "Learn and remember one thing",
                         steps = listOf("Record a trusted lesson", "Run redundant leftover step")
                     )
+                    is EgoTrigger.ActionFeedback -> EgoDecision.Noop("ignore feedback in test")
                     is EgoTrigger.GoalWork -> EgoDecision.Noop("ignore goal work in test")
-                    is EgoTrigger.PendingThoughtInput ->
-                        when (trigger.thought.planContext?.stepIndex) {
-                            0 -> EgoDecision.ProposeAction(
+                    is EgoTrigger.DeferredIntention ->
+                        when (trigger.intention.deferredPlanContext?.stepIndex) {
+                            0 -> EgoDecision.FormIntention(
                                 urgency = Urgency.MEDIUM,
+                                intentionKind = IntentionKind.OBSERVE,
                                 actionType = ActionType.REFLECT_INTERNAL,
                                 payload = """{"summary":"Remember this useful lesson","keywords":["lesson"]}""",
                                 summary = "Record trusted lesson"
@@ -459,8 +468,9 @@ class IdEgoLifecycleIntegrationTest {
                 when (trigger) {
                     is EgoTrigger.IncomingInput -> EgoDecision.Noop("ignore user test input")
                     is EgoTrigger.IncomingImpulse -> EgoDecision.Noop("no useful action available")
+                    is EgoTrigger.ActionFeedback -> EgoDecision.Noop("ignore feedback in test")
                     is EgoTrigger.GoalWork -> EgoDecision.Noop("ignore goal work in test")
-                    is EgoTrigger.PendingThoughtInput -> EgoDecision.Noop("done")
+                    is EgoTrigger.DeferredIntention -> EgoDecision.Noop("done")
                 }
         }
         val config = AgentConfig(
@@ -522,14 +532,16 @@ class IdEgoLifecycleIntegrationTest {
             override fun decide(trigger: EgoTrigger, context: PlannerContext): EgoDecision =
                 when (trigger) {
                     is EgoTrigger.IncomingInput -> EgoDecision.Noop("ignore user test input")
-                    is EgoTrigger.IncomingImpulse -> EgoDecision.ProposeAction(
+                    is EgoTrigger.IncomingImpulse -> EgoDecision.FormIntention(
                         urgency = Urgency.MEDIUM,
+                        intentionKind = IntentionKind.OBSERVE,
                         actionType = ActionType.REFLECT_INTERNAL,
                         payload = """{"summary":"I learned something durable","keywords":["learning"]}""",
                         summary = "persist insight"
                     )
+                    is EgoTrigger.ActionFeedback -> EgoDecision.Noop("ignore feedback in test")
                     is EgoTrigger.GoalWork -> EgoDecision.Noop("ignore goal work in test")
-                    is EgoTrigger.PendingThoughtInput -> EgoDecision.Noop("done")
+                    is EgoTrigger.DeferredIntention -> EgoDecision.Noop("done")
                 }
         }
         val config = AgentConfig(
@@ -599,14 +611,16 @@ class IdEgoLifecycleIntegrationTest {
             override fun decide(trigger: EgoTrigger, context: PlannerContext): EgoDecision =
                 when (trigger) {
                     is EgoTrigger.IncomingInput -> EgoDecision.Noop("ignore user test input")
-                    is EgoTrigger.IncomingImpulse -> EgoDecision.ProposeAction(
+                    is EgoTrigger.IncomingImpulse -> EgoDecision.FormIntention(
                         urgency = Urgency.MEDIUM,
+                        intentionKind = IntentionKind.OBSERVE,
                         actionType = ActionType.WEB_SEARCH,
                         payload = "interesting new topic",
                         summary = "gather evidence"
                     )
+                    is EgoTrigger.ActionFeedback -> EgoDecision.Noop("ignore feedback in test")
                     is EgoTrigger.GoalWork -> EgoDecision.Noop("ignore goal work in test")
-                    is EgoTrigger.PendingThoughtInput -> EgoDecision.Noop("done")
+                    is EgoTrigger.DeferredIntention -> EgoDecision.Noop("done")
                 }
         }
         val config = AgentConfig(

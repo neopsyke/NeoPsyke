@@ -45,7 +45,7 @@ class DeliberationProgressMonitor(
         rememberSignature(signature)
 
         when (decision) {
-            is EgoDecision.ProposeAction -> {
+            is EgoDecision.FormIntention -> {
                 staleStreak = max(0, staleStreak - 1)
                 progressScore += 0.07
                 noopStreak = 0
@@ -147,8 +147,9 @@ class DeliberationProgressMonitor(
                 "thought:${normalize(decision.content)}"
             }
 
-            is EgoDecision.ProposeAction -> {
-                "action:${decision.actionType.name.lowercase()}:${normalize(decision.payload)}"
+            is EgoDecision.FormIntention -> {
+                "intention:${decision.intentionKind.name.lowercase()}:" +
+                    "${decision.actionType.name.lowercase()}:${normalize(decision.payload)}"
             }
 
             is EgoDecision.EnqueuePlan -> {

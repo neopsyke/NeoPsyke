@@ -4,6 +4,7 @@ import mu.KotlinLogging
 import ai.neopsyke.agent.cortex.motor.actions.control.ActionControlDecisionResult
 import ai.neopsyke.agent.cortex.motor.actions.control.ActionControlService
 import ai.neopsyke.agent.cortex.motor.actions.control.LegacyCompatibleActionControlService
+import ai.neopsyke.agent.cortex.sensory.ActionFeedbackCue
 import ai.neopsyke.agent.config.*
 import ai.neopsyke.agent.id.evaluateSatisfaction
 import ai.neopsyke.agent.model.*
@@ -11,13 +12,13 @@ import ai.neopsyke.agent.cortex.motor.MotorCortex
 import ai.neopsyke.agent.cortex.motor.actions.ActionCapability
 import ai.neopsyke.agent.memory.longterm.MemoryEventType
 import ai.neopsyke.agent.memory.scratchpad.ScratchpadStore
-import ai.neopsyke.agent.support.PromptInjectionDefense
 import ai.neopsyke.agent.support.TextSecurity
 import ai.neopsyke.agent.superego.Superego
 import ai.neopsyke.instrumentation.AgentEvent
 import ai.neopsyke.instrumentation.AgentEvents
 import ai.neopsyke.instrumentation.AgentInstrumentation
 import ai.neopsyke.instrumentation.PhaseTimingCollector
+import java.time.Instant
 
 private val logger = KotlinLogging.logger {}
 
@@ -41,10 +42,21 @@ internal class ActionReviewPipeline(
     private val cleanupResolvedInputAfterAnswer: (PendingAction) -> Unit,
     private val cleanupSatisfiedIdImpulse: (PendingAction) -> Unit,
     private val getId: () -> ai.neopsyke.agent.id.Id?,
+    private val recordThreadIntention: (String?, ConversationContext, String?, IntentionKind, String, CommitMode, Map<String, String>) -> Unit =
+        { _, _, _, _, _, _, _ -> },
+    private val recordThreadBlocked: (String?, ConversationContext, String?, String?) -> Unit = { _, _, _, _ -> },
+    private val recordThreadDenied: (String?, ConversationContext, String?, String?) -> Unit = { _, _, _, _ -> },
+    private val resolveTerminalControlPlaneDenial: (String?, ConversationContext, String?, String?) -> Unit =
+        { _, _, _, _ -> },
+    private val recordThreadWaiting: (String?, ConversationContext, String?, String?) -> Unit = { _, _, _, _ -> },
+    private val emitThreadUpdate: (String?, ConversationContext, String) -> Unit = { _, _, _ -> },
+    private val onApprovalStaged: suspend (PendingAction, StagedAction, String, String?, ConversationContext) -> Unit =
+        { _, _, _, _, _ -> },
     private val actionControlService: ActionControlService = LegacyCompatibleActionControlService { action, authorization ->
         motorCortex.execute(action, config.searchResultCount, authorization)
     },
     private val actionLifecycleObserver: ActionLifecycleObserver = NoopActionLifecycleObserver,
+    private val emitActionFeedback: (ActionFeedbackCue) -> Boolean = { false },
 ) {
     suspend fun reviewAndExecute(action: PendingAction) {
         val timing = PhaseTimingCollector("action", action.rootInputId)
@@ -56,6 +68,12 @@ internal class ActionReviewPipeline(
         timing.startPhase("scratchpad_final_pass")
         val resolvedAction = applyScratchpadFinalPass(action, sessionId)
         instrumentation.emit(AgentEvents.actionReviewRequested(resolvedAction))
+        emitIntentionTransition(
+            action = resolvedAction,
+            stage = "review_requested",
+            kind = resolvedAction.intentionKind,
+            commitMode = resolvedAction.requestedCommitMode,
+        )
         if (resolvedAction.isFallbackExplanation) {
             executeFallbackBypass(resolvedAction, sessionId, convCtx, timing)
             return
@@ -80,6 +98,13 @@ internal class ActionReviewPipeline(
             )
         ) {
             is ActionControlDecisionResult.Refused -> {
+                recordThreadDenied(
+                    resolvedAction.rootInputId,
+                    convCtx,
+                    controlResult.reason,
+                    controlResult.reasonCode,
+                )
+                emitThreadUpdate(resolvedAction.rootInputId, convCtx, "action_refused")
                 actionControlService.recordLedgerEntry(
                     action = resolvedAction,
                     conversationContext = convCtx,
@@ -121,7 +146,21 @@ internal class ActionReviewPipeline(
                         )
                     )
                 )
+                emitIntentionTransition(
+                    action = resolvedAction,
+                    stage = "staged",
+                    kind = IntentionKind.STAGE,
+                    commitMode = controlResult.authorizationDecision.commitMode,
+                    extras = mapOf("staged_action_id" to controlResult.stagedAction.id)
+                )
                 if (controlResult.stagedAction.commitMode == CommitMode.POLICY_AUTONOMOUS) {
+                    recordThreadWaiting(
+                        resolvedAction.rootInputId,
+                        convCtx,
+                        controlResult.authorizationDecision.reason,
+                        controlResult.stagedAction.id,
+                    )
+                    emitThreadUpdate(resolvedAction.rootInputId, convCtx, "action_staged_waiting")
                     instrumentation.emit(
                         AgentEvents.warning(
                             "Action '${resolvedAction.type.id}' was queued for autonomous staged execution."
@@ -130,19 +169,39 @@ internal class ActionReviewPipeline(
                     instrumentation.emit(AgentEvents.phaseTimings(timing.build()))
                     return
                 }
-                fallbackHandler.handleStagedAction(
+                emitIntentionTransition(
                     action = resolvedAction,
-                    stagedAction = controlResult.stagedAction,
-                    reason = controlResult.authorizationDecision.reason,
-                    reasonCode = controlResult.authorizationDecision.reasonCode,
-                    conversationContext = convCtx,
-                    source = "action_control"
+                    stage = "request_authorization",
+                    kind = IntentionKind.REQUEST_AUTHORIZATION,
+                    commitMode = controlResult.authorizationDecision.commitMode,
+                    extras = mapOf("staged_action_id" to controlResult.stagedAction.id)
+                )
+                recordThreadBlocked(
+                    resolvedAction.rootInputId,
+                    convCtx,
+                    controlResult.authorizationDecision.reason,
+                    controlResult.authorizationDecision.reasonCode,
+                )
+                emitThreadUpdate(resolvedAction.rootInputId, convCtx, "action_staged_blocked")
+                onApprovalStaged(
+                    resolvedAction,
+                    controlResult.stagedAction,
+                    controlResult.authorizationDecision.reason,
+                    controlResult.authorizationDecision.reasonCode,
+                    convCtx,
                 )
                 instrumentation.emit(AgentEvents.phaseTimings(timing.build()))
                 return
             }
 
             is ActionControlDecisionResult.Cancelled -> {
+                recordThreadDenied(
+                    resolvedAction.rootInputId,
+                    convCtx,
+                    controlResult.ledgerEntry.summary,
+                    controlResult.ledgerEntry.reasonCode,
+                )
+                emitThreadUpdate(resolvedAction.rootInputId, convCtx, "action_cancelled")
                 actionLifecycleObserver.onActionBlocked(
                     action = resolvedAction,
                     reason = controlResult.ledgerEntry.summary,
@@ -179,6 +238,50 @@ internal class ActionReviewPipeline(
         return executed.size
     }
 
+    fun processExternalApprovalExecuted(controlResult: ActionControlDecisionResult.Executed) {
+        val timing = PhaseTimingCollector("external_action_control", controlResult.stagedAction.rootInputId)
+        timing.startPhase("external_action_execute")
+        processExecutedControlResult(controlResult, timing)
+    }
+
+    fun processExternalApprovalDenied(controlResult: ActionControlDecisionResult.Cancelled) {
+        val action = controlResult.stagedAction.toPipelinePendingAction()
+        val convCtx = action.conversationContext
+        val sessionId = resolveSessionId(convCtx)
+        val reasonCode = controlResult.ledgerEntry.reasonCode
+        recordThreadDenied(
+            action.rootInputId,
+            convCtx,
+            controlResult.ledgerEntry.summary,
+            reasonCode,
+        )
+        emitThreadUpdate(action.rootInputId, convCtx, "external_action_cancelled")
+        actionLifecycleObserver.onActionBlocked(
+            action = action,
+            reason = controlResult.ledgerEntry.summary,
+            reasonCode = reasonCode,
+            source = "external_action_control_cancelled"
+        )
+        if (reasonCode in CONTROL_PLANE_TERMINAL_DENIAL_CODES) {
+            resolveTerminalControlPlaneDenial(
+                action.rootInputId,
+                convCtx,
+                controlResult.ledgerEntry.summary,
+                reasonCode,
+            )
+            emitThreadUpdate(action.rootInputId, convCtx, "external_action_terminal_denied")
+            return
+        }
+        fallbackHandler.handleDeniedAction(
+            action = action,
+            reason = controlResult.ledgerEntry.summary,
+            reasonCode = reasonCode,
+            conversationContext = convCtx,
+            sessionId = sessionId,
+            source = "external_action_control_cancelled"
+        )
+    }
+
     private fun processExecutedControlResult(
         controlResult: ActionControlDecisionResult.Executed,
         timing: PhaseTimingCollector,
@@ -187,6 +290,21 @@ internal class ActionReviewPipeline(
         val convCtx = resolvedAction.conversationContext
         val sessionId = resolveSessionId(convCtx)
         val outcome = controlResult.outcome
+        emitIntentionTransition(
+            action = resolvedAction,
+            stage = "commit",
+            kind = if (resolvedAction.intentionKind == IntentionKind.OBSERVE) {
+                IntentionKind.OBSERVE
+            } else {
+                IntentionKind.COMMIT
+            },
+            commitMode = controlResult.authorization.commitMode,
+            extras = mapOf(
+                "staged_action_id" to controlResult.stagedAction.id,
+                "authorization_id" to controlResult.authorization.id,
+            )
+        )
+        emitThreadUpdate(resolvedAction.rootInputId, convCtx, "action_commit")
         processExecutedAction(
             resolvedAction = resolvedAction,
             outcome = outcome,
@@ -203,22 +321,16 @@ internal class ActionReviewPipeline(
         convCtx: ConversationContext,
         timing: PhaseTimingCollector,
     ) {
-        if (outcome.executionStatus == ActionExecutionStatus.FAILED) {
-            deliberation.markEvidenceFailure(resolvedAction)
-            instrumentation.emit(AgentEvents.warning("Action execution failed; action dropped."))
-        }
         impulseTracker.recordActionOutcome(resolvedAction, outcome)
         instrumentation.emit(AgentEvents.actionExecuted(resolvedAction, outcome.statusSummary))
         if (resolvedAction.origin.source != OriginSource.ID && outcome.successful) {
             getId()?.onActivity("action_executed", resolvedAction.type.id)
         }
         journalActionExecution(resolvedAction, outcome)
+        deliberation.recordActionArtifacts(resolvedAction, outcome)
         timing.startPhase("post_execute")
-        val observed = deliberation.observedEvidence(resolvedAction, outcome)
-        deliberation.recordEvidenceProgress(resolvedAction, outcome, observed)
-        deliberation.onActionExecuted(resolvedAction, observed)
+        val observed = outcome.observedEvidence ?: deliberation.observedEvidence(resolvedAction, outcome)
         maybeRecordScratchpadOutcome(resolvedAction, outcome, observed)
-        deliberation.recordActionOutcome(resolvedAction, outcome, observed)
         actionLifecycleObserver.onActionExecuted(resolvedAction, outcome, observed)
         if (resolvedAction.type == ActionType.CONTACT_USER) {
             recordAnswerLatency(resolvedAction)
@@ -242,7 +354,7 @@ internal class ActionReviewPipeline(
         }
 
         timing.startPhase("follow_up")
-        maybeEnqueueFollowUp(resolvedAction, outcome, observed, convCtx)
+        maybeEmitActionFeedback(resolvedAction, outcome, observed, convCtx)
 
         instrumentation.emit(AgentEvents.phaseTimings(timing.build()))
     }
@@ -363,6 +475,13 @@ internal class ActionReviewPipeline(
             )
         )
         if (!taskVerificationDecision.allow) {
+            recordThreadDenied(
+                resolvedAction.rootInputId,
+                convCtx,
+                taskVerificationDecision.reason,
+                taskVerificationDecision.reasonCode,
+            )
+            emitThreadUpdate(resolvedAction.rootInputId, convCtx, "action_denied_task_verifier")
             actionControlService.recordLedgerEntry(
                 action = resolvedAction,
                 conversationContext = convCtx,
@@ -414,6 +533,8 @@ internal class ActionReviewPipeline(
                 data = mapOf(
                     "action_id" to resolvedAction.id,
                     "action_type" to resolvedAction.type.id,
+                    "intention_kind" to resolvedAction.intentionKind.name.lowercase(),
+                    "requested_commit_mode" to resolvedAction.requestedCommitMode.name.lowercase(),
                     "progress" to authorizationDecision.progress.name.lowercase(),
                     "commit_mode" to authorizationDecision.commitMode.name.lowercase(),
                     "reason" to authorizationDecision.reason,
@@ -435,6 +556,13 @@ internal class ActionReviewPipeline(
             )
         )
         if (!gateDecision.allow) {
+            recordThreadDenied(
+                resolvedAction.rootInputId,
+                convCtx,
+                gateDecision.reason,
+                gateDecision.reasonCode,
+            )
+            emitThreadUpdate(resolvedAction.rootInputId, convCtx, "action_denied_superego")
             actionControlService.recordLedgerEntry(
                 action = resolvedAction,
                 conversationContext = convCtx,
@@ -476,6 +604,39 @@ internal class ActionReviewPipeline(
                 observedEvidence = false,
             )
         }
+    }
+
+    private fun emitIntentionTransition(
+        action: PendingAction,
+        stage: String,
+        kind: IntentionKind,
+        commitMode: CommitMode,
+        extras: Map<String, Any?> = emptyMap(),
+    ) {
+        instrumentation.emit(
+            AgentEvent(
+                type = "intention_transition",
+                data = mapOf(
+                    "action_id" to action.id,
+                    "intention_id" to action.intentionId,
+                    "intention_kind" to kind.name.lowercase(),
+                    "summary" to action.summary,
+                    "stage" to stage,
+                    "commit_mode" to commitMode.name.lowercase(),
+                    "action_type" to action.type.id,
+                    "root_input_id" to action.rootInputId,
+                ) + extras
+            )
+        )
+        recordThreadIntention(
+            action.rootInputId,
+            action.conversationContext,
+            action.intentionId,
+            kind,
+            action.summary,
+            commitMode,
+            extras.mapValues { (_, value) -> value?.toString().orEmpty() }
+        )
     }
 
     // ── Post-execute bookkeeping ──
@@ -540,7 +701,8 @@ internal class ActionReviewPipeline(
         if (action.type == ActionType.RESOLUTION_DRAFT) {
             scratchpadStore.recordResolutionDraft(
                 rootInputId = action.rootInputId,
-                payload = action.payload
+                payload = action.payload,
+                intentionId = action.intentionId,
             )
             instrumentation.emit(
                 AgentEvent(
@@ -647,7 +809,8 @@ internal class ActionReviewPipeline(
         }
         scratchpadStore.recordResolutionDraft(
             rootInputId = action.rootInputId,
-            payload = action.payload
+            payload = action.payload,
+            intentionId = action.intentionId,
         )
         telemetry.emitScratchpadTelemetry(
             rootInputId = action.rootInputId,
@@ -657,7 +820,8 @@ internal class ActionReviewPipeline(
         val finalPassInput = scratchpadStore.buildFinalPassInput(
             rootInputId = action.rootInputId,
             candidateAnswer = action.payload,
-            maxChars = config.memory.scratchpad.finalCompilationMaxChars
+            maxChars = config.memory.scratchpad.finalCompilationMaxChars,
+            intentionId = action.intentionId,
         ) ?: return action
         val draftThreshold = maxOf(2, config.memory.scratchpad.activationMinPlanSteps)
         if (finalPassInput.evidenceCount == 0 && finalPassInput.resolutionDraftCount < draftThreshold) {
@@ -809,45 +973,52 @@ internal class ActionReviewPipeline(
         }
     }
 
-    private fun maybeEnqueueFollowUp(
+    private fun maybeEmitActionFeedback(
         resolvedAction: PendingAction,
         outcome: ActionOutcome,
         observed: Boolean,
         convCtx: ConversationContext,
     ) {
-        if (!resolvedAction.requiresFollowUpThought) return
-        if (!actionLifecycleObserver.allowFollowUp(resolvedAction)) return
-        val safePlannerSignal = PromptInjectionDefense.asUntrustedDataBlock(
-            text = outcome.plannerSignal,
-            maxChars = FOLLOW_UP_SIGNAL_MAX_CHARS
-        )
-        val followUpThought = TextSecurity.clamp(
-            "${resolvedAction.followUpPrefix}\n$safePlannerSignal\n" +
-                "Produce the next planner decision as one raw JSON object only. " +
-                "Do not use tool or function wrappers.",
-            config.planner.maxThoughtChars
-        )
-        val queued = scheduler.enqueueThought(
-            content = followUpThought,
-            urgency = resolvedAction.urgency,
-            passes = resolvedAction.attempts,
-            rootInputId = resolvedAction.rootInputId,
-            rootInputReceivedAtMs = resolvedAction.rootInputReceivedAtMs,
-            allowFallbackExplanation = true,
-            originActionType = resolvedAction.type,
-            originActionObservedEvidence = observed,
+        if (resolvedAction.type == ActionType.CONTACT_USER) return
+        val cue = ActionFeedbackCue(
+            rootInputId = resolvedAction.rootInputId ?: return,
+            actionType = resolvedAction.type,
+            actionSummary = resolvedAction.summary,
+            feedbackContent = if (outcome.plannerSignal.isNotBlank()) outcome.plannerSignal else outcome.statusSummary,
+            statusSummary = outcome.statusSummary,
+            plannerSignal = outcome.plannerSignal,
+            executionStatus = outcome.executionStatus,
             conversationContext = convCtx,
+            observedEvidence = observed,
+            actionErrorCategory = outcome.actionErrorCategory,
+            fetchErrorCategory = outcome.fetchErrorCategory,
+            sourceActionId = resolvedAction.id.takeIf { it > 0L },
+            rootInputReceivedAtMs = resolvedAction.rootInputReceivedAtMs,
+            attempts = resolvedAction.attempts,
+            urgency = resolvedAction.urgency.name,
+            requiresFollowUpThought = resolvedAction.requiresFollowUpThought,
             origin = resolvedAction.origin,
         )
-        if (!queued) {
-            instrumentation.emit(AgentEvents.warning("Failed to enqueue follow-up thought after action."))
+        if (!emitActionFeedback(cue)) {
+            instrumentation.emit(AgentEvents.warning("Failed to enqueue action feedback stimulus."))
             telemetry.recordQueueSaturation(
-                queueType = "thought",
-                capacity = config.maxPendingThoughts,
-                reason = "enqueue_followup_thought_failed_full"
+                queueType = "input",
+                capacity = config.maxPendingInputs,
+                reason = "enqueue_action_feedback_failed_full"
             )
+            return
         }
-        telemetry.emitQueueSnapshot("follow_up_thought_enqueued")
+        instrumentation.emit(
+            AgentEvent(
+                type = "action_feedback_emitted",
+                data = mapOf(
+                    "action_id" to resolvedAction.id,
+                    "action_type" to resolvedAction.type.id,
+                    "root_input_id" to resolvedAction.rootInputId,
+                    "execution_status" to outcome.executionStatus.name.lowercase(),
+                )
+            )
+        )
     }
 
     // ── Dialogue trim ──
@@ -860,8 +1031,27 @@ internal class ActionReviewPipeline(
     }
 
     private companion object {
-        const val FOLLOW_UP_SIGNAL_MAX_CHARS: Int = 420
         const val JOURNAL_SUMMARY_PREVIEW_CHARS: Int = 160
         const val MAX_DIALOGUE_SIZE: Int = 20
+        val CONTROL_PLANE_TERMINAL_DENIAL_CODES = setOf(
+            "OWNER_DENIED_FROM_CHAT",
+            "APPROVAL_EXPIRED",
+            "APPROVAL_CLARIFICATION_EXHAUSTED",
+            "APPROVAL_HASH_MISMATCH",
+        )
     }
 }
+
+private fun StagedAction.toPipelinePendingAction(): PendingAction =
+    PendingAction(
+        id = -1L,
+        urgency = Urgency.MEDIUM,
+        type = actionType,
+        payload = payload,
+        summary = summary,
+        rootInputId = rootInputId,
+        rootInputReceivedAtMs = rootInputReceivedAtMs,
+        conversationContext = conversationContext,
+        argumentDataTrust = argumentDataTrust,
+        origin = origin,
+    )
