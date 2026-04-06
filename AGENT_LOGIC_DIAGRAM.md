@@ -3,7 +3,35 @@
 This file complements `AGENT_LOGIC_SUMMARY.md` with simple, editable Mermaid diagrams.
 Keep diagrams high signal: small, readable, and updated as runtime logic evolves.
 
-## 1) Component View
+---
+
+## L0: System-Level Component View
+
+High-level view of the six major subsystems and their interactions.
+
+```mermaid
+flowchart LR
+    Input["Stimuli\n(User, Telegram, Goals, Id)"] --> SC["SensoryCortex"]
+    SC --> Ego["Ego"]
+    Ego --> Planner["Planner\n(LLM Decision)"]
+    Planner --> Ego
+    Ego --> Sup["Superego\n(Review Gate)"]
+    Sup --> Ego
+    Ego --> MC["MotorCortex\n(Action Execution)"]
+    MC -->|"ActionFeedbackCue"| SC
+    Id["Id\n(Autonomous Drives)"] -->|"Impulse"| SC
+    Ego --> Mem["Memory System\n(MemoryStore/Hippocampus/Logbook/ScratchpadStore)"]
+    Mem --> Ego
+    Ego --> Goals["GoalsGateway\n(Persistent Objectives)"]
+    Goals -->|"GoalRuntimeCue"| SC
+    MC --> Output["ConversationOutputGateway\n(Dashboard, Telegram)"]
+```
+
+---
+
+## L1: Full Component View
+
+Detailed component wiring showing all runtime components and their connections.
 
 ```mermaid
 flowchart LR
@@ -13,7 +41,7 @@ flowchart LR
     TWH --> SC
     TLP --> SC
     GOU["Google OAuth Browser Flow"] --> GOA["GoogleWorkspaceOAuthBridge"]
-    SC --> E["Ego Orchestrator"]
+    SC --> E["Ego"]
     NoteCtx["ConversationContext(sessionId required, unknown interlocutor resolved at sensory boundary, security context carried end-to-end)"] --> SC
 
     E --> AS["AttentionScheduler"]
@@ -26,14 +54,13 @@ flowchart LR
     P --> AV["Action Verifier LLM Call"]
     E --> TV["DecisionVerifier (Deterministic Task Gate)"]
     E --> S["Superego"]
-    S --> S1["SingleStage Review Engine"]
-    S --> S2["TwoStage Escalation Engine"]
+    S --> S1["SingleStage Review Engine (DeterministicConscience + LLM)"]
+    S --> S2["TwoStageReview Escalation Engine"]
     E --> ACP["ActionAuthorizationPolicy (YAML)"]
     E --> ACS["ActionControlService"]
-    E --> ACW["ActionControlAutonomousWorker"]
+    E --> ACW["AutonomousWorker"]
     ACS --> ACDB["ActionControl SQLite (staged / auth / receipts)"]
     ACW --> ACS
-    %% Goal deletes are delete-sensitive: delete_all always stages, single-goal delete direct commit restricted to owner-direct channels with exact goal_id
     E --> AR["ActionRegistry (ServiceLoader Discovery)"]
     AR --> CR["Connector Runtime (curated catalog + local install state + stdio host)"]
     E --> M["MotorCortex"]
@@ -42,16 +69,16 @@ flowchart LR
 
     E --> DE["DeliberationEngine"]
     DE --> MR["LlmMetaReasoner"]
-    MR -.-> MRF["MetaReasoner Fallback Model (optional, repeated technical failures: empty-content or schema-validation)"]
+    MR -.-> MRF["MetaReasoner Fallback (optional, on repeated technical failures)"]
 
     E --> MC["MemorySystem"]
     MC --> MS["MemoryStore (Short-term)"]
-    MC --> H["Hippocampus (Long-term facade: recall/imprint/health/consolidate stub)"]
-    MC --> LTM["LlmLongTermMemoryAdvisor"]
-    MC --> LB["Logbook (Episodic backend, SQLite+FTS5, grouped under long-term domain)"]
-    LB -.->|"event-type narrative normalization: User timeline vs agent first-person memory/reflection"| MC
+    MC --> H["Hippocampus (Long-term facade: recall/imprint/health)"]
+    MC --> LTM["LongTermMemoryAdvisor"]
+    MC --> LB["Logbook (Episodic backend, SQLite+FTS5)"]
+    LB -.->|"event-type narrative normalization"| MC
     MC --> RL["Reflection Lessons (Recall + Imprint Filters)"]
-    MC -.->|"temporal intent → episodic recall + vector cues"| LB
+    MC -.->|"temporal intent -> episodic recall + vector cues"| LB
     E --> TWS["ScratchpadStore (Thread Workspace + Intention Drafts)"]
     E --> TWF["ScratchpadFinalizer (Noop or LLM)"]
     E --> PG["GoalsGateway (optional goal runtime boundary)"]
@@ -64,18 +91,16 @@ flowchart LR
     AR --> AP["Action Plugins (self-described)"]
     CR --> AP
     AP --> M
-    %% Connector bundles are install presets only; goals compose primitive actions rather than executing bundle workflows directly
-    %% Connector subprocesses get an explicit minimal env + declared secret handles only; runtime ignores manifest commit/autonomy hints
-    AP -.->|"Actions emit structured effects; reflection emits durable-memory-save only on successful persistence"| MC
+    AP -.->|"structured effects; reflection emits durable-memory-save on success"| MC
     M --> SC
 
     M --> WS["Web Search Handler/Engine"]
-    CfgWS["WebSearch Provider Config (provider/key/base/model)"] --> WS
+    CfgWS["WebSearch Provider Config"] --> WS
     M --> MF["Fetch Tool"]
     M --> EM["Email Send (Microsoft Graph)"]
     M --> COG["ConversationOutputGateway"]
     COG --> TGA["Telegram Bot API"]
-    TWH -.-> GAUTH["Native OAuth Auth Primitives (signed state + encrypted pending store)"]
+    TWH -.-> GAUTH["Native OAuth Auth Primitives"]
     GOA --> GCS["GoogleWorkspaceCredentialStore (encrypted)"]
     GOA --> GAP["Google OAuth + Gmail Profile Verification"]
     M --> GOBS["Native Google Observe Actions"]
@@ -95,18 +120,71 @@ flowchart LR
 
     E --> I["InstrumentationBus + Metrics"]
     I --> DS["DashboardStateStore"]
-    DS --> CP["Conversations Page (`/`) + Chat API (`/api/chat/*`)"]
-    DS --> OP["Observability Page (`/dashboard`) + Obs API (`/api/obs/*`)"]
-    DS --> OT["Thread Inspection (`/api/obs/threads*`)"]
-    DS --> OX["Action Control Page (`/action-control`)"]
-    DS --> ACAPI["Action Control API + SSE (`/api/action-control/*`)"]
-    %% Action control UI defaults to SIGNAL activity items; can opt into BACKGROUND or TRACE ledger visibility; live updates replace polling
-    %% Telegram ingress is owner-only: POST webhook + shared secret + direct-chat restriction + owner chat/user allowlist
-    %% Native Google auth: signed state tokens + encrypted pending-auth storage; no plaintext refresh-token staging
-    %% Google auth: explicit public callback URL, signed state, PKCE, owner-email verification, encrypted local credential storage
+    DS --> CP["Conversations Page (/) + Chat API (/api/chat/*)"]
+    DS --> OP["Observability Page (/dashboard) + Obs API (/api/obs/*)"]
+    DS --> OT["Thread Inspection (/api/obs/threads*)"]
+    DS --> OX["Action Control Page (/action-control)"]
+    DS --> ACAPI["Action Control API + SSE (/api/action-control/*)"]
 ```
 
-## 2) Loop Sequence (Per Input)
+---
+
+## L1: Main Loop Sequence (Simplified)
+
+Clean overview of the per-input happy path without implementation detail.
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant SC as SensoryCortex
+    participant Ego
+    participant Sched as AttentionScheduler
+    participant Planner as LlmEgoPlanner
+    participant Sup as Superego
+    participant ACS as ActionControlService
+    participant Motor as MotorCortex
+    participant Mem as MemorySystem
+
+    User->>SC: Input (chat, Telegram)
+    SC->>Ego: StimulusReceived (stimulus + percept)
+    Ego->>Sched: enqueue ScheduledOpportunity
+
+    loop While pending work and step limit not reached
+        Ego->>Sched: nextTask()
+        Sched-->>Ego: opportunity / intention / action
+
+        alt Opportunity (input/feedback/impulse/goal)
+            Ego->>Mem: recall context
+            Ego->>Planner: decide(context)
+            Planner-->>Ego: defer / intend / plan / noop
+            Ego->>Sched: enqueue intentions
+        else Intention (DEFER)
+            Ego->>Planner: decide(deferred context)
+            Planner-->>Ego: decision
+        else Intention (action-bearing)
+            Ego->>Ego: materialize PendingAction
+        else Action
+            Ego->>Sup: reviewAuthorization(action)
+            Sup-->>Ego: allow / stage / deny
+            alt allow
+                Ego->>ACS: stage + authorize + commit
+                ACS->>Motor: execute(action)
+                Motor-->>SC: ActionFeedbackCue
+                SC->>Ego: StimulusReceived(feedback)
+            else deny
+                Ego->>Sched: enqueue recovery defer
+            end
+        end
+    end
+
+    Ego->>Mem: maybeAssessLongTermMemory
+```
+
+---
+
+## L2: Full Loop Sequence (Per Input)
+
+Complete sequence with all notes and edge cases. Read L1 first for orientation.
 
 ```mermaid
 sequenceDiagram
@@ -134,7 +212,7 @@ sequenceDiagram
     CTS-->>Ego: policy-shaped Opportunity\n(intentions + commit modes + planner-visible action surface)
     Ego->>Sched: enqueue ScheduledOpportunity(opportunity + trigger)
     Ego->>Dash: emit opportunity_enqueued
-    Note over CTS,Dash: Thread snapshots are retained for live and terminal roots and exposed through `/api/obs/threads`
+    Note over CTS,Dash: Thread snapshots are retained for live and terminal roots and exposed through /api/obs/threads
 
     loop While pending work and step limit not reached
         Ego->>Sched: nextTask()
@@ -235,12 +313,12 @@ sequenceDiagram
                             alt stage required
                                 ACS->>ACDB: save staged action
                                 ACS->>ACDB: save signal/background ledger entry
-                                ACS-->>Ego: staged action (`WAITING_AUTHORIZATION` or `READY`)
+                                ACS-->>Ego: staged action (WAITING_AUTHORIZATION or READY)
                                 Note over Ego: Action review emits explicit intention transitions for STAGE and, when needed, REQUEST_AUTHORIZATION
                                 Ego->>AIR: notify approval runtime
                                 AIR->>ACDB: persist approval request + audit trail
                                 AIR->>AIR: resolve owner channel (same-channel or shared resolver/default fallback)
-                                Note over AIR: Telegram non-conversation routing counts as deliverable/live only after successful startup ACK delivery (`approval-startup-ack`)
+                                Note over AIR: Telegram non-conversation routing counts as deliverable/live only after successful startup ACK delivery (approval-startup-ack)
                                 AIR->>Dash: deliver chat-native approval prompt
                                 AIR->>TG: deliver Telegram approval prompt (if selected channel)
                                 Note over AIR,ACDB: If no eligible owner channel exists, AIR persists an unrouted fail-closed approval artifact and leaves the staged action blocked until expiry/manual resolution
@@ -308,7 +386,9 @@ sequenceDiagram
     Note over Ego,GOBS: Gmail and Calendar are native read-only observe actions, intended for goals such as Morning Briefing and Inbox Management
 ```
 
-## 2.1) Goals Boundary
+---
+
+## L1: Goals Boundary
 
 ```mermaid
 flowchart LR
@@ -321,55 +401,16 @@ flowchart LR
     PSM --> PCS["GoalCommand stream"]
     PCS -->|persist| Store["GoalStore / goal-events.jsonl + goal.json + goal-snapshot.json"]
     PCS -->|work ready| Sig["GoalRuntimeCue"]
-    %% Cron-backed goals do not emit initial work-ready on creation; first execution waits for a cron wake
     TS -->|"cron tick after completed/failed recurring goal"| PSM
     PSM -->|"reset plan steps + clear produced keys"| PCS
     Sig --> Ego["Ego"]
-    %% Goal work is re-entered with a trusted internal automation conversation/security context
-    %% Eval/live launches should isolate GoalStore root from the default user runtime store
     Ego -->|nextWorkFromCue| PM
     Ego -->|goal-origin action outcomes| PM
 ```
 
-## 2.5) Interactive Startup Memory Gate
+---
 
-```mermaid
-flowchart LR
-    A["runInteractiveMode"] --> B["Resolve memory mode from memory-runtime.yaml"]
-    B -->|memory=off| C["NoopHippocampus (memory unavailable)"]
-    B -->|memory=default| D["Check managed HTTP provider health"]
-    D -->|healthy| E["Provider-backed Hippocampus enabled"]
-    D -->|unhealthy| F["Install managed provider artifact if needed,\nstart provider command, wait for /v1/health"]
-    F -->|pass| E
-    F -->|fail| C
-    B -->|memory=external| X["Check external HTTP provider health"]
-    X -->|healthy| E
-    X -->|unhealthy/unsupported| C
-    E --> Z["Register managed closeables with JVM shutdown hook\nso Ctrl-C / SIGTERM also closes the provider process"]
-    E --> H["Emit action_capabilities(memory=available)"]
-    C --> G["Emit action_capabilities(memory=unavailable + warning)"]
-```
-
-## 2.6) Interactive Startup LLM Provider Health Gate
-
-```mermaid
-flowchart LR
-    A["runInteractiveMode"] --> B["Per-role provider health probe: GET base_url/models"]
-    B --> C["Normalize URL join (trim trailing slash)"]
-    C --> D{"Provider is Google and probe is HTTP 404?"}
-    D -->|yes| E["Fallback probe: GET /v1beta/models (native Gemini endpoint)"]
-    D -->|no| F["Report initial probe status"]
-    E --> G["Report fallback status"]
-    F --> H{"Unavailable and retryable?"}
-    G --> H
-    H -->|yes| I["Retry health probe once"]
-    H -->|no| J{"Role is optional meta_reasoner_fallback?"}
-    I --> J
-    J -->|yes + still unavailable| K["Warn and disable fallback for this run"]
-    J -->|no| L["Required role unavailable -> abort startup"]
-```
-
-## 3) Convergence and Fallback States
+## L1: Convergence and Fallback States
 
 ```mermaid
 stateDiagram-v2
@@ -416,7 +457,52 @@ stateDiagram-v2
     Complete --> [*]
 ```
 
+---
+
+## L2: Startup Memory Gate
+
+```mermaid
+flowchart LR
+    A["runInteractiveMode"] --> B["Resolve memory mode from memory-runtime.yaml"]
+    B -->|memory=off| C["NoopHippocampus (memory unavailable)"]
+    B -->|memory=default| D["Check managed HTTP provider health"]
+    D -->|healthy| E["Provider-backed Hippocampus enabled"]
+    D -->|unhealthy| F["Install managed provider artifact if needed,\nstart provider command, wait for /v1/health"]
+    F -->|pass| E
+    F -->|fail| C
+    B -->|memory=external| X["Check external HTTP provider health"]
+    X -->|healthy| E
+    X -->|unhealthy/unsupported| C
+    E --> Z["Register managed closeables with JVM shutdown hook\nso Ctrl-C / SIGTERM also closes the provider process"]
+    E --> H["Emit action_capabilities(memory=available)"]
+    C --> G["Emit action_capabilities(memory=unavailable + warning)"]
+```
+
+---
+
+## L2: Startup LLM Provider Health Gate
+
+```mermaid
+flowchart LR
+    A["runInteractiveMode"] --> B["Per-role provider health probe: GET base_url/models"]
+    B --> C["Normalize URL join (trim trailing slash)"]
+    C --> D{"Provider is Google and probe is HTTP 404?"}
+    D -->|yes| E["Fallback probe: GET /v1beta/models (native Gemini endpoint)"]
+    D -->|no| F["Report initial probe status"]
+    E --> G["Report fallback status"]
+    F --> H{"Unavailable and retryable?"}
+    G --> H
+    H -->|yes| I["Retry health probe once"]
+    H -->|no| J{"Role is optional meta_reasoner_fallback?"}
+    I --> J
+    J -->|yes + still unavailable| K["Warn and disable fallback for this run"]
+    J -->|no| L["Required role unavailable -> abort startup"]
+```
+
+---
+
 ## Edit Rules
 - Keep this file synced with `AGENT_LOGIC_SUMMARY.md`.
+- Source of truth is the code, not this document.
 - Prefer updating existing diagrams over adding a large monolith.
 - If behavior changes, update only affected diagram sections and labels.
