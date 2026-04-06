@@ -16,8 +16,11 @@ import ai.neopsyke.agent.ego.planner.input.GoalCreationPlanner
 import ai.neopsyke.agent.ego.planner.input.GoalManagementPlanner
 import ai.neopsyke.agent.ego.planner.input.InputIntentRouter
 import ai.neopsyke.agent.ego.planner.input.TaskDecompositionPlanner
+import ai.neopsyke.agent.ego.planner.lane.DeferredStepPlanner
+import ai.neopsyke.agent.ego.planner.lane.FeedbackPlanner
+import ai.neopsyke.agent.ego.planner.lane.GoalWorkPlanner
+import ai.neopsyke.agent.ego.planner.lane.ImpulsePlanner
 import ai.neopsyke.agent.ego.planner.lane.InputPlanner
-import ai.neopsyke.agent.ego.planner.lane.MonolithicLaneStub
 import ai.neopsyke.agent.ego.planner.runtime.PlannerRuntime
 import ai.neopsyke.agent.ego.LlmScratchpadFinalizer
 import ai.neopsyke.agent.memory.longterm.Logbook
@@ -2864,18 +2867,18 @@ private fun buildHierarchicalPlanner(
         goalManagementPlanner = goalManagement,
     )
 
-    val deferredStub = MonolithicLaneStub(LaneId.DEFERRED_STEP, runtime, config, instrumentation)
-    val feedbackStub = MonolithicLaneStub(LaneId.FEEDBACK, runtime, config, instrumentation)
-    val goalWorkStub = MonolithicLaneStub(LaneId.GOAL_WORK, runtime, config, instrumentation)
-    val impulseStub = MonolithicLaneStub(LaneId.IMPULSE, runtime, config, instrumentation)
+    val deferredStepPlanner = DeferredStepPlanner(runtime, config, instrumentation)
+    val feedbackPlanner = FeedbackPlanner(runtime, config, instrumentation)
+    val goalWorkPlannerLane = GoalWorkPlanner(runtime, config, instrumentation)
+    val impulsePlannerLane = ImpulsePlanner(runtime, config, instrumentation)
 
     return HierarchicalEgoPlanner(
         runtime = runtime,
         instrumentation = instrumentation,
         inputPlanner = inputPlanner,
-        deferredStepPlanner = deferredStub,
-        feedbackPlanner = feedbackStub,
-        goalWorkPlanner = goalWorkStub,
-        impulsePlanner = impulseStub,
+        deferredStepPlanner = deferredStepPlanner,
+        feedbackPlanner = feedbackPlanner,
+        goalWorkPlanner = goalWorkPlannerLane,
+        impulsePlanner = impulsePlannerLane,
     )
 }
