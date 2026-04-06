@@ -335,7 +335,9 @@ class ConfiguredActionAuthorizationPolicy(
             return false
         }
         val node = goalOperationNode(action, ActionRegistry.empty()) ?: return false
-        val operation = node.path("operation").asText().trim().lowercase()
+        val operation = optionalText(node, "command").ifBlank {
+            optionalText(node, "operation")
+        }
         val cronExpression = optionalText(node, "cron_expression", "cronExpression")
         return cronExpression.isNotBlank() && operation in setOf("create", "revise_plan")
     }
@@ -348,7 +350,9 @@ class ConfiguredActionAuthorizationPolicy(
             return null
         }
         val node = goalOperationNode(action, actionRegistry) ?: return null
-        val operation = node.path("operation").asText().trim().lowercase()
+        val operation = optionalText(node, "command").ifBlank {
+            optionalText(node, "operation")
+        }
         val goalId = optionalText(node, "goal_id", "goalId")
         return when (operation) {
             "delete_all" -> GoalDeleteIntent.DELETE_ALL
@@ -367,14 +371,17 @@ class ConfiguredActionAuthorizationPolicy(
     private fun optionalText(
         node: JsonNode,
         primaryField: String,
-        fallbackField: String,
+        fallbackField: String? = null,
     ): String {
         val primary = node.path(primaryField)
         if (primary.isTextual) {
             return primary.asText().trim()
         }
-        val fallback = node.path(fallbackField)
-        return if (fallback.isTextual) fallback.asText().trim() else ""
+        if (fallbackField != null) {
+            val fallback = node.path(fallbackField)
+            return if (fallback.isTextual) fallback.asText().trim() else ""
+        }
+        return ""
     }
 
     private fun isOwnerVerifiedDirectChannel(conversationContext: ConversationContext): Boolean =

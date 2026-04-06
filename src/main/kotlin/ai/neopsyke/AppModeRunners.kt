@@ -8,7 +8,17 @@ import ai.neopsyke.agent.config.AgentConfig
 import ai.neopsyke.agent.config.TelegramIngressMode
 import ai.neopsyke.agent.ego.Ego
 import ai.neopsyke.agent.ego.EgoAssembler
-import ai.neopsyke.agent.ego.LlmEgoPlanner
+import ai.neopsyke.agent.ego.planner.HierarchicalEgoPlanner
+import ai.neopsyke.agent.ego.planner.LaneId
+import ai.neopsyke.agent.ego.planner.input.DirectResponsePlanner
+import ai.neopsyke.agent.ego.planner.input.GeneralActionPlanner
+import ai.neopsyke.agent.ego.planner.input.GoalCreationPlanner
+import ai.neopsyke.agent.ego.planner.input.GoalManagementPlanner
+import ai.neopsyke.agent.ego.planner.input.InputIntentRouter
+import ai.neopsyke.agent.ego.planner.input.TaskDecompositionPlanner
+import ai.neopsyke.agent.ego.planner.lane.InputPlanner
+import ai.neopsyke.agent.ego.planner.lane.MonolithicLaneStub
+import ai.neopsyke.agent.ego.planner.runtime.PlannerRuntime
 import ai.neopsyke.agent.ego.LlmScratchpadFinalizer
 import ai.neopsyke.agent.memory.longterm.Logbook
 import ai.neopsyke.agent.memory.longterm.SqliteLogbook
@@ -1201,13 +1211,11 @@ internal object AppModeRunners {
                                                     val assembly = EgoAssembler.assemble(
                                                         config = config,
                                                         plannerFactory = { motorCortex ->
-                                                            LlmEgoPlanner(
-                                                                modelClient = plannerClient,
-                                                                actionVerifierModelClient = actionVerifierClient,
-                                                                actionVerifierContextWindow = llm.modelCatalog.contextWindowFor(llm.actionVerifier),
+                                                            buildHierarchicalPlanner(
+                                                                plannerClient = plannerClient,
                                                                 config = config,
-                                                                actionPayloadRepair = motorCortex::repairPlannerPayload,
                                                                 instrumentation = instrumentation,
+                                                                actionPayloadRepair = motorCortex::repairPlannerPayload,
                                                                 onPlannerNoop = {
                                                                     metrics.recordPlannerNoop()
                                                                     plannerNoopCount += 1
@@ -1229,7 +1237,7 @@ internal object AppModeRunners {
                                                                             )
                                                                         )
                                                                     }
-                                                                }
+                                                                },
                                                             )
                                                         },
                                                         superegoFactory = { registry ->
@@ -1768,15 +1776,13 @@ internal object AppModeRunners {
                                                 val assembly = EgoAssembler.assemble(
                                                     config = config,
                                                     plannerFactory = { motorCortex ->
-                                                        LlmEgoPlanner(
-                                                            modelClient = plannerClient,
-                                                            actionVerifierModelClient = actionVerifierClient,
-                                                            actionVerifierContextWindow = llm.modelCatalog.contextWindowFor(llm.actionVerifier),
+                                                        buildHierarchicalPlanner(
+                                                            plannerClient = plannerClient,
                                                             config = config,
-                                                            actionPayloadRepair = motorCortex::repairPlannerPayload,
                                                             instrumentation = instrumentation,
+                                                            actionPayloadRepair = motorCortex::repairPlannerPayload,
                                                             onPlannerNoop = { metrics.recordPlannerNoop() },
-                                                            onPlannerOutputRepaired = { metrics.recordPlannerOutputRepaired() }
+                                                            onPlannerOutputRepaired = { metrics.recordPlannerOutputRepaired() },
                                                         )
                                                     },
                                                     superegoFactory = { registry ->
@@ -2817,4 +2823,59 @@ internal object AppModeRunners {
             logger.trace { "Failed to dump end-of-run metrics: ${ex.message}" }
         }
     }
+}
+
+/**
+ * Factory for the HierarchicalEgoPlanner, replacing LlmEgoPlanner.
+ */
+private fun buildHierarchicalPlanner(
+    plannerClient: ai.neopsyke.llm.ChatModelClient,
+    config: ai.neopsyke.agent.config.AgentConfig,
+    instrumentation: ai.neopsyke.instrumentation.AgentInstrumentation,
+    actionPayloadRepair: (ai.neopsyke.agent.model.ActionType, String) -> String,
+    onPlannerNoop: () -> Unit = {},
+    onPlannerOutputRepaired: () -> Unit = {},
+): Ego.Planner {
+    val runtime = PlannerRuntime(
+        defaultModelClient = plannerClient,
+        config = config,
+        instrumentation = instrumentation,
+        onPlannerNoop = onPlannerNoop,
+        onPlannerOutputRepaired = onPlannerOutputRepaired,
+        actionPayloadRepair = actionPayloadRepair,
+    )
+
+    val router = InputIntentRouter(runtime, config, instrumentation)
+    val directResponse = DirectResponsePlanner(runtime, config, instrumentation)
+    val generalAction = GeneralActionPlanner(runtime, config, instrumentation)
+    val taskDecomp = TaskDecompositionPlanner(runtime, config, instrumentation)
+    val goalCreation = GoalCreationPlanner(runtime, config, instrumentation)
+    val goalManagement = GoalManagementPlanner(runtime, config, instrumentation)
+
+    val inputPlanner = InputPlanner(
+        runtime = runtime,
+        config = config,
+        instrumentation = instrumentation,
+        router = router,
+        directResponsePlanner = directResponse,
+        generalActionPlanner = generalAction,
+        taskDecompositionPlanner = taskDecomp,
+        goalCreationPlanner = goalCreation,
+        goalManagementPlanner = goalManagement,
+    )
+
+    val deferredStub = MonolithicLaneStub(LaneId.DEFERRED_STEP, runtime, config, instrumentation)
+    val feedbackStub = MonolithicLaneStub(LaneId.FEEDBACK, runtime, config, instrumentation)
+    val goalWorkStub = MonolithicLaneStub(LaneId.GOAL_WORK, runtime, config, instrumentation)
+    val impulseStub = MonolithicLaneStub(LaneId.IMPULSE, runtime, config, instrumentation)
+
+    return HierarchicalEgoPlanner(
+        runtime = runtime,
+        instrumentation = instrumentation,
+        inputPlanner = inputPlanner,
+        deferredStepPlanner = deferredStub,
+        feedbackPlanner = feedbackStub,
+        goalWorkPlanner = goalWorkStub,
+        impulsePlanner = impulseStub,
+    )
 }

@@ -203,16 +203,17 @@ class ConfiguredActionAuthorizationPolicyTest {
     }
 
     @Test
-    fun `delete all alias payload is normalized and staged`() {
+    fun `delete all via typed command payload is staged`() {
         val policy = ConfiguredActionAuthorizationPolicy()
         val context = ownerContext()
+        // New planner emits canonical "command":"delete_all" instead of text heuristics
         val decision = policy.authorize(
             action = PendingAction(
                 id = 61,
                 urgency = Urgency.HIGH,
                 type = ActionType.GOAL_OPERATION,
-                payload = """{"operation":"revise","instruction":"Delete all existing goals"}""",
-                summary = "delete all goals via alias",
+                payload = """{"command":"delete_all"}""",
+                summary = "delete all goals",
                 conversationContext = context,
             ),
             conversationContext = context,

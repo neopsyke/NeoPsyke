@@ -88,7 +88,7 @@ class GoalOperationActionPluginTest {
     }
 
     @Test
-    fun `plugin normalizes delete all intent from revise payload`() = runBlocking {
+    fun `plugin executes typed delete_all command from planner`() = runBlocking {
         var capturedRequest: GoalOperationRequest? = null
         val gateway = object : GoalsGateway by NoopGoalsGateway {
             override fun executeOperation(request: GoalOperationRequest): GoalOperationResult {
@@ -107,12 +107,13 @@ class GoalOperationActionPluginTest {
             )
         )
 
+        // The new planner emits canonical "command" field; no operation normalization needed
         val outcome = plugin.execute(
             PendingAction(
                 id = 1L,
                 urgency = Urgency.MEDIUM,
                 type = ActionType.GOAL_OPERATION,
-                payload = """{"operation":"revise","instruction":"Delete all existing goals"}""",
+                payload = """{"command":"delete_all"}""",
                 summary = "delete goals",
             ),
             ActionExecutionContext(searchResultCount = 0)

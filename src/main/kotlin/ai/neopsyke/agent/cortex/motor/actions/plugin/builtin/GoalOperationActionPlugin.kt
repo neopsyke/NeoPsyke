@@ -1,6 +1,7 @@
 package ai.neopsyke.agent.cortex.motor.actions.plugin.builtin
 
 import com.fasterxml.jackson.annotation.JsonAlias
+import com.fasterxml.jackson.annotation.JsonInclude
 import com.fasterxml.jackson.annotation.JsonProperty
 import com.fasterxml.jackson.databind.DeserializationFeature
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
@@ -28,6 +29,15 @@ import ai.neopsyke.agent.goal.GoalPriority
 
 private val logger = KotlinLogging.logger {}
 
+/**
+ * Goal operation action plugin. Refactored to accept typed GoalCommand payloads
+ * from the hierarchical planner. No deterministic text heuristics for operation
+ * normalization or goal reference resolution.
+ *
+ * Payload contract: JSON with a "command" field (canonical operation name from
+ * GoalCommand.operationName) and typed goal parameters. The "goal_id" field
+ * is pre-resolved by the planner's LLM; this plugin validates and executes.
+ */
 class GoalOperationActionPlugin(
     private val context: ActionPluginFactoryContext,
 ) : AgentActionPlugin {
@@ -35,9 +45,9 @@ class GoalOperationActionPlugin(
         actionType = ActionType.GOAL_OPERATION,
         dispatchable = context.config.goals.enabled,
         plannerDescription = "goal_operation: create, update, status, list, pause, resume, reprioritize, complete, delete, delete_all, or revise_plan persistent goals, including recurring cron-backed reminders.",
-        payloadGuidance = "Strict JSON with an operation field and the required goal arguments. goal_id must be the goal number (e.g. \"1\") or the exact title (e.g. \"Daily weather notification\"). Use update to change a goal's schedule, instruction, or title. Use delete_all to remove every goal. For recurring goals, include cron_expression.",
+        payloadGuidance = "Strict JSON with a command field and the required goal arguments. goal_id is the goal number or exact ID resolved by the planner. For recurring goals, include cron_expression.",
         payloadSchemaExample = """
-            {"operation":"create","title":"Weather reminder","instruction":"Check the current weather and remind me every time this goal runs.","priority":"HIGH","completion_criteria":"A weather reminder is delivered for the current scheduled run.","cron_expression":"*/5 * * * *"}
+            {"command":"create","title":"Weather reminder","instruction":"Check the current weather and remind me every time this goal runs.","priority":"HIGH","completion_criteria":"A weather reminder is delivered for the current scheduled run.","cron_expression":"*/5 * * * *"}
         """.trimIndent(),
         requiresFollowUpThought = false,
         followUpPrefix = "Goal operation completed.",
@@ -67,12 +77,12 @@ class GoalOperationActionPlugin(
                 ruleId = "goal_operation_invalid_payload",
                 reason = "GOAL_OPERATION payload must be valid JSON."
             )
-        val operation = payload.operation?.trim().orEmpty()
-        if (operation.isBlank()) {
+        val operation = resolveOperation(payload)
+        if (operation.isNullOrBlank()) {
             return ActionDeterministicReview(
                 allow = false,
                 ruleId = "goal_operation_missing_operation",
-                reason = "GOAL_OPERATION payload requires an operation field."
+                reason = "GOAL_OPERATION payload requires a command or operation field."
             )
         }
         return ActionDeterministicReview(allow = true)
@@ -80,10 +90,10 @@ class GoalOperationActionPlugin(
 
     override fun repairPlannerPayload(raw: String): String {
         val payload = parsePayload(raw) ?: return raw
-        val resolvedGoalId = resolveGoalId(payload.goalId?.trim()?.ifBlank { null })
+        // Resolve goal_id: exact ID match or numeric index only (no fuzzy text matching)
+        val resolvedGoalId = resolveGoalIdTyped(payload.goalId?.trim()?.ifBlank { null })
         return mapper.writeValueAsString(
             payload.copy(
-                operation = normalizeOperation(payload),
                 goalId = resolvedGoalId,
                 title = payload.title?.trim()?.ifBlank { null },
                 instruction = payload.instruction?.trim()?.ifBlank { null },
@@ -96,11 +106,13 @@ class GoalOperationActionPlugin(
     }
 
     /**
-     * Resolves a planner-provided goal_id (which may be a numeric index like "1",
-     * a title like "Daily weather notification", or an exact internal ID) to the
-     * real internal goal ID.
+     * Resolves a goal_id using only typed/exact matching:
+     * 1. Exact internal ID match
+     * 2. Numeric index (1-based)
+     * No case-insensitive title matching or fuzzy token-overlap scoring.
+     * Goal references are resolved semantically by the planner's LLM.
      */
-    private fun resolveGoalId(raw: String?): String? {
+    private fun resolveGoalIdTyped(raw: String?): String? {
         if (raw.isNullOrBlank()) return null
         val goals = context.goalsGateway.allGoals()
         if (goals.isEmpty()) return raw
@@ -117,33 +129,7 @@ class GoalOperationActionPlugin(
             }
         }
 
-        // 3. Case-insensitive exact title match
-        val rawLower = raw.lowercase()
-        goals.firstOrNull { it.title.lowercase() == rawLower }?.let {
-            logger.info { "goal_id resolved: title match '$raw' -> '${it.goalId}'" }
-            return it.goalId
-        }
-
-        // 4. Fuzzy title match — token overlap
-        val rawTokens = rawLower.split(Regex("\\W+")).filter { it.length > 2 }.toSet()
-        if (rawTokens.isNotEmpty()) {
-            val best = goals.maxByOrNull { goal ->
-                val goalTokens = goal.title.lowercase().split(Regex("\\W+")).filter { it.length > 2 }.toSet()
-                if (goalTokens.isEmpty()) 0.0
-                else rawTokens.intersect(goalTokens).size.toDouble() / maxOf(rawTokens.size, goalTokens.size)
-            }
-            if (best != null) {
-                val bestTokens = best.title.lowercase().split(Regex("\\W+")).filter { it.length > 2 }.toSet()
-                val overlap = if (bestTokens.isEmpty()) 0.0
-                else rawTokens.intersect(bestTokens).size.toDouble() / maxOf(rawTokens.size, bestTokens.size)
-                if (overlap >= GOAL_TITLE_FUZZY_MATCH_THRESHOLD) {
-                    logger.info { "goal_id resolved: fuzzy title match '$raw' -> '${best.goalId}' (overlap=${"%.2f".format(overlap)})" }
-                    return best.goalId
-                }
-            }
-        }
-
-        logger.warn { "goal_id unresolved: '$raw' did not match any goal. available=${goals.map { it.goalId }}" }
+        logger.warn { "goal_id unresolved: '$raw' did not match any goal by ID or index. available=${goals.map { it.goalId }}" }
         return raw
     }
 
@@ -153,16 +139,16 @@ class GoalOperationActionPlugin(
                 statusSummary = "Invalid goal_operation payload.",
                 executionStatus = ActionExecutionStatus.FAILED,
             )
-        val operation = normalizeOperation(payload)
+        val operationStr = resolveOperation(payload)
             ?.uppercase()
             ?.let { runCatching { GoalOperation.valueOf(it) }.getOrNull() }
             ?: return ActionOutcome(
-                statusSummary = "Unknown goal operation '${payload.operation?.trim()}'.",
+                statusSummary = "Unknown goal operation '${resolveOperation(payload) ?: "null"}'.",
                 executionStatus = ActionExecutionStatus.FAILED,
             )
         val result = this.context.goalsGateway.executeOperation(
             GoalOperationRequest(
-                operation = operation,
+                operation = operationStr,
                 goalId = payload.goalId,
                 title = payload.title,
                 instruction = payload.instruction,
@@ -185,35 +171,22 @@ class GoalOperationActionPlugin(
         )
     }
 
-    private fun parsePayload(raw: String): ProjectOperationPayload? =
-        runCatching { mapper.readValue<ProjectOperationPayload>(raw) }.getOrNull()
+    private fun parsePayload(raw: String): GoalOperationPayload? =
+        runCatching { mapper.readValue<GoalOperationPayload>(raw) }.getOrNull()
 
-    private fun normalizeOperation(payload: ProjectOperationPayload): String? {
-        val operation = payload.operation?.trim()?.lowercase()?.ifBlank { return null } ?: return null
-        val hasGoalId = !payload.goalId.isNullOrBlank()
-        val deleteAllIntent = looksLikeDeleteAllIntent(payload)
-        return when (operation) {
-            "inspect" -> if (hasGoalId) "status" else "list"
-            "revise" -> if (deleteAllIntent) "delete_all" else "revise_plan"
-            "update", "modify", "change" -> "update"
-            "delete_all" -> "delete_all"
-            "delete", "remove", "clear" -> if (deleteAllIntent) "delete_all" else "delete"
-            else -> operation
-        }
+    /**
+     * Resolves the operation from the typed "command" field or legacy "operation" field.
+     * No semantic normalization -- the planner emits canonical operation names.
+     */
+    private fun resolveOperation(payload: GoalOperationPayload): String? {
+        // Prefer "command" (typed GoalCommand payload) over "operation" (legacy)
+        val command = payload.command?.trim()?.lowercase()?.ifBlank { null }
+        if (command != null) return command
+        return payload.operation?.trim()?.lowercase()?.ifBlank { null }
     }
 
-    private fun looksLikeDeleteAllIntent(payload: ProjectOperationPayload): Boolean {
-        val instruction = payload.instruction?.trim()?.lowercase().orEmpty()
-        if (instruction.isBlank()) {
-            return false
-        }
-        val deleteVerbPresent = listOf("delete", "remove", "clear").any(instruction::contains)
-        val goalReferencePresent = instruction.contains("goal")
-        val bulkReferencePresent = instruction.contains("all") || instruction.contains("existing")
-        return deleteVerbPresent && goalReferencePresent && bulkReferencePresent
-    }
-
-    private data class ProjectOperationPayload(
+    private data class GoalOperationPayload(
+        val command: String? = null,
         val operation: String? = null,
         @field:JsonProperty("goal_id")
         @field:JsonAlias("goalId")
@@ -231,9 +204,9 @@ class GoalOperationActionPlugin(
     )
 
     private companion object {
-        const val GOAL_TITLE_FUZZY_MATCH_THRESHOLD = 0.5
         val mapper = jacksonObjectMapper()
             .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
+            .setSerializationInclusion(JsonInclude.Include.NON_NULL)
     }
 }
 
