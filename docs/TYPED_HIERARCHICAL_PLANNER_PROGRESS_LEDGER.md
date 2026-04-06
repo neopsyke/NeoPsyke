@@ -11,19 +11,19 @@
 
 | Step | Description | Status | Committed | Freud Gate | Notes |
 |------|-------------|--------|-----------|------------|-------|
-| 0 | Backup and prep | pending | - | - | |
-| 1 | Typed intermediate models | pending | - | - | |
-| 2 | Shared planner runtime | pending | - | - | |
-| 3 | Lane interface and config wiring | pending | - | - | |
-| 4 | Prompt assembly infrastructure | pending | - | - | |
-| 5 | HierarchicalEgoPlanner (L0) | pending | - | - | |
-| 6 | InputPlanner + L2 sub-planners | pending | - | - | |
-| 7 | GoalOperationActionPlugin refactor | pending | - | - | |
-| 8 | Wire into Ego + remove action verifier | pending | - | - | Phase 1 complete |
-| 9 | DeferredStepPlanner | pending | - | - | |
-| 10 | FeedbackPlanner | pending | - | - | |
-| 11 | GoalWorkPlanner | pending | - | - | |
-| 12 | ImpulsePlanner | pending | - | - | |
+| 0 | Backup and prep | done | db0fe66 | - | |
+| 1 | Typed intermediate models | done | db0fe66 | - | 11 sealed types + LaneId |
+| 2 | Shared planner runtime | done | db0fe66 | - | PlannerRuntime, StructuredOutputHandler, TruncationRetry |
+| 3 | Lane interface and config wiring | done | db0fe66 | - | PlannerConfig + laneDefaults/lanes |
+| 4 | Prompt assembly infrastructure | done | db0fe66 | - | PromptProfile, PlannerPromptAssembler |
+| 5 | HierarchicalEgoPlanner (L0) | done | 7b29673 | - | Typed trigger dispatch |
+| 6 | InputPlanner + L2 sub-planners | done | 7b29673 | - | 7 L2 planners + InputPlanner L1 |
+| 7 | GoalOperationActionPlugin refactor | done | 196e4d6 | - | Removed text heuristics |
+| 8 | Wire into Ego + remove action verifier | done | 196e4d6 | PASS | Phase 1 complete, Freud gate passed |
+| 9 | DeferredStepPlanner | pending | - | - | Using MonolithicLaneStub |
+| 10 | FeedbackPlanner | pending | - | - | Using MonolithicLaneStub |
+| 11 | GoalWorkPlanner | pending | - | - | Using MonolithicLaneStub |
+| 12 | ImpulsePlanner | pending | - | - | Using MonolithicLaneStub |
 | 13 | Delete backup + final cleanup | pending | - | - | |
 | 14 | Acceptance verification | pending | - | - | |
 
@@ -127,7 +127,7 @@
 
 | Run | Timestamp | Result | Failing Steps | Notes |
 |-----|-----------|--------|---------------|-------|
-| - | - | - | - | - |
+| 1 | 2026-04-06T03:17Z | PASS | none | After Phase 1 complete (Step 8) |
 
 ---
 
@@ -143,7 +143,10 @@
 
 | # | Description | Was Bug/Limitation | Details |
 |---|-------------|-------------------|---------|
-| - | - | - | - |
+| 1 | Removed normalizeOperation() text heuristics | Limitation | Operation normalization (inspect->status, revise->delete_all) was text-based; now handled by typed planner |
+| 2 | Removed looksLikeDeleteAllIntent() | Limitation | Keyword matching on instruction text for delete_all detection; now typed GoalCommand |
+| 3 | Removed resolveGoalId() fuzzy matching | Limitation | Case-insensitive title + token-overlap scoring; now LLM-resolved references |
+| 4 | Removed shouldUseGoalCreationBranch() regex | Limitation | Regex-based goal creation routing; now LLM-based InputIntentRouter |
 
 ---
 

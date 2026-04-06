@@ -116,7 +116,7 @@ class ImpulsePlanner(
 
         val response = runtime.call(
             laneId = laneId, messages = allocation.messages, metadata = metadata,
-            responseFormat = MonolithicLaneStub.PLANNER_DECISION_RESPONSE_FORMAT,
+            responseFormat = StructuredOutputHandler.PLANNER_DECISION_RESPONSE_FORMAT,
         )
 
         if (response == null) return EgoDecision.Noop("ImpulsePlanner unavailable.")
@@ -127,12 +127,12 @@ class ImpulsePlanner(
         if (TruncationRetry.isLikelyTruncated(response)) {
             val bumped = TruncationRetry.bumpCompletionBudget(runtime.resolvedConfig(laneId).maxCompletionTokens)
             runtime.call(laneId, allocation.messages + ChatMessage(ChatRole.USER, "Return one complete JSON object."),
-                metadata.copy(callSite = "impulse_truncation_retry"), MonolithicLaneStub.PLANNER_DECISION_RESPONSE_FORMAT, maxTokens = bumped, temperature = 0.0)
+                metadata.copy(callSite = "impulse_truncation_retry"), StructuredOutputHandler.PLANNER_DECISION_RESPONSE_FORMAT, maxTokens = bumped, temperature = 0.0)
                 ?.let { parseResponse(it.content, context) }?.let { runtime.recordSuccess(laneId, rootInputId); return it }
         }
 
         runtime.call(laneId, allocation.messages + ChatMessage(ChatRole.USER, "Reply with STRICT JSON only."),
-            metadata.copy(callSite = "impulse_json_retry"), MonolithicLaneStub.PLANNER_DECISION_RESPONSE_FORMAT, temperature = 0.0)
+            metadata.copy(callSite = "impulse_json_retry"), StructuredOutputHandler.PLANNER_DECISION_RESPONSE_FORMAT, temperature = 0.0)
             ?.let { parseResponse(it.content, context) }?.let { runtime.recordSuccess(laneId, rootInputId); return it }
 
         runtime.recordParseFailure(laneId, rootInputId)

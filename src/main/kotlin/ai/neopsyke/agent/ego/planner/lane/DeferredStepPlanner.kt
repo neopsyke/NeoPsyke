@@ -22,7 +22,6 @@ import ai.neopsyke.agent.support.TextSecurity
 import ai.neopsyke.instrumentation.AgentEvents
 import ai.neopsyke.instrumentation.AgentInstrumentation
 import ai.neopsyke.llm.ChatMessage
-import ai.neopsyke.llm.ChatResponseFormat
 import ai.neopsyke.llm.ChatRole
 
 private val logger = KotlinLogging.logger {}
@@ -147,7 +146,7 @@ class DeferredStepPlanner(
             laneId = laneId,
             messages = allocation.messages,
             metadata = metadata,
-            responseFormat = MonolithicLaneStub.PLANNER_DECISION_RESPONSE_FORMAT,
+            responseFormat = StructuredOutputHandler.PLANNER_DECISION_RESPONSE_FORMAT,
         )
 
         if (response == null) {
@@ -167,7 +166,7 @@ class DeferredStepPlanner(
                 laneId = laneId,
                 messages = allocation.messages + ChatMessage(ChatRole.USER, "Your previous output appears truncated. Return one complete JSON object."),
                 metadata = metadata.copy(callSite = "deferred_step_truncation_retry"),
-                responseFormat = MonolithicLaneStub.PLANNER_DECISION_RESPONSE_FORMAT,
+                responseFormat = StructuredOutputHandler.PLANNER_DECISION_RESPONSE_FORMAT,
                 maxTokens = bumped,
                 temperature = 0.0,
             )
@@ -181,7 +180,7 @@ class DeferredStepPlanner(
             laneId = laneId,
             messages = allocation.messages + ChatMessage(ChatRole.USER, "Reply with STRICT JSON only."),
             metadata = metadata.copy(callSite = "deferred_step_json_retry"),
-            responseFormat = MonolithicLaneStub.PLANNER_DECISION_RESPONSE_FORMAT,
+            responseFormat = StructuredOutputHandler.PLANNER_DECISION_RESPONSE_FORMAT,
             temperature = 0.0,
         )
         retryResponse?.let { parseResponse(it.content, context, allowResolutionDraft) }?.let {
