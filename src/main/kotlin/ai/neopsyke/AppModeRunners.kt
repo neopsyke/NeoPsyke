@@ -2875,28 +2875,44 @@ private fun buildPlannerLaneModelClientResolver(
     val warnedUnknownProviders = mutableSetOf<String>()
 
     return { laneId, resolved ->
-        val requestedProvider = resolved.provider?.trim()?.lowercase()?.ifBlank { null }
-        val requestedModel = resolved.model?.trim()?.ifBlank { null }
-        if (requestedProvider == null && requestedModel == null) {
-            null
-        } else {
-            val provider = requestedProvider ?: plannerProvider
-            val template = endpointTemplates[provider]
-            if (template == null) {
-                if (warnedUnknownProviders.add(provider)) {
-                    logger.warn {
-                        "Lane ${laneId.configKey} requested provider '$provider' but no endpoint template is configured; using default planner client."
-                    }
+        // Priority 1: per-lane endpoint from llm-runtime.yaml cognitive_roles.planner.lanes
+        val laneEndpoint = llm.cognitiveRoles.plannerLanes[laneId.configKey]
+        if (laneEndpoint != null) {
+            val provider = laneEndpoint.providerLabel.lowercase()
+            val model = laneEndpoint.model.trim()
+            if (provider == plannerProvider && model == plannerModel) {
+                plannerClient
+            } else {
+                val cacheKey = "$provider::$model"
+                clientsByKey.getOrPut(cacheKey) {
+                    createPlannerClient(laneEndpoint)
                 }
+            }
+        } else {
+            // Priority 2: per-lane provider/model from agent-runtime.yaml planner.lanes
+            val requestedProvider = resolved.provider?.trim()?.lowercase()?.ifBlank { null }
+            val requestedModel = resolved.model?.trim()?.ifBlank { null }
+            if (requestedProvider == null && requestedModel == null) {
                 null
             } else {
-                val model = requestedModel ?: template.model
-                if (provider == plannerProvider && model == plannerModel) {
-                    plannerClient
+                val provider = requestedProvider ?: plannerProvider
+                val template = endpointTemplates[provider]
+                if (template == null) {
+                    if (warnedUnknownProviders.add(provider)) {
+                        logger.warn {
+                            "Lane ${laneId.configKey} requested provider '$provider' but no endpoint template is configured; using default planner client."
+                        }
+                    }
+                    null
                 } else {
-                    val cacheKey = "$provider::$model"
-                    clientsByKey.getOrPut(cacheKey) {
-                        createPlannerClient(template.copy(model = model))
+                    val model = requestedModel ?: template.model
+                    if (provider == plannerProvider && model == plannerModel) {
+                        plannerClient
+                    } else {
+                        val cacheKey = "$provider::$model"
+                        clientsByKey.getOrPut(cacheKey) {
+                            createPlannerClient(template.copy(model = model))
+                        }
                     }
                 }
             }

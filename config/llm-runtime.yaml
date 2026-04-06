@@ -35,6 +35,37 @@ cognitive_roles:
   planner:
     provider: groq
     model: openai/gpt-oss-120b
+    lanes:
+      input_intent_router:
+        provider: groq
+        model: openai/gpt-oss-120b
+      direct_response:
+        provider: groq
+        model: openai/gpt-oss-120b
+      general_action:
+        provider: groq
+        model: openai/gpt-oss-120b
+      task_decomposition:
+        provider: groq
+        model: openai/gpt-oss-120b
+      goal_creation:
+        provider: groq
+        model: openai/gpt-oss-120b
+      goal_management:
+        provider: groq
+        model: openai/gpt-oss-120b
+      deferred_step:
+        provider: groq
+        model: openai/gpt-oss-120b
+      feedback:
+        provider: groq
+        model: openai/gpt-oss-120b
+      goal_work:
+        provider: groq
+        model: openai/gpt-oss-120b
+      impulse:
+        provider: groq
+        model: openai/gpt-oss-120b
   superego_primary:
     provider: groq
     model: openai/gpt-oss-120b

@@ -415,6 +415,23 @@ class LlmRuntimeConfigLoaderTest {
         assertTrue(appConfig.modelCatalog.profiles(LlmProvider.OLLAMA).isNotEmpty())
         assertTrue(lowLlmConfig.modelCatalog.profiles(LlmProvider.ANTHROPIC).isNotEmpty())
         assertTrue(highLlmConfig.modelCatalog.profiles(LlmProvider.OLLAMA).isNotEmpty())
+
+        // Verify planner lanes loaded from all three checked-in configs
+        assertEquals(10, appConfig.cognitiveRoles.plannerLanes.size)
+        assertEquals(10, lowLlmConfig.cognitiveRoles.plannerLanes.size)
+        assertEquals(10, highLlmConfig.cognitiveRoles.plannerLanes.size)
+
+        val appRouter = appConfig.cognitiveRoles.plannerLanes["input_intent_router"]!!
+        assertEquals(LlmProvider.GROQ, appRouter.provider)
+        assertEquals("openai/gpt-oss-120b", appRouter.model)
+
+        val lowRouter = lowLlmConfig.cognitiveRoles.plannerLanes["input_intent_router"]!!
+        assertEquals(LlmProvider.GROQ, lowRouter.provider)
+        assertEquals("openai/gpt-oss-20b", lowRouter.model)
+
+        val highRouter = highLlmConfig.cognitiveRoles.plannerLanes["input_intent_router"]!!
+        assertEquals(LlmProvider.GROQ, highRouter.provider)
+        assertEquals("openai/gpt-oss-120b", highRouter.model)
     }
 
     @Test
@@ -428,5 +445,217 @@ class LlmRuntimeConfigLoaderTest {
         assertEquals("gemini-2.5-flash", config.planner.model)
         assertEquals(LlmProvider.GOOGLE, config.webSearch.provider)
         assertEquals("gemini-2.5-pro", config.superegoEscalation?.model)
+    }
+
+    @Test
+    fun `load reads planner lanes from yaml`() {
+        val tempDir = Files.createTempDirectory("neopsyke-llm-config-lanes")
+        val yamlPath = tempDir.resolve("llm-runtime.yaml")
+        Files.writeString(
+            yamlPath,
+            """
+            providers:
+              groq:
+                api_key_env: GROQ_API_KEY
+                base_url: https://api.groq.com/openai/v1
+                default_model: openai/gpt-oss-20b
+                default_web_search_model: groq/compound-mini
+              openai:
+                api_key_env: OPENAI_API_KEY
+                base_url: https://api.openai.com/v1
+                default_model: gpt-4o-mini
+                default_web_search_model: gpt-4o-mini
+            cognitive_roles:
+              planner:
+                provider: groq
+                model: openai/gpt-oss-120b
+                lanes:
+                  input_intent_router:
+                    provider: groq
+                    model: openai/gpt-oss-20b
+                  direct_response:
+                    provider: openai
+                    model: gpt-4.1-mini
+                  general_action:
+                    provider: groq
+                    model: openai/gpt-oss-120b
+              superego:
+                provider: groq
+                model: openai/gpt-oss-120b
+              meta_reasoner:
+                provider: groq
+                model: openai/gpt-oss-120b
+              memory_advisor:
+                provider: groq
+                model: openai/gpt-oss-20b
+            web_search:
+              provider: groq
+              model: groq/compound-mini
+            """.trimIndent()
+        )
+
+        val config = LlmRuntimeConfigLoader.load(
+            env = mapOf(
+                "GROQ_API_KEY" to "groq-key",
+                "OPENAI_API_KEY" to "openai-key"
+            ),
+            defaultPath = yamlPath
+        )
+
+        // External specifies 3 lanes; remaining 7 are inherited from bundled config via deep-merge
+        assertTrue(config.cognitiveRoles.plannerLanes.size >= 3)
+
+        val router = config.cognitiveRoles.plannerLanes["input_intent_router"]!!
+        assertEquals(LlmProvider.GROQ, router.provider)
+        assertEquals("openai/gpt-oss-20b", router.model)
+        assertEquals("groq-key", router.apiKey)
+        assertEquals("https://api.groq.com/openai/v1", router.baseUrl)
+
+        val directResponse = config.cognitiveRoles.plannerLanes["direct_response"]!!
+        assertEquals(LlmProvider.OPENAI, directResponse.provider)
+        assertEquals("gpt-4.1-mini", directResponse.model)
+        assertEquals("openai-key", directResponse.apiKey)
+        assertEquals("https://api.openai.com/v1", directResponse.baseUrl)
+
+        val generalAction = config.cognitiveRoles.plannerLanes["general_action"]!!
+        assertEquals(LlmProvider.GROQ, generalAction.provider)
+        assertEquals("openai/gpt-oss-120b", generalAction.model)
+    }
+
+    @Test
+    fun `planner lanes inherit provider from planner when only model is set`() {
+        val tempDir = Files.createTempDirectory("neopsyke-llm-config-lane-inherit")
+        val yamlPath = tempDir.resolve("llm-runtime.yaml")
+        Files.writeString(
+            yamlPath,
+            """
+            providers:
+              groq:
+                api_key_env: GROQ_API_KEY
+                base_url: https://api.groq.com/openai/v1
+                default_model: openai/gpt-oss-20b
+                default_web_search_model: groq/compound-mini
+            cognitive_roles:
+              planner:
+                provider: groq
+                model: openai/gpt-oss-120b
+                lanes:
+                  feedback:
+                    model: openai/gpt-oss-20b
+              superego:
+                provider: groq
+                model: openai/gpt-oss-120b
+              meta_reasoner:
+                provider: groq
+                model: openai/gpt-oss-120b
+              memory_advisor:
+                provider: groq
+                model: openai/gpt-oss-20b
+            web_search:
+              provider: groq
+              model: groq/compound-mini
+            """.trimIndent()
+        )
+
+        val config = LlmRuntimeConfigLoader.load(
+            env = mapOf("GROQ_API_KEY" to "groq-key"),
+            defaultPath = yamlPath
+        )
+
+        val feedback = config.cognitiveRoles.plannerLanes["feedback"]!!
+        assertEquals(LlmProvider.GROQ, feedback.provider)
+        assertEquals("openai/gpt-oss-20b", feedback.model)
+        assertEquals("groq-key", feedback.apiKey)
+    }
+
+    @Test
+    fun `planner lanes inherited from bundled config when not specified in external yaml`() {
+        val tempDir = Files.createTempDirectory("neopsyke-llm-config-no-lanes")
+        val yamlPath = tempDir.resolve("llm-runtime.yaml")
+        Files.writeString(
+            yamlPath,
+            """
+            providers:
+              groq:
+                api_key_env: GROQ_API_KEY
+                base_url: https://api.groq.com/openai/v1
+                default_model: openai/gpt-oss-20b
+                default_web_search_model: groq/compound-mini
+            cognitive_roles:
+              planner:
+                provider: groq
+                model: openai/gpt-oss-120b
+              superego:
+                provider: groq
+                model: openai/gpt-oss-120b
+              meta_reasoner:
+                provider: groq
+                model: openai/gpt-oss-120b
+              memory_advisor:
+                provider: groq
+                model: openai/gpt-oss-20b
+            web_search:
+              provider: groq
+              model: groq/compound-mini
+            """.trimIndent()
+        )
+
+        val config = LlmRuntimeConfigLoader.load(
+            env = mapOf("GROQ_API_KEY" to "groq-key"),
+            defaultPath = yamlPath
+        )
+
+        // Lanes inherited from bundled config/llm-runtime.yaml via deep-merge
+        assertEquals(10, config.cognitiveRoles.plannerLanes.size)
+        // All inherited lanes resolve to the planner provider (groq) from the external YAML
+        for ((_, endpoint) in config.cognitiveRoles.plannerLanes) {
+            assertEquals(LlmProvider.GROQ, endpoint.provider)
+        }
+    }
+
+    @Test
+    fun `planner lane with invalid provider fails validation`() {
+        val tempDir = Files.createTempDirectory("neopsyke-llm-config-lane-bad-provider")
+        val yamlPath = tempDir.resolve("llm-runtime.yaml")
+        Files.writeString(
+            yamlPath,
+            """
+            providers:
+              groq:
+                api_key_env: GROQ_API_KEY
+                base_url: https://api.groq.com/openai/v1
+                default_model: openai/gpt-oss-20b
+                default_web_search_model: groq/compound-mini
+            cognitive_roles:
+              planner:
+                provider: groq
+                model: openai/gpt-oss-120b
+                lanes:
+                  impulse:
+                    provider: not-a-provider
+                    model: some-model
+              superego:
+                provider: groq
+                model: openai/gpt-oss-120b
+              meta_reasoner:
+                provider: groq
+                model: openai/gpt-oss-120b
+              memory_advisor:
+                provider: groq
+                model: openai/gpt-oss-20b
+            web_search:
+              provider: groq
+              model: groq/compound-mini
+            """.trimIndent()
+        )
+
+        val error = assertFailsWith<IllegalStateException> {
+            LlmRuntimeConfigLoader.load(
+                env = mapOf("GROQ_API_KEY" to "groq-key"),
+                defaultPath = yamlPath
+            )
+        }
+
+        assertTrue(error.message!!.contains("cognitive_roles.planner.lanes.impulse"))
     }
 }
