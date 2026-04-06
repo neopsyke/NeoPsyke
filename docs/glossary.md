@@ -81,7 +81,7 @@ Each section covers terms that appear together in the same area of the agent.
 
 - **Planner** — The LLM-backed decision function inside the Ego. Given a `PlannerContext`, returns an `EgoDecision`: propose an action, enqueue a thought, produce a no-op, or enqueue a multi-step plan. `LlmEgoPlanner`
 - **PlannerContext** — The full context bundle passed to the planner on each step: recent dialogue, queue snapshot, short-term and long-term memory, lessons, scratchpad, evidence hints, deliberation state, meta-guidance, security summaries, available actions, and optionally the Id state snapshot.
-- **PlanningBranch** — Which reasoning path the planner uses. `GENERAL` is the default; `GOAL_CREATION` is a special branch for multi-step goal proposals.
+- **PlanningBranch** — The current coarse branch selector inside `LlmEgoPlanner`. `GENERAL` is the default; `GOAL_CREATION` is a special branch for multi-step goal proposals. This is legacy terminology for the monolithic planner design; the planned typed hierarchical redesign replaces this idea with `PlannerLane` plus narrower typed routing structures.
 - **EgoDecision** — The planner's output. A sealed type with four variants: `FormIntention` (propose an action with intention kind and commit mode), `EnqueueThought` (defer and think more), `Noop` (decline with reason), `EnqueuePlan` (propose a multi-step goal).
 - **DeliberationState** — Accumulated counters that track how the current reasoning episode is going. Injected into the planner context so it can adapt behavior under pressure. `CognitionModels.kt`
 - **DecisionPressure** — A `[0,1]` score that rises with each deliberation step. When high, it signals the planner to stop deliberating and commit to an answer. Also used to trigger forced terminal answers.
@@ -106,6 +106,38 @@ Each section covers terms that appear together in the same area of the agent.
 - **ScratchpadFinalizer** — Optional LLM-backed pass that rewrites the final action payload using gathered evidence, scratchpad state, and dialogue history. Returns confidence and grounding assessment. `ScratchpadFinalizer.kt`
 - **ActionReviewPipeline** — Orchestrates the full path from proposed action to execution: scratchpad finalization, decision verifier check, superego review, action-control authorization, and execution. `ActionReviewPipeline.kt`
 - **ImpulseLifecycleTracker** — Tracks the lifecycle of Id impulses through the Ego, recording action outcomes and evaluating need satisfaction when all impulse-driven work completes. `ImpulseLifecycleTracker.kt`
+- **ActionVerifier** — The current LLM-backed post-planner action-verification stage inside `LlmEgoPlanner`. It is distinct from `DecisionVerifier`: the action verifier critiques or repairs a planner-proposed action after generation, while `DecisionVerifier` is a deterministic pre-superego gate. The typed hierarchical planner redesign plans to remove this stage rather than preserve it.
+
+### Planned Hierarchical Planner Terms
+
+- **Typed Hierarchical Planner** — Proposed planner architecture for the redesign. Keeps a single planner entry point behind `Ego.Planner`, but splits planning into narrower typed planner lanes and sub-planners that communicate through typed intermediate results instead of one monolithic prompt/decision surface.
+- **HierarchicalEgoPlanner** — Proposed top-level planner entry point for the typed hierarchical redesign. Remains the single implementation behind `Ego.Planner`, but delegates work to narrower planner lanes based on typed runtime facts.
+- **PlannerLane** — Proposed top-level planner lane in the typed hierarchical redesign. Replaces the old coarse `PlanningBranch` idea with more specific lane ownership by decision family.
+- **InputPlanner** — Proposed planner lane for `EgoTrigger.IncomingInput`. Owns fresh-input semantic routing before delegating to narrower input-specific planners.
+- **DeferredStepPlanner** — Proposed planner lane for `EgoTrigger.DeferredIntention`. Owns deferred continuations and active plan-step reasoning.
+- **FeedbackPlanner** — Proposed planner lane for `EgoTrigger.ActionFeedback`. Owns reasoning over completed, failed, or waiting action outcomes.
+- **GoalWorkPlanner** — Proposed planner lane for `EgoTrigger.GoalWork`. Owns active goal-runtime work and step-level goal execution reasoning.
+- **ImpulsePlanner** — Proposed planner lane for `EgoTrigger.IncomingImpulse`. Owns self-motivated / Id-origin planning.
+- **InputIntentRouter** — Proposed semantic router inside `InputPlanner`. Interprets fresh natural-language input and returns an `InputRoute` instead of directly generating an `EgoDecision`.
+- **InputRoute** — Proposed typed routing result returned by `InputIntentRouter`. Initial planned variants are `DirectResponse`, `GeneralAction`, `MultiStepTask`, `GoalCreation`, `GoalManagement`, `ClarificationNeeded`, and `Noop`.
+- **DirectResponsePlanner** — Proposed input sub-planner used when the request can be answered directly from current context.
+- **GeneralActionPlanner** — Proposed input sub-planner used when one explicit next action or intention is sufficient.
+- **TaskDecompositionPlanner** — Proposed input sub-planner used when a request requires multi-step decomposition into a typed plan.
+- **GoalCreationPlanner** — Proposed input sub-planner used only for semantic goal creation.
+- **GoalManagementPlanner** — Proposed input sub-planner used only for semantic operations on existing goals.
+- **PlannerOutcome** — Proposed umbrella term for typed intermediate planner outputs in the hierarchical design before they are adapted into `EgoDecision`.
+- **ExecutionCandidate** — Proposed typed intermediate result representing one next action/intention candidate that can be adapted into `EgoDecision.FormIntention`.
+- **PlanDecomposition** — Proposed typed intermediate result representing a decomposed multi-step task rather than an unstructured plan string list.
+- **PlanStepDirective** — Proposed typed representation of one step inside a `PlanDecomposition`.
+- **ClarificationRequest** — Proposed typed planner result indicating that semantic resolution is insufficient and the agent should ask for clarification.
+- **GoalCommand** — Proposed typed semantic goal operation returned by planner layers before execution. Planned variants include `Create`, `List`, `Status`, `Pause`, `Resume`, `Complete`, `Delete`, `DeleteAll`, `Update`, `RevisePlan`, and `Reprioritize`.
+- **GoalReference** — Proposed typed goal-reference resolution result used by `GoalCommand`. Planned variants include `ByInternalId`, `ByResolvedEntity`, `Ambiguous`, and `Unresolved`.
+- **StepDecision** — Proposed typed output family returned by `DeferredStepPlanner`. Initial planned variants are `Execute`, `RefinePlan`, `SkipStep`, `Answer`, `Defer`, `Clarify`, and `Fail`.
+- **FeedbackDecision** — Proposed typed output family returned by `FeedbackPlanner`. Initial planned variants are `Answer`, `Retry`, `NextStep`, `Defer`, `MarkBlocked`, and `MarkDone`.
+- **GoalWorkDecision** — Proposed typed output family returned by `GoalWorkPlanner`. Initial planned variants are `ExecuteStep`, `DeferUntilCondition`, `MarkStepComplete`, `RequestClarification`, and `FailStep`.
+- **ImpulseDecision** — Proposed typed output family returned by `ImpulsePlanner`. Initial planned variants are `Research`, `Reflect`, `ContactUser`, and `Noop`.
+- **Orchestrator-Worker** — A design pattern where a narrow orchestrator decomposes a task into bounded subtasks, delegates those subtasks to specialized workers, then synthesizes the result. The planner redesign spec treats this as a possible future pattern for evidence-heavy work, not as the first step of the planner refactor.
+- **Evaluator-Optimizer** — A design pattern where one component generates a candidate output and a separate evaluator critiques, gates, or requests regeneration without silently owning the full planning path. In the planner redesign spec, evaluator-optimizer work is explicitly deferred and treated as a future analyzer/meta-reasoner-adjacent concern rather than part of the immediate planner redesign.
 
 ---
 

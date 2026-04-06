@@ -518,6 +518,61 @@ the outcome," guiding the planner to use `goal_operation` instead of
 - [MIRAGE-Bench: Hallucination in Interactive LLM-Agent Scenarios](https://arxiv.org/abs/2507.21017)
 - [AgentGuard: Runtime Verification of AI Agents](https://arxiv.org/abs/2509.23864)
 - [Reducing Tool Hallucination via Reliability Alignment (ICML 2024)](https://arxiv.org/abs/2412.04141)
+
+---
+
+## 3. Evaluator-Optimizer for Planner/Answer Critique
+
+> Status: Backlog
+>
+> Added: 2026-04-06
+>
+> Scope note: Explicitly out of scope for the typed hierarchical planner redesign.
+
+### Problem
+
+The current action verifier is not an acceptable long-term evaluation layer:
+- it is disabled by default
+- it tends to rewrite or overwrite prior planner decisions
+- it is too tightly coupled to the planner generation path
+
+We still want a future critique/gating mechanism, but not as part of the current planner redesign.
+
+### Goal
+
+Design a future evaluator-optimizer subsystem that can critique planner outputs,
+candidate answers, or execution proposals without silently rewriting the core
+planner's decisions.
+
+### Requirements
+
+- Must be architecturally separate from the core planner generation path.
+- Must be designed around typed critique/gating signals rather than free-form rewriting.
+- Should be evaluated for placement closer to:
+  - meta-reasoner
+  - analyzers
+  - post-planner review/gating layers
+- Must not re-introduce deterministic natural-language routing or brittle text heuristics.
+- Must not be implemented as part of the typed hierarchical planner redesign.
+
+### Open Design Direction
+
+Possible future outputs:
+- approve
+- reject
+- request-clarification
+- request-regeneration
+- attach-critique-signal
+
+Possible future placement:
+- after planner candidate generation but before terminal answer/action commitment
+- inside a meta-reasoner-driven review stage
+- inside a broader analyzer/review architecture shared by multiple cognitive components
+
+### References
+
+- [Anthropic: Building effective agents](https://www.anthropic.com/engineering/building-effective-agents)
+- [Magentic-One](https://www.microsoft.com/en-us/research/publication/magentic-one-a-generalist-multi-agent-system-for-solving-complex-tasks/)
 - [Chain-of-Verification (CoVe)](https://arxiv.org/abs/2309.11495)
 - [Reflexion: Language Agents with Verbal Reinforcement Learning](https://arxiv.org/abs/2303.11366)
 - [The Reasoning Trap: How Reasoning Amplifies Tool Hallucination](https://arxiv.org/html/2510.22977v1)

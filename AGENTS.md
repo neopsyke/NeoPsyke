@@ -83,6 +83,13 @@ Bad:
   make sure to find the root cause and fix it. Every work session must end with all
   tests running and stable. 
 
+## Planner Routing Rules
+- No deterministic routing may be performed on natural-language or free-text input at any stage of planner/orchestrator execution.
+- Do not use regexes, keyword matching, substring checks, locale-specific tokenization, or any other deterministic language/text parsing to select planner branches, classify user intent, resolve semantic goal operations, or interpret free-text planner payloads.
+- Deterministic routing is allowed only when it is based on typed runtime facts already present in the opportunity/trigger/context, such as provenance, trigger kind, principal role, policy scope, trust level, action availability, or other structured metadata.
+- Semantic interpretation of natural-language input must be delegated to model-based components that return typed outputs.
+- Execution-time components must not re-introduce text heuristics to reinterpret planner intent after a semantic planner has already produced a typed command.
+
 ## Agent Memory Policy
 - Auto-memory is for personal or local preferences only, such as output style or terminal setup.
 - Never store project rules, architecture facts, or coding patterns in auto-memory.
