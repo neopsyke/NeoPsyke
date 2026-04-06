@@ -32,6 +32,8 @@ Each section covers terms that appear together in the same area of the agent.
 - **AsyncSignalSource** — The coroutine-backed signal bus that feeds stimuli into the Ego loop. Dashboard chat messages and terminal commands are enqueued here. `AsyncSignalSource.kt`
 - **Interlocutor** — The identity of whoever the agent is talking to in a given session. Carries an `id` (name, hash, or JWT subject) and optional display `label`. The sentinel `Interlocutor.UNKNOWN` is used before identity resolution.
 - **ConversationContext** — End-to-end metadata that travels with every input, thought, and action through the pipeline. Contains `sessionId`, `interlocutor`, and `security` (principal, channel, trust). Required to be non-blank everywhere.
+- **GoalRuntimeCue** — A signal from the goal runtime to the Ego indicating that a goal step is ready for execution. Carries `goalId`, `stepId`, and `reason`. Enters cognition as a `CUE`-family stimulus with `TRUSTED_INTERNAL` trust.
+- **ActionFeedbackCue** — A signal emitted by the MotorCortex after action execution. Carries root input id, action type, summary, feedback content, execution status, error category, and origin metadata. Re-enters cognition as a `FEEDBACK`-family stimulus through SensoryCortex.
 
 ---
 
@@ -151,6 +153,9 @@ Each section covers terms that appear together in the same area of the agent.
 - **AuthorizationDecision** — The full output of the action-control authorization step. Contains `progress` (how far the action is allowed to advance), `commitMode`, and reason/code.
 - **AuthorizationProgress** — How far an action is allowed to proceed: `DENY`, `ALLOW_STAGE`, or `ALLOW_COMMIT`. Determines which lifecycle stage the action reaches.
 - **CommitMode** — How an action was authorized to execute: `NOT_APPLICABLE` (no commit needed), `APPROVAL_BACKED` (human approved), `POLICY_AUTONOMOUS` (policy allowed direct commit), `ADMIN_OVERRIDE` (administrative bypass).
+- **ApprovalRuntime** — Manages the lifecycle of approval requests for staged actions. Creates durable approval artifacts, resolves the owner-facing delivery channel, sends approval prompts (dashboard or Telegram), and keeps issuing roots blocked until terminal resolution. Hash-bound to staged actions; hash drift triggers replacement prompts.
+- **PromptInjectionDefense** — Deterministic, model-agnostic guards that sanitize untrusted external content before it enters the Planner or Superego. Works alongside `ExternalContentPipeline` for consistent trust tagging.
+- **PolicyScope** — Controls the autonomy level of the agent in a given context: `DEFAULT` (standard policy), `DEPLOYMENT_RESTRICTED` (reduced autonomy, no direct/autonomous commits), `FULL_AUTONOMY` (maximal agent freedom). Part of `ConversationSecurityContext`.
 
 ---
 
@@ -175,6 +180,8 @@ Each section covers terms that appear together in the same area of the agent.
 - **ActionPlanningDefinition** — Per-action guidance injected into the `PlannerContext`: description, payload guidance, schema examples, effect class, and trust constraints. Derived from `ActionDescriptor`. `CognitionModels.kt`
 - **ActionCapability** — Enum declaring behavioral traits of action plugins: `PRODUCES_USER_OUTPUT`, `GATHERS_EVIDENCE`. Allows cross-cutting systems (evidence tracking, workspace synthesis) to query plugin traits without hard-coding action types. `ActionPluginContracts.kt`
 - **ActionExecutionContext** — Runtime context passed to action handlers during execution: conversation context, request ID, dry-run flag, and authorization record. `ActionPluginContracts.kt`
+- **ConversationOutputGateway** — Channel-aware delivery interface for `contact_user` actions. Routes output to the correct sink: Telegram Bot API for Telegram sessions, dashboard chat events for web sessions. `ConversationOutputGateway.kt`
+- **ConnectorRuntime** — Optional subsystem that loads third-party action plugins from a curated connector catalog plus local installed state. Connector-backed actions require local enablement, allowlisting, and capability validation before becoming planner-visible. Subprocesses launch with explicit minimal environment. `config.connectors.enabled`
 
 ---
 
@@ -189,6 +196,7 @@ Each section covers terms that appear together in the same area of the agent.
 - **MemoryKind** — Classification of what is being stored: `NARRATIVE`, `FACT`, `RELATION`, `EPISODE`, `LESSON`, `PREFERENCE`, `GOAL`, or `CONSTRAINT`.
 - **Lesson** — A piece of learned knowledge stored in long-term memory and recalled alongside facts. Lessons are retrieved by the planner to avoid repeating mistakes or to apply prior insights.
 - **Consolidation** — The process of summarizing and compacting long-term memories. Not yet fully implemented; the `consolidate` path exists on the `Hippocampus` interface.
+- **ReflectionLesson** — A learned insight persisted to long-term memory after an action denial or repeated denial loop. Stored as `MemoryImprint(source=ego_reflection_lesson)` with tags (`kind:reflection_lesson`, action/reason/session metadata). Deduplicated via fingerprint window. Skipped for technical/system failures. Recalled into Planner and action-verifier prompts to avoid repeating failed strategies.
 
 ---
 
@@ -227,6 +235,14 @@ Each section covers terms that appear together in the same area of the agent.
 - **StepStatus** — Lifecycle state of a plan step: `PENDING`, `READY`, `IN_PROGRESS`, `BLOCKED`, `DONE`, `FAILED`, `SKIPPED`.
 - **WaitCondition** — A condition that must be met before a step can proceed. Types: `TIMER`, `EXTERNAL_EVENT`, `CONDITION_CHECK`, `CRON`, `ASYNC_OPERATION`. Has a timeout and escalation behavior.
 - **GoalRunActivation** — A signal from the goal runtime to the Ego indicating that a goal step is ready for execution. Enters the Ego as an `EgoTrigger.GoalWork`.
+- **GoalsGateway** — The Ego-facing boundary interface for the goals runtime. Ego uses it only for: `pendingWorkSummary()`, `nextWorkFromCue(GoalRuntimeCue)`, goal-origin action lifecycle callbacks, and `finalizeGoalCycle(rootInputId)`. Feature-flagged behind `config.goals.enabled`; `NoopGoalsGateway` when disabled. `GoalsGateway.kt`
+- **GoalManager** — The internal orchestrator of the goals runtime. Manages goal creation, plan generation (via `GoalPlanner`), step verification (via `GoalStepVerifier`), async operation tracking, timer/cron scheduling, and event-sourced state transitions. `GoalManager.kt`
+- **GoalStateMachine** — Pure state-transition function: `transition(state, event) → (newState, commands)`. Implements the event-sourced goal lifecycle without side effects. Commands describe side effects (emit work-ready, schedule timers, persist state). `GoalStateMachine.kt`
+- **GoalPlanner** — Generates a `GoalPlan` (ordered list of `PlanStep` entries) from a goal's title, instruction, and completion criteria. Implementations: `DeterministicGoalPlanner` (single-step fallback) and `LlmGoalPlanner` (LLM-backed decomposition). `GoalPlanner.kt`
+- **GoalStepVerifier** — Evaluates whether a goal step's acceptance criteria have been met after action execution. Returns verdicts: `PASS`, `RETRY`, `BLOCK`, `CONTINUE`, `FAIL`. `GoalStepVerifier.kt`
+- **TimerScheduler** — Registers cron expressions or absolute timestamps for goal wake-ups. Fires `onTimerWake(goalId, scheduledAtMs)` to restart cron-backed goal cycles or resume suspended goals. `TimerScheduler.kt`
+- **WaitConditionMonitor** — Polls async operation providers and accepts externally-delivered completion events for blocked goal steps. Fires `WaitConditionSatisfied` or `WaitConditionTimedOut` events when conditions resolve or expire.
+- **AsyncOperationRegistry** — Generic provider adapter registry for long-running action handles. Restored by the goal runtime on startup so blocked steps can resume monitoring after restart.
 
 ---
 
