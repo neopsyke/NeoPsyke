@@ -1,0 +1,73 @@
+package ai.neopsyke.agent.ego.planner.runtime
+
+import com.fasterxml.jackson.databind.DeserializationFeature
+import com.fasterxml.jackson.databind.JsonNode
+import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+import com.fasterxml.jackson.module.kotlin.readValue
+import mu.KotlinLogging
+import ai.neopsyke.agent.support.TextSecurity
+
+private val logger = KotlinLogging.logger {}
+
+/**
+ * JSON schema definitions, response parsing, escape repair, and payload normalization.
+ * Extracted from LlmEgoPlanner's parsePayloadWithRepair / repairInvalidJsonEscapes.
+ */
+object StructuredOutputHandler {
+
+    val mapper = jacksonObjectMapper()
+        .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
+
+    @PublishedApi internal val invalidJsonEscapeRegex = Regex("""\\(?!["\\/bfnrtu])""")
+
+    /**
+     * Parse raw LLM output into a typed result with JSON escape repair fallback.
+     */
+    inline fun <reified T> parseWithRepair(
+        raw: String,
+        onRepair: () -> Unit = {},
+    ): T? {
+        val json = TextSecurity.extractJsonObject(raw)
+        return try {
+            mapper.readValue<T>(json)
+        } catch (initial: Exception) {
+            val repaired = repairInvalidJsonEscapes(json)
+            if (repaired == json) {
+                logParseFailure(initial, raw)
+                null
+            } else {
+                try {
+                    val payload = mapper.readValue<T>(repaired)
+                    onRepair()
+                    payload
+                } catch (_: Exception) {
+                    logParseFailure(initial, raw)
+                    null
+                }
+            }
+        }
+    }
+
+    @PublishedApi
+    internal fun logParseFailure(ex: Exception, raw: String) {
+        logger.warn(ex) {
+            "Failed to parse response. preview='${TextSecurity.preview(raw, 120)}'"
+        }
+    }
+
+    fun repairInvalidJsonEscapes(json: String): String =
+        json.replace(invalidJsonEscapeRegex, "")
+
+    /**
+     * Normalize a JsonNode action_payload into a string.
+     * Matches current LlmEgoPlanner.normalizeActionPayload behavior.
+     */
+    fun normalizeActionPayload(node: JsonNode?): String? {
+        if (node == null || node.isNull) return null
+        return when {
+            node.isTextual -> node.asText()
+            node.isObject || node.isArray -> mapper.writeValueAsString(node)
+            else -> node.asText()
+        }
+    }
+}
