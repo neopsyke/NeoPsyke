@@ -6,7 +6,7 @@
 
 ## Purpose
 - Replace the current monolithic planner with a typed hierarchical planner architecture.
-- Preserve current planner behavior and feature coverage while improving separation of concerns, prompt scope, architectural clarity, and future extensibility.
+- Preserve all current end-to-end functionality and behavior, including current planner-driven feature coverage, while improving separation of concerns, prompt scope, architectural clarity, and future extensibility.
 - Remove deterministic natural-language routing and semantic text heuristics from the planner stack and adjacent goal-operation execution path.
 
 ## Problem Statement
@@ -34,6 +34,7 @@
 - Give every sub-planner its own LLM configuration so it can use an independent model/provider/settings from other planner layers.
 - Remove the current action verifier from the target planner architecture.
 - Defer evaluator-optimizer design to a later iteration, likely outside the planner core and closer to meta-reasoner/analyzer structures.
+- Treat `DeterministicDecisionVerifier` evidence-gating redesign as out of scope for this project and track it separately.
 
 ## Mandatory Routing Rule
 - NO DETERMINISTIC ROUTING MUST BE DONE AT ANY STAGE ON ANY NATURAL LANGUAGE OR TEXT INPUT.
@@ -57,9 +58,14 @@
   - action availability
   - commit constraints
   - other structured metadata already computed upstream
+- Scoped exception for this redesign:
+  - the existing `DeterministicDecisionVerifier` evidence-gating path is not being redesigned here
+  - its current deterministic text heuristics remain a known out-of-scope issue tracked separately
+  - this exception does not permit any new deterministic natural-language routing or semantic heuristics in the planner/orchestrator/goal-semantic paths covered by this redesign
 
 ## Goals
-- Preserve current external behavior and feature coverage during migration.
+- Preserve all current end-to-end functionality and behavior during migration, except for the explicitly approved removals and reshaping in this spec.
+- Do not treat existing bugs, accidental defects, or known architectural limitations as required behavior to preserve.
 - Reduce prompt width by narrowing each planner call to one decision family.
 - Make planner classes easier to navigate, reason about, test, and evolve.
 - Support future planner capabilities without growing a single monolithic prompt.
@@ -71,6 +77,7 @@
 - Immediate cost optimization through cheaper models.
 - Immediate introduction of a multi-agent framework.
 - Any evaluator-optimizer implementation work as part of this redesign.
+- Redesign of `DeterministicDecisionVerifier` evidence gating.
 - Changing user-visible behavior unless required by architectural cleanup and explicitly approved.
 
 ## Architectural Principles
@@ -90,7 +97,8 @@
   - inspect typed trigger/opportunity/runtime facts
   - choose the next planner lane only from typed metadata
   - call the selected sub-planner
-  - return a typed `EgoDecision` or intermediate typed planner result
+  - return the final `EgoDecision`
+- Lane-specific sealed types remain the typed intermediate results inside planner boundaries; a shared `PlannerOutcome` wrapper is not required.
 - It must not inspect natural-language content deterministically.
 
 ### 2. Typed Planner Lanes
@@ -116,9 +124,7 @@
   - `InputRoute`
   - `GoalCommand`
   - `GoalReference`
-  - `PlannerOutcome`
   - `PlanDecomposition`
-  - `PlanStepDirective`
   - `ExecutionCandidate`
 - Intermediate types must be expressive enough to avoid pushing semantics back into execution-time text normalization.
 
@@ -131,7 +137,7 @@
   - inspect typed trigger/opportunity/runtime facts
   - deterministically select the planner lane only when the lane is already implied by typed metadata
   - invoke the next planner lane
-  - translate typed planner outcomes into `EgoDecision`
+  - return the final `EgoDecision` produced by the selected lane
 - It must not use deterministic logic over natural-language input.
 
 ### Level 1: Top-Level Lanes
@@ -185,12 +191,10 @@
 ### Lane Selection / Routing
 - `PlannerLane`
 - `InputRoute`
-- `PlannerOutcome`
 
 ### Execution / Tasking
 - `ExecutionCandidate`
 - `PlanDecomposition`
-- `PlanStepDirective`
 - `ClarificationRequest`
 
 ### Goals
@@ -316,8 +320,9 @@
 - If orchestrator-worker is adopted later, worker responsibilities should map to bounded decision families or evidence-gathering jobs rather than free-form personas.
 
 ## Migration Requirements
-- Preserve current external planner contract during migration through adapter layers where necessary.
-- If legacy planner/execution interfaces still require JSON payloads during migration, those payloads must be generated from typed planner results, not from downstream text heuristics.
+- Prefer clean architectural breaks over compatibility shims or parallel legacy planner paths.
+- Do not preserve old planner structure just for migration convenience.
+- If a final runtime boundary still intentionally uses serialized payloads, those payloads must be generated directly from typed planner results, not from downstream text heuristics.
 - Add black-box tests around typed planner contracts and resulting `EgoDecision` behavior.
 - Remove natural-language routing heuristics as part of the migration, not as a later cleanup.
 - Remove goal-operation semantic heuristics from execution-time plugin code as part of the migration to typed goal commands.
@@ -349,18 +354,19 @@
 ## Acceptance Summary
 - No planner/orchestrator routing logic performs deterministic interpretation of natural-language input.
 - No goal-operation execution path performs deterministic semantic reinterpretation of planner text.
+- The existing `DeterministicDecisionVerifier` evidence-gating path is excluded from this redesign's acceptance scope and tracked separately.
+- All current end-to-end functionality and behavior covered by the planner stack are preserved unless explicitly approved otherwise in this spec.
 - The immediate redesign stays within a single-agent typed hierarchical planner architecture.
 - Planner logic is split into multiple smaller classes aligned to decision family.
 - Each planner lane has its own prompt and its own LLM configuration entry point.
 - The current action verifier is removed from the redesigned planner path.
-- Any remaining legacy payload adaptation is generated from typed semantic outputs rather than deterministic text parsing.
-- The planner can preserve current behavior/features with equivalent or better test coverage.
+- Any intentionally retained serialized boundary payloads are generated from typed semantic outputs rather than deterministic text parsing.
+- The redesign preserves intended current end-to-end behavior with equivalent or better test coverage, without treating existing bugs or limitations as parity targets.
 
 ## Open Questions
-- What is the minimum typed intermediate representation that can survive the migration without excessive adapter code?
-- Which goal-management operations should require clarification instead of semantic best-effort resolution?
-- Which evaluator/analyzer structure should own future evaluator-optimizer loops?
-- Which planner lanes should be introduced in the first migration step versus later refinement?
+- No open question remains that blocks implementation start.
+- Non-blocking future question:
+  - which evaluator/analyzer structure should own future evaluator-optimizer loops?
 
 ## Detailed Acceptance Criteria and Signoff Rules
 
@@ -368,9 +374,11 @@ This section defines how to determine that the redesign has successfully
 replaced the current planner without losing required behavior.
 
 ### 1. Scope-Control Rule
-- The redesign is accepted only if it preserves current planner/user-visible behavior except for the explicitly approved removals and reshaping in this spec.
+- The redesign is accepted only if it preserves all current end-to-end functionality and behavior within scope, except for the explicitly approved removals and reshaping in this spec.
 - The current action verifier is the only planner-stage removal explicitly approved by this spec.
 - Any other behavior change must be called out explicitly as an intentional change with dedicated tests and documentation updates.
+- Existing bugs, accidental defects, and known limitations do not count as required behavior for parity and do not need to be preserved.
+- Fixing an existing bug or removing an accidental limitation is allowed, but it must be documented explicitly so it is not mistaken for silent behavioral drift.
 
 ### 2. Feature-Parity Inventory Rule
 - Before signoff, the implementation must produce a planner parity inventory that maps current planner capabilities to their new owner components.
@@ -379,6 +387,7 @@ replaced the current planner without losing required behavior.
   - preserved with narrower typed architecture
   - intentionally changed
   - intentionally removed
+- Existing bugs and known limitations must not be classified as preserved capabilities. If they are fixed as part of the redesign, the parity/signoff artifacts must describe them as bug fixes or limitation removals rather than parity targets.
 - Nothing may be left unclassified.
 - The parity inventory must explicitly include, at minimum:
   - fresh input planning
@@ -444,6 +453,10 @@ replaced the current planner without losing required behavior.
   - tests that prove semantic routing succeeds on natural-language inputs through model-based typed outputs
   - a code-level audit that no planner-semantic path relies on regex, keyword matching, substring matching, token overlap scoring, or comparable deterministic text heuristics
 - Any deterministic logic found on a semantic text path blocks signoff.
+- Scoped exception:
+  - the existing `DeterministicDecisionVerifier` evidence-gating path is excluded from this redesign's Rule 6 audit and signoff
+  - this exception must be documented explicitly in the parity/signoff artifacts
+  - no new deterministic natural-language heuristics may be added there as part of this redesign
 
 ### 7. Goal-Semantics Acceptance Rule
 - Goal behavior is accepted only if goal creation and goal management semantics are resolved before execution as typed goal commands.
@@ -497,10 +510,13 @@ replaced the current planner without losing required behavior.
   - planner/unit/integration tests for the redesign pass
   - existing required deterministic validation passes
   - the planner parity inventory is complete
+  - end-to-end scenario/integration evidence shows current in-scope behavior is preserved
   - no blocked acceptance rule above remains unresolved
 - Final validation must be reported with explicit evidence, including:
   - which test suites were run
-  - whether existing planner behavior was preserved, intentionally changed, or intentionally removed
+  - whether current end-to-end functionality and behavior were preserved, intentionally changed, or intentionally removed
+  - which existing bugs or limitations were intentionally fixed or removed during the redesign
+  - which known scope exceptions were explicitly excluded from signoff and why
   - whether any open gaps remain
 
 ### 13. Default Failure Rule

@@ -770,4 +770,63 @@ in prompt content. Use relative or bucketed representations instead.
 
 ---
 
+## 5. Semantic Redesign of DeterministicDecisionVerifier Evidence Gating
+
+> Status: Backlog
+>
+> Added: 2026-04-06
+>
+> Scope note: Explicitly out of scope for the typed hierarchical planner redesign.
+
+### Problem
+
+`DeterministicDecisionVerifier` currently performs deterministic interpretation
+of natural-language text to decide whether a final `CONTACT_USER` response
+requires prior external evidence. It classifies the latest user turn and answer
+payload using keyword sets, substring matching, and date-sensitive regexes.
+
+That creates two architectural problems:
+- it is brittle across languages and phrasing
+- it conflicts with the broader planner-direction rule that natural-language
+  semantic interpretation should not be done deterministically
+
+### Goal
+
+Redesign evidence-gating so it no longer interprets user or planner free text
+with deterministic heuristics.
+
+### Requirements
+
+- Must not classify or route natural-language text with regexes, keyword sets,
+  substring matching, or comparable deterministic heuristics.
+- Should consume typed upstream signals when possible, such as:
+  - typed volatility/risk classification
+  - typed evidence requirements
+  - typed action/evidence status
+- If semantic interpretation is still required, it must be model-based and
+  return typed outputs rather than free-form text.
+- Must remain architecturally separate from the removed planner action verifier.
+- Must be evaluated for placement relative to:
+  - the existing decision-verifier/review path
+  - future evaluator-optimizer work
+  - meta-reasoner or analyzer-owned critique/gating flows
+
+### Open Design Direction
+
+Promising options:
+- Replace text classification with typed metadata computed upstream by a
+  dedicated semantic classifier.
+- Restrict the verifier to purely typed runtime facts and remove semantic text
+  interpretation from it entirely.
+- Fold evidence-sensitivity assessment into a future typed evaluator/analyzer
+  layer rather than keeping it inside `DecisionVerifier`.
+
+### References
+
+- [`DecisionVerifier.kt`](../../src/main/kotlin/ai/neopsyke/agent/ego/DecisionVerifier.kt)
+- [`TYPED_HIERARCHICAL_PLANNER_REDESIGN.md`](../specs/TYPED_HIERARCHICAL_PLANNER_REDESIGN.md)
+- [`TODO_PLANNED_FEATURES.md` section 3](./TODO_PLANNED_FEATURES.md)
+
+---
+
 <!-- Add new features below this line as ## N+1. Title -->
