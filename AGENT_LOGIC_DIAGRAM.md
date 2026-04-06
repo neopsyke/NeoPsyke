@@ -13,7 +13,7 @@ High-level view of the six major subsystems and their interactions.
 flowchart LR
     Input["Stimuli\n(User, Telegram, Goals, Id)"] --> SC["SensoryCortex"]
     SC --> Ego["Ego"]
-    Ego --> Planner["Planner\n(LLM Decision)"]
+    Ego --> Planner["HierarchicalEgoPlanner\n(Typed Lane Dispatch)"]
     Planner --> Ego
     Ego --> Sup["Superego\n(Review Gate)"]
     Sup --> Ego
@@ -49,9 +49,18 @@ flowchart LR
     ID["Id (Autonomous Drives)"] --> AS
     E --> ID
 
-    E --> P["LlmEgoPlanner"]
-    P --> GBR["Goal-Creation Branch"]
-    P --> AV["Action Verifier LLM Call"]
+    E --> P["HierarchicalEgoPlanner (L0)"]
+    P --> IL["InputPlanner (L1)"]
+    IL --> IR["InputIntentRouter (L2)"]
+    IL --> DRP["DirectResponsePlanner"]
+    IL --> GAP["GeneralActionPlanner"]
+    IL --> TDP["TaskDecompositionPlanner"]
+    IL --> GCP["GoalCreationPlanner"]
+    IL --> GMP["GoalManagementPlanner"]
+    P --> DSP["DeferredStepPlanner (L1)"]
+    P --> FP["FeedbackPlanner (L1)"]
+    P --> GWP["GoalWorkPlanner (L1)"]
+    P --> IP["ImpulsePlanner (L1)"]
     E --> TV["DecisionVerifier (Deterministic Task Gate)"]
     E --> S["Superego"]
     S --> S1["SingleStage Review Engine (DeterministicConscience + LLM)"]
@@ -139,7 +148,7 @@ sequenceDiagram
     participant SC as SensoryCortex
     participant Ego
     participant Sched as AttentionScheduler
-    participant Planner as LlmEgoPlanner
+    participant Planner as HierarchicalEgoPlanner
     participant Sup as Superego
     participant ACS as ActionControlService
     participant Motor as MotorCortex
@@ -192,7 +201,7 @@ sequenceDiagram
     participant SC as SensoryCortex
     participant Ego
     participant Sched as AttentionScheduler
-    participant Planner as LlmEgoPlanner
+    participant Planner as HierarchicalEgoPlanner
     participant Sup as Superego
     participant AIR as ApprovalRuntime
     participant Motor as MotorCortex
@@ -242,8 +251,9 @@ sequenceDiagram
             Ego->>Planner: decide(context)
             Note over Ego,Planner: PromptBudgetAllocator reserves required-core/context floors with message-overhead accounting, trims optional first, and emits prompt_budget_allocation
             Note over Ego,Planner: Planner prompt includes conversation security summary, thread trust state, percept summary/family, opportunity summary/kind, allowed intentions/commit modes, and trigger provenance summary untrusted external content is framed as data, not instruction
-            Note over Ego,Planner: Obvious persistent reminder / monitoring / goal-creation inputs route into a dedicated goal-creation branch before the generic planner path
-            Note over Ego,Planner: Goal-creation branch uses a narrow schema prompt plus deterministic recurring schedule detection for supported forms like every N minutes / every N hours
+            Note over Ego,Planner: HierarchicalEgoPlanner dispatches to typed L1 lanes based on trigger type (no text inspection)
+            Note over Ego,Planner: InputPlanner uses InputIntentRouter (LLM classifier) then dispatches to typed L2 sub-planner
+            Note over Ego,Planner: Goal creation and management use typed GoalCommand with LLM-resolved references (no regex heuristics)
             Note over Ego,Planner: Planner requests schema-enforced structured output. LLM layer owns compatibility degradation from strict to relaxed to prompt-only JSON. Parse failures do truncation-budget retry then strict-JSON retry before noop fallback
             Planner-->>Ego: defer/intend/plan/noop
             Ego->>Delib: maybeApplyPressureOverride

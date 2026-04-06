@@ -128,6 +128,9 @@
 | Run | Timestamp | Result | Failing Steps | Notes |
 |-----|-----------|--------|---------------|-------|
 | 1 | 2026-04-06T03:17Z | PASS | none | After Phase 1 complete (Step 8) |
+| 2 | 2026-04-06T03:22Z | PASS | none | After Phase 2 lanes (Steps 9-12) |
+| 3 | 2026-04-06T07:53Z | PASS | none | Final deterministic gate |
+| 4 | 2026-04-06T07:54Z | FAIL (live) | reasoning_eval_model | Superego model errors (not planner); 7/24 pass, 17 superego_unavailable |
 
 ---
 

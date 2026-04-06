@@ -238,9 +238,10 @@ Stimulus → SensoryCortex (sanitize, appraise) → Percept
 
 ---
 
-## L1: Planner (LlmEgoPlanner)
+## L1: Planner (HierarchicalEgoPlanner)
 
-- File: `src/main/kotlin/ai/neopsyke/agent/ego/LlmEgoPlanner.kt`
+- Files: `src/main/kotlin/ai/neopsyke/agent/ego/planner/`
+- Legacy dead code: `src/main/kotlin/ai/neopsyke/agent/ego/LlmEgoPlanner.kt` (not wired; retained for test compatibility)
 
 **Decision types** (sealed `EgoDecision`):
 - `FormIntention(urgency, intentionKind, commitModePreference, actionType, payload, summary)` — Execute an action.
@@ -248,51 +249,64 @@ Stimulus → SensoryCortex (sanitize, appraise) → Percept
 - `EnqueuePlan(urgency, goal, steps)` — Multi-step plan decomposed into deferred steps.
 - `Noop(reason, parseFailureShortCircuit?, deniedActionType?, deniedActionPayload?, denialReasonCode?)` — No action.
 
-**Main entry: `decide(trigger, context)`**:
-1. Select branch: GOAL_CREATION (for obvious persistent-goal/reminder/monitoring inputs) or GENERAL.
-2. Build prompt messages with budget allocation.
-3. Call LLM (temperature 0.2 for general, 0.0 for goal creation).
-4. Parse structured JSON response.
-5. Apply action verifier (if enabled).
-6. Return `EgoDecision`.
+### L0: HierarchicalEgoPlanner (Entry Point)
+- Replaces `LlmEgoPlanner` behind `Ego.Planner`.
+- Typed trigger dispatch: `when (trigger)` on sealed interface variant (no text inspection).
+- Delegates to L1 lanes, each returning `EgoDecision` directly.
+- Each lane has its own LLM configuration entry point (`PlannerConfig.lanes`).
+- Emits `planner_start`, `planner_lane_selected`, and decision telemetry.
 
-**Planner context includes**: recent dialogue, queue snapshot, short-term memory summary, long-term recall, reflection-lesson recall, scratchpad summary, deliberation state/meta-guidance, conversation security summary, trigger provenance, available/dispatchable actions with per-action planner definitions.
+### L1: Planner Lanes
+| Lane | Trigger | File |
+|------|---------|------|
+| `InputPlanner` | `IncomingInput` | `lane/InputPlanner.kt` |
+| `DeferredStepPlanner` | `DeferredIntention` | `lane/DeferredStepPlanner.kt` |
+| `FeedbackPlanner` | `ActionFeedback` | `lane/FeedbackPlanner.kt` |
+| `GoalWorkPlanner` | `GoalWork` | `lane/GoalWorkPlanner.kt` |
+| `ImpulsePlanner` | `IncomingImpulse` | `lane/ImpulsePlanner.kt` |
+
+Each lane:
+- Has its own narrower system prompt focused on its decision family.
+- Uses `PlannerRuntime` for model calls (retry, circuit-breaker, schema fallback).
+- Validates constraints: allowed intentions, commit modes, available/dispatchable actions.
+- Emits per-lane prompt-budget telemetry.
+
+### L2: InputPlanner Sub-Planners
+- `InputIntentRouter`: LLM-based semantic classifier returning typed `InputRoute`.
+- `DirectResponsePlanner`: terminal answers from current context.
+- `GeneralActionPlanner`: single-action with full constraint validation.
+- `TaskDecompositionPlanner`: multi-step plan decomposition.
+- `GoalCreationPlanner`: semantic goal creation (no regex heuristics).
+- `GoalManagementPlanner`: typed GoalCommand with LLM reference resolution.
+
+Two-call pattern: InputIntentRouter (classify) then sub-planner (decide).
+Dispatch from `InputRoute` variant to sub-planner is deterministic on typed LLM output.
+
+### L2: Goal Semantics (Typed)
+- Goal creation and management emit typed `GoalCommand` variants.
+- Goal references are LLM-resolved (`GoalReference.ByInternalId`, `ByResolvedEntity`, `Ambiguous`, `Unresolved`).
+- `GoalOperationActionPlugin` validates and executes typed commands (no text heuristics).
+- Ambiguous/unresolved references trigger clarification or failure, never silent guessing.
 
 ### L2: Prompt Budget and Assembly
-- `PromptBudget` allocator reserves required-core/context floors with message-overhead accounting.
-- Tiered degradation: trims optional sections first, single-message fallback under extreme pressure.
-- Emits `prompt_budget_allocation` telemetry for planner and action-verifier builds.
-- Planner prompt includes: security context summary, trigger provenance, per-action effect/commit/trust metadata.
-- Instructions frame untrusted external content as data, not instruction.
-
-### L2: Goal-Creation Branch
-- Triggered when input contains goal-creation intent patterns and `GOAL_OPERATION` action is available.
-- Uses a narrow schema prompt to synthesize `goal_operation(create)` payloads.
-- Deterministic recurring schedule detection for supported forms (`every N minutes`, `every N hours`).
-- Unsupported recurring phrasings fall back to user clarification.
+- `PromptBudgetAllocator` reserves required-core/context floors with message-overhead accounting.
+- `SharedPromptSections` provides reusable context sections across lanes.
+- Each lane has its own prompt profile; narrower prompts per decision family.
+- Emits `prompt_budget_allocation` telemetry per lane.
 
 ### L2: Structured Output and Parse Recovery
-- Planner requests schema-enforced structured output (`response_format=json_schema`).
-- LLM adapter owns compatibility degradation (strict → relaxed → prompt-only JSON).
-- Parse pipeline: strict JSON parse + minimal repair for invalid escapes.
-- On parse failure: one truncation retry with increased completion budget (if output looks truncated), then one strict-JSON retry.
-- Circuit breaker: after N consecutive parse failures, short-circuit to Noop.
-- Normalizes `action_payload` from either JSON string or structured JSON into string payload.
+- Lanes request schema-enforced structured output (`response_format=json_schema`).
+- `StructuredOutputHandler`: JSON parse with escape repair fallback.
+- On parse failure: truncation retry (increased budget) then strict-JSON retry.
+- Per-lane circuit breaker: after N consecutive parse failures, short-circuit to Noop.
+- `PlannerRuntime` owns retry, schema-fallback (strict → relaxed), and circuit-breaker.
 
 ### L2: Action Verifier
-- Disabled by default (`planner.actionVerifierEnabled = false`).
-- When enabled: strict json_schema call with relaxed-schema fallback.
-- Truncation retry + strict-JSON retry on parse failure.
-- Parse-failure circuit breaker scoped by `(root_input, action_type)`.
-- Reject propagates into noop-retry deferred continuations with denied action metadata.
-- Repeated-answer disagreement override: if follow-up repeats same `contact_user` payload after prior non-technical reject, planner keeps original answer.
-- `contact_user` meaning guard: repairs may clean up surface form but semantic rewrites are ignored.
-- No-op repair collapse: materially unchanged repairs treated as approve.
-- Temperature fixed at 0.0.
+- **Removed** from the redesigned planner path per spec requirement.
+- Planner correctness is achieved through lane design, typed outputs, and existing runtime controls.
 
 ### L2: Redundancy Handling
 - Planner-side soft cost control: prompt treats repeated external calls as low-value unless refresh/retry explicitly requested.
-- Action verifier can reject low-value repeated calls when evidence hints already contain usable signal.
 - `Ego` emits `external_action_redundancy_signal` telemetry (soft signal, not policy deny).
 
 ---
