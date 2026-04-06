@@ -277,8 +277,7 @@ private object StructuredOutputExecutionPolicyResolver {
         requestedFormat: ChatResponseFormat.JsonSchema,
     ): StructuredOutputExecutionPlan {
         val stickyEligible = provider.equals("groq", ignoreCase = true) &&
-            groqGptOssModelRegex.matches(modelName.trim()) &&
-            metadata.callSite.equals("thought", ignoreCase = true)
+            groqGptOssModelRegex.matches(modelName.trim())
         return StructuredOutputExecutionPlan(
             initialMode = StructuredOutputMode.STRICT_JSON_SCHEMA,
             stickyEligible = stickyEligible,

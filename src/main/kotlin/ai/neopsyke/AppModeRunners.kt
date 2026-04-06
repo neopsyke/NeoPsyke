@@ -1034,13 +1034,10 @@ internal object AppModeRunners {
 
                     InstrumentedChatModelClient(
                         delegate = TokenBudgetGuardedChatClient(
-                            delegate = AdaptiveStructuredOutputChatClient(
-                                delegate = maybeCacheWrap(createChatClient(
-                                    endpoint = llm.planner,
-                                    callObserver = callObserverForProvider(llm.planner.providerLabel)
-                                )),
-                                provider = llm.planner.providerLabel
-                            ),
+                            delegate = maybeCacheWrap(createChatClient(
+                                endpoint = llm.planner,
+                                callObserver = callObserverForProvider(llm.planner.providerLabel)
+                            )),
                             budgetGate = tokenBudgetGate,
                             provider = llm.planner.providerLabel,
                             role = LlmRoleLabels.PLANNER
@@ -1616,13 +1613,10 @@ internal object AppModeRunners {
 
                     InstrumentedChatModelClient(
                         delegate = TokenBudgetGuardedChatClient(
-                            delegate = AdaptiveStructuredOutputChatClient(
-                                delegate = maybeCacheWrap(createChatClient(
-                                    endpoint = llm.planner,
-                                    callObserver = callObserverForProvider(llm.planner.providerLabel)
-                                )),
-                                provider = llm.planner.providerLabel
-                            ),
+                            delegate = maybeCacheWrap(createChatClient(
+                                endpoint = llm.planner,
+                                callObserver = callObserverForProvider(llm.planner.providerLabel)
+                            )),
                             budgetGate = tokenBudgetGate,
                             provider = llm.planner.providerLabel,
                             role = LlmRoleLabels.PLANNER
@@ -2169,7 +2163,8 @@ internal object AppModeRunners {
                 return SuperegoReviewRouting(
                     primaryEndpoint = explicitPrimary,
                     primaryTokenWeight = llm.modelCatalog.tokenWeightFor(explicitPrimary),
-                    primaryContextWindow = llm.modelCatalog.contextWindowFor(explicitPrimary)
+                    primaryContextWindow = llm.modelCatalog.contextWindowFor(explicitPrimary),
+                    primaryReasoningOverhead = llm.modelCatalog.reasoningOverheadFor(explicitPrimary)
                 )
             }
             instrumentation.emit(
@@ -2204,7 +2199,8 @@ internal object AppModeRunners {
             return SuperegoReviewRouting(
                 primaryEndpoint = explicitPrimary,
                 primaryTokenWeight = llm.modelCatalog.tokenWeightFor(explicitPrimary),
-                primaryContextWindow = llm.modelCatalog.contextWindowFor(explicitPrimary)
+                primaryContextWindow = llm.modelCatalog.contextWindowFor(explicitPrimary),
+                primaryReasoningOverhead = llm.modelCatalog.reasoningOverheadFor(explicitPrimary)
             )
         }
 
@@ -2218,7 +2214,8 @@ internal object AppModeRunners {
             return SuperegoReviewRouting(
                 primaryEndpoint = explicitEscalation,
                 primaryTokenWeight = llm.modelCatalog.tokenWeightFor(explicitEscalation),
-                primaryContextWindow = llm.modelCatalog.contextWindowFor(explicitEscalation)
+                primaryContextWindow = llm.modelCatalog.contextWindowFor(explicitEscalation),
+                primaryReasoningOverhead = llm.modelCatalog.reasoningOverheadFor(explicitEscalation)
             )
         }
 
@@ -2246,7 +2243,8 @@ internal object AppModeRunners {
         return SuperegoReviewRouting(
             primaryEndpoint = legacyEndpoint,
             primaryTokenWeight = llm.modelCatalog.tokenWeightFor(legacyEndpoint),
-            primaryContextWindow = llm.modelCatalog.contextWindowFor(legacyEndpoint)
+            primaryContextWindow = llm.modelCatalog.contextWindowFor(legacyEndpoint),
+            primaryReasoningOverhead = llm.modelCatalog.reasoningOverheadFor(legacyEndpoint)
         )
     }
     
@@ -2254,7 +2252,7 @@ internal object AppModeRunners {
         endpoint: LlmEndpointConfig,
         callObserver: ai.neopsyke.llm.ChatCallObserver? = null,
     ): ChatModelClient {
-        return when (endpoint.provider) {
+        val raw: ChatModelClient = when (endpoint.provider) {
             LlmProvider.ANTHROPIC -> AnthropicChatClient(
                 apiKey = endpoint.apiKey,
                 baseUrl = endpoint.baseUrl,
@@ -2268,7 +2266,7 @@ internal object AppModeRunners {
                 modelName = endpoint.model,
                 callObserver = callObserver
             )
-    
+
             LlmProvider.MISTRAL -> MistralChatClient(
                 apiKey = endpoint.apiKey,
                 baseUrl = endpoint.baseUrl,
@@ -2297,6 +2295,10 @@ internal object AppModeRunners {
                 callObserver = callObserver
             )
         }
+        return AdaptiveStructuredOutputChatClient(
+            delegate = raw,
+            provider = endpoint.providerLabel
+        )
     }
     
     private fun resolveLlmCacheConfig(): Pair<LlmCacheMode, java.nio.file.Path?> {

@@ -522,7 +522,7 @@ func runBuiltinStep(name string, cfg *config.FreudConfig, repoRoot, gradleHome, 
 
 	case "reasoning_eval_model":
 		result, err := BBHSmoke(BBHOpts{
-			Lane:                 resolveLane(cfg),
+			Lane:                 orDefault(cfg.Lane, "default"),
 			PromptsFile:          cfg.BBH.PromptsFile,
 			AnswersFile:          cfg.BBH.AnswersFile,
 			MinPassRatePercent:   cfg.BBH.MinPassRate,
@@ -689,14 +689,3 @@ func orDefault(value, fallback string) string {
 	return value
 }
 
-// resolveLane determines the BBH lane name from the LLM config file path.
-func resolveLane(cfg *config.FreudConfig) string {
-	llmConfig := cfg.LiveEval.LLMConfigFile
-	if strings.Contains(llmConfig, "low-llm") {
-		return "low-llm"
-	}
-	if strings.Contains(llmConfig, "high-llm") {
-		return "high-llm"
-	}
-	return "default"
-}
