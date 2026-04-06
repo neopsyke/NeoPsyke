@@ -1,0 +1,84 @@
+package ai.neopsyke.agent.ego.planner.lane
+
+import ai.neopsyke.agent.config.AgentConfig
+import ai.neopsyke.agent.ego.planner.LaneId
+import ai.neopsyke.agent.ego.planner.PlannerLane
+import ai.neopsyke.agent.ego.planner.input.DirectResponsePlanner
+import ai.neopsyke.agent.ego.planner.input.GeneralActionPlanner
+import ai.neopsyke.agent.ego.planner.input.GoalCreationPlanner
+import ai.neopsyke.agent.ego.planner.input.GoalManagementPlanner
+import ai.neopsyke.agent.ego.planner.input.InputIntentRouter
+import ai.neopsyke.agent.ego.planner.input.TaskDecompositionPlanner
+import ai.neopsyke.agent.ego.planner.model.InputRoute
+import ai.neopsyke.agent.ego.planner.runtime.PlannerRuntime
+import ai.neopsyke.agent.model.ActionType
+import ai.neopsyke.agent.model.CommitMode
+import ai.neopsyke.agent.model.EgoDecision
+import ai.neopsyke.agent.model.EgoTrigger
+import ai.neopsyke.agent.model.IntentionKind
+import ai.neopsyke.agent.model.PlannerContext
+import ai.neopsyke.agent.model.Urgency
+import ai.neopsyke.agent.support.TextSecurity
+import ai.neopsyke.instrumentation.AgentEvent
+import ai.neopsyke.instrumentation.AgentInstrumentation
+
+/**
+ * L1 lane: orchestrates fresh user input through InputIntentRouter -> L2 sub-planner.
+ *
+ * The two-call pattern (classify then decide) is consistent with the spec's
+ * principle "One semantic interpretation pass per domain boundary whenever possible"
+ * because the router and the sub-planner operate at different domain boundaries.
+ *
+ * Dispatch from InputRoute to sub-planner is deterministic on a typed result
+ * from an LLM call, which is allowed by the mandatory routing rule.
+ */
+class InputPlanner(
+    private val runtime: PlannerRuntime,
+    private val config: AgentConfig,
+    private val instrumentation: AgentInstrumentation,
+    private val router: InputIntentRouter,
+    private val directResponsePlanner: DirectResponsePlanner,
+    private val generalActionPlanner: GeneralActionPlanner,
+    private val taskDecompositionPlanner: TaskDecompositionPlanner,
+    private val goalCreationPlanner: GoalCreationPlanner,
+    private val goalManagementPlanner: GoalManagementPlanner,
+) : PlannerLane {
+
+    override val laneId: LaneId = LaneId.INPUT_INTENT_ROUTER
+
+    override fun plan(trigger: EgoTrigger, context: PlannerContext): EgoDecision {
+        val inputTrigger = trigger as? EgoTrigger.IncomingInput
+            ?: return EgoDecision.Noop("InputPlanner requires IncomingInput trigger.")
+
+        val route = router.route(inputTrigger, context)
+
+        instrumentation.emit(
+            AgentEvent(
+                type = "input_route_selected",
+                data = mapOf(
+                    "route" to route::class.simpleName?.lowercase(),
+                    "root_input_id" to inputTrigger.input.rootInputId,
+                )
+            )
+        )
+
+        return when (route) {
+            is InputRoute.DirectResponse -> directResponsePlanner.plan(inputTrigger, context)
+            is InputRoute.GeneralAction -> generalActionPlanner.plan(inputTrigger, context)
+            is InputRoute.MultiStepTask -> taskDecompositionPlanner.plan(inputTrigger, context)
+            is InputRoute.GoalCreation -> goalCreationPlanner.plan(inputTrigger, context)
+            is InputRoute.GoalManagement -> goalManagementPlanner.plan(inputTrigger, context)
+            is InputRoute.ClarificationNeeded -> {
+                EgoDecision.FormIntention(
+                    urgency = Urgency.MEDIUM,
+                    intentionKind = IntentionKind.OBSERVE,
+                    commitModePreference = CommitMode.NOT_APPLICABLE,
+                    actionType = ActionType.CONTACT_USER,
+                    payload = TextSecurity.clamp(route.question, config.maxActionPayloadChars),
+                    summary = TextSecurity.clamp("Ask for clarification", config.maxActionSummaryChars),
+                )
+            }
+            is InputRoute.Noop -> EgoDecision.Noop(route.reason)
+        }
+    }
+}
