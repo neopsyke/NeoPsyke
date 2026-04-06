@@ -31,14 +31,19 @@
 | 11 | Allowed-intention shaping | Preserved | All L1/L2 lanes via `PlannerContext.allowedIntentions` | Each lane checks `ik !in context.allowedIntentions` before forming intention. |
 | 12 | Allowed-commit-mode shaping | Preserved | All L1/L2 lanes via `PlannerContext.allowedCommitModes` + `DecisionValidation` | Commit mode resolved and validated per lane. |
 | 13 | Action-availability shaping | Preserved | All L1/L2 lanes via `PlannerContext.availableActions` | Each lane checks `at !in context.availableActions`. |
-| 14 | Plan-step continuation semantics | Preserved | `DeferredStepPlanner` | Plan context, pass count, denial codes carried via typed `QueuedIntention` fields. |
-| 15 | Resolution-draft gating | Preserved | `DeferredStepPlanner` | `allowResolutionDraft = thought.planContext != null` check. Only in DeferredStep lane. |
-| 16 | Structured-output retry / recovery | Preserved | `PlannerRuntime` | Retry loop with strict-to-relaxed schema fallback. Shared across all lanes. |
-| 17 | Planner output repair | Preserved | `StructuredOutputHandler` + `PlannerRuntime` | Invalid JSON escape repair, bare URL wrapping, missing summary synthesis. |
-| 18 | Planner telemetry | Preserved | `PlannerRuntime` + `HierarchicalEgoPlanner` | `planner_start`, `planner_lane_selected`, `planner_decision`, `prompt_budget_allocation`. |
-| 19 | Prompt-budget allocation telemetry | Preserved | `PlannerRuntime.emitPromptBudgetTelemetry()` | Emitted per-lane with lane-specific call_site. |
-| 20 | Circuit-breaker behavior | Preserved | `PlannerRuntime` (per-lane, per-rootInputId) | 3 consecutive parse failures trip the breaker. |
-| 21 | Truncation retry | Preserved | `TruncationRetry` (shared utility) | Detects `finish_reason=length` or unclosed JSON, bumps token budget. |
+| 14 | Dispatchable-action shaping | Preserved | `SharedPromptSections.actionGuidanceBlock()` + `SharedPromptSections.plannerVisibleActionSchemaEnum()` + `InputIntentRouter` / `GoalCreationPlanner` | Planner-visible action surface is restricted to dispatchable actions; goal routes also gate on `GOAL_OPERATION in context.dispatchableActions`. |
+| 15 | Conversation / thread trust and provenance shaping | Preserved | Shared prompt context sections across L1/L2 lanes | `securityContextSection`, `triggerProvenanceSection`, `perceptThreadSection`, and prompt instructions carry trust/provenance constraints into planner decisions. |
+| 16 | Goal-runtime constraints | Preserved | `GoalWorkPlanner` + `SharedPromptSections.formatTriggerText()` | Goal step description, acceptance criteria, wake reason, and working context are preserved in the goal-work lane prompt and decision path. |
+| 17 | Id convergence constraints | Preserved | Upstream `CognitivePolicyShaper` / `Ego` shaping, consumed by `ImpulsePlanner` and deferred lanes through `PlannerContext` | Convergence-mode action/intention restrictions are preserved as typed context constraints before planner choice, then enforced by planner-visible action surface and lane validation. |
+| 18 | Plan-step continuation semantics | Preserved | `DeferredStepPlanner` | Plan context, pass count, denial codes carried via typed `QueuedIntention` fields. |
+| 19 | Resolution-draft gating | Preserved | `DeferredStepPlanner` | `allowResolutionDraft = thought.planContext != null` check. Only in DeferredStep lane. |
+| 20 | Structured-output retry / recovery | Preserved (narrower) | `PlannerRuntime` + lane-local retry paths | Runtime owns model-call retry and provider-side schema-validation fallback. Parse-failure retries are lane-local (`truncation_retry` + strict-JSON retry). |
+| 21 | Planner output repair | Preserved | `StructuredOutputHandler` + `PlannerRuntime` | Invalid JSON escape repair, bare URL wrapping, missing summary synthesis. |
+| 22 | Planner telemetry | Preserved | `PlannerRuntime` + `HierarchicalEgoPlanner` | `planner_start`, `planner_lane_selected`, `planner_decision`, `prompt_budget_allocation`. |
+| 23 | Prompt-budget allocation telemetry | Preserved | `PlannerRuntime.emitPromptBudgetTelemetry()` | Emitted per-lane with lane-specific call_site. |
+| 24 | Circuit-breaker behavior | Preserved | `PlannerRuntime` (per-lane, per-rootInputId) | 3 consecutive parse failures trip the breaker. |
+| 25 | Truncation retry | Preserved | `TruncationRetry` (shared utility) | Detects `finish_reason=length` or unclosed JSON, bumps token budget. |
+| 26 | Per-lane LLM configuration entry points | Preserved (narrower) | `PlannerConfig.laneDefaults` + `PlannerConfig.lanes` + `PlannerRuntime` lane client resolver | Lanes can override provider, model, temperature, token budget, retries, and structured-output mode independently. |
 
 ---
 
@@ -51,6 +56,7 @@
 | C3 | Goal-creation routing | Intentionally changed | Was `shouldUseGoalCreationBranch()` regex. Now LLM-based `InputIntentRouter`. |
 | C4 | Delete-all intent detection | Intentionally changed | Was `looksLikeDeleteAllIntent()` keyword matching. Now LLM-resolved `GoalCommand.DeleteAll`. |
 | C5 | Input routing | Intentionally changed | Was single monolithic planner call deciding everything. Now two-call pattern: `InputIntentRouter` classifies, then L2 sub-planner decides. |
+| C6 | Shared parse-failure recovery shape | Intentionally changed | Runtime preserves provider-side schema-validation fallback. Parse-failure recovery remains lane-level (truncation retry + strict-JSON retry), not a centralized strict→relaxed parse-retry layer. |
 
 ---
 

@@ -670,6 +670,20 @@ class HierarchicalPlannerAcceptanceTest {
         assertTrue(intention.payload.contains("doesn't seem like"))
     }
 
+    @Test
+    fun `goal creation malformed create response does not synthesize persistent goal`() {
+        val llm = StubChatModelClient()
+        llm.enqueueRawResponseForCallSite("input_intent_router", """{"route":"goal_creation","reasoning":"goal?"}""")
+        llm.enqueueRawResponseForCallSite("goal_creation", """{"decision":"create_goal","title":"Broken goal","instruction":null,"completion_criteria":"done","priority":"medium","cron_expression":null,"assistant_response":null,"reason":"missing instruction"}""")
+        val planner = buildTestHierarchicalPlanner(llm)
+
+        val decision = planner.decide(inputTrigger("set up a goal"), defaultContext)
+
+        val intention = assertIs<EgoDecision.FormIntention>(decision)
+        assertEquals(ActionType.CONTACT_USER, intention.actionType)
+        assertTrue(intention.payload.contains("couldn't safely create", ignoreCase = true))
+    }
+
     // ── Rule 9: Shared-Runtime Preservation ───────────────────────
 
     @Test

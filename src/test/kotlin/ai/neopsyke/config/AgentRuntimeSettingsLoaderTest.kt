@@ -1,11 +1,13 @@
 package ai.neopsyke.config
 
 import ai.neopsyke.agent.config.TelegramIngressMode
+import ai.neopsyke.agent.ego.planner.StructuredOutputMode
 import java.nio.file.Files
 import java.nio.file.Paths
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -376,6 +378,62 @@ class AgentRuntimeSettingsLoaderTest {
         assertEquals(TelegramIngressMode.WEBHOOK, settings.agentConfig.nativeIntegrations.telegram.mode)
         assertEquals(false, settings.agentConfig.nativeIntegrations.googleWorkspace.enabled)
         assertEquals(true, settings.agentConfig.goals.enabled)
+    }
+
+    @Test
+    fun `planner lane defaults and overrides load from yaml`() {
+        val tempDir = Files.createTempDirectory("neopsyke-agent-runtime-lanes")
+        val yamlPath = tempDir.resolve("agent-runtime.yaml")
+        Files.writeString(
+            yamlPath,
+            """
+            app:
+              dashboard_enabled: true
+            eval:
+              max_raw_response_chars: 4096
+            agent:
+              planner:
+                lane_defaults:
+                  provider: openai
+                  model: gpt-4.1-mini
+                  temperature: 0.35
+                  max_completion_tokens: 654
+                  retry_attempts: 6
+                  structured_output: relaxed
+                lanes:
+                  input_intent_router:
+                    temperature: 0.0
+                    max_completion_tokens: 120
+                  goal_creation:
+                    provider: mistral
+                    model: mistral-small-latest
+                    structured_output: off
+            """.trimIndent()
+        )
+
+        val settings = AgentRuntimeSettingsLoader.load(
+            env = emptyMap(),
+            defaultPath = yamlPath
+        )
+
+        val defaults = settings.agentConfig.planner.laneDefaults
+        assertEquals("openai", defaults.provider)
+        assertEquals("gpt-4.1-mini", defaults.model)
+        assertEquals(0.35, defaults.temperature)
+        assertEquals(654, defaults.maxCompletionTokens)
+        assertEquals(6, defaults.retryAttempts)
+        assertEquals(StructuredOutputMode.RELAXED, defaults.structuredOutput)
+
+        val routerLane = assertNotNull(settings.agentConfig.planner.lanes["input_intent_router"])
+        assertEquals(0.0, routerLane.temperature)
+        assertEquals(120, routerLane.maxCompletionTokens)
+        assertNull(routerLane.provider)
+        assertNull(routerLane.model)
+
+        val goalCreationLane = assertNotNull(settings.agentConfig.planner.lanes["goal_creation"])
+        assertEquals("mistral", goalCreationLane.provider)
+        assertEquals("mistral-small-latest", goalCreationLane.model)
+        assertEquals(StructuredOutputMode.OFF, goalCreationLane.structuredOutput)
     }
 
     @Test

@@ -469,7 +469,7 @@ replaced the current planner without losing required behavior.
   - goal update / revise-plan / reprioritize as applicable
   - ambiguous goal references
   - unresolved goal references
-  - multilingual phrasing that does not rely on deterministic English-only heuristics
+- Multilingual phrasing support remains a design goal of the architecture, but multilingual acceptance coverage is not a required signoff item for this iteration.
 
 ### 8. Removed-Action-Verifier Rule
 - The current action verifier must be absent from the redesigned planner path.

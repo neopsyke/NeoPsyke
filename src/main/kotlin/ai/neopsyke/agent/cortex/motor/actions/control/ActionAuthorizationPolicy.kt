@@ -353,7 +353,9 @@ class ConfiguredActionAuthorizationPolicy(
         val operation = optionalText(node, "command").ifBlank {
             optionalText(node, "operation")
         }
-        val goalId = optionalText(node, "goal_id", "goalId")
+        val goalId = optionalText(node, "goal_id", "goalId").ifBlank {
+            optionalText(node.path("goal_reference"), "id")
+        }
         return when (operation) {
             "delete_all" -> GoalDeleteIntent.DELETE_ALL
             "delete" -> if (goalId.isNotBlank()) GoalDeleteIntent.DELETE_EXACT else GoalDeleteIntent.DELETE_AMBIGUOUS

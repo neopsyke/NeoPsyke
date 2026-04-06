@@ -1009,10 +1009,13 @@ class DefaultActionControlService(
         val goalId = payload.path("goal_id").textValue()
             ?.ifBlank { null }
             ?: payload.path("goalId").textValue()?.ifBlank { null }
+            ?: payload.path("goal_reference").path("id").textValue()?.ifBlank { null }
         if (!goalId.isNullOrBlank()) {
             return "goal:${goalId.trim()}"
         }
-        val operation = payload.path("operation").textValue()?.trim()?.lowercase().orEmpty()
+        val operation = payload.path("command").textValue()?.trim()?.lowercase()
+            ?.ifBlank { payload.path("operation").textValue()?.trim()?.lowercase() }
+            .orEmpty()
         return if (operation in setOf("pause", "resume", "reprioritize", "complete", "revise_plan", "delete_all")) {
             "goal-operation:${action.rootInputId.orEmpty()}:${operation}"
         } else {
@@ -1030,7 +1033,9 @@ class DefaultActionControlService(
 
     private fun goalOperationBucketPayload(actionTypeId: String, payloadRaw: String): String {
         val payload = runCatching { payloadMapper.readTree(payloadRaw) }.getOrNull()
-        val operation = payload?.path("operation")?.asText()?.trim()?.lowercase().orEmpty()
+        val operation = payload?.path("command")?.asText()?.trim()?.lowercase()
+            ?.ifBlank { payload.path("operation").asText().trim().lowercase() }
+            .orEmpty()
         val cronExpression = payload?.path("cron_expression")?.asText()?.ifEmpty { payload.path("cronExpression").asText() }?.trim().orEmpty()
         val category = when (operation) {
             "list", "inspect" -> "goal_read"

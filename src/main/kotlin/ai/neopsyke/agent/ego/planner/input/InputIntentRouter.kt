@@ -101,8 +101,6 @@ class InputIntentRouter(
             messages = allocation.messages,
             metadata = metadata,
             responseFormat = ROUTER_RESPONSE_FORMAT,
-            temperature = 0.1,
-            maxTokens = 400,
         )
 
         if (response == null) {

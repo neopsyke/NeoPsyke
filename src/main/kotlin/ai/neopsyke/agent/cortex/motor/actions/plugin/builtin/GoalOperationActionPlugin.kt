@@ -1,20 +1,22 @@
 package ai.neopsyke.agent.cortex.motor.actions.plugin.builtin
 
-import com.fasterxml.jackson.annotation.JsonAlias
 import com.fasterxml.jackson.annotation.JsonInclude
-import com.fasterxml.jackson.annotation.JsonProperty
 import com.fasterxml.jackson.databind.DeserializationFeature
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
-import mu.KotlinLogging
+import ai.neopsyke.agent.config.AgentConfig
+import ai.neopsyke.agent.cortex.motor.actions.ActionCapability
 import ai.neopsyke.agent.cortex.motor.actions.ActionDescriptor
 import ai.neopsyke.agent.cortex.motor.actions.ActionDeterministicReview
 import ai.neopsyke.agent.cortex.motor.actions.ActionExecutionContext
-import ai.neopsyke.agent.cortex.motor.actions.ActionCapability
+import ai.neopsyke.agent.cortex.motor.actions.ActionPluginFactoryContext
 import ai.neopsyke.agent.cortex.motor.actions.AgentActionPlugin
 import ai.neopsyke.agent.cortex.motor.actions.AgentActionPluginFactory
-import ai.neopsyke.agent.cortex.motor.actions.ActionPluginFactoryContext
-import ai.neopsyke.agent.config.AgentConfig
+import ai.neopsyke.agent.ego.planner.model.GoalCommand
+import ai.neopsyke.agent.ego.planner.model.GoalReference
+import ai.neopsyke.agent.ego.planner.model.SerializedGoalCommand
+import ai.neopsyke.agent.goal.GoalOperation
+import ai.neopsyke.agent.goal.GoalOperationRequest
 import ai.neopsyke.agent.model.ActionEffectClass
 import ai.neopsyke.agent.model.ActionExecutionStatus
 import ai.neopsyke.agent.model.ActionOutcome
@@ -23,20 +25,11 @@ import ai.neopsyke.agent.model.DataTrust
 import ai.neopsyke.agent.model.InstructionTrust
 import ai.neopsyke.agent.model.PendingAction
 import ai.neopsyke.agent.model.SuperegoContext
-import ai.neopsyke.agent.goal.GoalOperation
-import ai.neopsyke.agent.goal.GoalOperationRequest
-import ai.neopsyke.agent.goal.GoalPriority
-
-private val logger = KotlinLogging.logger {}
 
 /**
- * Goal operation action plugin. Refactored to accept typed GoalCommand payloads
- * from the hierarchical planner. No deterministic text heuristics for operation
- * normalization or goal reference resolution.
- *
- * Payload contract: JSON with a "command" field (canonical operation name from
- * GoalCommand.operationName) and typed goal parameters. The "goal_id" field
- * is pre-resolved by the planner's LLM; this plugin validates and executes.
+ * Goal operation action plugin.
+ * Planner payloads must use the typed serialized GoalCommand contract.
+ * No execution-time semantic interpretation or goal-id repair heuristics.
  */
 class GoalOperationActionPlugin(
     private val context: ActionPluginFactoryContext,
@@ -45,7 +38,7 @@ class GoalOperationActionPlugin(
         actionType = ActionType.GOAL_OPERATION,
         dispatchable = context.config.goals.enabled,
         plannerDescription = "goal_operation: create, update, status, list, pause, resume, reprioritize, complete, delete, delete_all, or revise_plan persistent goals, including recurring cron-backed reminders.",
-        payloadGuidance = "Strict JSON with a command field and the required goal arguments. goal_id is the goal number or exact ID resolved by the planner. For recurring goals, include cron_expression.",
+        payloadGuidance = "Strict JSON using the typed GoalCommand contract: command, optional goal_reference, and command-specific fields.",
         payloadSchemaExample = """
             {"command":"create","title":"Weather reminder","instruction":"Check the current weather and remind me every time this goal runs.","priority":"HIGH","completion_criteria":"A weather reminder is delivered for the current scheduled run.","cron_expression":"*/5 * * * *"}
         """.trimIndent(),
@@ -71,96 +64,41 @@ class GoalOperationActionPlugin(
                 reason = "GOAL_OPERATION requires trusted thread data.",
             )
         }
-        val payload = parsePayload(action.payload)
+        val command = parseGoalCommand(action.payload)
             ?: return ActionDeterministicReview(
                 allow = false,
                 ruleId = "goal_operation_invalid_payload",
-                reason = "GOAL_OPERATION payload must be valid JSON."
+                reason = "GOAL_OPERATION payload must follow the typed GoalCommand contract with a command field.",
             )
-        val operation = resolveOperation(payload)
-        if (operation.isNullOrBlank()) {
-            return ActionDeterministicReview(
+        return if (toRequest(command) == null) {
+            ActionDeterministicReview(
                 allow = false,
-                ruleId = "goal_operation_missing_operation",
-                reason = "GOAL_OPERATION payload requires a command or operation field."
+                ruleId = "goal_operation_invalid_command",
+                reason = "GOAL_OPERATION command is incomplete or invalid for execution.",
             )
+        } else {
+            ActionDeterministicReview(allow = true)
         }
-        return ActionDeterministicReview(allow = true)
     }
 
     override fun repairPlannerPayload(raw: String): String {
-        val payload = parsePayload(raw) ?: return raw
-        // Resolve goal_id: exact ID match or numeric index only (no fuzzy text matching)
-        val resolvedGoalId = resolveGoalIdTyped(payload.goalId?.trim()?.ifBlank { null })
-        return mapper.writeValueAsString(
-            payload.copy(
-                goalId = resolvedGoalId,
-                title = payload.title?.trim()?.ifBlank { null },
-                instruction = payload.instruction?.trim()?.ifBlank { null },
-                priority = payload.priority?.trim()?.uppercase()?.ifBlank { null },
-                completionCriteria = payload.completionCriteria?.trim()?.ifBlank { null },
-                cronExpression = payload.cronExpression?.trim()?.ifBlank { null },
-                reason = payload.reason?.trim()?.ifBlank { null },
-            )
-        )
-    }
-
-    /**
-     * Resolves a goal_id using only typed/exact matching:
-     * 1. Exact internal ID match
-     * 2. Numeric index (1-based)
-     * No case-insensitive title matching or fuzzy token-overlap scoring.
-     * Goal references are resolved semantically by the planner's LLM.
-     */
-    private fun resolveGoalIdTyped(raw: String?): String? {
-        if (raw.isNullOrBlank()) return null
-        val goals = context.goalsGateway.allGoals()
-        if (goals.isEmpty()) return raw
-
-        // 1. Exact internal ID match
-        goals.firstOrNull { it.goalId == raw }?.let { return it.goalId }
-
-        // 2. Numeric index (1-based, matching numbered list shown to planner)
-        raw.toIntOrNull()?.let { index ->
-            if (index in 1..goals.size) {
-                val resolved = goals[index - 1].goalId
-                logger.info { "goal_id resolved: numeric index '$raw' -> '$resolved'" }
-                return resolved
-            }
-        }
-
-        logger.warn { "goal_id unresolved: '$raw' did not match any goal by ID or index. available=${goals.map { it.goalId }}" }
-        return raw
+        val command = parseGoalCommand(raw) ?: return raw
+        return mapper.writeValueAsString(SerializedGoalCommand.fromGoalCommand(command))
     }
 
     override suspend fun execute(action: PendingAction, context: ActionExecutionContext): ActionOutcome {
-        val payload = parsePayload(action.payload)
+        val command = parseGoalCommand(action.payload)
             ?: return ActionOutcome(
                 statusSummary = "Invalid goal_operation payload.",
                 executionStatus = ActionExecutionStatus.FAILED,
             )
-        val operationStr = resolveOperation(payload)
-            ?.uppercase()
-            ?.let { runCatching { GoalOperation.valueOf(it) }.getOrNull() }
+        val request = toRequest(command)
             ?: return ActionOutcome(
-                statusSummary = "Unknown goal operation '${resolveOperation(payload) ?: "null"}'.",
+                statusSummary = "Goal operation payload is missing required typed fields.",
                 executionStatus = ActionExecutionStatus.FAILED,
             )
-        val result = this.context.goalsGateway.executeOperation(
-            GoalOperationRequest(
-                operation = operationStr,
-                goalId = payload.goalId,
-                title = payload.title,
-                instruction = payload.instruction,
-                priority = payload.priority
-                    ?.trim()
-                    ?.uppercase()
-                    ?.let { runCatching { GoalPriority.valueOf(it) }.getOrNull() },
-                completionCriteria = payload.completionCriteria,
-                cronExpression = payload.cronExpression,
-                reason = payload.reason,
-            )
-        )
+
+        val result = this.context.goalsGateway.executeOperation(request)
         if (result.message.isNotBlank()) {
             this.context.output("ego> ${result.message}")
         }
@@ -171,37 +109,73 @@ class GoalOperationActionPlugin(
         )
     }
 
-    private fun parsePayload(raw: String): GoalOperationPayload? =
-        runCatching { mapper.readValue<GoalOperationPayload>(raw) }.getOrNull()
+    private fun parseGoalCommand(raw: String): GoalCommand? =
+        runCatching {
+            mapper.readValue<SerializedGoalCommand>(raw).toGoalCommand()
+        }.getOrNull()
 
-    /**
-     * Resolves the operation from the typed "command" field or legacy "operation" field.
-     * No semantic normalization -- the planner emits canonical operation names.
-     */
-    private fun resolveOperation(payload: GoalOperationPayload): String? {
-        // Prefer "command" (typed GoalCommand payload) over "operation" (legacy)
-        val command = payload.command?.trim()?.lowercase()?.ifBlank { null }
-        if (command != null) return command
-        return payload.operation?.trim()?.lowercase()?.ifBlank { null }
+    private fun toRequest(command: GoalCommand): GoalOperationRequest? {
+        return when (command) {
+            is GoalCommand.Create -> GoalOperationRequest(
+                operation = GoalOperation.CREATE,
+                title = command.title,
+                instruction = command.instruction,
+                priority = command.priority,
+                completionCriteria = command.completionCriteria,
+                cronExpression = command.cronExpression,
+            )
+            is GoalCommand.List -> GoalOperationRequest(operation = GoalOperation.LIST)
+            is GoalCommand.Status -> GoalOperationRequest(
+                operation = GoalOperation.STATUS,
+                goalId = resolvedGoalId(command.reference) ?: return null,
+            )
+            is GoalCommand.Pause -> GoalOperationRequest(
+                operation = GoalOperation.PAUSE,
+                goalId = resolvedGoalId(command.reference) ?: return null,
+            )
+            is GoalCommand.Resume -> GoalOperationRequest(
+                operation = GoalOperation.RESUME,
+                goalId = resolvedGoalId(command.reference) ?: return null,
+            )
+            is GoalCommand.Complete -> GoalOperationRequest(
+                operation = GoalOperation.COMPLETE,
+                goalId = resolvedGoalId(command.reference) ?: return null,
+            )
+            is GoalCommand.Delete -> GoalOperationRequest(
+                operation = GoalOperation.DELETE,
+                goalId = resolvedGoalId(command.reference) ?: return null,
+            )
+            is GoalCommand.DeleteAll -> GoalOperationRequest(operation = GoalOperation.DELETE_ALL)
+            is GoalCommand.Update -> GoalOperationRequest(
+                operation = GoalOperation.UPDATE,
+                goalId = resolvedGoalId(command.reference) ?: return null,
+                title = command.title,
+                instruction = command.instruction,
+                priority = command.priority,
+                completionCriteria = command.completionCriteria,
+                cronExpression = command.cronExpression,
+            )
+            is GoalCommand.RevisePlan -> GoalOperationRequest(
+                operation = GoalOperation.REVISE_PLAN,
+                goalId = resolvedGoalId(command.reference) ?: return null,
+                reason = command.reason,
+            )
+            is GoalCommand.Reprioritize -> GoalOperationRequest(
+                operation = GoalOperation.REPRIORITIZE,
+                goalId = resolvedGoalId(command.reference) ?: return null,
+                priority = command.newPriority,
+            )
+        }
     }
 
-    private data class GoalOperationPayload(
-        val command: String? = null,
-        val operation: String? = null,
-        @field:JsonProperty("goal_id")
-        @field:JsonAlias("goalId")
-        val goalId: String? = null,
-        val title: String? = null,
-        val instruction: String? = null,
-        val priority: String? = null,
-        @field:JsonProperty("completion_criteria")
-        @field:JsonAlias("completionCriteria")
-        val completionCriteria: String? = null,
-        @field:JsonProperty("cron_expression")
-        @field:JsonAlias("cronExpression")
-        val cronExpression: String? = null,
-        val reason: String? = null,
-    )
+    private fun resolvedGoalId(reference: GoalReference): String? {
+        return when (reference) {
+            is GoalReference.ByInternalId -> reference.id.trim().ifBlank { null }
+            is GoalReference.ByResolvedEntity -> reference.goalId.trim().ifBlank { null }
+            is GoalReference.Ambiguous -> null
+            is GoalReference.Unresolved -> null
+        }
+    }
 
     private companion object {
         val mapper = jacksonObjectMapper()

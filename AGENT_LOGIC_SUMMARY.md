@@ -268,6 +268,11 @@ Stimulus → SensoryCortex (sanitize, appraise) → Percept
 Each lane:
 - Has its own narrower system prompt focused on its decision family.
 - Uses `PlannerRuntime` for model calls (retry, circuit-breaker, schema fallback).
+- Parses model output into typed lane decision models before mapping to `EgoDecision`:
+  - `StepDecision` (`DeferredStepPlanner`)
+  - `FeedbackDecision` (`FeedbackPlanner`)
+  - `GoalWorkDecision` (`GoalWorkPlanner`)
+  - `ImpulseDecision` (`ImpulsePlanner`)
 - Validates constraints: allowed intentions, commit modes, available/dispatchable actions.
 - Emits per-lane prompt-budget telemetry.
 
@@ -285,7 +290,8 @@ Dispatch from `InputRoute` variant to sub-planner is deterministic on typed LLM 
 ### L2: Goal Semantics (Typed)
 - Goal creation and management emit typed `GoalCommand` variants.
 - Goal references are LLM-resolved (`GoalReference.ByInternalId`, `ByResolvedEntity`, `Ambiguous`, `Unresolved`).
-- `GoalOperationActionPlugin` validates and executes typed commands (no text heuristics).
+- Planner payloads use a canonical serialized typed boundary (`SerializedGoalCommand`) with nested typed `goal_reference`.
+- `GoalOperationActionPlugin` validates and executes typed commands (no text heuristics, no plugin-side goal-id repair).
 - Ambiguous/unresolved references trigger clarification or failure, never silent guessing.
 
 ### L2: Prompt Budget and Assembly
@@ -299,7 +305,7 @@ Dispatch from `InputRoute` variant to sub-planner is deterministic on typed LLM 
 - `StructuredOutputHandler`: JSON parse with escape repair fallback.
 - On parse failure: truncation retry (increased budget) then strict-JSON retry.
 - Per-lane circuit breaker: after N consecutive parse failures, short-circuit to Noop.
-- `PlannerRuntime` owns retry, schema-fallback (strict → relaxed), and circuit-breaker.
+- `PlannerRuntime` owns model-call retry, provider-side schema-validation fallback, and circuit-breaker.
 
 ### L2: Action Verifier
 - **Removed** from the redesigned planner path per spec requirement.

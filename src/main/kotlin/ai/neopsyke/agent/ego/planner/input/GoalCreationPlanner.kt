@@ -5,6 +5,7 @@ import ai.neopsyke.agent.config.AgentConfig
 import ai.neopsyke.agent.ego.planner.HierarchicalEgoPlanner
 import ai.neopsyke.agent.ego.planner.LaneId
 import ai.neopsyke.agent.ego.planner.model.GoalCommand
+import ai.neopsyke.agent.ego.planner.model.SerializedGoalCommand
 import ai.neopsyke.agent.ego.planner.prompt.SharedPromptSections
 import ai.neopsyke.agent.ego.planner.runtime.PlannerRuntime
 import ai.neopsyke.agent.ego.planner.runtime.StructuredOutputHandler
@@ -106,29 +107,36 @@ class GoalCreationPlanner(
             messages = allocation.messages,
             metadata = metadata,
             responseFormat = GOAL_CREATION_FORMAT,
-            temperature = 0.0,
-            maxTokens = GOAL_CREATION_MAX_TOKENS,
         )
 
-        val spec = response?.let { StructuredOutputHandler.parseWithRepair<GoalCreationPayload>(it.content) }
+        val responsePayload = response?.let { StructuredOutputHandler.parseWithRepair<GoalCreationPayload>(it.content) }
+        val spec = responsePayload
             ?.takeIf { it.decision.equals("create_goal", ignoreCase = true) }
             ?.takeIf { !it.instruction.isNullOrBlank() }
 
         if (spec == null) {
             // Fallback: if the LLM produced a fallback response, deliver it as contact_user
-            val fallbackResponse = response?.let { StructuredOutputHandler.parseWithRepair<GoalCreationPayload>(it.content) }
-            if (fallbackResponse?.assistantResponse?.isNotBlank() == true) {
+            if (responsePayload?.assistantResponse?.isNotBlank() == true) {
                 return EgoDecision.FormIntention(
                     urgency = Urgency.MEDIUM,
                     intentionKind = IntentionKind.OBSERVE,
                     commitModePreference = CommitMode.NOT_APPLICABLE,
                     actionType = ActionType.CONTACT_USER,
-                    payload = TextSecurity.clamp(fallbackResponse.assistantResponse.trim(), config.maxActionPayloadChars),
+                    payload = TextSecurity.clamp(responsePayload.assistantResponse.trim(), config.maxActionPayloadChars),
                     summary = "Respond to goal-related request",
                 )
             }
-            // Hard fallback: create a generic goal from the input
-            return createGenericGoal(trigger.input.content, context)
+            return EgoDecision.FormIntention(
+                urgency = Urgency.MEDIUM,
+                intentionKind = IntentionKind.OBSERVE,
+                commitModePreference = CommitMode.NOT_APPLICABLE,
+                actionType = ActionType.CONTACT_USER,
+                payload = TextSecurity.clamp(
+                    "I couldn't safely create a persistent goal from that. Please specify the goal title, what it should do, and whether it should recur.",
+                    config.maxActionPayloadChars
+                ),
+                summary = "Ask for goal creation clarification",
+            )
         }
 
         val priority = spec.priority?.trim()?.uppercase()
@@ -146,15 +154,8 @@ class GoalCreationPlanner(
             cronExpression = spec.cronExpression?.trim()?.ifBlank { null },
         )
 
-        val payload = StructuredOutputHandler.mapper.writeValueAsString(
-            mapOf(
-                "command" to command.operationName,
-                "title" to command.title,
-                "instruction" to command.instruction,
-                "priority" to command.priority.name,
-                "completion_criteria" to command.completionCriteria,
-                "cron_expression" to command.cronExpression,
-            )
+        val serializedPayload = StructuredOutputHandler.mapper.writeValueAsString(
+            SerializedGoalCommand.fromGoalCommand(command)
         )
 
         val summaryPrefix = if (command.cronExpression.isNullOrBlank()) "Create persistent goal" else "Create recurring goal"
@@ -165,37 +166,8 @@ class GoalCreationPlanner(
                 context.allowedCommitModes, IntentionKind.PREPARE
             ),
             actionType = ActionType.GOAL_OPERATION,
-            payload = TextSecurity.clamp(payload, config.maxActionPayloadChars),
+            payload = TextSecurity.clamp(serializedPayload, config.maxActionPayloadChars),
             summary = TextSecurity.clamp("$summaryPrefix: ${command.title}", config.maxActionSummaryChars),
-        )
-    }
-
-    private fun createGenericGoal(input: String, context: PlannerContext): EgoDecision {
-        val command = GoalCommand.Create(
-            title = TextSecurity.clamp("Persistent goal", GOAL_TITLE_MAX_CHARS),
-            instruction = TextSecurity.clamp(input.trim(), GOAL_INSTRUCTION_MAX_CHARS),
-            priority = GoalPriority.MEDIUM,
-            completionCriteria = DEFAULT_COMPLETION_CRITERIA,
-        )
-        val payload = StructuredOutputHandler.mapper.writeValueAsString(
-            mapOf(
-                "command" to command.operationName,
-                "title" to command.title,
-                "instruction" to command.instruction,
-                "priority" to command.priority.name,
-                "completion_criteria" to command.completionCriteria,
-                "cron_expression" to command.cronExpression,
-            )
-        )
-        return EgoDecision.FormIntention(
-            urgency = Urgency.MEDIUM,
-            intentionKind = IntentionKind.PREPARE,
-            commitModePreference = ai.neopsyke.agent.ego.planner.runtime.DecisionValidation.preferredCommitMode(
-                context.allowedCommitModes, IntentionKind.PREPARE
-            ),
-            actionType = ActionType.GOAL_OPERATION,
-            payload = TextSecurity.clamp(payload, config.maxActionPayloadChars),
-            summary = TextSecurity.clamp("Create persistent goal", config.maxActionSummaryChars),
         )
     }
 
@@ -227,7 +199,6 @@ class GoalCreationPlanner(
         const val GOAL_TITLE_MAX_CHARS: Int = 80
         const val GOAL_INSTRUCTION_MAX_CHARS: Int = 400
         const val GOAL_COMPLETION_CRITERIA_MAX_CHARS: Int = 200
-        const val GOAL_CREATION_MAX_TOKENS: Int = 220
         const val GOAL_CREATION_PROMPT_MAX_TOKENS: Int = 900
         const val DEFAULT_COMPLETION_CRITERIA: String = "User confirms the goal is met."
 

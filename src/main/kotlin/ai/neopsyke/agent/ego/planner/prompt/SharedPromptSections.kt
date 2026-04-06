@@ -327,7 +327,7 @@ object SharedPromptSections {
                 key = "planner_active_goals",
                 role = ChatRole.USER,
                 band = PromptBudgetAllocator.Band.OPTIONAL,
-                content = "Persistent goals (use the number or title as goal_id in goal_operation):\n$it"
+                content = "Persistent goals (resolve references into typed goal_reference / goal_id fields for goal_operation):\n$it"
             )
         }
 

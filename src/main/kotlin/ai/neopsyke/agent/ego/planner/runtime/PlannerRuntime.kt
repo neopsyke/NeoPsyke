@@ -36,6 +36,7 @@ class PlannerRuntime(
     private val onPlannerNoop: () -> Unit = {},
     private val onPlannerOutputRepaired: () -> Unit = {},
     private val actionPayloadRepair: (ai.neopsyke.agent.model.ActionType, String) -> String = { _, raw -> raw },
+    private val laneModelClientResolver: (LaneId, ResolvedLaneConfig) -> ChatModelClient? = { _, _ -> null },
 ) {
     private val circuitBreakers = mutableMapOf<CircuitBreakerKey, LlmCallCircuitBreaker>()
 
@@ -52,7 +53,7 @@ class PlannerRuntime(
         modelClient: ChatModelClient? = null,
     ): ChatCompletion? {
         val resolved = resolvedConfig(laneId)
-        val client = modelClient ?: defaultModelClient
+        val client = modelClient ?: laneModelClientResolver(laneId, resolved) ?: defaultModelClient
         val effectiveTemp = temperature ?: resolved.temperature
         val effectiveMaxTokens = maxTokens ?: resolved.maxCompletionTokens
         val retryAttempts = RetryPolicy.boundedLlmRetryAttempts(resolved.retryAttempts)

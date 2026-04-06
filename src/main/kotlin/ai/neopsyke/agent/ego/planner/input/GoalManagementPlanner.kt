@@ -6,6 +6,7 @@ import ai.neopsyke.agent.ego.planner.HierarchicalEgoPlanner
 import ai.neopsyke.agent.ego.planner.LaneId
 import ai.neopsyke.agent.ego.planner.model.GoalCommand
 import ai.neopsyke.agent.ego.planner.model.GoalReference
+import ai.neopsyke.agent.ego.planner.model.SerializedGoalCommand
 import ai.neopsyke.agent.ego.planner.prompt.SharedPromptSections
 import ai.neopsyke.agent.ego.planner.runtime.PlannerRuntime
 import ai.neopsyke.agent.ego.planner.runtime.StructuredOutputHandler
@@ -54,7 +55,7 @@ class GoalManagementPlanner(
                     Return STRICT JSON only.
                     Operations: list, status, pause, resume, complete, delete, delete_all, update, revise_plan, reprioritize
                     Goal reference resolution:
-                    - If you can confidently identify the goal, return type=by_id with the goal's number or exact ID.
+                    - If you can confidently identify the goal, return type=by_internal_id with the goal's number or exact ID.
                     - If the user's reference is ambiguous (multiple matches), return type=ambiguous with candidate IDs.
                     - If no goal matches, return type=unresolved.
                     - Never silently guess when uncertain -- return ambiguous instead.
@@ -70,7 +71,7 @@ class GoalManagementPlanner(
                     JSON schema:
                     {
                       "operation":"list|status|pause|resume|complete|delete|delete_all|update|revise_plan|reprioritize",
-                      "goal_reference":{"type":"by_id|by_resolved|ambiguous|unresolved","id":"...","candidates":["..."],"original_text":"...","resolved_from":"..."},
+                      "goal_reference":{"type":"by_internal_id|by_resolved_entity|ambiguous|unresolved","id":"...","candidates":["..."],"original_text":"...","resolved_from":"..."},
                       "params":{"title":"...","instruction":"...","priority":"...","completion_criteria":"...","cron_expression":"...","reason":"...","new_priority":"..."}
                     }
                 """.trimIndent()
@@ -103,8 +104,6 @@ class GoalManagementPlanner(
             messages = allocation.messages,
             metadata = metadata,
             responseFormat = GOAL_MGMT_FORMAT,
-            temperature = 0.0,
-            maxTokens = 400,
         )
 
         if (response == null) {
@@ -146,31 +145,21 @@ class GoalManagementPlanner(
             )
         }
 
-        // Build typed command payload
-        val goalId = when (ref) {
-            is GoalReference.ByInternalId -> ref.id
-            is GoalReference.ByResolvedEntity -> ref.goalId
+        val command = buildGoalCommand(
+            operation = operation,
+            reference = ref,
+            params = payload.params,
+        ) ?: return EgoDecision.Noop("GoalManagementPlanner returned invalid typed command.")
+
+        val serialized = StructuredOutputHandler.mapper.writeValueAsString(
+            SerializedGoalCommand.fromGoalCommand(command)
+        )
+        val referenceLabel = when (val commandReference = commandReference(command)) {
+            is GoalReference.ByInternalId -> commandReference.id
+            is GoalReference.ByResolvedEntity -> commandReference.goalId
             else -> null
         }
-        val params = payload.params
 
-        val commandPayload = buildMap<String, Any?> {
-            put("command", operation)
-            goalId?.let { put("goal_id", it) }
-            when (operation) {
-                "update" -> {
-                    params?.title?.let { put("title", it) }
-                    params?.instruction?.let { put("instruction", it) }
-                    params?.priority?.let { put("priority", it.uppercase()) }
-                    params?.completionCriteria?.let { put("completion_criteria", it) }
-                    params?.cronExpression?.let { put("cron_expression", it) }
-                }
-                "revise_plan" -> params?.reason?.let { put("reason", it) }
-                "reprioritize" -> params?.newPriority?.let { put("priority", it.uppercase()) }
-            }
-        }
-
-        val serialized = StructuredOutputHandler.mapper.writeValueAsString(commandPayload)
         return EgoDecision.FormIntention(
             urgency = Urgency.MEDIUM,
             intentionKind = IntentionKind.PREPARE,
@@ -179,15 +168,82 @@ class GoalManagementPlanner(
             ),
             actionType = ActionType.GOAL_OPERATION,
             payload = TextSecurity.clamp(serialized, config.maxActionPayloadChars),
-            summary = TextSecurity.clamp("Goal operation: $operation${goalId?.let { " on $it" } ?: ""}", config.maxActionSummaryChars),
+            summary = TextSecurity.clamp(
+                "Goal operation: ${command.operationName}${referenceLabel?.let { " on $it" } ?: ""}",
+                config.maxActionSummaryChars
+            ),
         )
     }
+
+    private fun buildGoalCommand(
+        operation: String,
+        reference: GoalReference,
+        params: GoalMgmtParams?,
+    ): GoalCommand? {
+        return when (operation) {
+            "list" -> GoalCommand.List
+            "delete_all" -> GoalCommand.DeleteAll
+            "status" -> resolvedReference(reference)?.let { GoalCommand.Status(it) }
+            "pause" -> resolvedReference(reference)?.let { GoalCommand.Pause(it) }
+            "resume" -> resolvedReference(reference)?.let { GoalCommand.Resume(it) }
+            "complete" -> resolvedReference(reference)?.let { GoalCommand.Complete(it) }
+            "delete" -> resolvedReference(reference)?.let { GoalCommand.Delete(it) }
+            "update" -> resolvedReference(reference)?.let {
+                GoalCommand.Update(
+                    reference = it,
+                    title = params?.title?.trim()?.ifBlank { null },
+                    instruction = params?.instruction?.trim()?.ifBlank { null },
+                    priority = params?.priority?.trim()?.uppercase()?.let { raw ->
+                        runCatching { GoalPriority.valueOf(raw) }.getOrNull()
+                    },
+                    completionCriteria = params?.completionCriteria?.trim()?.ifBlank { null },
+                    cronExpression = params?.cronExpression?.trim()?.ifBlank { null },
+                )
+            }
+            "revise_plan" -> resolvedReference(reference)?.let {
+                GoalCommand.RevisePlan(
+                    reference = it,
+                    reason = params?.reason?.trim()?.ifBlank { null },
+                )
+            }
+            "reprioritize" -> {
+                val parsedPriority = params?.newPriority?.trim()?.uppercase()?.let { raw ->
+                    runCatching { GoalPriority.valueOf(raw) }.getOrNull()
+                } ?: return null
+                resolvedReference(reference)?.let { GoalCommand.Reprioritize(it, parsedPriority) }
+            }
+            else -> null
+        }
+    }
+
+    private fun resolvedReference(reference: GoalReference): GoalReference? =
+        when (reference) {
+            is GoalReference.ByInternalId -> reference
+            is GoalReference.ByResolvedEntity -> reference
+            is GoalReference.Ambiguous -> null
+            is GoalReference.Unresolved -> null
+        }
+
+    private fun commandReference(command: GoalCommand): GoalReference? =
+        when (command) {
+            is GoalCommand.Status -> command.reference
+            is GoalCommand.Pause -> command.reference
+            is GoalCommand.Resume -> command.reference
+            is GoalCommand.Complete -> command.reference
+            is GoalCommand.Delete -> command.reference
+            is GoalCommand.Update -> command.reference
+            is GoalCommand.RevisePlan -> command.reference
+            is GoalCommand.Reprioritize -> command.reference
+            is GoalCommand.Create -> null
+            is GoalCommand.List -> null
+            is GoalCommand.DeleteAll -> null
+        }
 
     private fun resolveGoalReference(raw: GoalReferencePayload?): GoalReference {
         if (raw == null) return GoalReference.Unresolved("")
         return when (raw.type?.trim()?.lowercase()) {
-            "by_id" -> GoalReference.ByInternalId(raw.id?.trim().orEmpty())
-            "by_resolved" -> GoalReference.ByResolvedEntity(
+            "by_internal_id", "by_id" -> GoalReference.ByInternalId(raw.id?.trim().orEmpty())
+            "by_resolved_entity", "by_resolved" -> GoalReference.ByResolvedEntity(
                 goalId = raw.id?.trim().orEmpty(),
                 resolvedFrom = raw.resolvedFrom?.trim().orEmpty(),
             )

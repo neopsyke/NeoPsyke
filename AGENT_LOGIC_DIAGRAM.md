@@ -254,6 +254,7 @@ sequenceDiagram
             Note over Ego,Planner: HierarchicalEgoPlanner dispatches to typed L1 lanes based on trigger type (no text inspection)
             Note over Ego,Planner: InputPlanner uses InputIntentRouter (LLM classifier) then dispatches to typed L2 sub-planner
             Note over Ego,Planner: Goal creation and management use typed GoalCommand with LLM-resolved references (no regex heuristics)
+            Note over Ego,Planner: Goal-operation payload boundary is canonical SerializedGoalCommand (command + typed goal_reference), consumed directly by GoalOperationActionPlugin
             Note over Ego,Planner: Planner requests schema-enforced structured output. LLM layer owns compatibility degradation from strict to relaxed to prompt-only JSON. Parse failures do truncation-budget retry then strict-JSON retry before noop fallback
             Planner-->>Ego: defer/intend/plan/noop
             Ego->>Delib: maybeApplyPressureOverride

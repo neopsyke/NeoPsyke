@@ -1193,6 +1193,26 @@ internal object AppModeRunners {
                                                     dashboardServer?.goalManager = goalManager
                                                     var plannerNoopCount = 0
                                                     var plannerOutputRepairedCount = 0
+                                                    val plannerLaneClientResolver = buildPlannerLaneModelClientResolver(
+                                                        llm = llm,
+                                                        plannerClient = plannerClient,
+                                                        createPlannerClient = { endpoint ->
+                                                            InstrumentedChatModelClient(
+                                                                delegate = TokenBudgetGuardedChatClient(
+                                                                    delegate = maybeCacheWrap(
+                                                                        createChatClient(
+                                                                            endpoint = endpoint,
+                                                                            callObserver = callObserverForProvider(endpoint.providerLabel)
+                                                                        )
+                                                                    ),
+                                                                    budgetGate = tokenBudgetGate,
+                                                                    provider = endpoint.providerLabel,
+                                                                    role = LlmRoleLabels.PLANNER
+                                                                ),
+                                                                hooks = listOf(rawResponseHook)
+                                                            )
+                                                        }
+                                                    )
                                                     val assembly = EgoAssembler.assemble(
                                                         config = config,
                                                         plannerFactory = { motorCortex ->
@@ -1223,6 +1243,7 @@ internal object AppModeRunners {
                                                                         )
                                                                     }
                                                                 },
+                                                                laneModelClientResolver = plannerLaneClientResolver,
                                                             )
                                                         },
                                                         superegoFactory = { registry ->
@@ -1742,6 +1763,26 @@ internal object AppModeRunners {
                                                 } else {
                                                     null
                                                 }
+                                                val plannerLaneClientResolver = buildPlannerLaneModelClientResolver(
+                                                    llm = llm,
+                                                    plannerClient = plannerClient,
+                                                    createPlannerClient = { endpoint ->
+                                                        InstrumentedChatModelClient(
+                                                            delegate = TokenBudgetGuardedChatClient(
+                                                                delegate = maybeCacheWrap(
+                                                                    createChatClient(
+                                                                        endpoint = endpoint,
+                                                                        callObserver = callObserverForProvider(endpoint.providerLabel)
+                                                                    )
+                                                                ),
+                                                                budgetGate = tokenBudgetGate,
+                                                                provider = endpoint.providerLabel,
+                                                                role = LlmRoleLabels.PLANNER
+                                                            ),
+                                                            hooks = listOf(rawResponseHook)
+                                                        )
+                                                    }
+                                                )
                                                 val assembly = EgoAssembler.assemble(
                                                     config = config,
                                                     plannerFactory = { motorCortex ->
@@ -1752,6 +1793,7 @@ internal object AppModeRunners {
                                                             actionPayloadRepair = motorCortex::repairPlannerPayload,
                                                             onPlannerNoop = { metrics.recordPlannerNoop() },
                                                             onPlannerOutputRepaired = { metrics.recordPlannerOutputRepaired() },
+                                                            laneModelClientResolver = plannerLaneClientResolver,
                                                         )
                                                     },
                                                     superegoFactory = { registry ->
@@ -2801,6 +2843,67 @@ internal object AppModeRunners {
     }
 }
 
+private fun plannerLaneEndpointTemplates(llm: LlmRuntimeConfig): Map<String, LlmEndpointConfig> {
+    val templates = linkedMapOf<String, LlmEndpointConfig>()
+    val endpoints = listOfNotNull(
+        llm.planner,
+        llm.superego,
+        llm.metaReasoner,
+        llm.metaReasonerFallback,
+        llm.memoryAdvisor,
+        llm.approvalInterpreter,
+        llm.superegoPrimary,
+        llm.superegoEscalation,
+        llm.webSearch,
+    )
+    for (endpoint in endpoints) {
+        val provider = endpoint.providerLabel.lowercase()
+        templates.putIfAbsent(provider, endpoint)
+    }
+    return templates
+}
+
+private fun buildPlannerLaneModelClientResolver(
+    llm: LlmRuntimeConfig,
+    plannerClient: ChatModelClient,
+    createPlannerClient: (LlmEndpointConfig) -> ChatModelClient,
+): (LaneId, ai.neopsyke.agent.ego.planner.ResolvedLaneConfig) -> ChatModelClient? {
+    val endpointTemplates = plannerLaneEndpointTemplates(llm)
+    val plannerProvider = llm.planner.providerLabel.lowercase()
+    val plannerModel = llm.planner.model.trim()
+    val clientsByKey = mutableMapOf<String, ChatModelClient>()
+    val warnedUnknownProviders = mutableSetOf<String>()
+
+    return { laneId, resolved ->
+        val requestedProvider = resolved.provider?.trim()?.lowercase()?.ifBlank { null }
+        val requestedModel = resolved.model?.trim()?.ifBlank { null }
+        if (requestedProvider == null && requestedModel == null) {
+            null
+        } else {
+            val provider = requestedProvider ?: plannerProvider
+            val template = endpointTemplates[provider]
+            if (template == null) {
+                if (warnedUnknownProviders.add(provider)) {
+                    logger.warn {
+                        "Lane ${laneId.configKey} requested provider '$provider' but no endpoint template is configured; using default planner client."
+                    }
+                }
+                null
+            } else {
+                val model = requestedModel ?: template.model
+                if (provider == plannerProvider && model == plannerModel) {
+                    plannerClient
+                } else {
+                    val cacheKey = "$provider::$model"
+                    clientsByKey.getOrPut(cacheKey) {
+                        createPlannerClient(template.copy(model = model))
+                    }
+                }
+            }
+        }
+    }
+}
+
 /**
  * Factory for the HierarchicalEgoPlanner, replacing LlmEgoPlanner.
  */
@@ -2811,6 +2914,7 @@ private fun buildHierarchicalPlanner(
     actionPayloadRepair: (ai.neopsyke.agent.model.ActionType, String) -> String,
     onPlannerNoop: () -> Unit = {},
     onPlannerOutputRepaired: () -> Unit = {},
+    laneModelClientResolver: ((LaneId, ai.neopsyke.agent.ego.planner.ResolvedLaneConfig) -> ai.neopsyke.llm.ChatModelClient?)? = null,
 ): Ego.Planner {
     val runtime = PlannerRuntime(
         defaultModelClient = plannerClient,
@@ -2819,6 +2923,7 @@ private fun buildHierarchicalPlanner(
         onPlannerNoop = onPlannerNoop,
         onPlannerOutputRepaired = onPlannerOutputRepaired,
         actionPayloadRepair = actionPayloadRepair,
+        laneModelClientResolver = laneModelClientResolver ?: { _, _ -> null },
     )
 
     val router = InputIntentRouter(runtime, config, instrumentation)

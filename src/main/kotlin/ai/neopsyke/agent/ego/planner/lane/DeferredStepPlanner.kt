@@ -2,11 +2,13 @@ package ai.neopsyke.agent.ego.planner.lane
 
 import com.fasterxml.jackson.annotation.JsonProperty
 import com.fasterxml.jackson.databind.JsonNode
-import mu.KotlinLogging
 import ai.neopsyke.agent.config.AgentConfig
 import ai.neopsyke.agent.ego.planner.HierarchicalEgoPlanner
 import ai.neopsyke.agent.ego.planner.LaneId
 import ai.neopsyke.agent.ego.planner.PlannerLane
+import ai.neopsyke.agent.ego.planner.model.ExecutionCandidate
+import ai.neopsyke.agent.ego.planner.model.PlanDecomposition
+import ai.neopsyke.agent.ego.planner.model.StepDecision
 import ai.neopsyke.agent.ego.planner.prompt.SharedPromptSections
 import ai.neopsyke.agent.ego.planner.runtime.DecisionValidation
 import ai.neopsyke.agent.ego.planner.runtime.PlannerRuntime
@@ -23,8 +25,6 @@ import ai.neopsyke.instrumentation.AgentEvents
 import ai.neopsyke.instrumentation.AgentInstrumentation
 import ai.neopsyke.llm.ChatMessage
 import ai.neopsyke.llm.ChatRole
-
-private val logger = KotlinLogging.logger {}
 
 /**
  * L1 lane: handles EgoTrigger.DeferredIntention with a narrower prompt
@@ -153,10 +153,10 @@ class DeferredStepPlanner(
             return EgoDecision.Noop("DeferredStepPlanner unavailable.")
         }
 
-        val parsed = parseResponse(response.content, context, allowResolutionDraft)
-        if (parsed != null) {
+        val parsedDecision = parseStepDecision(response.content, context)
+        if (parsedDecision != null) {
             runtime.recordSuccess(laneId, rootInputId)
-            return parsed
+            return toEgoDecision(parsedDecision, context, allowResolutionDraft)
         }
 
         // Truncation + JSON retry (same pattern as MonolithicLaneStub)
@@ -170,9 +170,9 @@ class DeferredStepPlanner(
                 maxTokens = bumped,
                 temperature = 0.0,
             )
-            retryResponse?.let { parseResponse(it.content, context, allowResolutionDraft) }?.let {
+            retryResponse?.let { parseStepDecision(it.content, context) }?.let {
                 runtime.recordSuccess(laneId, rootInputId)
-                return it
+                return toEgoDecision(it, context, allowResolutionDraft)
             }
         }
 
@@ -183,19 +183,20 @@ class DeferredStepPlanner(
             responseFormat = StructuredOutputHandler.PLANNER_DECISION_RESPONSE_FORMAT,
             temperature = 0.0,
         )
-        retryResponse?.let { parseResponse(it.content, context, allowResolutionDraft) }?.let {
+        retryResponse?.let { parseStepDecision(it.content, context) }?.let {
             runtime.recordSuccess(laneId, rootInputId)
-            return it
+            return toEgoDecision(it, context, allowResolutionDraft)
         }
 
         runtime.recordParseFailure(laneId, rootInputId)
+        instrumentation.emit(AgentEvents.warning("DeferredStepPlanner response remained non-parseable after retry."))
         return EgoDecision.Noop(
             reason = "DeferredStepPlanner produced non-parseable output.",
             parseFailureShortCircuit = runtime.isCircuitOpen(laneId, rootInputId),
         )
     }
 
-    private fun parseResponse(raw: String, context: PlannerContext, allowResolutionDraft: Boolean): EgoDecision? {
+    private fun parseStepDecision(raw: String, context: PlannerContext): StepDecision? {
         val payload = StructuredOutputHandler.parseWithRepair<DeferredPayload>(raw) {
             runtime.onOutputRepaired()
         } ?: return null
@@ -203,14 +204,15 @@ class DeferredStepPlanner(
         return when (payload.decision?.trim()?.lowercase()) {
             "defer" -> {
                 val content = payload.deferContent?.trim().orEmpty()
-                if (content.isBlank()) EgoDecision.Noop("Empty deferred content.")
-                else EgoDecision.EnqueueThought(
-                    urgency = Urgency.fromRaw(payload.urgency),
-                    content = TextSecurity.clamp(content, config.planner.maxThoughtChars),
-                    longTermMemoryRecallQuery = payload.longTermMemoryRecallQuery?.trim()?.ifBlank { null }?.let {
-                        TextSecurity.clamp(it, config.planner.maxThoughtChars)
-                    },
-                )
+                if (content.isBlank()) {
+                    StepDecision.Fail("Empty deferred content.")
+                } else {
+                    StepDecision.Defer(
+                        urgency = Urgency.fromRaw(payload.urgency),
+                        content = content,
+                        longTermMemoryRecallQuery = payload.longTermMemoryRecallQuery?.trim()?.ifBlank { null },
+                    )
+                }
             }
             "intend" -> {
                 val intentionKind = DecisionValidation.intentionKindFromRaw(payload.intentionKind)
@@ -218,37 +220,120 @@ class DeferredStepPlanner(
                 val rawPayload = StructuredOutputHandler.normalizeActionPayload(payload.actionPayload)?.trim().orEmpty()
                 val actionPayload = actionType?.let { runtime.repairActionPayload(it, rawPayload) } ?: rawPayload
                 val summary = payload.actionSummary?.trim().orEmpty()
-                val commitMode = DecisionValidation.resolveCommitModePreference(payload.commitModePreference, context.allowedCommitModes, intentionKind)
-
-                if (actionType == ActionType.RESOLUTION_DRAFT && !allowResolutionDraft)
-                    EgoDecision.Noop("resolution_draft outside active plan context.")
-                else if (intentionKind == null || actionType == null || actionPayload.isBlank() || summary.isBlank())
-                    EgoDecision.Noop("Invalid intention payload.")
-                else if (!DecisionValidation.isCommitModeValidForIntention(intentionKind, commitMode))
-                    EgoDecision.Noop("Invalid commit_mode for intention kind.")
-                else if (!context.availableActions.contains(actionType))
-                    EgoDecision.Noop("Unavailable action type: ${actionType.id}.")
-                else if (intentionKind !in context.allowedIntentions)
-                    EgoDecision.Noop("Unavailable intention kind.")
-                else if (commitMode !in context.allowedCommitModes)
-                    EgoDecision.Noop("Unavailable commit mode.")
-                else EgoDecision.FormIntention(
-                    urgency = Urgency.fromRaw(payload.urgency),
-                    intentionKind = intentionKind,
-                    commitModePreference = commitMode,
-                    actionType = actionType,
-                    payload = TextSecurity.clamp(actionPayload, config.maxActionPayloadChars),
-                    summary = TextSecurity.clamp(summary, config.maxActionSummaryChars),
+                val commitMode = DecisionValidation.resolveCommitModePreference(
+                    payload.commitModePreference,
+                    context.allowedCommitModes,
+                    intentionKind
                 )
+                if (intentionKind == null || actionType == null || actionPayload.isBlank() || summary.isBlank()) {
+                    StepDecision.Fail("Invalid intention payload.")
+                } else {
+                    StepDecision.Execute(
+                        ExecutionCandidate(
+                            urgency = Urgency.fromRaw(payload.urgency),
+                            intentionKind = intentionKind,
+                            commitModePreference = commitMode,
+                            actionType = actionType,
+                            payload = actionPayload,
+                            summary = summary,
+                        )
+                    )
+                }
             }
             "plan" -> {
                 val goal = payload.planGoal?.trim().orEmpty()
                 val steps = payload.planSteps?.map { it.trim() }?.filter { it.isNotBlank() }
-                    ?.take(config.planner.maxPlanSteps)?.map { TextSecurity.clamp(it, config.planner.maxPlanStepDescriptionChars) }.orEmpty()
-                if (goal.isBlank() || steps.isEmpty()) EgoDecision.Noop("Plan with missing goal or empty steps.")
-                else EgoDecision.EnqueuePlan(urgency = Urgency.fromRaw(payload.urgency), goal = TextSecurity.clamp(goal, config.planner.maxThoughtChars), steps = steps)
+                    ?.take(config.planner.maxPlanSteps)
+                    ?.map { PlanDecomposition.PlanStep(description = it) }
+                    .orEmpty()
+                if (goal.isBlank() || steps.isEmpty()) {
+                    StepDecision.Fail("Plan with missing goal or empty steps.")
+                } else {
+                    StepDecision.RefinePlan(
+                        urgency = Urgency.fromRaw(payload.urgency),
+                        goal = goal,
+                        steps = steps,
+                    )
+                }
             }
-            else -> EgoDecision.Noop(payload.reason?.take(120) ?: "Planner returned noop.")
+            else -> StepDecision.Fail(payload.reason?.take(120) ?: "Planner returned noop.")
+        }
+    }
+
+    private fun toEgoDecision(
+        decision: StepDecision,
+        context: PlannerContext,
+        allowResolutionDraft: Boolean,
+    ): EgoDecision {
+        return when (decision) {
+            is StepDecision.Defer -> EgoDecision.EnqueueThought(
+                urgency = decision.urgency,
+                content = TextSecurity.clamp(decision.content, config.planner.maxThoughtChars),
+                longTermMemoryRecallQuery = decision.longTermMemoryRecallQuery?.let {
+                    TextSecurity.clamp(it, config.planner.maxThoughtChars)
+                },
+            )
+            is StepDecision.Execute -> {
+                val candidate = decision.candidate
+                if (candidate.actionType == ActionType.RESOLUTION_DRAFT && !allowResolutionDraft) {
+                    EgoDecision.Noop("resolution_draft outside active plan context.")
+                } else if (!DecisionValidation.isCommitModeValidForIntention(
+                        candidate.intentionKind,
+                        candidate.commitModePreference
+                    )
+                ) {
+                    EgoDecision.Noop("Invalid commit_mode for intention kind.")
+                } else if (!context.availableActions.contains(candidate.actionType)) {
+                    EgoDecision.Noop("Unavailable action type: ${candidate.actionType.id}.")
+                } else if (candidate.intentionKind !in context.allowedIntentions) {
+                    EgoDecision.Noop("Unavailable intention kind.")
+                } else if (candidate.commitModePreference !in context.allowedCommitModes) {
+                    EgoDecision.Noop("Unavailable commit mode.")
+                } else {
+                    EgoDecision.FormIntention(
+                        urgency = candidate.urgency,
+                        intentionKind = candidate.intentionKind,
+                        commitModePreference = candidate.commitModePreference,
+                        actionType = candidate.actionType,
+                        payload = TextSecurity.clamp(candidate.payload, config.maxActionPayloadChars),
+                        summary = TextSecurity.clamp(candidate.summary, config.maxActionSummaryChars),
+                    )
+                }
+            }
+            is StepDecision.RefinePlan -> {
+                val steps = decision.steps
+                    .map { it.description.trim() }
+                    .filter { it.isNotBlank() }
+                    .take(config.planner.maxPlanSteps)
+                    .map { TextSecurity.clamp(it, config.planner.maxPlanStepDescriptionChars) }
+                if (decision.goal.isBlank() || steps.isEmpty()) {
+                    EgoDecision.Noop("Plan with missing goal or empty steps.")
+                } else {
+                    EgoDecision.EnqueuePlan(
+                        urgency = decision.urgency,
+                        goal = TextSecurity.clamp(decision.goal, config.planner.maxThoughtChars),
+                        steps = steps,
+                    )
+                }
+            }
+            is StepDecision.Answer -> EgoDecision.FormIntention(
+                urgency = Urgency.MEDIUM,
+                intentionKind = ai.neopsyke.agent.model.IntentionKind.OBSERVE,
+                commitModePreference = ai.neopsyke.agent.model.CommitMode.NOT_APPLICABLE,
+                actionType = ActionType.CONTACT_USER,
+                payload = TextSecurity.clamp(decision.payload, config.maxActionPayloadChars),
+                summary = TextSecurity.clamp(decision.summary, config.maxActionSummaryChars),
+            )
+            is StepDecision.Clarify -> EgoDecision.FormIntention(
+                urgency = Urgency.MEDIUM,
+                intentionKind = ai.neopsyke.agent.model.IntentionKind.OBSERVE,
+                commitModePreference = ai.neopsyke.agent.model.CommitMode.NOT_APPLICABLE,
+                actionType = ActionType.CONTACT_USER,
+                payload = TextSecurity.clamp(decision.question, config.maxActionPayloadChars),
+                summary = "Ask for clarification",
+            )
+            is StepDecision.SkipStep -> EgoDecision.Noop(decision.reason)
+            is StepDecision.Fail -> EgoDecision.Noop(decision.reason)
         }
     }
 

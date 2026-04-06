@@ -2,11 +2,12 @@ package ai.neopsyke.agent.ego.planner.lane
 
 import com.fasterxml.jackson.annotation.JsonProperty
 import com.fasterxml.jackson.databind.JsonNode
-import mu.KotlinLogging
 import ai.neopsyke.agent.config.AgentConfig
 import ai.neopsyke.agent.ego.planner.HierarchicalEgoPlanner
 import ai.neopsyke.agent.ego.planner.LaneId
 import ai.neopsyke.agent.ego.planner.PlannerLane
+import ai.neopsyke.agent.ego.planner.model.ExecutionCandidate
+import ai.neopsyke.agent.ego.planner.model.ImpulseDecision
 import ai.neopsyke.agent.ego.planner.prompt.SharedPromptSections
 import ai.neopsyke.agent.ego.planner.runtime.DecisionValidation
 import ai.neopsyke.agent.ego.planner.runtime.PlannerRuntime
@@ -22,8 +23,6 @@ import ai.neopsyke.agent.support.TextSecurity
 import ai.neopsyke.instrumentation.AgentInstrumentation
 import ai.neopsyke.llm.ChatMessage
 import ai.neopsyke.llm.ChatRole
-
-private val logger = KotlinLogging.logger {}
 
 /**
  * L1 lane: handles EgoTrigger.IncomingImpulse (Id/self-motivated work).
@@ -121,44 +120,118 @@ class ImpulsePlanner(
 
         if (response == null) return EgoDecision.Noop("ImpulsePlanner unavailable.")
 
-        val parsed = parseResponse(response.content, context)
-        if (parsed != null) { runtime.recordSuccess(laneId, rootInputId); return parsed }
+        val parsedDecision = parseImpulseDecision(response.content, context)
+        if (parsedDecision != null) {
+            runtime.recordSuccess(laneId, rootInputId)
+            return toEgoDecision(parsedDecision, context)
+        }
 
         if (TruncationRetry.isLikelyTruncated(response)) {
             val bumped = TruncationRetry.bumpCompletionBudget(runtime.resolvedConfig(laneId).maxCompletionTokens)
             runtime.call(laneId, allocation.messages + ChatMessage(ChatRole.USER, "Return one complete JSON object."),
                 metadata.copy(callSite = "impulse_truncation_retry"), StructuredOutputHandler.PLANNER_DECISION_RESPONSE_FORMAT, maxTokens = bumped, temperature = 0.0)
-                ?.let { parseResponse(it.content, context) }?.let { runtime.recordSuccess(laneId, rootInputId); return it }
+                ?.let { parseImpulseDecision(it.content, context) }?.let {
+                    runtime.recordSuccess(laneId, rootInputId)
+                    return toEgoDecision(it, context)
+                }
         }
 
         runtime.call(laneId, allocation.messages + ChatMessage(ChatRole.USER, "Reply with STRICT JSON only."),
             metadata.copy(callSite = "impulse_json_retry"), StructuredOutputHandler.PLANNER_DECISION_RESPONSE_FORMAT, temperature = 0.0)
-            ?.let { parseResponse(it.content, context) }?.let { runtime.recordSuccess(laneId, rootInputId); return it }
+            ?.let { parseImpulseDecision(it.content, context) }?.let {
+                runtime.recordSuccess(laneId, rootInputId)
+                return toEgoDecision(it, context)
+            }
 
         runtime.recordParseFailure(laneId, rootInputId)
+        instrumentation.emit(ai.neopsyke.instrumentation.AgentEvents.warning("ImpulsePlanner response remained non-parseable after retry."))
         return EgoDecision.Noop(reason = "ImpulsePlanner non-parseable.", parseFailureShortCircuit = runtime.isCircuitOpen(laneId, rootInputId))
     }
 
-    private fun parseResponse(raw: String, context: PlannerContext): EgoDecision? {
+    private fun parseImpulseDecision(raw: String, context: PlannerContext): ImpulseDecision? {
         val p = StructuredOutputHandler.parseWithRepair<ImpulsePayload>(raw) { runtime.onOutputRepaired() } ?: return null
         return when (p.decision?.trim()?.lowercase()) {
             "defer" -> {
                 val c = p.deferContent?.trim().orEmpty()
-                if (c.isBlank()) EgoDecision.Noop("Empty defer.") else EgoDecision.EnqueueThought(Urgency.fromRaw(p.urgency), TextSecurity.clamp(c, config.planner.maxThoughtChars),
-                    p.longTermMemoryRecallQuery?.trim()?.ifBlank { null }?.let { TextSecurity.clamp(it, config.planner.maxThoughtChars) })
+                if (c.isBlank()) {
+                    ImpulseDecision.Noop("Empty defer.")
+                } else {
+                    ImpulseDecision.Reflect(
+                        urgency = Urgency.fromRaw(p.urgency),
+                        content = c,
+                        longTermMemoryRecallQuery = p.longTermMemoryRecallQuery?.trim()?.ifBlank { null },
+                    )
+                }
             }
             "intend" -> {
                 val ik = DecisionValidation.intentionKindFromRaw(p.intentionKind); val at = ActionType.fromRaw(p.actionType)
                 val rp = StructuredOutputHandler.normalizeActionPayload(p.actionPayload)?.trim().orEmpty()
                 val ap = at?.let { runtime.repairActionPayload(it, rp) } ?: rp; val s = p.actionSummary?.trim().orEmpty()
                 val cm = DecisionValidation.resolveCommitModePreference(p.commitModePreference, context.allowedCommitModes, ik)
-                if (ik == null || at == null || ap.isBlank() || s.isBlank()) EgoDecision.Noop("Invalid intention.")
-                else if (!DecisionValidation.isCommitModeValidForIntention(ik, cm)) EgoDecision.Noop("Invalid commit mode.")
-                else if (at !in context.availableActions) EgoDecision.Noop("Unavailable action.")
-                else if (ik !in context.allowedIntentions) EgoDecision.Noop("Unavailable intention kind.")
-                else EgoDecision.FormIntention(Urgency.fromRaw(p.urgency), ik, cm, at, TextSecurity.clamp(ap, config.maxActionPayloadChars), TextSecurity.clamp(s, config.maxActionSummaryChars))
+                if (ik == null || at == null || ap.isBlank() || s.isBlank()) {
+                    ImpulseDecision.Noop("Invalid intention.")
+                } else if (at == ActionType.CONTACT_USER && ik == ai.neopsyke.agent.model.IntentionKind.OBSERVE) {
+                    ImpulseDecision.ContactUser(
+                        urgency = Urgency.fromRaw(p.urgency),
+                        payload = ap,
+                        summary = s,
+                    )
+                } else {
+                    ImpulseDecision.Research(
+                        ExecutionCandidate(
+                            urgency = Urgency.fromRaw(p.urgency),
+                            intentionKind = ik,
+                            commitModePreference = cm,
+                            actionType = at,
+                            payload = ap,
+                            summary = s,
+                        )
+                    )
+                }
             }
-            else -> EgoDecision.Noop(p.reason?.take(120) ?: "Noop.")
+            else -> ImpulseDecision.Noop(p.reason?.take(120) ?: "Noop.")
+        }
+    }
+
+    private fun toEgoDecision(decision: ImpulseDecision, context: PlannerContext): EgoDecision {
+        return when (decision) {
+            is ImpulseDecision.Reflect -> EgoDecision.EnqueueThought(
+                urgency = decision.urgency,
+                content = TextSecurity.clamp(decision.content, config.planner.maxThoughtChars),
+                longTermMemoryRecallQuery = decision.longTermMemoryRecallQuery?.let {
+                    TextSecurity.clamp(it, config.planner.maxThoughtChars)
+                },
+            )
+            is ImpulseDecision.Research -> {
+                val candidate = decision.candidate
+                if (!DecisionValidation.isCommitModeValidForIntention(candidate.intentionKind, candidate.commitModePreference)) {
+                    EgoDecision.Noop("Invalid commit mode.")
+                } else if (candidate.actionType !in context.availableActions) {
+                    EgoDecision.Noop("Unavailable action.")
+                } else if (candidate.intentionKind !in context.allowedIntentions) {
+                    EgoDecision.Noop("Unavailable intention kind.")
+                } else if (candidate.commitModePreference !in context.allowedCommitModes) {
+                    EgoDecision.Noop("Unavailable commit mode.")
+                } else {
+                    EgoDecision.FormIntention(
+                        urgency = candidate.urgency,
+                        intentionKind = candidate.intentionKind,
+                        commitModePreference = candidate.commitModePreference,
+                        actionType = candidate.actionType,
+                        payload = TextSecurity.clamp(candidate.payload, config.maxActionPayloadChars),
+                        summary = TextSecurity.clamp(candidate.summary, config.maxActionSummaryChars),
+                    )
+                }
+            }
+            is ImpulseDecision.ContactUser -> EgoDecision.FormIntention(
+                urgency = decision.urgency,
+                intentionKind = ai.neopsyke.agent.model.IntentionKind.OBSERVE,
+                commitModePreference = ai.neopsyke.agent.model.CommitMode.NOT_APPLICABLE,
+                actionType = ActionType.CONTACT_USER,
+                payload = TextSecurity.clamp(decision.payload, config.maxActionPayloadChars),
+                summary = TextSecurity.clamp(decision.summary, config.maxActionSummaryChars),
+            )
+            is ImpulseDecision.Noop -> EgoDecision.Noop(decision.reason)
         }
     }
 
