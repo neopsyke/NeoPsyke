@@ -260,7 +260,7 @@ Each section covers terms that appear together in the same area of the agent.
 
 ## LLM & Providers
 
-- **CognitiveRole** — A named function the agent uses an LLM for: `planner`, `action_verifier`, `superego_primary`, `superego_escalation`, `meta_reasoner`, `meta_reasoner_fallback`, `memory_advisor`. Each can use a different provider and model, configured in `llm-runtime.yaml`.
+- **CognitiveRole** — A named function the agent uses an LLM for: `planner`, `superego_primary`, `superego_escalation`, `meta_reasoner`, `meta_reasoner_fallback`, `memory_advisor`. Each can use a different provider and model, configured in `llm-runtime.yaml`.
 - **ChatModelClient** — The interface for making LLM completion calls. Implementations exist per provider: `OpenAiChatClient`, `AnthropicChatClient`, `GroqChatClient`, `MistralChatClient`, `GeminiChatClient`, `OllamaChatClient`.
 - **ProviderStatus** — The result of a health check against an LLM provider endpoint. States: `AVAILABLE`, `DEGRADED`, `UNAVAILABLE`. Probed at startup per cognitive role.
 - **PromptBudget** — The token budget system that controls how much context the planner can include. Sections are prioritized and trimmed (optional sections first, then required context) to fit within `maxLlmPromptTokens`. Logged as `prompt_budget.allocation` events.

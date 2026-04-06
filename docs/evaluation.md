@@ -247,7 +247,6 @@ Each line is a JSON object:
 ```json
 {"seq":0,"hash":"a3f8...","actor":"planner","call_site":"PlannerPromptRunner","model":"claude-sonnet-4-20250514","content":"...","finish_reason":"end_turn","prompt_tokens":1842,"completion_tokens":312,"total_tokens":2154}
 {"seq":1,"hash":"e7b2...","actor":"superego","call_site":"SuperegoReviewer","model":"claude-sonnet-4-20250514","content":"...","finish_reason":"end_turn","prompt_tokens":956,"completion_tokens":87,"total_tokens":1043}
-{"seq":2,"hash":"c1d9...","actor":"action_verifier","call_site":"DecisionVerifier","model":"claude-sonnet-4-20250514","content":"...","finish_reason":"end_turn","prompt_tokens":1104,"completion_tokens":145,"total_tokens":1249}
 ```
 
 The `seq` field is the global call order across all cognitive roles. The `hash` is what replay uses to detect divergence.
@@ -271,7 +270,6 @@ Example output:
   "hits_by_actor": {
     "planner": 1,
     "superego": 1,
-    "action_verifier": 1,
     "meta_reasoner": 1
   },
   "hints": ["All calls served from cache: fully deterministic replay."]
@@ -363,7 +361,7 @@ The dashboard snapshot (`/api/obs/snapshot`) also exposes aggregated `taskVerifi
 
 ### Prompt budget telemetry
 
-The `prompt_budget_allocation` event is emitted when prompts are assembled for each cognitive role (`planner_prompt`, `action_verifier_prompt`, `superego_prompt`, `meta_reasoner_prompt`). The event payload includes:
+The `prompt_budget_allocation` event is emitted when prompts are assembled for each cognitive role (`planner_prompt`, `superego_prompt`, `meta_reasoner_prompt`). The event payload includes:
 
 - Budget and cost estimates (`max_tokens`, `estimated_total_cost`, `allocated_total_cost`, `reserved_floor_cost`)
 - Degradation path (what was dropped to fit the budget)

@@ -34,9 +34,6 @@ cognitive_roles:
   planner:
     provider: groq
     model: openai/gpt-oss-20b
-  action_verifier:
-    provider: openai
-    model: gpt-4o-mini
   superego_primary:
     provider: groq
     model: openai/gpt-oss-120b

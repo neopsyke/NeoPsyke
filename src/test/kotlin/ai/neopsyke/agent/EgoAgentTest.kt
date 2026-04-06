@@ -158,8 +158,8 @@ class EgoAgentTest {
     }
 
     @Test
-    fun `verifier style denied action context is preserved through noop and next thought`() {
-        var sawVerifierDeniedThought = false
+    fun `denied action context is preserved through noop and next thought`() {
+        var sawDeniedThought = false
         val planner = object : ai.neopsyke.agent.ego.Ego.Planner {
             override fun decide(
                 trigger: ai.neopsyke.agent.model.EgoTrigger,
@@ -170,21 +170,21 @@ class EgoAgentTest {
                         reason = "The answer 'Omar' is incorrect based on the provided information.",
                         deniedActionType = ActionType.CONTACT_USER,
                         deniedActionPayload = "Omar",
-                        denialReasonCode = "ACTION_VERIFIER_REJECT"
+                        denialReasonCode = "SUPEREGO_REJECT"
                     )
 
                     is ai.neopsyke.agent.model.EgoTrigger.DeferredIntention -> {
                         val thought = trigger.intention.toPendingThought()
-                        sawVerifierDeniedThought =
+                        sawDeniedThought =
                             thought.deniedActionType == ActionType.CONTACT_USER &&
                                 thought.deniedActionPayload == "Omar" &&
-                                thought.denialReasonCode == "ACTION_VERIFIER_REJECT"
+                                thought.denialReasonCode == "SUPEREGO_REJECT"
                        ai.neopsyke.agent.model.EgoDecision.FormIntention(
                             urgency = Urgency.HIGH,
                             intentionKind = IntentionKind.OBSERVE,
                             actionType = ActionType.CONTACT_USER,
-                            payload = "Omar",
-                            summary = "deliver answer"
+                            payload = "The correct answer is Omar Khayyam",
+                            summary = "deliver corrected answer"
                         )
                     }
 
@@ -216,8 +216,8 @@ class EgoAgentTest {
 
         runAgentWithInput(agent, "Who arrived last?\nexit\n")
 
-        assertTrue(sawVerifierDeniedThought)
-        assertEquals(listOf("ego> Omar"), outputs)
+        assertTrue(sawDeniedThought)
+        assertEquals(listOf("ego> The correct answer is Omar Khayyam"), outputs)
     }
 
     @Test
@@ -327,11 +327,11 @@ class EgoAgentTest {
     @Test
     fun `session workspace digest persists across turns when queues drain`() {
         val plannerLlm = StubChatModelClient().apply {
-            enqueueRawResponse(
-                """{"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"contact_user","action_payload":"first done","action_summary":"respond first"}"""
+            enqueueRawResponseForCallSite("general_action",
+                """{"intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"contact_user","action_payload":"first done","action_summary":"respond first"}"""
             )
-            enqueueRawResponse(
-                """{"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"contact_user","action_payload":"second done","action_summary":"respond second"}"""
+            enqueueRawResponseForCallSite("general_action",
+                """{"intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"contact_user","action_payload":"second done","action_summary":"respond second"}"""
             )
         }
         val superegoLlm = StubChatModelClient().apply {
@@ -362,7 +362,7 @@ class EgoAgentTest {
         runAgentWithInput(agent, "digest sentinel one\ndigest sentinel two\nexit\n")
 
         assertEquals(listOf("ego> first done", "ego> second done"), outputs)
-        val plannerInputCalls = plannerLlm.calls.filter { it.options.metadata.callSite == "input" }
+        val plannerInputCalls = plannerLlm.calls.filter { it.options.metadata.callSite == "general_action" }
         assertTrue(plannerInputCalls.size >= 2)
         val secondPrompt = plannerInputCalls[1].messages.joinToString("\\n\\n") { it.content }
         assertTrue(secondPrompt.contains("Recent completed work summaries"))
@@ -658,12 +658,10 @@ class EgoAgentTest {
     @Test
     fun `fallback answer uses gathered evidence when planner output remains non parseable`() {
         val plannerLlm = StubChatModelClient().apply {
-            enqueueRawResponse(
-                """
-                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"web_search","action_payload":"latest groq pricing","action_summary":"search pricing"}
-                """.trimIndent()
+            enqueueRawResponseForCallSite("general_action",
+                """{"intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"web_search","action_payload":"latest groq pricing","action_summary":"search pricing"}"""
             )
-            enqueueRawResponse("not-json")
+            enqueueRawResponseForCallSite("feedback", """{"decision":"intend","urgency":"medium"}""")
         }
         val superegoLlm = StubChatModelClient().apply {
             enqueueRawResponse("""{"allow":true}""")
@@ -888,26 +886,9 @@ class EgoAgentTest {
     @Test
     fun `duplicate plan emission is suppressed when identical plan hash is emitted`() {
         val plannerLlm = StubChatModelClient().apply {
-            enqueueRawResponse(
-                """
-                {
-                  "decision":"plan",
-                  "urgency":"medium",
-                  "plan_goal":"Get pricing",
-                  "plan_steps":["step one","step two"]
-                }
-                """.trimIndent()
-            )
-            enqueueRawResponse(
-                """
-                {
-                  "decision":"plan",
-                  "urgency":"medium",
-                  "plan_goal":"Get pricing",
-                  "plan_steps":["step one","step two"]
-                }
-                """.trimIndent()
-            )
+            enqueueRawResponseForCallSite("input_intent_router", """{"route":"multi_step_task","reasoning":"test"}""")
+            enqueueRawResponseForCallSite("task_decomposition", """{"goal":"Get pricing","steps":["step one","step two"],"urgency":"medium"}""")
+            enqueueRawResponseForCallSite("deferred_step", """{"decision":"plan","urgency":"medium","plan_goal":"Get pricing","plan_steps":["step one","step two"]}""")
         }
         val instrumentation = RecordingInstrumentation()
         val agent = buildTestEgo(
@@ -939,30 +920,13 @@ class EgoAgentTest {
     @Test
     fun `plan suppression recovery enqueues convergence thought instead of silently ending input`() {
         val plannerLlm = StubChatModelClient().apply {
-            enqueueRawResponse(
-                """
-                {
-                  "decision":"plan",
-                  "urgency":"medium",
-                  "plan_goal":"Initial plan",
-                  "plan_steps":["step one"]
-                }
-                """.trimIndent()
+            enqueueRawResponseForCallSite("input_intent_router", """{"route":"multi_step_task","reasoning":"test"}""")
+            enqueueRawResponseForCallSite("task_decomposition", """{"goal":"Initial plan","steps":["step one"],"urgency":"medium"}""")
+            enqueueRawResponseForCallSite("deferred_step",
+                """{"decision":"plan","urgency":"medium","plan_goal":"Duplicate plan after first step","plan_steps":["step again"]}"""
             )
-            enqueueRawResponse(
-                """
-                {
-                  "decision":"plan",
-                  "urgency":"medium",
-                  "plan_goal":"Duplicate plan after first step",
-                  "plan_steps":["step again"]
-                }
-                """.trimIndent()
-            )
-            enqueueRawResponse(
-                """
-                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"contact_user","action_payload":"final after suppression","action_summary":"converged"}
-                """.trimIndent()
+            enqueueRawResponseForCallSite("deferred_step",
+                """{"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"contact_user","action_payload":"final after suppression","action_summary":"converged"}"""
             )
         }
         val superegoLlm = StubChatModelClient().apply {
@@ -1003,20 +967,13 @@ class EgoAgentTest {
     @Test
     fun `convergence fallback explanation survives suppressed plan loops`() {
         val plannerLlm = StubChatModelClient().apply {
-            enqueueRawResponse(
-                """
-                {"decision":"plan","urgency":"medium","plan_goal":"Verify pricing info","plan_steps":["Search pricing page"]}
-                """.trimIndent()
+            enqueueRawResponseForCallSite("input_intent_router", """{"route":"multi_step_task","reasoning":"test"}""")
+            enqueueRawResponseForCallSite("task_decomposition", """{"goal":"Verify pricing info","steps":["Search pricing page"],"urgency":"medium"}""")
+            enqueueRawResponseForCallSite("deferred_step",
+                """{"decision":"plan","urgency":"medium","plan_goal":"Verify pricing info","plan_steps":["Search pricing page","Summarize pricing"]}"""
             )
-            enqueueRawResponse(
-                """
-                {"decision":"plan","urgency":"medium","plan_goal":"Verify pricing info","plan_steps":["Search pricing page","Summarize pricing"]}
-                """.trimIndent()
-            )
-            enqueueRawResponse(
-                """
-                {"decision":"plan","urgency":"medium","plan_goal":"Verify pricing info","plan_steps":["Search pricing page","Summarize pricing"]}
-                """.trimIndent()
+            enqueueRawResponseForCallSite("deferred_step",
+                """{"decision":"plan","urgency":"medium","plan_goal":"Verify pricing info","plan_steps":["Search pricing page","Summarize pricing"]}"""
             )
         }
         val instrumentation = RecordingInstrumentation()
@@ -1160,15 +1117,11 @@ class EgoAgentTest {
     @Test
     fun `scratchpad summary is injected and lifecycle is scoped to resolved input`() {
         val plannerLlm = StubChatModelClient().apply {
-            enqueueRawResponse(
-                """
-                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"web_search","action_payload":"official pricing","action_summary":"search pricing"}
-                """.trimIndent()
+            enqueueRawResponseForCallSite("general_action",
+                """{"intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"web_search","action_payload":"official pricing","action_summary":"search pricing"}"""
             )
-            enqueueRawResponse(
-                """
-                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"contact_user","action_payload":"Final answer from planner","action_summary":"respond"}
-                """.trimIndent()
+            enqueueRawResponseForCallSite("feedback",
+                """{"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"contact_user","action_payload":"Final answer from planner","action_summary":"respond"}"""
             )
         }
         val superegoLlm = StubChatModelClient().apply {
@@ -1215,9 +1168,12 @@ class EgoAgentTest {
 
         runAgentWithInput(agent, "find current pricing\nexit\n")
 
-        val plannerCalls = plannerLlm.calls.filter { it.options.metadata.callSite != "action_verifier" }
+        val plannerCalls = plannerLlm.calls.filter {
+            it.options.metadata.callSite != "input_intent_router"
+        }
         assertTrue(plannerCalls.size >= 2)
-        val followUpPrompt = plannerCalls[1].messages.last().content
+        val followUpCall = plannerCalls.first { it.options.metadata.callSite == "feedback" }
+        val followUpPrompt = followUpCall.messages.last().content
         assertTrue(followUpPrompt.contains("Working notes for this request:"))
         assertTrue(
             followUpPrompt.contains("Request") ||
@@ -1363,25 +1319,18 @@ class EgoAgentTest {
     @Test
     fun `scratchpad final pass can finalize from answer drafts without external evidence`() {
         val plannerLlm = StubChatModelClient().apply {
-            enqueueRawResponse(
-                """
-                {"decision":"plan","urgency":"medium","plan_goal":"Build final response in chunks","plan_steps":["Synthesize chunk one","Synthesize chunk two","Finalize answer"]}
-                """.trimIndent()
+            enqueueRawResponseForCallSite("input_intent_router", """{"route":"multi_step_task","reasoning":"test"}""")
+            enqueueRawResponseForCallSite("task_decomposition",
+                """{"goal":"Build final response in chunks","steps":["Synthesize chunk one","Synthesize chunk two","Finalize answer"],"urgency":"medium"}"""
             )
-            enqueueRawResponse(
-                """
-                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"resolution_draft","action_payload":"Draft chunk one","action_summary":"capture chunk one"}
-                """.trimIndent()
+            enqueueRawResponseForCallSite("deferred_step",
+                """{"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"resolution_draft","action_payload":"Draft chunk one","action_summary":"capture chunk one"}"""
             )
-            enqueueRawResponse(
-                """
-                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"resolution_draft","action_payload":"Draft chunk two","action_summary":"capture chunk two"}
-                """.trimIndent()
+            enqueueRawResponseForCallSite("deferred_step",
+                """{"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"resolution_draft","action_payload":"Draft chunk two","action_summary":"capture chunk two"}"""
             )
-            enqueueRawResponse(
-                """
-                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"contact_user","action_payload":"Final draft answer","action_summary":"deliver final answer"}
-                """.trimIndent()
+            enqueueRawResponseForCallSite("deferred_step",
+                """{"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"contact_user","action_payload":"Final draft answer","action_summary":"deliver final answer"}"""
             )
         }
         val superegoLlm = StubChatModelClient().apply {
@@ -1482,15 +1431,15 @@ class EgoAgentTest {
     @Test
     fun `thought recall runs when planner requests explicit recall query`() {
         val plannerLlm = StubChatModelClient().apply {
-            enqueueRawResponse(
-                """
-                {"decision":"defer","urgency":"medium","defer_content":"check memory","long_term_memory_recall_query":"goal constraints and deadlines"}
-                """.trimIndent()
+            enqueueRawResponseForCallSite("input_intent_router", """{"route":"multi_step_task","reasoning":"test"}""")
+            enqueueRawResponseForCallSite("task_decomposition",
+                """{"goal":"Check memory for constraints","steps":["recall constraints"],"urgency":"medium"}"""
             )
-            enqueueRawResponse(
-                """
-                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"contact_user","action_payload":"ok","action_summary":"respond"}
-                """.trimIndent()
+            enqueueRawResponseForCallSite("deferred_step",
+                """{"decision":"defer","urgency":"medium","defer_content":"check memory","long_term_memory_recall_query":"goal constraints and deadlines"}"""
+            )
+            enqueueRawResponseForCallSite("deferred_step",
+                """{"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"contact_user","action_payload":"ok","action_summary":"respond"}"""
             )
         }
         val superegoLlm = StubChatModelClient().apply {
@@ -1512,7 +1461,7 @@ class EgoAgentTest {
                 instrumentation = instrumentation
             ),
             motorCortex = buildMotorCortex(output = {}),
-            config = AgentConfig(planner = PlannerConfig(maxLoopStepsPerInput = 6)),
+            config = AgentConfig(planner = PlannerConfig(maxLoopStepsPerInput = 8)),
             hippocampus = hippocampus,
             instrumentation = instrumentation
         )

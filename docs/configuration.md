@@ -108,9 +108,6 @@ cognitive_roles:
   planner:
     provider: groq
     model: openai/gpt-oss-120b
-  action_verifier:
-    provider: openai
-    model: gpt-4o-mini
   superego_primary:
     provider: openai
     model: gpt-4o-mini
@@ -133,7 +130,6 @@ Each cognitive role can use a different provider and model. This allows cost opt
 | Role | What it does |
 |---|---|
 | `planner` | Main reasoning and planning LLM. Forms thoughts, proposes actions, generates answers. |
-| `action_verifier` | Checks whether a candidate action is grounded, sufficient, and ready to commit. |
 | `superego_primary` | Reviews proposed actions against safety directives and policy. |
 | `superego_escalation` | Stronger model used when two-stage review escalates on low confidence or medium policy risk. |
 | `meta_reasoner` | Intervenes when the planning chain stalls or loops. Classifies chain health. |
@@ -211,7 +207,6 @@ This is the largest configuration file, covering the Ego planner, Superego, memo
 | `max_plans_per_input` | `2` | Maximum plan generations per input. |
 | `action_retry_budget_non_retryable_failures` | `3` | How many non-retryable action failures before giving up. |
 | `action_retry_cooldown_steps` | `10` | Steps to wait before retrying a failed action type. |
-| `action_verifier_enabled` | `false` | Enable the planner-side action-verifier LLM pass that can repair or veto proposed actions before Superego review. This is separate from the deterministic `DecisionVerifier` gate. |
 
 **Tuning notes:**
 - `max_loop_steps_per_input` is your main safety valve. Start with the default (180) and lower it if you find the agent spending too many tokens on simple requests.

@@ -9,8 +9,7 @@ This guide explains how to monitor and tune the contract-based `PromptBudgetAllo
 
 ## Where telemetry is emitted
 `prompt_budget_allocation` events are emitted at:
-- `planner_prompt`
-- `action_verifier_prompt`
+- `planner_prompt` (per-lane: `input_intent_router_prompt`, `general_action_prompt`, etc.)
 - `superego_prompt`
 - `meta_reasoner_prompt`
 - `legacy_web_search_prompt`

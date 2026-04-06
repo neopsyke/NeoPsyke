@@ -98,7 +98,7 @@ Secondary pressure indicators:
 
 ## Fast triage actions
 If severe pressure appears (`single_message_fallback` or floor violations):
-1. Identify affected `call_site` (`planner_prompt`, `action_verifier_prompt`, `superego_prompt`, `meta_reasoner_prompt`, `legacy_web_search_prompt`).
+1. Identify affected `call_site` (`planner_prompt`, `superego_prompt`, `meta_reasoner_prompt`, `legacy_web_search_prompt`).
 2. Reduce `floorTokens` for lower-criticality sections first.
 3. Reclassify sections from `REQUIRED_CONTEXT` to `OPTIONAL` when safe.
 4. Increase prompt budget only if structural tuning is insufficient.

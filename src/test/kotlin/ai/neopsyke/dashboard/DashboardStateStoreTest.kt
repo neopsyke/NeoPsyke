@@ -173,7 +173,7 @@ class DashboardStateStoreTest {
                 id = 2,
                 type = "prompt_budget_allocation",
                 data = mapOf(
-                    "call_site" to "action_verifier_prompt",
+                    "call_site" to "deferred_step_prompt",
                     "single_message_fallback" to true,
                     "degradation_path" to "single_message_fallback",
                     "floor_violation_count" to 2,
@@ -190,7 +190,7 @@ class DashboardStateStoreTest {
         @Suppress("UNCHECKED_CAST")
         val byCallSite = snapshot.promptBudgetStats["by_call_site"] as Map<String, Any?>
         assertEquals(1L, (byCallSite["planner_prompt"] as Number).toLong())
-        assertEquals(1L, (byCallSite["action_verifier_prompt"] as Number).toLong())
+        assertEquals(1L, (byCallSite["deferred_step_prompt"] as Number).toLong())
     }
 
     @Test

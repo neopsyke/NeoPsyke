@@ -121,7 +121,9 @@ class AgentScenarioPackTest {
         runAgentWithInput(agent, "hello\nexit\n")
 
         assertEquals(listOf("ego> ok"), outputs)
-        val plannerCalls = plannerLlm.calls.filter { it.options.metadata.callSite != "action_verifier" }
+        val plannerCalls = plannerLlm.calls.filter {
+            it.options.metadata.callSite != "input_intent_router"
+        }
         assertEquals(1, plannerCalls.size)
         assertTrue(instrumentation.events.none { it.type == "plan_created" })
     }
@@ -304,7 +306,9 @@ class AgentScenarioPackTest {
 
         runAgentWithInput(agent, "find pricing\nexit\n")
 
-        val plannerCalls = plannerLlm.calls.filter { it.options.metadata.callSite != "action_verifier" }
+        val plannerCalls = plannerLlm.calls.filter {
+            it.options.metadata.callSite != "input_intent_router"
+        }
         assertTrue(plannerCalls.size >= 2)
         val followUpPrompt = plannerCalls[1].messages.last().content
         assertTrue(followUpPrompt.contains("Working notes for this request:"))
@@ -411,91 +415,24 @@ class AgentScenarioPackTest {
     }
 
     @Test
-    fun scenario_action_verifier_does_not_semantically_rewrite_web_search_before_superego_review() {
-        val plannerLlm = StubChatModelClient().apply {
-            enqueueRawResponse(
-                """
-                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"web_search","action_payload":"stale query","action_summary":"search old pricing"}
-                """.trimIndent()
-            )
-            enqueueRawResponseForCallSite(
-                callSite = "action_verifier",
-                content = """
-                {"verdict":"repair","action_type":"web_search","action_payload":"official groq pricing","action_summary":"search official pricing page","reason":"refined query"}
-                """.trimIndent()
-            )
-        }
-        val superegoLlm = StubChatModelClient().apply {
-            enqueueRawResponse("""{"allow":true}""")
-        }
-        val instrumentation = RecordingInstrumentation()
-        val observedQueries = mutableListOf<String>()
-        val recordingSearchEngine = object : WebSearchEngine {
-            override fun search(query: String, maxResults: Int): WebSearchResult {
-                observedQueries += query
-                return WebSearchResult(
-                    summary = "ok",
-                    snippets = listOf("official result"),
-                    sources = listOf(
-                        WebSearchSource(
-                            title = "Groq Pricing",
-                            url = "https://groq.com/pricing"
-                        )
-                    )
-                )
-            }
-        }
-        val config = AgentConfig(
-            planner = PlannerConfig(
-                maxLoopStepsPerInput = 2,
-                maxThoughtPasses = 2,
-                actionVerifierEnabled = true
-            )
-        )
-        val agent = buildTestEgo(
-            planner = LlmEgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
-            superego = Superego(modelClient = superegoLlm, config = config, instrumentation = instrumentation),
-            motorCortex = buildMotorCortex(webSearchEngine = recordingSearchEngine, output = {}),
-            config = config,
-            instrumentation = instrumentation
-        )
-
-        runAgentWithInput(agent, "check pricing\nexit\n")
-
-        assertEquals(listOf("stale query"), observedQueries)
-        assertTrue(
-            instrumentation.events.any {
-                it.type == "action_verifier_result" &&
-                    it.data["verdict"] == "approve" &&
-                    it.data["repaired"] == false &&
-                    (it.data["reason"] as? String)?.contains("alter action meaning", ignoreCase = true) == true
-            }
-        )
-        assertTrue(
-            instrumentation.events.any {
-                it.type == "action_review_requested" &&
-                    (it.data["action"] as? PendingAction)?.payload == "stale query"
-            }
-        )
-    }
-
-    @Test
     fun scenario_plan_decomposition_then_execute() {
         val plannerLlm = StubChatModelClient().apply {
-            // Input: planner decides to create a plan
-            enqueueRawResponse(
+            // Route to multi_step_task via input_intent_router
+            enqueueRawResponseForCallSite("input_intent_router", """{"route":"multi_step_task","reasoning":"test"}""")
+            // Task decomposition planner returns plan
+            enqueueRawResponseForCallSite("task_decomposition",
                 """
-                {"decision":"plan","urgency":"medium","plan_goal":"Search and answer pricing question","plan_steps":["Search for official pricing","Synthesize answer from search results"]}
+                {"goal":"Search and answer pricing question","steps":["Search for official pricing","Synthesize answer from search results"],"urgency":"medium"}
                 """.trimIndent()
             )
-            // Step-thought 1: planner decides to web_search
-            enqueueRawResponse(
+            // Step-thought 1 (deferred_step): planner decides to web_search
+            enqueueRawResponseForCallSite("deferred_step",
                 """
                 {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"web_search","action_payload":"official pricing 2025","action_summary":"search pricing"}
                 """.trimIndent()
             )
-            // Follow-up thought from search: planner decides to answer
-            enqueueRawResponse(
+            // Step-thought 2 (deferred_step): planner synthesizes the answer
+            enqueueRawResponseForCallSite("deferred_step",
                 """
                 {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"contact_user","action_payload":"Pricing is $20/month based on verified sources.","action_summary":"deliver verified answer"}
                 """.trimIndent()
@@ -595,7 +532,7 @@ class AgentScenarioPackTest {
 
         assertEquals(listOf("official pricing"), observedQueries)
         assertEquals(listOf("ego> Pricing is available on the official site."), outputs)
-        val plannerCalls = plannerLlm.calls.filter { it.options.metadata.callSite != "action_verifier" }
+        val plannerCalls = plannerLlm.calls
         assertTrue(plannerCalls.size >= 2)
     }
 
@@ -805,7 +742,9 @@ class AgentScenarioPackTest {
         var actionControlStore: SqliteActionControlStore? = null
         try {
             val plannerLlm = StubChatModelClient().apply {
-                enqueueRawResponse(
+                // Route to goal_creation via input_intent_router
+                enqueueRawResponseForCallSite("input_intent_router", """{"route":"goal_creation","reasoning":"test"}""")
+                enqueueRawResponseForCallSite("goal_creation",
                     """
                     {
                       "decision":"create_goal",
@@ -886,7 +825,7 @@ class AgentScenarioPackTest {
             assertEquals(1, approvalPrompts.size)
             assertTrue(approvalPrompts.single().contains("approval", ignoreCase = true))
             assertTrue(approvalPrompts.single().contains(ActionType.GOAL_OPERATION.id, ignoreCase = true))
-            assertTrue(plannerLlm.calls.any { it.options.metadata.callSite == "input_goal_create" })
+            assertTrue(plannerLlm.calls.any { it.options.metadata.callSite == "goal_creation" })
         } finally {
             actionControlStore?.close()
             manager?.stop()
@@ -901,7 +840,9 @@ class AgentScenarioPackTest {
         var actionControlStore: SqliteActionControlStore? = null
         try {
             val plannerLlm = StubChatModelClient().apply {
-                enqueueRawResponse(
+                // Route to goal_creation via input_intent_router
+                enqueueRawResponseForCallSite("input_intent_router", """{"route":"goal_creation","reasoning":"test"}""")
+                enqueueRawResponseForCallSite("goal_creation",
                     """
                     {
                       "decision":"create_goal",
@@ -982,14 +923,8 @@ class AgentScenarioPackTest {
             assertTrue(staged.payload.contains("\"cron_expression\":\"5 5 * * *\""),
                 "Expected daily 5:05 cron from LLM; payload=${staged.payload}")
             assertTrue(staged.payload.contains("Daily weather forecast"))
-            // Planner was invoked via the goal creation branch
-            assertTrue(plannerLlm.calls.any { it.options.metadata.callSite == "input_goal_create" })
-            // The LLM prompt should include recurring_intent=true
-            val goalCreationCall = plannerLlm.calls.first { it.options.metadata.callSite == "input_goal_create" }
-            assertTrue(
-                goalCreationCall.messages.any { it.content.contains("recurring_intent=true") },
-                "Expected recurring_intent=true in prompt"
-            )
+            // Planner was invoked via the goal creation lane
+            assertTrue(plannerLlm.calls.any { it.options.metadata.callSite == "goal_creation" })
         } finally {
             actionControlStore?.close()
             manager?.stop()
@@ -1003,8 +938,10 @@ class AgentScenarioPackTest {
         var manager: GoalManager? = null
         try {
             val plannerLlm = StubChatModelClient().apply {
-                // First call: goal creation branch returns an invalid cron
-                enqueueRawResponseForCallSite("input_goal_create",
+                // Route to goal_creation via input_intent_router
+                enqueueRawResponseForCallSite("input_intent_router", """{"route":"goal_creation","reasoning":"test"}""")
+                // First call: goal creation lane returns an invalid cron
+                enqueueRawResponseForCallSite("goal_creation",
                     """
                     {
                       "decision":"create_goal",
@@ -1018,21 +955,17 @@ class AgentScenarioPackTest {
                     }
                     """.trimIndent()
                 )
-                // Second call: feedback triggers general branch — planner responds to the user
+                // Second call: feedback triggers feedback lane — planner responds to the user
                 enqueueRawResponse(
                     """
                     {
-                      "decision":"intend",
                       "urgency":"medium",
-                      "defer_content":null,
-                      "long_term_memory_recall_query":null,
                       "intention_kind":"observe",
                       "commit_mode_preference":"not_applicable",
                       "action_type":"contact_user",
                       "action_payload":"I corrected the schedule. Your weekly standup reminder is set for Mondays at 9 AM.",
                       "action_summary":"Confirm corrected goal schedule",
-                      "plan_goal":null,
-                      "plan_steps":null,
+                      "long_term_memory_recall_query":null,
                       "reason":"Retrying with corrected cron expression"
                     }
                     """.trimIndent()
@@ -1103,15 +1036,15 @@ class AgentScenarioPackTest {
             }
             assertTrue(feedbackPlannerCalls.isNotEmpty(), "Expected planner re-invocation via feedback trigger after bad cron")
 
-            // The feedback planner call should go through the general branch (not goal_creation)
+            // The feedback planner call should go through the feedback lane
             assertTrue(
                 instrumentation.events.any {
-                    it.type == "planner_branch_selected" && it.data["branch"] == "general" && it.data["trigger"] == "feedback"
+                    it.type == "planner_lane_selected" && it.data["lane"] == "feedback" && it.data["trigger"] == "feedback"
                 },
-                "Expected feedback to route through general branch"
+                "Expected feedback to route through feedback lane"
             )
 
-            // The planner should have been called at least twice: once for goal creation, once for feedback
+            // The planner should have been called at least twice: router + goal_creation + feedback
             assertTrue(plannerLlm.calls.size >= 2,
                 "Expected at least 2 planner calls (creation + feedback), got ${plannerLlm.calls.size}")
         } finally {

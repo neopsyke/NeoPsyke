@@ -1007,8 +1007,6 @@
       "thought",
       "input_json_retry",
       "thought_json_retry",
-      "action_verifier",
-      "action_verifier_json_retry",
       "action_review",
       "action_review_json_retry",
       "action_review_escalated",
@@ -1058,7 +1056,6 @@
         const actor = String(event?.data?.actor || "").toLowerCase();
         const callSite = String(event?.data?.call_site || "").toLowerCase();
         if (actor === "superego" || callSite.startsWith("action_review")) return "superego";
-        if (callSite.startsWith("action_verifier")) return "action";
         if (callSite === "meta_reasoner") return "meta";
         if (callSite.includes("memory")) return "memory";
         if (callSite === "input" || callSite === "thought") return "planner";

@@ -216,9 +216,7 @@ internal class DecisionDispatcher(
                     reasonCode = originThought?.denialReasonCode,
                     reason = originThought?.denialReason
                 )
-                val repeatedVerifierDisagreement =
-                    repeatedDeniedAction && shouldAllowRepeatedVerifierDisagreement(originThought, decision)
-                if (repeatedDeniedAction && !technicalDenial && !repeatedVerifierDisagreement) {
+                if (repeatedDeniedAction && !technicalDenial) {
                     instrumentation.emit(AgentEvents.warning("Planner repeated a denied action; requesting an alternative."))
                     deliberation.onRepeatedDeniedAction()
                     memory.maybeRecordLesson(
@@ -540,16 +538,6 @@ internal class DecisionDispatcher(
                 }
             }
         }
-    }
-
-    private fun shouldAllowRepeatedVerifierDisagreement(
-        originThought: PendingThought?,
-        decision: EgoDecision.FormIntention,
-    ): Boolean {
-        val thought = originThought ?: return false
-        if (thought.denialReasonCode != ACTION_VERIFIER_REJECT_REASON_CODE) return false
-        if (thought.deniedActionType != ActionType.CONTACT_USER) return false
-        return decision.actionType == ActionType.CONTACT_USER
     }
 
     private suspend fun recoverFromSuppressedPlan(

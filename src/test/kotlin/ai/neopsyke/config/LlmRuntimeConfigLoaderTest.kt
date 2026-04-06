@@ -19,7 +19,6 @@ class LlmRuntimeConfigLoaderTest {
         val resolved = config
         assertEquals(LlmProvider.GROQ, resolved.planner.provider)
         assertEquals("openai/gpt-oss-120b", resolved.planner.model)
-        assertEquals(LlmProvider.OPENAI, resolved.actionVerifier.provider)
         assertEquals(LlmProvider.OPENAI, resolved.approvalInterpreter.provider)
         assertEquals("gpt-5-nano", resolved.approvalInterpreter.model)
         assertEquals(LlmProvider.GROQ, resolved.webSearch.provider)
@@ -53,9 +52,6 @@ class LlmRuntimeConfigLoaderTest {
               planner:
                 provider: google
                 model: gemini-3.1-flash-lite-preview
-              action_verifier:
-                provider: groq
-                model: openai/gpt-oss-20b
               superego:
                 provider: groq
                 model: openai/gpt-oss-safeguard-20b
@@ -89,8 +85,6 @@ class LlmRuntimeConfigLoaderTest {
         assertEquals("google-key", resolved.planner.apiKey)
         assertEquals("https://custom.google.test/v1beta/openai/", resolved.planner.baseUrl)
 
-        assertEquals(LlmProvider.GROQ, resolved.actionVerifier.provider)
-        assertEquals("openai/gpt-oss-20b", resolved.actionVerifier.model)
         assertEquals(LlmProvider.GROQ, resolved.superego.provider)
         assertEquals("openai/gpt-oss-safeguard-20b", resolved.superego.model)
         assertEquals(LlmProvider.GROQ, resolved.memoryAdvisor.provider)
@@ -174,8 +168,6 @@ class LlmRuntimeConfigLoaderTest {
         assertEquals(LlmProvider.ANTHROPIC, config.planner.provider)
         assertEquals("anthropic-key", config.planner.apiKey)
         assertEquals("https://anthropic-proxy.test/v1", config.planner.baseUrl)
-        assertEquals(LlmProvider.OPENAI, config.actionVerifier.provider)
-        assertEquals("gpt-4o-mini", config.actionVerifier.model)
         assertEquals(LlmProvider.GROQ, config.superego.provider)
         assertEquals("openai/gpt-oss-120b", config.superego.model)
         assertEquals(LlmProvider.ANTHROPIC, config.metaReasoner.provider)
@@ -207,9 +199,6 @@ class LlmRuntimeConfigLoaderTest {
               planner:
                 provider: openai
                 model: gpt-4o-mini
-              action_verifier:
-                provider: openai
-                model: gpt-4o-mini
               superego:
                 provider: openai
                 model: gpt-4.1-mini
@@ -235,7 +224,6 @@ class LlmRuntimeConfigLoaderTest {
 
         val resolved = config
         assertEquals(LlmProvider.OPENAI, resolved.planner.provider)
-        assertEquals(LlmProvider.OPENAI, resolved.actionVerifier.provider)
         assertEquals(LlmProvider.OPENAI, resolved.superego.provider)
         assertEquals(LlmProvider.OPENAI, resolved.metaReasoner.provider)
         assertEquals(LlmProvider.OPENAI, resolved.memoryAdvisor.provider)
@@ -272,9 +260,6 @@ class LlmRuntimeConfigLoaderTest {
               planner:
                 provider: anthropic
                 model: claude-sonnet-4-20250514
-              action_verifier:
-                provider: ollama
-                model: gpt-oss
               superego:
                 provider: anthropic
                 model: claude-sonnet-4-20250514
@@ -302,10 +287,6 @@ class LlmRuntimeConfigLoaderTest {
         assertEquals(LlmProvider.ANTHROPIC, resolved.planner.provider)
         assertEquals("anthropic-key", resolved.planner.apiKey)
         assertEquals("https://anthropic-proxy.test/v1", resolved.planner.baseUrl)
-        assertEquals(LlmProvider.OLLAMA, resolved.actionVerifier.provider)
-        assertEquals("http://ollama.test:11434/api", resolved.actionVerifier.baseUrl)
-        assertEquals("", resolved.actionVerifier.apiKey)
-        assertEquals("OLLAMA_API_KEY", resolved.actionVerifier.apiKeyEnvVar)
         assertTrue(resolved.modelCatalog.profiles(LlmProvider.ANTHROPIC).isNotEmpty())
     }
 

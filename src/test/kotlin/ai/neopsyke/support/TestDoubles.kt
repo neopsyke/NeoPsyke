@@ -41,14 +41,12 @@ class StubChatModelClient(
     override fun chat(messages: List<ChatMessage>, options: ChatRequestOptions): ChatCompletion {
         val callSite = options.metadata.callSite.orEmpty()
         calls += ObservedCall(messages = messages, options = options)
-        if (callSite != "action_verifier") {
-            lastMessages = messages
-            lastOptions = options
-        }
+        lastMessages = messages
+        lastOptions = options
 
         queuedResponsesByCallSite[callSite]?.removeFirstOrNull()?.let { return it }
-        if (callSite == "action_verifier") {
-            return ChatCompletion(content = """{"verdict":"approve"}""", model = modelName)
+        if (callSite == "input_intent_router") {
+            return ChatCompletion(content = """{"route":"general_action","reasoning":"test default"}""", model = modelName)
         }
         return queuedResponses.removeFirstOrNull()
             ?: ChatCompletion(content = """{"decision":"noop","reason":"empty queue"}""", model = modelName)

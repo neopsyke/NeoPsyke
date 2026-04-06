@@ -16,6 +16,12 @@ Instructions for coding agents working in this repository (Codex, Claude, Gemini
 - This is an unreleased prototype. All changes should prioritize architectural clarity over backwards compatibility. Rename freely, restructure fearlessly, and never add compatibility shims or aliases for old names. Clean breaks are always preferred.
 - If a user-facing name is changed, change it everywhere in the repo for consistency: commands, step names, config keys, docs, tests, examples, and internal references. Only keep the old name when changing it everywhere would create a high risk of breaking something outside this repo, such as an external dependency or external API contract. In that case, tell the user that this decision was made and why.
 
+## Gradle Concurrency (Critical)
+- **NEVER run overlapping Gradle-backed commands in the same checkout/worktree.** This includes `./gradlew`, `./freud/bin/freud run`, and any agent subprocesses that may invoke Gradle.
+- If you spawn parallel agents (subprocesses), at most ONE of them may run `./gradlew` or any Gradle-triggering command. All others must be limited to file reads, searches, and edits.
+- Violating this rule causes Gradle daemon lock contention, stuck builds, and hung processes that block the entire session.
+- See the detailed "Concurrency Policy" section under "Freud Workflow" for the full rules.
+
 ## Project Snapshot
 - Language: Kotlin (JVM), Gradle Kotlin DSL.
 - Main source: `src/main/kotlin/ai/neopsyke`.

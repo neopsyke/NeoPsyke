@@ -39,7 +39,6 @@ data class LlmEndpointConfig(
 
 data class LlmCognitiveRolesConfig(
     val planner: LlmEndpointConfig,
-    val actionVerifier: LlmEndpointConfig,
     val superego: LlmEndpointConfig,
     val metaReasoner: LlmEndpointConfig,
     val metaReasonerFallback: LlmEndpointConfig? = null,
@@ -56,9 +55,6 @@ data class LlmRuntimeConfig(
 ) {
     val planner: LlmEndpointConfig
         get() = cognitiveRoles.planner
-
-    val actionVerifier: LlmEndpointConfig
-        get() = cognitiveRoles.actionVerifier
 
     val superego: LlmEndpointConfig
         get() = cognitiveRoles.superego
@@ -135,8 +131,6 @@ private data class LlmRuntimeYamlRole(
 
 private data class LlmRuntimeYamlCognitiveRoles(
     val planner: LlmRuntimeYamlRole? = null,
-    @param:JsonProperty("action_verifier")
-    val actionVerifier: LlmRuntimeYamlRole? = null,
     val superego: LlmRuntimeYamlRole? = null,
     @param:JsonProperty("superego_primary")
     val superegoPrimary: LlmRuntimeYamlRole? = null,
@@ -250,13 +244,6 @@ object LlmRuntimeConfigLoader {
             role = yaml.cognitiveRoles?.planner
         )
 
-        val actionVerifier = resolveRoleEndpoint(
-            env = env,
-            yaml = yaml,
-            roleName = "cognitive_roles.action_verifier",
-            role = yaml.cognitiveRoles?.actionVerifier,
-        )
-
         val superego = resolveRoleEndpoint(
             env = env,
             yaml = yaml,
@@ -339,7 +326,6 @@ object LlmRuntimeConfigLoader {
         return LlmRuntimeConfig(
             cognitiveRoles = LlmCognitiveRolesConfig(
                 planner = planner,
-                actionVerifier = actionVerifier,
                 superego = superego,
                 metaReasoner = metaReasoner,
                 metaReasonerFallback = metaReasonerFallback,
@@ -360,7 +346,6 @@ object LlmRuntimeConfigLoader {
             ?: throw IllegalStateException("llm-runtime.yaml is missing required section: cognitive_roles")
 
         requireRole(name = "cognitive_roles.planner", role = roles.planner)
-        requireRole(name = "cognitive_roles.action_verifier", role = roles.actionVerifier)
         requireRole(name = "cognitive_roles.meta_reasoner", role = roles.metaReasoner)
         requireRole(name = "cognitive_roles.memory_advisor", role = roles.memoryAdvisor)
         requireRole(name = "cognitive_roles.approval_interpreter", role = roles.approvalInterpreter)
@@ -370,7 +355,6 @@ object LlmRuntimeConfigLoader {
             )
         }
         validateRoleProvider("cognitive_roles.planner", roles.planner, providers)
-        validateRoleProvider("cognitive_roles.action_verifier", roles.actionVerifier, providers)
         validateRoleProvider("cognitive_roles.superego", roles.superego, providers)
         validateRoleProvider("cognitive_roles.superego_primary", roles.superegoPrimary, providers)
         validateRoleProvider("cognitive_roles.superego_escalation", roles.superegoEscalation, providers)

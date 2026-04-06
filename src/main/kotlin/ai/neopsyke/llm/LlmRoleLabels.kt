@@ -2,7 +2,6 @@ package ai.neopsyke.llm
 
 object LlmRoleLabels {
     const val PLANNER: String = "planner"
-    const val ACTION_VERIFIER: String = "action_verifier"
     const val SUPEREGO: String = "superego"
     const val META_REASONER: String = "meta_reasoner"
     const val MEMORY_ADVISOR: String = "memory_advisor"
@@ -21,7 +20,6 @@ object LlmRoleLabels {
 
         return when {
             normalizedActor == "superego" -> SUPEREGO
-            normalizedCallSite.startsWith("action_verifier") -> ACTION_VERIFIER
             normalizedCallSite.startsWith("meta_reasoner") -> META_REASONER
             normalizedCallSite.startsWith("long_term_memory_assessment") -> MEMORY_ADVISOR
             normalizedCallSite.startsWith("approval_interpreter") -> APPROVAL_INTERPRETER

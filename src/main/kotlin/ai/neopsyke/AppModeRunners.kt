@@ -576,7 +576,6 @@ internal object AppModeRunners {
     ): InteractiveLlmStartupConfig? {
         val requiredEndpoints = listOf(
             "planner" to llm.planner,
-            "action_verifier" to llm.actionVerifier,
             "superego" to llm.superego,
             "meta_reasoner" to llm.metaReasoner,
             "memory_advisor" to llm.memoryAdvisor
@@ -620,7 +619,6 @@ internal object AppModeRunners {
     private fun resolveMetricsProviderLabel(llm: LlmRuntimeConfig): String {
         val providers = linkedSetOf(
             llm.planner.providerLabel,
-            llm.actionVerifier.providerLabel,
             llm.superego.providerLabel,
             llm.metaReasoner.providerLabel,
             llm.metaReasonerFallback?.providerLabel ?: "",
@@ -1044,18 +1042,6 @@ internal object AppModeRunners {
                         ),
                         hooks = listOf(rawResponseHook)
                     ).use { plannerClient ->
-                        InstrumentedChatModelClient(
-                            delegate = TokenBudgetGuardedChatClient(
-                                delegate = maybeCacheWrap(createChatClient(
-                                    endpoint = llm.actionVerifier,
-                                    callObserver = callObserverForProvider(llm.actionVerifier.providerLabel)
-                                )),
-                                budgetGate = tokenBudgetGate,
-                                provider = llm.actionVerifier.providerLabel,
-                                role = LlmRoleLabels.ACTION_VERIFIER
-                            ),
-                            hooks = listOf(rawResponseHook)
-                        ).use { actionVerifierClient ->
                             val superegoReviewRouting = resolveSuperegoReviewRouting(
                                 llm = llm,
                                 config = config,
@@ -1140,7 +1126,6 @@ internal object AppModeRunners {
                                         logger.info {
                                             "Cognitive role routing: " +
                                                 "planner=${llm.planner.providerLabel}/${llm.planner.model}, " +
-                                                "action_verifier=${llm.actionVerifier.providerLabel}/${llm.actionVerifier.model}, " +
                                                 "superego_primary=${superegoReviewRouting.primaryEndpoint.providerLabel}/${superegoReviewRouting.primaryEndpoint.model}, " +
                                                 "superego_escalation=${superegoReviewRouting.escalationEndpoint?.let { "${it.providerLabel}/${it.model}" } ?: "disabled"}, " +
                                                 "meta_reasoner=${llm.metaReasoner.providerLabel}/${llm.metaReasoner.model}, " +
@@ -1449,7 +1434,6 @@ internal object AppModeRunners {
                                     }
                                 }
                             }
-                        }
                     }
                     llmCacheManager?.close()
                     dumpEndOfRunMetrics(metrics)
@@ -1623,18 +1607,6 @@ internal object AppModeRunners {
                         ),
                         hooks = listOf(rawResponseHook)
                     ).use { plannerClient ->
-                        InstrumentedChatModelClient(
-                            delegate = TokenBudgetGuardedChatClient(
-                                delegate = maybeCacheWrap(createChatClient(
-                                    endpoint = llm.actionVerifier,
-                                    callObserver = callObserverForProvider(llm.actionVerifier.providerLabel)
-                                )),
-                                budgetGate = tokenBudgetGate,
-                                provider = llm.actionVerifier.providerLabel,
-                                role = LlmRoleLabels.ACTION_VERIFIER
-                            ),
-                            hooks = listOf(rawResponseHook)
-                        ).use { actionVerifierClient ->
                             val superegoReviewRouting = resolveSuperegoReviewRouting(
                                 llm = llm,
                                 config = config,
@@ -1970,7 +1942,6 @@ internal object AppModeRunners {
                                     }
                                 }
                             }
-                        }
                     }
                     }
                 }

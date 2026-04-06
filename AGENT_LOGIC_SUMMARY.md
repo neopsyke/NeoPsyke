@@ -44,7 +44,7 @@ Stimulus → SensoryCortex (sanitize, appraise) → Percept
 
 - Entry: `Application.kt` → `AppModeRunners.kt#runInteractiveMode`
 - `runInteractiveMode` assembles all components before starting the Ego loop:
-  - `ChatModelClient` instances per `CognitiveRole` (planner, action_verifier, superego_primary, superego_escalation, meta_reasoner, meta_reasoner_fallback, memory_advisor) from `llm-runtime.yaml`
+  - `ChatModelClient` instances per `CognitiveRole` (planner, superego_primary, superego_escalation, meta_reasoner, meta_reasoner_fallback, memory_advisor) from `llm-runtime.yaml`
   - Memory system from `memory-runtime.yaml` (off / default managed provider / external provider)
   - Id from `id-runtime.yaml` (optional)
   - Goals runtime (optional, behind `config.goals.enabled`)
@@ -241,7 +241,7 @@ Stimulus → SensoryCortex (sanitize, appraise) → Percept
 ## L1: Planner (HierarchicalEgoPlanner)
 
 - Files: `src/main/kotlin/ai/neopsyke/agent/ego/planner/`
-- Legacy dead code: `src/main/kotlin/ai/neopsyke/agent/ego/LlmEgoPlanner.kt` (not wired; retained for test compatibility)
+- Old monolithic `LlmEgoPlanner` has been deleted. A test-only shim exists at `src/test/kotlin/ai/neopsyke/agent/ego/LlmEgoPlanner.kt` for backward-compatible test signatures.
 
 **Decision types** (sealed `EgoDecision`):
 - `FormIntention(urgency, intentionKind, commitModePreference, actionType, payload, summary)` — Execute an action.
@@ -250,7 +250,7 @@ Stimulus → SensoryCortex (sanitize, appraise) → Percept
 - `Noop(reason, parseFailureShortCircuit?, deniedActionType?, deniedActionPayload?, denialReasonCode?)` — No action.
 
 ### L0: HierarchicalEgoPlanner (Entry Point)
-- Replaces `LlmEgoPlanner` behind `Ego.Planner`.
+- Single entry point behind `Ego.Planner` (replaced the deleted `LlmEgoPlanner`).
 - Typed trigger dispatch: `when (trigger)` on sealed interface variant (no text inspection).
 - Delegates to L1 lanes, each returning `EgoDecision` directly.
 - Each lane has its own LLM configuration entry point (`PlannerConfig.lanes`).
@@ -503,7 +503,7 @@ Dispatch from `InputRoute` variant to sub-planner is deterministic on typed LLM 
 - Persisted as `MemoryImprint(source=ego_reflection_lesson)` with tags (`kind:reflection_lesson`, action/reason/session metadata).
 - Deduplicated via recent fingerprint window.
 - Explicitly skipped for technical/system failures (`TECH_*`/`SYSTEM_*` reason codes).
-- Injected into Planner and action-verifier prompts as "reflection lessons" context.
+- Injected into planner lane prompts as "reflection lessons" context.
 
 ### L2: Scratchpad (Thread Workspace)
 - File: `src/main/kotlin/ai/neopsyke/agent/memory/scratchpad/ScratchpadStore.kt`

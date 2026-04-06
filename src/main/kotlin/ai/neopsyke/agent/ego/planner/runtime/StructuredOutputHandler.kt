@@ -24,11 +24,22 @@ object StructuredOutputHandler {
     /**
      * Parse raw LLM output into a typed result with JSON escape repair fallback.
      */
+    @PublishedApi
+    internal fun safeExtractJsonObject(raw: String): String? = try {
+        TextSecurity.extractJsonObject(raw)
+    } catch (_: IllegalArgumentException) {
+        null
+    }
+
     inline fun <reified T> parseWithRepair(
         raw: String,
         onRepair: () -> Unit = {},
     ): T? {
-        val json = TextSecurity.extractJsonObject(raw)
+        val json = safeExtractJsonObject(raw)
+        if (json == null) {
+            logParseFailure(IllegalArgumentException("No JSON object found"), raw)
+            return null
+        }
         return try {
             mapper.readValue<T>(json)
         } catch (initial: Exception) {
