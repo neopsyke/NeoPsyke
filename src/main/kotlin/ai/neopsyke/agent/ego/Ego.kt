@@ -1118,11 +1118,19 @@ class Ego(
             is EgoTrigger.IncomingInput ->
                 trigger.input.groundingMetadata ?: GroundingMetadata.NOT_REQUIRED_PREFILTER
             is EgoTrigger.DeferredIntention ->
-                trigger.intention.groundingMetadata
-                    ?: GroundingMetadata(GroundingRequirement.NOT_REQUIRED, GroundingSource.INHERITED)
+                GroundingMetadataResolver.inheritedOrDefault(
+                    metadata = trigger.intention.groundingMetadata,
+                    rootInputId = trigger.intention.rootInputId,
+                    triggerType = "deferred_intention",
+                    instrumentation = instrumentation,
+                )
             is EgoTrigger.ActionFeedback ->
-                trigger.feedback.cue.groundingMetadata
-                    ?: GroundingMetadata(GroundingRequirement.NOT_REQUIRED, GroundingSource.INHERITED)
+                GroundingMetadataResolver.inheritedOrDefault(
+                    metadata = trigger.feedback.cue.groundingMetadata,
+                    rootInputId = trigger.feedback.cue.rootInputId,
+                    triggerType = "action_feedback",
+                    instrumentation = instrumentation,
+                )
             is EgoTrigger.IncomingImpulse ->
                 GroundingMetadata.NOT_REQUIRED_PREFILTER
             is EgoTrigger.GoalWork ->
