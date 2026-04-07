@@ -93,6 +93,7 @@ class DashboardStateStore(
     private val chatSubscribers = mutableMapOf<String, MutableSet<Channel<String>>>()
     private val actionControlSubscribers = mutableSetOf<Channel<String>>()
     private var nextChatMessageId: Long = 1L
+    private val runEpochSec: Long = System.currentTimeMillis() / 1000
     private val sessionSequenceCounters = mutableMapOf<String, AtomicLong>()
     private val plannerStructuredOutputModes = mutableMapOf<PlannerStructuredOutputScope, String>()
     private val transportScope = CoroutineScope(SupervisorJob() + Dispatchers.Default + CoroutineName("dashboard-transport"))
@@ -665,6 +666,9 @@ class DashboardStateStore(
         }
         return mapper.writeValueAsString(payload)
     }
+
+    fun eventIdForMessage(message: ChatMessage): String =
+        "dashboard-chat:$runEpochSec-${message.id}"
 
     fun addUserMessage(sessionId: String, content: String, source: String = "web"): ChatMessage? {
         return addChatMessage(

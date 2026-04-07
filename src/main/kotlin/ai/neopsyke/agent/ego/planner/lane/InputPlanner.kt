@@ -67,7 +67,23 @@ class InputPlanner(
             is InputRoute.GeneralAction -> generalActionPlanner.plan(inputTrigger, context)
             is InputRoute.MultiStepTask -> taskDecompositionPlanner.plan(inputTrigger, context)
             is InputRoute.GoalCreation -> goalCreationPlanner.plan(inputTrigger, context)
-            is InputRoute.GoalManagement -> goalManagementPlanner.plan(inputTrigger, context)
+            is InputRoute.GoalManagement -> {
+                val decision = goalManagementPlanner.plan(inputTrigger, context)
+                if (decision is EgoDecision.Noop) {
+                    instrumentation.emit(
+                        AgentEvent(
+                            type = "goal_management_fallback",
+                            data = mapOf(
+                                "reason" to decision.reason,
+                                "root_input_id" to inputTrigger.input.rootInputId,
+                            )
+                        )
+                    )
+                    generalActionPlanner.plan(inputTrigger, context)
+                } else {
+                    decision
+                }
+            }
             is InputRoute.ClarificationNeeded -> {
                 EgoDecision.FormIntention(
                     urgency = Urgency.MEDIUM,

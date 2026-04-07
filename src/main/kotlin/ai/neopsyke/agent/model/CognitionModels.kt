@@ -97,6 +97,7 @@ data class PlannerContext(
     val conversationContext: ConversationContext = ConversationContext.default(),
     val idState: IdStateSnapshot? = null,
     val goalWorkSummary: String = "",
+    val goalIndex: Map<Int, String> = emptyMap(),
 )
 
 data class ActionPlanningDefinition(

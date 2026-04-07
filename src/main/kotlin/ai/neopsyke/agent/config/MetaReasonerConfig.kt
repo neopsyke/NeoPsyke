@@ -12,4 +12,5 @@ data class MetaReasonerConfig(
     val dynamicCompletionMinPromptTokens: Int = 160,
     val forcedTerminalPressureThreshold: Double = 0.98,
     val forcedTerminalStaleStreakThreshold: Int = 8,
+    val reasonMaxChars: Int = 500,
 )

@@ -574,6 +574,12 @@ class Ego(
         val sessionId = resolveSessionId(convCtx)
         activateSession(convCtx)
 
+        if (deliberation.hasForcedTerminalForInput(deferred.rootInputId, sessionId)) {
+            logger.info { "Dropping deferred intention ${deferred.id}: forced terminal answer already queued for this input." }
+            instrumentation.emit(AgentEvents.thoughtDropped(thought = deferred, reason = "forced_terminal_queued"))
+            return
+        }
+
         if (deferred.passes >= config.planner.maxThoughtPasses) {
             logger.info { "Dropping deferred intention ${deferred.id} due to max defer passes." }
             instrumentation.emit(AgentEvents.thoughtDropped(thought = deferred, reason = "max_passes_reached"))
@@ -963,7 +969,7 @@ class Ego(
                 .filter { definition -> definition.actionType in availableActions }
         }
         val evidenceHints = buildEvidenceHints(rootInputId, sessionId)
-        val goalSummary = buildNumberedGoalSummary()
+        val goalSummaryResult = buildNumberedGoalSummary()
         return PlannerContext(
             recentDialogue = recentDialogue,
             queue = scheduler.queueSnapshot(),
@@ -996,7 +1002,8 @@ class Ego(
             dispatchableActions = dispatchableActions,
             actionDefinitions = actionDefinitions,
             conversationContext = conversationContext,
-            goalWorkSummary = goalSummary,
+            goalWorkSummary = goalSummaryResult.text,
+            goalIndex = goalSummaryResult.index,
         )
     }
 
@@ -1037,17 +1044,26 @@ class Ego(
                 ).renderSummary()
         }
 
-    private fun buildNumberedGoalSummary(): String {
+    private data class GoalSummaryResult(
+        val text: String,
+        val index: Map<Int, String>,
+    )
+
+    private fun buildNumberedGoalSummary(): GoalSummaryResult {
         val goals = goalsGateway.allGoals()
-        if (goals.isEmpty()) return ""
-        return buildString {
+        if (goals.isEmpty()) return GoalSummaryResult("", emptyMap())
+        val index = mutableMapOf<Int, String>()
+        val text = buildString {
             append("Active goals:")
-            goals.forEachIndexed { index, g ->
-                append("\n${index + 1}. \"${g.title}\" (${g.status}")
+            goals.forEachIndexed { i, g ->
+                val position = i + 1
+                index[position] = g.goalId
+                append("\n$position. \"${g.title}\" (${g.status}")
                 if (!g.cronExpression.isNullOrBlank()) append(", cron=${g.cronExpression}")
                 append(")")
             }
         }
+        return GoalSummaryResult(text, index)
     }
 
     private fun buildAmbientContext(trigger: EgoTrigger): AmbientContext {

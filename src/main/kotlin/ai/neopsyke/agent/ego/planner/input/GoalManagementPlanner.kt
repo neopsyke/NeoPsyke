@@ -54,12 +54,14 @@ class GoalManagementPlanner(
                     You determine which goal management operation the user wants and resolve the goal reference.
                     Return STRICT JSON only.
                     Operations: list, status, pause, resume, complete, delete, delete_all, update, revise_plan, reprioritize
-                    Goal reference resolution:
-                    - If you can confidently identify the goal, return type=by_internal_id with the goal's number or exact ID.
-                    - If the user's reference is ambiguous (multiple matches), return type=ambiguous with candidate IDs.
-                    - If no goal matches, return type=unresolved.
-                    - Never silently guess when uncertain -- return ambiguous instead.
-                    For delete_all, goal_reference is not required.
+                    Goal reference resolution — the active goals list is numbered starting at 1.
+                    - Set goal_reference.id to the NUMBER of the goal from the list (e.g. "1", "2", "3").
+                    - Do NOT return the goal's internal ID or title — only the number.
+                    - If the user's reference clearly matches one goal, set type=by_position with that number.
+                    - If the user's reference is ambiguous (could match more than one), set type=ambiguous with candidate numbers in the candidates array.
+                    - If no goal matches, set type=unresolved with original_text set to the user's words.
+                    - Never silently guess when uncertain — return ambiguous instead.
+                    For list and delete_all, goal_reference can be null.
                 """.trimIndent()
             ),
             PromptBudgetAllocator.Section(
@@ -71,7 +73,7 @@ class GoalManagementPlanner(
                     JSON schema:
                     {
                       "operation":"list|status|pause|resume|complete|delete|delete_all|update|revise_plan|reprioritize",
-                      "goal_reference":{"type":"by_internal_id|by_resolved_entity|ambiguous|unresolved","id":"...","candidates":["..."],"original_text":"...","resolved_from":"..."},
+                      "goal_reference":{"type":"by_position|ambiguous|unresolved","id":"<number from list>","candidates":["<numbers>"],"original_text":"<user's words>","resolved_from":null},
                       "params":{"title":"...","instruction":"...","priority":"...","completion_criteria":"...","cron_expression":"...","reason":"...","new_priority":"..."}
                     }
                 """.trimIndent()
@@ -120,8 +122,8 @@ class GoalManagementPlanner(
             return EgoDecision.Noop("GoalManagementPlanner returned missing operation.")
         }
 
-        // Resolve goal reference
-        val ref = resolveGoalReference(payload.goalReference)
+        // Resolve goal reference — map LLM's position number to real goal ID.
+        val ref = resolveGoalReference(payload.goalReference, context.goalIndex)
 
         // For ambiguous or unresolved references, return clarification
         if (ref is GoalReference.Ambiguous) {
@@ -239,18 +241,27 @@ class GoalManagementPlanner(
             is GoalCommand.DeleteAll -> null
         }
 
-    private fun resolveGoalReference(raw: GoalReferencePayload?): GoalReference {
+    private fun resolveGoalReference(raw: GoalReferencePayload?, goalIndex: Map<Int, String>): GoalReference {
         if (raw == null) return GoalReference.Unresolved("")
         return when (raw.type?.trim()?.lowercase()) {
-            "by_internal_id", "by_id" -> GoalReference.ByInternalId(raw.id?.trim().orEmpty())
-            "by_resolved_entity", "by_resolved" -> GoalReference.ByResolvedEntity(
-                goalId = raw.id?.trim().orEmpty(),
-                resolvedFrom = raw.resolvedFrom?.trim().orEmpty(),
-            )
-            "ambiguous" -> GoalReference.Ambiguous(
-                candidates = raw.candidates.orEmpty(),
-                originalText = raw.originalText?.trim().orEmpty(),
-            )
+            "by_position", "by_internal_id", "by_id" -> {
+                val position = raw.id?.trim()?.toIntOrNull()
+                val resolvedId = if (position != null) goalIndex[position] else null
+                if (resolvedId != null) {
+                    GoalReference.ByInternalId(resolvedId)
+                } else {
+                    GoalReference.Unresolved(raw.originalText?.trim().orEmpty())
+                }
+            }
+            "ambiguous" -> {
+                val resolvedCandidates = raw.candidates.orEmpty().mapNotNull { c ->
+                    c.trim().toIntOrNull()?.let { goalIndex[it] }
+                }
+                GoalReference.Ambiguous(
+                    candidates = resolvedCandidates,
+                    originalText = raw.originalText?.trim().orEmpty(),
+                )
+            }
             "unresolved" -> GoalReference.Unresolved(raw.originalText?.trim().orEmpty())
             else -> GoalReference.Unresolved(raw.originalText?.trim().orEmpty())
         }
@@ -305,7 +316,7 @@ class GoalManagementPlanner(
                         "original_text": { "type": ["string", "null"] },
                         "resolved_from": { "type": ["string", "null"] }
                       },
-                      "required": ["type"],
+                      "required": ["type", "id", "candidates", "original_text", "resolved_from"],
                       "additionalProperties": false
                     },
                     "params": {
@@ -319,6 +330,7 @@ class GoalManagementPlanner(
                         "reason": { "type": ["string", "null"] },
                         "new_priority": { "type": ["string", "null"] }
                       },
+                      "required": ["title", "instruction", "priority", "completion_criteria", "cron_expression", "reason", "new_priority"],
                       "additionalProperties": false
                     }
                   }

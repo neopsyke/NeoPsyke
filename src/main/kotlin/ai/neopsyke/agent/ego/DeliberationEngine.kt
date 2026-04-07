@@ -325,9 +325,16 @@ internal class DeliberationEngine(
 
     // --- Reset ---
 
+    fun hasForcedTerminalForInput(rootInputId: String?, sessionId: String): Boolean {
+        val scope = inputScope(rootInputId, sessionId) ?: return false
+        return scope in forcedTerminalAnswerQueuedByInput
+    }
+
     fun clearForInput(rootInputId: String?, sessionId: String, retainThreadContinuity: Boolean = false) {
         val scope = inputScope(rootInputId, sessionId) ?: return
-        forcedTerminalAnswerQueuedByInput.remove(scope)
+        if (!retainThreadContinuity) {
+            forcedTerminalAnswerQueuedByInput.remove(scope)
+        }
         if (!retainThreadContinuity) {
             externalEvidence.remove(scope)
             actionCooldownByScope.remove(scope)
