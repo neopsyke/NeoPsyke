@@ -103,6 +103,8 @@ class Ego(
     interface Planner {
         fun decide(trigger: EgoTrigger, context: PlannerContext): EgoDecision
         fun resetForInput(rootInputId: String) {}
+        /** Grounded root input resolved by the most recent input classification, if any. */
+        val lastResolvedInput: PendingInput? get() = null
         /** Grounding metadata resolved by the most recent input classification, if any. */
         val lastResolvedGrounding: GroundingMetadata? get() = null
     }
@@ -579,12 +581,13 @@ class Ego(
         journalPlannerDecision(finalDecision)
 
         // Incorporate resolved grounding metadata from InputPlanner classification.
-        val resolvedGrounding = planner.lastResolvedGrounding
+        val resolvedInput = planner.lastResolvedInput ?: input
+        val resolvedGrounding = resolvedInput.groundingMetadata ?: planner.lastResolvedGrounding
         val groundedContext = if (resolvedGrounding != null) {
             instrumentation.emit(
                 AgentEvents.groundingMetadataPropagated(
-                    rootInputId = input.rootInputId,
-                    fromEnvelopeType = "input_planner",
+                    rootInputId = resolvedInput.rootInputId,
+                    fromEnvelopeType = "pending_input",
                     toEnvelopeType = "planner_context",
                     groundingRequired = resolvedGrounding.requirement == GroundingRequirement.REQUIRED,
                     source = resolvedGrounding.source.name.lowercase(),
@@ -600,8 +603,8 @@ class Ego(
             finalDecision,
             nextPassCount = 0,
             originThought = null,
-            rootInputId = input.rootInputId,
-            rootInputReceivedAtMs = input.receivedAtMs,
+            rootInputId = resolvedInput.rootInputId,
+            rootInputReceivedAtMs = resolvedInput.receivedAtMs,
             conversationContext = convCtx,
             plannerContext = groundedContext,
         )

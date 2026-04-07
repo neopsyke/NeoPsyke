@@ -11,6 +11,7 @@ import ai.neopsyke.agent.model.CommitMode
 import ai.neopsyke.agent.model.ConversationContext
 import ai.neopsyke.agent.model.EgoDecision
 import ai.neopsyke.agent.model.EgoTrigger
+import ai.neopsyke.agent.model.GroundingRequirement
 import ai.neopsyke.agent.model.IntentionKind
 import ai.neopsyke.agent.model.OriginSource
 import ai.neopsyke.agent.model.Percept
@@ -161,6 +162,34 @@ class HierarchicalPlannerAcceptanceTest {
         val intention = assertIs<EgoDecision.FormIntention>(decision)
         assertEquals(ActionType.CONTACT_USER, intention.actionType)
         assertTrue(intention.payload.contains("Hello!"))
+    }
+
+    @Test
+    fun `IncomingInput carries resolved grounding metadata on the root input before L2 planning`() {
+        val llm = StubChatModelClient()
+        llm.enqueueRawResponseForCallSite("input_intent_router", """{"route":"direct_response","reasoning":"needs freshness"}""")
+        llm.enqueueRawResponseForCallSite("grounding_classifier", """{"grounding_required":true}""")
+        llm.enqueueRawResponseForCallSite("direct_response", """{"answer":"Checking now","summary":"fresh answer","needs_more_context":false}""")
+        val instrumentation = RecordingInstrumentation()
+        val planner = buildTestHierarchicalPlanner(llm, instrumentation = instrumentation)
+
+        planner.decide(inputTrigger("what is the weather in Hamburg right now"), defaultContext)
+
+        val resolvedInput = planner.lastResolvedInput
+        assertEquals(
+            GroundingRequirement.REQUIRED,
+            resolvedInput?.groundingMetadata?.requirement,
+            "InputPlanner must attach resolved grounding metadata to the root PendingInput before L2 dispatch."
+        )
+        assertTrue(
+            instrumentation.events.any {
+                it.type == "grounding_metadata_propagated" &&
+                    it.data["from_envelope_type"] == "grounding_classifier" &&
+                    it.data["to_envelope_type"] == "pending_input" &&
+                    it.data["grounding_required"] == true
+            },
+            "Expected grounding propagation into the root PendingInput envelope."
+        )
     }
 
     @Test
