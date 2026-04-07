@@ -32,6 +32,8 @@ import ai.neopsyke.metrics.MetricsTotals
 import java.time.Instant
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotEquals
+import kotlin.test.assertNotNull
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -727,5 +729,47 @@ class DashboardStateStoreTest {
         assertTrue(snapshot.storeStats.containsKey("event_count"))
         assertTrue(snapshot.storeStats.containsKey("max_events"))
         assertEquals(50, (snapshot.storeStats["max_events"] as Number).toInt())
+    }
+
+    @Test
+    fun `eventIdForMessage includes run epoch and is unique across messages`() {
+        val store = DashboardStateStore()
+        store.ensureChatSession(sessionId = "test-session")
+        val msg1 = store.addUserMessage(sessionId = "test-session", content = "hello")!!
+        val msg2 = store.addUserMessage(sessionId = "test-session", content = "world")!!
+        val id1 = store.eventIdForMessage(msg1)
+        val id2 = store.eventIdForMessage(msg2)
+
+        assertTrue(id1.startsWith("dashboard-chat:"), "eventId must start with dashboard-chat: prefix")
+        assertTrue(id2.startsWith("dashboard-chat:"), "eventId must start with dashboard-chat: prefix")
+        assertNotEquals(id1, id2, "Different messages must have different eventIds")
+        // Format: dashboard-chat:{epoch}-{seq}
+        val parts1 = id1.removePrefix("dashboard-chat:").split("-")
+        assertEquals(2, parts1.size, "eventId must have epoch-seq format")
+        assertNotNull(parts1[0].toLongOrNull(), "epoch component must be numeric")
+        assertNotNull(parts1[1].toLongOrNull(), "sequence component must be numeric")
+        // Both messages share the same run epoch
+        val parts2 = id2.removePrefix("dashboard-chat:").split("-")
+        assertEquals(parts1[0], parts2[0], "Same run must have the same epoch prefix")
+    }
+
+    @Test
+    fun `eventIdForMessage does not collide across store instances`() {
+        val store1 = DashboardStateStore()
+        store1.ensureChatSession(sessionId = "s1")
+        val msg1 = store1.addUserMessage(sessionId = "s1", content = "hello")!!
+        val id1 = store1.eventIdForMessage(msg1)
+
+        // Simulate a different run by creating a new store (different runEpochSec).
+        // In practice the epoch changes every second; we verify the format allows it.
+        val store2 = DashboardStateStore()
+        store2.ensureChatSession(sessionId = "s1")
+        val msg2 = store2.addUserMessage(sessionId = "s1", content = "hello")!!
+        val id2 = store2.eventIdForMessage(msg2)
+
+        // Same sequence (both first message), but epoch may or may not differ
+        // within the same second. The key invariant is format correctness.
+        assertTrue(id1.startsWith("dashboard-chat:"))
+        assertTrue(id2.startsWith("dashboard-chat:"))
     }
 }

@@ -899,6 +899,146 @@ class ApprovalRuntimeTest {
         Files.deleteIfExists(replayDb)
     }
 
+    @Test
+    fun `stale terminal request does not consume new message with different eventId`() = runBlocking {
+        var forwarded = 0
+        withRuntime(
+            stagedAction = testStagedAction(),
+            forwardNormalInput = { _, _, _, _ ->
+                forwarded += 1
+                true
+            }
+        ) { runtime, store, _, actionControl, _, _, _, _ ->
+            // Stage and approve to create a terminal request.
+            runtime.onApprovalStaged(
+                actionSummary = actionControl.currentStagedAction.summary,
+                stagedAction = actionControl.currentStagedAction,
+                reason = "Owner approval required.",
+                reasonCode = "NEEDS_APPROVAL",
+                conversationContext = actionControl.currentStagedAction.conversationContext,
+            )
+            runtime.routeOwnerMessage(
+                OwnerMessageEnvelope(
+                    content = "yes",
+                    source = "chat:test",
+                    priority = InputPriority.HIGH,
+                    conversationContext = actionControl.currentStagedAction.conversationContext,
+                    receivedAtMs = System.currentTimeMillis(),
+                    eventId = "evt-old-1",
+                )
+            )
+            // Manually backdate the terminal request's resolution to >60s ago.
+            val request = store.requestByStagedActionId(actionControl.currentStagedAction.id)!!
+            store.updateRequest(request.copy(resolutionAtMs = System.currentTimeMillis() - 120_000))
+
+            // A new message with a different eventId should be forwarded, not consumed.
+            val result = runtime.routeOwnerMessage(
+                OwnerMessageEnvelope(
+                    content = "Create a new goal for weather reports",
+                    source = "chat:test",
+                    priority = InputPriority.HIGH,
+                    conversationContext = actionControl.currentStagedAction.conversationContext,
+                    receivedAtMs = System.currentTimeMillis(),
+                    eventId = "evt-new-2",
+                )
+            )
+            assertTrue(result is OwnerIngressResult.Forwarded, "Stale terminal request should not block new messages")
+            assertEquals(1, forwarded)
+        }
+    }
+
+    @Test
+    fun `fresh terminal request still consumes duplicate eventId`() = runBlocking {
+        var forwarded = 0
+        withRuntime(
+            stagedAction = testStagedAction(),
+            forwardNormalInput = { _, _, _, _ ->
+                forwarded += 1
+                true
+            }
+        ) { runtime, store, _, actionControl, _, _, _, _ ->
+            runtime.onApprovalStaged(
+                actionSummary = actionControl.currentStagedAction.summary,
+                stagedAction = actionControl.currentStagedAction,
+                reason = "Owner approval required.",
+                reasonCode = "NEEDS_APPROVAL",
+                conversationContext = actionControl.currentStagedAction.conversationContext,
+            )
+            runtime.routeOwnerMessage(
+                OwnerMessageEnvelope(
+                    content = "yes",
+                    source = "chat:test",
+                    priority = InputPriority.HIGH,
+                    conversationContext = actionControl.currentStagedAction.conversationContext,
+                    receivedAtMs = System.currentTimeMillis(),
+                    eventId = "evt-fresh-1",
+                )
+            )
+            // Request was just resolved — within the 60s window.
+            // A duplicate eventId should still be consumed.
+            val duplicate = runtime.routeOwnerMessage(
+                OwnerMessageEnvelope(
+                    content = "yes",
+                    source = "chat:test",
+                    priority = InputPriority.HIGH,
+                    conversationContext = actionControl.currentStagedAction.conversationContext,
+                    receivedAtMs = System.currentTimeMillis(),
+                    eventId = "evt-fresh-1",
+                )
+            )
+            assertTrue(duplicate is OwnerIngressResult.Consumed, "Fresh duplicate should still be consumed")
+            assertEquals(0, forwarded)
+        }
+    }
+
+    @Test
+    fun `stale terminal request with matching eventId is forwarded not consumed`() = runBlocking {
+        var forwarded = 0
+        withRuntime(
+            stagedAction = testStagedAction(),
+            forwardNormalInput = { _, _, _, _ ->
+                forwarded += 1
+                true
+            }
+        ) { runtime, store, _, actionControl, _, _, _, _ ->
+            runtime.onApprovalStaged(
+                actionSummary = actionControl.currentStagedAction.summary,
+                stagedAction = actionControl.currentStagedAction,
+                reason = "Owner approval required.",
+                reasonCode = "NEEDS_APPROVAL",
+                conversationContext = actionControl.currentStagedAction.conversationContext,
+            )
+            runtime.routeOwnerMessage(
+                OwnerMessageEnvelope(
+                    content = "yes",
+                    source = "chat:test",
+                    priority = InputPriority.HIGH,
+                    conversationContext = actionControl.currentStagedAction.conversationContext,
+                    receivedAtMs = System.currentTimeMillis(),
+                    eventId = "evt-collide",
+                )
+            )
+            // Backdate resolution to simulate a cross-run stale request.
+            val request = store.requestByStagedActionId(actionControl.currentStagedAction.id)!!
+            store.updateRequest(request.copy(resolutionAtMs = System.currentTimeMillis() - 120_000))
+
+            // Same eventId as the stale request — simulates cross-run collision.
+            // Should be forwarded because the request is stale.
+            val result = runtime.routeOwnerMessage(
+                OwnerMessageEnvelope(
+                    content = "Create a new goal",
+                    source = "chat:test",
+                    priority = InputPriority.HIGH,
+                    conversationContext = actionControl.currentStagedAction.conversationContext,
+                    receivedAtMs = System.currentTimeMillis(),
+                    eventId = "evt-collide",
+                )
+            )
+            assertTrue(result is OwnerIngressResult.Forwarded, "Stale request with colliding eventId must not block messages")
+            assertEquals(1, forwarded)
+        }
+    }
+
     private suspend fun withRuntime(
         stagedAction: StagedAction,
         config: AgentConfig = AgentConfig(),

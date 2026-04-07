@@ -663,6 +663,35 @@ class HierarchicalPlannerAcceptanceTest {
     }
 
     @Test
+    fun `goal management invalid position resolves to unresolved and returns clarification`() {
+        val llm = StubChatModelClient()
+        llm.enqueueRawResponseForCallSite("input_intent_router", """{"route":"goal_management","reasoning":"delete"}""")
+        llm.enqueueRawResponseForCallSite("goal_management", """{"operation":"delete","goal_reference":{"type":"by_position","id":"99","candidates":null,"original_text":"goal 99","resolved_from":null},"params":null}""")
+        val planner = buildTestHierarchicalPlanner(llm)
+
+        val decision = planner.decide(inputTrigger("delete goal 99"), goalContext)
+
+        val intention = assertIs<EgoDecision.FormIntention>(decision)
+        assertEquals(ActionType.CONTACT_USER, intention.actionType)
+        assertTrue(intention.payload.contains("couldn't find", ignoreCase = true) || intention.payload.contains("goal 99"))
+    }
+
+    @Test
+    fun `goal management falls back to general action when goal_management lane fails`() {
+        val llm = StubChatModelClient()
+        llm.enqueueRawResponseForCallSite("input_intent_router", """{"route":"goal_management","reasoning":"delete"}""")
+        // goal_management lane returns garbage -> parse failure -> Noop -> fallback to general action
+        llm.enqueueRawResponseForCallSite("goal_management", "not-valid-json-at-all")
+        llm.enqueueRawResponseForCallSite("general_action", """{"decision":"intend","urgency":"medium","intention_kind":"observe","commit_mode_preference":"not_applicable","action_type":"goal_operation","action_payload":"{\"command\":\"delete\"}","action_summary":"Delete goal"}""")
+        val planner = buildTestHierarchicalPlanner(llm)
+
+        val decision = planner.decide(inputTrigger("delete the goal"), goalContext)
+
+        // Should NOT be Noop — the fallback to GeneralActionPlanner should produce something.
+        assertTrue(decision !is EgoDecision.Noop, "GoalManagement failure should fall back to GeneralActionPlanner, not Noop")
+    }
+
+    @Test
     fun `goal creation fallback response delivers assistant message`() {
         val llm = StubChatModelClient()
         llm.enqueueRawResponseForCallSite("input_intent_router", """{"route":"goal_creation","reasoning":"goal?"}""")
