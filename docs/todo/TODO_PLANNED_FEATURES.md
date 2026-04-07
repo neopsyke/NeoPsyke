@@ -772,7 +772,7 @@ in prompt content. Use relative or bucketed representations instead.
 
 ## 5. Semantic Redesign of DeterministicDecisionVerifier Evidence Gating
 
-> Status: Backlog
+> Status: In progress as 'Grounding Gate Redesign'
 >
 > Added: 2026-04-06
 >
