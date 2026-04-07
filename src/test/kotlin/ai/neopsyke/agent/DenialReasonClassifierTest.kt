@@ -41,4 +41,20 @@ class DenialReasonClassifierTest {
         assertTrue(DenialReasonClassifier.isLikelyTechnical("", "transport failure"))
         assertFalse(DenialReasonClassifier.isLikelyTechnical("", "user safety concern"))
     }
+
+    // AC 22: Grounding gate technical retry reason code is classified as technical,
+    // ensuring repeated-denied-action logic does not suppress legitimate evidence retries.
+    @Test
+    fun `TECH_GROUNDING_EVIDENCE_FAILURE is classified as technical`() {
+        assertTrue(
+            DenialReasonClassifier.isLikelyTechnical("TECH_GROUNDING_EVIDENCE_FAILURE", null)
+        )
+    }
+
+    @Test
+    fun `GROUNDING_EVIDENCE_REQUIRED is not classified as technical`() {
+        assertFalse(
+            DenialReasonClassifier.isLikelyTechnical("GROUNDING_EVIDENCE_REQUIRED", null)
+        )
+    }
 }

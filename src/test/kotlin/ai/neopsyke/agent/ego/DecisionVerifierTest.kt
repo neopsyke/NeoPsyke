@@ -1,122 +1,182 @@
 package ai.neopsyke.agent.ego
 
 import ai.neopsyke.agent.model.ActionType
+import ai.neopsyke.agent.model.GroundingMetadata
+import ai.neopsyke.agent.model.GroundingRequirement
+import ai.neopsyke.agent.model.GroundingSource
 import ai.neopsyke.agent.model.PendingAction
 import ai.neopsyke.agent.model.Urgency
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
-import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 class DecisionVerifierTest {
-    private val verifier = DeterministicDecisionVerifier()
+    private val gate = GroundingGate()
     private val evidenceActionTypes = setOf(ActionType.WEB_SEARCH, ActionType.WEBSITE_FETCH)
 
-    @Test
-    fun `volatile factual answer requires evidence when tools are available`() {
-        val decision = verifier.review(
-            action = answerAction(payload = "The current price is 20 USD."),
-            context = DecisionVerifierContext(
-                latestUserTurn = "What is the latest price today?",
-                availableActions = setOf(ActionType.WEB_SEARCH, ActionType.CONTACT_USER),
-                dispatchableActions = setOf(ActionType.WEB_SEARCH, ActionType.CONTACT_USER),
-                evidenceActionTypes = evidenceActionTypes,
-                externalEvidence = DeliberationEngine.ExternalEvidenceProgress()
-            )
-        )
+    // --- Non-contact_user and fallback bypass ---
 
-        assertFalse(decision.allow)
-        assertEquals("TASK_EVIDENCE_REQUIRED", decision.reasonCode)
-        assertEquals(TaskIntentCategory.VOLATILE_FACT, decision.assessment?.intentCategory)
-        assertTrue(decision.assessment?.requiresExternalEvidence == true)
+    @Test
+    fun `non-contact_user actions always allowed`() {
+        val decision = gate.review(
+            action = action(type = ActionType.WEB_SEARCH, grounding = GroundingRequirement.REQUIRED),
+            context = contextWithEvidence()
+        )
+        assertTrue(decision.allow)
     }
 
     @Test
-    fun `volatile factual answer degrades gracefully when evidence actions are unavailable`() {
-        val decision = verifier.review(
-            action = answerAction(payload = "The current score is 3-1."),
+    fun `fallback explanation always allowed`() {
+        val decision = gate.review(
+            action = action(isFallbackExplanation = true, grounding = GroundingRequirement.REQUIRED),
+            context = contextWithEvidence()
+        )
+        assertTrue(decision.allow)
+    }
+
+    // --- Grounding NOT_REQUIRED ---
+
+    @Test
+    fun `grounding not required allows action`() {
+        val decision = gate.review(
+            action = action(grounding = GroundingRequirement.NOT_REQUIRED),
+            context = contextWithEvidence()
+        )
+        assertTrue(decision.allow)
+        assertFalse(decision.groundingRequired)
+    }
+
+    // --- Grounding REQUIRED + evidence gathered ---
+
+    @Test
+    fun `grounding required with successful evidence allows action`() {
+        val decision = gate.review(
+            action = action(grounding = GroundingRequirement.REQUIRED),
+            context = contextWithEvidence(hadSuccessfulEvidence = true)
+        )
+        assertTrue(decision.allow)
+        assertTrue(decision.groundingRequired)
+        assertTrue(decision.evidenceGathered)
+    }
+
+    // --- Grounding REQUIRED + evidence unavailable ---
+
+    @Test
+    fun `grounding required with unavailable evidence tools allows gracefully`() {
+        val decision = gate.review(
+            action = action(grounding = GroundingRequirement.REQUIRED),
             context = DecisionVerifierContext(
-                latestUserTurn = "What is the current score right now?",
+                externalEvidence = DeliberationEngine.ExternalEvidenceProgress(),
                 availableActions = setOf(ActionType.CONTACT_USER),
                 dispatchableActions = setOf(ActionType.CONTACT_USER),
                 evidenceActionTypes = evidenceActionTypes,
-                externalEvidence = DeliberationEngine.ExternalEvidenceProgress()
             )
         )
-
         assertTrue(decision.allow)
-        assertEquals("TASK_EVIDENCE_UNAVAILABLE_GRACEFUL", decision.reasonCode)
-        assertTrue(decision.assessment?.requiresExternalEvidence == true)
-        assertFalse(decision.assessment?.evidenceActionsAvailable == true)
+        assertEquals(GroundingGate.REASON_CODE_GROUNDING_EVIDENCE_UNAVAILABLE_GRACEFUL, decision.reasonCode)
+        assertTrue(decision.groundingRequired)
+        assertTrue(decision.evidenceUnavailable)
+    }
+
+    // --- Grounding REQUIRED + technical evidence failure ---
+
+    @Test
+    fun `grounding required with technical evidence failure denies`() {
+        val decision = gate.review(
+            action = action(grounding = GroundingRequirement.REQUIRED),
+            context = contextWithEvidence(hadExternalFailures = true)
+        )
+        assertFalse(decision.allow)
+        assertEquals(GroundingGate.REASON_CODE_TECH_GROUNDING_EVIDENCE_FAILURE, decision.reasonCode)
+        assertTrue(decision.groundingRequired)
+        assertTrue(decision.evidenceFailedTechnically)
+    }
+
+    // --- Grounding REQUIRED + no evidence ---
+
+    @Test
+    fun `grounding required with no evidence denies`() {
+        val decision = gate.review(
+            action = action(grounding = GroundingRequirement.REQUIRED),
+            context = contextWithEvidence()
+        )
+        assertFalse(decision.allow)
+        assertEquals(GroundingGate.REASON_CODE_GROUNDING_EVIDENCE_REQUIRED, decision.reasonCode)
+        assertTrue(decision.groundingRequired)
+        assertFalse(decision.evidenceGathered)
+    }
+
+    // --- Forced terminal ---
+
+    @Test
+    fun `forced terminal with grounding not required allows`() {
+        val decision = gate.review(
+            action = action(grounding = GroundingRequirement.NOT_REQUIRED, isForcedTerminal = true),
+            context = contextWithEvidence()
+        )
+        assertTrue(decision.allow)
+        assertTrue(decision.forcedTerminal)
     }
 
     @Test
-    fun `transformation intent bypasses evidence requirement even with volatile words`() {
-        val decision = verifier.review(
-            action = answerAction(payload = "Rewritten sentence."),
-            context = DecisionVerifierContext(
-                latestUserTurn = "Rewrite this sentence in formal tone: current policy is strict.",
-                availableActions = setOf(ActionType.WEB_SEARCH, ActionType.CONTACT_USER),
-                dispatchableActions = setOf(ActionType.WEB_SEARCH, ActionType.CONTACT_USER),
-                evidenceActionTypes = evidenceActionTypes,
-                externalEvidence = DeliberationEngine.ExternalEvidenceProgress()
-            )
+    fun `forced terminal with grounding required and successful evidence allows`() {
+        val decision = gate.review(
+            action = action(grounding = GroundingRequirement.REQUIRED, isForcedTerminal = true),
+            context = contextWithEvidence(hadSuccessfulEvidence = true)
         )
-
         assertTrue(decision.allow)
-        assertEquals(TaskIntentCategory.TRANSFORMATION, decision.assessment?.intentCategory)
-        assertTrue(decision.assessment?.requiresExternalEvidence == false)
     }
 
     @Test
-    fun `unknown intent with low volatility does not require evidence`() {
-        val decision = verifier.review(
-            action = answerAction(payload = "maybe"),
-            context = DecisionVerifierContext(
-                latestUserTurn = "xqzv",
-                availableActions = setOf(ActionType.WEB_SEARCH, ActionType.CONTACT_USER),
-                dispatchableActions = setOf(ActionType.WEB_SEARCH, ActionType.CONTACT_USER),
-                evidenceActionTypes = evidenceActionTypes,
-                externalEvidence = DeliberationEngine.ExternalEvidenceProgress()
-            )
+    fun `forced terminal with grounding required and technical failures allows degraded`() {
+        val decision = gate.review(
+            action = action(grounding = GroundingRequirement.REQUIRED, isForcedTerminal = true),
+            context = contextWithEvidence(hadExternalFailures = true)
         )
-
         assertTrue(decision.allow)
-        assertEquals(TaskIntentCategory.UNKNOWN, decision.assessment?.intentCategory)
-        assertEquals(null, decision.reasonCode)
+        assertTrue(decision.forcedTerminal)
+        assertEquals(GroundingGate.REASON_CODE_GROUNDING_EVIDENCE_UNAVAILABLE_GRACEFUL, decision.reasonCode)
     }
 
     @Test
-    fun `successful evidence allows volatile factual answer`() {
-        val decision = verifier.review(
-            action = answerAction(payload = "Latest verified release is 2.1.0."),
-            context = DecisionVerifierContext(
-                latestUserTurn = "What is the latest release version?",
-                availableActions = setOf(ActionType.WEB_SEARCH, ActionType.CONTACT_USER),
-                dispatchableActions = setOf(ActionType.WEB_SEARCH, ActionType.CONTACT_USER),
-                evidenceActionTypes = evidenceActionTypes,
-                externalEvidence = DeliberationEngine.ExternalEvidenceProgress(
-                    hadSuccessfulEvidence = true,
-                    latestPlannerSignal = "official changelog"
-                )
-            )
+    fun `forced terminal with grounding required and no evidence denies`() {
+        val decision = gate.review(
+            action = action(grounding = GroundingRequirement.REQUIRED, isForcedTerminal = true),
+            context = contextWithEvidence()
         )
-
-        assertTrue(decision.allow)
-        val assessment = decision.assessment
-        assertNotNull(assessment)
-        assertEquals(TaskIntentCategory.VOLATILE_FACT, assessment.intentCategory)
-        assertTrue(assessment.requiresExternalEvidence)
-        assertTrue(assessment.hadSuccessfulEvidence)
+        assertFalse(decision.allow)
+        assertEquals(GroundingGate.REASON_CODE_GROUNDING_EVIDENCE_REQUIRED, decision.reasonCode)
     }
 
-    private fun answerAction(payload: String): PendingAction =
-        PendingAction(
-            id = 1L,
-            urgency = Urgency.MEDIUM,
-            type = ActionType.CONTACT_USER,
-            payload = payload,
-            summary = "respond"
-        )
+    // --- Helpers ---
+
+    private fun action(
+        type: ActionType = ActionType.CONTACT_USER,
+        grounding: GroundingRequirement = GroundingRequirement.NOT_REQUIRED,
+        isFallbackExplanation: Boolean = false,
+        isForcedTerminal: Boolean = false,
+    ): PendingAction = PendingAction(
+        id = 1L,
+        urgency = Urgency.MEDIUM,
+        type = type,
+        payload = "test payload",
+        summary = "test",
+        isFallbackExplanation = isFallbackExplanation,
+        isForcedTerminal = isForcedTerminal,
+        groundingMetadata = GroundingMetadata(grounding, GroundingSource.INPUT_CLASSIFIER),
+    )
+
+    private fun contextWithEvidence(
+        hadSuccessfulEvidence: Boolean = false,
+        hadExternalFailures: Boolean = false,
+    ): DecisionVerifierContext = DecisionVerifierContext(
+        externalEvidence = DeliberationEngine.ExternalEvidenceProgress(
+            hadSuccessfulEvidence = hadSuccessfulEvidence,
+            hadExternalFailures = hadExternalFailures,
+        ),
+        availableActions = setOf(ActionType.WEB_SEARCH, ActionType.CONTACT_USER),
+        dispatchableActions = setOf(ActionType.WEB_SEARCH, ActionType.CONTACT_USER),
+        evidenceActionTypes = evidenceActionTypes,
+    )
 }

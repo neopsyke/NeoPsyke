@@ -348,14 +348,17 @@ Dispatch from `InputRoute` variant to sub-planner is deterministic on typed LLM 
 - `contact_user`: runs scratchpad final-pass processing before execution (workspace compilation + finalizer rewrite if enabled).
 - Fallback explanation actions bypass the entire review pipeline.
 
-### L2: Decision Verifier Gate
+### L2: Grounding Gate
 - File: `src/main/kotlin/ai/neopsyke/agent/ego/DecisionVerifier.kt`
-- Deterministic pre-policy gate for task-level correctness/sufficiency.
-- Only applies to `contact_user` actions (non-contact actions always allowed).
-- Forced terminal answers exempt.
-- Classifies task intent: `volatile_fact`, `stable_fact`, `transformation`, `personal_memory`, `subjective_advice`, `static_reasoning`, `unknown`.
-- Volatility scoring: recency signals (+2), dynamic domain (+2), date sensitivity (+2), combined recency+domain (+1). Threshold: score >= 3 requires evidence.
-- Decision: no evidence required → allow; had successful evidence → allow; evidence unavailable → graceful allow (`TASK_EVIDENCE_UNAVAILABLE_GRACEFUL`); only failures → deny; no evidence yet but tools available → deny.
+- Typed post-gate enforcing that evidence was gathered when grounding is required.
+- Only applies to `contact_user` actions (non-contact actions and fallback explanations always allowed).
+- Reads typed `GroundingMetadata` from `PendingAction.groundingMetadata` (set at input classification time).
+- Reads typed evidence state from `DeliberationEngine.ExternalEvidenceProgress`.
+- Reads evidence action availability/dispatchability.
+- Reads typed `isForcedTerminal` marker on the action.
+- Decision: grounding not required → allow; evidence gathered → allow; evidence unavailable → graceful allow (`GROUNDING_EVIDENCE_UNAVAILABLE_GRACEFUL`); technical failures → deny (`TECH_GROUNDING_EVIDENCE_FAILURE`); no evidence yet → deny (`GROUNDING_EVIDENCE_REQUIRED`).
+- Forced terminal + grounding required + technical failures → allow degraded answer with verification-failure disclaimer.
+- Grounding classification happens at input intake via `GroundingClassifier` (deterministic pre-filter on `InputRoute` + LLM fallback for ambiguous routes). Goal work uses per-step typed grounding policy.
 
 ### L2: Superego Review
 - File: `src/main/kotlin/ai/neopsyke/agent/superego/Superego.kt`

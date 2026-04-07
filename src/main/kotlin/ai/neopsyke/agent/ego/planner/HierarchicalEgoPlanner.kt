@@ -1,9 +1,11 @@
 package ai.neopsyke.agent.ego.planner
 
 import ai.neopsyke.agent.ego.Ego
+import ai.neopsyke.agent.ego.planner.lane.InputPlanner
 import ai.neopsyke.agent.ego.planner.runtime.PlannerRuntime
 import ai.neopsyke.agent.model.EgoDecision
 import ai.neopsyke.agent.model.EgoTrigger
+import ai.neopsyke.agent.model.GroundingMetadata
 import ai.neopsyke.agent.model.OriginSource
 import ai.neopsyke.agent.model.PlannerContext
 import ai.neopsyke.instrumentation.AgentEvent
@@ -71,9 +73,15 @@ class HierarchicalEgoPlanner(
 
         val decision = lane.plan(trigger, context)
 
+        // Expose resolved grounding from InputPlanner for the Ego dispatcher.
+        _lastResolvedGrounding = (lane as? InputPlanner)?.lastResolvedGrounding
+
         runtime.emitDecision(triggerLabel, decision, sessionId, rootInputId)
         return decision
     }
+
+    @Volatile private var _lastResolvedGrounding: GroundingMetadata? = null
+    override val lastResolvedGrounding: GroundingMetadata? get() = _lastResolvedGrounding
 
     override fun resetForInput(rootInputId: String) {
         runtime.resetAllCircuits(rootInputId)

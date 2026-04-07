@@ -3,6 +3,7 @@ package ai.neopsyke.agent.ego
 import ai.neopsyke.agent.config.AgentConfig
 import ai.neopsyke.agent.model.EgoDecision
 import ai.neopsyke.agent.model.EgoTrigger
+import ai.neopsyke.agent.model.GroundingMetadata
 import ai.neopsyke.agent.model.PlannerContext
 import ai.neopsyke.instrumentation.AgentInstrumentation
 import ai.neopsyke.instrumentation.NoopAgentInstrumentation
@@ -32,4 +33,7 @@ class LlmEgoPlanner(
 
     override fun resetForInput(rootInputId: String) =
         delegate.resetForInput(rootInputId)
+
+    override val lastResolvedGrounding: GroundingMetadata?
+        get() = delegate.lastResolvedGrounding
 }

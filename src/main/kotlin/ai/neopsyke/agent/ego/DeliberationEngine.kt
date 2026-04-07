@@ -12,6 +12,8 @@ import ai.neopsyke.agent.model.ConversationContext
 import ai.neopsyke.agent.model.DeliberationState
 import ai.neopsyke.agent.model.EgoDecision
 import ai.neopsyke.agent.model.EgoTrigger
+import ai.neopsyke.agent.model.GroundingMetadata
+import ai.neopsyke.agent.model.GroundingRequirement
 import ai.neopsyke.agent.model.Intention
 import ai.neopsyke.agent.model.PendingAction
 import ai.neopsyke.agent.model.PlannerContext
@@ -144,6 +146,7 @@ internal class DeliberationEngine(
         rootInputId: String?,
         rootInputReceivedAtMs: Long?,
         conversationContext: ConversationContext,
+        groundingMetadata: GroundingMetadata? = null,
     ) {
         val scope = inputScope(rootInputId, conversationContext.sessionId) ?: return
         if (scope in forcedTerminalAnswerQueuedByInput) return
@@ -155,18 +158,28 @@ internal class DeliberationEngine(
             state.decisionPressure >= MODEL_ERROR_PRESSURE_THRESHOLD &&
             state.stepIndex >= MODEL_ERROR_MIN_STEP_INDEX
         if (!circularPressureHigh && !repeatedModelErrors) return
+        val basePayload = "I have reached diminishing returns in internal reasoning. " +
+            "Here is the best concise answer I can provide now with current evidence."
+        val payload = if (groundingMetadata?.requirement == GroundingRequirement.REQUIRED) {
+            val evidence = evidenceFor(rootInputId, conversationContext.sessionId)
+            if (evidence?.hadExternalFailures == true && evidence.hadSuccessfulEvidence != true) {
+                basePayload + FORCED_TERMINAL_EVIDENCE_FAILURE_DISCLAIMER
+            } else {
+                basePayload
+            }
+        } else {
+            basePayload
+        }
         val queued = scheduler.enqueueAction(
             type = ActionType.CONTACT_USER,
-            payload = TextSecurity.clamp(
-                "I have reached diminishing returns in internal reasoning. " +
-                    "Here is the best concise answer I can provide now with current evidence.",
-                config.maxActionPayloadChars
-            ),
+            payload = TextSecurity.clamp(payload, config.maxActionPayloadChars),
             summary = "Forced terminal answer due to high decision pressure.",
             urgency = Urgency.HIGH,
             rootInputId = rootInputId,
             rootInputReceivedAtMs = rootInputReceivedAtMs,
-            conversationContext = conversationContext
+            conversationContext = conversationContext,
+            groundingMetadata = groundingMetadata,
+            isForcedTerminal = true,
         )
         if (queued) {
             forcedTerminalAnswerQueuedByInput.add(scope)
@@ -434,6 +447,10 @@ internal class DeliberationEngine(
         private const val MAX_FORCED_TERMINAL_SCOPES: Int = 256
         private const val ACTION_ERROR_CATEGORY_NONE: String = "none"
         private const val ACTION_ERROR_CATEGORY_NON_RETRYABLE: String = "non_retryable"
+        private const val FORCED_TERMINAL_EVIDENCE_FAILURE_DISCLAIMER: String =
+            "\n\nNote: I was unable to verify this information with external sources due to " +
+                "technical failures. This answer is based on available knowledge and may not " +
+                "reflect the latest data."
     }
 
     private fun normalizeActionErrorCategory(outcome: ActionOutcome): String {

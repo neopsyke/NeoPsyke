@@ -128,6 +128,8 @@ object AgentEvents {
         payload: String,
         summary: String,
         queued: Boolean,
+        groundingRequired: String? = null,
+        groundingSource: String? = null,
     ): AgentEvent =
         AgentEvent(
             type = "action_proposed",
@@ -138,7 +140,9 @@ object AgentEvents {
                 "urgency" to urgency,
                 "payload" to payload,
                 "summary" to summary,
-                "queued" to queued
+                "queued" to queued,
+                "grounding_required" to groundingRequired,
+                "grounding_source" to groundingSource,
             )
         )
 
@@ -463,13 +467,21 @@ object AgentEvents {
             )
         )
 
-    fun planStepsEnqueued(planId: String, totalSteps: Int, allQueued: Boolean): AgentEvent =
+    fun planStepsEnqueued(
+        planId: String,
+        totalSteps: Int,
+        allQueued: Boolean,
+        groundingRequired: String? = null,
+        groundingSource: String? = null,
+    ): AgentEvent =
         AgentEvent(
             type = "plan_steps_enqueued",
             data = mapOf(
                 "plan_id" to planId,
                 "total_steps" to totalSteps,
-                "all_queued" to allQueued
+                "all_queued" to allQueued,
+                "grounding_required" to groundingRequired,
+                "grounding_source" to groundingSource,
             )
         )
 

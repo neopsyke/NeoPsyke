@@ -417,9 +417,9 @@ class LlmRuntimeConfigLoaderTest {
         assertTrue(highLlmConfig.modelCatalog.profiles(LlmProvider.OLLAMA).isNotEmpty())
 
         // Verify planner lanes loaded from all three checked-in configs
-        assertEquals(10, appConfig.cognitiveRoles.plannerLanes.size)
-        assertEquals(10, lowLlmConfig.cognitiveRoles.plannerLanes.size)
-        assertEquals(10, highLlmConfig.cognitiveRoles.plannerLanes.size)
+        assertEquals(11, appConfig.cognitiveRoles.plannerLanes.size)
+        assertEquals(11, lowLlmConfig.cognitiveRoles.plannerLanes.size)
+        assertEquals(11, highLlmConfig.cognitiveRoles.plannerLanes.size)
 
         val appRouter = appConfig.cognitiveRoles.plannerLanes["input_intent_router"]!!
         assertEquals(LlmProvider.GROQ, appRouter.provider)
@@ -606,10 +606,15 @@ class LlmRuntimeConfigLoaderTest {
         )
 
         // Lanes inherited from bundled config/llm-runtime.yaml via deep-merge
-        assertEquals(10, config.cognitiveRoles.plannerLanes.size)
-        // All inherited lanes resolve to the planner provider (groq) from the external YAML
-        for ((_, endpoint) in config.cognitiveRoles.plannerLanes) {
-            assertEquals(LlmProvider.GROQ, endpoint.provider)
+        assertEquals(11, config.cognitiveRoles.plannerLanes.size)
+        // All inherited lanes resolve to the planner provider from the external YAML;
+        // the grounding_classifier lane uses OpenAI (cheap model) per config
+        for ((laneKey, endpoint) in config.cognitiveRoles.plannerLanes) {
+            if (laneKey == "grounding_classifier") {
+                assertEquals(LlmProvider.OPENAI, endpoint.provider)
+            } else {
+                assertEquals(LlmProvider.GROQ, endpoint.provider)
+            }
         }
     }
 

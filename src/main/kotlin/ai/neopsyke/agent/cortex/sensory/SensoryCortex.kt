@@ -8,6 +8,7 @@ import ai.neopsyke.agent.model.ConversationSecurityContexts
 import ai.neopsyke.agent.model.ActionExecutionStatus
 import ai.neopsyke.agent.model.ActionType
 import ai.neopsyke.agent.model.ActionOrigin
+import ai.neopsyke.agent.model.GroundingMetadata
 import ai.neopsyke.agent.model.OriginSource
 import ai.neopsyke.agent.model.InputPriority
 import ai.neopsyke.agent.model.Interlocutor
@@ -123,6 +124,7 @@ data class ActionFeedbackCue(
     val urgency: String? = null,
     val requiresFollowUpThought: Boolean = false,
     val origin: ActionOrigin = ActionOrigin.USER,
+    val groundingMetadata: GroundingMetadata? = null,
 ) {
     fun toStimulus(): StimulusEnvelope =
         StimulusEnvelope(

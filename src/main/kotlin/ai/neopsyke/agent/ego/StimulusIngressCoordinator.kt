@@ -31,7 +31,7 @@ internal class StimulusIngressCoordinator(
     private val telemetry: EgoTelemetry,
     private val shapeOpportunityContract: (Opportunity, String?, ai.neopsyke.agent.model.ConversationContext) -> Opportunity,
     private val emitThreadUpdate: (CognitiveThread, String?, String) -> Unit,
-    private val emitOpportunityEnqueued: (Opportunity, String?, String) -> Unit,
+    private val emitOpportunityEnqueued: (Opportunity, String?, String, ai.neopsyke.agent.model.GroundingMetadata?) -> Unit,
 ) {
     sealed interface Outcome {
         data object NoWork : Outcome
@@ -81,7 +81,7 @@ internal class StimulusIngressCoordinator(
             work.conversationContext,
         )
         scheduler.enqueueGoalWork(work, opportunity)
-        emitOpportunityEnqueued(opportunity, work.rootInputId, "goal_runtime")
+        emitOpportunityEnqueued(opportunity, work.rootInputId, "goal_runtime", work.groundingMetadata)
         return Outcome.RunLoop(
             cleanupRootInputId = work.rootInputId,
             cleanupConversationContext = work.conversationContext,
@@ -139,7 +139,7 @@ internal class StimulusIngressCoordinator(
             )
             return Outcome.NoWork
         }
-        emitOpportunityEnqueued(opportunity, cue.rootInputId, "feedback")
+        emitOpportunityEnqueued(opportunity, cue.rootInputId, "feedback", cue.groundingMetadata)
         telemetry.emitQueueSnapshot("feedback_enqueued")
         return Outcome.RunLoop()
     }
@@ -186,7 +186,7 @@ internal class StimulusIngressCoordinator(
         scheduler.latestQueuedInput()?.let { queuedInput ->
             instrumentation.emit(AgentEvents.inputQueued(queuedInput))
         }
-        emitOpportunityEnqueued(opportunity, input.rootInputId, "input")
+        emitOpportunityEnqueued(opportunity, input.rootInputId, "input", input.groundingMetadata)
         telemetry.emitQueueSnapshot("input_enqueued")
         return Outcome.RunLoop()
     }

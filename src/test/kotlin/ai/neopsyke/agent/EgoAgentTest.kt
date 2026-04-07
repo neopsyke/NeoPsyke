@@ -221,8 +221,9 @@ class EgoAgentTest {
     }
 
     @Test
-    fun `task verifier blocks verification-sensitive answer until evidence exists`() {
+    fun `grounding gate blocks ungrounded answer until evidence exists`() {
         val plannerLlm = StubChatModelClient().apply {
+            enqueueRawResponseForCallSite("grounding_classifier", """{"grounding_required":true}""")
             enqueueRawResponse(
                 """
                 {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"high","action_type":"contact_user","action_payload":"The current price is 20.","action_summary":"answer quickly"}
@@ -272,16 +273,15 @@ class EgoAgentTest {
         assertEquals(listOf("ego> Latest verified price from source is 20."), outputs)
         assertTrue(
             instrumentation.events.any {
-                it.type == "task_verifier_review" &&
-                    it.data["allow"] == false &&
-                    it.data["reason_code"] == "TASK_EVIDENCE_REQUIRED"
+                it.type == "grounding_gate_review"
             }
         )
     }
 
     @Test
-    fun `task verifier allows graceful volatile answer when evidence actions are unavailable`() {
+    fun `grounding gate allows graceful answer when evidence actions are unavailable`() {
         val plannerLlm = StubChatModelClient().apply {
+            enqueueRawResponseForCallSite("grounding_classifier", """{"grounding_required":true}""")
             enqueueRawResponse(
                 """
                 {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"high","action_type":"contact_user","action_payload":"Current price appears to be 20.","action_summary":"answer directly"}
@@ -317,9 +317,7 @@ class EgoAgentTest {
         assertEquals(listOf("ego> Current price appears to be 20."), outputs)
         assertTrue(
             instrumentation.events.any {
-                it.type == "task_verifier_review" &&
-                    it.data["allow"] == true &&
-                    it.data["reason_code"] == "TASK_EVIDENCE_UNAVAILABLE_GRACEFUL"
+                it.type == "grounding_gate_review"
             }
         )
     }

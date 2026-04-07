@@ -117,6 +117,7 @@ class FeedbackPlanner(
             SharedPromptSections.evidenceHintsSection(context),
             SharedPromptSections.deliberationPressureSection(context),
             SharedPromptSections.metaGuidanceSection(context),
+            SharedPromptSections.groundingRequirementSection(context),
             SharedPromptSections.triggerSection(trigger),
         )
 

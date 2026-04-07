@@ -15,4 +15,5 @@ enum class LaneId(val configKey: String) {
     FEEDBACK("feedback"),
     GOAL_WORK("goal_work"),
     IMPULSE("impulse"),
+    GROUNDING_CLASSIFIER("grounding_classifier"),
 }

@@ -66,14 +66,14 @@ class DashboardStateStore(
     private var droppedEvents: Long = 0
     private var queueSaturationEvents: Long = 0
     private val queueSaturationByType = mutableMapOf<String, Long>()
-    private var taskVerifierTotal: Long = 0
-    private var taskVerifierAllow: Long = 0
-    private var taskVerifierDeny: Long = 0
-    private var taskVerifierRequiresEvidence: Long = 0
-    private var taskVerifierGracefulAllow: Long = 0
-    private val taskVerifierByReasonCode = mutableMapOf<String, Long>()
-    private val taskVerifierByIntent = mutableMapOf<String, Long>()
-    private val taskVerifierByVolatility = mutableMapOf<String, Long>()
+    private var groundingGateTotal: Long = 0
+    private var groundingGateAllow: Long = 0
+    private var groundingGateDeny: Long = 0
+    private var groundingGateGroundingRequired: Long = 0
+    private var groundingGateEvidenceGathered: Long = 0
+    private var groundingGateEvidenceFailedTechnically: Long = 0
+    private var groundingGateEvidenceUnavailable: Long = 0
+    private val groundingGateByReasonCode = mutableMapOf<String, Long>()
     private var promptBudgetAllocationsTotal: Long = 0
     private var promptBudgetFallbackCount: Long = 0
     private var promptBudgetFloorViolationEvents: Long = 0
@@ -258,32 +258,29 @@ class DashboardStateStore(
                     }
                 }
 
-                "task_verifier_review" -> {
-                    taskVerifierTotal += 1
+                "grounding_gate_review" -> {
+                    groundingGateTotal += 1
                     val allow = (event.data["allow"] as? Boolean) ?: true
                     if (allow) {
-                        taskVerifierAllow += 1
+                        groundingGateAllow += 1
                     } else {
-                        taskVerifierDeny += 1
+                        groundingGateDeny += 1
                     }
-                    val requiresEvidence = (event.data["requires_external_evidence"] as? Boolean) ?: false
-                    if (requiresEvidence) {
-                        taskVerifierRequiresEvidence += 1
+                    if ((event.data["grounding_required"] as? Boolean) == true) {
+                        groundingGateGroundingRequired += 1
+                    }
+                    if ((event.data["evidence_gathered"] as? Boolean) == true) {
+                        groundingGateEvidenceGathered += 1
+                    }
+                    if ((event.data["evidence_failed_technically"] as? Boolean) == true) {
+                        groundingGateEvidenceFailedTechnically += 1
+                    }
+                    if ((event.data["evidence_unavailable"] as? Boolean) == true) {
+                        groundingGateEvidenceUnavailable += 1
                     }
                     val reasonCode = event.data["reason_code"]?.toString()?.ifBlank { null }
                     if (reasonCode != null) {
-                        taskVerifierByReasonCode[reasonCode] = (taskVerifierByReasonCode[reasonCode] ?: 0L) + 1L
-                        if (allow && reasonCode == "TASK_EVIDENCE_UNAVAILABLE_GRACEFUL") {
-                            taskVerifierGracefulAllow += 1
-                        }
-                    }
-                    val intentCategory = event.data["intent_category"]?.toString()?.ifBlank { null }
-                    if (intentCategory != null) {
-                        taskVerifierByIntent[intentCategory] = (taskVerifierByIntent[intentCategory] ?: 0L) + 1L
-                    }
-                    val volatilityLevel = event.data["volatility_level"]?.toString()?.ifBlank { null }
-                    if (volatilityLevel != null) {
-                        taskVerifierByVolatility[volatilityLevel] = (taskVerifierByVolatility[volatilityLevel] ?: 0L) + 1L
+                        groundingGateByReasonCode[reasonCode] = (groundingGateByReasonCode[reasonCode] ?: 0L) + 1L
                     }
                 }
 
@@ -435,7 +432,7 @@ class DashboardStateStore(
                 limits = limits,
                 metrics = metrics,
                 instrumentationHealth = instrumentationHealthMap(),
-                taskVerifierStats = taskVerifierStatsMap(),
+                taskVerifierStats = groundingGateStatsMap(),
                 promptBudgetStats = promptBudgetStatsMap(),
                 cognitiveThreads = threadSnapshotsLocked(includeTerminal = true, limit = DEFAULT_THREAD_SNAPSHOT_LIMIT),
                 recentEvents = snapshotRecentEventsLocked(
@@ -821,28 +818,22 @@ class DashboardStateStore(
             put("queue_saturation_by_type", queueSaturationByType.toMap())
         }
 
-    private fun taskVerifierStatsMap(): Map<String, Any?> {
-        val denyRate = if (taskVerifierTotal > 0) {
-            taskVerifierDeny.toDouble() / taskVerifierTotal.toDouble()
-        } else {
-            0.0
-        }
-        val gracefulAllowRate = if (taskVerifierTotal > 0) {
-            taskVerifierGracefulAllow.toDouble() / taskVerifierTotal.toDouble()
+    private fun groundingGateStatsMap(): Map<String, Any?> {
+        val denyRate = if (groundingGateTotal > 0) {
+            groundingGateDeny.toDouble() / groundingGateTotal.toDouble()
         } else {
             0.0
         }
         return buildMap {
-            put("total_reviews", taskVerifierTotal)
-            put("allow_count", taskVerifierAllow)
-            put("deny_count", taskVerifierDeny)
+            put("total_reviews", groundingGateTotal)
+            put("allow_count", groundingGateAllow)
+            put("deny_count", groundingGateDeny)
             put("deny_rate", denyRate)
-            put("requires_evidence_count", taskVerifierRequiresEvidence)
-            put("graceful_allow_count", taskVerifierGracefulAllow)
-            put("graceful_allow_rate", gracefulAllowRate)
-            put("by_reason_code", taskVerifierByReasonCode.toMap())
-            put("by_intent_category", taskVerifierByIntent.toMap())
-            put("by_volatility_level", taskVerifierByVolatility.toMap())
+            put("grounding_required_count", groundingGateGroundingRequired)
+            put("evidence_gathered_count", groundingGateEvidenceGathered)
+            put("evidence_failed_technically_count", groundingGateEvidenceFailedTechnically)
+            put("evidence_unavailable_count", groundingGateEvidenceUnavailable)
+            put("by_reason_code", groundingGateByReasonCode.toMap())
         }
     }
 

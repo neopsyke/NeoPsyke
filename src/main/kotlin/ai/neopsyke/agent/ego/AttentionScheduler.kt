@@ -70,6 +70,7 @@ class AttentionScheduler(
         originActionObservedEvidence: Boolean? = null,
         conversationContext: ConversationContext = ConversationContext.default(),
         origin: ActionOrigin = ActionOrigin.USER,
+        groundingMetadata: GroundingMetadata? = null,
     ): Intention? {
         val deferredIntentions = intentions.count { it.intention.kind == IntentionKind.DEFER }
         if (deferredIntentions >= config.maxPendingThoughts) {
@@ -101,6 +102,7 @@ class AttentionScheduler(
                 deferredDenialReasonCode = denialReasonCode,
                 deferredOriginActionType = originActionType,
                 deferredOriginActionObservedEvidence = originActionObservedEvidence,
+                groundingMetadata = groundingMetadata,
             )
         )
         return if (queued) intention else null
@@ -120,6 +122,8 @@ class AttentionScheduler(
         conversationContext: ConversationContext = ConversationContext.default(),
         argumentDataTrust: DataTrust = DataTrust.TRUSTED_DATA,
         origin: ActionOrigin = ActionOrigin.USER,
+        groundingMetadata: GroundingMetadata? = null,
+        isForcedTerminal: Boolean = false,
     ): Boolean {
         if (actions.size >= config.maxPendingActions) {
             return false
@@ -140,6 +144,8 @@ class AttentionScheduler(
                 conversationContext = conversationContext,
                 argumentDataTrust = argumentDataTrust,
                 origin = origin,
+                groundingMetadata = groundingMetadata,
+                isForcedTerminal = isForcedTerminal,
             )
         )
         return true

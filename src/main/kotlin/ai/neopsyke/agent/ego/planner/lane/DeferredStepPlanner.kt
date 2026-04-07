@@ -136,6 +136,7 @@ class DeferredStepPlanner(
             SharedPromptSections.deliberationPressureSection(context),
             SharedPromptSections.metaGuidanceSection(context),
             SharedPromptSections.idImpulseContextSection(context),
+            SharedPromptSections.groundingRequirementSection(context),
             SharedPromptSections.triggerSection(trigger),
         )
 

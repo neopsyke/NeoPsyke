@@ -115,31 +115,35 @@ class DashboardStateStoreTest {
     }
 
     @Test
-    fun `snapshot aggregates task verifier stats`() {
+    fun `snapshot aggregates grounding gate stats`() {
         val store = DashboardStateStore(maxEvents = 30)
         store.onEvent(
             AgentEvent(
                 id = 1,
-                type = "task_verifier_review",
+                type = "grounding_gate_review",
                 data = mapOf(
                     "allow" to false,
-                    "reason_code" to "TASK_EVIDENCE_REQUIRED",
-                    "intent_category" to "volatile_fact",
-                    "volatility_level" to "high",
-                    "requires_external_evidence" to true
+                    "reason_code" to "GROUNDING_EVIDENCE_REQUIRED",
+                    "grounding_required" to true,
+                    "evidence_gathered" to false,
+                    "evidence_failed_technically" to false,
+                    "evidence_unavailable" to false,
+                    "forced_terminal" to false,
                 )
             )
         )
         store.onEvent(
             AgentEvent(
                 id = 2,
-                type = "task_verifier_review",
+                type = "grounding_gate_review",
                 data = mapOf(
                     "allow" to true,
-                    "reason_code" to "TASK_EVIDENCE_UNAVAILABLE_GRACEFUL",
-                    "intent_category" to "volatile_fact",
-                    "volatility_level" to "high",
-                    "requires_external_evidence" to true
+                    "reason_code" to "GROUNDING_EVIDENCE_UNAVAILABLE_GRACEFUL",
+                    "grounding_required" to true,
+                    "evidence_gathered" to false,
+                    "evidence_failed_technically" to false,
+                    "evidence_unavailable" to true,
+                    "forced_terminal" to false,
                 )
             )
         )
@@ -147,11 +151,12 @@ class DashboardStateStoreTest {
         val snapshot: DashboardSnapshot = mapper.readValue(store.snapshotJson())
         assertEquals(2L, (snapshot.taskVerifierStats["total_reviews"] as Number).toLong())
         assertEquals(1L, (snapshot.taskVerifierStats["deny_count"] as Number).toLong())
-        assertEquals(1L, (snapshot.taskVerifierStats["graceful_allow_count"] as Number).toLong())
+        assertEquals(2L, (snapshot.taskVerifierStats["grounding_required_count"] as Number).toLong())
+        assertEquals(1L, (snapshot.taskVerifierStats["evidence_unavailable_count"] as Number).toLong())
         @Suppress("UNCHECKED_CAST")
         val byReason = snapshot.taskVerifierStats["by_reason_code"] as Map<String, Any?>
-        assertEquals(1L, (byReason["TASK_EVIDENCE_REQUIRED"] as Number).toLong())
-        assertEquals(1L, (byReason["TASK_EVIDENCE_UNAVAILABLE_GRACEFUL"] as Number).toLong())
+        assertEquals(1L, (byReason["GROUNDING_EVIDENCE_REQUIRED"] as Number).toLong())
+        assertEquals(1L, (byReason["GROUNDING_EVIDENCE_UNAVAILABLE_GRACEFUL"] as Number).toLong())
     }
 
     @Test

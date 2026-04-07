@@ -61,7 +61,7 @@ flowchart LR
     P --> FP["FeedbackPlanner (L1)"]
     P --> GWP["GoalWorkPlanner (L1)"]
     P --> IP["ImpulsePlanner (L1)"]
-    E --> TV["DecisionVerifier (Deterministic Task Gate)"]
+    E --> TV["GroundingGate (Typed Evidence Gate)"]
     E --> S["Superego"]
     S --> S1["SingleStage Review Engine (DeterministicConscience + LLM)"]
     S --> S2["TwoStageReview Escalation Engine"]
@@ -279,14 +279,14 @@ sequenceDiagram
                 Ego->>Motor: execute (bypass Superego)
                 Note over Ego,ACS: Bypass execution is still mirrored into durable staged/receipt state
             else Normal action
-                Ego->>TV: review(action, evidence/recent dialogue)
-                Note over Ego,TV: DecisionVerifier classifies intent + volatility. evidence required only for volatile/unknown factual intents
-                alt decision verifier deny
-                    TV-->>Ego: deny (with reason_code)
-                    Ego->>Sched: enqueue safe-alternative thought
+                Ego->>TV: review(action, typed grounding metadata + evidence state)
+                Note over Ego,TV: GroundingGate reads action.groundingMetadata (set at input classification), evidence state, and forced-terminal marker
+                alt grounding gate deny
+                    TV-->>Ego: deny (GROUNDING_EVIDENCE_REQUIRED or TECH_GROUNDING_EVIDENCE_FAILURE)
+                    Ego->>Sched: enqueue evidence-gathering or retry thought
                     Ego->>Mem: maybeRecordReflectionLesson(filtered)
-                else decision verifier allow
-                    Note over Ego,TV: If volatile evidence is required but tools are unavailable, verifier returns graceful allow [TASK_EVIDENCE_UNAVAILABLE_GRACEFUL]
+                else grounding gate allow
+                    Note over Ego,TV: If grounding required but evidence tools unavailable, gate returns graceful allow [GROUNDING_EVIDENCE_UNAVAILABLE_GRACEFUL]
                     Ego->>Sup: deterministic checks + authorization policy
                     alt deterministic deny
                         Sup-->>Ego: deny (hard deny)
@@ -429,11 +429,11 @@ stateDiagram-v2
     Planning --> ThoughtQueued: decision=defer/plan/noop-retry
     Planning --> ThoughtQueued: plan suppressed (budget/pressure/hash/pending) -> convergence/recovery defer
 
-    ActionQueued --> TaskReview: non-fallback action
+    ActionQueued --> GroundingReview: non-fallback action
     ActionQueued --> Executing: fallback explanation action
-    TaskReview --> Denied: task verifier deny
+    GroundingReview --> Denied: grounding gate deny
 
-    TaskReview --> PolicyReview: task verifier allow
+    GroundingReview --> PolicyReview: grounding gate allow
     PolicyReview --> Denied: deterministic hard deny / contract deny / superego deny
     Denied --> ThoughtQueued: enqueue safe alternative defer
     Note right of ThoughtQueued: Repeat-denied payload block is skipped for technical or transient denial reasons (prefer reason_code classification) reflection lessons persist only for non-technical and non-system denials

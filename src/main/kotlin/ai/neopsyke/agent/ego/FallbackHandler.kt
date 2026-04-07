@@ -36,6 +36,7 @@ internal class FallbackHandler(
         origin: ActionOrigin,
         originActionType: ActionType? = null,
         originActionObservedEvidence: Boolean? = null,
+        groundingMetadata: GroundingMetadata? = null,
     ): Boolean =
         scheduler.enqueueThought(
             content = content,
@@ -52,6 +53,7 @@ internal class FallbackHandler(
             origin = origin,
             originActionType = originActionType,
             originActionObservedEvidence = originActionObservedEvidence,
+            groundingMetadata = groundingMetadata,
         ) != null
 
     fun handleDeniedAction(
@@ -84,9 +86,7 @@ internal class FallbackHandler(
         )
 
         val denialThought = TextSecurity.clamp(
-            "Action denied by $source ($reason). " +
-                "Try a different safe action than the denied one. " +
-                "If no safe alternative exists, prepare a concise explanation for the interlocutor.",
+            buildDenialThought(source, reason, reasonCode),
             config.planner.maxThoughtChars
         )
         val queued = enqueueDeferredIntention(
@@ -103,6 +103,7 @@ internal class FallbackHandler(
             conversationContext = conversationContext,
             origin = action.origin,
             originActionType = action.type,
+            groundingMetadata = action.groundingMetadata,
         )
         if (!queued) {
             instrumentation.emit(AgentEvents.warning("Failed to enqueue denial thought."))
@@ -147,6 +148,7 @@ internal class FallbackHandler(
             conversationContext = conversationContext,
             origin = action.origin,
             originActionType = action.type,
+            groundingMetadata = action.groundingMetadata,
         )
         if (!queued) {
             instrumentation.emit(AgentEvents.warning("Failed to enqueue staged-action follow-up thought."))
@@ -277,6 +279,23 @@ internal class FallbackHandler(
         }
         telemetry.emitQueueSnapshot("fallback_explanation_circuit_breaker")
     }
+
+    private fun buildDenialThought(source: String, reason: String, reasonCode: String?): String =
+        when (reasonCode) {
+            GroundingGate.REASON_CODE_GROUNDING_EVIDENCE_REQUIRED ->
+                "Grounding gate: this request requires external evidence, but no successful " +
+                    "evidence-gathering action has run yet. Dispatch an evidence-gathering action " +
+                    "and use its results before answering. Do not repeat the denied contact_user."
+            GroundingGate.REASON_CODE_TECH_GROUNDING_EVIDENCE_FAILURE ->
+                "Grounding gate: this request requires external evidence and prior evidence " +
+                    "attempts failed for technical/transient reasons. Retry evidence gathering with " +
+                    "the same or an alternate evidence source before answering. A repeated evidence " +
+                    "attempt is allowed here."
+            else ->
+                "Action denied by $source ($reason). " +
+                    "Try a different safe action than the denied one. " +
+                    "If no safe alternative exists, prepare a concise explanation for the interlocutor."
+        }
 
     fun isRepeatOfDeniedAction(thought: PendingThought, decision: EgoDecision.FormIntention): Boolean {
         val deniedType = thought.deniedActionType ?: return false

@@ -77,6 +77,7 @@ import ai.neopsyke.llm.ChatModelClient
 import ai.neopsyke.llm.ChatRequestOptions
 import ai.neopsyke.support.RecordingInstrumentation
 import ai.neopsyke.support.StubChatModelClient
+import ai.neopsyke.support.buildTestHierarchicalPlanner
 import java.io.ByteArrayInputStream
 import java.nio.file.Files
 import java.time.Instant
@@ -122,7 +123,8 @@ class AgentScenarioPackTest {
 
         assertEquals(listOf("ego> ok"), outputs)
         val plannerCalls = plannerLlm.calls.filter {
-            it.options.metadata.callSite != "input_intent_router"
+            it.options.metadata.callSite != "input_intent_router" &&
+                it.options.metadata.callSite != "grounding_classifier"
         }
         assertEquals(1, plannerCalls.size)
         assertTrue(instrumentation.events.none { it.type == "plan_created" })
@@ -307,7 +309,8 @@ class AgentScenarioPackTest {
         runAgentWithInput(agent, "find pricing\nexit\n")
 
         val plannerCalls = plannerLlm.calls.filter {
-            it.options.metadata.callSite != "input_intent_router"
+            it.options.metadata.callSite != "input_intent_router" &&
+                it.options.metadata.callSite != "grounding_classifier"
         }
         assertTrue(plannerCalls.size >= 2)
         val followUpPrompt = plannerCalls[1].messages.last().content
@@ -1051,6 +1054,181 @@ class AgentScenarioPackTest {
             manager?.stop()
             root.toFile().deleteRecursively()
         }
+    }
+
+    // --- AC 25: Goal creation confirmation grounding ---
+    @Test
+    fun scenario_goal_creation_confirmation_grounding() {
+        val plannerLlm = StubChatModelClient().apply {
+            enqueueRawResponseForCallSite("input_intent_router", """{"route":"goal_creation","reasoning":"user wants a goal"}""")
+            enqueueRawResponse(
+                """
+                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"goal_operation","action_payload":"{\"command\":\"create\",\"title\":\"Daily Weather\",\"description\":\"Fetch weather\",\"priority\":\"medium\",\"cron_expression\":\"5 6 * * *\",\"step_descriptions\":[\"Check weather\"]}","action_summary":"create weather goal"}
+                """.trimIndent()
+            )
+            enqueueRawResponse(
+                """
+                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"contact_user","action_payload":"Goal created: Daily Weather. Recurs on cron '5 6 * * *'.","action_summary":"confirm goal creation"}
+                """.trimIndent()
+            )
+        }
+        val superegoLlm = StubChatModelClient().apply {
+            enqueueRawResponse("""{"allow":true}""")
+            enqueueRawResponse("""{"allow":true}""")
+        }
+        val instrumentation = RecordingInstrumentation()
+        val outputs = mutableListOf<String>()
+        val config = AgentConfig(planner = PlannerConfig(maxLoopStepsPerInput = 8, maxThoughtPasses = 3))
+        val agent = buildTestEgo(
+            planner = LlmEgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
+            superego = Superego(modelClient = superegoLlm, config = config, instrumentation = instrumentation),
+            motorCortex = buildMotorCortex(output = { outputs.add(it) }),
+            config = config,
+            instrumentation = instrumentation
+        )
+
+        runAgentWithInput(agent, "create a daily weather goal at 06:05\nexit\n")
+
+        // Confirmation message must be delivered without denial.
+        assertTrue(outputs.any { it.contains("Goal created") }, "Confirmation should be delivered: $outputs")
+        // grounding_gate_review must show allow=true, grounding_required=false for the confirmation.
+        val gateEvents = instrumentation.events.filter { it.type == "grounding_gate_review" }
+        assertTrue(gateEvents.any { it.data["allow"] == true && it.data["grounding_required"] == false },
+            "Expected grounding_gate_review with allow=true and grounding_required=false: $gateEvents")
+    }
+
+    // --- AC 26: Volatile-fact grounding enforcement ---
+    @Test
+    fun scenario_volatile_fact_grounding_enforcement() {
+        val plannerLlm = StubChatModelClient().apply {
+            enqueueRawResponseForCallSite("input_intent_router", """{"route":"direct_response","reasoning":"weather question"}""")
+            enqueueRawResponseForCallSite("grounding_classifier", """{"grounding_required":true}""")
+            // First planner call (DirectResponsePlanner): tries to answer without evidence.
+            enqueueRawResponseForCallSite("direct_response",
+                """{"answer":"The weather in Hamburg is sunny.","summary":"answer weather"}""")
+            // After denial requeue (DeferredStepPlanner): planner gathers evidence.
+            enqueueRawResponse(
+                """
+                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"web_search","action_payload":"Hamburg weather today","action_summary":"search weather"}
+                """.trimIndent()
+            )
+            // After evidence feedback (DeferredStepPlanner or FeedbackPlanner): planner answers.
+            enqueueRawResponse(
+                """
+                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"contact_user","action_payload":"Based on search results, Hamburg is 15C and cloudy.","action_summary":"grounded answer"}
+                """.trimIndent()
+            )
+        }
+        val superegoLlm = StubChatModelClient().apply {
+            enqueueRawResponse("""{"allow":true}""")
+            enqueueRawResponse("""{"allow":true}""")
+            enqueueRawResponse("""{"allow":true}""")
+        }
+        val instrumentation = RecordingInstrumentation()
+        val outputs = mutableListOf<String>()
+        val config = AgentConfig(planner = PlannerConfig(maxLoopStepsPerInput = 12, maxThoughtPasses = 4))
+        val agent = buildTestEgo(
+            planner = buildTestHierarchicalPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
+            superego = Superego(modelClient = superegoLlm, config = config, instrumentation = instrumentation),
+            motorCortex = buildMotorCortex(output = { outputs.add(it) }),
+            config = config,
+            instrumentation = instrumentation
+        )
+
+        runAgentWithInput(agent, "what is the weather in Hamburg right now\nexit\n")
+
+        // The grounded answer should be delivered.
+        val classifierEvents = instrumentation.events.filter { it.type == "grounding_classification_resolved" }
+        val gateEvents = instrumentation.events.filter { it.type == "grounding_gate_review" }
+        assertTrue(outputs.any { it.contains("15C") || it.contains("cloudy") },
+            "Expected grounded answer in outputs: $outputs\nClassifier events: $classifierEvents\nGate events: $gateEvents")
+        // First gate review must deny (no evidence).
+        assertTrue(gateEvents.any {
+            it.data["allow"] == false &&
+                it.data["grounding_required"] == true &&
+                it.data["evidence_gathered"] == false &&
+                it.data["reason_code"] == "GROUNDING_EVIDENCE_REQUIRED"
+        }, "Expected deny gate event.\nClassifier events: $classifierEvents\nGate events: $gateEvents")
+        // Final gate review must allow the contact_user (evidence gathered).
+        assertTrue(gateEvents.any {
+            it.data["allow"] == true &&
+                it.data["action_type"] == "contact_user" &&
+                it.data["evidence_gathered"] == true
+        }, "Expected allow gate event for contact_user after evidence: $gateEvents")
+    }
+
+    // --- AC 27: Technical evidence retry ---
+    @Test
+    fun scenario_technical_evidence_retry() {
+        val plannerLlm = StubChatModelClient().apply {
+            enqueueRawResponseForCallSite("input_intent_router", """{"route":"direct_response","reasoning":"weather question"}""")
+            enqueueRawResponseForCallSite("grounding_classifier", """{"grounding_required":true}""")
+            // First (DirectResponsePlanner): planner dispatches web_search via needs_more_context.
+            enqueueRawResponseForCallSite("direct_response",
+                """{"answer":null,"summary":null,"needs_more_context":true}""")
+            // DeferredStepPlanner: dispatches web_search.
+            enqueueRawResponse(
+                """
+                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"web_search","action_payload":"Hamburg weather","action_summary":"search weather"}
+                """.trimIndent()
+            )
+            // After technical failure feedback: planner retries web_search.
+            enqueueRawResponse(
+                """
+                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"web_search","action_payload":"Hamburg current weather","action_summary":"retry search"}
+                """.trimIndent()
+            )
+            // After successful evidence: planner answers.
+            enqueueRawResponse(
+                """
+                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"contact_user","action_payload":"Hamburg is 12C with rain.","action_summary":"grounded answer"}
+                """.trimIndent()
+            )
+        }
+        val superegoLlm = StubChatModelClient().apply {
+            enqueueRawResponse("""{"allow":true}""")
+            enqueueRawResponse("""{"allow":true}""")
+            enqueueRawResponse("""{"allow":true}""")
+        }
+        val instrumentation = RecordingInstrumentation()
+        val outputs = mutableListOf<String>()
+        var searchAttempts = 0
+        val search = object : WebSearchEngine {
+            override fun search(query: String, maxResults: Int): WebSearchResult {
+                searchAttempts++
+                if (searchAttempts == 1) {
+                    throw RuntimeException("Simulated search timeout")
+                }
+                return WebSearchResult(
+                    summary = "Hamburg weather: 12C, rain.",
+                    snippets = listOf("Hamburg 12C rain."),
+                    sources = listOf(WebSearchSource(title = "Weather", url = "https://example.com/weather"))
+                )
+            }
+        }
+        val config = AgentConfig(planner = PlannerConfig(maxLoopStepsPerInput = 12, maxThoughtPasses = 4))
+        val agent = buildTestEgo(
+            planner = buildTestHierarchicalPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
+            superego = Superego(modelClient = superegoLlm, config = config, instrumentation = instrumentation),
+            motorCortex = buildMotorCortex(output = { outputs.add(it) }, webSearchEngine = search),
+            config = config,
+            instrumentation = instrumentation
+        )
+
+        runAgentWithInput(agent, "what is the weather in Hamburg\nexit\n")
+
+        // Answer should be delivered.
+        assertTrue(outputs.any { it.contains("12C") || it.contains("rain") },
+            "Expected grounded answer: $outputs")
+        // Evidence retry was not suppressed: search was attempted at least twice.
+        assertTrue(searchAttempts >= 2, "Expected at least 2 search attempts (first failed, second succeeded)")
+        // Final gate must allow the contact_user with evidence gathered.
+        val gateEvents = instrumentation.events.filter { it.type == "grounding_gate_review" }
+        assertTrue(gateEvents.any {
+            it.data["allow"] == true &&
+                it.data["action_type"] == "contact_user" &&
+                it.data["evidence_gathered"] == true
+        }, "Expected allow gate event after retry: $gateEvents")
     }
 
     private fun runAgentWithInput(agent: Ego, stdinContent: String) {

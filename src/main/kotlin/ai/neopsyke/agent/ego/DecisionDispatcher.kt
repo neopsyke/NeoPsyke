@@ -66,6 +66,7 @@ internal class DecisionDispatcher(
         planContext: PlanContext? = null,
         originActionType: ActionType? = null,
         originActionObservedEvidence: Boolean? = null,
+        groundingMetadata: GroundingMetadata? = null,
     ): Boolean {
         val intention = scheduler.enqueueThought(
             content = content,
@@ -84,6 +85,7 @@ internal class DecisionDispatcher(
             originActionObservedEvidence = originActionObservedEvidence,
             conversationContext = conversationContext,
             origin = origin,
+            groundingMetadata = groundingMetadata,
         )
         if (intention != null) {
             deliberation.recordIntention(rootInputId, conversationContext, intention)
@@ -106,6 +108,7 @@ internal class DecisionDispatcher(
                 scratchpadStore.resetDraftSequence(rootInputId)
                 val allowFallbackExplanation =
                     originThought?.allowFallbackExplanation ?: (origin.source != OriginSource.ID)
+                val resolvedGrounding = originThought?.groundingMetadata ?: plannerContext?.groundingMetadata
                 val queued = enqueueDeferredIntention(
                     content = decision.content,
                     urgency = decision.urgency,
@@ -122,6 +125,7 @@ internal class DecisionDispatcher(
                     originActionObservedEvidence = originThought?.originActionObservedEvidence,
                     conversationContext = conversationContext,
                     origin = origin,
+                    groundingMetadata = resolvedGrounding,
                 )
                 if (!decision.longTermMemoryRecallQuery.isNullOrBlank()) {
                     instrumentation.emit(
@@ -138,7 +142,9 @@ internal class DecisionDispatcher(
                         data = mapOf(
                             "queued" to queued,
                             "urgency" to decision.urgency.name.lowercase(),
-                            "content" to decision.content
+                            "content" to decision.content,
+                            "grounding_required" to (resolvedGrounding?.requirement?.name?.lowercase()),
+                            "grounding_source" to (resolvedGrounding?.source?.name?.lowercase()),
                         )
                     )
                 )
@@ -197,6 +203,7 @@ internal class DecisionDispatcher(
                         denialReasonCode = violation.reasonCode,
                         conversationContext = conversationContext,
                         origin = origin,
+                        groundingMetadata = originThought?.groundingMetadata ?: plannerContext?.groundingMetadata,
                     )
                     if (!queuedRetry) {
                         instrumentation.emit(
@@ -247,6 +254,7 @@ internal class DecisionDispatcher(
                         originActionObservedEvidence = originThought.originActionObservedEvidence,
                         conversationContext = conversationContext,
                         origin = origin,
+                        groundingMetadata = originThought.groundingMetadata,
                     )
                     if (!queuedRetry) {
                         instrumentation.emit(AgentEvents.warning("Failed to enqueue retry thought after repeated denied action."))
@@ -285,11 +293,13 @@ internal class DecisionDispatcher(
                         proposedActionSummary = decision.summary,
                         argumentDataTrust = deliberation.threadSecurityContext(rootInputId, conversationContext).aggregatedDataTrust,
                         origin = origin,
+                        groundingMetadata = originThought?.groundingMetadata ?: plannerContext?.groundingMetadata,
                     )
                 )
                 if (queued) {
                     deliberation.recordIntention(rootInputId, conversationContext, intention)
                 }
+                val actionGrounding = originThought?.groundingMetadata ?: plannerContext?.groundingMetadata
                 instrumentation.emit(
                     AgentEvents.actionProposed(
                         actionType = decision.actionType.id,
@@ -298,7 +308,9 @@ internal class DecisionDispatcher(
                         urgency = decision.urgency.name.lowercase(),
                         payload = decision.payload,
                         summary = decision.summary,
-                        queued = queued
+                        queued = queued,
+                        groundingRequired = actionGrounding?.requirement?.name?.lowercase(),
+                        groundingSource = actionGrounding?.source?.name?.lowercase(),
                     )
                 )
                 if (!queued) {
@@ -455,6 +467,7 @@ internal class DecisionDispatcher(
                         originActionObservedEvidence = originThought?.originActionObservedEvidence,
                         conversationContext = conversationContext,
                         origin = origin,
+                        groundingMetadata = originThought?.groundingMetadata ?: plannerContext?.groundingMetadata,
                     )
                     if (!queued) {
                         allQueued = false
@@ -468,11 +481,14 @@ internal class DecisionDispatcher(
                         )
                     }
                 }
+                val planGrounding = originThought?.groundingMetadata ?: plannerContext?.groundingMetadata
                 instrumentation.emit(
                     AgentEvents.planStepsEnqueued(
                         planId = planId,
                         totalSteps = decision.steps.size,
-                        allQueued = allQueued
+                        allQueued = allQueued,
+                        groundingRequired = planGrounding?.requirement?.name?.lowercase(),
+                        groundingSource = planGrounding?.source?.name?.lowercase(),
                     )
                 )
                 telemetry.emitQueueSnapshot("decision_plan")
@@ -576,6 +592,7 @@ internal class DecisionDispatcher(
             originActionObservedEvidence = originThought?.originActionObservedEvidence,
             conversationContext = conversationContext,
             origin = origin,
+            groundingMetadata = originThought?.groundingMetadata,
         )
         if (queued) {
             instrumentation.emit(

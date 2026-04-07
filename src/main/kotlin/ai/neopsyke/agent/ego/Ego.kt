@@ -89,7 +89,7 @@ class Ego(
         )
         val queued = scheduler.enqueueImpulse(impulse, opportunity, maxPendingImpulses)
         if (queued) {
-            emitOpportunityEnqueued(opportunity, impulse.rootImpulseId, "impulse")
+            emitOpportunityEnqueued(opportunity, impulse.rootImpulseId, "impulse", GroundingMetadata.NOT_REQUIRED_PREFILTER)
         }
         return queued
     }
@@ -103,6 +103,8 @@ class Ego(
     interface Planner {
         fun decide(trigger: EgoTrigger, context: PlannerContext): EgoDecision
         fun resetForInput(rootInputId: String) {}
+        /** Grounding metadata resolved by the most recent input classification, if any. */
+        val lastResolvedGrounding: GroundingMetadata? get() = null
     }
 
     private val scheduler = AttentionScheduler(config)
@@ -132,7 +134,7 @@ class Ego(
         resolveSessionId = ::resolveSessionId,
         inputScope = ::inputScope,
     )
-    private val taskVerifier: DecisionVerifier = DeterministicDecisionVerifier()
+    private val taskVerifier: DecisionVerifier = GroundingGate()
     private val actionPipeline = ActionReviewPipeline(
         superego, motorCortex, config, instrumentation, scheduler,
         taskVerifier, scratchpadStore, scratchpadFinalizer,
@@ -441,7 +443,8 @@ class Ego(
                 scheduler = scheduler,
                 rootInputId = taskRootInputId(task),
                 rootInputReceivedAtMs = taskRootInputReceivedAtMs(task),
-                conversationContext = taskConversationContext
+                conversationContext = taskConversationContext,
+                groundingMetadata = taskGroundingMetadata(task),
             )
             maybeRunLongTermMemoryAssessment(
                 trigger = "interval",
@@ -544,6 +547,14 @@ class Ego(
         deliberation.onPlannerDecision(finalDecision)
         journalPlannerDecision(finalDecision)
 
+        // Incorporate resolved grounding metadata from InputPlanner classification.
+        val resolvedGrounding = planner.lastResolvedGrounding
+        val groundedContext = if (resolvedGrounding != null) {
+            context.copy(groundingMetadata = resolvedGrounding)
+        } else {
+            context
+        }
+
         timing.startPhase("apply_decision")
         dispatcher.dispatch(
             finalDecision,
@@ -552,7 +563,7 @@ class Ego(
             rootInputId = input.rootInputId,
             rootInputReceivedAtMs = input.receivedAtMs,
             conversationContext = convCtx,
-            plannerContext = context,
+            plannerContext = groundedContext,
         )
 
         instrumentation.emit(AgentEvents.phaseTimings(timing.build()))
@@ -655,6 +666,8 @@ class Ego(
                     "summary" to intention.intention.summary,
                     "action_type" to intention.proposedActionType?.id,
                     "root_input_id" to intention.rootInputId,
+                    "grounding_required" to intention.groundingMetadata?.requirement?.name?.lowercase(),
+                    "grounding_source" to intention.groundingMetadata?.source?.name?.lowercase(),
                 )
             )
         )
@@ -683,6 +696,7 @@ class Ego(
                     intentionId = intention.intention.id,
                     intentionKind = intention.intention.kind,
                     requestedCommitMode = intention.intention.commitMode,
+                    groundingMetadata = intention.groundingMetadata,
                 )
                 processAction(pendingAction)
             }
@@ -1004,6 +1018,7 @@ class Ego(
             conversationContext = conversationContext,
             goalWorkSummary = goalSummaryResult.text,
             goalIndex = goalSummaryResult.index,
+            groundingMetadata = groundingMetadataForTrigger(trigger),
         )
     }
 
@@ -1042,6 +1057,23 @@ class Ego(
                     provider = "goal-runtime",
                     sourceRef = trigger.workUnit.rootInputId,
                 ).renderSummary()
+        }
+
+    private fun groundingMetadataForTrigger(trigger: EgoTrigger): GroundingMetadata =
+        when (trigger) {
+            is EgoTrigger.IncomingInput ->
+                trigger.input.groundingMetadata ?: GroundingMetadata.NOT_REQUIRED_PREFILTER
+            is EgoTrigger.DeferredIntention ->
+                trigger.intention.groundingMetadata
+                    ?: GroundingMetadata(GroundingRequirement.NOT_REQUIRED, GroundingSource.INHERITED)
+            is EgoTrigger.ActionFeedback ->
+                trigger.feedback.cue.groundingMetadata
+                    ?: GroundingMetadata(GroundingRequirement.NOT_REQUIRED, GroundingSource.INHERITED)
+            is EgoTrigger.IncomingImpulse ->
+                GroundingMetadata.NOT_REQUIRED_PREFILTER
+            is EgoTrigger.GoalWork ->
+                trigger.workUnit.groundingMetadata
+                    ?: GroundingMetadata(GroundingRequirement.NOT_REQUIRED, GroundingSource.GOAL_STEP_POLICY)
         }
 
     private data class GoalSummaryResult(
@@ -1451,6 +1483,13 @@ class Ego(
             is LoopTask.PerformAction -> task.item.conversationContext
         }
 
+    private fun taskGroundingMetadata(task: LoopTask): GroundingMetadata? =
+        when (task) {
+            is LoopTask.AttendOpportunity -> task.item.trigger.groundingMetadata
+            is LoopTask.ProcessIntention -> task.item.groundingMetadata
+            is LoopTask.PerformAction -> task.item.groundingMetadata
+        }
+
     private fun journalPlannerDecision(decision: EgoDecision) {
         val (label, actionType) = when (decision) {
             is EgoDecision.EnqueueThought -> "thought" to null
@@ -1512,6 +1551,7 @@ class Ego(
         opportunity: Opportunity,
         rootInputId: String?,
         source: String,
+        groundingMetadata: GroundingMetadata? = null,
     ) {
         instrumentation.emit(
             AgentEvent(
@@ -1529,6 +1569,8 @@ class Ego(
                     "dispatchable_actions" to opportunity.dispatchableActions.map { it.id }.sorted(),
                     "opportunity_metadata" to opportunity.metadata,
                     "thread_snapshot" to cognitiveThreads.snapshot(rootInputId, opportunity.conversationContext),
+                    "grounding_required" to groundingMetadata?.requirement?.name?.lowercase(),
+                    "grounding_source" to groundingMetadata?.source?.name?.lowercase(),
                 )
             )
         )

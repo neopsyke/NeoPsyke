@@ -14,6 +14,7 @@ import ai.neopsyke.agent.ego.planner.input.DirectResponsePlanner
 import ai.neopsyke.agent.ego.planner.input.GeneralActionPlanner
 import ai.neopsyke.agent.ego.planner.input.GoalCreationPlanner
 import ai.neopsyke.agent.ego.planner.input.GoalManagementPlanner
+import ai.neopsyke.agent.ego.planner.input.GroundingClassifier
 import ai.neopsyke.agent.ego.planner.input.InputIntentRouter
 import ai.neopsyke.agent.ego.planner.input.TaskDecompositionPlanner
 import ai.neopsyke.agent.ego.planner.lane.DeferredStepPlanner
@@ -2943,6 +2944,7 @@ private fun buildHierarchicalPlanner(
     )
 
     val router = InputIntentRouter(runtime, config, instrumentation)
+    val groundingClassifier = GroundingClassifier(runtime, config, instrumentation)
     val directResponse = DirectResponsePlanner(runtime, config, instrumentation)
     val generalAction = GeneralActionPlanner(runtime, config, instrumentation)
     val taskDecomp = TaskDecompositionPlanner(runtime, config, instrumentation)
@@ -2954,6 +2956,7 @@ private fun buildHierarchicalPlanner(
         config = config,
         instrumentation = instrumentation,
         router = router,
+        groundingClassifier = groundingClassifier,
         directResponsePlanner = directResponse,
         generalActionPlanner = generalAction,
         taskDecompositionPlanner = taskDecomp,

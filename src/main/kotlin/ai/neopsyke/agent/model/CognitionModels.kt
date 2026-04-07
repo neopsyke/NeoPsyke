@@ -98,6 +98,7 @@ data class PlannerContext(
     val idState: IdStateSnapshot? = null,
     val goalWorkSummary: String = "",
     val goalIndex: Map<Int, String> = emptyMap(),
+    val groundingMetadata: GroundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
 )
 
 data class ActionPlanningDefinition(

@@ -5,6 +5,8 @@ import java.nio.file.Path
 import java.time.Instant
 import ai.neopsyke.agent.model.ConversationContext
 import ai.neopsyke.agent.model.ConversationSecurityContexts
+import ai.neopsyke.agent.model.GroundingMetadata
+import ai.neopsyke.agent.model.GroundingSource
 import ai.neopsyke.agent.model.Interlocutor
 
 /**
@@ -93,6 +95,10 @@ object GoalContextLoader {
                 ),
             ),
             wakeReason = wakeReason,
+            groundingMetadata = GroundingMetadata(
+                requirement = step.groundingRequirement,
+                source = GroundingSource.GOAL_STEP_POLICY,
+            ),
         )
     }
 

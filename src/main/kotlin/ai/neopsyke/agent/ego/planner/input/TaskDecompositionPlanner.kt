@@ -65,6 +65,7 @@ class TaskDecompositionPlanner(
             SharedPromptSections.shortTermSummarySection(context),
             SharedPromptSections.actionAvailabilitySection(context),
             SharedPromptSections.evidenceHintsSection(context),
+            SharedPromptSections.groundingRequirementSection(context),
             SharedPromptSections.triggerSection(trigger),
         )
 

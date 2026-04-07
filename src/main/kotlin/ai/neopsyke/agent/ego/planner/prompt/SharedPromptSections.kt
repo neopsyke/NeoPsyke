@@ -2,6 +2,7 @@ package ai.neopsyke.agent.ego.planner.prompt
 
 import ai.neopsyke.agent.model.ActionType
 import ai.neopsyke.agent.model.EgoTrigger
+import ai.neopsyke.agent.model.GroundingRequirement
 import ai.neopsyke.agent.model.PlannerContext
 import ai.neopsyke.agent.support.DenialReasonClassifier
 import ai.neopsyke.agent.support.PromptBudgetAllocator
@@ -401,6 +402,28 @@ object SharedPromptSections {
                 "${turn.role.name.lowercase()}: ${turn.content}"
             }
         }
+
+    /**
+     * Returns a grounding requirement section when grounding is required, null otherwise.
+     * Zero token cost when grounding is not required.
+     */
+    fun groundingRequirementSection(context: PlannerContext): PromptBudgetAllocator.Section? {
+        if (context.groundingMetadata.requirement != GroundingRequirement.REQUIRED) return null
+        return PromptBudgetAllocator.Section(
+            key = "planner_grounding_requirement",
+            role = ChatRole.USER,
+            band = PromptBudgetAllocator.Band.REQUIRED_CONTEXT,
+            importance = PromptBudgetAllocator.Importance.HIGH,
+            floorTokens = 30,
+            content = """
+                GROUNDING REQUIREMENT: This request requires up-to-date external information.
+                You MUST gather external evidence before any final user-facing factual answer.
+                Use one or more evidence-gathering actions and base the answer on gathered
+                results. If prior evidence attempts failed technically, retry evidence gathering
+                with the same or an alternate evidence source before giving up.
+            """.trimIndent()
+        )
+    }
 
     private fun buildSelfMotivatedContext(idState: ai.neopsyke.agent.model.IdStateSnapshot): String {
         val motivation = String.format(Locale.ROOT, "%.3f", idState.triggeringTension)

@@ -74,16 +74,15 @@ class StructuredLogSink : InstrumentationSink {
                 }
             }
 
-            "task_verifier_review" -> {
+            "grounding_gate_review" -> {
                 logger.info {
-                    "task_verifier.review action_id=${event.data["action_id"]} allow=${event.data["allow"]} " +
-                        "reason_code=${event.data["reason_code"]} intent=${event.data["intent_category"]} " +
-                        "volatility=${event.data["volatility_level"]}/${event.data["volatility_score"]} " +
-                        "requires_external_evidence=${event.data["requires_external_evidence"]} " +
-                        "evidence_available=${event.data["evidence_actions_available"]} " +
-                        "evidence_dispatchable=${event.data["evidence_actions_dispatchable"]} " +
-                        "had_successful_evidence=${event.data["had_successful_evidence"]} " +
-                        "had_external_failures=${event.data["had_external_failures"]}"
+                    "grounding_gate.review action_id=${event.data["action_id"]} allow=${event.data["allow"]} " +
+                        "grounding_required=${event.data["grounding_required"]} " +
+                        "evidence_gathered=${event.data["evidence_gathered"]} " +
+                        "evidence_failed_technically=${event.data["evidence_failed_technically"]} " +
+                        "evidence_unavailable=${event.data["evidence_unavailable"]} " +
+                        "forced_terminal=${event.data["forced_terminal"]} " +
+                        "reason_code=${event.data["reason_code"]}"
                 }
             }
 

@@ -48,6 +48,9 @@ class StubChatModelClient(
         if (callSite == "input_intent_router") {
             return ChatCompletion(content = """{"route":"general_action","reasoning":"test default"}""", model = modelName)
         }
+        if (callSite == "grounding_classifier") {
+            return ChatCompletion(content = """{"grounding_required":false}""", model = modelName)
+        }
         return queuedResponses.removeFirstOrNull()
             ?: ChatCompletion(content = """{"decision":"noop","reason":"empty queue"}""", model = modelName)
     }

@@ -71,6 +71,7 @@ class DirectResponsePlanner(
             SharedPromptSections.episodicRecallSection(context),
             SharedPromptSections.evidenceHintsSection(context),
             SharedPromptSections.scratchpadSection(context),
+            SharedPromptSections.groundingRequirementSection(context),
             SharedPromptSections.triggerSection(trigger),
         )
 

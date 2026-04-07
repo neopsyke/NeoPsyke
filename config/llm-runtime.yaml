@@ -66,6 +66,9 @@ cognitive_roles:
       impulse:
         provider: groq
         model: openai/gpt-oss-120b
+      grounding_classifier:
+        provider: openai
+        model: gpt-5-nano
   superego_primary:
     provider: groq
     model: openai/gpt-oss-120b

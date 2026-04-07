@@ -65,6 +65,21 @@
       "id": "goal_creation_bad_cron_feedback_retry",
       "selector": "ai.neopsyke.eval.AgentScenarioPackTest.scenario_goal_creation_bad_cron_triggers_feedback_retry",
       "description": "Invalid LLM-generated cron fails at GoalManager, triggers feedback loop, and planner re-plans via general branch."
+    },
+    {
+      "id": "goal_creation_confirmation_grounding",
+      "selector": "ai.neopsyke.eval.AgentScenarioPackTest.scenario_goal_creation_confirmation_grounding",
+      "description": "Goal creation confirmation (operational, NOT_REQUIRED grounding) passes grounding gate without denial."
+    },
+    {
+      "id": "volatile_fact_grounding_enforcement",
+      "selector": "ai.neopsyke.eval.AgentScenarioPackTest.scenario_volatile_fact_grounding_enforcement",
+      "description": "Volatile-fact question is denied without evidence, then allowed after web search gathers evidence."
+    },
+    {
+      "id": "technical_evidence_retry",
+      "selector": "ai.neopsyke.eval.AgentScenarioPackTest.scenario_technical_evidence_retry",
+      "description": "Technical evidence failure triggers retry rather than hard denial; second attempt succeeds."
     }
   ]
 }

@@ -6,6 +6,8 @@ import ai.neopsyke.agent.ego.planner.PlannerLane
 import ai.neopsyke.agent.ego.planner.input.DirectResponsePlanner
 import ai.neopsyke.agent.ego.planner.input.GeneralActionPlanner
 import ai.neopsyke.agent.ego.planner.input.GoalCreationPlanner
+import ai.neopsyke.agent.ego.planner.input.GroundingClassifier
+import ai.neopsyke.agent.model.GroundingMetadata
 import ai.neopsyke.agent.ego.planner.input.GoalManagementPlanner
 import ai.neopsyke.agent.ego.planner.input.InputIntentRouter
 import ai.neopsyke.agent.ego.planner.input.TaskDecompositionPlanner
@@ -37,6 +39,7 @@ class InputPlanner(
     private val config: AgentConfig,
     private val instrumentation: AgentInstrumentation,
     private val router: InputIntentRouter,
+    private val groundingClassifier: GroundingClassifier,
     private val directResponsePlanner: DirectResponsePlanner,
     private val generalActionPlanner: GeneralActionPlanner,
     private val taskDecompositionPlanner: TaskDecompositionPlanner,
@@ -45,6 +48,10 @@ class InputPlanner(
 ) : PlannerLane {
 
     override val laneId: LaneId = LaneId.INPUT_INTENT_ROUTER
+
+    /** Last resolved grounding metadata from [GroundingClassifier]. Read after [plan] returns. */
+    @Volatile var lastResolvedGrounding: GroundingMetadata? = null
+        private set
 
     override fun plan(trigger: EgoTrigger, context: PlannerContext): EgoDecision {
         val inputTrigger = trigger as? EgoTrigger.IncomingInput
@@ -62,13 +69,18 @@ class InputPlanner(
             )
         )
 
+        // Classify grounding after route, before L2 sub-planner dispatch.
+        val groundingMetadata = groundingClassifier.classify(route, inputTrigger, context)
+        lastResolvedGrounding = groundingMetadata
+        val groundedContext = context.copy(groundingMetadata = groundingMetadata)
+
         return when (route) {
-            is InputRoute.DirectResponse -> directResponsePlanner.plan(inputTrigger, context)
-            is InputRoute.GeneralAction -> generalActionPlanner.plan(inputTrigger, context)
-            is InputRoute.MultiStepTask -> taskDecompositionPlanner.plan(inputTrigger, context)
-            is InputRoute.GoalCreation -> goalCreationPlanner.plan(inputTrigger, context)
+            is InputRoute.DirectResponse -> directResponsePlanner.plan(inputTrigger, groundedContext)
+            is InputRoute.GeneralAction -> generalActionPlanner.plan(inputTrigger, groundedContext)
+            is InputRoute.MultiStepTask -> taskDecompositionPlanner.plan(inputTrigger, groundedContext)
+            is InputRoute.GoalCreation -> goalCreationPlanner.plan(inputTrigger, groundedContext)
             is InputRoute.GoalManagement -> {
-                val decision = goalManagementPlanner.plan(inputTrigger, context)
+                val decision = goalManagementPlanner.plan(inputTrigger, groundedContext)
                 if (decision is EgoDecision.Noop) {
                     instrumentation.emit(
                         AgentEvent(
@@ -79,7 +91,7 @@ class InputPlanner(
                             )
                         )
                     )
-                    generalActionPlanner.plan(inputTrigger, context)
+                    generalActionPlanner.plan(inputTrigger, groundedContext)
                 } else {
                     decision
                 }

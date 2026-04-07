@@ -14,6 +14,7 @@ data class PendingInput(
     val conversationContext: ConversationContext = ConversationContext.default(),
     val percept: Percept? = null,
     val cognitiveThreadId: String? = null,
+    val groundingMetadata: GroundingMetadata? = null,
 )
 
 data class PlanContext(
@@ -42,6 +43,7 @@ data class PendingThought(
     val originActionObservedEvidence: Boolean? = null,
     val conversationContext: ConversationContext = ConversationContext.default(),
     val origin: ActionOrigin = ActionOrigin.USER,
+    val groundingMetadata: GroundingMetadata? = null,
 )
 
 /**
@@ -92,6 +94,8 @@ data class PendingAction(
     val intentionId: String? = null,
     val intentionKind: IntentionKind = IntentionKind.PREPARE,
     val requestedCommitMode: CommitMode = CommitMode.NOT_APPLICABLE,
+    val groundingMetadata: GroundingMetadata? = null,
+    val isForcedTerminal: Boolean = false,
 )
 
 data class PendingFeedback(
@@ -127,29 +131,34 @@ sealed interface OpportunityTrigger {
     val rootInputId: String
     val conversationContext: ConversationContext
     val receivedAtMs: Long?
+    val groundingMetadata: GroundingMetadata?
 
     data class Input(val input: PendingInput) : OpportunityTrigger {
         override val rootInputId: String = input.rootInputId
         override val conversationContext: ConversationContext = input.conversationContext
         override val receivedAtMs: Long = input.receivedAtMs
+        override val groundingMetadata: GroundingMetadata? = input.groundingMetadata
     }
 
     data class Impulse(val impulse: PendingImpulse) : OpportunityTrigger {
         override val rootInputId: String = impulse.rootImpulseId
         override val conversationContext: ConversationContext = impulse.conversationContext
         override val receivedAtMs: Long = impulse.receivedAtMs
+        override val groundingMetadata: GroundingMetadata? = GroundingMetadata.NOT_REQUIRED_PREFILTER
     }
 
     data class Feedback(val feedback: PendingFeedback) : OpportunityTrigger {
         override val rootInputId: String = feedback.cue.rootInputId
         override val conversationContext: ConversationContext = feedback.cue.conversationContext
         override val receivedAtMs: Long = feedback.receivedAtMs
+        override val groundingMetadata: GroundingMetadata? = feedback.cue.groundingMetadata
     }
 
     data class GoalWork(val work: GoalRunActivation) : OpportunityTrigger {
         override val rootInputId: String = work.rootInputId
         override val conversationContext: ConversationContext = work.conversationContext
         override val receivedAtMs: Long? = null
+        override val groundingMetadata: GroundingMetadata? = work.groundingMetadata
     }
 }
 
@@ -191,6 +200,7 @@ data class QueuedIntention(
     val deferredDenialReasonCode: String? = null,
     val deferredOriginActionType: ActionType? = null,
     val deferredOriginActionObservedEvidence: Boolean? = null,
+    val groundingMetadata: GroundingMetadata? = null,
 ) {
     val rootInputId: String? get() = intention.rootStimulusId
     val conversationContext: ConversationContext get() = intention.conversationContext
@@ -217,6 +227,7 @@ data class QueuedIntention(
             originActionObservedEvidence = deferredOriginActionObservedEvidence,
             conversationContext = conversationContext,
             origin = origin,
+            groundingMetadata = groundingMetadata,
         )
 }
 

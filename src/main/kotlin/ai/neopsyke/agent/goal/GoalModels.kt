@@ -4,6 +4,8 @@ import ai.neopsyke.agent.cortex.motor.actions.async.AsyncActionWait
 import java.nio.file.Path
 import java.time.Instant
 import ai.neopsyke.agent.model.ConversationContext
+import ai.neopsyke.agent.model.GroundingMetadata
+import ai.neopsyke.agent.model.GroundingRequirement
 
 data class Goal(
     val id: String,
@@ -61,6 +63,7 @@ data class PlanStep(
     val lastAttemptAt: Instant? = null,
     val completedAt: Instant? = null,
     val notes: String = "",
+    val groundingRequirement: GroundingRequirement = GroundingRequirement.NOT_REQUIRED,
 )
 
 enum class StepStatus {
@@ -113,6 +116,7 @@ data class GoalRunActivation(
     val conversationContext: ConversationContext,
     val actionSuggestion: String = "",
     val wakeReason: String = "",
+    val groundingMetadata: GroundingMetadata? = null,
 )
 
 /**
