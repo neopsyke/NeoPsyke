@@ -106,7 +106,7 @@ class DashboardStateStoreTest {
         assertEquals(metrics, snapshot.metrics)
         assertEquals(3L, (snapshot.instrumentationHealth["dropped_events"] as Number).toLong())
         assertEquals(1L, (snapshot.instrumentationHealth["queue_saturation_events"] as Number).toLong())
-        assertEquals(0L, (snapshot.taskVerifierStats["total_reviews"] as Number).toLong())
+        assertEquals(0L, (snapshot.groundingGateStats["total_reviews"] as Number).toLong())
         assertEquals(0L, (snapshot.promptBudgetStats["total_allocations"] as Number).toLong())
         @Suppress("UNCHECKED_CAST")
         val saturationByType = snapshot.instrumentationHealth["queue_saturation_by_type"] as Map<String, Any?>
@@ -149,12 +149,12 @@ class DashboardStateStoreTest {
         )
 
         val snapshot: DashboardSnapshot = mapper.readValue(store.snapshotJson())
-        assertEquals(2L, (snapshot.taskVerifierStats["total_reviews"] as Number).toLong())
-        assertEquals(1L, (snapshot.taskVerifierStats["deny_count"] as Number).toLong())
-        assertEquals(2L, (snapshot.taskVerifierStats["grounding_required_count"] as Number).toLong())
-        assertEquals(1L, (snapshot.taskVerifierStats["evidence_unavailable_count"] as Number).toLong())
+        assertEquals(2L, (snapshot.groundingGateStats["total_reviews"] as Number).toLong())
+        assertEquals(1L, (snapshot.groundingGateStats["deny_count"] as Number).toLong())
+        assertEquals(2L, (snapshot.groundingGateStats["grounding_required_count"] as Number).toLong())
+        assertEquals(1L, (snapshot.groundingGateStats["evidence_unavailable_count"] as Number).toLong())
         @Suppress("UNCHECKED_CAST")
-        val byReason = snapshot.taskVerifierStats["by_reason_code"] as Map<String, Any?>
+        val byReason = snapshot.groundingGateStats["by_reason_code"] as Map<String, Any?>
         assertEquals(1L, (byReason["GROUNDING_EVIDENCE_REQUIRED"] as Number).toLong())
         assertEquals(1L, (byReason["GROUNDING_EVIDENCE_UNAVAILABLE_GRACEFUL"] as Number).toLong())
     }

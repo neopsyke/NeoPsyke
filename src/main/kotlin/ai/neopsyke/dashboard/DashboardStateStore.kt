@@ -432,7 +432,7 @@ class DashboardStateStore(
                 limits = limits,
                 metrics = metrics,
                 instrumentationHealth = instrumentationHealthMap(),
-                taskVerifierStats = groundingGateStatsMap(),
+                groundingGateStats = groundingGateStatsMap(),
                 promptBudgetStats = promptBudgetStatsMap(),
                 cognitiveThreads = threadSnapshotsLocked(includeTerminal = true, limit = DEFAULT_THREAD_SNAPSHOT_LIMIT),
                 recentEvents = snapshotRecentEventsLocked(
@@ -1496,7 +1496,7 @@ data class DashboardSnapshot(
     val limits: Map<String, Any?>,
     val metrics: MetricsSnapshot?,
     val instrumentationHealth: Map<String, Any?> = emptyMap(),
-    val taskVerifierStats: Map<String, Any?> = emptyMap(),
+    val groundingGateStats: Map<String, Any?> = emptyMap(),
     val promptBudgetStats: Map<String, Any?> = emptyMap(),
     val cognitiveThreads: List<CognitiveThreadSnapshot> = emptyList(),
     val recentEvents: List<AgentEvent>,
