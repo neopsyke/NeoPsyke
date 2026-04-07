@@ -10,6 +10,7 @@ internal data class DecisionVerifierContext(
     val availableActions: Set<ActionType> = emptySet(),
     val dispatchableActions: Set<ActionType> = emptySet(),
     val evidenceActionTypes: Set<ActionType> = emptySet(),
+    val groundingTechnicalFailureBudgetExceeded: Boolean = false,
 )
 
 internal data class DecisionVerifierDecision(
@@ -94,7 +95,7 @@ internal class GroundingGate : DecisionVerifier {
 
         // Technical evidence failures.
         if (evidenceFailedTechnically) {
-            if (forcedTerminal) {
+            if (forcedTerminal && context.groundingTechnicalFailureBudgetExceeded) {
                 // Bounded failure budget exhausted: allow degraded best-effort answer.
                 // The disclaimer is attached by DeliberationEngine.maybeForceTerminalAnswer().
                 return decision(
@@ -106,7 +107,12 @@ internal class GroundingGate : DecisionVerifier {
             }
             return decision(
                 allow = false,
-                reason = "Grounding required; evidence gathering failed technically. Retry evidence gathering.",
+                reason = if (forcedTerminal) {
+                    "Grounding required; forced terminal answer attempted before technical failure budget was exhausted. " +
+                        "Retry evidence gathering first."
+                } else {
+                    "Grounding required; evidence gathering failed technically. Retry evidence gathering."
+                },
                 reasonCode = REASON_CODE_TECH_GROUNDING_EVIDENCE_FAILURE,
             )
         }

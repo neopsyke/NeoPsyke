@@ -9,6 +9,8 @@ import ai.neopsyke.agent.model.ActionExecutionStatus
 import ai.neopsyke.agent.model.ActionType
 import ai.neopsyke.agent.model.ActionOrigin
 import ai.neopsyke.agent.model.GroundingMetadata
+import ai.neopsyke.agent.model.GroundingRequirement
+import ai.neopsyke.agent.model.GroundingSource
 import ai.neopsyke.agent.model.OriginSource
 import ai.neopsyke.agent.model.InputPriority
 import ai.neopsyke.agent.model.Interlocutor
@@ -52,6 +54,11 @@ sealed interface CognitiveSignal : Signal {
         val stimulus: StimulusEnvelope,
         val percept: Percept? = null,
     ) : CognitiveSignal
+
+    data class FeedbackReceived(
+        val cue: ActionFeedbackCue,
+    ) : CognitiveSignal
+
     data object NoStimulus : CognitiveSignal
 }
 
@@ -156,6 +163,10 @@ data class ActionFeedbackCue(
                 put(METADATA_ORIGIN_SOURCE, origin.source.name)
                 origin.needId?.takeIf { it.isNotBlank() }?.let { put(METADATA_ORIGIN_NEED_ID, it) }
                 origin.rootImpulseId?.takeIf { it.isNotBlank() }?.let { put(METADATA_ORIGIN_ROOT_IMPULSE_ID, it) }
+                groundingMetadata?.let { metadata ->
+                    put(METADATA_GROUNDING_REQUIRED, metadata.requirement.name)
+                    put(METADATA_GROUNDING_SOURCE, metadata.source.name)
+                }
             },
         )
 
@@ -175,6 +186,15 @@ data class ActionFeedbackCue(
             val originSource = stimulus.metadata[METADATA_ORIGIN_SOURCE]
                 ?.let { raw -> runCatching { OriginSource.valueOf(raw) }.getOrNull() }
                 ?: OriginSource.USER
+            val groundingRequirement = stimulus.metadata[METADATA_GROUNDING_REQUIRED]
+                ?.let { raw -> runCatching { GroundingRequirement.valueOf(raw.uppercase()) }.getOrNull() }
+            val groundingSource = stimulus.metadata[METADATA_GROUNDING_SOURCE]
+                ?.let { raw -> runCatching { GroundingSource.valueOf(raw.uppercase()) }.getOrNull() }
+            val groundingMetadata = if (groundingRequirement != null && groundingSource != null) {
+                GroundingMetadata(requirement = groundingRequirement, source = groundingSource)
+            } else {
+                null
+            }
             return ActionFeedbackCue(
                 rootInputId = rootInputId,
                 actionType = actionType,
@@ -199,6 +219,7 @@ data class ActionFeedbackCue(
                     needId = stimulus.metadata[METADATA_ORIGIN_NEED_ID],
                     rootImpulseId = stimulus.metadata[METADATA_ORIGIN_ROOT_IMPULSE_ID],
                 ),
+                groundingMetadata = groundingMetadata,
             )
         }
     }
@@ -226,6 +247,8 @@ object CognitiveCueMetadata {
     const val METADATA_ORIGIN_SOURCE: String = "origin_source"
     const val METADATA_ORIGIN_NEED_ID: String = "origin_need_id"
     const val METADATA_ORIGIN_ROOT_IMPULSE_ID: String = "origin_root_impulse_id"
+    const val METADATA_GROUNDING_REQUIRED: String = "grounding_required"
+    const val METADATA_GROUNDING_SOURCE: String = "grounding_source"
 
     const val CUE_TYPE_ID_IMPULSE_READY: String = "id_impulse_ready"
     const val CUE_TYPE_WORK_READY: String = "goal_runtime_work_ready"
@@ -254,6 +277,8 @@ private const val METADATA_REQUIRES_FOLLOW_UP_THOUGHT: String =
 private const val METADATA_ORIGIN_SOURCE: String = CognitiveCueMetadata.METADATA_ORIGIN_SOURCE
 private const val METADATA_ORIGIN_NEED_ID: String = CognitiveCueMetadata.METADATA_ORIGIN_NEED_ID
 private const val METADATA_ORIGIN_ROOT_IMPULSE_ID: String = CognitiveCueMetadata.METADATA_ORIGIN_ROOT_IMPULSE_ID
+private const val METADATA_GROUNDING_REQUIRED: String = CognitiveCueMetadata.METADATA_GROUNDING_REQUIRED
+private const val METADATA_GROUNDING_SOURCE: String = CognitiveCueMetadata.METADATA_GROUNDING_SOURCE
 private const val CUE_TYPE_ID_IMPULSE_READY: String = CognitiveCueMetadata.CUE_TYPE_ID_IMPULSE_READY
 private const val CUE_TYPE_WORK_READY: String = CognitiveCueMetadata.CUE_TYPE_WORK_READY
 private const val CUE_TYPE_ACTION_FEEDBACK: String = CognitiveCueMetadata.CUE_TYPE_ACTION_FEEDBACK
@@ -472,7 +497,7 @@ class SensoryCortex(
     private val syntheticSignalCount = AtomicInteger(0)
 
     fun offerActionFeedback(cue: ActionFeedbackCue): Boolean =
-        offerSyntheticSignal(CognitiveSignal.StimulusReceived(cue.toStimulus()))
+        offerSyntheticSignal(CognitiveSignal.FeedbackReceived(cue))
 
     fun hasPendingSyntheticSignals(): Boolean = syntheticSignalCount.get() > 0
 

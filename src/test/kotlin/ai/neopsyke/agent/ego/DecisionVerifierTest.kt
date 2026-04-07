@@ -132,11 +132,27 @@ class DecisionVerifierTest {
     fun `forced terminal with grounding required and technical failures allows degraded`() {
         val decision = gate.review(
             action = action(grounding = GroundingRequirement.REQUIRED, isForcedTerminal = true),
-            context = contextWithEvidence(hadExternalFailures = true)
+            context = contextWithEvidence(
+                hadExternalFailures = true,
+                groundingTechnicalFailureBudgetExceeded = true,
+            )
         )
         assertTrue(decision.allow)
         assertTrue(decision.forcedTerminal)
         assertEquals(GroundingGate.REASON_CODE_GROUNDING_EVIDENCE_UNAVAILABLE_GRACEFUL, decision.reasonCode)
+    }
+
+    @Test
+    fun `forced terminal with grounding required and technical failures below budget denies`() {
+        val decision = gate.review(
+            action = action(grounding = GroundingRequirement.REQUIRED, isForcedTerminal = true),
+            context = contextWithEvidence(
+                hadExternalFailures = true,
+                groundingTechnicalFailureBudgetExceeded = false,
+            )
+        )
+        assertFalse(decision.allow)
+        assertEquals(GroundingGate.REASON_CODE_TECH_GROUNDING_EVIDENCE_FAILURE, decision.reasonCode)
     }
 
     @Test
@@ -170,6 +186,7 @@ class DecisionVerifierTest {
     private fun contextWithEvidence(
         hadSuccessfulEvidence: Boolean = false,
         hadExternalFailures: Boolean = false,
+        groundingTechnicalFailureBudgetExceeded: Boolean = false,
     ): DecisionVerifierContext = DecisionVerifierContext(
         externalEvidence = DeliberationEngine.ExternalEvidenceProgress(
             hadSuccessfulEvidence = hadSuccessfulEvidence,
@@ -178,5 +195,6 @@ class DecisionVerifierTest {
         availableActions = setOf(ActionType.WEB_SEARCH, ActionType.CONTACT_USER),
         dispatchableActions = setOf(ActionType.WEB_SEARCH, ActionType.CONTACT_USER),
         evidenceActionTypes = evidenceActionTypes,
+        groundingTechnicalFailureBudgetExceeded = groundingTechnicalFailureBudgetExceeded,
     )
 }

@@ -230,7 +230,27 @@ internal class DeliberationEngine(
         if (!isEvidenceAction(action)) return
         val scope = inputScope(action.rootInputId, action.conversationContext.sessionId) ?: return
         val current = externalEvidence[scope] ?: ExternalEvidenceProgress()
-        externalEvidence[scope] = current.copy(hadExternalFailures = true)
+        val actionId = action.id.takeIf { it > 0L }
+        val alreadyCounted = actionId != null && actionId in current.technicalFailureActionIds
+        val updatedIds = if (actionId != null && !alreadyCounted) {
+            if (current.technicalFailureActionIds.size >= MAX_TRACKED_TECHNICAL_FAILURE_ACTION_IDS) {
+                current.technicalFailureActionIds
+            } else {
+                current.technicalFailureActionIds + actionId
+            }
+        } else {
+            current.technicalFailureActionIds
+        }
+        val nextCount = if (alreadyCounted) {
+            current.technicalFailureCount
+        } else {
+            current.technicalFailureCount + 1
+        }
+        externalEvidence[scope] = current.copy(
+            hadExternalFailures = true,
+            technicalFailureCount = nextCount,
+            technicalFailureActionIds = updatedIds,
+        )
     }
 
     fun clearEvidenceForInput(rootInputId: String?, sessionId: String) {
@@ -241,6 +261,12 @@ internal class DeliberationEngine(
     fun evidenceFor(rootInputId: String?, sessionId: String): ExternalEvidenceProgress? {
         val scope = inputScope(rootInputId, sessionId) ?: return null
         return externalEvidence[scope]
+    }
+
+    fun isGroundingTechnicalFailureBudgetExceeded(rootInputId: String?, sessionId: String): Boolean {
+        val scope = inputScope(rootInputId, sessionId) ?: return false
+        val evidence = externalEvidence[scope] ?: return false
+        return evidence.technicalFailureCount >= GROUNDING_TECHNICAL_FAILURE_BUDGET
     }
 
     fun threadSecurityContext(
@@ -430,6 +456,8 @@ internal class DeliberationEngine(
         val hadExternalFailures: Boolean = false,
         val latestPlannerSignal: String = "",
         val successfulEvidenceSignals: List<String> = emptyList(),
+        val technicalFailureCount: Int = 0,
+        val technicalFailureActionIds: Set<Long> = emptySet(),
     )
 
     data class ActionCooldownState(
@@ -447,6 +475,8 @@ internal class DeliberationEngine(
         private const val MAX_FORCED_TERMINAL_SCOPES: Int = 256
         private const val ACTION_ERROR_CATEGORY_NONE: String = "none"
         private const val ACTION_ERROR_CATEGORY_NON_RETRYABLE: String = "non_retryable"
+        private const val GROUNDING_TECHNICAL_FAILURE_BUDGET: Int = 2
+        private const val MAX_TRACKED_TECHNICAL_FAILURE_ACTION_IDS: Int = 128
         private const val FORCED_TERMINAL_EVIDENCE_FAILURE_DISCLAIMER: String =
             "\n\nNote: I was unable to verify this information with external sources due to " +
                 "technical failures. This answer is based on available knowledge and may not " +

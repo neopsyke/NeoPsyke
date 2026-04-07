@@ -86,6 +86,16 @@ class StructuredLogSink : InstrumentationSink {
                 }
             }
 
+            "grounding_metadata_propagated" -> {
+                logger.info {
+                    "grounding.propagated root_input_id=${event.data["root_input_id"]} " +
+                        "from=${event.data["from_envelope_type"]} " +
+                        "to=${event.data["to_envelope_type"]} " +
+                        "grounding_required=${event.data["grounding_required"]} " +
+                        "source=${event.data["source"]}"
+                }
+            }
+
             "prompt_budget_allocation" -> {
                 logger.info {
                     "prompt_budget.allocation call_site=${event.data["call_site"]} " +

@@ -89,6 +89,17 @@ internal class DecisionDispatcher(
         )
         if (intention != null) {
             deliberation.recordIntention(rootInputId, conversationContext, intention)
+            groundingMetadata?.let { metadata ->
+                instrumentation.emit(
+                    AgentEvents.groundingMetadataPropagated(
+                        rootInputId = rootInputId,
+                        fromEnvelopeType = "planner_context",
+                        toEnvelopeType = "queued_intention",
+                        groundingRequired = metadata.requirement == GroundingRequirement.REQUIRED,
+                        source = metadata.source.name.lowercase(),
+                    )
+                )
+            }
         }
         return intention != null
     }
@@ -300,6 +311,17 @@ internal class DecisionDispatcher(
                     deliberation.recordIntention(rootInputId, conversationContext, intention)
                 }
                 val actionGrounding = originThought?.groundingMetadata ?: plannerContext?.groundingMetadata
+                if (queued && actionGrounding != null) {
+                    instrumentation.emit(
+                        AgentEvents.groundingMetadataPropagated(
+                            rootInputId = rootInputId,
+                            fromEnvelopeType = "planner_context",
+                            toEnvelopeType = "queued_intention",
+                            groundingRequired = actionGrounding.requirement == GroundingRequirement.REQUIRED,
+                            source = actionGrounding.source.name.lowercase(),
+                        )
+                    )
+                }
                 instrumentation.emit(
                     AgentEvents.actionProposed(
                         actionType = decision.actionType.id,
@@ -535,6 +557,7 @@ internal class DecisionDispatcher(
                         originActionObservedEvidence = originThought?.originActionObservedEvidence,
                         conversationContext = conversationContext,
                         origin = origin,
+                        groundingMetadata = originThought?.groundingMetadata ?: plannerContext?.groundingMetadata,
                     )
                     instrumentation.emit(
                         AgentEvent(

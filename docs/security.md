@@ -770,7 +770,7 @@ simply disappear.
 
 In the review pipeline:
 
-- task verifier denials are recorded in the ledger and fed back into fallback /
+- grounding-gate denials are recorded in the ledger and fed back into fallback /
   replanning behavior
 - superego denials are recorded and fed back
 - action-control refusals are recorded and fed back

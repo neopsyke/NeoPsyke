@@ -1140,8 +1140,10 @@ class AgentScenarioPackTest {
         // The grounded answer should be delivered.
         val classifierEvents = instrumentation.events.filter { it.type == "grounding_classification_resolved" }
         val gateEvents = instrumentation.events.filter { it.type == "grounding_gate_review" }
+        val propagationEvents = instrumentation.events.filter { it.type == "grounding_metadata_propagated" }
         assertTrue(outputs.any { it.contains("15C") || it.contains("cloudy") },
             "Expected grounded answer in outputs: $outputs\nClassifier events: $classifierEvents\nGate events: $gateEvents")
+        assertTrue(propagationEvents.isNotEmpty(), "Expected grounding_metadata_propagated events: $propagationEvents")
         // First gate review must deny (no evidence).
         assertTrue(gateEvents.any {
             it.data["allow"] == false &&
@@ -1153,6 +1155,7 @@ class AgentScenarioPackTest {
         assertTrue(gateEvents.any {
             it.data["allow"] == true &&
                 it.data["action_type"] == "contact_user" &&
+                it.data["grounding_required"] == true &&
                 it.data["evidence_gathered"] == true
         }, "Expected allow gate event for contact_user after evidence: $gateEvents")
     }
@@ -1227,6 +1230,7 @@ class AgentScenarioPackTest {
         assertTrue(gateEvents.any {
             it.data["allow"] == true &&
                 it.data["action_type"] == "contact_user" &&
+                it.data["grounding_required"] == true &&
                 it.data["evidence_gathered"] == true
         }, "Expected allow gate event after retry: $gateEvents")
     }

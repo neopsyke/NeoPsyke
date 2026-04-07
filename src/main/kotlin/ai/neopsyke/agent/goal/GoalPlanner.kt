@@ -4,14 +4,15 @@ import com.fasterxml.jackson.annotation.JsonProperty
 import com.fasterxml.jackson.databind.DeserializationFeature
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
-import mu.KotlinLogging
 import ai.neopsyke.agent.config.AgentConfig
+import ai.neopsyke.agent.model.GroundingRequirement
 import ai.neopsyke.llm.ChatMessage
 import ai.neopsyke.llm.ChatModelClient
 import ai.neopsyke.llm.ChatRequestOptions
 import ai.neopsyke.llm.ChatResponseFormat
 import ai.neopsyke.llm.ChatRole
 import java.time.Instant
+import mu.KotlinLogging
 
 private val plannerLogger = KotlinLogging.logger {}
 
@@ -96,6 +97,7 @@ class LlmGoalPlanner(
                         requires = step.requires.orEmpty().toSet(),
                         produces = step.produces.orEmpty().toSet(),
                         maxAttempts = (step.maxAttempts ?: DEFAULT_MAX_ATTEMPTS).coerceAtLeast(1),
+                        groundingRequirement = parseGroundingRequirement(step.groundingRequirement),
                     )
                 }
             }
@@ -115,13 +117,25 @@ class LlmGoalPlanner(
     private data class GoalPlanStepPayload(
         val id: String? = null,
         val description: String? = null,
-        @field:JsonProperty("acceptance_criteria")
+        @param:JsonProperty("acceptance_criteria")
         val acceptanceCriteria: String? = null,
+        @param:JsonProperty("grounding_requirement")
+        val groundingRequirement: String? = null,
         val requires: List<String>? = null,
         val produces: List<String>? = null,
-        @field:JsonProperty("max_attempts")
+        @param:JsonProperty("max_attempts")
         val maxAttempts: Int? = null,
     )
+
+    private fun parseGroundingRequirement(raw: String?): GroundingRequirement =
+        when (raw?.trim()?.lowercase()) {
+            "required" -> GroundingRequirement.REQUIRED
+            "not_required", "", null -> GroundingRequirement.NOT_REQUIRED
+            else -> {
+                plannerLogger.warn { "Goal planner produced unknown grounding_requirement='$raw'; defaulting to not_required." }
+                GroundingRequirement.NOT_REQUIRED
+            }
+        }
 
     private companion object {
         const val DEFAULT_MAX_ATTEMPTS: Int = 3
@@ -142,6 +156,7 @@ class LlmGoalPlanner(
                       "id":{"type":"string"},
                       "description":{"type":"string"},
                       "acceptance_criteria":{"type":"string"},
+                      "grounding_requirement":{"type":"string","enum":["required","not_required"]},
                       "requires":{"type":"array","items":{"type":"string"}},
                       "produces":{"type":"array","items":{"type":"string"}},
                       "max_attempts":{"type":"integer","minimum":1}
@@ -159,6 +174,9 @@ class LlmGoalPlanner(
             Use a short flat step list.
             Each step must be independently verifiable.
             Do not exceed the provided max_steps.
+            For each step set grounding_requirement:
+            - "required" when the step needs fresh external evidence (weather, prices, news, schedules, current-state facts).
+            - "not_required" for static/internal/procedural steps.
         """.trimIndent()
     }
 }

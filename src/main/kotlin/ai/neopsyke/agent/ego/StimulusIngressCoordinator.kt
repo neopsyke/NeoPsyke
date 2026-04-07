@@ -14,10 +14,14 @@ import ai.neopsyke.agent.model.Opportunity
 import ai.neopsyke.agent.model.PendingFeedback
 import ai.neopsyke.agent.model.PendingInput
 import ai.neopsyke.agent.model.Percept
+import ai.neopsyke.agent.model.Provenances
 import ai.neopsyke.agent.model.RootInputIds
 import ai.neopsyke.agent.model.StimulusEnvelope
+import ai.neopsyke.agent.model.StimulusFamily
+import ai.neopsyke.agent.model.StimulusTrustLevel
 import ai.neopsyke.instrumentation.AgentEvents
 import ai.neopsyke.instrumentation.AgentInstrumentation
+import java.time.Instant
 import mu.KotlinLogging
 
 private val ingressLogger = KotlinLogging.logger {}
@@ -54,6 +58,39 @@ internal class StimulusIngressCoordinator(
             return enqueueFeedback(cue, stimulus, percept)
         }
         return enqueueInput(stimulus, percept)
+    }
+
+    fun ingestFeedbackCue(cue: ActionFeedbackCue): Outcome {
+        val stimulus = StimulusEnvelope(
+            id = RootInputIds.next(),
+            family = StimulusFamily.FEEDBACK,
+            source = "action-feedback-internal",
+            content = cue.feedbackContent,
+            receivedAt = Instant.now(),
+            conversationContext = cue.conversationContext,
+            correlationId = cue.rootInputId,
+            causationId = cue.sourceActionId?.toString(),
+            trustLevel = StimulusTrustLevel.TRUSTED_INTERNAL,
+            provenance = Provenances.trustedSystemSignal(
+                provider = "action-feedback-internal",
+                sourceRef = cue.rootInputId,
+            ),
+            metadata = mapOf(
+                CognitiveCueMetadata.METADATA_CUE_TYPE to CognitiveCueMetadata.CUE_TYPE_ACTION_FEEDBACK,
+            ),
+        )
+        val percept = Percept(
+            id = RootInputIds.next(),
+            family = ai.neopsyke.agent.model.PerceptFamily.FEEDBACK,
+            summary = cue.feedbackContent,
+            source = stimulus.source,
+            occurredAt = stimulus.receivedAt,
+            conversationContext = cue.conversationContext,
+            rootStimulusId = stimulus.id,
+            provenance = stimulus.provenance,
+            metadata = stimulus.metadata,
+        )
+        return enqueueFeedback(cue, stimulus, percept)
     }
 
     private fun enqueueGoalWork(
@@ -124,6 +161,17 @@ internal class StimulusIngressCoordinator(
             receivedAtMs = stimulus.receivedAt.toEpochMilli(),
             resumedFromWaitingThread = resumedFromWaitingThread,
         )
+        cue.groundingMetadata?.let { metadata ->
+            instrumentation.emit(
+                AgentEvents.groundingMetadataPropagated(
+                    rootInputId = cue.rootInputId,
+                    fromEnvelopeType = "action_feedback_cue",
+                    toEnvelopeType = "pending_feedback",
+                    groundingRequired = metadata.requirement == ai.neopsyke.agent.model.GroundingRequirement.REQUIRED,
+                    source = metadata.source.name.lowercase(),
+                )
+            )
+        }
         val opportunity = shapeOpportunityContract(
             cognitiveThreads.feedbackOpportunity(feedback),
             cue.rootInputId,

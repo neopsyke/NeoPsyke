@@ -189,6 +189,24 @@ object AgentEvents {
             )
         )
 
+    fun groundingMetadataPropagated(
+        rootInputId: String?,
+        fromEnvelopeType: String,
+        toEnvelopeType: String,
+        groundingRequired: Boolean,
+        source: String,
+    ): AgentEvent =
+        AgentEvent(
+            type = "grounding_metadata_propagated",
+            data = mapOf(
+                "root_input_id" to rootInputId,
+                "from_envelope_type" to fromEnvelopeType,
+                "to_envelope_type" to toEnvelopeType,
+                "grounding_required" to groundingRequired,
+                "source" to source,
+            )
+        )
+
     fun superegoReviewInput(
         action: PendingAction,
         directives: List<String>,

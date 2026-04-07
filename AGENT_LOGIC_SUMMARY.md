@@ -15,10 +15,10 @@ NeoPsyke is an autonomous cognitive agent built around a Freudian-inspired archi
 
 **Six major subsystems:**
 
-1. **SensoryCortex** — Receives external stimuli (user messages, Telegram updates, feedback cues, goal/Id wake signals), sanitizes them, resolves conversation identity/security, and transforms them into typed `Percept` objects.
+1. **SensoryCortex** — Receives external stimuli (user messages, Telegram updates, goal/Id wake signals) and internal typed feedback cues, sanitizes/enriches stimulus envelopes, resolves conversation identity/security, and transforms envelope stimuli into typed `Percept` objects.
 2. **Ego** — The central deliberation loop. Pulls percepts from SensoryCortex, schedules cognitive work via `AttentionScheduler`, delegates planning to the Planner, routes actions through the `ActionReviewPipeline`, tracks `DecisionPressure`, and manages thread/session lifecycle.
 3. **Superego** — Three-layer action review gate: `DeterministicConscience` hard-deny checks, configuration-based `ActionAuthorizationPolicy`, and LLM semantic review (with optional `TwoStageReview` escalation). Every non-fallback action must pass all three layers.
-4. **MotorCortex** — Discovers action plugins at startup via `ServiceLoader`, executes authorized actions through `ActionControlService`, and routes output through `ConversationOutputGateway`. Action feedback re-enters through SensoryCortex.
+4. **MotorCortex** — Discovers action plugins at startup via `ServiceLoader`, executes authorized actions through `ActionControlService`, and routes output through `ConversationOutputGateway`. Internal action feedback re-enters through SensoryCortex as a typed cognitive signal and is routed by `StimulusIngressCoordinator`.
 5. **Id** — Autonomous drive module. Maintains configurable needs that grow over time and emit impulses into the Ego loop when tension exceeds threshold. Impulses are processed like inputs but with convergence constraints.
 6. **Memory System** — Four tiers: short-term context buffer (`MemoryStore`), long-term vector recall (`Hippocampus`), episodic journal (`Logbook`), and per-request scratchpad workspace (`ScratchpadStore`).
 
@@ -35,7 +35,7 @@ Stimulus → SensoryCortex (sanitize, appraise) → Percept
     → Superego (deterministic + policy + LLM review)
     → ActionControlService (stage/authorize/commit)
     → MotorCortex (plugin dispatch)
-  → ActionFeedbackCue → SensoryCortex → Ego (continuation)
+  → ActionFeedbackCue → SensoryCortex (typed feedback signal) → StimulusIngressCoordinator → Ego (continuation)
 ```
 
 ---
@@ -85,7 +85,7 @@ Stimulus → SensoryCortex (sanitize, appraise) → Percept
 - File: `src/main/kotlin/ai/neopsyke/agent/cortex/sensory/SensoryCortex.kt`
 - Receives signals from `SignalSource` (async channel or stdin).
 - Two signal planes:
-  - `CognitiveSignal` — perception-bearing: `StimulusReceived(envelope, percept)`, `NoStimulus`.
+  - `CognitiveSignal` — perception-bearing: `StimulusReceived(envelope, percept)`, `FeedbackReceived(cue)`, `NoStimulus`.
   - `RuntimeControlSignal` — lifecycle: `SourceClosed`, `ExitRequested`, `ShutdownRequested`, `ConfigReloaded`.
 - `nextSignal()` is the mandatory stimulus→percept boundary:
   - Prioritizes synthetic signals (internal feedback cues) over external source signals.
@@ -96,7 +96,8 @@ Stimulus → SensoryCortex (sanitize, appraise) → Percept
   - Linguistic stimuli from owner-only Telegram (webhook or polling).
   - Cue stimuli from Id impulse wakeups.
   - Cue stimuli from goal-runtime work-ready signals.
-  - Feedback stimuli from completed/waiting action outcomes.
+  - Typed internal feedback cues from completed/waiting action outcomes (`FeedbackReceived`).
+  - Envelope feedback stimuli for external compatibility paths (`StimulusReceived` with `family=FEEDBACK`).
 
 ### L2: Conversation Security Context
 - `ConversationContext` is mandatory end-to-end, requires non-blank `sessionId`.

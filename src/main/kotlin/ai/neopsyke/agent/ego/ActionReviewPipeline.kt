@@ -439,6 +439,10 @@ internal class ActionReviewPipeline(
                 availableActions = availableActionsForScope,
                 dispatchableActions = dispatchableActionsForScope,
                 evidenceActionTypes = motorCortex.actionTypesWithCapability(ActionCapability.GATHERS_EVIDENCE),
+                groundingTechnicalFailureBudgetExceeded = deliberation.isGroundingTechnicalFailureBudgetExceeded(
+                    resolvedAction.rootInputId,
+                    sessionId,
+                ),
             )
         )
         instrumentation.emit(
@@ -985,6 +989,17 @@ internal class ActionReviewPipeline(
             origin = resolvedAction.origin,
             groundingMetadata = resolvedAction.groundingMetadata,
         )
+        resolvedAction.groundingMetadata?.let { metadata ->
+            instrumentation.emit(
+                AgentEvents.groundingMetadataPropagated(
+                    rootInputId = resolvedAction.rootInputId,
+                    fromEnvelopeType = "pending_action",
+                    toEnvelopeType = "action_feedback_cue",
+                    groundingRequired = metadata.requirement == ai.neopsyke.agent.model.GroundingRequirement.REQUIRED,
+                    source = metadata.source.name.lowercase(),
+                )
+            )
+        }
         if (!emitActionFeedback(cue)) {
             instrumentation.emit(AgentEvents.warning("Failed to enqueue action feedback stimulus."))
             telemetry.recordQueueSaturation(

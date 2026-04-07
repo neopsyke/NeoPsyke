@@ -179,7 +179,7 @@ sequenceDiagram
                 Ego->>ACS: stage + authorize + commit
                 ACS->>Motor: execute(action)
                 Motor-->>SC: ActionFeedbackCue
-                SC->>Ego: StimulusReceived(feedback)
+                SC->>Ego: FeedbackReceived(cue)
             else deny
                 Ego->>Sched: enqueue recovery defer
             end
@@ -340,12 +340,12 @@ sequenceDiagram
                                 ACS->>Motor: execute(action, authorization)
                                 Motor-->>ACS: outcome
                                 Motor->>SC: emit ActionFeedbackCue (non-contact outcomes)
-                                SC->>Ego: StimulusReceived(feedback percept)
+                                SC->>Ego: FeedbackReceived(cue)
                                 ACS->>ACDB: save receipt + ledger + final staged status
                                 ACS-->>Ego: executed outcome
                             end
                             Note over Ego,Motor: Actions may complete immediately or return WAITING + async operation handles
-                            Note over SC,Ego: Feedback continuations and terminal thread resolution are decided only after feedback re-enters through SensoryCortex, and WAITING outcomes suspend the thread instead of auto-queuing a continuation
+                            Note over SC,Ego: Feedback continuations and terminal thread resolution are decided only after typed feedback re-enters through SensoryCortex and StimulusIngressCoordinator; WAITING outcomes suspend the thread instead of auto-queuing a continuation
                             Note over Ego,Motor: contact_user delivery is channel-aware. Telegram sessions send through Bot API, dashboard sessions continue through local/dashboard delivery
                             Note over ACAPI,Dash: Dashboard-approved staged executions can append a completion/answer message back into the originating chat session before root-session mapping is cleared
                             Note over Ego,PG: Goal-origin WAITING without handles is rejected as a contract violation

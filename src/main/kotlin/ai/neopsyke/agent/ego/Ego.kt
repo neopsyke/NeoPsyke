@@ -231,6 +231,15 @@ class Ego(
                     }
                 }
 
+                is CognitiveSignal.FeedbackReceived -> {
+                    when (val outcome = stimulusIngress.ingestFeedbackCue(signal.cue)) {
+                        StimulusIngressCoordinator.Outcome.NoWork -> continue
+                        is StimulusIngressCoordinator.Outcome.RunLoop -> {
+                            runLoop()
+                        }
+                    }
+                }
+
                 RuntimeControlSignal.ShutdownRequested -> {
                     logger.info { "Graceful shutdown requested." }
                     instrumentation.emit(AgentEvents.loopStatus(status = "stopped", message = "shutdown_requested"))
@@ -282,6 +291,7 @@ class Ego(
             requiresFollowUpThought = cue.requiresFollowUpThought,
             followUpPrefix = motorCortex.followUpPrefix(cue.actionType),
             origin = cue.origin,
+            groundingMetadata = cue.groundingMetadata,
         )
         val outcome = ActionOutcome(
             statusSummary = cue.statusSummary,
@@ -304,7 +314,28 @@ class Ego(
             originActionObservedEvidence = observed,
             conversationContext = convCtx,
             origin = cue.origin,
+            groundingMetadata = cue.groundingMetadata,
         )
+        cue.groundingMetadata?.let { metadata ->
+            instrumentation.emit(
+                AgentEvents.groundingMetadataPropagated(
+                    rootInputId = cue.rootInputId,
+                    fromEnvelopeType = "action_feedback_cue",
+                    toEnvelopeType = "pending_action",
+                    groundingRequired = metadata.requirement == GroundingRequirement.REQUIRED,
+                    source = metadata.source.name.lowercase(),
+                )
+            )
+            instrumentation.emit(
+                AgentEvents.groundingMetadataPropagated(
+                    rootInputId = cue.rootInputId,
+                    fromEnvelopeType = "action_feedback_cue",
+                    toEnvelopeType = "pending_thought",
+                    groundingRequired = metadata.requirement == GroundingRequirement.REQUIRED,
+                    source = metadata.source.name.lowercase(),
+                )
+            )
+        }
         if (cue.executionStatus == ActionExecutionStatus.FAILED) {
             deliberation.markEvidenceFailure(feedbackAction)
         }
@@ -550,6 +581,15 @@ class Ego(
         // Incorporate resolved grounding metadata from InputPlanner classification.
         val resolvedGrounding = planner.lastResolvedGrounding
         val groundedContext = if (resolvedGrounding != null) {
+            instrumentation.emit(
+                AgentEvents.groundingMetadataPropagated(
+                    rootInputId = input.rootInputId,
+                    fromEnvelopeType = "input_planner",
+                    toEnvelopeType = "planner_context",
+                    groundingRequired = resolvedGrounding.requirement == GroundingRequirement.REQUIRED,
+                    source = resolvedGrounding.source.name.lowercase(),
+                )
+            )
             context.copy(groundingMetadata = resolvedGrounding)
         } else {
             context
@@ -698,6 +738,17 @@ class Ego(
                     requestedCommitMode = intention.intention.commitMode,
                     groundingMetadata = intention.groundingMetadata,
                 )
+                intention.groundingMetadata?.let { metadata ->
+                    instrumentation.emit(
+                        AgentEvents.groundingMetadataPropagated(
+                            rootInputId = intention.rootInputId,
+                            fromEnvelopeType = "queued_intention",
+                            toEnvelopeType = "pending_action",
+                            groundingRequired = metadata.requirement == GroundingRequirement.REQUIRED,
+                            source = metadata.source.name.lowercase(),
+                        )
+                    )
+                }
                 processAction(pendingAction)
             }
         }
