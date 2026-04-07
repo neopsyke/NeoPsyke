@@ -112,6 +112,18 @@ internal class FallbackHandler(
                 capacity = config.maxPendingThoughts,
                 reason = "enqueue_denial_thought_failed_full"
             )
+        } else {
+            action.groundingMetadata?.let { metadata ->
+                instrumentation.emit(
+                    AgentEvents.groundingMetadataPropagated(
+                        rootInputId = action.rootInputId,
+                        fromEnvelopeType = "pending_action",
+                        toEnvelopeType = "queued_intention",
+                        groundingRequired = metadata.requirement == GroundingRequirement.REQUIRED,
+                        source = metadata.source.name.lowercase(),
+                    )
+                )
+            }
         }
         telemetry.emitQueueSnapshot("action_denied")
     }
@@ -157,6 +169,18 @@ internal class FallbackHandler(
                 capacity = config.maxPendingThoughts,
                 reason = "enqueue_staged_action_thought_failed_full"
             )
+        } else {
+            action.groundingMetadata?.let { metadata ->
+                instrumentation.emit(
+                    AgentEvents.groundingMetadataPropagated(
+                        rootInputId = action.rootInputId,
+                        fromEnvelopeType = "pending_action",
+                        toEnvelopeType = "queued_intention",
+                        groundingRequired = metadata.requirement == GroundingRequirement.REQUIRED,
+                        source = metadata.source.name.lowercase(),
+                    )
+                )
+            }
         }
         telemetry.emitQueueSnapshot("action_staged")
     }

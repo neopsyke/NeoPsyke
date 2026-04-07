@@ -1141,9 +1141,27 @@ class AgentScenarioPackTest {
         val classifierEvents = instrumentation.events.filter { it.type == "grounding_classification_resolved" }
         val gateEvents = instrumentation.events.filter { it.type == "grounding_gate_review" }
         val propagationEvents = instrumentation.events.filter { it.type == "grounding_metadata_propagated" }
+        val propagationPairs = propagationEvents.mapNotNull { event ->
+            val from = event.data["from_envelope_type"]?.toString()
+            val to = event.data["to_envelope_type"]?.toString()
+            if (from != null && to != null) from to to else null
+        }.toSet()
         assertTrue(outputs.any { it.contains("15C") || it.contains("cloudy") },
             "Expected grounded answer in outputs: $outputs\nClassifier events: $classifierEvents\nGate events: $gateEvents")
         assertTrue(propagationEvents.isNotEmpty(), "Expected grounding_metadata_propagated events: $propagationEvents")
+        assertTrue(
+            setOf(
+                "grounding_classifier" to "pending_input",
+                "pending_input" to "planner_context",
+                "planner_context" to "queued_intention",
+                "queued_intention" to "pending_action",
+                "pending_action" to "queued_intention",
+                "pending_action" to "action_feedback_cue",
+                "action_feedback_cue" to "pending_action",
+                "action_feedback_cue" to "pending_thought",
+            ).all { it in propagationPairs },
+            "Expected full grounding propagation chain, got: $propagationPairs"
+        )
         // First gate review must deny (no evidence).
         assertTrue(gateEvents.any {
             it.data["allow"] == false &&
