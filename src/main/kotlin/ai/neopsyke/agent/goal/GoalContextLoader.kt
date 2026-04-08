@@ -79,6 +79,7 @@ object GoalContextLoader {
         wakeReason: String,
     ): GoalRunActivation {
         val tier2 = tier2Context(state.goal.workspacePath)
+        val provider = state.goal.contactChannel ?: GOAL_RUNTIME_PROVIDER
         return GoalRunActivation(
             goalId = state.id,
             stepId = step.id,
@@ -90,7 +91,7 @@ object GoalContextLoader {
                 sessionId = ConversationContext.DEFAULT_SESSION_ID,
                 interlocutor = Interlocutor.named(GOAL_RUNTIME_PROVIDER),
                 security = ConversationSecurityContexts.internalAutomation(
-                    provider = GOAL_RUNTIME_PROVIDER,
+                    provider = provider,
                     channelId = rootInputId,
                 ),
             ),

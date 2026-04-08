@@ -697,10 +697,33 @@ internal object AppModeRunners {
         } else {
             null
         }
+        val telegramAckTracker = ai.neopsyke.agent.cortex.motor.actions.TelegramStartupAckTracker()
+        val dashboardMessageSink = ai.neopsyke.agent.cortex.motor.actions.DashboardMessageSink { sessionId, text, source ->
+            dashboardStore.ensureChatSession(sessionId = sessionId, title = "Default")
+            dashboardStore.addAssistantMessage(sessionId = sessionId, content = text, source = source)
+            ai.neopsyke.agent.cortex.motor.actions.ConversationDeliveryResult(delivered = true, detail = "Dashboard delivery recorded.")
+        }
+        val dashboardAvailability = ai.neopsyke.agent.cortex.motor.actions.DashboardAvailabilityCheck { sessionId ->
+            dashboardStore.hasChatSession(sessionId) &&
+                (!config.approvals.dashboardRequiresLiveSubscriber || dashboardStore.hasActiveChatSubscriber(sessionId))
+        }
+        val contactChannelStatusProvider = ai.neopsyke.agent.cortex.motor.actions.DefaultUserContactChannelStatusProvider(
+            dashboardAvailability = dashboardAvailability,
+            telegramConfig = telegramConfig,
+            telegramSink = telegramSink,
+            telegramAckTracker = telegramAckTracker,
+        )
+        val contactChannelResolver = ai.neopsyke.agent.cortex.motor.actions.DefaultUserContactChannelResolver(
+            channelStatusProvider = contactChannelStatusProvider,
+            channelPriority = config.approvals.channelPriority,
+            defaultChannel = config.approvals.defaultChannel,
+        )
         val conversationOutput = RoutedConversationOutputGateway(
             fallbackOutput = {},
             telegramSink = telegramSink,
+            dashboardSink = dashboardMessageSink,
         )
+        conversationOutput.setChannelResolver(contactChannelResolver)
         val chatBridge = ChatRuntimeBridge(
             store = dashboardStore,
             sensoryInput = sensoryInput,
@@ -857,6 +880,7 @@ internal object AppModeRunners {
                 criticalSinks = listOfNotNull(sidecarSink),
                 scope = agentScope
             ).use { instrumentation ->
+                sensoryCortex.setInstrumentation(instrumentation)
                 sessionRecordingManager?.setInstrumentation(instrumentation)
                 val actionAuthorizationPolicy = createActionAuthorizationPolicy(config)
                 createActionControlStoreIfEnabled(config).use { actionControlStore ->
@@ -1186,7 +1210,7 @@ internal object AppModeRunners {
                                                             planner = ai.neopsyke.agent.goal.LlmGoalPlanner(plannerClient, config),
                                                             verifier = ai.neopsyke.agent.goal.LlmGoalStepVerifier(plannerClient, config),
                                                             instrumentation = instrumentation,
-                                                            cueEmitter = sensoryInput::offerGoalRuntimeCue,
+                                                            cueEmitter = sensoryCortex::offerGoalRuntimeCue,
                                                         ).also { it.start(agentScope) }
                                                     } else {
                                                         null
@@ -1334,6 +1358,7 @@ internal object AppModeRunners {
                                                             dashboardStore = dashboardStore,
                                                             telegramConfig = telegramConfig,
                                                             telegramSink = telegramSink,
+                                                            telegramAckTracker = telegramAckTracker,
                                                             sessionRecordingManager = sessionRecordingManager,
                                                             forwardNormalInput = { content, source, priority, conversationContext ->
                                                                 sensoryInput.submitInput(
@@ -1554,6 +1579,7 @@ internal object AppModeRunners {
                 criticalSinks = listOfNotNull(sidecarSink),
                 scope = agentScope
             ).use { instrumentation ->
+                sensoryCortex.setInstrumentation(instrumentation)
                 sessionRecordingManager?.setInstrumentation(instrumentation)
                 instrumentation.emit(AgentEvents.loopStatus(status = "booting", message = "freud_live_start"))
 
@@ -1759,7 +1785,7 @@ internal object AppModeRunners {
                                                         planner = ai.neopsyke.agent.goal.LlmGoalPlanner(plannerClient, config),
                                                         verifier = ai.neopsyke.agent.goal.LlmGoalStepVerifier(plannerClient, config),
                                                         instrumentation = instrumentation,
-                                                        cueEmitter = sensoryInput::offerGoalRuntimeCue,
+                                                        cueEmitter = sensoryCortex::offerGoalRuntimeCue,
                                                     ).also { it.start(agentScope) }
                                                 } else {
                                                     null
@@ -2521,6 +2547,7 @@ internal object AppModeRunners {
         dashboardStore: DashboardStateStore,
         telegramConfig: ai.neopsyke.agent.config.TelegramChannelConfig,
         telegramSink: ai.neopsyke.agent.cortex.motor.actions.TelegramMessageSink?,
+        telegramAckTracker: ai.neopsyke.agent.cortex.motor.actions.TelegramStartupAckTracker = ai.neopsyke.agent.cortex.motor.actions.TelegramStartupAckTracker(),
         sessionRecordingManager: SessionRecordingManager? = null,
         forwardNormalInput: (String, String, ai.neopsyke.agent.model.InputPriority, ConversationContext) -> Boolean,
         onApprovalExecuted: (ai.neopsyke.agent.cortex.motor.actions.control.ActionControlDecisionResult.Executed) -> Unit,
@@ -2551,6 +2578,7 @@ internal object AppModeRunners {
             onApprovalExecuted = onApprovalExecuted,
             onApprovalDenied = onApprovalDenied,
             sessionRecordingManager = sessionRecordingManager,
+            telegramAckTracker = telegramAckTracker,
         )
     }
 

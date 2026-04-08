@@ -20,6 +20,8 @@ data class SerializedGoalCommand(
     val completionCriteria: String? = null,
     @param:JsonProperty("cron_expression")
     val cronExpression: String? = null,
+    @param:JsonProperty("contact_channel")
+    val contactChannel: String? = null,
     val reason: String? = null,
 ) {
     fun toGoalCommand(): GoalCommand? {
@@ -38,6 +40,7 @@ data class SerializedGoalCommand(
                         priority = parsePriority(priority) ?: GoalPriority.MEDIUM,
                         completionCriteria = completionCriteria?.trim().orEmpty(),
                         cronExpression = cronExpression?.trim()?.ifBlank { null },
+                        contactChannel = contactChannel?.trim()?.ifBlank { null },
                     )
                 }
             }
@@ -56,6 +59,7 @@ data class SerializedGoalCommand(
                     priority = parsePriority(priority),
                     completionCriteria = completionCriteria?.trim()?.ifBlank { null },
                     cronExpression = cronExpression?.trim()?.ifBlank { null },
+                    contactChannel = contactChannel?.trim()?.ifBlank { null },
                 )
             }
             "revise_plan" -> reference?.let { GoalCommand.RevisePlan(reference = it, reason = reason?.trim()?.ifBlank { null }) }
@@ -77,6 +81,7 @@ data class SerializedGoalCommand(
                     priority = command.priority.name,
                     completionCriteria = command.completionCriteria,
                     cronExpression = command.cronExpression,
+                    contactChannel = command.contactChannel,
                 )
                 is GoalCommand.List -> SerializedGoalCommand(command = command.operationName)
                 is GoalCommand.Status -> fromReferenceCommand(command.operationName, command.reference)
@@ -94,6 +99,7 @@ data class SerializedGoalCommand(
                     priority = command.priority?.name,
                     completionCriteria = command.completionCriteria,
                     cronExpression = command.cronExpression,
+                    contactChannel = command.contactChannel,
                 )
                 is GoalCommand.RevisePlan -> SerializedGoalCommand(
                     command = command.operationName,

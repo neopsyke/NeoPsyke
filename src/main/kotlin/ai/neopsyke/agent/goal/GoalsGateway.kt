@@ -31,6 +31,7 @@ data class GoalOperationRequest(
     val priority: GoalPriority? = null,
     val completionCriteria: String? = null,
     val cronExpression: String? = null,
+    val contactChannel: String? = null,
     val reason: String? = null,
 )
 

@@ -441,9 +441,6 @@ class AsyncSignalSource(
             )
         )
 
-    fun offerGoalRuntimeCue(cue: GoalRuntimeCue): Boolean =
-        offerSignal(CognitiveSignal.StimulusReceived(cue.toStimulus()))
-
     fun submitInput(
         content: String,
         source: String,
@@ -502,11 +499,21 @@ class SensoryCortex(
     private val source: SignalSource,
     private val interlocutorResolver: InterlocutorResolver = DefaultInterlocutorResolver(),
 ) {
+    @Volatile private var instrumentation: ai.neopsyke.instrumentation.AgentInstrumentation =
+        ai.neopsyke.instrumentation.NoopAgentInstrumentation
+
+    fun setInstrumentation(inst: ai.neopsyke.instrumentation.AgentInstrumentation) {
+        instrumentation = inst
+    }
+
     private val syntheticSignals = Channel<Signal>(SYNTHETIC_SIGNAL_QUEUE)
     private val syntheticSignalCount = AtomicInteger(0)
 
     fun offerActionFeedback(cue: ActionFeedbackCue): Boolean =
         offerSyntheticSignal(CognitiveSignal.FeedbackReceived(cue))
+
+    fun offerGoalRuntimeCue(cue: GoalRuntimeCue): Boolean =
+        offerSyntheticSignal(CognitiveSignal.StimulusReceived(cue.toStimulus()))
 
     fun hasPendingSyntheticSignals(): Boolean = syntheticSignalCount.get() > 0
 
@@ -516,7 +523,25 @@ class SensoryCortex(
             val stimulusSignal = signal as? CognitiveSignal.StimulusReceived ?: return signal
             val enrichedStimulus = enrichStimulus(stimulusSignal.stimulus)
             if (enrichedStimulus == null) {
-                sensoryCortexLogger.debug { "Synthetic stimulus dropped: blank content after sanitization" }
+                sensoryCortexLogger.warn {
+                    "Synthetic stimulus dropped: blank content after sanitization" +
+                        " family=${stimulusSignal.stimulus.family}" +
+                        " source=${stimulusSignal.stimulus.source}" +
+                        " content_len=${stimulusSignal.stimulus.content.length}"
+                }
+                instrumentation.emit(
+                    ai.neopsyke.instrumentation.AgentEvent(
+                        type = "signal_dropped",
+                        data = mapOf(
+                            "channel" to "synthetic",
+                            "reason" to "blank_after_sanitization",
+                            "family" to stimulusSignal.stimulus.family.name,
+                            "source" to stimulusSignal.stimulus.source,
+                            "content_length" to stimulusSignal.stimulus.content.length,
+                            "metadata_keys" to stimulusSignal.stimulus.metadata.keys.toList(),
+                        ),
+                    )
+                )
                 return CognitiveSignal.NoStimulus
             }
             return CognitiveSignal.StimulusReceived(
@@ -528,7 +553,25 @@ class SensoryCortex(
         val stimulusSignal = signal as? CognitiveSignal.StimulusReceived ?: return signal
         val enrichedStimulus = enrichStimulus(stimulusSignal.stimulus)
         if (enrichedStimulus == null) {
-            sensoryCortexLogger.debug { "Source stimulus dropped: blank content after sanitization" }
+            sensoryCortexLogger.warn {
+                "Source stimulus dropped: blank content after sanitization" +
+                    " family=${stimulusSignal.stimulus.family}" +
+                    " source=${stimulusSignal.stimulus.source}" +
+                    " content_len=${stimulusSignal.stimulus.content.length}"
+            }
+            instrumentation.emit(
+                ai.neopsyke.instrumentation.AgentEvent(
+                    type = "signal_dropped",
+                    data = mapOf(
+                        "channel" to "source",
+                        "reason" to "blank_after_sanitization",
+                        "family" to stimulusSignal.stimulus.family.name,
+                        "source" to stimulusSignal.stimulus.source,
+                        "content_length" to stimulusSignal.stimulus.content.length,
+                        "metadata_keys" to stimulusSignal.stimulus.metadata.keys.toList(),
+                    ),
+                )
+            )
             return CognitiveSignal.NoStimulus
         }
         return CognitiveSignal.StimulusReceived(

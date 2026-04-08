@@ -15,6 +15,7 @@ sealed interface GoalCommand {
         val priority: GoalPriority = GoalPriority.MEDIUM,
         val completionCriteria: String = "",
         val cronExpression: String? = null,
+        val contactChannel: String? = null,
     ) : GoalCommand
 
     data object List : GoalCommand
@@ -38,6 +39,7 @@ sealed interface GoalCommand {
         val priority: GoalPriority? = null,
         val completionCriteria: String? = null,
         val cronExpression: String? = null,
+        val contactChannel: String? = null,
     ) : GoalCommand
 
     data class RevisePlan(

@@ -19,6 +19,7 @@ data class Goal(
     val lastWorkedAt: Instant? = null,
     val suspendedUntil: Instant? = null,
     val cronExpression: String? = null,
+    val contactChannel: String? = null,
     val workspacePath: Path,
     val metadata: Map<String, String> = emptyMap(),
 )

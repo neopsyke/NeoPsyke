@@ -44,6 +44,8 @@ class ApprovalRuntime(
     private val onApprovalExecuted: (ActionControlDecisionResult.Executed) -> Unit,
     private val onApprovalDenied: (ActionControlDecisionResult.Cancelled) -> Unit,
     private val sessionRecordingManager: SessionRecordingManager? = null,
+    private val telegramAckTracker: ai.neopsyke.agent.cortex.motor.actions.TelegramStartupAckTracker =
+        ai.neopsyke.agent.cortex.motor.actions.TelegramStartupAckTracker(),
 ) : ApprovalStagingHook, AutoCloseable {
 
     private val approvalFlowChannel: RecordReplayChannel? = sessionRecordingManager?.approvalFlow
@@ -53,6 +55,7 @@ class ApprovalRuntime(
             dashboardStore = dashboardStore,
             telegramConfig = telegramConfig,
             telegramSink = telegramSink,
+            telegramAckTracker = telegramAckTracker,
         )
     private val channelResolver: ApprovalChannelResolver =
         DefaultApprovalChannelResolver(
@@ -653,15 +656,8 @@ class ApprovalRuntime(
                 ConversationDeliveryResult(delivered = true, detail = "Dashboard delivery recorded.")
             }
             "telegram" -> {
-                val telegramDelivery = telegramSink?.let { sink -> kotlinx.coroutines.runBlocking { sink.sendMessage(target.channelId, text) } }
+                telegramSink?.let { sink -> kotlinx.coroutines.runBlocking { sink.sendMessage(target.channelId, text) } }
                     ?: ConversationDeliveryResult(delivered = false, detail = "Telegram sink unavailable.")
-                dashboardStore.ensureChatSession(sessionId = target.sessionId, title = "Telegram owner")
-                dashboardStore.addAssistantMessage(
-                    sessionId = target.sessionId,
-                    content = text,
-                    source = source,
-                )
-                telegramDelivery
             }
             else -> ConversationDeliveryResult(delivered = false, detail = "Unsupported approval provider '${target.provider}'.")
         }

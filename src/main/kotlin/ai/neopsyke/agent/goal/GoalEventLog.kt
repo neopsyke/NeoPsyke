@@ -92,14 +92,19 @@ internal data class EventWrapper(
     val actionsExecuted: Int? = null,
     // Updated
     val cronExpression: String? = null,
+    val contactChannel: String? = null,
 ) {
     fun toEvent(): GoalEvent {
         val ts = java.time.Instant.parse(timestamp)
         return when (type) {
             "Created" -> GoalEvent.Created(
-                goalId, title ?: "", instruction ?: "",
-                GoalPriority.valueOf(priority ?: "MEDIUM"),
-                completionCriteria ?: "", ts
+                goalId = goalId,
+                title = title ?: "",
+                instruction = instruction ?: "",
+                priority = GoalPriority.valueOf(priority ?: "MEDIUM"),
+                completionCriteria = completionCriteria ?: "",
+                contactChannel = contactChannel,
+                timestamp = ts,
             )
             "PlanGenerated" -> GoalEvent.PlanGenerated(goalId, plan!!, ts)
             "PlanRevised" -> GoalEvent.PlanRevised(goalId, plan!!, reason ?: "", ts)
@@ -138,6 +143,7 @@ internal data class EventWrapper(
                 title = title,
                 instruction = instruction,
                 completionCriteria = completionCriteria,
+                contactChannel = contactChannel,
                 reason = reason,
                 timestamp = ts,
             )
@@ -158,6 +164,7 @@ internal data class EventWrapper(
                     instruction = event.instruction,
                     priority = event.priority.name,
                     completionCriteria = event.completionCriteria,
+                    contactChannel = event.contactChannel,
                 )
                 is GoalEvent.PlanGenerated -> base.copy(plan = event.plan)
                 is GoalEvent.PlanRevised -> base.copy(plan = event.plan, reason = event.reason)
@@ -189,6 +196,7 @@ internal data class EventWrapper(
                     instruction = event.instruction,
                     completionCriteria = event.completionCriteria,
                     cronExpression = event.cronExpression,
+                    contactChannel = event.contactChannel,
                     reason = event.reason,
                 )
             }

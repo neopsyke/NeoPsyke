@@ -293,6 +293,7 @@ class GoalManager(
                         priority = request.priority ?: GoalPriority.MEDIUM,
                         completionCriteria = request.completionCriteria ?: "User confirms the goal is met.",
                         cronExpression = cronExpression.ifBlank { null },
+                        contactChannel = request.contactChannel?.trim()?.ifBlank { null },
                     )
                     if (goalId.isBlank()) {
                         GoalOperationResult(false, "Goal creation was rejected.")
@@ -444,6 +445,7 @@ class GoalManager(
                                 instruction = request.instruction?.trim()?.ifBlank { null },
                                 title = request.title?.trim()?.ifBlank { null },
                                 completionCriteria = request.completionCriteria?.trim()?.ifBlank { null },
+                                contactChannel = request.contactChannel?.trim()?.ifBlank { null },
                                 reason = request.reason?.trim()?.ifBlank { null },
                             )
                         )
@@ -481,6 +483,7 @@ class GoalManager(
         priority: GoalPriority = GoalPriority.MEDIUM,
         completionCriteria: String = "User confirms the goal is met.",
         cronExpression: String? = null,
+        contactChannel: String? = null,
     ): String {
         val activeCount = states.values.count { !it.isTerminal() }
         if (activeCount >= config.maxActiveGoals) {
@@ -496,6 +499,7 @@ class GoalManager(
             instruction = instruction,
             priority = priority,
             completionCriteria = completionCriteria,
+            contactChannel = contactChannel,
         )
         val initial = GoalStateMachine.initialState(created, workspacePath).let { state ->
             if (cronExpression.isNullOrBlank()) {

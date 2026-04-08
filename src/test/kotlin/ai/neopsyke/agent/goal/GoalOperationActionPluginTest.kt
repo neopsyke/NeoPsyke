@@ -283,5 +283,68 @@ class GoalOperationActionPluginTest {
             )
         )
 
+    @Test
+    fun `create command with contactChannel passes through to request`() = runBlocking {
+        var capturedRequest: GoalOperationRequest? = null
+        val gateway = object : GoalsGateway by NoopGoalsGateway {
+            override fun executeOperation(request: GoalOperationRequest): GoalOperationResult {
+                capturedRequest = request
+                return GoalOperationResult(true, "created", "goal-1")
+            }
+        }
+        val plugin = pluginWithGateway(gateway)
+
+        plugin.execute(
+            PendingAction(
+                id = 1L,
+                urgency = Urgency.MEDIUM,
+                type = ActionType.GOAL_OPERATION,
+                payload = """{"command":"create","title":"Weather","instruction":"Check weather","contact_channel":"telegram"}""",
+                summary = "create goal",
+                groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
+            ),
+            ActionExecutionContext(searchResultCount = 0),
+        )
+
+        assertEquals("telegram", capturedRequest?.contactChannel)
+    }
+
+    @Test
+    fun `update command with contactChannel passes through to request`() = runBlocking {
+        var capturedRequest: GoalOperationRequest? = null
+        val gateway = object : GoalsGateway by NoopGoalsGateway {
+            override fun executeOperation(request: GoalOperationRequest): GoalOperationResult {
+                capturedRequest = request
+                return GoalOperationResult(true, "updated", "goal-1")
+            }
+        }
+        val plugin = pluginWithGateway(gateway)
+
+        plugin.execute(
+            PendingAction(
+                id = 1L,
+                urgency = Urgency.MEDIUM,
+                type = ActionType.GOAL_OPERATION,
+                payload = """{"command":"update","goal_id":"goal-1","contact_channel":"webapp"}""",
+                summary = "update goal",
+                groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
+            ),
+            ActionExecutionContext(searchResultCount = 0),
+        )
+
+        assertEquals("webapp", capturedRequest?.contactChannel)
+    }
+
+    private fun pluginWithGateway(gateway: GoalsGateway) = GoalOperationActionPlugin(
+        ActionPluginFactoryContext(
+            config = AgentConfig(goals = GoalConfig(enabled = true)),
+            webSearchActionHandler = null,
+            fetchTool = null,
+            output = {},
+            reflectionMemoryRecorder = NoopReflectionMemoryRecorder,
+            goalsGateway = gateway,
+        )
+    )
+
     private fun testScope(): CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 }

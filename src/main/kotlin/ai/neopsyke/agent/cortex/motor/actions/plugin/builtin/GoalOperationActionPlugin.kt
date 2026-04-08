@@ -123,6 +123,7 @@ class GoalOperationActionPlugin(
                 priority = command.priority,
                 completionCriteria = command.completionCriteria,
                 cronExpression = command.cronExpression,
+                contactChannel = command.contactChannel,
             )
             is GoalCommand.List -> GoalOperationRequest(operation = GoalOperation.LIST)
             is GoalCommand.Status -> GoalOperationRequest(
@@ -154,6 +155,7 @@ class GoalOperationActionPlugin(
                 priority = command.priority,
                 completionCriteria = command.completionCriteria,
                 cronExpression = command.cronExpression,
+                contactChannel = command.contactChannel,
             )
             is GoalCommand.RevisePlan -> GoalOperationRequest(
                 operation = GoalOperation.REVISE_PLAN,
