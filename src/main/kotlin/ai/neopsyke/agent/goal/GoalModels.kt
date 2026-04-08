@@ -116,7 +116,7 @@ data class GoalRunActivation(
     val conversationContext: ConversationContext,
     val actionSuggestion: String = "",
     val wakeReason: String = "",
-    val groundingMetadata: GroundingMetadata? = null,
+    val groundingMetadata: GroundingMetadata,
 )
 
 /**

@@ -66,7 +66,7 @@ internal class DecisionDispatcher(
         planContext: PlanContext? = null,
         originActionType: ActionType? = null,
         originActionObservedEvidence: Boolean? = null,
-        groundingMetadata: GroundingMetadata? = null,
+        groundingMetadata: GroundingMetadata,
     ): Boolean {
         val intention = scheduler.enqueueThought(
             content = content,
@@ -119,7 +119,7 @@ internal class DecisionDispatcher(
                 scratchpadStore.resetDraftSequence(rootInputId)
                 val allowFallbackExplanation =
                     originThought?.allowFallbackExplanation ?: (origin.source != OriginSource.ID)
-                val resolvedGrounding = originThought?.groundingMetadata ?: plannerContext?.groundingMetadata
+                val resolvedGrounding = originThought?.groundingMetadata ?: plannerContext?.groundingMetadata ?: GroundingMetadata.NOT_REQUIRED_PREFILTER
                 val queued = enqueueDeferredIntention(
                     content = decision.content,
                     urgency = decision.urgency,
@@ -214,7 +214,7 @@ internal class DecisionDispatcher(
                         denialReasonCode = violation.reasonCode,
                         conversationContext = conversationContext,
                         origin = origin,
-                        groundingMetadata = originThought?.groundingMetadata ?: plannerContext?.groundingMetadata,
+                        groundingMetadata = originThought?.groundingMetadata ?: plannerContext?.groundingMetadata ?: GroundingMetadata.NOT_REQUIRED_PREFILTER,
                     )
                     if (!queuedRetry) {
                         instrumentation.emit(
@@ -304,13 +304,13 @@ internal class DecisionDispatcher(
                         proposedActionSummary = decision.summary,
                         argumentDataTrust = deliberation.threadSecurityContext(rootInputId, conversationContext).aggregatedDataTrust,
                         origin = origin,
-                        groundingMetadata = originThought?.groundingMetadata ?: plannerContext?.groundingMetadata,
+                        groundingMetadata = originThought?.groundingMetadata ?: plannerContext?.groundingMetadata ?: GroundingMetadata.NOT_REQUIRED_PREFILTER,
                     )
                 )
                 if (queued) {
                     deliberation.recordIntention(rootInputId, conversationContext, intention)
                 }
-                val actionGrounding = originThought?.groundingMetadata ?: plannerContext?.groundingMetadata
+                val actionGrounding = originThought?.groundingMetadata ?: plannerContext?.groundingMetadata ?: GroundingMetadata.NOT_REQUIRED_PREFILTER
                 if (queued && actionGrounding != null) {
                     instrumentation.emit(
                         AgentEvents.groundingMetadataPropagated(
@@ -489,7 +489,7 @@ internal class DecisionDispatcher(
                         originActionObservedEvidence = originThought?.originActionObservedEvidence,
                         conversationContext = conversationContext,
                         origin = origin,
-                        groundingMetadata = originThought?.groundingMetadata ?: plannerContext?.groundingMetadata,
+                        groundingMetadata = originThought?.groundingMetadata ?: plannerContext?.groundingMetadata ?: GroundingMetadata.NOT_REQUIRED_PREFILTER,
                     )
                     if (!queued) {
                         allQueued = false
@@ -503,7 +503,7 @@ internal class DecisionDispatcher(
                         )
                     }
                 }
-                val planGrounding = originThought?.groundingMetadata ?: plannerContext?.groundingMetadata
+                val planGrounding = originThought?.groundingMetadata ?: plannerContext?.groundingMetadata ?: GroundingMetadata.NOT_REQUIRED_PREFILTER
                 instrumentation.emit(
                     AgentEvents.planStepsEnqueued(
                         planId = planId,
@@ -557,7 +557,7 @@ internal class DecisionDispatcher(
                         originActionObservedEvidence = originThought?.originActionObservedEvidence,
                         conversationContext = conversationContext,
                         origin = origin,
-                        groundingMetadata = originThought?.groundingMetadata ?: plannerContext?.groundingMetadata,
+                        groundingMetadata = originThought?.groundingMetadata ?: plannerContext?.groundingMetadata ?: GroundingMetadata.NOT_REQUIRED_PREFILTER,
                     )
                     instrumentation.emit(
                         AgentEvent(
@@ -615,7 +615,7 @@ internal class DecisionDispatcher(
             originActionObservedEvidence = originThought?.originActionObservedEvidence,
             conversationContext = conversationContext,
             origin = origin,
-            groundingMetadata = originThought?.groundingMetadata,
+            groundingMetadata = originThought?.groundingMetadata ?: GroundingMetadata.NOT_REQUIRED_PREFILTER,
         )
         if (queued) {
             instrumentation.emit(

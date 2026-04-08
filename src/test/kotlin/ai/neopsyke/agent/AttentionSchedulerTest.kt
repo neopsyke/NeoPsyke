@@ -5,6 +5,7 @@ import ai.neopsyke.agent.model.OpportunityKind
 import ai.neopsyke.agent.model.PendingInput
 import ai.neopsyke.agent.model.Intention
 import ai.neopsyke.agent.model.IntentionKind
+import ai.neopsyke.agent.model.GroundingMetadata
 import ai.neopsyke.agent.model.QueuedIntention
 import ai.neopsyke.agent.model.RootInputIds
 import kotlin.test.Test
@@ -69,13 +70,14 @@ class AttentionSchedulerTest {
             proposedActionType = ActionType.CONTACT_USER,
             proposedActionPayload = "hello",
             proposedActionSummary = summary,
+            groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
         )
 
     @Test
     fun `inputs always take priority over thoughts and actions`() {
         val scheduler = AttentionScheduler(config)
-        scheduler.enqueueThought("process this", Urgency.HIGH)
-        scheduler.enqueueAction(ActionType.CONTACT_USER, "hello", "reply", Urgency.HIGH)
+        scheduler.enqueueThought("process this", Urgency.HIGH, groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER)
+        scheduler.enqueueAction(ActionType.CONTACT_USER, "hello", "reply", Urgency.HIGH, groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER)
         val input = testInput("new input")
         scheduler.enqueueInput(input, testOpportunity(input))
 
@@ -88,9 +90,9 @@ class AttentionSchedulerTest {
     @Test
     fun `deferred continuations outrank equally urgent actions and keep urgency order`() {
         val scheduler = AttentionScheduler(config)
-        scheduler.enqueueThought("low", Urgency.LOW)
-        scheduler.enqueueThought("high", Urgency.HIGH)
-        scheduler.enqueueAction(ActionType.WEB_SEARCH, "q", "s", Urgency.HIGH)
+        scheduler.enqueueThought("low", Urgency.LOW, groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER)
+        scheduler.enqueueThought("high", Urgency.HIGH, groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER)
+        scheduler.enqueueAction(ActionType.WEB_SEARCH, "q", "s", Urgency.HIGH, groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER)
 
         val first = scheduler.nextTask()
         val second = scheduler.nextTask()
@@ -111,8 +113,8 @@ class AttentionSchedulerTest {
         val scheduler = AttentionScheduler(config.copy(maxPendingThoughts = 4, maxPendingActions = 4))
         val blockedRoot = "blocked-root"
         val freeRoot = "free-root"
-        scheduler.enqueueThought("blocked", Urgency.HIGH, rootInputId = blockedRoot)
-        scheduler.enqueueAction(ActionType.CONTACT_USER, "free", "free", Urgency.MEDIUM, rootInputId = freeRoot)
+        scheduler.enqueueThought("blocked", Urgency.HIGH, rootInputId = blockedRoot, groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER)
+        scheduler.enqueueAction(ActionType.CONTACT_USER, "free", "free", Urgency.MEDIUM, rootInputId = freeRoot, groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER)
 
         val first = scheduler.nextTask { rootInputId, _ -> rootInputId == blockedRoot }
         val second = scheduler.nextTask { _, _ -> false }
@@ -154,13 +156,13 @@ class AttentionSchedulerTest {
         assertTrue(scheduler.enqueueInput(input2, testOpportunity(input2)))
         assertFalse(scheduler.enqueueInput(input3, testOpportunity(input3)))
 
-        assertNotNull(scheduler.enqueueThought("t1", Urgency.MEDIUM))
-        assertNotNull(scheduler.enqueueThought("t2", Urgency.MEDIUM))
-        assertNull(scheduler.enqueueThought("t3", Urgency.MEDIUM))
+        assertNotNull(scheduler.enqueueThought("t1", Urgency.MEDIUM, groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER))
+        assertNotNull(scheduler.enqueueThought("t2", Urgency.MEDIUM, groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER))
+        assertNull(scheduler.enqueueThought("t3", Urgency.MEDIUM, groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER))
 
-        assertTrue(scheduler.enqueueAction(ActionType.CONTACT_USER, "a1", "s1", Urgency.MEDIUM))
-        assertTrue(scheduler.enqueueAction(ActionType.CONTACT_USER, "a2", "s2", Urgency.MEDIUM))
-        assertFalse(scheduler.enqueueAction(ActionType.CONTACT_USER, "a3", "s3", Urgency.MEDIUM))
+        assertTrue(scheduler.enqueueAction(ActionType.CONTACT_USER, "a1", "s1", Urgency.MEDIUM, groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER))
+        assertTrue(scheduler.enqueueAction(ActionType.CONTACT_USER, "a2", "s2", Urgency.MEDIUM, groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER))
+        assertFalse(scheduler.enqueueAction(ActionType.CONTACT_USER, "a3", "s3", Urgency.MEDIUM, groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER))
     }
 
     @Test
@@ -169,8 +171,8 @@ class AttentionSchedulerTest {
         val input = testInput("line-1")
         scheduler.enqueueInput(input, testOpportunity(input))
         scheduler.enqueueIntention(testIntention())
-        scheduler.enqueueThought("line-2", Urgency.HIGH)
-        scheduler.enqueueAction(ActionType.CONTACT_USER, "line-3", "summary", Urgency.MEDIUM)
+        scheduler.enqueueThought("line-2", Urgency.HIGH, groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER)
+        scheduler.enqueueAction(ActionType.CONTACT_USER, "line-3", "summary", Urgency.MEDIUM, groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER)
 
         val snapshot = scheduler.queueSnapshot()
         assertEquals(1, snapshot.pendingInputCount)
@@ -182,7 +184,7 @@ class AttentionSchedulerTest {
     @Test
     fun `intentions are processed before lower priority thoughts`() {
         val scheduler = AttentionScheduler(config)
-        scheduler.enqueueThought("low-thought", Urgency.LOW)
+        scheduler.enqueueThought("low-thought", Urgency.LOW, groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER)
         scheduler.enqueueIntention(testIntention(summary = "prepare reply", urgency = Urgency.HIGH))
 
         val first = scheduler.nextTask()
@@ -207,6 +209,7 @@ class AttentionSchedulerTest {
                 ),
                 urgency = Urgency.HIGH,
                 deferredContent = "continue thinking",
+                groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
             )
         )
         scheduler.enqueueIntention(
@@ -248,6 +251,7 @@ class AttentionSchedulerTest {
                     totalSteps = 2,
                     stepDescription = "gather evidence",
                 ),
+                groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
             )
         )
 
@@ -261,10 +265,10 @@ class AttentionSchedulerTest {
         val high = testInput("high-input", InputPriority.HIGH)
         scheduler.enqueueInput(medium, testOpportunity(medium))
         scheduler.enqueueInput(high, testOpportunity(high))
-        scheduler.enqueueThought("low", Urgency.LOW)
-        scheduler.enqueueThought("high", Urgency.HIGH)
-        scheduler.enqueueAction(ActionType.CONTACT_USER, "low-action", "s1", Urgency.LOW)
-        scheduler.enqueueAction(ActionType.CONTACT_USER, "high-action", "s2", Urgency.HIGH)
+        scheduler.enqueueThought("low", Urgency.LOW, groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER)
+        scheduler.enqueueThought("high", Urgency.HIGH, groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER)
+        scheduler.enqueueAction(ActionType.CONTACT_USER, "low-action", "s1", Urgency.LOW, groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER)
+        scheduler.enqueueAction(ActionType.CONTACT_USER, "high-action", "s2", Urgency.HIGH, groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER)
 
         val state = scheduler.queueState()
         assertEquals(listOf("high-input", "medium-input"), state.inputs.map { it.content })
@@ -278,21 +282,23 @@ class AttentionSchedulerTest {
         val scheduler = AttentionScheduler(config.copy(maxPendingThoughts = 8, maxPendingActions = 8))
         val rootA = "root-a"
         val rootB = "root-b"
-        scheduler.enqueueThought("a-thought", Urgency.HIGH, rootInputId = rootA)
-        scheduler.enqueueThought("b-thought", Urgency.HIGH, rootInputId = rootB)
+        scheduler.enqueueThought("a-thought", Urgency.HIGH, rootInputId = rootA, groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER)
+        scheduler.enqueueThought("b-thought", Urgency.HIGH, rootInputId = rootB, groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER)
         scheduler.enqueueAction(
             ActionType.WEB_SEARCH,
             "a-action",
             "a-summary",
             Urgency.HIGH,
-            rootInputId = rootA
+            rootInputId = rootA,
+            groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
         )
         scheduler.enqueueAction(
             ActionType.WEB_SEARCH,
             "b-action",
             "b-summary",
             Urgency.HIGH,
-            rootInputId = rootB
+            rootInputId = rootB,
+            groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
         )
 
         val cleared = scheduler.clearPendingWorkForInput(rootA, "default")
@@ -316,13 +322,15 @@ class AttentionSchedulerTest {
             content = "a-thought",
             urgency = Urgency.HIGH,
             rootInputId = root,
-            conversationContext = ctxA
+            conversationContext = ctxA,
+            groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
         )
         scheduler.enqueueThought(
             content = "b-thought",
             urgency = Urgency.HIGH,
             rootInputId = root,
-            conversationContext = ctxB
+            conversationContext = ctxB,
+            groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
         )
         scheduler.enqueueAction(
             type = ActionType.WEB_SEARCH,
@@ -330,7 +338,8 @@ class AttentionSchedulerTest {
             summary = "a-summary",
             urgency = Urgency.HIGH,
             rootInputId = root,
-            conversationContext = ctxA
+            conversationContext = ctxA,
+            groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
         )
         scheduler.enqueueAction(
             type = ActionType.WEB_SEARCH,
@@ -338,7 +347,8 @@ class AttentionSchedulerTest {
             summary = "b-summary",
             urgency = Urgency.HIGH,
             rootInputId = root,
-            conversationContext = ctxB
+            conversationContext = ctxB,
+            groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
         )
 
         val cleared = scheduler.clearPendingWorkForInput(rootInputId = root, sessionId = sessionA)
@@ -364,7 +374,8 @@ class AttentionSchedulerTest {
                 stepIndex = 0,
                 totalSteps = 2,
                 stepDescription = "step"
-            )
+            ),
+            groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
         )
         scheduler.enqueueAction(
             type = ActionType.CONTACT_USER,
@@ -372,7 +383,8 @@ class AttentionSchedulerTest {
             summary = "fallback",
             urgency = Urgency.HIGH,
             isFallbackExplanation = true,
-            rootInputId = root
+            rootInputId = root,
+            groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
         )
 
         assertTrue(scheduler.hasPendingPlanThoughtsForInput(root, "default"))
@@ -398,7 +410,8 @@ class AttentionSchedulerTest {
                 totalSteps = 1,
                 stepDescription = "step-a"
             ),
-            conversationContext = ctxA
+            conversationContext = ctxA,
+            groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
         )
         scheduler.enqueueAction(
             type = ActionType.CONTACT_USER,
@@ -407,13 +420,15 @@ class AttentionSchedulerTest {
             urgency = Urgency.HIGH,
             isFallbackExplanation = true,
             rootInputId = root,
-            conversationContext = ctxA
+            conversationContext = ctxA,
+            groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
         )
         scheduler.enqueueThought(
             content = "${AttentionScheduler.CONVERGENCE_THOUGHT_PREFIX}other session",
             urgency = Urgency.MEDIUM,
             rootInputId = root,
-            conversationContext = ctxB
+            conversationContext = ctxB,
+            groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
         )
 
         assertTrue(scheduler.hasPendingPlanThoughtsForInput(root, "session-a"))

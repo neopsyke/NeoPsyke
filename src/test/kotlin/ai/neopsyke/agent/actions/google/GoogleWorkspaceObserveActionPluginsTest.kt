@@ -8,6 +8,7 @@ import ai.neopsyke.agent.cortex.motor.actions.ActionExecutionContext
 import ai.neopsyke.agent.cortex.motor.actions.plugin.google.CalendarObserveEventsActionPlugin
 import ai.neopsyke.agent.cortex.motor.actions.plugin.google.GmailObserveSearchActionPlugin
 import ai.neopsyke.agent.model.ActionType
+import ai.neopsyke.agent.model.GroundingMetadata
 import ai.neopsyke.agent.model.PendingAction
 import ai.neopsyke.agent.model.Urgency
 import ai.neopsyke.integrations.google.GoogleWorkspaceApiClient
@@ -69,6 +70,7 @@ class GoogleWorkspaceObserveActionPluginsTest {
                     payload = """{"query":"from:alice","max_results":2}""",
                     summary = "Search gmail",
                     attempts = 0,
+                    groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
                 ),
                 ActionExecutionContext(searchResultCount = 5),
             )
@@ -131,6 +133,7 @@ class GoogleWorkspaceObserveActionPluginsTest {
                     payload = """{"calendar_id":"primary","max_results":1}""",
                     summary = "List calendar events",
                     attempts = 0,
+                    groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
                 ),
                 ActionExecutionContext(searchResultCount = 5),
             )

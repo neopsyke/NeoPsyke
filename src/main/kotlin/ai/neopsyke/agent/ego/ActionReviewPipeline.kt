@@ -951,6 +951,7 @@ internal class ActionReviewPipeline(
             rootInputReceivedAtMs = resolvedAction.rootInputReceivedAtMs,
             conversationContext = convCtx,
             origin = resolvedAction.origin,
+            groundingMetadata = resolvedAction.groundingMetadata,
         )
         if (!queued) {
             instrumentation.emit(AgentEvents.warning("Failed to enqueue user-visible action result."))
@@ -1048,7 +1049,7 @@ internal class ActionReviewPipeline(
 private fun StagedAction.toPipelinePendingAction(): PendingAction =
     PendingAction(
         id = -1L,
-        urgency = Urgency.MEDIUM,
+        urgency = urgency,
         type = actionType,
         payload = payload,
         summary = summary,
@@ -1057,4 +1058,11 @@ private fun StagedAction.toPipelinePendingAction(): PendingAction =
         conversationContext = conversationContext,
         argumentDataTrust = argumentDataTrust,
         origin = origin,
+        intentionId = intentionId,
+        intentionKind = intentionKind,
+        requestedCommitMode = requestedCommitMode,
+        groundingMetadata = groundingMetadata,
+        isForcedTerminal = isForcedTerminal,
+        requiresFollowUpThought = requiresFollowUpThought,
+        followUpPrefix = followUpPrefix,
     )

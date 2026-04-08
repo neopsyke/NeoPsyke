@@ -36,7 +36,7 @@ internal class FallbackHandler(
         origin: ActionOrigin,
         originActionType: ActionType? = null,
         originActionObservedEvidence: Boolean? = null,
-        groundingMetadata: GroundingMetadata? = null,
+        groundingMetadata: GroundingMetadata,
     ): Boolean =
         scheduler.enqueueThought(
             content = content,
@@ -243,6 +243,7 @@ internal class FallbackHandler(
             rootInputReceivedAtMs = thought.rootInputReceivedAtMs,
             conversationContext = thought.conversationContext,
             origin = thought.origin,
+            groundingMetadata = thought.groundingMetadata,
         )
         if (!queued) {
             logger.warn { "Fallback explanation enqueue failed; executing immediate fallback action." }
@@ -265,6 +266,7 @@ internal class FallbackHandler(
                     rootInputReceivedAtMs = thought.rootInputReceivedAtMs,
                     conversationContext = thought.conversationContext,
                     origin = thought.origin,
+                    groundingMetadata = thought.groundingMetadata,
                 )
             )
             telemetry.emitQueueSnapshot("fallback_explanation_executed_immediate")
@@ -297,6 +299,7 @@ internal class FallbackHandler(
             rootInputReceivedAtMs = rootInputReceivedAtMs,
             conversationContext = conversationContext,
             origin = origin,
+            groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
         )
         if (!queued) {
             instrumentation.emit(AgentEvents.warning("Failed to enqueue circuit-breaker fallback."))

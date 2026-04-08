@@ -20,6 +20,7 @@ import ai.neopsyke.agent.model.PendingAction
 import ai.neopsyke.agent.model.StagedAction
 import ai.neopsyke.agent.model.StagedActionStatus
 import ai.neopsyke.agent.model.Urgency
+import ai.neopsyke.agent.model.GroundingMetadata
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
 import java.nio.file.Files
@@ -98,6 +99,7 @@ class RecordingActionControlServiceTest {
         urgency = Urgency.MEDIUM,
         summary = "test action",
         payload = "{}",
+    groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
     )
 
     private val testDecision = AuthorizationDecision(
@@ -269,6 +271,7 @@ class RecordingActionControlServiceTest {
                     id = 1L, urgency = Urgency.MEDIUM, type = ActionType.CONTACT_USER,
                     payload = "{}", summary = "test", rootInputId = "root-1",
                     conversationContext = ConversationContext.default(),
+                groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
                 ),
             )
         }

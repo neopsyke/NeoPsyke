@@ -52,7 +52,7 @@ internal class GroundingGate : DecisionVerifier {
             return DecisionVerifierDecision(allow = true)
         }
 
-        val grounding = action.groundingMetadata ?: GroundingMetadata.NOT_REQUIRED_PREFILTER
+        val grounding = action.groundingMetadata
         val groundingRequired = grounding.requirement == GroundingRequirement.REQUIRED
         val evidence = context.externalEvidence
         val evidenceGathered = evidence?.hadSuccessfulEvidence == true

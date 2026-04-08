@@ -12,6 +12,7 @@ import ai.neopsyke.agent.model.OpportunityTrigger
 import ai.neopsyke.agent.model.PendingImpulse
 import ai.neopsyke.agent.model.PendingInput
 import ai.neopsyke.agent.model.RootInputIds
+import ai.neopsyke.agent.model.GroundingMetadata
 import ai.neopsyke.agent.ego.AttentionScheduler
 import ai.neopsyke.agent.config.AgentConfig
 import ai.neopsyke.instrumentation.AgentEvent
@@ -176,12 +177,14 @@ class IdEgoIntegrationTest {
         scheduler.enqueueThought(
             content = "thinking...",
             urgency = ai.neopsyke.agent.model.Urgency.MEDIUM,
+        groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
         )
         scheduler.enqueueAction(
             type = ActionType.CONTACT_USER,
             payload = "hello",
             summary = "answer",
             urgency = ai.neopsyke.agent.model.Urgency.MEDIUM,
+        groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
         )
 
         // Manually enqueue an impulse (Id.pulse() won't fire because hasPendingWork=true)
@@ -212,6 +215,7 @@ class IdEgoIntegrationTest {
         scheduler.enqueueThought(
             content = "pending thought",
             urgency = ai.neopsyke.agent.model.Urgency.LOW,
+        groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
         )
 
         id.pulse()

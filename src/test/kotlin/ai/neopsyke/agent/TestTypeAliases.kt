@@ -121,5 +121,6 @@ fun deferredTrigger(thought: PendingThought): EgoTrigger =
             deferredDenialReasonCode = thought.denialReasonCode,
             deferredOriginActionType = thought.originActionType,
             deferredOriginActionObservedEvidence = thought.originActionObservedEvidence,
+            groundingMetadata = thought.groundingMetadata,
         )
     )

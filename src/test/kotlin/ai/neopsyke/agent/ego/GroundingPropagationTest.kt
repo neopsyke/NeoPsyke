@@ -42,10 +42,10 @@ class GroundingPropagationTest {
     }
 
     @Test
-    fun `OpportunityTrigger Input exposes null when PendingInput has no grounding`() {
+    fun `OpportunityTrigger Input defaults to NOT_REQUIRED_PREFILTER when no grounding specified`() {
         val input = PendingInput(id = 1L, content = "hello")
         val trigger = OpportunityTrigger.Input(input)
-        assertEquals(null, trigger.groundingMetadata)
+        assertEquals(notRequiredMetadata, trigger.groundingMetadata)
     }
 
     // --- QueuedIntention -> PendingThought ---
@@ -69,7 +69,7 @@ class GroundingPropagationTest {
     }
 
     @Test
-    fun `toPendingThought preserves null grounding when absent`() {
+    fun `toPendingThought preserves NOT_REQUIRED_PREFILTER grounding when default`() {
         val intention = QueuedIntention(
             intention = Intention(
                 id = "i2",
@@ -80,8 +80,9 @@ class GroundingPropagationTest {
                 conversationContext = ConversationContext.default(),
             ),
             urgency = Urgency.MEDIUM,
+            groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
         )
-        assertEquals(null, intention.toPendingThought().groundingMetadata)
+        assertEquals(notRequiredMetadata, intention.toPendingThought().groundingMetadata)
     }
 
     // --- GoalRunActivation -> OpportunityTrigger.GoalWork ---

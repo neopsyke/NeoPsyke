@@ -19,6 +19,7 @@ import ai.neopsyke.agent.model.ConversationContext
 import ai.neopsyke.agent.model.OriginSource
 import ai.neopsyke.agent.model.PendingAction
 import ai.neopsyke.agent.model.Urgency
+import ai.neopsyke.agent.model.GroundingMetadata
 import ai.neopsyke.support.RecordingInstrumentation
 import java.nio.file.Files
 import java.time.Instant
@@ -155,6 +156,7 @@ class GoalManagerTest {
                     rootInputId = work.rootInputId,
                     conversationContext = ConversationContext.default(),
                     origin = ai.neopsyke.agent.model.ActionOrigin(source = OriginSource.GOAL),
+                groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
                 ),
                 outcome = ActionOutcome(
                     statusSummary = "completed",
@@ -485,6 +487,7 @@ class GoalManagerTest {
                     rootInputId = work.rootInputId,
                     conversationContext = ConversationContext.default(),
                     origin = ai.neopsyke.agent.model.ActionOrigin(source = OriginSource.GOAL),
+                groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
                 ),
                 outcome = ActionOutcome(
                     statusSummary = "completed",
@@ -1007,6 +1010,7 @@ class GoalManagerTest {
         rootInputId = rootInputId,
         conversationContext = ConversationContext.default(),
         origin = ai.neopsyke.agent.model.ActionOrigin(source = OriginSource.GOAL),
+    groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
     )
 
     private fun asyncWaitingOutcome(

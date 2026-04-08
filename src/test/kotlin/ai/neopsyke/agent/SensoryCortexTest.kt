@@ -344,6 +344,7 @@ class SensoryCortexTest {
                 plannerSignal = "web_search result: pricing found",
                 executionStatus = ActionExecutionStatus.SUCCESS,
                 conversationContext = ConversationContext.default(),
+                groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
             )
         )
 

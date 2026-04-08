@@ -146,7 +146,7 @@ internal class DeliberationEngine(
         rootInputId: String?,
         rootInputReceivedAtMs: Long?,
         conversationContext: ConversationContext,
-        groundingMetadata: GroundingMetadata? = null,
+        groundingMetadata: GroundingMetadata,
     ) {
         val scope = inputScope(rootInputId, conversationContext.sessionId) ?: return
         if (scope in forcedTerminalAnswerQueuedByInput) return
@@ -157,10 +157,11 @@ internal class DeliberationEngine(
         val repeatedModelErrors = state.modelErrorStreak >= MODEL_ERROR_STREAK_THRESHOLD &&
             state.decisionPressure >= MODEL_ERROR_PRESSURE_THRESHOLD &&
             state.stepIndex >= MODEL_ERROR_MIN_STEP_INDEX
-        if (!circularPressureHigh && !repeatedModelErrors) return
+        val noopSpiral = state.noopStreak >= config.metaReasoner.forcedTerminalNoopStreakThreshold
+        if (!circularPressureHigh && !repeatedModelErrors && !noopSpiral) return
         val basePayload = "I have reached diminishing returns in internal reasoning. " +
             "Here is the best concise answer I can provide now with current evidence."
-        val payload = if (groundingMetadata?.requirement == GroundingRequirement.REQUIRED) {
+        val payload = if (groundingMetadata.requirement == GroundingRequirement.REQUIRED) {
             val evidence = evidenceFor(rootInputId, conversationContext.sessionId)
             if (evidence?.hadExternalFailures == true && evidence.hadSuccessfulEvidence != true) {
                 basePayload + FORCED_TERMINAL_EVIDENCE_FAILURE_DISCLAIMER

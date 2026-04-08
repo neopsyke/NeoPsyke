@@ -1,5 +1,6 @@
 package ai.neopsyke.agent
 
+import ai.neopsyke.agent.model.GroundingMetadata
 import ai.neopsyke.agent.model.IntentionKind
 import kotlin.test.Test
 import kotlin.test.assertTrue
@@ -44,7 +45,8 @@ class DeliberationProgressMonitorTest {
                 urgency = Urgency.HIGH,
                 type = ActionType.WEB_SEARCH,
                 payload = "query",
-                summary = "search"
+                summary = "search",
+                groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
             )
         )
 
@@ -102,7 +104,8 @@ class DeliberationProgressMonitorTest {
                 urgency = Urgency.MEDIUM,
                 type = ActionType.WEB_SEARCH,
                 payload = "query",
-                summary = "search"
+                summary = "search",
+                groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
             ),
             observedEvidence = false
         )

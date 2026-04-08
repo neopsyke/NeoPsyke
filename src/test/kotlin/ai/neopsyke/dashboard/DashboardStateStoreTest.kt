@@ -26,6 +26,7 @@ import ai.neopsyke.agent.model.PerceptFamily
 import ai.neopsyke.agent.model.QueueState
 import ai.neopsyke.agent.model.RootInputIds
 import ai.neopsyke.agent.model.Urgency
+import ai.neopsyke.agent.model.GroundingMetadata
 import ai.neopsyke.instrumentation.AgentEvent
 import ai.neopsyke.metrics.MetricsSnapshot
 import ai.neopsyke.metrics.MetricsTotals
@@ -48,7 +49,7 @@ class DashboardStateStoreTest {
         val queues = QueueState(
             inputs = listOf(PendingInput(1, "hello")),
             thoughts = listOf(PendingThought(2, Urgency.HIGH, "think", 1)),
-            actions = listOf(PendingAction(3, Urgency.MEDIUM, ActionType.CONTACT_USER, "payload", "sum", 0))
+            actions = listOf(PendingAction(3, Urgency.MEDIUM, ActionType.CONTACT_USER, "payload", "sum", 0, groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER))
         )
         val metrics = MetricsSnapshot(
             runId = "run-1",
@@ -552,7 +553,8 @@ class DashboardStateStoreTest {
                         summary = "summary",
                         rootInputId = rootInputId,
                         rootInputReceivedAtMs = rootInputMs,
-                        conversationContext = conversationContext
+                        conversationContext = conversationContext,
+                        groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
                     ),
                     "outcome_summary" to "ok"
                 )
@@ -610,6 +612,7 @@ class DashboardStateStoreTest {
                         rootInputId = rootInputId,
                         rootInputReceivedAtMs = rootInputMs,
                         conversationContext = conversationContext,
+                    groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
                     ),
                     "outcome_summary" to "ok",
                 )

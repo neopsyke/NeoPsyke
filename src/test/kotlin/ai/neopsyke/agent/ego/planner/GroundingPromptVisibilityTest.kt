@@ -252,6 +252,7 @@ class GroundingPromptVisibilityTest {
                 ),
                 urgency = Urgency.MEDIUM,
                 deferredContent = "test thought",
+            groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
             )
         )
 
@@ -267,6 +268,7 @@ class GroundingPromptVisibilityTest {
                     plannerSignal = "ok",
                     executionStatus = ActionExecutionStatus.SUCCESS,
                     conversationContext = ConversationContext.default(),
+                groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
                 ),
                 percept = Percept(
                     id = "p1",
@@ -293,6 +295,7 @@ class GroundingPromptVisibilityTest {
                 acceptanceCriteria = "Fresh data",
                 workingContext = "",
                 conversationContext = ConversationContext.default(),
+            groundingMetadata = GroundingMetadata(requirement = GroundingRequirement.NOT_REQUIRED, source = GroundingSource.GOAL_STEP_POLICY),
             )
         )
 }

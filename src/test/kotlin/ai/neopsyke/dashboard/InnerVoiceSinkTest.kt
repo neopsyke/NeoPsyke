@@ -11,6 +11,7 @@ import ai.neopsyke.agent.model.OriginSource
 import ai.neopsyke.agent.model.PendingAction
 import ai.neopsyke.agent.model.PendingInput
 import ai.neopsyke.agent.model.Urgency
+import ai.neopsyke.agent.model.GroundingMetadata
 import ai.neopsyke.instrumentation.AgentEvent
 import ai.neopsyke.instrumentation.AgentEvents
 import kotlin.test.Test
@@ -200,7 +201,8 @@ class InnerVoiceSinkTest {
             type = ActionType.WEBSITE_FETCH,
             payload = "https://example.com",
             summary = "Fetch page",
-            rootInputId = "root-1"
+            rootInputId = "root-1",
+            groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
         )
         sink.onEvent(AgentEvents.actionDenied(action, "External API calls restricted", "POLICY_EXTERNAL_CALLS"))
 
@@ -335,7 +337,8 @@ class InnerVoiceSinkTest {
             type = ActionType.WEB_SEARCH,
             payload = "AI news",
             summary = "Search for AI news",
-            rootInputId = "root-1"
+            rootInputId = "root-1",
+            groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
         )
         sink.onEvent(AgentEvents.actionExecuted(action, "Found 5 results for 'AI news'."))
 
@@ -665,7 +668,8 @@ class InnerVoiceSinkTest {
             type = ActionType.REFLECT_INTERNAL,
             payload = """{"summary":"Learned that X is important","keywords":["X","important"]}""",
             summary = "Record insight about X",
-            rootInputId = "root-1"
+            rootInputId = "root-1",
+            groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
         )
         sink.onEvent(AgentEvents.actionExecuted(action, "Insight recorded: X is important"))
 
@@ -722,7 +726,8 @@ class InnerVoiceSinkTest {
                         type = ActionType.WEB_SEARCH,
                         payload = "test",
                         summary = "test",
-                        rootInputId = "root-1"
+                        rootInputId = "root-1",
+                        groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
                     ),
                     "outcome_summary" to "Result"
                 )

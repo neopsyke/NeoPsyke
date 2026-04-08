@@ -13,6 +13,7 @@ import ai.neopsyke.agent.model.ActionExecutionStatus
 import ai.neopsyke.agent.model.ActionType
 import ai.neopsyke.agent.model.PendingAction
 import ai.neopsyke.agent.model.Urgency
+import ai.neopsyke.agent.model.GroundingMetadata
 import java.nio.file.Files
 import java.time.Instant
 import kotlin.test.Test
@@ -75,6 +76,7 @@ class GoalOperationActionPluginTest {
                 type = ActionType.GOAL_OPERATION,
                 payload = """{"command":"create","title":"Inbox","instruction":"Keep inbox triaged","priority":"HIGH","completion_criteria":"Inbox is triaged","cron_expression":"*/5 * * * *"}""",
                 summary = "create goal",
+            groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
             ),
             ActionExecutionContext(searchResultCount = 0)
         )
@@ -115,6 +117,7 @@ class GoalOperationActionPluginTest {
                 type = ActionType.GOAL_OPERATION,
                 payload = """{"command":"delete_all"}""",
                 summary = "delete goals",
+            groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
             ),
             ActionExecutionContext(searchResultCount = 0)
         )
@@ -150,6 +153,7 @@ class GoalOperationActionPluginTest {
                 type = ActionType.GOAL_OPERATION,
                 payload = """{"command":"delete"}""",
                 summary = "delete goal ambiguously",
+            groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
             ),
             ActionExecutionContext(searchResultCount = 0)
         )
@@ -262,6 +266,7 @@ class GoalOperationActionPluginTest {
                 type = ActionType.GOAL_OPERATION,
                 payload = payload,
                 summary = "goal operation",
+            groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
             ),
             ActionExecutionContext(searchResultCount = 0)
         )

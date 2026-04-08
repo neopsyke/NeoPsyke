@@ -25,6 +25,8 @@ import ai.neopsyke.agent.model.Provenances
 import ai.neopsyke.agent.model.QueueSnapshot
 import ai.neopsyke.agent.model.RootInputIds
 import ai.neopsyke.agent.model.Urgency
+import ai.neopsyke.agent.model.GroundingMetadata
+import ai.neopsyke.agent.model.GroundingSource
 import ai.neopsyke.llm.ChatCompletion
 import ai.neopsyke.llm.ChatMessage
 import ai.neopsyke.llm.ChatModelClient
@@ -89,6 +91,7 @@ class HierarchicalPlannerAcceptanceTest {
             plannerSignal = "action_completed",
             executionStatus = status,
             conversationContext = ConversationContext.default(),
+        groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
         )
         val percept = Percept(
             id = RootInputIds.next(),
@@ -118,6 +121,7 @@ class HierarchicalPlannerAcceptanceTest {
                 acceptanceCriteria = "Weather reported",
                 workingContext = "Goal: weather reminder",
                 conversationContext = ConversationContext.default(),
+            groundingMetadata = GroundingMetadata(requirement = GroundingRequirement.NOT_REQUIRED, source = GroundingSource.GOAL_STEP_POLICY),
             )
         )
 

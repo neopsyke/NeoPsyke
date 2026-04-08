@@ -4,6 +4,7 @@ import ai.neopsyke.agent.config.AgentConfig
 import ai.neopsyke.agent.config.MetaReasonerConfig
 import ai.neopsyke.agent.model.ConversationContext
 import ai.neopsyke.agent.model.EgoDecision
+import ai.neopsyke.agent.model.GroundingMetadata
 import ai.neopsyke.agent.model.Urgency
 import ai.neopsyke.instrumentation.NoopAgentInstrumentation
 import kotlin.test.Test
@@ -56,6 +57,7 @@ class ForcedTerminalShortCircuitTest {
             rootInputId = "root-1",
             rootInputReceivedAtMs = System.currentTimeMillis(),
             conversationContext = ConversationContext.default().copy(sessionId = "s1"),
+            groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
         )
         assertTrue(engine.hasForcedTerminalForInput("root-1", "s1"))
     }
@@ -70,6 +72,7 @@ class ForcedTerminalShortCircuitTest {
             rootInputId = "root-1",
             rootInputReceivedAtMs = System.currentTimeMillis(),
             conversationContext = ConversationContext.default().copy(sessionId = "s1"),
+            groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
         )
         assertTrue(engine.hasForcedTerminalForInput("root-1", "s1"))
 
@@ -88,6 +91,7 @@ class ForcedTerminalShortCircuitTest {
             rootInputId = "root-1",
             rootInputReceivedAtMs = System.currentTimeMillis(),
             conversationContext = ConversationContext.default().copy(sessionId = "s1"),
+            groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
         )
         assertTrue(engine.hasForcedTerminalForInput("root-1", "s1"))
 
@@ -106,6 +110,7 @@ class ForcedTerminalShortCircuitTest {
             rootInputId = "root-1",
             rootInputReceivedAtMs = System.currentTimeMillis(),
             conversationContext = ConversationContext.default().copy(sessionId = "s1"),
+            groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
         )
 
         // Drive pressure up again and try to force another terminal.
@@ -115,6 +120,7 @@ class ForcedTerminalShortCircuitTest {
             rootInputId = "root-1",
             rootInputReceivedAtMs = System.currentTimeMillis(),
             conversationContext = ConversationContext.default().copy(sessionId = "s1"),
+            groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
         )
 
         // Only one contact_user action should be enqueued.

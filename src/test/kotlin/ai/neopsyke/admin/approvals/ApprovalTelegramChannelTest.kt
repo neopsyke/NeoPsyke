@@ -24,6 +24,7 @@ import ai.neopsyke.agent.model.ConversationSecurityContext
 import ai.neopsyke.agent.model.ConversationSecurityContexts
 import ai.neopsyke.agent.model.InputPriority
 import ai.neopsyke.agent.model.Interlocutor
+import ai.neopsyke.agent.model.GroundingMetadata
 import ai.neopsyke.agent.model.PendingAction
 import ai.neopsyke.agent.model.StagedAction
 import ai.neopsyke.agent.model.StagedActionStatus
@@ -86,6 +87,7 @@ class ApprovalTelegramChannelTest {
                     id = 1L, urgency = Urgency.MEDIUM, type = currentStagedAction.actionType,
                     payload = currentStagedAction.payload, summary = currentStagedAction.summary,
                     rootInputId = currentStagedAction.rootInputId, conversationContext = currentStagedAction.conversationContext,
+                    groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
                 ),
             )
         }

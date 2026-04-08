@@ -131,7 +131,7 @@ data class ActionFeedbackCue(
     val urgency: String? = null,
     val requiresFollowUpThought: Boolean = false,
     val origin: ActionOrigin = ActionOrigin.USER,
-    val groundingMetadata: GroundingMetadata? = null,
+    val groundingMetadata: GroundingMetadata,
 ) {
     fun toStimulus(): StimulusEnvelope =
         StimulusEnvelope(
@@ -163,10 +163,8 @@ data class ActionFeedbackCue(
                 put(METADATA_ORIGIN_SOURCE, origin.source.name)
                 origin.needId?.takeIf { it.isNotBlank() }?.let { put(METADATA_ORIGIN_NEED_ID, it) }
                 origin.rootImpulseId?.takeIf { it.isNotBlank() }?.let { put(METADATA_ORIGIN_ROOT_IMPULSE_ID, it) }
-                groundingMetadata?.let { metadata ->
-                    put(METADATA_GROUNDING_REQUIRED, metadata.requirement.name)
-                    put(METADATA_GROUNDING_SOURCE, metadata.source.name)
-                }
+                put(METADATA_GROUNDING_REQUIRED, groundingMetadata.requirement.name)
+                put(METADATA_GROUNDING_SOURCE, groundingMetadata.source.name)
             },
         )
 
@@ -193,7 +191,18 @@ data class ActionFeedbackCue(
             val groundingMetadata = if (groundingRequirement != null && groundingSource != null) {
                 GroundingMetadata(requirement = groundingRequirement, source = groundingSource)
             } else {
-                null
+                // Stimulus missing grounding metadata keys — default to NOT_REQUIRED.
+                // This is the only site where a default is allowed; all other envelope
+                // construction must provide grounding metadata explicitly.
+                sensoryCortexLogger.warn {
+                    "ActionFeedbackCue.fromStimulus: grounding metadata missing from stimulus " +
+                        "metadata keys; defaulting to NOT_REQUIRED/INHERITED. " +
+                        "root_input_id=$rootInputId action_type=${actionType.id}"
+                }
+                GroundingMetadata(
+                    requirement = GroundingRequirement.NOT_REQUIRED,
+                    source = GroundingSource.INHERITED,
+                )
             }
             return ActionFeedbackCue(
                 rootInputId = rootInputId,

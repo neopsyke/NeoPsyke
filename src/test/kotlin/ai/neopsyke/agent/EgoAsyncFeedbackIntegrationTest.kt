@@ -33,6 +33,7 @@ import ai.neopsyke.agent.model.EgoTrigger
 import ai.neopsyke.agent.model.InputPriority
 import ai.neopsyke.agent.model.IntentionKind
 import ai.neopsyke.agent.model.Interlocutor
+import ai.neopsyke.agent.model.GroundingMetadata
 import ai.neopsyke.agent.model.PendingAction
 import ai.neopsyke.agent.model.PlannerContext
 import ai.neopsyke.agent.model.Provenances
@@ -160,6 +161,7 @@ class EgoAsyncFeedbackIntegrationTest {
                     plannerSignal = "download finished",
                     executionStatus = ActionExecutionStatus.SUCCESS,
                     conversationContext = context,
+                    groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
                 )
             )
 
