@@ -19,7 +19,7 @@
 | # | Capability | Classification | New Owner | Notes |
 |---|-----------|---------------|-----------|-------|
 | 1 | Fresh input planning | Preserved (narrower) | `InputPlanner` -> `InputIntentRouter` -> L2 sub-planners | Two-call pattern: classify then decide. Old: single monolithic call. |
-| 2 | Deferred intention / continuation planning | Preserved (narrower) | `DeferredStepPlanner` | Dedicated lane with narrower prompt. Supports defer/intend/plan/noop. |
+| 2 | Continuation planning | Preserved (narrower) | `ContinuationPlanner` | Dedicated lane with narrower prompt. Supports continuation/intend/plan/noop. |
 | 3 | Action feedback planning | Preserved (narrower) | `FeedbackPlanner` | Dedicated lane for action outcome interpretation. |
 | 4 | Goal-work planning | Preserved (narrower) | `GoalWorkPlanner` | Dedicated lane for goal-step execution. |
 | 5 | Id/self-motivated planning | Preserved (narrower) | `ImpulsePlanner` | Dedicated lane. No plan decision (only defer/intend/noop). |
@@ -35,8 +35,8 @@
 | 15 | Conversation / thread trust and provenance shaping | Preserved | Shared prompt context sections across L1/L2 lanes | `securityContextSection`, `triggerProvenanceSection`, `perceptThreadSection`, and prompt instructions carry trust/provenance constraints into planner decisions. |
 | 16 | Goal-runtime constraints | Preserved | `GoalWorkPlanner` + `SharedPromptSections.formatTriggerText()` | Goal step description, acceptance criteria, wake reason, and working context are preserved in the goal-work lane prompt and decision path. |
 | 17 | Id convergence constraints | Preserved | Upstream `CognitivePolicyShaper` / `Ego` shaping, consumed by `ImpulsePlanner` and deferred lanes through `PlannerContext` | Convergence-mode action/intention restrictions are preserved as typed context constraints before planner choice, then enforced by planner-visible action surface and lane validation. |
-| 18 | Plan-step continuation semantics | Preserved | `DeferredStepPlanner` | Plan context, pass count, denial codes carried via typed `QueuedIntention` fields. |
-| 19 | Resolution-draft gating | Preserved | `DeferredStepPlanner` | `allowResolutionDraft = thought.planContext != null` check. Only in DeferredStep lane. |
+| 18 | Plan-step continuation semantics | Preserved | `ContinuationPlanner` | Plan context, pass count, denial codes carried via typed `QueuedContinuation` fields. |
+| 19 | Resolution-draft gating | Preserved | `ContinuationPlanner` | `allowResolutionDraft = continuation.planContext != null` check. Only in the continuation lane. |
 | 20 | Structured-output retry / recovery | Preserved (narrower) | `PlannerRuntime` + lane-local retry paths | Runtime owns model-call retry and provider-side schema-validation fallback. Parse-failure retries are lane-local (`truncation_retry` + strict-JSON retry). |
 | 21 | Planner output repair | Preserved | `StructuredOutputHandler` + `PlannerRuntime` | Invalid JSON escape repair, bare URL wrapping, missing summary synthesis. |
 | 22 | Planner telemetry | Preserved | `PlannerRuntime` + `HierarchicalEgoPlanner` | `planner_start`, `planner_lane_selected`, `planner_decision`, `prompt_budget_allocation`. |

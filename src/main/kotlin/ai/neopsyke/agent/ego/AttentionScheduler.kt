@@ -12,6 +12,7 @@ class AttentionScheduler(
     // coroutine reads these structures, so cross-thread fields are @Volatile.
     @Volatile private var idCounter = 0L
     private val opportunities = PriorityQueue<ScheduledOpportunity>(opportunityComparator)
+    private val continuations = PriorityQueue<QueuedContinuation>(continuationComparator)
     private val intentions = PriorityQueue<QueuedIntention>(intentionComparator)
     private val actions = PriorityQueue<PendingAction>(actionComparator)
     @Volatile private var latestQueuedInput: PendingInput? = null
@@ -47,65 +48,32 @@ class AttentionScheduler(
 
     fun latestQueuedInput(): PendingInput? = latestQueuedInput
 
-    /**
-     * Build a deferred [Intention] + [QueuedIntention] and enqueue it.
-     * Returns the [Intention] if successfully queued, null if the queue is full.
-     *
-     * Shared entry point for [DecisionDispatcher] and [FallbackHandler].
-     */
-    fun enqueueThought(
-        content: String,
+    fun enqueueContinuation(
+        continuation: Continuation,
         urgency: Urgency,
         passes: Int = 0,
-        longTermMemoryRecallQuery: String? = null,
         rootInputId: String? = null,
         rootInputReceivedAtMs: Long? = null,
-        deniedActionType: ActionType? = null,
-        deniedActionPayload: String? = null,
-        denialReason: String? = null,
-        allowFallbackExplanation: Boolean = false,
-        planContext: PlanContext? = null,
-        denialReasonCode: String? = null,
-        originActionType: ActionType? = null,
-        originActionObservedEvidence: Boolean? = null,
         conversationContext: ConversationContext = ConversationContext.default(),
         origin: ActionOrigin = ActionOrigin.USER,
         groundingMetadata: GroundingMetadata,
-    ): Intention? {
-        val deferredIntentions = intentions.count { it.intention.kind == IntentionKind.DEFER }
-        if (deferredIntentions >= config.maxPendingThoughts) {
+    ): QueuedContinuation? {
+        if (continuations.size >= config.maxPendingContinuations) {
             return null
         }
-        val intention = Intention(
-            id = RootInputIds.next(),
-            cognitiveThreadId = rootInputId ?: RootInputIds.next(),
-            kind = IntentionKind.DEFER,
-            summary = content.take(160),
-            createdAt = java.time.Instant.now(),
+        val queued = QueuedContinuation(
+            queueId = nextId(),
+            urgency = urgency,
+            continuation = continuation,
+            passes = passes,
+            rootInputId = rootInputId,
+            rootInputReceivedAtMs = rootInputReceivedAtMs,
             conversationContext = conversationContext,
-            rootStimulusId = rootInputId,
+            origin = origin,
+            groundingMetadata = groundingMetadata,
         )
-        val queued = enqueueIntention(
-            QueuedIntention(
-                intention = intention,
-                urgency = urgency,
-                rootInputReceivedAtMs = rootInputReceivedAtMs,
-                origin = origin,
-                deferredContent = content,
-                deferredPasses = passes,
-                deferredRecallQuery = longTermMemoryRecallQuery,
-                deferredDeniedActionType = deniedActionType,
-                deferredDeniedActionPayload = deniedActionPayload,
-                deferredDenialReason = denialReason,
-                deferredAllowFallbackExplanation = allowFallbackExplanation,
-                deferredPlanContext = planContext,
-                deferredDenialReasonCode = denialReasonCode,
-                deferredOriginActionType = originActionType,
-                deferredOriginActionObservedEvidence = originActionObservedEvidence,
-                groundingMetadata = groundingMetadata,
-            )
-        )
-        return if (queued) intention else null
+        continuations.add(queued)
+        return queued
     }
 
     fun enqueueAction(
@@ -228,15 +196,14 @@ class AttentionScheduler(
         if (rootInputId.isNullOrBlank()) {
             return false
         }
-        return intentions.any { intention ->
+        return continuations.any { continuation ->
             matchesInputScope(
-                itemRootInputId = intention.rootInputId,
-                itemConversationContext = intention.conversationContext,
+                itemRootInputId = continuation.rootInputId,
+                itemConversationContext = continuation.conversationContext,
                 rootInputId = rootInputId,
                 sessionId = sessionId
             ) &&
-                intention.intention.kind == IntentionKind.DEFER &&
-                intention.deferredPlanContext != null
+                continuation.planContext != null
         }
     }
 
@@ -244,15 +211,14 @@ class AttentionScheduler(
         if (rootInputId.isNullOrBlank()) {
             return false
         }
-        return intentions.any { intention ->
+        return continuations.any { continuation ->
             matchesInputScope(
-                itemRootInputId = intention.rootInputId,
-                itemConversationContext = intention.conversationContext,
+                itemRootInputId = continuation.rootInputId,
+                itemConversationContext = continuation.conversationContext,
                 rootInputId = rootInputId,
                 sessionId = sessionId
             ) &&
-                intention.intention.kind == IntentionKind.DEFER &&
-                intention.deferredContent?.startsWith(CONVERGENCE_THOUGHT_PREFIX) == true
+                continuation.continuation is Continuation.ConvergeNow
         }
     }
 
@@ -260,8 +226,17 @@ class AttentionScheduler(
         if (rootInputId.isNullOrBlank()) {
             return ClearedPendingWork()
         }
+        val continuationBefore = continuations.size
         val intentionBefore = intentions.size
         val actionBefore = actions.size
+        continuations.removeIf { continuation ->
+            matchesInputScope(
+                itemRootInputId = continuation.rootInputId,
+                itemConversationContext = continuation.conversationContext,
+                rootInputId = rootInputId,
+                sessionId = sessionId
+            )
+        }
         intentions.removeIf { intention ->
             matchesInputScope(
                 itemRootInputId = intention.rootInputId,
@@ -279,7 +254,7 @@ class AttentionScheduler(
             )
         }
         return ClearedPendingWork(
-            thoughtsRemoved = intentionBefore - intentions.size,
+            continuationsRemoved = continuationBefore - continuations.size,
             actionsRemoved = actionBefore - actions.size
         )
     }
@@ -292,10 +267,27 @@ class AttentionScheduler(
             return LoopTask.AttendOpportunity(opportunity)
         }
 
+        val topContinuation = peekNextContinuation(isBlocked)
         val topIntention = peekNextIntention(isBlocked)
         val topAction = peekNextAction(isBlocked)
-        if (topIntention == null && topAction == null) {
+        if (topContinuation == null && topIntention == null && topAction == null) {
             return null
+        }
+        if (topContinuation != null && topIntention == null && topAction == null) {
+            return LoopTask.ProcessContinuation(removeNextContinuation(isBlocked) ?: return null)
+        }
+        if (topContinuation != null && topIntention == null && topAction != null) {
+            return if (topContinuation.urgency.priority >= topAction.urgency.priority) {
+                LoopTask.ProcessContinuation(removeNextContinuation(isBlocked) ?: return null)
+            } else {
+                LoopTask.PerformAction(removeNextAction(isBlocked) ?: return null)
+            }
+        }
+        if (topContinuation != null && topIntention != null) {
+            val continuationWins = topContinuation.urgency.priority > topIntention.urgency.priority
+            if (continuationWins && (topAction == null || topContinuation.urgency.priority >= topAction.urgency.priority)) {
+                return LoopTask.ProcessContinuation(removeNextContinuation(isBlocked) ?: return null)
+            }
         }
         if (topIntention != null && topAction == null) {
             return LoopTask.ProcessIntention(removeNextIntention(isBlocked) ?: return null)
@@ -303,25 +295,29 @@ class AttentionScheduler(
         if (topIntention != null && topIntention.urgency.priority >= topAction!!.urgency.priority) {
             return LoopTask.ProcessIntention(removeNextIntention(isBlocked) ?: return null)
         }
+        if (topContinuation != null && topAction != null && topContinuation.urgency.priority >= topAction.urgency.priority) {
+            return LoopTask.ProcessContinuation(removeNextContinuation(isBlocked) ?: return null)
+        }
         return LoopTask.PerformAction(removeNextAction(isBlocked) ?: return null)
     }
 
     fun hasPendingWork(): Boolean =
-        opportunities.isNotEmpty() || intentions.isNotEmpty() || actions.isNotEmpty()
+        opportunities.isNotEmpty() || continuations.isNotEmpty() || intentions.isNotEmpty() || actions.isNotEmpty()
 
     /**
-     * Returns true when there is queued work (thought/action/impulse) for a specific root.
+     * Returns true when there is queued work (opportunity/continuation/intention/action) for a specific root.
      * Used by Ego to close Id impulse lifecycles only after all derived work is drained.
      */
     fun hasPendingWorkForRoot(rootInputId: String): Boolean =
         opportunities.any { it.rootInputId == rootInputId } ||
+            continuations.any { it.rootInputId == rootInputId } ||
             intentions.any { it.rootInputId == rootInputId } ||
             actions.any { it.rootInputId == rootInputId }
 
     fun queueSnapshot(): QueueSnapshot =
         QueueSnapshot(
             pendingInputCount = pendingInputCount(),
-            deferredIntentionCount = intentions.count { it.intention.kind == IntentionKind.DEFER },
+            continuationCount = continuations.size,
             pendingActionCount = actions.size,
             pendingIntentionCount = intentions.size,
             pendingImpulseCount = pendingImpulseCount(),
@@ -334,11 +330,8 @@ class AttentionScheduler(
                     (scheduled.trigger as? OpportunityTrigger.Input)?.input
                 }
                 .sortedWith(inputComparator),
+            continuations = continuations.toList().sortedWith(continuationComparator),
             intentions = intentions.toList().sortedWith(intentionComparator),
-            thoughts = intentions
-                .filter { it.intention.kind == IntentionKind.DEFER }
-                .map { it.toPendingThought() }
-                .sortedWith(thoughtComparator),
             actions = actions.toList().sortedWith(actionComparator)
         )
 
@@ -376,6 +369,26 @@ class AttentionScheduler(
         deferred.forEach(opportunities::add)
         return selected
     }
+
+    private fun peekNextContinuation(
+        isBlocked: (rootInputId: String?, conversationContext: ConversationContext) -> Boolean,
+    ): QueuedContinuation? =
+        peekAvailableFromQueue(
+            queue = continuations,
+            isBlocked = isBlocked,
+            rootInputId = { it.rootInputId },
+            conversationContext = { it.conversationContext },
+        )
+
+    private fun removeNextContinuation(
+        isBlocked: (rootInputId: String?, conversationContext: ConversationContext) -> Boolean,
+    ): QueuedContinuation? =
+        removeAvailableFromQueue(
+            queue = continuations,
+            isBlocked = isBlocked,
+            rootInputId = { it.rootInputId },
+            conversationContext = { it.conversationContext },
+        )
 
     private fun peekNextIntention(
         isBlocked: (rootInputId: String?, conversationContext: ConversationContext) -> Boolean,
@@ -461,19 +474,18 @@ class AttentionScheduler(
     }
 
     companion object {
-        const val CONVERGENCE_THOUGHT_PREFIX: String = "[convergence] "
+        const val CONVERGENCE_CONTINUATION_PREFIX: String = "[convergence] "
 
         internal val inputComparator = compareByDescending<PendingInput> { it.priority.level }
             .thenBy { it.id }
 
-        internal val thoughtComparator = compareByDescending<PendingThought> { it.urgency.priority }
-            .thenBy { it.id }
+        internal val continuationComparator = compareByDescending<QueuedContinuation> { it.urgency.priority }
+            .thenBy { it.queueId }
 
         internal val actionComparator = compareByDescending<PendingAction> { it.urgency.priority }
             .thenBy { it.id }
 
         internal val intentionComparator = compareByDescending<QueuedIntention> { it.urgency.priority }
-            .thenBy { if (it.intention.kind == IntentionKind.DEFER) 1 else 0 }
             .thenBy { it.intention.createdAt }
             .thenBy { it.queueId }
 

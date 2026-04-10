@@ -246,16 +246,6 @@ class GeneralActionPlanner(
         if (!DecisionValidation.isCommitModeValidForIntention(intentionKind, commitModePreference)) {
             return EgoDecision.Noop("GeneralAction returned invalid commit_mode for intention kind.")
         }
-        if (!context.availableActions.contains(actionType)) {
-            return EgoDecision.Noop("GeneralAction formed unavailable action type: ${actionType.id}.")
-        }
-        if (intentionKind !in context.allowedIntentions) {
-            return EgoDecision.Noop("GeneralAction formed unavailable intention kind: ${intentionKind.name.lowercase()}.")
-        }
-        if (commitModePreference !in context.allowedCommitModes) {
-            return EgoDecision.Noop("GeneralAction formed unavailable commit mode: ${commitModePreference.name.lowercase()}.")
-        }
-
         return EgoDecision.FormIntention(
             urgency = Urgency.fromRaw(payload.urgency),
             intentionKind = intentionKind,

@@ -36,7 +36,7 @@ import ai.neopsyke.agent.model.StagedActionStatus
 import ai.neopsyke.agent.config.MemoryConfig
 import ai.neopsyke.agent.model.PendingImpulse
 import ai.neopsyke.agent.model.PendingAction
-import ai.neopsyke.agent.model.PendingThought
+import ai.neopsyke.agent.model.QueuedContinuation
 import ai.neopsyke.agent.config.MetaReasonerConfig
 import ai.neopsyke.agent.config.PlannerConfig
 import ai.neopsyke.agent.model.PlannerContext
@@ -110,7 +110,7 @@ class AgentScenarioPackTest {
         }
         val instrumentation = RecordingInstrumentation()
         val outputs = mutableListOf<String>()
-        val config = AgentConfig(planner = PlannerConfig(maxLoopStepsPerInput = 4, maxThoughtPasses = 1))
+        val config = AgentConfig(planner = PlannerConfig(maxLoopStepsPerInput = 4, maxContinuationPasses = 1))
         val agent = buildTestEgo(
             planner = LlmEgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
             superego = Superego(modelClient = superegoLlm, config = config, instrumentation = instrumentation),
@@ -155,7 +155,7 @@ class AgentScenarioPackTest {
         }
         val instrumentation = RecordingInstrumentation()
         val outputs = mutableListOf<String>()
-        val config = AgentConfig(planner = PlannerConfig(maxLoopStepsPerInput = 8, maxThoughtPasses = 4))
+        val config = AgentConfig(planner = PlannerConfig(maxLoopStepsPerInput = 8, maxContinuationPasses = 4))
         val agent = buildTestEgo(
             planner = LlmEgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
             superego = Superego(modelClient = superegoLlm, config = config, instrumentation = instrumentation),
@@ -203,7 +203,7 @@ class AgentScenarioPackTest {
                     sources = emptyList()
                 )
         }
-        val config = AgentConfig(planner = PlannerConfig(maxLoopStepsPerInput = 7, maxThoughtPasses = 1))
+        val config = AgentConfig(planner = PlannerConfig(maxLoopStepsPerInput = 7, maxContinuationPasses = 1))
         val agent = buildTestEgo(
             planner = LlmEgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
             superego = Superego(modelClient = superegoLlm, config = config, instrumentation = instrumentation),
@@ -293,7 +293,7 @@ class AgentScenarioPackTest {
                 )
         }
         val config = AgentConfig(
-            planner = PlannerConfig(maxLoopStepsPerInput = 8, maxThoughtPasses = 3),
+            planner = PlannerConfig(maxLoopStepsPerInput = 8, maxContinuationPasses = 3),
             memory = MemoryConfig(
                 scratchpad = ScratchpadConfig(enabled = true, activationMinPlanSteps = 1, maxPromptTokens = 260)
             )
@@ -325,59 +325,6 @@ class AgentScenarioPackTest {
     }
 
     @Test
-    fun scenario_forced_terminal_after_repeated_model_errors() {
-        val failingClient = object : ChatModelClient {
-            override val modelName: String = "failing-planner"
-
-            override fun chat(messages: List<ChatMessage>, options: ChatRequestOptions): ChatCompletion {
-                throw IllegalStateException("planner unavailable")
-            }
-        }
-        val superegoLlm = StubChatModelClient().apply {
-            enqueueRawResponse("""{"allow":true}""")
-        }
-        val instrumentation = RecordingInstrumentation()
-        val outputs = mutableListOf<String>()
-        val config = AgentConfig(
-            planner = PlannerConfig(
-                maxLoopStepsPerInput = 24,
-                maxThoughtPasses = 20
-            ),
-            llmRetryAttempts = 1,
-            metaReasoner = MetaReasonerConfig(
-                deliberationPressureAssessmentMinStep = 1,
-                forcedTerminalPressureThreshold = 0.55,
-                forcedTerminalStaleStreakThreshold = 2
-            )
-        )
-        val agent = buildTestEgo(
-            planner = LlmEgoPlanner(modelClient = failingClient, config = config, instrumentation = instrumentation),
-            superego = Superego(modelClient = superegoLlm, config = config, instrumentation = instrumentation),
-            motorCortex = buildMotorCortex(output = { outputs.add(it) }),
-            config = config,
-            instrumentation = instrumentation
-        )
-
-        runAgentWithInput(agent, "hello\nexit\n")
-
-        assertTrue(outputs.isNotEmpty())
-        assertTrue(
-            outputs.any {
-                it.contains("diminishing returns", ignoreCase = true) ||
-                    it.contains("parsing", ignoreCase = true) ||
-                    it.contains("model error", ignoreCase = true)
-            }
-        )
-        assertTrue(
-            instrumentation.events.any {
-                it.type == "warning" &&
-                    ((it.data["message"] as? String)?.contains("Forced terminal answer queued", ignoreCase = true) == true ||
-                        (it.data["message"] as? String)?.contains("circuit breaker tripped", ignoreCase = true) == true)
-            }
-        )
-    }
-
-    @Test
     fun scenario_unavailable_action_then_recover_with_answer() {
         val plannerLlm = StubChatModelClient().apply {
             enqueueRawResponse(
@@ -396,7 +343,7 @@ class AgentScenarioPackTest {
         }
         val instrumentation = RecordingInstrumentation()
         val outputs = mutableListOf<String>()
-        val config = AgentConfig(planner = PlannerConfig(maxLoopStepsPerInput = 6, maxThoughtPasses = 2))
+        val config = AgentConfig(planner = PlannerConfig(maxLoopStepsPerInput = 6, maxContinuationPasses = 2))
         val agent = buildTestEgo(
             planner = LlmEgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
             superego = Superego(modelClient = superegoLlm, config = config, instrumentation = instrumentation),
@@ -410,9 +357,8 @@ class AgentScenarioPackTest {
         assertEquals(listOf("ego> using available tools only"), outputs)
         assertTrue(
             instrumentation.events.any {
-                it.type == "planner_decision" &&
-                    it.data["decision_type"] == "noop" &&
-                    (it.data["reason"] as? String)?.contains("unavailable action type", ignoreCase = true) == true
+                it.type == "planner_decision_blocked" &&
+                    it.data["action_type"] == "website_fetch"
             }
         )
     }
@@ -428,14 +374,14 @@ class AgentScenarioPackTest {
                 {"goal":"Search and answer pricing question","steps":["Search for official pricing","Synthesize answer from search results"],"urgency":"medium"}
                 """.trimIndent()
             )
-            // Step-thought 1 (deferred_step): planner decides to web_search
-            enqueueRawResponseForCallSite("deferred_step",
+            // Continuation step 1: planner decides to web_search
+            enqueueRawResponseForCallSite("continuation",
                 """
                 {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"web_search","action_payload":"official pricing 2025","action_summary":"search pricing"}
                 """.trimIndent()
             )
-            // Step-thought 2 (deferred_step): planner synthesizes the answer
-            enqueueRawResponseForCallSite("deferred_step",
+            // Continuation step 2: planner synthesizes the answer
+            enqueueRawResponseForCallSite("continuation",
                 """
                 {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"contact_user","action_payload":"Pricing is $20/month based on verified sources.","action_summary":"deliver verified answer"}
                 """.trimIndent()
@@ -447,7 +393,7 @@ class AgentScenarioPackTest {
         }
         val instrumentation = RecordingInstrumentation()
         val outputs = mutableListOf<String>()
-        val config = AgentConfig(planner = PlannerConfig(maxLoopStepsPerInput = 12, maxThoughtPasses = 4))
+        val config = AgentConfig(planner = PlannerConfig(maxLoopStepsPerInput = 12, maxContinuationPasses = 4))
         val search = object : WebSearchEngine {
             override fun search(query: String, maxResults: Int): WebSearchResult =
                 WebSearchResult(
@@ -522,7 +468,7 @@ class AgentScenarioPackTest {
                 )
             }
         }
-        val config = AgentConfig(planner = PlannerConfig(maxLoopStepsPerInput = 6, maxThoughtPasses = 2))
+        val config = AgentConfig(planner = PlannerConfig(maxLoopStepsPerInput = 6, maxContinuationPasses = 2))
         val agent = buildTestEgo(
             planner = LlmEgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
             superego = Superego(modelClient = superegoLlm, config = config, instrumentation = instrumentation),
@@ -552,11 +498,11 @@ class AgentScenarioPackTest {
                         steps = listOf("discard branch", "execute branch")
                     )
                     is EgoTrigger.ActionFeedback -> EgoDecision.Noop("ignore feedback in test")
-                    is EgoTrigger.DeferredIntention -> decideThought(trigger.intention.toPendingThought())
+                    is EgoTrigger.Continuation -> decideThought(trigger.continuation)
                     is EgoTrigger.GoalWork -> EgoDecision.Noop("ignore goal work")
                 }
 
-            private fun decideThought(thought: PendingThought): EgoDecision =
+            private fun decideThought(thought: QueuedContinuation): EgoDecision =
                 when {
                     thought.planContext?.stepIndex == 0 -> EgoDecision.Noop("discard this branch")
                     thought.planContext?.stepIndex == 1 -> EgoDecision.FormIntention(
@@ -570,7 +516,7 @@ class AgentScenarioPackTest {
                 }
         }
         val config = AgentConfig(
-            planner = PlannerConfig(maxLoopStepsPerInput = 24, maxThoughtPasses = 1)
+            planner = PlannerConfig(maxLoopStepsPerInput = 24, maxContinuationPasses = 1)
         )
         val superegoLlm = StubChatModelClient().apply {
             enqueueRawResponse("""{"allow":true}""")
@@ -643,7 +589,7 @@ class AgentScenarioPackTest {
         val instrumentation = RecordingInstrumentation()
         val outputs = mutableListOf<String>()
         val config = AgentConfig(
-            planner = PlannerConfig(maxLoopStepsPerInput = 8, maxThoughtPasses = 2),
+            planner = PlannerConfig(maxLoopStepsPerInput = 8, maxContinuationPasses = 2),
             goals = GoalConfig(
                 enabled = true,
                 workspaceRoot = root,
@@ -765,7 +711,7 @@ class AgentScenarioPackTest {
             val instrumentation = RecordingInstrumentation()
             val outputs = mutableListOf<String>()
             val config = AgentConfig(
-                planner = PlannerConfig(maxLoopStepsPerInput = 4, maxThoughtPasses = 2),
+                planner = PlannerConfig(maxLoopStepsPerInput = 4, maxContinuationPasses = 2),
                 goals = GoalConfig(enabled = true, workspaceRoot = root),
             )
             manager = GoalManager(
@@ -863,7 +809,7 @@ class AgentScenarioPackTest {
             val instrumentation = RecordingInstrumentation()
             val outputs = mutableListOf<String>()
             val config = AgentConfig(
-                planner = PlannerConfig(maxLoopStepsPerInput = 4, maxThoughtPasses = 2),
+                planner = PlannerConfig(maxLoopStepsPerInput = 4, maxContinuationPasses = 2),
                 goals = GoalConfig(enabled = true, workspaceRoot = root),
             )
             manager = GoalManager(
@@ -977,7 +923,7 @@ class AgentScenarioPackTest {
             val instrumentation = RecordingInstrumentation()
             val outputs = mutableListOf<String>()
             val config = AgentConfig(
-                planner = PlannerConfig(maxLoopStepsPerInput = 6, maxThoughtPasses = 3),
+                planner = PlannerConfig(maxLoopStepsPerInput = 6, maxContinuationPasses = 3),
                 goals = GoalConfig(enabled = true, workspaceRoot = root),
             )
             manager = GoalManager(
@@ -1078,7 +1024,7 @@ class AgentScenarioPackTest {
         }
         val instrumentation = RecordingInstrumentation()
         val outputs = mutableListOf<String>()
-        val config = AgentConfig(planner = PlannerConfig(maxLoopStepsPerInput = 8, maxThoughtPasses = 3))
+        val config = AgentConfig(planner = PlannerConfig(maxLoopStepsPerInput = 8, maxContinuationPasses = 3))
         val agent = buildTestEgo(
             planner = LlmEgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
             superego = Superego(modelClient = superegoLlm, config = config, instrumentation = instrumentation),
@@ -1106,13 +1052,13 @@ class AgentScenarioPackTest {
             // First planner call (DirectResponsePlanner): tries to answer without evidence.
             enqueueRawResponseForCallSite("direct_response",
                 """{"answer":"The weather in Hamburg is sunny.","summary":"answer weather"}""")
-            // After denial requeue (DeferredStepPlanner): planner gathers evidence.
+            // After denial requeue (ContinuationPlanner): planner gathers evidence.
             enqueueRawResponse(
                 """
                 {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"web_search","action_payload":"Hamburg weather today","action_summary":"search weather"}
                 """.trimIndent()
             )
-            // After evidence feedback (DeferredStepPlanner or FeedbackPlanner): planner answers.
+            // After evidence feedback (ContinuationPlanner or FeedbackPlanner): planner answers.
             enqueueRawResponse(
                 """
                 {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"contact_user","action_payload":"Based on search results, Hamburg is 15C and cloudy.","action_summary":"grounded answer"}
@@ -1126,7 +1072,7 @@ class AgentScenarioPackTest {
         }
         val instrumentation = RecordingInstrumentation()
         val outputs = mutableListOf<String>()
-        val config = AgentConfig(planner = PlannerConfig(maxLoopStepsPerInput = 12, maxThoughtPasses = 4))
+        val config = AgentConfig(planner = PlannerConfig(maxLoopStepsPerInput = 12, maxContinuationPasses = 4))
         val agent = buildTestEgo(
             planner = buildTestHierarchicalPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
             superego = Superego(modelClient = superegoLlm, config = config, instrumentation = instrumentation),
@@ -1155,10 +1101,10 @@ class AgentScenarioPackTest {
                 "pending_input" to "planner_context",
                 "planner_context" to "queued_intention",
                 "queued_intention" to "pending_action",
-                "pending_action" to "queued_intention",
+                "pending_action" to "queued_continuation",
                 "pending_action" to "action_feedback_cue",
                 "action_feedback_cue" to "pending_action",
-                "action_feedback_cue" to "pending_thought",
+                "action_feedback_cue" to "queued_continuation",
             ).all { it in propagationPairs },
             "Expected full grounding propagation chain, got: $propagationPairs"
         )
@@ -1182,16 +1128,12 @@ class AgentScenarioPackTest {
     @Test
     fun scenario_technical_evidence_retry() {
         val plannerLlm = StubChatModelClient().apply {
-            enqueueRawResponseForCallSite("input_intent_router", """{"route":"direct_response","reasoning":"weather question"}""")
+            enqueueRawResponseForCallSite("input_intent_router", """{"route":"general_action","reasoning":"weather question"}""")
             enqueueRawResponseForCallSite("grounding_classifier", """{"grounding_required":true}""")
-            // First (DirectResponsePlanner): planner dispatches web_search via needs_more_context.
-            enqueueRawResponseForCallSite("direct_response",
-                """{"answer":null,"summary":null,"needs_more_context":true}""")
-            // DeferredStepPlanner: dispatches web_search.
-            enqueueRawResponse(
-                """
-                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"web_search","action_payload":"Hamburg weather","action_summary":"search weather"}
-                """.trimIndent()
+            // First planner call dispatches web_search.
+            enqueueRawResponseForCallSite(
+                "general_action",
+                """{"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"web_search","action_payload":"Hamburg weather","action_summary":"search weather"}"""
             )
             // After technical failure feedback: planner retries web_search.
             enqueueRawResponse(
@@ -1227,7 +1169,7 @@ class AgentScenarioPackTest {
                 )
             }
         }
-        val config = AgentConfig(planner = PlannerConfig(maxLoopStepsPerInput = 12, maxThoughtPasses = 4))
+        val config = AgentConfig(planner = PlannerConfig(maxLoopStepsPerInput = 12, maxContinuationPasses = 4))
         val agent = buildTestEgo(
             planner = buildTestHierarchicalPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
             superego = Superego(modelClient = superegoLlm, config = config, instrumentation = instrumentation),

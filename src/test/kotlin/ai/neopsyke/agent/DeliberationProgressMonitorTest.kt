@@ -63,9 +63,12 @@ class DeliberationProgressMonitorTest {
         repeat(50) {
             monitor.startStep()
             monitor.onPlannerDecision(
-               ai.neopsyke.agent.model.EgoDecision.EnqueueThought(
+                ai.neopsyke.agent.model.EgoDecision.EnqueueContinuation(
                     urgency = Urgency.MEDIUM,
-                    content = "thinking step $it"
+                    continuation = ai.neopsyke.agent.model.Continuation.ConvergeNow(
+                        content = "thinking step $it",
+                        convergenceReason = "test",
+                    ),
                 )
             )
         }

@@ -48,15 +48,15 @@ class GroundingPropagationTest {
         assertEquals(notRequiredMetadata, trigger.groundingMetadata)
     }
 
-    // --- QueuedIntention -> PendingThought ---
+    // --- QueuedIntention / QueuedContinuation carriers ---
 
     @Test
-    fun `toPendingThought copies grounding metadata from QueuedIntention`() {
+    fun `QueuedIntention carries grounding metadata unchanged`() {
         val intention = QueuedIntention(
             intention = Intention(
                 id = "i1",
                 cognitiveThreadId = "t1",
-                kind = IntentionKind.DEFER,
+                kind = IntentionKind.PREPARE,
                 summary = "test",
                 createdAt = Instant.now(),
                 conversationContext = ConversationContext.default(),
@@ -64,17 +64,16 @@ class GroundingPropagationTest {
             urgency = Urgency.MEDIUM,
             groundingMetadata = requiredMetadata,
         )
-        val thought = intention.toPendingThought()
-        assertEquals(requiredMetadata, thought.groundingMetadata)
+        assertEquals(requiredMetadata, intention.groundingMetadata)
     }
 
     @Test
-    fun `toPendingThought preserves NOT_REQUIRED_PREFILTER grounding when default`() {
+    fun `QueuedIntention preserves NOT_REQUIRED_PREFILTER grounding when default`() {
         val intention = QueuedIntention(
             intention = Intention(
                 id = "i2",
                 cognitiveThreadId = "t1",
-                kind = IntentionKind.DEFER,
+                kind = IntentionKind.PREPARE,
                 summary = "test",
                 createdAt = Instant.now(),
                 conversationContext = ConversationContext.default(),
@@ -82,7 +81,7 @@ class GroundingPropagationTest {
             urgency = Urgency.MEDIUM,
             groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
         )
-        assertEquals(notRequiredMetadata, intention.toPendingThought().groundingMetadata)
+        assertEquals(notRequiredMetadata, intention.groundingMetadata)
     }
 
     // --- GoalRunActivation -> OpportunityTrigger.GoalWork ---

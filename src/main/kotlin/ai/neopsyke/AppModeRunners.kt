@@ -17,7 +17,7 @@ import ai.neopsyke.agent.ego.planner.input.GoalManagementPlanner
 import ai.neopsyke.agent.ego.planner.input.GroundingClassifier
 import ai.neopsyke.agent.ego.planner.input.InputIntentRouter
 import ai.neopsyke.agent.ego.planner.input.TaskDecompositionPlanner
-import ai.neopsyke.agent.ego.planner.lane.DeferredStepPlanner
+import ai.neopsyke.agent.ego.planner.lane.ContinuationPlanner
 import ai.neopsyke.agent.ego.planner.lane.FeedbackPlanner
 import ai.neopsyke.agent.ego.planner.lane.GoalWorkPlanner
 import ai.neopsyke.agent.ego.planner.lane.ImpulsePlanner
@@ -915,14 +915,14 @@ internal object AppModeRunners {
                                 "limits" to mapOf(
                                 "max_loop_steps" to config.planner.maxLoopStepsPerInput,
                                 "loop_delay_ms" to config.loopDelayMs,
-                                "max_thought_passes" to config.planner.maxThoughtPasses,
+                                "max_continuation_passes" to config.planner.maxContinuationPasses,
                                 "max_prompt_tokens" to config.maxLlmPromptTokens,
                                 "max_completion_tokens" to config.planner.maxCompletionTokens,
                                 "max_run_total_tokens" to config.planner.maxRunTotalTokens,
                                 "max_run_tokens_per_provider" to config.planner.maxRunTokensPerProvider,
                                 "max_run_tokens_per_role" to config.planner.maxRunTokensPerRole,
                                 "max_pending_inputs" to config.maxPendingInputs,
-                                "max_pending_thoughts" to config.maxPendingThoughts,
+                                "max_pending_continuations" to config.maxPendingContinuations,
                                 "max_pending_actions" to config.maxPendingActions,
                                 "max_input_chars" to config.planner.maxInputChars,
                                 "short_term_context_max_chars" to config.memory.maxShortTermContextChars,
@@ -2992,7 +2992,7 @@ private fun buildHierarchicalPlanner(
         goalManagementPlanner = goalManagement,
     )
 
-    val deferredStepPlanner = DeferredStepPlanner(runtime, config, instrumentation)
+    val continuationPlanner = ContinuationPlanner(runtime, config, instrumentation)
     val feedbackPlanner = FeedbackPlanner(runtime, config, instrumentation)
     val goalWorkPlannerLane = GoalWorkPlanner(runtime, config, instrumentation)
     val impulsePlannerLane = ImpulsePlanner(runtime, config, instrumentation)
@@ -3001,7 +3001,7 @@ private fun buildHierarchicalPlanner(
         runtime = runtime,
         instrumentation = instrumentation,
         inputPlanner = inputPlanner,
-        deferredStepPlanner = deferredStepPlanner,
+        continuationPlanner = continuationPlanner,
         feedbackPlanner = feedbackPlanner,
         goalWorkPlanner = goalWorkPlannerLane,
         impulsePlanner = impulsePlannerLane,

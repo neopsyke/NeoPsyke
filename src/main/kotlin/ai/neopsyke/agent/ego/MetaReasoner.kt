@@ -307,14 +307,14 @@ class LlmMetaReasoner(
     private fun buildMessages(trigger: EgoTrigger, context: PlannerContext): List<ChatMessage> {
         val triggerLabel = when (trigger) {
             is EgoTrigger.IncomingInput -> "input"
-            is EgoTrigger.DeferredIntention -> "deferred-intention"
+            is EgoTrigger.Continuation -> "continuation"
             is EgoTrigger.ActionFeedback -> "feedback"
             is EgoTrigger.IncomingImpulse -> "impulse"
             is EgoTrigger.GoalWork -> "goal-work"
         }
         val triggerText = when (trigger) {
             is EgoTrigger.IncomingInput -> trigger.input.content
-            is EgoTrigger.DeferredIntention -> trigger.intention.resolvedContent
+            is EgoTrigger.Continuation -> trigger.continuation.content
             is EgoTrigger.ActionFeedback -> trigger.feedback.cue.feedbackContent
             is EgoTrigger.IncomingImpulse -> trigger.impulse.prompt
             is EgoTrigger.GoalWork -> trigger.workUnit.stepDescription
@@ -332,7 +332,7 @@ class LlmMetaReasoner(
             ChatMessage(
                 role = ChatRole.SYSTEM,
                 content = """
-                You are MetaReasoner for Ego's deferred-intention loop.
+                You are MetaReasoner for Ego's continuation loop.
                 Decide if continued deliberation is productive or stale.
                 Return only data that matches the response format schema.
                 Use finalize_now when repeated loops or high pressure suggest diminishing returns.
@@ -358,7 +358,7 @@ class LlmMetaReasoner(
 
                 Queue:
                 pending_inputs=${context.queue.pendingInputCount}
-                pending_thoughts=${context.queue.deferredIntentionCount}
+                pending_continuations=${context.queue.continuationCount}
                 pending_actions=${context.queue.pendingActionCount}
                 pending_intentions=${context.queue.pendingIntentionCount}
 

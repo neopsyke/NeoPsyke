@@ -2,7 +2,7 @@ package ai.neopsyke.instrumentation
 
 import mu.KotlinLogging
 import ai.neopsyke.agent.model.PendingInput
-import ai.neopsyke.agent.model.PendingThought
+import ai.neopsyke.agent.model.QueuedContinuation
 import ai.neopsyke.agent.model.PendingAction
 import ai.neopsyke.agent.model.QueueState
 import java.util.concurrent.ConcurrentHashMap
@@ -15,11 +15,11 @@ class StructuredLogSink : InstrumentationSink {
     private fun sessionPrefix(event: AgentEvent): String {
         val sessionId = event.data["session_id"]
             ?: (event.data["input"] as? PendingInput)?.conversationContext?.sessionId
-            ?: (event.data["thought"] as? PendingThought)?.conversationContext?.sessionId
+            ?: (event.data["continuation"] as? QueuedContinuation)?.conversationContext?.sessionId
             ?: (event.data["action"] as? PendingAction)?.conversationContext?.sessionId
         val interlocutor = event.data["interlocutor"]
             ?: (event.data["input"] as? PendingInput)?.conversationContext?.interlocutor?.id
-            ?: (event.data["thought"] as? PendingThought)?.conversationContext?.interlocutor?.id
+            ?: (event.data["continuation"] as? QueuedContinuation)?.conversationContext?.interlocutor?.id
             ?: (event.data["action"] as? PendingAction)?.conversationContext?.interlocutor?.id
         return buildString {
             if (sessionId != null) append("session=$sessionId ")
@@ -44,7 +44,7 @@ class StructuredLogSink : InstrumentationSink {
             "queue_snapshot" -> {
                 val queues = event.data["queues"] as? QueueState
                 logger.trace {
-                    "queue.snapshot source=${event.data["source"]} in=${queues?.inputs?.size ?: 0} th=${queues?.thoughts?.size ?: 0} ac=${queues?.actions?.size ?: 0}"
+                    "queue.snapshot source=${event.data["source"]} in=${queues?.inputs?.size ?: 0} co=${queues?.continuations?.size ?: 0} ac=${queues?.actions?.size ?: 0}"
                 }
             }
 

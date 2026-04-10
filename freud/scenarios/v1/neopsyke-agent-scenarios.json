@@ -27,11 +27,6 @@
       "description": "Per-request scratchpad is injected into prompt context and destroyed after terminal answer."
     },
     {
-      "id": "forced_terminal_model_errors",
-      "selector": "ai.neopsyke.eval.AgentScenarioPackTest.scenario_forced_terminal_after_repeated_model_errors",
-      "description": "Repeated planner model errors trigger forced terminal answer path."
-    },
-    {
       "id": "unavailable_action_recovery",
       "selector": "ai.neopsyke.eval.AgentScenarioPackTest.scenario_unavailable_action_then_recover_with_answer",
       "description": "Unavailable actions are rejected and flow recovers to an answer."
@@ -39,7 +34,7 @@
     {
       "id": "plan_decomposition",
       "selector": "ai.neopsyke.eval.AgentScenarioPackTest.scenario_plan_decomposition_then_execute",
-      "description": "Plan decision decomposes into step-thoughts that execute through normal Ego loop."
+      "description": "Plan decision decomposes into step continuations that execute through the normal Ego loop."
     },
     {
       "id": "search_then_answer",

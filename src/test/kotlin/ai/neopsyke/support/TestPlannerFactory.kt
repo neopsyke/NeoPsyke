@@ -11,7 +11,7 @@ import ai.neopsyke.agent.ego.planner.input.GoalManagementPlanner
 import ai.neopsyke.agent.ego.planner.input.GroundingClassifier
 import ai.neopsyke.agent.ego.planner.input.InputIntentRouter
 import ai.neopsyke.agent.ego.planner.input.TaskDecompositionPlanner
-import ai.neopsyke.agent.ego.planner.lane.DeferredStepPlanner
+import ai.neopsyke.agent.ego.planner.lane.ContinuationPlanner
 import ai.neopsyke.agent.ego.planner.lane.FeedbackPlanner
 import ai.neopsyke.agent.ego.planner.lane.GoalWorkPlanner
 import ai.neopsyke.agent.ego.planner.lane.ImpulsePlanner
@@ -60,7 +60,7 @@ fun buildTestHierarchicalPlanner(
         goalManagementPlanner = goalManagement,
     )
 
-    val deferredStepPlanner = DeferredStepPlanner(runtime, config, instrumentation)
+    val continuationPlanner = ContinuationPlanner(runtime, config, instrumentation)
     val feedbackPlanner = FeedbackPlanner(runtime, config, instrumentation)
     val goalWorkPlannerLane = GoalWorkPlanner(runtime, config, instrumentation)
     val impulsePlannerLane = ImpulsePlanner(runtime, config, instrumentation)
@@ -69,7 +69,7 @@ fun buildTestHierarchicalPlanner(
         runtime = runtime,
         instrumentation = instrumentation,
         inputPlanner = inputPlanner,
-        deferredStepPlanner = deferredStepPlanner,
+        continuationPlanner = continuationPlanner,
         feedbackPlanner = feedbackPlanner,
         goalWorkPlanner = goalWorkPlannerLane,
         impulsePlanner = impulsePlannerLane,

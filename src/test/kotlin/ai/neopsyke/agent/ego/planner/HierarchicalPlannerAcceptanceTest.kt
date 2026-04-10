@@ -19,7 +19,7 @@ import ai.neopsyke.agent.model.PerceptFamily
 import ai.neopsyke.agent.model.PendingFeedback
 import ai.neopsyke.agent.model.PendingImpulse
 import ai.neopsyke.agent.model.PendingInput
-import ai.neopsyke.agent.model.PendingThought
+import ai.neopsyke.agent.model.QueuedContinuation
 import ai.neopsyke.agent.model.PlannerContext
 import ai.neopsyke.agent.model.Provenances
 import ai.neopsyke.agent.model.QueueSnapshot
@@ -69,13 +69,13 @@ class HierarchicalPlannerAcceptanceTest {
     private fun inputTrigger(content: String = "hello"): EgoTrigger.IncomingInput =
         EgoTrigger.IncomingInput(PendingInput(1, content))
 
-    private fun deferredTrigger(
+    private fun continuationTrigger(
         content: String = "think more",
         passes: Int = 0,
         planContext: ai.neopsyke.agent.model.PlanContext? = null,
-    ): EgoTrigger.DeferredIntention {
-        val thought = PendingThought(1, Urgency.MEDIUM, content, passes = passes, planContext = planContext)
-        return ai.neopsyke.agent.deferredTrigger(thought) as EgoTrigger.DeferredIntention
+    ): EgoTrigger.Continuation {
+        val thought = ai.neopsyke.agent.queuedContinuation(1, Urgency.MEDIUM, content, passes = passes, planContext = planContext)
+        return ai.neopsyke.agent.continuationTrigger(thought) as EgoTrigger.Continuation
     }
 
     private fun feedbackTrigger(
@@ -197,16 +197,16 @@ class HierarchicalPlannerAcceptanceTest {
     }
 
     @Test
-    fun `DeferredIntention trigger routes to DeferredStepPlanner`() {
+    fun `Continuation trigger routes to ContinuationPlanner`() {
         val llm = StubChatModelClient()
-        llm.enqueueRawResponse("""{"decision":"defer","urgency":"medium","defer_content":"keep thinking"}""")
+        llm.enqueueRawResponse("""{"decision":"noop","reason":"no further continuation needed"}""")
         val instrumentation = RecordingInstrumentation()
         val planner = buildTestHierarchicalPlanner(llm, instrumentation = instrumentation)
 
-        val decision = planner.decide(deferredTrigger(), defaultContext)
+        val decision = planner.decide(continuationTrigger(), defaultContext)
 
-        assertIs<EgoDecision.EnqueueThought>(decision)
-        assertTrue(instrumentation.events.any { it.type == "planner_lane_selected" && it.data["lane"] == "deferred_step" })
+        assertIs<EgoDecision.Noop>(decision)
+        assertTrue(instrumentation.events.any { it.type == "planner_lane_selected" && it.data["lane"] == "continuation" })
     }
 
     @Test
@@ -265,7 +265,7 @@ class HierarchicalPlannerAcceptanceTest {
     }
 
     @Test
-    fun `negative - direct response with needs_more_context defers instead of answering`() {
+    fun `negative - direct response with needs_more_context returns noop instead of answering`() {
         val llm = StubChatModelClient()
         llm.enqueueRawResponseForCallSite("input_intent_router", """{"route":"direct_response","reasoning":"simple"}""")
         llm.enqueueRawResponseForCallSite("direct_response", """{"answer":"","summary":"","needs_more_context":true}""")
@@ -273,29 +273,31 @@ class HierarchicalPlannerAcceptanceTest {
 
         val decision = planner.decide(inputTrigger("tell me more"), defaultContext)
 
-        assertIs<EgoDecision.EnqueueThought>(decision)
+        assertIs<EgoDecision.Noop>(decision)
     }
 
     @Test
-    fun `positive - deferred continuation returns EnqueueThought`() {
+    fun `positive - continuation returns FormIntention`() {
         val llm = StubChatModelClient()
-        llm.enqueueRawResponse("""{"decision":"defer","urgency":"high","defer_content":"research needed"}""")
+        llm.enqueueRawResponse(
+            """{"decision":"intend","urgency":"high","intention_kind":"observe","commit_mode_preference":"not_applicable","action_type":"contact_user","action_payload":"research done","action_summary":"respond"}"""
+        )
         val planner = buildTestHierarchicalPlanner(llm)
 
-        val decision = planner.decide(deferredTrigger(), defaultContext)
+        val decision = planner.decide(continuationTrigger(), defaultContext)
 
-        val thought = assertIs<EgoDecision.EnqueueThought>(decision)
-        assertEquals(Urgency.HIGH, thought.urgency)
-        assertEquals("research needed", thought.content)
+        val intention = assertIs<EgoDecision.FormIntention>(decision)
+        assertEquals(Urgency.HIGH, intention.urgency)
+        assertEquals(ActionType.CONTACT_USER, intention.actionType)
     }
 
     @Test
-    fun `negative - deferred with empty content returns noop`() {
+    fun `negative - continuation noop returns noop`() {
         val llm = StubChatModelClient()
-        llm.enqueueRawResponse("""{"decision":"defer","urgency":"medium","defer_content":""}""")
+        llm.enqueueRawResponse("""{"decision":"noop","reason":"no progress"}""")
         val planner = buildTestHierarchicalPlanner(llm)
 
-        val decision = planner.decide(deferredTrigger(), defaultContext)
+        val decision = planner.decide(continuationTrigger(), defaultContext)
 
         assertIs<EgoDecision.Noop>(decision)
     }
@@ -415,10 +417,10 @@ class HierarchicalPlannerAcceptanceTest {
         llm.enqueueRawResponse("""{"decision":"intend","urgency":"medium","intention_kind":"stage","commit_mode_preference":"approval_backed","action_type":"contact_user","action_payload":"hello","action_summary":"greet"}""")
         val planner = buildTestHierarchicalPlanner(llm)
         val context = defaultContext.copy(
-            allowedIntentions = setOf(IntentionKind.OBSERVE, IntentionKind.DEFER),
+            allowedIntentions = setOf(IntentionKind.OBSERVE),
         )
 
-        val decision = planner.decide(deferredTrigger(), context)
+        val decision = planner.decide(continuationTrigger(), context)
 
         val noop = assertIs<EgoDecision.Noop>(decision)
         assertTrue(noop.reason.contains("intention", ignoreCase = true))
@@ -433,7 +435,7 @@ class HierarchicalPlannerAcceptanceTest {
             allowedCommitModes = setOf(CommitMode.NOT_APPLICABLE, CommitMode.APPROVAL_BACKED),
         )
 
-        val decision = planner.decide(deferredTrigger(), context)
+        val decision = planner.decide(continuationTrigger(), context)
 
         val noop = assertIs<EgoDecision.Noop>(decision)
         assertTrue(noop.reason.contains("commit mode", ignoreCase = true) || noop.reason.contains("intention", ignoreCase = true))
@@ -485,7 +487,7 @@ class HierarchicalPlannerAcceptanceTest {
     }
 
     @Test
-    fun `resolution_draft blocked outside plan context in DeferredStepPlanner`() {
+    fun `resolution_draft blocked outside plan context in ContinuationPlanner`() {
         val llm = StubChatModelClient()
         llm.enqueueRawResponse("""{"decision":"intend","urgency":"medium","intention_kind":"observe","commit_mode_preference":"not_applicable","action_type":"resolution_draft","action_payload":"draft","action_summary":"draft chunk"}""")
         val planner = buildTestHierarchicalPlanner(llm)
@@ -493,7 +495,7 @@ class HierarchicalPlannerAcceptanceTest {
             availableActions = setOf(ActionType.CONTACT_USER, ActionType.RESOLUTION_DRAFT),
         )
 
-        val decision = planner.decide(deferredTrigger(planContext = null), context)
+        val decision = planner.decide(continuationTrigger(planContext = null), context)
 
         val noop = assertIs<EgoDecision.Noop>(decision)
         assertTrue(noop.reason.contains("resolution_draft", ignoreCase = true) || noop.reason.contains("plan context", ignoreCase = true))
@@ -511,19 +513,19 @@ class HierarchicalPlannerAcceptanceTest {
             availableActions = setOf(ActionType.CONTACT_USER, ActionType.RESOLUTION_DRAFT),
         )
 
-        val decision = planner.decide(deferredTrigger(planContext = planCtx), context)
+        val decision = planner.decide(continuationTrigger(planContext = planCtx), context)
 
         val intention = assertIs<EgoDecision.FormIntention>(decision)
         assertEquals(ActionType.RESOLUTION_DRAFT, intention.actionType)
     }
 
     @Test
-    fun `max thought passes exceeded returns noop in DeferredStepPlanner`() {
+    fun `max continuation passes exceeded returns noop in ContinuationPlanner`() {
         val llm = StubChatModelClient()
-        llm.enqueueRawResponse("""{"decision":"defer","urgency":"medium","defer_content":"more thinking"}""")
-        val planner = buildTestHierarchicalPlanner(llm, config = AgentConfig(planner = PlannerConfig(maxThoughtPasses = 3)))
+        llm.enqueueRawResponse("""{"decision":"noop","reason":"more thinking"}""")
+        val planner = buildTestHierarchicalPlanner(llm, config = AgentConfig(planner = PlannerConfig(maxContinuationPasses = 3)))
 
-        val decision = planner.decide(deferredTrigger(passes = 4), defaultContext)
+        val decision = planner.decide(continuationTrigger(passes = 4), defaultContext)
 
         val noop = assertIs<EgoDecision.Noop>(decision)
         assertTrue(noop.reason.contains("passes", ignoreCase = true))
@@ -768,10 +770,10 @@ class HierarchicalPlannerAcceptanceTest {
 
         // 3 calls needed to trip circuit (threshold = 3 parse failures)
         val rootId = RootInputIds.next()
-        val trigger1 = deferredTrigger("t1")
-        val trigger2 = deferredTrigger("t2")
-        val trigger3 = deferredTrigger("t3")
-        val trigger4 = deferredTrigger("t4")
+        val trigger1 = continuationTrigger("t1")
+        val trigger2 = continuationTrigger("t2")
+        val trigger3 = continuationTrigger("t3")
+        val trigger4 = continuationTrigger("t4")
 
         planner.decide(trigger1, defaultContext)
         planner.decide(trigger2, defaultContext)
@@ -796,7 +798,7 @@ class HierarchicalPlannerAcceptanceTest {
         }
         val planner = buildTestHierarchicalPlanner(flakyClient, config = AgentConfig(llmRetryAttempts = 3))
 
-        val decision = planner.decide(deferredTrigger(), defaultContext)
+        val decision = planner.decide(continuationTrigger(), defaultContext)
 
         assertIs<EgoDecision.Noop>(decision)
         assertEquals(3, attempts)
@@ -809,7 +811,7 @@ class HierarchicalPlannerAcceptanceTest {
         val instrumentation = RecordingInstrumentation()
         val planner = buildTestHierarchicalPlanner(llm, instrumentation = instrumentation)
 
-        planner.decide(deferredTrigger(), defaultContext)
+        planner.decide(continuationTrigger(), defaultContext)
 
         assertTrue(instrumentation.events.any { it.type == "planner_start" })
         assertTrue(instrumentation.events.any { it.type == "planner_lane_selected" })
@@ -823,11 +825,11 @@ class HierarchicalPlannerAcceptanceTest {
         val instrumentation = RecordingInstrumentation()
         val planner = buildTestHierarchicalPlanner(llm, instrumentation = instrumentation)
 
-        planner.decide(deferredTrigger(), defaultContext)
+        planner.decide(continuationTrigger(), defaultContext)
 
         assertTrue(
             instrumentation.events.any {
-                it.type == "prompt_budget_allocation" && it.data["call_site"] == "deferred_step_prompt"
+                it.type == "prompt_budget_allocation" && it.data["call_site"] == "continuation_prompt"
             }
         )
     }
@@ -839,7 +841,7 @@ class HierarchicalPlannerAcceptanceTest {
         var repaired = false
         val planner = buildTestHierarchicalPlanner(llm, onPlannerOutputRepaired = { repaired = true })
 
-        val decision = planner.decide(deferredTrigger(), defaultContext)
+        val decision = planner.decide(continuationTrigger(), defaultContext)
 
         assertIs<EgoDecision.FormIntention>(decision)
         assertTrue(repaired)
@@ -853,13 +855,13 @@ class HierarchicalPlannerAcceptanceTest {
             override fun chat(messages: List<ChatMessage>, options: ChatRequestOptions): ChatCompletion {
                 calls += options
                 return when (options.metadata.callSite) {
-                    "deferred_step" -> ChatCompletion(
+                    "continuation" -> ChatCompletion(
                         content = """{"decision":"noop","reason":"truncat""",
                         model = modelName,
                         finishReason = "length",
                     )
-                    "deferred_step_truncation_retry" -> ChatCompletion(
-                        content = """{"decision":"defer","urgency":"medium","defer_content":"recovered via truncation retry"}""",
+                    "continuation_truncation_retry" -> ChatCompletion(
+                        content = """{"decision":"intend","urgency":"medium","intention_kind":"observe","commit_mode_preference":"not_applicable","action_type":"contact_user","action_payload":"recovered via truncation retry","action_summary":"deliver"}""",
                         model = modelName,
                     )
                     else -> ChatCompletion(content = """{"decision":"noop","reason":"fallthrough"}""", model = modelName)
@@ -868,12 +870,12 @@ class HierarchicalPlannerAcceptanceTest {
         }
         val planner = buildTestHierarchicalPlanner(truncationClient)
 
-        val decision = planner.decide(deferredTrigger(), defaultContext)
+        val decision = planner.decide(continuationTrigger(), defaultContext)
 
-        val thought = assertIs<EgoDecision.EnqueueThought>(decision)
-        assertTrue(thought.content.contains("recovered"))
-        val initial = calls.first { it.metadata.callSite == "deferred_step" }
-        val retry = calls.first { it.metadata.callSite == "deferred_step_truncation_retry" }
+        val intention = assertIs<EgoDecision.FormIntention>(decision)
+        assertTrue(intention.payload.contains("recovered"))
+        val initial = calls.first { it.metadata.callSite == "continuation" }
+        val retry = calls.first { it.metadata.callSite == "continuation_truncation_retry" }
         assertTrue((retry.maxTokens ?: 0) > (initial.maxTokens ?: 0))
     }
 
@@ -885,7 +887,7 @@ class HierarchicalPlannerAcceptanceTest {
         llm.enqueueRawResponse("""{"decision":"intend","urgency":"medium","intention_kind":"commit","commit_mode_preference":"policy_autonomous","action_type":"contact_user","action_payload":"hi","action_summary":"greet"}""")
         val planner = buildTestHierarchicalPlanner(llm)
         val context = defaultContext.copy(
-            allowedIntentions = setOf(IntentionKind.OBSERVE, IntentionKind.DEFER),
+            allowedIntentions = setOf(IntentionKind.OBSERVE),
         )
 
         val decision = planner.decide(feedbackTrigger(), context)
@@ -899,7 +901,7 @@ class HierarchicalPlannerAcceptanceTest {
         llm.enqueueRawResponse("""{"decision":"intend","urgency":"medium","intention_kind":"commit","commit_mode_preference":"policy_autonomous","action_type":"contact_user","action_payload":"hi","action_summary":"greet"}""")
         val planner = buildTestHierarchicalPlanner(llm)
         val context = defaultContext.copy(
-            allowedIntentions = setOf(IntentionKind.OBSERVE, IntentionKind.DEFER),
+            allowedIntentions = setOf(IntentionKind.OBSERVE),
         )
 
         val decision = planner.decide(goalWorkTrigger(), context)

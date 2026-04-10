@@ -16,45 +16,56 @@ import kotlin.test.assertTrue
 
 class EgoPlannerTest {
     @Test
-    fun `planner returns clamped thought decision and emits events`() {
+    fun `continuation planner returns action decision and emits events`() {
         val llm = StubChatModelClient()
-        llm.enqueueRawResponse("""{"decision":"defer","urgency":"high","defer_content":"abcdefghi"}""")
+        llm.enqueueRawResponse(
+            """
+            {
+              "decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable",
+              "urgency":"high",
+              "action_type":"contact_user",
+              "action_payload":"payload-too-long",
+              "action_summary":"summary-too-long"
+            }
+            """.trimIndent()
+        )
         val instrumentation = RecordingInstrumentation()
         val planner = LlmEgoPlanner(
             modelClient = llm,
-            config = AgentConfig(planner = PlannerConfig(maxThoughtChars = 5)),
+            config = AgentConfig(maxActionPayloadChars = 7, maxActionSummaryChars = 8),
             instrumentation = instrumentation
         )
 
         val decision = planner.decide(
-            trigger = deferredTrigger(PendingThought(1, Urgency.HIGH, "think about it")),
+            trigger = continuationTrigger(queuedContinuation(1, Urgency.HIGH, "think about it")),
             context = PlannerContext(
                 recentDialogue = emptyList(),
                 queue = QueueSnapshot(
                     pendingInputCount = 1,
-                    deferredIntentionCount = 2,
+                    continuationCount = 2,
                     pendingActionCount = 3
                 )
             )
         )
 
-        val thought = assertIs<ai.neopsyke.agent.model.EgoDecision.EnqueueThought>(decision)
-        assertEquals(Urgency.HIGH, thought.urgency)
-        assertEquals("abcde", thought.content)
+        val action = assertIs<ai.neopsyke.agent.model.EgoDecision.FormIntention>(decision)
+        assertEquals(Urgency.HIGH, action.urgency)
+        assertEquals("payload", action.payload)
+        assertEquals("summary-", action.summary)
         assertEquals("ego", llm.lastOptions.metadata.actor)
-        assertEquals("deferred_step", llm.lastOptions.metadata.callSite)
+        assertEquals("continuation", llm.lastOptions.metadata.callSite)
         val plannerFormat = assertIs<ChatResponseFormat.JsonSchema>(llm.lastOptions.responseFormat)
         assertTrue(plannerFormat.strict)
         assertTrue(instrumentation.events.any { it.type == "planner_start" })
         assertTrue(
             instrumentation.events.any {
-                it.type == "planner_decision" && it.data["decision_type"] == "defer"
+                it.type == "planner_decision" && it.data["decision_type"] == "intention"
             }
         )
         assertTrue(
             instrumentation.events.any {
                 it.type == "prompt_budget_allocation" &&
-                    it.data["call_site"] == "deferred_step_prompt"
+                    it.data["call_site"] == "continuation_prompt"
             }
         )
     }
@@ -79,7 +90,7 @@ class EgoPlannerTest {
         )
 
         val decision = planner.decide(
-            trigger = deferredTrigger(PendingThought(7, Urgency.LOW, "think", 1)),
+            trigger = continuationTrigger(queuedContinuation(7, Urgency.LOW, "think", 1)),
             context = PlannerContext(
                 recentDialogue = listOf(
                     DialogueTurn(DialogueRole.USER, "u"),
@@ -87,7 +98,7 @@ class EgoPlannerTest {
                 ),
                 queue = QueueSnapshot(
                     pendingInputCount = 0,
-                    deferredIntentionCount = 1,
+                    continuationCount = 1,
                     pendingActionCount = 0
                 )
             )
@@ -97,18 +108,18 @@ class EgoPlannerTest {
         assertEquals(ActionType.CONTACT_USER, action.actionType)
         assertEquals("payload", action.payload)
         assertEquals("summary-", action.summary)
-        assertEquals("deferred_step", llm.lastOptions.metadata.callSite)
+        assertEquals("continuation", llm.lastOptions.metadata.callSite)
     }
 
     @Test
-    fun `planner attaches thought and plan context metadata to llm calls`() {
+    fun `planner attaches continuation and plan context metadata to llm calls`() {
         val llm = StubChatModelClient()
         llm.enqueueRawResponse("""{"decision":"noop","reason":"ok"}""")
         val planner = LlmEgoPlanner(
             modelClient = llm,
             config = AgentConfig()
         )
-        val thought = PendingThought(
+        val continuation = queuedContinuation(
             id = 17,
             urgency = Urgency.MEDIUM,
             content = "Plan step 2/4: Fetch summary of top result",
@@ -130,19 +141,19 @@ class EgoPlannerTest {
         )
 
         planner.decide(
-            trigger = deferredTrigger(thought),
+            trigger = continuationTrigger(continuation),
             context = PlannerContext(
                 recentDialogue = emptyList(),
                 queue = QueueSnapshot(0, 1, 0),
-                conversationContext = thought.conversationContext
+                conversationContext = continuation.conversationContext
             )
         )
 
         with(llm.lastOptions.metadata) {
             assertEquals("ego", actor)
             assertEquals("planner", cognitiveRole)
-            assertEquals("deferred_step", callSite)
-            assertEquals("deferred_step", trigger)
+            assertEquals("continuation", callSite)
+            assertEquals("continuation", trigger)
             assertEquals("id", originSource)
             assertEquals("learn-something", needId)
             assertEquals("impulse-42", rootImpulseId)
@@ -175,7 +186,7 @@ class EgoPlannerTest {
         )
 
         val decision = planner.decide(
-            trigger = deferredTrigger(PendingThought(7, Urgency.LOW, "think", 1)),
+            trigger = continuationTrigger(queuedContinuation(7, Urgency.LOW, "think", 1)),
             context = PlannerContext(
                 recentDialogue = emptyList(),
                 queue = QueueSnapshot(0, 0, 0)
@@ -189,7 +200,7 @@ class EgoPlannerTest {
     }
 
     @Test
-    fun `planner rejects actions unavailable at runtime`() {
+    fun `planner may propose actions that runtime later blocks`() {
         val llm = StubChatModelClient()
         llm.enqueueRawResponse(
             """
@@ -216,8 +227,8 @@ class EgoPlannerTest {
             )
         )
 
-        val noop = assertIs<ai.neopsyke.agent.model.EgoDecision.Noop>(decision)
-        assertTrue(noop.reason.contains("unavailable", ignoreCase = true))
+        val action = assertIs<ai.neopsyke.agent.model.EgoDecision.FormIntention>(decision)
+        assertEquals(ActionType.WEBSITE_FETCH, action.actionType)
     }
 
     @Test
@@ -301,7 +312,7 @@ class EgoPlannerTest {
         )
 
         val decision = planner.decide(
-            trigger = deferredTrigger(PendingThought(1, Urgency.MEDIUM, "hello")),
+            trigger = continuationTrigger(queuedContinuation(1, Urgency.MEDIUM, "hello")),
             context = PlannerContext(
                 recentDialogue = emptyList(),
                 queue = QueueSnapshot(0, 0, 0)
@@ -374,7 +385,7 @@ class EgoPlannerTest {
         val planner = LlmEgoPlanner(modelClient = llm, config = AgentConfig())
 
         val decision = planner.decide(
-            trigger = deferredTrigger(PendingThought(1, Urgency.MEDIUM, "long answer")),
+            trigger = continuationTrigger(queuedContinuation(1, Urgency.MEDIUM, "long answer")),
             context = PlannerContext(
                 recentDialogue = emptyList(),
                 queue = QueueSnapshot(0, 0, 0),
@@ -479,7 +490,7 @@ class EgoPlannerTest {
             },
             queue = QueueSnapshot(
                 pendingInputCount = 5,
-                deferredIntentionCount = 4,
+                continuationCount = 4,
                 pendingActionCount = 3
             )
         )
@@ -504,7 +515,7 @@ class EgoPlannerTest {
             recentDialogue = listOf(DialogueTurn(DialogueRole.USER, "hello")),
             queue = QueueSnapshot(
                 pendingInputCount = 1,
-                deferredIntentionCount = 0,
+                continuationCount = 0,
                 pendingActionCount = 0
             ),
             shortTermContextSummary = "Short-term context summary:\n- user likes concise answers"
@@ -529,7 +540,7 @@ class EgoPlannerTest {
             recentDialogue = listOf(DialogueTurn(DialogueRole.USER, "hello")),
             queue = QueueSnapshot(
                 pendingInputCount = 1,
-                deferredIntentionCount = 0,
+                continuationCount = 0,
                 pendingActionCount = 0
             ),
             shortTermContextSummary = "Short-term context summary:\n- user likes concise answers",
@@ -567,7 +578,7 @@ class EgoPlannerTest {
             metaGuidance = "Finalize now with concise answer."
         )
 
-        planner.decide(deferredTrigger(PendingThought(1, Urgency.MEDIUM, "think")), context)
+        planner.decide(continuationTrigger(queuedContinuation(1, Urgency.MEDIUM, "think")), context)
 
         val prompt = llm.lastMessages.last().content
         assertTrue(prompt.contains("Deliberation pressure:"))
@@ -667,7 +678,7 @@ class EgoPlannerTest {
         )
 
         val decision = planner.decide(
-            trigger = deferredTrigger(PendingThought(1, Urgency.MEDIUM, "hello")),
+            trigger = continuationTrigger(queuedContinuation(1, Urgency.MEDIUM, "hello")),
             context = PlannerContext(
                 recentDialogue = emptyList(),
                 queue = QueueSnapshot(0, 0, 0)
@@ -710,7 +721,7 @@ class EgoPlannerTest {
         )
 
         val decision = planner.decide(
-            trigger = deferredTrigger(PendingThought(1, Urgency.MEDIUM, "hello")),
+            trigger = continuationTrigger(queuedContinuation(1, Urgency.MEDIUM, "hello")),
             context = PlannerContext(
                 recentDialogue = emptyList(),
                 queue = QueueSnapshot(0, 0, 0)
@@ -741,7 +752,7 @@ class EgoPlannerTest {
         )
 
         val decision = planner.decide(
-            trigger = deferredTrigger(PendingThought(1, Urgency.MEDIUM, "hello")),
+            trigger = continuationTrigger(queuedContinuation(1, Urgency.MEDIUM, "hello")),
             context = PlannerContext(
                 recentDialogue = emptyList(),
                 queue = QueueSnapshot(0, 0, 0)
@@ -773,7 +784,7 @@ class EgoPlannerTest {
         )
 
         val decision = planner.decide(
-            trigger = deferredTrigger(PendingThought(1, Urgency.MEDIUM, "pricing?")),
+            trigger = continuationTrigger(queuedContinuation(1, Urgency.MEDIUM, "pricing?")),
             context = PlannerContext(
                 recentDialogue = emptyList(),
                 queue = QueueSnapshot(0, 0, 0)
@@ -800,7 +811,7 @@ class EgoPlannerTest {
         val planner = LlmEgoPlanner(modelClient = llm, config = AgentConfig())
 
         val decision = planner.decide(
-            trigger = deferredTrigger(PendingThought(1, Urgency.MEDIUM, "test")),
+            trigger = continuationTrigger(queuedContinuation(1, Urgency.MEDIUM, "test")),
             context = PlannerContext(
                 recentDialogue = emptyList(),
                 queue = QueueSnapshot(0, 0, 0)
@@ -820,7 +831,7 @@ class EgoPlannerTest {
         val planner = LlmEgoPlanner(modelClient = llm, config = AgentConfig())
 
         val decision = planner.decide(
-            trigger = deferredTrigger(PendingThought(1, Urgency.MEDIUM, "test")),
+            trigger = continuationTrigger(queuedContinuation(1, Urgency.MEDIUM, "test")),
             context = PlannerContext(
                 recentDialogue = emptyList(),
                 queue = QueueSnapshot(0, 0, 0)

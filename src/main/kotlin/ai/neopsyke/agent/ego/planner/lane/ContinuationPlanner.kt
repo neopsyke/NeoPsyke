@@ -6,9 +6,9 @@ import ai.neopsyke.agent.config.AgentConfig
 import ai.neopsyke.agent.ego.planner.HierarchicalEgoPlanner
 import ai.neopsyke.agent.ego.planner.LaneId
 import ai.neopsyke.agent.ego.planner.PlannerLane
+import ai.neopsyke.agent.ego.planner.model.ContinuationDecision
 import ai.neopsyke.agent.ego.planner.model.ExecutionCandidate
 import ai.neopsyke.agent.ego.planner.model.PlanDecomposition
-import ai.neopsyke.agent.ego.planner.model.StepDecision
 import ai.neopsyke.agent.ego.planner.prompt.SharedPromptSections
 import ai.neopsyke.agent.ego.planner.runtime.DecisionValidation
 import ai.neopsyke.agent.ego.planner.runtime.PlannerRuntime
@@ -27,44 +27,43 @@ import ai.neopsyke.llm.ChatMessage
 import ai.neopsyke.llm.ChatRole
 
 /**
- * L1 lane: handles EgoTrigger.DeferredIntention with a narrower prompt
+ * L1 lane: handles EgoTrigger.Continuation with a narrower prompt
  * focused on continuation context, plan steps, and denial recovery.
  *
  * No deterministic text routing. Typed facts from trigger metadata
  * (plan context, denial reason codes, pass count) drive deterministic
  * pre-checks. Semantic interpretation is always model-based.
  */
-class DeferredStepPlanner(
+class ContinuationPlanner(
     private val runtime: PlannerRuntime,
     private val config: AgentConfig,
     private val instrumentation: AgentInstrumentation,
 ) : PlannerLane {
 
-    override val laneId: LaneId = LaneId.DEFERRED_STEP
+    override val laneId: LaneId = LaneId.CONTINUATION
 
     override fun plan(trigger: EgoTrigger, context: PlannerContext): EgoDecision {
-        val deferredTrigger = trigger as? EgoTrigger.DeferredIntention
-            ?: return EgoDecision.Noop("DeferredStepPlanner requires DeferredIntention trigger.")
+        val continuationTrigger = trigger as? EgoTrigger.Continuation
+            ?: return EgoDecision.Noop("ContinuationPlanner requires Continuation trigger.")
 
-        val rootInputId = deferredTrigger.intention.rootInputId
-        val thought = deferredTrigger.intention.toPendingThought()
-        val allowResolutionDraft = thought.planContext != null
+        val rootInputId = continuationTrigger.continuation.rootInputId
+        val continuation = continuationTrigger.continuation
+        val allowResolutionDraft = continuation.planContext != null
 
         if (runtime.isCircuitOpen(laneId, rootInputId)) {
             return EgoDecision.Noop(
-                reason = "DeferredStep circuit breaker tripped.",
+                reason = "Continuation circuit breaker tripped.",
                 parseFailureShortCircuit = true,
             )
         }
 
-        // Typed pre-check: max thought passes exceeded
-        if (thought.passes > config.planner.maxThoughtPasses) {
-            return EgoDecision.Noop("Max thought passes exceeded (${thought.passes}/${config.planner.maxThoughtPasses}).")
+        if (continuation.passes > config.planner.maxContinuationPasses) {
+            return EgoDecision.Noop("Max continuation passes exceeded (${continuation.passes}/${config.planner.maxContinuationPasses}).")
         }
 
         val metadata = HierarchicalEgoPlanner.plannerChatMetadata(
             trigger = trigger,
-            callSite = "deferred_step",
+            callSite = "continuation",
             sessionId = context.conversationContext.sessionId,
             rootInputId = rootInputId,
         )
@@ -74,16 +73,15 @@ class DeferredStepPlanner(
 
         val sections = listOfNotNull(
             PromptBudgetAllocator.Section(
-                key = "deferred_step_system",
+                key = "continuation_system",
                 role = ChatRole.SYSTEM,
                 band = PromptBudgetAllocator.Band.REQUIRED_CORE,
                 importance = PromptBudgetAllocator.Importance.MEDIUM,
                 floorTokens = 48,
                 content = """
-                    You are an action planner processing a deferred continuation.
+                    You are an action planner processing a continuation.
                     Return STRICT JSON only.
                     Decisions:
-                    - defer: refine the continuation for further processing.
                     - intend: form one explicit intention for the next action.
                     - plan: decompose into ordered steps when the task needs multiple stages.
                     - noop: when no safe next step exists.
@@ -99,17 +97,15 @@ class DeferredStepPlanner(
                 """.trimIndent()
             ),
             PromptBudgetAllocator.Section(
-                key = "deferred_step_schema",
+                key = "continuation_schema",
                 role = ChatRole.SYSTEM,
                 band = PromptBudgetAllocator.Band.REQUIRED_CORE,
                 floorTokens = 28,
                 content = """
                     JSON schema:
                     {
-                      "decision":"defer|intend|plan|noop",
+                      "decision":"intend|plan|noop",
                       "urgency":"low|medium|high",
-                      "defer_content":"optional when decision=defer",
-                      "long_term_memory_recall_query":"optional",
                       "intention_kind":"observe|prepare|stage|request_authorization|commit",
                       "commit_mode_preference":"not_applicable|approval_backed|policy_autonomous|admin_override",
                       "action_type":"$actionSchemaEnum",
@@ -151,10 +147,10 @@ class DeferredStepPlanner(
         )
 
         if (response == null) {
-            return EgoDecision.Noop("DeferredStepPlanner unavailable.")
+            return EgoDecision.Noop("ContinuationPlanner unavailable.")
         }
 
-        val parsedDecision = parseStepDecision(response.content, context)
+        val parsedDecision = parseContinuationDecision(response.content, context)
         if (parsedDecision != null) {
             runtime.recordSuccess(laneId, rootInputId)
             return toEgoDecision(parsedDecision, context, allowResolutionDraft)
@@ -166,12 +162,12 @@ class DeferredStepPlanner(
             val retryResponse = runtime.call(
                 laneId = laneId,
                 messages = allocation.messages + ChatMessage(ChatRole.USER, "Your previous output appears truncated. Return one complete JSON object."),
-                metadata = metadata.copy(callSite = "deferred_step_truncation_retry"),
+                metadata = metadata.copy(callSite = "continuation_truncation_retry"),
                 responseFormat = StructuredOutputHandler.PLANNER_DECISION_RESPONSE_FORMAT,
                 maxTokens = bumped,
                 temperature = 0.0,
             )
-            retryResponse?.let { parseStepDecision(it.content, context) }?.let {
+            retryResponse?.let { parseContinuationDecision(it.content, context) }?.let {
                 runtime.recordSuccess(laneId, rootInputId)
                 return toEgoDecision(it, context, allowResolutionDraft)
             }
@@ -180,41 +176,29 @@ class DeferredStepPlanner(
         val retryResponse = runtime.call(
             laneId = laneId,
             messages = allocation.messages + ChatMessage(ChatRole.USER, "Reply with STRICT JSON only."),
-            metadata = metadata.copy(callSite = "deferred_step_json_retry"),
+            metadata = metadata.copy(callSite = "continuation_json_retry"),
             responseFormat = StructuredOutputHandler.PLANNER_DECISION_RESPONSE_FORMAT,
             temperature = 0.0,
         )
-        retryResponse?.let { parseStepDecision(it.content, context) }?.let {
+        retryResponse?.let { parseContinuationDecision(it.content, context) }?.let {
             runtime.recordSuccess(laneId, rootInputId)
             return toEgoDecision(it, context, allowResolutionDraft)
         }
 
         runtime.recordParseFailure(laneId, rootInputId)
-        instrumentation.emit(AgentEvents.warning("DeferredStepPlanner response remained non-parseable after retry."))
+        instrumentation.emit(AgentEvents.warning("ContinuationPlanner response remained non-parseable after retry."))
         return EgoDecision.Noop(
-            reason = "DeferredStepPlanner produced non-parseable output.",
+            reason = "ContinuationPlanner produced non-parseable output.",
             parseFailureShortCircuit = runtime.isCircuitOpen(laneId, rootInputId),
         )
     }
 
-    private fun parseStepDecision(raw: String, context: PlannerContext): StepDecision? {
-        val payload = StructuredOutputHandler.parseWithRepair<DeferredPayload>(raw) {
+    private fun parseContinuationDecision(raw: String, context: PlannerContext): ContinuationDecision? {
+        val payload = StructuredOutputHandler.parseWithRepair<ContinuationPayload>(raw) {
             runtime.onOutputRepaired()
         } ?: return null
 
         return when (payload.decision?.trim()?.lowercase()) {
-            "defer" -> {
-                val content = payload.deferContent?.trim().orEmpty()
-                if (content.isBlank()) {
-                    StepDecision.Fail("Empty deferred content.")
-                } else {
-                    StepDecision.Defer(
-                        urgency = Urgency.fromRaw(payload.urgency),
-                        content = content,
-                        longTermMemoryRecallQuery = payload.longTermMemoryRecallQuery?.trim()?.ifBlank { null },
-                    )
-                }
-            }
             "intend" -> {
                 val intentionKind = DecisionValidation.intentionKindFromRaw(payload.intentionKind)
                 val actionType = ActionType.fromRaw(payload.actionType)
@@ -227,9 +211,9 @@ class DeferredStepPlanner(
                     intentionKind
                 )
                 if (intentionKind == null || actionType == null || actionPayload.isBlank() || summary.isBlank()) {
-                    StepDecision.Fail("Invalid intention payload.")
+                    ContinuationDecision.Fail("Invalid intention payload.")
                 } else {
-                    StepDecision.Execute(
+                    ContinuationDecision.Execute(
                         ExecutionCandidate(
                             urgency = Urgency.fromRaw(payload.urgency),
                             intentionKind = intentionKind,
@@ -248,33 +232,26 @@ class DeferredStepPlanner(
                     ?.map { PlanDecomposition.PlanStep(description = it) }
                     .orEmpty()
                 if (goal.isBlank() || steps.isEmpty()) {
-                    StepDecision.Fail("Plan with missing goal or empty steps.")
+                    ContinuationDecision.Fail("Plan with missing goal or empty steps.")
                 } else {
-                    StepDecision.RefinePlan(
+                    ContinuationDecision.RefinePlan(
                         urgency = Urgency.fromRaw(payload.urgency),
                         goal = goal,
                         steps = steps,
                     )
                 }
             }
-            else -> StepDecision.Fail(payload.reason?.take(120) ?: "Planner returned noop.")
+            else -> ContinuationDecision.Fail(payload.reason?.take(120) ?: "Planner returned noop.")
         }
     }
 
     private fun toEgoDecision(
-        decision: StepDecision,
+        decision: ContinuationDecision,
         context: PlannerContext,
         allowResolutionDraft: Boolean,
     ): EgoDecision {
         return when (decision) {
-            is StepDecision.Defer -> EgoDecision.EnqueueThought(
-                urgency = decision.urgency,
-                content = TextSecurity.clamp(decision.content, config.planner.maxThoughtChars),
-                longTermMemoryRecallQuery = decision.longTermMemoryRecallQuery?.let {
-                    TextSecurity.clamp(it, config.planner.maxThoughtChars)
-                },
-            )
-            is StepDecision.Execute -> {
+            is ContinuationDecision.Execute -> {
                 val candidate = decision.candidate
                 if (candidate.actionType == ActionType.RESOLUTION_DRAFT && !allowResolutionDraft) {
                     EgoDecision.Noop("resolution_draft outside active plan context.")
@@ -301,7 +278,7 @@ class DeferredStepPlanner(
                     )
                 }
             }
-            is StepDecision.RefinePlan -> {
+            is ContinuationDecision.RefinePlan -> {
                 val steps = decision.steps
                     .map { it.description.trim() }
                     .filter { it.isNotBlank() }
@@ -317,7 +294,7 @@ class DeferredStepPlanner(
                     )
                 }
             }
-            is StepDecision.Answer -> EgoDecision.FormIntention(
+            is ContinuationDecision.Answer -> EgoDecision.FormIntention(
                 urgency = Urgency.MEDIUM,
                 intentionKind = ai.neopsyke.agent.model.IntentionKind.OBSERVE,
                 commitModePreference = ai.neopsyke.agent.model.CommitMode.NOT_APPLICABLE,
@@ -325,7 +302,7 @@ class DeferredStepPlanner(
                 payload = TextSecurity.clamp(decision.payload, config.maxActionPayloadChars),
                 summary = TextSecurity.clamp(decision.summary, config.maxActionSummaryChars),
             )
-            is StepDecision.Clarify -> EgoDecision.FormIntention(
+            is ContinuationDecision.Clarify -> EgoDecision.FormIntention(
                 urgency = Urgency.MEDIUM,
                 intentionKind = ai.neopsyke.agent.model.IntentionKind.OBSERVE,
                 commitModePreference = ai.neopsyke.agent.model.CommitMode.NOT_APPLICABLE,
@@ -333,16 +310,14 @@ class DeferredStepPlanner(
                 payload = TextSecurity.clamp(decision.question, config.maxActionPayloadChars),
                 summary = "Ask for clarification",
             )
-            is StepDecision.SkipStep -> EgoDecision.Noop(decision.reason)
-            is StepDecision.Fail -> EgoDecision.Noop(decision.reason)
+            is ContinuationDecision.SkipStep -> EgoDecision.Noop(decision.reason)
+            is ContinuationDecision.Fail -> EgoDecision.Noop(decision.reason)
         }
     }
 
-    private data class DeferredPayload(
+    private data class ContinuationPayload(
         val decision: String? = null,
         val urgency: String? = null,
-        @param:JsonProperty("defer_content") val deferContent: String? = null,
-        @param:JsonProperty("long_term_memory_recall_query") val longTermMemoryRecallQuery: String? = null,
         @param:JsonProperty("intention_kind") val intentionKind: String? = null,
         @param:JsonProperty("commit_mode_preference") val commitModePreference: String? = null,
         @param:JsonProperty("action_type") val actionType: String? = null,

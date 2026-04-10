@@ -57,7 +57,7 @@ flowchart LR
     IL --> TDP["TaskDecompositionPlanner"]
     IL --> GCP["GoalCreationPlanner"]
     IL --> GMP["GoalManagementPlanner"]
-    P --> DSP["DeferredStepPlanner (L1)"]
+    P --> DSP["ContinuationPlanner (L1)"]
     P --> FP["FeedbackPlanner (L1)"]
     P --> GWP["GoalWorkPlanner (L1)"]
     P --> IP["ImpulsePlanner (L1)"]
@@ -167,10 +167,10 @@ sequenceDiagram
             Ego->>Planner: decide(context)
             Planner-->>Ego: defer / intend / plan / noop
             Ego->>Sched: enqueue intentions
-        else Intention (DEFER)
-            Ego->>Planner: decide(deferred context)
+        else Continuation
+            Ego->>Planner: decide(continuation context)
             Planner-->>Ego: decision
-        else Intention (action-bearing)
+        else Intention
             Ego->>Ego: materialize PendingAction
         else Action
             Ego->>Sup: reviewAuthorization(action)
@@ -181,7 +181,7 @@ sequenceDiagram
                 Motor-->>SC: ActionFeedbackCue
                 SC->>Ego: FeedbackReceived(cue)
             else deny
-                Ego->>Sched: enqueue recovery defer
+                Ego->>Sched: enqueue retry continuation
             end
         end
     end
@@ -259,21 +259,19 @@ sequenceDiagram
             Planner-->>Ego: defer/intend/plan/noop
             Ego->>Delib: maybeApplyPressureOverride (FINALIZE_NOW directly enqueues forced terminal; REQUEST_TOOL_THEN_FINALIZE produces soft hint)
             Note over Ego: Runtime opportunity guard rejects invalid intention kind, action surface, or commit-mode violations before scheduling execution work
-            Ego->>Sched: enqueue explicit intentions (observe/prepare/stage/request_authorization/commit/defer)
-            Note over Ego,Sched: Planner now forms explicit lifecycle-aware intentions directly; plan steps and recovery/follow-up work become deferred intentions, not first-class thought queue items
+            Ego->>Sched: enqueue continuations or explicit intentions
+            Note over Ego,Sched: Planner now forms explicit lifecycle-aware continuations and intentions directly; plan steps and recovery/follow-up work are queued as typed continuations, not as generic defer loops
             Note over Ego,Sched: Plans gated by budget, pressure, hash dedup, pending-plan check
             Note over Ego,Planner: Redundancy is planner-side soft cost control [prompt and verifier], with telemetry event external_action_redundancy_signal
             Note over Ego,Planner: Action verifier has been removed from the planner architecture. Planner correctness is achieved through typed lane design, constraint validation, and existing runtime controls (superego review, action authorization policy). See docs/specs/TYPED_HIERARCHICAL_PLANNER_REDESIGN.md Rule 8
             Note over Ego,Planner: Follow-up evidence thoughts explicitly request one raw JSON planner decision and forbid tool/function wrappers
+        else Task = continuation
+            Ego->>Ego: rebuild continuation context from queued continuation
+            Ego->>Planner: decide(context for continuation)
+            Note over Ego,Sched: Non-Id continuation chains carry fallback permission by default; if repeated continuations hit max passes, Ego converts the chain into a fallback contact_user action instead of ending silently
         else Task = intention
-            alt Deferred continuation
-                Ego->>Ego: rebuild deferred continuation context from DEFER intention
-                Ego->>Planner: decide(context for deferred continuation)
-                Note over Ego,Sched: Non-Id defer chains carry fallback permission by default; if repeated defers hit max passes, Ego converts the chain into a fallback contact_user action instead of ending silently
-            else Action-bearing intention
-                Ego->>Ego: materialize PendingAction with intention metadata
-                Note over Ego: PendingAction now carries intentionId, intentionKind, and requestedCommitMode
-            end
+            Ego->>Ego: materialize PendingAction with intention metadata
+            Note over Ego: PendingAction now carries intentionId, intentionKind, and requestedCommitMode
         else Task = action
             alt Fallback explanation action
                 Ego->>Motor: execute (bypass Superego)
@@ -283,14 +281,14 @@ sequenceDiagram
                 Note over Ego,TV: GroundingGate reads action.groundingMetadata (set at input classification), evidence state, and forced-terminal marker
                 alt grounding gate deny
                     TV-->>Ego: deny (GROUNDING_EVIDENCE_REQUIRED or TECH_GROUNDING_EVIDENCE_FAILURE)
-                    Ego->>Sched: enqueue evidence-gathering or retry thought
+                    Ego->>Sched: enqueue evidence-gathering or retry continuation
                     Ego->>Mem: maybeRecordReflectionLesson(filtered)
                 else grounding gate allow
                     Note over Ego,TV: If grounding required but evidence tools unavailable, gate returns graceful allow [GROUNDING_EVIDENCE_UNAVAILABLE_GRACEFUL]
                     Ego->>Sup: deterministic checks + authorization policy
                     alt deterministic deny
                         Sup-->>Ego: deny (hard deny)
-                        Ego->>Sched: enqueue safe-alternative thought
+                        Ego->>Sched: enqueue safe-alternative continuation
                         Ego->>Mem: maybeRecordReflectionLesson(filtered)
                     else deterministic pass
                         alt action = id-origin reflect
@@ -351,7 +349,7 @@ sequenceDiagram
                             Note over Ego,PG: Goal-origin WAITING without handles is rejected as a contract violation
                             Ego->>Ego: PromptInjectionDefense sanitize untrusted tool output
                             alt action = contact_user
-                                Ego->>Sched: clear pending thought and action work for same root-session scope
+                                Ego->>Sched: clear pending continuation and action work for same root-session scope
                                 Ego->>TWS: capture session digest for resolved input
                                 Ego->>TWS: destroy workspace for resolved input
                                 Note over Ego,Dash: Workspace telemetry carries root_input_id [identity] and root_input_received_at_ms [timing]
@@ -362,12 +360,12 @@ sequenceDiagram
                             Note over Ego,TWS: External evidence is stored as typed artifacts first and rendered into scratchpad with trust/source labels
                             Ego->>PG: onActionExecuted / allowFollowUp (generic action lifecycle observer)
                             Note over Ego,Sched: Id-origin satisfying actions clear remaining same-root queued work before any follow-up can be enqueued
-                            Ego->>Sched: enqueue follow-up defer (for evidence actions)
+                            Ego->>Sched: enqueue follow-up continuation (for evidence actions)
                             Ego->>Mem: maybeAssessLongTermMemory(post_allowed_action, optional force)
                             Note over Ego,Mem: Blocked imprints emit long_term_memory_persistence_skipped [reason_code, reason_detail] for timeline visibility
                         else deny
                             Ego->>ACS: save durable denial/refusal ledger entry
-                            Ego->>Sched: enqueue safe-alternative thought
+                            Ego->>Sched: enqueue safe-alternative continuation
                             Ego->>Mem: maybeRecordReflectionLesson(filtered)
                         end
                     end
@@ -424,10 +422,10 @@ flowchart LR
 stateDiagram-v2
     [*] --> Processing
 
-    Processing --> Planning: input/deferred-intention task
+    Processing --> Planning: input/continuation task
     Planning --> ActionQueued: decision=intend
-    Planning --> ThoughtQueued: decision=defer/plan/noop-retry
-    Planning --> ThoughtQueued: plan suppressed (budget/pressure/hash/pending) -> convergence/recovery defer
+    Planning --> ContinuationQueued: decision=continuation/plan/noop-retry
+    Planning --> ContinuationQueued: plan suppressed (budget/pressure/hash/pending) -> convergence/recovery continuation
 
     ActionQueued --> GroundingReview: non-fallback action
     ActionQueued --> Executing: fallback explanation action
@@ -435,20 +433,20 @@ stateDiagram-v2
 
     GroundingReview --> PolicyReview: grounding gate allow
     PolicyReview --> Denied: deterministic hard deny / contract deny / superego deny
-    Denied --> ThoughtQueued: enqueue safe alternative defer
-    Note right of ThoughtQueued: Repeat-denied payload block is skipped for technical or transient denial reasons (prefer reason_code classification) reflection lessons persist only for non-technical and non-system denials
+    Denied --> ContinuationQueued: enqueue safe alternative continuation
+    Note right of ContinuationQueued: Repeat-denied payload block is skipped for technical or transient denial reasons (prefer reason_code classification) reflection lessons persist only for non-technical and non-system denials
 
     PolicyReview --> Executing: allow_commit
     PolicyReview --> Executing: allow_stage (legacy runtime compatibility path)
-    Executing --> ThoughtQueued: action=resolution_draft (plan continues)
+    Executing --> ContinuationQueued: action=resolution_draft (plan continues)
     Executing --> EvidenceObserved: external action succeeded
     Executing --> EvidenceMissing: tool/provider failure
     Executing --> WebSearchUnavailable: web search init/config failure
-    WebSearchUnavailable --> ThoughtQueued: planner uses remaining available actions
-    EvidenceObserved --> ThoughtQueued: feedback-driven defer
-    EvidenceMissing --> ThoughtQueued: retry/adjust defer
+    WebSearchUnavailable --> ContinuationQueued: planner uses remaining available actions
+    EvidenceObserved --> ContinuationQueued: feedback-driven continuation
+    EvidenceMissing --> ContinuationQueued: retry/adjust continuation
     EvidenceMissing --> ActionDisabled: retry-budget cooldown trips (non-retryable action failures)
-    ActionDisabled --> ThoughtQueued: planner uses remaining available actions
+    ActionDisabled --> ContinuationQueued: planner uses remaining available actions
 
     Processing --> HighPressure: pressure threshold reached
     HighPressure --> ForcedTerminal: force terminal contact_user enqueue

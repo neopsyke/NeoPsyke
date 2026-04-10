@@ -19,7 +19,7 @@ import kotlin.test.assertFalse
 
 /**
  * Verifies that [MetaReasonerVerdict.FINALIZE_NOW] directly enqueues a forced
- * terminal answer rather than producing a soft [EgoDecision.EnqueueThought] hint.
+ * terminal answer rather than producing a soft [EgoDecision.EnqueueContinuation] hint.
  *
  * [MetaReasonerVerdict.REQUEST_TOOL_THEN_FINALIZE] still uses the soft hint to
  * give the planner one more chance for a tool action.
@@ -135,10 +135,10 @@ class FinalizeNowTerminalPromotionTest {
             groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
         )
 
-        // Should produce a soft EnqueueThought hint (not forced terminal).
-        assertIs<EgoDecision.EnqueueThought>(result)
-        assertTrue(result.content.contains("Decision pressure is high"))
-        assertEquals(Urgency.HIGH, result.urgency)
+        // Should produce a soft EnqueueContinuation hint (not forced terminal).
+        val continuation = assertIs<EgoDecision.EnqueueContinuation>(result)
+        assertTrue(continuation.continuation.content.contains("Decision pressure is high"))
+        assertEquals(Urgency.HIGH, continuation.urgency)
 
         // No forced terminal should be enqueued.
         val state = scheduler.queueState()
@@ -220,7 +220,7 @@ class FinalizeNowTerminalPromotionTest {
         )
 
         // Falls through to soft hint because forced terminal already queued.
-        assertIs<EgoDecision.EnqueueThought>(result2)
+        assertIs<EgoDecision.EnqueueContinuation>(result2)
 
         // Only one forced terminal action in the scheduler.
         val state = scheduler.queueState()
@@ -303,13 +303,16 @@ class FinalizeNowTerminalPromotionTest {
     }
 
     @Test
-    fun `FINALIZE_NOW with EnqueueThought decision also triggers forced terminal`() {
+    fun `FINALIZE_NOW with EnqueueContinuation decision also triggers forced terminal`() {
         val engine = buildEngine()
         engine.setActiveSession(sessionId)
         val scheduler = AttentionScheduler(AgentConfig())
-        val thoughtDecision = EgoDecision.EnqueueThought(
+        val thoughtDecision = EgoDecision.EnqueueContinuation(
             urgency = Urgency.LOW,
-            content = "Still thinking...",
+            continuation = ai.neopsyke.agent.model.Continuation.ConvergeNow(
+                content = "Still thinking...",
+                convergenceReason = "test",
+            ),
         )
 
         val result = engine.maybeApplyPressureOverride(
@@ -322,9 +325,9 @@ class FinalizeNowTerminalPromotionTest {
             groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
         )
 
-        // Original decision returned (thought will be dropped by hasForcedTerminalForInput).
-        assertIs<EgoDecision.EnqueueThought>(result)
-        assertEquals("Still thinking...", result.content)
+        // Original decision returned (continuation will be dropped by hasForcedTerminalForInput).
+        val continuation = assertIs<EgoDecision.EnqueueContinuation>(result)
+        assertEquals("Still thinking...", continuation.continuation.content)
 
         // Forced terminal enqueued.
         val state = scheduler.queueState()

@@ -304,16 +304,18 @@ class Ego(
             fetchErrorCategory = cue.fetchErrorCategory,
         )
         val observed = cue.observedEvidence ?: deliberation.observedEvidence(feedbackAction, outcome)
-        val dispatcherOriginThought = PendingThought(
-            id = cue.sourceActionId ?: 0L,
+        val dispatcherOriginContinuation = QueuedContinuation(
+            queueId = cue.sourceActionId ?: 0L,
             urgency = Urgency.fromRaw(cue.urgency),
-            content = cue.feedbackContent,
+            continuation = ai.neopsyke.agent.model.Continuation.RetryAlternative(
+                content = cue.feedbackContent,
+                allowFallbackExplanation = cue.origin.source != OriginSource.ID,
+                originActionType = cue.actionType,
+                originActionObservedEvidence = observed,
+            ),
             passes = cue.attempts,
             rootInputId = cue.rootInputId,
             rootInputReceivedAtMs = cue.rootInputReceivedAtMs ?: feedback.receivedAtMs,
-            allowFallbackExplanation = cue.origin.source != OriginSource.ID,
-            originActionType = cue.actionType,
-            originActionObservedEvidence = observed,
             conversationContext = convCtx,
             origin = cue.origin,
             groundingMetadata = cue.groundingMetadata,
@@ -332,7 +334,7 @@ class Ego(
                 AgentEvents.groundingMetadataPropagated(
                     rootInputId = cue.rootInputId,
                     fromEnvelopeType = "action_feedback_cue",
-                    toEnvelopeType = "pending_thought",
+                    toEnvelopeType = "queued_continuation",
                     groundingRequired = metadata.requirement == GroundingRequirement.REQUIRED,
                     source = metadata.source.name.lowercase(),
                 )
@@ -438,7 +440,7 @@ class Ego(
         dispatcher.dispatch(
             decision = finalDecision,
             nextPassCount = cue.attempts,
-            originThought = dispatcherOriginThought,
+            originContinuation = dispatcherOriginContinuation,
             rootInputId = cue.rootInputId,
             rootInputReceivedAtMs = cue.rootInputReceivedAtMs ?: feedback.receivedAtMs,
             conversationContext = convCtx,
@@ -472,6 +474,7 @@ class Ego(
             try {
                 when (task) {
                     is LoopTask.AttendOpportunity -> processOpportunity(task.item)
+                    is LoopTask.ProcessContinuation -> processContinuation(task.item)
                     is LoopTask.ProcessIntention -> processIntention(task.item)
                     is LoopTask.PerformAction -> processAction(task.item)
                 }
@@ -618,7 +621,7 @@ class Ego(
         dispatcher.dispatch(
             finalDecision,
             nextPassCount = 0,
-            originThought = null,
+            originContinuation = null,
             rootInputId = resolvedInput.rootInputId,
             rootInputReceivedAtMs = resolvedInput.receivedAtMs,
             conversationContext = convCtx,
@@ -637,54 +640,53 @@ class Ego(
         }
     }
 
-    private suspend fun processDeferredIntention(intention: QueuedIntention) {
-        val deferred = intention.toPendingThought()
-        val timing = PhaseTimingCollector("deferred_intention", deferred.rootInputId)
-        val convCtx = deferred.conversationContext
+    private suspend fun processContinuation(continuation: QueuedContinuation) {
+        val timing = PhaseTimingCollector("continuation", continuation.rootInputId)
+        val convCtx = continuation.conversationContext
         val sessionId = resolveSessionId(convCtx)
         activateSession(convCtx)
 
-        if (deliberation.hasForcedTerminalForInput(deferred.rootInputId, sessionId)) {
-            logger.info { "Dropping deferred intention ${deferred.id}: forced terminal answer already queued for this input." }
-            instrumentation.emit(AgentEvents.thoughtDropped(thought = deferred, reason = "forced_terminal_queued"))
+        if (deliberation.hasForcedTerminalForInput(continuation.rootInputId, sessionId)) {
+            logger.info { "Dropping continuation ${continuation.queueId}: forced terminal answer already queued for this input." }
+            instrumentation.emit(AgentEvents.continuationDropped(continuation = continuation, reason = "forced_terminal_queued"))
             return
         }
 
-        if (deferred.passes >= config.planner.maxThoughtPasses) {
-            logger.info { "Dropping deferred intention ${deferred.id} due to max defer passes." }
-            instrumentation.emit(AgentEvents.thoughtDropped(thought = deferred, reason = "max_passes_reached"))
-            if (deferred.allowFallbackExplanation) {
-                fallbackHandler.enqueueFallbackExplanation(deferred)
+        if (continuation.passes >= config.planner.maxContinuationPasses) {
+            logger.info { "Dropping continuation ${continuation.queueId} due to max continuation passes." }
+            instrumentation.emit(AgentEvents.continuationDropped(continuation = continuation, reason = "max_passes_reached"))
+            if (continuation.allowFallbackExplanation) {
+                fallbackHandler.enqueueFallbackExplanation(continuation)
             }
             return
         }
 
-        timing.startPhase("deferred_intention_processing")
-        instrumentation.emit(AgentEvents.thoughtProcessing(deferred))
-        deferred.planContext?.let { planContext ->
+        timing.startPhase("continuation_processing")
+        instrumentation.emit(AgentEvents.continuationProcessing(continuation))
+        continuation.planContext?.let { planContext ->
             instrumentation.emit(
                 AgentEvents.planStepStarted(
                     planId = planContext.planId,
                     stepIndex = planContext.stepIndex,
                     totalSteps = planContext.totalSteps,
                     stepDescription = planContext.stepDescription,
-                    rootInputId = deferred.rootInputId,
+                    rootInputId = continuation.rootInputId,
                 )
             )
         }
 
         timing.startPhase("planner_context")
-        val trigger = EgoTrigger.DeferredIntention(intention)
+        val trigger = EgoTrigger.Continuation(continuation)
         val baseContext = plannerContext(
             trigger,
-            rootInputId = deferred.rootInputId,
+            rootInputId = continuation.rootInputId,
             sessionId = sessionId,
             conversationContext = convCtx
         )
         val context = applyIdConvergenceContextForOrigin(
             baseContext = baseContext,
-            origin = deferred.origin,
-            triggeringTension = idNeedTension(deferred.origin.needId),
+            origin = continuation.origin,
+            triggeringTension = idNeedTension(continuation.origin.needId),
         )
 
         timing.startPhase("meta_assessment")
@@ -699,8 +701,8 @@ class Ego(
             decision = decision,
             assessment = assessment,
             scheduler = scheduler,
-            rootInputId = deferred.rootInputId,
-            rootInputReceivedAtMs = deferred.rootInputReceivedAtMs,
+            rootInputId = continuation.rootInputId,
+            rootInputReceivedAtMs = continuation.rootInputReceivedAtMs,
             conversationContext = convCtx,
             groundingMetadata = context.groundingMetadata,
         )
@@ -710,13 +712,13 @@ class Ego(
         timing.startPhase("apply_decision")
         dispatcher.dispatch(
             finalDecision,
-            nextPassCount = deferred.passes + 1,
-            originThought = deferred,
-            rootInputId = deferred.rootInputId,
-            rootInputReceivedAtMs = deferred.rootInputReceivedAtMs,
+            nextPassCount = continuation.passes + 1,
+            originContinuation = continuation,
+            rootInputId = continuation.rootInputId,
+            rootInputReceivedAtMs = continuation.rootInputReceivedAtMs,
             conversationContext = convCtx,
             plannerContext = context,
-            origin = deferred.origin,
+            origin = continuation.origin,
         )
 
         instrumentation.emit(AgentEvents.phaseTimings(timing.build()))
@@ -738,47 +740,39 @@ class Ego(
                 )
             )
         )
-        when (intention.intention.kind) {
-            IntentionKind.DEFER -> {
-                processDeferredIntention(intention)
-            }
-
-            else -> {
-                val actionType = intention.proposedActionType ?: return
-                val payload = intention.proposedActionPayload ?: return
-                val summary = intention.proposedActionSummary ?: intention.intention.summary
-                val pendingAction = PendingAction(
-                    id = intention.queueId,
-                    urgency = intention.urgency,
-                    type = actionType,
-                    payload = payload,
-                    summary = summary,
+        val actionType = intention.proposedActionType ?: return
+        val payload = intention.proposedActionPayload ?: return
+        val summary = intention.proposedActionSummary ?: intention.intention.summary
+        val pendingAction = PendingAction(
+            id = intention.queueId,
+            urgency = intention.urgency,
+            type = actionType,
+            payload = payload,
+            summary = summary,
+            rootInputId = intention.rootInputId,
+            rootInputReceivedAtMs = intention.rootInputReceivedAtMs,
+            conversationContext = intention.conversationContext,
+            requiresFollowUpThought = motorCortex.requiresFollowUpThought(actionType),
+            followUpPrefix = motorCortex.followUpPrefix(actionType),
+            argumentDataTrust = intention.argumentDataTrust,
+            origin = intention.origin,
+            intentionId = intention.intention.id,
+            intentionKind = intention.intention.kind,
+            requestedCommitMode = intention.intention.commitMode,
+            groundingMetadata = intention.groundingMetadata,
+        )
+        intention.groundingMetadata?.let { metadata ->
+            instrumentation.emit(
+                AgentEvents.groundingMetadataPropagated(
                     rootInputId = intention.rootInputId,
-                    rootInputReceivedAtMs = intention.rootInputReceivedAtMs,
-                    conversationContext = intention.conversationContext,
-                    requiresFollowUpThought = motorCortex.requiresFollowUpThought(actionType),
-                    followUpPrefix = motorCortex.followUpPrefix(actionType),
-                    argumentDataTrust = intention.argumentDataTrust,
-                    origin = intention.origin,
-                    intentionId = intention.intention.id,
-                    intentionKind = intention.intention.kind,
-                    requestedCommitMode = intention.intention.commitMode,
-                    groundingMetadata = intention.groundingMetadata,
+                    fromEnvelopeType = "queued_intention",
+                    toEnvelopeType = "pending_action",
+                    groundingRequired = metadata.requirement == GroundingRequirement.REQUIRED,
+                    source = metadata.source.name.lowercase(),
                 )
-                intention.groundingMetadata?.let { metadata ->
-                    instrumentation.emit(
-                        AgentEvents.groundingMetadataPropagated(
-                            rootInputId = intention.rootInputId,
-                            fromEnvelopeType = "queued_intention",
-                            toEnvelopeType = "pending_action",
-                            groundingRequired = metadata.requirement == GroundingRequirement.REQUIRED,
-                            source = metadata.source.name.lowercase(),
-                        )
-                    )
-                }
-                processAction(pendingAction)
-            }
+            )
         }
+        processAction(pendingAction)
     }
 
     private suspend fun processImpulse(impulse: PendingImpulse, opportunity: Opportunity? = null) {
@@ -855,7 +849,7 @@ class Ego(
                 dispatcher.dispatch(
                     decision = decision,
                     nextPassCount = 0,
-                    originThought = null,
+                    originContinuation = null,
                     rootInputId = impulse.rootImpulseId,
                     rootInputReceivedAtMs = impulse.receivedAtMs,
                     conversationContext = convCtx,
@@ -930,7 +924,7 @@ class Ego(
         dispatcher.dispatch(
             decision = finalDecision,
             nextPassCount = 0,
-            originThought = null,
+            originContinuation = null,
             rootInputId = work.rootInputId,
             rootInputReceivedAtMs = System.currentTimeMillis(),
             conversationContext = convCtx,
@@ -1095,7 +1089,6 @@ class Ego(
             allowedIntentions = opportunity?.allowedIntentions ?: setOf(
                 IntentionKind.OBSERVE,
                 IntentionKind.PREPARE,
-                IntentionKind.DEFER,
             ),
             allowedCommitModes = opportunity?.allowedCommitModes ?: CommitMode.entries.toSet(),
             availableActions = availableActions,
@@ -1120,10 +1113,10 @@ class Ego(
                     sourceRef = trigger.input.rootInputId,
                 ).renderSummary()
 
-            is EgoTrigger.DeferredIntention ->
+            is EgoTrigger.Continuation ->
                 Provenances.trustedSystemSignal(
-                    provider = "planner-deferred-intention",
-                    sourceRef = trigger.intention.rootInputId,
+                    provider = "planner-continuation",
+                    sourceRef = trigger.continuation.rootInputId,
                 ).renderSummary()
 
             is EgoTrigger.ActionFeedback ->
@@ -1148,7 +1141,7 @@ class Ego(
     private fun groundingMetadataForTrigger(trigger: EgoTrigger): GroundingMetadata =
         when (trigger) {
             is EgoTrigger.IncomingInput -> trigger.input.groundingMetadata
-            is EgoTrigger.DeferredIntention -> trigger.intention.groundingMetadata
+            is EgoTrigger.Continuation -> trigger.continuation.groundingMetadata
             is EgoTrigger.ActionFeedback -> trigger.feedback.cue.groundingMetadata
             is EgoTrigger.IncomingImpulse -> GroundingMetadata.NOT_REQUIRED_PREFILTER
             is EgoTrigger.GoalWork -> trigger.workUnit.groundingMetadata
@@ -1199,7 +1192,7 @@ class Ego(
             is EgoTrigger.ActionFeedback -> trigger.feedback.cue.origin.source == OriginSource.ID
             is EgoTrigger.IncomingImpulse -> true
             is EgoTrigger.GoalWork -> true
-            is EgoTrigger.DeferredIntention -> trigger.intention.origin.source == OriginSource.ID
+            is EgoTrigger.Continuation -> trigger.continuation.origin.source == OriginSource.ID
         }
 
     private fun emitAmbientContextSnapshot(
@@ -1224,7 +1217,7 @@ class Ego(
     private fun rootInputIdForTrigger(trigger: EgoTrigger): String? =
         when (trigger) {
             is EgoTrigger.IncomingInput -> trigger.input.rootInputId
-            is EgoTrigger.DeferredIntention -> trigger.intention.rootInputId
+            is EgoTrigger.Continuation -> trigger.continuation.rootInputId
             is EgoTrigger.ActionFeedback -> trigger.feedback.cue.rootInputId
             is EgoTrigger.IncomingImpulse -> trigger.impulse.rootImpulseId
             is EgoTrigger.GoalWork -> trigger.workUnit.rootInputId
@@ -1233,7 +1226,7 @@ class Ego(
     private fun triggerLabel(trigger: EgoTrigger): String =
         when (trigger) {
             is EgoTrigger.IncomingInput -> "input"
-            is EgoTrigger.DeferredIntention -> "deferred-intention"
+            is EgoTrigger.Continuation -> "continuation"
             is EgoTrigger.ActionFeedback -> "feedback"
             is EgoTrigger.IncomingImpulse -> "impulse"
             is EgoTrigger.GoalWork -> "goal-work"
@@ -1418,7 +1411,7 @@ class Ego(
                 )
             )
         }
-        if (cleared.thoughtsRemoved == 0 && cleared.actionsRemoved == 0) {
+        if (cleared.continuationsRemoved == 0 && cleared.actionsRemoved == 0) {
             return
         }
         instrumentation.emit(
@@ -1430,7 +1423,7 @@ class Ego(
                     "root_input_id" to rootInputId,
                     "root_input_received_at_ms" to action.rootInputReceivedAtMs,
                     "session_id" to sessionId,
-                    "removed_thoughts" to cleared.thoughtsRemoved,
+                    "removed_continuations" to cleared.continuationsRemoved,
                     "removed_actions" to cleared.actionsRemoved,
                     "reason" to reason
                 )
@@ -1536,6 +1529,7 @@ class Ego(
                 is OpportunityTrigger.Feedback -> "feedback"
                 is OpportunityTrigger.GoalWork -> "goal_work"
             }
+            is LoopTask.ProcessContinuation -> "continuation"
             is LoopTask.ProcessIntention -> "intention"
             is LoopTask.PerformAction -> "action"
         }
@@ -1543,6 +1537,7 @@ class Ego(
     private fun taskRootInputId(task: LoopTask): String? =
         when (task) {
             is LoopTask.AttendOpportunity -> task.item.rootInputId
+            is LoopTask.ProcessContinuation -> task.item.rootInputId
             is LoopTask.ProcessIntention -> task.item.rootInputId
             is LoopTask.PerformAction -> task.item.rootInputId
         }
@@ -1550,6 +1545,7 @@ class Ego(
     private fun taskRootInputReceivedAtMs(task: LoopTask): Long? =
         when (task) {
             is LoopTask.AttendOpportunity -> task.item.receivedAtMs ?: System.currentTimeMillis()
+            is LoopTask.ProcessContinuation -> task.item.rootInputReceivedAtMs
             is LoopTask.ProcessIntention -> task.item.rootInputReceivedAtMs
             is LoopTask.PerformAction -> task.item.rootInputReceivedAtMs
         }
@@ -1557,6 +1553,7 @@ class Ego(
     private fun taskConversationContext(task: LoopTask): ConversationContext =
         when (task) {
             is LoopTask.AttendOpportunity -> task.item.conversationContext
+            is LoopTask.ProcessContinuation -> task.item.conversationContext
             is LoopTask.ProcessIntention -> task.item.conversationContext
             is LoopTask.PerformAction -> task.item.conversationContext
         }
@@ -1564,13 +1561,14 @@ class Ego(
     private fun taskGroundingMetadata(task: LoopTask): GroundingMetadata =
         when (task) {
             is LoopTask.AttendOpportunity -> task.item.trigger.groundingMetadata
+            is LoopTask.ProcessContinuation -> task.item.groundingMetadata
             is LoopTask.ProcessIntention -> task.item.groundingMetadata
             is LoopTask.PerformAction -> task.item.groundingMetadata
         }
 
     private fun journalPlannerDecision(decision: EgoDecision) {
         val (label, actionType) = when (decision) {
-            is EgoDecision.EnqueueThought -> "thought" to null
+            is EgoDecision.EnqueueContinuation -> "continuation" to null
             is EgoDecision.FormIntention ->
                 "intention: ${decision.intentionKind.name.lowercase()} ${decision.actionType.name.lowercase()}" to
                     decision.actionType.name.lowercase()
@@ -1580,8 +1578,8 @@ class Ego(
         val summary = when (decision) {
             is EgoDecision.FormIntention ->
                 "Decision: $label — ${TextSecurity.preview(decision.summary, JOURNAL_SUMMARY_PREVIEW_CHARS)}"
-            is EgoDecision.EnqueueThought ->
-                "Decision: $label — ${TextSecurity.preview(decision.content, JOURNAL_SUMMARY_PREVIEW_CHARS)}"
+            is EgoDecision.EnqueueContinuation ->
+                "Decision: $label — ${TextSecurity.preview(decision.continuation.content, JOURNAL_SUMMARY_PREVIEW_CHARS)}"
             is EgoDecision.EnqueuePlan ->
                 "Decision: plan — ${TextSecurity.preview(decision.goal, JOURNAL_SUMMARY_PREVIEW_CHARS)}"
             is EgoDecision.Noop ->

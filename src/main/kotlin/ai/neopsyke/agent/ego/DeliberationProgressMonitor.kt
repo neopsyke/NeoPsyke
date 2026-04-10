@@ -52,7 +52,7 @@ class DeliberationProgressMonitor(
                 modelErrorStreak = max(0, modelErrorStreak - 1)
             }
 
-            is EgoDecision.EnqueueThought -> {
+            is EgoDecision.EnqueueContinuation -> {
                 staleStreak = max(0, staleStreak - 1)
                 progressScore += 0.03
                 noopStreak = 0
@@ -143,8 +143,8 @@ class DeliberationProgressMonitor(
 
     private fun decisionSignature(decision: EgoDecision): String =
         when (decision) {
-            is EgoDecision.EnqueueThought -> {
-                "thought:${normalize(decision.content)}"
+            is EgoDecision.EnqueueContinuation -> {
+                "continuation:${normalize(decision.continuation.content)}"
             }
 
             is EgoDecision.FormIntention -> {

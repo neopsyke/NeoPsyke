@@ -38,7 +38,7 @@ object DecisionValidation {
                     CommitMode.POLICY_AUTONOMOUS,
                     CommitMode.ADMIN_OVERRIDE,
                 )
-            IntentionKind.PREPARE, IntentionKind.DEFER -> commitModePreference != CommitMode.NOT_APPLICABLE
+            IntentionKind.PREPARE -> commitModePreference != CommitMode.NOT_APPLICABLE
         }
 
     fun resolveCommitModePreference(

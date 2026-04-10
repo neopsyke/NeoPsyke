@@ -182,10 +182,10 @@ class DashboardStateStore(
                     }
                 }
 
-                "thought_processing" -> {
+                "continuation_processing" -> {
                     currentProcessing = mapOf(
-                        "kind" to "thought",
-                        "item" to (event.data["thought"] ?: "")
+                        "kind" to "continuation",
+                        "item" to (event.data["continuation"] ?: "")
                     )
                 }
 
@@ -1169,7 +1169,7 @@ class DashboardStateStore(
         val intention = Intention(
             id = data["intention_id"].asString() ?: return,
             cognitiveThreadId = threadId,
-            kind = data["intention_kind"].asIntentionKind() ?: IntentionKind.DEFER,
+            kind = data["intention_kind"].asIntentionKind() ?: IntentionKind.PREPARE,
             summary = data["summary"]?.toString()?.ifBlank { null }
                 ?: data["action_type"]?.toString()
                 ?: current.latestIntention?.summary
@@ -1189,7 +1189,7 @@ class DashboardStateStore(
         val threadId = resolveThreadIdLocked(data) ?: return
         val current = threadSnapshotLocked(threadId) ?: return
         val stage = data["stage"]?.toString()?.trim().orEmpty()
-        val kind = data["intention_kind"].asIntentionKind() ?: current.latestIntention?.kind ?: IntentionKind.DEFER
+        val kind = data["intention_kind"].asIntentionKind() ?: current.latestIntention?.kind ?: IntentionKind.PREPARE
         val summary = listOfNotNull(
             data["summary"]?.toString()?.trim()?.takeIf { it.isNotBlank() },
             current.latestIntention?.summary,
@@ -1442,7 +1442,7 @@ class DashboardStateStore(
         const val DEFAULT_THREAD_SNAPSHOT_LIMIT: Int = 100
         const val MAX_LIVE_THREAD_SNAPSHOTS: Int = 256
         const val MAX_TERMINAL_THREAD_SNAPSHOTS: Int = 512
-        val PLANNER_CALL_SITES: Set<String> = setOf("input", "thought", "impulse")
+        val PLANNER_CALL_SITES: Set<String> = setOf("input", "continuation", "feedback", "goal_work", "impulse")
         val ACTION_CONTROL_STREAM_EVENT_TYPES: Set<String> = setOf(
             "action_staged",
             "action_executed",

@@ -119,7 +119,7 @@ data class Opportunity(
     val rootStimulusId: String? = null,
     val goalId: String? = null,
     val goalRunId: String? = null,
-    val allowedIntentions: Set<IntentionKind> = setOf(IntentionKind.DEFER),
+    val allowedIntentions: Set<IntentionKind> = emptySet(),
     val allowedCommitModes: Set<CommitMode> = setOf(CommitMode.NOT_APPLICABLE),
     val availableActions: Set<ActionType> = emptySet(),
     val dispatchableActions: Set<ActionType> = emptySet(),
@@ -156,5 +156,4 @@ enum class IntentionKind {
     STAGE,
     REQUEST_AUTHORIZATION,
     COMMIT,
-    DEFER,
 }

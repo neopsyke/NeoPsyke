@@ -195,7 +195,7 @@ class AgentRuntimeSettingsLoaderTest {
                     - https://www.googleapis.com/auth/gmail.readonly
               runtime:
                 loop_delay_ms: 9
-                max_pending_thoughts: 11
+                max_pending_continuations: 11
                 max_pending_actions: 12
                 max_pending_inputs: 13
                 search_result_count: 8
@@ -339,7 +339,7 @@ class AgentRuntimeSettingsLoaderTest {
         )
 
         assertEquals(9, settings.agentConfig.loopDelayMs)
-        assertEquals(11, settings.agentConfig.maxPendingThoughts)
+        assertEquals(11, settings.agentConfig.maxPendingContinuations)
         assertEquals(12, settings.agentConfig.maxPendingActions)
         assertEquals(13, settings.agentConfig.maxPendingInputs)
         assertEquals(8, settings.agentConfig.searchResultCount)

@@ -13,7 +13,8 @@ typealias ActionExecutionStatus = ai.neopsyke.agent.model.ActionExecutionStatus
 typealias CommitMode = ai.neopsyke.agent.model.CommitMode
 typealias InputPriority = ai.neopsyke.agent.model.InputPriority
 typealias PendingInput = ai.neopsyke.agent.model.PendingInput
-typealias PendingThought = ai.neopsyke.agent.model.PendingThought
+typealias Continuation = ai.neopsyke.agent.model.Continuation
+typealias QueuedContinuation = ai.neopsyke.agent.model.QueuedContinuation
 typealias PendingAction = ai.neopsyke.agent.model.PendingAction
 typealias QueueState = ai.neopsyke.agent.model.QueueState
 typealias QueueSnapshot = ai.neopsyke.agent.model.QueueSnapshot
@@ -93,34 +94,71 @@ typealias TextSecurity = ai.neopsyke.agent.support.TextSecurity
 fun encodeMcpArguments(arguments: Map<String, Any?>): Map<String, Any> =
    ai.neopsyke.agent.cortex.motor.actions.mcp.encodeMcpArguments(arguments)
 
-fun deferredTrigger(thought: PendingThought): EgoTrigger =
-    ai.neopsyke.agent.model.EgoTrigger.DeferredIntention(
-        QueuedIntention(
-            queueId = thought.id,
-            intention = Intention(
-                id = ai.neopsyke.agent.model.RootInputIds.next(),
-                cognitiveThreadId = thought.rootInputId ?: ai.neopsyke.agent.model.RootInputIds.next(),
-                kind = IntentionKind.DEFER,
-                summary = thought.content.take(160),
-                createdAt = java.time.Instant.now(),
-                conversationContext = thought.conversationContext,
-                commitMode = CommitMode.NOT_APPLICABLE,
-                rootStimulusId = thought.rootInputId,
-            ),
-            urgency = thought.urgency,
-            rootInputReceivedAtMs = thought.rootInputReceivedAtMs,
-            origin = thought.origin,
-            deferredContent = thought.content,
-            deferredPasses = thought.passes,
-            deferredRecallQuery = thought.longTermMemoryRecallQuery,
-            deferredDeniedActionType = thought.deniedActionType,
-            deferredDeniedActionPayload = thought.deniedActionPayload,
-            deferredDenialReason = thought.denialReason,
-            deferredAllowFallbackExplanation = thought.allowFallbackExplanation,
-            deferredPlanContext = thought.planContext,
-            deferredDenialReasonCode = thought.denialReasonCode,
-            deferredOriginActionType = thought.originActionType,
-            deferredOriginActionObservedEvidence = thought.originActionObservedEvidence,
-            groundingMetadata = thought.groundingMetadata,
+fun queuedContinuation(
+    id: Long = 1L,
+    urgency: Urgency = Urgency.MEDIUM,
+    content: String = "continue",
+    passes: Int = 0,
+    longTermMemoryRecallQuery: String? = null,
+    rootInputId: String? = null,
+    rootInputReceivedAtMs: Long? = null,
+    deniedActionType: ActionType? = null,
+    deniedActionPayload: String? = null,
+    denialReason: String? = null,
+    denialReasonCode: String? = null,
+    allowFallbackExplanation: Boolean = false,
+    planContext: ai.neopsyke.agent.model.PlanContext? = null,
+    originActionType: ActionType? = null,
+    originActionObservedEvidence: Boolean? = null,
+    conversationContext: ai.neopsyke.agent.model.ConversationContext = ai.neopsyke.agent.model.ConversationContext.default(),
+    origin: ai.neopsyke.agent.model.ActionOrigin = ai.neopsyke.agent.model.ActionOrigin.USER,
+    groundingMetadata: ai.neopsyke.agent.model.GroundingMetadata = ai.neopsyke.agent.model.GroundingMetadata.NOT_REQUIRED_PREFILTER,
+): QueuedContinuation {
+    val continuation = when {
+        planContext != null -> ai.neopsyke.agent.model.Continuation.PlanStepContinuation(
+            content = content,
+            planContext = planContext,
+            longTermMemoryRecallQuery = longTermMemoryRecallQuery,
+            allowFallbackExplanation = allowFallbackExplanation,
+            originActionType = originActionType,
+            originActionObservedEvidence = originActionObservedEvidence,
         )
+
+        deniedActionType != null || deniedActionPayload != null || denialReason != null || denialReasonCode != null ->
+            ai.neopsyke.agent.model.Continuation.RetryAlternative(
+                content = content,
+                deniedActionType = deniedActionType,
+                deniedActionPayload = deniedActionPayload,
+                denialReason = denialReason,
+                denialReasonCode = denialReasonCode,
+                longTermMemoryRecallQuery = longTermMemoryRecallQuery,
+                allowFallbackExplanation = allowFallbackExplanation,
+                originActionType = originActionType,
+                originActionObservedEvidence = originActionObservedEvidence,
+            )
+
+        else -> ai.neopsyke.agent.model.Continuation.ConvergeNow(
+            content = content,
+            convergenceReason = "test",
+            longTermMemoryRecallQuery = longTermMemoryRecallQuery,
+            allowFallbackExplanation = allowFallbackExplanation,
+            originActionType = originActionType,
+            originActionObservedEvidence = originActionObservedEvidence,
+        )
+    }
+
+    return QueuedContinuation(
+        queueId = id,
+        urgency = urgency,
+        continuation = continuation,
+        passes = passes,
+        rootInputId = rootInputId,
+        rootInputReceivedAtMs = rootInputReceivedAtMs,
+        conversationContext = conversationContext,
+        origin = origin,
+        groundingMetadata = groundingMetadata,
     )
+}
+
+fun continuationTrigger(continuation: QueuedContinuation): EgoTrigger =
+    ai.neopsyke.agent.model.EgoTrigger.Continuation(continuation)

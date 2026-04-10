@@ -1,6 +1,6 @@
 package ai.neopsyke.agent.ego
 
-import ai.neopsyke.agent.deferredTrigger
+import ai.neopsyke.agent.continuationTrigger
 import ai.neopsyke.agent.config.AgentConfig
 import ai.neopsyke.agent.config.MemoryConfig
 import ai.neopsyke.agent.model.ActionOrigin
@@ -30,7 +30,7 @@ import ai.neopsyke.agent.model.DialogueRole
 import ai.neopsyke.agent.model.DialogueTurn
 import ai.neopsyke.agent.model.OriginSource
 import ai.neopsyke.agent.model.PendingAction
-import ai.neopsyke.agent.model.PendingThought
+import ai.neopsyke.agent.model.QueuedContinuation
 import ai.neopsyke.agent.model.Provenances
 import ai.neopsyke.agent.model.Urgency
 import ai.neopsyke.agent.model.ExternalContentArtifact
@@ -286,8 +286,8 @@ class MemorySystemLogbookNarrativeTest {
         )
 
         val recalled = coordinator.recall(
-            trigger = deferredTrigger(
-                PendingThought(
+            trigger = continuationTrigger(
+                ai.neopsyke.agent.queuedContinuation(
                     id = 91,
                     urgency = Urgency.MEDIUM,
                     content = "review evidence",

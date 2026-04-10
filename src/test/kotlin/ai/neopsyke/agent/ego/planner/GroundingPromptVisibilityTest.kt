@@ -120,7 +120,7 @@ class GroundingPromptVisibilityTest {
         assertLaneIncludesGroundingPrompt(
             route = null,
             context = contextWith(GroundingRequirement.REQUIRED),
-            trigger = deferredTrigger(),
+            trigger = continuationTrigger(),
         )
     }
 
@@ -129,7 +129,7 @@ class GroundingPromptVisibilityTest {
         assertLaneOmitsGroundingPrompt(
             route = null,
             context = contextWith(GroundingRequirement.NOT_REQUIRED),
-            trigger = deferredTrigger(),
+            trigger = continuationTrigger(),
         )
     }
 
@@ -239,20 +239,15 @@ class GroundingPromptVisibilityTest {
             input = PendingInput(id = 1L, content = "test")
         )
 
-    private fun deferredTrigger(): EgoTrigger.DeferredIntention =
-        EgoTrigger.DeferredIntention(
-            intention = QueuedIntention(
-                intention = Intention(
-                    id = "i1",
-                    cognitiveThreadId = "t1",
-                    kind = IntentionKind.DEFER,
-                    summary = "deferred test",
-                    createdAt = Instant.now(),
-                    conversationContext = ConversationContext.default(),
-                ),
+    private fun continuationTrigger(): EgoTrigger.Continuation =
+        EgoTrigger.Continuation(
+            continuation = ai.neopsyke.agent.model.QueuedContinuation(
                 urgency = Urgency.MEDIUM,
-                deferredContent = "test thought",
-            groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
+                continuation = ai.neopsyke.agent.model.Continuation.ConvergeNow(
+                    content = "test continuation",
+                    convergenceReason = "test",
+                ),
+                groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
             )
         )
 

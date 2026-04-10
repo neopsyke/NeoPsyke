@@ -27,7 +27,7 @@ enum class GroundingSource {
     /** Typed policy on a goal step / activation. */
     GOAL_STEP_POLICY,
 
-    /** Inherited from an upstream envelope (deferred intention, feedback, etc.). */
+    /** Inherited from an upstream envelope (continuation, feedback, etc.). */
     INHERITED,
 }
 

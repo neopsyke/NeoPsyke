@@ -116,7 +116,7 @@ Scenarios are evaluated deterministically using recorded LLM responses, not live
 Deterministic tests that verify structural properties of planner output without making LLM calls:
 
 - **shape-lock** — Does the planner output conform to the expected JSON schema?
-- **feedback-carry** — Does the planner correctly incorporate denial feedback into the next deferred continuation?
+- **feedback-carry** — Does the planner correctly incorporate denial feedback into the next queued continuation?
 - **multi-fix** — Can the planner recover from multiple consecutive failures?
 
 The logic eval also includes a 45-case behavioral/perturbation pack that tests edge cases and boundary conditions.

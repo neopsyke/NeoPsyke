@@ -88,7 +88,6 @@ data class PlannerContext(
     val allowedIntentions: Set<IntentionKind> = setOf(
         IntentionKind.OBSERVE,
         IntentionKind.PREPARE,
-        IntentionKind.DEFER,
     ),
     val allowedCommitModes: Set<CommitMode> = CommitMode.entries.toSet(),
     val availableActions: Set<ActionType> = ActionType.entries.toSet(),
@@ -126,17 +125,16 @@ data class SuperegoContext(
 
 sealed interface EgoTrigger {
     data class IncomingInput(val input: PendingInput) : EgoTrigger
-    data class DeferredIntention(val intention: QueuedIntention) : EgoTrigger
+    data class Continuation(val continuation: QueuedContinuation) : EgoTrigger
     data class ActionFeedback(val feedback: PendingFeedback) : EgoTrigger
     data class IncomingImpulse(val impulse: PendingImpulse) : EgoTrigger
     data class GoalWork(val workUnit: GoalRunActivation) : EgoTrigger
 }
 
 sealed interface EgoDecision {
-    data class EnqueueThought(
+    data class EnqueueContinuation(
         val urgency: Urgency,
-        val content: String,
-        val longTermMemoryRecallQuery: String? = null,
+        val continuation: ai.neopsyke.agent.model.Continuation,
     ) : EgoDecision
 
     data class FormIntention(

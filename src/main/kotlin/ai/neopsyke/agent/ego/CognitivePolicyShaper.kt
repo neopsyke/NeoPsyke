@@ -281,7 +281,7 @@ internal object CognitivePolicyShaper {
         allowedCommitModes: Set<CommitMode>,
     ): Set<IntentionKind> {
         if (dispatchableDefinitions.isEmpty()) {
-            return baseIntentions.intersect(setOf(IntentionKind.DEFER)).ifEmpty { setOf(IntentionKind.DEFER) }
+            return emptySet()
         }
         val hasObserveOnly = dispatchableDefinitions.all { it.effectClass == ActionEffectClass.OBSERVE }
         val hasSideEffecting = dispatchableDefinitions.any { it.effectClass != ActionEffectClass.OBSERVE }
@@ -290,7 +290,6 @@ internal object CognitivePolicyShaper {
         val approvalBackedAllowed = CommitMode.APPROVAL_BACKED in allowedCommitModes
         return buildSet {
             if (IntentionKind.OBSERVE in baseIntentions) add(IntentionKind.OBSERVE)
-            if (IntentionKind.DEFER in baseIntentions) add(IntentionKind.DEFER)
             if (IntentionKind.PREPARE in baseIntentions && !hasObserveOnly) add(IntentionKind.PREPARE)
             if (IntentionKind.STAGE in baseIntentions && hasSideEffecting && (approvalBackedAllowed || hasAutonomousCommit)) {
                 add(IntentionKind.STAGE)
@@ -301,7 +300,7 @@ internal object CognitivePolicyShaper {
             if (IntentionKind.COMMIT in baseIntentions && (hasDirectCommit || hasAutonomousCommit || hasObserveOnly)) {
                 add(IntentionKind.COMMIT)
             }
-        }.ifEmpty { baseIntentions.intersect(setOf(IntentionKind.DEFER)).ifEmpty { setOf(IntentionKind.DEFER) } }
+        }
     }
 
     private fun shapeOpportunityCommitModes(

@@ -65,7 +65,7 @@ class GoalWorkPlanner(
                 content = """
                     You are an action planner executing a goal step.
                     Return STRICT JSON only.
-                    Decisions: defer, intend, plan, noop.
+                    Decisions: intend, plan, noop.
                     You are working on a persistent goal step. The trigger contains the step details and acceptance criteria.
                     Execute the step by choosing an appropriate action.
                     If the step is already satisfied by available evidence, deliver the result using contact_user.
@@ -83,10 +83,8 @@ class GoalWorkPlanner(
                 content = """
                     JSON schema:
                     {
-                      "decision":"defer|intend|plan|noop",
+                      "decision":"intend|plan|noop",
                       "urgency":"low|medium|high",
-                      "defer_content":"optional",
-                      "long_term_memory_recall_query":"optional",
                       "intention_kind":"observe|prepare|stage|request_authorization|commit",
                       "commit_mode_preference":"not_applicable|approval_backed|policy_autonomous|admin_override",
                       "action_type":"$actionSchemaEnum",
@@ -151,18 +149,6 @@ class GoalWorkPlanner(
     private fun parseGoalWorkDecision(raw: String, context: PlannerContext): GoalWorkDecision? {
         val p = StructuredOutputHandler.parseWithRepair<GoalWorkPayload>(raw) { runtime.onOutputRepaired() } ?: return null
         return when (p.decision?.trim()?.lowercase()) {
-            "defer" -> {
-                val c = p.deferContent?.trim().orEmpty()
-                if (c.isBlank()) {
-                    GoalWorkDecision.FailStep("Empty defer.")
-                } else {
-                    GoalWorkDecision.DeferUntilCondition(
-                        urgency = Urgency.fromRaw(p.urgency),
-                        content = c,
-                        longTermMemoryRecallQuery = p.longTermMemoryRecallQuery?.trim()?.ifBlank { null },
-                    )
-                }
-            }
             "intend" -> {
                 val ik = DecisionValidation.intentionKindFromRaw(p.intentionKind); val at = ActionType.fromRaw(p.actionType)
                 val rp = StructuredOutputHandler.normalizeActionPayload(p.actionPayload)?.trim().orEmpty()
@@ -226,13 +212,6 @@ class GoalWorkPlanner(
                     )
                 }
             }
-            is GoalWorkDecision.DeferUntilCondition -> EgoDecision.EnqueueThought(
-                urgency = decision.urgency,
-                content = TextSecurity.clamp(decision.content, config.planner.maxThoughtChars),
-                longTermMemoryRecallQuery = decision.longTermMemoryRecallQuery?.let {
-                    TextSecurity.clamp(it, config.planner.maxThoughtChars)
-                },
-            )
             is GoalWorkDecision.RefinePlan -> {
                 val steps = decision.steps
                     .map { it.description.trim() }
@@ -264,8 +243,6 @@ class GoalWorkPlanner(
 
     private data class GoalWorkPayload(
         val decision: String? = null, val urgency: String? = null,
-        @param:JsonProperty("defer_content") val deferContent: String? = null,
-        @param:JsonProperty("long_term_memory_recall_query") val longTermMemoryRecallQuery: String? = null,
         @param:JsonProperty("intention_kind") val intentionKind: String? = null,
         @param:JsonProperty("commit_mode_preference") val commitModePreference: String? = null,
         @param:JsonProperty("action_type") val actionType: String? = null,

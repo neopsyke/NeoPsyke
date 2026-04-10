@@ -149,9 +149,10 @@ Stimulus → SensoryCortex (sanitize, appraise) → Percept
 
 **`runLoop()`** — Inner deliberation loop (bounded by `config.planner.maxLoopStepsPerInput`):
 - Each iteration: `scheduler.nextTask(isBlocked)` → returns `LoopTask`.
-- Three task types:
+- Four task types:
   - `AttendOpportunity` → `processOpportunity()` (routes by trigger: Input/Impulse/Feedback/GoalWork)
-  - `ProcessIntention` → `processIntention()` (DEFER → `processDeferredIntention()`, others → action)
+  - `ProcessContinuation` → `processContinuation()`
+  - `ProcessIntention` → `processIntention()` (action-bearing intentions only)
   - `PerformAction` → `processAction()` → `actionPipeline.reviewAndExecute()`
 - Per step: activate session context, advance deliberation step, dispatch task, catch errors.
 - Pressure monitoring: `deliberation.maybeForceTerminalAnswer()` can enqueue forced `contact_user`.
@@ -165,10 +166,10 @@ Stimulus → SensoryCortex (sanitize, appraise) → Percept
 
 ### L2: Scheduler and Priority Model
 - File: `src/main/kotlin/ai/neopsyke/agent/ego/AttentionScheduler.kt`
-- Three bounded priority queues: opportunities, intentions, actions.
+- Four bounded priority queues: opportunities, continuations, intentions, actions.
 - `nextTask(isBlocked)` returns work in priority order:
   - Opportunities first (highest priority).
-  - Between intentions and actions: higher urgency wins; at equal urgency, non-DEFER intentions outrank deferred continuations.
+  - Between continuations, intentions, and actions: higher urgency wins; at equal urgency, intentions outrank actions and continuations only outrank actions when their urgency is not lower.
 - Opportunity ranking: `RESPOND`/`INTEGRATE_FEEDBACK` > `EXECUTE` > `RESUME`/`CLARIFY`/`FINALIZE`, then by salience.
 - Blocked roots are skipped without being dropped; they become schedulable when approval resolves.
 - Queue saturation → drop + instrumentation warning.
@@ -246,8 +247,8 @@ Stimulus → SensoryCortex (sanitize, appraise) → Percept
 
 **Decision types** (sealed `EgoDecision`):
 - `FormIntention(urgency, intentionKind, commitModePreference, actionType, payload, summary)` — Execute an action.
-- `EnqueueThought(urgency, content, longTermMemoryRecallQuery?)` — Defer for later processing.
-- `EnqueuePlan(urgency, goal, steps)` — Multi-step plan decomposed into deferred steps.
+- `EnqueueContinuation(urgency, continuation)` — Queue typed resumable work for later processing.
+- `EnqueuePlan(urgency, goal, steps)` — Multi-step plan decomposed into typed continuations.
 - `Noop(reason, parseFailureShortCircuit?, deniedActionType?, deniedActionPayload?, denialReasonCode?)` — No action.
 
 ### L0: HierarchicalEgoPlanner (Entry Point)
@@ -261,7 +262,7 @@ Stimulus → SensoryCortex (sanitize, appraise) → Percept
 | Lane | Trigger | File |
 |------|---------|------|
 | `InputPlanner` | `IncomingInput` | `lane/InputPlanner.kt` |
-| `DeferredStepPlanner` | `DeferredIntention` | `lane/DeferredStepPlanner.kt` |
+| `ContinuationPlanner` | `Continuation` | `lane/ContinuationPlanner.kt` |
 | `FeedbackPlanner` | `ActionFeedback` | `lane/FeedbackPlanner.kt` |
 | `GoalWorkPlanner` | `GoalWork` | `lane/GoalWorkPlanner.kt` |
 | `ImpulsePlanner` | `IncomingImpulse` | `lane/ImpulsePlanner.kt` |
@@ -270,7 +271,7 @@ Each lane:
 - Has its own narrower system prompt focused on its decision family.
 - Uses `PlannerRuntime` for model calls (retry, circuit-breaker, schema fallback).
 - Parses model output into typed lane decision models before mapping to `EgoDecision`:
-  - `StepDecision` (`DeferredStepPlanner`)
+  - `ContinuationDecision` (`ContinuationPlanner`)
   - `FeedbackDecision` (`FeedbackPlanner`)
   - `GoalWorkDecision` (`GoalWorkPlanner`)
   - `ImpulseDecision` (`ImpulsePlanner`)
@@ -318,24 +319,23 @@ Dispatch from `InputRoute` variant to sub-planner is deterministic on typed LLM 
 
 ---
 
-## L1: Intention and Deferred Continuation Path
+## L1: Continuation and Intention Path
+
+**`processContinuation(continuation: QueuedContinuation)`**:
+- Drops if `passes >= maxContinuationPasses`; if fallback allowed, enqueues fallback `contact_user` action.
+- User/system/goal-origin continuation chains default to `allowFallbackExplanation=true`.
+- For Id-origin: rebuilds convergence state and action filters; fallback disabled unless earlier path explicitly enables it.
+- Otherwise mirrors the input path: build context → meta assessment → planner decision → dispatch.
 
 **`processIntention(intention: QueuedIntention)`**:
-- `IntentionKind.DEFER` → `processDeferredIntention()`.
 - Action-carrying intentions (OBSERVE, PREPARE, STAGE, REQUEST_AUTHORIZATION, COMMIT) → convert to `PendingAction` with intention metadata (intentionId, intentionKind, requestedCommitMode) → `processAction()`.
 - Runtime rejects intentions whose kind, action type, or commit mode fall outside the current opportunity contract.
 
-**`processDeferredIntention()`**:
-- Drops if `passes >= maxThoughtPasses`; if fallback allowed, enqueues fallback `contact_user` action.
-- User/system/goal-origin defer chains default to `allowFallbackExplanation=true`.
-- For Id-origin: rebuilds convergence state and action filters; fallback disabled unless earlier path explicitly enables it.
-- Otherwise mirrors input path: build context → meta assessment → planner decision → dispatch.
-
-**Planner output is intention-native**:
+**Planner output is split across continuations and intentions**:
 - `decision=intend` carries explicit `intention_kind` + optional `commit_mode_preference`.
-- `decision=defer` yields queued `DEFER` intention.
-- Plan steps and recovery/follow-up become deferred intentions, not first-class thought queue items.
-- Deferred continuations live inside the intention queue as `IntentionKind.DEFER`.
+- `decision=plan` yields queued `PlanStepContinuation` items.
+- Recovery/follow-up work becomes typed continuations (`RetryAlternative`, `ConvergeNow`, `WaitResume`) rather than generic defer loops.
+- Continuations are first-class scheduler items, separate from action-bearing intentions.
 
 ---
 
@@ -449,8 +449,8 @@ Dispatch from `InputRoute` variant to sub-planner is deterministic on typed LLM 
 - `MetaReasoner` assessment cadence (triggered when min steps reached + interval or pressure due).
 - Guidance text for Planner.
 - Pressure override (`maybeApplyPressureOverride`):
-  - `FINALIZE_NOW` + non-`FormIntention` → directly enqueues a forced terminal `contact_user` action with a synthesized best-effort payload from accumulated evidence. No further planner calls. The original decision passes through but any resulting deferred thoughts are dropped via `hasForcedTerminalForInput`.
-  - `REQUEST_TOOL_THEN_FINALIZE` + non-`FormIntention` → soft hint: replaces decision with a HIGH-urgency `EnqueueThought` giving the planner one more chance to produce a tool action.
+- `FINALIZE_NOW` + non-`FormIntention` → directly enqueues a forced terminal `contact_user` action with a synthesized best-effort payload from accumulated evidence. No further planner calls. The original decision passes through but any resulting continuations are dropped via `hasForcedTerminalForInput`.
+- `REQUEST_TOOL_THEN_FINALIZE` + non-`FormIntention` → soft hint: replaces decision with a HIGH-urgency `EnqueueContinuation(ConvergeNow)` giving the planner one more chance to produce a decisive tool action or answer.
   - Either verdict + `FormIntention` → passes through unchanged (planner already converged).
 - Forced terminal safety net (`maybeForceTerminalAnswer`): circular pressure (high `DecisionPressure` + high `StaleStreak`) OR `ModelErrorStreak` (>= 3 errors + pressure >= 0.72 + steps >= 6) OR `NoopStreak` >= 6. This is a backstop for cases where the meta-reasoner is disabled or the `FINALIZE_NOW` enqueue failed.
 

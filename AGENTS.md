@@ -18,6 +18,11 @@ Instructions for coding agents working in this repository (Codex, Claude, Gemini
 
 ## Gradle Concurrency (Critical)
 - **NEVER run overlapping Gradle-backed commands in the same checkout/worktree.** This includes `./gradlew`, `./freud/bin/freud run`, and any agent subprocesses that may invoke Gradle.
+- If one Gradle-backed command is already running, do not start another one until the first has clearly finished or has been stopped.
+- Non-Gradle inspection while a Gradle-backed command is running is allowed: for example `ps`, `rg`, `sed`, `cat`, and log/artifact inspection.
+- Simple rule:
+  - Allowed: one Gradle-backed command + read-only inspection commands.
+  - Forbidden: two Gradle-backed commands in parallel in the same checkout.
 - If you spawn parallel agents (subprocesses), at most ONE of them may run `./gradlew` or any Gradle-triggering command. All others must be limited to file reads, searches, and edits.
 - Violating this rule causes Gradle daemon lock contention, stuck builds, and hung processes that block the entire session.
 - See the detailed "Concurrency Policy" section under "Freud Workflow" for the full rules.
@@ -82,6 +87,10 @@ Bad:
 - Preserve existing behavior unless the user asked for behavior changes.
 - Commit only when explicitly asked.
 - Do not push to remote unless explicitly asked.
+- Never run overlapping Gradle-backed commands in the same checkout/worktree.
+- While a Gradle-backed command is running, only non-Gradle inspection work is allowed in that same checkout, such as `ps`, `rg`, `sed`, `cat`, or log/artifact reads.
+- Forbidden example: starting `./gradlew test` while `./gradlew compileKotlin` or `./freud/bin/freud run ...` is still running in the same checkout.
+- Allowed example: checking process state with `ps` or reading logs with `rg`/`sed` while a single Gradle command is already running.
 - When resuming from a compacted session, read the transcript at the provided path before proceeding.
 - When fixing tests, always prioritize understanding the feature and making sure the root
   cause is addressed instead of making the test just pass.

@@ -52,9 +52,9 @@ object SharedPromptSections {
                     }
                 }
             }
-            is EgoTrigger.DeferredIntention -> {
-                val thought = trigger.intention.toPendingThought()
-                val planInfo = thought.planContext?.let { ctx ->
+            is EgoTrigger.Continuation -> {
+                val continuation = trigger.continuation
+                val planInfo = continuation.planContext?.let { ctx ->
                     """
                     Active plan context:
                     plan_goal=${ctx.planGoal}
@@ -63,10 +63,11 @@ object SharedPromptSections {
                     Re-evaluate this step in light of current context. You may refine, skip, or act.
                     """.trimIndent()
                 } ?: ""
-                val denialContext = if (thought.deniedActionType != null && !thought.deniedActionPayload.isNullOrBlank()) {
+                val deniedActionType = continuation.deniedActionType
+                val denialContext = if (deniedActionType != null && !continuation.deniedActionPayload.isNullOrBlank()) {
                     val technicalDenial = DenialReasonClassifier.isLikelyTechnical(
-                        reasonCode = thought.denialReasonCode,
-                        reason = thought.denialReason
+                        reasonCode = continuation.denialReasonCode,
+                        reason = continuation.denialReason
                     )
                     val retryGuidance = if (technicalDenial) {
                         "Denied reason appears technical/transient; retrying the same payload once is allowed if still best."
@@ -75,16 +76,16 @@ object SharedPromptSections {
                     }
                     """
                     Denied action context:
-                    denied_action_type=${thought.deniedActionType.name.lowercase()}
-                    denied_action_payload=${thought.deniedActionPayload}
-                    denied_reason=${thought.denialReason ?: "none"}
-                    denied_reason_code=${thought.denialReasonCode ?: "none"}
+                    denied_action_type=${deniedActionType.name.lowercase()}
+                    denied_action_payload=${continuation.deniedActionPayload}
+                    denied_reason=${continuation.denialReason ?: "none"}
+                    denied_reason_code=${continuation.denialReasonCode ?: "none"}
                     $retryGuidance
                     """.trimIndent()
                 } else {
                     "Denied action context: none"
                 }
-                val parts = listOf("DEFERRED_INTENTION(pass=${thought.passes}): ${thought.content}", planInfo, denialContext)
+                val parts = listOf("CONTINUATION(pass=${continuation.passes}): ${continuation.content}", planInfo, denialContext)
                     .filter { it.isNotBlank() }
                 parts.joinToString("\n")
             }
@@ -173,7 +174,7 @@ object SharedPromptSections {
         content = """
             Queue snapshot:
             pending_inputs=${context.queue.pendingInputCount}
-            pending_thoughts=${context.queue.deferredIntentionCount}
+            pending_continuations=${context.queue.continuationCount}
             pending_actions=${context.queue.pendingActionCount}
             pending_intentions=${context.queue.pendingIntentionCount}
         """.trimIndent()

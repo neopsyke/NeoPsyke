@@ -27,7 +27,7 @@ All files under:
 Converts LLM-produced canonical values to typed enums via `lowercase()`/`uppercase()`.
 Examples: `"defer"` -> decision branch, `"observe"` -> `IntentionKind.OBSERVE`.
 
-Files: `DecisionValidation.kt`, `DeferredStepPlanner.kt`, `FeedbackPlanner.kt`,
+Files: `DecisionValidation.kt`, `ContinuationPlanner.kt`, `FeedbackPlanner.kt`,
 `GoalWorkPlanner.kt`, `ImpulsePlanner.kt`, `GoalCreationPlanner.kt`, `GoalManagementPlanner.kt`
 
 **Verdict:** Allowed. Matching enum values, not interpreting NL.

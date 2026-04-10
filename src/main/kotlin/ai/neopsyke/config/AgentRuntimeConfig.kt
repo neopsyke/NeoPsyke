@@ -73,7 +73,7 @@ private data class AgentRuntimeYamlAgent(
 
 private data class AgentRuntimeYamlPlanner(
     val maxLoopStepsPerInput: Int? = null,
-    val maxThoughtPasses: Int? = null,
+    val maxContinuationPasses: Int? = null,
     val maxThoughtChars: Int? = null,
     val maxInputChars: Int? = null,
     val maxActionPayloadChars: Int? = null,
@@ -311,7 +311,7 @@ private data class AgentRuntimeYamlGoals(
 
 private data class AgentRuntimeYamlRuntime(
     val loopDelayMs: Int? = null,
-    val maxPendingThoughts: Int? = null,
+    val maxPendingContinuations: Int? = null,
     val maxPendingActions: Int? = null,
     val maxPendingInputs: Int? = null,
     val searchResultCount: Int? = null,
@@ -375,10 +375,10 @@ object AgentRuntimeSettingsLoader {
                     plannerYaml.maxLoopStepsPerInput,
                     defaults.planner.maxLoopStepsPerInput
                 ),
-                maxThoughtPasses = readPositiveInt(
-                    env["EGO_MAX_THOUGHT_PASSES"],
-                    plannerYaml.maxThoughtPasses,
-                    defaults.planner.maxThoughtPasses
+                maxContinuationPasses = readPositiveInt(
+                    env["EGO_MAX_CONTINUATION_PASSES"],
+                    plannerYaml.maxContinuationPasses,
+                    defaults.planner.maxContinuationPasses
                 ),
                 maxThoughtChars = readPositiveInt(
                     env["EGO_MAX_THOUGHT_CHARS"],
@@ -1242,10 +1242,10 @@ object AgentRuntimeSettingsLoader {
                 runtimeYaml.loopDelayMs,
                 defaults.loopDelayMs
             ),
-            maxPendingThoughts = readPositiveInt(
-                env["EGO_MAX_PENDING_THOUGHTS"],
-                runtimeYaml.maxPendingThoughts,
-                defaults.maxPendingThoughts
+            maxPendingContinuations = readPositiveInt(
+                env["EGO_MAX_PENDING_CONTINUATIONS"],
+                runtimeYaml.maxPendingContinuations,
+                defaults.maxPendingContinuations
             ),
             maxPendingActions = readPositiveInt(
                 env["EGO_MAX_PENDING_ACTIONS"],

@@ -4,7 +4,7 @@ import ai.neopsyke.agent.ego.planner.LaneConfig
 
 data class PlannerConfig(
     val maxLoopStepsPerInput: Int = 180,
-    val maxThoughtPasses: Int = 5,
+    val maxContinuationPasses: Int = 5,
     val maxThoughtChars: Int = 600,
     val maxInputChars: Int = 2_000,
     val maxCompletionTokens: Int = 1200,

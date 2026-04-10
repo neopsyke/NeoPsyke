@@ -15,12 +15,6 @@ sealed interface GoalWorkDecision {
         val steps: List<PlanDecomposition.PlanStep>,
     ) : GoalWorkDecision
 
-    data class DeferUntilCondition(
-        val urgency: Urgency = Urgency.MEDIUM,
-        val content: String,
-        val longTermMemoryRecallQuery: String? = null,
-    ) : GoalWorkDecision
-
     data class MarkStepComplete(val reason: String) : GoalWorkDecision
 
     data class RequestClarification(val question: String) : GoalWorkDecision

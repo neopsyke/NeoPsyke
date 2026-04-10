@@ -7,7 +7,7 @@ Current planner architecture as of 2026-04-10.
 External events enter through `SensoryCortex`, get classified by
 `StimulusIngressCoordinator`, queued in `AttentionScheduler`, and dispatched
 by `Ego` to the planner. The planner returns an `EgoDecision` which the
-`DecisionDispatcher` converts into scheduled work (thoughts, intentions, or
+`DecisionDispatcher` converts into scheduled work (continuations, intentions, or
 actions).
 
 ```mermaid
@@ -17,7 +17,7 @@ flowchart TB
         timer["TimerScheduler<br/>(cron wake)"]
         id_mod["Id module<br/>(drive impulse)"]
         action_fb["Action execution<br/>(feedback cue)"]
-        deferred["Deferred thought<br/>(from prior iteration)"]
+        deferred["Queued continuation<br/>(from prior iteration)"]
     end
 
     subgraph ingress ["StimulusIngressCoordinator"]
@@ -30,9 +30,10 @@ flowchart TB
 
     subgraph scheduler ["AttentionScheduler"]
         opp_q["Opportunity queue<br/>(priority-ranked)"]
-        int_q["Intention queue<br/>(deferred thoughts)"]
+        cont_q["Continuation queue"]
+        int_q["Intention queue"]
         act_q["Action queue"]
-        opp_q & int_q & act_q --> next["nextTask()"]
+        opp_q & cont_q & int_q & act_q --> next["nextTask()"]
     end
 
     user --> classify
@@ -44,14 +45,16 @@ flowchart TB
     enq_impulse --> opp_q
     enq_feedback --> opp_q
     enq_input --> opp_q
-    deferred --> int_q
+    deferred --> cont_q
 
     next -->|"LoopTask.AttendOpportunity"| ego_opp
+    next -->|"LoopTask.ProcessContinuation"| ego_cont
     next -->|"LoopTask.ProcessIntention"| ego_int
     next -->|"LoopTask.PerformAction"| ego_act
 
     subgraph ego ["Ego runLoop()"]
         ego_opp["processOpportunity()"]
+        ego_cont["processContinuation()"]
         ego_int["processIntention()"]
         ego_act["processAction()"]
 
@@ -60,8 +63,8 @@ flowchart TB
         ego_opp -->|"OpportunityTrigger.Feedback"| proc_feedback["processActionFeedback()"]
         ego_opp -->|"OpportunityTrigger.GoalWork"| proc_goal["processGoalWork()"]
 
-        ego_int -->|"kind = DEFER"| proc_deferred["processDeferredIntention()"]
-        ego_int -->|"kind != DEFER"| ego_act
+        ego_cont --> proc_deferred["processContinuation()"]
+        ego_int --> ego_act
     end
 ```
 
@@ -77,7 +80,7 @@ flowchart TB
     decide["HierarchicalEgoPlanner.decide()"]
 
     decide -->|"EgoTrigger.IncomingInput"| L1_input["InputPlanner<br/><b>L1</b>"]
-    decide -->|"EgoTrigger.DeferredIntention"| L1_deferred["DeferredStepPlanner<br/><b>L1</b>"]
+    decide -->|"EgoTrigger.Continuation"| L1_deferred["ContinuationPlanner<br/><b>L1</b>"]
     decide -->|"EgoTrigger.ActionFeedback"| L1_feedback["FeedbackPlanner<br/><b>L1</b>"]
     decide -->|"EgoTrigger.GoalWork"| L1_goal["GoalWorkPlanner<br/><b>L1</b>"]
     decide -->|"EgoTrigger.IncomingImpulse"| L1_impulse["ImpulsePlanner<br/><b>L1</b>"]
@@ -88,7 +91,7 @@ flowchart TB
 | Trigger | Origin | L1 Lane | LaneId |
 |---------|--------|---------|--------|
 | `IncomingInput` | User (dashboard, telegram) | InputPlanner | `INPUT_INTENT_ROUTER` |
-| `DeferredIntention` | Internal queue (prior iteration) | DeferredStepPlanner | `DEFERRED_STEP` |
+| `Continuation` | Internal queue (prior iteration) | ContinuationPlanner | `CONTINUATION` |
 | `ActionFeedback` | Motor cortex (execution result) | FeedbackPlanner | `FEEDBACK` |
 | `GoalWork` | Goal cue (cron, step advance) | GoalWorkPlanner | `GOAL_WORK` |
 | `IncomingImpulse` | Id module (drive activation) | ImpulsePlanner | `IMPULSE` |
@@ -150,7 +153,7 @@ the typed result.
 
 | Route | L2 Sub-Planner | Grounding | Typical Decision |
 |-------|---------------|-----------|------------------|
-| `DirectResponse` | DirectResponsePlanner | LLM-classified | `EnqueueThought` or `FormIntention(CONTACT_USER)` |
+| `DirectResponse` | DirectResponsePlanner | LLM-classified | `EnqueueContinuation` or `FormIntention(CONTACT_USER)` |
 | `GeneralAction` | GeneralActionPlanner | LLM-classified | `FormIntention` (any action type) |
 | `MultiStepTask` | TaskDecompositionPlanner | LLM-classified | `EnqueuePlan` |
 | `GoalCreation` | GoalCreationPlanner | NOT_REQUIRED | `FormIntention(CONTACT_USER)` with goal params |
@@ -175,9 +178,9 @@ planner context, consumed downstream by the grounding gate in
 Each L1 lane parses an LLM response into one of the `EgoDecision` variants.
 Not all lanes support all decision types.
 
-| EgoDecision | InputPlanner | DeferredStep | Feedback | GoalWork | Impulse |
+| EgoDecision | InputPlanner | Continuation | Feedback | GoalWork | Impulse |
 |-------------|:---:|:---:|:---:|:---:|:---:|
-| `EnqueueThought` (defer) | via L2 | yes | yes | yes | yes |
+| `EnqueueContinuation` | via L2 | yes | yes | yes | yes |
 | `FormIntention` (intend) | via L2 | yes | yes | yes | yes |
 | `EnqueuePlan` (plan) | via L2 | yes | yes | yes | **no** |
 | `Noop` (noop) | via L2 | yes | yes | yes | yes |
@@ -198,7 +201,7 @@ flowchart TB
     assessment --> override["maybeApplyPressureOverride()"]
 
     override -->|"FINALIZE_NOW +<br/>non-FormIntention"| forced["Enqueue forced<br/>terminal CONTACT_USER<br/>(isForcedTerminal=true)"]
-    override -->|"REQUEST_TOOL_THEN_FINALIZE +<br/>non-FormIntention"| soft["Replace with<br/>EnqueueThought(HIGH)<br/>(soft hint)"]
+    override -->|"REQUEST_TOOL_THEN_FINALIZE +<br/>non-FormIntention"| soft["Replace with<br/>EnqueueContinuation(HIGH)<br/>(soft hint)"]
     override -->|"FormIntention or<br/>no override needed"| passthrough["Pass through unchanged"]
 
     forced --> dispatch
@@ -207,10 +210,10 @@ flowchart TB
 
     dispatch["DecisionDispatcher.dispatch()"]
 
-    dispatch -->|EnqueueThought| enq_thought["enqueueDeferredIntention()<br/>-> scheduler thought queue"]
+    dispatch -->|EnqueueContinuation| enq_thought["enqueueContinuation()<br/>-> scheduler continuation queue"]
     dispatch -->|FormIntention| form["Validate contract<br/>-> enqueue QueuedIntention"]
-    dispatch -->|EnqueuePlan| plan_steps["Decompose into<br/>deferred step thoughts"]
-    dispatch -->|Noop| noop_enq["Re-enqueue as<br/>deferred thought<br/>(unless parseFailure)"]
+    dispatch -->|EnqueuePlan| plan_steps["Decompose into<br/>plan-step continuations"]
+    dispatch -->|Noop| noop_enq["Re-enqueue as<br/>typed continuation<br/>(unless parseFailure)"]
 
     form --> next_loop["Next runLoop() iteration"]
     enq_thought --> next_loop
@@ -268,7 +271,7 @@ sequenceDiagram
     DE-->>Ego: (possibly overridden) EgoDecision
 
     Ego->>DD: dispatch(decision)
-    DD->>AS: enqueueIntention / enqueueThought / enqueueAction
+    DD->>AS: enqueueIntention / enqueueContinuation / enqueueAction
 
     Note over Ego,AS: runLoop continues draining scheduler
 
@@ -282,9 +285,9 @@ sequenceDiagram
         ARP->>MC: execute(action)
         MC-->>ARP: ActionOutcome
         ARP-->>Ego: cleanup if CONTACT_USER
-    else Deferred Intention
-        Ego->>HP: decide(DeferredIntention, context)
-        HP->>L1: DeferredStepPlanner.plan() [LLM]
+    else Continuation
+        Ego->>HP: decide(Continuation, context)
+        HP->>L1: ContinuationPlanner.plan() [LLM]
         L1-->>HP: EgoDecision
         HP-->>Ego: EgoDecision
         Ego->>DD: dispatch(decision)
@@ -309,7 +312,7 @@ explanation.
 | `TASK_DECOMPOSITION` | no |
 | `GOAL_CREATION` | no |
 | `GOAL_MANAGEMENT` | no |
-| `DEFERRED_STEP` | yes |
+| `CONTINUATION` | yes |
 | `FEEDBACK` | yes |
 | `GOAL_WORK` | yes |
 | `IMPULSE` | yes |
@@ -324,7 +327,7 @@ explanation.
 | `PlannerLane` interface | `agent/ego/planner/PlannerLane.kt` |
 | `LaneId` enum | `agent/ego/planner/LaneId.kt` |
 | `InputPlanner` | `agent/ego/planner/lane/InputPlanner.kt` |
-| `DeferredStepPlanner` | `agent/ego/planner/lane/DeferredStepPlanner.kt` |
+| `ContinuationPlanner` | `agent/ego/planner/lane/ContinuationPlanner.kt` |
 | `FeedbackPlanner` | `agent/ego/planner/lane/FeedbackPlanner.kt` |
 | `GoalWorkPlanner` | `agent/ego/planner/lane/GoalWorkPlanner.kt` |
 | `ImpulsePlanner` | `agent/ego/planner/lane/ImpulsePlanner.kt` |

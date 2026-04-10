@@ -54,7 +54,7 @@ class InnerVoiceSinkTest {
     }
 
     @Test
-    fun `thought planner decision produces DELIBERATION event`() {
+    fun `continuation planner decision produces DELIBERATION event`() {
         val (dashboardStore, innerVoiceStore, sink) = buildStack()
         seedSession(dashboardStore)
         val sub = innerVoiceStore.subscribe("default")!!
@@ -63,8 +63,8 @@ class InnerVoiceSinkTest {
         sink.onEvent(
             AgentEvents.plannerDecision(
                 trigger = "input",
-                decisionType = "defer",
-                thought = "I need to search for recent information about this topic.",
+                decisionType = "continuation",
+                content = "I need to search for recent information about this topic.",
                 rootInputId = "root-1",
             )
         )
@@ -189,8 +189,8 @@ class InnerVoiceSinkTest {
         sink.onEvent(
             AgentEvents.plannerDecision(
                 trigger = "input",
-                decisionType = "defer",
-                thought = "Let me think...",
+                decisionType = "continuation",
+                content = "Let me think...",
                 rootInputId = "root-1",
             )
         )
@@ -325,8 +325,8 @@ class InnerVoiceSinkTest {
         sink.onEvent(
             AgentEvents.plannerDecision(
                 trigger = "input",
-                decisionType = "defer",
-                thought = "Let me search...",
+                decisionType = "continuation",
+                content = "Let me search...",
                 rootInputId = "root-1",
             )
         )
@@ -369,8 +369,8 @@ class InnerVoiceSinkTest {
         sink.onEvent(
             AgentEvents.plannerDecision(
                 trigger = "input",
-                decisionType = "defer",
-                thought = "This is a very long thought that exceeds the maximum content character limit.",
+                decisionType = "continuation",
+                content = "This is a very long thought that exceeds the maximum content character limit.",
                 rootInputId = "root-1",
             )
         )
@@ -401,8 +401,8 @@ class InnerVoiceSinkTest {
         sink.onEvent(
             AgentEvents.plannerDecision(
                 trigger = "input",
-                decisionType = "defer",
-                thought = "Should not appear",
+                decisionType = "continuation",
+                content = "Should not appear",
                 rootInputId = "root-1",
             )
         )
@@ -450,8 +450,8 @@ class InnerVoiceSinkTest {
         sink.onEvent(
             AgentEvents.plannerDecision(
                 trigger = "input",
-                decisionType = "defer",
-                thought = "Let me think about this.",
+                decisionType = "continuation",
+                content = "Let me think about this.",
                 rootInputId = "root-1",
             )
         )
@@ -576,8 +576,8 @@ class InnerVoiceSinkTest {
         sink.onEvent(
             AgentEvents.plannerDecision(
                 trigger = "impulse",
-                decisionType = "defer",
-                thought = "Id-driven thought about a need.",
+                decisionType = "continuation",
+                content = "Id-driven thought about a need.",
                 rootInputId = "impulse-1",
             )
         )
@@ -611,8 +611,8 @@ class InnerVoiceSinkTest {
         sink.onEvent(
             AgentEvents.plannerDecision(
                 trigger = "impulse",
-                decisionType = "defer",
-                thought = "Id thought that should not be in conversation.",
+                decisionType = "continuation",
+                content = "Id thought that should not be in conversation.",
                 rootInputId = "impulse-2",
             )
         )
@@ -636,8 +636,8 @@ class InnerVoiceSinkTest {
         sink.onEvent(
             AgentEvents.plannerDecision(
                 trigger = "input",
-                decisionType = "defer",
-                thought = "User-driven thought.",
+                decisionType = "continuation",
+                content = "User-driven thought.",
                 rootInputId = "root-1",
             )
         )
@@ -701,8 +701,8 @@ class InnerVoiceSinkTest {
         sink.onEvent(
             AgentEvents.plannerDecision(
                 trigger = "input",
-                decisionType = "defer",
-                thought = "thinking...",
+                decisionType = "continuation",
+                content = "thinking...",
                 rootInputId = "root-1",
             )
         )

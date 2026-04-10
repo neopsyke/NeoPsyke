@@ -171,13 +171,13 @@ class PlannerRuntime(
         rootInputId: String?,
     ) {
         when (decision) {
-            is ai.neopsyke.agent.model.EgoDecision.EnqueueThought -> {
+            is ai.neopsyke.agent.model.EgoDecision.EnqueueContinuation -> {
                 instrumentation.emit(
                     AgentEvents.plannerDecision(
                         trigger = triggerLabel,
-                        decisionType = "defer",
+                        decisionType = "continuation",
                         urgency = decision.urgency.name.lowercase(),
-                        thought = decision.content,
+                        content = decision.continuation.content,
                         sessionId = sessionId,
                         rootInputId = rootInputId,
                     )
@@ -205,7 +205,7 @@ class PlannerRuntime(
                         trigger = triggerLabel,
                         decisionType = "plan",
                         urgency = decision.urgency.name.lowercase(),
-                        thought = decision.goal,
+                        content = decision.goal,
                         reason = "steps=${decision.steps.size}",
                         sessionId = sessionId,
                         rootInputId = rootInputId,

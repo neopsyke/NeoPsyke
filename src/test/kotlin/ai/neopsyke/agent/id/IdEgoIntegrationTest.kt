@@ -4,6 +4,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import ai.neopsyke.agent.model.ActionOrigin
 import ai.neopsyke.agent.model.ActionType
+import ai.neopsyke.agent.model.Continuation
 import ai.neopsyke.agent.model.LoopTask
 import ai.neopsyke.agent.model.OriginSource
 import ai.neopsyke.agent.model.Opportunity
@@ -29,7 +30,7 @@ import kotlin.test.assertTrue
  *
  * Verifies that the Id fires impulses into the scheduler, the scheduler
  * dispatches them as attended impulse opportunities at the correct priority
- * (after inputs but before actions/thoughts), and callbacks from the Ego
+ * (after inputs but before actions/continuations), and callbacks from the Ego
  * correctly close the impulse lifecycle.
  */
 class IdEgoIntegrationTest {
@@ -170,14 +171,17 @@ class IdEgoIntegrationTest {
     }
 
     @Test
-    fun `impulses take priority over actions and thoughts`() {
+    fun `impulses take priority over actions and continuations`() {
         val (scheduler, _) = buildSchedulerAndId()
 
-        // Enqueue a thought and action first
-        scheduler.enqueueThought(
-            content = "thinking...",
+        // Enqueue a continuation and action first
+        scheduler.enqueueContinuation(
+            continuation = Continuation.ConvergeNow(
+                content = "thinking...",
+                convergenceReason = "test",
+            ),
             urgency = ai.neopsyke.agent.model.Urgency.MEDIUM,
-        groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
+            groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
         )
         scheduler.enqueueAction(
             type = ActionType.CONTACT_USER,
@@ -201,9 +205,9 @@ class IdEgoIntegrationTest {
         )
         scheduler.enqueueImpulse(impulse, impulseOpportunity(impulse), maxPendingImpulses = 1)
 
-        // Impulse should come before thought and action
+        // Impulse should come before continuation and action
         val task1 = scheduler.nextTask()
-        assertIs<LoopTask.AttendOpportunity>(task1, "Impulse should beat thoughts and actions")
+        assertIs<LoopTask.AttendOpportunity>(task1, "Impulse should beat continuations and actions")
         assertIs<OpportunityTrigger.Impulse>(task1.item.trigger)
     }
 
@@ -212,10 +216,13 @@ class IdEgoIntegrationTest {
         val (scheduler, id) = buildSchedulerAndId()
 
         // Put work in the scheduler to make it "busy"
-        scheduler.enqueueThought(
-            content = "pending thought",
+        scheduler.enqueueContinuation(
+            continuation = Continuation.ConvergeNow(
+                content = "pending continuation",
+                convergenceReason = "test",
+            ),
             urgency = ai.neopsyke.agent.model.Urgency.LOW,
-        groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
+            groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
         )
 
         id.pulse()

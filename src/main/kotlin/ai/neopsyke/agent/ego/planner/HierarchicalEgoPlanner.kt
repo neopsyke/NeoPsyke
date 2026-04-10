@@ -29,7 +29,7 @@ class HierarchicalEgoPlanner(
     private val runtime: PlannerRuntime,
     private val instrumentation: AgentInstrumentation,
     private val inputPlanner: PlannerLane,
-    private val deferredStepPlanner: PlannerLane,
+    private val continuationPlanner: PlannerLane,
     private val feedbackPlanner: PlannerLane,
     private val goalWorkPlanner: PlannerLane,
     private val impulsePlanner: PlannerLane,
@@ -46,7 +46,7 @@ class HierarchicalEgoPlanner(
                 data = mapOf(
                     "trigger" to triggerLabel,
                     "pending_inputs" to context.queue.pendingInputCount,
-                    "pending_thoughts" to context.queue.deferredIntentionCount,
+                    "pending_continuations" to context.queue.continuationCount,
                     "pending_actions" to context.queue.pendingActionCount,
                     "pending_intentions" to context.queue.pendingIntentionCount,
                 )
@@ -55,7 +55,7 @@ class HierarchicalEgoPlanner(
 
         val lane = when (trigger) {
             is EgoTrigger.IncomingInput -> inputPlanner
-            is EgoTrigger.DeferredIntention -> deferredStepPlanner
+            is EgoTrigger.Continuation -> continuationPlanner
             is EgoTrigger.ActionFeedback -> feedbackPlanner
             is EgoTrigger.GoalWork -> goalWorkPlanner
             is EgoTrigger.IncomingImpulse -> impulsePlanner
@@ -94,7 +94,7 @@ class HierarchicalEgoPlanner(
     companion object {
         fun triggerLabel(trigger: EgoTrigger): String = when (trigger) {
             is EgoTrigger.IncomingInput -> "input"
-            is EgoTrigger.DeferredIntention -> "deferred-intention"
+            is EgoTrigger.Continuation -> "continuation"
             is EgoTrigger.ActionFeedback -> "feedback"
             is EgoTrigger.IncomingImpulse -> "impulse"
             is EgoTrigger.GoalWork -> "goal-work"
@@ -102,7 +102,7 @@ class HierarchicalEgoPlanner(
 
         fun rootInputId(trigger: EgoTrigger): String? = when (trigger) {
             is EgoTrigger.IncomingInput -> trigger.input.rootInputId
-            is EgoTrigger.DeferredIntention -> trigger.intention.rootInputId
+            is EgoTrigger.Continuation -> trigger.continuation.rootInputId
             is EgoTrigger.ActionFeedback -> trigger.feedback.cue.rootInputId
             is EgoTrigger.IncomingImpulse -> trigger.impulse.rootImpulseId
             is EgoTrigger.GoalWork -> trigger.workUnit.goalId
@@ -138,14 +138,14 @@ class HierarchicalEgoPlanner(
                         actionType = cue.actionType.id,
                     )
                 }
-                is EgoTrigger.DeferredIntention -> {
-                    val thought = trigger.intention.toPendingThought()
-                    val plan = thought.planContext
+                is EgoTrigger.Continuation -> {
+                    val continuation = trigger.continuation
+                    val plan = continuation.planContext
                     base.copy(
-                        originSource = thought.origin.source.name.lowercase(Locale.ROOT),
-                        needId = thought.origin.needId,
-                        rootImpulseId = thought.origin.rootImpulseId,
-                        thoughtId = thought.id,
+                        originSource = continuation.origin.source.name.lowercase(Locale.ROOT),
+                        needId = continuation.origin.needId,
+                        rootImpulseId = continuation.origin.rootImpulseId,
+                        thoughtId = continuation.queueId,
                         planId = plan?.planId,
                         planStepIndex = plan?.stepIndex,
                         planTotalSteps = plan?.totalSteps,

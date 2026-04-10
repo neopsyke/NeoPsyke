@@ -125,7 +125,7 @@ internal class DeliberationEngine(
      *
      * For [MetaReasonerVerdict.FINALIZE_NOW]: the planner already failed to converge, so
      * a forced terminal answer is enqueued directly via [scheduler]. The original [decision]
-     * is returned unchanged (any noop/deferred thought it enqueues will be dropped by
+     * is returned unchanged (any noop/continuation it enqueues will be dropped by
      * [hasForcedTerminalForInput] on the next iteration).
      *
      * For [MetaReasonerVerdict.REQUEST_TOOL_THEN_FINALIZE]: a soft hint is returned,
@@ -156,7 +156,7 @@ internal class DeliberationEngine(
                 groundingMetadata = groundingMetadata,
             )
             if (enqueued) {
-                // Return original decision unchanged. It may re-enqueue a noop/thought,
+                // Return original decision unchanged. It may re-enqueue a noop/continuation,
                 // but hasForcedTerminalForInput will drop it on the next iteration.
                 return decision
             }
@@ -165,13 +165,17 @@ internal class DeliberationEngine(
         }
 
         // REQUEST_TOOL_THEN_FINALIZE (or FINALIZE_NOW fallback): soft hint.
-        val pressuredThought = TextSecurity.clamp(
-            "Decision pressure is high. Stop looping and provide a concise best-effort final answer now. " +
-                "If one decisive tool action is strictly necessary, do only one then answer.",
-            config.planner.maxThoughtChars
+        val pressuredContinuation = ai.neopsyke.agent.model.Continuation.ConvergeNow(
+            content = TextSecurity.clamp(
+                "Decision pressure is high. Stop looping and provide a concise best-effort final answer now. " +
+                    "If one decisive tool action is strictly necessary, do only one then answer.",
+                config.planner.maxThoughtChars
+            ),
+            convergenceReason = assessment.reason,
+            allowFallbackExplanation = true,
         )
         instrumentation.emit(AgentEvents.warning("MetaReasoner requested faster convergence; overriding non-action decision."))
-        return EgoDecision.EnqueueThought(urgency = Urgency.HIGH, content = pressuredThought)
+        return EgoDecision.EnqueueContinuation(urgency = Urgency.HIGH, continuation = pressuredContinuation)
     }
 
     /**

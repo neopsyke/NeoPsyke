@@ -77,7 +77,7 @@ Key changes to existing tests:
 End-to-end integration tests. Key changes:
 - Router + sub-planner two-call pattern accounted for
 - Plan response format adapted
-- Defer-on-input now routes through DeferredStepPlanner
+- Continuation-on-input now routes through ContinuationPlanner
 - Goal creation routes through `goal_creation` callSite
 
 ### AgentScenarioPackTest (14 tests, 6 updated)
@@ -97,7 +97,7 @@ Covers spec acceptance rules 3, 4, 5, 7, and 9:
 
 **Rule 3 — Trigger-Family Coverage (5 tests):**
 - `IncomingInput trigger routes to InputPlanner and returns decision`
-- `DeferredIntention trigger routes to DeferredStepPlanner`
+- `Continuation trigger routes to ContinuationPlanner`
 - `ActionFeedback trigger routes to FeedbackPlanner`
 - `GoalWork trigger routes to GoalWorkPlanner`
 - `IncomingImpulse trigger routes to ImpulsePlanner`

@@ -20,7 +20,7 @@ import ai.neopsyke.agent.model.Opportunity
 import ai.neopsyke.agent.model.OpportunityKind
 import ai.neopsyke.agent.model.PendingAction
 import ai.neopsyke.agent.model.PendingInput
-import ai.neopsyke.agent.model.PendingThought
+import ai.neopsyke.agent.model.QueuedContinuation
 import ai.neopsyke.agent.model.Percept
 import ai.neopsyke.agent.model.PerceptFamily
 import ai.neopsyke.agent.model.QueueState
@@ -48,7 +48,7 @@ class DashboardStateStoreTest {
         val store = DashboardStateStore(maxEvents = 100)
         val queues = QueueState(
             inputs = listOf(PendingInput(1, "hello")),
-            thoughts = listOf(PendingThought(2, Urgency.HIGH, "think", 1)),
+            continuations = listOf(ai.neopsyke.agent.queuedContinuation(2, Urgency.HIGH, "think", 1)),
             actions = listOf(PendingAction(3, Urgency.MEDIUM, ActionType.CONTACT_USER, "payload", "sum", 0, groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER))
         )
         val metrics = MetricsSnapshot(
@@ -63,7 +63,7 @@ class DashboardStateStoreTest {
             persistentSuperegoTokens = 6
         )
 
-        store.onEvent(AgentEvent(id = 2, type = "loop_step", data = mapOf("step" to 2, "task_type" to "thought")))
+        store.onEvent(AgentEvent(id = 2, type = "loop_step", data = mapOf("step" to 2, "task_type" to "continuation")))
         store.onEvent(AgentEvent(id = 1, type = "loop_status", data = mapOf("status" to "running", "message" to "ok")))
         store.onEvent(AgentEvent(id = 3, type = "queue_snapshot", data = mapOf("queues" to queues)))
         store.onEvent(AgentEvent(id = 4, type = "superego_input", data = mapOf("allow" to false)))
@@ -86,7 +86,7 @@ class DashboardStateStoreTest {
             AgentEvent(
                 id = 9,
                 type = "queue_saturation",
-                data = mapOf("queue_type" to "thought", "pending" to 32, "capacity" to 32, "reason" to "full")
+                data = mapOf("queue_type" to "continuation", "pending" to 32, "capacity" to 32, "reason" to "full")
             )
         )
         store.recordDroppedEvents(3)
@@ -95,9 +95,9 @@ class DashboardStateStoreTest {
         assertEquals("running", snapshot.loopStatus)
         assertEquals("ok", snapshot.loopMessage)
         assertEquals(2, snapshot.loopStep)
-        assertEquals("thought", snapshot.currentTaskType)
+        assertEquals("continuation", snapshot.currentTaskType)
         assertEquals(1, snapshot.queues.inputs.size)
-        assertEquals(1, snapshot.queues.thoughts.size)
+        assertEquals(1, snapshot.queues.continuations.size)
         assertEquals(1, snapshot.queues.actions.size)
         assertEquals(true, snapshot.lastSuperegoOutput?.get("allow"))
         assertEquals(2, snapshot.actionCapabilities.size)
@@ -111,7 +111,7 @@ class DashboardStateStoreTest {
         assertEquals(0L, (snapshot.promptBudgetStats["total_allocations"] as Number).toLong())
         @Suppress("UNCHECKED_CAST")
         val saturationByType = snapshot.instrumentationHealth["queue_saturation_by_type"] as Map<String, Any?>
-        assertEquals(1L, (saturationByType["thought"] as Number).toLong())
+        assertEquals(1L, (saturationByType["continuation"] as Number).toLong())
         assertEquals(listOf(1L, 2L, 3L, 4L, 5L, 6L, 7L, 8L, 9L, 10L), snapshot.recentEvents.map { it.id })
     }
 
@@ -181,7 +181,7 @@ class DashboardStateStoreTest {
                 id = 2,
                 type = "prompt_budget_allocation",
                 data = mapOf(
-                    "call_site" to "deferred_step_prompt",
+                    "call_site" to "continuation_prompt",
                     "single_message_fallback" to true,
                     "degradation_path" to "single_message_fallback",
                     "floor_violation_count" to 2,
@@ -198,7 +198,7 @@ class DashboardStateStoreTest {
         @Suppress("UNCHECKED_CAST")
         val byCallSite = snapshot.promptBudgetStats["by_call_site"] as Map<String, Any?>
         assertEquals(1L, (byCallSite["planner_prompt"] as Number).toLong())
-        assertEquals(1L, (byCallSite["deferred_step_prompt"] as Number).toLong())
+        assertEquals(1L, (byCallSite["continuation_prompt"] as Number).toLong())
     }
 
     @Test
@@ -210,7 +210,7 @@ class DashboardStateStoreTest {
                 type = "llm_call",
                 data = mapOf(
                     "actor" to "ego",
-                    "call_site" to "thought_json_retry",
+                    "call_site" to "continuation_json_retry",
                     "structured_output_mode" to "relaxed",
                     "session_id" to "session-a",
                     "root_input_id" to "root-a",
@@ -224,7 +224,7 @@ class DashboardStateStoreTest {
                 type = "llm_call",
                 data = mapOf(
                     "actor" to "ego",
-                    "call_site" to "thought",
+                    "call_site" to "continuation",
                     "structured_output_mode" to "strict",
                     "session_id" to "session-b",
                     "root_input_id" to "root-b",
@@ -237,8 +237,8 @@ class DashboardStateStoreTest {
                 id = 3,
                 type = "planner_decision",
                 data = mapOf(
-                    "trigger" to "thought",
-                    "decision_type" to "action",
+                    "trigger" to "continuation",
+                    "decision_type" to "intention",
                     "session_id" to "session-a",
                     "root_input_id" to "root-a"
                 )

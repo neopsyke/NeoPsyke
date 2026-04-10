@@ -65,7 +65,7 @@ class ImpulsePlanner(
                 content = """
                     You are an action planner processing a self-motivated impulse.
                     Return STRICT JSON only.
-                    Decisions: defer, intend, noop.
+                    Decisions: intend, noop.
                     This is a self-initiated trigger, not a user request.
                     Act proportionally to the motivation described in the context.
                     Only act if there is genuine value; prefer noop otherwise.
@@ -82,10 +82,8 @@ class ImpulsePlanner(
                 content = """
                     JSON schema:
                     {
-                      "decision":"defer|intend|noop",
+                      "decision":"intend|noop",
                       "urgency":"low|medium|high",
-                      "defer_content":"optional when decision=defer",
-                      "long_term_memory_recall_query":"optional",
                       "intention_kind":"observe|prepare|stage|request_authorization|commit",
                       "commit_mode_preference":"not_applicable|approval_backed|policy_autonomous|admin_override",
                       "action_type":"$actionSchemaEnum",
@@ -151,18 +149,6 @@ class ImpulsePlanner(
     private fun parseImpulseDecision(raw: String, context: PlannerContext): ImpulseDecision? {
         val p = StructuredOutputHandler.parseWithRepair<ImpulsePayload>(raw) { runtime.onOutputRepaired() } ?: return null
         return when (p.decision?.trim()?.lowercase()) {
-            "defer" -> {
-                val c = p.deferContent?.trim().orEmpty()
-                if (c.isBlank()) {
-                    ImpulseDecision.Noop("Empty defer.")
-                } else {
-                    ImpulseDecision.Reflect(
-                        urgency = Urgency.fromRaw(p.urgency),
-                        content = c,
-                        longTermMemoryRecallQuery = p.longTermMemoryRecallQuery?.trim()?.ifBlank { null },
-                    )
-                }
-            }
             "intend" -> {
                 val ik = DecisionValidation.intentionKindFromRaw(p.intentionKind); val at = ActionType.fromRaw(p.actionType)
                 val rp = StructuredOutputHandler.normalizeActionPayload(p.actionPayload)?.trim().orEmpty()
@@ -195,13 +181,7 @@ class ImpulsePlanner(
 
     private fun toEgoDecision(decision: ImpulseDecision, context: PlannerContext): EgoDecision {
         return when (decision) {
-            is ImpulseDecision.Reflect -> EgoDecision.EnqueueThought(
-                urgency = decision.urgency,
-                content = TextSecurity.clamp(decision.content, config.planner.maxThoughtChars),
-                longTermMemoryRecallQuery = decision.longTermMemoryRecallQuery?.let {
-                    TextSecurity.clamp(it, config.planner.maxThoughtChars)
-                },
-            )
+            is ImpulseDecision.Reflect -> EgoDecision.Noop("Impulse reflection continuation removed.")
             is ImpulseDecision.Research -> {
                 val candidate = decision.candidate
                 if (!DecisionValidation.isCommitModeValidForIntention(candidate.intentionKind, candidate.commitModePreference)) {
@@ -237,8 +217,6 @@ class ImpulsePlanner(
 
     private data class ImpulsePayload(
         val decision: String? = null, val urgency: String? = null,
-        @param:JsonProperty("defer_content") val deferContent: String? = null,
-        @param:JsonProperty("long_term_memory_recall_query") val longTermMemoryRecallQuery: String? = null,
         @param:JsonProperty("intention_kind") val intentionKind: String? = null,
         @param:JsonProperty("commit_mode_preference") val commitModePreference: String? = null,
         @param:JsonProperty("action_type") val actionType: String? = null,

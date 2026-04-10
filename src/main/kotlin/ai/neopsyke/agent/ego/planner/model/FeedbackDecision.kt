@@ -23,12 +23,6 @@ sealed interface FeedbackDecision {
         val steps: List<PlanDecomposition.PlanStep>,
     ) : FeedbackDecision
 
-    data class Defer(
-        val urgency: Urgency = Urgency.MEDIUM,
-        val content: String,
-        val longTermMemoryRecallQuery: String? = null,
-    ) : FeedbackDecision
-
     data class MarkBlocked(val reason: String) : FeedbackDecision
 
     data class MarkDone(val reason: String) : FeedbackDecision

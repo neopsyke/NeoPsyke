@@ -69,7 +69,6 @@ class FeedbackPlanner(
                     You are an action planner interpreting the result of a completed action.
                     Return STRICT JSON only.
                     Decisions:
-                    - defer: defer for further processing.
                     - intend: form one explicit intention for the next action.
                     - plan: decompose into ordered steps.
                     - noop: when no next step exists.
@@ -90,10 +89,8 @@ class FeedbackPlanner(
                 content = """
                     JSON schema:
                     {
-                      "decision":"defer|intend|plan|noop",
+                      "decision":"intend|plan|noop",
                       "urgency":"low|medium|high",
-                      "defer_content":"optional",
-                      "long_term_memory_recall_query":"optional",
                       "intention_kind":"observe|prepare|stage|request_authorization|commit",
                       "commit_mode_preference":"not_applicable|approval_backed|policy_autonomous|admin_override",
                       "action_type":"$actionSchemaEnum",
@@ -162,18 +159,6 @@ class FeedbackPlanner(
     private fun parseFeedbackDecision(raw: String, context: PlannerContext): FeedbackDecision? {
         val payload = StructuredOutputHandler.parseWithRepair<FeedbackPayload>(raw) { runtime.onOutputRepaired() } ?: return null
         return when (payload.decision?.trim()?.lowercase()) {
-            "defer" -> {
-                val content = payload.deferContent?.trim().orEmpty()
-                if (content.isBlank()) {
-                    FeedbackDecision.MarkBlocked("Empty deferred content.")
-                } else {
-                    FeedbackDecision.Defer(
-                        urgency = Urgency.fromRaw(payload.urgency),
-                        content = content,
-                        longTermMemoryRecallQuery = payload.longTermMemoryRecallQuery?.trim()?.ifBlank { null },
-                    )
-                }
-            }
             "intend" -> {
                 val ik = DecisionValidation.intentionKindFromRaw(payload.intentionKind)
                 val at = ActionType.fromRaw(payload.actionType)
@@ -235,13 +220,6 @@ class FeedbackPlanner(
             )
             is FeedbackDecision.NextStep -> toExecutionDecision(decision.candidate, context)
             is FeedbackDecision.Retry -> toExecutionDecision(decision.candidate, context)
-            is FeedbackDecision.Defer -> EgoDecision.EnqueueThought(
-                urgency = decision.urgency,
-                content = TextSecurity.clamp(decision.content, config.planner.maxThoughtChars),
-                longTermMemoryRecallQuery = decision.longTermMemoryRecallQuery?.let {
-                    TextSecurity.clamp(it, config.planner.maxThoughtChars)
-                },
-            )
             is FeedbackDecision.RefinePlan -> {
                 val steps = decision.steps
                     .map { it.description.trim() }
@@ -288,8 +266,6 @@ class FeedbackPlanner(
 
     private data class FeedbackPayload(
         val decision: String? = null, val urgency: String? = null,
-        @param:JsonProperty("defer_content") val deferContent: String? = null,
-        @param:JsonProperty("long_term_memory_recall_query") val longTermMemoryRecallQuery: String? = null,
         @param:JsonProperty("intention_kind") val intentionKind: String? = null,
         @param:JsonProperty("commit_mode_preference") val commitModePreference: String? = null,
         @param:JsonProperty("action_type") val actionType: String? = null,

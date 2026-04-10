@@ -151,14 +151,14 @@ class DefaultMemoryProviderInstaller(
     }
 
     data class GitHubRelease(
-        @JsonProperty("tag_name")
+        @param:JsonProperty("tag_name")
         val tagName: String,
         val assets: List<GitHubReleaseAsset>,
     )
 
     data class GitHubReleaseAsset(
         val name: String,
-        @JsonProperty("browser_download_url")
+        @param:JsonProperty("browser_download_url")
         val browserDownloadUrl: String,
         val digest: String? = null,
     )
