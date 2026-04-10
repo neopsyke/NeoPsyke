@@ -77,11 +77,10 @@ object StructuredOutputHandler {
             {
               "type": "object",
               "additionalProperties": false,
-              "required": ["decision", "urgency", "defer_content", "long_term_memory_recall_query", "intention_kind", "commit_mode_preference", "action_type", "action_payload", "action_summary", "plan_goal", "plan_steps", "reason"],
+              "required": ["decision", "urgency", "long_term_memory_recall_query", "intention_kind", "commit_mode_preference", "action_type", "action_payload", "action_summary", "plan_goal", "plan_steps", "reason"],
               "properties": {
-                "decision": { "type": "string", "enum": ["defer", "intend", "plan", "noop"] },
+                "decision": { "type": "string", "enum": ["intend", "plan", "noop"] },
                 "urgency": { "type": ["string", "null"], "enum": ["low", "medium", "high", null] },
-                "defer_content": { "type": ["string", "null"], "maxLength": 600 },
                 "long_term_memory_recall_query": { "type": ["string", "null"], "maxLength": 600 },
                 "intention_kind": { "type": ["string", "null"], "enum": ["observe", "prepare", "stage", "request_authorization", "commit", null] },
                 "commit_mode_preference": { "type": ["string", "null"], "enum": ["not_applicable", "approval_backed", "policy_autonomous", "admin_override", null] },
@@ -99,11 +98,10 @@ object StructuredOutputHandler {
             {
               "type": "object",
               "additionalProperties": false,
-              "required": ["decision", "urgency", "defer_content", "long_term_memory_recall_query", "intention_kind", "commit_mode_preference", "action_type", "action_payload", "action_summary", "plan_goal", "plan_steps", "reason"],
+              "required": ["decision", "urgency", "long_term_memory_recall_query", "intention_kind", "commit_mode_preference", "action_type", "action_payload", "action_summary", "plan_goal", "plan_steps", "reason"],
               "properties": {
-                "decision": { "type": "string", "enum": ["defer", "intend", "plan", "noop"] },
+                "decision": { "type": "string", "enum": ["intend", "plan", "noop"] },
                 "urgency": { "type": ["string", "null"], "enum": ["low", "medium", "high", null] },
-                "defer_content": { "type": ["string", "null"] },
                 "long_term_memory_recall_query": { "type": ["string", "null"] },
                 "intention_kind": { "type": ["string", "null"], "enum": ["observe", "prepare", "stage", "request_authorization", "commit", null] },
                 "commit_mode_preference": { "type": ["string", "null"], "enum": ["not_applicable", "approval_backed", "policy_autonomous", "admin_override", null] },

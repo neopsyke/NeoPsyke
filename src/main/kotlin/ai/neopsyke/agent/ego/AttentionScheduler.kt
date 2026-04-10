@@ -129,7 +129,7 @@ class AttentionScheduler(
 
     /**
      * Enqueue an impulse from the Id module.
-     * Impulses are processed after inputs but before actions/thoughts (Ego idle).
+     * Impulses are processed after inputs but before actions/continuations (Ego idle).
      *
      * @param impulse the impulse to enqueue
      * @param maxPendingImpulses maximum impulse queue depth (from [IdConfig])
@@ -192,7 +192,7 @@ class AttentionScheduler(
         }
     }
 
-    fun hasPendingPlanThoughtsForInput(rootInputId: String?, sessionId: String): Boolean {
+    fun hasPendingPlanContinuationsForInput(rootInputId: String?, sessionId: String): Boolean {
         if (rootInputId.isNullOrBlank()) {
             return false
         }
@@ -207,7 +207,7 @@ class AttentionScheduler(
         }
     }
 
-    fun hasPendingConvergenceThoughtForInput(rootInputId: String?, sessionId: String): Boolean {
+    fun hasPendingConvergenceContinuationForInput(rootInputId: String?, sessionId: String): Boolean {
         if (rootInputId.isNullOrBlank()) {
             return false
         }

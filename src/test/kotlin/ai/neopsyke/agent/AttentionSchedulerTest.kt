@@ -252,7 +252,7 @@ class AttentionSchedulerTest {
             ),
         )
 
-        assertTrue(scheduler.hasPendingPlanThoughtsForInput(rootInputId, sessionId))
+        assertTrue(scheduler.hasPendingPlanContinuationsForInput(rootInputId, sessionId))
     }
 
     @Test
@@ -372,9 +372,9 @@ class AttentionSchedulerTest {
             groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
         )
 
-        assertTrue(scheduler.hasPendingPlanThoughtsForInput(root, "default"))
+        assertTrue(scheduler.hasPendingPlanContinuationsForInput(root, "default"))
         assertTrue(scheduler.hasPendingFallbackExplanationAction(root, "default"))
-        assertFalse(scheduler.hasPendingPlanThoughtsForInput("root-missing", "default"))
+        assertFalse(scheduler.hasPendingPlanContinuationsForInput("root-missing", "default"))
         assertFalse(scheduler.hasPendingFallbackExplanationAction("root-missing", "default"))
     }
 
@@ -419,11 +419,149 @@ class AttentionSchedulerTest {
             groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
         )
 
-        assertTrue(scheduler.hasPendingPlanThoughtsForInput(root, "session-a"))
+        assertTrue(scheduler.hasPendingPlanContinuationsForInput(root, "session-a"))
         assertTrue(scheduler.hasPendingFallbackExplanationAction(root, "session-a"))
-        assertFalse(scheduler.hasPendingPlanThoughtsForInput(root, "session-b"))
+        assertFalse(scheduler.hasPendingPlanContinuationsForInput(root, "session-b"))
         assertFalse(scheduler.hasPendingFallbackExplanationAction(root, "session-b"))
-        assertFalse(scheduler.hasPendingConvergenceThoughtForInput(root, "session-a"))
-        assertTrue(scheduler.hasPendingConvergenceThoughtForInput(root, "session-b"))
+        assertFalse(scheduler.hasPendingConvergenceContinuationForInput(root, "session-a"))
+        assertTrue(scheduler.hasPendingConvergenceContinuationForInput(root, "session-b"))
+    }
+
+    // ── RetryAlternative metadata propagation ──
+
+    @Test
+    fun `retry alternative preserves denial metadata through enqueue`() {
+        val scheduler = AttentionScheduler(config)
+        val rootInputId = "root-retry"
+        val retryContinuation = Continuation.RetryAlternative(
+            content = "Pick a different action",
+            deniedActionType = ActionType.WEB_SEARCH,
+            deniedActionPayload = """{"query":"test"}""",
+            denialReason = "Action not allowed for external users",
+            denialReasonCode = "policy_scope_restricted",
+            allowFallbackExplanation = true,
+            originActionType = ActionType.CONTACT_USER,
+            originActionObservedEvidence = true,
+        )
+
+        val queued = scheduler.enqueueContinuation(
+            continuation = retryContinuation,
+            urgency = Urgency.HIGH,
+            passes = 1,
+            rootInputId = rootInputId,
+            groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
+        )
+
+        assertNotNull(queued)
+        assertIs<Continuation.RetryAlternative>(queued.continuation)
+        assertEquals(ActionType.WEB_SEARCH, queued.deniedActionType)
+        assertEquals("""{"query":"test"}""", queued.deniedActionPayload)
+        assertEquals("Action not allowed for external users", queued.denialReason)
+        assertEquals("policy_scope_restricted", queued.denialReasonCode)
+        assertTrue(queued.allowFallbackExplanation)
+        assertEquals(ActionType.CONTACT_USER, queued.originActionType)
+        assertEquals(true, queued.originActionObservedEvidence)
+        assertEquals(1, queued.passes)
+        assertEquals(rootInputId, queued.rootInputId)
+    }
+
+    @Test
+    fun `retry alternative accessors return null for non-retry continuations`() {
+        val scheduler = AttentionScheduler(config)
+        val queued = scheduler.enqueueContinuation(
+            continuation = Continuation.ConvergeNow(
+                content = "converge",
+                convergenceReason = "test",
+            ),
+            urgency = Urgency.MEDIUM,
+            groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
+        )
+
+        assertNotNull(queued)
+        assertNull(queued.deniedActionType)
+        assertNull(queued.deniedActionPayload)
+        assertNull(queued.denialReason)
+        assertNull(queued.denialReasonCode)
+        assertNull(queued.planContext)
+    }
+
+    // ── ConvergeNow double-queue guard (recoverFromSuppressedPlan behaviour) ──
+
+    @Test
+    fun `convergence continuation blocks duplicate enqueue for same root and session`() {
+        val scheduler = AttentionScheduler(config.copy(maxPendingContinuations = 8))
+        val rootInputId = "root-converge"
+        val sessionId = "default"
+        val ctx = ai.neopsyke.agent.model.ConversationContext.default()
+
+        val first = scheduler.enqueueContinuation(
+            continuation = Continuation.ConvergeNow(
+                content = "converge: plan suppressed",
+                convergenceReason = "budget_exhausted",
+            ),
+            urgency = Urgency.HIGH,
+            rootInputId = rootInputId,
+            conversationContext = ctx,
+            groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
+        )
+        assertNotNull(first)
+        assertTrue(scheduler.hasPendingConvergenceContinuationForInput(rootInputId, sessionId))
+
+        // The guard at the scheduler level: callers (DecisionDispatcher) check
+        // hasPendingConvergenceContinuationForInput before enqueuing a second one.
+        // Verify the check returns true so callers can skip the duplicate.
+        assertTrue(scheduler.hasPendingConvergenceContinuationForInput(rootInputId, sessionId))
+    }
+
+    @Test
+    fun `plan continuations prevent convergence recovery for same root`() {
+        val scheduler = AttentionScheduler(config.copy(maxPendingContinuations = 8))
+        val rootInputId = "root-plan-guard"
+        val sessionId = "default"
+        val ctx = ai.neopsyke.agent.model.ConversationContext.default()
+
+        scheduler.enqueueContinuation(
+            continuation = Continuation.PlanStepContinuation(
+                content = "plan step 1",
+                planContext = ai.neopsyke.agent.model.PlanContext(
+                    planId = "p1",
+                    planGoal = "goal",
+                    stepIndex = 0,
+                    totalSteps = 3,
+                    stepDescription = "gather evidence",
+                ),
+            ),
+            urgency = Urgency.MEDIUM,
+            rootInputId = rootInputId,
+            conversationContext = ctx,
+            groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
+        )
+
+        // When plan steps are pending, the recoverFromSuppressedPlan guard
+        // (hasPendingPlanContinuationsForInput) should return true, preventing
+        // a ConvergeNow from being enqueued.
+        assertTrue(scheduler.hasPendingPlanContinuationsForInput(rootInputId, sessionId))
+        assertFalse(scheduler.hasPendingConvergenceContinuationForInput(rootInputId, sessionId))
+    }
+
+    @Test
+    fun `convergence check is false for different session same root`() {
+        val scheduler = AttentionScheduler(config.copy(maxPendingContinuations = 8))
+        val rootInputId = "root-cross-session"
+        val ctxA = ai.neopsyke.agent.model.ConversationContext("session-a", ai.neopsyke.agent.model.Interlocutor.named("a"))
+
+        scheduler.enqueueContinuation(
+            continuation = Continuation.ConvergeNow(
+                content = "converge for session-a",
+                convergenceReason = "hash_dedup",
+            ),
+            urgency = Urgency.HIGH,
+            rootInputId = rootInputId,
+            conversationContext = ctxA,
+            groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
+        )
+
+        assertTrue(scheduler.hasPendingConvergenceContinuationForInput(rootInputId, "session-a"))
+        assertFalse(scheduler.hasPendingConvergenceContinuationForInput(rootInputId, "session-b"))
     }
 }

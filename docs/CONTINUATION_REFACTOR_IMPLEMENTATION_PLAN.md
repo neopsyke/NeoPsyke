@@ -1,6 +1,6 @@
 # Continuation Refactor Implementation Plan
 
-**Status:** Draft plan
+**Status:** Complete
 **Related docs:** `docs/specs/TYPED_HIERARCHICAL_PLANNER_REDESIGN.md`, `docs/specs/GOAL_WORK_REDESIGN.md`
 **Date:** 2026-04-10
 
@@ -25,7 +25,6 @@ By the end of this refactor, the runtime should have these properties:
    - `PlanStepContinuation`
    - `RetryAlternative`
    - `ConvergeNow`
-   - `WaitResume`
 4. `ActionFeedback` is the only execute-then-assess entry point after an action runs.
 5. Planner prompts no longer encourage plain "enqueue thought for further processing"
    without a typed continuation reason.
@@ -173,17 +172,6 @@ Carries:
 - source event, such as suppressed plan or bounded recovery
 - fallback eligibility metadata
 
-#### `WaitResume`
-
-Used when work resumes after waiting on time, approval, async result, or other
-external readiness signal.
-
-Carries:
-
-- wake reason
-- wait source
-- relevant resume metadata
-
 ## Workstreams
 
 ### 1. Inventory Existing Deferred Usage
@@ -197,7 +185,6 @@ Classify each site as one of:
 - `PlanStepContinuation`
 - `RetryAlternative`
 - `ConvergeNow`
-- `WaitResume`
 
 This inventory is required before changing runtime models.
 
@@ -309,7 +296,6 @@ Expected mappings:
 - denied action retry -> `RetryAlternative`
 - noop recovery -> `RetryAlternative` or remove, depending on case
 - plan suppression recovery -> `ConvergeNow`
-- timer/approval/async resume -> `WaitResume`
 
 The refactor should aggressively delete continuation producers that only exist to
 keep the model "thinking" without new state.
@@ -381,7 +367,6 @@ The implementation is complete only when all of the following are true:
    - `PlanStepContinuation`
    - `RetryAlternative`
    - `ConvergeNow`
-   - `WaitResume`
 4. Planner prompts no longer instruct the model to "enqueue thought" or defer for
    generic further processing without a typed reason.
 5. No planner lane preserves a plain free-form evidence-free defer loop as an
@@ -405,16 +390,16 @@ The implementation is complete only when all of the following are true:
 
 ## Completion Checklist
 
-- [ ] Deferred inventory complete and classified
-- [ ] Runtime models switched from deferred thought to continuation
-- [ ] Trigger/planner wiring switched to continuation terminology
-- [ ] Generic evidence-free defer prompt behavior removed
-- [ ] `ActionFeedback` confirmed as execute-then-assess owner
-- [ ] Continuation producers rewired to the four typed variants
-- [ ] Scheduler and telemetry updated
-- [ ] Tests updated and passing
-- [ ] Thought terminology reviewed so concrete runtime items use `Continuation`
+- [x] Deferred inventory complete and classified
+- [x] Runtime models switched from deferred thought to continuation
+- [x] Trigger/planner wiring switched to continuation terminology
+- [x] Generic evidence-free defer prompt behavior removed
+- [x] `ActionFeedback` confirmed as execute-then-assess owner
+- [x] Continuation producers rewired to the four typed variants
+- [x] Scheduler and telemetry updated
+- [x] Tests updated and passing
+- [x] Thought terminology reviewed so concrete runtime items use `Continuation`
   while generic cognition language remains unambiguous
-- [ ] `AGENT_LOGIC_SUMMARY.md` updated
-- [ ] `AGENT_LOGIC_DIAGRAM.md` updated
-- [ ] `./freud/bin/freud run signoff-gate` passing
+- [x] `AGENT_LOGIC_SUMMARY.md` updated
+- [x] `AGENT_LOGIC_DIAGRAM.md` updated
+- [x] `./freud/bin/freud run signoff-gate` passing

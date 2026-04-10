@@ -540,10 +540,10 @@ internal class DecisionDispatcher(
         origin: ActionOrigin,
     ) {
         val sessionId = resolveSessionId(conversationContext)
-        if (scheduler.hasPendingPlanThoughtsForInput(rootInputId, sessionId)) {
+        if (scheduler.hasPendingPlanContinuationsForInput(rootInputId, sessionId)) {
             return
         }
-        if (scheduler.hasPendingConvergenceThoughtForInput(rootInputId, sessionId)) {
+        if (scheduler.hasPendingConvergenceContinuationForInput(rootInputId, sessionId)) {
             return
         }
         val convergenceContinuation = Continuation.ConvergeNow(

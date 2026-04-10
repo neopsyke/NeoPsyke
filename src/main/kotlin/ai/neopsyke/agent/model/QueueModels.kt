@@ -33,7 +33,6 @@ data class PlanContext(
     JsonSubTypes.Type(value = Continuation.PlanStepContinuation::class, name = "plan_step"),
     JsonSubTypes.Type(value = Continuation.RetryAlternative::class, name = "retry_alternative"),
     JsonSubTypes.Type(value = Continuation.ConvergeNow::class, name = "converge_now"),
-    JsonSubTypes.Type(value = Continuation.WaitResume::class, name = "wait_resume"),
 )
 sealed interface Continuation {
     val content: String
@@ -66,15 +65,6 @@ sealed interface Continuation {
     data class ConvergeNow(
         override val content: String,
         val convergenceReason: String,
-        override val longTermMemoryRecallQuery: String? = null,
-        override val allowFallbackExplanation: Boolean = false,
-        override val originActionType: ActionType? = null,
-        override val originActionObservedEvidence: Boolean? = null,
-    ) : Continuation
-
-    data class WaitResume(
-        override val content: String,
-        val waitReason: String,
         override val longTermMemoryRecallQuery: String? = null,
         override val allowFallbackExplanation: Boolean = false,
         override val originActionType: ActionType? = null,

@@ -334,7 +334,7 @@ Dispatch from `InputRoute` variant to sub-planner is deterministic on typed LLM 
 **Planner output is split across continuations and intentions**:
 - `decision=intend` carries explicit `intention_kind` + optional `commit_mode_preference`.
 - `decision=plan` yields queued `PlanStepContinuation` items.
-- Recovery/follow-up work becomes typed continuations (`RetryAlternative`, `ConvergeNow`, `WaitResume`) rather than generic defer loops.
+- Recovery/follow-up work becomes typed continuations (`RetryAlternative`, `ConvergeNow`) rather than generic defer loops.
 - Continuations are first-class scheduler items, separate from action-bearing intentions.
 
 ---

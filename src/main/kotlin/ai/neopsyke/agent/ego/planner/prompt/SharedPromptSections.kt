@@ -360,7 +360,7 @@ object SharedPromptSections {
                 noop_streak=${deliberation.noopStreak}
                 Guidance:
                 - if decision_pressure >= 0.75, prefer a concrete action or final answer.
-                - if decision_pressure >= 0.90, avoid new deferred-intention loops unless strictly necessary.
+                - if decision_pressure >= 0.90, avoid new continuation loops unless strictly necessary.
                 - if external evidence hints already contain useful signals, avoid repeating the same external call unless refresh/retry is explicitly requested.
             """.trimIndent()
         )

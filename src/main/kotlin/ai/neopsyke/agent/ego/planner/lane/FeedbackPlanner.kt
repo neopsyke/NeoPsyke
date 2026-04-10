@@ -73,7 +73,7 @@ class FeedbackPlanner(
                     - plan: decompose into ordered steps.
                     - noop: when no next step exists.
                     The trigger describes a completed action and its outcome.
-                    Use the outcome to decide the next step: answer the user, retry, proceed to next step, or defer.
+                    Use the outcome to decide the next step: answer the user, retry, proceed to next step, or noop.
                     If the action succeeded and you can answer the user, prefer action_type=contact_user.
                     Prefer concise responses.
                     Only choose actions visible in runtime availability.

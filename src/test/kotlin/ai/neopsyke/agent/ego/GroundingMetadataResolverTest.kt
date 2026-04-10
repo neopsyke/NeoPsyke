@@ -18,7 +18,7 @@ class GroundingMetadataResolverTest {
         val resolved = GroundingMetadataResolver.inheritedOrDefault(
             metadata = metadata,
             rootInputId = "root-1",
-            triggerType = "deferred_intention",
+            triggerType = "continuation",
             instrumentation = instrumentation,
         )
 

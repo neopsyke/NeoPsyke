@@ -621,7 +621,9 @@ class StructuredLogSink : InstrumentationSink {
     companion object {
         private val PLANNER_CALL_SITES: Set<String> = setOf(
             "input",
-            "thought",
+            "continuation",
+            "feedback",
+            "goal_work",
             "impulse",
         )
     }
