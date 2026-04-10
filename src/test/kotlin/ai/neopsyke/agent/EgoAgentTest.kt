@@ -1511,13 +1511,11 @@ class EgoAgentTest {
 
     @Test
     fun `meta reasoner can push convergence when chain is stale`() {
+        // FINALIZE_NOW directly enqueues a forced terminal answer instead of
+        // producing a soft hint. The planner only needs to return one noop;
+        // the forced terminal bypasses further planner calls.
         val plannerLlm = StubChatModelClient().apply {
             enqueueRawResponse("""{"decision":"noop","reason":"still thinking"}""")
-            enqueueRawResponse(
-                """
-                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"high","action_type":"contact_user","action_payload":"final answer","action_summary":"deliver final"}
-                """.trimIndent()
-            )
         }
         val superegoLlm = StubChatModelClient().apply {
             enqueueRawResponse("""{"allow":true}""")
@@ -1562,7 +1560,12 @@ class EgoAgentTest {
 
         runAgentWithInput(agent, "hello\nexit\n")
 
-        assertEquals(listOf("ego> final answer"), outputs)
+        // Forced terminal delivers a synthesized best-effort payload directly.
+        assertEquals(1, outputs.size, "Exactly one output should be produced")
+        assertTrue(
+            outputs.first().contains("diminishing returns", ignoreCase = true),
+            "Forced terminal should contain the synthesized best-effort payload"
+        )
         assertTrue(
             instrumentation.events.any {
                 it.type == "meta_reasoner_assessment" &&
@@ -1572,7 +1575,7 @@ class EgoAgentTest {
         assertTrue(
             instrumentation.events.any {
                 it.type == "warning" &&
-                    (it.data["message"] as? String)?.contains("MetaReasoner requested faster convergence", ignoreCase = true) == true
+                    (it.data["message"] as? String)?.contains("finalize_now", ignoreCase = true) == true
             }
         )
     }

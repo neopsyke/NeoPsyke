@@ -422,7 +422,15 @@ class Ego(
             trigger = trigger,
             context = context.copy(metaGuidance = deliberation.guidance())
         )
-        val finalDecision = deliberation.maybeApplyPressureOverride(decision, assessment)
+        val finalDecision = deliberation.maybeApplyPressureOverride(
+            decision = decision,
+            assessment = assessment,
+            scheduler = scheduler,
+            rootInputId = cue.rootInputId,
+            rootInputReceivedAtMs = cue.rootInputReceivedAtMs ?: feedback.receivedAtMs,
+            conversationContext = convCtx,
+            groundingMetadata = context.groundingMetadata,
+        )
         deliberation.onPlannerDecision(finalDecision)
         journalPlannerDecision(finalDecision)
 
@@ -576,7 +584,15 @@ class Ego(
             trigger = trigger,
             context = context.copy(metaGuidance = deliberation.guidance())
         )
-        val finalDecision = deliberation.maybeApplyPressureOverride(decision, assessment)
+        val finalDecision = deliberation.maybeApplyPressureOverride(
+            decision = decision,
+            assessment = assessment,
+            scheduler = scheduler,
+            rootInputId = input.rootInputId,
+            rootInputReceivedAtMs = input.receivedAtMs,
+            conversationContext = convCtx,
+            groundingMetadata = context.groundingMetadata,
+        )
         deliberation.onPlannerDecision(finalDecision)
         journalPlannerDecision(finalDecision)
 
@@ -679,7 +695,15 @@ class Ego(
             trigger = trigger,
             context = context.copy(metaGuidance = deliberation.guidance())
         )
-        val finalDecision = deliberation.maybeApplyPressureOverride(decision, assessment)
+        val finalDecision = deliberation.maybeApplyPressureOverride(
+            decision = decision,
+            assessment = assessment,
+            scheduler = scheduler,
+            rootInputId = deferred.rootInputId,
+            rootInputReceivedAtMs = deferred.rootInputReceivedAtMs,
+            conversationContext = convCtx,
+            groundingMetadata = context.groundingMetadata,
+        )
         deliberation.onPlannerDecision(finalDecision)
         journalPlannerDecision(finalDecision)
 
@@ -889,7 +913,15 @@ class Ego(
             trigger = trigger,
             context = context.copy(metaGuidance = deliberation.guidance())
         )
-        val finalDecision = deliberation.maybeApplyPressureOverride(decision, assessment)
+        val finalDecision = deliberation.maybeApplyPressureOverride(
+            decision = decision,
+            assessment = assessment,
+            scheduler = scheduler,
+            rootInputId = work.rootInputId,
+            rootInputReceivedAtMs = System.currentTimeMillis(),
+            conversationContext = convCtx,
+            groundingMetadata = context.groundingMetadata,
+        )
         deliberation.onPlannerDecision(finalDecision)
         journalPlannerDecision(finalDecision)
 

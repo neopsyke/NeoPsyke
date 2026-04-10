@@ -122,13 +122,49 @@ internal class DeliberationEngine(
 
     /**
      * Applies meta-pressure override to [decision] if [assessment] demands finalization.
+     *
+     * For [MetaReasonerVerdict.FINALIZE_NOW]: the planner already failed to converge, so
+     * a forced terminal answer is enqueued directly via [scheduler]. The original [decision]
+     * is returned unchanged (any noop/deferred thought it enqueues will be dropped by
+     * [hasForcedTerminalForInput] on the next iteration).
+     *
+     * For [MetaReasonerVerdict.REQUEST_TOOL_THEN_FINALIZE]: a soft hint is returned,
+     * giving the planner one more chance to produce a tool action before finalization.
      */
-    fun maybeApplyPressureOverride(decision: EgoDecision, assessment: MetaReasonerAssessment?): EgoDecision {
+    fun maybeApplyPressureOverride(
+        decision: EgoDecision,
+        assessment: MetaReasonerAssessment?,
+        scheduler: AttentionScheduler,
+        rootInputId: String?,
+        rootInputReceivedAtMs: Long?,
+        conversationContext: ConversationContext,
+        groundingMetadata: GroundingMetadata,
+    ): EgoDecision {
         if (assessment == null) return decision
         val needsFinalization = assessment.verdict == MetaReasonerVerdict.FINALIZE_NOW ||
             assessment.verdict == MetaReasonerVerdict.REQUEST_TOOL_THEN_FINALIZE
         if (!needsFinalization) return decision
         if (decision is EgoDecision.FormIntention) return decision
+
+        // FINALIZE_NOW: enqueue forced terminal directly -- no more soft hints.
+        if (assessment.verdict == MetaReasonerVerdict.FINALIZE_NOW) {
+            val enqueued = enqueueMetaReasonerForcedTerminal(
+                scheduler = scheduler,
+                rootInputId = rootInputId,
+                rootInputReceivedAtMs = rootInputReceivedAtMs,
+                conversationContext = conversationContext,
+                groundingMetadata = groundingMetadata,
+            )
+            if (enqueued) {
+                // Return original decision unchanged. It may re-enqueue a noop/thought,
+                // but hasForcedTerminalForInput will drop it on the next iteration.
+                return decision
+            }
+            // Fall through to soft override if forced terminal couldn't be enqueued
+            // (e.g. already queued for this input, or action queue full).
+        }
+
+        // REQUEST_TOOL_THEN_FINALIZE (or FINALIZE_NOW fallback): soft hint.
         val pressuredThought = TextSecurity.clamp(
             "Decision pressure is high. Stop looping and provide a concise best-effort final answer now. " +
                 "If one decisive tool action is strictly necessary, do only one then answer.",
@@ -136,6 +172,68 @@ internal class DeliberationEngine(
         )
         instrumentation.emit(AgentEvents.warning("MetaReasoner requested faster convergence; overriding non-action decision."))
         return EgoDecision.EnqueueThought(urgency = Urgency.HIGH, content = pressuredThought)
+    }
+
+    /**
+     * Enqueues a forced terminal answer triggered by a [MetaReasonerVerdict.FINALIZE_NOW]
+     * verdict. Synthesizes a best-effort payload from accumulated evidence.
+     * Returns true if the action was enqueued.
+     */
+    private fun enqueueMetaReasonerForcedTerminal(
+        scheduler: AttentionScheduler,
+        rootInputId: String?,
+        rootInputReceivedAtMs: Long?,
+        conversationContext: ConversationContext,
+        groundingMetadata: GroundingMetadata,
+    ): Boolean {
+        val scope = inputScope(rootInputId, conversationContext.sessionId) ?: return false
+        if (scope in forcedTerminalAnswerQueuedByInput) return false
+
+        val evidence = evidenceFor(rootInputId, conversationContext.sessionId)
+        val payload = synthesizeFinalizeNowPayload(evidence, groundingMetadata)
+        val queued = scheduler.enqueueAction(
+            type = ActionType.CONTACT_USER,
+            payload = TextSecurity.clamp(payload, config.maxActionPayloadChars),
+            summary = "Meta-reasoner finalize_now: best-effort answer from accumulated evidence.",
+            urgency = Urgency.HIGH,
+            rootInputId = rootInputId,
+            rootInputReceivedAtMs = rootInputReceivedAtMs,
+            conversationContext = conversationContext,
+            groundingMetadata = groundingMetadata,
+            isForcedTerminal = true,
+        )
+        if (queued) {
+            forcedTerminalAnswerQueuedByInput.add(scope)
+            trimForcedTerminalQueue()
+            instrumentation.emit(AgentEvents.warning("Meta-reasoner finalize_now: forced terminal answer enqueued directly."))
+            activeState().guidance = "Finalization in progress. Terminal answer queued by meta-reasoner verdict."
+        }
+        return queued
+    }
+
+    private fun synthesizeFinalizeNowPayload(
+        evidence: ExternalEvidenceProgress?,
+        groundingMetadata: GroundingMetadata,
+    ): String {
+        // If successful evidence was gathered, incorporate it.
+        if (evidence?.hadSuccessfulEvidence == true) {
+            val signals = evidence.successfulEvidenceSignals
+            if (signals.isNotEmpty()) {
+                return signals.joinToString(" | ")
+            }
+            val latest = evidence.latestPlannerSignal
+            if (latest.isNotBlank()) return latest
+        }
+        // Generic payload with evidence-failure disclaimer if applicable.
+        val base = "I have reached diminishing returns in internal reasoning. " +
+            "Here is the best concise answer I can provide now with current evidence."
+        return if (groundingMetadata.requirement == GroundingRequirement.REQUIRED &&
+            evidence?.hadExternalFailures == true && evidence.hadSuccessfulEvidence != true
+        ) {
+            base + FORCED_TERMINAL_EVIDENCE_FAILURE_DISCLAIMER
+        } else {
+            base
+        }
     }
 
     /**

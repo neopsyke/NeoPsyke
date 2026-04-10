@@ -448,8 +448,11 @@ Dispatch from `InputRoute` variant to sub-planner is deterministic on typed LLM 
 **Pressure drives**:
 - `MetaReasoner` assessment cadence (triggered when min steps reached + interval or pressure due).
 - Guidance text for Planner.
-- Pressure override: `MetaReasonerVerdict` `FINALIZE_NOW` or `REQUEST_TOOL_THEN_FINALIZE` → force convergence.
-- Forced terminal `contact_user` under: circular pressure (high `DecisionPressure` + high `StaleStreak`) OR `ModelErrorStreak` (>= 3 errors + pressure >= 0.72 + steps >= 6).
+- Pressure override (`maybeApplyPressureOverride`):
+  - `FINALIZE_NOW` + non-`FormIntention` → directly enqueues a forced terminal `contact_user` action with a synthesized best-effort payload from accumulated evidence. No further planner calls. The original decision passes through but any resulting deferred thoughts are dropped via `hasForcedTerminalForInput`.
+  - `REQUEST_TOOL_THEN_FINALIZE` + non-`FormIntention` → soft hint: replaces decision with a HIGH-urgency `EnqueueThought` giving the planner one more chance to produce a tool action.
+  - Either verdict + `FormIntention` → passes through unchanged (planner already converged).
+- Forced terminal safety net (`maybeForceTerminalAnswer`): circular pressure (high `DecisionPressure` + high `StaleStreak`) OR `ModelErrorStreak` (>= 3 errors + pressure >= 0.72 + steps >= 6) OR `NoopStreak` >= 6. This is a backstop for cases where the meta-reasoner is disabled or the `FINALIZE_NOW` enqueue failed.
 
 **Action retry budget** (managed by `DeliberationEngine`):
 - Per-input-scope cooldown/circuit-breaker for action types.

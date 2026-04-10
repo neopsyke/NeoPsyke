@@ -257,7 +257,7 @@ sequenceDiagram
             Note over Ego,Planner: Goal-operation payload boundary is canonical SerializedGoalCommand (command + typed goal_reference), consumed directly by GoalOperationActionPlugin
             Note over Ego,Planner: Planner requests schema-enforced structured output. LLM layer owns compatibility degradation from strict to relaxed to prompt-only JSON. Parse failures do truncation-budget retry then strict-JSON retry before noop fallback
             Planner-->>Ego: defer/intend/plan/noop
-            Ego->>Delib: maybeApplyPressureOverride
+            Ego->>Delib: maybeApplyPressureOverride (FINALIZE_NOW directly enqueues forced terminal; REQUEST_TOOL_THEN_FINALIZE produces soft hint)
             Note over Ego: Runtime opportunity guard rejects invalid intention kind, action surface, or commit-mode violations before scheduling execution work
             Ego->>Sched: enqueue explicit intentions (observe/prepare/stage/request_authorization/commit/defer)
             Note over Ego,Sched: Planner now forms explicit lifecycle-aware intentions directly; plan steps and recovery/follow-up work become deferred intentions, not first-class thought queue items
