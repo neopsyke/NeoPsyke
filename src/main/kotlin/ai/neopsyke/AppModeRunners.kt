@@ -12,13 +12,11 @@ import ai.neopsyke.agent.ego.planner.HierarchicalEgoPlanner
 import ai.neopsyke.agent.ego.planner.LaneId
 import ai.neopsyke.agent.ego.planner.input.DirectResponsePlanner
 import ai.neopsyke.agent.ego.planner.input.GeneralActionPlanner
-import ai.neopsyke.agent.ego.planner.input.GoalCreationPlanner
-import ai.neopsyke.agent.ego.planner.input.GoalManagementPlanner
+import ai.neopsyke.agent.ego.planner.input.GoalPlanner
 import ai.neopsyke.agent.ego.planner.input.GroundingClassifier
 import ai.neopsyke.agent.ego.planner.input.InputIntentRouter
 import ai.neopsyke.agent.ego.planner.input.TaskDecompositionPlanner
-import ai.neopsyke.agent.ego.planner.lane.ContinuationPlanner
-import ai.neopsyke.agent.ego.planner.lane.FeedbackPlanner
+import ai.neopsyke.agent.ego.planner.lane.ProgressionPlanner
 import ai.neopsyke.agent.ego.planner.lane.GoalWorkPlanner
 import ai.neopsyke.agent.ego.planner.lane.ImpulsePlanner
 import ai.neopsyke.agent.ego.planner.lane.InputPlanner
@@ -2976,8 +2974,7 @@ private fun buildHierarchicalPlanner(
     val directResponse = DirectResponsePlanner(runtime, config, instrumentation)
     val generalAction = GeneralActionPlanner(runtime, config, instrumentation)
     val taskDecomp = TaskDecompositionPlanner(runtime, config, instrumentation)
-    val goalCreation = GoalCreationPlanner(runtime, config, instrumentation)
-    val goalManagement = GoalManagementPlanner(runtime, config, instrumentation)
+    val goalPlanner = GoalPlanner(runtime, config, instrumentation)
 
     val inputPlanner = InputPlanner(
         runtime = runtime,
@@ -2988,12 +2985,10 @@ private fun buildHierarchicalPlanner(
         directResponsePlanner = directResponse,
         generalActionPlanner = generalAction,
         taskDecompositionPlanner = taskDecomp,
-        goalCreationPlanner = goalCreation,
-        goalManagementPlanner = goalManagement,
+        goalPlanner = goalPlanner,
     )
 
-    val continuationPlanner = ContinuationPlanner(runtime, config, instrumentation)
-    val feedbackPlanner = FeedbackPlanner(runtime, config, instrumentation)
+    val progressionPlanner = ProgressionPlanner(runtime, config, instrumentation)
     val goalWorkPlannerLane = GoalWorkPlanner(runtime, config, instrumentation)
     val impulsePlannerLane = ImpulsePlanner(runtime, config, instrumentation)
 
@@ -3001,8 +2996,7 @@ private fun buildHierarchicalPlanner(
         runtime = runtime,
         instrumentation = instrumentation,
         inputPlanner = inputPlanner,
-        continuationPlanner = continuationPlanner,
-        feedbackPlanner = feedbackPlanner,
+        progressionPlanner = progressionPlanner,
         goalWorkPlanner = goalWorkPlannerLane,
         impulsePlanner = impulsePlannerLane,
     )

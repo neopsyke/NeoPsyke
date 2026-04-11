@@ -89,8 +89,7 @@ class GroundingClassifier(
      */
     internal fun prefilter(route: InputRoute): GroundingMetadata? =
         when (route) {
-            is InputRoute.GoalCreation -> GroundingMetadata.NOT_REQUIRED_PREFILTER
-            is InputRoute.GoalManagement -> GroundingMetadata.NOT_REQUIRED_PREFILTER
+            is InputRoute.Goal -> GroundingMetadata.NOT_REQUIRED_PREFILTER
             is InputRoute.ClarificationNeeded -> GroundingMetadata.NOT_REQUIRED_PREFILTER
             is InputRoute.Noop -> GroundingMetadata.NOT_REQUIRED_PREFILTER
             is InputRoute.DirectResponse -> null

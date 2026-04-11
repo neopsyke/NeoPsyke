@@ -25,18 +25,9 @@ class GroundingClassifierTest {
     // --- AC 17: Pre-filter deterministic routes ---
 
     @Test
-    fun `prefilter returns NOT_REQUIRED for GoalCreation`() {
+    fun `prefilter returns NOT_REQUIRED for Goal`() {
         val classifier = buildClassifier()
-        val result = classifier.prefilter(InputRoute.GoalCreation("test"))
-        assertNotNull(result)
-        assertEquals(GroundingRequirement.NOT_REQUIRED, result.requirement)
-        assertEquals(GroundingSource.INPUT_PREFILTER, result.source)
-    }
-
-    @Test
-    fun `prefilter returns NOT_REQUIRED for GoalManagement`() {
-        val classifier = buildClassifier()
-        val result = classifier.prefilter(InputRoute.GoalManagement("test"))
+        val result = classifier.prefilter(InputRoute.Goal("test"))
         assertNotNull(result)
         assertEquals(GroundingRequirement.NOT_REQUIRED, result.requirement)
         assertEquals(GroundingSource.INPUT_PREFILTER, result.source)
@@ -83,7 +74,7 @@ class GroundingClassifierTest {
         val llm = StubChatModelClient()
         val classifier = buildClassifier(llm = llm)
         val result = classifier.classify(
-            InputRoute.GoalCreation("create weather goal"),
+            InputRoute.Goal("create weather goal"),
             inputTrigger(),
             defaultContext(),
         )

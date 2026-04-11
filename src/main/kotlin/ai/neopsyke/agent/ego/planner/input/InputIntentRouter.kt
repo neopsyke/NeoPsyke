@@ -60,8 +60,7 @@ class InputIntentRouter(
                     - direct_response: the request can be answered directly from current context without external tools.
                     - general_action: the request requires one explicit action (search, fetch, contact, etc.).
                     - multi_step_task: the request requires multiple sequential stages.
-                    - goal_creation: the user wants to create a persistent goal, reminder, or monitoring task.
-                    - goal_management: the user wants to manage existing goals (list, status, pause, resume, delete, update, etc.).
+                    - goal: the user wants to create, manage, or interact with persistent goals (create, list, pause, resume, delete, update, etc.).
                     - clarification: you cannot confidently distinguish between materially different routes.
                     - noop: no actionable intent detected.
                     Available actions: $actionSummary
@@ -119,9 +118,8 @@ class InputIntentRouter(
             "direct_response" -> InputRoute.DirectResponse(reasoning)
             "general_action" -> InputRoute.GeneralAction(reasoning)
             "multi_step_task" -> InputRoute.MultiStepTask(reasoning)
-            "goal_creation" -> if (goalsAvailable) InputRoute.GoalCreation(reasoning)
-                else InputRoute.GeneralAction("Goals unavailable; routing as general action.")
-            "goal_management" -> if (goalsAvailable) InputRoute.GoalManagement(reasoning)
+            "goal", "goal_creation", "goal_management" ->
+                if (goalsAvailable) InputRoute.Goal(reasoning)
                 else InputRoute.GeneralAction("Goals unavailable; routing as general action.")
             "clarification" -> InputRoute.ClarificationNeeded(reasoning.ifBlank { "Could you clarify what you'd like me to do?" })
             "noop" -> InputRoute.Noop(reasoning.ifBlank { "No actionable intent." })
@@ -134,8 +132,7 @@ class InputIntentRouter(
             "direct_response", "general_action", "multi_step_task"
         )
         if (goalsAvailable) {
-            routes.add("goal_creation")
-            routes.add("goal_management")
+            routes.add("goal")
         }
         routes.add("clarification")
         routes.add("noop")

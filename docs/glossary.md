@@ -118,17 +118,15 @@ Each section covers terms that appear together in the same area of the agent.
 - **HierarchicalEgoPlanner** — Proposed top-level planner entry point for the typed hierarchical redesign. Remains the single implementation behind `Ego.Planner`, but delegates work to narrower planner lanes based on typed runtime facts.
 - **PlannerLane** — Proposed top-level planner lane in the typed hierarchical redesign. Replaces the old coarse `PlanningBranch` idea with more specific lane ownership by decision family.
 - **InputPlanner** — Proposed planner lane for `EgoTrigger.IncomingInput`. Owns fresh-input semantic routing before delegating to narrower input-specific planners.
-- **ContinuationPlanner** — Planner lane for `EgoTrigger.Continuation`. Owns typed continuations and active plan-step reasoning.
-- **FeedbackPlanner** — Proposed planner lane for `EgoTrigger.ActionFeedback`. Owns reasoning over completed, failed, or waiting action outcomes.
+- **ProgressionPlanner** — Planner lane for both `EgoTrigger.Continuation` and `EgoTrigger.ActionFeedback`. Handles progression reasoning (what comes next) for continuations and action feedback. Merged from the former ContinuationPlanner and FeedbackPlanner.
 - **GoalWorkPlanner** — Proposed planner lane for `EgoTrigger.GoalWork`. Owns active goal-runtime work and step-level goal execution reasoning.
 - **ImpulsePlanner** — Proposed planner lane for `EgoTrigger.IncomingImpulse`. Owns self-motivated / Id-origin planning.
 - **InputIntentRouter** — Proposed semantic router inside `InputPlanner`. Interprets fresh natural-language input and returns an `InputRoute` instead of directly generating an `EgoDecision`.
-- **InputRoute** — Proposed typed routing result returned by `InputIntentRouter`. Initial planned variants are `DirectResponse`, `GeneralAction`, `MultiStepTask`, `GoalCreation`, `GoalManagement`, `ClarificationNeeded`, and `Noop`.
+- **InputRoute** — Typed routing result returned by `InputIntentRouter`. Variants are `DirectResponse`, `GeneralAction`, `MultiStepTask`, `Goal`, `ClarificationNeeded`, and `Noop`.
 - **DirectResponsePlanner** — Proposed input sub-planner used when the request can be answered directly from current context.
 - **GeneralActionPlanner** — Proposed input sub-planner used when one explicit next action or intention is sufficient.
 - **TaskDecompositionPlanner** — Proposed input sub-planner used when a request requires multi-step decomposition into a typed plan.
-- **GoalCreationPlanner** — Proposed input sub-planner used only for semantic goal creation.
-- **GoalManagementPlanner** — Proposed input sub-planner used only for semantic operations on existing goals.
+- **GoalPlanner** — Unified input sub-planner for goal creation and management. Merged from the former GoalCreationPlanner and GoalManagementPlanner.
 - **PlannerOutcome** — Proposed umbrella term for typed intermediate planner outputs in the hierarchical design before they are adapted into `EgoDecision`.
 - **ExecutionCandidate** — Proposed typed intermediate result representing one next action/intention candidate that can be adapted into `EgoDecision.FormIntention`.
 - **PlanDecomposition** — Proposed typed intermediate result representing a decomposed multi-step task rather than an unstructured plan string list.
@@ -136,8 +134,7 @@ Each section covers terms that appear together in the same area of the agent.
 - **ClarificationRequest** — Proposed typed planner result indicating that semantic resolution is insufficient and the agent should ask for clarification.
 - **GoalCommand** — Proposed typed semantic goal operation returned by planner layers before execution. Planned variants include `Create`, `List`, `Status`, `Pause`, `Resume`, `Complete`, `Delete`, `DeleteAll`, `Update`, `RevisePlan`, and `Reprioritize`.
 - **GoalReference** — Proposed typed goal-reference resolution result used by `GoalCommand`. Planned variants include `ByInternalId`, `ByResolvedEntity`, `Ambiguous`, and `Unresolved`.
-- **ContinuationDecision** — Typed output family returned by `ContinuationPlanner`. Current variants are `Execute`, `RefinePlan`, `SkipStep`, `Answer`, `Clarify`, and `Fail`.
-- **FeedbackDecision** — Proposed typed output family returned by `FeedbackPlanner`. Initial planned variants are `Answer`, `Retry`, `NextStep`, `Defer`, `MarkBlocked`, and `MarkDone`.
+- **ProgressionDecision** — Typed output family returned by `ProgressionPlanner`. Variants are `Execute`, `RefinePlan`, `Answer`, and `Fail`.
 - **GoalWorkDecision** — Proposed typed output family returned by `GoalWorkPlanner`. Initial planned variants are `ExecuteStep`, `DeferUntilCondition`, `MarkStepComplete`, `RequestClarification`, and `FailStep`.
 - **ImpulseDecision** — Proposed typed output family returned by `ImpulsePlanner`. Initial planned variants are `Research`, `Reflect`, `ContactUser`, and `Noop`.
 - **Orchestrator-Worker** — A design pattern where a narrow orchestrator decomposes a task into bounded subtasks, delegates those subtasks to specialized workers, then synthesizes the result. The planner redesign spec treats this as a possible future pattern for evidence-heavy work, not as the first step of the planner refactor.

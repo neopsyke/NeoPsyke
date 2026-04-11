@@ -3,9 +3,8 @@ package ai.neopsyke.agent.ego.planner.model
 import ai.neopsyke.agent.goal.GoalPriority
 
 /**
- * Typed goal command sealed hierarchy. Produced by GoalCreationPlanner and
- * GoalManagementPlanner; consumed by GoalOperationActionPlugin as a typed
- * contract rather than free-form text.
+ * Typed goal command sealed hierarchy. Produced by GoalPlanner; consumed by
+ * GoalOperationActionPlugin as a typed contract rather than free-form text.
  */
 sealed interface GoalCommand {
 

@@ -29,8 +29,7 @@ class HierarchicalEgoPlanner(
     private val runtime: PlannerRuntime,
     private val instrumentation: AgentInstrumentation,
     private val inputPlanner: PlannerLane,
-    private val continuationPlanner: PlannerLane,
-    private val feedbackPlanner: PlannerLane,
+    private val progressionPlanner: PlannerLane,
     private val goalWorkPlanner: PlannerLane,
     private val impulsePlanner: PlannerLane,
 ) : Ego.Planner {
@@ -55,8 +54,8 @@ class HierarchicalEgoPlanner(
 
         val lane = when (trigger) {
             is EgoTrigger.IncomingInput -> inputPlanner
-            is EgoTrigger.Continuation -> continuationPlanner
-            is EgoTrigger.ActionFeedback -> feedbackPlanner
+            is EgoTrigger.Continuation -> progressionPlanner
+            is EgoTrigger.ActionFeedback -> progressionPlanner
             is EgoTrigger.GoalWork -> goalWorkPlanner
             is EgoTrigger.IncomingImpulse -> impulsePlanner
         }

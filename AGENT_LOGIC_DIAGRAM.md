@@ -55,10 +55,10 @@ flowchart LR
     IL --> DRP["DirectResponsePlanner"]
     IL --> GAP["GeneralActionPlanner"]
     IL --> TDP["TaskDecompositionPlanner"]
-    IL --> GCP["GoalCreationPlanner"]
-    IL --> GMP["GoalManagementPlanner"]
-    P --> DSP["ContinuationPlanner (L1)"]
-    P --> FP["FeedbackPlanner (L1)"]
+    IL --> GP["GoalPlanner"]
+    IL --> CLR["ClarificationNeeded (→ contact_user)"]
+    IL --> NOP["Noop (unactionable input)"]
+    P --> PP["ProgressionPlanner (L1)"]
     P --> GWP["GoalWorkPlanner (L1)"]
     P --> IP["ImpulsePlanner (L1)"]
     E --> TV["GroundingGate (Typed Evidence Gate)"]
@@ -165,7 +165,7 @@ sequenceDiagram
         alt Opportunity (input/feedback/impulse/goal)
             Ego->>Mem: recall context
             Ego->>Planner: decide(context)
-            Planner-->>Ego: defer / intend / plan / noop
+            Planner-->>Ego: intend / plan / noop
             Ego->>Sched: enqueue intentions
         else Continuation
             Ego->>Planner: decide(continuation context)
@@ -233,7 +233,7 @@ sequenceDiagram
     Note over Ego,Mem: Id-driven recall/planning can see shared ambient context: goals, scratchpad themes, useful updates, open loops, and recent exact learning topics
     Note over Ego,Mem: Ambient context is a cached best-effort snapshot, not a real-time synchronized view
             Ego->>Planner: decide(context + idState)
-            Planner-->>Ego: defer/intend/plan/noop
+            Planner-->>Ego: intend/plan/noop
             Ego->>Sched: enqueue impulse-derived work with origin=ID
             Note over Ego,Sched: Impulse final result is deferred until all work for root_impulse_id drains
         else Task = goal work opportunity
@@ -256,7 +256,7 @@ sequenceDiagram
             Note over Ego,Planner: Goal creation and management use typed GoalCommand with LLM-resolved references (no regex heuristics)
             Note over Ego,Planner: Goal-operation payload boundary is canonical SerializedGoalCommand (command + typed goal_reference), consumed directly by GoalOperationActionPlugin
             Note over Ego,Planner: Planner requests schema-enforced structured output. LLM layer owns compatibility degradation from strict to relaxed to prompt-only JSON. Parse failures do truncation-budget retry then strict-JSON retry before noop fallback
-            Planner-->>Ego: defer/intend/plan/noop
+            Planner-->>Ego: intend/plan/noop
             Ego->>Delib: maybeApplyPressureOverride (FINALIZE_NOW directly enqueues forced terminal; REQUEST_TOOL_THEN_FINALIZE produces soft hint)
             Note over Ego: Runtime opportunity guard rejects invalid intention kind, action surface, or commit-mode violations before scheduling execution work
             Ego->>Sched: enqueue continuations or explicit intentions

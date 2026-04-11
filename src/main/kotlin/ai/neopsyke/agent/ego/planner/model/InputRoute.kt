@@ -12,9 +12,7 @@ sealed interface InputRoute {
 
     data class MultiStepTask(val reasoning: String) : InputRoute
 
-    data class GoalCreation(val reasoning: String) : InputRoute
-
-    data class GoalManagement(val reasoning: String) : InputRoute
+    data class Goal(val reasoning: String) : InputRoute
 
     data class ClarificationNeeded(val question: String) : InputRoute
 

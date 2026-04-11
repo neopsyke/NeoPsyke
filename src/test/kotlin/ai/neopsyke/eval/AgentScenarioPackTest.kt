@@ -691,12 +691,12 @@ class AgentScenarioPackTest {
         var actionControlStore: SqliteActionControlStore? = null
         try {
             val plannerLlm = StubChatModelClient().apply {
-                // Route to goal_creation via input_intent_router
-                enqueueRawResponseForCallSite("input_intent_router", """{"route":"goal_creation","reasoning":"test"}""")
-                enqueueRawResponseForCallSite("goal_creation",
+                // Route to goal via input_intent_router
+                enqueueRawResponseForCallSite("input_intent_router", """{"route":"goal","reasoning":"test"}""")
+                enqueueRawResponseForCallSite("goal",
                     """
                     {
-                      "decision":"create_goal",
+                      "operation":"create","goal_reference":null,
                       "title":"Weather reminder",
                       "instruction":"Check the current weather and send the user an update for this scheduled run.",
                       "completion_criteria":"A weather update is delivered to the user for the current scheduled run.",
@@ -774,7 +774,7 @@ class AgentScenarioPackTest {
             assertEquals(1, approvalPrompts.size)
             assertTrue(approvalPrompts.single().contains("approval", ignoreCase = true))
             assertTrue(approvalPrompts.single().contains(ActionType.GOAL_OPERATION.id, ignoreCase = true))
-            assertTrue(plannerLlm.calls.any { it.options.metadata.callSite == "goal_creation" })
+            assertTrue(plannerLlm.calls.any { it.options.metadata.callSite == "goal" })
         } finally {
             actionControlStore?.close()
             manager?.stop()
@@ -789,12 +789,12 @@ class AgentScenarioPackTest {
         var actionControlStore: SqliteActionControlStore? = null
         try {
             val plannerLlm = StubChatModelClient().apply {
-                // Route to goal_creation via input_intent_router
-                enqueueRawResponseForCallSite("input_intent_router", """{"route":"goal_creation","reasoning":"test"}""")
-                enqueueRawResponseForCallSite("goal_creation",
+                // Route to goal via input_intent_router
+                enqueueRawResponseForCallSite("input_intent_router", """{"route":"goal","reasoning":"test"}""")
+                enqueueRawResponseForCallSite("goal",
                     """
                     {
-                      "decision":"create_goal",
+                      "operation":"create","goal_reference":null,
                       "title":"Daily weather forecast",
                       "instruction":"Fetch the weather forecast for Hamburg and send the user a summary for this scheduled run.",
                       "completion_criteria":"The weather forecast is delivered to the user for the current scheduled run.",
@@ -873,7 +873,7 @@ class AgentScenarioPackTest {
                 "Expected daily 5:05 cron from LLM; payload=${staged.payload}")
             assertTrue(staged.payload.contains("Daily weather forecast"))
             // Planner was invoked via the goal creation lane
-            assertTrue(plannerLlm.calls.any { it.options.metadata.callSite == "goal_creation" })
+            assertTrue(plannerLlm.calls.any { it.options.metadata.callSite == "goal" })
         } finally {
             actionControlStore?.close()
             manager?.stop()
@@ -887,13 +887,13 @@ class AgentScenarioPackTest {
         var manager: GoalManager? = null
         try {
             val plannerLlm = StubChatModelClient().apply {
-                // Route to goal_creation via input_intent_router
-                enqueueRawResponseForCallSite("input_intent_router", """{"route":"goal_creation","reasoning":"test"}""")
+                // Route to goal via input_intent_router
+                enqueueRawResponseForCallSite("input_intent_router", """{"route":"goal","reasoning":"test"}""")
                 // First call: goal creation lane returns an invalid cron
-                enqueueRawResponseForCallSite("goal_creation",
+                enqueueRawResponseForCallSite("goal",
                     """
                     {
-                      "decision":"create_goal",
+                      "operation":"create","goal_reference":null,
                       "title":"Weekly standup",
                       "instruction":"Remind the user about their weekly standup meeting.",
                       "completion_criteria":"Standup reminder delivered.",
@@ -904,7 +904,7 @@ class AgentScenarioPackTest {
                     }
                     """.trimIndent()
                 )
-                // Second call: feedback triggers feedback lane — planner responds to the user
+                // Second call: feedback triggers progression lane — planner responds to the user
                 enqueueRawResponse(
                     """
                     {
@@ -985,12 +985,12 @@ class AgentScenarioPackTest {
             }
             assertTrue(feedbackPlannerCalls.isNotEmpty(), "Expected planner re-invocation via feedback trigger after bad cron")
 
-            // The feedback planner call should go through the feedback lane
+            // The feedback planner call should go through the progression lane
             assertTrue(
                 instrumentation.events.any {
-                    it.type == "planner_lane_selected" && it.data["lane"] == "feedback" && it.data["trigger"] == "feedback"
+                    it.type == "planner_lane_selected" && it.data["lane"] == "progression" && it.data["trigger"] == "feedback"
                 },
-                "Expected feedback to route through feedback lane"
+                "Expected feedback to route through progression lane"
             )
 
             // The planner should have been called at least twice: router + goal_creation + feedback
@@ -1006,7 +1006,7 @@ class AgentScenarioPackTest {
     @Test
     fun scenario_goal_creation_confirmation_grounding() {
         val plannerLlm = StubChatModelClient().apply {
-            enqueueRawResponseForCallSite("input_intent_router", """{"route":"goal_creation","reasoning":"user wants a goal"}""")
+            enqueueRawResponseForCallSite("input_intent_router", """{"route":"goal","reasoning":"user wants a goal"}""")
             enqueueRawResponse(
                 """
                 {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"goal_operation","action_payload":"{\"command\":\"create\",\"title\":\"Daily Weather\",\"description\":\"Fetch weather\",\"priority\":\"medium\",\"cron_expression\":\"5 6 * * *\",\"step_descriptions\":[\"Check weather\"]}","action_summary":"create weather goal"}

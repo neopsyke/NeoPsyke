@@ -262,8 +262,7 @@ Stimulus → SensoryCortex (sanitize, appraise) → Percept
 | Lane | Trigger | File |
 |------|---------|------|
 | `InputPlanner` | `IncomingInput` | `lane/InputPlanner.kt` |
-| `ContinuationPlanner` | `Continuation` | `lane/ContinuationPlanner.kt` |
-| `FeedbackPlanner` | `ActionFeedback` | `lane/FeedbackPlanner.kt` |
+| `ProgressionPlanner` | `Continuation`, `ActionFeedback` | `lane/ProgressionPlanner.kt` |
 | `GoalWorkPlanner` | `GoalWork` | `lane/GoalWorkPlanner.kt` |
 | `ImpulsePlanner` | `IncomingImpulse` | `lane/ImpulsePlanner.kt` |
 
@@ -271,8 +270,7 @@ Each lane:
 - Has its own narrower system prompt focused on its decision family.
 - Uses `PlannerRuntime` for model calls (retry, circuit-breaker, schema fallback).
 - Parses model output into typed lane decision models before mapping to `EgoDecision`:
-  - `ContinuationDecision` (`ContinuationPlanner`)
-  - `FeedbackDecision` (`FeedbackPlanner`)
+  - `ProgressionDecision` (`ProgressionPlanner`)
   - `GoalWorkDecision` (`GoalWorkPlanner`)
   - `ImpulseDecision` (`ImpulsePlanner`)
 - Validates constraints: allowed intentions, commit modes, available/dispatchable actions.
@@ -283,8 +281,7 @@ Each lane:
 - `DirectResponsePlanner`: terminal answers from current context.
 - `GeneralActionPlanner`: single-action with full constraint validation.
 - `TaskDecompositionPlanner`: multi-step plan decomposition.
-- `GoalCreationPlanner`: semantic goal creation (no regex heuristics).
-- `GoalManagementPlanner`: typed GoalCommand with LLM reference resolution.
+- `GoalPlanner`: unified goal creation and management with typed GoalCommand and LLM reference resolution.
 
 Two-call pattern: InputIntentRouter (classify) then sub-planner (decide).
 Dispatch from `InputRoute` variant to sub-planner is deterministic on typed LLM output.

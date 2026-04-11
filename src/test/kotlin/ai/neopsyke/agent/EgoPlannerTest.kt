@@ -65,7 +65,7 @@ class EgoPlannerTest {
         assertTrue(
             instrumentation.events.any {
                 it.type == "prompt_budget_allocation" &&
-                    it.data["call_site"] == "continuation_prompt"
+                    it.data["call_site"] == "progression_prompt"
             }
         )
     }

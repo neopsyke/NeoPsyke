@@ -197,7 +197,7 @@ class HierarchicalPlannerAcceptanceTest {
     }
 
     @Test
-    fun `Continuation trigger routes to ContinuationPlanner`() {
+    fun `Continuation trigger routes to ProgressionPlanner`() {
         val llm = StubChatModelClient()
         llm.enqueueRawResponse("""{"decision":"noop","reason":"no further continuation needed"}""")
         val instrumentation = RecordingInstrumentation()
@@ -206,11 +206,11 @@ class HierarchicalPlannerAcceptanceTest {
         val decision = planner.decide(continuationTrigger(), defaultContext)
 
         assertIs<EgoDecision.Noop>(decision)
-        assertTrue(instrumentation.events.any { it.type == "planner_lane_selected" && it.data["lane"] == "continuation" })
+        assertTrue(instrumentation.events.any { it.type == "planner_lane_selected" && it.data["lane"] == "progression" })
     }
 
     @Test
-    fun `ActionFeedback trigger routes to FeedbackPlanner`() {
+    fun `ActionFeedback trigger routes to ProgressionPlanner`() {
         val llm = StubChatModelClient()
         llm.enqueueRawResponse("""{"decision":"intend","urgency":"medium","intention_kind":"observe","commit_mode_preference":"not_applicable","action_type":"contact_user","action_payload":"done","action_summary":"deliver result"}""")
         val instrumentation = RecordingInstrumentation()
@@ -219,7 +219,7 @@ class HierarchicalPlannerAcceptanceTest {
         val decision = planner.decide(feedbackTrigger(), defaultContext)
 
         assertIs<EgoDecision.FormIntention>(decision)
-        assertTrue(instrumentation.events.any { it.type == "planner_lane_selected" && it.data["lane"] == "feedback" })
+        assertTrue(instrumentation.events.any { it.type == "planner_lane_selected" && it.data["lane"] == "progression" })
     }
 
     @Test
@@ -359,8 +359,8 @@ class HierarchicalPlannerAcceptanceTest {
     @Test
     fun `positive - goal creation returns FormIntention with GOAL_OPERATION`() {
         val llm = StubChatModelClient()
-        llm.enqueueRawResponseForCallSite("input_intent_router", """{"route":"goal_creation","reasoning":"wants reminder"}""")
-        llm.enqueueRawResponseForCallSite("goal_creation", """{"decision":"create_goal","title":"Weather check","instruction":"Check the weather forecast","completion_criteria":"Weather reported","priority":"medium","cron_expression":"0 9 * * *","assistant_response":null,"reason":null}""")
+        llm.enqueueRawResponseForCallSite("input_intent_router", """{"route":"goal","reasoning":"wants reminder"}""")
+        llm.enqueueRawResponseForCallSite("goal", """{"operation":"create","goal_reference":null,"title":"Weather check","instruction":"Check the weather forecast","completion_criteria":"Weather reported","priority":"medium","cron_expression":"0 9 * * *","assistant_response":null,"reason":null}""")
         val planner = buildTestHierarchicalPlanner(llm)
 
         val decision = planner.decide(inputTrigger("remind me about weather every morning"), defaultContext)
@@ -374,8 +374,8 @@ class HierarchicalPlannerAcceptanceTest {
     @Test
     fun `positive - goal management returns FormIntention with goal operation`() {
         val llm = StubChatModelClient()
-        llm.enqueueRawResponseForCallSite("input_intent_router", """{"route":"goal_management","reasoning":"wants to pause"}""")
-        llm.enqueueRawResponseForCallSite("goal_management", """{"operation":"pause","goal_reference":{"type":"by_position","id":"1","candidates":null,"original_text":null,"resolved_from":null},"params":null}""")
+        llm.enqueueRawResponseForCallSite("input_intent_router", """{"route":"goal","reasoning":"wants to pause"}""")
+        llm.enqueueRawResponseForCallSite("goal", """{"operation":"pause","goal_reference":{"type":"by_position","id":"1","candidates":null,"original_text":null,"resolved_from":null},"title":null,"instruction":null,"completion_criteria":null,"priority":null,"cron_expression":null,"assistant_response":null,"reason":null}""")
         val planner = buildTestHierarchicalPlanner(llm)
 
         val decision = planner.decide(inputTrigger("pause my first goal"), goalContext)
@@ -536,8 +536,8 @@ class HierarchicalPlannerAcceptanceTest {
     @Test
     fun `goal creation with cron produces typed GoalCommand Create payload`() {
         val llm = StubChatModelClient()
-        llm.enqueueRawResponseForCallSite("input_intent_router", """{"route":"goal_creation","reasoning":"recurring"}""")
-        llm.enqueueRawResponseForCallSite("goal_creation", """{"decision":"create_goal","title":"Check stocks","instruction":"Fetch current stock prices","completion_criteria":"Prices reported","priority":"high","cron_expression":"0 * * * *","assistant_response":null,"reason":null}""")
+        llm.enqueueRawResponseForCallSite("input_intent_router", """{"route":"goal","reasoning":"recurring"}""")
+        llm.enqueueRawResponseForCallSite("goal", """{"operation":"create","goal_reference":null,"title":"Check stocks","instruction":"Fetch current stock prices","completion_criteria":"Prices reported","priority":"high","cron_expression":"0 * * * *","assistant_response":null,"reason":null}""")
         val planner = buildTestHierarchicalPlanner(llm)
 
         val decision = planner.decide(inputTrigger("check stocks every hour"), defaultContext)
@@ -551,8 +551,8 @@ class HierarchicalPlannerAcceptanceTest {
     @Test
     fun `goal management list operation works without goal reference`() {
         val llm = StubChatModelClient()
-        llm.enqueueRawResponseForCallSite("input_intent_router", """{"route":"goal_management","reasoning":"list"}""")
-        llm.enqueueRawResponseForCallSite("goal_management", """{"operation":"list","goal_reference":null,"params":null}""")
+        llm.enqueueRawResponseForCallSite("input_intent_router", """{"route":"goal","reasoning":"list"}""")
+        llm.enqueueRawResponseForCallSite("goal", """{"operation":"list","goal_reference":null,"title":null,"instruction":null,"completion_criteria":null,"priority":null,"cron_expression":null,"assistant_response":null,"reason":null}""")
         val planner = buildTestHierarchicalPlanner(llm)
 
         val decision = planner.decide(inputTrigger("show my goals"), defaultContext)
@@ -564,8 +564,8 @@ class HierarchicalPlannerAcceptanceTest {
     @Test
     fun `goal management pause with by_position reference`() {
         val llm = StubChatModelClient()
-        llm.enqueueRawResponseForCallSite("input_intent_router", """{"route":"goal_management","reasoning":"pause"}""")
-        llm.enqueueRawResponseForCallSite("goal_management", """{"operation":"pause","goal_reference":{"type":"by_position","id":"2","candidates":null,"original_text":null,"resolved_from":null},"params":null}""")
+        llm.enqueueRawResponseForCallSite("input_intent_router", """{"route":"goal","reasoning":"pause"}""")
+        llm.enqueueRawResponseForCallSite("goal", """{"operation":"pause","goal_reference":{"type":"by_position","id":"2","candidates":null,"original_text":null,"resolved_from":null},"title":null,"instruction":null,"completion_criteria":null,"priority":null,"cron_expression":null,"assistant_response":null,"reason":null}""")
         val planner = buildTestHierarchicalPlanner(llm)
 
         val decision = planner.decide(inputTrigger("pause goal 2"), goalContext)
@@ -578,8 +578,8 @@ class HierarchicalPlannerAcceptanceTest {
     @Test
     fun `goal management resume with by_position reference`() {
         val llm = StubChatModelClient()
-        llm.enqueueRawResponseForCallSite("input_intent_router", """{"route":"goal_management","reasoning":"resume"}""")
-        llm.enqueueRawResponseForCallSite("goal_management", """{"operation":"resume","goal_reference":{"type":"by_position","id":"1","candidates":null,"original_text":"the weather one","resolved_from":null},"params":null}""")
+        llm.enqueueRawResponseForCallSite("input_intent_router", """{"route":"goal","reasoning":"resume"}""")
+        llm.enqueueRawResponseForCallSite("goal", """{"operation":"resume","goal_reference":{"type":"by_position","id":"1","candidates":null,"original_text":"the weather one","resolved_from":null},"title":null,"instruction":null,"completion_criteria":null,"priority":null,"cron_expression":null,"assistant_response":null,"reason":null}""")
         val planner = buildTestHierarchicalPlanner(llm)
 
         val decision = planner.decide(inputTrigger("resume the weather one"), goalContext)
@@ -592,8 +592,8 @@ class HierarchicalPlannerAcceptanceTest {
     @Test
     fun `goal management complete operation`() {
         val llm = StubChatModelClient()
-        llm.enqueueRawResponseForCallSite("input_intent_router", """{"route":"goal_management","reasoning":"complete"}""")
-        llm.enqueueRawResponseForCallSite("goal_management", """{"operation":"complete","goal_reference":{"type":"by_position","id":"1","candidates":null,"original_text":null,"resolved_from":null},"params":null}""")
+        llm.enqueueRawResponseForCallSite("input_intent_router", """{"route":"goal","reasoning":"complete"}""")
+        llm.enqueueRawResponseForCallSite("goal", """{"operation":"complete","goal_reference":{"type":"by_position","id":"1","candidates":null,"original_text":null,"resolved_from":null},"title":null,"instruction":null,"completion_criteria":null,"priority":null,"cron_expression":null,"assistant_response":null,"reason":null}""")
         val planner = buildTestHierarchicalPlanner(llm)
 
         val decision = planner.decide(inputTrigger("mark goal 1 as done"), goalContext)
@@ -605,8 +605,8 @@ class HierarchicalPlannerAcceptanceTest {
     @Test
     fun `goal management delete operation`() {
         val llm = StubChatModelClient()
-        llm.enqueueRawResponseForCallSite("input_intent_router", """{"route":"goal_management","reasoning":"delete"}""")
-        llm.enqueueRawResponseForCallSite("goal_management", """{"operation":"delete","goal_reference":{"type":"by_position","id":"3","candidates":null,"original_text":null,"resolved_from":null},"params":null}""")
+        llm.enqueueRawResponseForCallSite("input_intent_router", """{"route":"goal","reasoning":"delete"}""")
+        llm.enqueueRawResponseForCallSite("goal", """{"operation":"delete","goal_reference":{"type":"by_position","id":"3","candidates":null,"original_text":null,"resolved_from":null},"title":null,"instruction":null,"completion_criteria":null,"priority":null,"cron_expression":null,"assistant_response":null,"reason":null}""")
         val planner = buildTestHierarchicalPlanner(llm)
 
         val decision = planner.decide(inputTrigger("delete goal 3"), goalContext)
@@ -618,8 +618,8 @@ class HierarchicalPlannerAcceptanceTest {
     @Test
     fun `goal management delete_all operation`() {
         val llm = StubChatModelClient()
-        llm.enqueueRawResponseForCallSite("input_intent_router", """{"route":"goal_management","reasoning":"delete all"}""")
-        llm.enqueueRawResponseForCallSite("goal_management", """{"operation":"delete_all","goal_reference":null,"params":null}""")
+        llm.enqueueRawResponseForCallSite("input_intent_router", """{"route":"goal","reasoning":"delete all"}""")
+        llm.enqueueRawResponseForCallSite("goal", """{"operation":"delete_all","goal_reference":null,"title":null,"instruction":null,"completion_criteria":null,"priority":null,"cron_expression":null,"assistant_response":null,"reason":null}""")
         val planner = buildTestHierarchicalPlanner(llm)
 
         val decision = planner.decide(inputTrigger("remove all my goals"), defaultContext)
@@ -631,8 +631,8 @@ class HierarchicalPlannerAcceptanceTest {
     @Test
     fun `goal management update operation with params`() {
         val llm = StubChatModelClient()
-        llm.enqueueRawResponseForCallSite("input_intent_router", """{"route":"goal_management","reasoning":"update"}""")
-        llm.enqueueRawResponseForCallSite("goal_management", """{"operation":"update","goal_reference":{"type":"by_position","id":"1","candidates":null,"original_text":null,"resolved_from":null},"params":{"title":"New title","instruction":null,"priority":"HIGH","completion_criteria":null,"cron_expression":null,"reason":null,"new_priority":null}}""")
+        llm.enqueueRawResponseForCallSite("input_intent_router", """{"route":"goal","reasoning":"update"}""")
+        llm.enqueueRawResponseForCallSite("goal", """{"operation":"update","goal_reference":{"type":"by_position","id":"1","candidates":null,"original_text":null,"resolved_from":null},"title":"New title","instruction":null,"completion_criteria":null,"priority":"HIGH","cron_expression":null,"assistant_response":null,"reason":null}""")
         val planner = buildTestHierarchicalPlanner(llm)
 
         val decision = planner.decide(inputTrigger("update goal 1 title and priority"), goalContext)
@@ -645,8 +645,8 @@ class HierarchicalPlannerAcceptanceTest {
     @Test
     fun `goal management reprioritize operation`() {
         val llm = StubChatModelClient()
-        llm.enqueueRawResponseForCallSite("input_intent_router", """{"route":"goal_management","reasoning":"reprioritize"}""")
-        llm.enqueueRawResponseForCallSite("goal_management", """{"operation":"reprioritize","goal_reference":{"type":"by_position","id":"2","candidates":null,"original_text":null,"resolved_from":null},"params":{"title":null,"instruction":null,"priority":null,"completion_criteria":null,"cron_expression":null,"reason":null,"new_priority":"critical"}}""")
+        llm.enqueueRawResponseForCallSite("input_intent_router", """{"route":"goal","reasoning":"reprioritize"}""")
+        llm.enqueueRawResponseForCallSite("goal", """{"operation":"reprioritize","goal_reference":{"type":"by_position","id":"2","candidates":null,"original_text":null,"resolved_from":null},"title":null,"instruction":null,"completion_criteria":null,"priority":"critical","cron_expression":null,"assistant_response":null,"reason":null}""")
         val planner = buildTestHierarchicalPlanner(llm)
 
         val decision = planner.decide(inputTrigger("make goal 2 critical"), goalContext)
@@ -659,8 +659,8 @@ class HierarchicalPlannerAcceptanceTest {
     @Test
     fun `goal management revise_plan operation`() {
         val llm = StubChatModelClient()
-        llm.enqueueRawResponseForCallSite("input_intent_router", """{"route":"goal_management","reasoning":"revise"}""")
-        llm.enqueueRawResponseForCallSite("goal_management", """{"operation":"revise_plan","goal_reference":{"type":"by_position","id":"1","candidates":null,"original_text":null,"resolved_from":null},"params":{"title":null,"instruction":null,"priority":null,"completion_criteria":null,"cron_expression":null,"reason":"approach not working","new_priority":null}}""")
+        llm.enqueueRawResponseForCallSite("input_intent_router", """{"route":"goal","reasoning":"revise"}""")
+        llm.enqueueRawResponseForCallSite("goal", """{"operation":"revise_plan","goal_reference":{"type":"by_position","id":"1","candidates":null,"original_text":null,"resolved_from":null},"title":null,"instruction":null,"completion_criteria":null,"priority":null,"cron_expression":null,"assistant_response":null,"reason":"approach not working"}""")
         val planner = buildTestHierarchicalPlanner(llm)
 
         val decision = planner.decide(inputTrigger("revise the plan for goal 1"), goalContext)
@@ -672,8 +672,8 @@ class HierarchicalPlannerAcceptanceTest {
     @Test
     fun `goal management ambiguous reference returns clarification`() {
         val llm = StubChatModelClient()
-        llm.enqueueRawResponseForCallSite("input_intent_router", """{"route":"goal_management","reasoning":"status"}""")
-        llm.enqueueRawResponseForCallSite("goal_management", """{"operation":"status","goal_reference":{"type":"ambiguous","id":null,"candidates":["1","2"],"original_text":"the weather goal","resolved_from":null},"params":null}""")
+        llm.enqueueRawResponseForCallSite("input_intent_router", """{"route":"goal","reasoning":"status"}""")
+        llm.enqueueRawResponseForCallSite("goal", """{"operation":"status","goal_reference":{"type":"ambiguous","id":null,"candidates":["1","2"],"original_text":"the weather goal","resolved_from":null},"title":null,"instruction":null,"completion_criteria":null,"priority":null,"cron_expression":null,"assistant_response":null,"reason":null}""")
         val planner = buildTestHierarchicalPlanner(llm)
 
         val decision = planner.decide(inputTrigger("status of the weather goal"), goalContext)
@@ -686,8 +686,8 @@ class HierarchicalPlannerAcceptanceTest {
     @Test
     fun `goal management unresolved reference returns clarification`() {
         val llm = StubChatModelClient()
-        llm.enqueueRawResponseForCallSite("input_intent_router", """{"route":"goal_management","reasoning":"delete"}""")
-        llm.enqueueRawResponseForCallSite("goal_management", """{"operation":"delete","goal_reference":{"type":"unresolved","id":null,"candidates":null,"original_text":"nonexistent goal","resolved_from":null},"params":null}""")
+        llm.enqueueRawResponseForCallSite("input_intent_router", """{"route":"goal","reasoning":"delete"}""")
+        llm.enqueueRawResponseForCallSite("goal", """{"operation":"delete","goal_reference":{"type":"unresolved","id":null,"candidates":null,"original_text":"nonexistent goal","resolved_from":null},"title":null,"instruction":null,"completion_criteria":null,"priority":null,"cron_expression":null,"assistant_response":null,"reason":null}""")
         val planner = buildTestHierarchicalPlanner(llm)
 
         val decision = planner.decide(inputTrigger("delete the nonexistent goal"), goalContext)
@@ -700,8 +700,8 @@ class HierarchicalPlannerAcceptanceTest {
     @Test
     fun `goal management invalid position resolves to unresolved and returns clarification`() {
         val llm = StubChatModelClient()
-        llm.enqueueRawResponseForCallSite("input_intent_router", """{"route":"goal_management","reasoning":"delete"}""")
-        llm.enqueueRawResponseForCallSite("goal_management", """{"operation":"delete","goal_reference":{"type":"by_position","id":"99","candidates":null,"original_text":"goal 99","resolved_from":null},"params":null}""")
+        llm.enqueueRawResponseForCallSite("input_intent_router", """{"route":"goal","reasoning":"delete"}""")
+        llm.enqueueRawResponseForCallSite("goal", """{"operation":"delete","goal_reference":{"type":"by_position","id":"99","candidates":null,"original_text":"goal 99","resolved_from":null},"title":null,"instruction":null,"completion_criteria":null,"priority":null,"cron_expression":null,"assistant_response":null,"reason":null}""")
         val planner = buildTestHierarchicalPlanner(llm)
 
         val decision = planner.decide(inputTrigger("delete goal 99"), goalContext)
@@ -712,25 +712,25 @@ class HierarchicalPlannerAcceptanceTest {
     }
 
     @Test
-    fun `goal management falls back to general action when goal_management lane fails`() {
+    fun `goal planner falls back to general action when goal lane fails`() {
         val llm = StubChatModelClient()
-        llm.enqueueRawResponseForCallSite("input_intent_router", """{"route":"goal_management","reasoning":"delete"}""")
-        // goal_management lane returns garbage -> parse failure -> Noop -> fallback to general action
-        llm.enqueueRawResponseForCallSite("goal_management", "not-valid-json-at-all")
+        llm.enqueueRawResponseForCallSite("input_intent_router", """{"route":"goal","reasoning":"delete"}""")
+        // goal lane returns garbage -> parse failure -> Noop -> fallback to general action
+        llm.enqueueRawResponseForCallSite("goal", "not-valid-json-at-all")
         llm.enqueueRawResponseForCallSite("general_action", """{"decision":"intend","urgency":"medium","intention_kind":"observe","commit_mode_preference":"not_applicable","action_type":"goal_operation","action_payload":"{\"command\":\"delete\"}","action_summary":"Delete goal"}""")
         val planner = buildTestHierarchicalPlanner(llm)
 
         val decision = planner.decide(inputTrigger("delete the goal"), goalContext)
 
         // Should NOT be Noop — the fallback to GeneralActionPlanner should produce something.
-        assertTrue(decision !is EgoDecision.Noop, "GoalManagement failure should fall back to GeneralActionPlanner, not Noop")
+        assertTrue(decision !is EgoDecision.Noop, "Goal planner failure should fall back to GeneralActionPlanner, not Noop")
     }
 
     @Test
     fun `goal creation fallback response delivers assistant message`() {
         val llm = StubChatModelClient()
-        llm.enqueueRawResponseForCallSite("input_intent_router", """{"route":"goal_creation","reasoning":"goal?"}""")
-        llm.enqueueRawResponseForCallSite("goal_creation", """{"decision":"fallback","title":null,"instruction":null,"completion_criteria":null,"priority":null,"cron_expression":null,"assistant_response":"That doesn't seem like a persistent goal. Can you be more specific?","reason":"not a goal"}""")
+        llm.enqueueRawResponseForCallSite("input_intent_router", """{"route":"goal","reasoning":"goal?"}""")
+        llm.enqueueRawResponseForCallSite("goal", """{"operation":"fallback","goal_reference":null,"title":null,"instruction":null,"completion_criteria":null,"priority":null,"cron_expression":null,"assistant_response":"That doesn't seem like a persistent goal. Can you be more specific?","reason":"not a goal"}""")
         val planner = buildTestHierarchicalPlanner(llm)
 
         val decision = planner.decide(inputTrigger("what time is it"), defaultContext)
@@ -743,8 +743,8 @@ class HierarchicalPlannerAcceptanceTest {
     @Test
     fun `goal creation malformed create response does not synthesize persistent goal`() {
         val llm = StubChatModelClient()
-        llm.enqueueRawResponseForCallSite("input_intent_router", """{"route":"goal_creation","reasoning":"goal?"}""")
-        llm.enqueueRawResponseForCallSite("goal_creation", """{"decision":"create_goal","title":"Broken goal","instruction":null,"completion_criteria":"done","priority":"medium","cron_expression":null,"assistant_response":null,"reason":"missing instruction"}""")
+        llm.enqueueRawResponseForCallSite("input_intent_router", """{"route":"goal","reasoning":"goal?"}""")
+        llm.enqueueRawResponseForCallSite("goal", """{"operation":"create","goal_reference":null,"title":"Broken goal","instruction":null,"completion_criteria":"done","priority":"medium","cron_expression":null,"assistant_response":null,"reason":"missing instruction"}""")
         val planner = buildTestHierarchicalPlanner(llm)
 
         val decision = planner.decide(inputTrigger("set up a goal"), defaultContext)
@@ -829,7 +829,7 @@ class HierarchicalPlannerAcceptanceTest {
 
         assertTrue(
             instrumentation.events.any {
-                it.type == "prompt_budget_allocation" && it.data["call_site"] == "continuation_prompt"
+                it.type == "prompt_budget_allocation" && it.data["call_site"] == "progression_prompt"
             }
         )
     }

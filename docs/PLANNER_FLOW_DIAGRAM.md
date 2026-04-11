@@ -80,8 +80,8 @@ flowchart TB
     decide["HierarchicalEgoPlanner.decide()"]
 
     decide -->|"EgoTrigger.IncomingInput"| L1_input["InputPlanner<br/><b>L1</b>"]
-    decide -->|"EgoTrigger.Continuation"| L1_deferred["ContinuationPlanner<br/><b>L1</b>"]
-    decide -->|"EgoTrigger.ActionFeedback"| L1_feedback["FeedbackPlanner<br/><b>L1</b>"]
+    decide -->|"EgoTrigger.Continuation"| L1_progression["ProgressionPlanner<br/><b>L1</b>"]
+    decide -->|"EgoTrigger.ActionFeedback"| L1_progression
     decide -->|"EgoTrigger.GoalWork"| L1_goal["GoalWorkPlanner<br/><b>L1</b>"]
     decide -->|"EgoTrigger.IncomingImpulse"| L1_impulse["ImpulsePlanner<br/><b>L1</b>"]
 ```
@@ -91,8 +91,8 @@ flowchart TB
 | Trigger | Origin | L1 Lane | LaneId |
 |---------|--------|---------|--------|
 | `IncomingInput` | User (dashboard, telegram) | InputPlanner | `INPUT_INTENT_ROUTER` |
-| `Continuation` | Internal queue (prior iteration) | ContinuationPlanner | `CONTINUATION` |
-| `ActionFeedback` | Motor cortex (execution result) | FeedbackPlanner | `FEEDBACK` |
+| `Continuation` | Internal queue (prior iteration) | ProgressionPlanner | `PROGRESSION` |
+| `ActionFeedback` | Motor cortex (execution result) | ProgressionPlanner | `PROGRESSION` |
 | `GoalWork` | Goal cue (cron, step advance) | GoalWorkPlanner | `GOAL_WORK` |
 | `IncomingImpulse` | Id module (drive activation) | ImpulsePlanner | `IMPULSE` |
 
@@ -127,16 +127,14 @@ flowchart TB
     dispatch -->|DirectResponse| L2_direct["DirectResponsePlanner"]
     dispatch -->|GeneralAction| L2_general["GeneralActionPlanner"]
     dispatch -->|MultiStepTask| L2_task["TaskDecompositionPlanner"]
-    dispatch -->|GoalCreation| L2_goalcreate["GoalCreationPlanner"]
-    dispatch -->|GoalManagement| L2_goalmgmt["GoalManagementPlanner"]
+    dispatch -->|Goal| L2_goal["GoalPlanner"]
 
-    L2_goalmgmt -->|"returns Noop?"| L2_general_fb["Fallback to<br/>GeneralActionPlanner"]
+    L2_goal -->|"returns Noop?"| L2_general_fb["Fallback to<br/>GeneralActionPlanner"]
 
     L2_direct --> decision
     L2_general --> decision
     L2_task --> decision
-    L2_goalcreate --> decision
-    L2_goalmgmt -->|"returns non-Noop"| decision
+    L2_goal -->|"returns non-Noop"| decision
     L2_general_fb --> decision
 
     inline_clarify --> decision
@@ -148,7 +146,7 @@ flowchart TB
 ### InputIntentRouter Routes
 
 The router is an LLM classifier that maps free-text user input to one of
-seven typed routes. Dispatch from route to sub-planner is deterministic on
+six typed routes. Dispatch from route to sub-planner is deterministic on
 the typed result.
 
 | Route | L2 Sub-Planner | Grounding | Typical Decision |
@@ -156,8 +154,7 @@ the typed result.
 | `DirectResponse` | DirectResponsePlanner | LLM-classified | `EnqueueContinuation` or `FormIntention(CONTACT_USER)` |
 | `GeneralAction` | GeneralActionPlanner | LLM-classified | `FormIntention` (any action type) |
 | `MultiStepTask` | TaskDecompositionPlanner | LLM-classified | `EnqueuePlan` |
-| `GoalCreation` | GoalCreationPlanner | NOT_REQUIRED | `FormIntention(CONTACT_USER)` with goal params |
-| `GoalManagement` | GoalManagementPlanner | NOT_REQUIRED | `FormIntention(CONTACT_USER)` with goal op |
+| `Goal` | GoalPlanner | NOT_REQUIRED | `FormIntention(GOAL_OPERATION)` with typed GoalCommand |
 | `ClarificationNeeded` | (inline) | NOT_REQUIRED | `FormIntention(CONTACT_USER)` |
 | `Noop` | (inline) | NOT_REQUIRED | `EgoDecision.Noop` |
 
@@ -166,7 +163,7 @@ the typed result.
 Determines whether the input requires fresh external evidence before a
 response can be delivered.
 
-- **Deterministic NOT_REQUIRED**: GoalCreation, GoalManagement, ClarificationNeeded, Noop
+- **Deterministic NOT_REQUIRED**: Goal, ClarificationNeeded, Noop
 - **Requires LLM classification**: DirectResponse, GeneralAction, MultiStepTask
 
 Result is propagated as `GroundingMetadata` on the input envelope and the
@@ -287,7 +284,7 @@ sequenceDiagram
         ARP-->>Ego: cleanup if CONTACT_USER
     else Continuation
         Ego->>HP: decide(Continuation, context)
-        HP->>L1: ContinuationPlanner.plan() [LLM]
+        HP->>L1: ProgressionPlanner.plan() [LLM]
         L1-->>HP: EgoDecision
         HP-->>Ego: EgoDecision
         Ego->>DD: dispatch(decision)
@@ -310,10 +307,8 @@ explanation.
 | `DIRECT_RESPONSE` | no |
 | `GENERAL_ACTION` | yes |
 | `TASK_DECOMPOSITION` | no |
-| `GOAL_CREATION` | no |
-| `GOAL_MANAGEMENT` | no |
-| `CONTINUATION` | yes |
-| `FEEDBACK` | yes |
+| `GOAL` | no |
+| `PROGRESSION` | yes |
 | `GOAL_WORK` | yes |
 | `IMPULSE` | yes |
 | `GROUNDING_CLASSIFIER` | no |
@@ -327,8 +322,7 @@ explanation.
 | `PlannerLane` interface | `agent/ego/planner/PlannerLane.kt` |
 | `LaneId` enum | `agent/ego/planner/LaneId.kt` |
 | `InputPlanner` | `agent/ego/planner/lane/InputPlanner.kt` |
-| `ContinuationPlanner` | `agent/ego/planner/lane/ContinuationPlanner.kt` |
-| `FeedbackPlanner` | `agent/ego/planner/lane/FeedbackPlanner.kt` |
+| `ProgressionPlanner` | `agent/ego/planner/lane/ProgressionPlanner.kt` |
 | `GoalWorkPlanner` | `agent/ego/planner/lane/GoalWorkPlanner.kt` |
 | `ImpulsePlanner` | `agent/ego/planner/lane/ImpulsePlanner.kt` |
 | `InputIntentRouter` | `agent/ego/planner/input/InputIntentRouter.kt` |
@@ -336,8 +330,7 @@ explanation.
 | `DirectResponsePlanner` | `agent/ego/planner/input/DirectResponsePlanner.kt` |
 | `GeneralActionPlanner` | `agent/ego/planner/input/GeneralActionPlanner.kt` |
 | `TaskDecompositionPlanner` | `agent/ego/planner/input/TaskDecompositionPlanner.kt` |
-| `GoalCreationPlanner` | `agent/ego/planner/input/GoalCreationPlanner.kt` |
-| `GoalManagementPlanner` | `agent/ego/planner/input/GoalManagementPlanner.kt` |
+| `GoalPlanner` | `agent/ego/planner/input/GoalPlanner.kt` |
 | `InputRoute` sealed interface | `agent/ego/planner/model/InputRoute.kt` |
 | `EgoTrigger` sealed interface | `agent/model/CognitionModels.kt:127-133` |
 | `EgoDecision` sealed interface | `agent/model/CognitionModels.kt:135-164` |

@@ -5,10 +5,9 @@ import ai.neopsyke.agent.ego.planner.LaneId
 import ai.neopsyke.agent.ego.planner.PlannerLane
 import ai.neopsyke.agent.ego.planner.input.DirectResponsePlanner
 import ai.neopsyke.agent.ego.planner.input.GeneralActionPlanner
-import ai.neopsyke.agent.ego.planner.input.GoalCreationPlanner
+import ai.neopsyke.agent.ego.planner.input.GoalPlanner
 import ai.neopsyke.agent.ego.planner.input.GroundingClassifier
 import ai.neopsyke.agent.model.GroundingMetadata
-import ai.neopsyke.agent.ego.planner.input.GoalManagementPlanner
 import ai.neopsyke.agent.ego.planner.input.InputIntentRouter
 import ai.neopsyke.agent.ego.planner.input.TaskDecompositionPlanner
 import ai.neopsyke.agent.ego.planner.model.InputRoute
@@ -45,8 +44,7 @@ class InputPlanner(
     private val directResponsePlanner: DirectResponsePlanner,
     private val generalActionPlanner: GeneralActionPlanner,
     private val taskDecompositionPlanner: TaskDecompositionPlanner,
-    private val goalCreationPlanner: GoalCreationPlanner,
-    private val goalManagementPlanner: GoalManagementPlanner,
+    private val goalPlanner: GoalPlanner,
 ) : PlannerLane {
 
     override val laneId: LaneId = LaneId.INPUT_INTENT_ROUTER
@@ -99,13 +97,12 @@ class InputPlanner(
             is InputRoute.DirectResponse -> directResponsePlanner.plan(groundedTrigger, groundedContext)
             is InputRoute.GeneralAction -> generalActionPlanner.plan(groundedTrigger, groundedContext)
             is InputRoute.MultiStepTask -> taskDecompositionPlanner.plan(groundedTrigger, groundedContext)
-            is InputRoute.GoalCreation -> goalCreationPlanner.plan(groundedTrigger, groundedContext)
-            is InputRoute.GoalManagement -> {
-                val decision = goalManagementPlanner.plan(groundedTrigger, groundedContext)
+            is InputRoute.Goal -> {
+                val decision = goalPlanner.plan(groundedTrigger, groundedContext)
                 if (decision is EgoDecision.Noop) {
                     instrumentation.emit(
                         AgentEvent(
-                            type = "goal_management_fallback",
+                            type = "goal_planner_fallback",
                             data = mapOf(
                                 "reason" to decision.reason,
                                 "root_input_id" to groundedInput.rootInputId,
