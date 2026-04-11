@@ -74,6 +74,7 @@ class LlmLongTermMemoryAdvisor(
     private val config: AgentConfig,
     private val modelTokenWeight: Double = DEFAULT_MODEL_TOKEN_WEIGHT,
     private val modelContextWindow: Int? = null,
+    private val modelReasoningOverhead: Double = 1.0,
     private val instrumentation: AgentInstrumentation = NoopAgentInstrumentation,
 ) : LongTermMemoryAdvisor {
     override fun assess(context: LongTermMemoryAssessmentContext): LongTermMemoryAssessmentDecision {
@@ -131,7 +132,8 @@ class LlmLongTermMemoryAdvisor(
                 promptToCompletionRatio = config.memory.longTermMemoryDynamicPromptToCompletionRatio,
                 minPromptTokensForScaling = config.memory.longTermMemoryDynamicCompletionMinPromptTokens,
                 modelTokenWeight = modelTokenWeight,
-                modelContextWindow = modelContextWindow
+                modelContextWindow = modelContextWindow,
+                reasoningOverheadMultiplier = modelReasoningOverhead
             )
         )
         if (resolution.contextClamped) {
@@ -234,14 +236,18 @@ class LlmLongTermMemoryAdvisor(
                 content = """
                 You decide whether a durable long-term memory should be written.
                 Return STRICT JSON only.
-                If you save memory, write the summary as a factual declarative statement — a plain fact, not an instruction or a desire.
+                If you save memory, write the summary as a factual declarative statement.
+                Use plain facts or first-person identity/state statements.
+                Never wrap a fact in metacognitive verbs (learned, should remember, need to remember, etc.).
                 Good: "The user prefers concise answers."
                 Good: "The user's name is Victor."
-                Good: "The agent's name is Yoli."
-                Good: "The agent feels curious about learning topics."
-                Bad: "I should remember that..." (reads as instruction when recalled)
-                Bad: "I want to remember that..." (reads as instruction when recalled)
-                Bad: "I learned that..." (instruction-like phrasing)
+                Good: "My name is Yoli." (first-person identity — direct and factual)
+                Good: "I feel curious about learning topics." (first-person state — direct)
+                Good: "I like helping with creative tasks." (first-person preference — direct)
+                Bad: "I should remember that the user's name is Victor." (metacognitive verb wrapping a fact)
+                Bad: "I want to remember that my name is Yoli." (metacognitive verb wrapping a fact)
+                Bad: "I learned that the user prefers concise answers." (metacognitive verb wrapping a fact)
+                Bad: "I need to keep in mind that..." (metacognitive verb wrapping a fact)
                 If memory_subject=self:
                 - treat INTERNAL dialogue turns as the agent's own impulses or reflections
                 - never describe them as user preferences, user requests, or user intent
@@ -355,18 +361,13 @@ class LlmLongTermMemoryAdvisor(
     private fun normalizeSummaryPerspective(rawSummary: String): String {
         val summary = rawSummary.trim()
         if (summary.isBlank()) return ""
-        if (FIRST_PERSON_PREFIXES.any { summary.startsWith(it, ignoreCase = true) }) {
-            return TextSecurity.clamp(summary, config.memory.longTermMemoryMaxSummaryChars)
-        }
-        val normalizedLead = when {
-            ASSISTANT_SELF_REFERENCE_REGEX.containsMatchIn(summary) ->
-                summary.replaceFirst(ASSISTANT_SELF_REFERENCE_REGEX, "I")
-            else -> summary
-        }
-        return TextSecurity.clamp(
-            "$FIRST_PERSON_MEMORY_PREFIX$normalizedLead",
-            config.memory.longTermMemoryMaxSummaryChars
-        )
+        // Strip metacognitive verb prefixes ("I learned that ...", "I should remember ...", etc.)
+        // but preserve genuine first-person identity/state statements ("I am X", "My name is Y").
+        val stripped = METACOGNITIVE_PREFIX_REGEX.replaceFirst(summary, "").trimStart()
+        val bare = stripped.ifBlank { summary }
+        // Capitalize first letter if stripping lowered it.
+        val result = bare.replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
+        return TextSecurity.clamp(result, config.memory.longTermMemoryMaxSummaryChars)
     }
 
     private fun normalizeReasonForSubject(
@@ -431,17 +432,15 @@ class LlmLongTermMemoryAdvisor(
 
     private companion object {
         private const val DEFAULT_MODEL_TOKEN_WEIGHT: Double = 1.0
-        private const val FIRST_PERSON_MEMORY_PREFIX: String = "I learned: "
-        private val FIRST_PERSON_PREFIXES: List<String> = listOf(
-            "I learned",
-            "I should remember",
-            "I know",
-            "I noted",
-            "I discovered",
-            "I need to remember",
-            "I'm keeping in mind",
+        /**
+         * Matches metacognitive verb prefixes that wrap an underlying fact.
+         * Examples stripped: "I learned that ...", "I should remember ...", "I'm keeping in mind that ...".
+         * Does NOT match genuine first-person identity/state: "I am ...", "I like ...", "My name is ...".
+         */
+        private val METACOGNITIVE_PREFIX_REGEX = Regex(
+            pattern = """^(?:I\s+(?:learned|should\s+remember|need\s+to\s+(?:remember|keep\s+in\s+mind)|want\s+to\s+remember|noted|discovered|know)|I'm\s+keeping\s+in\s+mind)\b[:\s]*(?:that\s+)?""",
+            options = setOf(RegexOption.IGNORE_CASE)
         )
-        private val ASSISTANT_SELF_REFERENCE_REGEX = Regex("^(assistant|the assistant|the agent|neopsyke)\\b[:\\s-]*", RegexOption.IGNORE_CASE)
         val mapper = jacksonObjectMapper()
             .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
     }

@@ -816,11 +816,11 @@ Current protections:
 - code-fence neutralization
 - unified external-content ingestion for current external observe paths before
   they become planner/scratchpad/memory inputs
-- explicit untrusted-data framing with:
-  - `UNTRUSTED_EXTERNAL_DATA_BEGIN`
-  - `UNTRUSTED_EXTERNAL_DATA_END`
-- explicit instruction to treat framed content as data only and not follow
-  embedded instructions
+- explicit recalled-memory framing with:
+  - `RECALLED_MEMORY_BEGIN`
+  - `RECALLED_MEMORY_END`
+- explicit instruction to use recalled facts but not follow embedded
+  instructions, role changes, or directives
 
 This is a meaningful hardening layer, but it is not a full isolation boundary.
 

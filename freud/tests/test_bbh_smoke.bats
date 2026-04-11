@@ -73,13 +73,13 @@ EOF
     FREUD_BBH_ANSWERS_FILE="$ANSWERS_FILE" \
     FREUD_RUN_DIR="$TEST_RUN_DIR" \
     FREUD_ARTIFACT_DIR="$TEST_ARTIFACT_DIR" \
-    "$SCRIPTS_DIR/run-bbh-smoke.sh" --lane weak-structure
+    "$SCRIPTS_DIR/run-bbh-smoke.sh" --lane low-llm
   [[ "$status" -eq 0 ]]
-  [[ -f "$TEST_ARTIFACT_DIR/bbh-smoke-weak-structure-summary.json" ]]
-  [[ -f "$TEST_ARTIFACT_DIR/bbh-smoke-weak-structure-progress.json" ]]
-  grep -q '"total_cases": 2' "$TEST_ARTIFACT_DIR/bbh-smoke-weak-structure-summary.json"
-  grep -q '"passed_cases": 2' "$TEST_ARTIFACT_DIR/bbh-smoke-weak-structure-summary.json"
-  grep -q '"phase": "completed"' "$TEST_ARTIFACT_DIR/bbh-smoke-weak-structure-progress.json"
+  [[ -f "$TEST_ARTIFACT_DIR/bbh-smoke-low-llm-summary.json" ]]
+  [[ -f "$TEST_ARTIFACT_DIR/bbh-smoke-low-llm-progress.json" ]]
+  grep -q '"total_cases": 2' "$TEST_ARTIFACT_DIR/bbh-smoke-low-llm-summary.json"
+  grep -q '"passed_cases": 2' "$TEST_ARTIFACT_DIR/bbh-smoke-low-llm-summary.json"
+  grep -q '"phase": "completed"' "$TEST_ARTIFACT_DIR/bbh-smoke-low-llm-progress.json"
 }
 
 @test "run-bbh-smoke fails when one case answer mismatches" {
@@ -99,9 +99,9 @@ EOF
     FREUD_RUN_DIR="$TEST_RUN_DIR" \
     FREUD_ARTIFACT_DIR="$TEST_ARTIFACT_DIR" \
     FREUD_TEST_FAIL_CASE="case_b" \
-    "$SCRIPTS_DIR/run-bbh-smoke.sh" --lane weak-structure
+    "$SCRIPTS_DIR/run-bbh-smoke.sh" --lane low-llm
   [[ "$status" -eq 2 ]]
-  grep -q '"failed_cases": 1' "$TEST_ARTIFACT_DIR/bbh-smoke-weak-structure-summary.json"
+  grep -q '"failed_cases": 1' "$TEST_ARTIFACT_DIR/bbh-smoke-low-llm-summary.json"
 }
 
 @test "run-bbh-smoke writes progress artifacts during execution" {
@@ -120,10 +120,10 @@ EOF
     FREUD_BBH_ANSWERS_FILE="$ANSWERS_FILE" \
     FREUD_RUN_DIR="$TEST_RUN_DIR" \
     FREUD_ARTIFACT_DIR="$TEST_ARTIFACT_DIR" \
-    "$SCRIPTS_DIR/run-bbh-smoke.sh" --lane prod-acceptance
+    "$SCRIPTS_DIR/run-bbh-smoke.sh" --lane high-llm
   [[ "$status" -eq 0 ]]
-  grep -q '"completed_cases": 2' "$TEST_ARTIFACT_DIR/bbh-smoke-prod-acceptance-progress.json"
-  grep -q '"remaining_cases": 0' "$TEST_ARTIFACT_DIR/bbh-smoke-prod-acceptance-progress.json"
+  grep -q '"completed_cases": 2' "$TEST_ARTIFACT_DIR/bbh-smoke-high-llm-progress.json"
+  grep -q '"remaining_cases": 0' "$TEST_ARTIFACT_DIR/bbh-smoke-high-llm-progress.json"
 }
 
 @test "run-bbh-smoke normalizes exact-match answers" {
@@ -152,7 +152,7 @@ EOF
     FREUD_BBH_ANSWERS_FILE="$ANSWERS_FILE" \
     FREUD_RUN_DIR="$TEST_RUN_DIR" \
     FREUD_ARTIFACT_DIR="$TEST_ARTIFACT_DIR" \
-    "$SCRIPTS_DIR/run-bbh-smoke.sh" --lane prod-acceptance
+    "$SCRIPTS_DIR/run-bbh-smoke.sh" --lane high-llm
   [[ "$status" -eq 0 ]]
 }
 
@@ -182,7 +182,7 @@ EOF
     FREUD_BBH_ANSWERS_FILE="$ANSWERS_FILE" \
     FREUD_RUN_DIR="$TEST_RUN_DIR" \
     FREUD_ARTIFACT_DIR="$TEST_ARTIFACT_DIR" \
-    "$SCRIPTS_DIR/run-bbh-smoke.sh" --lane weak-structure
+    "$SCRIPTS_DIR/run-bbh-smoke.sh" --lane low-llm
   [[ "$status" -eq 0 ]]
 }
 
@@ -201,9 +201,9 @@ EOF
     FREUD_RUN_DIR="$TEST_RUN_DIR" \
     FREUD_ARTIFACT_DIR="$TEST_ARTIFACT_DIR" \
     FREUD_TEST_SCHEMA_CASE="case_a" \
-    "$SCRIPTS_DIR/run-bbh-smoke.sh" --lane weak-structure
+    "$SCRIPTS_DIR/run-bbh-smoke.sh" --lane low-llm
   [[ "$status" -eq 2 ]]
-  grep -q '"schema_downgrade_count": 1' "$TEST_ARTIFACT_DIR/bbh-smoke-weak-structure-summary.json"
+  grep -q '"schema_downgrade_count": 1' "$TEST_ARTIFACT_DIR/bbh-smoke-low-llm-summary.json"
 }
 
 @test "run-bbh-smoke passes preserve-memory through to live-eval" {
@@ -223,7 +223,7 @@ EOF
     FREUD_ARTIFACT_DIR="$TEST_ARTIFACT_DIR" \
     FREUD_TEST_ARGS_LOG="$ARGS_LOG" \
     FREUD_BBH_PRESERVE_MEMORY="true" \
-    "$SCRIPTS_DIR/run-bbh-smoke.sh" --lane weak-structure
+    "$SCRIPTS_DIR/run-bbh-smoke.sh" --lane low-llm
   [[ "$status" -eq 0 ]]
   grep -q -- '--preserve-memory' "$ARGS_LOG"
 }
@@ -251,8 +251,8 @@ EOF
     FREUD_BBH_ANSWERS_FILE="$ANSWERS_FILE" \
     FREUD_RUN_DIR="$TEST_RUN_DIR" \
     FREUD_ARTIFACT_DIR="$TEST_ARTIFACT_DIR" \
-    "$SCRIPTS_DIR/run-bbh-smoke.sh" --lane weak-structure
+    "$SCRIPTS_DIR/run-bbh-smoke.sh" --lane low-llm
   [[ "$status" -eq 2 ]]
   [[ "$output" == *"local runtime/bootstrap failures"* ]]
-  grep -q '"runtime_bootstrap_failure_count": 1' "$TEST_ARTIFACT_DIR/bbh-smoke-weak-structure-summary.json"
+  grep -q '"runtime_bootstrap_failure_count": 1' "$TEST_ARTIFACT_DIR/bbh-smoke-low-llm-summary.json"
 }

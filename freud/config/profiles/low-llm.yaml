@@ -1,8 +1,8 @@
-# Profile: low-llm (formerly weak-structure)
+# Profile: low-llm
 # Enables live steps with the low-cost LLM routing.
 
 live_eval:
-  llm_config_file: freud/config/llm-weak-structure.yaml
+  llm_config_file: freud/config/llm-low-llm.yaml
   timeout: 120
 
 # Live steps are built-in — no cmd needed. Just mark them present so the

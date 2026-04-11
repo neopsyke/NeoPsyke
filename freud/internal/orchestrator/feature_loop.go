@@ -692,10 +692,10 @@ func orDefault(value, fallback string) string {
 // resolveLane determines the BBH lane name from the LLM config file path.
 func resolveLane(cfg *config.FreudConfig) string {
 	llmConfig := cfg.LiveEval.LLMConfigFile
-	if strings.Contains(llmConfig, "weak-structure") {
+	if strings.Contains(llmConfig, "low-llm") {
 		return "low-llm"
 	}
-	if strings.Contains(llmConfig, "prod-acceptance") {
+	if strings.Contains(llmConfig, "high-llm") {
 		return "high-llm"
 	}
 	return "default"

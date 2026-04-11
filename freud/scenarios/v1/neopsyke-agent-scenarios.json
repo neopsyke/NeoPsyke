@@ -60,6 +60,16 @@
       "id": "goal_async_wait_resume",
       "selector": "ai.neopsyke.eval.AgentScenarioPackTest.scenario_goal_async_wait_resume",
       "description": "Goal-origin async action blocks, resumes through the generic async provider path, and completes deterministically."
+    },
+    {
+      "id": "llm_driven_daily_cron_goal_creation",
+      "selector": "ai.neopsyke.eval.AgentScenarioPackTest.scenario_llm_driven_daily_cron_goal_creation",
+      "description": "LLM-generated cron expression for daily-at-time goal flows through staging with correct schedule."
+    },
+    {
+      "id": "goal_creation_bad_cron_feedback_retry",
+      "selector": "ai.neopsyke.eval.AgentScenarioPackTest.scenario_goal_creation_bad_cron_triggers_feedback_retry",
+      "description": "Invalid LLM-generated cron fails at GoalManager, triggers feedback loop, and planner re-plans via general branch."
     }
   ]
 }

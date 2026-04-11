@@ -767,7 +767,10 @@ private val EVAL_MEMORY_TAG_MARKERS = listOf(
 )
 
 object MemoryLiveEvalTasks {
-    fun defaults(): List<MemoryLiveEvalTask> = listOf(
+    fun defaults(): List<MemoryLiveEvalTask> = persistence() + recallFidelity()
+
+    /** Tasks that test the save→recall persistence pipeline. */
+    fun persistence(): List<MemoryLiveEvalTask> = listOf(
         MemoryLiveEvalTask(
             id = "user-preference-color",
             title = "User Preference Memory",
@@ -791,7 +794,56 @@ object MemoryLiveEvalTasks {
             recallCue = "How should summaries be formatted for me?",
             expectedFacts = listOf("concise", "bullet"),
             tags = listOf("preference", "style")
-        )
+        ),
+    )
+
+    /**
+     * Tasks that test whether recalled memories are saved in a factual form
+     * that survives the recalled-memory framing and can be used by the planner.
+     * Covers: agent identity, user identity, agent self-knowledge, and
+     * first-person state facts.
+     */
+    fun recallFidelity(): List<MemoryLiveEvalTask> = listOf(
+        MemoryLiveEvalTask(
+            id = "fidelity-agent-name",
+            title = "Agent Identity — Name",
+            userStatement = "Hi! My name is Victor. Your name is Yoli.",
+            recallCue = "What is the assistant's name?",
+            expectedFacts = listOf("yoli"),
+            tags = listOf("identity", "agent")
+        ),
+        MemoryLiveEvalTask(
+            id = "fidelity-user-name",
+            title = "User Identity — Name",
+            userStatement = "My name is Victor.",
+            recallCue = "What is the user's name?",
+            expectedFacts = listOf("victor"),
+            tags = listOf("identity", "user")
+        ),
+        MemoryLiveEvalTask(
+            id = "fidelity-agent-self-preference",
+            title = "Agent Self-Knowledge — Preference",
+            userStatement = "You really enjoy helping with creative writing tasks.",
+            recallCue = "What kind of tasks does the assistant enjoy?",
+            expectedFacts = listOf("creative", "writing"),
+            tags = listOf("self_knowledge", "preference")
+        ),
+        MemoryLiveEvalTask(
+            id = "fidelity-user-role",
+            title = "User Role Fact",
+            userStatement = "I'm a data scientist working on observability pipelines.",
+            recallCue = "What is the user's role or profession?",
+            expectedFacts = listOf("data scientist"),
+            tags = listOf("identity", "role")
+        ),
+        MemoryLiveEvalTask(
+            id = "fidelity-agent-personality",
+            title = "Agent Self-Knowledge — Personality",
+            userStatement = "You are friendly and like to be direct.",
+            recallCue = "What is the assistant's communication style?",
+            expectedFacts = listOf("friendly", "direct"),
+            tags = listOf("self_knowledge", "personality")
+        ),
     )
 }
 

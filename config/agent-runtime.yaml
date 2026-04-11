@@ -63,9 +63,9 @@ agent:
     long_term_memory_assess_every_steps: 16
     long_term_memory_assess_cooldown_steps: 8
     long_term_memory_min_confidence: 0.65
-    long_term_memory_max_tokens: 320
+    long_term_memory_max_tokens: 1024
     long_term_memory_dynamic_completion_enabled: true
-    long_term_memory_dynamic_completion_hard_max_tokens: 512
+    long_term_memory_dynamic_completion_hard_max_tokens: 2048
     long_term_memory_dynamic_prompt_to_completion_ratio: 0.08
     long_term_memory_dynamic_completion_min_prompt_tokens: 160
     long_term_memory_max_summary_chars: 320
