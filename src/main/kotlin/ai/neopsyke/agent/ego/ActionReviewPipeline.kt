@@ -581,6 +581,21 @@ internal class ActionReviewPipeline(
     }
 
     private suspend fun executeActionSafely(action: PendingAction): ActionOutcome {
+        val gate = actionLifecycleObserver.beforeActionExecution(action)
+        if (!gate.allow) {
+            val blockedReason = gate.reason.ifBlank { "Action blocked by lifecycle observer." }
+            actionLifecycleObserver.onActionBlocked(
+                action = action,
+                reason = blockedReason,
+                reasonCode = gate.reasonCode,
+                source = gate.source,
+            )
+            return ActionOutcome(
+                statusSummary = blockedReason,
+                executionStatus = ActionExecutionStatus.FAILED,
+                observedEvidence = false,
+            )
+        }
         return try {
             motorCortex.execute(action, config.searchResultCount)
         } catch (ex: Exception) {

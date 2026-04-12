@@ -282,7 +282,7 @@ object AgentEvents {
                 "root_input_id" to rootInputId,
                 "is_empty" to ambientContext.isEmpty(),
                 "rendered_context" to ambientContext.render(),
-                "active_goals" to ambientContext.activeGoals,
+                "active_goals" to ambientContext.activeWorkItems,
                 "recent_scratchpad_themes" to ambientContext.recentScratchpadThemes,
                 "recent_useful_actions_updates" to ambientContext.recentUsefulActionsOrUpdates,
                 "unresolved_open_loops" to ambientContext.unresolvedOpenLoops,
@@ -650,57 +650,57 @@ object AgentEvents {
 
     // ── Goal events ───────────────────────────────────────────────────
 
-    fun goalCreated(goalId: String, title: String, priority: String): AgentEvent =
+    fun durableWorkCreated(goalId: String, title: String, priority: String): AgentEvent =
         AgentEvent(
-            type = "goal_created",
+            type = "durable_work_created",
             data = mapOf("goal_id" to goalId, "title" to title, "priority" to priority)
         )
 
-    fun goalStatusChanged(goalId: String, oldStatus: String, newStatus: String): AgentEvent =
+    fun durableWorkStatusChanged(goalId: String, oldStatus: String, newStatus: String): AgentEvent =
         AgentEvent(
-            type = "goal_status_changed",
+            type = "durable_work_status_changed",
             data = mapOf("goal_id" to goalId, "previous_status" to oldStatus, "current_status" to newStatus)
         )
 
-    fun goalStepStarted(goalId: String, stepId: String, description: String): AgentEvent =
+    fun durableWorkStepStarted(goalId: String, stepId: String, description: String): AgentEvent =
         AgentEvent(
-            type = "goal_step_started",
+            type = "durable_work_step_started",
             data = mapOf("goal_id" to goalId, "step_id" to stepId, "description" to description)
         )
 
-    fun goalStepCompleted(goalId: String, stepId: String, success: Boolean, attempts: Int): AgentEvent =
+    fun durableWorkStepCompleted(goalId: String, stepId: String, success: Boolean, attempts: Int): AgentEvent =
         AgentEvent(
-            type = "goal_step_completed",
+            type = "durable_work_step_completed",
             data = mapOf(
                 "goal_id" to goalId, "step_id" to stepId,
                 "success" to success, "attempts" to attempts,
             )
         )
 
-    fun goalWorkCycleCompleted(goalId: String, stepId: String, actionsExecuted: Int): AgentEvent =
+    fun durableWorkCycleCompleted(goalId: String, stepId: String, actionsExecuted: Int): AgentEvent =
         AgentEvent(
-            type = "goal_work_cycle_completed",
+            type = "durable_work_cycle_completed",
             data = mapOf(
                 "goal_id" to goalId, "step_id" to stepId,
                 "actions_executed" to actionsExecuted,
             )
         )
 
-    fun goalWakeUp(goalId: String, path: String, signalType: String): AgentEvent =
+    fun durableWorkWakeUp(goalId: String, path: String, signalType: String): AgentEvent =
         AgentEvent(
-            type = "goal_wake_up",
+            type = "durable_work_wake_up",
             data = mapOf("goal_id" to goalId, "path" to path, "signal_type" to signalType)
         )
 
-    fun goalBlocked(goalId: String, stepId: String, conditionType: String): AgentEvent =
+    fun durableWorkBlocked(goalId: String, stepId: String, conditionType: String): AgentEvent =
         AgentEvent(
-            type = "goal_blocked",
+            type = "durable_work_blocked",
             data = mapOf("goal_id" to goalId, "step_id" to stepId, "condition_type" to conditionType)
         )
 
-    fun goalCompleted(goalId: String): AgentEvent =
+    fun durableWorkCompleted(goalId: String): AgentEvent =
         AgentEvent(
-            type = "goal_completed",
+            type = "durable_work_completed",
             data = mapOf("goal_id" to goalId)
         )
 
@@ -712,9 +712,9 @@ object AgentEvents {
             data = mapOf("reason" to reason)
         )
 
-    fun goalWorkUnavailable(cueType: String): AgentEvent =
+    fun durableWorkUnavailable(cueType: String): AgentEvent =
         AgentEvent(
-            type = "goal_work_unavailable",
+            type = "durable_work_unavailable",
             data = mapOf("cue_type" to cueType)
         )
 }

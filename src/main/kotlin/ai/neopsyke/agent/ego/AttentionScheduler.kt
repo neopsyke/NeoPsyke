@@ -1,7 +1,7 @@
 package ai.neopsyke.agent.ego
 
 import ai.neopsyke.agent.config.*
-import ai.neopsyke.agent.goal.GoalRunActivation
+import ai.neopsyke.agent.durablework.DurableWorkActivation
 import ai.neopsyke.agent.model.*
 import java.util.PriorityQueue
 
@@ -152,19 +152,19 @@ class AttentionScheduler(
         opportunities.removeIf { it.trigger is OpportunityTrigger.Impulse }
     }
 
-    fun enqueueGoalWork(work: GoalRunActivation, opportunity: Opportunity): Boolean {
+    fun enqueueGoalWork(work: DurableWorkActivation, opportunity: Opportunity): Boolean {
         opportunities.add(
             ScheduledOpportunity(
                 queueId = nextId(),
                 opportunity = opportunity,
-                trigger = OpportunityTrigger.GoalWork(work),
+                trigger = OpportunityTrigger.DurableWork(work),
             )
         )
         return true
     }
 
     fun clearGoalWork() {
-        opportunities.removeIf { it.trigger is OpportunityTrigger.GoalWork }
+        opportunities.removeIf { it.trigger is OpportunityTrigger.DurableWork }
     }
 
     fun dequeueFallbackExplanationAction(): PendingAction? {

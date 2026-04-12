@@ -1,7 +1,7 @@
 package ai.neopsyke.agent.ego
 
 import mu.KotlinLogging
-import ai.neopsyke.agent.goal.GoalRunActivation
+import ai.neopsyke.agent.durablework.DurableWorkActivation
 import ai.neopsyke.agent.model.CommitMode
 import ai.neopsyke.agent.model.CognitiveThread
 import ai.neopsyke.agent.model.CognitiveThreadKind
@@ -31,7 +31,7 @@ private val threadStoreLogger = KotlinLogging.logger("CognitiveThreadStore")
 internal class CognitiveThreadStore {
     private sealed interface ContinuationState {
         data class GoalActivation(
-            val work: GoalRunActivation,
+            val work: DurableWorkActivation,
         ) : ContinuationState
     }
 
@@ -183,22 +183,22 @@ internal class CognitiveThreadStore {
         }
     }
 
-    fun ensureForGoalWork(work: GoalRunActivation): CognitiveThread =
+    fun ensureForGoalWork(work: DurableWorkActivation): CognitiveThread =
         ensureThread(
             rootInputId = work.rootInputId,
             conversationContext = work.conversationContext,
-            kind = CognitiveThreadKind.GOAL_DIRECTED,
+            kind = CognitiveThreadKind.DURABLE_WORK_DIRECTED,
             title = work.stepDescription,
             rootStimulusId = work.rootInputId,
             metadata = mapOf(
-                META_GOAL_ID to work.goalId,
+                META_GOAL_ID to work.workItemId,
                 META_GOAL_STEP_ID to work.stepId,
                 META_GOAL_WAKE_REASON to work.wakeReason,
             ),
-            goalId = work.goalId,
+            workItemId = work.workItemId,
         )
 
-    fun bindGoalWork(work: GoalRunActivation): CognitiveThread {
+    fun bindGoalWork(work: DurableWorkActivation): CognitiveThread {
         val thread = ensureForGoalWork(work)
         update(work.rootInputId, work.conversationContext) { record ->
             record.copy(
@@ -214,7 +214,7 @@ internal class CognitiveThreadStore {
         return thread
     }
 
-    fun goalOpportunity(work: GoalRunActivation): Opportunity {
+    fun goalOpportunity(work: DurableWorkActivation): Opportunity {
         val thread = ensureForGoalWork(work)
         return opportunityFor(
             thread = thread,
@@ -286,7 +286,7 @@ internal class CognitiveThreadStore {
         thread(rootInputId, conversationContext)?.securityContext
             ?: CognitiveThreadSecurityContext.fromConversation(conversationContext.security)
 
-    fun goalWork(rootInputId: String?, conversationContext: ConversationContext): GoalRunActivation? =
+    fun goalWork(rootInputId: String?, conversationContext: ConversationContext): DurableWorkActivation? =
         when (val continuation = record(rootInputId, conversationContext)?.continuation) {
             is ContinuationState.GoalActivation -> continuation.work
             null -> null
@@ -524,7 +524,7 @@ internal class CognitiveThreadStore {
         rootStimulusId: String? = null,
         percept: Percept? = null,
         metadata: Map<String, String> = emptyMap(),
-        goalId: String? = null,
+        workItemId: String? = null,
     ): CognitiveThread {
         val scope = scope(rootInputId, conversationContext.sessionId)
             ?: error("rootInputId must not be blank")
@@ -536,7 +536,7 @@ internal class CognitiveThreadStore {
                 status = CognitiveThreadStatus.ACTIVE,
                 title = previewTitle(title),
                 securityContext = existing.thread.securityContext,
-                goalId = goalId ?: existing.thread.goalId,
+                workItemId = workItemId ?: existing.thread.workItemId,
                 rootStimulusId = rootStimulusId ?: existing.thread.rootStimulusId,
                 lastUpdatedAt = now,
                 metadata = existing.thread.metadata + metadata,
@@ -549,7 +549,7 @@ internal class CognitiveThreadStore {
                 title = previewTitle(title),
                 conversationContext = conversationContext,
                 securityContext = CognitiveThreadSecurityContext.fromConversation(conversationContext.security),
-                goalId = goalId,
+                workItemId = workItemId,
                 rootStimulusId = rootStimulusId,
                 lastUpdatedAt = now,
                 metadata = metadata,
@@ -621,7 +621,7 @@ internal class CognitiveThreadStore {
                 CognitiveThreadKind.DRIVE
 
             PerceptFamily.STATE_CHANGE ->
-                CognitiveThreadKind.GOAL_DIRECTED
+                CognitiveThreadKind.DURABLE_WORK_DIRECTED
         }
 
     private fun previewTitle(value: String): String = TextSecurity.preview(value, MAX_TITLE_CHARS)
@@ -645,7 +645,7 @@ internal class CognitiveThreadStore {
             conversationContext = thread.conversationContext,
             securityContext = thread.securityContext,
             rootStimulusId = rootStimulusId,
-            goalId = thread.goalId,
+            workItemId = thread.workItemId,
             goalRunId = thread.goalRunId,
             allowedIntentions = allowedIntentions,
             allowedCommitModes = allowedCommitModes,

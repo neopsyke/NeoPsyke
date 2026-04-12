@@ -14,7 +14,7 @@ import ai.neopsyke.agent.model.ActionType
 import ai.neopsyke.agent.model.ConversationSecurityContexts
 import ai.neopsyke.agent.model.StagedAction
 import ai.neopsyke.agent.model.StagedActionStatus
-import ai.neopsyke.agent.goal.GoalManager
+import ai.neopsyke.agent.durablework.DurableWorkRuntime
 import ai.neopsyke.integrations.google.GoogleWorkspaceOAuthBridge
 import ai.neopsyke.integrations.telegram.TelegramWebhookBridge
 import ai.neopsyke.metrics.LlmCallStatsReport
@@ -48,7 +48,7 @@ class DashboardServer(
     private val innerVoiceStore: InnerVoiceStore? = null,
     private val idInnerVoiceFilePath: Path? = null,
     @Volatile var metricsQueryProvider: MetricsQueryProvider? = null,
-    @Volatile var goalManager: GoalManager? = null,
+    @Volatile var durableWorkRuntime: DurableWorkRuntime? = null,
     @Volatile var actionControlService: ActionControlService? = null,
     @Volatile var actionControlMutationHandler: ((String, ActionControlDecisionResult) -> Unit)? = null,
     port: Int,
@@ -1114,7 +1114,7 @@ class DashboardServer(
     }
 
     private fun handleGoalsApi(exchange: HttpExchange) {
-        val pm = goalManager
+        val pm = durableWorkRuntime
         if (pm == null) {
             respondText(exchange, 503, "[]", "application/json; charset=utf-8")
             return
@@ -1127,12 +1127,13 @@ class DashboardServer(
         }
         val suffix = path.removePrefix(basePath).removePrefix("/").trim()
         if (suffix.isBlank()) {
-            val summaries = pm.allGoals().map { summary ->
-                val state = pm.goalStatus(summary.goalId)
-                val allSteps = state?.goal?.plan?.steps ?: emptyList()
+            val summaries = pm.allWorkItems().map { summary ->
+                val state = pm.workItemStatus(summary.workItemId)
+                val projection = pm.workItemProjection(summary.workItemId)
+                val allSteps = state?.workItem?.plan?.steps ?: emptyList()
                 val totalSteps = allSteps.size
                 val doneSteps = allSteps.count { step ->
-                    step.status == ai.neopsyke.agent.goal.StepStatus.DONE
+                    step.status == ai.neopsyke.agent.durablework.StepStatus.DONE
                 }
                 val steps = allSteps.map { step ->
                     mapOf(
@@ -1142,25 +1143,41 @@ class DashboardServer(
                     )
                 }
                 mapOf(
-                    "goalId" to summary.goalId,
+                    "goalId" to summary.workItemId,
+                    "workItemId" to summary.workItemId,
                     "title" to summary.title,
                     "status" to summary.status.name,
+                    "health" to (projection?.health?.name ?: summary.health.name),
                     "priority" to summary.priority.name,
+                    "deliveryPolicy" to (projection?.deliveryPolicy?.name ?: summary.deliveryPolicy.name),
                     "totalSteps" to totalSteps,
                     "doneSteps" to doneSteps,
+                    "nextWakeAt" to projection?.nextWakeAt?.toString(),
+                    "lastSuccessfulActivation" to projection?.lastSuccessfulActivation?.toString(),
+                    "lastMeaningfulChange" to projection?.lastMeaningfulChange?.toString(),
+                    "currentBlocker" to projection?.currentBlocker,
+                    "failureCountInWindow" to (projection?.failureCountInWindow ?: 0),
+                    "latestArtifactSummary" to projection?.latestArtifactSummary,
                     "lastWorkedAt" to summary.lastWorkedAt?.toString(),
-                    "createdAtMs" to (state?.goal?.createdAt?.toEpochMilli() ?: 0),
+                    "createdAtMs" to (state?.workItem?.createdAt?.toEpochMilli() ?: 0),
+                    "whyActive" to projection?.explanation?.whyActive,
+                    "whyBlocked" to projection?.explanation?.whyBlocked,
+                    "whyStalled" to projection?.explanation?.whyStalled,
+                    "whyQuiet" to projection?.explanation?.whyQuiet,
+                    "whyNotified" to projection?.explanation?.whyNotified,
+                    "whySkippedOrDeferred" to projection?.explanation?.whySkippedOrDeferred,
                     "steps" to steps,
                 )
             }
             respondText(exchange, 200, mapper.writeValueAsString(summaries), "application/json; charset=utf-8")
         } else {
-            val state = pm.goalStatus(suffix)
+            val state = pm.workItemStatus(suffix)
             if (state == null) {
                 respondText(exchange, 404, """{"error":"Goal not found"}""", "application/json; charset=utf-8")
                 return
             }
-            val steps = state.goal.plan.steps.map { step ->
+            val projection = pm.workItemProjection(suffix)
+            val steps = state.workItem.plan.steps.map { step ->
                 mapOf(
                     "id" to step.id,
                     "description" to step.description,
@@ -1173,13 +1190,28 @@ class DashboardServer(
             }
             val detail = mapOf(
                 "goalId" to state.id,
-                "title" to state.goal.title,
-                "status" to state.goal.status.name,
-                "priority" to state.goal.priority.name,
-                "instruction" to state.goal.instruction,
-                "completionCriteria" to state.goal.completionCriteria,
-                "createdAt" to state.goal.createdAt.toString(),
-                "lastWorkedAt" to state.goal.lastWorkedAt?.toString(),
+                "workItemId" to state.id,
+                "title" to state.workItem.title,
+                "status" to state.workItem.status.name,
+                "health" to (projection?.health?.name ?: state.workItem.health.name),
+                "priority" to state.workItem.priority.name,
+                "deliveryPolicy" to (projection?.deliveryPolicy?.name ?: state.workItem.deliveryPolicy.name),
+                "instruction" to state.workItem.instruction,
+                "completionCriteria" to state.workItem.completionCriteria,
+                "nextWakeAt" to projection?.nextWakeAt?.toString(),
+                "lastSuccessfulActivation" to projection?.lastSuccessfulActivation?.toString(),
+                "lastMeaningfulChange" to projection?.lastMeaningfulChange?.toString(),
+                "currentBlocker" to projection?.currentBlocker,
+                "failureCountInWindow" to (projection?.failureCountInWindow ?: 0),
+                "latestArtifactSummary" to projection?.latestArtifactSummary,
+                "whyActive" to projection?.explanation?.whyActive,
+                "whyBlocked" to projection?.explanation?.whyBlocked,
+                "whyStalled" to projection?.explanation?.whyStalled,
+                "whyQuiet" to projection?.explanation?.whyQuiet,
+                "whyNotified" to projection?.explanation?.whyNotified,
+                "whySkippedOrDeferred" to projection?.explanation?.whySkippedOrDeferred,
+                "createdAt" to state.workItem.createdAt.toString(),
+                "lastWorkedAt" to state.workItem.lastWorkedAt?.toString(),
                 "steps" to steps,
                 "producedKeys" to state.producedKeys.toList(),
                 "eventCount" to state.eventCount,

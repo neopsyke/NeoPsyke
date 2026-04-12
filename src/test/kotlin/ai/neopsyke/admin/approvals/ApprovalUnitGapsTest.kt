@@ -179,7 +179,7 @@ class ApprovalUnitGapsTest {
             interlocutor = Interlocutor.named("System"),
             security = ConversationSecurityContexts.default(),
         )
-        val staged = stagedAction(ctx = nonOwnerCtx).copy(origin = ActionOrigin(ai.neopsyke.agent.model.OriginSource.GOAL))
+        val staged = stagedAction(ctx = nonOwnerCtx).copy(origin = ActionOrigin(ai.neopsyke.agent.model.OriginSource.DURABLE_WORK))
 
         val decision = resolver.resolve(staged)
         assertNotNull(decision.target)
@@ -210,7 +210,7 @@ class ApprovalUnitGapsTest {
             interlocutor = Interlocutor.named("System"),
             security = ConversationSecurityContexts.default(),
         )
-        val staged = stagedAction(ctx = nonOwnerCtx).copy(origin = ActionOrigin(ai.neopsyke.agent.model.OriginSource.GOAL))
+        val staged = stagedAction(ctx = nonOwnerCtx).copy(origin = ActionOrigin(ai.neopsyke.agent.model.OriginSource.DURABLE_WORK))
 
         val decision = resolver.resolve(staged)
         assertNotNull(decision.target)
@@ -240,7 +240,7 @@ class ApprovalUnitGapsTest {
             interlocutor = Interlocutor.named("System"),
             security = ConversationSecurityContexts.default(),
         )
-        val staged = stagedAction(ctx = nonOwnerCtx).copy(origin = ActionOrigin(ai.neopsyke.agent.model.OriginSource.GOAL))
+        val staged = stagedAction(ctx = nonOwnerCtx).copy(origin = ActionOrigin(ai.neopsyke.agent.model.OriginSource.DURABLE_WORK))
 
         val decision = resolver.resolve(staged)
         assertEquals(null, decision.target)

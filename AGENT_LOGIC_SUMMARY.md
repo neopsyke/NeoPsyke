@@ -529,21 +529,21 @@ Dispatch from `InputRoute` variant to sub-planner is deterministic on typed LLM 
 
 ---
 
-## L1: Goals Runtime
+## L1: Durable Work Runtime
 
-- Files: `src/main/kotlin/ai/neopsyke/agent/goal/GoalsGateway.kt`, `GoalManager.kt`, `GoalStateMachine.kt`, `GoalPlanner.kt`, `GoalStepVerifier.kt`
-- Feature flag: `config.goals.enabled=false` → `NoopGoalsGateway`.
+- Files: `src/main/kotlin/ai/neopsyke/agent/durablework/DurableWorkGateway.kt`, `DurableWorkRuntime.kt`, `WorkItemStateMachine.kt`, `WorkPlanBuilder.kt`, `WorkStepVerifier.kt`
+- Feature flag: `config.durableWork.enabled=false` → `NoopDurableWorkGateway`.
 
 **Boundary** — Ego uses gateway only for:
 - `pendingWorkSummary()` during Id-driven impulses.
-- `nextWorkFromCue(GoalRuntimeCue)` when goal work is ready.
-- Goal-origin action lifecycle callbacks + `finalizeGoalCycle(rootInputId)`.
+- `nextWorkFromCue(DurableWorkCue)` when durable work is ready.
+- Durable-work-origin action lifecycle callbacks + `finalizeDurableWorkCycle(rootInputId)`.
 
-**Event-sourced state machine** (`GoalStateMachine`):
+**Event-sourced state machine** (`WorkItemStateMachine`):
 - Pure function: `transition(state, event) → (newState, commands)`.
-- `GoalStatus`: `CREATED`, `PLANNING`, `ACTIVE`, `BLOCKED`, `SUSPENDED`, `COMPLETED`, `FAILED`.
-- Events: Created, PlanGenerated, PlanRevised, StepStarted, StepActionExecuted, StepAcceptancePassed/Failed, StepBlocked/Unblocked, WaitConditionSatisfied/TimedOut, Suspended, Resumed, CronCycleStarted, Completed, Failed, PriorityChanged, Updated.
-- Commands (side effects): EmitWorkReady, ScheduleWakeTimer, CancelWakeTimer, RegisterWaitCondition, ClearWaitCondition, PersistGoal, NotifyUser.
+- `WorkItemStatus`: `CREATED`, `PLANNING`, `ACTIVE`, `BLOCKED`, `SUSPENDED`, `COMPLETED`, `FAILED`, `STALLED`, `NEEDS_ATTENTION`.
+- Events: Created, PlanGenerated, PlanRevised, StepStarted, StepActionExecuted, StepAcceptancePassed/Failed, StepBlocked/Unblocked, WaitConditionSatisfied/TimedOut, Suspended, Resumed, CronCycleStarted, Completed, Failed, PriorityChanged, Updated, lease/activation lifecycle events, effect-intent lifecycle events.
+- Commands (side effects): EmitWorkReady, ScheduleWakeTimer, CancelWakeTimer, RegisterWaitCondition, ClearWaitCondition, PersistWorkItem, NotifyUser.
 
 **PlanStep**:
 - `StepStatus`: PENDING → READY → IN_PROGRESS → DONE/BLOCKED/SKIPPED/FAILED.
@@ -552,14 +552,16 @@ Dispatch from `InputRoute` variant to sub-planner is deterministic on typed LLM 
 
 **Scheduling**:
 - `TimerScheduler`: registers cron expressions or absolute timestamps.
-- Cron-backed goals do not emit initial work-ready on creation; first execution waits for cron wake.
+- Cron-backed work items do not emit initial work-ready on creation; first execution waits for cron wake.
 - Cron cycle restart: when tick arrives after COMPLETED/FAILED, resets plan-step state + clears produced keys.
 - `WaitConditionMonitor`: polls async operations, fires satisfaction events.
-- Goal step roots stable per `goal:<goalId>:<stepId>` for thread/scratchpad continuity across wait/resume.
+- Work step roots stable per `work:<workItemId>:<stepId>` for thread/scratchpad continuity across wait/resume.
 
-**Goal work activations** use trusted internal automation `ConversationContext`.
+**Durable work activations** use trusted internal automation `ConversationContext`.
 - Scratchpads created when work is actually processed, not when cue ingested.
-- Goal-origin `WAITING` without async handles → contract violation.
+- Durable-work-origin `WAITING` without async handles → contract violation.
+- Activation journal records `STARTED`, `STEP_SELECTED`, `CONTEXT_MATERIALIZED`, `NEXT_WAKE_SCHEDULED`, `FINISHED`, `RECOVERED`.
+- Mutating durable-work actions are guarded by `WorkEffectLedger` (`effectIntentId = workItemId + planRevision + stepId + logicalEffectKey`) and duplicate confirmed effects are blocked before dispatch.
 - Persist: `goal-events.jsonl`, `goal.json`, `goal-snapshot.json`, workspace artifacts.
 
 ---
@@ -577,7 +579,7 @@ Dispatch from `InputRoute` variant to sub-planner is deterministic on typed LLM 
 - `website_fetch` — Fetch URL content. Effect: OBSERVE. Capability: GATHERS_EVIDENCE.
 - `reflect_internal` — Internal durable-memory action. Effect: OBSERVE. Direct+autonomous commit.
 - `reflect_evidence` — Evidence-bound reflection. Effect: OBSERVE.
-- `goal_operation` — Goal lifecycle (create/status/list/pause/resume/delete). Effect: COMMIT_INTERNAL. Create supports optional `cron_expression`.
+- `durable_work_operation` — Durable work lifecycle (create/status/list/pause/resume/delete/revise/reprioritize). Effect: CONTROL_PLANE. Create supports optional `cron_expression`.
 - `email_send` — Microsoft Graph adapter. Disabled unless env config present.
 - `gmail_observe_search`, `gmail_observe_message`, `calendar_observe_events` — Native Google read-only.
 

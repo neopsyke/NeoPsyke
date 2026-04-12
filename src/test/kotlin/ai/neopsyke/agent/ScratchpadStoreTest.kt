@@ -10,7 +10,7 @@ import ai.neopsyke.agent.model.GroundingSource
 import ai.neopsyke.agent.model.PendingAction
 import ai.neopsyke.agent.model.PendingInput
 import ai.neopsyke.agent.model.Provenances
-import ai.neopsyke.agent.goal.GoalRunActivation
+import ai.neopsyke.agent.durablework.DurableWorkActivation
 import ai.neopsyke.agent.config.ScratchpadConfig
 import ai.neopsyke.agent.model.Urgency
 import ai.neopsyke.agent.memory.scratchpad.ScratchpadStore
@@ -223,11 +223,11 @@ class ScratchpadStoreTest {
     @Test
     fun `goal work creates thread-scoped workspace`() {
         val store = ScratchpadStore(ScratchpadConfig(enabled = true, activationMinPlanSteps = 1))
-        val root = "goal:alpha:step-1"
+        val root = "work:alpha:step-1"
 
         val created = store.ensureForGoalWork(
-            GoalRunActivation(
-                goalId = "goal-alpha",
+            DurableWorkActivation(
+                workItemId = "goal-alpha",
                 stepId = "step-1",
                 rootInputId = root,
                 stepDescription = "Verify pricing",
@@ -235,7 +235,7 @@ class ScratchpadStoreTest {
                 workingContext = "Previous attempt found conflicting pages",
                 conversationContext = ConversationContext.default(),
                 wakeReason = "timer",
-                groundingMetadata = GroundingMetadata(requirement = GroundingRequirement.NOT_REQUIRED, source = GroundingSource.GOAL_STEP_POLICY),
+                groundingMetadata = GroundingMetadata(requirement = GroundingRequirement.NOT_REQUIRED, source = GroundingSource.DURABLE_WORK_STEP_POLICY),
             )
         )
 
@@ -599,10 +599,10 @@ class ScratchpadStoreTest {
         )
         store.captureDigest("root-digest", "session-b")
 
-        val activeGoals = store.activeGoalSignals()
+        val activeWorkItems = store.activeGoalSignals()
         val resolvedGoals = store.recentResolvedGoalSignals()
 
-        assertTrue(activeGoals.contains("active migration goal"))
+        assertTrue(activeWorkItems.contains("active migration goal"))
         assertTrue(resolvedGoals.any { it.contains("resolved docs refresh") })
     }
 }

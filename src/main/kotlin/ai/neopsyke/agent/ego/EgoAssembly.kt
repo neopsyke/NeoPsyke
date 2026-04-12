@@ -20,8 +20,8 @@ import ai.neopsyke.agent.memory.longterm.Logbook
 import ai.neopsyke.agent.memory.longterm.LogbookSummarizer
 import ai.neopsyke.agent.memory.shortterm.MemoryStore
 import ai.neopsyke.agent.memory.scratchpad.ScratchpadStore
-import ai.neopsyke.agent.goal.NoopGoalsGateway
-import ai.neopsyke.agent.goal.GoalsGateway
+import ai.neopsyke.agent.durablework.NoopDurableWorkGateway
+import ai.neopsyke.agent.durablework.DurableWorkGateway
 import ai.neopsyke.agent.superego.Superego
 import ai.neopsyke.agent.cortex.motor.actions.fetch.FetchTool
 import ai.neopsyke.instrumentation.AgentInstrumentation
@@ -76,7 +76,7 @@ object EgoAssembler {
         runId: String? = null,
         webSearchActionHandler: WebSearchActionHandler? = null,
         fetchTool: FetchTool? = null,
-        goalsGateway: GoalsGateway = NoopGoalsGateway,
+        durableWorkGateway: DurableWorkGateway = NoopDurableWorkGateway,
         actionControlServiceFactory: (MotorCortex) -> ActionControlService = { NoopActionControlService },
         output: (String) -> Unit = {},
         conversationOutput: ConversationOutputGateway = RoutedConversationOutputGateway(fallbackOutput = output),
@@ -100,7 +100,7 @@ object EgoAssembler {
                 conversationOutput = conversationOutput,
                 evidenceArtifactStore = evidenceArtifactStore,
                 reflectionMemoryRecorder = memory,
-                goalsGateway = goalsGateway,
+                durableWorkGateway = durableWorkGateway,
             )
         )
         val motorCortex = MotorCortex(actionRegistry = actionRegistry)
@@ -117,8 +117,8 @@ object EgoAssembler {
             scratchpadFinalizer = scratchpadFinalizer,
             instrumentation = instrumentation,
             actionControlService = actionControlService,
-            goalRegistry = goalsGateway,
-            goalsGateway = goalsGateway,
+            goalRegistry = durableWorkGateway,
+            durableWorkGateway = durableWorkGateway,
             evidenceArtifactStore = evidenceArtifactStore,
         )
         return EgoAssembly(

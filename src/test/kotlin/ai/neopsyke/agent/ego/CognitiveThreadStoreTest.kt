@@ -1,6 +1,6 @@
 package ai.neopsyke.agent.ego
 
-import ai.neopsyke.agent.goal.GoalRunActivation
+import ai.neopsyke.agent.durablework.DurableWorkActivation
 import ai.neopsyke.agent.model.ConversationContext
 import ai.neopsyke.agent.model.ConversationSecurityContexts
 import ai.neopsyke.agent.model.CognitiveThreadKind
@@ -117,8 +117,8 @@ class CognitiveThreadStoreTest {
             )
         )
         val goalThread = store.ensureForGoalWork(
-            GoalRunActivation(
-                goalId = "goal-1",
+            DurableWorkActivation(
+                workItemId = "goal-1",
                 stepId = "step-1",
                 rootInputId = "goal-root-1",
                 stepDescription = "Verify latest pricing",
@@ -126,12 +126,12 @@ class CognitiveThreadStoreTest {
                 workingContext = "pricing",
                 conversationContext = automationContext,
                 wakeReason = "timer",
-            groundingMetadata = GroundingMetadata(requirement = GroundingRequirement.NOT_REQUIRED, source = GroundingSource.GOAL_STEP_POLICY),
+            groundingMetadata = GroundingMetadata(requirement = GroundingRequirement.NOT_REQUIRED, source = GroundingSource.DURABLE_WORK_STEP_POLICY),
             )
         )
 
         assertEquals(CognitiveThreadKind.DRIVE, impulseThread.kind)
-        assertEquals(CognitiveThreadKind.GOAL_DIRECTED, goalThread.kind)
+        assertEquals(CognitiveThreadKind.DURABLE_WORK_DIRECTED, goalThread.kind)
         assertNotNull(store.thread("goal-root-1", automationContext))
     }
 
@@ -146,16 +146,16 @@ class CognitiveThreadStoreTest {
                 channelId = "goal-session",
             ),
         )
-        val work = GoalRunActivation(
-            goalId = "goal-1",
+        val work = DurableWorkActivation(
+            workItemId = "goal-1",
             stepId = "step-1",
-            rootInputId = "goal:goal-1:step-1",
+            rootInputId = "work:goal-1:step-1",
             stepDescription = "Verify latest pricing",
             acceptanceCriteria = "Provide verified pricing",
             workingContext = "pricing",
             conversationContext = automationContext,
             wakeReason = "timer",
-        groundingMetadata = GroundingMetadata(requirement = GroundingRequirement.NOT_REQUIRED, source = GroundingSource.GOAL_STEP_POLICY),
+        groundingMetadata = GroundingMetadata(requirement = GroundingRequirement.NOT_REQUIRED, source = GroundingSource.DURABLE_WORK_STEP_POLICY),
         )
 
         store.bindGoalWork(work)

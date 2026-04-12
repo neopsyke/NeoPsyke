@@ -12,12 +12,12 @@ import ai.neopsyke.agent.ego.planner.HierarchicalEgoPlanner
 import ai.neopsyke.agent.ego.planner.LaneId
 import ai.neopsyke.agent.ego.planner.input.DirectResponsePlanner
 import ai.neopsyke.agent.ego.planner.input.GeneralActionPlanner
-import ai.neopsyke.agent.ego.planner.input.GoalPlanner
+import ai.neopsyke.agent.ego.planner.input.WorkPlanBuilder
 import ai.neopsyke.agent.ego.planner.input.GroundingClassifier
 import ai.neopsyke.agent.ego.planner.input.InputIntentRouter
 import ai.neopsyke.agent.ego.planner.input.TaskDecompositionPlanner
 import ai.neopsyke.agent.ego.planner.lane.ProgressionPlanner
-import ai.neopsyke.agent.ego.planner.lane.GoalWorkPlanner
+import ai.neopsyke.agent.ego.planner.lane.DurableWorkLanePlanner
 import ai.neopsyke.agent.ego.planner.lane.ImpulsePlanner
 import ai.neopsyke.agent.ego.planner.lane.InputPlanner
 import ai.neopsyke.agent.ego.planner.runtime.PlannerRuntime
@@ -1198,22 +1198,22 @@ internal object AppModeRunners {
                                                         runtime.engine
                                                     }
                                                     val webSearchActionHandler = WebSearchActionHandler(activeWebSearchEngine)
-                                                    if (cliOptions?.clearGoals == true) {
-                                                        executeGoalsClear(config, instrumentation)
+                                                    if (cliOptions?.clearDurableWork == true) {
+                                                        executeDurableWorkClear(config, instrumentation)
                                                     }
-                                                    val goalManager = if (config.goals.enabled) {
-                                                        ai.neopsyke.agent.goal.GoalManager(
-                                                            config = config.goals,
-                                                            store = ai.neopsyke.agent.goal.GoalStore(config.goals.workspaceRoot),
-                                                            planner = ai.neopsyke.agent.goal.LlmGoalPlanner(plannerClient, config),
-                                                            verifier = ai.neopsyke.agent.goal.LlmGoalStepVerifier(plannerClient, config),
+                                                    val durableWorkRuntime = if (config.durableWork.enabled) {
+                                                        ai.neopsyke.agent.durablework.DurableWorkRuntime(
+                                                            config = config.durableWork,
+                                                            store = ai.neopsyke.agent.durablework.WorkItemStore(config.durableWork.workspaceRoot),
+                                                            planner = ai.neopsyke.agent.durablework.LlmWorkPlanBuilder(plannerClient, config),
+                                                            verifier = ai.neopsyke.agent.durablework.LlmWorkStepVerifier(plannerClient, config),
                                                             instrumentation = instrumentation,
-                                                            cueEmitter = sensoryCortex::offerGoalRuntimeCue,
+                                                            cueEmitter = sensoryCortex::offerDurableWorkCue,
                                                         ).also { it.start(agentScope) }
                                                     } else {
                                                         null
                                                     }
-                                                    dashboardServer?.goalManager = goalManager
+                                                    dashboardServer?.durableWorkRuntime = durableWorkRuntime
                                                     var plannerNoopCount = 0
                                                     var plannerOutputRepairedCount = 0
                                                     val plannerLaneClientResolver = buildPlannerLaneModelClientResolver(
@@ -1314,8 +1314,8 @@ internal object AppModeRunners {
                                                         logbookSummarizer = logbookSummarizer,
                                                         webSearchActionHandler = webSearchActionHandler,
                                                         fetchTool = activeFetchTool,
-                                                        goalsGateway = goalManager
-                                                            ?: ai.neopsyke.agent.goal.NoopGoalsGateway,
+                                                        durableWorkGateway = durableWorkRuntime
+                                                            ?: ai.neopsyke.agent.durablework.NoopDurableWorkGateway,
                                                         actionControlServiceFactory = { motorCortex ->
                                                             val rawService = actionControlStore?.let { store ->
                                                                 DefaultActionControlService(
@@ -1465,7 +1465,7 @@ internal object AppModeRunners {
                                                             shutdownGuard.close()
                                                         }
                                                         } } finally {
-                                                            goalManager?.stop()
+                                                            durableWorkRuntime?.stop()
                                                             approvalRuntime?.close()
                                                             egoDispatcher.close()
                                                         }
@@ -1773,17 +1773,17 @@ internal object AppModeRunners {
                                                     runtime.engine
                                                 }
                                                 val webSearchActionHandler = WebSearchActionHandler(activeWebSearchEngine2)
-                                                if (cliOptions.clearGoals) {
-                                                    executeGoalsClear(config, instrumentation)
+                                                if (cliOptions.clearDurableWork) {
+                                                    executeDurableWorkClear(config, instrumentation)
                                                 }
-                                                val goalManager = if (config.goals.enabled) {
-                                                    ai.neopsyke.agent.goal.GoalManager(
-                                                        config = config.goals,
-                                                        store = ai.neopsyke.agent.goal.GoalStore(config.goals.workspaceRoot),
-                                                        planner = ai.neopsyke.agent.goal.LlmGoalPlanner(plannerClient, config),
-                                                        verifier = ai.neopsyke.agent.goal.LlmGoalStepVerifier(plannerClient, config),
+                                                val durableWorkRuntime = if (config.durableWork.enabled) {
+                                                    ai.neopsyke.agent.durablework.DurableWorkRuntime(
+                                                        config = config.durableWork,
+                                                        store = ai.neopsyke.agent.durablework.WorkItemStore(config.durableWork.workspaceRoot),
+                                                        planner = ai.neopsyke.agent.durablework.LlmWorkPlanBuilder(plannerClient, config),
+                                                        verifier = ai.neopsyke.agent.durablework.LlmWorkStepVerifier(plannerClient, config),
                                                         instrumentation = instrumentation,
-                                                        cueEmitter = sensoryCortex::offerGoalRuntimeCue,
+                                                        cueEmitter = sensoryCortex::offerDurableWorkCue,
                                                     ).also { it.start(agentScope) }
                                                 } else {
                                                     null
@@ -1866,8 +1866,8 @@ internal object AppModeRunners {
                                                     logbookSummarizer = logbookSummarizer,
                                                     webSearchActionHandler = webSearchActionHandler,
                                                     fetchTool = activeFetchTool,
-                                                    goalsGateway = goalManager
-                                                        ?: ai.neopsyke.agent.goal.NoopGoalsGateway,
+                                                    durableWorkGateway = durableWorkRuntime
+                                                        ?: ai.neopsyke.agent.durablework.NoopDurableWorkGateway,
                                                     actionControlServiceFactory = { motorCortex ->
                                                         val rawService = actionControlStore?.let { store ->
                                                             DefaultActionControlService(
@@ -1998,7 +1998,7 @@ internal object AppModeRunners {
                                                     exitProcess(exitCode)
 
                                                     } } finally {
-                                                        goalManager?.stop()
+                                                        durableWorkRuntime?.stop()
                                                         egoDispatcher.close()
                                                     }
                                                 }
@@ -2686,11 +2686,11 @@ internal object AppModeRunners {
         }
     }
 
-    private fun executeGoalsClear(
+    private fun executeDurableWorkClear(
         config: AgentConfig,
         instrumentation: ai.neopsyke.instrumentation.AgentInstrumentation,
     ) {
-        val goalsRoot = config.goals.workspaceRoot
+        val goalsRoot = config.durableWork.workspaceRoot
         if (!java.nio.file.Files.isDirectory(goalsRoot)) {
             output.info("Goals workspace does not exist; nothing to clear.")
             return
@@ -2974,7 +2974,7 @@ private fun buildHierarchicalPlanner(
     val directResponse = DirectResponsePlanner(runtime, config, instrumentation)
     val generalAction = GeneralActionPlanner(runtime, config, instrumentation)
     val taskDecomp = TaskDecompositionPlanner(runtime, config, instrumentation)
-    val goalPlanner = GoalPlanner(runtime, config, instrumentation)
+    val goalPlanner = WorkPlanBuilder(runtime, config, instrumentation)
 
     val inputPlanner = InputPlanner(
         runtime = runtime,
@@ -2989,7 +2989,7 @@ private fun buildHierarchicalPlanner(
     )
 
     val progressionPlanner = ProgressionPlanner(runtime, config, instrumentation)
-    val goalWorkPlannerLane = GoalWorkPlanner(runtime, config, instrumentation)
+    val durableWorkLanePlannerLane = DurableWorkLanePlanner(runtime, config, instrumentation)
     val impulsePlannerLane = ImpulsePlanner(runtime, config, instrumentation)
 
     return HierarchicalEgoPlanner(
@@ -2997,7 +2997,7 @@ private fun buildHierarchicalPlanner(
         instrumentation = instrumentation,
         inputPlanner = inputPlanner,
         progressionPlanner = progressionPlanner,
-        goalWorkPlanner = goalWorkPlannerLane,
+        durableWorkLanePlanner = durableWorkLanePlannerLane,
         impulsePlanner = impulsePlannerLane,
     )
 }

@@ -44,7 +44,7 @@ import ai.neopsyke.agent.config.ScratchpadConfig
 import ai.neopsyke.agent.model.Urgency
 import ai.neopsyke.agent.cortex.motor.MotorCortex
 import ai.neopsyke.agent.cortex.sensory.CognitiveSignal
-import ai.neopsyke.agent.cortex.sensory.GoalRuntimeCue
+import ai.neopsyke.agent.cortex.sensory.DurableWorkCue
 import ai.neopsyke.agent.cortex.sensory.RuntimeControlSignal
 import ai.neopsyke.agent.cortex.sensory.SensoryCortex
 import ai.neopsyke.agent.cortex.sensory.Signal
@@ -62,14 +62,14 @@ import ai.neopsyke.agent.memory.longterm.MemoryCapability
 import ai.neopsyke.agent.memory.longterm.MemoryImprint
 import ai.neopsyke.agent.memory.longterm.MemoryRecall
 import ai.neopsyke.agent.memory.longterm.MemoryRecallQuery
-import ai.neopsyke.agent.goal.DeterministicGoalPlanner
-import ai.neopsyke.agent.goal.GoalConfig
-import ai.neopsyke.agent.goal.GoalManager
-import ai.neopsyke.agent.goal.GoalPriority
-import ai.neopsyke.agent.goal.GoalStatus
-import ai.neopsyke.agent.goal.GoalStore
-import ai.neopsyke.agent.goal.GoalsGateway
-import ai.neopsyke.agent.goal.NoopGoalsGateway
+import ai.neopsyke.agent.durablework.DeterministicWorkPlanBuilder
+import ai.neopsyke.agent.durablework.DurableWorkConfig
+import ai.neopsyke.agent.durablework.DurableWorkRuntime
+import ai.neopsyke.agent.durablework.WorkItemPriority
+import ai.neopsyke.agent.durablework.WorkItemStatus
+import ai.neopsyke.agent.durablework.WorkItemStore
+import ai.neopsyke.agent.durablework.DurableWorkGateway
+import ai.neopsyke.agent.durablework.NoopDurableWorkGateway
 import ai.neopsyke.agent.superego.Superego
 import ai.neopsyke.llm.ChatCompletion
 import ai.neopsyke.llm.ChatMessage
@@ -499,7 +499,7 @@ class AgentScenarioPackTest {
                     )
                     is EgoTrigger.ActionFeedback -> EgoDecision.Noop("ignore feedback in test")
                     is EgoTrigger.Continuation -> decideThought(trigger.continuation)
-                    is EgoTrigger.GoalWork -> EgoDecision.Noop("ignore goal work")
+                    is EgoTrigger.DurableWork -> EgoDecision.Noop("ignore goal work")
                 }
 
             private fun decideThought(thought: QueuedContinuation): EgoDecision =
@@ -590,7 +590,7 @@ class AgentScenarioPackTest {
         val outputs = mutableListOf<String>()
         val config = AgentConfig(
             planner = PlannerConfig(maxLoopStepsPerInput = 8, maxContinuationPasses = 2),
-            goals = GoalConfig(
+            durableWork = DurableWorkConfig(
                 enabled = true,
                 workspaceRoot = root,
                 actionsPerCycle = 2,
@@ -606,10 +606,10 @@ class AgentScenarioPackTest {
                 )
             )
         }
-        val manager = GoalManager(
-            config = config.goals,
-            store = GoalStore(root),
-            planner = DeterministicGoalPlanner(),
+        val manager = DurableWorkRuntime(
+            config = config.durableWork,
+            store = WorkItemStore(root),
+            planner = DeterministicWorkPlanBuilder(),
             asyncOperationRegistry = AsyncOperationRegistry.fromProviders(listOf(provider)),
             instrumentation = instrumentation,
             cueEmitter = source::offer,
@@ -619,7 +619,7 @@ class AgentScenarioPackTest {
         val planner = object : Ego.Planner {
             override fun decide(trigger: EgoTrigger, context: PlannerContext): EgoDecision =
                 when (trigger) {
-                    is EgoTrigger.GoalWork -> {
+                    is EgoTrigger.DurableWork -> {
                         if (!startedAsync) {
                             startedAsync = true
                             EgoDecision.FormIntention(
@@ -658,24 +658,24 @@ class AgentScenarioPackTest {
             config = config,
             instrumentation = instrumentation,
             sensoryCortex = SensoryCortex(config, source),
-            goalsGateway = manager,
+            durableWorkGateway = manager,
         )
 
         val loop = launch { agent.runInteractive() }
         try {
-            val goalId = manager.createGoal(
+            val workItemId = manager.createWorkItem(
                 instruction = "Complete async scenario goal",
                 title = "Async Scenario",
-                priority = GoalPriority.HIGH,
+                priority = WorkItemPriority.HIGH,
             )
-            waitForGoalStatus(manager, goalId, GoalStatus.COMPLETED)
+            waitForWorkItemStatus(manager, workItemId, WorkItemStatus.COMPLETED)
             source.offer(RuntimeControlSignal.ExitRequested("scenario test"))
             loop.join()
 
-            val state = manager.goalStatus(goalId)
+            val state = manager.workItemStatus(workItemId)
             assertNotNull(state)
-            assertEquals(GoalStatus.COMPLETED, state.goal.status)
-            assertTrue(state.goal.plan.steps.first().notes.contains("async_status=succeeded"))
+            assertEquals(WorkItemStatus.COMPLETED, state.workItem.status)
+            assertTrue(state.workItem.plan.steps.first().notes.contains("async_status=succeeded"))
             assertEquals(listOf("ego> scenario async goal done"), outputs)
         } finally {
             manager.stop()
@@ -687,7 +687,7 @@ class AgentScenarioPackTest {
     @Test
     fun scenario_natural_language_recurring_goal_creation() = runBlocking {
         val root = Files.createTempDirectory("neopsyke-scenario-goal-create")
-        var manager: GoalManager? = null
+        var manager: DurableWorkRuntime? = null
         var actionControlStore: SqliteActionControlStore? = null
         try {
             val plannerLlm = StubChatModelClient().apply {
@@ -696,7 +696,7 @@ class AgentScenarioPackTest {
                 enqueueRawResponseForCallSite("goal",
                     """
                     {
-                      "operation":"create","goal_reference":null,
+                      "operation":"create","work_item_reference":null,
                       "title":"Weather reminder",
                       "instruction":"Check the current weather and send the user an update for this scheduled run.",
                       "completion_criteria":"A weather update is delivered to the user for the current scheduled run.",
@@ -712,12 +712,12 @@ class AgentScenarioPackTest {
             val outputs = mutableListOf<String>()
             val config = AgentConfig(
                 planner = PlannerConfig(maxLoopStepsPerInput = 4, maxContinuationPasses = 2),
-                goals = GoalConfig(enabled = true, workspaceRoot = root),
+                durableWork = DurableWorkConfig(enabled = true, workspaceRoot = root),
             )
-            manager = GoalManager(
-                config = config.goals,
-                store = GoalStore(root),
-                planner = DeterministicGoalPlanner(),
+            manager = DurableWorkRuntime(
+                config = config.durableWork,
+                store = WorkItemStore(root),
+                planner = DeterministicWorkPlanBuilder(),
                 instrumentation = instrumentation,
             )
             manager.start(CoroutineScope(SupervisorJob() + Dispatchers.Default))
@@ -726,7 +726,7 @@ class AgentScenarioPackTest {
             val motorCortex = buildMotorCortex(
                 output = { outputs.add(it) },
                 config = config,
-                goalsGateway = manager,
+                durableWorkGateway = manager,
             )
             val agent = buildTestEgo(
                 planner = LlmEgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
@@ -738,7 +738,7 @@ class AgentScenarioPackTest {
                 motorCortex = motorCortex,
                 config = config,
                 instrumentation = instrumentation,
-                goalsGateway = manager,
+                durableWorkGateway = manager,
                 actionControlService = DefaultActionControlService(
                     config = config.actionControl.copy(dbPath = actionControlDb.toString()),
                     store = actionControlStore,
@@ -763,17 +763,17 @@ class AgentScenarioPackTest {
 
             runAgentWithInput(agent, "I would like to set a goal for you: Remind me of the current weather every 5 minutes.\nexit\n")
 
-            assertTrue(manager.allGoals().isEmpty())
+            assertTrue(manager.allWorkItems().isEmpty())
             val staged = actionControlStore.listStagedActions(limit = 10)
-                .firstOrNull { it.actionType == ActionType.GOAL_OPERATION }
+                .firstOrNull { it.actionType == ActionType.DURABLE_WORK_OPERATION }
             assertNotNull(staged)
-            assertEquals(ActionType.GOAL_OPERATION, staged.actionType)
+            assertEquals(ActionType.DURABLE_WORK_OPERATION, staged.actionType)
             assertEquals(StagedActionStatus.WAITING_AUTHORIZATION, staged.status)
             assertTrue(staged.payload.contains("\"cron_expression\":\"*/5 * * * *\""))
             assertTrue(outputs.isEmpty())
             assertEquals(1, approvalPrompts.size)
             assertTrue(approvalPrompts.single().contains("approval", ignoreCase = true))
-            assertTrue(approvalPrompts.single().contains(ActionType.GOAL_OPERATION.id, ignoreCase = true))
+            assertTrue(approvalPrompts.single().contains(ActionType.DURABLE_WORK_OPERATION.id, ignoreCase = true))
             assertTrue(plannerLlm.calls.any { it.options.metadata.callSite == "goal" })
         } finally {
             actionControlStore?.close()
@@ -785,7 +785,7 @@ class AgentScenarioPackTest {
     @Test
     fun scenario_llm_driven_daily_cron_goal_creation() = runBlocking {
         val root = Files.createTempDirectory("neopsyke-scenario-daily-goal")
-        var manager: GoalManager? = null
+        var manager: DurableWorkRuntime? = null
         var actionControlStore: SqliteActionControlStore? = null
         try {
             val plannerLlm = StubChatModelClient().apply {
@@ -794,7 +794,7 @@ class AgentScenarioPackTest {
                 enqueueRawResponseForCallSite("goal",
                     """
                     {
-                      "operation":"create","goal_reference":null,
+                      "operation":"create","work_item_reference":null,
                       "title":"Daily weather forecast",
                       "instruction":"Fetch the weather forecast for Hamburg and send the user a summary for this scheduled run.",
                       "completion_criteria":"The weather forecast is delivered to the user for the current scheduled run.",
@@ -810,12 +810,12 @@ class AgentScenarioPackTest {
             val outputs = mutableListOf<String>()
             val config = AgentConfig(
                 planner = PlannerConfig(maxLoopStepsPerInput = 4, maxContinuationPasses = 2),
-                goals = GoalConfig(enabled = true, workspaceRoot = root),
+                durableWork = DurableWorkConfig(enabled = true, workspaceRoot = root),
             )
-            manager = GoalManager(
-                config = config.goals,
-                store = GoalStore(root),
-                planner = DeterministicGoalPlanner(),
+            manager = DurableWorkRuntime(
+                config = config.durableWork,
+                store = WorkItemStore(root),
+                planner = DeterministicWorkPlanBuilder(),
                 instrumentation = instrumentation,
             )
             manager.start(CoroutineScope(SupervisorJob() + Dispatchers.Default))
@@ -824,7 +824,7 @@ class AgentScenarioPackTest {
             val motorCortex = buildMotorCortex(
                 output = { outputs.add(it) },
                 config = config,
-                goalsGateway = manager,
+                durableWorkGateway = manager,
             )
             val agent = buildTestEgo(
                 planner = LlmEgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
@@ -836,7 +836,7 @@ class AgentScenarioPackTest {
                 motorCortex = motorCortex,
                 config = config,
                 instrumentation = instrumentation,
-                goalsGateway = manager,
+                durableWorkGateway = manager,
                 actionControlService = DefaultActionControlService(
                     config = config.actionControl.copy(dbPath = actionControlDb.toString()),
                     store = actionControlStore,
@@ -862,11 +862,11 @@ class AgentScenarioPackTest {
             runAgentWithInput(agent, "Create a new goal. It's purpose should be to remind me of the weather forecast for the day, every day at 5:05 am hamburg time.\nexit\n")
 
             // Goal not yet created (waiting for approval)
-            assertTrue(manager.allGoals().isEmpty())
+            assertTrue(manager.allWorkItems().isEmpty())
             val staged = actionControlStore.listStagedActions(limit = 10)
-                .firstOrNull { it.actionType == ActionType.GOAL_OPERATION }
-            assertNotNull(staged, "Expected a staged goal_operation action")
-            assertEquals(ActionType.GOAL_OPERATION, staged.actionType)
+                .firstOrNull { it.actionType == ActionType.DURABLE_WORK_OPERATION }
+            assertNotNull(staged, "Expected a staged durable_work_operation action")
+            assertEquals(ActionType.DURABLE_WORK_OPERATION, staged.actionType)
             assertEquals(StagedActionStatus.WAITING_AUTHORIZATION, staged.status)
             // Cron comes from the LLM, not regex
             assertTrue(staged.payload.contains("\"cron_expression\":\"5 5 * * *\""),
@@ -884,7 +884,7 @@ class AgentScenarioPackTest {
     @Test
     fun scenario_goal_creation_bad_cron_triggers_feedback_retry() = runBlocking {
         val root = Files.createTempDirectory("neopsyke-scenario-goal-retry")
-        var manager: GoalManager? = null
+        var manager: DurableWorkRuntime? = null
         try {
             val plannerLlm = StubChatModelClient().apply {
                 // Route to goal via input_intent_router
@@ -893,7 +893,7 @@ class AgentScenarioPackTest {
                 enqueueRawResponseForCallSite("goal",
                     """
                     {
-                      "operation":"create","goal_reference":null,
+                      "operation":"create","work_item_reference":null,
                       "title":"Weekly standup",
                       "instruction":"Remind the user about their weekly standup meeting.",
                       "completion_criteria":"Standup reminder delivered.",
@@ -924,30 +924,30 @@ class AgentScenarioPackTest {
             val outputs = mutableListOf<String>()
             val config = AgentConfig(
                 planner = PlannerConfig(maxLoopStepsPerInput = 6, maxContinuationPasses = 3),
-                goals = GoalConfig(enabled = true, workspaceRoot = root),
+                durableWork = DurableWorkConfig(enabled = true, workspaceRoot = root),
             )
-            manager = GoalManager(
-                config = config.goals,
-                store = GoalStore(root),
-                planner = DeterministicGoalPlanner(),
+            manager = DurableWorkRuntime(
+                config = config.durableWork,
+                store = WorkItemStore(root),
+                planner = DeterministicWorkPlanBuilder(),
                 instrumentation = instrumentation,
             )
             manager.start(CoroutineScope(SupervisorJob() + Dispatchers.Default))
             val motorCortex = buildMotorCortex(
                 output = { outputs.add(it) },
                 config = config,
-                goalsGateway = manager,
+                durableWorkGateway = manager,
             )
             val superEgoLlm = StubChatModelClient().apply {
                 // Enqueue enough superego approvals for all action reviews
                 repeat(6) { enqueueRawResponse("""{"allow":true}""") }
             }
             // Use a policy that allows autonomous commit for recurring goals so the bad cron
-            // reaches GoalManager.executeOperation() and triggers the feedback loop.
+            // reaches DurableWorkRuntime.executeOperation() and triggers the feedback loop.
             val autoCommitPolicy = ConfiguredActionAuthorizationPolicy(
                 ActionSecurityPolicyConfig(
                     actions = mapOf(
-                        ActionType.GOAL_OPERATION.id to ActionSecurityActionRule(
+                        ActionType.DURABLE_WORK_OPERATION.id to ActionSecurityActionRule(
                             directCommitEnabled = true,
                             autonomousCommitEnabled = true,
                             recurringRequiresApproval = false,
@@ -970,7 +970,7 @@ class AgentScenarioPackTest {
                 motorCortex = motorCortex,
                 config = config,
                 instrumentation = instrumentation,
-                goalsGateway = manager,
+                durableWorkGateway = manager,
             )
 
             runAgentWithInput(agent, "Create a goal to remind me every Monday at 9am about our standup.\nexit\n")
@@ -1009,7 +1009,7 @@ class AgentScenarioPackTest {
             enqueueRawResponseForCallSite("input_intent_router", """{"route":"goal","reasoning":"user wants a goal"}""")
             enqueueRawResponse(
                 """
-                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"goal_operation","action_payload":"{\"command\":\"create\",\"title\":\"Daily Weather\",\"description\":\"Fetch weather\",\"priority\":\"medium\",\"cron_expression\":\"5 6 * * *\",\"step_descriptions\":[\"Check weather\"]}","action_summary":"create weather goal"}
+                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"durable_work_operation","action_payload":"{\"command\":\"create\",\"title\":\"Daily Weather\",\"description\":\"Fetch weather\",\"priority\":\"medium\",\"cron_expression\":\"5 6 * * *\",\"step_descriptions\":[\"Check weather\"]}","action_summary":"create weather goal"}
                 """.trimIndent()
             )
             enqueueRawResponse(
@@ -1216,7 +1216,7 @@ class AgentScenarioPackTest {
                 )
         },
         config: AgentConfig = AgentConfig(),
-        goalsGateway: GoalsGateway = NoopGoalsGateway,
+        durableWorkGateway: DurableWorkGateway = NoopDurableWorkGateway,
     ): MotorCortex {
         val webSearchHandler = WebSearchActionHandler(engine = webSearchEngine)
         return MotorCortex(
@@ -1224,7 +1224,7 @@ class AgentScenarioPackTest {
             output = output,
             reflectionMemoryRecorder = NoopReflectionMemoryRecorder,
             config = config,
-            goalsGateway = goalsGateway,
+            durableWorkGateway = durableWorkGateway,
         )
     }
 
@@ -1271,20 +1271,20 @@ class AgentScenarioPackTest {
         )
     }
 
-    private suspend fun waitForGoalStatus(
-        manager: GoalManager,
-        goalId: String,
-        status: GoalStatus,
+    private suspend fun waitForWorkItemStatus(
+        manager: DurableWorkRuntime,
+        workItemId: String,
+        status: WorkItemStatus,
     ) {
         val deadline = System.currentTimeMillis() + 3_000
         while (System.currentTimeMillis() < deadline) {
-            if (manager.goalStatus(goalId)?.goal?.status == status) {
+            if (manager.workItemStatus(workItemId)?.workItem?.status == status) {
                 return
             }
             delay(10)
         }
-        val state = manager.goalStatus(goalId)
-        fail("Timed out waiting for status=$status, actual=${state?.goal?.status}")
+        val state = manager.workItemStatus(workItemId)
+        fail("Timed out waiting for status=$status, actual=${state?.workItem?.status}")
     }
 
     private class QueueSignalSource : SignalSource {
@@ -1294,7 +1294,7 @@ class AgentScenarioPackTest {
             signals.trySend(signal).getOrThrow()
         }
 
-        fun offer(cue: GoalRuntimeCue) {
+        fun offer(cue: DurableWorkCue) {
             signals.trySend(CognitiveSignal.StimulusReceived(cue.toStimulus())).getOrThrow()
         }
 

@@ -27,7 +27,7 @@ class GroundingClassifierTest {
     @Test
     fun `prefilter returns NOT_REQUIRED for Goal`() {
         val classifier = buildClassifier()
-        val result = classifier.prefilter(InputRoute.Goal("test"))
+        val result = classifier.prefilter(InputRoute.DurableWork("test"))
         assertNotNull(result)
         assertEquals(GroundingRequirement.NOT_REQUIRED, result.requirement)
         assertEquals(GroundingSource.INPUT_PREFILTER, result.source)
@@ -74,7 +74,7 @@ class GroundingClassifierTest {
         val llm = StubChatModelClient()
         val classifier = buildClassifier(llm = llm)
         val result = classifier.classify(
-            InputRoute.Goal("create weather goal"),
+            InputRoute.DurableWork("create weather goal"),
             inputTrigger(),
             defaultContext(),
         )

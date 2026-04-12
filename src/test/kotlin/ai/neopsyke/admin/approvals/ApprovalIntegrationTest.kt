@@ -528,7 +528,7 @@ class ApprovalIntegrationTest {
         )
         val staged = testStagedAction(
             conversationContext = nonOwnerCtx,
-            origin = ActionOrigin(ai.neopsyke.agent.model.OriginSource.GOAL),
+            origin = ActionOrigin(ai.neopsyke.agent.model.OriginSource.DURABLE_WORK),
         )
         val telegramConfig = TelegramChannelConfig(
             enabled = true,
@@ -562,7 +562,7 @@ class ApprovalIntegrationTest {
         )
         val staged = testStagedAction(
             conversationContext = nonOwnerCtx,
-            origin = ActionOrigin(ai.neopsyke.agent.model.OriginSource.GOAL),
+            origin = ActionOrigin(ai.neopsyke.agent.model.OriginSource.DURABLE_WORK),
         )
         val config = AgentConfig(approvals = ApprovalRuntimeConfig(
             dashboardRequiresLiveSubscriber = true,

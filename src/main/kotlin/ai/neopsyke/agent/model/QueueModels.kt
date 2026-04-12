@@ -1,7 +1,7 @@
 package ai.neopsyke.agent.model
 
 import ai.neopsyke.agent.cortex.sensory.ActionFeedbackCue
-import ai.neopsyke.agent.goal.GoalRunActivation
+import ai.neopsyke.agent.durablework.DurableWorkActivation
 import com.fasterxml.jackson.annotation.JsonIgnore
 import com.fasterxml.jackson.annotation.JsonSubTypes
 import com.fasterxml.jackson.annotation.JsonTypeInfo
@@ -89,7 +89,7 @@ data class ActionOrigin(
     }
 }
 
-enum class OriginSource { USER, ID, SYSTEM, GOAL }
+enum class OriginSource { USER, ID, SYSTEM, DURABLE_WORK }
 
 data class PendingImpulse(
     val id: Long,
@@ -180,7 +180,7 @@ sealed interface OpportunityTrigger {
         override val groundingMetadata: GroundingMetadata = feedback.cue.groundingMetadata
     }
 
-    data class GoalWork(val work: GoalRunActivation) : OpportunityTrigger {
+    data class DurableWork(val work: DurableWorkActivation) : OpportunityTrigger {
         override val rootInputId: String = work.rootInputId
         override val conversationContext: ConversationContext = work.conversationContext
         override val receivedAtMs: Long? = null

@@ -11,7 +11,7 @@ enum class LaneId(val configKey: String) {
     TASK_DECOMPOSITION("task_decomposition"),
     GOAL("goal"),
     PROGRESSION("progression"),
-    GOAL_WORK("goal_work"),
+    GOAL_WORK("durable_work"),
     IMPULSE("impulse"),
     GROUNDING_CLASSIFIER("grounding_classifier"),
 }

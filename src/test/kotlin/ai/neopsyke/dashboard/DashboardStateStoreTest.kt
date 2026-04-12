@@ -444,14 +444,14 @@ class DashboardStateStoreTest {
     @Test
     fun `filtered subscription only receives matching events`() = runBlocking {
         val store = DashboardStateStore(maxEvents = 10)
-        val subscription = store.subscribe { event -> event.type.startsWith("goal_") }
+        val subscription = store.subscribe { event -> event.type.startsWith("durable_work_") }
         store.onEvent(AgentEvent(id = 1, type = "warning", data = mapOf("message" to "ignore")))
-        store.onEvent(AgentEvent(id = 2, type = "goal_started", data = mapOf("goal_id" to "goal-1")))
+        store.onEvent(AgentEvent(id = 2, type = "durable_work_started", data = mapOf("work_item_id" to "goal-1")))
 
         val payload = withTimeoutOrNull(200) { subscription.receive() }
         assertNotNull(payload)
-        assertTrue(payload.contains("\"type\":\"goal_started\""))
-        assertTrue(payload.contains("\"goal_id\":\"goal-1\""))
+        assertTrue(payload.contains("\"type\":\"durable_work_started\""))
+        assertTrue(payload.contains("\"work_item_id\":\"goal-1\""))
         subscription.close()
         store.close()
     }
@@ -470,7 +470,7 @@ class DashboardStateStoreTest {
                     "update_type" to "plan_recorded",
                     "version" to 4L,
                     "updated_at_ms" to nowMs,
-                    "goal" to "Verify pricing and summarize",
+                    "workItem" to "Verify pricing and summarize",
                     "section_count" to 2,
                     "evidence_count" to 1,
                     "scratchpad_confidence" to 0.72,
@@ -502,7 +502,7 @@ class DashboardStateStoreTest {
         val detailJson = store.scratchpadSnapshotJson(rootInputId = "root-99")
         assertNotNull(detailJson)
         val detail: Map<String, Any?> = mapper.readValue(detailJson)
-        assertEquals("Verify pricing and summarize", detail["goal"])
+        assertEquals("Verify pricing and summarize", detail["workItem"])
         @Suppress("UNCHECKED_CAST")
         val sections = detail["sections"] as List<Map<String, Any?>>
         assertEquals(1, sections.size)

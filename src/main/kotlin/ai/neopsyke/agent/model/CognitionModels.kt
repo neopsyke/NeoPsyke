@@ -2,7 +2,7 @@ package ai.neopsyke.agent.model
 
 import ai.neopsyke.agent.cortex.motor.actions.async.AsyncActionWait
 import ai.neopsyke.agent.id.ConvergenceMode
-import ai.neopsyke.agent.goal.GoalRunActivation
+import ai.neopsyke.agent.durablework.DurableWorkActivation
 import java.util.UUID
 
 /**
@@ -18,7 +18,7 @@ data class IdStateSnapshot(
 )
 
 data class AmbientContext(
-    val activeGoals: List<String> = emptyList(),
+    val activeWorkItems: List<String> = emptyList(),
     val recentScratchpadThemes: List<String> = emptyList(),
     val recentUsefulActionsOrUpdates: List<String> = emptyList(),
     val unresolvedOpenLoops: List<String> = emptyList(),
@@ -33,7 +33,7 @@ data class AmbientContext(
      * cross-thread coordination.
      */
     fun isEmpty(): Boolean =
-        activeGoals.isEmpty() &&
+        activeWorkItems.isEmpty() &&
             recentScratchpadThemes.isEmpty() &&
             recentUsefulActionsOrUpdates.isEmpty() &&
             unresolvedOpenLoops.isEmpty() &&
@@ -43,7 +43,7 @@ data class AmbientContext(
         if (isEmpty()) return ""
         return buildString {
             append("Optional relevance signals:\n")
-            appendSection("active_goals", activeGoals)
+            appendSection("active_goals", activeWorkItems)
             appendSection("recent_scratchpad_themes", recentScratchpadThemes)
             appendSection("recent_useful_actions_updates", recentUsefulActionsOrUpdates)
             appendSection("unresolved_open_loops", unresolvedOpenLoops)
@@ -128,7 +128,7 @@ sealed interface EgoTrigger {
     data class Continuation(val continuation: QueuedContinuation) : EgoTrigger
     data class ActionFeedback(val feedback: PendingFeedback) : EgoTrigger
     data class IncomingImpulse(val impulse: PendingImpulse) : EgoTrigger
-    data class GoalWork(val workUnit: GoalRunActivation) : EgoTrigger
+    data class DurableWork(val workUnit: DurableWorkActivation) : EgoTrigger
 }
 
 sealed interface EgoDecision {

@@ -2,7 +2,7 @@ package ai.neopsyke.session
 
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import ai.neopsyke.agent.cortex.sensory.CognitiveSignal
-import ai.neopsyke.agent.cortex.sensory.GoalRuntimeCue
+import ai.neopsyke.agent.cortex.sensory.DurableWorkCue
 import ai.neopsyke.agent.cortex.sensory.RuntimeControlSignal
 import ai.neopsyke.agent.cortex.sensory.Signal
 import ai.neopsyke.agent.cortex.sensory.SignalSource
@@ -297,7 +297,7 @@ class RecordingSignalSourceTest {
     fun `REPLAY preserves trusted internal automation security context`() = runBlocking {
         val file = Files.createTempFile("session-signal-internal-security-", ".jsonl")
         try {
-            val stimulus = GoalRuntimeCue(goalId = "goal-1", stepId = "step-1", reason = "ready").toStimulus()
+            val stimulus = DurableWorkCue(workItemId = "goal-1", stepId = "step-1", reason = "ready").toStimulus()
             val recordChannel = RecordReplayChannel(
                 channelName = "signals",
                 mode = SessionRecordingMode.RECORD,

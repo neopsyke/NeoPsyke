@@ -224,7 +224,7 @@ class MemorySystemTemporalVectorTest {
             shortTermSummary = "",
             recentDialogue = emptyList(),
             ambientContext = ai.neopsyke.agent.model.AmbientContext(
-                activeGoals = listOf("Build the memory subsystem"),
+                activeWorkItems = listOf("Build the memory subsystem"),
                 recentExactLearningTopics = listOf("kotlin, coroutines")
             )
         )
