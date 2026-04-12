@@ -2,8 +2,15 @@ package ai.neopsyke.agent.ego.planner.input
 
 import com.fasterxml.jackson.annotation.JsonProperty
 import ai.neopsyke.agent.config.AgentConfig
+import ai.neopsyke.agent.ego.planner.ActionSummary
 import ai.neopsyke.agent.ego.planner.HierarchicalEgoPlanner
 import ai.neopsyke.agent.ego.planner.LaneId
+import ai.neopsyke.agent.ego.planner.PlanKind
+import ai.neopsyke.agent.ego.planner.PlanRefiner
+import ai.neopsyke.agent.ego.planner.PlanRefinementMode
+import ai.neopsyke.agent.ego.planner.PlanRefinementRequest
+import ai.neopsyke.agent.ego.planner.PlanStepCandidate
+import ai.neopsyke.agent.ego.planner.TerminalPolicy
 import ai.neopsyke.agent.ego.planner.model.DurableWorkCommand
 import ai.neopsyke.agent.ego.planner.model.DurableWorkPlanStepPayload
 import ai.neopsyke.agent.ego.planner.model.WorkItemReference
@@ -22,6 +29,7 @@ import ai.neopsyke.agent.model.PlannerContext
 import ai.neopsyke.agent.model.Urgency
 import ai.neopsyke.agent.support.PromptBudgetAllocator
 import ai.neopsyke.agent.support.TextSecurity
+import ai.neopsyke.instrumentation.AgentEvent
 import ai.neopsyke.instrumentation.AgentInstrumentation
 import ai.neopsyke.llm.ChatResponseFormat
 import ai.neopsyke.llm.ChatRole
@@ -39,6 +47,7 @@ class WorkPlanBuilder(
     private val runtime: PlannerRuntime,
     private val config: AgentConfig,
     private val instrumentation: AgentInstrumentation,
+    private val planRefiner: PlanRefiner,
 ) {
     fun plan(trigger: EgoTrigger.IncomingInput, context: PlannerContext): EgoDecision {
         if (ActionType.DURABLE_WORK_OPERATION !in context.dispatchableActions) {
@@ -102,7 +111,7 @@ class WorkPlanBuilder(
 
                     For "update": set relevant fields (title, instruction, priority, completion_criteria, cron_expression) to new values; leave others null.
                     For "reprioritize": set priority to the new priority value.
-                    For "revise_plan": optionally set reason to explain why.
+                    For "revise_plan": set reason to explain why, and generate new plan_steps with the revised execution plan.
                     For "fallback": provide a helpful response in assistant_response.
                 """.trimIndent()
             ),
@@ -197,7 +206,7 @@ class WorkPlanBuilder(
             ?.let { runCatching { WorkItemPriority.valueOf(it) }.getOrNull() }
             ?: WorkItemPriority.MEDIUM
 
-        val planSteps = payload.planSteps
+        val rawPlanSteps = payload.planSteps
             ?.mapNotNull { step ->
                 val desc = step.description?.trim().orEmpty()
                 if (desc.isBlank()) null
@@ -213,6 +222,15 @@ class WorkPlanBuilder(
             }
             ?.take(config.planner.maxPlanSteps)
             ?.takeIf { it.isNotEmpty() }
+
+        val planSteps = refineDurableWorkPlan(
+            rawSteps = rawPlanSteps,
+            planKind = PlanKind.DURABLE_WORK_CREATE,
+            goal = title.ifBlank { instruction },
+            instruction = instruction,
+            completionCriteria = payload.completionCriteria?.trim().orEmpty(),
+            context = context,
+        )
 
         val command = DurableWorkCommand.Create(
             title = TextSecurity.clamp(title.ifBlank { "Persistent goal" }, GOAL_TITLE_MAX_CHARS),
@@ -260,7 +278,7 @@ class WorkPlanBuilder(
             )
         }
 
-        val command = buildDurableWorkCommand(operation, ref, payload)
+        val command = buildDurableWorkCommand(operation, ref, payload, context)
             ?: return EgoDecision.Noop("WorkPlanBuilder returned invalid typed command.")
 
         return goalOperationDecision(command, context)
@@ -270,6 +288,7 @@ class WorkPlanBuilder(
         operation: String,
         reference: WorkItemReference,
         payload: GoalPayload,
+        context: PlannerContext,
     ): DurableWorkCommand? {
         return when (operation) {
             "list" -> DurableWorkCommand.List
@@ -291,10 +310,37 @@ class WorkPlanBuilder(
                     cronExpression = payload.cronExpression?.trim()?.ifBlank { null },
                 )
             }
-            "revise_plan" -> resolvedReference(reference)?.let {
+            "revise_plan" -> resolvedReference(reference)?.let { ref ->
+                val rawPlanSteps = payload.planSteps
+                    ?.mapNotNull { step ->
+                        val desc = step.description?.trim().orEmpty()
+                        if (desc.isBlank()) null
+                        else DurableWorkPlanStepPayload(
+                            id = step.id?.trim()?.ifBlank { null },
+                            description = desc,
+                            acceptanceCriteria = step.acceptanceCriteria?.trim().orEmpty(),
+                            groundingRequirement = step.groundingRequirement?.trim()?.lowercase(),
+                            requires = step.requires.orEmpty().toSet(),
+                            produces = step.produces.orEmpty().toSet(),
+                            maxAttempts = step.maxAttempts?.coerceIn(1, 10),
+                        )
+                    }
+                    ?.take(config.planner.maxPlanSteps)
+                    ?.takeIf { it.isNotEmpty() }
+
+                val refinedSteps = refineDurableWorkPlan(
+                    rawSteps = rawPlanSteps,
+                    planKind = PlanKind.DURABLE_WORK_REVISE,
+                    goal = payload.title?.trim().orEmpty().ifBlank { "Revise plan" },
+                    instruction = payload.instruction?.trim().orEmpty(),
+                    context = context,
+                    userFeedbackHint = payload.reason?.trim(),
+                )
+
                 DurableWorkCommand.RevisePlan(
-                    reference = it,
+                    reference = ref,
                     reason = payload.reason?.trim()?.ifBlank { null },
+                    planSteps = refinedSteps,
                 )
             }
             "reprioritize" -> {
@@ -398,6 +444,87 @@ class WorkPlanBuilder(
             payload = TextSecurity.clamp(payload, config.maxActionPayloadChars),
             summary = TextSecurity.clamp(summary, config.maxActionSummaryChars),
         )
+
+    private fun refineDurableWorkPlan(
+        rawSteps: List<DurableWorkPlanStepPayload>?,
+        planKind: PlanKind,
+        goal: String,
+        instruction: String,
+        completionCriteria: String = "",
+        context: PlannerContext,
+        userFeedbackHint: String? = null,
+    ): List<DurableWorkPlanStepPayload>? {
+        if (rawSteps.isNullOrEmpty()) return rawSteps
+        if (!config.planner.planRefinementEnabled) return rawSteps
+
+        val candidates = rawSteps.mapIndexed { i, step ->
+            PlanStepCandidate(
+                id = step.id ?: "step-${i + 1}",
+                description = step.description,
+                acceptanceCriteria = step.acceptanceCriteria.orEmpty(),
+                groundingRequirement = step.groundingRequirement ?: "not_required",
+                requires = step.requires,
+                produces = step.produces,
+                maxAttempts = step.maxAttempts ?: 3,
+            )
+        }
+
+        val availableActions = context.dispatchableActions.map { actionType ->
+            ActionSummary(actionType = actionType.id, description = actionType.id)
+        }
+
+        val now = java.time.ZonedDateTime.now()
+        val runtimeFacts = mapOf(
+            "date" to now.toLocalDate().toString(),
+            "time" to now.toLocalTime().toString().take(5),
+            "timezone" to now.zone.id,
+        )
+
+        val request = PlanRefinementRequest(
+            planKind = planKind,
+            terminalPolicy = TerminalPolicy.DELIVERY_CONTROLLED_BY_WORK_ITEM,
+            goal = goal,
+            instruction = instruction,
+            completionCriteria = completionCriteria,
+            steps = candidates,
+            availableActions = availableActions,
+            runtimeFacts = runtimeFacts,
+            recentDialogue = context.recentDialogue.map { "${it.role.name.lowercase()}: ${it.content}" },
+            shortTermContextSummary = context.shortTermContextSummary,
+            longTermMemoryRecall = context.longTermMemoryRecall,
+            episodicRecall = context.episodicRecall,
+            userFeedbackHint = userFeedbackHint,
+        )
+
+        val result = planRefiner.refine(request)
+
+        instrumentation.emit(
+            AgentEvent(
+                type = "plan_refinement_completed",
+                data = mapOf(
+                    "plan_kind" to planKind.name.lowercase(),
+                    "refinement_mode" to result.refinementMode.name.lowercase(),
+                    "original_step_count" to rawSteps.size,
+                    "refined_step_count" to result.steps.size,
+                    "dropped_step_count" to result.droppedSteps.size,
+                )
+            )
+        )
+
+        if (result.refinementMode == PlanRefinementMode.UNCHANGED) return rawSteps
+
+        return result.steps.map { step ->
+            DurableWorkPlanStepPayload(
+                id = step.id.ifBlank { null },
+                description = step.description,
+                acceptanceCriteria = step.acceptanceCriteria.ifBlank { null },
+                groundingRequirement = step.groundingRequirement,
+                requires = step.requires,
+                produces = step.produces,
+                maxAttempts = step.maxAttempts,
+            )
+        }.takeIf { it.isNotEmpty() } ?: rawSteps
+    }
 
     private fun unavailableDecision(): EgoDecision =
         contactUser(

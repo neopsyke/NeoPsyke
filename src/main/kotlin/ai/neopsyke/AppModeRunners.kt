@@ -2974,12 +2974,18 @@ private fun buildHierarchicalPlanner(
         laneModelClientResolver = laneModelClientResolver ?: { _, _ -> null },
     )
 
+    val planRefiner: ai.neopsyke.agent.ego.planner.PlanRefiner = if (config.planner.planRefinementEnabled) {
+        ai.neopsyke.agent.ego.planner.LlmPlanRefiner(runtime, instrumentation)
+    } else {
+        ai.neopsyke.agent.ego.planner.NoopPlanRefiner()
+    }
+
     val router = InputIntentRouter(runtime, config, instrumentation)
     val groundingClassifier = GroundingClassifier(runtime, config, instrumentation)
     val directResponse = DirectResponsePlanner(runtime, config, instrumentation)
     val generalAction = GeneralActionPlanner(runtime, config, instrumentation)
     val taskDecomp = TaskDecompositionPlanner(runtime, config, instrumentation)
-    val goalPlanner = WorkPlanBuilder(runtime, config, instrumentation)
+    val goalPlanner = WorkPlanBuilder(runtime, config, instrumentation, planRefiner)
 
     val inputPlanner = InputPlanner(
         runtime = runtime,
@@ -2996,12 +3002,6 @@ private fun buildHierarchicalPlanner(
     val progressionPlanner = ProgressionPlanner(runtime, config, instrumentation)
     val durableWorkLanePlannerLane = DurableWorkLanePlanner(runtime, config, instrumentation)
     val impulsePlannerLane = ImpulsePlanner(runtime, config, instrumentation)
-
-    val planRefiner: ai.neopsyke.agent.ego.planner.PlanRefiner = if (config.planner.planRefinementEnabled) {
-        ai.neopsyke.agent.ego.planner.LlmPlanRefiner(runtime, instrumentation)
-    } else {
-        ai.neopsyke.agent.ego.planner.NoopPlanRefiner()
-    }
 
     val planner = HierarchicalEgoPlanner(
         runtime = runtime,

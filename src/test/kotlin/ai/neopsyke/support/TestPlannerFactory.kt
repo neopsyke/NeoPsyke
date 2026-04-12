@@ -7,6 +7,7 @@ import ai.neopsyke.agent.ego.planner.HierarchicalEgoPlanner
 import ai.neopsyke.agent.ego.planner.input.DirectResponsePlanner
 import ai.neopsyke.agent.ego.planner.input.GeneralActionPlanner
 import ai.neopsyke.agent.ego.planner.input.WorkPlanBuilder
+import ai.neopsyke.agent.ego.planner.NoopPlanRefiner
 import ai.neopsyke.agent.ego.planner.input.GroundingClassifier
 import ai.neopsyke.agent.ego.planner.input.InputIntentRouter
 import ai.neopsyke.agent.ego.planner.input.TaskDecompositionPlanner
@@ -42,7 +43,7 @@ fun buildTestHierarchicalPlanner(
     val directResponse = DirectResponsePlanner(runtime, config, instrumentation)
     val generalAction = GeneralActionPlanner(runtime, config, instrumentation)
     val taskDecomp = TaskDecompositionPlanner(runtime, config, instrumentation)
-    val goalPlanner = WorkPlanBuilder(runtime, config, instrumentation)
+    val goalPlanner = WorkPlanBuilder(runtime, config, instrumentation, NoopPlanRefiner())
 
     val inputPlanner = InputPlanner(
         runtime = runtime,
