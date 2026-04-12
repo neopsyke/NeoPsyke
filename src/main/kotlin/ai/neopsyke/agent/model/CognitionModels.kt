@@ -3,6 +3,8 @@ package ai.neopsyke.agent.model
 import ai.neopsyke.agent.cortex.motor.actions.async.AsyncActionWait
 import ai.neopsyke.agent.id.ConvergenceMode
 import ai.neopsyke.agent.durablework.DurableWorkActivation
+import ai.neopsyke.agent.durablework.StepStatus
+import ai.neopsyke.agent.durablework.WorkItemStatus
 import java.util.UUID
 
 /**
@@ -63,6 +65,29 @@ data class AmbientContext(
     }
 }
 
+data class DurableWorkPlanStepSnapshot(
+    val id: String,
+    val description: String,
+    val status: StepStatus,
+    val acceptanceCriteria: String,
+    val requires: Set<String> = emptySet(),
+    val produces: Set<String> = emptySet(),
+    val attempts: Int = 0,
+    val maxAttempts: Int = 3,
+)
+
+data class DurableWorkItemSnapshot(
+    val workItemId: String,
+    val title: String,
+    val instruction: String,
+    val completionCriteria: String,
+    val status: WorkItemStatus,
+    val planRevision: Int,
+    val failureCountInWindow: Int = 0,
+    val latestArtifactSummary: String? = null,
+    val planSteps: List<DurableWorkPlanStepSnapshot> = emptyList(),
+)
+
 data class PlannerContext(
     val recentDialogue: List<DialogueTurn>,
     val queue: QueueSnapshot,
@@ -97,6 +122,7 @@ data class PlannerContext(
     val idState: IdStateSnapshot? = null,
     val goalWorkSummary: String = "",
     val goalIndex: Map<Int, String> = emptyMap(),
+    val goalSnapshots: Map<String, DurableWorkItemSnapshot> = emptyMap(),
     val groundingMetadata: GroundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
 )
 

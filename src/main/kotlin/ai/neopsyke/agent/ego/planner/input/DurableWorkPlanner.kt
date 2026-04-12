@@ -22,6 +22,7 @@ import ai.neopsyke.agent.ego.planner.runtime.StructuredOutputHandler
 import ai.neopsyke.agent.durablework.WorkItemPriority
 import ai.neopsyke.agent.model.ActionType
 import ai.neopsyke.agent.model.CommitMode
+import ai.neopsyke.agent.model.DurableWorkItemSnapshot
 import ai.neopsyke.agent.model.EgoDecision
 import ai.neopsyke.agent.model.EgoTrigger
 import ai.neopsyke.agent.model.IntentionKind
@@ -311,6 +312,7 @@ class WorkPlanBuilder(
                 )
             }
             "revise_plan" -> resolvedReference(reference)?.let { ref ->
+                val snapshot = resolvedGoalSnapshot(ref, context)
                 val rawPlanSteps = payload.planSteps
                     ?.mapNotNull { step ->
                         val desc = step.description?.trim().orEmpty()
@@ -327,14 +329,35 @@ class WorkPlanBuilder(
                     }
                     ?.take(config.planner.maxPlanSteps)
                     ?.takeIf { it.isNotEmpty() }
+                    ?: snapshot?.planSteps
+                        ?.map { step ->
+                            DurableWorkPlanStepPayload(
+                                id = step.id,
+                                description = step.description,
+                                acceptanceCriteria = step.acceptanceCriteria,
+                                groundingRequirement = "not_required",
+                                requires = step.requires,
+                                produces = step.produces,
+                                maxAttempts = step.maxAttempts,
+                            )
+                        }
+                        ?.take(config.planner.maxPlanSteps)
+                        ?.takeIf { it.isNotEmpty() }
+
+                val snapshotContextHint = snapshot?.let { renderRevisionSnapshotContext(it) }
 
                 val refinedSteps = refineDurableWorkPlan(
                     rawSteps = rawPlanSteps,
                     planKind = PlanKind.DURABLE_WORK_REVISE,
-                    goal = payload.title?.trim().orEmpty().ifBlank { "Revise plan" },
-                    instruction = payload.instruction?.trim().orEmpty(),
+                    goal = snapshot?.title?.ifBlank { null }
+                        ?: payload.title?.trim()?.ifBlank { null }
+                        ?: "Revise plan",
+                    instruction = snapshot?.instruction?.ifBlank { null }
+                        ?: payload.instruction?.trim().orEmpty(),
+                    completionCriteria = snapshot?.completionCriteria.orEmpty(),
                     context = context,
                     userFeedbackHint = payload.reason?.trim(),
+                    revisionContextHint = snapshotContextHint,
                 )
 
                 DurableWorkCommand.RevisePlan(
@@ -357,6 +380,14 @@ class WorkPlanBuilder(
         when (reference) {
             is WorkItemReference.ByInternalId -> reference
             is WorkItemReference.ByResolvedEntity -> reference
+            is WorkItemReference.Ambiguous -> null
+            is WorkItemReference.Unresolved -> null
+        }
+
+    private fun resolvedGoalSnapshot(reference: WorkItemReference, context: PlannerContext): DurableWorkItemSnapshot? =
+        when (reference) {
+            is WorkItemReference.ByInternalId -> context.goalSnapshots[reference.id]
+            is WorkItemReference.ByResolvedEntity -> context.goalSnapshots[reference.workItemId]
             is WorkItemReference.Ambiguous -> null
             is WorkItemReference.Unresolved -> null
         }
@@ -453,6 +484,7 @@ class WorkPlanBuilder(
         completionCriteria: String = "",
         context: PlannerContext,
         userFeedbackHint: String? = null,
+        revisionContextHint: String? = null,
     ): List<DurableWorkPlanStepPayload>? {
         if (rawSteps.isNullOrEmpty()) return rawSteps
         if (!config.planner.planRefinementEnabled) return rawSteps
@@ -490,7 +522,10 @@ class WorkPlanBuilder(
             availableActions = availableActions,
             runtimeFacts = runtimeFacts,
             recentDialogue = context.recentDialogue.map { "${it.role.name.lowercase()}: ${it.content}" },
-            shortTermContextSummary = context.shortTermContextSummary,
+            shortTermContextSummary = mergeContextHints(
+                context.shortTermContextSummary,
+                revisionContextHint,
+            ),
             longTermMemoryRecall = context.longTermMemoryRecall,
             episodicRecall = context.episodicRecall,
             userFeedbackHint = userFeedbackHint,
@@ -525,6 +560,28 @@ class WorkPlanBuilder(
             )
         }.takeIf { it.isNotEmpty() } ?: rawSteps
     }
+
+    private fun mergeContextHints(primary: String, secondary: String?): String {
+        if (secondary.isNullOrBlank()) return primary
+        if (primary.isBlank()) return secondary
+        return "$primary\n\n$secondary"
+    }
+
+    private fun renderRevisionSnapshotContext(snapshot: DurableWorkItemSnapshot): String = buildString {
+        appendLine("Current work-item state:")
+        appendLine("- id: ${snapshot.workItemId}")
+        appendLine("- title: ${snapshot.title}")
+        appendLine("- status: ${snapshot.status.name.lowercase()}")
+        appendLine("- plan_revision: ${snapshot.planRevision}")
+        appendLine("- failure_count_in_window: ${snapshot.failureCountInWindow}")
+        if (!snapshot.latestArtifactSummary.isNullOrBlank()) {
+            appendLine("- latest_artifact_summary: ${snapshot.latestArtifactSummary}")
+        }
+        appendLine("Current plan steps:")
+        snapshot.planSteps.forEach { step ->
+            appendLine("- ${step.id} [${step.status.name.lowercase()}] attempts=${step.attempts}/${step.maxAttempts}: ${step.description}")
+        }
+    }.trimEnd()
 
     private fun unavailableDecision(): EgoDecision =
         contactUser(

@@ -1103,6 +1103,7 @@ class Ego(
             conversationContext = conversationContext,
             goalWorkSummary = goalSummaryResult.text,
             goalIndex = goalSummaryResult.index,
+            goalSnapshots = goalSummaryResult.snapshots,
             groundingMetadata = groundingMetadataForTrigger(trigger),
         )
     }
@@ -1156,23 +1157,74 @@ class Ego(
     private data class GoalSummaryResult(
         val text: String,
         val index: Map<Int, String>,
+        val snapshots: Map<String, DurableWorkItemSnapshot>,
     )
 
     private fun buildNumberedGoalSummary(): GoalSummaryResult {
         val goals = durableWorkGateway.allWorkItems()
-        if (goals.isEmpty()) return GoalSummaryResult("", emptyMap())
+        if (goals.isEmpty()) return GoalSummaryResult("", emptyMap(), emptyMap())
         val index = mutableMapOf<Int, String>()
+        val snapshots = mutableMapOf<String, DurableWorkItemSnapshot>()
         val text = buildString {
             append("Active goals:")
             goals.forEachIndexed { i, g ->
                 val position = i + 1
                 index[position] = g.workItemId
-                append("\n$position. \"${g.title}\" (${g.status}")
+                val state = durableWorkGateway.workItemStatus(g.workItemId)
+                val projection = durableWorkGateway.workItemProjection(g.workItemId)
+                state?.let { workState ->
+                    snapshots[g.workItemId] = DurableWorkItemSnapshot(
+                        workItemId = workState.id,
+                        title = workState.workItem.title,
+                        instruction = workState.workItem.instruction,
+                        completionCriteria = workState.workItem.completionCriteria,
+                        status = workState.workItem.status,
+                        planRevision = workState.workItem.planRevision,
+                        failureCountInWindow = workState.workItem.failureWindow.failureCount,
+                        latestArtifactSummary = projection?.latestArtifactSummary ?: workState.durableState.artifacts.lastSummary,
+                        planSteps = workState.workItem.plan.steps.map { step ->
+                            DurableWorkPlanStepSnapshot(
+                                id = step.id,
+                                description = step.description,
+                                status = step.status,
+                                acceptanceCriteria = step.acceptanceCriteria,
+                                requires = step.requires,
+                                produces = step.produces,
+                                attempts = step.attempts,
+                                maxAttempts = step.maxAttempts,
+                            )
+                        },
+                    )
+                }
+                val snapshot = snapshots[g.workItemId]
+                append("\n$position. \"${g.title}\" (${snapshot?.status ?: g.status}")
                 if (!g.cronExpression.isNullOrBlank()) append(", cron=${g.cronExpression}")
+                snapshot?.let {
+                    val doneCount = it.planSteps.count { step -> step.status == ai.neopsyke.agent.durablework.StepStatus.DONE }
+                    append(", rev=${it.planRevision}, steps=$doneCount/${it.planSteps.size}")
+                }
                 append(")")
+                val currentStep = snapshot?.planSteps?.firstOrNull { step ->
+                    step.status in setOf(
+                        ai.neopsyke.agent.durablework.StepStatus.IN_PROGRESS,
+                        ai.neopsyke.agent.durablework.StepStatus.READY,
+                        ai.neopsyke.agent.durablework.StepStatus.BLOCKED,
+                    )
+                }
+                if (currentStep != null) {
+                    append("\n   current_step: ${currentStep.id} (${currentStep.status.name.lowercase()}) ${currentStep.description}")
+                }
+                snapshot?.latestArtifactSummary?.takeIf { it.isNotBlank() }?.let { summary ->
+                    append("\n   latest_artifact: ${TextSecurity.preview(summary, GOAL_ARTIFACT_SUMMARY_PREVIEW_CHARS)}")
+                }
+                snapshot?.let {
+                    if (it.failureCountInWindow > 0) {
+                        append("\n   failure_count_in_window: ${it.failureCountInWindow}")
+                    }
+                }
             }
         }
-        return GoalSummaryResult(text, index)
+        return GoalSummaryResult(text, index, snapshots)
     }
 
     private fun buildAmbientContext(trigger: EgoTrigger): AmbientContext {
@@ -1595,6 +1647,7 @@ class Ego(
     }
 
     private companion object {
+        const val GOAL_ARTIFACT_SUMMARY_PREVIEW_CHARS: Int = 160
         const val MAX_AMBIENT_PROJECTS: Int = 4
         const val AMBIENT_PROJECT_PREVIEW_CHARS: Int = 180
         const val MAX_AMBIENT_SCRATCHPAD_SIGNALS: Int = 6
