@@ -4,6 +4,7 @@ import ai.neopsyke.agent.config.ApprovalRuntimeConfig
 import ai.neopsyke.agent.config.TelegramChannelConfig
 import ai.neopsyke.agent.cortex.motor.actions.ConversationDeliveryResult
 import ai.neopsyke.agent.cortex.motor.actions.TelegramMessageSink
+import ai.neopsyke.agent.cortex.motor.actions.TelegramStartupAckTracker
 import ai.neopsyke.agent.model.ConversationContext
 import ai.neopsyke.agent.model.PrincipalRole
 import ai.neopsyke.agent.model.StagedAction
@@ -35,8 +36,8 @@ class DefaultApprovalChannelStatusProvider(
     private val dashboardStore: DashboardStateStore,
     private val telegramConfig: TelegramChannelConfig,
     private val telegramSink: TelegramMessageSink?,
+    private val telegramAckTracker: TelegramStartupAckTracker = TelegramStartupAckTracker(),
 ) : ApprovalChannelStatusProvider {
-    @Volatile private var telegramStartupAckDelivered: Boolean = false
 
     override fun statuses(): Map<String, ApprovalChannelStatus> {
         val candidates = linkedMapOf<String, ApprovalChannelStatus>()
@@ -50,7 +51,7 @@ class DefaultApprovalChannelStatusProvider(
         if (source != "approval-startup-ack") return
         val ownerChatId = telegramConfig.ownerChatId.trim()
         if (ownerChatId.isBlank() || target.channelId != ownerChatId) return
-        telegramStartupAckDelivered = delivery.delivered
+        telegramAckTracker.recordDelivery(delivery.delivered)
     }
 
     private fun dashboardStatus(): ApprovalChannelStatus? {
@@ -76,9 +77,8 @@ class DefaultApprovalChannelStatusProvider(
             principalId = telegramConfig.ownerUserId.ifBlank { "telegram-owner" },
             principalLabel = "Telegram owner",
         )
-        // Startup ACK is the current source-of-truth for non-conversation Telegram routing.
-        val deliverable = telegramStartupAckDelivered
-        val live = telegramStartupAckDelivered
+        val deliverable = telegramAckTracker.delivered
+        val live = telegramAckTracker.delivered
         return ApprovalChannelStatus(
             target = target,
             deliverable = deliverable,

@@ -368,4 +368,54 @@ class ProjectStateMachineTest {
         ).first
         assertEquals(3, state.eventCount)
     }
+
+    @Test
+    fun `Created event sets contactChannel on goal`() {
+        val event = GoalEvent.Created(
+            goalId = "proj-1",
+            title = "Notify via Telegram",
+            instruction = "Send weather update",
+            priority = GoalPriority.MEDIUM,
+            completionCriteria = "Message sent",
+            contactChannel = "telegram",
+            timestamp = now,
+        )
+        val state = GoalStateMachine.initialState(event, workspacePath)
+        assertEquals("telegram", state.goal.contactChannel)
+    }
+
+    @Test
+    fun `Created event without contactChannel leaves it null`() {
+        val state = initialState()
+        assertEquals(null, state.goal.contactChannel)
+    }
+
+    @Test
+    fun `Updated event sets contactChannel`() {
+        val state = initialState()
+        val (updated, _) = GoalStateMachine.transition(
+            state,
+            GoalEvent.Updated(goalId = "proj-1", contactChannel = "webapp", timestamp = now),
+        )
+        assertEquals("webapp", updated.goal.contactChannel)
+    }
+
+    @Test
+    fun `Updated event without contactChannel preserves existing value`() {
+        val event = GoalEvent.Created(
+            goalId = "proj-1",
+            title = "Test",
+            instruction = "Test",
+            priority = GoalPriority.MEDIUM,
+            completionCriteria = "Done",
+            contactChannel = "telegram",
+            timestamp = now,
+        )
+        val state = GoalStateMachine.initialState(event, workspacePath)
+        val (updated, _) = GoalStateMachine.transition(
+            state,
+            GoalEvent.Updated(goalId = "proj-1", instruction = "New instruction", timestamp = now),
+        )
+        assertEquals("telegram", updated.goal.contactChannel)
+    }
 }

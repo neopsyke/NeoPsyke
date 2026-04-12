@@ -108,9 +108,6 @@ cognitive_roles:
   planner:
     provider: groq
     model: openai/gpt-oss-120b
-  action_verifier:
-    provider: openai
-    model: gpt-4o-mini
   superego_primary:
     provider: openai
     model: gpt-4o-mini
@@ -133,7 +130,6 @@ Each cognitive role can use a different provider and model. This allows cost opt
 | Role | What it does |
 |---|---|
 | `planner` | Main reasoning and planning LLM. Forms thoughts, proposes actions, generates answers. |
-| `action_verifier` | Checks whether a candidate action is grounded, sufficient, and ready to commit. |
 | `superego_primary` | Reviews proposed actions against safety directives and policy. |
 | `superego_escalation` | Stronger model used when two-stage review escalates on low confidence or medium policy risk. |
 | `meta_reasoner` | Intervenes when the planning chain stalls or loops. Classifies chain health. |
@@ -196,7 +192,7 @@ This is the largest configuration file, covering the Ego planner, Superego, memo
 | Key | Default | Description |
 |---|---|---|
 | `max_loop_steps_per_input` | `180` | Maximum Ego loop iterations per user input. Safety bound against runaway reasoning. |
-| `max_thought_passes` | `5` | Maximum consecutive thought passes before the planner must propose an action or answer. |
+| `max_continuation_passes` | `5` | Maximum consecutive continuation passes before the planner must propose an action or answer. |
 | `max_thought_chars` | `600` | Maximum length of a single thought. |
 | `max_input_chars` | `2000` | Maximum user input length processed. |
 | `max_action_payload_chars` | `4000` | Maximum action payload size. |
@@ -211,11 +207,10 @@ This is the largest configuration file, covering the Ego planner, Superego, memo
 | `max_plans_per_input` | `2` | Maximum plan generations per input. |
 | `action_retry_budget_non_retryable_failures` | `3` | How many non-retryable action failures before giving up. |
 | `action_retry_cooldown_steps` | `10` | Steps to wait before retrying a failed action type. |
-| `action_verifier_enabled` | `false` | Enable the planner-side action-verifier LLM pass that can repair or veto proposed actions before Superego review. This is separate from the deterministic `DecisionVerifier` gate. |
 
 **Tuning notes:**
 - `max_loop_steps_per_input` is your main safety valve. Start with the default (180) and lower it if you find the agent spending too many tokens on simple requests.
-- `max_thought_passes` limits how long the agent can "think" before it must act. Lower values force faster convergence but may reduce answer quality for complex questions.
+- `max_continuation_passes` limits how long the agent can keep resuming queued continuation work before it must act. Lower values force faster convergence but may reduce answer quality for complex questions.
 - Token caps (`max_run_total_tokens`, etc.) are disabled by default. Enable them for cost control during experimentation.
 
 ### Superego (`agent.superego`)
@@ -430,7 +425,7 @@ This controls the internal thought/event stream shown in observability views and
 | Key | Default | Description |
 |---|---|---|
 | `loop_delay_ms` | `0` | Delay between Ego loop iterations (ms). When `0` (the default) the delay is skipped entirely. |
-| `max_pending_thoughts` | `64` | Maximum queued thoughts. |
+| `max_pending_continuations` | `64` | Maximum queued continuations. |
 | `max_pending_actions` | `32` | Maximum queued actions. |
 | `max_pending_inputs` | `32` | Maximum queued inputs. |
 | `search_result_count` | `5` | Number of web search results to request. |

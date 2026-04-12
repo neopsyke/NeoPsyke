@@ -154,8 +154,8 @@ func RgSearch(pattern, directory string, caseInsensitive, lineNumbers bool, inve
 }
 
 // WriteJSONFile writes a map as formatted JSON to a file.
-func WriteJSONFile(filepath string, obj interface{}) error {
-	dir := filepath[:strings.LastIndex(filepath, "/")]
+func WriteJSONFile(filePath string, obj interface{}) error {
+	dir := filepath.Dir(filePath)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
@@ -163,7 +163,7 @@ func WriteJSONFile(filepath string, obj interface{}) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath, append(data, '\n'), 0o644)
+	return os.WriteFile(filePath, append(data, '\n'), 0o644)
 }
 
 // UTCNowISO returns current UTC time as ISO 8601 string.

@@ -12,6 +12,8 @@ import ai.neopsyke.agent.model.ConversationContext
 import ai.neopsyke.agent.model.DeliberationState
 import ai.neopsyke.agent.model.EgoDecision
 import ai.neopsyke.agent.model.EgoTrigger
+import ai.neopsyke.agent.model.GroundingMetadata
+import ai.neopsyke.agent.model.GroundingRequirement
 import ai.neopsyke.agent.model.Intention
 import ai.neopsyke.agent.model.PendingAction
 import ai.neopsyke.agent.model.PlannerContext
@@ -120,20 +122,122 @@ internal class DeliberationEngine(
 
     /**
      * Applies meta-pressure override to [decision] if [assessment] demands finalization.
+     *
+     * For [MetaReasonerVerdict.FINALIZE_NOW]: the planner already failed to converge, so
+     * a forced terminal answer is enqueued directly via [scheduler]. The original [decision]
+     * is returned unchanged (any noop/continuation it enqueues will be dropped by
+     * [hasForcedTerminalForInput] on the next iteration).
+     *
+     * For [MetaReasonerVerdict.REQUEST_TOOL_THEN_FINALIZE]: a soft hint is returned,
+     * giving the planner one more chance to produce a tool action before finalization.
      */
-    fun maybeApplyPressureOverride(decision: EgoDecision, assessment: MetaReasonerAssessment?): EgoDecision {
+    fun maybeApplyPressureOverride(
+        decision: EgoDecision,
+        assessment: MetaReasonerAssessment?,
+        scheduler: AttentionScheduler,
+        rootInputId: String?,
+        rootInputReceivedAtMs: Long?,
+        conversationContext: ConversationContext,
+        groundingMetadata: GroundingMetadata,
+    ): EgoDecision {
         if (assessment == null) return decision
         val needsFinalization = assessment.verdict == MetaReasonerVerdict.FINALIZE_NOW ||
             assessment.verdict == MetaReasonerVerdict.REQUEST_TOOL_THEN_FINALIZE
         if (!needsFinalization) return decision
         if (decision is EgoDecision.FormIntention) return decision
-        val pressuredThought = TextSecurity.clamp(
-            "Decision pressure is high. Stop looping and provide a concise best-effort final answer now. " +
-                "If one decisive tool action is strictly necessary, do only one then answer.",
-            config.planner.maxThoughtChars
+
+        // FINALIZE_NOW: enqueue forced terminal directly -- no more soft hints.
+        if (assessment.verdict == MetaReasonerVerdict.FINALIZE_NOW) {
+            val enqueued = enqueueMetaReasonerForcedTerminal(
+                scheduler = scheduler,
+                rootInputId = rootInputId,
+                rootInputReceivedAtMs = rootInputReceivedAtMs,
+                conversationContext = conversationContext,
+                groundingMetadata = groundingMetadata,
+            )
+            if (enqueued) {
+                // Return original decision unchanged. It may re-enqueue a noop/continuation,
+                // but hasForcedTerminalForInput will drop it on the next iteration.
+                return decision
+            }
+            // Fall through to soft override if forced terminal couldn't be enqueued
+            // (e.g. already queued for this input, or action queue full).
+        }
+
+        // REQUEST_TOOL_THEN_FINALIZE (or FINALIZE_NOW fallback): soft hint.
+        val pressuredContinuation = ai.neopsyke.agent.model.Continuation.ConvergeNow(
+            content = TextSecurity.clamp(
+                "Decision pressure is high. Stop looping and provide a concise best-effort final answer now. " +
+                    "If one decisive tool action is strictly necessary, do only one then answer.",
+                config.planner.maxThoughtChars
+            ),
+            convergenceReason = assessment.reason,
+            allowFallbackExplanation = true,
         )
         instrumentation.emit(AgentEvents.warning("MetaReasoner requested faster convergence; overriding non-action decision."))
-        return EgoDecision.EnqueueThought(urgency = Urgency.HIGH, content = pressuredThought)
+        return EgoDecision.EnqueueContinuation(urgency = Urgency.HIGH, continuation = pressuredContinuation)
+    }
+
+    /**
+     * Enqueues a forced terminal answer triggered by a [MetaReasonerVerdict.FINALIZE_NOW]
+     * verdict. Synthesizes a best-effort payload from accumulated evidence.
+     * Returns true if the action was enqueued.
+     */
+    private fun enqueueMetaReasonerForcedTerminal(
+        scheduler: AttentionScheduler,
+        rootInputId: String?,
+        rootInputReceivedAtMs: Long?,
+        conversationContext: ConversationContext,
+        groundingMetadata: GroundingMetadata,
+    ): Boolean {
+        val scope = inputScope(rootInputId, conversationContext.sessionId) ?: return false
+        if (scope in forcedTerminalAnswerQueuedByInput) return false
+
+        val evidence = evidenceFor(rootInputId, conversationContext.sessionId)
+        val payload = synthesizeFinalizeNowPayload(evidence, groundingMetadata)
+        val queued = scheduler.enqueueAction(
+            type = ActionType.CONTACT_USER,
+            payload = TextSecurity.clamp(payload, config.maxActionPayloadChars),
+            summary = "Meta-reasoner finalize_now: best-effort answer from accumulated evidence.",
+            urgency = Urgency.HIGH,
+            rootInputId = rootInputId,
+            rootInputReceivedAtMs = rootInputReceivedAtMs,
+            conversationContext = conversationContext,
+            groundingMetadata = groundingMetadata,
+            isForcedTerminal = true,
+        )
+        if (queued) {
+            forcedTerminalAnswerQueuedByInput.add(scope)
+            trimForcedTerminalQueue()
+            instrumentation.emit(AgentEvents.warning("Meta-reasoner finalize_now: forced terminal answer enqueued directly."))
+            activeState().guidance = "Finalization in progress. Terminal answer queued by meta-reasoner verdict."
+        }
+        return queued
+    }
+
+    private fun synthesizeFinalizeNowPayload(
+        evidence: ExternalEvidenceProgress?,
+        groundingMetadata: GroundingMetadata,
+    ): String {
+        // If successful evidence was gathered, incorporate it.
+        if (evidence?.hadSuccessfulEvidence == true) {
+            val signals = evidence.successfulEvidenceSignals
+            if (signals.isNotEmpty()) {
+                return signals.joinToString(" | ")
+            }
+            val latest = evidence.latestPlannerSignal
+            if (latest.isNotBlank()) return latest
+        }
+        // Generic payload with evidence-failure disclaimer if applicable.
+        val base = "I have reached diminishing returns in internal reasoning. " +
+            "Here is the best concise answer I can provide now with current evidence."
+        return if (groundingMetadata.requirement == GroundingRequirement.REQUIRED &&
+            evidence?.hadExternalFailures == true && evidence.hadSuccessfulEvidence != true
+        ) {
+            base + FORCED_TERMINAL_EVIDENCE_FAILURE_DISCLAIMER
+        } else {
+            base
+        }
     }
 
     /**
@@ -144,6 +248,7 @@ internal class DeliberationEngine(
         rootInputId: String?,
         rootInputReceivedAtMs: Long?,
         conversationContext: ConversationContext,
+        groundingMetadata: GroundingMetadata,
     ) {
         val scope = inputScope(rootInputId, conversationContext.sessionId) ?: return
         if (scope in forcedTerminalAnswerQueuedByInput) return
@@ -154,19 +259,30 @@ internal class DeliberationEngine(
         val repeatedModelErrors = state.modelErrorStreak >= MODEL_ERROR_STREAK_THRESHOLD &&
             state.decisionPressure >= MODEL_ERROR_PRESSURE_THRESHOLD &&
             state.stepIndex >= MODEL_ERROR_MIN_STEP_INDEX
-        if (!circularPressureHigh && !repeatedModelErrors) return
+        val noopSpiral = state.noopStreak >= config.metaReasoner.forcedTerminalNoopStreakThreshold
+        if (!circularPressureHigh && !repeatedModelErrors && !noopSpiral) return
+        val basePayload = "I have reached diminishing returns in internal reasoning. " +
+            "Here is the best concise answer I can provide now with current evidence."
+        val payload = if (groundingMetadata.requirement == GroundingRequirement.REQUIRED) {
+            val evidence = evidenceFor(rootInputId, conversationContext.sessionId)
+            if (evidence?.hadExternalFailures == true && evidence.hadSuccessfulEvidence != true) {
+                basePayload + FORCED_TERMINAL_EVIDENCE_FAILURE_DISCLAIMER
+            } else {
+                basePayload
+            }
+        } else {
+            basePayload
+        }
         val queued = scheduler.enqueueAction(
             type = ActionType.CONTACT_USER,
-            payload = TextSecurity.clamp(
-                "I have reached diminishing returns in internal reasoning. " +
-                    "Here is the best concise answer I can provide now with current evidence.",
-                config.maxActionPayloadChars
-            ),
+            payload = TextSecurity.clamp(payload, config.maxActionPayloadChars),
             summary = "Forced terminal answer due to high decision pressure.",
             urgency = Urgency.HIGH,
             rootInputId = rootInputId,
             rootInputReceivedAtMs = rootInputReceivedAtMs,
-            conversationContext = conversationContext
+            conversationContext = conversationContext,
+            groundingMetadata = groundingMetadata,
+            isForcedTerminal = true,
         )
         if (queued) {
             forcedTerminalAnswerQueuedByInput.add(scope)
@@ -217,7 +333,27 @@ internal class DeliberationEngine(
         if (!isEvidenceAction(action)) return
         val scope = inputScope(action.rootInputId, action.conversationContext.sessionId) ?: return
         val current = externalEvidence[scope] ?: ExternalEvidenceProgress()
-        externalEvidence[scope] = current.copy(hadExternalFailures = true)
+        val actionId = action.id.takeIf { it > 0L }
+        val alreadyCounted = actionId != null && actionId in current.technicalFailureActionIds
+        val updatedIds = if (actionId != null && !alreadyCounted) {
+            if (current.technicalFailureActionIds.size >= MAX_TRACKED_TECHNICAL_FAILURE_ACTION_IDS) {
+                current.technicalFailureActionIds
+            } else {
+                current.technicalFailureActionIds + actionId
+            }
+        } else {
+            current.technicalFailureActionIds
+        }
+        val nextCount = if (alreadyCounted) {
+            current.technicalFailureCount
+        } else {
+            current.technicalFailureCount + 1
+        }
+        externalEvidence[scope] = current.copy(
+            hadExternalFailures = true,
+            technicalFailureCount = nextCount,
+            technicalFailureActionIds = updatedIds,
+        )
     }
 
     fun clearEvidenceForInput(rootInputId: String?, sessionId: String) {
@@ -228,6 +364,12 @@ internal class DeliberationEngine(
     fun evidenceFor(rootInputId: String?, sessionId: String): ExternalEvidenceProgress? {
         val scope = inputScope(rootInputId, sessionId) ?: return null
         return externalEvidence[scope]
+    }
+
+    fun isGroundingTechnicalFailureBudgetExceeded(rootInputId: String?, sessionId: String): Boolean {
+        val scope = inputScope(rootInputId, sessionId) ?: return false
+        val evidence = externalEvidence[scope] ?: return false
+        return evidence.technicalFailureCount >= GROUNDING_TECHNICAL_FAILURE_BUDGET
     }
 
     fun threadSecurityContext(
@@ -325,9 +467,16 @@ internal class DeliberationEngine(
 
     // --- Reset ---
 
+    fun hasForcedTerminalForInput(rootInputId: String?, sessionId: String): Boolean {
+        val scope = inputScope(rootInputId, sessionId) ?: return false
+        return scope in forcedTerminalAnswerQueuedByInput
+    }
+
     fun clearForInput(rootInputId: String?, sessionId: String, retainThreadContinuity: Boolean = false) {
         val scope = inputScope(rootInputId, sessionId) ?: return
-        forcedTerminalAnswerQueuedByInput.remove(scope)
+        if (!retainThreadContinuity) {
+            forcedTerminalAnswerQueuedByInput.remove(scope)
+        }
         if (!retainThreadContinuity) {
             externalEvidence.remove(scope)
             actionCooldownByScope.remove(scope)
@@ -410,6 +559,8 @@ internal class DeliberationEngine(
         val hadExternalFailures: Boolean = false,
         val latestPlannerSignal: String = "",
         val successfulEvidenceSignals: List<String> = emptyList(),
+        val technicalFailureCount: Int = 0,
+        val technicalFailureActionIds: Set<Long> = emptySet(),
     )
 
     data class ActionCooldownState(
@@ -427,6 +578,12 @@ internal class DeliberationEngine(
         private const val MAX_FORCED_TERMINAL_SCOPES: Int = 256
         private const val ACTION_ERROR_CATEGORY_NONE: String = "none"
         private const val ACTION_ERROR_CATEGORY_NON_RETRYABLE: String = "non_retryable"
+        private const val GROUNDING_TECHNICAL_FAILURE_BUDGET: Int = 2
+        private const val MAX_TRACKED_TECHNICAL_FAILURE_ACTION_IDS: Int = 128
+        private const val FORCED_TERMINAL_EVIDENCE_FAILURE_DISCLAIMER: String =
+            "\n\nNote: I was unable to verify this information with external sources due to " +
+                "technical failures. This answer is based on available knowledge and may not " +
+                "reflect the latest data."
     }
 
     private fun normalizeActionErrorCategory(outcome: ActionOutcome): String {

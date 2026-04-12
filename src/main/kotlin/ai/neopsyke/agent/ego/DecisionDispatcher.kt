@@ -49,52 +49,46 @@ internal class DecisionDispatcher(
     private fun preservesDraftSequence(actionType: ActionType): Boolean =
         actionType == ActionType.RESOLUTION_DRAFT || actionType == ActionType.CONTACT_USER
 
-    private fun enqueueDeferredIntention(
-        content: String,
+    private fun enqueueContinuation(
+        continuation: Continuation,
         urgency: Urgency,
         nextPassCount: Int,
         rootInputId: String?,
         rootInputReceivedAtMs: Long?,
         conversationContext: ConversationContext,
         origin: ActionOrigin,
-        longTermMemoryRecallQuery: String? = null,
-        deniedActionType: ActionType? = null,
-        deniedActionPayload: String? = null,
-        denialReason: String? = null,
-        denialReasonCode: String? = null,
-        allowFallbackExplanation: Boolean = false,
-        planContext: PlanContext? = null,
-        originActionType: ActionType? = null,
-        originActionObservedEvidence: Boolean? = null,
+        groundingMetadata: GroundingMetadata,
     ): Boolean {
-        val intention = scheduler.enqueueThought(
-            content = content,
+        val queued = scheduler.enqueueContinuation(
+            continuation = continuation,
             urgency = urgency,
             passes = nextPassCount,
-            longTermMemoryRecallQuery = longTermMemoryRecallQuery,
             rootInputId = rootInputId,
             rootInputReceivedAtMs = rootInputReceivedAtMs,
-            deniedActionType = deniedActionType,
-            deniedActionPayload = deniedActionPayload,
-            denialReason = denialReason,
-            allowFallbackExplanation = allowFallbackExplanation,
-            planContext = planContext,
-            denialReasonCode = denialReasonCode,
-            originActionType = originActionType,
-            originActionObservedEvidence = originActionObservedEvidence,
             conversationContext = conversationContext,
             origin = origin,
+            groundingMetadata = groundingMetadata,
         )
-        if (intention != null) {
-            deliberation.recordIntention(rootInputId, conversationContext, intention)
+        if (queued != null) {
+            groundingMetadata?.let { metadata ->
+                instrumentation.emit(
+                    AgentEvents.groundingMetadataPropagated(
+                        rootInputId = rootInputId,
+                        fromEnvelopeType = "planner_context",
+                        toEnvelopeType = "queued_continuation",
+                        groundingRequired = metadata.requirement == GroundingRequirement.REQUIRED,
+                        source = metadata.source.name.lowercase(),
+                    )
+                )
+            }
         }
-        return intention != null
+        return queued != null
     }
 
     suspend fun dispatch(
         decision: EgoDecision,
         nextPassCount: Int,
-        originThought: PendingThought?,
+        originContinuation: QueuedContinuation?,
         rootInputId: String?,
         rootInputReceivedAtMs: Long?,
         conversationContext: ConversationContext,
@@ -102,55 +96,51 @@ internal class DecisionDispatcher(
         origin: ActionOrigin = ActionOrigin.USER,
     ) {
         when (decision) {
-            is EgoDecision.EnqueueThought -> {
+            is EgoDecision.EnqueueContinuation -> {
                 scratchpadStore.resetDraftSequence(rootInputId)
-                val allowFallbackExplanation =
-                    originThought?.allowFallbackExplanation ?: (origin.source != OriginSource.ID)
-                val queued = enqueueDeferredIntention(
-                    content = decision.content,
+                val resolvedGrounding = originContinuation?.groundingMetadata ?: plannerContext?.groundingMetadata ?: GroundingMetadata.NOT_REQUIRED_PREFILTER
+                val queued = enqueueContinuation(
+                    continuation = decision.continuation,
                     urgency = decision.urgency,
                     nextPassCount = nextPassCount,
-                    longTermMemoryRecallQuery = decision.longTermMemoryRecallQuery,
                     rootInputId = rootInputId,
                     rootInputReceivedAtMs = rootInputReceivedAtMs,
-                    deniedActionType = originThought?.deniedActionType,
-                    deniedActionPayload = originThought?.deniedActionPayload,
-                    denialReason = originThought?.denialReason,
-                    denialReasonCode = originThought?.denialReasonCode,
-                    allowFallbackExplanation = allowFallbackExplanation,
-                    originActionType = originThought?.originActionType,
-                    originActionObservedEvidence = originThought?.originActionObservedEvidence,
                     conversationContext = conversationContext,
                     origin = origin,
+                    groundingMetadata = resolvedGrounding,
                 )
-                if (!decision.longTermMemoryRecallQuery.isNullOrBlank()) {
+                val recallQuery = decision.continuation.longTermMemoryRecallQuery
+                if (!recallQuery.isNullOrBlank()) {
                     instrumentation.emit(
                         AgentEvents.longTermMemoryRecallRequested(
-                            trigger = "thought",
+                            trigger = "continuation",
                             source = "planner",
-                            queryPreview = TextSecurity.preview(decision.longTermMemoryRecallQuery, 180)
+                            queryPreview = TextSecurity.preview(recallQuery, 180)
                         )
                     )
                 }
                 instrumentation.emit(
                     AgentEvent(
-                        type = "thought_enqueued",
+                        type = "continuation_enqueued",
                         data = mapOf(
                             "queued" to queued,
                             "urgency" to decision.urgency.name.lowercase(),
-                            "content" to decision.content
+                            "content" to decision.continuation.content,
+                            "continuation_type" to decision.continuation.javaClass.simpleName,
+                            "grounding_required" to (resolvedGrounding?.requirement?.name?.lowercase()),
+                            "grounding_source" to (resolvedGrounding?.source?.name?.lowercase()),
                         )
                     )
                 )
                 if (!queued) {
-                    instrumentation.emit(AgentEvents.warning("Failed to enqueue planner thought."))
+                    instrumentation.emit(AgentEvents.warning("Failed to enqueue planner continuation."))
                     telemetry.recordQueueSaturation(
-                        queueType = "thought",
-                        capacity = config.maxPendingThoughts,
-                        reason = "enqueue_planner_thought_failed_full"
+                        queueType = "continuation",
+                        capacity = config.maxPendingContinuations,
+                        reason = "enqueue_planner_continuation_failed_full"
                     )
                 }
-                telemetry.emitQueueSnapshot("decision_thought")
+                telemetry.emitQueueSnapshot("decision_continuation")
             }
 
             is EgoDecision.FormIntention -> {
@@ -181,81 +171,88 @@ internal class DecisionDispatcher(
                             )
                         )
                     )
-                    val retryThought = TextSecurity.clamp(
+                    val retryContinuation = Continuation.RetryAlternative(
+                        content = TextSecurity.clamp(
                         buildInvalidActionRetryThought(decision, plannerContext, violation),
                         config.planner.maxThoughtChars
-                    )
-                    val queuedRetry = enqueueDeferredIntention(
-                        content = retryThought,
-                        urgency = decision.urgency,
-                        nextPassCount = nextPassCount,
-                        rootInputId = rootInputId,
-                        rootInputReceivedAtMs = rootInputReceivedAtMs,
+                        ),
                         deniedActionType = decision.actionType,
                         deniedActionPayload = decision.payload,
                         denialReason = violation.reason,
                         denialReasonCode = violation.reasonCode,
+                        allowFallbackExplanation = origin.source != OriginSource.ID,
+                        originActionType = originContinuation?.originActionType,
+                        originActionObservedEvidence = originContinuation?.originActionObservedEvidence,
+                    )
+                    val queuedRetry = enqueueContinuation(
+                        continuation = retryContinuation,
+                        urgency = decision.urgency,
+                        nextPassCount = nextPassCount,
+                        rootInputId = rootInputId,
+                        rootInputReceivedAtMs = rootInputReceivedAtMs,
                         conversationContext = conversationContext,
                         origin = origin,
+                        groundingMetadata = originContinuation?.groundingMetadata ?: plannerContext?.groundingMetadata ?: GroundingMetadata.NOT_REQUIRED_PREFILTER,
                     )
                     if (!queuedRetry) {
                         instrumentation.emit(
-                            AgentEvents.warning("Failed to enqueue retry thought after blocking an invalid planner action.")
+                            AgentEvents.warning("Failed to enqueue retry continuation after blocking an invalid planner action.")
                         )
                         telemetry.recordQueueSaturation(
-                            queueType = "thought",
-                            capacity = config.maxPendingThoughts,
-                            reason = "enqueue_invalid_action_retry_thought_failed_full"
+                            queueType = "continuation",
+                            capacity = config.maxPendingContinuations,
+                            reason = "enqueue_invalid_action_retry_continuation_failed_full"
                         )
                     }
                     telemetry.emitQueueSnapshot("decision_action_blocked")
                     return
                 }
-                val repeatedDeniedAction = originThought != null && fallbackHandler.isRepeatOfDeniedAction(originThought, decision)
+                val repeatedDeniedAction = originContinuation != null && fallbackHandler.isRepeatOfDeniedAction(originContinuation, decision)
                 val technicalDenial = DenialReasonClassifier.isLikelyTechnical(
-                    reasonCode = originThought?.denialReasonCode,
-                    reason = originThought?.denialReason
+                    reasonCode = originContinuation?.denialReasonCode,
+                    reason = originContinuation?.denialReason
                 )
-                val repeatedVerifierDisagreement =
-                    repeatedDeniedAction && shouldAllowRepeatedVerifierDisagreement(originThought, decision)
-                if (repeatedDeniedAction && !technicalDenial && !repeatedVerifierDisagreement) {
+                if (repeatedDeniedAction && !technicalDenial) {
                     instrumentation.emit(AgentEvents.warning("Planner repeated a denied action; requesting an alternative."))
                     deliberation.onRepeatedDeniedAction()
                     memory.maybeRecordLesson(
                         trigger = "repeated_denied_action",
                         actionType = decision.actionType,
-                        reasonCode = originThought.denialReasonCode,
-                        reason = originThought.denialReason,
+                        reasonCode = originContinuation!!.denialReasonCode,
+                        reason = originContinuation.denialReason,
                         deniedPayload = decision.payload,
                         recentDialogue = dialogueFor(resolveSessionId(conversationContext)).takeLast(12),
                         stepIndex = deliberation.snapshot().stepIndex
                     )
-                    val retryThought = TextSecurity.clamp(
-                        "Previous proposed action repeats a denied action. Pick a materially different safe action.",
-                        config.planner.maxThoughtChars
+                    val retryContinuation = Continuation.RetryAlternative(
+                        content = TextSecurity.clamp(
+                            "Previous proposed action repeats a denied action. Pick a materially different safe action.",
+                            config.planner.maxThoughtChars
+                        ),
+                        deniedActionType = originContinuation.deniedActionType,
+                        deniedActionPayload = originContinuation.deniedActionPayload,
+                        denialReason = originContinuation.denialReason,
+                        denialReasonCode = originContinuation.denialReasonCode,
+                        allowFallbackExplanation = originContinuation.allowFallbackExplanation,
+                        originActionType = originContinuation.originActionType,
+                        originActionObservedEvidence = originContinuation.originActionObservedEvidence,
                     )
-                    val queuedRetry = enqueueDeferredIntention(
-                        content = retryThought,
-                        urgency = originThought.urgency,
+                    val queuedRetry = enqueueContinuation(
+                        continuation = retryContinuation,
+                        urgency = originContinuation.urgency,
                         nextPassCount = nextPassCount,
                         rootInputId = rootInputId,
                         rootInputReceivedAtMs = rootInputReceivedAtMs,
-                        deniedActionType = originThought.deniedActionType,
-                        deniedActionPayload = originThought.deniedActionPayload,
-                        denialReason = originThought.denialReason,
-                        denialReasonCode = originThought.denialReasonCode,
-                        allowFallbackExplanation = originThought.allowFallbackExplanation,
-                        originActionType = originThought.originActionType,
-                        originActionObservedEvidence = originThought.originActionObservedEvidence,
                         conversationContext = conversationContext,
                         origin = origin,
+                        groundingMetadata = originContinuation.groundingMetadata,
                     )
                     if (!queuedRetry) {
-                        instrumentation.emit(AgentEvents.warning("Failed to enqueue retry thought after repeated denied action."))
+                        instrumentation.emit(AgentEvents.warning("Failed to enqueue retry continuation after repeated denied action."))
                         telemetry.recordQueueSaturation(
-                            queueType = "thought",
-                            capacity = config.maxPendingThoughts,
-                            reason = "enqueue_retry_thought_failed_full"
+                            queueType = "continuation",
+                            capacity = config.maxPendingContinuations,
+                            reason = "enqueue_retry_continuation_failed_full"
                         )
                     }
                     telemetry.emitQueueSnapshot("repeated_denied_action_blocked")
@@ -287,10 +284,23 @@ internal class DecisionDispatcher(
                         proposedActionSummary = decision.summary,
                         argumentDataTrust = deliberation.threadSecurityContext(rootInputId, conversationContext).aggregatedDataTrust,
                         origin = origin,
+                        groundingMetadata = originContinuation?.groundingMetadata ?: plannerContext?.groundingMetadata ?: GroundingMetadata.NOT_REQUIRED_PREFILTER,
                     )
                 )
                 if (queued) {
                     deliberation.recordIntention(rootInputId, conversationContext, intention)
+                }
+                val actionGrounding = originContinuation?.groundingMetadata ?: plannerContext?.groundingMetadata ?: GroundingMetadata.NOT_REQUIRED_PREFILTER
+                if (queued) {
+                    instrumentation.emit(
+                        AgentEvents.groundingMetadataPropagated(
+                            rootInputId = rootInputId,
+                            fromEnvelopeType = "planner_context",
+                            toEnvelopeType = "queued_intention",
+                            groundingRequired = actionGrounding.requirement == GroundingRequirement.REQUIRED,
+                            source = actionGrounding.source.name.lowercase(),
+                        )
+                    )
                 }
                 instrumentation.emit(
                     AgentEvents.actionProposed(
@@ -300,7 +310,9 @@ internal class DecisionDispatcher(
                         urgency = decision.urgency.name.lowercase(),
                         payload = decision.payload,
                         summary = decision.summary,
-                        queued = queued
+                        queued = queued,
+                        groundingRequired = actionGrounding.requirement.name.lowercase(),
+                        groundingSource = actionGrounding.source.name.lowercase(),
                     )
                 )
                 if (!queued) {
@@ -337,7 +349,7 @@ internal class DecisionDispatcher(
                         suppressionReason = "budget_exhausted",
                         decision = decision,
                         nextPassCount = nextPassCount,
-                        originThought = originThought,
+                        originContinuation = originContinuation,
                         rootInputId = rootInputId,
                         rootInputReceivedAtMs = rootInputReceivedAtMs,
                         conversationContext = conversationContext,
@@ -367,7 +379,7 @@ internal class DecisionDispatcher(
                         suppressionReason = "hash_dedup",
                         decision = decision,
                         nextPassCount = nextPassCount,
-                        originThought = originThought,
+                        originContinuation = originContinuation,
                         rootInputId = rootInputId,
                         rootInputReceivedAtMs = rootInputReceivedAtMs,
                         conversationContext = conversationContext,
@@ -436,16 +448,11 @@ internal class DecisionDispatcher(
                 )
                 var allQueued = true
                 decision.steps.forEachIndexed { index, stepDescription ->
-                    val stepContent = TextSecurity.clamp(
-                        "Plan step ${index + 1}/${decision.steps.size}: $stepDescription",
-                        config.planner.maxThoughtChars
-                    )
-                    val queued = enqueueDeferredIntention(
-                        content = stepContent,
-                        urgency = decision.urgency,
-                        nextPassCount = nextPassCount,
-                        rootInputId = rootInputId,
-                        rootInputReceivedAtMs = rootInputReceivedAtMs,
+                    val stepContinuation = Continuation.PlanStepContinuation(
+                        content = TextSecurity.clamp(
+                            "Plan step ${index + 1}/${decision.steps.size}: $stepDescription",
+                            config.planner.maxThoughtChars
+                        ),
                         planContext = PlanContext(
                             planId = planId,
                             planGoal = decision.goal,
@@ -453,10 +460,19 @@ internal class DecisionDispatcher(
                             totalSteps = decision.steps.size,
                             stepDescription = stepDescription,
                         ),
-                        originActionType = originThought?.originActionType,
-                        originActionObservedEvidence = originThought?.originActionObservedEvidence,
+                        allowFallbackExplanation = originContinuation?.allowFallbackExplanation == true || origin.source != OriginSource.ID,
+                        originActionType = originContinuation?.originActionType,
+                        originActionObservedEvidence = originContinuation?.originActionObservedEvidence,
+                    )
+                    val queued = enqueueContinuation(
+                        continuation = stepContinuation,
+                        urgency = decision.urgency,
+                        nextPassCount = nextPassCount,
+                        rootInputId = rootInputId,
+                        rootInputReceivedAtMs = rootInputReceivedAtMs,
                         conversationContext = conversationContext,
                         origin = origin,
+                        groundingMetadata = originContinuation?.groundingMetadata ?: plannerContext?.groundingMetadata ?: GroundingMetadata.NOT_REQUIRED_PREFILTER,
                     )
                     if (!queued) {
                         allQueued = false
@@ -464,17 +480,20 @@ internal class DecisionDispatcher(
                             AgentEvents.warning("Failed to enqueue plan step ${index + 1}/${decision.steps.size}.")
                         )
                         telemetry.recordQueueSaturation(
-                            queueType = "thought",
-                            capacity = config.maxPendingThoughts,
+                            queueType = "continuation",
+                            capacity = config.maxPendingContinuations,
                             reason = "enqueue_plan_step_failed_full"
                         )
                     }
                 }
+                val planGrounding = originContinuation?.groundingMetadata ?: plannerContext?.groundingMetadata ?: GroundingMetadata.NOT_REQUIRED_PREFILTER
                 instrumentation.emit(
                     AgentEvents.planStepsEnqueued(
                         planId = planId,
                         totalSteps = decision.steps.size,
-                        allQueued = allQueued
+                        allQueued = allQueued,
+                        groundingRequired = planGrounding?.requirement?.name?.lowercase(),
+                        groundingSource = planGrounding?.source?.name?.lowercase(),
                     )
                 )
                 telemetry.emitQueueSnapshot("decision_plan")
@@ -495,46 +514,14 @@ internal class DecisionDispatcher(
                     )
                     telemetry.emitQueueSnapshot("decision_noop_short_circuit")
                 } else {
-                    val deniedActionType = decision.deniedActionType ?: originThought?.deniedActionType
-                    val deniedActionPayload = decision.deniedActionPayload ?: originThought?.deniedActionPayload
-                    val denialReason = if (decision.deniedActionType != null) {
-                        decision.reason
-                    } else {
-                        originThought?.denialReason
-                    }
-                    val denialReasonCode = decision.denialReasonCode ?: originThought?.denialReasonCode
-                    val noopThought = TextSecurity.clamp("Noop decision: ${decision.reason}", config.planner.maxThoughtChars)
-                    val allowFallbackExplanation =
-                        originThought?.allowFallbackExplanation ?: (origin.source != OriginSource.ID)
-                    val queued = enqueueDeferredIntention(
-                        content = noopThought,
-                        urgency = Urgency.LOW,
-                        nextPassCount = nextPassCount,
-                        rootInputId = rootInputId,
-                        rootInputReceivedAtMs = rootInputReceivedAtMs,
-                        deniedActionType = deniedActionType,
-                        deniedActionPayload = deniedActionPayload,
-                        denialReason = denialReason,
-                        denialReasonCode = denialReasonCode,
-                        allowFallbackExplanation = allowFallbackExplanation,
-                        originActionType = originThought?.originActionType,
-                        originActionObservedEvidence = originThought?.originActionObservedEvidence,
-                        conversationContext = conversationContext,
-                        origin = origin,
-                    )
                     instrumentation.emit(
                         AgentEvent(
                             type = "noop_recorded",
-                            data = mapOf("queued_thought" to queued, "reason" to decision.reason)
+                            data = mapOf("queued_continuation" to false, "reason" to decision.reason)
                         )
                     )
-                    if (!queued) {
-                        instrumentation.emit(AgentEvents.warning("Failed to enqueue noop thought."))
-                        telemetry.recordQueueSaturation(
-                            queueType = "thought",
-                            capacity = config.maxPendingThoughts,
-                            reason = "enqueue_noop_thought_failed_full"
-                        )
+                    if (originContinuation?.allowFallbackExplanation == true) {
+                        fallbackHandler.enqueueFallbackExplanation(originContinuation)
                     }
                     telemetry.emitQueueSnapshot("decision_noop")
                 }
@@ -542,56 +529,50 @@ internal class DecisionDispatcher(
         }
     }
 
-    private fun shouldAllowRepeatedVerifierDisagreement(
-        originThought: PendingThought?,
-        decision: EgoDecision.FormIntention,
-    ): Boolean {
-        val thought = originThought ?: return false
-        if (thought.denialReasonCode != ACTION_VERIFIER_REJECT_REASON_CODE) return false
-        if (thought.deniedActionType != ActionType.CONTACT_USER) return false
-        return decision.actionType == ActionType.CONTACT_USER
-    }
-
     private suspend fun recoverFromSuppressedPlan(
         suppressionReason: String,
         decision: EgoDecision.EnqueuePlan,
         nextPassCount: Int,
-        originThought: PendingThought?,
+        originContinuation: QueuedContinuation?,
         rootInputId: String?,
         rootInputReceivedAtMs: Long?,
         conversationContext: ConversationContext,
         origin: ActionOrigin,
     ) {
         val sessionId = resolveSessionId(conversationContext)
-        if (scheduler.hasPendingPlanThoughtsForInput(rootInputId, sessionId)) {
+        if (scheduler.hasPendingPlanContinuationsForInput(rootInputId, sessionId)) {
             return
         }
-        if (scheduler.hasPendingConvergenceThoughtForInput(rootInputId, sessionId)) {
+        if (scheduler.hasPendingConvergenceContinuationForInput(rootInputId, sessionId)) {
             return
         }
-        val convergenceThought = TextSecurity.clamp(
-            "${AttentionScheduler.CONVERGENCE_THOUGHT_PREFIX}" +
-                "Plan emission was suppressed ($suppressionReason). " +
-                "Converge now: use gathered evidence and produce a final answer, " +
-                "or provide a concise fallback explanation if completion is not possible.",
-            config.planner.maxThoughtChars
+        val convergenceContinuation = Continuation.ConvergeNow(
+            content = TextSecurity.clamp(
+                "${AttentionScheduler.CONVERGENCE_CONTINUATION_PREFIX}" +
+                    "Plan emission was suppressed ($suppressionReason). " +
+                    "Converge now: use gathered evidence and produce a final answer, " +
+                    "or provide a concise fallback explanation if completion is not possible.",
+                config.planner.maxThoughtChars
+            ),
+            convergenceReason = suppressionReason,
+            allowFallbackExplanation =
+                originContinuation?.allowFallbackExplanation == true || origin.source != OriginSource.ID,
+            originActionType = originContinuation?.originActionType,
+            originActionObservedEvidence = originContinuation?.originActionObservedEvidence,
         )
-        val queued = enqueueDeferredIntention(
-            content = convergenceThought,
+        val queued = enqueueContinuation(
+            continuation = convergenceContinuation,
             urgency = decision.urgency,
             nextPassCount = nextPassCount,
             rootInputId = rootInputId,
             rootInputReceivedAtMs = rootInputReceivedAtMs,
-            allowFallbackExplanation =
-                originThought?.allowFallbackExplanation == true || origin.source != OriginSource.ID,
-            originActionType = originThought?.originActionType,
-            originActionObservedEvidence = originThought?.originActionObservedEvidence,
             conversationContext = conversationContext,
             origin = origin,
+            groundingMetadata = originContinuation?.groundingMetadata ?: GroundingMetadata.NOT_REQUIRED_PREFILTER,
         )
         if (queued) {
             instrumentation.emit(
-                AgentEvents.convergenceThoughtEnqueued(
+                AgentEvents.convergenceContinuationEnqueued(
                     rootInputId = rootInputId,
                     rootInputReceivedAtMs = rootInputReceivedAtMs
                 )
@@ -599,15 +580,15 @@ internal class DecisionDispatcher(
             return
         }
         instrumentation.emit(
-            AgentEvents.warning("Failed to enqueue convergence thought after plan suppression recovery.")
+            AgentEvents.warning("Failed to enqueue convergence continuation after plan suppression recovery.")
         )
         telemetry.recordQueueSaturation(
-            queueType = "thought",
-            capacity = config.maxPendingThoughts,
-            reason = "enqueue_plan_suppression_recovery_thought_failed_full"
+            queueType = "continuation",
+            capacity = config.maxPendingContinuations,
+            reason = "enqueue_plan_suppression_recovery_continuation_failed_full"
         )
-        if (originThought?.allowFallbackExplanation == true) {
-            fallbackHandler.enqueueFallbackExplanation(originThought)
+        if (originContinuation?.allowFallbackExplanation == true) {
+            fallbackHandler.enqueueFallbackExplanation(originContinuation)
         }
     }
 

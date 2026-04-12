@@ -14,7 +14,7 @@ import java.nio.file.Paths
 private val logger = KotlinLogging.logger {}
 
 data class RuntimeDefaultsConfig(
-    @JsonProperty("metrics_db")
+    @param:JsonProperty("metrics_db")
     val metricsDb: String = ".neopsyke/metrics.db",
 )
 

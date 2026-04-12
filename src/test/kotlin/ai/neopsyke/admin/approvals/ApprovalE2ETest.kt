@@ -24,6 +24,7 @@ import ai.neopsyke.agent.model.ConversationSecurityContext
 import ai.neopsyke.agent.model.ConversationSecurityContexts
 import ai.neopsyke.agent.model.InputPriority
 import ai.neopsyke.agent.model.Interlocutor
+import ai.neopsyke.agent.model.GroundingMetadata
 import ai.neopsyke.agent.model.PendingAction
 import ai.neopsyke.agent.model.StagedAction
 import ai.neopsyke.agent.model.StagedActionStatus
@@ -84,6 +85,7 @@ class ApprovalE2ETest {
                 executedAction = PendingAction(
                     id = 1L, urgency = Urgency.MEDIUM, type = staged.actionType, payload = staged.payload,
                     summary = staged.summary, rootInputId = staged.rootInputId, conversationContext = staged.conversationContext,
+                    groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
                 ),
             )
         }

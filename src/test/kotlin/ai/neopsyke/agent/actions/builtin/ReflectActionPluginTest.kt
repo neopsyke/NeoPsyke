@@ -10,6 +10,7 @@ import ai.neopsyke.agent.cortex.motor.actions.plugin.builtin.ReflectEvidenceActi
 import ai.neopsyke.agent.cortex.motor.actions.plugin.builtin.ReflectInternalActionPlugin
 import ai.neopsyke.agent.model.ActionType
 import ai.neopsyke.agent.model.ContentKind
+import ai.neopsyke.agent.model.GroundingMetadata
 import ai.neopsyke.agent.model.PendingAction
 import ai.neopsyke.agent.model.SourceDescriptor
 import ai.neopsyke.agent.model.SuperegoContext
@@ -139,6 +140,7 @@ class ReflectActionPluginTest {
         payload = payload,
         summary = "reflect test",
         rootInputId = rootInputId,
+        groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
     )
 
     private class RecordingReflectionMemoryRecorder : ReflectionMemoryRecorder {

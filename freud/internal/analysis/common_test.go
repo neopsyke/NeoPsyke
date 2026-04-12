@@ -134,6 +134,28 @@ func TestFileExists(t *testing.T) {
 	}
 }
 
+func TestWriteJSONFile(t *testing.T) {
+	dir := t.TempDir()
+
+	// Test normal case with nested directory creation
+	f := filepath.Join(dir, "sub", "deep", "test.json")
+	err := WriteJSONFile(f, map[string]string{"key": "value"})
+	if err != nil {
+		t.Fatalf("WriteJSONFile failed: %v", err)
+	}
+	data, _ := os.ReadFile(f)
+	if len(data) == 0 {
+		t.Error("expected non-empty file")
+	}
+
+	// Test with file at root of temp dir (no parent to create)
+	f2 := filepath.Join(dir, "root.json")
+	err = WriteJSONFile(f2, map[string]int{"count": 42})
+	if err != nil {
+		t.Fatalf("WriteJSONFile at root failed: %v", err)
+	}
+}
+
 func TestDirExists(t *testing.T) {
 	dir := t.TempDir()
 	if !DirExists(dir) {

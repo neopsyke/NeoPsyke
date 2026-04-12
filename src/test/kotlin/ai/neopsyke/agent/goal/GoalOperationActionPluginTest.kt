@@ -13,6 +13,7 @@ import ai.neopsyke.agent.model.ActionExecutionStatus
 import ai.neopsyke.agent.model.ActionType
 import ai.neopsyke.agent.model.PendingAction
 import ai.neopsyke.agent.model.Urgency
+import ai.neopsyke.agent.model.GroundingMetadata
 import java.nio.file.Files
 import java.time.Instant
 import kotlin.test.Test
@@ -73,8 +74,9 @@ class GoalOperationActionPluginTest {
                 id = 1L,
                 urgency = Urgency.MEDIUM,
                 type = ActionType.GOAL_OPERATION,
-                payload = """{"operation":"create","title":"Inbox","instruction":"Keep inbox triaged","priority":"HIGH","completion_criteria":"Inbox is triaged","cron_expression":"*/5 * * * *"}""",
+                payload = """{"command":"create","title":"Inbox","instruction":"Keep inbox triaged","priority":"HIGH","completion_criteria":"Inbox is triaged","cron_expression":"*/5 * * * *"}""",
                 summary = "create goal",
+            groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
             ),
             ActionExecutionContext(searchResultCount = 0)
         )
@@ -88,7 +90,7 @@ class GoalOperationActionPluginTest {
     }
 
     @Test
-    fun `plugin normalizes delete all intent from revise payload`() = runBlocking {
+    fun `plugin executes typed delete_all command from planner`() = runBlocking {
         var capturedRequest: GoalOperationRequest? = null
         val gateway = object : GoalsGateway by NoopGoalsGateway {
             override fun executeOperation(request: GoalOperationRequest): GoalOperationResult {
@@ -107,13 +109,15 @@ class GoalOperationActionPluginTest {
             )
         )
 
+        // The new planner emits canonical "command" field; no operation normalization needed
         val outcome = plugin.execute(
             PendingAction(
                 id = 1L,
                 urgency = Urgency.MEDIUM,
                 type = ActionType.GOAL_OPERATION,
-                payload = """{"operation":"revise","instruction":"Delete all existing goals"}""",
+                payload = """{"command":"delete_all"}""",
                 summary = "delete goals",
+            groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
             ),
             ActionExecutionContext(searchResultCount = 0)
         )
@@ -123,7 +127,7 @@ class GoalOperationActionPluginTest {
     }
 
     @Test
-    fun `plugin keeps ambiguous delete payload as single delete instead of delete all`() = runBlocking {
+    fun `plugin rejects delete command without goal reference`() = runBlocking {
         var capturedRequest: GoalOperationRequest? = null
         val gateway = object : GoalsGateway by NoopGoalsGateway {
             override fun executeOperation(request: GoalOperationRequest): GoalOperationResult {
@@ -147,15 +151,15 @@ class GoalOperationActionPluginTest {
                 id = 2L,
                 urgency = Urgency.MEDIUM,
                 type = ActionType.GOAL_OPERATION,
-                payload = """{"operation":"delete"}""",
+                payload = """{"command":"delete"}""",
                 summary = "delete goal ambiguously",
+            groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
             ),
             ActionExecutionContext(searchResultCount = 0)
         )
 
         assertEquals(ActionExecutionStatus.FAILED, outcome.executionStatus)
-        assertEquals(GoalOperation.DELETE, capturedRequest?.operation)
-        assertEquals(null, capturedRequest?.goalId)
+        assertEquals(null, capturedRequest)
     }
 
     @Test
@@ -170,7 +174,7 @@ class GoalOperationActionPluginTest {
             manager.start(testScope())
             val plugin = projectPlugin(manager, root)
 
-            val create = execute(plugin, """{"operation":"create","title":"Inbox","instruction":"Keep inbox triaged","priority":"HIGH"}""")
+            val create = execute(plugin, """{"command":"create","title":"Inbox","instruction":"Keep inbox triaged","priority":"HIGH"}""")
             assertEquals(ActionExecutionStatus.SUCCESS, create.executionStatus)
 
             val goalId = manager.allGoals().single().goalId
@@ -178,29 +182,29 @@ class GoalOperationActionPluginTest {
             assertNotNull(created)
             assertEquals(GoalPriority.HIGH, created.goal.priority)
 
-            val status = execute(plugin, """{"operation":"status","goalId":"$goalId"}""")
+            val status = execute(plugin, """{"command":"status","goal_reference":{"type":"by_internal_id","id":"$goalId"}}""")
             assertEquals(ActionExecutionStatus.SUCCESS, status.executionStatus)
             assertTrue(status.statusSummary.contains("status=ACTIVE"))
             assertTrue(status.statusSummary.contains("next_step=Keep inbox triaged"))
 
-            val list = execute(plugin, """{"operation":"list"}""")
+            val list = execute(plugin, """{"command":"list"}""")
             assertEquals(ActionExecutionStatus.SUCCESS, list.executionStatus)
             assertTrue(list.statusSummary.contains(goalId))
             assertTrue(list.statusSummary.contains("Inbox"))
 
-            val pause = execute(plugin, """{"operation":"pause","goalId":"$goalId","reason":"waiting"}""")
+            val pause = execute(plugin, """{"command":"pause","goal_reference":{"type":"by_internal_id","id":"$goalId"},"reason":"waiting"}""")
             assertEquals(ActionExecutionStatus.SUCCESS, pause.executionStatus)
             assertEquals(GoalStatus.SUSPENDED, manager.goalStatus(goalId)?.goal?.status)
 
-            val resume = execute(plugin, """{"operation":"resume","goalId":"$goalId"}""")
+            val resume = execute(plugin, """{"command":"resume","goal_reference":{"type":"by_internal_id","id":"$goalId"}}""")
             assertEquals(ActionExecutionStatus.SUCCESS, resume.executionStatus)
             assertEquals(GoalStatus.ACTIVE, manager.goalStatus(goalId)?.goal?.status)
 
-            val reprioritize = execute(plugin, """{"operation":"reprioritize","goalId":"$goalId","priority":"CRITICAL"}""")
+            val reprioritize = execute(plugin, """{"command":"reprioritize","goal_reference":{"type":"by_internal_id","id":"$goalId"},"priority":"CRITICAL"}""")
             assertEquals(ActionExecutionStatus.SUCCESS, reprioritize.executionStatus)
             assertEquals(GoalPriority.CRITICAL, manager.goalStatus(goalId)?.goal?.priority)
 
-            val complete = execute(plugin, """{"operation":"complete","goalId":"$goalId"}""")
+            val complete = execute(plugin, """{"command":"complete","goal_reference":{"type":"by_internal_id","id":"$goalId"}}""")
             assertEquals(ActionExecutionStatus.SUCCESS, complete.executionStatus)
             assertEquals(GoalStatus.COMPLETED, manager.goalStatus(goalId)?.goal?.status)
 
@@ -239,12 +243,12 @@ class GoalOperationActionPluginTest {
             manager.start(testScope())
             val plugin = projectPlugin(manager, root)
 
-            val create = execute(plugin, """{"operation":"create","title":"Revise Me","instruction":"Original instruction"}""")
+            val create = execute(plugin, """{"command":"create","title":"Revise Me","instruction":"Original instruction"}""")
             assertEquals(ActionExecutionStatus.SUCCESS, create.executionStatus)
             val goalId = manager.allGoals().single().goalId
             assertEquals("Initial plan", manager.goalStatus(goalId)?.goal?.plan?.steps?.single()?.description)
 
-            val revise = execute(plugin, """{"operation":"revise_plan","goalId":"$goalId","reason":"new context"}""")
+            val revise = execute(plugin, """{"command":"revise_plan","goal_reference":{"type":"by_internal_id","id":"$goalId"},"reason":"new context"}""")
             assertEquals(ActionExecutionStatus.SUCCESS, revise.executionStatus)
             assertEquals("Revised plan", manager.goalStatus(goalId)?.goal?.plan?.steps?.single()?.description)
 
@@ -262,6 +266,7 @@ class GoalOperationActionPluginTest {
                 type = ActionType.GOAL_OPERATION,
                 payload = payload,
                 summary = "goal operation",
+            groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
             ),
             ActionExecutionContext(searchResultCount = 0)
         )
@@ -277,6 +282,69 @@ class GoalOperationActionPluginTest {
                 goalsGateway = gateway,
             )
         )
+
+    @Test
+    fun `create command with contactChannel passes through to request`() = runBlocking {
+        var capturedRequest: GoalOperationRequest? = null
+        val gateway = object : GoalsGateway by NoopGoalsGateway {
+            override fun executeOperation(request: GoalOperationRequest): GoalOperationResult {
+                capturedRequest = request
+                return GoalOperationResult(true, "created", "goal-1")
+            }
+        }
+        val plugin = pluginWithGateway(gateway)
+
+        plugin.execute(
+            PendingAction(
+                id = 1L,
+                urgency = Urgency.MEDIUM,
+                type = ActionType.GOAL_OPERATION,
+                payload = """{"command":"create","title":"Weather","instruction":"Check weather","contact_channel":"telegram"}""",
+                summary = "create goal",
+                groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
+            ),
+            ActionExecutionContext(searchResultCount = 0),
+        )
+
+        assertEquals("telegram", capturedRequest?.contactChannel)
+    }
+
+    @Test
+    fun `update command with contactChannel passes through to request`() = runBlocking {
+        var capturedRequest: GoalOperationRequest? = null
+        val gateway = object : GoalsGateway by NoopGoalsGateway {
+            override fun executeOperation(request: GoalOperationRequest): GoalOperationResult {
+                capturedRequest = request
+                return GoalOperationResult(true, "updated", "goal-1")
+            }
+        }
+        val plugin = pluginWithGateway(gateway)
+
+        plugin.execute(
+            PendingAction(
+                id = 1L,
+                urgency = Urgency.MEDIUM,
+                type = ActionType.GOAL_OPERATION,
+                payload = """{"command":"update","goal_id":"goal-1","contact_channel":"webapp"}""",
+                summary = "update goal",
+                groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
+            ),
+            ActionExecutionContext(searchResultCount = 0),
+        )
+
+        assertEquals("webapp", capturedRequest?.contactChannel)
+    }
+
+    private fun pluginWithGateway(gateway: GoalsGateway) = GoalOperationActionPlugin(
+        ActionPluginFactoryContext(
+            config = AgentConfig(goals = GoalConfig(enabled = true)),
+            webSearchActionHandler = null,
+            fetchTool = null,
+            output = {},
+            reflectionMemoryRecorder = NoopReflectionMemoryRecorder,
+            goalsGateway = gateway,
+        )
+    )
 
     private fun testScope(): CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 }

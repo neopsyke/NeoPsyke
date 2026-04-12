@@ -13,16 +13,16 @@ Live prompt-budget events:
 tail -F .neopsyke/logs/latest-events.jsonl | jq -c 'select(.type=="prompt_budget_allocation") | {ts:.tsIso,call_site:.data.call_site,degradation_path:.data.degradation_path,single_message_fallback:.data.single_message_fallback,floor_violation_count:.data.floor_violation_count,dropped_section_count:.data.dropped_section_count}'
 ```
 
-Live task-verifier events:
+Live grounding-gate events:
 ```bash
-tail -F .neopsyke/logs/latest-events.jsonl | jq -c 'select(.type=="task_verifier_review") | {ts:.tsIso,allow:.data.allow,reason_code:.data.reason_code,intent:.data.intent_category,volatility:.data.volatility_level}'
+tail -F .neopsyke/logs/latest-events.jsonl | jq -c 'select(.type=="grounding_gate_review") | {ts:.tsIso,allow:.data.allow,reason_code:.data.reason_code,grounding_required:.data.grounding_required,evidence_gathered:.data.evidence_gathered,evidence_unavailable:.data.evidence_unavailable}'
 ```
 
-Prompt budget and task verifier telemetry are computed automatically during `freud eval` runs.
+Prompt budget and grounding-gate telemetry are computed automatically during `freud eval` runs.
 
 Dashboard snapshot:
 ```bash
-curl -s http://127.0.0.1:8787/api/obs/snapshot | jq '.promptBudgetStats, .taskVerifierStats'
+curl -s http://127.0.0.1:8787/api/obs/snapshot | jq '.promptBudgetStats, .groundingGateStats'
 ```
 
 ## Purpose
@@ -60,23 +60,23 @@ tail -F .neopsyke/logs/latest-events.jsonl | jq -c '
   }'
 ```
 
-## 3) Live monitor task verifier (complementary)
+## 3) Live monitor grounding gate (complementary)
 ```bash
 tail -F .neopsyke/logs/latest-events.jsonl | jq -c '
-  select(.type=="task_verifier_review") |
+  select(.type=="grounding_gate_review") |
   {
     ts: .tsIso,
     allow: .data.allow,
     reason_code: .data.reason_code,
-    intent: .data.intent_category,
-    volatility: .data.volatility_level,
-    requires_external_evidence: .data.requires_external_evidence
+    grounding_required: .data.grounding_required,
+    evidence_gathered: .data.evidence_gathered,
+    evidence_unavailable: .data.evidence_unavailable
   }'
 ```
 
 ## 4) Post-run aggregate summaries
 
-Prompt budget and task verifier telemetry are computed automatically during `freud eval` runs and written to the run artifacts directory.
+Prompt budget and grounding-gate telemetry are computed automatically during `freud eval` runs and written to the run artifacts directory.
 
 ## 5) Dashboard checks
 Open dashboard:
@@ -84,7 +84,7 @@ Open dashboard:
 
 Or query snapshot directly:
 ```bash
-curl -s http://127.0.0.1:8787/api/obs/snapshot | jq '.promptBudgetStats, .taskVerifierStats'
+curl -s http://127.0.0.1:8787/api/obs/snapshot | jq '.promptBudgetStats, .groundingGateStats'
 ```
 
 ## Prompt-budget tuning signals
@@ -98,7 +98,7 @@ Secondary pressure indicators:
 
 ## Fast triage actions
 If severe pressure appears (`single_message_fallback` or floor violations):
-1. Identify affected `call_site` (`planner_prompt`, `action_verifier_prompt`, `superego_prompt`, `meta_reasoner_prompt`, `legacy_web_search_prompt`).
+1. Identify affected `call_site` (`planner_prompt`, `superego_prompt`, `meta_reasoner_prompt`, `legacy_web_search_prompt`).
 2. Reduce `floorTokens` for lower-criticality sections first.
 3. Reclassify sections from `REQUIRED_CONTEXT` to `OPTIONAL` when safe.
 4. Increase prompt budget only if structural tuning is insufficient.

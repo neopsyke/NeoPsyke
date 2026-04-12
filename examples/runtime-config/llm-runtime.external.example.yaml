@@ -12,9 +12,6 @@ cognitive_roles:
   planner:
     provider: google
     model: gemini-2.5-flash
-  action_verifier:
-    provider: google
-    model: gemini-2.5-flash
   superego_primary:
     provider: google
     model: gemini-2.5-flash

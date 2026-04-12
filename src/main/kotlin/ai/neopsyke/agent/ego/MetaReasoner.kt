@@ -1,5 +1,6 @@
 package ai.neopsyke.agent.ego
 
+import com.fasterxml.jackson.annotation.JsonProperty
 import com.fasterxml.jackson.databind.DeserializationFeature
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
@@ -66,6 +67,8 @@ class LlmMetaReasoner(
     private val fallbackModelClient: ChatModelClient? = null,
     private val instrumentation: AgentInstrumentation = NoopAgentInstrumentation,
 ) : MetaReasoner {
+    private val reasonMaxChars = config.metaReasoner.reasonMaxChars
+    private val responseFormatStrict = buildStrictResponseFormat(reasonMaxChars)
     private val circuitBreaker = LlmCallCircuitBreaker(
         tripThreshold = PARSE_FAILURE_TRIP_THRESHOLD,
         onTripBehavior = OnTripBehavior.BYPASS,
@@ -166,7 +169,7 @@ class LlmMetaReasoner(
     ): ChatAttemptResult {
         var response: ChatCompletion? = null
         var lastError: Exception? = null
-        var responseFormat: ChatResponseFormat.JsonSchema = META_REASONER_RESPONSE_FORMAT_STRICT
+        var responseFormat: ChatResponseFormat.JsonSchema = responseFormatStrict
         var completionTokenBudget = completionBudget.budget
         val completionRetryCap = if (completionBudget.contextClamped) {
             completionBudget.budget
@@ -304,14 +307,14 @@ class LlmMetaReasoner(
     private fun buildMessages(trigger: EgoTrigger, context: PlannerContext): List<ChatMessage> {
         val triggerLabel = when (trigger) {
             is EgoTrigger.IncomingInput -> "input"
-            is EgoTrigger.DeferredIntention -> "deferred-intention"
+            is EgoTrigger.Continuation -> "continuation"
             is EgoTrigger.ActionFeedback -> "feedback"
             is EgoTrigger.IncomingImpulse -> "impulse"
             is EgoTrigger.GoalWork -> "goal-work"
         }
         val triggerText = when (trigger) {
             is EgoTrigger.IncomingInput -> trigger.input.content
-            is EgoTrigger.DeferredIntention -> trigger.intention.resolvedContent
+            is EgoTrigger.Continuation -> trigger.continuation.content
             is EgoTrigger.ActionFeedback -> trigger.feedback.cue.feedbackContent
             is EgoTrigger.IncomingImpulse -> trigger.impulse.prompt
             is EgoTrigger.GoalWork -> trigger.workUnit.stepDescription
@@ -329,7 +332,7 @@ class LlmMetaReasoner(
             ChatMessage(
                 role = ChatRole.SYSTEM,
                 content = """
-                You are MetaReasoner for Ego's deferred-intention loop.
+                You are MetaReasoner for Ego's continuation loop.
                 Decide if continued deliberation is productive or stale.
                 Return only data that matches the response format schema.
                 Use finalize_now when repeated loops or high pressure suggest diminishing returns.
@@ -355,7 +358,7 @@ class LlmMetaReasoner(
 
                 Queue:
                 pending_inputs=${context.queue.pendingInputCount}
-                pending_thoughts=${context.queue.deferredIntentionCount}
+                pending_continuations=${context.queue.continuationCount}
                 pending_actions=${context.queue.pendingActionCount}
                 pending_intentions=${context.queue.pendingIntentionCount}
 
@@ -376,7 +379,8 @@ class LlmMetaReasoner(
         return try {
             val json = TextSecurity.extractJsonObject(raw)
             val payload = mapper.readValue<MetaReasonerPayload>(json)
-            if (payload.verdict.isNullOrBlank()) {
+            val resolvedVerdict = resolveVerdictFromPayload(payload)
+            if (resolvedVerdict == null) {
                 logger.warn {
                     "MetaReasoner response missing required 'verdict' field. response_len=${raw.length} preview='${TextSecurity.preview(raw, 120)}'"
                 }
@@ -386,10 +390,11 @@ class LlmMetaReasoner(
                     reason = "Meta reasoner: missing verdict field."
                 )
             }
+            val reasonText = payload.reason ?: payload.explanation
             MetaReasonerAssessment(
-                verdict = resolveVerdict(payload.verdict),
+                verdict = resolvedVerdict,
                 confidence = payload.confidence?.coerceIn(0.0, 1.0) ?: 0.5,
-                reason = TextSecurity.clamp(payload.reason?.trim().orEmpty().ifBlank { "No reason provided." }, META_REASONER_REASON_MAX_CHARS)
+                reason = TextSecurity.clamp(reasonText?.trim().orEmpty().ifBlank { "No reason provided." }, reasonMaxChars)
             )
         } catch (ex: Exception) {
             // Attempt truncation-tolerant extraction before falling back.
@@ -431,6 +436,22 @@ class LlmMetaReasoner(
         )
     }
 
+    /**
+     * Resolves the verdict from a parsed payload, handling alternative field names
+     * that models may produce after structured-output downgrade to prompt_only_json.
+     * Returns null if no verdict can be determined.
+     */
+    private fun resolveVerdictFromPayload(payload: MetaReasonerPayload): MetaReasonerVerdict? {
+        // Primary: explicit verdict field.
+        if (!payload.verdict.isNullOrBlank()) return resolveVerdict(payload.verdict)
+        // Alternative: "decision" field used as verdict alias.
+        if (!payload.decision.isNullOrBlank()) return resolveVerdict(payload.decision)
+        // Alternative: boolean fields like {"finalize_now": true}.
+        if (payload.finalizeNow == true) return MetaReasonerVerdict.FINALIZE_NOW
+        if (payload.requestToolThenFinalize == true) return MetaReasonerVerdict.REQUEST_TOOL_THEN_FINALIZE
+        return null
+    }
+
     private fun resolveVerdict(raw: String?): MetaReasonerVerdict {
         val normalized = raw?.trim()?.lowercase() ?: return MetaReasonerVerdict.CONTINUE
         return MetaReasonerVerdict.entries.firstOrNull {
@@ -447,6 +468,13 @@ class LlmMetaReasoner(
         val verdict: String? = null,
         val confidence: Double? = null,
         val reason: String? = null,
+        // Alternative field names produced by models after structured-output downgrade.
+        val decision: String? = null,
+        val explanation: String? = null,
+        @param:JsonProperty("finalize_now")
+        val finalizeNow: Boolean? = null,
+        @param:JsonProperty("request_tool_then_finalize")
+        val requestToolThenFinalize: Boolean? = null,
     )
 
     private data class ChatAttemptResult(
@@ -470,30 +498,7 @@ class LlmMetaReasoner(
         private const val CALL_SITE_PRIMARY: String = "meta_reasoner"
         private const val CALL_SITE_FALLBACK: String = "meta_reasoner_fallback"
         private const val META_REASONER_PROMPT_CALL_SITE: String = "meta_reasoner_prompt"
-        private const val META_REASONER_REASON_MAX_CHARS: Int = 180
         private const val DEFAULT_MODEL_TOKEN_WEIGHT: Double = 1.0
-        private const val META_REASONER_RESPONSE_SCHEMA_STRICT: String = """
-            {
-              "type": "object",
-              "additionalProperties": false,
-              "required": ["verdict", "confidence", "reason"],
-              "properties": {
-                "verdict": {
-                  "type": "string",
-                  "enum": ["continue", "continue_with_constraints", "finalize_now", "request_tool_then_finalize"]
-                },
-                "confidence": {
-                  "type": "number",
-                  "minimum": 0.0,
-                  "maximum": 1.0
-                },
-                "reason": {
-                  "type": "string",
-                  "maxLength": 180
-                }
-              }
-            }
-        """
 
         private const val META_REASONER_RESPONSE_SCHEMA_RELAXED: String = """
             {
@@ -520,10 +525,31 @@ class LlmMetaReasoner(
         val mapper = jacksonObjectMapper()
             .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
 
-        val META_REASONER_RESPONSE_FORMAT_STRICT: ChatResponseFormat.JsonSchema =
+        fun buildStrictResponseFormat(reasonMaxChars: Int): ChatResponseFormat.JsonSchema =
             ChatResponseFormat.JsonSchema(
                 name = "meta_reasoner_assessment",
-                schemaJson = META_REASONER_RESPONSE_SCHEMA_STRICT,
+                schemaJson = """
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": ["verdict", "confidence", "reason"],
+                      "properties": {
+                        "verdict": {
+                          "type": "string",
+                          "enum": ["continue", "continue_with_constraints", "finalize_now", "request_tool_then_finalize"]
+                        },
+                        "confidence": {
+                          "type": "number",
+                          "minimum": 0.0,
+                          "maximum": 1.0
+                        },
+                        "reason": {
+                          "type": "string",
+                          "maxLength": $reasonMaxChars
+                        }
+                      }
+                    }
+                """.trimIndent(),
                 strict = true
             )
 

@@ -88,6 +88,14 @@ data class StagedAction(
     val receiptId: String? = null,
     val createdAtMs: Long = System.currentTimeMillis(),
     val updatedAtMs: Long = createdAtMs,
+    val urgency: Urgency = Urgency.MEDIUM,
+    val intentionKind: IntentionKind = IntentionKind.PREPARE,
+    val requestedCommitMode: CommitMode = CommitMode.NOT_APPLICABLE,
+    val groundingMetadata: GroundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
+    val isForcedTerminal: Boolean = false,
+    val requiresFollowUpThought: Boolean = false,
+    val followUpPrefix: String = "Action completed.",
+    val intentionId: String? = null,
 )
 
 data class CommitAuthorization(

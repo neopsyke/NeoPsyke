@@ -26,6 +26,7 @@ import ai.neopsyke.agent.model.PendingAction
 import ai.neopsyke.agent.model.StagedAction
 import ai.neopsyke.agent.model.StagedActionStatus
 import ai.neopsyke.agent.model.Urgency
+import ai.neopsyke.agent.model.GroundingMetadata
 import ai.neopsyke.instrumentation.AgentEvent
 import ai.neopsyke.metrics.MetricsQueryProvider
 import java.time.Instant
@@ -643,6 +644,7 @@ class DashboardServerTest {
                     payload = staged.payload,
                     summary = staged.summary,
                     conversationContext = staged.conversationContext,
+                groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
                 ),
             )
         }

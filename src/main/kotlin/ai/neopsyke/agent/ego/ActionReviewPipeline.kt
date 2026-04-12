@@ -429,89 +429,78 @@ internal class ActionReviewPipeline(
         sessionId: String,
         convCtx: ConversationContext,
     ): Boolean {
-        val recentDialogue = dialogueFor(sessionId).takeLast(12)
-        val latestUserTurn = recentDialogue
-            .asReversed()
-            .firstOrNull { it.role == DialogueRole.USER }
-            ?.content
-            .orEmpty()
         val disabledForScope = deliberation.disabledActionTypes(resolvedAction.rootInputId, sessionId)
         val availableActionsForScope = motorCortex.availableActionTypes() - disabledForScope
         val dispatchableActionsForScope = motorCortex.dispatchableActionTypes() - disabledForScope
-        val taskVerificationDecision = taskVerifier.review(
+        val gateDecision = taskVerifier.review(
             action = resolvedAction,
             context = DecisionVerifierContext(
-                recentDialogue = recentDialogue,
                 externalEvidence = deliberation.evidenceFor(resolvedAction.rootInputId, sessionId),
                 availableActions = availableActionsForScope,
                 dispatchableActions = dispatchableActionsForScope,
                 evidenceActionTypes = motorCortex.actionTypesWithCapability(ActionCapability.GATHERS_EVIDENCE),
-                latestUserTurn = latestUserTurn
+                groundingTechnicalFailureBudgetExceeded = deliberation.isGroundingTechnicalFailureBudgetExceeded(
+                    resolvedAction.rootInputId,
+                    sessionId,
+                ),
             )
         )
-        val assessment = taskVerificationDecision.assessment
         instrumentation.emit(
             AgentEvent(
-                type = "task_verifier_review",
+                type = "grounding_gate_review",
                 data = mapOf(
                     "action_id" to resolvedAction.id,
                     "root_input_id" to resolvedAction.rootInputId,
-                    "root_input_received_at_ms" to resolvedAction.rootInputReceivedAtMs,
                     "session_id" to sessionId,
                     "action_type" to resolvedAction.type.id,
-                    "allow" to taskVerificationDecision.allow,
-                    "reason" to taskVerificationDecision.reason,
-                    "reason_code" to taskVerificationDecision.reasonCode,
-                    "intent_category" to assessment?.intentCategory?.name?.lowercase(),
-                    "volatility_level" to assessment?.volatilityLevel?.name?.lowercase(),
-                    "volatility_score" to assessment?.volatilityScore,
-                    "requires_external_evidence" to assessment?.requiresExternalEvidence,
-                    "evidence_actions_available" to assessment?.evidenceActionsAvailable,
-                    "evidence_actions_dispatchable" to assessment?.evidenceActionsDispatchable,
-                    "had_successful_evidence" to assessment?.hadSuccessfulEvidence,
-                    "had_external_failures" to assessment?.hadExternalFailures,
-                    "latest_user_turn_preview" to TextSecurity.preview(latestUserTurn, 140)
+                    "allow" to gateDecision.allow,
+                    "grounding_required" to gateDecision.groundingRequired,
+                    "evidence_gathered" to gateDecision.evidenceGathered,
+                    "evidence_failed_technically" to gateDecision.evidenceFailedTechnically,
+                    "evidence_unavailable" to gateDecision.evidenceUnavailable,
+                    "forced_terminal" to gateDecision.forcedTerminal,
+                    "reason_code" to gateDecision.reasonCode,
                 )
             )
         )
-        if (!taskVerificationDecision.allow) {
+        if (!gateDecision.allow) {
             recordThreadDenied(
                 resolvedAction.rootInputId,
                 convCtx,
-                taskVerificationDecision.reason,
-                taskVerificationDecision.reasonCode,
+                gateDecision.reason,
+                gateDecision.reasonCode,
             )
-            emitThreadUpdate(resolvedAction.rootInputId, convCtx, "action_denied_task_verifier")
+            emitThreadUpdate(resolvedAction.rootInputId, convCtx, "action_denied_grounding_gate")
             actionControlService.recordLedgerEntry(
                 action = resolvedAction,
                 conversationContext = convCtx,
                 kind = ActionLedgerKind.DENIED,
                 importance = ActionRecordImportance.SIGNAL,
-                summary = taskVerificationDecision.reason,
-                reasonCode = taskVerificationDecision.reasonCode,
-                source = "task_verifier",
+                summary = gateDecision.reason,
+                reasonCode = gateDecision.reasonCode,
+                source = "grounding_gate",
             )
             actionLifecycleObserver.onActionBlocked(
                 action = resolvedAction,
-                reason = taskVerificationDecision.reason,
-                reasonCode = taskVerificationDecision.reasonCode,
-                source = "task_verifier"
+                reason = gateDecision.reason,
+                reasonCode = gateDecision.reasonCode,
+                source = "grounding_gate"
             )
             instrumentation.emit(
                 AgentEvents.actionReviewResult(
                     actionId = resolvedAction.id,
                     allow = false,
-                    reason = taskVerificationDecision.reason,
-                    reasonCode = taskVerificationDecision.reasonCode
+                    reason = gateDecision.reason,
+                    reasonCode = gateDecision.reasonCode
                 )
             )
             fallbackHandler.handleDeniedAction(
                 action = resolvedAction,
-                reason = taskVerificationDecision.reason,
-                reasonCode = taskVerificationDecision.reasonCode,
+                reason = gateDecision.reason,
+                reasonCode = gateDecision.reasonCode,
                 conversationContext = convCtx,
                 sessionId = sessionId,
-                source = "task_verifier"
+                source = "grounding_gate"
             )
             return false
         }
@@ -962,6 +951,7 @@ internal class ActionReviewPipeline(
             rootInputReceivedAtMs = resolvedAction.rootInputReceivedAtMs,
             conversationContext = convCtx,
             origin = resolvedAction.origin,
+            groundingMetadata = resolvedAction.groundingMetadata,
         )
         if (!queued) {
             instrumentation.emit(AgentEvents.warning("Failed to enqueue user-visible action result."))
@@ -998,7 +988,19 @@ internal class ActionReviewPipeline(
             urgency = resolvedAction.urgency.name,
             requiresFollowUpThought = resolvedAction.requiresFollowUpThought,
             origin = resolvedAction.origin,
+            groundingMetadata = resolvedAction.groundingMetadata,
         )
+        resolvedAction.groundingMetadata?.let { metadata ->
+            instrumentation.emit(
+                AgentEvents.groundingMetadataPropagated(
+                    rootInputId = resolvedAction.rootInputId,
+                    fromEnvelopeType = "pending_action",
+                    toEnvelopeType = "action_feedback_cue",
+                    groundingRequired = metadata.requirement == ai.neopsyke.agent.model.GroundingRequirement.REQUIRED,
+                    source = metadata.source.name.lowercase(),
+                )
+            )
+        }
         if (!emitActionFeedback(cue)) {
             instrumentation.emit(AgentEvents.warning("Failed to enqueue action feedback stimulus."))
             telemetry.recordQueueSaturation(
@@ -1016,6 +1018,8 @@ internal class ActionReviewPipeline(
                     "action_type" to resolvedAction.type.id,
                     "root_input_id" to resolvedAction.rootInputId,
                     "execution_status" to outcome.executionStatus.name.lowercase(),
+                    "grounding_required" to resolvedAction.groundingMetadata?.requirement?.name?.lowercase(),
+                    "grounding_source" to resolvedAction.groundingMetadata?.source?.name?.lowercase(),
                 )
             )
         )
@@ -1045,7 +1049,7 @@ internal class ActionReviewPipeline(
 private fun StagedAction.toPipelinePendingAction(): PendingAction =
     PendingAction(
         id = -1L,
-        urgency = Urgency.MEDIUM,
+        urgency = urgency,
         type = actionType,
         payload = payload,
         summary = summary,
@@ -1054,4 +1058,11 @@ private fun StagedAction.toPipelinePendingAction(): PendingAction =
         conversationContext = conversationContext,
         argumentDataTrust = argumentDataTrust,
         origin = origin,
+        intentionId = intentionId,
+        intentionKind = intentionKind,
+        requestedCommitMode = requestedCommitMode,
+        groundingMetadata = groundingMetadata,
+        isForcedTerminal = isForcedTerminal,
+        requiresFollowUpThought = requiresFollowUpThought,
+        followUpPrefix = followUpPrefix,
     )

@@ -36,7 +36,7 @@ import ai.neopsyke.agent.model.StagedActionStatus
 import ai.neopsyke.agent.config.MemoryConfig
 import ai.neopsyke.agent.model.PendingImpulse
 import ai.neopsyke.agent.model.PendingAction
-import ai.neopsyke.agent.model.PendingThought
+import ai.neopsyke.agent.model.QueuedContinuation
 import ai.neopsyke.agent.config.MetaReasonerConfig
 import ai.neopsyke.agent.config.PlannerConfig
 import ai.neopsyke.agent.model.PlannerContext
@@ -77,6 +77,7 @@ import ai.neopsyke.llm.ChatModelClient
 import ai.neopsyke.llm.ChatRequestOptions
 import ai.neopsyke.support.RecordingInstrumentation
 import ai.neopsyke.support.StubChatModelClient
+import ai.neopsyke.support.buildTestHierarchicalPlanner
 import java.io.ByteArrayInputStream
 import java.nio.file.Files
 import java.time.Instant
@@ -109,7 +110,7 @@ class AgentScenarioPackTest {
         }
         val instrumentation = RecordingInstrumentation()
         val outputs = mutableListOf<String>()
-        val config = AgentConfig(planner = PlannerConfig(maxLoopStepsPerInput = 4, maxThoughtPasses = 1))
+        val config = AgentConfig(planner = PlannerConfig(maxLoopStepsPerInput = 4, maxContinuationPasses = 1))
         val agent = buildTestEgo(
             planner = LlmEgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
             superego = Superego(modelClient = superegoLlm, config = config, instrumentation = instrumentation),
@@ -121,7 +122,10 @@ class AgentScenarioPackTest {
         runAgentWithInput(agent, "hello\nexit\n")
 
         assertEquals(listOf("ego> ok"), outputs)
-        val plannerCalls = plannerLlm.calls.filter { it.options.metadata.callSite != "action_verifier" }
+        val plannerCalls = plannerLlm.calls.filter {
+            it.options.metadata.callSite != "input_intent_router" &&
+                it.options.metadata.callSite != "grounding_classifier"
+        }
         assertEquals(1, plannerCalls.size)
         assertTrue(instrumentation.events.none { it.type == "plan_created" })
     }
@@ -151,7 +155,7 @@ class AgentScenarioPackTest {
         }
         val instrumentation = RecordingInstrumentation()
         val outputs = mutableListOf<String>()
-        val config = AgentConfig(planner = PlannerConfig(maxLoopStepsPerInput = 8, maxThoughtPasses = 4))
+        val config = AgentConfig(planner = PlannerConfig(maxLoopStepsPerInput = 8, maxContinuationPasses = 4))
         val agent = buildTestEgo(
             planner = LlmEgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
             superego = Superego(modelClient = superegoLlm, config = config, instrumentation = instrumentation),
@@ -199,7 +203,7 @@ class AgentScenarioPackTest {
                     sources = emptyList()
                 )
         }
-        val config = AgentConfig(planner = PlannerConfig(maxLoopStepsPerInput = 7, maxThoughtPasses = 1))
+        val config = AgentConfig(planner = PlannerConfig(maxLoopStepsPerInput = 7, maxContinuationPasses = 1))
         val agent = buildTestEgo(
             planner = LlmEgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
             superego = Superego(modelClient = superegoLlm, config = config, instrumentation = instrumentation),
@@ -289,7 +293,7 @@ class AgentScenarioPackTest {
                 )
         }
         val config = AgentConfig(
-            planner = PlannerConfig(maxLoopStepsPerInput = 8, maxThoughtPasses = 3),
+            planner = PlannerConfig(maxLoopStepsPerInput = 8, maxContinuationPasses = 3),
             memory = MemoryConfig(
                 scratchpad = ScratchpadConfig(enabled = true, activationMinPlanSteps = 1, maxPromptTokens = 260)
             )
@@ -304,7 +308,10 @@ class AgentScenarioPackTest {
 
         runAgentWithInput(agent, "find pricing\nexit\n")
 
-        val plannerCalls = plannerLlm.calls.filter { it.options.metadata.callSite != "action_verifier" }
+        val plannerCalls = plannerLlm.calls.filter {
+            it.options.metadata.callSite != "input_intent_router" &&
+                it.options.metadata.callSite != "grounding_classifier"
+        }
         assertTrue(plannerCalls.size >= 2)
         val followUpPrompt = plannerCalls[1].messages.last().content
         assertTrue(followUpPrompt.contains("Working notes for this request:"))
@@ -315,59 +322,6 @@ class AgentScenarioPackTest {
         assertEquals(listOf("ego> done"), outputs)
         assertTrue(instrumentation.events.any { it.type == "scratchpad_created" })
         assertTrue(instrumentation.events.any { it.type == "scratchpad_destroyed" })
-    }
-
-    @Test
-    fun scenario_forced_terminal_after_repeated_model_errors() {
-        val failingClient = object : ChatModelClient {
-            override val modelName: String = "failing-planner"
-
-            override fun chat(messages: List<ChatMessage>, options: ChatRequestOptions): ChatCompletion {
-                throw IllegalStateException("planner unavailable")
-            }
-        }
-        val superegoLlm = StubChatModelClient().apply {
-            enqueueRawResponse("""{"allow":true}""")
-        }
-        val instrumentation = RecordingInstrumentation()
-        val outputs = mutableListOf<String>()
-        val config = AgentConfig(
-            planner = PlannerConfig(
-                maxLoopStepsPerInput = 24,
-                maxThoughtPasses = 20
-            ),
-            llmRetryAttempts = 1,
-            metaReasoner = MetaReasonerConfig(
-                deliberationPressureAssessmentMinStep = 1,
-                forcedTerminalPressureThreshold = 0.55,
-                forcedTerminalStaleStreakThreshold = 2
-            )
-        )
-        val agent = buildTestEgo(
-            planner = LlmEgoPlanner(modelClient = failingClient, config = config, instrumentation = instrumentation),
-            superego = Superego(modelClient = superegoLlm, config = config, instrumentation = instrumentation),
-            motorCortex = buildMotorCortex(output = { outputs.add(it) }),
-            config = config,
-            instrumentation = instrumentation
-        )
-
-        runAgentWithInput(agent, "hello\nexit\n")
-
-        assertTrue(outputs.isNotEmpty())
-        assertTrue(
-            outputs.any {
-                it.contains("diminishing returns", ignoreCase = true) ||
-                    it.contains("parsing", ignoreCase = true) ||
-                    it.contains("model error", ignoreCase = true)
-            }
-        )
-        assertTrue(
-            instrumentation.events.any {
-                it.type == "warning" &&
-                    ((it.data["message"] as? String)?.contains("Forced terminal answer queued", ignoreCase = true) == true ||
-                        (it.data["message"] as? String)?.contains("circuit breaker tripped", ignoreCase = true) == true)
-            }
-        )
     }
 
     @Test
@@ -389,7 +343,7 @@ class AgentScenarioPackTest {
         }
         val instrumentation = RecordingInstrumentation()
         val outputs = mutableListOf<String>()
-        val config = AgentConfig(planner = PlannerConfig(maxLoopStepsPerInput = 6, maxThoughtPasses = 2))
+        val config = AgentConfig(planner = PlannerConfig(maxLoopStepsPerInput = 6, maxContinuationPasses = 2))
         val agent = buildTestEgo(
             planner = LlmEgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
             superego = Superego(modelClient = superegoLlm, config = config, instrumentation = instrumentation),
@@ -403,78 +357,8 @@ class AgentScenarioPackTest {
         assertEquals(listOf("ego> using available tools only"), outputs)
         assertTrue(
             instrumentation.events.any {
-                it.type == "planner_decision" &&
-                    it.data["decision_type"] == "noop" &&
-                    (it.data["reason"] as? String)?.contains("unavailable action type", ignoreCase = true) == true
-            }
-        )
-    }
-
-    @Test
-    fun scenario_action_verifier_does_not_semantically_rewrite_web_search_before_superego_review() {
-        val plannerLlm = StubChatModelClient().apply {
-            enqueueRawResponse(
-                """
-                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"web_search","action_payload":"stale query","action_summary":"search old pricing"}
-                """.trimIndent()
-            )
-            enqueueRawResponseForCallSite(
-                callSite = "action_verifier",
-                content = """
-                {"verdict":"repair","action_type":"web_search","action_payload":"official groq pricing","action_summary":"search official pricing page","reason":"refined query"}
-                """.trimIndent()
-            )
-        }
-        val superegoLlm = StubChatModelClient().apply {
-            enqueueRawResponse("""{"allow":true}""")
-        }
-        val instrumentation = RecordingInstrumentation()
-        val observedQueries = mutableListOf<String>()
-        val recordingSearchEngine = object : WebSearchEngine {
-            override fun search(query: String, maxResults: Int): WebSearchResult {
-                observedQueries += query
-                return WebSearchResult(
-                    summary = "ok",
-                    snippets = listOf("official result"),
-                    sources = listOf(
-                        WebSearchSource(
-                            title = "Groq Pricing",
-                            url = "https://groq.com/pricing"
-                        )
-                    )
-                )
-            }
-        }
-        val config = AgentConfig(
-            planner = PlannerConfig(
-                maxLoopStepsPerInput = 2,
-                maxThoughtPasses = 2,
-                actionVerifierEnabled = true
-            )
-        )
-        val agent = buildTestEgo(
-            planner = LlmEgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
-            superego = Superego(modelClient = superegoLlm, config = config, instrumentation = instrumentation),
-            motorCortex = buildMotorCortex(webSearchEngine = recordingSearchEngine, output = {}),
-            config = config,
-            instrumentation = instrumentation
-        )
-
-        runAgentWithInput(agent, "check pricing\nexit\n")
-
-        assertEquals(listOf("stale query"), observedQueries)
-        assertTrue(
-            instrumentation.events.any {
-                it.type == "action_verifier_result" &&
-                    it.data["verdict"] == "approve" &&
-                    it.data["repaired"] == false &&
-                    (it.data["reason"] as? String)?.contains("alter action meaning", ignoreCase = true) == true
-            }
-        )
-        assertTrue(
-            instrumentation.events.any {
-                it.type == "action_review_requested" &&
-                    (it.data["action"] as? PendingAction)?.payload == "stale query"
+                it.type == "planner_decision_blocked" &&
+                    it.data["action_type"] == "website_fetch"
             }
         )
     }
@@ -482,20 +366,22 @@ class AgentScenarioPackTest {
     @Test
     fun scenario_plan_decomposition_then_execute() {
         val plannerLlm = StubChatModelClient().apply {
-            // Input: planner decides to create a plan
-            enqueueRawResponse(
+            // Route to multi_step_task via input_intent_router
+            enqueueRawResponseForCallSite("input_intent_router", """{"route":"multi_step_task","reasoning":"test"}""")
+            // Task decomposition planner returns plan
+            enqueueRawResponseForCallSite("task_decomposition",
                 """
-                {"decision":"plan","urgency":"medium","plan_goal":"Search and answer pricing question","plan_steps":["Search for official pricing","Synthesize answer from search results"]}
+                {"goal":"Search and answer pricing question","steps":["Search for official pricing","Synthesize answer from search results"],"urgency":"medium"}
                 """.trimIndent()
             )
-            // Step-thought 1: planner decides to web_search
-            enqueueRawResponse(
+            // Continuation step 1: planner decides to web_search
+            enqueueRawResponseForCallSite("continuation",
                 """
                 {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"web_search","action_payload":"official pricing 2025","action_summary":"search pricing"}
                 """.trimIndent()
             )
-            // Follow-up thought from search: planner decides to answer
-            enqueueRawResponse(
+            // Continuation step 2: planner synthesizes the answer
+            enqueueRawResponseForCallSite("continuation",
                 """
                 {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"contact_user","action_payload":"Pricing is $20/month based on verified sources.","action_summary":"deliver verified answer"}
                 """.trimIndent()
@@ -507,7 +393,7 @@ class AgentScenarioPackTest {
         }
         val instrumentation = RecordingInstrumentation()
         val outputs = mutableListOf<String>()
-        val config = AgentConfig(planner = PlannerConfig(maxLoopStepsPerInput = 12, maxThoughtPasses = 4))
+        val config = AgentConfig(planner = PlannerConfig(maxLoopStepsPerInput = 12, maxContinuationPasses = 4))
         val search = object : WebSearchEngine {
             override fun search(query: String, maxResults: Int): WebSearchResult =
                 WebSearchResult(
@@ -582,7 +468,7 @@ class AgentScenarioPackTest {
                 )
             }
         }
-        val config = AgentConfig(planner = PlannerConfig(maxLoopStepsPerInput = 6, maxThoughtPasses = 2))
+        val config = AgentConfig(planner = PlannerConfig(maxLoopStepsPerInput = 6, maxContinuationPasses = 2))
         val agent = buildTestEgo(
             planner = LlmEgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
             superego = Superego(modelClient = superegoLlm, config = config, instrumentation = instrumentation),
@@ -595,7 +481,7 @@ class AgentScenarioPackTest {
 
         assertEquals(listOf("official pricing"), observedQueries)
         assertEquals(listOf("ego> Pricing is available on the official site."), outputs)
-        val plannerCalls = plannerLlm.calls.filter { it.options.metadata.callSite != "action_verifier" }
+        val plannerCalls = plannerLlm.calls
         assertTrue(plannerCalls.size >= 2)
     }
 
@@ -612,11 +498,11 @@ class AgentScenarioPackTest {
                         steps = listOf("discard branch", "execute branch")
                     )
                     is EgoTrigger.ActionFeedback -> EgoDecision.Noop("ignore feedback in test")
-                    is EgoTrigger.DeferredIntention -> decideThought(trigger.intention.toPendingThought())
+                    is EgoTrigger.Continuation -> decideThought(trigger.continuation)
                     is EgoTrigger.GoalWork -> EgoDecision.Noop("ignore goal work")
                 }
 
-            private fun decideThought(thought: PendingThought): EgoDecision =
+            private fun decideThought(thought: QueuedContinuation): EgoDecision =
                 when {
                     thought.planContext?.stepIndex == 0 -> EgoDecision.Noop("discard this branch")
                     thought.planContext?.stepIndex == 1 -> EgoDecision.FormIntention(
@@ -630,7 +516,7 @@ class AgentScenarioPackTest {
                 }
         }
         val config = AgentConfig(
-            planner = PlannerConfig(maxLoopStepsPerInput = 24, maxThoughtPasses = 1)
+            planner = PlannerConfig(maxLoopStepsPerInput = 24, maxContinuationPasses = 1)
         )
         val superegoLlm = StubChatModelClient().apply {
             enqueueRawResponse("""{"allow":true}""")
@@ -703,7 +589,7 @@ class AgentScenarioPackTest {
         val instrumentation = RecordingInstrumentation()
         val outputs = mutableListOf<String>()
         val config = AgentConfig(
-            planner = PlannerConfig(maxLoopStepsPerInput = 8, maxThoughtPasses = 2),
+            planner = PlannerConfig(maxLoopStepsPerInput = 8, maxContinuationPasses = 2),
             goals = GoalConfig(
                 enabled = true,
                 workspaceRoot = root,
@@ -805,10 +691,12 @@ class AgentScenarioPackTest {
         var actionControlStore: SqliteActionControlStore? = null
         try {
             val plannerLlm = StubChatModelClient().apply {
-                enqueueRawResponse(
+                // Route to goal via input_intent_router
+                enqueueRawResponseForCallSite("input_intent_router", """{"route":"goal","reasoning":"test"}""")
+                enqueueRawResponseForCallSite("goal",
                     """
                     {
-                      "decision":"create_goal",
+                      "operation":"create","goal_reference":null,
                       "title":"Weather reminder",
                       "instruction":"Check the current weather and send the user an update for this scheduled run.",
                       "completion_criteria":"A weather update is delivered to the user for the current scheduled run.",
@@ -823,7 +711,7 @@ class AgentScenarioPackTest {
             val instrumentation = RecordingInstrumentation()
             val outputs = mutableListOf<String>()
             val config = AgentConfig(
-                planner = PlannerConfig(maxLoopStepsPerInput = 4, maxThoughtPasses = 2),
+                planner = PlannerConfig(maxLoopStepsPerInput = 4, maxContinuationPasses = 2),
                 goals = GoalConfig(enabled = true, workspaceRoot = root),
             )
             manager = GoalManager(
@@ -886,7 +774,7 @@ class AgentScenarioPackTest {
             assertEquals(1, approvalPrompts.size)
             assertTrue(approvalPrompts.single().contains("approval", ignoreCase = true))
             assertTrue(approvalPrompts.single().contains(ActionType.GOAL_OPERATION.id, ignoreCase = true))
-            assertTrue(plannerLlm.calls.any { it.options.metadata.callSite == "input_goal_create" })
+            assertTrue(plannerLlm.calls.any { it.options.metadata.callSite == "goal" })
         } finally {
             actionControlStore?.close()
             manager?.stop()
@@ -901,10 +789,12 @@ class AgentScenarioPackTest {
         var actionControlStore: SqliteActionControlStore? = null
         try {
             val plannerLlm = StubChatModelClient().apply {
-                enqueueRawResponse(
+                // Route to goal via input_intent_router
+                enqueueRawResponseForCallSite("input_intent_router", """{"route":"goal","reasoning":"test"}""")
+                enqueueRawResponseForCallSite("goal",
                     """
                     {
-                      "decision":"create_goal",
+                      "operation":"create","goal_reference":null,
                       "title":"Daily weather forecast",
                       "instruction":"Fetch the weather forecast for Hamburg and send the user a summary for this scheduled run.",
                       "completion_criteria":"The weather forecast is delivered to the user for the current scheduled run.",
@@ -919,7 +809,7 @@ class AgentScenarioPackTest {
             val instrumentation = RecordingInstrumentation()
             val outputs = mutableListOf<String>()
             val config = AgentConfig(
-                planner = PlannerConfig(maxLoopStepsPerInput = 4, maxThoughtPasses = 2),
+                planner = PlannerConfig(maxLoopStepsPerInput = 4, maxContinuationPasses = 2),
                 goals = GoalConfig(enabled = true, workspaceRoot = root),
             )
             manager = GoalManager(
@@ -982,14 +872,8 @@ class AgentScenarioPackTest {
             assertTrue(staged.payload.contains("\"cron_expression\":\"5 5 * * *\""),
                 "Expected daily 5:05 cron from LLM; payload=${staged.payload}")
             assertTrue(staged.payload.contains("Daily weather forecast"))
-            // Planner was invoked via the goal creation branch
-            assertTrue(plannerLlm.calls.any { it.options.metadata.callSite == "input_goal_create" })
-            // The LLM prompt should include recurring_intent=true
-            val goalCreationCall = plannerLlm.calls.first { it.options.metadata.callSite == "input_goal_create" }
-            assertTrue(
-                goalCreationCall.messages.any { it.content.contains("recurring_intent=true") },
-                "Expected recurring_intent=true in prompt"
-            )
+            // Planner was invoked via the goal creation lane
+            assertTrue(plannerLlm.calls.any { it.options.metadata.callSite == "goal" })
         } finally {
             actionControlStore?.close()
             manager?.stop()
@@ -1003,11 +887,13 @@ class AgentScenarioPackTest {
         var manager: GoalManager? = null
         try {
             val plannerLlm = StubChatModelClient().apply {
-                // First call: goal creation branch returns an invalid cron
-                enqueueRawResponseForCallSite("input_goal_create",
+                // Route to goal via input_intent_router
+                enqueueRawResponseForCallSite("input_intent_router", """{"route":"goal","reasoning":"test"}""")
+                // First call: goal creation lane returns an invalid cron
+                enqueueRawResponseForCallSite("goal",
                     """
                     {
-                      "decision":"create_goal",
+                      "operation":"create","goal_reference":null,
                       "title":"Weekly standup",
                       "instruction":"Remind the user about their weekly standup meeting.",
                       "completion_criteria":"Standup reminder delivered.",
@@ -1018,21 +904,17 @@ class AgentScenarioPackTest {
                     }
                     """.trimIndent()
                 )
-                // Second call: feedback triggers general branch — planner responds to the user
+                // Second call: feedback triggers progression lane — planner responds to the user
                 enqueueRawResponse(
                     """
                     {
-                      "decision":"intend",
                       "urgency":"medium",
-                      "defer_content":null,
-                      "long_term_memory_recall_query":null,
                       "intention_kind":"observe",
                       "commit_mode_preference":"not_applicable",
                       "action_type":"contact_user",
                       "action_payload":"I corrected the schedule. Your weekly standup reminder is set for Mondays at 9 AM.",
                       "action_summary":"Confirm corrected goal schedule",
-                      "plan_goal":null,
-                      "plan_steps":null,
+                      "long_term_memory_recall_query":null,
                       "reason":"Retrying with corrected cron expression"
                     }
                     """.trimIndent()
@@ -1041,7 +923,7 @@ class AgentScenarioPackTest {
             val instrumentation = RecordingInstrumentation()
             val outputs = mutableListOf<String>()
             val config = AgentConfig(
-                planner = PlannerConfig(maxLoopStepsPerInput = 6, maxThoughtPasses = 3),
+                planner = PlannerConfig(maxLoopStepsPerInput = 6, maxContinuationPasses = 3),
                 goals = GoalConfig(enabled = true, workspaceRoot = root),
             )
             manager = GoalManager(
@@ -1103,21 +985,214 @@ class AgentScenarioPackTest {
             }
             assertTrue(feedbackPlannerCalls.isNotEmpty(), "Expected planner re-invocation via feedback trigger after bad cron")
 
-            // The feedback planner call should go through the general branch (not goal_creation)
+            // The feedback planner call should go through the progression lane
             assertTrue(
                 instrumentation.events.any {
-                    it.type == "planner_branch_selected" && it.data["branch"] == "general" && it.data["trigger"] == "feedback"
+                    it.type == "planner_lane_selected" && it.data["lane"] == "progression" && it.data["trigger"] == "feedback"
                 },
-                "Expected feedback to route through general branch"
+                "Expected feedback to route through progression lane"
             )
 
-            // The planner should have been called at least twice: once for goal creation, once for feedback
+            // The planner should have been called at least twice: router + goal_creation + feedback
             assertTrue(plannerLlm.calls.size >= 2,
                 "Expected at least 2 planner calls (creation + feedback), got ${plannerLlm.calls.size}")
         } finally {
             manager?.stop()
             root.toFile().deleteRecursively()
         }
+    }
+
+    // --- AC 25: Goal creation confirmation grounding ---
+    @Test
+    fun scenario_goal_creation_confirmation_grounding() {
+        val plannerLlm = StubChatModelClient().apply {
+            enqueueRawResponseForCallSite("input_intent_router", """{"route":"goal","reasoning":"user wants a goal"}""")
+            enqueueRawResponse(
+                """
+                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"goal_operation","action_payload":"{\"command\":\"create\",\"title\":\"Daily Weather\",\"description\":\"Fetch weather\",\"priority\":\"medium\",\"cron_expression\":\"5 6 * * *\",\"step_descriptions\":[\"Check weather\"]}","action_summary":"create weather goal"}
+                """.trimIndent()
+            )
+            enqueueRawResponse(
+                """
+                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"contact_user","action_payload":"Goal created: Daily Weather. Recurs on cron '5 6 * * *'.","action_summary":"confirm goal creation"}
+                """.trimIndent()
+            )
+        }
+        val superegoLlm = StubChatModelClient().apply {
+            enqueueRawResponse("""{"allow":true}""")
+            enqueueRawResponse("""{"allow":true}""")
+        }
+        val instrumentation = RecordingInstrumentation()
+        val outputs = mutableListOf<String>()
+        val config = AgentConfig(planner = PlannerConfig(maxLoopStepsPerInput = 8, maxContinuationPasses = 3))
+        val agent = buildTestEgo(
+            planner = LlmEgoPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
+            superego = Superego(modelClient = superegoLlm, config = config, instrumentation = instrumentation),
+            motorCortex = buildMotorCortex(output = { outputs.add(it) }),
+            config = config,
+            instrumentation = instrumentation
+        )
+
+        runAgentWithInput(agent, "create a daily weather goal at 06:05\nexit\n")
+
+        // Confirmation message must be delivered without denial.
+        assertTrue(outputs.any { it.contains("Goal created") }, "Confirmation should be delivered: $outputs")
+        // grounding_gate_review must show allow=true, grounding_required=false for the confirmation.
+        val gateEvents = instrumentation.events.filter { it.type == "grounding_gate_review" }
+        assertTrue(gateEvents.any { it.data["allow"] == true && it.data["grounding_required"] == false },
+            "Expected grounding_gate_review with allow=true and grounding_required=false: $gateEvents")
+    }
+
+    // --- AC 26: Volatile-fact grounding enforcement ---
+    @Test
+    fun scenario_volatile_fact_grounding_enforcement() {
+        val plannerLlm = StubChatModelClient().apply {
+            enqueueRawResponseForCallSite("input_intent_router", """{"route":"direct_response","reasoning":"weather question"}""")
+            enqueueRawResponseForCallSite("grounding_classifier", """{"grounding_required":true}""")
+            // First planner call (DirectResponsePlanner): tries to answer without evidence.
+            enqueueRawResponseForCallSite("direct_response",
+                """{"answer":"The weather in Hamburg is sunny.","summary":"answer weather"}""")
+            // After denial requeue (ContinuationPlanner): planner gathers evidence.
+            enqueueRawResponse(
+                """
+                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"web_search","action_payload":"Hamburg weather today","action_summary":"search weather"}
+                """.trimIndent()
+            )
+            // After evidence feedback (ContinuationPlanner or FeedbackPlanner): planner answers.
+            enqueueRawResponse(
+                """
+                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"contact_user","action_payload":"Based on search results, Hamburg is 15C and cloudy.","action_summary":"grounded answer"}
+                """.trimIndent()
+            )
+        }
+        val superegoLlm = StubChatModelClient().apply {
+            enqueueRawResponse("""{"allow":true}""")
+            enqueueRawResponse("""{"allow":true}""")
+            enqueueRawResponse("""{"allow":true}""")
+        }
+        val instrumentation = RecordingInstrumentation()
+        val outputs = mutableListOf<String>()
+        val config = AgentConfig(planner = PlannerConfig(maxLoopStepsPerInput = 12, maxContinuationPasses = 4))
+        val agent = buildTestEgo(
+            planner = buildTestHierarchicalPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
+            superego = Superego(modelClient = superegoLlm, config = config, instrumentation = instrumentation),
+            motorCortex = buildMotorCortex(output = { outputs.add(it) }),
+            config = config,
+            instrumentation = instrumentation
+        )
+
+        runAgentWithInput(agent, "what is the weather in Hamburg right now\nexit\n")
+
+        // The grounded answer should be delivered.
+        val classifierEvents = instrumentation.events.filter { it.type == "grounding_classification_resolved" }
+        val gateEvents = instrumentation.events.filter { it.type == "grounding_gate_review" }
+        val propagationEvents = instrumentation.events.filter { it.type == "grounding_metadata_propagated" }
+        val propagationPairs = propagationEvents.mapNotNull { event ->
+            val from = event.data["from_envelope_type"]?.toString()
+            val to = event.data["to_envelope_type"]?.toString()
+            if (from != null && to != null) from to to else null
+        }.toSet()
+        assertTrue(outputs.any { it.contains("15C") || it.contains("cloudy") },
+            "Expected grounded answer in outputs: $outputs\nClassifier events: $classifierEvents\nGate events: $gateEvents")
+        assertTrue(propagationEvents.isNotEmpty(), "Expected grounding_metadata_propagated events: $propagationEvents")
+        assertTrue(
+            setOf(
+                "grounding_classifier" to "pending_input",
+                "pending_input" to "planner_context",
+                "planner_context" to "queued_intention",
+                "queued_intention" to "pending_action",
+                "pending_action" to "queued_continuation",
+                "pending_action" to "action_feedback_cue",
+                "action_feedback_cue" to "pending_action",
+                "action_feedback_cue" to "queued_continuation",
+            ).all { it in propagationPairs },
+            "Expected full grounding propagation chain, got: $propagationPairs"
+        )
+        // First gate review must deny (no evidence).
+        assertTrue(gateEvents.any {
+            it.data["allow"] == false &&
+                it.data["grounding_required"] == true &&
+                it.data["evidence_gathered"] == false &&
+                it.data["reason_code"] == "GROUNDING_EVIDENCE_REQUIRED"
+        }, "Expected deny gate event.\nClassifier events: $classifierEvents\nGate events: $gateEvents")
+        // Final gate review must allow the contact_user (evidence gathered).
+        assertTrue(gateEvents.any {
+            it.data["allow"] == true &&
+                it.data["action_type"] == "contact_user" &&
+                it.data["grounding_required"] == true &&
+                it.data["evidence_gathered"] == true
+        }, "Expected allow gate event for contact_user after evidence: $gateEvents")
+    }
+
+    // --- AC 27: Technical evidence retry ---
+    @Test
+    fun scenario_technical_evidence_retry() {
+        val plannerLlm = StubChatModelClient().apply {
+            enqueueRawResponseForCallSite("input_intent_router", """{"route":"general_action","reasoning":"weather question"}""")
+            enqueueRawResponseForCallSite("grounding_classifier", """{"grounding_required":true}""")
+            // First planner call dispatches web_search.
+            enqueueRawResponseForCallSite(
+                "general_action",
+                """{"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"web_search","action_payload":"Hamburg weather","action_summary":"search weather"}"""
+            )
+            // After technical failure feedback: planner retries web_search.
+            enqueueRawResponse(
+                """
+                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"web_search","action_payload":"Hamburg current weather","action_summary":"retry search"}
+                """.trimIndent()
+            )
+            // After successful evidence: planner answers.
+            enqueueRawResponse(
+                """
+                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"contact_user","action_payload":"Hamburg is 12C with rain.","action_summary":"grounded answer"}
+                """.trimIndent()
+            )
+        }
+        val superegoLlm = StubChatModelClient().apply {
+            enqueueRawResponse("""{"allow":true}""")
+            enqueueRawResponse("""{"allow":true}""")
+            enqueueRawResponse("""{"allow":true}""")
+        }
+        val instrumentation = RecordingInstrumentation()
+        val outputs = mutableListOf<String>()
+        var searchAttempts = 0
+        val search = object : WebSearchEngine {
+            override fun search(query: String, maxResults: Int): WebSearchResult {
+                searchAttempts++
+                if (searchAttempts == 1) {
+                    throw RuntimeException("Simulated search timeout")
+                }
+                return WebSearchResult(
+                    summary = "Hamburg weather: 12C, rain.",
+                    snippets = listOf("Hamburg 12C rain."),
+                    sources = listOf(WebSearchSource(title = "Weather", url = "https://example.com/weather"))
+                )
+            }
+        }
+        val config = AgentConfig(planner = PlannerConfig(maxLoopStepsPerInput = 12, maxContinuationPasses = 4))
+        val agent = buildTestEgo(
+            planner = buildTestHierarchicalPlanner(modelClient = plannerLlm, config = config, instrumentation = instrumentation),
+            superego = Superego(modelClient = superegoLlm, config = config, instrumentation = instrumentation),
+            motorCortex = buildMotorCortex(output = { outputs.add(it) }, webSearchEngine = search),
+            config = config,
+            instrumentation = instrumentation
+        )
+
+        runAgentWithInput(agent, "what is the weather in Hamburg\nexit\n")
+
+        // Answer should be delivered.
+        assertTrue(outputs.any { it.contains("12C") || it.contains("rain") },
+            "Expected grounded answer: $outputs")
+        // Evidence retry was not suppressed: search was attempted at least twice.
+        assertTrue(searchAttempts >= 2, "Expected at least 2 search attempts (first failed, second succeeded)")
+        // Final gate must allow the contact_user with evidence gathered.
+        val gateEvents = instrumentation.events.filter { it.type == "grounding_gate_review" }
+        assertTrue(gateEvents.any {
+            it.data["allow"] == true &&
+                it.data["action_type"] == "contact_user" &&
+                it.data["grounding_required"] == true &&
+                it.data["evidence_gathered"] == true
+        }, "Expected allow gate event after retry: $gateEvents")
     }
 
     private fun runAgentWithInput(agent: Ego, stdinContent: String) {

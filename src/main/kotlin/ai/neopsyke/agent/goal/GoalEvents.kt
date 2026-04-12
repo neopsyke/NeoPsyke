@@ -19,6 +19,7 @@ sealed interface GoalEvent {
         val instruction: String,
         val priority: GoalPriority,
         val completionCriteria: String,
+        val contactChannel: String? = null,
         override val timestamp: Instant = Instant.now(),
     ) : GoalEvent
 
@@ -41,6 +42,7 @@ sealed interface GoalEvent {
         val instruction: String? = null,
         val title: String? = null,
         val completionCriteria: String? = null,
+        val contactChannel: String? = null,
         val reason: String? = null,
         override val timestamp: Instant = Instant.now(),
     ) : GoalEvent

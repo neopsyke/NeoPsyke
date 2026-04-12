@@ -3,7 +3,7 @@ package ai.neopsyke.instrumentation
 import ai.neopsyke.agent.model.PendingAction
 import ai.neopsyke.agent.model.AmbientContext
 import ai.neopsyke.agent.model.PendingInput
-import ai.neopsyke.agent.model.PendingThought
+import ai.neopsyke.agent.model.QueuedContinuation
 import ai.neopsyke.agent.model.QueueState
 import ai.neopsyke.agent.cortex.motor.ActionImplementationStatus
 import java.time.Instant
@@ -71,19 +71,19 @@ object AgentEvents {
             )
         )
 
-    fun thoughtProcessing(thought: PendingThought): AgentEvent =
+    fun continuationProcessing(continuation: QueuedContinuation): AgentEvent =
         AgentEvent(
-            type = "thought_processing",
+            type = "continuation_processing",
             data = mapOf(
-                "thought" to thought
+                "continuation" to continuation
             )
         )
 
-    fun thoughtDropped(thought: PendingThought, reason: String): AgentEvent =
+    fun continuationDropped(continuation: QueuedContinuation, reason: String): AgentEvent =
         AgentEvent(
-            type = "thought_dropped",
+            type = "continuation_dropped",
             data = mapOf(
-                "thought" to thought,
+                "continuation" to continuation,
                 "reason" to reason
             )
         )
@@ -92,7 +92,7 @@ object AgentEvents {
         trigger: String,
         decisionType: String,
         urgency: String? = null,
-        thought: String? = null,
+        content: String? = null,
         intentionKind: String? = null,
         commitModePreference: String? = null,
         actionType: String? = null,
@@ -108,7 +108,7 @@ object AgentEvents {
                 "trigger" to trigger,
                 "decision_type" to decisionType,
                 "urgency" to urgency,
-                "thought" to thought,
+                "content" to content,
                 "intention_kind" to intentionKind,
                 "commit_mode_preference" to commitModePreference,
                 "action_type" to actionType,
@@ -128,6 +128,8 @@ object AgentEvents {
         payload: String,
         summary: String,
         queued: Boolean,
+        groundingRequired: String? = null,
+        groundingSource: String? = null,
     ): AgentEvent =
         AgentEvent(
             type = "action_proposed",
@@ -138,7 +140,9 @@ object AgentEvents {
                 "urgency" to urgency,
                 "payload" to payload,
                 "summary" to summary,
-                "queued" to queued
+                "queued" to queued,
+                "grounding_required" to groundingRequired,
+                "grounding_source" to groundingSource,
             )
         )
 
@@ -182,6 +186,24 @@ object AgentEvents {
                 "action" to action,
                 "reason" to reason,
                 "reason_code" to reasonCode
+            )
+        )
+
+    fun groundingMetadataPropagated(
+        rootInputId: String?,
+        fromEnvelopeType: String,
+        toEnvelopeType: String,
+        groundingRequired: Boolean,
+        source: String,
+    ): AgentEvent =
+        AgentEvent(
+            type = "grounding_metadata_propagated",
+            data = mapOf(
+                "root_input_id" to rootInputId,
+                "from_envelope_type" to fromEnvelopeType,
+                "to_envelope_type" to toEnvelopeType,
+                "grounding_required" to groundingRequired,
+                "source" to source,
             )
         )
 
@@ -400,12 +422,12 @@ object AgentEvents {
             )
         )
 
-    fun convergenceThoughtEnqueued(
+    fun convergenceContinuationEnqueued(
         rootInputId: String? = null,
         rootInputReceivedAtMs: Long? = null,
     ): AgentEvent =
         AgentEvent(
-            type = "convergence_thought_enqueued",
+            type = "convergence_continuation_enqueued",
             data = mapOf(
                 "root_input_id" to rootInputId,
                 "root_input_received_at_ms" to rootInputReceivedAtMs
@@ -463,13 +485,21 @@ object AgentEvents {
             )
         )
 
-    fun planStepsEnqueued(planId: String, totalSteps: Int, allQueued: Boolean): AgentEvent =
+    fun planStepsEnqueued(
+        planId: String,
+        totalSteps: Int,
+        allQueued: Boolean,
+        groundingRequired: String? = null,
+        groundingSource: String? = null,
+    ): AgentEvent =
         AgentEvent(
             type = "plan_steps_enqueued",
             data = mapOf(
                 "plan_id" to planId,
                 "total_steps" to totalSteps,
-                "all_queued" to allQueued
+                "all_queued" to allQueued,
+                "grounding_required" to groundingRequired,
+                "grounding_source" to groundingSource,
             )
         )
 

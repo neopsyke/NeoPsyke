@@ -20,7 +20,7 @@ data class AgentConfig(
     val innerVoice: InnerVoiceConfig = InnerVoiceConfig(),
     val goals: GoalConfig = GoalConfig(),
     val loopDelayMs: Int = 0,
-    val maxPendingThoughts: Int = 64,
+    val maxPendingContinuations: Int = 64,
     val maxPendingActions: Int = 32,
     val maxPendingInputs: Int = 32,
     val searchResultCount: Int = 5,

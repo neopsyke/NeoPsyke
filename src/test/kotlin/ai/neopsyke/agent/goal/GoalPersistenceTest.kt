@@ -99,7 +99,7 @@ class ProjectPersistenceTest {
 
             // Create two goal dirs, one with events, one without
             val eventLog1 = store.goalEventLog("proj-1")
-            eventLog1.append(GoalEvent.Created("proj-1", "P1", "do", GoalPriority.LOW, "done", now))
+            eventLog1.append(GoalEvent.Created("proj-1", "P1", "do", GoalPriority.LOW, "done", timestamp = now))
             Files.createDirectories(root.resolve("proj-empty"))
 
             val goals = store.scanGoals()
@@ -148,7 +148,7 @@ class ProjectPersistenceTest {
             // loadGoal needs events to bootstrap; add a Created event first
             val goalEventLog = store.goalEventLog("proj-1")
             goalEventLog.append(GoalEvent.Created("proj-1", "Snapshot Test", "test snapshotting",
-                GoalPriority.MEDIUM, "all steps done", now))
+                GoalPriority.MEDIUM, "all steps done", timestamp = now))
             // Now it should load from snapshot + 0 extra events (snapshot has eventCount=5,
             // but events file only has 1 event which is < 5, so it reads from seq 5 = 0 events)
 
@@ -172,7 +172,7 @@ class ProjectPersistenceTest {
             val goalEventLog = store.goalEventLog("proj-1")
 
             goalEventLog.append(GoalEvent.Created("proj-1", "Replay Test", "test replay",
-                GoalPriority.HIGH, "done", now))
+                GoalPriority.HIGH, "done", timestamp = now))
             goalEventLog.append(GoalEvent.PlanGenerated("proj-1", GoalPlan(
                 steps = listOf(
                     PlanStep("s1", "Step 1", StepStatus.PENDING, "verify s1"),
@@ -220,7 +220,7 @@ class ProjectPersistenceTest {
             Files.writeString(root.resolve("proj-1").resolve(GoalStore.GOAL_FILE), "{not valid json")
             store.goalEventLog("proj-1").append(
                 GoalEvent.Created("proj-1", "Fallback Test", "recover from corrupt goal json",
-                    GoalPriority.MEDIUM, "done", now)
+                    GoalPriority.MEDIUM, "done", timestamp = now)
             )
 
             val loaded = store.loadGoal("proj-1")
@@ -242,7 +242,7 @@ class ProjectPersistenceTest {
             Files.writeString(root.resolve("proj-1").resolve(GoalStore.SNAPSHOT_FILE), "{broken snapshot")
             val goalEventLog = store.goalEventLog("proj-1")
             goalEventLog.append(GoalEvent.Created("proj-1", "Replay Fallback", "recover from corrupt snapshot",
-                GoalPriority.HIGH, "done", now))
+                GoalPriority.HIGH, "done", timestamp = now))
             goalEventLog.append(GoalEvent.PlanGenerated("proj-1", GoalPlan(
                 steps = listOf(
                     PlanStep("s1", "Step 1", StepStatus.PENDING, "verify s1"),

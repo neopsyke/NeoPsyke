@@ -8,6 +8,9 @@ import ai.neopsyke.agent.model.ConversationSecurityContexts
 import ai.neopsyke.agent.model.ActionExecutionStatus
 import ai.neopsyke.agent.model.ActionType
 import ai.neopsyke.agent.model.ActionOrigin
+import ai.neopsyke.agent.model.GroundingMetadata
+import ai.neopsyke.agent.model.GroundingRequirement
+import ai.neopsyke.agent.model.GroundingSource
 import ai.neopsyke.agent.model.OriginSource
 import ai.neopsyke.agent.model.InputPriority
 import ai.neopsyke.agent.model.Interlocutor
@@ -51,6 +54,11 @@ sealed interface CognitiveSignal : Signal {
         val stimulus: StimulusEnvelope,
         val percept: Percept? = null,
     ) : CognitiveSignal
+
+    data class FeedbackReceived(
+        val cue: ActionFeedbackCue,
+    ) : CognitiveSignal
+
     data object NoStimulus : CognitiveSignal
 }
 
@@ -123,6 +131,7 @@ data class ActionFeedbackCue(
     val urgency: String? = null,
     val requiresFollowUpThought: Boolean = false,
     val origin: ActionOrigin = ActionOrigin.USER,
+    val groundingMetadata: GroundingMetadata,
 ) {
     fun toStimulus(): StimulusEnvelope =
         StimulusEnvelope(
@@ -154,6 +163,8 @@ data class ActionFeedbackCue(
                 put(METADATA_ORIGIN_SOURCE, origin.source.name)
                 origin.needId?.takeIf { it.isNotBlank() }?.let { put(METADATA_ORIGIN_NEED_ID, it) }
                 origin.rootImpulseId?.takeIf { it.isNotBlank() }?.let { put(METADATA_ORIGIN_ROOT_IMPULSE_ID, it) }
+                put(METADATA_GROUNDING_REQUIRED, groundingMetadata.requirement.name)
+                put(METADATA_GROUNDING_SOURCE, groundingMetadata.source.name)
             },
         )
 
@@ -173,6 +184,26 @@ data class ActionFeedbackCue(
             val originSource = stimulus.metadata[METADATA_ORIGIN_SOURCE]
                 ?.let { raw -> runCatching { OriginSource.valueOf(raw) }.getOrNull() }
                 ?: OriginSource.USER
+            val groundingRequirement = stimulus.metadata[METADATA_GROUNDING_REQUIRED]
+                ?.let { raw -> runCatching { GroundingRequirement.valueOf(raw.uppercase()) }.getOrNull() }
+            val groundingSource = stimulus.metadata[METADATA_GROUNDING_SOURCE]
+                ?.let { raw -> runCatching { GroundingSource.valueOf(raw.uppercase()) }.getOrNull() }
+            val groundingMetadata = if (groundingRequirement != null && groundingSource != null) {
+                GroundingMetadata(requirement = groundingRequirement, source = groundingSource)
+            } else {
+                // Stimulus missing grounding metadata keys — default to NOT_REQUIRED.
+                // This is the only site where a default is allowed; all other envelope
+                // construction must provide grounding metadata explicitly.
+                sensoryCortexLogger.warn {
+                    "ActionFeedbackCue.fromStimulus: grounding metadata missing from stimulus " +
+                        "metadata keys; defaulting to NOT_REQUIRED/INHERITED. " +
+                        "root_input_id=$rootInputId action_type=${actionType.id}"
+                }
+                GroundingMetadata(
+                    requirement = GroundingRequirement.NOT_REQUIRED,
+                    source = GroundingSource.INHERITED,
+                )
+            }
             return ActionFeedbackCue(
                 rootInputId = rootInputId,
                 actionType = actionType,
@@ -197,6 +228,7 @@ data class ActionFeedbackCue(
                     needId = stimulus.metadata[METADATA_ORIGIN_NEED_ID],
                     rootImpulseId = stimulus.metadata[METADATA_ORIGIN_ROOT_IMPULSE_ID],
                 ),
+                groundingMetadata = groundingMetadata,
             )
         }
     }
@@ -224,6 +256,8 @@ object CognitiveCueMetadata {
     const val METADATA_ORIGIN_SOURCE: String = "origin_source"
     const val METADATA_ORIGIN_NEED_ID: String = "origin_need_id"
     const val METADATA_ORIGIN_ROOT_IMPULSE_ID: String = "origin_root_impulse_id"
+    const val METADATA_GROUNDING_REQUIRED: String = "grounding_required"
+    const val METADATA_GROUNDING_SOURCE: String = "grounding_source"
 
     const val CUE_TYPE_ID_IMPULSE_READY: String = "id_impulse_ready"
     const val CUE_TYPE_WORK_READY: String = "goal_runtime_work_ready"
@@ -252,6 +286,8 @@ private const val METADATA_REQUIRES_FOLLOW_UP_THOUGHT: String =
 private const val METADATA_ORIGIN_SOURCE: String = CognitiveCueMetadata.METADATA_ORIGIN_SOURCE
 private const val METADATA_ORIGIN_NEED_ID: String = CognitiveCueMetadata.METADATA_ORIGIN_NEED_ID
 private const val METADATA_ORIGIN_ROOT_IMPULSE_ID: String = CognitiveCueMetadata.METADATA_ORIGIN_ROOT_IMPULSE_ID
+private const val METADATA_GROUNDING_REQUIRED: String = CognitiveCueMetadata.METADATA_GROUNDING_REQUIRED
+private const val METADATA_GROUNDING_SOURCE: String = CognitiveCueMetadata.METADATA_GROUNDING_SOURCE
 private const val CUE_TYPE_ID_IMPULSE_READY: String = CognitiveCueMetadata.CUE_TYPE_ID_IMPULSE_READY
 private const val CUE_TYPE_WORK_READY: String = CognitiveCueMetadata.CUE_TYPE_WORK_READY
 private const val CUE_TYPE_ACTION_FEEDBACK: String = CognitiveCueMetadata.CUE_TYPE_ACTION_FEEDBACK
@@ -405,9 +441,6 @@ class AsyncSignalSource(
             )
         )
 
-    fun offerGoalRuntimeCue(cue: GoalRuntimeCue): Boolean =
-        offerSignal(CognitiveSignal.StimulusReceived(cue.toStimulus()))
-
     fun submitInput(
         content: String,
         source: String,
@@ -466,10 +499,20 @@ class SensoryCortex(
     private val source: SignalSource,
     private val interlocutorResolver: InterlocutorResolver = DefaultInterlocutorResolver(),
 ) {
+    @Volatile private var instrumentation: ai.neopsyke.instrumentation.AgentInstrumentation =
+        ai.neopsyke.instrumentation.NoopAgentInstrumentation
+
+    fun setInstrumentation(inst: ai.neopsyke.instrumentation.AgentInstrumentation) {
+        instrumentation = inst
+    }
+
     private val syntheticSignals = Channel<Signal>(SYNTHETIC_SIGNAL_QUEUE)
     private val syntheticSignalCount = AtomicInteger(0)
 
     fun offerActionFeedback(cue: ActionFeedbackCue): Boolean =
+        offerSyntheticSignal(CognitiveSignal.FeedbackReceived(cue))
+
+    fun offerGoalRuntimeCue(cue: GoalRuntimeCue): Boolean =
         offerSyntheticSignal(CognitiveSignal.StimulusReceived(cue.toStimulus()))
 
     fun hasPendingSyntheticSignals(): Boolean = syntheticSignalCount.get() > 0
@@ -480,7 +523,25 @@ class SensoryCortex(
             val stimulusSignal = signal as? CognitiveSignal.StimulusReceived ?: return signal
             val enrichedStimulus = enrichStimulus(stimulusSignal.stimulus)
             if (enrichedStimulus == null) {
-                sensoryCortexLogger.debug { "Synthetic stimulus dropped: blank content after sanitization" }
+                sensoryCortexLogger.warn {
+                    "Synthetic stimulus dropped: blank content after sanitization" +
+                        " family=${stimulusSignal.stimulus.family}" +
+                        " source=${stimulusSignal.stimulus.source}" +
+                        " content_len=${stimulusSignal.stimulus.content.length}"
+                }
+                instrumentation.emit(
+                    ai.neopsyke.instrumentation.AgentEvent(
+                        type = "signal_dropped",
+                        data = mapOf(
+                            "channel" to "synthetic",
+                            "reason" to "blank_after_sanitization",
+                            "family" to stimulusSignal.stimulus.family.name,
+                            "source" to stimulusSignal.stimulus.source,
+                            "content_length" to stimulusSignal.stimulus.content.length,
+                            "metadata_keys" to stimulusSignal.stimulus.metadata.keys.toList(),
+                        ),
+                    )
+                )
                 return CognitiveSignal.NoStimulus
             }
             return CognitiveSignal.StimulusReceived(
@@ -492,7 +553,25 @@ class SensoryCortex(
         val stimulusSignal = signal as? CognitiveSignal.StimulusReceived ?: return signal
         val enrichedStimulus = enrichStimulus(stimulusSignal.stimulus)
         if (enrichedStimulus == null) {
-            sensoryCortexLogger.debug { "Source stimulus dropped: blank content after sanitization" }
+            sensoryCortexLogger.warn {
+                "Source stimulus dropped: blank content after sanitization" +
+                    " family=${stimulusSignal.stimulus.family}" +
+                    " source=${stimulusSignal.stimulus.source}" +
+                    " content_len=${stimulusSignal.stimulus.content.length}"
+            }
+            instrumentation.emit(
+                ai.neopsyke.instrumentation.AgentEvent(
+                    type = "signal_dropped",
+                    data = mapOf(
+                        "channel" to "source",
+                        "reason" to "blank_after_sanitization",
+                        "family" to stimulusSignal.stimulus.family.name,
+                        "source" to stimulusSignal.stimulus.source,
+                        "content_length" to stimulusSignal.stimulus.content.length,
+                        "metadata_keys" to stimulusSignal.stimulus.metadata.keys.toList(),
+                    ),
+                )
+            )
             return CognitiveSignal.NoStimulus
         }
         return CognitiveSignal.StimulusReceived(

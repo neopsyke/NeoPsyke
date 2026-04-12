@@ -2,6 +2,9 @@ package ai.neopsyke.agent.model
 
 import ai.neopsyke.agent.cortex.sensory.ActionFeedbackCue
 import ai.neopsyke.agent.goal.GoalRunActivation
+import com.fasterxml.jackson.annotation.JsonIgnore
+import com.fasterxml.jackson.annotation.JsonSubTypes
+import com.fasterxml.jackson.annotation.JsonTypeInfo
 import java.util.UUID
 
 data class PendingInput(
@@ -14,6 +17,7 @@ data class PendingInput(
     val conversationContext: ConversationContext = ConversationContext.default(),
     val percept: Percept? = null,
     val cognitiveThreadId: String? = null,
+    val groundingMetadata: GroundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
 )
 
 data class PlanContext(
@@ -24,28 +28,52 @@ data class PlanContext(
     val stepDescription: String,
 )
 
-data class PendingThought(
-    val id: Long,
-    val urgency: Urgency,
-    val content: String,
-    val passes: Int = 0,
-    val longTermMemoryRecallQuery: String? = null,
-    val rootInputId: String? = null,
-    val rootInputReceivedAtMs: Long? = null,
-    val deniedActionType: ActionType? = null,
-    val deniedActionPayload: String? = null,
-    val denialReason: String? = null,
-    val allowFallbackExplanation: Boolean = false,
-    val planContext: PlanContext? = null,
-    val denialReasonCode: String? = null,
-    val originActionType: ActionType? = null,
-    val originActionObservedEvidence: Boolean? = null,
-    val conversationContext: ConversationContext = ConversationContext.default(),
-    val origin: ActionOrigin = ActionOrigin.USER,
+@JsonTypeInfo(use = JsonTypeInfo.Id.NAME, include = JsonTypeInfo.As.PROPERTY, property = "type")
+@JsonSubTypes(
+    JsonSubTypes.Type(value = Continuation.PlanStepContinuation::class, name = "plan_step"),
+    JsonSubTypes.Type(value = Continuation.RetryAlternative::class, name = "retry_alternative"),
+    JsonSubTypes.Type(value = Continuation.ConvergeNow::class, name = "converge_now"),
 )
+sealed interface Continuation {
+    val content: String
+    val longTermMemoryRecallQuery: String?
+    val allowFallbackExplanation: Boolean
+    val originActionType: ActionType?
+    val originActionObservedEvidence: Boolean?
+
+    data class PlanStepContinuation(
+        override val content: String,
+        val planContext: PlanContext,
+        override val longTermMemoryRecallQuery: String? = null,
+        override val allowFallbackExplanation: Boolean = false,
+        override val originActionType: ActionType? = null,
+        override val originActionObservedEvidence: Boolean? = null,
+    ) : Continuation
+
+    data class RetryAlternative(
+        override val content: String,
+        val deniedActionType: ActionType? = null,
+        val deniedActionPayload: String? = null,
+        val denialReason: String? = null,
+        val denialReasonCode: String? = null,
+        override val longTermMemoryRecallQuery: String? = null,
+        override val allowFallbackExplanation: Boolean = false,
+        override val originActionType: ActionType? = null,
+        override val originActionObservedEvidence: Boolean? = null,
+    ) : Continuation
+
+    data class ConvergeNow(
+        override val content: String,
+        val convergenceReason: String,
+        override val longTermMemoryRecallQuery: String? = null,
+        override val allowFallbackExplanation: Boolean = false,
+        override val originActionType: ActionType? = null,
+        override val originActionObservedEvidence: Boolean? = null,
+    ) : Continuation
+}
 
 /**
- * Tracks the origin of a pending thought or action, distinguishing
+ * Tracks the origin of a pending continuation or action, distinguishing
  * user-initiated work from Id-driven (internal drive) work.
  */
 data class ActionOrigin(
@@ -92,6 +120,8 @@ data class PendingAction(
     val intentionId: String? = null,
     val intentionKind: IntentionKind = IntentionKind.PREPARE,
     val requestedCommitMode: CommitMode = CommitMode.NOT_APPLICABLE,
+    val groundingMetadata: GroundingMetadata,
+    val isForcedTerminal: Boolean = false,
 )
 
 data class PendingFeedback(
@@ -105,20 +135,20 @@ data class PendingFeedback(
 
 data class QueueSnapshot(
     val pendingInputCount: Int,
-    val deferredIntentionCount: Int,
+    val continuationCount: Int,
     val pendingActionCount: Int,
     val pendingIntentionCount: Int = 0,
     val pendingImpulseCount: Int = 0,
 )
 
 data class ClearedPendingWork(
-    val thoughtsRemoved: Int = 0,
+    val continuationsRemoved: Int = 0,
     val actionsRemoved: Int = 0,
 )
 
 data class QueueState(
     val inputs: List<PendingInput>,
-    val thoughts: List<PendingThought>,
+    val continuations: List<QueuedContinuation>,
     val actions: List<PendingAction>,
     val intentions: List<QueuedIntention> = emptyList(),
 )
@@ -127,34 +157,40 @@ sealed interface OpportunityTrigger {
     val rootInputId: String
     val conversationContext: ConversationContext
     val receivedAtMs: Long?
+    val groundingMetadata: GroundingMetadata
 
     data class Input(val input: PendingInput) : OpportunityTrigger {
         override val rootInputId: String = input.rootInputId
         override val conversationContext: ConversationContext = input.conversationContext
         override val receivedAtMs: Long = input.receivedAtMs
+        override val groundingMetadata: GroundingMetadata = input.groundingMetadata
     }
 
     data class Impulse(val impulse: PendingImpulse) : OpportunityTrigger {
         override val rootInputId: String = impulse.rootImpulseId
         override val conversationContext: ConversationContext = impulse.conversationContext
         override val receivedAtMs: Long = impulse.receivedAtMs
+        override val groundingMetadata: GroundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER
     }
 
     data class Feedback(val feedback: PendingFeedback) : OpportunityTrigger {
         override val rootInputId: String = feedback.cue.rootInputId
         override val conversationContext: ConversationContext = feedback.cue.conversationContext
         override val receivedAtMs: Long = feedback.receivedAtMs
+        override val groundingMetadata: GroundingMetadata = feedback.cue.groundingMetadata
     }
 
     data class GoalWork(val work: GoalRunActivation) : OpportunityTrigger {
         override val rootInputId: String = work.rootInputId
         override val conversationContext: ConversationContext = work.conversationContext
         override val receivedAtMs: Long? = null
+        override val groundingMetadata: GroundingMetadata = work.groundingMetadata
     }
 }
 
 sealed interface LoopTask {
     data class AttendOpportunity(val item: ScheduledOpportunity) : LoopTask
+    data class ProcessContinuation(val item: QueuedContinuation) : LoopTask
     data class ProcessIntention(val item: QueuedIntention) : LoopTask
     data class PerformAction(val item: PendingAction) : LoopTask
 }
@@ -180,44 +216,48 @@ data class QueuedIntention(
     val proposedActionSummary: String? = null,
     val argumentDataTrust: DataTrust = DataTrust.TRUSTED_DATA,
     val origin: ActionOrigin = ActionOrigin.USER,
-    val deferredContent: String? = null,
-    val deferredPasses: Int = 0,
-    val deferredRecallQuery: String? = null,
-    val deferredDeniedActionType: ActionType? = null,
-    val deferredDeniedActionPayload: String? = null,
-    val deferredDenialReason: String? = null,
-    val deferredAllowFallbackExplanation: Boolean = false,
-    val deferredPlanContext: PlanContext? = null,
-    val deferredDenialReasonCode: String? = null,
-    val deferredOriginActionType: ActionType? = null,
-    val deferredOriginActionObservedEvidence: Boolean? = null,
+    val groundingMetadata: GroundingMetadata,
 ) {
     val rootInputId: String? get() = intention.rootStimulusId
     val conversationContext: ConversationContext get() = intention.conversationContext
+}
 
-    /** Resolved content: the deferred content if present, else the intention summary. */
-    val resolvedContent: String get() = deferredContent ?: intention.summary
-
-    fun toPendingThought(): PendingThought =
-        PendingThought(
-            id = queueId,
-            urgency = urgency,
-            content = resolvedContent,
-            passes = deferredPasses,
-            longTermMemoryRecallQuery = deferredRecallQuery,
-            rootInputId = rootInputId,
-            rootInputReceivedAtMs = rootInputReceivedAtMs,
-            deniedActionType = deferredDeniedActionType,
-            deniedActionPayload = deferredDeniedActionPayload,
-            denialReason = deferredDenialReason,
-            allowFallbackExplanation = deferredAllowFallbackExplanation,
-            planContext = deferredPlanContext,
-            denialReasonCode = deferredDenialReasonCode,
-            originActionType = deferredOriginActionType,
-            originActionObservedEvidence = deferredOriginActionObservedEvidence,
-            conversationContext = conversationContext,
-            origin = origin,
-        )
+data class QueuedContinuation(
+    val queueId: Long = 0,
+    val urgency: Urgency,
+    val continuation: Continuation,
+    val passes: Int = 0,
+    val rootInputId: String? = null,
+    val rootInputReceivedAtMs: Long? = null,
+    val conversationContext: ConversationContext = ConversationContext.default(),
+    val origin: ActionOrigin = ActionOrigin.USER,
+    val groundingMetadata: GroundingMetadata,
+) {
+    @get:JsonIgnore
+    val content: String get() = continuation.content
+    @get:JsonIgnore
+    val longTermMemoryRecallQuery: String? get() = continuation.longTermMemoryRecallQuery
+    @get:JsonIgnore
+    val allowFallbackExplanation: Boolean get() = continuation.allowFallbackExplanation
+    @get:JsonIgnore
+    val originActionType: ActionType? get() = continuation.originActionType
+    @get:JsonIgnore
+    val originActionObservedEvidence: Boolean? get() = continuation.originActionObservedEvidence
+    @get:JsonIgnore
+    val planContext: PlanContext?
+        get() = (continuation as? Continuation.PlanStepContinuation)?.planContext
+    @get:JsonIgnore
+    val deniedActionType: ActionType?
+        get() = (continuation as? Continuation.RetryAlternative)?.deniedActionType
+    @get:JsonIgnore
+    val deniedActionPayload: String?
+        get() = (continuation as? Continuation.RetryAlternative)?.deniedActionPayload
+    @get:JsonIgnore
+    val denialReason: String?
+        get() = (continuation as? Continuation.RetryAlternative)?.denialReason
+    @get:JsonIgnore
+    val denialReasonCode: String?
+        get() = (continuation as? Continuation.RetryAlternative)?.denialReasonCode
 }
 
 object RootInputIds {

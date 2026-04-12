@@ -2,7 +2,7 @@ package ai.neopsyke.instrumentation
 
 import mu.KotlinLogging
 import ai.neopsyke.agent.model.PendingInput
-import ai.neopsyke.agent.model.PendingThought
+import ai.neopsyke.agent.model.QueuedContinuation
 import ai.neopsyke.agent.model.PendingAction
 import ai.neopsyke.agent.model.QueueState
 import java.util.concurrent.ConcurrentHashMap
@@ -15,11 +15,11 @@ class StructuredLogSink : InstrumentationSink {
     private fun sessionPrefix(event: AgentEvent): String {
         val sessionId = event.data["session_id"]
             ?: (event.data["input"] as? PendingInput)?.conversationContext?.sessionId
-            ?: (event.data["thought"] as? PendingThought)?.conversationContext?.sessionId
+            ?: (event.data["continuation"] as? QueuedContinuation)?.conversationContext?.sessionId
             ?: (event.data["action"] as? PendingAction)?.conversationContext?.sessionId
         val interlocutor = event.data["interlocutor"]
             ?: (event.data["input"] as? PendingInput)?.conversationContext?.interlocutor?.id
-            ?: (event.data["thought"] as? PendingThought)?.conversationContext?.interlocutor?.id
+            ?: (event.data["continuation"] as? QueuedContinuation)?.conversationContext?.interlocutor?.id
             ?: (event.data["action"] as? PendingAction)?.conversationContext?.interlocutor?.id
         return buildString {
             if (sessionId != null) append("session=$sessionId ")
@@ -44,7 +44,7 @@ class StructuredLogSink : InstrumentationSink {
             "queue_snapshot" -> {
                 val queues = event.data["queues"] as? QueueState
                 logger.trace {
-                    "queue.snapshot source=${event.data["source"]} in=${queues?.inputs?.size ?: 0} th=${queues?.thoughts?.size ?: 0} ac=${queues?.actions?.size ?: 0}"
+                    "queue.snapshot source=${event.data["source"]} in=${queues?.inputs?.size ?: 0} co=${queues?.continuations?.size ?: 0} ac=${queues?.actions?.size ?: 0}"
                 }
             }
 
@@ -74,16 +74,25 @@ class StructuredLogSink : InstrumentationSink {
                 }
             }
 
-            "task_verifier_review" -> {
+            "grounding_gate_review" -> {
                 logger.info {
-                    "task_verifier.review action_id=${event.data["action_id"]} allow=${event.data["allow"]} " +
-                        "reason_code=${event.data["reason_code"]} intent=${event.data["intent_category"]} " +
-                        "volatility=${event.data["volatility_level"]}/${event.data["volatility_score"]} " +
-                        "requires_external_evidence=${event.data["requires_external_evidence"]} " +
-                        "evidence_available=${event.data["evidence_actions_available"]} " +
-                        "evidence_dispatchable=${event.data["evidence_actions_dispatchable"]} " +
-                        "had_successful_evidence=${event.data["had_successful_evidence"]} " +
-                        "had_external_failures=${event.data["had_external_failures"]}"
+                    "grounding_gate.review action_id=${event.data["action_id"]} allow=${event.data["allow"]} " +
+                        "grounding_required=${event.data["grounding_required"]} " +
+                        "evidence_gathered=${event.data["evidence_gathered"]} " +
+                        "evidence_failed_technically=${event.data["evidence_failed_technically"]} " +
+                        "evidence_unavailable=${event.data["evidence_unavailable"]} " +
+                        "forced_terminal=${event.data["forced_terminal"]} " +
+                        "reason_code=${event.data["reason_code"]}"
+                }
+            }
+
+            "grounding_metadata_propagated" -> {
+                logger.info {
+                    "grounding.propagated root_input_id=${event.data["root_input_id"]} " +
+                        "from=${event.data["from_envelope_type"]} " +
+                        "to=${event.data["to_envelope_type"]} " +
+                        "grounding_required=${event.data["grounding_required"]} " +
+                        "source=${event.data["source"]}"
                 }
             }
 
@@ -612,7 +621,9 @@ class StructuredLogSink : InstrumentationSink {
     companion object {
         private val PLANNER_CALL_SITES: Set<String> = setOf(
             "input",
-            "thought",
+            "continuation",
+            "feedback",
+            "goal_work",
             "impulse",
         )
     }

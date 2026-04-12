@@ -1,5 +1,6 @@
 package ai.neopsyke.agent
 
+import ai.neopsyke.agent.model.GroundingMetadata
 import ai.neopsyke.support.RecordingInstrumentation
 import ai.neopsyke.support.StubChatModelClient
 import kotlin.test.Test
@@ -34,7 +35,8 @@ class ScratchpadFinalizerTest {
                     urgency = Urgency.MEDIUM,
                     type = ActionType.CONTACT_USER,
                     payload = "Draft answer",
-                    summary = "respond"
+                    summary = "respond",
+                    groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
                 ),
                 workspaceCompilation = "Scratchpad final compilation:\nsections:\n1. Request: summarize pricing",
                 workspaceConfidence = 0.73,
@@ -71,7 +73,8 @@ class ScratchpadFinalizerTest {
                     type = ActionType.CONTACT_USER,
                     payload = "Initial fallback",
                     summary = "fallback",
-                    isFallbackExplanation = true
+                    isFallbackExplanation = true,
+                    groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
                 ),
                 workspaceCompilation = "Scratchpad final compilation:\nsections:\n1. Request: explain constraint",
                 workspaceConfidence = 0.64,

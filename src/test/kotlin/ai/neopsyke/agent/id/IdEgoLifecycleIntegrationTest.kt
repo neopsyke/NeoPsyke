@@ -18,7 +18,7 @@ import ai.neopsyke.agent.model.IntentionKind
 import ai.neopsyke.agent.model.OriginSource
 import ai.neopsyke.agent.model.ActionEffect
 import ai.neopsyke.agent.model.PendingImpulse
-import ai.neopsyke.agent.model.PendingThought
+import ai.neopsyke.agent.model.QueuedContinuation
 import ai.neopsyke.agent.config.PlannerConfig
 import ai.neopsyke.agent.model.PlannerContext
 import ai.neopsyke.agent.model.Urgency
@@ -56,10 +56,10 @@ class IdEgoLifecycleIntegrationTest {
                         EgoDecision.Noop("search completed")
                     }
                     is EgoTrigger.GoalWork -> EgoDecision.Noop("ignore goal work in test")
-                    is EgoTrigger.DeferredIntention -> decisionForThought(trigger.intention.toPendingThought())
+                    is EgoTrigger.Continuation -> decisionForThought(trigger.continuation)
                 }
 
-            private fun decisionForThought(thought: PendingThought): EgoDecision =
+            private fun decisionForThought(thought: QueuedContinuation): EgoDecision =
                 when {
                     thought.planContext?.stepIndex == 0 -> EgoDecision.Noop("drop this branch")
                     thought.planContext?.stepIndex == 1 -> EgoDecision.FormIntention(
@@ -76,7 +76,7 @@ class IdEgoLifecycleIntegrationTest {
         val config = AgentConfig(
             planner = PlannerConfig(
                 maxLoopStepsPerInput = 24,
-                maxThoughtPasses = 1
+                maxContinuationPasses = 1
             )
         )
         val ego = buildTestEgo(
@@ -176,7 +176,7 @@ class IdEgoLifecycleIntegrationTest {
                         EgoDecision.Noop("done")
                     }
                     is EgoTrigger.GoalWork -> EgoDecision.Noop("ignore goal work in test")
-                    is EgoTrigger.DeferredIntention -> {
+                    is EgoTrigger.Continuation -> {
                         EgoDecision.Noop("done")
                     }
                 }
@@ -185,7 +185,7 @@ class IdEgoLifecycleIntegrationTest {
         val config = AgentConfig(
             planner = PlannerConfig(
                 maxLoopStepsPerInput = 12,
-                maxThoughtPasses = 2
+                maxContinuationPasses = 2
             )
         )
         val ego = buildTestEgo(
@@ -260,8 +260,8 @@ class IdEgoLifecycleIntegrationTest {
                     )
                     is EgoTrigger.ActionFeedback -> EgoDecision.Noop("ignore feedback in test")
                     is EgoTrigger.GoalWork -> EgoDecision.Noop("ignore goal work in test")
-                    is EgoTrigger.DeferredIntention -> {
-                        if (trigger.intention.deferredPlanContext != null) {
+                    is EgoTrigger.Continuation -> {
+                        if (trigger.continuation.planContext != null) {
                             planStepHasReflectInternalAvailable = ActionType.REFLECT_INTERNAL in context.availableActions
                             planStepHasContactDispatchable = ActionType.CONTACT_USER in context.dispatchableActions
                             planStepHasReflectInternalDispatchable = ActionType.REFLECT_INTERNAL in context.dispatchableActions
@@ -279,7 +279,7 @@ class IdEgoLifecycleIntegrationTest {
         val config = AgentConfig(
             planner = PlannerConfig(
                 maxLoopStepsPerInput = 12,
-                maxThoughtPasses = 2
+                maxContinuationPasses = 2
             )
         )
         val ego = buildTestEgo(
@@ -363,8 +363,8 @@ class IdEgoLifecycleIntegrationTest {
                     )
                     is EgoTrigger.ActionFeedback -> EgoDecision.Noop("ignore feedback in test")
                     is EgoTrigger.GoalWork -> EgoDecision.Noop("ignore goal work in test")
-                    is EgoTrigger.DeferredIntention ->
-                        when (trigger.intention.deferredPlanContext?.stepIndex) {
+                    is EgoTrigger.Continuation ->
+                        when (trigger.continuation.planContext?.stepIndex) {
                             0 -> EgoDecision.FormIntention(
                                 urgency = Urgency.MEDIUM,
                                 intentionKind = IntentionKind.OBSERVE,
@@ -384,7 +384,7 @@ class IdEgoLifecycleIntegrationTest {
         val config = AgentConfig(
             planner = PlannerConfig(
                 maxLoopStepsPerInput = 12,
-                maxThoughtPasses = 2
+                maxContinuationPasses = 2
             )
         )
         val ego = buildTestEgo(
@@ -453,7 +453,7 @@ class IdEgoLifecycleIntegrationTest {
         }
         assertNotNull(cleanup, "Expected cleanup event after Id satisfaction")
         assertEquals("id_satisfaction_resolved", cleanup.data["reason"])
-        assertTrue((cleanup.data["removed_thoughts"] as? Int ?: 0) >= 1)
+        assertTrue((cleanup.data["removed_continuations"] as? Int ?: 0) >= 1)
 
         val completed = instrumentation.events.filter { it.type == "id_impulse_completed" }
         assertEquals(1, completed.size)
@@ -470,13 +470,13 @@ class IdEgoLifecycleIntegrationTest {
                     is EgoTrigger.IncomingImpulse -> EgoDecision.Noop("no useful action available")
                     is EgoTrigger.ActionFeedback -> EgoDecision.Noop("ignore feedback in test")
                     is EgoTrigger.GoalWork -> EgoDecision.Noop("ignore goal work in test")
-                    is EgoTrigger.DeferredIntention -> EgoDecision.Noop("done")
+                    is EgoTrigger.Continuation -> EgoDecision.Noop("done")
                 }
         }
         val config = AgentConfig(
             planner = PlannerConfig(
                 maxLoopStepsPerInput = 8,
-                maxThoughtPasses = 1
+                maxContinuationPasses = 1
             )
         )
         val ego = buildTestEgo(
@@ -541,13 +541,13 @@ class IdEgoLifecycleIntegrationTest {
                     )
                     is EgoTrigger.ActionFeedback -> EgoDecision.Noop("ignore feedback in test")
                     is EgoTrigger.GoalWork -> EgoDecision.Noop("ignore goal work in test")
-                    is EgoTrigger.DeferredIntention -> EgoDecision.Noop("done")
+                    is EgoTrigger.Continuation -> EgoDecision.Noop("done")
                 }
         }
         val config = AgentConfig(
             planner = PlannerConfig(
                 maxLoopStepsPerInput = 8,
-                maxThoughtPasses = 1
+                maxContinuationPasses = 1
             )
         )
         ego = buildTestEgo(
@@ -620,13 +620,13 @@ class IdEgoLifecycleIntegrationTest {
                     )
                     is EgoTrigger.ActionFeedback -> EgoDecision.Noop("ignore feedback in test")
                     is EgoTrigger.GoalWork -> EgoDecision.Noop("ignore goal work in test")
-                    is EgoTrigger.DeferredIntention -> EgoDecision.Noop("done")
+                    is EgoTrigger.Continuation -> EgoDecision.Noop("done")
                 }
         }
         val config = AgentConfig(
             planner = PlannerConfig(
                 maxLoopStepsPerInput = 8,
-                maxThoughtPasses = 1
+                maxContinuationPasses = 1
             )
         )
         ego = buildTestEgo(

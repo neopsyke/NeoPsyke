@@ -1,11 +1,13 @@
 package ai.neopsyke.config
 
 import ai.neopsyke.agent.config.TelegramIngressMode
+import ai.neopsyke.agent.ego.planner.StructuredOutputMode
 import java.nio.file.Files
 import java.nio.file.Paths
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -66,7 +68,6 @@ class AgentRuntimeSettingsLoaderTest {
                 max_plans_per_input: 3
                 action_retry_budget_non_retryable_failures: 7
                 action_retry_cooldown_steps: 15
-                action_verifier_enabled: true
               superego:
                 dynamic_completion_enabled: false
                 dynamic_completion_hard_max_tokens: 700
@@ -194,7 +195,7 @@ class AgentRuntimeSettingsLoaderTest {
                     - https://www.googleapis.com/auth/gmail.readonly
               runtime:
                 loop_delay_ms: 9
-                max_pending_thoughts: 11
+                max_pending_continuations: 11
                 max_pending_actions: 12
                 max_pending_inputs: 13
                 search_result_count: 8
@@ -222,8 +223,6 @@ class AgentRuntimeSettingsLoaderTest {
         assertEquals(3, settings.agentConfig.planner.maxPlansPerInput)
         assertEquals(7, settings.agentConfig.planner.actionRetryBudgetNonRetryableFailures)
         assertEquals(15, settings.agentConfig.planner.actionRetryCooldownSteps)
-        assertEquals(true, settings.agentConfig.planner.actionVerifierEnabled)
-
         assertEquals(false, settings.agentConfig.superego.dynamicCompletionEnabled)
         assertEquals(700, settings.agentConfig.superego.dynamicCompletionHardMaxTokens)
         assertEquals(0.21, settings.agentConfig.superego.dynamicPromptToCompletionRatio)
@@ -340,7 +339,7 @@ class AgentRuntimeSettingsLoaderTest {
         )
 
         assertEquals(9, settings.agentConfig.loopDelayMs)
-        assertEquals(11, settings.agentConfig.maxPendingThoughts)
+        assertEquals(11, settings.agentConfig.maxPendingContinuations)
         assertEquals(12, settings.agentConfig.maxPendingActions)
         assertEquals(13, settings.agentConfig.maxPendingInputs)
         assertEquals(8, settings.agentConfig.searchResultCount)
@@ -379,6 +378,62 @@ class AgentRuntimeSettingsLoaderTest {
         assertEquals(TelegramIngressMode.WEBHOOK, settings.agentConfig.nativeIntegrations.telegram.mode)
         assertEquals(false, settings.agentConfig.nativeIntegrations.googleWorkspace.enabled)
         assertEquals(true, settings.agentConfig.goals.enabled)
+    }
+
+    @Test
+    fun `planner lane defaults and overrides load from yaml`() {
+        val tempDir = Files.createTempDirectory("neopsyke-agent-runtime-lanes")
+        val yamlPath = tempDir.resolve("agent-runtime.yaml")
+        Files.writeString(
+            yamlPath,
+            """
+            app:
+              dashboard_enabled: true
+            eval:
+              max_raw_response_chars: 4096
+            agent:
+              planner:
+                lane_defaults:
+                  provider: openai
+                  model: gpt-4.1-mini
+                  temperature: 0.35
+                  max_completion_tokens: 654
+                  retry_attempts: 6
+                  structured_output: relaxed
+                lanes:
+                  input_intent_router:
+                    temperature: 0.0
+                    max_completion_tokens: 120
+                  goal_creation:
+                    provider: mistral
+                    model: mistral-small-latest
+                    structured_output: off
+            """.trimIndent()
+        )
+
+        val settings = AgentRuntimeSettingsLoader.load(
+            env = emptyMap(),
+            defaultPath = yamlPath
+        )
+
+        val defaults = settings.agentConfig.planner.laneDefaults
+        assertEquals("openai", defaults.provider)
+        assertEquals("gpt-4.1-mini", defaults.model)
+        assertEquals(0.35, defaults.temperature)
+        assertEquals(654, defaults.maxCompletionTokens)
+        assertEquals(6, defaults.retryAttempts)
+        assertEquals(StructuredOutputMode.RELAXED, defaults.structuredOutput)
+
+        val routerLane = assertNotNull(settings.agentConfig.planner.lanes["input_intent_router"])
+        assertEquals(0.0, routerLane.temperature)
+        assertEquals(120, routerLane.maxCompletionTokens)
+        assertNull(routerLane.provider)
+        assertNull(routerLane.model)
+
+        val goalCreationLane = assertNotNull(settings.agentConfig.planner.lanes["goal_creation"])
+        assertEquals("mistral", goalCreationLane.provider)
+        assertEquals("mistral-small-latest", goalCreationLane.model)
+        assertEquals(StructuredOutputMode.OFF, goalCreationLane.structuredOutput)
     }
 
     @Test

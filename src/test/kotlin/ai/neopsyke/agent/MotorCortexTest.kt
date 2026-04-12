@@ -1,5 +1,6 @@
 package ai.neopsyke.agent
 
+import ai.neopsyke.agent.model.GroundingMetadata
 import kotlinx.coroutines.runBlocking
 import ai.neopsyke.agent.cortex.motor.actions.NoopReflectionMemoryRecorder
 import ai.neopsyke.agent.cortex.motor.actions.websearch.WebSearchActionHandler
@@ -34,7 +35,8 @@ class MotorCortexTest {
                 urgency = Urgency.MEDIUM,
                 type = ActionType.CONTACT_USER,
                 payload = "Hello there",
-                summary = "reply"
+                summary = "reply",
+                groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
             ),
             searchResultCount = 3
         )
@@ -71,7 +73,8 @@ class MotorCortexTest {
                 urgency = Urgency.HIGH,
                 type = ActionType.WEB_SEARCH,
                 payload = "kotlin testing",
-                summary = "search"
+                summary = "search",
+                groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
             ),
             searchResultCount = 2
         )
@@ -110,7 +113,8 @@ class MotorCortexTest {
                 urgency = Urgency.HIGH,
                 type = ActionType.WEBSITE_FETCH,
                 payload = """{"url":"https://example.com","max_chars":500}""",
-                summary = "fetch page"
+                summary = "fetch page",
+                groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
             ),
             searchResultCount = 1
         )
@@ -146,7 +150,8 @@ class MotorCortexTest {
                 urgency = Urgency.HIGH,
                 type = ActionType.WEBSITE_FETCH,
                 payload = """{"url":"https://example.com"}""",
-                summary = "fetch page"
+                summary = "fetch page",
+                groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
             ),
             searchResultCount = 1
         )
@@ -180,7 +185,8 @@ class MotorCortexTest {
                 urgency = Urgency.MEDIUM,
                 type = ActionType.WEBSITE_FETCH,
                 payload = "bad payload",
-                summary = "fetch page"
+                summary = "fetch page",
+                groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
             ),
             searchResultCount = 1
         )
@@ -242,7 +248,8 @@ class MotorCortexTest {
                 urgency = Urgency.HIGH,
                 type = ActionType("email_send"),
                 payload = """{"to":["user@example.com"],"subject":"Status","body_text":"Done."}""",
-                summary = "send email"
+                summary = "send email",
+                groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
             ),
             searchResultCount = 1
         )

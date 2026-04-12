@@ -1,6 +1,6 @@
 package ai.neopsyke.agent.ego
 
-import ai.neopsyke.agent.deferredTrigger
+import ai.neopsyke.agent.continuationTrigger
 import ai.neopsyke.agent.config.AgentConfig
 import ai.neopsyke.agent.config.MemoryConfig
 import ai.neopsyke.agent.model.ActionOrigin
@@ -30,11 +30,12 @@ import ai.neopsyke.agent.model.DialogueRole
 import ai.neopsyke.agent.model.DialogueTurn
 import ai.neopsyke.agent.model.OriginSource
 import ai.neopsyke.agent.model.PendingAction
-import ai.neopsyke.agent.model.PendingThought
+import ai.neopsyke.agent.model.QueuedContinuation
 import ai.neopsyke.agent.model.Provenances
 import ai.neopsyke.agent.model.Urgency
 import ai.neopsyke.agent.model.ExternalContentArtifact
 import ai.neopsyke.agent.model.EgoTrigger
+import ai.neopsyke.agent.model.GroundingMetadata
 import ai.neopsyke.instrumentation.NoopAgentInstrumentation
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -139,6 +140,7 @@ class MemorySystemLogbookNarrativeTest {
                     needId = "be-useful",
                     rootImpulseId = "impulse-1",
                 ),
+            groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
             ),
             summary = "The agent learned about Kotlin",
             keywords = listOf("kotlin", "learning"),
@@ -190,6 +192,7 @@ class MemorySystemLogbookNarrativeTest {
                 type = ActionType.REFLECT_INTERNAL,
                 payload = """{"summary":"Failed save"}""",
                 summary = "reflect",
+            groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
             ),
             summary = "Failed save",
             keywords = listOf("failure"),
@@ -220,6 +223,7 @@ class MemorySystemLogbookNarrativeTest {
                 type = ActionType.REFLECT_EVIDENCE,
                 payload = """{"artifact_ids":["artifact-1"],"summary_hint":"Kotlin coroutines are useful","keywords":["kotlin","coroutines"]}""",
                 summary = "reflect evidence",
+            groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
             ),
             summaryHint = "Kotlin coroutines are useful",
             keywords = listOf("kotlin", "coroutines"),
@@ -282,8 +286,8 @@ class MemorySystemLogbookNarrativeTest {
         )
 
         val recalled = coordinator.recall(
-            trigger = deferredTrigger(
-                PendingThought(
+            trigger = continuationTrigger(
+                ai.neopsyke.agent.queuedContinuation(
                     id = 91,
                     urgency = Urgency.MEDIUM,
                     content = "review evidence",
@@ -364,6 +368,7 @@ class MemorySystemLogbookNarrativeTest {
                 payload = """{"summary":"I learned about Kotlin coroutines"}""",
                 summary = "reflect",
                 origin = learningOrigin,
+            groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
             ),
             summary = "I learned about Kotlin coroutines",
             keywords = listOf("kotlin", "coroutines"),
@@ -376,6 +381,7 @@ class MemorySystemLogbookNarrativeTest {
                 payload = """{"summary":"I learned about Kotlin coroutines again"}""",
                 summary = "reflect",
                 origin = learningOrigin,
+            groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
             ),
             summary = "I learned about Kotlin coroutines again",
             keywords = listOf("coroutines", "kotlin"),
@@ -388,6 +394,7 @@ class MemorySystemLogbookNarrativeTest {
                 payload = """{"summary":"I dug into coroutine cancellation"}""",
                 summary = "reflect",
                 origin = learningOrigin,
+            groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
             ),
             summary = "I dug into coroutine cancellation",
             keywords = listOf("kotlin", "coroutine cancellation"),

@@ -40,8 +40,8 @@ class MetaReasonerTest {
         )
     )
 
-    private fun thoughtTrigger() = deferredTrigger(
-        PendingThought(id = 1, urgency = Urgency.MEDIUM, content = "keep thinking")
+    private fun thoughtTrigger() = continuationTrigger(
+        queuedContinuation(id = 1, urgency = Urgency.MEDIUM, content = "keep thinking")
     )
 
     private fun inputTrigger() = ai.neopsyke.agent.model.EgoTrigger.IncomingInput(
@@ -278,6 +278,8 @@ class MetaReasonerTest {
 
     @Test
     fun `meta reasoner retries with relaxed schema after provider schema validation failure`() {
+        val metaConfig = MetaReasonerConfig(dynamicCompletionEnabled = false)
+        val reasonMaxChars = metaConfig.reasonMaxChars
         var calls = 0
         val observedSchemas = mutableListOf<String>()
         val client = object : ChatModelClient {
@@ -295,7 +297,7 @@ class MetaReasonerTest {
                     )
                 }
                 return ai.neopsyke.llm.ChatCompletion(
-                    content = """{"verdict":"finalize_now","confidence":0.9,"reason":"${"a".repeat(220)}"}""",
+                    content = """{"verdict":"finalize_now","confidence":0.9,"reason":"${"a".repeat(reasonMaxChars + 100)}"}""",
                     model = modelName
                 )
             }
@@ -304,14 +306,14 @@ class MetaReasonerTest {
             modelClient = client,
             config = AgentConfig(
                 llmRetryAttempts = 2,
-                metaReasoner = MetaReasonerConfig(dynamicCompletionEnabled = false)
+                metaReasoner = metaConfig
             )
         )
 
         val assessment = reasoner.assess(trigger = thoughtTrigger(), context = defaultContext())
 
         assertEquals(MetaReasonerVerdict.FINALIZE_NOW, assessment.verdict)
-        assertEquals(180, assessment.reason.length)
+        assertEquals(reasonMaxChars, assessment.reason.length)
         assertEquals(2, calls)
         assertTrue(observedSchemas.first().contains("maxLength"))
         assertTrue(!observedSchemas.last().contains("maxLength"))

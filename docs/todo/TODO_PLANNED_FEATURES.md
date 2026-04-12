@@ -518,6 +518,61 @@ the outcome," guiding the planner to use `goal_operation` instead of
 - [MIRAGE-Bench: Hallucination in Interactive LLM-Agent Scenarios](https://arxiv.org/abs/2507.21017)
 - [AgentGuard: Runtime Verification of AI Agents](https://arxiv.org/abs/2509.23864)
 - [Reducing Tool Hallucination via Reliability Alignment (ICML 2024)](https://arxiv.org/abs/2412.04141)
+
+---
+
+## 3. Evaluator-Optimizer for Planner/Answer Critique
+
+> Status: Backlog
+>
+> Added: 2026-04-06
+>
+> Scope note: Explicitly out of scope for the typed hierarchical planner redesign.
+
+### Problem
+
+The current action verifier is not an acceptable long-term evaluation layer:
+- it is disabled by default
+- it tends to rewrite or overwrite prior planner decisions
+- it is too tightly coupled to the planner generation path
+
+We still want a future critique/gating mechanism, but not as part of the current planner redesign.
+
+### Goal
+
+Design a future evaluator-optimizer subsystem that can critique planner outputs,
+candidate answers, or execution proposals without silently rewriting the core
+planner's decisions.
+
+### Requirements
+
+- Must be architecturally separate from the core planner generation path.
+- Must be designed around typed critique/gating signals rather than free-form rewriting.
+- Should be evaluated for placement closer to:
+  - meta-reasoner
+  - analyzers
+  - post-planner review/gating layers
+- Must not re-introduce deterministic natural-language routing or brittle text heuristics.
+- Must not be implemented as part of the typed hierarchical planner redesign.
+
+### Open Design Direction
+
+Possible future outputs:
+- approve
+- reject
+- request-clarification
+- request-regeneration
+- attach-critique-signal
+
+Possible future placement:
+- after planner candidate generation but before terminal answer/action commitment
+- inside a meta-reasoner-driven review stage
+- inside a broader analyzer/review architecture shared by multiple cognitive components
+
+### References
+
+- [Anthropic: Building effective agents](https://www.anthropic.com/engineering/building-effective-agents)
+- [Magentic-One](https://www.microsoft.com/en-us/research/publication/magentic-one-a-generalist-multi-agent-system-for-solving-complex-tasks/)
 - [Chain-of-Verification (CoVe)](https://arxiv.org/abs/2309.11495)
 - [Reflexion: Language Agents with Verbal Reinforcement Learning](https://arxiv.org/abs/2303.11366)
 - [The Reasoning Trap: How Reasoning Amplifies Tool Hallucination](https://arxiv.org/html/2510.22977v1)
@@ -712,6 +767,65 @@ thresholds, not wall-clock time) that doesn't break LLM cache replay.
 Any temporal data sent to the LLM must be deterministic given the same
 input sequence. Avoid raw `Instant.now()`, epoch-ms, or ISO timestamps
 in prompt content. Use relative or bucketed representations instead.
+
+---
+
+## 5. Semantic Redesign of DeterministicDecisionVerifier Evidence Gating
+
+> Status: In progress as 'Grounding Gate Redesign'
+>
+> Added: 2026-04-06
+>
+> Scope note: Explicitly out of scope for the typed hierarchical planner redesign.
+
+### Problem
+
+`DeterministicDecisionVerifier` currently performs deterministic interpretation
+of natural-language text to decide whether a final `CONTACT_USER` response
+requires prior external evidence. It classifies the latest user turn and answer
+payload using keyword sets, substring matching, and date-sensitive regexes.
+
+That creates two architectural problems:
+- it is brittle across languages and phrasing
+- it conflicts with the broader planner-direction rule that natural-language
+  semantic interpretation should not be done deterministically
+
+### Goal
+
+Redesign evidence-gating so it no longer interprets user or planner free text
+with deterministic heuristics.
+
+### Requirements
+
+- Must not classify or route natural-language text with regexes, keyword sets,
+  substring matching, or comparable deterministic heuristics.
+- Should consume typed upstream signals when possible, such as:
+  - typed volatility/risk classification
+  - typed evidence requirements
+  - typed action/evidence status
+- If semantic interpretation is still required, it must be model-based and
+  return typed outputs rather than free-form text.
+- Must remain architecturally separate from the removed planner action verifier.
+- Must be evaluated for placement relative to:
+  - the existing decision-verifier/review path
+  - future evaluator-optimizer work
+  - meta-reasoner or analyzer-owned critique/gating flows
+
+### Open Design Direction
+
+Promising options:
+- Replace text classification with typed metadata computed upstream by a
+  dedicated semantic classifier.
+- Restrict the verifier to purely typed runtime facts and remove semantic text
+  interpretation from it entirely.
+- Fold evidence-sensitivity assessment into a future typed evaluator/analyzer
+  layer rather than keeping it inside `DecisionVerifier`.
+
+### References
+
+- [`DecisionVerifier.kt`](../../src/main/kotlin/ai/neopsyke/agent/ego/DecisionVerifier.kt)
+- [`TYPED_HIERARCHICAL_PLANNER_REDESIGN.md`](../specs/TYPED_HIERARCHICAL_PLANNER_REDESIGN.md)
+- [`TODO_PLANNED_FEATURES.md` section 3](./TODO_PLANNED_FEATURES.md)
 
 ---
 

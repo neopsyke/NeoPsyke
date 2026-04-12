@@ -33,6 +33,7 @@ import ai.neopsyke.agent.model.EgoTrigger
 import ai.neopsyke.agent.model.InputPriority
 import ai.neopsyke.agent.model.IntentionKind
 import ai.neopsyke.agent.model.Interlocutor
+import ai.neopsyke.agent.model.GroundingMetadata
 import ai.neopsyke.agent.model.PendingAction
 import ai.neopsyke.agent.model.PlannerContext
 import ai.neopsyke.agent.model.Provenances
@@ -62,7 +63,7 @@ class EgoAsyncFeedbackIntegrationTest {
         val source = QueueSignalSource()
         val instrumentation = RecordingInstrumentation()
         val outputs = mutableListOf<String>()
-        val pendingThoughts = mutableListOf<String>()
+        val pendingContinuations = mutableListOf<String>()
         val feedbackSignals = mutableListOf<String>()
         val context = ConversationContext(
             sessionId = "async-user-session",
@@ -83,9 +84,9 @@ class EgoAsyncFeedbackIntegrationTest {
                         summary = "start async test operation",
                     )
 
-                    is EgoTrigger.DeferredIntention -> {
-                        pendingThoughts += trigger.intention.resolvedContent
-                        EgoDecision.Noop("unexpected deferred continuation")
+                    is EgoTrigger.Continuation -> {
+                        pendingContinuations += trigger.continuation.content
+                        EgoDecision.Noop("unexpected continuation")
                     }
 
                     is EgoTrigger.ActionFeedback -> {
@@ -107,7 +108,7 @@ class EgoAsyncFeedbackIntegrationTest {
                 }
         }
         val config = AgentConfig(
-            planner = PlannerConfig(maxLoopStepsPerInput = 8, maxThoughtPasses = 2),
+            planner = PlannerConfig(maxLoopStepsPerInput = 8, maxContinuationPasses = 2),
         )
         val agent = buildTestEgo(
             planner = planner,
@@ -146,7 +147,7 @@ class EgoAsyncFeedbackIntegrationTest {
             }
             assertTrue(outputs.isEmpty(), "No user-visible answer should be emitted while the thread is waiting.")
             assertTrue(
-                pendingThoughts.isEmpty(),
+                pendingContinuations.isEmpty(),
                 "WAITING should not enqueue a planner continuation before external feedback arrives.",
             )
 
@@ -160,6 +161,7 @@ class EgoAsyncFeedbackIntegrationTest {
                     plannerSignal = "download finished",
                     executionStatus = ActionExecutionStatus.SUCCESS,
                     conversationContext = context,
+                    groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
                 )
             )
 
@@ -174,7 +176,7 @@ class EgoAsyncFeedbackIntegrationTest {
                 outputs == listOf("ego> async user done")
             }
             assertEquals(listOf("ego> async user done"), outputs)
-            assertTrue(pendingThoughts.isEmpty(), "Feedback re-entry should not be translated into a deferred thought.")
+            assertTrue(pendingContinuations.isEmpty(), "Feedback re-entry should not be translated into continuation work.")
             assertEquals(listOf("download finished"), feedbackSignals)
         } finally {
             source.offer(RuntimeControlSignal.ExitRequested("test"))
@@ -187,7 +189,7 @@ class EgoAsyncFeedbackIntegrationTest {
         val source = QueueSignalSource()
         val instrumentation = RecordingInstrumentation()
         val outputs = mutableListOf<String>()
-        val pendingThoughts = mutableListOf<String>()
+        val pendingContinuations = mutableListOf<String>()
         val context = ConversationContext(
             sessionId = "feedback-resolution-session",
             interlocutor = Interlocutor.named("resolution-user"),
@@ -207,9 +209,9 @@ class EgoAsyncFeedbackIntegrationTest {
                         summary = "run background success action",
                     )
 
-                    is EgoTrigger.DeferredIntention -> {
-                        pendingThoughts += trigger.intention.resolvedContent
-                        EgoDecision.Noop("unexpected deferred continuation")
+                    is EgoTrigger.Continuation -> {
+                        pendingContinuations += trigger.continuation.content
+                        EgoDecision.Noop("unexpected continuation")
                     }
 
                     is EgoTrigger.ActionFeedback -> EgoDecision.Noop("background success should resolve without replanning")
@@ -239,7 +241,7 @@ class EgoAsyncFeedbackIntegrationTest {
             )
         )
         val config = AgentConfig(
-            planner = PlannerConfig(maxLoopStepsPerInput = 8, maxThoughtPasses = 2),
+            planner = PlannerConfig(maxLoopStepsPerInput = 8, maxContinuationPasses = 2),
         )
         val agent = buildTestEgo(
             planner = planner,
@@ -263,7 +265,7 @@ class EgoAsyncFeedbackIntegrationTest {
             }
             assertEquals("resolved", resolvedUpdate.data["thread_status"])
             assertTrue(outputs.isEmpty(), "Successful background feedback should not synthesize a user answer by itself.")
-            assertTrue(pendingThoughts.isEmpty(), "Resolved feedback should not enqueue deferred continuation work.")
+            assertTrue(pendingContinuations.isEmpty(), "Resolved feedback should not enqueue continuation work.")
         } finally {
             source.offer(RuntimeControlSignal.ExitRequested("test"))
             loop.join()
@@ -275,7 +277,7 @@ class EgoAsyncFeedbackIntegrationTest {
         val source = QueueSignalSource()
         val instrumentation = RecordingInstrumentation()
         val outputs = mutableListOf<String>()
-        val retryThoughts = mutableListOf<String>()
+        val retryContinuations = mutableListOf<String>()
         val context = ConversationContext(
             sessionId = "opportunity-guard-session",
             interlocutor = Interlocutor.named("guard-user"),
@@ -296,8 +298,8 @@ class EgoAsyncFeedbackIntegrationTest {
                         summary = "illegal control-plane action",
                     )
 
-                    is EgoTrigger.DeferredIntention -> {
-                        retryThoughts += trigger.intention.resolvedContent
+                    is EgoTrigger.Continuation -> {
+                        retryContinuations += trigger.continuation.content
                         EgoDecision.FormIntention(
                             urgency = Urgency.MEDIUM,
                             intentionKind = IntentionKind.OBSERVE,
@@ -313,7 +315,7 @@ class EgoAsyncFeedbackIntegrationTest {
                 }
         }
         val config = AgentConfig(
-            planner = PlannerConfig(maxLoopStepsPerInput = 8, maxThoughtPasses = 2),
+            planner = PlannerConfig(maxLoopStepsPerInput = 8, maxContinuationPasses = 2),
         )
         val agent = buildTestEgo(
             planner = planner,
@@ -343,7 +345,7 @@ class EgoAsyncFeedbackIntegrationTest {
 
             assertEquals("goal_operation", blockedEvent.data["action_type"])
             assertEquals("ACTION_TYPE_NOT_AVAILABLE", blockedEvent.data["reason_code"])
-            assertTrue(retryThoughts.single().contains("Action 'goal_operation' is not available"))
+            assertTrue(retryContinuations.single().contains("Action 'goal_operation' is not available"))
             assertFalse((opportunityEvent.data["available_actions"] as List<*>).contains("goal_operation"))
             assertFalse((opportunityEvent.data["dispatchable_actions"] as List<*>).contains("goal_operation"))
             assertTrue(

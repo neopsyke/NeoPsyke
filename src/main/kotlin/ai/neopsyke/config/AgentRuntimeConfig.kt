@@ -22,6 +22,8 @@ import ai.neopsyke.agent.config.TelegramIngressMode
 import ai.neopsyke.agent.config.WebsiteFetchConfig
 import ai.neopsyke.dashboard.InnerVoiceConfig
 import ai.neopsyke.agent.config.PlannerConfig
+import ai.neopsyke.agent.ego.planner.LaneConfig
+import ai.neopsyke.agent.ego.planner.StructuredOutputMode
 import ai.neopsyke.agent.goal.GoalConfig
 import ai.neopsyke.agent.config.SuperegoConfig
 import ai.neopsyke.agent.config.ScratchpadConfig
@@ -71,7 +73,7 @@ private data class AgentRuntimeYamlAgent(
 
 private data class AgentRuntimeYamlPlanner(
     val maxLoopStepsPerInput: Int? = null,
-    val maxThoughtPasses: Int? = null,
+    val maxContinuationPasses: Int? = null,
     val maxThoughtChars: Int? = null,
     val maxInputChars: Int? = null,
     val maxActionPayloadChars: Int? = null,
@@ -87,7 +89,17 @@ private data class AgentRuntimeYamlPlanner(
     val maxPlansPerInput: Int? = null,
     val actionRetryBudgetNonRetryableFailures: Int? = null,
     val actionRetryCooldownSteps: Int? = null,
-    val actionVerifierEnabled: Boolean? = null,
+    val laneDefaults: AgentRuntimeYamlPlannerLane? = null,
+    val lanes: Map<String, AgentRuntimeYamlPlannerLane>? = null,
+)
+
+private data class AgentRuntimeYamlPlannerLane(
+    val provider: String? = null,
+    val model: String? = null,
+    val temperature: Double? = null,
+    val maxCompletionTokens: Int? = null,
+    val retryAttempts: Int? = null,
+    val structuredOutput: Any? = null,
 )
 
 private data class AgentRuntimeYamlSuperego(
@@ -299,7 +311,7 @@ private data class AgentRuntimeYamlGoals(
 
 private data class AgentRuntimeYamlRuntime(
     val loopDelayMs: Int? = null,
-    val maxPendingThoughts: Int? = null,
+    val maxPendingContinuations: Int? = null,
     val maxPendingActions: Int? = null,
     val maxPendingInputs: Int? = null,
     val searchResultCount: Int? = null,
@@ -363,10 +375,10 @@ object AgentRuntimeSettingsLoader {
                     plannerYaml.maxLoopStepsPerInput,
                     defaults.planner.maxLoopStepsPerInput
                 ),
-                maxThoughtPasses = readPositiveInt(
-                    env["EGO_MAX_THOUGHT_PASSES"],
-                    plannerYaml.maxThoughtPasses,
-                    defaults.planner.maxThoughtPasses
+                maxContinuationPasses = readPositiveInt(
+                    env["EGO_MAX_CONTINUATION_PASSES"],
+                    plannerYaml.maxContinuationPasses,
+                    defaults.planner.maxContinuationPasses
                 ),
                 maxThoughtChars = readPositiveInt(
                     env["EGO_MAX_THOUGHT_CHARS"],
@@ -423,11 +435,8 @@ object AgentRuntimeSettingsLoader {
                     plannerYaml.actionRetryCooldownSteps,
                     defaults.planner.actionRetryCooldownSteps
                 ),
-                actionVerifierEnabled = readBoolean(
-                    env["EGO_ACTION_VERIFIER_ENABLED"],
-                    plannerYaml.actionVerifierEnabled,
-                    defaults.planner.actionVerifierEnabled
-                ),
+                laneDefaults = toLaneConfig(plannerYaml.laneDefaults),
+                lanes = plannerYaml.lanes.orEmpty().mapValues { (_, lane) -> toLaneConfig(lane) },
             ),
             superego = SuperegoConfig(
                 maxCompletionTokens = readPositiveInt(
@@ -1233,10 +1242,10 @@ object AgentRuntimeSettingsLoader {
                 runtimeYaml.loopDelayMs,
                 defaults.loopDelayMs
             ),
-            maxPendingThoughts = readPositiveInt(
-                env["EGO_MAX_PENDING_THOUGHTS"],
-                runtimeYaml.maxPendingThoughts,
-                defaults.maxPendingThoughts
+            maxPendingContinuations = readPositiveInt(
+                env["EGO_MAX_PENDING_CONTINUATIONS"],
+                runtimeYaml.maxPendingContinuations,
+                defaults.maxPendingContinuations
             ),
             maxPendingActions = readPositiveInt(
                 env["EGO_MAX_PENDING_ACTIONS"],
@@ -1377,6 +1386,27 @@ object AgentRuntimeSettingsLoader {
         val yamlValues = yaml
             ?.mapNotNull { value -> value.trim().takeIf { it.isNotEmpty() } }
         return if (!yamlValues.isNullOrEmpty()) yamlValues else fallback
+    }
+
+    private fun toLaneConfig(raw: AgentRuntimeYamlPlannerLane?): LaneConfig {
+        if (raw == null) return LaneConfig()
+        return LaneConfig(
+            provider = raw.provider?.trim()?.ifBlank { null },
+            model = raw.model?.trim()?.ifBlank { null },
+            temperature = raw.temperature,
+            maxCompletionTokens = raw.maxCompletionTokens,
+            retryAttempts = raw.retryAttempts,
+            structuredOutput = parseStructuredOutputMode(raw.structuredOutput),
+        )
+    }
+
+    private fun parseStructuredOutputMode(raw: Any?): StructuredOutputMode? {
+        val normalized = raw?.toString()?.trim()?.uppercase() ?: return null
+        return when (normalized) {
+            "FALSE", "OFF", "DISABLED" -> StructuredOutputMode.OFF
+            "TRUE", "ON", "ENABLED" -> StructuredOutputMode.STRICT
+            else -> runCatching { StructuredOutputMode.valueOf(normalized) }.getOrNull()
+        }
     }
 
     private fun parseBoolean(raw: String?): Boolean? =

@@ -116,7 +116,7 @@ Scenarios are evaluated deterministically using recorded LLM responses, not live
 Deterministic tests that verify structural properties of planner output without making LLM calls:
 
 - **shape-lock** — Does the planner output conform to the expected JSON schema?
-- **feedback-carry** — Does the planner correctly incorporate denial feedback into the next deferred continuation?
+- **feedback-carry** — Does the planner correctly incorporate denial feedback into the next queued continuation?
 - **multi-fix** — Can the planner recover from multiple consecutive failures?
 
 The logic eval also includes a 45-case behavioral/perturbation pack that tests edge cases and boundary conditions.
@@ -247,7 +247,6 @@ Each line is a JSON object:
 ```json
 {"seq":0,"hash":"a3f8...","actor":"planner","call_site":"PlannerPromptRunner","model":"claude-sonnet-4-20250514","content":"...","finish_reason":"end_turn","prompt_tokens":1842,"completion_tokens":312,"total_tokens":2154}
 {"seq":1,"hash":"e7b2...","actor":"superego","call_site":"SuperegoReviewer","model":"claude-sonnet-4-20250514","content":"...","finish_reason":"end_turn","prompt_tokens":956,"completion_tokens":87,"total_tokens":1043}
-{"seq":2,"hash":"c1d9...","actor":"action_verifier","call_site":"DecisionVerifier","model":"claude-sonnet-4-20250514","content":"...","finish_reason":"end_turn","prompt_tokens":1104,"completion_tokens":145,"total_tokens":1249}
 ```
 
 The `seq` field is the global call order across all cognitive roles. The `hash` is what replay uses to detect divergence.
@@ -271,7 +270,6 @@ Example output:
   "hits_by_actor": {
     "planner": 1,
     "superego": 1,
-    "action_verifier": 1,
     "meta_reasoner": 1
   },
   "hints": ["All calls served from cache: fully deterministic replay."]
@@ -345,25 +343,24 @@ During iterative development — where you might run the same eval 10–20 times
 
 NeoPsyke emits structured instrumentation events to a per-run sidecar JSONL file. These events are the primary data source for understanding agent behavior beyond pass/fail eval results.
 
-### Task verifier telemetry
+### Grounding gate telemetry
 
-The `task_verifier_review` event captures how the DecisionVerifier evaluates candidate actions:
+The `grounding_gate_review` event captures how the grounding gate evaluates candidate `contact_user` actions:
 
-- `intent_category`, `volatility_level`, `volatility_score`
-- `requires_external_evidence`
-- `evidence_actions_available`, `evidence_actions_dispatchable`
-- `had_successful_evidence`, `had_external_failures`
-- `reason_code` (`TASK_EVIDENCE_REQUIRED`, `TECH_EXTERNAL_EVIDENCE_FAILURE`, `TASK_EVIDENCE_UNAVAILABLE_GRACEFUL`)
+- `grounding_required`
+- `evidence_gathered`
+- `evidence_failed_technically`
+- `evidence_unavailable`
+- `forced_terminal`
+- `reason_code` (`GROUNDING_EVIDENCE_REQUIRED`, `TECH_GROUNDING_EVIDENCE_FAILURE`, `GROUNDING_EVIDENCE_UNAVAILABLE_GRACEFUL`)
 
 Aggregate from the event sidecar:
 
-Task verifier telemetry is computed automatically during `freud eval` runs. The dashboard snapshot (`/api/obs/snapshot`) also exposes aggregated `taskVerifierStats` counters and rates.
-
-The dashboard snapshot (`/api/obs/snapshot`) also exposes aggregated `taskVerifierStats` counters and rates.
+Grounding gate telemetry is computed automatically during `freud eval` runs. The dashboard snapshot (`/api/obs/snapshot`) also exposes aggregated `groundingGateStats` counters and rates.
 
 ### Prompt budget telemetry
 
-The `prompt_budget_allocation` event is emitted when prompts are assembled for each cognitive role (`planner_prompt`, `action_verifier_prompt`, `superego_prompt`, `meta_reasoner_prompt`). The event payload includes:
+The `prompt_budget_allocation` event is emitted when prompts are assembled for each cognitive role (`planner_prompt`, `superego_prompt`, `meta_reasoner_prompt`). The event payload includes:
 
 - Budget and cost estimates (`max_tokens`, `estimated_total_cost`, `allocated_total_cost`, `reserved_floor_cost`)
 - Degradation path (what was dropped to fit the budget)

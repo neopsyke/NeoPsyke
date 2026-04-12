@@ -21,37 +21,25 @@ internal class FallbackHandler(
     private val resolveSessionId: (ConversationContext) -> String,
     private val processActionFallback: suspend (PendingAction) -> Unit,
 ) {
-    private fun enqueueDeferredIntention(
-        content: String,
+    private fun enqueueContinuation(
+        continuation: Continuation,
         urgency: Urgency,
         passes: Int,
         rootInputId: String?,
         rootInputReceivedAtMs: Long?,
-        deniedActionType: ActionType? = null,
-        deniedActionPayload: String? = null,
-        denialReason: String? = null,
-        denialReasonCode: String? = null,
-        allowFallbackExplanation: Boolean = false,
         conversationContext: ConversationContext,
         origin: ActionOrigin,
-        originActionType: ActionType? = null,
-        originActionObservedEvidence: Boolean? = null,
+        groundingMetadata: GroundingMetadata,
     ): Boolean =
-        scheduler.enqueueThought(
-            content = content,
+        scheduler.enqueueContinuation(
+            continuation = continuation,
             urgency = urgency,
             passes = passes,
             rootInputId = rootInputId,
             rootInputReceivedAtMs = rootInputReceivedAtMs,
-            deniedActionType = deniedActionType,
-            deniedActionPayload = deniedActionPayload,
-            denialReason = denialReason,
-            denialReasonCode = denialReasonCode,
-            allowFallbackExplanation = allowFallbackExplanation,
             conversationContext = conversationContext,
             origin = origin,
-            originActionType = originActionType,
-            originActionObservedEvidence = originActionObservedEvidence,
+            groundingMetadata = groundingMetadata,
         ) != null
 
     fun handleDeniedAction(
@@ -83,34 +71,47 @@ internal class FallbackHandler(
             stepIndex = deliberation.snapshot().stepIndex
         )
 
-        val denialThought = TextSecurity.clamp(
-            "Action denied by $source ($reason). " +
-                "Try a different safe action than the denied one. " +
-                "If no safe alternative exists, prepare a concise explanation for the interlocutor.",
+        val denialContinuation = Continuation.RetryAlternative(
+            content = TextSecurity.clamp(
+            buildDenialThought(source, reason, reasonCode),
             config.planner.maxThoughtChars
-        )
-        val queued = enqueueDeferredIntention(
-            content = denialThought,
-            urgency = action.urgency,
-            passes = action.attempts + 1,
-            rootInputId = action.rootInputId,
-            rootInputReceivedAtMs = action.rootInputReceivedAtMs,
+            ),
             deniedActionType = action.type,
             deniedActionPayload = TextSecurity.clamp(action.payload, 240),
             denialReason = reason,
             denialReasonCode = reasonCode,
             allowFallbackExplanation = action.origin.source != OriginSource.ID,
-            conversationContext = conversationContext,
-            origin = action.origin,
             originActionType = action.type,
         )
+        val queued = enqueueContinuation(
+            continuation = denialContinuation,
+            urgency = action.urgency,
+            passes = action.attempts + 1,
+            rootInputId = action.rootInputId,
+            rootInputReceivedAtMs = action.rootInputReceivedAtMs,
+            conversationContext = conversationContext,
+            origin = action.origin,
+            groundingMetadata = action.groundingMetadata,
+        )
         if (!queued) {
-            instrumentation.emit(AgentEvents.warning("Failed to enqueue denial thought."))
+            instrumentation.emit(AgentEvents.warning("Failed to enqueue denial continuation."))
             telemetry.recordQueueSaturation(
-                queueType = "thought",
-                capacity = config.maxPendingThoughts,
-                reason = "enqueue_denial_thought_failed_full"
+                queueType = "continuation",
+                capacity = config.maxPendingContinuations,
+                reason = "enqueue_denial_continuation_failed_full"
             )
+        } else {
+            action.groundingMetadata?.let { metadata ->
+                instrumentation.emit(
+                    AgentEvents.groundingMetadataPropagated(
+                        rootInputId = action.rootInputId,
+                        fromEnvelopeType = "pending_action",
+                        toEnvelopeType = "queued_continuation",
+                        groundingRequired = metadata.requirement == GroundingRequirement.REQUIRED,
+                        source = metadata.source.name.lowercase(),
+                    )
+                )
+            }
         }
         telemetry.emitQueueSnapshot("action_denied")
     }
@@ -128,51 +129,66 @@ internal class FallbackHandler(
                 "Action '${action.type.id}' was staged by $source and now requires authorization or a safer alternative."
             )
         )
-        val stagedThought = TextSecurity.clamp(
-            "Action was staged by $source (${reason.ifBlank { "authorization required" }}). " +
-                "Choose the next best step: request approval, pick a lower-risk alternative, or explain the constraint to the interlocutor.",
-            config.planner.maxThoughtChars
-        )
-        val queued = enqueueDeferredIntention(
-            content = stagedThought,
-            urgency = action.urgency,
-            passes = action.attempts + 1,
-            rootInputId = action.rootInputId,
-            rootInputReceivedAtMs = action.rootInputReceivedAtMs,
+        val stagedContinuation = Continuation.RetryAlternative(
+            content = TextSecurity.clamp(
+                "Action was staged by $source (${reason.ifBlank { "authorization required" }}). " +
+                    "Choose the next best step: request approval, pick a lower-risk alternative, or explain the constraint to the interlocutor.",
+                config.planner.maxThoughtChars
+            ),
             deniedActionType = action.type,
             deniedActionPayload = TextSecurity.clamp(action.payload, 240),
             denialReason = "staged:${stagedAction.id}:$reason",
             denialReasonCode = reasonCode ?: "ACTION_STAGED_REQUIRES_AUTH",
             allowFallbackExplanation = action.origin.source != OriginSource.ID,
-            conversationContext = conversationContext,
-            origin = action.origin,
             originActionType = action.type,
         )
+        val queued = enqueueContinuation(
+            continuation = stagedContinuation,
+            urgency = action.urgency,
+            passes = action.attempts + 1,
+            rootInputId = action.rootInputId,
+            rootInputReceivedAtMs = action.rootInputReceivedAtMs,
+            conversationContext = conversationContext,
+            origin = action.origin,
+            groundingMetadata = action.groundingMetadata,
+        )
         if (!queued) {
-            instrumentation.emit(AgentEvents.warning("Failed to enqueue staged-action follow-up thought."))
+            instrumentation.emit(AgentEvents.warning("Failed to enqueue staged-action follow-up continuation."))
             telemetry.recordQueueSaturation(
-                queueType = "thought",
-                capacity = config.maxPendingThoughts,
-                reason = "enqueue_staged_action_thought_failed_full"
+                queueType = "continuation",
+                capacity = config.maxPendingContinuations,
+                reason = "enqueue_staged_action_continuation_failed_full"
             )
+        } else {
+            action.groundingMetadata?.let { metadata ->
+                instrumentation.emit(
+                    AgentEvents.groundingMetadataPropagated(
+                        rootInputId = action.rootInputId,
+                        fromEnvelopeType = "pending_action",
+                        toEnvelopeType = "queued_continuation",
+                        groundingRequired = metadata.requirement == GroundingRequirement.REQUIRED,
+                        source = metadata.source.name.lowercase(),
+                    )
+                )
+            }
         }
         telemetry.emitQueueSnapshot("action_staged")
     }
 
-    suspend fun enqueueFallbackExplanation(thought: PendingThought) {
-        val sessionId = resolveSessionId(thought.conversationContext)
-        if (scheduler.hasPendingFallbackExplanationAction(thought.rootInputId, sessionId)) {
+    suspend fun enqueueFallbackExplanation(continuation: QueuedContinuation) {
+        val sessionId = resolveSessionId(continuation.conversationContext)
+        if (scheduler.hasPendingFallbackExplanationAction(continuation.rootInputId, sessionId)) {
             instrumentation.emit(
                 AgentEvents.warning("Fallback explanation already queued for this input; skipping duplicate enqueue.")
             )
             return
         }
-        val evidence = deliberation.evidenceFor(thought.rootInputId, sessionId)
-        val parseFailureLikely = thought.content.contains("non-parseable", ignoreCase = true)
+        val evidence = deliberation.evidenceFor(continuation.rootInputId, sessionId)
+        val parseFailureLikely = continuation.content.contains("non-parseable", ignoreCase = true)
         val (payload, summary) = when {
-            !thought.denialReason.isNullOrBlank() -> {
+            !continuation.denialReason.isNullOrBlank() -> {
                 val message = "I cannot complete the previous action because it was blocked by policy " +
-                    "(${thought.denialReason ?: "no reason provided"}). " +
+                    "(${continuation.denialReason ?: "no reason provided"}). " +
                     "I could not find a safe alternative."
                 message to "Explain inability to comply after policy denial."
             }
@@ -210,13 +226,14 @@ internal class FallbackHandler(
             type = ActionType.CONTACT_USER,
             payload = TextSecurity.clamp(payload, config.maxActionPayloadChars),
             summary = summary,
-            urgency = thought.urgency,
-            attempts = thought.passes,
+            urgency = continuation.urgency,
+            attempts = continuation.passes,
             isFallbackExplanation = true,
-            rootInputId = thought.rootInputId,
-            rootInputReceivedAtMs = thought.rootInputReceivedAtMs,
-            conversationContext = thought.conversationContext,
-            origin = thought.origin,
+            rootInputId = continuation.rootInputId,
+            rootInputReceivedAtMs = continuation.rootInputReceivedAtMs,
+            conversationContext = continuation.conversationContext,
+            origin = continuation.origin,
+            groundingMetadata = continuation.groundingMetadata,
         )
         if (!queued) {
             logger.warn { "Fallback explanation enqueue failed; executing immediate fallback action." }
@@ -229,16 +246,17 @@ internal class FallbackHandler(
             processActionFallback(
                 PendingAction(
                     id = -1,
-                    urgency = thought.urgency,
+                    urgency = continuation.urgency,
                     type = ActionType.CONTACT_USER,
                     payload = payload,
                     summary = summary,
-                    attempts = thought.passes,
+                    attempts = continuation.passes,
                     isFallbackExplanation = true,
-                    rootInputId = thought.rootInputId,
-                    rootInputReceivedAtMs = thought.rootInputReceivedAtMs,
-                    conversationContext = thought.conversationContext,
-                    origin = thought.origin,
+                    rootInputId = continuation.rootInputId,
+                    rootInputReceivedAtMs = continuation.rootInputReceivedAtMs,
+                    conversationContext = continuation.conversationContext,
+                    origin = continuation.origin,
+                    groundingMetadata = continuation.groundingMetadata,
                 )
             )
             telemetry.emitQueueSnapshot("fallback_explanation_executed_immediate")
@@ -271,6 +289,7 @@ internal class FallbackHandler(
             rootInputReceivedAtMs = rootInputReceivedAtMs,
             conversationContext = conversationContext,
             origin = origin,
+            groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
         )
         if (!queued) {
             instrumentation.emit(AgentEvents.warning("Failed to enqueue circuit-breaker fallback."))
@@ -278,9 +297,26 @@ internal class FallbackHandler(
         telemetry.emitQueueSnapshot("fallback_explanation_circuit_breaker")
     }
 
-    fun isRepeatOfDeniedAction(thought: PendingThought, decision: EgoDecision.FormIntention): Boolean {
-        val deniedType = thought.deniedActionType ?: return false
-        val deniedPayload = thought.deniedActionPayload ?: return false
+    private fun buildDenialThought(source: String, reason: String, reasonCode: String?): String =
+        when (reasonCode) {
+            GroundingGate.REASON_CODE_GROUNDING_EVIDENCE_REQUIRED ->
+                "Grounding gate: this request requires external evidence, but no successful " +
+                    "evidence-gathering action has run yet. Dispatch an evidence-gathering action " +
+                    "and use its results before answering. Do not repeat the denied contact_user."
+            GroundingGate.REASON_CODE_TECH_GROUNDING_EVIDENCE_FAILURE ->
+                "Grounding gate: this request requires external evidence and prior evidence " +
+                    "attempts failed for technical/transient reasons. Retry evidence gathering with " +
+                    "the same or an alternate evidence source before answering. A repeated evidence " +
+                    "attempt is allowed here."
+            else ->
+                "Action denied by $source ($reason). " +
+                    "Try a different safe action than the denied one. " +
+                    "If no safe alternative exists, prepare a concise explanation for the interlocutor."
+        }
+
+    fun isRepeatOfDeniedAction(continuation: QueuedContinuation, decision: EgoDecision.FormIntention): Boolean {
+        val deniedType = continuation.deniedActionType ?: return false
+        val deniedPayload = continuation.deniedActionPayload ?: return false
         if (decision.actionType != deniedType) return false
         return normalizeActionPayload(decision.payload) == normalizeActionPayload(deniedPayload)
     }

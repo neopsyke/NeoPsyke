@@ -1,6 +1,7 @@
 package ai.neopsyke.admin.approvals
 
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+import mu.KotlinLogging
 import ai.neopsyke.agent.config.AgentConfig
 import ai.neopsyke.agent.config.TelegramChannelConfig
 import ai.neopsyke.agent.cortex.motor.actions.ConversationDeliveryResult
@@ -18,6 +19,8 @@ import ai.neopsyke.session.SessionRecordingManager
 import ai.neopsyke.session.SessionRecordingMode
 import java.time.Instant
 import java.util.UUID
+
+private val logger = KotlinLogging.logger {}
 
 interface ApprovalStagingHook {
     suspend fun onApprovalStaged(
@@ -41,6 +44,8 @@ class ApprovalRuntime(
     private val onApprovalExecuted: (ActionControlDecisionResult.Executed) -> Unit,
     private val onApprovalDenied: (ActionControlDecisionResult.Cancelled) -> Unit,
     private val sessionRecordingManager: SessionRecordingManager? = null,
+    private val telegramAckTracker: ai.neopsyke.agent.cortex.motor.actions.TelegramStartupAckTracker =
+        ai.neopsyke.agent.cortex.motor.actions.TelegramStartupAckTracker(),
 ) : ApprovalStagingHook, AutoCloseable {
 
     private val approvalFlowChannel: RecordReplayChannel? = sessionRecordingManager?.approvalFlow
@@ -50,6 +55,7 @@ class ApprovalRuntime(
             dashboardStore = dashboardStore,
             telegramConfig = telegramConfig,
             telegramSink = telegramSink,
+            telegramAckTracker = telegramAckTracker,
         )
     private val channelResolver: ApprovalChannelResolver =
         DefaultApprovalChannelResolver(
@@ -122,11 +128,30 @@ class ApprovalRuntime(
     }
 
     fun routeOwnerMessage(message: OwnerMessageEnvelope): OwnerIngressResult {
+        val sessionId = message.conversationContext.sessionId
+        val eventId = message.eventId
         expirePendingRequests()
-        val request = store.activeRequestForSession(message.conversationContext.sessionId)
-            ?: return consumeDuplicateTerminalReply(message) ?: forward(message)
+        val request = store.activeRequestForSession(sessionId)
+        if (request == null) {
+            val dupResult = consumeDuplicateTerminalReply(message)
+            if (dupResult != null) {
+                logger.warn {
+                    "[approval.ingress] route=consumed_duplicate session=$sessionId eventId=$eventId"
+                }
+                return dupResult
+            }
+            val forwardResult = forward(message)
+            logger.info {
+                "[approval.ingress] route=forward session=$sessionId eventId=$eventId enqueued=${(forwardResult as? OwnerIngressResult.Forwarded)?.enqueued}"
+            }
+            return forwardResult
+        }
+        logger.info {
+            "[approval.ingress] route=approval_reply session=$sessionId eventId=$eventId request_id=${request.id}"
+        }
         if (isDuplicateEvent(request, message)) {
             audit(request.id, "duplicate_reply_ignored", "Duplicate approval reply ignored.", payload = message.eventId)
+            logger.warn { "[approval.ingress] route=duplicate_event session=$sessionId eventId=$eventId request_id=${request.id}" }
             return OwnerIngressResult.Consumed("Duplicate approval reply ignored.")
         }
         if (!matchesRequestTarget(request, message)) {
@@ -631,15 +656,8 @@ class ApprovalRuntime(
                 ConversationDeliveryResult(delivered = true, detail = "Dashboard delivery recorded.")
             }
             "telegram" -> {
-                val telegramDelivery = telegramSink?.let { sink -> kotlinx.coroutines.runBlocking { sink.sendMessage(target.channelId, text) } }
+                telegramSink?.let { sink -> kotlinx.coroutines.runBlocking { sink.sendMessage(target.channelId, text) } }
                     ?: ConversationDeliveryResult(delivered = false, detail = "Telegram sink unavailable.")
-                dashboardStore.ensureChatSession(sessionId = target.sessionId, title = "Telegram owner")
-                dashboardStore.addAssistantMessage(
-                    sessionId = target.sessionId,
-                    content = text,
-                    source = source,
-                )
-                telegramDelivery
             }
             else -> ConversationDeliveryResult(delivered = false, detail = "Unsupported approval provider '${target.provider}'.")
         }
@@ -845,6 +863,7 @@ class ApprovalRuntime(
         )
         val MUTABLE_REQUEST_STATUSES = LIVE_REQUEST_STATUSES + ApprovalRequestStatus.QUEUED
         const val UNROUTED_PROVIDER: String = "unrouted"
+        const val DUPLICATE_TERMINAL_REPLY_WINDOW_MS: Long = 60_000
         const val PROMPT_REFERENCE_CHARS: Int = 8
         val APPROVAL_REF_REGEX: Regex = Regex("""(?:approval\s*ref|ref)\s*[:#]?\s*([a-z0-9]{8})""")
     }
@@ -904,6 +923,8 @@ class ApprovalRuntime(
         val eventId = message.eventId ?: return null
         val latest = store.latestRequestForSession(message.conversationContext.sessionId) ?: return null
         if (!latest.status.isTerminal()) return null
+        val nowMs = System.currentTimeMillis()
+        if (latest.resolutionAtMs != null && latest.resolutionAtMs < nowMs - DUPLICATE_TERMINAL_REPLY_WINDOW_MS) return null
         return if (latest.lastInboundEventId == eventId) {
             OwnerIngressResult.Consumed("Duplicate approval reply ignored.")
         } else {

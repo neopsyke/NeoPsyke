@@ -182,20 +182,17 @@ func InteractiveSessionTest(opts InteractiveSessionTestOpts) (*InteractiveSessio
 		return &InteractiveSessionTestResult{Passed: false, Failures: 1, ExitCode: 1}, nil
 	}
 
-	// Extract session recording dir from app output
-	stdoutLog.Sync()
-	logData, _ := os.ReadFile(stdoutLogPath)
+	// Find session recording dir by looking for the most recent run with a session manifest.
+	// This is more robust than parsing stdout log messages.
 	sessionRecordDir := ""
-	for _, line := range strings.Split(string(logData), "\n") {
-		if idx := strings.Index(line, "signals will be written to "); idx >= 0 {
-			sessionRecordDir = strings.TrimSpace(line[idx+len("signals will be written to "):])
-			break
-		}
+	runRoot := filepath.Join(repoRoot, ".neopsyke/runs/freud")
+	if manifests, _ := filepath.Glob(filepath.Join(runRoot, "*/session/session-manifest.json")); len(manifests) > 0 {
+		// Glob returns sorted; last entry is the most recent by timestamp prefix.
+		sessionRecordDir = filepath.Dir(manifests[len(manifests)-1])
 	}
 	if sessionRecordDir == "" {
-		// Fallback: find latest session dir
-		entries, _ := filepath.Glob(filepath.Join(repoRoot, ".neopsyke/runs/freud/*-session"))
-		if len(entries) > 0 {
+		// Fallback: find latest session dir by name convention
+		if entries, _ := filepath.Glob(filepath.Join(runRoot, "*-session")); len(entries) > 0 {
 			sessionRecordDir = entries[len(entries)-1]
 		}
 	}

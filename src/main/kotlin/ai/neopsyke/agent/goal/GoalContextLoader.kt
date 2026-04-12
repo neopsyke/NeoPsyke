@@ -5,6 +5,8 @@ import java.nio.file.Path
 import java.time.Instant
 import ai.neopsyke.agent.model.ConversationContext
 import ai.neopsyke.agent.model.ConversationSecurityContexts
+import ai.neopsyke.agent.model.GroundingMetadata
+import ai.neopsyke.agent.model.GroundingSource
 import ai.neopsyke.agent.model.Interlocutor
 
 /**
@@ -77,6 +79,7 @@ object GoalContextLoader {
         wakeReason: String,
     ): GoalRunActivation {
         val tier2 = tier2Context(state.goal.workspacePath)
+        val provider = state.goal.contactChannel ?: GOAL_RUNTIME_PROVIDER
         return GoalRunActivation(
             goalId = state.id,
             stepId = step.id,
@@ -88,11 +91,15 @@ object GoalContextLoader {
                 sessionId = ConversationContext.DEFAULT_SESSION_ID,
                 interlocutor = Interlocutor.named(GOAL_RUNTIME_PROVIDER),
                 security = ConversationSecurityContexts.internalAutomation(
-                    provider = GOAL_RUNTIME_PROVIDER,
+                    provider = provider,
                     channelId = rootInputId,
                 ),
             ),
             wakeReason = wakeReason,
+            groundingMetadata = GroundingMetadata(
+                requirement = step.groundingRequirement,
+                source = GroundingSource.GOAL_STEP_POLICY,
+            ),
         )
     }
 

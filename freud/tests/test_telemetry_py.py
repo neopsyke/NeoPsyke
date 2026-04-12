@@ -10,7 +10,7 @@ from unittest.mock import patch
 import pytest
 
 from freud.py.telemetry.prompt_budget import prompt_budget_telemetry
-from freud.py.telemetry.task_verifier import task_verifier_telemetry
+from freud.py.telemetry.task_verifier import task_verifier_telemetry as grounding_gate_telemetry
 
 
 # --- Fixtures ---
@@ -42,25 +42,36 @@ def budget_events_file(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
-def verifier_events_file(tmp_path: Path) -> Path:
+def grounding_events_file(tmp_path: Path) -> Path:
     events = [
-        {"type": "task_verifier_review", "data": {
-            "allow": True, "reason_code": "TASK_VERIFIED",
-            "intent_category": "factual", "volatility_level": "low",
-            "requires_external_evidence": True,
+        {"type": "grounding_gate_review", "data": {
+            "allow": True,
+            "grounding_required": False,
+            "evidence_gathered": False,
+            "evidence_failed_technically": False,
+            "evidence_unavailable": False,
+            "forced_terminal": False,
         }},
-        {"type": "task_verifier_review", "data": {
-            "allow": True, "reason_code": "TASK_EVIDENCE_UNAVAILABLE_GRACEFUL",
-            "intent_category": "unknown", "volatility_level": "medium",
-            "requires_external_evidence": True,
+        {"type": "grounding_gate_review", "data": {
+            "allow": False,
+            "reason_code": "GROUNDING_EVIDENCE_REQUIRED",
+            "grounding_required": True,
+            "evidence_gathered": False,
+            "evidence_failed_technically": False,
+            "evidence_unavailable": False,
+            "forced_terminal": False,
         }},
-        {"type": "task_verifier_review", "data": {
-            "allow": False, "reason_code": "VOLATILE_UNVERIFIED",
-            "intent_category": "volatile_fact", "volatility_level": "high",
-            "requires_external_evidence": False,
+        {"type": "grounding_gate_review", "data": {
+            "allow": True,
+            "reason_code": "GROUNDING_EVIDENCE_UNAVAILABLE_GRACEFUL",
+            "grounding_required": True,
+            "evidence_gathered": False,
+            "evidence_failed_technically": False,
+            "evidence_unavailable": True,
+            "forced_terminal": False,
         }},
     ]
-    f = tmp_path / "verifier-events.jsonl"
+    f = tmp_path / "grounding-events.jsonl"
     f.write_text("\n".join(json.dumps(e) for e in events) + "\n")
     return f
 
@@ -115,64 +126,43 @@ class TestPromptBudget:
         assert exc.value.code == 1
 
 
-# --- Task Verifier Tests ---
+# --- Grounding Gate Tests ---
 
-class TestTaskVerifier:
-    def test_totals(self, verifier_events_file: Path, capsys):
-        task_verifier_telemetry(str(verifier_events_file))
+class TestGroundingGate:
+    def test_totals(self, grounding_events_file: Path, capsys):
+        grounding_gate_telemetry(str(grounding_events_file))
         out = capsys.readouterr().out
         assert "reviews: 3" in out
         assert "allow: 2" in out
         assert "deny: 1" in out
 
-    def test_requires_external(self, verifier_events_file: Path, capsys):
-        task_verifier_telemetry(str(verifier_events_file))
+    def test_grounding_required(self, grounding_events_file: Path, capsys):
+        grounding_gate_telemetry(str(grounding_events_file))
         out = capsys.readouterr().out
-        assert "requires_external_evidence: 2" in out
+        assert "grounding_required: 2" in out
 
-    def test_graceful_allows(self, verifier_events_file: Path, capsys):
-        task_verifier_telemetry(str(verifier_events_file))
+    def test_evidence_unavailable(self, grounding_events_file: Path, capsys):
+        grounding_gate_telemetry(str(grounding_events_file))
         out = capsys.readouterr().out
-        assert "graceful_allows: 1" in out
+        assert "evidence_unavailable: 1" in out
 
-    def test_unknown_intent(self, verifier_events_file: Path, capsys):
-        task_verifier_telemetry(str(verifier_events_file))
+    def test_reason_code_breakdown(self, grounding_events_file: Path, capsys):
+        grounding_gate_telemetry(str(grounding_events_file))
         out = capsys.readouterr().out
-        assert "unknown_intent: 1" in out
+        assert "GROUNDING_EVIDENCE_REQUIRED" in out
+        assert "GROUNDING_EVIDENCE_UNAVAILABLE_GRACEFUL" in out
 
-    def test_volatile_intent(self, verifier_events_file: Path, capsys):
-        task_verifier_telemetry(str(verifier_events_file))
+    def test_tuning_hint_unavailable(self, grounding_events_file: Path, capsys):
+        grounding_gate_telemetry(str(grounding_events_file))
         out = capsys.readouterr().out
-        assert "volatile_intent: 1" in out
-
-    def test_reason_code_breakdown(self, verifier_events_file: Path, capsys):
-        task_verifier_telemetry(str(verifier_events_file))
-        out = capsys.readouterr().out
-        assert "TASK_VERIFIED" in out
-        assert "VOLATILE_UNVERIFIED" in out
-        assert "TASK_EVIDENCE_UNAVAILABLE_GRACEFUL" in out
-
-    def test_tuning_hint_unknown(self, verifier_events_file: Path, capsys):
-        task_verifier_telemetry(str(verifier_events_file))
-        out = capsys.readouterr().out
-        assert "unknown intent observed" in out
-
-    def test_tuning_hint_graceful(self, verifier_events_file: Path, capsys):
-        task_verifier_telemetry(str(verifier_events_file))
-        out = capsys.readouterr().out
-        assert "graceful allows occurred" in out
-
-    def test_volatile_deny_rate(self, verifier_events_file: Path, capsys):
-        task_verifier_telemetry(str(verifier_events_file))
-        out = capsys.readouterr().out
-        assert "volatile deny rate" in out
+        assert "evidence unavailable observed" in out
 
     def test_no_events(self, empty_events_file: Path, capsys):
-        task_verifier_telemetry(str(empty_events_file))
+        grounding_gate_telemetry(str(empty_events_file))
         out = capsys.readouterr().out
-        assert "No task_verifier_review events" in out
+        assert "No grounding_gate_review events" in out
 
     def test_missing_file(self):
         with pytest.raises(SystemExit) as exc:
-            task_verifier_telemetry("/nonexistent/file.jsonl")
+            grounding_gate_telemetry("/nonexistent/file.jsonl")
         assert exc.value.code == 1

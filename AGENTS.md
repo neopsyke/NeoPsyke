@@ -16,6 +16,17 @@ Instructions for coding agents working in this repository (Codex, Claude, Gemini
 - This is an unreleased prototype. All changes should prioritize architectural clarity over backwards compatibility. Rename freely, restructure fearlessly, and never add compatibility shims or aliases for old names. Clean breaks are always preferred.
 - If a user-facing name is changed, change it everywhere in the repo for consistency: commands, step names, config keys, docs, tests, examples, and internal references. Only keep the old name when changing it everywhere would create a high risk of breaking something outside this repo, such as an external dependency or external API contract. In that case, tell the user that this decision was made and why.
 
+## Gradle Concurrency (Critical)
+- **NEVER run overlapping Gradle-backed commands in the same checkout/worktree.** This includes `./gradlew`, `./freud/bin/freud run`, and any agent subprocesses that may invoke Gradle.
+- If one Gradle-backed command is already running, do not start another one until the first has clearly finished or has been stopped.
+- Non-Gradle inspection while a Gradle-backed command is running is allowed: for example `ps`, `rg`, `sed`, `cat`, and log/artifact inspection.
+- Simple rule:
+  - Allowed: one Gradle-backed command + read-only inspection commands.
+  - Forbidden: two Gradle-backed commands in parallel in the same checkout.
+- If you spawn parallel agents (subprocesses), at most ONE of them may run `./gradlew` or any Gradle-triggering command. All others must be limited to file reads, searches, and edits.
+- Violating this rule causes Gradle daemon lock contention, stuck builds, and hung processes that block the entire session.
+- See the detailed "Concurrency Policy" section under "Freud Workflow" for the full rules.
+
 ## Project Snapshot
 - Language: Kotlin (JVM), Gradle Kotlin DSL.
 - Main source: `src/main/kotlin/ai/neopsyke`.
@@ -76,12 +87,23 @@ Bad:
 - Preserve existing behavior unless the user asked for behavior changes.
 - Commit only when explicitly asked.
 - Do not push to remote unless explicitly asked.
+- Never run overlapping Gradle-backed commands in the same checkout/worktree.
+- While a Gradle-backed command is running, only non-Gradle inspection work is allowed in that same checkout, such as `ps`, `rg`, `sed`, `cat`, or log/artifact reads.
+- Forbidden example: starting `./gradlew test` while `./gradlew compileKotlin` or `./freud/bin/freud run ...` is still running in the same checkout.
+- Allowed example: checking process state with `ps` or reading logs with `rg`/`sed` while a single Gradle command is already running.
 - When resuming from a compacted session, read the transcript at the provided path before proceeding.
 - When fixing tests, always prioritize understanding the feature and making sure the root
   cause is addressed instead of making the test just pass.
 - If you find a failing test, flaky test, even if unrelated to current changes
   make sure to find the root cause and fix it. Every work session must end with all
   tests running and stable. 
+
+## Planner Routing Rules
+- No deterministic routing may be performed on natural-language or free-text input at any stage of planner/orchestrator execution.
+- Do not use regexes, keyword matching, substring checks, locale-specific tokenization, or any other deterministic language/text parsing to select planner branches, classify user intent, resolve semantic goal operations, or interpret free-text planner payloads.
+- Deterministic routing is allowed only when it is based on typed runtime facts already present in the opportunity/trigger/context, such as provenance, trigger kind, principal role, policy scope, trust level, action availability, or other structured metadata.
+- Semantic interpretation of natural-language input must be delegated to model-based components that return typed outputs.
+- Execution-time components must not re-introduce text heuristics to reinterpret planner intent after a semantic planner has already produced a typed command.
 
 ## Agent Memory Policy
 - Auto-memory is for personal or local preferences only, such as output style or terminal setup.

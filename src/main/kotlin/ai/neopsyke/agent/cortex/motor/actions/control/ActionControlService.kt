@@ -19,7 +19,9 @@ import ai.neopsyke.agent.model.CommitAuthorization
 import ai.neopsyke.agent.model.CommitMode
 import ai.neopsyke.agent.model.ConversationContext
 import ai.neopsyke.agent.model.ConversationSecurityContext
+import ai.neopsyke.agent.model.GroundingMetadata
 import ai.neopsyke.agent.model.InstructionTrust
+import ai.neopsyke.agent.model.IntentionKind
 import ai.neopsyke.agent.model.PendingAction
 import ai.neopsyke.agent.model.PreparedAction
 import ai.neopsyke.agent.model.PrincipalRole
@@ -218,6 +220,14 @@ class LegacyCompatibleActionControlService(
                     statusReason = decision.reason,
                     statusReasonCode = decision.reasonCode,
                     policyVersion = decision.policyVersion,
+                    urgency = action.urgency,
+                    intentionKind = action.intentionKind,
+                    requestedCommitMode = action.requestedCommitMode,
+                    groundingMetadata = action.groundingMetadata,
+                    isForcedTerminal = action.isForcedTerminal,
+                    requiresFollowUpThought = action.requiresFollowUpThought,
+                    followUpPrefix = action.followUpPrefix,
+                    intentionId = action.intentionId,
                 ),
                 authorizationDecision = decision,
             )
@@ -262,6 +272,14 @@ class LegacyCompatibleActionControlService(
             actionHash = authorization.actionHash,
             policyVersion = decision.policyVersion,
             authorizationId = authorization.id,
+            urgency = action.urgency,
+            intentionKind = action.intentionKind,
+            requestedCommitMode = action.requestedCommitMode,
+            groundingMetadata = action.groundingMetadata,
+            isForcedTerminal = action.isForcedTerminal,
+            requiresFollowUpThought = action.requiresFollowUpThought,
+            followUpPrefix = action.followUpPrefix,
+            intentionId = action.intentionId,
         )
         val receipt = ActionReceipt(
             id = nextId(),
@@ -387,6 +405,14 @@ class DefaultActionControlService(
                 statusReason = decision.reason,
                 statusReasonCode = decision.reasonCode,
                 policyVersion = decision.policyVersion,
+                urgency = action.urgency,
+                intentionKind = action.intentionKind,
+                requestedCommitMode = action.requestedCommitMode,
+                groundingMetadata = action.groundingMetadata,
+                isForcedTerminal = action.isForcedTerminal,
+                requiresFollowUpThought = action.requiresFollowUpThought,
+                followUpPrefix = action.followUpPrefix,
+                intentionId = action.intentionId,
             )
         )
         saveStagedLedgerEntry(
@@ -600,6 +626,14 @@ class DefaultActionControlService(
                 statusReason = reason,
                 statusReasonCode = reasonCode ?: BYPASS_REASON_CODE,
                 policyVersion = BYPASS_POLICY_VERSION,
+                urgency = action.urgency,
+                intentionKind = action.intentionKind,
+                requestedCommitMode = action.requestedCommitMode,
+                groundingMetadata = action.groundingMetadata,
+                isForcedTerminal = action.isForcedTerminal,
+                requiresFollowUpThought = action.requiresFollowUpThought,
+                followUpPrefix = action.followUpPrefix,
+                intentionId = action.intentionId,
             )
         )
         val receipt = store.saveReceipt(
@@ -873,7 +907,7 @@ class DefaultActionControlService(
     private fun StagedAction.toPendingAction(): PendingAction =
         PendingAction(
             id = -1L,
-            urgency = Urgency.MEDIUM,
+            urgency = urgency,
             type = actionType,
             payload = payload,
             summary = summary,
@@ -882,6 +916,13 @@ class DefaultActionControlService(
             conversationContext = conversationContext,
             argumentDataTrust = argumentDataTrust,
             origin = origin,
+            intentionId = intentionId,
+            intentionKind = intentionKind,
+            requestedCommitMode = requestedCommitMode,
+            groundingMetadata = groundingMetadata,
+            isForcedTerminal = isForcedTerminal,
+            requiresFollowUpThought = requiresFollowUpThought,
+            followUpPrefix = followUpPrefix,
         )
 
     private fun hashAction(action: PendingAction): String {
@@ -1009,10 +1050,13 @@ class DefaultActionControlService(
         val goalId = payload.path("goal_id").textValue()
             ?.ifBlank { null }
             ?: payload.path("goalId").textValue()?.ifBlank { null }
+            ?: payload.path("goal_reference").path("id").textValue()?.ifBlank { null }
         if (!goalId.isNullOrBlank()) {
             return "goal:${goalId.trim()}"
         }
-        val operation = payload.path("operation").textValue()?.trim()?.lowercase().orEmpty()
+        val operation = payload.path("command").textValue()?.trim()?.lowercase()
+            ?.ifBlank { payload.path("operation").textValue()?.trim()?.lowercase() }
+            .orEmpty()
         return if (operation in setOf("pause", "resume", "reprioritize", "complete", "revise_plan", "delete_all")) {
             "goal-operation:${action.rootInputId.orEmpty()}:${operation}"
         } else {
@@ -1030,7 +1074,9 @@ class DefaultActionControlService(
 
     private fun goalOperationBucketPayload(actionTypeId: String, payloadRaw: String): String {
         val payload = runCatching { payloadMapper.readTree(payloadRaw) }.getOrNull()
-        val operation = payload?.path("operation")?.asText()?.trim()?.lowercase().orEmpty()
+        val operation = payload?.path("command")?.asText()?.trim()?.lowercase()
+            ?.ifBlank { payload.path("operation").asText().trim().lowercase() }
+            .orEmpty()
         val cronExpression = payload?.path("cron_expression")?.asText()?.ifEmpty { payload.path("cronExpression").asText() }?.trim().orEmpty()
         val category = when (operation) {
             "list", "inspect" -> "goal_read"

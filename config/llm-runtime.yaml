@@ -35,9 +35,40 @@ cognitive_roles:
   planner:
     provider: groq
     model: openai/gpt-oss-120b
-  action_verifier:
-    provider: openai
-    model: gpt-4o-mini
+    lanes:
+      input_intent_router:
+        provider: groq
+        model: openai/gpt-oss-120b
+      direct_response:
+        provider: groq
+        model: openai/gpt-oss-120b
+      general_action:
+        provider: groq
+        model: openai/gpt-oss-120b
+      task_decomposition:
+        provider: groq
+        model: openai/gpt-oss-120b
+      goal_creation:
+        provider: groq
+        model: openai/gpt-oss-120b
+      goal_management:
+        provider: groq
+        model: openai/gpt-oss-120b
+      deferred_step:
+        provider: groq
+        model: openai/gpt-oss-120b
+      feedback:
+        provider: groq
+        model: openai/gpt-oss-120b
+      goal_work:
+        provider: groq
+        model: openai/gpt-oss-120b
+      impulse:
+        provider: groq
+        model: openai/gpt-oss-120b
+      grounding_classifier:
+        provider: openai
+        model: gpt-5-nano
   superego_primary:
     provider: groq
     model: openai/gpt-oss-120b
@@ -71,6 +102,7 @@ model_catalog:
       context_window: 131072
       input_cost_per_million_tokens_usd: 0.15
       output_cost_per_million_tokens_usd: 0.60
+      reasoning_overhead_multiplier: 3.0
       metadata_updated_at: 2026-03-24
     - model: openai/gpt-oss-20b
       tier: medium
@@ -78,6 +110,7 @@ model_catalog:
       context_window: 131072
       input_cost_per_million_tokens_usd: 0.075
       output_cost_per_million_tokens_usd: 0.30
+      reasoning_overhead_multiplier: 2.0
       metadata_updated_at: 2026-03-24
     - model: llama-3.3-70b-versatile
       tier: medium
@@ -92,6 +125,7 @@ model_catalog:
       context_window: 131072
       input_cost_per_million_tokens_usd: 0.29
       output_cost_per_million_tokens_usd: 0.59
+      reasoning_overhead_multiplier: 2.0
       metadata_updated_at: 2026-03-24
     - model: llama-3.1-8b-instant
       tier: light
@@ -146,6 +180,7 @@ model_catalog:
       context_window: 1048576
       input_cost_per_million_tokens_usd: 1.25
       output_cost_per_million_tokens_usd: 10.0
+      reasoning_overhead_multiplier: 2.5
       metadata_updated_at: 2026-03-24
     - model: gemini-2.5-flash
       tier: medium
@@ -153,6 +188,7 @@ model_catalog:
       context_window: 1048576
       input_cost_per_million_tokens_usd: 0.30
       output_cost_per_million_tokens_usd: 2.50
+      reasoning_overhead_multiplier: 2.0
       metadata_updated_at: 2026-03-24
     - model: gemini-2.5-flash-lite
       tier: light
@@ -216,36 +252,43 @@ model_catalog:
       tier: medium_high
       token_weight: 1.30
       context_window: 131072
+      reasoning_overhead_multiplier: 3.0
       metadata_updated_at: 2026-03-24
     - model: qwen3:32b
       tier: medium_high
       token_weight: 1.15
       context_window: 40000
+      reasoning_overhead_multiplier: 2.0
       metadata_updated_at: 2026-03-24
     - model: gpt-oss
       tier: medium
       token_weight: 1.00
       context_window: 131072
+      reasoning_overhead_multiplier: 2.5
       metadata_updated_at: 2026-03-24
     - model: gpt-oss:20b
       tier: medium
       token_weight: 0.95
       context_window: 131072
+      reasoning_overhead_multiplier: 2.0
       metadata_updated_at: 2026-03-24
     - model: qwen3:14b
       tier: medium
       token_weight: 0.90
       context_window: 40000
+      reasoning_overhead_multiplier: 1.5
       metadata_updated_at: 2026-03-24
     - model: qwen3
       tier: light
       token_weight: 0.90
       context_window: 40000
+      reasoning_overhead_multiplier: 1.5
       metadata_updated_at: 2026-03-24
     - model: qwen3:8b
       tier: light
       token_weight: 0.80
       context_window: 40000
+      reasoning_overhead_multiplier: 1.5
       metadata_updated_at: 2026-03-24
     - model: llama3.1
       tier: light

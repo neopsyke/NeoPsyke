@@ -78,7 +78,7 @@ class EgoProjectIntegrationTest {
         val instrumentation = RecordingInstrumentation()
         val outputs = mutableListOf<String>()
         val config = AgentConfig(
-            planner = PlannerConfig(maxLoopStepsPerInput = 8, maxThoughtPasses = 2),
+            planner = PlannerConfig(maxLoopStepsPerInput = 8, maxContinuationPasses = 2),
             goals = GoalConfig(enabled = true, workspaceRoot = root, actionsPerCycle = 2),
         )
         val manager = GoalManager(
@@ -130,7 +130,7 @@ class EgoProjectIntegrationTest {
         val instrumentation = RecordingInstrumentation()
         val outputs = mutableListOf<String>()
         val config = AgentConfig(
-            planner = PlannerConfig(maxLoopStepsPerInput = 8, maxThoughtPasses = 2),
+            planner = PlannerConfig(maxLoopStepsPerInput = 8, maxContinuationPasses = 2),
             goals = GoalConfig(enabled = true, workspaceRoot = root, actionsPerCycle = 2, conditionCheckIntervalMs = 25),
         )
         val provider = StubAsyncOperationProvider().apply {
@@ -224,7 +224,7 @@ class EgoProjectIntegrationTest {
         val instrumentation = RecordingInstrumentation()
         val outputs = mutableListOf<String>()
         val config = AgentConfig(
-            planner = PlannerConfig(maxLoopStepsPerInput = 12, maxThoughtPasses = 2),
+            planner = PlannerConfig(maxLoopStepsPerInput = 12, maxContinuationPasses = 2),
             goals = GoalConfig(enabled = true, workspaceRoot = root, actionsPerCycle = 2),
         )
         val manager = GoalManager(
@@ -289,7 +289,7 @@ class EgoProjectIntegrationTest {
         val instrumentation = RecordingInstrumentation()
         val outputs = mutableListOf<String>()
         val config = AgentConfig(
-            planner = PlannerConfig(maxLoopStepsPerInput = 12, maxThoughtPasses = 2),
+            planner = PlannerConfig(maxLoopStepsPerInput = 12, maxContinuationPasses = 2),
             goals = GoalConfig(enabled = true, workspaceRoot = root, actionsPerCycle = 1),
         )
         var verifierCalls = 0
@@ -371,7 +371,7 @@ class EgoProjectIntegrationTest {
         val instrumentation = RecordingInstrumentation()
         val outputs = mutableListOf<String>()
         val config = AgentConfig(
-            planner = PlannerConfig(maxLoopStepsPerInput = 12, maxThoughtPasses = 2),
+            planner = PlannerConfig(maxLoopStepsPerInput = 12, maxContinuationPasses = 2),
             goals = GoalConfig(
                 enabled = true,
                 workspaceRoot = root,

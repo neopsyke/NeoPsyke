@@ -41,7 +41,7 @@ class Id(
      */
     private val enqueueImpulse: (PendingImpulse) -> Boolean,
     /**
-     * Callback to check whether the Ego has pending work (inputs, thoughts, actions).
+     * Callback to check whether the Ego has pending work (inputs, continuations, actions).
      */
     private val hasPendingWork: () -> Boolean,
     /**

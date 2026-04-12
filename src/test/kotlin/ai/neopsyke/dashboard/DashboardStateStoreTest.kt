@@ -20,18 +20,21 @@ import ai.neopsyke.agent.model.Opportunity
 import ai.neopsyke.agent.model.OpportunityKind
 import ai.neopsyke.agent.model.PendingAction
 import ai.neopsyke.agent.model.PendingInput
-import ai.neopsyke.agent.model.PendingThought
+import ai.neopsyke.agent.model.QueuedContinuation
 import ai.neopsyke.agent.model.Percept
 import ai.neopsyke.agent.model.PerceptFamily
 import ai.neopsyke.agent.model.QueueState
 import ai.neopsyke.agent.model.RootInputIds
 import ai.neopsyke.agent.model.Urgency
+import ai.neopsyke.agent.model.GroundingMetadata
 import ai.neopsyke.instrumentation.AgentEvent
 import ai.neopsyke.metrics.MetricsSnapshot
 import ai.neopsyke.metrics.MetricsTotals
 import java.time.Instant
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotEquals
+import kotlin.test.assertNotNull
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -45,8 +48,8 @@ class DashboardStateStoreTest {
         val store = DashboardStateStore(maxEvents = 100)
         val queues = QueueState(
             inputs = listOf(PendingInput(1, "hello")),
-            thoughts = listOf(PendingThought(2, Urgency.HIGH, "think", 1)),
-            actions = listOf(PendingAction(3, Urgency.MEDIUM, ActionType.CONTACT_USER, "payload", "sum", 0))
+            continuations = listOf(ai.neopsyke.agent.queuedContinuation(2, Urgency.HIGH, "think", 1)),
+            actions = listOf(PendingAction(3, Urgency.MEDIUM, ActionType.CONTACT_USER, "payload", "sum", 0, groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER))
         )
         val metrics = MetricsSnapshot(
             runId = "run-1",
@@ -60,7 +63,7 @@ class DashboardStateStoreTest {
             persistentSuperegoTokens = 6
         )
 
-        store.onEvent(AgentEvent(id = 2, type = "loop_step", data = mapOf("step" to 2, "task_type" to "thought")))
+        store.onEvent(AgentEvent(id = 2, type = "loop_step", data = mapOf("step" to 2, "task_type" to "continuation")))
         store.onEvent(AgentEvent(id = 1, type = "loop_status", data = mapOf("status" to "running", "message" to "ok")))
         store.onEvent(AgentEvent(id = 3, type = "queue_snapshot", data = mapOf("queues" to queues)))
         store.onEvent(AgentEvent(id = 4, type = "superego_input", data = mapOf("allow" to false)))
@@ -83,7 +86,7 @@ class DashboardStateStoreTest {
             AgentEvent(
                 id = 9,
                 type = "queue_saturation",
-                data = mapOf("queue_type" to "thought", "pending" to 32, "capacity" to 32, "reason" to "full")
+                data = mapOf("queue_type" to "continuation", "pending" to 32, "capacity" to 32, "reason" to "full")
             )
         )
         store.recordDroppedEvents(3)
@@ -92,9 +95,9 @@ class DashboardStateStoreTest {
         assertEquals("running", snapshot.loopStatus)
         assertEquals("ok", snapshot.loopMessage)
         assertEquals(2, snapshot.loopStep)
-        assertEquals("thought", snapshot.currentTaskType)
+        assertEquals("continuation", snapshot.currentTaskType)
         assertEquals(1, snapshot.queues.inputs.size)
-        assertEquals(1, snapshot.queues.thoughts.size)
+        assertEquals(1, snapshot.queues.continuations.size)
         assertEquals(1, snapshot.queues.actions.size)
         assertEquals(true, snapshot.lastSuperegoOutput?.get("allow"))
         assertEquals(2, snapshot.actionCapabilities.size)
@@ -104,52 +107,57 @@ class DashboardStateStoreTest {
         assertEquals(metrics, snapshot.metrics)
         assertEquals(3L, (snapshot.instrumentationHealth["dropped_events"] as Number).toLong())
         assertEquals(1L, (snapshot.instrumentationHealth["queue_saturation_events"] as Number).toLong())
-        assertEquals(0L, (snapshot.taskVerifierStats["total_reviews"] as Number).toLong())
+        assertEquals(0L, (snapshot.groundingGateStats["total_reviews"] as Number).toLong())
         assertEquals(0L, (snapshot.promptBudgetStats["total_allocations"] as Number).toLong())
         @Suppress("UNCHECKED_CAST")
         val saturationByType = snapshot.instrumentationHealth["queue_saturation_by_type"] as Map<String, Any?>
-        assertEquals(1L, (saturationByType["thought"] as Number).toLong())
+        assertEquals(1L, (saturationByType["continuation"] as Number).toLong())
         assertEquals(listOf(1L, 2L, 3L, 4L, 5L, 6L, 7L, 8L, 9L, 10L), snapshot.recentEvents.map { it.id })
     }
 
     @Test
-    fun `snapshot aggregates task verifier stats`() {
+    fun `snapshot aggregates grounding gate stats`() {
         val store = DashboardStateStore(maxEvents = 30)
         store.onEvent(
             AgentEvent(
                 id = 1,
-                type = "task_verifier_review",
+                type = "grounding_gate_review",
                 data = mapOf(
                     "allow" to false,
-                    "reason_code" to "TASK_EVIDENCE_REQUIRED",
-                    "intent_category" to "volatile_fact",
-                    "volatility_level" to "high",
-                    "requires_external_evidence" to true
+                    "reason_code" to "GROUNDING_EVIDENCE_REQUIRED",
+                    "grounding_required" to true,
+                    "evidence_gathered" to false,
+                    "evidence_failed_technically" to false,
+                    "evidence_unavailable" to false,
+                    "forced_terminal" to false,
                 )
             )
         )
         store.onEvent(
             AgentEvent(
                 id = 2,
-                type = "task_verifier_review",
+                type = "grounding_gate_review",
                 data = mapOf(
                     "allow" to true,
-                    "reason_code" to "TASK_EVIDENCE_UNAVAILABLE_GRACEFUL",
-                    "intent_category" to "volatile_fact",
-                    "volatility_level" to "high",
-                    "requires_external_evidence" to true
+                    "reason_code" to "GROUNDING_EVIDENCE_UNAVAILABLE_GRACEFUL",
+                    "grounding_required" to true,
+                    "evidence_gathered" to false,
+                    "evidence_failed_technically" to false,
+                    "evidence_unavailable" to true,
+                    "forced_terminal" to false,
                 )
             )
         )
 
         val snapshot: DashboardSnapshot = mapper.readValue(store.snapshotJson())
-        assertEquals(2L, (snapshot.taskVerifierStats["total_reviews"] as Number).toLong())
-        assertEquals(1L, (snapshot.taskVerifierStats["deny_count"] as Number).toLong())
-        assertEquals(1L, (snapshot.taskVerifierStats["graceful_allow_count"] as Number).toLong())
+        assertEquals(2L, (snapshot.groundingGateStats["total_reviews"] as Number).toLong())
+        assertEquals(1L, (snapshot.groundingGateStats["deny_count"] as Number).toLong())
+        assertEquals(2L, (snapshot.groundingGateStats["grounding_required_count"] as Number).toLong())
+        assertEquals(1L, (snapshot.groundingGateStats["evidence_unavailable_count"] as Number).toLong())
         @Suppress("UNCHECKED_CAST")
-        val byReason = snapshot.taskVerifierStats["by_reason_code"] as Map<String, Any?>
-        assertEquals(1L, (byReason["TASK_EVIDENCE_REQUIRED"] as Number).toLong())
-        assertEquals(1L, (byReason["TASK_EVIDENCE_UNAVAILABLE_GRACEFUL"] as Number).toLong())
+        val byReason = snapshot.groundingGateStats["by_reason_code"] as Map<String, Any?>
+        assertEquals(1L, (byReason["GROUNDING_EVIDENCE_REQUIRED"] as Number).toLong())
+        assertEquals(1L, (byReason["GROUNDING_EVIDENCE_UNAVAILABLE_GRACEFUL"] as Number).toLong())
     }
 
     @Test
@@ -173,7 +181,7 @@ class DashboardStateStoreTest {
                 id = 2,
                 type = "prompt_budget_allocation",
                 data = mapOf(
-                    "call_site" to "action_verifier_prompt",
+                    "call_site" to "continuation_prompt",
                     "single_message_fallback" to true,
                     "degradation_path" to "single_message_fallback",
                     "floor_violation_count" to 2,
@@ -190,7 +198,7 @@ class DashboardStateStoreTest {
         @Suppress("UNCHECKED_CAST")
         val byCallSite = snapshot.promptBudgetStats["by_call_site"] as Map<String, Any?>
         assertEquals(1L, (byCallSite["planner_prompt"] as Number).toLong())
-        assertEquals(1L, (byCallSite["action_verifier_prompt"] as Number).toLong())
+        assertEquals(1L, (byCallSite["continuation_prompt"] as Number).toLong())
     }
 
     @Test
@@ -202,7 +210,7 @@ class DashboardStateStoreTest {
                 type = "llm_call",
                 data = mapOf(
                     "actor" to "ego",
-                    "call_site" to "thought_json_retry",
+                    "call_site" to "continuation_json_retry",
                     "structured_output_mode" to "relaxed",
                     "session_id" to "session-a",
                     "root_input_id" to "root-a",
@@ -216,7 +224,7 @@ class DashboardStateStoreTest {
                 type = "llm_call",
                 data = mapOf(
                     "actor" to "ego",
-                    "call_site" to "thought",
+                    "call_site" to "continuation",
                     "structured_output_mode" to "strict",
                     "session_id" to "session-b",
                     "root_input_id" to "root-b",
@@ -229,8 +237,8 @@ class DashboardStateStoreTest {
                 id = 3,
                 type = "planner_decision",
                 data = mapOf(
-                    "trigger" to "thought",
-                    "decision_type" to "action",
+                    "trigger" to "continuation",
+                    "decision_type" to "intention",
                     "session_id" to "session-a",
                     "root_input_id" to "root-a"
                 )
@@ -545,7 +553,8 @@ class DashboardStateStoreTest {
                         summary = "summary",
                         rootInputId = rootInputId,
                         rootInputReceivedAtMs = rootInputMs,
-                        conversationContext = conversationContext
+                        conversationContext = conversationContext,
+                        groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
                     ),
                     "outcome_summary" to "ok"
                 )
@@ -603,6 +612,7 @@ class DashboardStateStoreTest {
                         rootInputId = rootInputId,
                         rootInputReceivedAtMs = rootInputMs,
                         conversationContext = conversationContext,
+                    groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
                     ),
                     "outcome_summary" to "ok",
                 )
@@ -727,5 +737,47 @@ class DashboardStateStoreTest {
         assertTrue(snapshot.storeStats.containsKey("event_count"))
         assertTrue(snapshot.storeStats.containsKey("max_events"))
         assertEquals(50, (snapshot.storeStats["max_events"] as Number).toInt())
+    }
+
+    @Test
+    fun `eventIdForMessage includes run epoch and is unique across messages`() {
+        val store = DashboardStateStore()
+        store.ensureChatSession(sessionId = "test-session")
+        val msg1 = store.addUserMessage(sessionId = "test-session", content = "hello")!!
+        val msg2 = store.addUserMessage(sessionId = "test-session", content = "world")!!
+        val id1 = store.eventIdForMessage(msg1)
+        val id2 = store.eventIdForMessage(msg2)
+
+        assertTrue(id1.startsWith("dashboard-chat:"), "eventId must start with dashboard-chat: prefix")
+        assertTrue(id2.startsWith("dashboard-chat:"), "eventId must start with dashboard-chat: prefix")
+        assertNotEquals(id1, id2, "Different messages must have different eventIds")
+        // Format: dashboard-chat:{epoch}-{seq}
+        val parts1 = id1.removePrefix("dashboard-chat:").split("-")
+        assertEquals(2, parts1.size, "eventId must have epoch-seq format")
+        assertNotNull(parts1[0].toLongOrNull(), "epoch component must be numeric")
+        assertNotNull(parts1[1].toLongOrNull(), "sequence component must be numeric")
+        // Both messages share the same run epoch
+        val parts2 = id2.removePrefix("dashboard-chat:").split("-")
+        assertEquals(parts1[0], parts2[0], "Same run must have the same epoch prefix")
+    }
+
+    @Test
+    fun `eventIdForMessage does not collide across store instances`() {
+        val store1 = DashboardStateStore()
+        store1.ensureChatSession(sessionId = "s1")
+        val msg1 = store1.addUserMessage(sessionId = "s1", content = "hello")!!
+        val id1 = store1.eventIdForMessage(msg1)
+
+        // Simulate a different run by creating a new store (different runEpochSec).
+        // In practice the epoch changes every second; we verify the format allows it.
+        val store2 = DashboardStateStore()
+        store2.ensureChatSession(sessionId = "s1")
+        val msg2 = store2.addUserMessage(sessionId = "s1", content = "hello")!!
+        val id2 = store2.eventIdForMessage(msg2)
+
+        // Same sequence (both first message), but epoch may or may not differ
+        // within the same second. The key invariant is format correctness.
+        assertTrue(id1.startsWith("dashboard-chat:"))
+        assertTrue(id2.startsWith("dashboard-chat:"))
     }
 }

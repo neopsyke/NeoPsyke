@@ -33,17 +33,17 @@ enum class LlmCacheMode {
 }
 
 data class LlmCacheEntry(
-    @JsonProperty("seq") val sequenceIndex: Int,
-    @JsonProperty("hash") val messagesHash: String,
-    @JsonProperty("actor") val actor: String = "",
-    @JsonProperty("call_site") val callSite: String = "",
-    @JsonProperty("model") val model: String = "",
-    @JsonProperty("content") val content: String,
-    @JsonProperty("finish_reason") val finishReason: String? = null,
-    @JsonProperty("completion_id") val completionId: String? = null,
-    @JsonProperty("prompt_tokens") val promptTokens: Int? = null,
-    @JsonProperty("completion_tokens") val completionTokens: Int? = null,
-    @JsonProperty("total_tokens") val totalTokens: Int? = null,
+    @param:JsonProperty("seq") val sequenceIndex: Int,
+    @param:JsonProperty("hash") val messagesHash: String,
+    @param:JsonProperty("actor") val actor: String = "",
+    @param:JsonProperty("call_site") val callSite: String = "",
+    @param:JsonProperty("model") val model: String = "",
+    @param:JsonProperty("content") val content: String,
+    @param:JsonProperty("finish_reason") val finishReason: String? = null,
+    @param:JsonProperty("completion_id") val completionId: String? = null,
+    @param:JsonProperty("prompt_tokens") val promptTokens: Int? = null,
+    @param:JsonProperty("completion_tokens") val completionTokens: Int? = null,
+    @param:JsonProperty("total_tokens") val totalTokens: Int? = null,
 )
 
 private val cacheMapper = jacksonObjectMapper()

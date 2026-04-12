@@ -81,6 +81,7 @@ object GoalStateMachine {
                 plan = GoalPlan.empty(),
                 completionCriteria = event.completionCriteria,
                 createdAt = event.timestamp,
+                contactChannel = event.contactChannel,
                 workspacePath = workspacePath,
             ),
             eventCount = 1,
@@ -101,6 +102,7 @@ object GoalStateMachine {
                 status = GoalStatus.PLANNING,
                 priority = event.priority,
                 completionCriteria = event.completionCriteria,
+                contactChannel = event.contactChannel,
             )
         )
     }
@@ -144,6 +146,7 @@ object GoalStateMachine {
         event.instruction?.let { goal = goal.copy(instruction = it) }
         event.title?.let { goal = goal.copy(title = it) }
         event.completionCriteria?.let { goal = goal.copy(completionCriteria = it) }
+        event.contactChannel?.let { goal = goal.copy(contactChannel = it) }
         return state.copy(goal = goal)
     }
 

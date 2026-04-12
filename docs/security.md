@@ -750,10 +750,9 @@ Current cognitive-stage inspection surfaces:
   last blocked and denied reason codes
 - `intention_transition` events now expose explicit `STAGE`,
   `REQUEST_AUTHORIZATION`, and `COMMIT` progression
-- queue snapshots still expose deferred continuations as compatibility
-  `thoughts`, but primary runtime scheduling now runs through opportunities,
-  intentions, and secure action lifecycle objects rather than a standalone
-  thought queue
+- queue snapshots expose continuations directly; primary runtime scheduling now
+  runs through opportunities, continuations, intentions, and secure action
+  lifecycle objects rather than a standalone deferred-work abstraction
 
 Current UX behavior:
 
@@ -770,7 +769,7 @@ simply disappear.
 
 In the review pipeline:
 
-- task verifier denials are recorded in the ledger and fed back into fallback /
+- grounding-gate denials are recorded in the ledger and fed back into fallback /
   replanning behavior
 - superego denials are recorded and fed back
 - action-control refusals are recorded and fed back

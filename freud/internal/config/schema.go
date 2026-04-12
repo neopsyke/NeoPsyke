@@ -12,6 +12,10 @@ type FreudConfig struct {
 	MemoryLive MemoryLiveConfig `mapstructure:"memory_live"`
 	Runtime    RuntimeConfig    `mapstructure:"runtime"`
 	Telemetry  TelemetryConfig  `mapstructure:"telemetry"`
+
+	// Lane is the profile lane name passed via --lane (e.g. "low-llm", "high-llm").
+	// Set programmatically after config load, not mapped from YAML.
+	Lane string `mapstructure:"-"`
 }
 
 type ProjectConfig struct {

@@ -179,6 +179,78 @@ func TestLoadConfigInvalidOverrideFormat(t *testing.T) {
 	}
 }
 
+func TestLoadConfigLaneStoredInConfig(t *testing.T) {
+	dir := t.TempDir()
+
+	yamlPath := filepath.Join(dir, "freud.yaml")
+	os.WriteFile(yamlPath, []byte("project:\n  name: test\n"), 0o644)
+
+	cfg, err := LoadConfig(yamlPath, "", nil)
+	if err != nil {
+		t.Fatalf("LoadConfig failed: %v", err)
+	}
+	if cfg.Lane != "" {
+		t.Errorf("expected empty lane without --lane, got %q", cfg.Lane)
+	}
+
+	cfg2, err := LoadConfig(yamlPath, "low-llm", nil)
+	if err != nil {
+		// Profile file won't exist in temp dir, which is expected.
+		// The lane should still be stored before profile merge fails.
+		// Skip this sub-test if profile lookup fails.
+		t.Skipf("profile merge failed (expected in test without repo root): %v", err)
+	}
+	if cfg2.Lane != "low-llm" {
+		t.Errorf("expected lane=low-llm, got %q", cfg2.Lane)
+	}
+}
+
+func TestLoadConfigProfileScalarOverride(t *testing.T) {
+	dir := t.TempDir()
+
+	// Base config with explicit empty llm_config_file
+	yamlPath := filepath.Join(dir, "freud.yaml")
+	baseContent := `
+live_eval:
+  timeout: 120
+  llm_config_file: ""
+`
+	os.WriteFile(yamlPath, []byte(baseContent), 0o644)
+
+	// Profile that should override the empty value
+	profileDir := filepath.Join(dir, "freud", "config", "profiles")
+	os.MkdirAll(profileDir, 0o755)
+	profileContent := `
+live_eval:
+  llm_config_file: freud/config/llm-test.yaml
+  timeout: 60
+`
+	os.WriteFile(filepath.Join(profileDir, "test-lane.yaml"), []byte(profileContent), 0o644)
+
+	// Also need a .git directory so RepoRoot finds it
+	os.MkdirAll(filepath.Join(dir, ".git"), 0o755)
+
+	// Run from the temp dir so RepoRoot resolves correctly
+	origDir, _ := os.Getwd()
+	os.Chdir(dir)
+	defer os.Chdir(origDir)
+
+	cfg, err := LoadConfig(yamlPath, "test-lane", nil)
+	if err != nil {
+		t.Fatalf("LoadConfig with profile failed: %v", err)
+	}
+
+	if cfg.LiveEval.LLMConfigFile != "freud/config/llm-test.yaml" {
+		t.Errorf("profile scalar override failed: expected llm_config_file=freud/config/llm-test.yaml, got %q", cfg.LiveEval.LLMConfigFile)
+	}
+	if cfg.LiveEval.Timeout != 60 {
+		t.Errorf("profile scalar override failed: expected timeout=60, got %d", cfg.LiveEval.Timeout)
+	}
+	if cfg.Lane != "test-lane" {
+		t.Errorf("expected lane=test-lane, got %q", cfg.Lane)
+	}
+}
+
 func TestLaneNames(t *testing.T) {
 	if len(LaneNames) != 2 {
 		t.Errorf("expected 2 lane names, got %d", len(LaneNames))

@@ -39,7 +39,6 @@ data class LlmEndpointConfig(
 
 data class LlmCognitiveRolesConfig(
     val planner: LlmEndpointConfig,
-    val actionVerifier: LlmEndpointConfig,
     val superego: LlmEndpointConfig,
     val metaReasoner: LlmEndpointConfig,
     val metaReasonerFallback: LlmEndpointConfig? = null,
@@ -47,6 +46,7 @@ data class LlmCognitiveRolesConfig(
     val approvalInterpreter: LlmEndpointConfig,
     val superegoPrimary: LlmEndpointConfig? = null,
     val superegoEscalation: LlmEndpointConfig? = null,
+    val plannerLanes: Map<String, LlmEndpointConfig> = emptyMap(),
 )
 
 data class LlmRuntimeConfig(
@@ -56,9 +56,6 @@ data class LlmRuntimeConfig(
 ) {
     val planner: LlmEndpointConfig
         get() = cognitiveRoles.planner
-
-    val actionVerifier: LlmEndpointConfig
-        get() = cognitiveRoles.actionVerifier
 
     val superego: LlmEndpointConfig
         get() = cognitiveRoles.superego
@@ -133,10 +130,16 @@ private data class LlmRuntimeYamlRole(
     val model: String? = null,
 )
 
+private data class LlmRuntimeYamlPlannerRole(
+    val provider: String? = null,
+    val model: String? = null,
+    val lanes: Map<String, LlmRuntimeYamlRole>? = null,
+) {
+    fun toBaseRole(): LlmRuntimeYamlRole = LlmRuntimeYamlRole(provider = provider, model = model)
+}
+
 private data class LlmRuntimeYamlCognitiveRoles(
-    val planner: LlmRuntimeYamlRole? = null,
-    @param:JsonProperty("action_verifier")
-    val actionVerifier: LlmRuntimeYamlRole? = null,
+    val planner: LlmRuntimeYamlPlannerRole? = null,
     val superego: LlmRuntimeYamlRole? = null,
     @param:JsonProperty("superego_primary")
     val superegoPrimary: LlmRuntimeYamlRole? = null,
@@ -247,14 +250,7 @@ object LlmRuntimeConfigLoader {
             env = env,
             yaml = yaml,
             roleName = "cognitive_roles.planner",
-            role = yaml.cognitiveRoles?.planner
-        )
-
-        val actionVerifier = resolveRoleEndpoint(
-            env = env,
-            yaml = yaml,
-            roleName = "cognitive_roles.action_verifier",
-            role = yaml.cognitiveRoles?.actionVerifier,
+            role = yaml.cognitiveRoles?.planner?.toBaseRole()
         )
 
         val superego = resolveRoleEndpoint(
@@ -336,17 +332,24 @@ object LlmRuntimeConfigLoader {
             model = webSearchModel
         )
 
+        val plannerLanes = resolvePlannerLanes(
+            env = env,
+            yaml = yaml,
+            plannerEndpoint = planner,
+            lanes = yaml.cognitiveRoles?.planner?.lanes,
+        )
+
         return LlmRuntimeConfig(
             cognitiveRoles = LlmCognitiveRolesConfig(
                 planner = planner,
-                actionVerifier = actionVerifier,
                 superego = superego,
                 metaReasoner = metaReasoner,
                 metaReasonerFallback = metaReasonerFallback,
                 memoryAdvisor = memoryAdvisor,
                 approvalInterpreter = approvalInterpreter,
                 superegoPrimary = superegoPrimary,
-                superegoEscalation = superegoEscalation
+                superegoEscalation = superegoEscalation,
+                plannerLanes = plannerLanes,
             ),
             webSearch = webSearch,
             modelCatalog = resolveModelCatalog(yaml.modelCatalog)
@@ -359,8 +362,7 @@ object LlmRuntimeConfigLoader {
         val roles = yaml.cognitiveRoles
             ?: throw IllegalStateException("llm-runtime.yaml is missing required section: cognitive_roles")
 
-        requireRole(name = "cognitive_roles.planner", role = roles.planner)
-        requireRole(name = "cognitive_roles.action_verifier", role = roles.actionVerifier)
+        requireRole(name = "cognitive_roles.planner", role = roles.planner?.toBaseRole())
         requireRole(name = "cognitive_roles.meta_reasoner", role = roles.metaReasoner)
         requireRole(name = "cognitive_roles.memory_advisor", role = roles.memoryAdvisor)
         requireRole(name = "cognitive_roles.approval_interpreter", role = roles.approvalInterpreter)
@@ -369,8 +371,10 @@ object LlmRuntimeConfigLoader {
                 "llm-runtime.yaml must define either cognitive_roles.superego or cognitive_roles.superego_primary"
             )
         }
-        validateRoleProvider("cognitive_roles.planner", roles.planner, providers)
-        validateRoleProvider("cognitive_roles.action_verifier", roles.actionVerifier, providers)
+        validateRoleProvider("cognitive_roles.planner", roles.planner?.toBaseRole(), providers)
+        for ((laneKey, laneRole) in roles.planner?.lanes.orEmpty()) {
+            validatePlannerLaneRole("cognitive_roles.planner.lanes.$laneKey", laneRole, providers)
+        }
         validateRoleProvider("cognitive_roles.superego", roles.superego, providers)
         validateRoleProvider("cognitive_roles.superego_primary", roles.superegoPrimary, providers)
         validateRoleProvider("cognitive_roles.superego_escalation", roles.superegoEscalation, providers)
@@ -474,6 +478,45 @@ object LlmRuntimeConfigLoader {
             defaultModel = firstNonBlank(providerYaml?.defaultModel),
             defaultWebSearchModel = firstNonBlank(providerYaml?.defaultWebSearchModel, providerYaml?.defaultModel),
         )
+    }
+
+    private fun resolvePlannerLanes(
+        env: Map<String, String>,
+        yaml: LlmRuntimeYamlConfig,
+        plannerEndpoint: LlmEndpointConfig,
+        lanes: Map<String, LlmRuntimeYamlRole>?,
+    ): Map<String, LlmEndpointConfig> {
+        if (lanes.isNullOrEmpty()) return emptyMap()
+        return lanes.mapValues { (laneKey, role) ->
+            val provider = LlmProvider.parse(role.provider)
+            val model = role.model?.trim()?.ifBlank { null }
+            if (provider == null && model == null) {
+                plannerEndpoint
+            } else {
+                val effectiveProvider = provider ?: plannerEndpoint.provider
+                val providerSettings = resolveProviderSettings(env = env, yaml = yaml, provider = effectiveProvider)
+                val effectiveModel = model
+                    ?: firstNonBlank(providerSettings.defaultModel)
+                    ?: plannerEndpoint.model
+                LlmEndpointConfig(
+                    provider = effectiveProvider,
+                    apiKey = providerSettings.apiKey,
+                    apiKeyEnvVar = providerSettings.apiKeyEnvVar,
+                    baseUrl = providerSettings.baseUrl,
+                    model = effectiveModel,
+                )
+            }
+        }
+    }
+
+    private fun validatePlannerLaneRole(
+        name: String,
+        role: LlmRuntimeYamlRole,
+        providers: LlmRuntimeYamlProviders,
+    ) {
+        if (!role.provider.isNullOrBlank()) {
+            validateRoleProvider(name, role, providers)
+        }
     }
 
     private fun resolveWebSearchApiKeyEnvVar(

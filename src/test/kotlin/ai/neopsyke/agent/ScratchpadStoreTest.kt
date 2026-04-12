@@ -4,6 +4,9 @@ import ai.neopsyke.agent.model.ActionOutcome
 import ai.neopsyke.agent.model.ActionType
 import ai.neopsyke.agent.model.ContentKind
 import ai.neopsyke.agent.model.ExternalContentArtifact
+import ai.neopsyke.agent.model.GroundingMetadata
+import ai.neopsyke.agent.model.GroundingRequirement
+import ai.neopsyke.agent.model.GroundingSource
 import ai.neopsyke.agent.model.PendingAction
 import ai.neopsyke.agent.model.PendingInput
 import ai.neopsyke.agent.model.Provenances
@@ -77,7 +80,8 @@ class ScratchpadStoreTest {
                 urgency = Urgency.MEDIUM,
                 type = ActionType.WEB_SEARCH,
                 payload = "official pricing",
-                summary = "search docs"
+                summary = "search docs",
+                groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
             ),
             outcome = ActionOutcome(
                 statusSummary = "web_search returned official pricing page",
@@ -143,7 +147,8 @@ class ScratchpadStoreTest {
                 urgency = Urgency.MEDIUM,
                 type = ActionType.RESOLUTION_DRAFT,
                 payload = "Draft chunk two",
-                summary = "draft chunk"
+                summary = "draft chunk",
+                groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
             ),
             outcome = ActionOutcome(
                 statusSummary = "Internal answer draft chunk captured.",
@@ -230,6 +235,7 @@ class ScratchpadStoreTest {
                 workingContext = "Previous attempt found conflicting pages",
                 conversationContext = ConversationContext.default(),
                 wakeReason = "timer",
+                groundingMetadata = GroundingMetadata(requirement = GroundingRequirement.NOT_REQUIRED, source = GroundingSource.GOAL_STEP_POLICY),
             )
         )
 
@@ -296,7 +302,8 @@ class ScratchpadStoreTest {
                 urgency = Urgency.MEDIUM,
                 type = ActionType.WEBSITE_FETCH,
                 payload = "https://example.com",
-                summary = "fetch page"
+                summary = "fetch page",
+                groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
             ),
             outcome = ActionOutcome(
                 statusSummary = "Fetched page",
@@ -439,7 +446,8 @@ class ScratchpadStoreTest {
             rootInputId = root,
             action = PendingAction(
                 id = 2, urgency = Urgency.MEDIUM, type = ActionType.WEB_SEARCH,
-                payload = "pricing", summary = "search pricing"
+                payload = "pricing", summary = "search pricing",
+                groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
             ),
             outcome = ActionOutcome(
                 statusSummary = "Found pricing page",

@@ -1004,7 +1004,7 @@ class MemorySystem(
         if (!hippocampus.enabled) return ""
         val triggerLabel = when (trigger) {
             is EgoTrigger.IncomingInput -> "input"
-            is EgoTrigger.DeferredIntention -> "deferred-intention"
+            is EgoTrigger.Continuation -> "continuation"
             is EgoTrigger.ActionFeedback -> "feedback"
             is EgoTrigger.IncomingImpulse -> "impulse"
             is EgoTrigger.GoalWork -> "goal-work"
@@ -1018,8 +1018,8 @@ class MemorySystem(
                 val baseCue = trigger.impulse.prompt.trim()
                 buildImpulseRecallCue(baseCue, trigger.impulse.needId, ambientContext)
             }
-            is EgoTrigger.DeferredIntention -> {
-                val query = trigger.intention.deferredRecallQuery?.trim().orEmpty()
+            is EgoTrigger.Continuation -> {
+                val query = trigger.continuation.longTermMemoryRecallQuery?.trim().orEmpty()
                 if (query.isBlank()) {
                     instrumentation.emit(
                         AgentEvents.longTermMemoryRecallSkipped(trigger = triggerLabel, reason = "missing_explicit_query")
@@ -1033,7 +1033,7 @@ class MemorySystem(
                 instrumentation.emit(
                     AgentEvents.longTermMemoryRecallRequested(
                         trigger = triggerLabel,
-                        source = "deferred_intention",
+                        source = "continuation",
                         queryPreview = TextSecurity.preview(normalized, 180)
                     )
                 )
@@ -1071,7 +1071,7 @@ class MemorySystem(
             val latencyMs = (System.nanoTime() - startedAt) / 1_000_000L
             val recallRootInputId = when (trigger) {
                 is EgoTrigger.IncomingInput -> trigger.input.rootInputId
-                is EgoTrigger.DeferredIntention -> trigger.intention.rootInputId
+                is EgoTrigger.Continuation -> trigger.continuation.rootInputId
                 is EgoTrigger.ActionFeedback -> trigger.feedback.cue.rootInputId
                 is EgoTrigger.IncomingImpulse -> trigger.impulse.rootImpulseId
                 is EgoTrigger.GoalWork -> trigger.workUnit.goalId
@@ -1122,7 +1122,7 @@ class MemorySystem(
         val triggerCue = when (trigger) {
             is EgoTrigger.IncomingInput -> trigger.input.content.trim()
             is EgoTrigger.ActionFeedback -> trigger.feedback.cue.feedbackContent.trim()
-            is EgoTrigger.DeferredIntention -> ""
+            is EgoTrigger.Continuation -> ""
             is EgoTrigger.IncomingImpulse -> trigger.impulse.prompt.trim()
             is EgoTrigger.GoalWork -> trigger.workUnit.stepDescription.trim()
         }
@@ -1234,15 +1234,15 @@ class MemorySystem(
             is EgoTrigger.ActionFeedback -> null
             is EgoTrigger.IncomingImpulse -> null
             is EgoTrigger.GoalWork -> null
-            is EgoTrigger.DeferredIntention -> {
-                val thought = trigger.intention.toPendingThought()
-                if (thought.deniedActionType == null && thought.denialReasonCode.isNullOrBlank()) {
+            is EgoTrigger.Continuation -> {
+                val continuation = trigger.continuation
+                if (continuation.deniedActionType == null && continuation.denialReasonCode.isNullOrBlank()) {
                     null
                 } else {
                     listOfNotNull(
-                        thought.deniedActionType?.name?.lowercase()?.let { "denied_action_type: $it" },
-                        thought.denialReasonCode?.trim()?.takeIf { it.isNotBlank() }?.let { "denial_reason_code: $it" },
-                        thought.denialReason?.trim()?.takeIf { it.isNotBlank() }?.let { "denial_reason: ${TextSecurity.preview(it, 140)}" }
+                        continuation.deniedActionType?.name?.lowercase()?.let { "denied_action_type: $it" },
+                        continuation.denialReasonCode?.trim()?.takeIf { it.isNotBlank() }?.let { "denial_reason_code: $it" },
+                        continuation.denialReason?.trim()?.takeIf { it.isNotBlank() }?.let { "denial_reason: ${TextSecurity.preview(it, 140)}" }
                     ).joinToString("\n")
                 }
             }

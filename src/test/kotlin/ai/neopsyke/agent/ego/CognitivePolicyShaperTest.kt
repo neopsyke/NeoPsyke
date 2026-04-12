@@ -122,7 +122,7 @@ class CognitivePolicyShaperTest {
             opportunity = opportunity(
                 context = context,
                 security = security,
-                allowedIntentions = setOf(IntentionKind.OBSERVE, IntentionKind.PREPARE, IntentionKind.DEFER),
+                allowedIntentions = setOf(IntentionKind.OBSERVE, IntentionKind.PREPARE),
                 allowedCommitModes = setOf(CommitMode.NOT_APPLICABLE, CommitMode.APPROVAL_BACKED),
             ),
             plannerActionSurface = plannerSurface,
@@ -132,7 +132,7 @@ class CognitivePolicyShaperTest {
 
         assertEquals(setOf(ActionType.WEB_SEARCH), shaped.availableActions)
         assertEquals(setOf(ActionType.WEB_SEARCH), shaped.dispatchableActions)
-        assertEquals(setOf(IntentionKind.OBSERVE, IntentionKind.DEFER), shaped.allowedIntentions)
+        assertEquals(setOf(IntentionKind.OBSERVE), shaped.allowedIntentions)
         assertEquals(setOf(CommitMode.NOT_APPLICABLE), shaped.allowedCommitModes)
     }
 
@@ -161,7 +161,6 @@ class CognitivePolicyShaperTest {
                     IntentionKind.PREPARE,
                     IntentionKind.STAGE,
                     IntentionKind.COMMIT,
-                    IntentionKind.DEFER,
                 ),
                 allowedCommitModes = setOf(
                     CommitMode.APPROVAL_BACKED,

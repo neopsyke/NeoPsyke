@@ -8,7 +8,19 @@ import ai.neopsyke.agent.config.AgentConfig
 import ai.neopsyke.agent.config.TelegramIngressMode
 import ai.neopsyke.agent.ego.Ego
 import ai.neopsyke.agent.ego.EgoAssembler
-import ai.neopsyke.agent.ego.LlmEgoPlanner
+import ai.neopsyke.agent.ego.planner.HierarchicalEgoPlanner
+import ai.neopsyke.agent.ego.planner.LaneId
+import ai.neopsyke.agent.ego.planner.input.DirectResponsePlanner
+import ai.neopsyke.agent.ego.planner.input.GeneralActionPlanner
+import ai.neopsyke.agent.ego.planner.input.GoalPlanner
+import ai.neopsyke.agent.ego.planner.input.GroundingClassifier
+import ai.neopsyke.agent.ego.planner.input.InputIntentRouter
+import ai.neopsyke.agent.ego.planner.input.TaskDecompositionPlanner
+import ai.neopsyke.agent.ego.planner.lane.ProgressionPlanner
+import ai.neopsyke.agent.ego.planner.lane.GoalWorkPlanner
+import ai.neopsyke.agent.ego.planner.lane.ImpulsePlanner
+import ai.neopsyke.agent.ego.planner.lane.InputPlanner
+import ai.neopsyke.agent.ego.planner.runtime.PlannerRuntime
 import ai.neopsyke.agent.ego.LlmScratchpadFinalizer
 import ai.neopsyke.agent.memory.longterm.Logbook
 import ai.neopsyke.agent.memory.longterm.SqliteLogbook
@@ -563,7 +575,6 @@ internal object AppModeRunners {
     ): InteractiveLlmStartupConfig? {
         val requiredEndpoints = listOf(
             "planner" to llm.planner,
-            "action_verifier" to llm.actionVerifier,
             "superego" to llm.superego,
             "meta_reasoner" to llm.metaReasoner,
             "memory_advisor" to llm.memoryAdvisor
@@ -607,7 +618,6 @@ internal object AppModeRunners {
     private fun resolveMetricsProviderLabel(llm: LlmRuntimeConfig): String {
         val providers = linkedSetOf(
             llm.planner.providerLabel,
-            llm.actionVerifier.providerLabel,
             llm.superego.providerLabel,
             llm.metaReasoner.providerLabel,
             llm.metaReasonerFallback?.providerLabel ?: "",
@@ -685,10 +695,33 @@ internal object AppModeRunners {
         } else {
             null
         }
+        val telegramAckTracker = ai.neopsyke.agent.cortex.motor.actions.TelegramStartupAckTracker()
+        val dashboardMessageSink = ai.neopsyke.agent.cortex.motor.actions.DashboardMessageSink { sessionId, text, source ->
+            dashboardStore.ensureChatSession(sessionId = sessionId, title = "Default")
+            dashboardStore.addAssistantMessage(sessionId = sessionId, content = text, source = source)
+            ai.neopsyke.agent.cortex.motor.actions.ConversationDeliveryResult(delivered = true, detail = "Dashboard delivery recorded.")
+        }
+        val dashboardAvailability = ai.neopsyke.agent.cortex.motor.actions.DashboardAvailabilityCheck { sessionId ->
+            dashboardStore.hasChatSession(sessionId) &&
+                (!config.approvals.dashboardRequiresLiveSubscriber || dashboardStore.hasActiveChatSubscriber(sessionId))
+        }
+        val contactChannelStatusProvider = ai.neopsyke.agent.cortex.motor.actions.DefaultUserContactChannelStatusProvider(
+            dashboardAvailability = dashboardAvailability,
+            telegramConfig = telegramConfig,
+            telegramSink = telegramSink,
+            telegramAckTracker = telegramAckTracker,
+        )
+        val contactChannelResolver = ai.neopsyke.agent.cortex.motor.actions.DefaultUserContactChannelResolver(
+            channelStatusProvider = contactChannelStatusProvider,
+            channelPriority = config.approvals.channelPriority,
+            defaultChannel = config.approvals.defaultChannel,
+        )
         val conversationOutput = RoutedConversationOutputGateway(
             fallbackOutput = {},
             telegramSink = telegramSink,
+            dashboardSink = dashboardMessageSink,
         )
+        conversationOutput.setChannelResolver(contactChannelResolver)
         val chatBridge = ChatRuntimeBridge(
             store = dashboardStore,
             sensoryInput = sensoryInput,
@@ -845,6 +878,7 @@ internal object AppModeRunners {
                 criticalSinks = listOfNotNull(sidecarSink),
                 scope = agentScope
             ).use { instrumentation ->
+                sensoryCortex.setInstrumentation(instrumentation)
                 sessionRecordingManager?.setInstrumentation(instrumentation)
                 val actionAuthorizationPolicy = createActionAuthorizationPolicy(config)
                 createActionControlStoreIfEnabled(config).use { actionControlStore ->
@@ -879,14 +913,14 @@ internal object AppModeRunners {
                                 "limits" to mapOf(
                                 "max_loop_steps" to config.planner.maxLoopStepsPerInput,
                                 "loop_delay_ms" to config.loopDelayMs,
-                                "max_thought_passes" to config.planner.maxThoughtPasses,
+                                "max_continuation_passes" to config.planner.maxContinuationPasses,
                                 "max_prompt_tokens" to config.maxLlmPromptTokens,
                                 "max_completion_tokens" to config.planner.maxCompletionTokens,
                                 "max_run_total_tokens" to config.planner.maxRunTotalTokens,
                                 "max_run_tokens_per_provider" to config.planner.maxRunTokensPerProvider,
                                 "max_run_tokens_per_role" to config.planner.maxRunTokensPerRole,
                                 "max_pending_inputs" to config.maxPendingInputs,
-                                "max_pending_thoughts" to config.maxPendingThoughts,
+                                "max_pending_continuations" to config.maxPendingContinuations,
                                 "max_pending_actions" to config.maxPendingActions,
                                 "max_input_chars" to config.planner.maxInputChars,
                                 "short_term_context_max_chars" to config.memory.maxShortTermContextChars,
@@ -1021,31 +1055,16 @@ internal object AppModeRunners {
 
                     InstrumentedChatModelClient(
                         delegate = TokenBudgetGuardedChatClient(
-                            delegate = AdaptiveStructuredOutputChatClient(
-                                delegate = maybeCacheWrap(createChatClient(
-                                    endpoint = llm.planner,
-                                    callObserver = callObserverForProvider(llm.planner.providerLabel)
-                                )),
-                                provider = llm.planner.providerLabel
-                            ),
+                            delegate = maybeCacheWrap(createChatClient(
+                                endpoint = llm.planner,
+                                callObserver = callObserverForProvider(llm.planner.providerLabel)
+                            )),
                             budgetGate = tokenBudgetGate,
                             provider = llm.planner.providerLabel,
                             role = LlmRoleLabels.PLANNER
                         ),
                         hooks = listOf(rawResponseHook)
                     ).use { plannerClient ->
-                        InstrumentedChatModelClient(
-                            delegate = TokenBudgetGuardedChatClient(
-                                delegate = maybeCacheWrap(createChatClient(
-                                    endpoint = llm.actionVerifier,
-                                    callObserver = callObserverForProvider(llm.actionVerifier.providerLabel)
-                                )),
-                                budgetGate = tokenBudgetGate,
-                                provider = llm.actionVerifier.providerLabel,
-                                role = LlmRoleLabels.ACTION_VERIFIER
-                            ),
-                            hooks = listOf(rawResponseHook)
-                        ).use { actionVerifierClient ->
                             val superegoReviewRouting = resolveSuperegoReviewRouting(
                                 llm = llm,
                                 config = config,
@@ -1130,7 +1149,6 @@ internal object AppModeRunners {
                                         logger.info {
                                             "Cognitive role routing: " +
                                                 "planner=${llm.planner.providerLabel}/${llm.planner.model}, " +
-                                                "action_verifier=${llm.actionVerifier.providerLabel}/${llm.actionVerifier.model}, " +
                                                 "superego_primary=${superegoReviewRouting.primaryEndpoint.providerLabel}/${superegoReviewRouting.primaryEndpoint.model}, " +
                                                 "superego_escalation=${superegoReviewRouting.escalationEndpoint?.let { "${it.providerLabel}/${it.model}" } ?: "disabled"}, " +
                                                 "meta_reasoner=${llm.metaReasoner.providerLabel}/${llm.metaReasoner.model}, " +
@@ -1190,7 +1208,7 @@ internal object AppModeRunners {
                                                             planner = ai.neopsyke.agent.goal.LlmGoalPlanner(plannerClient, config),
                                                             verifier = ai.neopsyke.agent.goal.LlmGoalStepVerifier(plannerClient, config),
                                                             instrumentation = instrumentation,
-                                                            cueEmitter = sensoryInput::offerGoalRuntimeCue,
+                                                            cueEmitter = sensoryCortex::offerGoalRuntimeCue,
                                                         ).also { it.start(agentScope) }
                                                     } else {
                                                         null
@@ -1198,16 +1216,34 @@ internal object AppModeRunners {
                                                     dashboardServer?.goalManager = goalManager
                                                     var plannerNoopCount = 0
                                                     var plannerOutputRepairedCount = 0
+                                                    val plannerLaneClientResolver = buildPlannerLaneModelClientResolver(
+                                                        llm = llm,
+                                                        plannerClient = plannerClient,
+                                                        createPlannerClient = { endpoint ->
+                                                            InstrumentedChatModelClient(
+                                                                delegate = TokenBudgetGuardedChatClient(
+                                                                    delegate = maybeCacheWrap(
+                                                                        createChatClient(
+                                                                            endpoint = endpoint,
+                                                                            callObserver = callObserverForProvider(endpoint.providerLabel)
+                                                                        )
+                                                                    ),
+                                                                    budgetGate = tokenBudgetGate,
+                                                                    provider = endpoint.providerLabel,
+                                                                    role = LlmRoleLabels.PLANNER
+                                                                ),
+                                                                hooks = listOf(rawResponseHook)
+                                                            )
+                                                        }
+                                                    )
                                                     val assembly = EgoAssembler.assemble(
                                                         config = config,
                                                         plannerFactory = { motorCortex ->
-                                                            LlmEgoPlanner(
-                                                                modelClient = plannerClient,
-                                                                actionVerifierModelClient = actionVerifierClient,
-                                                                actionVerifierContextWindow = llm.modelCatalog.contextWindowFor(llm.actionVerifier),
+                                                            buildHierarchicalPlanner(
+                                                                plannerClient = plannerClient,
                                                                 config = config,
-                                                                actionPayloadRepair = motorCortex::repairPlannerPayload,
                                                                 instrumentation = instrumentation,
+                                                                actionPayloadRepair = motorCortex::repairPlannerPayload,
                                                                 onPlannerNoop = {
                                                                     metrics.recordPlannerNoop()
                                                                     plannerNoopCount += 1
@@ -1229,7 +1265,8 @@ internal object AppModeRunners {
                                                                             )
                                                                         )
                                                                     }
-                                                                }
+                                                                },
+                                                                laneModelClientResolver = plannerLaneClientResolver,
                                                             )
                                                         },
                                                         superegoFactory = { registry ->
@@ -1319,6 +1356,7 @@ internal object AppModeRunners {
                                                             dashboardStore = dashboardStore,
                                                             telegramConfig = telegramConfig,
                                                             telegramSink = telegramSink,
+                                                            telegramAckTracker = telegramAckTracker,
                                                             sessionRecordingManager = sessionRecordingManager,
                                                             forwardNormalInput = { content, source, priority, conversationContext ->
                                                                 sensoryInput.submitInput(
@@ -1441,7 +1479,6 @@ internal object AppModeRunners {
                                     }
                                 }
                             }
-                        }
                     }
                     llmCacheManager?.close()
                     dumpEndOfRunMetrics(metrics)
@@ -1540,6 +1577,7 @@ internal object AppModeRunners {
                 criticalSinks = listOfNotNull(sidecarSink),
                 scope = agentScope
             ).use { instrumentation ->
+                sensoryCortex.setInstrumentation(instrumentation)
                 sessionRecordingManager?.setInstrumentation(instrumentation)
                 instrumentation.emit(AgentEvents.loopStatus(status = "booting", message = "freud_live_start"))
 
@@ -1605,31 +1643,16 @@ internal object AppModeRunners {
 
                     InstrumentedChatModelClient(
                         delegate = TokenBudgetGuardedChatClient(
-                            delegate = AdaptiveStructuredOutputChatClient(
-                                delegate = maybeCacheWrap(createChatClient(
-                                    endpoint = llm.planner,
-                                    callObserver = callObserverForProvider(llm.planner.providerLabel)
-                                )),
-                                provider = llm.planner.providerLabel
-                            ),
+                            delegate = maybeCacheWrap(createChatClient(
+                                endpoint = llm.planner,
+                                callObserver = callObserverForProvider(llm.planner.providerLabel)
+                            )),
                             budgetGate = tokenBudgetGate,
                             provider = llm.planner.providerLabel,
                             role = LlmRoleLabels.PLANNER
                         ),
                         hooks = listOf(rawResponseHook)
                     ).use { plannerClient ->
-                        InstrumentedChatModelClient(
-                            delegate = TokenBudgetGuardedChatClient(
-                                delegate = maybeCacheWrap(createChatClient(
-                                    endpoint = llm.actionVerifier,
-                                    callObserver = callObserverForProvider(llm.actionVerifier.providerLabel)
-                                )),
-                                budgetGate = tokenBudgetGate,
-                                provider = llm.actionVerifier.providerLabel,
-                                role = LlmRoleLabels.ACTION_VERIFIER
-                            ),
-                            hooks = listOf(rawResponseHook)
-                        ).use { actionVerifierClient ->
                             val superegoReviewRouting = resolveSuperegoReviewRouting(
                                 llm = llm,
                                 config = config,
@@ -1760,23 +1783,42 @@ internal object AppModeRunners {
                                                         planner = ai.neopsyke.agent.goal.LlmGoalPlanner(plannerClient, config),
                                                         verifier = ai.neopsyke.agent.goal.LlmGoalStepVerifier(plannerClient, config),
                                                         instrumentation = instrumentation,
-                                                        cueEmitter = sensoryInput::offerGoalRuntimeCue,
+                                                        cueEmitter = sensoryCortex::offerGoalRuntimeCue,
                                                     ).also { it.start(agentScope) }
                                                 } else {
                                                     null
                                                 }
+                                                val plannerLaneClientResolver = buildPlannerLaneModelClientResolver(
+                                                    llm = llm,
+                                                    plannerClient = plannerClient,
+                                                    createPlannerClient = { endpoint ->
+                                                        InstrumentedChatModelClient(
+                                                            delegate = TokenBudgetGuardedChatClient(
+                                                                delegate = maybeCacheWrap(
+                                                                    createChatClient(
+                                                                        endpoint = endpoint,
+                                                                        callObserver = callObserverForProvider(endpoint.providerLabel)
+                                                                    )
+                                                                ),
+                                                                budgetGate = tokenBudgetGate,
+                                                                provider = endpoint.providerLabel,
+                                                                role = LlmRoleLabels.PLANNER
+                                                            ),
+                                                            hooks = listOf(rawResponseHook)
+                                                        )
+                                                    }
+                                                )
                                                 val assembly = EgoAssembler.assemble(
                                                     config = config,
                                                     plannerFactory = { motorCortex ->
-                                                        LlmEgoPlanner(
-                                                            modelClient = plannerClient,
-                                                            actionVerifierModelClient = actionVerifierClient,
-                                                            actionVerifierContextWindow = llm.modelCatalog.contextWindowFor(llm.actionVerifier),
+                                                        buildHierarchicalPlanner(
+                                                            plannerClient = plannerClient,
                                                             config = config,
-                                                            actionPayloadRepair = motorCortex::repairPlannerPayload,
                                                             instrumentation = instrumentation,
+                                                            actionPayloadRepair = motorCortex::repairPlannerPayload,
                                                             onPlannerNoop = { metrics.recordPlannerNoop() },
-                                                            onPlannerOutputRepaired = { metrics.recordPlannerOutputRepaired() }
+                                                            onPlannerOutputRepaired = { metrics.recordPlannerOutputRepaired() },
+                                                            laneModelClientResolver = plannerLaneClientResolver,
                                                         )
                                                     },
                                                     superegoFactory = { registry ->
@@ -1967,7 +2009,6 @@ internal object AppModeRunners {
                                     }
                                 }
                             }
-                        }
                     }
                     }
                 }
@@ -2160,7 +2201,8 @@ internal object AppModeRunners {
                 return SuperegoReviewRouting(
                     primaryEndpoint = explicitPrimary,
                     primaryTokenWeight = llm.modelCatalog.tokenWeightFor(explicitPrimary),
-                    primaryContextWindow = llm.modelCatalog.contextWindowFor(explicitPrimary)
+                    primaryContextWindow = llm.modelCatalog.contextWindowFor(explicitPrimary),
+                    primaryReasoningOverhead = llm.modelCatalog.reasoningOverheadFor(explicitPrimary)
                 )
             }
             instrumentation.emit(
@@ -2195,7 +2237,8 @@ internal object AppModeRunners {
             return SuperegoReviewRouting(
                 primaryEndpoint = explicitPrimary,
                 primaryTokenWeight = llm.modelCatalog.tokenWeightFor(explicitPrimary),
-                primaryContextWindow = llm.modelCatalog.contextWindowFor(explicitPrimary)
+                primaryContextWindow = llm.modelCatalog.contextWindowFor(explicitPrimary),
+                primaryReasoningOverhead = llm.modelCatalog.reasoningOverheadFor(explicitPrimary)
             )
         }
 
@@ -2209,7 +2252,8 @@ internal object AppModeRunners {
             return SuperegoReviewRouting(
                 primaryEndpoint = explicitEscalation,
                 primaryTokenWeight = llm.modelCatalog.tokenWeightFor(explicitEscalation),
-                primaryContextWindow = llm.modelCatalog.contextWindowFor(explicitEscalation)
+                primaryContextWindow = llm.modelCatalog.contextWindowFor(explicitEscalation),
+                primaryReasoningOverhead = llm.modelCatalog.reasoningOverheadFor(explicitEscalation)
             )
         }
 
@@ -2237,7 +2281,8 @@ internal object AppModeRunners {
         return SuperegoReviewRouting(
             primaryEndpoint = legacyEndpoint,
             primaryTokenWeight = llm.modelCatalog.tokenWeightFor(legacyEndpoint),
-            primaryContextWindow = llm.modelCatalog.contextWindowFor(legacyEndpoint)
+            primaryContextWindow = llm.modelCatalog.contextWindowFor(legacyEndpoint),
+            primaryReasoningOverhead = llm.modelCatalog.reasoningOverheadFor(legacyEndpoint)
         )
     }
     
@@ -2245,7 +2290,7 @@ internal object AppModeRunners {
         endpoint: LlmEndpointConfig,
         callObserver: ai.neopsyke.llm.ChatCallObserver? = null,
     ): ChatModelClient {
-        return when (endpoint.provider) {
+        val raw: ChatModelClient = when (endpoint.provider) {
             LlmProvider.ANTHROPIC -> AnthropicChatClient(
                 apiKey = endpoint.apiKey,
                 baseUrl = endpoint.baseUrl,
@@ -2259,7 +2304,7 @@ internal object AppModeRunners {
                 modelName = endpoint.model,
                 callObserver = callObserver
             )
-    
+
             LlmProvider.MISTRAL -> MistralChatClient(
                 apiKey = endpoint.apiKey,
                 baseUrl = endpoint.baseUrl,
@@ -2288,6 +2333,10 @@ internal object AppModeRunners {
                 callObserver = callObserver
             )
         }
+        return AdaptiveStructuredOutputChatClient(
+            delegate = raw,
+            provider = endpoint.providerLabel
+        )
     }
     
     private fun resolveLlmCacheConfig(): Pair<LlmCacheMode, java.nio.file.Path?> {
@@ -2496,6 +2545,7 @@ internal object AppModeRunners {
         dashboardStore: DashboardStateStore,
         telegramConfig: ai.neopsyke.agent.config.TelegramChannelConfig,
         telegramSink: ai.neopsyke.agent.cortex.motor.actions.TelegramMessageSink?,
+        telegramAckTracker: ai.neopsyke.agent.cortex.motor.actions.TelegramStartupAckTracker = ai.neopsyke.agent.cortex.motor.actions.TelegramStartupAckTracker(),
         sessionRecordingManager: SessionRecordingManager? = null,
         forwardNormalInput: (String, String, ai.neopsyke.agent.model.InputPriority, ConversationContext) -> Boolean,
         onApprovalExecuted: (ai.neopsyke.agent.cortex.motor.actions.control.ActionControlDecisionResult.Executed) -> Unit,
@@ -2526,6 +2576,7 @@ internal object AppModeRunners {
             onApprovalExecuted = onApprovalExecuted,
             onApprovalDenied = onApprovalDenied,
             sessionRecordingManager = sessionRecordingManager,
+            telegramAckTracker = telegramAckTracker,
         )
     }
 
@@ -2817,4 +2868,136 @@ internal object AppModeRunners {
             logger.trace { "Failed to dump end-of-run metrics: ${ex.message}" }
         }
     }
+}
+
+private fun plannerLaneEndpointTemplates(llm: LlmRuntimeConfig): Map<String, LlmEndpointConfig> {
+    val templates = linkedMapOf<String, LlmEndpointConfig>()
+    val endpoints = listOfNotNull(
+        llm.planner,
+        llm.superego,
+        llm.metaReasoner,
+        llm.metaReasonerFallback,
+        llm.memoryAdvisor,
+        llm.approvalInterpreter,
+        llm.superegoPrimary,
+        llm.superegoEscalation,
+        llm.webSearch,
+    )
+    for (endpoint in endpoints) {
+        val provider = endpoint.providerLabel.lowercase()
+        templates.putIfAbsent(provider, endpoint)
+    }
+    return templates
+}
+
+private fun buildPlannerLaneModelClientResolver(
+    llm: LlmRuntimeConfig,
+    plannerClient: ChatModelClient,
+    createPlannerClient: (LlmEndpointConfig) -> ChatModelClient,
+): (LaneId, ai.neopsyke.agent.ego.planner.ResolvedLaneConfig) -> ChatModelClient? {
+    val endpointTemplates = plannerLaneEndpointTemplates(llm)
+    val plannerProvider = llm.planner.providerLabel.lowercase()
+    val plannerModel = llm.planner.model.trim()
+    val clientsByKey = mutableMapOf<String, ChatModelClient>()
+    val warnedUnknownProviders = mutableSetOf<String>()
+
+    return { laneId, resolved ->
+        // Priority 1: per-lane endpoint from llm-runtime.yaml cognitive_roles.planner.lanes
+        val laneEndpoint = llm.cognitiveRoles.plannerLanes[laneId.configKey]
+        if (laneEndpoint != null) {
+            val provider = laneEndpoint.providerLabel.lowercase()
+            val model = laneEndpoint.model.trim()
+            if (provider == plannerProvider && model == plannerModel) {
+                plannerClient
+            } else {
+                val cacheKey = "$provider::$model"
+                clientsByKey.getOrPut(cacheKey) {
+                    createPlannerClient(laneEndpoint)
+                }
+            }
+        } else {
+            // Priority 2: per-lane provider/model from agent-runtime.yaml planner.lanes
+            val requestedProvider = resolved.provider?.trim()?.lowercase()?.ifBlank { null }
+            val requestedModel = resolved.model?.trim()?.ifBlank { null }
+            if (requestedProvider == null && requestedModel == null) {
+                null
+            } else {
+                val provider = requestedProvider ?: plannerProvider
+                val template = endpointTemplates[provider]
+                if (template == null) {
+                    if (warnedUnknownProviders.add(provider)) {
+                        logger.warn {
+                            "Lane ${laneId.configKey} requested provider '$provider' but no endpoint template is configured; using default planner client."
+                        }
+                    }
+                    null
+                } else {
+                    val model = requestedModel ?: template.model
+                    if (provider == plannerProvider && model == plannerModel) {
+                        plannerClient
+                    } else {
+                        val cacheKey = "$provider::$model"
+                        clientsByKey.getOrPut(cacheKey) {
+                            createPlannerClient(template.copy(model = model))
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Factory for the HierarchicalEgoPlanner, replacing LlmEgoPlanner.
+ */
+private fun buildHierarchicalPlanner(
+    plannerClient: ai.neopsyke.llm.ChatModelClient,
+    config: ai.neopsyke.agent.config.AgentConfig,
+    instrumentation: ai.neopsyke.instrumentation.AgentInstrumentation,
+    actionPayloadRepair: (ai.neopsyke.agent.model.ActionType, String) -> String,
+    onPlannerNoop: () -> Unit = {},
+    onPlannerOutputRepaired: () -> Unit = {},
+    laneModelClientResolver: ((LaneId, ai.neopsyke.agent.ego.planner.ResolvedLaneConfig) -> ai.neopsyke.llm.ChatModelClient?)? = null,
+): Ego.Planner {
+    val runtime = PlannerRuntime(
+        defaultModelClient = plannerClient,
+        config = config,
+        instrumentation = instrumentation,
+        onPlannerNoop = onPlannerNoop,
+        onPlannerOutputRepaired = onPlannerOutputRepaired,
+        actionPayloadRepair = actionPayloadRepair,
+        laneModelClientResolver = laneModelClientResolver ?: { _, _ -> null },
+    )
+
+    val router = InputIntentRouter(runtime, config, instrumentation)
+    val groundingClassifier = GroundingClassifier(runtime, config, instrumentation)
+    val directResponse = DirectResponsePlanner(runtime, config, instrumentation)
+    val generalAction = GeneralActionPlanner(runtime, config, instrumentation)
+    val taskDecomp = TaskDecompositionPlanner(runtime, config, instrumentation)
+    val goalPlanner = GoalPlanner(runtime, config, instrumentation)
+
+    val inputPlanner = InputPlanner(
+        runtime = runtime,
+        config = config,
+        instrumentation = instrumentation,
+        router = router,
+        groundingClassifier = groundingClassifier,
+        directResponsePlanner = directResponse,
+        generalActionPlanner = generalAction,
+        taskDecompositionPlanner = taskDecomp,
+        goalPlanner = goalPlanner,
+    )
+
+    val progressionPlanner = ProgressionPlanner(runtime, config, instrumentation)
+    val goalWorkPlannerLane = GoalWorkPlanner(runtime, config, instrumentation)
+    val impulsePlannerLane = ImpulsePlanner(runtime, config, instrumentation)
+
+    return HierarchicalEgoPlanner(
+        runtime = runtime,
+        instrumentation = instrumentation,
+        inputPlanner = inputPlanner,
+        progressionPlanner = progressionPlanner,
+        goalWorkPlanner = goalWorkPlannerLane,
+        impulsePlanner = impulsePlannerLane,
+    )
 }

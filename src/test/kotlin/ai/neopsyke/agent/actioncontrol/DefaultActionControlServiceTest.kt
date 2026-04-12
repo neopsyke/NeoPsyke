@@ -13,6 +13,7 @@ import ai.neopsyke.agent.model.AuthorizationProgress
 import ai.neopsyke.agent.model.CommitMode
 import ai.neopsyke.agent.model.ConversationContext
 import ai.neopsyke.agent.model.ConversationSecurityContexts
+import ai.neopsyke.agent.model.GroundingMetadata
 import ai.neopsyke.agent.model.PendingAction
 import ai.neopsyke.agent.model.StagedActionStatus
 import ai.neopsyke.agent.model.Urgency
@@ -51,6 +52,7 @@ class DefaultActionControlServiceTest {
                         payload = "hello",
                         summary = "reply",
                         conversationContext = context,
+                        groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
                     ),
                     decision = AuthorizationDecision(
                         progress = AuthorizationProgress.ALLOW_STAGE,
@@ -108,6 +110,7 @@ class DefaultActionControlServiceTest {
                         summary = "first action",
                         rootInputId = rootInputId,
                         conversationContext = context,
+                        groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
                     ),
                     decision = AuthorizationDecision(
                         progress = AuthorizationProgress.ALLOW_STAGE,
@@ -127,6 +130,7 @@ class DefaultActionControlServiceTest {
                         summary = "second action",
                         rootInputId = rootInputId,
                         conversationContext = context,
+                        groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
                     ),
                     decision = AuthorizationDecision(
                         progress = AuthorizationProgress.ALLOW_STAGE,
@@ -179,6 +183,7 @@ class DefaultActionControlServiceTest {
                 payload = "fallback",
                 summary = "fallback explanation",
                 conversationContext = ConversationContext.default(),
+                groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
             )
             val outcome = ActionOutcome(
                 statusSummary = "Delivered fallback explanation",
@@ -238,6 +243,7 @@ class DefaultActionControlServiceTest {
                         payload = "reply",
                         summary = "reply for approval",
                         conversationContext = ownerContext,
+                        groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
                     ),
                     decision = AuthorizationDecision(
                         progress = AuthorizationProgress.ALLOW_STAGE,
@@ -297,6 +303,7 @@ class DefaultActionControlServiceTest {
                         summary = "reflect one",
                         rootInputId = rootInputId,
                         conversationContext = context,
+                        groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
                     ),
                     decision = AuthorizationDecision(
                         progress = AuthorizationProgress.ALLOW_STAGE,
@@ -320,6 +327,7 @@ class DefaultActionControlServiceTest {
                         summary = "reflect evidence",
                         rootInputId = rootInputId,
                         conversationContext = context,
+                        groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
                     ),
                     decision = AuthorizationDecision(
                         progress = AuthorizationProgress.ALLOW_STAGE,
@@ -343,6 +351,7 @@ class DefaultActionControlServiceTest {
                         summary = "reflect evidence second",
                         rootInputId = rootInputId,
                         conversationContext = context,
+                        groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
                     ),
                     decision = AuthorizationDecision(
                         progress = AuthorizationProgress.ALLOW_STAGE,
@@ -390,6 +399,7 @@ class DefaultActionControlServiceTest {
                         summary = "list goals",
                         rootInputId = rootInputId,
                         conversationContext = context,
+                        groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
                     ),
                     decision = AuthorizationDecision(
                         progress = AuthorizationProgress.ALLOW_STAGE,
@@ -413,6 +423,7 @@ class DefaultActionControlServiceTest {
                         summary = "create goal",
                         rootInputId = rootInputId,
                         conversationContext = context,
+                        groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
                     ),
                     decision = AuthorizationDecision(
                         progress = AuthorizationProgress.ALLOW_STAGE,
@@ -436,6 +447,7 @@ class DefaultActionControlServiceTest {
                         summary = "create goal 2",
                         rootInputId = rootInputId,
                         conversationContext = context,
+                        groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
                     ),
                     decision = AuthorizationDecision(
                         progress = AuthorizationProgress.ALLOW_STAGE,

@@ -71,7 +71,10 @@ func LoadConfig(configPath string, lane string, overrides []string) (*FreudConfi
 		return nil, fmt.Errorf("unmarshalling config: %w", err)
 	}
 
-	// 7. Apply step cmd overrides from env vars (pipeline is a list, Viper can't auto-bind)
+	// 7. Store the lane name (not mapped from YAML)
+	cfg.Lane = lane
+
+	// 8. Apply step cmd overrides from env vars (pipeline is a list, Viper can't auto-bind)
 	applyStepEnvOverrides(cfg)
 
 	return cfg, nil
@@ -162,6 +165,17 @@ func mergeProfile(v *viper.Viper, lane string) error {
 	// Merge scalar config keys (this replaces the pipeline list)
 	if err := v.MergeConfigMap(profile.AllSettings()); err != nil {
 		return fmt.Errorf("merging profile: %w", err)
+	}
+
+	// Force-apply profile scalar overrides. Viper's MergeConfigMap preserves
+	// existing scalars when the base config explicitly sets a key (even to ""),
+	// so profile values for those keys are silently dropped. Use v.Set to
+	// ensure profile values win for non-pipeline keys.
+	for _, key := range profile.AllKeys() {
+		if key == "pipeline" || strings.HasPrefix(key, "pipeline.") {
+			continue // handled separately below
+		}
+		v.Set(key, profile.Get(key))
 	}
 
 	// Restore base pipeline and apply profile step overrides by name

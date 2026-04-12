@@ -12,6 +12,9 @@ import ai.neopsyke.agent.model.ActionExecutionStatus
 import ai.neopsyke.agent.model.ActionOrigin
 import ai.neopsyke.agent.model.ActionType
 import ai.neopsyke.agent.model.ConversationContext
+import ai.neopsyke.agent.model.GroundingMetadata
+import ai.neopsyke.agent.model.GroundingRequirement
+import ai.neopsyke.agent.model.GroundingSource
 import ai.neopsyke.agent.model.Interlocutor
 import ai.neopsyke.agent.model.OriginSource
 import ai.neopsyke.agent.model.PerceptFamily
@@ -304,6 +307,10 @@ class SensoryCortexTest {
                 needId = "be-useful",
                 rootImpulseId = "imp-1",
             ),
+            groundingMetadata = GroundingMetadata(
+                requirement = GroundingRequirement.REQUIRED,
+                source = GroundingSource.INHERITED,
+            ),
         )
 
         val parsed = ActionFeedbackCue.fromStimulus(cue.toStimulus())
@@ -318,6 +325,7 @@ class SensoryCortexTest {
         assertEquals(cue.urgency, parsed.urgency)
         assertEquals(cue.requiresFollowUpThought, parsed.requiresFollowUpThought)
         assertEquals(cue.origin, parsed.origin)
+        assertEquals(cue.groundingMetadata, parsed.groundingMetadata)
     }
 
     @Test
@@ -336,13 +344,14 @@ class SensoryCortexTest {
                 plannerSignal = "web_search result: pricing found",
                 executionStatus = ActionExecutionStatus.SUCCESS,
                 conversationContext = ConversationContext.default(),
+                groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
             )
         )
 
         assertTrue(offered)
         assertTrue(cortex.hasPendingSyntheticSignals())
         val signal = cortex.nextSignal()
-        assertIs<CognitiveSignal.StimulusReceived>(signal)
+        assertIs<CognitiveSignal.FeedbackReceived>(signal)
         assertTrue(!cortex.hasPendingSyntheticSignals())
     }
 

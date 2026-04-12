@@ -1,4 +1,4 @@
-{"type":"task_verifier_review","data":{"allow":true,"reason_code":"TASK_VERIFIED","intent_category":"factual","volatility_level":"stable","requires_external_evidence":false}}
-{"type":"task_verifier_review","data":{"allow":false,"reason_code":"VOLATILE_UNVERIFIED","intent_category":"volatile_fact","volatility_level":"volatile","requires_external_evidence":true}}
-{"type":"task_verifier_review","data":{"allow":true,"reason_code":"TASK_EVIDENCE_UNAVAILABLE_GRACEFUL","intent_category":"unknown","volatility_level":"stable","requires_external_evidence":true}}
+{"type":"grounding_gate_review","data":{"allow":true,"grounding_required":false,"evidence_gathered":false,"evidence_failed_technically":false,"evidence_unavailable":false,"forced_terminal":false}}
+{"type":"grounding_gate_review","data":{"allow":false,"reason_code":"GROUNDING_EVIDENCE_REQUIRED","grounding_required":true,"evidence_gathered":false,"evidence_failed_technically":false,"evidence_unavailable":false,"forced_terminal":false}}
+{"type":"grounding_gate_review","data":{"allow":true,"reason_code":"GROUNDING_EVIDENCE_UNAVAILABLE_GRACEFUL","grounding_required":true,"evidence_gathered":false,"evidence_failed_technically":false,"evidence_unavailable":true,"forced_terminal":false}}
 {"type":"other_event","data":{"unrelated":"data"}}

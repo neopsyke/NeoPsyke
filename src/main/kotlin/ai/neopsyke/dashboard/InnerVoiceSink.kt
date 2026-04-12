@@ -80,7 +80,7 @@ class InnerVoiceSink(
             // Id-origin roots are already activated in trackImpulseOrigin
             if (rootInputId !in activatedRoots) {
                 when (decisionType) {
-                    "defer", "plan" -> {
+                    "continuation", "plan" -> {
                         // Multi-step reasoning detected: activate inner voice for this root
                         activatedRoots.add(rootInputId)
                     }
@@ -102,8 +102,8 @@ class InnerVoiceSink(
         }
 
         when (decisionType) {
-            "defer" -> {
-                val thought = event.data["thought"]?.toString() ?: return
+            "continuation" -> {
+                val thought = event.data["content"]?.toString() ?: return
                 emitEvent(
                     type = InnerVoiceEventType.DELIBERATION,
                     content = thought,
@@ -292,7 +292,7 @@ class InnerVoiceSink(
         // Some events carry rootInputId inside nested objects
         (event.data["action"] as? PendingAction)?.rootInputId?.let { return it }
         (event.data["input"] as? ai.neopsyke.agent.model.PendingInput)?.rootInputId?.let { return it }
-        (event.data["thought"] as? ai.neopsyke.agent.model.PendingThought)?.rootInputId?.let { return it }
+        (event.data["continuation"] as? ai.neopsyke.agent.model.QueuedContinuation)?.rootInputId?.let { return it }
         return null
     }
 

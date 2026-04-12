@@ -16,46 +16,56 @@ import kotlin.test.assertTrue
 
 class EgoPlannerTest {
     @Test
-    fun `planner returns clamped thought decision and emits events`() {
+    fun `continuation planner returns action decision and emits events`() {
         val llm = StubChatModelClient()
-        llm.enqueueRawResponse("""{"decision":"defer","urgency":"high","defer_content":"abcdefghi"}""")
+        llm.enqueueRawResponse(
+            """
+            {
+              "decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable",
+              "urgency":"high",
+              "action_type":"contact_user",
+              "action_payload":"payload-too-long",
+              "action_summary":"summary-too-long"
+            }
+            """.trimIndent()
+        )
         val instrumentation = RecordingInstrumentation()
         val planner = LlmEgoPlanner(
             modelClient = llm,
-            config = AgentConfig(planner = PlannerConfig(maxThoughtChars = 5, maxCompletionTokens = 88)),
+            config = AgentConfig(maxActionPayloadChars = 7, maxActionSummaryChars = 8),
             instrumentation = instrumentation
         )
 
         val decision = planner.decide(
-            trigger = ai.neopsyke.agent.model.EgoTrigger.IncomingInput(PendingInput(1, "hi")),
+            trigger = continuationTrigger(queuedContinuation(1, Urgency.HIGH, "think about it")),
             context = PlannerContext(
                 recentDialogue = emptyList(),
                 queue = QueueSnapshot(
                     pendingInputCount = 1,
-                    deferredIntentionCount = 2,
+                    continuationCount = 2,
                     pendingActionCount = 3
                 )
             )
         )
 
-        val thought = assertIs<ai.neopsyke.agent.model.EgoDecision.EnqueueThought>(decision)
-        assertEquals(Urgency.HIGH, thought.urgency)
-        assertEquals("abcde", thought.content)
+        val action = assertIs<ai.neopsyke.agent.model.EgoDecision.FormIntention>(decision)
+        assertEquals(Urgency.HIGH, action.urgency)
+        assertEquals("payload", action.payload)
+        assertEquals("summary-", action.summary)
         assertEquals("ego", llm.lastOptions.metadata.actor)
-        assertEquals("input", llm.lastOptions.metadata.callSite)
-        assertEquals(88, llm.lastOptions.maxTokens)
+        assertEquals("continuation", llm.lastOptions.metadata.callSite)
         val plannerFormat = assertIs<ChatResponseFormat.JsonSchema>(llm.lastOptions.responseFormat)
         assertTrue(plannerFormat.strict)
         assertTrue(instrumentation.events.any { it.type == "planner_start" })
         assertTrue(
             instrumentation.events.any {
-                it.type == "planner_decision" && it.data["decision_type"] == "defer"
+                it.type == "planner_decision" && it.data["decision_type"] == "intention"
             }
         )
         assertTrue(
             instrumentation.events.any {
                 it.type == "prompt_budget_allocation" &&
-                    it.data["call_site"] == "planner_prompt"
+                    it.data["call_site"] == "progression_prompt"
             }
         )
     }
@@ -80,7 +90,7 @@ class EgoPlannerTest {
         )
 
         val decision = planner.decide(
-            trigger = deferredTrigger(PendingThought(7, Urgency.LOW, "think", 1)),
+            trigger = continuationTrigger(queuedContinuation(7, Urgency.LOW, "think", 1)),
             context = PlannerContext(
                 recentDialogue = listOf(
                     DialogueTurn(DialogueRole.USER, "u"),
@@ -88,7 +98,7 @@ class EgoPlannerTest {
                 ),
                 queue = QueueSnapshot(
                     pendingInputCount = 0,
-                    deferredIntentionCount = 1,
+                    continuationCount = 1,
                     pendingActionCount = 0
                 )
             )
@@ -98,175 +108,18 @@ class EgoPlannerTest {
         assertEquals(ActionType.CONTACT_USER, action.actionType)
         assertEquals("payload", action.payload)
         assertEquals("summary-", action.summary)
-        assertEquals("deferred-intention", llm.lastOptions.metadata.callSite)
+        assertEquals("continuation", llm.lastOptions.metadata.callSite)
     }
 
     @Test
-    fun `planner routes recurring reminder requests to dedicated goal creation branch`() {
-        val llm = StubChatModelClient().apply {
-            enqueueRawResponse(
-                """
-                {
-                  "decision":"create_goal",
-                  "title":"Weather reminder",
-                  "instruction":"Check the current weather and send the user an update for this scheduled run.",
-                  "completion_criteria":"A weather update is delivered to the user for the current scheduled run.",
-                  "priority":"medium",
-                  "cron_expression":"*/5 * * * *",
-                  "assistant_response":null,
-                  "reason":null
-                }
-                """.trimIndent()
-            )
-        }
-        val instrumentation = RecordingInstrumentation()
-        val planner = LlmEgoPlanner(
-            modelClient = llm,
-            config = AgentConfig(),
-            instrumentation = instrumentation
-        )
-
-        val decision = planner.decide(
-            trigger = ai.neopsyke.agent.model.EgoTrigger.IncomingInput(
-                PendingInput(8, "I would like to set a goal for you: remind me of the current weather every 5 minutes.")
-            ),
-            context = PlannerContext(
-                recentDialogue = emptyList(),
-                queue = QueueSnapshot(0, 0, 0),
-                availableActions = setOf(ActionType.CONTACT_USER, ActionType.GOAL_OPERATION),
-                dispatchableActions = setOf(ActionType.CONTACT_USER, ActionType.GOAL_OPERATION)
-            )
-        )
-
-        val action = assertIs<ai.neopsyke.agent.model.EgoDecision.FormIntention>(decision)
-        assertEquals(ActionType.GOAL_OPERATION, action.actionType)
-        assertTrue(action.payload.contains(""""operation":"create""""))
-        assertTrue(action.payload.contains(""""cron_expression":"*/5 * * * *""""))
-        assertTrue(action.payload.contains("Weather reminder"))
-        assertEquals("input_goal_create", llm.lastOptions.metadata.callSite)
-        assertEquals(1, llm.calls.size)
-        assertTrue(
-            instrumentation.events.any {
-                it.type == "planner_branch_selected" && it.data["branch"] == "goal_creation"
-            }
-        )
-    }
-
-    @Test
-    fun `planner uses llm-provided cron for daily-at-time goal creation`() {
-        val llm = StubChatModelClient().apply {
-            enqueueRawResponse(
-                """
-                {
-                  "decision":"create_goal",
-                  "title":"Daily weather forecast",
-                  "instruction":"Fetch and deliver the weather forecast for the day.",
-                  "completion_criteria":"The weather forecast is delivered to the user for the current scheduled run.",
-                  "priority":"medium",
-                  "cron_expression":"5 5 * * *",
-                  "assistant_response":null,
-                  "reason":null
-                }
-                """.trimIndent()
-            )
-        }
-        val planner = LlmEgoPlanner(
-            modelClient = llm,
-            config = AgentConfig()
-        )
-
-        val decision = planner.decide(
-            trigger = ai.neopsyke.agent.model.EgoTrigger.IncomingInput(
-                PendingInput(10, "Create a new goal. It's purpose should be to remind me of the weather forecast for the day, every day at 5:05 am hamburg time.")
-            ),
-            context = PlannerContext(
-                recentDialogue = emptyList(),
-                queue = QueueSnapshot(0, 0, 0),
-                availableActions = setOf(ActionType.CONTACT_USER, ActionType.GOAL_OPERATION),
-                dispatchableActions = setOf(ActionType.CONTACT_USER, ActionType.GOAL_OPERATION)
-            )
-        )
-
-        val action = assertIs<ai.neopsyke.agent.model.EgoDecision.FormIntention>(decision)
-        assertEquals(ActionType.GOAL_OPERATION, action.actionType)
-        assertTrue(action.payload.contains(""""operation":"create""""))
-        assertTrue(action.payload.contains(""""cron_expression":"5 5 * * *""""))
-        assertEquals("input_goal_create", llm.lastOptions.metadata.callSite)
-        assertEquals(1, llm.calls.size)
-    }
-
-    @Test
-    fun `planner creates non-recurring goal when llm returns null cron`() {
-        val llm = StubChatModelClient().apply {
-            enqueueRawResponse(
-                """
-                {
-                  "decision":"create_goal",
-                  "title":"Learn Spanish",
-                  "instruction":"Track progress on learning Spanish vocabulary.",
-                  "completion_criteria":"User confirms progress.",
-                  "priority":"medium",
-                  "cron_expression":null,
-                  "assistant_response":null,
-                  "reason":null
-                }
-                """.trimIndent()
-            )
-        }
-        val planner = LlmEgoPlanner(
-            modelClient = llm,
-            config = AgentConfig()
-        )
-
-        val decision = planner.decide(
-            trigger = ai.neopsyke.agent.model.EgoTrigger.IncomingInput(
-                PendingInput(11, "Create a goal to learn Spanish")
-            ),
-            context = PlannerContext(
-                recentDialogue = emptyList(),
-                queue = QueueSnapshot(0, 0, 0),
-                availableActions = setOf(ActionType.CONTACT_USER, ActionType.GOAL_OPERATION),
-                dispatchableActions = setOf(ActionType.CONTACT_USER, ActionType.GOAL_OPERATION)
-            )
-        )
-
-        val action = assertIs<ai.neopsyke.agent.model.EgoDecision.FormIntention>(decision)
-        assertEquals(ActionType.GOAL_OPERATION, action.actionType)
-        assertFalse(action.payload.contains(""""cron_expression":""""))
-    }
-
-    @Test
-    fun `planner explains when recurring goals are unavailable for reminder requests`() {
-        val llm = StubChatModelClient()
-        val planner = LlmEgoPlanner(modelClient = llm, config = AgentConfig())
-
-        val decision = planner.decide(
-            trigger = ai.neopsyke.agent.model.EgoTrigger.IncomingInput(
-                PendingInput(9, "monitor the weather and remind me every 5 minutes")
-            ),
-            context = PlannerContext(
-                recentDialogue = emptyList(),
-                queue = QueueSnapshot(0, 0, 0),
-                availableActions = setOf(ActionType.CONTACT_USER),
-                dispatchableActions = setOf(ActionType.CONTACT_USER)
-            )
-        )
-
-        val action = assertIs<ai.neopsyke.agent.model.EgoDecision.FormIntention>(decision)
-        assertEquals(ActionType.CONTACT_USER, action.actionType)
-        assertTrue(action.payload.contains("goals are unavailable", ignoreCase = true))
-        assertEquals(0, llm.calls.size)
-    }
-
-    @Test
-    fun `planner attaches thought and plan context metadata to llm calls`() {
+    fun `planner attaches continuation and plan context metadata to llm calls`() {
         val llm = StubChatModelClient()
         llm.enqueueRawResponse("""{"decision":"noop","reason":"ok"}""")
         val planner = LlmEgoPlanner(
             modelClient = llm,
             config = AgentConfig()
         )
-        val thought = PendingThought(
+        val continuation = queuedContinuation(
             id = 17,
             urgency = Urgency.MEDIUM,
             content = "Plan step 2/4: Fetch summary of top result",
@@ -288,19 +141,19 @@ class EgoPlannerTest {
         )
 
         planner.decide(
-            trigger = deferredTrigger(thought),
+            trigger = continuationTrigger(continuation),
             context = PlannerContext(
                 recentDialogue = emptyList(),
                 queue = QueueSnapshot(0, 1, 0),
-                conversationContext = thought.conversationContext
+                conversationContext = continuation.conversationContext
             )
         )
 
         with(llm.lastOptions.metadata) {
             assertEquals("ego", actor)
             assertEquals("planner", cognitiveRole)
-            assertEquals("deferred-intention", callSite)
-            assertEquals("deferred-intention", trigger)
+            assertEquals("continuation", callSite)
+            assertEquals("continuation", trigger)
             assertEquals("id", originSource)
             assertEquals("learn-something", needId)
             assertEquals("impulse-42", rootImpulseId)
@@ -333,7 +186,7 @@ class EgoPlannerTest {
         )
 
         val decision = planner.decide(
-            trigger = deferredTrigger(PendingThought(7, Urgency.LOW, "think", 1)),
+            trigger = continuationTrigger(queuedContinuation(7, Urgency.LOW, "think", 1)),
             context = PlannerContext(
                 recentDialogue = emptyList(),
                 queue = QueueSnapshot(0, 0, 0)
@@ -347,7 +200,7 @@ class EgoPlannerTest {
     }
 
     @Test
-    fun `planner rejects actions unavailable at runtime`() {
+    fun `planner may propose actions that runtime later blocks`() {
         val llm = StubChatModelClient()
         llm.enqueueRawResponse(
             """
@@ -374,8 +227,8 @@ class EgoPlannerTest {
             )
         )
 
-        val noop = assertIs<ai.neopsyke.agent.model.EgoDecision.Noop>(decision)
-        assertTrue(noop.reason.contains("unavailable", ignoreCase = true))
+        val action = assertIs<ai.neopsyke.agent.model.EgoDecision.FormIntention>(decision)
+        assertEquals(ActionType.WEBSITE_FETCH, action.actionType)
     }
 
     @Test
@@ -383,7 +236,7 @@ class EgoPlannerTest {
         val llm = StubChatModelClient()
         llm.enqueueRawResponse("""{"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","action_type":"contact_user"}""")
         llm.enqueueRawResponse("not-json")
-        llm.enqueueRawResponseForCallSite("input_json_retry", "still-not-json")
+        llm.enqueueRawResponseForCallSite("general_action_json_retry", "still-not-json")
         val instrumentation = RecordingInstrumentation()
         val planner = LlmEgoPlanner(
             modelClient = llm,
@@ -411,8 +264,8 @@ class EgoPlannerTest {
         val llm = StubChatModelClient().apply {
             enqueueRawResponse("not-json")
             enqueueRawResponseForCallSite(
-                callSite = "input_json_retry",
-                content = """{"decision":"noop","reason":"recovered"}"""
+                callSite = "general_action_json_retry",
+                content = """{"intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"contact_user","action_payload":"recovered","action_summary":"recovered"}"""
             )
         }
         val planner = LlmEgoPlanner(modelClient = llm, config = AgentConfig())
@@ -425,9 +278,9 @@ class EgoPlannerTest {
             )
         )
 
-        val noop = assertIs<ai.neopsyke.agent.model.EgoDecision.Noop>(decision)
-        assertEquals("recovered", noop.reason)
-        assertTrue(llm.calls.any { it.options.metadata.callSite == "input_json_retry" })
+        val action = assertIs<ai.neopsyke.agent.model.EgoDecision.FormIntention>(decision)
+        assertEquals("recovered", action.payload)
+        assertTrue(llm.calls.any { it.options.metadata.callSite == "general_action_json_retry" })
     }
 
     @Test
@@ -459,7 +312,7 @@ class EgoPlannerTest {
         )
 
         val decision = planner.decide(
-            trigger = ai.neopsyke.agent.model.EgoTrigger.IncomingInput(PendingInput(1, "hello")),
+            trigger = continuationTrigger(queuedContinuation(1, Urgency.MEDIUM, "hello")),
             context = PlannerContext(
                 recentDialogue = emptyList(),
                 queue = QueueSnapshot(0, 0, 0)
@@ -485,13 +338,17 @@ class EgoPlannerTest {
             override fun chat(messages: List<ChatMessage>, options: ai.neopsyke.llm.ChatRequestOptions): ai.neopsyke.llm.ChatCompletion {
                 calls += options
                 return when (options.metadata.callSite) {
-                    "input" -> ai.neopsyke.llm.ChatCompletion(
+                    "input_intent_router" -> ai.neopsyke.llm.ChatCompletion(
+                        content = """{"route":"general_action","reasoning":"test default"}""",
+                        model = modelName
+                    )
+                    "general_action" -> ai.neopsyke.llm.ChatCompletion(
                         content = """{"decision":"noop","reason":"truncated""",
                         model = modelName,
                         finishReason = "length"
                     )
-                    "input_truncation_retry" -> ai.neopsyke.llm.ChatCompletion(
-                        content = """{"decision":"noop","reason":"truncation recovered"}""",
+                    "general_action_truncation_retry" -> ai.neopsyke.llm.ChatCompletion(
+                        content = """{"intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"contact_user","action_payload":"truncation recovered","action_summary":"recovered"}""",
                         model = modelName
                     )
                     else -> throw IllegalStateException("unexpected call site ${options.metadata.callSite}")
@@ -508,12 +365,12 @@ class EgoPlannerTest {
             )
         )
 
-        val noop = assertIs<ai.neopsyke.agent.model.EgoDecision.Noop>(decision)
-        assertTrue(noop.reason.contains("truncation recovered", ignoreCase = true))
-        val initialCall = calls.first { it.metadata.callSite == "input" }
-        val truncationRetry = calls.first { it.metadata.callSite == "input_truncation_retry" }
+        val action = assertIs<ai.neopsyke.agent.model.EgoDecision.FormIntention>(decision)
+        assertEquals("truncation recovered", action.payload)
+        val initialCall = calls.first { it.metadata.callSite == "general_action" }
+        val truncationRetry = calls.first { it.metadata.callSite == "general_action_truncation_retry" }
         assertTrue((truncationRetry.maxTokens ?: 0) > (initialCall.maxTokens ?: 0))
-        assertFalse(calls.any { it.metadata.callSite == "input_json_retry" })
+        assertFalse(calls.any { it.metadata.callSite == "general_action_json_retry" })
     }
 
     @Test
@@ -528,7 +385,7 @@ class EgoPlannerTest {
         val planner = LlmEgoPlanner(modelClient = llm, config = AgentConfig())
 
         val decision = planner.decide(
-            trigger = ai.neopsyke.agent.model.EgoTrigger.IncomingInput(PendingInput(1, "long answer")),
+            trigger = continuationTrigger(queuedContinuation(1, Urgency.MEDIUM, "long answer")),
             context = PlannerContext(
                 recentDialogue = emptyList(),
                 queue = QueueSnapshot(0, 0, 0),
@@ -553,7 +410,7 @@ class EgoPlannerTest {
         var repairCount = 0
         val planner = LlmEgoPlanner(
             modelClient = llm,
-            config = AgentConfig(planner = PlannerConfig(actionVerifierEnabled = true)),
+            config = AgentConfig(),
             instrumentation = instrumentation,
             onPlannerOutputRepaired = { repairCount += 1 }
         )
@@ -616,536 +473,6 @@ class EgoPlannerTest {
     }
 
     @Test
-    fun `planner ignores semantic-changing contact_user repair from action verifier`() {
-        val llm = StubChatModelClient().apply {
-            enqueueRawResponse(
-                """
-                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"contact_user","action_payload":"18","action_summary":"Return the computed integer"}
-                """.trimIndent()
-            )
-            enqueueRawResponseForCallSite(
-                callSite = "action_verifier",
-                content = """
-                {"verdict":"repair","action_type":"contact_user","action_payload":"20","action_summary":"Return the computed integer","reason":"The computed result is 20."}
-                """.trimIndent()
-            )
-        }
-        val instrumentation = RecordingInstrumentation()
-        var repairCount = 0
-        val planner = LlmEgoPlanner(
-            modelClient = llm,
-            config = AgentConfig(planner = PlannerConfig(actionVerifierEnabled = true)),
-            instrumentation = instrumentation,
-            onPlannerOutputRepaired = { repairCount += 1 }
-        )
-
-        val decision = planner.decide(
-            trigger = ai.neopsyke.agent.model.EgoTrigger.IncomingInput(PendingInput(1, "what is 2+2?")),
-            context = PlannerContext(
-                recentDialogue = emptyList(),
-                queue = QueueSnapshot(0, 0, 0)
-            )
-        )
-
-        val action = assertIs<ai.neopsyke.agent.model.EgoDecision.FormIntention>(decision)
-        assertEquals(ActionType.CONTACT_USER, action.actionType)
-        assertEquals("18", action.payload)
-        assertEquals("Return the computed integer", action.summary)
-        assertEquals(0, repairCount)
-        assertTrue(llm.calls.any { it.options.metadata.callSite == "action_verifier" })
-        assertTrue(
-            instrumentation.events.any {
-                it.type == "warning" &&
-                    (it.data["message"] as? String)?.contains("meaning-changing repair", ignoreCase = true) == true
-            }
-        )
-        assertTrue(
-            instrumentation.events.any {
-                it.type == "action_verifier_result" &&
-                    it.data["verdict"] == "approve" &&
-                    it.data["repaired"] == false &&
-                    (it.data["reason"] as? String)?.contains("alter action meaning", ignoreCase = true) == true
-            }
-        )
-    }
-
-    @Test
-    fun `planner allows surface-only contact_user repair from action verifier`() {
-        val llm = StubChatModelClient().apply {
-            enqueueRawResponse(
-                """
-                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"contact_user","action_payload":"  hello, world  ","action_summary":"reply"}
-                """.trimIndent()
-            )
-            enqueueRawResponseForCallSite(
-                callSite = "action_verifier",
-                content = """
-                {"verdict":"repair","action_type":"contact_user","action_payload":"Hello world.","action_summary":"reply","reason":"surface cleanup only"}
-                """.trimIndent()
-            )
-        }
-        val instrumentation = RecordingInstrumentation()
-        var repairCount = 0
-        val planner = LlmEgoPlanner(
-            modelClient = llm,
-            config = AgentConfig(planner = PlannerConfig(actionVerifierEnabled = true)),
-            instrumentation = instrumentation,
-            onPlannerOutputRepaired = { repairCount += 1 }
-        )
-
-        val decision = planner.decide(
-            trigger = ai.neopsyke.agent.model.EgoTrigger.IncomingInput(PendingInput(1, "say hello world")),
-            context = PlannerContext(
-                recentDialogue = emptyList(),
-                queue = QueueSnapshot(0, 0, 0)
-            )
-        )
-
-        val action = assertIs<ai.neopsyke.agent.model.EgoDecision.FormIntention>(decision)
-        assertEquals(ActionType.CONTACT_USER, action.actionType)
-        assertEquals("Hello world.", action.payload)
-        assertEquals(1, repairCount)
-        assertTrue(
-            instrumentation.events.any {
-                it.type == "planner_output_repaired" &&
-                    it.data["repair"] == "action_verifier_repair"
-            }
-        )
-        assertTrue(
-            instrumentation.events.any {
-                it.type == "action_verifier_result" &&
-                    it.data["verdict"] == "repair" &&
-                    it.data["repaired"] == true
-            }
-        )
-    }
-
-    @Test
-    fun `planner ignores repair back to origin evidence action when follow-up already has successful evidence`() {
-        val llm = StubChatModelClient().apply {
-            enqueueRawResponse(
-                """
-                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"contact_user","action_payload":"The page confirms the pricing details.","action_summary":"Provide fetched summary"}
-                """.trimIndent()
-            )
-            enqueueRawResponseForCallSite(
-                callSite = "action_verifier",
-                content = """
-                {"verdict":"repair","action_type":"website_fetch","action_payload":{"url":"https://example.com/pricing","max_chars":900},"action_summary":"Fetch pricing page again","reason":"verify page contents"}
-                """.trimIndent()
-            )
-        }
-        val instrumentation = RecordingInstrumentation()
-        val planner = LlmEgoPlanner(
-            modelClient = llm,
-            config = AgentConfig(planner = PlannerConfig(actionVerifierEnabled = true)),
-            instrumentation = instrumentation
-        )
-
-        val decision = planner.decide(
-            trigger = deferredTrigger(
-                PendingThought(
-                    id = 9,
-                    urgency = Urgency.MEDIUM,
-                    content = """
-                    Website fetch completed.
-                    RECALLED_MEMORY_BEGIN
-                    Fetch completed for https://example.com/pricing. Extracted 612 chars. Preview: Pricing page with current plans and rates.
-                    RECALLED_MEMORY_END
-                    Produce the next planner decision as one raw JSON object only.
-                    Do not use tool or function wrappers.
-                    """.trimIndent(),
-                    passes = 1,
-                    originActionType = ActionType.WEBSITE_FETCH,
-                    originActionObservedEvidence = true
-                )
-            ),
-            context = PlannerContext(
-                recentDialogue = listOf(DialogueTurn(DialogueRole.USER, "what is the current time in hamburg?")),
-                queue = QueueSnapshot(0, 1, 0)
-            )
-        )
-
-        val action = assertIs<ai.neopsyke.agent.model.EgoDecision.FormIntention>(decision)
-        assertEquals(ActionType.CONTACT_USER, action.actionType)
-        assertTrue(llm.calls.any { it.options.metadata.callSite == "action_verifier" })
-        assertTrue(
-            instrumentation.events.any {
-                it.type == "action_verifier_result" &&
-                    it.data["verdict"] == "approve" &&
-                    (it.data["reason"] as? String)?.contains("repair ignored", ignoreCase = true) == true
-            }
-        )
-    }
-
-    @Test
-    fun `planner ignores action type changing verifier repair even when user requested refresh`() {
-        val llm = StubChatModelClient().apply {
-            enqueueRawResponse(
-                """
-                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"contact_user","action_payload":"The page confirms the pricing details.","action_summary":"Provide fetched summary"}
-                """.trimIndent()
-            )
-            enqueueRawResponseForCallSite(
-                callSite = "action_verifier",
-                content = """
-                {"verdict":"repair","action_type":"website_fetch","action_payload":{"url":"https://example.com/pricing","max_chars":900},"action_summary":"Fetch pricing page again","reason":"user asked to refresh"}
-                """.trimIndent()
-            )
-        }
-        val planner = LlmEgoPlanner(
-            modelClient = llm,
-            config = AgentConfig(planner = PlannerConfig(actionVerifierEnabled = true))
-        )
-
-        val decision = planner.decide(
-            trigger = deferredTrigger(
-                PendingThought(
-                    id = 10,
-                    urgency = Urgency.MEDIUM,
-                    content = "follow-up",
-                    passes = 1,
-                    originActionType = ActionType.WEBSITE_FETCH,
-                    originActionObservedEvidence = true
-                )
-            ),
-            context = PlannerContext(
-                recentDialogue = listOf(DialogueTurn(DialogueRole.USER, "refresh and check again please")),
-                queue = QueueSnapshot(0, 1, 0)
-            )
-        )
-
-        val action = assertIs<ai.neopsyke.agent.model.EgoDecision.FormIntention>(decision)
-        assertEquals(ActionType.CONTACT_USER, action.actionType)
-        assertEquals("The page confirms the pricing details.", action.payload)
-        assertTrue(llm.calls.any { it.options.metadata.callSite == "action_verifier" })
-    }
-
-    @Test
-    fun `planner treats no-op action verifier repair as approve`() {
-        val llm = StubChatModelClient().apply {
-            enqueueRawResponse(
-                """
-                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"website_fetch","action_payload":"{\"url\":\"https://example.com/pricing\",\"max_chars\":900}","action_summary":"Fetch pricing page"}
-                """.trimIndent()
-            )
-            enqueueRawResponseForCallSite(
-                callSite = "action_verifier",
-                content = """
-                {"verdict":"repair","action_type":"website_fetch","action_payload":{"url":"https://example.com/pricing","max_chars":900},"action_summary":"Fetch pricing page","reason":"same action wording update"}
-                """.trimIndent()
-            )
-        }
-        val instrumentation = RecordingInstrumentation()
-        var repairCount = 0
-        val planner = LlmEgoPlanner(
-            modelClient = llm,
-            config = AgentConfig(planner = PlannerConfig(actionVerifierEnabled = true)),
-            instrumentation = instrumentation,
-            onPlannerOutputRepaired = { repairCount += 1 }
-        )
-
-        val decision = planner.decide(
-            trigger = ai.neopsyke.agent.model.EgoTrigger.IncomingInput(PendingInput(1, "what time is it?")),
-            context = PlannerContext(
-                recentDialogue = emptyList(),
-                queue = QueueSnapshot(0, 0, 0)
-            )
-        )
-
-        val action = assertIs<ai.neopsyke.agent.model.EgoDecision.FormIntention>(decision)
-        assertEquals(ActionType.WEBSITE_FETCH, action.actionType)
-        assertEquals("""{"url":"https://example.com/pricing","max_chars":900}""", action.payload)
-        assertEquals(0, repairCount)
-        assertTrue(llm.calls.any { it.options.metadata.callSite == "action_verifier" })
-        assertTrue(
-            instrumentation.events.any {
-                it.type == "action_verifier_result" &&
-                    it.data["verdict"] == "approve" &&
-                    it.data["repaired"] == false &&
-                    (it.data["reason"] as? String)?.contains("No-op repair ignored", ignoreCase = true) == true
-            }
-        )
-        assertFalse(
-            instrumentation.events.any {
-                it.type == "planner_output_repaired" && it.data["repair"] == "action_verifier_repair"
-            }
-        )
-    }
-
-    @Test
-    fun `planner ignores meaning-changing non-contact action verifier repair`() {
-        val llm = StubChatModelClient().apply {
-            enqueueRawResponse(
-                """
-                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"website_fetch","action_payload":"{\"url\":\"https://example.com\"}","action_summary":"fetch"}
-                """.trimIndent()
-            )
-            enqueueRawResponseForCallSite(
-                callSite = "action_verifier",
-                content = """
-                {"verdict":"repair","action_type":"website_fetch","action_payload":{"url":"https://openai.com/pricing","max_chars":900},"action_summary":"fetch pricing"}
-                """.trimIndent()
-            )
-        }
-        val planner = LlmEgoPlanner(
-            modelClient = llm,
-            config = AgentConfig(planner = PlannerConfig(actionVerifierEnabled = true))
-        )
-
-        val decision = planner.decide(
-            trigger = ai.neopsyke.agent.model.EgoTrigger.IncomingInput(PendingInput(1, "pricing")),
-            context = PlannerContext(
-                recentDialogue = emptyList(),
-                queue = QueueSnapshot(0, 0, 0)
-            )
-        )
-
-        val action = assertIs<ai.neopsyke.agent.model.EgoDecision.FormIntention>(decision)
-        assertEquals(ActionType.WEBSITE_FETCH, action.actionType)
-        assertEquals("""{"url":"https://example.com"}""", action.payload)
-    }
-
-    @Test
-    fun `planner ignores action type changing verifier repair`() {
-        val llm = StubChatModelClient().apply {
-            enqueueRawResponse(
-                """
-                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"website_fetch","action_payload":"{\"url\":\"https://example.com\"}","action_summary":"fetch"}
-                """.trimIndent()
-            )
-            enqueueRawResponseForCallSite(
-                callSite = "action_verifier",
-                content = """
-                {"verdict":"repair","action_type":"web_search","action_payload":"OpenAI pricing","action_summary":"search pricing","reason":"different tool would be better"}
-                """.trimIndent()
-            )
-        }
-        val instrumentation = RecordingInstrumentation()
-        val planner = LlmEgoPlanner(
-            modelClient = llm,
-            config = AgentConfig(planner = PlannerConfig(actionVerifierEnabled = true)),
-            instrumentation = instrumentation
-        )
-
-        val decision = planner.decide(
-            trigger = ai.neopsyke.agent.model.EgoTrigger.IncomingInput(PendingInput(1, "pricing")),
-            context = PlannerContext(
-                recentDialogue = emptyList(),
-                queue = QueueSnapshot(0, 0, 0)
-            )
-        )
-
-        val action = assertIs<ai.neopsyke.agent.model.EgoDecision.FormIntention>(decision)
-        assertEquals(ActionType.WEBSITE_FETCH, action.actionType)
-        assertEquals("""{"url":"https://example.com"}""", action.payload)
-        assertTrue(
-            instrumentation.events.any {
-                it.type == "warning" &&
-                    (it.data["message"] as? String)?.contains("meaning-changing repair", ignoreCase = true) == true
-            }
-        )
-    }
-
-    @Test
-    fun `planner converts verifier reject into noop`() {
-        val llm = StubChatModelClient().apply {
-            enqueueRawResponse(
-                """
-                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"contact_user","action_payload":"unsafe","action_summary":"respond"}
-                """.trimIndent()
-            )
-            enqueueRawResponseForCallSite(
-                callSite = "action_verifier",
-                content = """{"verdict":"reject","reason":"internally inconsistent with trigger"}"""
-            )
-        }
-        val instrumentation = RecordingInstrumentation()
-        val planner = LlmEgoPlanner(
-            modelClient = llm,
-            config = AgentConfig(planner = PlannerConfig(actionVerifierEnabled = true)),
-            instrumentation = instrumentation
-        )
-
-        val decision = planner.decide(
-            trigger = ai.neopsyke.agent.model.EgoTrigger.IncomingInput(PendingInput(1, "safe response only")),
-            context = PlannerContext(
-                recentDialogue = emptyList(),
-                queue = QueueSnapshot(0, 0, 0)
-            )
-        )
-
-        val noop = assertIs<ai.neopsyke.agent.model.EgoDecision.Noop>(decision)
-        assertTrue(noop.reason.contains("inconsistent", ignoreCase = true))
-        assertEquals(ActionType.CONTACT_USER, noop.deniedActionType)
-        assertEquals("unsafe", noop.deniedActionPayload)
-        assertEquals("ACTION_VERIFIER_REJECT", noop.denialReasonCode)
-        assertTrue(
-            instrumentation.events.any {
-                it.type == "action_verifier_result" &&
-                    it.data["verdict"] == "reject"
-            }
-        )
-    }
-
-    @Test
-    fun `planner overrides repeated identical answer reject from action verifier`() {
-        val llm = StubChatModelClient().apply {
-            enqueueRawResponse(
-                """
-                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"contact_user","action_payload":"Omar","action_summary":"respond"}
-                """.trimIndent()
-            )
-            enqueueRawResponseForCallSite(
-                callSite = "action_verifier",
-                content = """{"verdict":"reject","reason":"The answer 'Omar' is incorrect based on the provided information."}"""
-            )
-        }
-        val instrumentation = RecordingInstrumentation()
-        val planner = LlmEgoPlanner(
-            modelClient = llm,
-            config = AgentConfig(planner = PlannerConfig(actionVerifierEnabled = true)),
-            instrumentation = instrumentation
-        )
-
-        val decision = planner.decide(
-            trigger = deferredTrigger(
-                PendingThought(
-                    id = 1,
-                    urgency = Urgency.LOW,
-                    content = "Retry previous answer",
-                    deniedActionType = ActionType.CONTACT_USER,
-                    deniedActionPayload = "Omar",
-                    denialReason = "The answer 'Omar' is incorrect based on the provided information.",
-                    denialReasonCode = "ACTION_VERIFIER_REJECT"
-                )
-            ),
-            context = PlannerContext(
-                recentDialogue = emptyList(),
-                queue = QueueSnapshot(0, 0, 0)
-            )
-        )
-
-        val action = assertIs<ai.neopsyke.agent.model.EgoDecision.FormIntention>(decision)
-        assertEquals(ActionType.CONTACT_USER, action.actionType)
-        assertEquals("Omar", action.payload)
-        assertTrue(
-            instrumentation.events.any {
-                it.type == "warning" &&
-                    (it.data["message"] as? String)?.contains("repeated a non-technical reject", ignoreCase = true) == true
-            }
-        )
-    }
-
-    @Test
-    fun `planner retries action verifier with strict json and applies retry verdict`() {
-        val llm = StubChatModelClient().apply {
-            enqueueRawResponse(
-                """
-                {"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"contact_user","action_payload":"unsafe","action_summary":"respond"}
-                """.trimIndent()
-            )
-            enqueueRawResponseForCallSite(callSite = "action_verifier", content = "not-json")
-            enqueueRawResponseForCallSite(
-                callSite = "action_verifier_json_retry",
-                content = """{"verdict":"reject","reason":"retry parsed and rejected"}"""
-            )
-        }
-        val planner = LlmEgoPlanner(
-            modelClient = llm,
-            config = AgentConfig(planner = PlannerConfig(actionVerifierEnabled = true))
-        )
-
-        val decision = planner.decide(
-            trigger = ai.neopsyke.agent.model.EgoTrigger.IncomingInput(PendingInput(1, "safe response only")),
-            context = PlannerContext(
-                recentDialogue = emptyList(),
-                queue = QueueSnapshot(0, 0, 0)
-            )
-        )
-
-        val noop = assertIs<ai.neopsyke.agent.model.EgoDecision.Noop>(decision)
-        assertTrue(noop.reason.contains("rejected", ignoreCase = true))
-        assertTrue(llm.calls.any { it.options.metadata.callSite == "action_verifier_json_retry" })
-        val verifierCall = llm.calls.firstOrNull { it.options.metadata.callSite == "action_verifier" }
-        assertNotNull(verifierCall)
-        val verifierFormat = assertIs<ChatResponseFormat.JsonSchema>(verifierCall.options.responseFormat)
-        assertTrue(verifierFormat.strict)
-    }
-
-    @Test
-    fun `planner trips action verifier parse-failure circuit breaker and bypasses one decision`() {
-        val llm = StubChatModelClient().apply {
-            enqueueRawResponse("""{"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"contact_user","action_payload":"a1","action_summary":"s1"}""")
-            enqueueRawResponse("""{"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"contact_user","action_payload":"a2","action_summary":"s2"}""")
-            enqueueRawResponse("""{"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"contact_user","action_payload":"a3","action_summary":"s3"}""")
-            enqueueRawResponseForCallSite(callSite = "action_verifier", content = "bad-1")
-            enqueueRawResponseForCallSite(callSite = "action_verifier_json_retry", content = "bad-1-retry")
-            enqueueRawResponseForCallSite(callSite = "action_verifier", content = "bad-2")
-            enqueueRawResponseForCallSite(callSite = "action_verifier_json_retry", content = "bad-2-retry")
-        }
-        val instrumentation = RecordingInstrumentation()
-        val planner = LlmEgoPlanner(
-            modelClient = llm,
-            config = AgentConfig(planner = PlannerConfig(actionVerifierEnabled = true)),
-            instrumentation = instrumentation
-        )
-        val trigger = ai.neopsyke.agent.model.EgoTrigger.IncomingInput(PendingInput(1, "test"))
-        val context = PlannerContext(recentDialogue = emptyList(), queue = QueueSnapshot(0, 0, 0))
-
-        assertIs<ai.neopsyke.agent.model.EgoDecision.FormIntention>(planner.decide(trigger, context))
-        assertIs<ai.neopsyke.agent.model.EgoDecision.FormIntention>(planner.decide(trigger, context))
-        assertIs<ai.neopsyke.agent.model.EgoDecision.FormIntention>(planner.decide(trigger, context))
-
-        val verifierCalls = llm.calls.count { it.options.metadata.callSite == "action_verifier" }
-        val verifierRetryCalls = llm.calls.count { it.options.metadata.callSite == "action_verifier_json_retry" }
-        assertEquals(2, verifierCalls)
-        assertEquals(2, verifierRetryCalls)
-        assertTrue(
-            instrumentation.events.any {
-                it.type == "warning" &&
-                    (it.data["message"] as? String)?.contains("circuit breaker tripped", ignoreCase = true) == true
-            }
-        )
-        assertTrue(instrumentation.events.any { it.type == "action_verifier_circuit_breaker" })
-    }
-
-    @Test
-    fun `planner action verifier bypass is scoped per input and action type`() {
-        val llm = StubChatModelClient().apply {
-            enqueueRawResponse("""{"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"contact_user","action_payload":"a1","action_summary":"s1"}""")
-            enqueueRawResponse("""{"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"contact_user","action_payload":"a2","action_summary":"s2"}""")
-            enqueueRawResponse("""{"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"contact_user","action_payload":"a3","action_summary":"s3"}""")
-            enqueueRawResponse("""{"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"contact_user","action_payload":"b1","action_summary":"s4"}""")
-            enqueueRawResponseForCallSite(callSite = "action_verifier", content = "bad-1")
-            enqueueRawResponseForCallSite(callSite = "action_verifier_json_retry", content = "bad-1-retry")
-            enqueueRawResponseForCallSite(callSite = "action_verifier", content = "bad-2")
-            enqueueRawResponseForCallSite(callSite = "action_verifier_json_retry", content = "bad-2-retry")
-        }
-        val planner = LlmEgoPlanner(
-            modelClient = llm,
-            config = AgentConfig(planner = PlannerConfig(actionVerifierEnabled = true))
-        )
-        val context = PlannerContext(recentDialogue = emptyList(), queue = QueueSnapshot(0, 0, 0))
-        val triggerA = ai.neopsyke.agent.model.EgoTrigger.IncomingInput(
-            PendingInput(id = 1, content = "test-a", receivedAtMs = 1L)
-        )
-        val triggerB = ai.neopsyke.agent.model.EgoTrigger.IncomingInput(
-            PendingInput(id = 2, content = "test-b", receivedAtMs = 2L)
-        )
-
-        assertIs<ai.neopsyke.agent.model.EgoDecision.FormIntention>(planner.decide(triggerA, context))
-        assertIs<ai.neopsyke.agent.model.EgoDecision.FormIntention>(planner.decide(triggerA, context))
-        assertIs<ai.neopsyke.agent.model.EgoDecision.FormIntention>(planner.decide(triggerA, context)) // bypassed
-        assertIs<ai.neopsyke.agent.model.EgoDecision.FormIntention>(planner.decide(triggerB, context)) // verifier active again
-
-        val verifierCalls = llm.calls.count { it.options.metadata.callSite == "action_verifier" }
-        val verifierRetryCalls = llm.calls.count { it.options.metadata.callSite == "action_verifier_json_retry" }
-        assertEquals(3, verifierCalls)
-        assertEquals(2, verifierRetryCalls)
-    }
-
-    @Test
     fun `planner trims oversized prompt before sending to model`() {
         val llm = StubChatModelClient()
         llm.enqueueRawResponse("""{"decision":"noop","reason":"done"}""")
@@ -1163,7 +490,7 @@ class EgoPlannerTest {
             },
             queue = QueueSnapshot(
                 pendingInputCount = 5,
-                deferredIntentionCount = 4,
+                continuationCount = 4,
                 pendingActionCount = 3
             )
         )
@@ -1188,7 +515,7 @@ class EgoPlannerTest {
             recentDialogue = listOf(DialogueTurn(DialogueRole.USER, "hello")),
             queue = QueueSnapshot(
                 pendingInputCount = 1,
-                deferredIntentionCount = 0,
+                continuationCount = 0,
                 pendingActionCount = 0
             ),
             shortTermContextSummary = "Short-term context summary:\n- user likes concise answers"
@@ -1213,7 +540,7 @@ class EgoPlannerTest {
             recentDialogue = listOf(DialogueTurn(DialogueRole.USER, "hello")),
             queue = QueueSnapshot(
                 pendingInputCount = 1,
-                deferredIntentionCount = 0,
+                continuationCount = 0,
                 pendingActionCount = 0
             ),
             shortTermContextSummary = "Short-term context summary:\n- user likes concise answers",
@@ -1251,7 +578,7 @@ class EgoPlannerTest {
             metaGuidance = "Finalize now with concise answer."
         )
 
-        planner.decide(deferredTrigger(PendingThought(1, Urgency.MEDIUM, "think")), context)
+        planner.decide(continuationTrigger(queuedContinuation(1, Urgency.MEDIUM, "think")), context)
 
         val prompt = llm.lastMessages.last().content
         assertTrue(prompt.contains("Deliberation pressure:"))
@@ -1267,7 +594,7 @@ class EgoPlannerTest {
         }
         val planner = LlmEgoPlanner(
             modelClient = llm,
-            config = AgentConfig(planner = PlannerConfig(actionVerifierEnabled = true))
+            config = AgentConfig()
         )
 
         planner.decide(
@@ -1292,16 +619,7 @@ class EgoPlannerTest {
         val planner = LlmEgoPlanner(modelClient = llm, config = AgentConfig())
 
         planner.decide(
-           ai.neopsyke.agent.model.EgoTrigger.IncomingImpulse(
-               ai.neopsyke.agent.model.PendingImpulse(
-                    id = 1,
-                    needId = "learn-something",
-                    prompt = "I feel curious and want to learn something new.",
-                    tension = 0.8,
-                    rawValue = 0.8,
-                    conversationContext = ai.neopsyke.agent.model.ConversationContext.default(),
-                )
-            ),
+           ai.neopsyke.agent.model.EgoTrigger.IncomingInput(PendingInput(1, "question")),
             PlannerContext(
                 recentDialogue = emptyList(),
                 queue = QueueSnapshot(0, 0, 0),
@@ -1338,8 +656,8 @@ class EgoPlannerTest {
         )
 
         val systemPrompt = llm.lastMessages.first().content
-        assertTrue(systemPrompt.contains("Do not return decision=intend without intention_kind, action_payload, and action_summary."))
-        assertTrue(systemPrompt.contains("\"action_summary\":\"required when decision=intend"))
+        assertTrue(systemPrompt.contains("action_summary"))
+        assertTrue(systemPrompt.contains("\"action_summary\":\"required"))
     }
 
     @Test
@@ -1360,7 +678,7 @@ class EgoPlannerTest {
         )
 
         val decision = planner.decide(
-            trigger = ai.neopsyke.agent.model.EgoTrigger.IncomingInput(PendingInput(1, "hello")),
+            trigger = continuationTrigger(queuedContinuation(1, Urgency.MEDIUM, "hello")),
             context = PlannerContext(
                 recentDialogue = emptyList(),
                 queue = QueueSnapshot(0, 0, 0)
@@ -1372,7 +690,7 @@ class EgoPlannerTest {
         assertTrue(
             instrumentation.events.any {
                 it.type == "warning" &&
-                    (it.data["message"] as? String)?.contains("Planner call failed", ignoreCase = true) == true
+                    (it.data["message"] as? String)?.contains("call failed", ignoreCase = true) == true
             }
         )
     }
@@ -1403,7 +721,7 @@ class EgoPlannerTest {
         )
 
         val decision = planner.decide(
-            trigger = ai.neopsyke.agent.model.EgoTrigger.IncomingInput(PendingInput(1, "hello")),
+            trigger = continuationTrigger(queuedContinuation(1, Urgency.MEDIUM, "hello")),
             context = PlannerContext(
                 recentDialogue = emptyList(),
                 queue = QueueSnapshot(0, 0, 0)
@@ -1434,7 +752,7 @@ class EgoPlannerTest {
         )
 
         val decision = planner.decide(
-            trigger = ai.neopsyke.agent.model.EgoTrigger.IncomingInput(PendingInput(1, "hello")),
+            trigger = continuationTrigger(queuedContinuation(1, Urgency.MEDIUM, "hello")),
             context = PlannerContext(
                 recentDialogue = emptyList(),
                 queue = QueueSnapshot(0, 0, 0)
@@ -1466,7 +784,7 @@ class EgoPlannerTest {
         )
 
         val decision = planner.decide(
-            trigger = ai.neopsyke.agent.model.EgoTrigger.IncomingInput(PendingInput(1, "pricing?")),
+            trigger = continuationTrigger(queuedContinuation(1, Urgency.MEDIUM, "pricing?")),
             context = PlannerContext(
                 recentDialogue = emptyList(),
                 queue = QueueSnapshot(0, 0, 0)
@@ -1493,7 +811,7 @@ class EgoPlannerTest {
         val planner = LlmEgoPlanner(modelClient = llm, config = AgentConfig())
 
         val decision = planner.decide(
-            trigger = ai.neopsyke.agent.model.EgoTrigger.IncomingInput(PendingInput(1, "test")),
+            trigger = continuationTrigger(queuedContinuation(1, Urgency.MEDIUM, "test")),
             context = PlannerContext(
                 recentDialogue = emptyList(),
                 queue = QueueSnapshot(0, 0, 0)
@@ -1513,7 +831,7 @@ class EgoPlannerTest {
         val planner = LlmEgoPlanner(modelClient = llm, config = AgentConfig())
 
         val decision = planner.decide(
-            trigger = ai.neopsyke.agent.model.EgoTrigger.IncomingInput(PendingInput(1, "test")),
+            trigger = continuationTrigger(queuedContinuation(1, Urgency.MEDIUM, "test")),
             context = PlannerContext(
                 recentDialogue = emptyList(),
                 queue = QueueSnapshot(0, 0, 0)
@@ -1521,27 +839,6 @@ class EgoPlannerTest {
         )
 
         assertIs<ai.neopsyke.agent.model.EgoDecision.Noop>(decision)
-    }
-
-    @Test
-    fun `planner prompt includes plan decision type in schema`() {
-        val llm = StubChatModelClient().apply {
-            enqueueRawResponse("""{"decision":"noop","reason":"done"}""")
-        }
-        val planner = LlmEgoPlanner(modelClient = llm, config = AgentConfig())
-
-        planner.decide(
-           ai.neopsyke.agent.model.EgoTrigger.IncomingInput(PendingInput(1, "test")),
-            PlannerContext(
-                recentDialogue = emptyList(),
-                queue = QueueSnapshot(0, 0, 0)
-            )
-        )
-
-        val allPromptText = llm.lastMessages.joinToString("\n") { it.content }
-        assertTrue(allPromptText.contains("plan:"))
-        assertTrue(allPromptText.contains("plan_goal"))
-        assertTrue(allPromptText.contains("plan_steps"))
     }
 
     @Test

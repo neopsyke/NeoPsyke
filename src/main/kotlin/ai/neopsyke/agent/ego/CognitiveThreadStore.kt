@@ -99,7 +99,6 @@ internal class CognitiveThreadStore {
                 IntentionKind.STAGE,
                 IntentionKind.REQUEST_AUTHORIZATION,
                 IntentionKind.COMMIT,
-                IntentionKind.DEFER,
             ),
             allowedCommitModes = CognitivePolicyShaper.opportunityCommitModes(thread.securityContext),
         ).also { opportunity ->
@@ -131,7 +130,6 @@ internal class CognitiveThreadStore {
                 IntentionKind.STAGE,
                 IntentionKind.REQUEST_AUTHORIZATION,
                 IntentionKind.COMMIT,
-                IntentionKind.DEFER,
             ),
             allowedCommitModes = CognitivePolicyShaper.opportunityCommitModes(thread.securityContext),
         ).also { opportunity ->
@@ -178,7 +176,6 @@ internal class CognitiveThreadStore {
                 IntentionKind.STAGE,
                 IntentionKind.REQUEST_AUTHORIZATION,
                 IntentionKind.COMMIT,
-                IntentionKind.DEFER,
             ),
             allowedCommitModes = CognitivePolicyShaper.opportunityCommitModes(thread.securityContext),
         ).also { opportunity ->
@@ -230,7 +227,6 @@ internal class CognitiveThreadStore {
                 IntentionKind.STAGE,
                 IntentionKind.REQUEST_AUTHORIZATION,
                 IntentionKind.COMMIT,
-                IntentionKind.DEFER,
             ),
             allowedCommitModes = CognitivePolicyShaper.opportunityCommitModes(thread.securityContext),
         ).also { opportunity ->

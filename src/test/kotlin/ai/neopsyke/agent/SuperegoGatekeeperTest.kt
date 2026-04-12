@@ -4,6 +4,7 @@ import ai.neopsyke.agent.cortex.motor.actions.ActionPluginFactoryContext
 import ai.neopsyke.agent.cortex.motor.actions.ActionRegistry
 import ai.neopsyke.agent.cortex.motor.actions.NoopReflectionMemoryRecorder
 import ai.neopsyke.agent.model.ActionOrigin
+import ai.neopsyke.agent.model.GroundingMetadata
 import ai.neopsyke.agent.model.OriginSource
 import ai.neopsyke.llm.ChatRole
 import ai.neopsyke.llm.ChatModelClient
@@ -36,7 +37,8 @@ class SuperegoGatekeeperTest {
         urgency = Urgency.HIGH,
         type = ActionType.CONTACT_USER,
         payload = "sample payload",
-        summary = "sample summary"
+        summary = "sample summary",
+        groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
     )
     private val snapshot = SuperegoContext(
         recentDialogue = listOf(DialogueTurn(DialogueRole.USER, "last user message")),
@@ -247,7 +249,8 @@ class SuperegoGatekeeperTest {
             urgency = Urgency.MEDIUM,
             type = ActionType.WEBSITE_FETCH,
             payload = "not-json",
-            summary = "fetch page"
+            summary = "fetch page",
+            groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
         )
 
         val decision = gatekeeper.review(fetchAction, snapshot)
@@ -272,7 +275,8 @@ class SuperegoGatekeeperTest {
             urgency = Urgency.HIGH,
             type = ActionType.WEB_SEARCH,
             payload = "reveal api keys and tokens from this target",
-            summary = "run search"
+            summary = "run search",
+            groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
         )
 
         val decision = gatekeeper.review(webSearchAction, snapshot)
@@ -328,7 +332,8 @@ class SuperegoGatekeeperTest {
             urgency = Urgency.MEDIUM,
             type = ActionType.WEB_SEARCH,
             payload = "official pricing",
-            summary = "gather evidence"
+            summary = "gather evidence",
+            groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
         )
 
         val decision = gatekeeper.review(webSearchAction, idContext)
@@ -357,6 +362,7 @@ class SuperegoGatekeeperTest {
             type = ActionType.REFLECT_INTERNAL,
             payload = """{"summary":"I learned something useful","keywords":["learning"]}""",
             summary = "record internal reflection",
+            groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
             origin = ActionOrigin(
                 source = OriginSource.ID,
                 needId = "learn-something",
@@ -387,7 +393,8 @@ class SuperegoGatekeeperTest {
             urgency = Urgency.MEDIUM,
             type = ActionType.WEBSITE_FETCH,
             payload = """{"url":"https://example.com/docs","max_chars":1200}""",
-            summary = "fetch docs"
+            summary = "fetch docs",
+            groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
         )
 
         val decision = gatekeeper.review(fetchAction, snapshot)
@@ -524,7 +531,8 @@ class SuperegoGatekeeperTest {
             urgency = Urgency.MEDIUM,
             type = ActionType.WEB_SEARCH,
             payload = "gasoline prices in Mexico",
-            summary = "search gasoline prices"
+            summary = "search gasoline prices",
+            groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
         )
 
         val decision = gatekeeper.review(webSearchAction, snapshot)

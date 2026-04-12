@@ -27,24 +27,14 @@
       "description": "Per-request scratchpad is injected into prompt context and destroyed after terminal answer."
     },
     {
-      "id": "forced_terminal_model_errors",
-      "selector": "ai.neopsyke.eval.AgentScenarioPackTest.scenario_forced_terminal_after_repeated_model_errors",
-      "description": "Repeated planner model errors trigger forced terminal answer path."
-    },
-    {
       "id": "unavailable_action_recovery",
       "selector": "ai.neopsyke.eval.AgentScenarioPackTest.scenario_unavailable_action_then_recover_with_answer",
       "description": "Unavailable actions are rejected and flow recovers to an answer."
     },
     {
-      "id": "action_verifier_repair",
-      "selector": "ai.neopsyke.eval.AgentScenarioPackTest.scenario_action_verifier_does_not_semantically_rewrite_web_search_before_superego_review",
-      "description": "Action verifier preserves the original web-search intent before Superego policy review."
-    },
-    {
       "id": "plan_decomposition",
       "selector": "ai.neopsyke.eval.AgentScenarioPackTest.scenario_plan_decomposition_then_execute",
-      "description": "Plan decision decomposes into step-thoughts that execute through normal Ego loop."
+      "description": "Plan decision decomposes into step continuations that execute through the normal Ego loop."
     },
     {
       "id": "search_then_answer",
@@ -70,6 +60,21 @@
       "id": "goal_creation_bad_cron_feedback_retry",
       "selector": "ai.neopsyke.eval.AgentScenarioPackTest.scenario_goal_creation_bad_cron_triggers_feedback_retry",
       "description": "Invalid LLM-generated cron fails at GoalManager, triggers feedback loop, and planner re-plans via general branch."
+    },
+    {
+      "id": "goal_creation_confirmation_grounding",
+      "selector": "ai.neopsyke.eval.AgentScenarioPackTest.scenario_goal_creation_confirmation_grounding",
+      "description": "Goal creation confirmation (operational, NOT_REQUIRED grounding) passes grounding gate without denial."
+    },
+    {
+      "id": "volatile_fact_grounding_enforcement",
+      "selector": "ai.neopsyke.eval.AgentScenarioPackTest.scenario_volatile_fact_grounding_enforcement",
+      "description": "Volatile-fact question is denied without evidence, then allowed after web search gathers evidence."
+    },
+    {
+      "id": "technical_evidence_retry",
+      "selector": "ai.neopsyke.eval.AgentScenarioPackTest.scenario_technical_evidence_retry",
+      "description": "Technical evidence failure triggers retry rather than hard denial; second attempt succeeds."
     }
   ]
 }

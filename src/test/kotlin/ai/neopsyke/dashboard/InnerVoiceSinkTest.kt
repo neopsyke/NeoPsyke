@@ -11,6 +11,7 @@ import ai.neopsyke.agent.model.OriginSource
 import ai.neopsyke.agent.model.PendingAction
 import ai.neopsyke.agent.model.PendingInput
 import ai.neopsyke.agent.model.Urgency
+import ai.neopsyke.agent.model.GroundingMetadata
 import ai.neopsyke.instrumentation.AgentEvent
 import ai.neopsyke.instrumentation.AgentEvents
 import kotlin.test.Test
@@ -53,7 +54,7 @@ class InnerVoiceSinkTest {
     }
 
     @Test
-    fun `thought planner decision produces DELIBERATION event`() {
+    fun `continuation planner decision produces DELIBERATION event`() {
         val (dashboardStore, innerVoiceStore, sink) = buildStack()
         seedSession(dashboardStore)
         val sub = innerVoiceStore.subscribe("default")!!
@@ -62,8 +63,8 @@ class InnerVoiceSinkTest {
         sink.onEvent(
             AgentEvents.plannerDecision(
                 trigger = "input",
-                decisionType = "defer",
-                thought = "I need to search for recent information about this topic.",
+                decisionType = "continuation",
+                content = "I need to search for recent information about this topic.",
                 rootInputId = "root-1",
             )
         )
@@ -188,8 +189,8 @@ class InnerVoiceSinkTest {
         sink.onEvent(
             AgentEvents.plannerDecision(
                 trigger = "input",
-                decisionType = "defer",
-                thought = "Let me think...",
+                decisionType = "continuation",
+                content = "Let me think...",
                 rootInputId = "root-1",
             )
         )
@@ -200,7 +201,8 @@ class InnerVoiceSinkTest {
             type = ActionType.WEBSITE_FETCH,
             payload = "https://example.com",
             summary = "Fetch page",
-            rootInputId = "root-1"
+            rootInputId = "root-1",
+            groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
         )
         sink.onEvent(AgentEvents.actionDenied(action, "External API calls restricted", "POLICY_EXTERNAL_CALLS"))
 
@@ -323,8 +325,8 @@ class InnerVoiceSinkTest {
         sink.onEvent(
             AgentEvents.plannerDecision(
                 trigger = "input",
-                decisionType = "defer",
-                thought = "Let me search...",
+                decisionType = "continuation",
+                content = "Let me search...",
                 rootInputId = "root-1",
             )
         )
@@ -335,7 +337,8 @@ class InnerVoiceSinkTest {
             type = ActionType.WEB_SEARCH,
             payload = "AI news",
             summary = "Search for AI news",
-            rootInputId = "root-1"
+            rootInputId = "root-1",
+            groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
         )
         sink.onEvent(AgentEvents.actionExecuted(action, "Found 5 results for 'AI news'."))
 
@@ -366,8 +369,8 @@ class InnerVoiceSinkTest {
         sink.onEvent(
             AgentEvents.plannerDecision(
                 trigger = "input",
-                decisionType = "defer",
-                thought = "This is a very long thought that exceeds the maximum content character limit.",
+                decisionType = "continuation",
+                content = "This is a very long thought that exceeds the maximum content character limit.",
                 rootInputId = "root-1",
             )
         )
@@ -398,8 +401,8 @@ class InnerVoiceSinkTest {
         sink.onEvent(
             AgentEvents.plannerDecision(
                 trigger = "input",
-                decisionType = "defer",
-                thought = "Should not appear",
+                decisionType = "continuation",
+                content = "Should not appear",
                 rootInputId = "root-1",
             )
         )
@@ -447,8 +450,8 @@ class InnerVoiceSinkTest {
         sink.onEvent(
             AgentEvents.plannerDecision(
                 trigger = "input",
-                decisionType = "defer",
-                thought = "Let me think about this.",
+                decisionType = "continuation",
+                content = "Let me think about this.",
                 rootInputId = "root-1",
             )
         )
@@ -573,8 +576,8 @@ class InnerVoiceSinkTest {
         sink.onEvent(
             AgentEvents.plannerDecision(
                 trigger = "impulse",
-                decisionType = "defer",
-                thought = "Id-driven thought about a need.",
+                decisionType = "continuation",
+                content = "Id-driven thought about a need.",
                 rootInputId = "impulse-1",
             )
         )
@@ -608,8 +611,8 @@ class InnerVoiceSinkTest {
         sink.onEvent(
             AgentEvents.plannerDecision(
                 trigger = "impulse",
-                decisionType = "defer",
-                thought = "Id thought that should not be in conversation.",
+                decisionType = "continuation",
+                content = "Id thought that should not be in conversation.",
                 rootInputId = "impulse-2",
             )
         )
@@ -633,8 +636,8 @@ class InnerVoiceSinkTest {
         sink.onEvent(
             AgentEvents.plannerDecision(
                 trigger = "input",
-                decisionType = "defer",
-                thought = "User-driven thought.",
+                decisionType = "continuation",
+                content = "User-driven thought.",
                 rootInputId = "root-1",
             )
         )
@@ -665,7 +668,8 @@ class InnerVoiceSinkTest {
             type = ActionType.REFLECT_INTERNAL,
             payload = """{"summary":"Learned that X is important","keywords":["X","important"]}""",
             summary = "Record insight about X",
-            rootInputId = "root-1"
+            rootInputId = "root-1",
+            groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
         )
         sink.onEvent(AgentEvents.actionExecuted(action, "Insight recorded: X is important"))
 
@@ -697,8 +701,8 @@ class InnerVoiceSinkTest {
         sink.onEvent(
             AgentEvents.plannerDecision(
                 trigger = "input",
-                decisionType = "defer",
-                thought = "thinking...",
+                decisionType = "continuation",
+                content = "thinking...",
                 rootInputId = "root-1",
             )
         )
@@ -722,7 +726,8 @@ class InnerVoiceSinkTest {
                         type = ActionType.WEB_SEARCH,
                         payload = "test",
                         summary = "test",
-                        rootInputId = "root-1"
+                        rootInputId = "root-1",
+                        groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
                     ),
                     "outcome_summary" to "Result"
                 )

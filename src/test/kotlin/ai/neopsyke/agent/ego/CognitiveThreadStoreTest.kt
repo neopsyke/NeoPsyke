@@ -17,6 +17,9 @@ import ai.neopsyke.agent.model.PerceptFamily
 import ai.neopsyke.agent.model.Provenances
 import ai.neopsyke.agent.model.RootInputIds
 import ai.neopsyke.agent.model.StimulusTrustLevel
+import ai.neopsyke.agent.model.GroundingMetadata
+import ai.neopsyke.agent.model.GroundingRequirement
+import ai.neopsyke.agent.model.GroundingSource
 import java.time.Instant
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -123,6 +126,7 @@ class CognitiveThreadStoreTest {
                 workingContext = "pricing",
                 conversationContext = automationContext,
                 wakeReason = "timer",
+            groundingMetadata = GroundingMetadata(requirement = GroundingRequirement.NOT_REQUIRED, source = GroundingSource.GOAL_STEP_POLICY),
             )
         )
 
@@ -151,6 +155,7 @@ class CognitiveThreadStoreTest {
             workingContext = "pricing",
             conversationContext = automationContext,
             wakeReason = "timer",
+        groundingMetadata = GroundingMetadata(requirement = GroundingRequirement.NOT_REQUIRED, source = GroundingSource.GOAL_STEP_POLICY),
         )
 
         store.bindGoalWork(work)
