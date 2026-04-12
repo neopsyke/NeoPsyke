@@ -2124,6 +2124,64 @@ class EgoAgentTest {
         assertEquals("resolved", resolvedEvent.data["thread_status"])
     }
 
+    @Test
+    fun `inline plan refinement receives planner action surface and runtime facts`() {
+        val planner = object : ai.neopsyke.agent.ego.Ego.Planner {
+            override fun decide(
+                trigger: ai.neopsyke.agent.model.EgoTrigger,
+                context: PlannerContext
+            ): EgoDecision =
+                when (trigger) {
+                    is ai.neopsyke.agent.model.EgoTrigger.IncomingInput ->
+                        ai.neopsyke.agent.model.EgoDecision.EnqueuePlan(
+                            urgency = Urgency.MEDIUM,
+                            goal = "Investigate then answer",
+                            steps = listOf("Gather evidence", "Deliver answer"),
+                        )
+
+                    else -> ai.neopsyke.agent.model.EgoDecision.Noop("done")
+                }
+        }
+        val captured = mutableListOf<ai.neopsyke.agent.ego.planner.PlanRefinementRequest>()
+        val planRefiner = object : ai.neopsyke.agent.ego.planner.PlanRefiner {
+            override fun refine(
+                request: ai.neopsyke.agent.ego.planner.PlanRefinementRequest
+            ): ai.neopsyke.agent.ego.planner.PlanRefinementResult {
+                captured += request
+                return ai.neopsyke.agent.ego.planner.PlanRefinementResult(
+                    steps = request.steps,
+                    reason = "noop",
+                )
+            }
+        }
+        val superegoLlm = StubChatModelClient().apply {
+            enqueueRawResponse("""{"allow":true}""")
+        }
+        val instrumentation = RecordingInstrumentation()
+        val agent = buildTestEgo(
+            planner = planner,
+            superego = Superego(
+                modelClient = superegoLlm,
+                config = AgentConfig(),
+                instrumentation = instrumentation,
+            ),
+            motorCortex = buildMotorCortex(output = {}),
+            config = AgentConfig(planner = PlannerConfig(maxLoopStepsPerInput = 3, maxContinuationPasses = 1)),
+            instrumentation = instrumentation,
+            planRefiner = planRefiner,
+        )
+
+        runAgentWithInput(agent, "hello\nexit\n")
+
+        assertTrue(captured.isNotEmpty(), "Expected inline plan refinement request to be captured.")
+        val request = captured.first()
+        assertTrue(request.availableActions.isNotEmpty(), "Refiner should receive non-empty available actions.")
+        assertTrue(request.availableActions.any { it.actionType == "contact_user" })
+        assertTrue(request.runtimeFacts["date"].orEmpty().isNotBlank())
+        assertTrue(request.runtimeFacts["time"].orEmpty().isNotBlank())
+        assertTrue(request.runtimeFacts["timezone"].orEmpty().isNotBlank())
+    }
+
     private fun runAgentWithInput(agent: Ego, stdinContent: String) {
         val previousIn = System.`in`
         try {

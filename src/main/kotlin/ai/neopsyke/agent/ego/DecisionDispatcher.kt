@@ -1,6 +1,7 @@
 package ai.neopsyke.agent.ego
 
 import ai.neopsyke.agent.config.*
+import ai.neopsyke.agent.ego.planner.ActionSummary
 import ai.neopsyke.agent.ego.planner.PlanKind
 import ai.neopsyke.agent.ego.planner.PlanRefiner
 import ai.neopsyke.agent.ego.planner.PlanRefinementMode
@@ -337,7 +338,7 @@ internal class DecisionDispatcher(
                 scratchpadStore.resetDraftSequence(rootInputId)
 
                 // ── Plan refinement ──
-                val refinedDecision = refineInlinePlan(decision)
+                val refinedDecision = refineInlinePlan(decision, plannerContext)
 
                 val scope = inputScope(rootInputId, conversationContext)
                 // ── Gate 1: plan budget per input ──
@@ -716,7 +717,10 @@ internal class DecisionDispatcher(
         val reason: String,
     )
 
-    private fun refineInlinePlan(decision: EgoDecision.EnqueuePlan): EgoDecision.EnqueuePlan {
+    private fun refineInlinePlan(
+        decision: EgoDecision.EnqueuePlan,
+        plannerContext: PlannerContext?,
+    ): EgoDecision.EnqueuePlan {
         if (!config.planner.planRefinementEnabled) return decision
 
         val candidates = decision.steps.mapIndexed { i, desc ->
@@ -731,8 +735,13 @@ internal class DecisionDispatcher(
             goal = decision.goal,
             instruction = decision.goal,
             steps = candidates,
-            availableActions = emptyList(),
-            runtimeFacts = emptyMap(),
+            availableActions = buildInlineRefinementActions(plannerContext),
+            runtimeFacts = buildInlineRuntimeFacts(plannerContext),
+            recentDialogue = plannerContext?.recentDialogue?.map { "${it.role.name.lowercase()}: ${it.content}" }.orEmpty(),
+            shortTermContextSummary = plannerContext?.shortTermContextSummary.orEmpty(),
+            longTermMemoryRecall = plannerContext?.longTermMemoryRecall.orEmpty(),
+            episodicRecall = plannerContext?.episodicRecall.orEmpty(),
+            evidenceHints = plannerContext?.evidenceHints.orEmpty(),
         )
 
         val result = planRefiner.refine(request)
@@ -755,8 +764,46 @@ internal class DecisionDispatcher(
         return decision.copy(steps = refinedSteps)
     }
 
+    private fun buildInlineRefinementActions(plannerContext: PlannerContext?): List<ActionSummary> {
+        val definitions = plannerContext?.actionDefinitions.orEmpty()
+        if (definitions.isNotEmpty()) {
+            return definitions
+                .map { def ->
+                    ActionSummary(
+                        actionType = def.actionType.id,
+                        description = def.description,
+                    )
+                }
+                .sortedBy { it.actionType }
+        }
+        return plannerContext?.dispatchableActions
+            .orEmpty()
+            .map { actionType ->
+                ActionSummary(
+                    actionType = actionType.id,
+                    description = actionType.id,
+                )
+            }
+            .sortedBy { it.actionType }
+    }
+
+    private fun buildInlineRuntimeFacts(plannerContext: PlannerContext?): Map<String, String> {
+        val now = java.time.ZonedDateTime.now()
+        val facts = linkedMapOf(
+            "date" to now.toLocalDate().toString(),
+            "time" to now.toLocalTime().toString().take(RUNTIME_FACT_TIME_CHARS),
+            "timezone" to now.zone.id,
+        )
+        plannerContext?.opportunityKind?.let { facts["opportunity_kind"] = it.name.lowercase() }
+        plannerContext?.conversationContext?.sessionId
+            ?.takeIf { it.isNotBlank() }
+            ?.let { facts["session_id"] = it }
+        return facts
+    }
+
     private companion object {
         const val PLAN_ID_LENGTH: Int = 8
         const val REDUNDANCY_SIGNAL_MIN_HITS: Int = 2
+        const val RUNTIME_FACT_TIME_CHARS: Int = 5
     }
 }

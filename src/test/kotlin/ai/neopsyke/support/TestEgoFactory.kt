@@ -10,6 +10,8 @@ import ai.neopsyke.agent.ego.EgoAssembler
 import ai.neopsyke.agent.ego.MetaReasoner
 import ai.neopsyke.agent.ego.NoopMetaReasoner
 import ai.neopsyke.agent.ego.NoopScratchpadFinalizer
+import ai.neopsyke.agent.ego.planner.NoopPlanRefiner
+import ai.neopsyke.agent.ego.planner.PlanRefiner
 import ai.neopsyke.agent.ego.ScratchpadFinalizer
 import ai.neopsyke.agent.memory.episodic.DeterministicLogbookSummarizer
 import ai.neopsyke.agent.memory.episodic.Logbook
@@ -40,6 +42,7 @@ fun buildTestEgo(
     runId: String? = null,
     durableWorkGateway: DurableWorkGateway = NoopDurableWorkGateway,
     actionControlService: ActionControlService? = null,
+    planRefiner: PlanRefiner = NoopPlanRefiner(),
 ): Ego {
     val memory = EgoAssembler.buildMemorySystem(
         config = config,
@@ -66,5 +69,6 @@ fun buildTestEgo(
             },
         goalRegistry = durableWorkGateway,
         durableWorkGateway = durableWorkGateway,
+        planRefiner = planRefiner,
     )
 }
