@@ -50,7 +50,6 @@ class DefaultApprovalInterpreter(
         if (isExplanationQuestion(normalized, normalizedWithQuestion)) return ApprovalClassificationKind.EXPLAIN
         if (looksLikeQuestion(normalizedWithQuestion)) return ApprovalClassificationKind.UNCLEAR
         parseDecisionWithTail(normalized)?.let { return it }
-        if (containsRedirectCue(normalized)) return ApprovalClassificationKind.DENY_AND_REISSUE
         if (containsAmbiguityCue(normalized)) return ApprovalClassificationKind.UNCLEAR
         return null
     }
@@ -191,13 +190,16 @@ class DefaultApprovalInterpreter(
         if (approveTail.isBlank() || approveTail in COURTESY_TAILS) {
             return ApprovalClassificationKind.APPROVE
         }
-        if (containsRedirectCue(approveTail) || containsConditionalModifier(approveTail)) {
+        if (isReferenceTail(approveTail)) {
+            return ApprovalClassificationKind.APPROVE
+        }
+        if (containsConditionalModifier(approveTail)) {
             return ApprovalClassificationKind.DENY_AND_REISSUE
         }
         if (containsAmbiguityCue(approveTail)) {
             return ApprovalClassificationKind.UNCLEAR
         }
-        return ApprovalClassificationKind.APPROVE
+        return ApprovalClassificationKind.DENY_AND_REISSUE
     }
 
     private fun parseDenyWithTail(normalized: String): ApprovalClassificationKind? {
@@ -205,13 +207,13 @@ class DefaultApprovalInterpreter(
         if (denyTail.isBlank() || denyTail in COURTESY_TAILS) {
             return ApprovalClassificationKind.DENY
         }
-        if (containsRedirectCue(denyTail)) {
-            return ApprovalClassificationKind.DENY_AND_REISSUE
+        if (isReferenceTail(denyTail)) {
+            return ApprovalClassificationKind.DENY
         }
         if (containsAmbiguityCue(denyTail)) {
             return ApprovalClassificationKind.UNCLEAR
         }
-        return ApprovalClassificationKind.DENY
+        return ApprovalClassificationKind.DENY_AND_REISSUE
     }
 
     private fun tailAfterPrefix(normalized: String, prefixes: Set<String>): String? {
@@ -226,13 +228,11 @@ class DefaultApprovalInterpreter(
         return null
     }
 
-    private fun containsRedirectCue(text: String): Boolean =
-        REDIRECT_MARKERS.any { marker ->
-            text.contains(marker)
-        }
-
     private fun containsConditionalModifier(text: String): Boolean =
         CONDITIONAL_MODIFIERS.any { marker -> text.startsWith(marker) || text.contains(" $marker") }
+
+    private fun isReferenceTail(text: String): Boolean =
+        REFERENCE_TAIL_REGEX.matches(text)
 
     private fun containsAmbiguityCue(text: String): Boolean =
         AMBIGUITY_MARKERS.any { marker ->
@@ -263,29 +263,6 @@ class DefaultApprovalInterpreter(
         private val COURTESY_TAILS = setOf("please", "thanks", "thank you", "thx", "pls")
         private val QUESTION_PREFIXES = listOf("what ", "what is", "what exactly", "who ", "why ", "how ", "when ", "is this", "which ", "can you ")
         private val EXPLANATION_MARKERS = listOf("explain", "clarify", "details", "detail", "more context", "more info", "more information")
-        private val REDIRECT_MARKERS = listOf(
-            "instead",
-            "not now",
-            "ask ",
-            "draft ",
-            "first",
-            "before",
-            "after",
-            "tomorrow",
-            "later",
-            "change",
-            "different",
-            "combine",
-            "merge",
-            "remove step",
-            "add a step",
-            "add step",
-            "use web search",
-            "use search",
-            "swap",
-            "replace",
-            "reorder",
-        )
         private val CONDITIONAL_MODIFIERS = listOf("but ", "except ", "only if ", "as long as ")
         private val AMBIGUITY_MARKERS = listOf(
             "maybe",
@@ -295,6 +272,7 @@ class DefaultApprovalInterpreter(
             "not sure",
             "unsure",
         )
+        private val REFERENCE_TAIL_REGEX = Regex("""^(approval\s+)?ref[:\s]+[a-z0-9_-]{4,}$""")
         private const val MAX_REPLY_CHARS: Int = 400
         private const val MAX_SUMMARY_CHARS: Int = 240
         private const val APPROVAL_SCHEMA_JSON: String =

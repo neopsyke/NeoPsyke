@@ -87,6 +87,23 @@ class ApprovalInterpreterTest {
     }
 
     @Test
+    fun `approve with explicit approval ref remains deterministic approve`() {
+        val interpreter = DefaultApprovalInterpreter(AgentConfig())
+
+        val result = interpreter.classify(
+            ApprovalInterpreterInput(
+                reply = "yes ref abc12345",
+                canonicalSummary = "action: contact_user",
+                sessionId = "chat-1",
+                rootInputId = "root-1",
+            )
+        )
+
+        assertEquals(ApprovalClassificationKind.APPROVE, result.kind)
+        assertFalse(result.usedModelAssistance)
+    }
+
+    @Test
     fun `deterministic explanation question remains explain even outside prefix allowlist`() {
         val client = StubChatModelClient().apply {
             enqueueRawResponse("""{"decision":"approve"}""")
