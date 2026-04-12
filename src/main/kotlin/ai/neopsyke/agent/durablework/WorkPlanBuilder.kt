@@ -38,10 +38,14 @@ class DeterministicWorkPlanBuilder : WorkPlanBuilder {
 class LlmWorkPlanBuilder(
     private val modelClient: ChatModelClient,
     private val config: AgentConfig,
+    private val availableActionSummaries: List<String> = DEFAULT_ACTION_SUMMARIES,
 ) : WorkPlanBuilder {
     override fun generatePlan(workItem: WorkItem): WorkItemPlan {
         val attempts = maxOf(1, config.llmRetryAttempts)
         var raw: String? = null
+        val actionBlock = if (availableActionSummaries.isNotEmpty()) {
+            "\navailable_actions:\n" + availableActionSummaries.joinToString("\n") { "- $it" }
+        } else ""
         for (attempt in 1..attempts) {
             try {
                 raw = modelClient.chat(
@@ -54,7 +58,7 @@ class LlmWorkPlanBuilder(
                             title=${workItem.title}
                             instruction=${workItem.instruction}
                             completion_criteria=${workItem.completionCriteria}
-                            max_steps=${config.durableWork.maxStepsPerPlan}
+                            max_steps=${config.durableWork.maxStepsPerPlan}$actionBlock
                             """.trimIndent()
                         )
                     ),
@@ -168,12 +172,32 @@ class LlmWorkPlanBuilder(
               "additionalProperties":false
             }
         """.trimIndent()
+        val DEFAULT_ACTION_SUMMARIES: List<String> = listOf(
+            "web_search: search the web for current information (weather, news, prices, events)",
+            "website_fetch: fetch and extract content from a specific URL",
+            "contact_user: send a message or result to the user",
+            "reflect_internal: internal reasoning (no external effect)",
+            "reflect_evidence: evaluate and synthesize collected evidence",
+        )
         val SYSTEM_PROMPT: String = """
             You generate persistent goal plans for a sequential agent.
             Return strict JSON only.
             Use a short flat step list.
             Each step must be independently verifiable.
             Do not exceed the provided max_steps.
+
+            Runtime facts available automatically (do NOT create steps for these):
+            - The current date and time are always known to the executor.
+            - The work item title, instruction, and context are always visible to the executor.
+
+            Step design rules:
+            - Each step is executed by an LLM planner that picks ONE action per cycle.
+            - The available_actions list shows what the executor can do. Design steps that map to these actions.
+            - Steps that fetch external data (weather, search, etc.) should use web_search or website_fetch.
+            - The final step should deliver the result to the user via contact_user.
+            - Step outputs are forwarded as context to subsequent steps, so data flows between steps.
+            - Do not create steps for purely internal bookkeeping (date lookup, variable assignment, etc.).
+
             For each step set grounding_requirement:
             - "required" when the step needs fresh external evidence (weather, prices, news, schedules, current-state facts).
             - "not_required" for static/internal/procedural steps.

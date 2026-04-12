@@ -223,6 +223,7 @@ internal class CognitiveThreadStore {
             rootStimulusId = work.rootInputId,
             salience = GOAL_SALIENCE,
             allowedIntentions = setOf(
+                IntentionKind.OBSERVE,
                 IntentionKind.PREPARE,
                 IntentionKind.STAGE,
                 IntentionKind.REQUEST_AUTHORIZATION,

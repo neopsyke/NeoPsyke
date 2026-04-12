@@ -228,16 +228,17 @@ class DurableWorkRuntime(
         val rootInputId = action.rootInputId ?: return
         val session = sessionsByRootInputId[rootInputId] ?: return
         finalizeEffectIntent(session.workItemId, action, outcome)
+        val stepOutput = outcome.plannerSignal.ifBlank { outcome.statusSummary }
         val actionCount = session.actionCount + 1
         sessionsByRootInputId[rootInputId] = session.copy(
             actionCount = actionCount,
-            lastResultSummary = outcome.statusSummary,
+            lastResultSummary = stepOutput,
             allowFollowUp = actionCount < config.actionsPerCycle,
         )
 
         val afterAction = applyEvent(
             session.workItemId,
-            WorkItemEvent.StepActionExecuted(session.workItemId, session.stepId, outcome.statusSummary)
+            WorkItemEvent.StepActionExecuted(session.workItemId, session.stepId, stepOutput)
         ) ?: return
         val step = afterAction.workItem.plan.steps.firstOrNull { it.id == session.stepId } ?: return
         if (outcome.executionStatus == ai.neopsyke.agent.model.ActionExecutionStatus.WAITING && outcome.asyncWait == null) {
@@ -406,6 +407,36 @@ class DurableWorkRuntime(
                     stepId = runnable.id,
                     reason = session.requeueReason,
                 )
+            )
+        }
+    }
+
+    override fun notifyStepPlannerNoop(rootInputId: String, reason: String) {
+        val session = sessionsByRootInputId[rootInputId] ?: return
+        val state = states[session.workItemId] ?: return
+        val step = state.workItem.plan.steps.firstOrNull { it.id == session.stepId } ?: return
+        logger.warn {
+            "Planner noop for work step: workItem=${session.workItemId} step=${session.stepId} " +
+                "attempt=${step.attempts + 1}/${step.maxAttempts} reason=$reason"
+        }
+        // Count the noop as an attempt so the step can eventually fail after maxAttempts.
+        applyEvent(
+            session.workItemId,
+            WorkItemEvent.StepActionExecuted(session.workItemId, session.stepId, "planner_noop: $reason")
+        )
+        applyEvent(
+            session.workItemId,
+            WorkItemEvent.StepAcceptanceFailed(session.workItemId, session.stepId, "planner_noop: $reason")
+        )
+        // If the step is still retryable (READY), set requeueReason so finalizeDurableWorkCycle
+        // will requeue after releasing the lease.
+        val refreshed = states[session.workItemId] ?: return
+        val updatedStep = refreshed.workItem.plan.steps.firstOrNull { it.id == session.stepId } ?: return
+        if (updatedStep.status == StepStatus.READY) {
+            sessionsByRootInputId[rootInputId] = session.copy(
+                actionCount = session.actionCount,
+                allowFollowUp = false,
+                requeueReason = "planner_noop_retry",
             )
         }
     }

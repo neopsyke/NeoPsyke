@@ -3,6 +3,10 @@ package ai.neopsyke.agent.durablework
 import java.nio.file.Files
 import java.nio.file.Path
 import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
+import java.time.ZonedDateTime
+import java.time.format.DateTimeFormatter
 import ai.neopsyke.agent.model.ConversationContext
 import ai.neopsyke.agent.model.ConversationSecurityContexts
 import ai.neopsyke.agent.model.GroundingMetadata
@@ -83,6 +87,13 @@ object WorkContextLoader {
     ): DurableWorkActivation {
         val tier2 = tier2Context(state.workItem.workspacePath)
         val provider = state.workItem.contactChannel ?: DURABLE_WORK_RUNTIME_PROVIDER
+        val zone = ZoneId.systemDefault()
+        val now = ZonedDateTime.now(zone)
+        val facts = mapOf(
+            "current_date" to LocalDate.now(zone).toString(),
+            "current_time_utc" to Instant.now().toString(),
+            "current_time_local" to now.format(DateTimeFormatter.ofPattern("HH:mm:ss")) + " ($zone)",
+        )
         return DurableWorkActivation(
             workItemId = state.id,
             stepId = step.id,
@@ -108,6 +119,7 @@ object WorkContextLoader {
             health = state.workItem.health,
             activationReason = wakeReason,
             wakeSequence = state.workItem.activationCount,
+            runtimeFacts = facts,
         )
     }
 
@@ -157,6 +169,17 @@ object WorkContextLoader {
             appendLine("- **Result:** $resultSummary")
             appendLine()
 
+            val completedWithOutput = workItem.plan.steps.filter {
+                it.status == StepStatus.DONE && it.notes.isNotBlank()
+            }
+            if (completedWithOutput.isNotEmpty()) {
+                appendLine("## Prior Step Outputs")
+                for (s in completedWithOutput) {
+                    appendLine("- **${s.id}** (${s.description}): ${s.notes.trim()}")
+                }
+                appendLine()
+            }
+
             appendLine("## Plan Overview")
             for (s in workItem.plan.steps) {
                 val marker = when (s.status) {
@@ -167,8 +190,7 @@ object WorkContextLoader {
                     StepStatus.BLOCKED -> "[B]"
                     else -> "[ ]"
                 }
-                val suffix = s.notes.trim().takeIf { it.isNotBlank() }?.let { " ($it)" }.orEmpty()
-                appendLine("- $marker ${s.id}: ${s.description}$suffix")
+                appendLine("- $marker ${s.id}: ${s.description}")
             }
             appendLine()
 

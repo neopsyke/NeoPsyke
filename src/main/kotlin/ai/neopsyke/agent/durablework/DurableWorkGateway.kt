@@ -12,6 +12,7 @@ interface DurableWorkGateway : WorkItemRegistry, ActionLifecycleObserver {
     fun pendingWorkSummary(): String = ""
     fun nextWorkFromCue(cue: DurableWorkCue): DurableWorkActivation? = null
     fun finalizeDurableWorkCycle(rootInputId: String) {}
+    fun notifyStepPlannerNoop(rootInputId: String, reason: String) {}
     fun executeOperation(request: DurableWorkOperationRequest): DurableWorkOperationResult =
         DurableWorkOperationResult(false, "Goals feature is disabled.")
     fun notifyAsyncOperationEvent(event: AsyncOperationEvent): Int = 0

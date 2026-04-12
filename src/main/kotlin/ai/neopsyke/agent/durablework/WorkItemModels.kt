@@ -169,6 +169,7 @@ data class DurableWorkActivation(
     val health: WorkItemHealth = WorkItemHealth.HEALTHY,
     val activationReason: String = "",
     val wakeSequence: Int = 0,
+    val runtimeFacts: Map<String, String> = emptyMap(),
 )
 
 // ── Namespaced durable state ────────────────────────────────────────────

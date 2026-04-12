@@ -93,6 +93,10 @@ object SharedPromptSections {
                 val wu = trigger.workUnit
                 buildString {
                     append("GOAL_WORK(goal=, step=${wu.stepId}): ${wu.stepDescription}")
+                    if (wu.runtimeFacts.isNotEmpty()) {
+                        append("\nruntime_facts=")
+                        append(wu.runtimeFacts.entries.joinToString(", ") { "${it.key}: ${it.value}" })
+                    }
                     if (wu.wakeReason.isNotBlank()) {
                         append("\nwake_reason=")
                         append(wu.wakeReason)

@@ -921,6 +921,9 @@ class Ego(
 
         timing.startPhase("apply_decision")
         val origin = ActionOrigin(OriginSource.DURABLE_WORK)
+        if (finalDecision is EgoDecision.Noop) {
+            durableWorkGateway.notifyStepPlannerNoop(work.rootInputId, finalDecision.reason)
+        }
         dispatcher.dispatch(
             decision = finalDecision,
             nextPassCount = 0,

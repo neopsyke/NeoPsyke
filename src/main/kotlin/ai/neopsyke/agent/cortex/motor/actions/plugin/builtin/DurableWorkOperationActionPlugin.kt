@@ -99,9 +99,6 @@ class DurableWorkOperationActionPlugin(
             )
 
         val result = this.context.durableWorkGateway.executeOperation(request)
-        if (result.message.isNotBlank()) {
-            this.context.output("ego> ${result.message}")
-        }
         return ActionOutcome(
             statusSummary = result.message,
             assistantOutput = result.message,
