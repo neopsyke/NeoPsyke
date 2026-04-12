@@ -595,6 +595,7 @@ class AgentScenarioPackTest {
                 workspaceRoot = root,
                 actionsPerCycle = 2,
                 conditionCheckIntervalMs = 25,
+                allowRuntimePlanFallback = true,
             ),
         )
         val provider = StubAsyncOperationProvider().apply {
@@ -712,7 +713,7 @@ class AgentScenarioPackTest {
             val outputs = mutableListOf<String>()
             val config = AgentConfig(
                 planner = PlannerConfig(maxLoopStepsPerInput = 4, maxContinuationPasses = 2),
-                durableWork = DurableWorkConfig(enabled = true, workspaceRoot = root),
+                durableWork = DurableWorkConfig(enabled = true, workspaceRoot = root, allowRuntimePlanFallback = true),
             )
             manager = DurableWorkRuntime(
                 config = config.durableWork,
@@ -810,7 +811,7 @@ class AgentScenarioPackTest {
             val outputs = mutableListOf<String>()
             val config = AgentConfig(
                 planner = PlannerConfig(maxLoopStepsPerInput = 4, maxContinuationPasses = 2),
-                durableWork = DurableWorkConfig(enabled = true, workspaceRoot = root),
+                durableWork = DurableWorkConfig(enabled = true, workspaceRoot = root, allowRuntimePlanFallback = true),
             )
             manager = DurableWorkRuntime(
                 config = config.durableWork,
@@ -924,7 +925,7 @@ class AgentScenarioPackTest {
             val outputs = mutableListOf<String>()
             val config = AgentConfig(
                 planner = PlannerConfig(maxLoopStepsPerInput = 6, maxContinuationPasses = 3),
-                durableWork = DurableWorkConfig(enabled = true, workspaceRoot = root),
+                durableWork = DurableWorkConfig(enabled = true, workspaceRoot = root, allowRuntimePlanFallback = true),
             )
             manager = DurableWorkRuntime(
                 config = config.durableWork,

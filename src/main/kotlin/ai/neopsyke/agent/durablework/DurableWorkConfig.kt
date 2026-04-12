@@ -22,4 +22,6 @@ data class DurableWorkConfig(
     val maxRegisteredWaits: Int = 100,
     val maxPendingWakeReasonsPerItem: Int = 10,
     val maxPendingDigestEntries: Int = 50,
+    // Explicit migration/recovery switch. Default is fail-closed for missing plans.
+    val allowRuntimePlanFallback: Boolean = false,
 )

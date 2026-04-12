@@ -167,7 +167,7 @@ class DurableWorkOperationActionPluginTest {
         val root = Files.createTempDirectory("psyke-goal-op-lifecycle")
         try {
             val manager = DurableWorkRuntime(
-                config = DurableWorkConfig(enabled = true, workspaceRoot = root),
+                config = DurableWorkConfig(enabled = true, workspaceRoot = root, allowRuntimePlanFallback = true),
                 store = WorkItemStore(root),
                 planner = DeterministicWorkPlanBuilder(),
             )
@@ -236,7 +236,7 @@ class DurableWorkOperationActionPluginTest {
                 }
             }
             val manager = DurableWorkRuntime(
-                config = DurableWorkConfig(enabled = true, workspaceRoot = root),
+                config = DurableWorkConfig(enabled = true, workspaceRoot = root, allowRuntimePlanFallback = true),
                 store = WorkItemStore(root),
                 planner = planner,
             )

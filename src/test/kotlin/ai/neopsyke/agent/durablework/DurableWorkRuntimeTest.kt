@@ -20,6 +20,7 @@ import ai.neopsyke.agent.model.OriginSource
 import ai.neopsyke.agent.model.PendingAction
 import ai.neopsyke.agent.model.Urgency
 import ai.neopsyke.agent.model.GroundingMetadata
+import ai.neopsyke.agent.ego.planner.model.DurableWorkPlanStepPayload
 import ai.neopsyke.support.RecordingInstrumentation
 import java.nio.file.Files
 import java.time.Instant
@@ -43,6 +44,7 @@ class DurableWorkRuntimeTest {
         maxActiveWorkItems = 5,
         timerResolutionMs = 100,
         conditionCheckIntervalMs = 100,
+        allowRuntimePlanFallback = true,
     )
 
     private fun testScope() = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -74,6 +76,98 @@ class DurableWorkRuntimeTest {
             assertEquals(WorkItemStatus.ACTIVE, state!!.workItem.status)
             assertTrue(Files.exists(root.resolve(id).resolve(WorkItemStore.GOAL_FILE)))
 
+            manager.stop()
+        } finally {
+            root.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `createWorkItem fails closed when pre-built plan is missing and fallback disabled`() {
+        val root = Files.createTempDirectory("psyke-pm-create-fail-closed")
+        try {
+            val manager = DurableWorkRuntime(
+                config = testConfig(root).copy(allowRuntimePlanFallback = false),
+                store = WorkItemStore(root),
+                planner = DeterministicWorkPlanBuilder(),
+            )
+            manager.start(testScope())
+
+            val id = manager.createWorkItem("Missing plan steps")
+
+            assertEquals("", id)
+            assertTrue(manager.allWorkItems().isEmpty())
+            manager.stop()
+        } finally {
+            root.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `revise_plan fails closed when plan steps are missing and fallback disabled`() {
+        val root = Files.createTempDirectory("psyke-pm-revise-fail-closed")
+        try {
+            val manager = DurableWorkRuntime(
+                config = testConfig(root).copy(allowRuntimePlanFallback = false),
+                store = WorkItemStore(root),
+                planner = DeterministicWorkPlanBuilder(),
+            )
+            manager.start(testScope())
+            val id = manager.createWorkItem(
+                instruction = "Task with explicit plan",
+                planSteps = listOf(
+                    DurableWorkPlanStepPayload(
+                        id = "step-1",
+                        description = "Do one thing",
+                        acceptanceCriteria = "done",
+                        produces = setOf("done_signal"),
+                    )
+                ),
+            )
+            assertTrue(id.isNotBlank())
+
+            val result = manager.executeOperation(
+                DurableWorkOperationRequest(
+                    operation = DurableWorkOperation.REVISE_PLAN,
+                    workItemId = id,
+                    reason = "Update approach",
+                    planSteps = null,
+                )
+            )
+
+            assertFalse(result.success)
+            assertTrue(result.message.contains("requires pre-built plan steps"))
+            manager.stop()
+        } finally {
+            root.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `createWorkItem rejects malformed dependency graph in pre-built plan`() {
+        val root = Files.createTempDirectory("psyke-pm-plan-validate")
+        try {
+            val manager = DurableWorkRuntime(
+                config = testConfig(root).copy(allowRuntimePlanFallback = false),
+                store = WorkItemStore(root),
+                planner = DeterministicWorkPlanBuilder(),
+            )
+            manager.start(testScope())
+
+            val id = manager.createWorkItem(
+                instruction = "Malformed plan",
+                planSteps = listOf(
+                    DurableWorkPlanStepPayload(
+                        id = "step-1",
+                        description = "Use missing key",
+                        acceptanceCriteria = "n/a",
+                        requires = setOf("missing_key"),
+                    )
+                ),
+            )
+
+            assertEquals("", id)
+            assertTrue(manager.allWorkItems().isEmpty())
             manager.stop()
         } finally {
             root.toFile().deleteRecursively()

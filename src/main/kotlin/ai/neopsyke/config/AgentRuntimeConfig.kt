@@ -307,6 +307,7 @@ private data class AgentRuntimeYamlDurableWork(
     val conditionCheckIntervalMs: Long? = null,
     val completedWorkItemRetentionDays: Int? = null,
     val maxWorkspaceBytes: Long? = null,
+    val allowRuntimePlanFallback: Boolean? = null,
 )
 
 private data class AgentRuntimeYamlRuntime(
@@ -1235,6 +1236,11 @@ object AgentRuntimeSettingsLoader {
                     env["NEOPSYKE_GOALS_MAX_WORKSPACE_BYTES"],
                     yaml = durableWorkYaml.maxWorkspaceBytes,
                     fallback = defaults.durableWork.maxWorkspaceBytes
+                ),
+                allowRuntimePlanFallback = readBoolean(
+                    env["NEOPSYKE_GOALS_ALLOW_RUNTIME_PLAN_FALLBACK"],
+                    yaml = durableWorkYaml.allowRuntimePlanFallback,
+                    fallback = defaults.durableWork.allowRuntimePlanFallback,
                 ),
             ),
             loopDelayMs = readNonNegativeInt(

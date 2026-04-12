@@ -79,7 +79,7 @@ class EgoProjectIntegrationTest {
         val outputs = mutableListOf<String>()
         val config = AgentConfig(
             planner = PlannerConfig(maxLoopStepsPerInput = 8, maxContinuationPasses = 2),
-            durableWork = DurableWorkConfig(enabled = true, workspaceRoot = root, actionsPerCycle = 2),
+            durableWork = DurableWorkConfig(enabled = true, workspaceRoot = root, actionsPerCycle = 2, allowRuntimePlanFallback = true),
         )
         val manager = DurableWorkRuntime(
             config = config.durableWork,
@@ -131,7 +131,7 @@ class EgoProjectIntegrationTest {
         val outputs = mutableListOf<String>()
         val config = AgentConfig(
             planner = PlannerConfig(maxLoopStepsPerInput = 8, maxContinuationPasses = 2),
-            durableWork = DurableWorkConfig(enabled = true, workspaceRoot = root, actionsPerCycle = 2, conditionCheckIntervalMs = 25),
+            durableWork = DurableWorkConfig(enabled = true, workspaceRoot = root, actionsPerCycle = 2, conditionCheckIntervalMs = 25, allowRuntimePlanFallback = true),
         )
         val provider = StubAsyncOperationProvider().apply {
             enqueue(
@@ -225,7 +225,7 @@ class EgoProjectIntegrationTest {
         val outputs = mutableListOf<String>()
         val config = AgentConfig(
             planner = PlannerConfig(maxLoopStepsPerInput = 12, maxContinuationPasses = 2),
-            durableWork = DurableWorkConfig(enabled = true, workspaceRoot = root, actionsPerCycle = 2),
+            durableWork = DurableWorkConfig(enabled = true, workspaceRoot = root, actionsPerCycle = 2, allowRuntimePlanFallback = true),
         )
         val manager = DurableWorkRuntime(
             config = config.durableWork,
@@ -290,7 +290,7 @@ class EgoProjectIntegrationTest {
         val outputs = mutableListOf<String>()
         val config = AgentConfig(
             planner = PlannerConfig(maxLoopStepsPerInput = 12, maxContinuationPasses = 2),
-            durableWork = DurableWorkConfig(enabled = true, workspaceRoot = root, actionsPerCycle = 1),
+            durableWork = DurableWorkConfig(enabled = true, workspaceRoot = root, actionsPerCycle = 1, allowRuntimePlanFallback = true),
         )
         var verifierCalls = 0
         val verifier = object : WorkStepVerifier {
@@ -377,6 +377,7 @@ class EgoProjectIntegrationTest {
                 workspaceRoot = root,
                 actionsPerCycle = 1,
                 timerResolutionMs = 50,
+                allowRuntimePlanFallback = true,
             ),
         )
         var verifierCalls = 0

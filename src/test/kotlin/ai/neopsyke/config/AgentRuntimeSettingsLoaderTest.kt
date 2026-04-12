@@ -36,6 +36,7 @@ class AgentRuntimeSettingsLoaderTest {
         assertEquals(false, settings.agentConfig.nativeIntegrations.googleWorkspace.enabled)
         assertEquals(true, settings.agentConfig.durableWork.enabled)
         assertEquals(Paths.get(".neopsyke/work-items"), settings.agentConfig.durableWork.workspaceRoot)
+        assertEquals(false, settings.agentConfig.durableWork.allowRuntimePlanFallback)
         assertTrue(settings.dashboardEnabled)
         assertEquals(8787, settings.dashboardPort)
         assertEquals(Int.MAX_VALUE, settings.evalMaxRawResponseChars)
@@ -112,6 +113,7 @@ class AgentRuntimeSettingsLoaderTest {
               durable_work:
                 enabled: true
                 workspace_root: /tmp/neopsyke-goals
+                allow_runtime_plan_fallback: true
               action_control:
                 enabled: true
                 db_path: /tmp/neopsyke-action-control.db
@@ -264,6 +266,7 @@ class AgentRuntimeSettingsLoaderTest {
         assertEquals(true, settings.agentConfig.logbook.useLlmSummarizer)
         assertEquals(true, settings.agentConfig.durableWork.enabled)
         assertEquals(Paths.get("/tmp/neopsyke-goals"), settings.agentConfig.durableWork.workspaceRoot)
+        assertEquals(true, settings.agentConfig.durableWork.allowRuntimePlanFallback)
         assertEquals(true, settings.agentConfig.actionControl.enabled)
         assertEquals("/tmp/neopsyke-action-control.db", settings.agentConfig.actionControl.dbPath)
         assertEquals("/tmp/neopsyke-action-security.yaml", settings.agentConfig.actionControl.policyPath)
@@ -378,6 +381,7 @@ class AgentRuntimeSettingsLoaderTest {
         assertEquals(TelegramIngressMode.WEBHOOK, settings.agentConfig.nativeIntegrations.telegram.mode)
         assertEquals(false, settings.agentConfig.nativeIntegrations.googleWorkspace.enabled)
         assertEquals(true, settings.agentConfig.durableWork.enabled)
+        assertEquals(false, settings.agentConfig.durableWork.allowRuntimePlanFallback)
     }
 
     @Test
@@ -575,6 +579,7 @@ class AgentRuntimeSettingsLoaderTest {
         )
         assertEquals(true, settings.agentConfig.durableWork.enabled)
         assertEquals(Paths.get("/env/goals"), settings.agentConfig.durableWork.workspaceRoot)
+        assertEquals(false, settings.agentConfig.durableWork.allowRuntimePlanFallback)
         assertEquals(true, settings.dashboardEnabled)
         assertEquals(9900, settings.dashboardPort)
         assertEquals(5555, settings.evalMaxRawResponseChars)

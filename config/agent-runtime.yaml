@@ -176,6 +176,7 @@ agent:
     condition_check_interval_ms: 30000
     completed_work_item_retention_days: 30
     max_workspace_bytes: 10485760
+    allow_runtime_plan_fallback: false
 
   native_integrations:
     telegram:

@@ -585,20 +585,18 @@ class DurableWorkRuntime(
                     logger.warn { "REVISE_PLAN work item not found: workItemId='$workItemId' available=${states.keys}" }
                     DurableWorkOperationResult(false, "Work item not found.")
                 } else if (request.planSteps != null && request.planSteps.isNotEmpty()) {
-                    val steps = request.planSteps.mapIndexed { i, step ->
-                        PlanStep(
-                            id = step.id?.trim()?.ifBlank { null } ?: "step-${i + 1}",
-                            description = step.description,
-                            status = StepStatus.PENDING,
-                            acceptanceCriteria = step.acceptanceCriteria?.trim().orEmpty()
-                                .ifBlank { state.workItem.completionCriteria },
-                            requires = step.requires,
-                            produces = step.produces,
-                            maxAttempts = (step.maxAttempts ?: DEFAULT_STEP_MAX_ATTEMPTS).coerceIn(1, MAX_STEP_ATTEMPTS),
-                            groundingRequirement = parseGroundingRequirement(step.groundingRequirement),
+                    val plan = buildValidatedPlanFromPayload(
+                        planSteps = request.planSteps,
+                        fallbackAcceptanceCriteria = state.workItem.completionCriteria,
+                    )
+                    if (plan == null) {
+                        emitInvalidPlan(
+                            workItemId = workItemId,
+                            path = "revise_plan_rejected",
+                            reason = "Plan payload failed structural validation.",
                         )
+                        return DurableWorkOperationResult(false, "Work item plan revision rejected: invalid plan structure.")
                     }
-                    val plan = WorkItemPlan(steps = steps, generatedAt = java.time.Instant.now())
                     applyEvent(
                         workItemId,
                         WorkItemEvent.PlanRevised(
@@ -609,23 +607,38 @@ class DurableWorkRuntime(
                     )
                     DurableWorkOperationResult(true, "Work item plan revised.", workItemId)
                 } else {
-                    logger.warn { "REVISE_PLAN without pre-built plan steps for workItemId='$workItemId'; using deterministic fallback." }
-                    instrumentation.emit(
-                        ai.neopsyke.instrumentation.AgentEvent(
-                            type = "durable_work_missing_plan",
-                            data = mapOf("work_item_id" to workItemId, "path" to "revise_plan_fallback")
+                    if (config.allowRuntimePlanFallback) {
+                        logger.warn { "REVISE_PLAN without pre-built plan steps for workItemId='$workItemId'; using deterministic fallback." }
+                        instrumentation.emit(
+                            ai.neopsyke.instrumentation.AgentEvent(
+                                type = "durable_work_missing_plan",
+                                data = mapOf("work_item_id" to workItemId, "path" to "revise_plan_fallback")
+                            )
                         )
-                    )
-                    val plan = planner.generatePlan(state.workItem)
-                    applyEvent(
-                        workItemId,
-                        WorkItemEvent.PlanRevised(
+                        val plan = planner.generatePlan(state.workItem)
+                        applyEvent(
+                            workItemId,
+                            WorkItemEvent.PlanRevised(
+                                workItemId = workItemId,
+                                plan = plan,
+                                reason = request.reason ?: "Revised by user request",
+                            )
+                        )
+                        DurableWorkOperationResult(true, "Work item plan revised.", workItemId)
+                    } else {
+                        logger.warn { "REVISE_PLAN rejected for workItemId='$workItemId': missing pre-built plan steps." }
+                        instrumentation.emit(
+                            ai.neopsyke.instrumentation.AgentEvent(
+                                type = "durable_work_missing_plan",
+                                data = mapOf("work_item_id" to workItemId, "path" to "revise_plan_fail_closed")
+                            )
+                        )
+                        DurableWorkOperationResult(
+                            success = false,
+                            message = "Work item plan revision requires pre-built plan steps from Ego.",
                             workItemId = workItemId,
-                            plan = plan,
-                            reason = request.reason ?: "Revised by user request",
                         )
-                    )
-                    DurableWorkOperationResult(true, "Work item plan revised.", workItemId)
+                    }
                 }
             }
 
@@ -697,6 +710,35 @@ class DurableWorkRuntime(
         contactChannel: String? = null,
         planSteps: List<ai.neopsyke.agent.ego.planner.model.DurableWorkPlanStepPayload>? = null,
     ): String {
+        val preBuiltPlan = when {
+            planSteps != null && planSteps.isNotEmpty() -> {
+                buildValidatedPlanFromPayload(
+                    planSteps = planSteps,
+                    fallbackAcceptanceCriteria = completionCriteria,
+                ) ?: run {
+                    emitInvalidPlan(
+                        workItemId = "",
+                        path = "create_rejected",
+                        reason = "Plan payload failed structural validation.",
+                    )
+                    return ""
+                }
+            }
+            config.allowRuntimePlanFallback -> {
+                null
+            }
+            else -> {
+                logger.warn { "CREATE rejected: missing pre-built plan steps while runtime fallback is disabled." }
+                instrumentation.emit(
+                    ai.neopsyke.instrumentation.AgentEvent(
+                        type = "durable_work_missing_plan",
+                        data = mapOf("work_item_id" to "", "path" to "create_fail_closed")
+                    )
+                )
+                return ""
+            }
+        }
+
         val activeCount = states.values.count { !it.isTerminal() }
         if (activeCount >= config.maxActiveWorkItems) {
             logger.warn { "Max active work items reached (${config.maxActiveWorkItems}), rejecting creation" }
@@ -728,8 +770,8 @@ class DurableWorkRuntime(
         if (!cronExpression.isNullOrBlank()) {
             timerScheduler?.registerCron(workItemId, cronExpression)
         }
-        if (planSteps != null && planSteps.isNotEmpty()) {
-            applyPreBuiltPlan(workItemId, planSteps, completionCriteria)
+        if (preBuiltPlan != null) {
+            applyEvent(workItemId, WorkItemEvent.PlanGenerated(workItemId, preBuiltPlan))
         } else {
             logger.warn { "CREATE without pre-built plan steps for workItemId='$workItemId'; using deterministic fallback." }
             instrumentation.emit(
@@ -749,25 +791,136 @@ class DurableWorkRuntime(
         applyEvent(workItemId, event)
     }
 
-    private fun applyPreBuiltPlan(
-        workItemId: String,
+    private fun buildValidatedPlanFromPayload(
         planSteps: List<ai.neopsyke.agent.ego.planner.model.DurableWorkPlanStepPayload>,
-        fallbackAcceptanceCriteria: String = "",
-    ) {
-        val steps = planSteps.mapIndexed { i, step ->
-            PlanStep(
-                id = step.id?.trim()?.ifBlank { null } ?: "step-${i + 1}",
-                description = step.description,
-                status = StepStatus.PENDING,
+        fallbackAcceptanceCriteria: String,
+    ): WorkItemPlan? {
+        if (planSteps.isEmpty()) return null
+
+        val normalizedIds = linkedMapOf<String, Int>()
+        val normalized = planSteps.mapIndexed { i, step ->
+            val description = step.description.trim()
+            if (description.isBlank()) {
+                logger.warn { "Plan step validation failed: blank description at index=$i" }
+                return null
+            }
+
+            val baseId = step.id?.trim()?.ifBlank { null } ?: "step-${i + 1}"
+            val uniqueId = normalizeUniqueStepId(baseId, normalizedIds)
+            val groundingRequirement = parseGroundingRequirementStrict(step.groundingRequirement) ?: run {
+                logger.warn { "Plan step validation failed: invalid grounding_requirement='${step.groundingRequirement}' id='$baseId'" }
+                return null
+            }
+
+            val requires = step.requires
+                .map { it.trim() }
+                .filter { it.isNotBlank() }
+                .toSet()
+            val produces = step.produces
+                .map { it.trim() }
+                .filter { it.isNotBlank() }
+                .toSet()
+
+            ValidatedPlanStep(
+                id = uniqueId,
+                description = description,
                 acceptanceCriteria = step.acceptanceCriteria?.trim().orEmpty().ifBlank { fallbackAcceptanceCriteria },
-                requires = step.requires,
-                produces = step.produces,
+                requires = requires,
+                produces = produces,
                 maxAttempts = (step.maxAttempts ?: DEFAULT_STEP_MAX_ATTEMPTS).coerceIn(1, MAX_STEP_ATTEMPTS),
-                groundingRequirement = parseGroundingRequirement(step.groundingRequirement),
+                groundingRequirement = groundingRequirement,
             )
         }
-        val plan = WorkItemPlan(steps = steps, generatedAt = java.time.Instant.now())
-        applyEvent(workItemId, WorkItemEvent.PlanGenerated(workItemId, plan))
+
+        val producedKeys = normalized.flatMap { it.produces }.toSet()
+        val missingRequires = normalized.flatMap { step ->
+            step.requires.filterNot { req -> req in producedKeys }
+                .map { req -> "${step.id}:$req" }
+        }
+        if (missingRequires.isNotEmpty()) {
+            logger.warn { "Plan step validation failed: missing requires references=$missingRequires" }
+            return null
+        }
+
+        if (hasDependencyCycle(normalized)) {
+            logger.warn { "Plan step validation failed: dependency cycle detected." }
+            return null
+        }
+
+        val steps = normalized.map { step ->
+            PlanStep(
+                id = step.id,
+                description = step.description,
+                status = StepStatus.PENDING,
+                acceptanceCriteria = step.acceptanceCriteria,
+                requires = step.requires,
+                produces = step.produces,
+                maxAttempts = step.maxAttempts,
+                groundingRequirement = step.groundingRequirement,
+            )
+        }
+        return WorkItemPlan(steps = steps, generatedAt = java.time.Instant.now())
+    }
+
+    private fun normalizeUniqueStepId(
+        baseId: String,
+        seen: MutableMap<String, Int>,
+    ): String {
+        val normalizedBase = baseId.lowercase()
+            .replace(Regex("[^a-z0-9._-]"), "-")
+            .replace(Regex("-+"), "-")
+            .trim('-')
+            .ifBlank { "step" }
+        val count = (seen[normalizedBase] ?: 0) + 1
+        seen[normalizedBase] = count
+        return if (count == 1) normalizedBase else "$normalizedBase-$count"
+    }
+
+    private fun hasDependencyCycle(steps: List<ValidatedPlanStep>): Boolean {
+        if (steps.isEmpty()) return false
+        val producersByKey = mutableMapOf<String, MutableSet<String>>()
+        steps.forEach { step ->
+            step.produces.forEach { key ->
+                producersByKey.getOrPut(key) { linkedSetOf() }.add(step.id)
+            }
+        }
+
+        val graph = steps.associate { it.id to linkedSetOf<String>() }.toMutableMap()
+        steps.forEach { step ->
+            step.requires.forEach { req ->
+                producersByKey[req].orEmpty().forEach { producerId ->
+                    graph.getOrPut(producerId) { linkedSetOf() }.add(step.id)
+                }
+            }
+        }
+
+        val visiting = mutableSetOf<String>()
+        val visited = mutableSetOf<String>()
+
+        fun dfs(node: String): Boolean {
+            if (node in visiting) return true
+            if (node in visited) return false
+            visiting.add(node)
+            val hasCycle = graph[node].orEmpty().any(::dfs)
+            visiting.remove(node)
+            visited.add(node)
+            return hasCycle
+        }
+
+        return graph.keys.any(::dfs)
+    }
+
+    private fun emitInvalidPlan(workItemId: String, path: String, reason: String) {
+        instrumentation.emit(
+            ai.neopsyke.instrumentation.AgentEvent(
+                type = "durable_work_invalid_plan",
+                data = mapOf(
+                    "work_item_id" to workItemId,
+                    "path" to path,
+                    "reason" to reason,
+                )
+            )
+        )
     }
 
     private fun generatePlan(workItemId: String) {
@@ -1393,6 +1546,13 @@ class DurableWorkRuntime(
                 else -> ai.neopsyke.agent.model.GroundingRequirement.NOT_REQUIRED
             }
 
+        fun parseGroundingRequirementStrict(raw: String?): ai.neopsyke.agent.model.GroundingRequirement? =
+            when (raw?.trim()?.lowercase()) {
+                "required" -> ai.neopsyke.agent.model.GroundingRequirement.REQUIRED
+                "not_required", "", null -> ai.neopsyke.agent.model.GroundingRequirement.NOT_REQUIRED
+                else -> null
+            }
+
         private const val ACTIVATION_JOURNAL_DETAIL_MAX_CHARS: Int = 200
         private const val DEFAULT_PLAN_REVISION: Int = 1
         private const val EFFECT_REASON_MAX_CHARS: Int = 180
@@ -1406,4 +1566,14 @@ class DurableWorkRuntime(
             WorkItemStatus.NEEDS_ATTENTION,
         )
     }
+
+    private data class ValidatedPlanStep(
+        val id: String,
+        val description: String,
+        val acceptanceCriteria: String,
+        val requires: Set<String>,
+        val produces: Set<String>,
+        val maxAttempts: Int,
+        val groundingRequirement: ai.neopsyke.agent.model.GroundingRequirement,
+    )
 }
